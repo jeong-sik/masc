@@ -42,6 +42,7 @@ type voice_wizard_session =
 type voice_wizard_save_reply =
   | Save_written of string
   | Save_refused of string
+  | Save_kept_back of string
   | Save_unanswered_reply of string
 
 val voice_wizard_open : section:Voice_setup.section -> provider:Voice_wizard.provider -> revision:string -> voice_wizard_session

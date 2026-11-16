@@ -24,6 +24,12 @@ let review_label state = function
   | Review_rejected _ -> ui_text state ~ko:"반려 기록" ~en:"rejected"
   | Review_superseded _ -> ui_text state ~ko:"다른 판정 적용" ~en:"superseded"
 
+(* The verdict's own failure in its words, or the notice of a verdict the
+   workspace guard kept back. *)
+let verdict_failure_text state failure =
+  request_failure_text ~ko:(state.ui_language = Lang_ko)
+    ~request:Kept_request.Verification_verdict failure
+
 (* These are readings of the retained snapshot, including while a new read is
    outstanding. The label qualifies the value even if a narrow title clips. *)
 let previous_reading_label state ~inflight ~error label =
@@ -45,12 +51,24 @@ let judgement_list_columns state ~cols ~status_header ~statuses =
     ^ "  " ^ fit_width status status_width in
   row (ui_text state ~ko:"작업" ~en:"Task") status_header, row
 
+(* What the notice above a retained reading says went wrong: the last read
+   failed with [detail], or the workspace guard kept the read back, which is
+   drawn as its kept-back notice alone. *)
+type reading_error = Last_error of string | Read_kept_back of string
+
+let verification_reading_error state = function
+  | Request_failed detail -> Last_error detail
+  | Request_withdrawn refusal ->
+      Read_kept_back (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+        ~request:Kept_request.Verification_read refusal)
+
 let reading_notice_lines state ~width ~inflight ~error =
   let notice = match error, inflight with
     | None, false -> None
     | None, true -> Some (Theme.recede (),
         ui_text state ~ko:"재조회 중 · 이전 조회 자료" ~en:"Refreshing · previous reading")
-    | Some detail, refreshing ->
+    | Some (Read_kept_back notice), (false | true) -> Some (Theme.warn (), notice)
+    | Some (Last_error detail), refreshing ->
         let prefix = if refreshing then
             ui_text state ~ko:"재조회 중 · 이전 자료 · 마지막 오류: "
               ~en:"Refreshing · previous reading · last error: "
@@ -160,9 +178,11 @@ let render_verification_list (state : state) =
   box_divider buf cols;
   (match state.verification_error with
    | None -> ()
-   | Some detail ->
+   | Some failure ->
        box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
+         ("  " ^ Keeper_chat.terminal_safe_text
+            (request_failure_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Verification_read failure));
        box_divider buf cols);
   (* The height the keypress bounds its step with, asked of the same layout:
      it counts the rows drawn under the list as well as the frame. *)
@@ -292,7 +312,8 @@ let render_verification_list (state : state) =
          ^ Ansi.reset)
    | None -> ());
   (match state.verification_verdict_error with
-   | Some err ->
+   | Some failure ->
+       let err = verdict_failure_text state failure in
        box_line buf cols
          ((Theme.bad ()) ^ "  "
          ^ fit_width (Terminal_text.single_line err) (framed_inner_width cols - 4)
@@ -472,7 +493,7 @@ let verification_detail_pane (state : state) ~rows ~cols
      known: wrapping is per row, so this is the same rows as wrapping once. *)
   let before = judgement_detail_rows ~width
       (reading_notice_lines state ~width ~inflight:state.verification_inflight
-         ~error:state.verification_error
+         ~error:(Option.map (verification_reading_error state) state.verification_error)
        @ verification_detail_lines ~ko:(state.ui_language = Lang_ko) ~width request) in
   (* What the verifier can actually inspect: the operator evidence bundle,
      lazily fetched on detail entry. The snapshot above lists references; this
@@ -498,8 +519,12 @@ let verification_detail_pane (state : state) ~rows ~cols
     ((match armed_note with None -> [] | Some note -> [Theme.warn (), note])
      @ (match state.verification_verdict_error with
         | None -> []
-        | Some detail ->
-          [Theme.bad (), say "  판정 실패: " "  Verdict action failed: " ^ Terminal_text.single_line detail]))
+        | Some (Request_failed detail) ->
+          [Theme.bad (), say "  판정 실패: " "  Verdict action failed: " ^ Terminal_text.single_line detail]
+        | Some (Request_withdrawn _ as failure) ->
+          (* Not sent: the kept-back notice alone, without the failure
+             prefix (RFC §2). *)
+          [Theme.bad (), "  " ^ Terminal_text.single_line (verdict_failure_text state failure)]))
     |> judgement_detail_rows ~width
   in
   let evidence_first = List.length before in
@@ -527,8 +552,9 @@ let verification_detail_pane (state : state) ~rows ~cols
       (fit_width note (framed_inner_width cols)))
     armed_note;
   Option.iter
-    (fun err -> box_line_styled buf cols ~style:(Theme.bad ())
-      (fit_width ("  " ^ Terminal_text.single_line err) (framed_inner_width cols)))
+    (fun failure -> box_line_styled buf cols ~style:(Theme.bad ())
+      (fit_width ("  " ^ Terminal_text.single_line (verdict_failure_text state failure))
+         (framed_inner_width cols)))
     state.verification_verdict_error;
   (* This reading has its own pane row: pinned footer keys can consume the
      whole footer at 30 and 40 columns, leaving its trailing position cut. *)
@@ -953,7 +979,8 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_divider buf cols;
   let lines =
     reading_notice_lines state ~width:(max 1 (framed_inner_width cols))
-      ~inflight:state.harness_inflight ~error:state.harness_error
+      ~inflight:state.harness_inflight
+      ~error:(Option.map (fun detail -> Last_error detail) state.harness_error)
     @ harness_detail_lines ~ko:(state.ui_language = Lang_ko)
         ~width:(max 1 (framed_inner_width cols)) verdict
     (* Appended rather than woven in: the verdict block is what the server

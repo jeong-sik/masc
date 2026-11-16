@@ -1301,17 +1301,77 @@ type keeper_chat_sources = {
 
 let empty_keeper_chat_sources = {kcs_history=Chat_history_unread; kcs_memory=[]}
 
+(* Why the workspace guard withdrew a request before it left: the workspace
+   moved since the request captured its authority, the server identity is not
+   confirmed, or the server, asked again just before sending, named another
+   workspace or none. *)
+type workspace_refusal =
+  | Workspace_authority_withdrawn
+  | Workspace_identity_not_confirmed
+  | Workspace_identity_changed
+
+(* A request the workspace guard withdrew, or one the transport or the server
+   answered with a failure, which is said in its own words. *)
+type request_failure =
+  | Request_withdrawn of workspace_refusal
+  | Request_failed of string
+
+(* Why the workspace guard withdrew a request. Defined beside the type so
+   the receipts drawn above the word table below can say it too. *)
+let workspace_refusal_reason ~ko = function
+  | Workspace_authority_withdrawn ->
+      if ko then "워크스페이스가 바뀜" else "workspace authority withdrawn"
+  | Workspace_identity_not_confirmed -> Masc_tui_words.workspace_identity_unconfirmed ~ko
+  | Workspace_identity_changed ->
+      if ko then "워크스페이스 식별이 바뀌었거나 읽히지 않음"
+      else "workspace identity changed or unavailable"
+
+(* The guard's refusal of a request its caller names, in the shape of every
+   request kept back. *)
+let workspace_refusal_text ~ko ~request refusal =
+  Masc_tui_words.kept_back ~ko ~request (workspace_refusal_reason ~ko refusal)
+    Masc_tui_words.Nothing_kept
+
+let request_failure_text ~ko ~request = function
+  | Request_withdrawn refusal -> workspace_refusal_text ~ko ~request refusal
+  | Request_failed detail -> detail
+
+(* A typed reading's view with its failure as [said] words it, for a renderer
+   below this module that cannot see [request_failure]. *)
+let observation_failure_said said (view : ('a, request_failure) Masc_tui_fetched.observation) =
+  match view with
+  | Masc_tui_fetched.Absent -> Masc_tui_fetched.Absent
+  | Loading -> Loading
+  | Ready value -> Ready value
+  | Stale (value, failure) -> Stale (value, said failure)
+  | Failed failure -> Failed (said failure)
+
+(* A history reading's failure as the history rows say it: the read's own
+   failure, or the kept-back notice for a read the guard stopped. *)
+let history_failure_said ~ko ~request = function
+  | Request_failed detail -> Masc_tui_task_document.History_read_failed detail
+  | Request_withdrawn refusal ->
+      Masc_tui_task_document.History_kept_back (workspace_refusal_text ~ko ~request refusal)
+
+(* What a Keeper chat dispatch came back with: the server's answer or error
+   for a request that left, or one the workspace guard kept back before its
+   first POST, which nothing on the server can have admitted (RFC §2). *)
+type keeper_chat_dispatch =
+  | Keeper_chat_answered of
+      (Masc_tui_keeper_chat_projection.response, Masc_tui_keeper_chat_projection.error) result
+  | Keeper_chat_kept_back of workspace_refusal
+
 (* Rows already read from one Keeper, with the paging authority supplied by
    those reads. This is a session cache, not another persistent transcript. *)
 type keeper_chat_page = {
   kcp_sources : keeper_chat_sources;
-  kcp_history_error : string option;
+  kcp_history_error : request_failure option;
   kcp_history_dropped : int;
-  kcp_memory_error : string option;
+  kcp_memory_error : request_failure option;
   kcp_memory_dropped : int;
   kcp_older_cursor : string option;
   kcp_older_exist : bool;
-  kcp_older_error : string option;
+  kcp_older_error : request_failure option;
 }
 
 (** The failed-read retries of the Fusion readings (RFC-0480 L2b). A change
@@ -1415,8 +1475,8 @@ type chat_entry_read =
    Offering is not settlement: the request stays busy until UI admission. *)
 module Keeper_history_read : sig
   type source = History | Memory | Initial_reply
-  type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
-  type page_result = (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) Result.t
+  type result = (Masc_tui_keeper_chat_history.decoded, request_failure) Result.t
+  type page_result = (Masc_tui_keeper_chat_history.page, request_failure) Result.t
   type 'a observed = { result : 'a; ready_at_ns : int64 }
   type observation = result observed
   type page_observation = page_result observed
@@ -1452,8 +1512,8 @@ module Keeper_history_read : sig
   val pending : t -> bool
 end = struct
   type source = History | Memory | Initial_reply
-  type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
-  type page_result = (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) Result.t
+  type result = (Masc_tui_keeper_chat_history.decoded, request_failure) Result.t
+  type page_result = (Masc_tui_keeper_chat_history.page, request_failure) Result.t
   type 'a observed = { result : 'a; ready_at_ns : int64 }
   type observation = result observed
   type page_observation = page_result observed
@@ -3572,6 +3632,9 @@ type runtime_lane_notice =
   | Lane_write_pending
   | Lane_write_committed of Masc_tui_runtime_config_receipt.t
       (* File commit and application facts, not inferred from a list GET. *)
+  | Lane_write_kept_back of workspace_refusal
+      (* The workspace guard stopped the write before it left; drawn as the
+         kept-back notice alone. *)
 
 let runtime_lane_refusal_text ~ko = function
   | Lane_list_may_be_stale ->
@@ -3620,6 +3683,8 @@ let runtime_lane_notice_text ~ko = function
     (if ko then "레인 쓰기 거부: " else "lane write refused: ")
     ^ runtime_lane_refusal_text ~ko refusal
   | Lane_write_committed receipt -> Masc_tui_runtime_config_receipt.lane_summary receipt
+  | Lane_write_kept_back refusal ->
+    workspace_refusal_text ~ko ~request:Masc_tui_words.Kept_request.Lane_write refusal
   | Lane_write_pending ->
     if ko then
       "레인 쓰기 거부: 이전 레인 변경을 아직 쓰는 중입니다. 목록을 다시 읽은 뒤 다시 누르세요"
@@ -3666,6 +3731,9 @@ let runtime_lane_notice_row_count ~ko ~cols = function
 type runtime_lane_list_freshness =
   | Lane_list_read
   | Lane_list_unread of string
+  | Lane_list_kept_back of string
+      (* The re-read was stopped by the workspace guard before it left; the
+         string is its kept-back notice. *)
 
 (** Identity of an asynchronous Git Changes diff read. *)
 type repository_diff_request =
@@ -3889,7 +3957,7 @@ type ask_answer_mode =
 
 module Ask_answer_receipt : sig
   type observation = private {
-    result: (Masc.Tui_decode_asks.answer_receipt, string) result;
+    result: (Masc.Tui_decode_asks.answer_receipt, request_failure) result;
     observed_ns: int64;
   }
   type reading = Waiting | Returned of observation | Closed_without_result
@@ -3897,13 +3965,13 @@ module Ask_answer_receipt : sig
   val create : unit -> t
   val read : t -> reading
   val publish : t -> observed_ns:int64 ->
-    (Masc.Tui_decode_asks.answer_receipt, string) result -> bool
+    (Masc.Tui_decode_asks.answer_receipt, request_failure) result -> bool
   val close : t -> unit
   (** One actual result survives worker closure. Closing without a result
       makes no claim about whether a POST was sent or applied. *)
 end = struct
   type observation = {
-    result: (Masc.Tui_decode_asks.answer_receipt, string) result;
+    result: (Masc.Tui_decode_asks.answer_receipt, request_failure) result;
     observed_ns: int64;
   }
   type reading = Waiting | Returned of observation | Closed_without_result
@@ -3917,7 +3985,7 @@ end
 
 module Ask_answer_completion : sig
   type observation = private {
-    receipt: (Masc.Tui_decode_asks.answer_receipt, string) result;
+    receipt: (Masc.Tui_decode_asks.answer_receipt, request_failure) result;
     asks: (Masc.Tui_decode_asks.asks_snapshot, string) result;
     observed_ns: int64;
   }
@@ -3926,14 +3994,14 @@ module Ask_answer_completion : sig
   val create : unit -> t
   val read : t -> reading
   val publish : t -> observed_ns:int64 ->
-    receipt:(Masc.Tui_decode_asks.answer_receipt, string) result ->
+    receipt:(Masc.Tui_decode_asks.answer_receipt, request_failure) result ->
     asks:(Masc.Tui_decode_asks.asks_snapshot, string) result -> bool
   val close : t -> unit
   (** The actual final pair, before UI authority projection. Closing without
       it does not invent a completed reread or an answer outcome. *)
 end = struct
   type observation = {
-    receipt: (Masc.Tui_decode_asks.answer_receipt, string) result;
+    receipt: (Masc.Tui_decode_asks.answer_receipt, request_failure) result;
     asks: (Masc.Tui_decode_asks.asks_snapshot, string) result;
     observed_ns: int64;
   }
@@ -5439,6 +5507,9 @@ type keeper_settings_save_outcome =
   | Settings_applied of { response : Yojson.Safe.t; severity : string; message : string }
   | Settings_unchanged
   | Settings_not_sent of string
+  | Settings_kept_back of workspace_refusal
+    (* The workspace guard withdrew the save before it was sent; said as kept
+       back with the input retained, never as the server's refusal (RFC §2). *)
   | Settings_refused of Yojson.Safe.t * string
   | Settings_observation_required of keeper_settings_save_observation * Yojson.Safe.t
   | Settings_unconfirmed of string
@@ -5513,6 +5584,9 @@ type runtime_form_prepared = {
 type runtime_form_save_outcome =
   | Form_saved of Masc_tui_runtime_config_receipt.t
   | Form_not_sent of string
+  | Form_kept_back of workspace_refusal
+    (* The workspace guard withdrew the save before it was sent; said as kept
+       back with the input retained, never as the server's refusal (RFC §2). *)
   | Form_invalid_account of Masc_tui_runtime_account_form.t
   | Form_refused of string
   | Form_conflict of Masc_tui_runtime_config_edit.document
@@ -5591,6 +5665,8 @@ end)
 type keeper_creation_outcome =
   | Creation_created
   | Creation_not_sent of string
+  (* The workspace guard stopped the POST: not sent, said as kept back. *)
+  | Creation_kept_back of workspace_refusal
   | Creation_refused of string
   | Creation_unconfirmed of string
 
@@ -6175,7 +6251,7 @@ type tools_activations =
   | Activations_read of Masc.Tui_decode_tools.skill_activation_projection
 
 (* A failed Activations read, held for the Keeper it was made for. *)
-type activations_failure = { taf_keeper : string; taf_detail : string }
+type activations_failure = { taf_keeper : string; taf_detail : request_failure }
 
 (* Whether the Activations reading, or the failure held without one, belongs
    to a Keeper other than [selected], or to one while none is selected. *)
@@ -6211,7 +6287,7 @@ type keeper_skill_usage_reading =
   | Skill_usage_read of Masc.Tui_decode_tools.keeper_skill_usage
   | Skill_usage_read_failed of
       { last : Masc.Tui_decode_tools.keeper_skill_usage option
-      ; detail : string
+      ; detail : request_failure
       }
 
 let skill_usage_answer = function
@@ -6269,7 +6345,7 @@ let begin_history_page ?(progressive=false) ~task_id ~limit ~older ~equal ~key ~
                      thr_followup_limit=followup_limit}))
 
 let history_followup_limit request
-    (result : (Masc.Tui_decode_task_inspection.history, string) result) =
+    (result : (Masc.Tui_decode_task_inspection.history, request_failure) result) =
   match request.thr_followup_limit,result with
   | Some limit,Ok history when Option.is_some history.history_next_cursor -> Some limit
   | Some _,Ok _ | Some _,Error _ | None,_ -> None
@@ -6344,6 +6420,13 @@ type runtime_param_edit =
        without holding the row it came from. Empty means the reader types the
        value. *)
   }
+
+(* The line the parameters pane draws about its last edit: a result or a
+   refusal in the pane's own words ([ok] picks which), or a write the
+   workspace guard kept back, drawn as the kept-back notice alone. *)
+type runtime_params_notice =
+  | Params_said of bool * string
+  | Params_kept_back of workspace_refusal
 
 let runtime_param_type_name value_type =
   String.lowercase_ascii (String.trim value_type)
@@ -8296,6 +8379,9 @@ module Browser_history = struct
   type content =
     | Listing
     | List_failed of string
+    | List_kept_back of string
+      (* The notice for a list read the workspace guard did not send, drawn
+         alone (RFC §2). *)
     | Entries of { entries : entry list; cursor : int; selection : selection }
   type resume = Reload_list | Reload_selection
   type t = { keeper_name : string; content : content; scroll : int; resume : resume option }
@@ -8303,7 +8389,7 @@ module Browser_history = struct
   let start_read ~reload t =
     let content = if reload then Listing else match t.content with
       | Entries entries -> Entries {entries with selection=Loading}
-      | Listing | List_failed _ -> t.content in
+      | Listing | List_failed _ | List_kept_back _ -> t.content in
     {t with content; resume=None}
   let suspend t =
     let detail = "Workspace identity is unconfirmed; reading will resume after recovery" in
@@ -8311,7 +8397,7 @@ module Browser_history = struct
     | Listing -> {t with content=List_failed detail; resume=Some Reload_list}
     | Entries ({selection=Loading; _} as entries) ->
         {t with content=Entries {entries with selection=Failed detail}; resume=Some Reload_selection}
-    | List_failed _ | Entries {selection=(Failed _ | Observed _); _} -> t
+    | List_failed _ | List_kept_back _ | Entries {selection=(Failed _ | Observed _); _} -> t
   let entries (snapshot : Tui_decode.keeper_calls_snapshot) =
     snapshot.kcs_entries |> List.rev |> List.concat_map (fun (call : Tui_decode.keeper_call) ->
       match call.kc_execution_id with
@@ -8321,21 +8407,21 @@ module Browser_history = struct
         then Some {at=call.kc_at;execution_id;artifact} else None))
   let selected t = match t.content with
     | Entries {entries;cursor;_} -> List.nth_opt entries cursor
-    | Listing | List_failed _ -> None
+    | Listing | List_failed _ | List_kept_back _ -> None
   let select cursor entries t =
     {t with content=Entries {entries;cursor;selection=Loading};scroll=0;resume=None}
   let move delta t = match t.content with
     | Entries {entries;cursor;_} when entries <> [] ->
         let next = max 0 (min (List.length entries - 1) (cursor + delta)) in
         if next=cursor then None else Some (select next entries t)
-    | Entries _ | Listing | List_failed _ -> None
+    | Entries _ | Listing | List_failed _ | List_kept_back _ -> None
   let accept result t = match t.content with
     | Entries entries -> {t with content=Entries {entries with selection=(match result with
         | Ok observation -> Observed observation | Error detail -> Failed detail)}}
-    | Listing | List_failed _ -> t
+    | Listing | List_failed _ | List_kept_back _ -> t
   let observation t = match t.content with
     | Entries {selection=Observed observation;_} -> Some observation
-    | Entries {selection=(Loading | Failed _); _} | Listing | List_failed _ -> None
+    | Entries {selection=(Loading | Failed _); _} | Listing | List_failed _ | List_kept_back _ -> None
   let page_view t =
     let view = Browser_lane_view.create () in
     match observation t with
@@ -8690,6 +8776,8 @@ type observed_interrupt_status =
   | Interrupt_signalled
   | Interrupt_declined of string
   | Interrupt_failed of string
+  | Interrupt_kept_back of workspace_refusal
+      (* The workspace guard stopped the interrupt before it was sent. *)
 
 type observed_interrupt =
   { oi_keeper : string
@@ -8774,6 +8862,9 @@ module Verification_evidence_read = struct
     | Launch_failure of string
     | Workspace_unconfirmed of string
     | Interrupted of string
+    | Kept_back of workspace_refusal
+        (** The workspace guard stopped the read before it left; drawn as
+            the kept-back notice, never as a failed read (RFC §2). *)
 end
 
 type verification_evidence_key = {
@@ -9222,6 +9313,9 @@ type preset_confirmation_progress =
    response does not prove whether the named snapshot was written. *)
 type preset_save_failure =
   | Preset_save_not_sent of string
+  | Preset_save_kept_back of workspace_refusal
+    (* The workspace guard withdrew the save before it was sent; said as
+       kept back, never as the server's refusal (RFC §2). *)
   | Preset_save_refused of string
   | Preset_save_auth_retry_not_sent of string
   | Preset_save_unconfirmed of string
@@ -9272,21 +9366,6 @@ type schedule_change = Schedule_create | Schedule_modify
 let schedule_change_name ~ko = function
   | Schedule_create -> if ko then "일정 만들기" else "create"
   | Schedule_modify -> if ko then "일정 편집" else "modify"
-
-(* Why the workspace guard withdrew a request before it left: the workspace
-   moved since the request captured its authority, the server identity is not
-   confirmed, or the server, asked again just before sending, named another
-   workspace or none. *)
-type workspace_refusal =
-  | Workspace_authority_withdrawn
-  | Workspace_identity_not_confirmed
-  | Workspace_identity_changed
-
-(* A request the workspace guard withdrew, or one the transport or the server
-   answered with a failure, which is said in its own words. *)
-type request_failure =
-  | Request_withdrawn of workspace_refusal
-  | Request_failed of string
 
 (* Why a Schedules form did not reach the server, or the server's refusal. *)
 type schedule_form_refusal_reason =
@@ -9417,6 +9496,8 @@ type resource_save_request = {
 type resource_save_outcome =
   | Resource_save_result of (unit, Masc_tui_resource_export.save_error) result
   | Resource_save_not_started of string
+  | Resource_save_kept_back of workspace_refusal
+      (* The workspace guard stopped the save before it began. *)
   | Resource_save_unconfirmed of { detail : string; cause : exn option }
   | Resource_save_interrupted of Masc_tui_resource_export.cancellation option
 
@@ -9487,6 +9568,9 @@ type queue_panel_owner = {
 
 type resource_share_outcome = Resource_share_applied of bool | Resource_share_conflict of bool
   | Resource_share_not_sent of string | Resource_share_not_prepared of string
+  (* The workspace guard stopped the POST after the intent was recorded: the
+     same unsent state as [Resource_share_not_sent], said as kept back. *)
+  | Resource_share_kept_back of workspace_refusal
 type resource_share_failure = Resource_share_unknown of string | Resource_share_not_started of string
 
 type resource_share_journal_observation =
@@ -9534,12 +9618,12 @@ type keeper_peer_pending = {
   kpn_reading : Masc_tui_detail_reading.t;
   (* A terminal response waits for the reader's next frame, so input already
      directed at the old frame can still change that reader first. *)
-  kpn_result : (Masc_tui_queue_inspection.peer_page, string) result option;
+  kpn_result : (Masc_tui_queue_inspection.peer_page, request_failure) result option;
 }
 
 type keeper_peer_failure = {
   kpf_position : keeper_peer_position;
-  kpf_reason : string;
+  kpf_reason : request_failure;
 }
 
 (* Opaque identity of the reader and the observation that a frame shows.
@@ -9572,17 +9656,23 @@ type keeper_peer_status =
   | Keeper_peer_loading of { page : int; retained : int option; retry : int option }
   | Keeper_peer_arrived of { page : int; retained : int option; retry : int option }
   | Keeper_peer_failed of { page : int; retained : int option; reason : string }
+  | Keeper_peer_kept_back of { page : int; retained : int option; notice : string }
   | Keeper_peer_current of int
   | Keeper_peer_unread
 
 type goal_candle_failure = Goal_candle_access_denied of int | Goal_candle_authority_changed of int option | Goal_candle_http_status of int | Goal_candle_read_failed of string
+
+(* What the Candle row keeps without an observation: the read's own failure,
+   or the kept-back notice for a read the workspace guard did not send, which
+   is drawn alone (RFC §2). *)
+type goal_candle_error = Goal_candle_unread of string | Goal_candle_kept_back of string
 
 type goal_action_receipt = {
   gar_goal_id : string;
   gar_ticket : string;
   gar_workspace : string;
   gar_authority : Masc_tui_planning_detail.receipt_authority option;
-  gar_result : (string, string) result;
+  gar_result : (string, request_failure) result;
 }
 
 type state = {
@@ -9663,7 +9753,7 @@ type state = {
   mutable keeper_deletions_generation: int;
   mutable keeper_deletions_cursor: int;
   mutable keeper_deletions_scroll: int;
-  mutable keeper_deletions: (Masc_tui_keeper_control.deletion_inventory, string) result option;
+  mutable keeper_deletions: (Masc_tui_keeper_control.deletion_inventory, request_failure) result option;
   (* The [;] agenda overlay: the strip above the composer says whether there
      is anything, and this says what. Modal like the help sheet, and like it
      the scroll survives only while it is open. *)
@@ -9708,7 +9798,7 @@ type state = {
   mutable keeper_run_next_ready : Masc_tui_keeper_chat_projection.request list;
   mutable keeper_priority_controls : (string * keeper_priority_control) list;
   mutable keeper_run_next_receipts :
-    (Masc_tui_keeper_chat_projection.request * (string, string) result) list;
+    (Masc_tui_keeper_chat_projection.request * (string, request_failure) result) list;
   (** Exact acknowledged priority results, retained while that input waits.
       Pending requests are tracked by the existing pending/ready/inflight lists. *)
   mutable keeper_auto_priority_pending : (string * string) list;
@@ -9833,7 +9923,7 @@ type state = {
      the pane's Changes tab. Refetched when the feed shows that keeper
      complete a tool call and on the operator cadence. *)
   mutable acting_pane_changes:
-    (acting_pane_key, acting_pane_read) Masc_tui_fetched.t;
+    (acting_pane_key, acting_pane_read, request_failure) Masc_tui_fetched.source;
   (* A loss during a read owes one more reading after that read settles. *)
   mutable acting_pane_changes_loss_followup: acting_pane_key option;
   (* When the answer on screen landed, so the tab can say how old it is. *)
@@ -10010,7 +10100,9 @@ type state = {
   mutable resource_inventory_notice: (Masc_tui_resource_catalog.report * string option) option;
   mutable resources_reports_complete: bool;
   mutable resources_list_owner: unit ref option;
-  mutable artifact_checks: (unit, Masc_tui_artifact_checks.inventory) Masc_tui_fetched.t;
+  mutable artifact_checks:
+    (unit, Masc_tui_artifact_checks.inventory, Masc_tui_artifact_checks.read_failure)
+      Masc_tui_fetched.source;
   mutable artifact_check_pending: Masc_tui_artifact_check_action.request option;
   mutable resources_cursor: int;
   mutable resource_scope: Masc_tui_resource_catalog.scope;
@@ -10084,7 +10176,7 @@ type state = {
      which stays on screen because it is the only place the skipped keys and
      the runtime.toml outcome are said. *)
   mutable presets_snapshot: Tui_decode.presets_snapshot option;
-  mutable presets_error: string option;
+  mutable presets_error: request_failure option;
   mutable presets_cursor: int;
   (* What the selected preset holds, fetched from /api/v1/presets/show. The
      listing names the overridden prompts; this is the rest of what applying
@@ -10092,7 +10184,7 @@ type state = {
 
      One value rather than a pair of options: the pair could not say "asked,
      waiting", which is the state this pane spends its first moments in. *)
-  mutable preset_detail: (string, Tui_decode.preset_detail) Masc_tui_fetched.t;
+  mutable preset_detail: (string, Tui_decode.preset_detail, request_failure) Masc_tui_fetched.source;
   mutable preset_save_draft: string option;
   mutable preset_save_draft_description: string;
   mutable preset_save_draft_source: preset_save_form_source;
@@ -10167,7 +10259,7 @@ type state = {
   mutable config_models_error: string option;
   (* Which exact account/model binding the structured [e] form edits. *)
   mutable config_models_cursor: int;
-  mutable runtime_config_view_error: string option;
+  mutable runtime_config_view_error: request_failure option;
   (* Absolute source row selected in runtime.toml. The viewport remains
      [config_scroll]; keeping the cursor separate lets j/k skip prose while
      PgUp/PgDn still move by a visible page. *)
@@ -10206,7 +10298,7 @@ type state = {
   mutable keeper_sandbox_logs_inflight: sandbox_logs_request option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
-  mutable keeper_settings_editor : (keeper_settings_key, keeper_settings_snapshot) Masc_tui_fetched.t;
+  mutable keeper_settings_editor : (keeper_settings_key, keeper_settings_snapshot, request_failure) Masc_tui_fetched.source;
   mutable keeper_settings_intent : keeper_settings_request option;
   mutable keeper_settings_cancel : (unit ref * (unit -> unit)) option;
   mutable keeper_settings_saves : Keeper_settings_saves.t;
@@ -10221,7 +10313,8 @@ type state = {
   (* The Info tab's month of efficiency, keyed by the month: one answer holds
      every Keeper of that month. *)
   mutable keeper_efficiency:
-    (string, Masc.Tui_decode_keeper_efficiency.month_view) Masc_tui_fetched.t;
+    (string, Masc.Tui_decode_keeper_efficiency.month_view, Masc_tui_keeper_efficiency.failure)
+      Masc_tui_fetched.source;
   mutable board_quarantine_requeue_inflight: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
@@ -10421,7 +10514,7 @@ type state = {
       once. *)
   (* The newest turns of the Keeper under the cursor, read while the Story
      window shows its story page (RFC-0515 section 2.5). Keyed by Keeper. *)
-  mutable keeper_story_turns: (string, Masc_tui_keeper_turns.turn list) Masc_tui_fetched.t;
+  mutable keeper_story_turns: (string, Masc_tui_keeper_turns.turn list, request_failure) Masc_tui_fetched.source;
   (* The read those turns owe: drawing them, a push about the Keeper's turns, a
      revalidation and a failed read each owe it. *)
   mutable keeper_story_turns_owed: Masc_tui_owed_read.t;
@@ -10478,12 +10571,15 @@ type state = {
   mutable runtime_catalog_reading: runtime_catalog_reading;
   (* Detail histories retain their exact request and last good value. A key
      alone cannot reject an older response after refreshing the same item. *)
-  mutable goal_timeline: (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t;
-  mutable goal_candle: (string, unit ref * string * Candle_goal_observation.t) Masc_tui_fetched.t;
+  mutable goal_timeline:
+    (string, Tui_decode.goal_timeline_event list, Masc_tui_planning_detail.timeline_failure)
+      Masc_tui_fetched.source;
+  mutable goal_candle:
+    (string, unit ref * string * Candle_goal_observation.t, goal_candle_error) Masc_tui_fetched.source;
   mutable goal_candle_revalidation_attempts: (string * unit ref) list;
   mutable goal_confirmation_revalidation_attempts: (string * unit ref) list;
   mutable goal_confirmation_identity_refresh: (string * Masc_tui_planning_detail.confirmation_workspace) option;
-  mutable task_history: (string, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
+  mutable task_history: (string, Masc.Tui_decode_task_inspection.history, request_failure) Masc_tui_fetched.source;
   mutable task_history_request: string task_history_request option;
   mutable task_history_last_reading: unit ref option;
   mutable task_document_body: task_document_slot;
@@ -10499,7 +10595,7 @@ type state = {
      scope and generation are the authority: cursor position is not, because
      palette/Answering can open a chat without moving the roster cursor. *)
   mutable keeper_calls: Tui_decode.keeper_calls_snapshot option;
-  mutable keeper_calls_error: string option;
+  mutable keeper_calls_error: request_failure option;
   mutable keeper_calls_keeper: string option;
   mutable keeper_calls_loading: bool;
   mutable keeper_calls_refresh_pending: bool;
@@ -10567,7 +10663,7 @@ type state = {
   mutable transport: Tui_decode.transport_health option;
   mutable transport_error: string option;
   mutable approval_snapshot: approval_snapshot option;
-  mutable approvals_error: string option;
+  mutable approvals_error: request_failure option;
   (* Ticket for the confirm-queue read outside the refresh bundle. The count
      on Home draws from [approval_snapshot] alone, so a refused refresh answer
      needs a read of its own to recover the count before the next cadence. *)
@@ -10636,10 +10732,10 @@ type state = {
   mutable keeper_waiting: Tui_decode.keeper_waiting_row list;
   mutable keeper_waiting_failure: Tui_decode.keeper_waiting_failure option;
   mutable keeper_waiting_unverified: string list;
-  mutable keeper_waiting_error: string option;
+  mutable keeper_waiting_error: request_failure option;
   mutable keeper_waiting_epoch: int;
   mutable keeper_waiting_versions: (string * int) list;
-  mutable keeper_turns_error: string option;
+  mutable keeper_turns_error: request_failure option;
   mutable keeper_turns_inflight: bool;
   (* The turns read owed after a server signal, a revalidation, a resumed
      authority or a failed read (RFC-0481 §3.4). The answering badge is drawn
@@ -10694,14 +10790,14 @@ type state = {
      them, not on their own. *)
   mutable runtime_params: Tui_decode.runtime_param_row list option;
   (* None means no registry observation; Some [] is a successful empty read. *)
-  mutable runtime_params_error: string option;
+  mutable runtime_params_error: request_failure option;
   mutable runtime_params_loading: bool;
   (* The Runtime params pane is an operator surface, not a passive dump.
      Selection and the in-progress typed value live separately from the shared
      Config scroll used by runtime.toml/prompt bodies. *)
   mutable runtime_params_cursor: int;
   mutable runtime_param_edit: runtime_param_edit option;
-  mutable runtime_params_notice: (bool * string) option;
+  mutable runtime_params_notice: runtime_params_notice option;
   mutable keeper_exact_lane_firsts: Tui_decode.keeper_exact_lane_first list;
   mutable keeper_gate_settings_unread: string option;
       (** [Some reason] until the per-Keeper Gate settings are read, and after
@@ -10830,7 +10926,7 @@ type state = {
      letters safe: c/x/o are lifecycle only once, and any other key disarms.
      A drop waits for its typed reason instead. *)
   mutable goal_action_pending: goal_action_pending option;
-  mutable goal_action_errors: (string * string) list;
+  mutable goal_action_errors: (string * request_failure) list;
   mutable goal_transition_latest: (string * string) list;
   mutable goal_action_inflight: (string * string) list;
   mutable goal_action_receipts: goal_action_receipt list;
@@ -10864,7 +10960,7 @@ type state = {
      own limit with active rows first, so a Keeper whose schedules sat past it
      read as having none. *)
   mutable keeper_schedules: (string * schedule_snapshot) option;
-  mutable keeper_schedules_error: (string * string) option;
+  mutable keeper_schedules_error: (string * request_failure) option;
   mutable keeper_schedules_page: (string * schedule_page) option;
   mutable keeper_schedules_pending: (detail_read_request * schedule_page * int) option;
   mutable msg_schedules_expanded: bool;
@@ -10948,7 +11044,7 @@ type state = {
   mutable tools_skill_generation: int;
   mutable tools_skill_pending: tools_read_part list;
   mutable tools_read_inflight: tools_read_inflight option;
-  mutable tools_error: string option;
+  mutable tools_error: request_failure option;
   mutable tools_activations: tools_activations option;
   mutable tools_activations_error: activations_failure option;
   (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
@@ -10968,7 +11064,7 @@ type state = {
   mutable tools_activations_owed: Masc_tui_owed_read.t;
   mutable tools_usage_owed: (string * Masc_tui_owed_read.t) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
-  mutable skills_catalog_error: string option;
+  mutable skills_catalog_error: request_failure option;
   mutable tools_scroll: int;
   mutable tools_task_visit: unit ref;
   mutable tools_task_follow_end: tools_task_owner option;
@@ -10992,22 +11088,22 @@ type state = {
   mutable tools_evidence_reference: Skill_reference.t option;
   mutable tools_evidence_run_id: Masc.Keeper_tool_plan.Composition_run_id.t option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
-  mutable tools_async_observation_error: string option;
+  mutable tools_async_observation_error: request_failure option;
   (* CanAdmin async reads have their own owner, independent of both the
      inventory/catalog generation and the public Keeper turns response. *)
   mutable tools_async_request_generation: int;
   mutable tools_async_observation_inflight: bool;
   mutable tools_async_selection: Masc.Tui_decode_async_request.target option;
   mutable tools_async_detail_open: bool;
-  mutable tools_async_detail: (Masc.Tui_decode_async_request.target, Masc.Tui_decode_async_request.reading) Masc_tui_fetched.t;
+  mutable tools_async_detail: (Masc.Tui_decode_async_request.target, Masc.Tui_decode_async_request.reading, request_failure) Masc_tui_fetched.source;
   mutable tools_async_detail_request: tools_async_detail_request option;
   (* What the open async request detail owes after its Keeper's requests or
      execution journal changed. *)
   mutable tools_async_detail_owed: Masc_tui_owed_read.t;
   mutable tools_async_last_logical: (Masc.Tui_decode_async_request.source * Masc.Tui_decode_async_request.logical_value) option;
   mutable tools_async_task_source: tools_async_task_source option;
-  mutable tools_async_task_body: (tools_async_task_source, Masc.Tui_decode_task_inspection.detail) Masc_tui_fetched.t;
-  mutable tools_async_task_history: (tools_async_task_source, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
+  mutable tools_async_task_body: (tools_async_task_source, Masc.Tui_decode_task_inspection.detail, request_failure) Masc_tui_fetched.source;
+  mutable tools_async_task_history: (tools_async_task_source, Masc.Tui_decode_task_inspection.history, request_failure) Masc_tui_fetched.source;
   mutable tools_async_task_body_request: tools_async_task_request option;
   (* What the open source Task body owes after a backlog write. *)
   mutable tools_async_task_owed: Masc_tui_owed_read.t;
@@ -11104,7 +11200,7 @@ type state = {
   mutable workspace_activity_cursor: int;
   mutable workspace_activity_context_scroll: int option;
   mutable memory_health: Masc.Tui_decode_memory_health.memory_health_snapshot option;
-  mutable memory_health_error: string option;
+  mutable memory_health_error: request_failure option;
   mutable memory_health_inflight: bool;
   (* The fleet memory health reads on arrival, on a revalidation, and again
      after a failed read, while Memory or Metrics shows it (RFC-0487). *)
@@ -11119,7 +11215,7 @@ type state = {
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
   mutable memory_unit: Masc_tui_memory_usage.display_unit;
-  mutable memory_input: (string, Masc_tui_memory_usage.t) Masc_tui_fetched.t;
+  mutable memory_input: (string, Masc_tui_memory_usage.t, request_failure) Masc_tui_fetched.source;
   (* The input pane reads the selected Keeper again after each memory health
      answer and after a failed read, while Memory shows it (RFC-0487). *)
   mutable memory_input_owed: Masc_tui_owed_read.t;
@@ -11137,7 +11233,8 @@ type state = {
      carries the keepers the fleet merge could not read beside the facts it
      could; a single keeper's answer has none. *)
   mutable memory_facts:
-    (string, Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option) Masc_tui_fetched.t;
+    (string, Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, request_failure)
+      Masc_tui_fetched.source;
   mutable memory_facts_cursor: int;
   mutable memory_facts_scroll: int;
   (* One selected claim's wrapped rows. The cursor and renderer ask for the
@@ -11414,7 +11511,7 @@ type state = {
   mutable acting_detail: Masc_tui_acting.entry option;
   mutable acting_detail_scroll: int;
   mutable verification: Tui_decode.verification_snapshot option;
-  mutable verification_error: string option;
+  mutable verification_error: request_failure option;
   mutable verification_inflight: bool;
   (* A verdict can commit while an older queue read is still in flight. Its
      answer is stale even if it arrives later; discard it and read again. *)
@@ -11444,7 +11541,7 @@ type state = {
      that second press must re-arm, not approve the new request. Reject carries
      no arm -- its $EDITOR reason form is the confirmation step. *)
   mutable verification_verdict_armed: (string * string) option;
-  mutable verification_verdict_error: string option;
+  mutable verification_verdict_error: request_failure option;
   mutable system_logs: System_logs_view.t;
   msg_input: Masc_tui_message_input.t;
   mutable msg_command_menu: Masc_tui_command.menu_state;
@@ -11493,7 +11590,7 @@ type state = {
   mutable msg_loaded: msg_entry list;
   mutable msg_loaded_pages: (string * keeper_chat_page) list;
   mutable msg_loaded_keeper: string option;
-  mutable msg_loaded_error: string option;
+  mutable msg_loaded_error: request_failure option;
   mutable msg_loaded_dropped: int;
   (* Recorded file changes are a separate chat cache. [changes] belongs to the
      Changes surface and follows its own keeper selection; sharing it would
@@ -11506,7 +11603,7 @@ type state = {
   mutable msg_file_changes_error: string option;
   mutable msg_file_changes_generation: int;
   mutable msg_memory_visibility: memory_visibility;
-  mutable msg_memory_error: string option;
+  mutable msg_memory_error: request_failure option;
   mutable msg_memory_dropped: int;
   (* Every full-history GET captures this generation. Keeper identity alone is
      not enough after alpha -> beta -> alpha: the first alpha response can
@@ -11534,7 +11631,7 @@ type state = {
   mutable msg_older_exist: bool;
   mutable msg_older_loading: bool;
   mutable msg_older_resume: (string * string option) option;
-  mutable msg_older_error: string option;
+  mutable msg_older_error: request_failure option;
   (* Presentation-only defaults come from the CLI and can be changed in the
      pane without mutating the transcript. *)
   mutable msg_reasoning_visibility: reasoning_visibility;
@@ -11636,8 +11733,11 @@ let close_code_diff state =
 let clear_goal_action_error state ~goal_id =
   state.goal_action_errors <- List.remove_assoc goal_id state.goal_action_errors
 
+let record_goal_action_failure state ~goal_id failure =
+  state.goal_action_errors <- (goal_id, failure) :: List.remove_assoc goal_id state.goal_action_errors
+
 let set_goal_action_error state ~goal_id error =
-  state.goal_action_errors <- (goal_id, error) :: List.remove_assoc goal_id state.goal_action_errors
+  record_goal_action_failure state ~goal_id (Request_failed error)
 
 let note_goal_action_started state ~goal_id ~ticket =
   if List.mem_assoc goal_id state.goal_action_inflight then false
@@ -11655,7 +11755,7 @@ let note_goal_action_result state ~goal_id ~ticket result =
       state.goal_action_inflight <- List.remove_assoc goal_id state.goal_action_inflight;
     (match result with
      | Ok _ -> clear_goal_action_error state ~goal_id
-     | Error error -> set_goal_action_error state ~goal_id error);
+     | Error failure -> record_goal_action_failure state ~goal_id failure);
     true
   end
 
@@ -11713,10 +11813,10 @@ let visible_preset_save_receipts (state : state) =
 let recoverable_preset_save_commands (state : state) =
   List.filter_map (fun receipt ->
     match receipt.psr_result, receipt.psr_request.psp_chat_input with
-    | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _), Some input ->
+    | Error (Preset_save_not_sent _ | Preset_save_kept_back _ | Preset_save_auth_retry_not_sent _), Some input ->
       Some (receipt.psr_request.psp_name, input)
     | (Ok _ | Error (Preset_save_refused _ | Preset_save_unconfirmed _)), _
-    | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _), None -> None)
+    | Error (Preset_save_not_sent _ | Preset_save_kept_back _ | Preset_save_auth_retry_not_sent _), None -> None)
     (workspace_preset_save_receipts state)
 
 let reveal_unsent_preset_save_receipts (state : state) =
@@ -11725,7 +11825,7 @@ let reveal_unsent_preset_save_receipts (state : state) =
     if receipt.psr_request.psp_workspace = workspace
        && Option.is_some receipt.psr_request.psp_chat_input
        && (match receipt.psr_result with
-           | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _) -> true
+           | Error (Preset_save_not_sent _ | Preset_save_kept_back _ | Preset_save_auth_retry_not_sent _) -> true
            | Ok _ | Error (Preset_save_refused _ | Preset_save_unconfirmed _) -> false)
     then { receipt with psr_visible = true } else receipt) state.preset_save_receipts
 
@@ -11733,7 +11833,7 @@ let preset_save_name_evidence receipt =
   match receipt.psr_result with
   | Ok _ -> Preset_name_written
   | Error (Preset_save_unconfirmed _) -> Preset_name_unknown
-  | Error (Preset_save_not_sent _ | Preset_save_refused _
+  | Error (Preset_save_not_sent _ | Preset_save_kept_back _ | Preset_save_refused _
            | Preset_save_auth_retry_not_sent _) -> Preset_name_untouched
 
 (* Receipts are prepended as results arrive, and a workspace has at most one
@@ -12301,6 +12401,15 @@ let retain_ask_answer_feedback (state : state) submission result =
     | Some (previous, _) -> previous.as_request == submission.as_request
     | None -> false in
   if not already_observed && owns_ask_submission state submission then begin
+    (* An answer the workspace guard stopped keeps its draft and is said as
+       kept back, never as an unconfirmed recording (RFC §2). *)
+    let result = Result.map_error (function
+      | Request_failed detail -> Masc_tui_ask_projection.Answer_unconfirmed detail
+      | Request_withdrawn refusal ->
+        let ko = state.ui_language = Lang_ko in
+        Masc_tui_ask_projection.Answer_kept_back
+          (Masc_tui_words.kept_back ~ko ~request:Masc_tui_words.Kept_request.Ask_answer
+             (workspace_refusal_reason ~ko refusal) Masc_tui_words.Draft_kept)) result in
     let feedback = Masc_tui_ask_projection.answer_feedback
       ?source_turn_ref:submission.as_source_turn_ref
       ~asker:submission.as_asker ~ask_id:submission.as_ask_id
@@ -13709,8 +13818,20 @@ let accept_keeper_turn_observation ?(accept_waiting = true) state ~rows ~waiting
     state.keeper_turns_observed_at <- Some observed_at;
     state.keeper_turns_error <- None)
 
-let refuse_keeper_turn_observation state detail =
-  state.keeper_turns_error <- Some detail
+let refuse_keeper_turn_observation state failure =
+  state.keeper_turns_error <- Some failure
+
+(* The turn poll's failure as the answering rows say it: the poll's own
+   failure, or the kept-back notice alone for a poll the workspace guard
+   stopped before it left (RFC §2). *)
+let keeper_turns_poll_error (state : state) =
+  Option.map (function
+    | Request_failed detail -> Masc_tui_answering.Poll_failed detail
+    | Request_withdrawn refusal ->
+        Masc_tui_answering.Poll_kept_back
+          (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+             ~request:Masc_tui_words.Kept_request.Turn_observation_read refusal))
+    state.keeper_turns_error
 
 let supersede_live_context_read (state : state) cancel =
   let previous = state.live_context_cancel in
@@ -13955,8 +14076,15 @@ let complete_chat_call_read state request result =
   | Some (origin, reader), Some pending
     when origin == request.ccr_origin && pending == request
          && chat_call_origin_current state origin ->
-      state.chat_call_reader <- Some (origin,
-        Masc_tui_chat_call_reader.complete reader request.ccr_ticket result);
+      let reader = match result with
+        | Ok call -> Masc_tui_chat_call_reader.complete reader request.ccr_ticket (Ok call)
+        | Error (Request_failed detail) ->
+            Masc_tui_chat_call_reader.complete reader request.ccr_ticket (Error detail)
+        | Error (Request_withdrawn refusal) ->
+            Masc_tui_chat_call_reader.withdraw reader request.ccr_ticket
+              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:Masc_tui_words.Kept_request.Call_read refusal) in
+      state.chat_call_reader <- Some (origin, reader);
       state.chat_call_pending <- None;
       true
   | (Some _ | None), (Some _ | None) -> false
@@ -13988,7 +14116,7 @@ let take_task_dispatch_completion state request =
 
 let restore_task_dispatch_input state request =
   let not_sent = match Masc_tui_task_dispatch.progress request.tdr_dispatch with
-    | Completed {outcome=Not_sent _;_} -> true
+    | Completed {outcome=(Not_sent _ | Kept_back _);_} -> true
     | Not_started | Reserved | Preparing | Sending | Completed {outcome=(Created _ | Server_error _ | Unconfirmed _);_} -> false in
   if not_sent && request.tdr_authority = state.workspace_authority
      && request.tdr_editor_keeper = state.msg_target_keeper_name
@@ -14012,7 +14140,7 @@ let task_dispatch_matches state ~keeper request =
 let task_dispatch_recoverable state ~keeper request =
     task_dispatch_matches state ~keeper request
     && match Masc_tui_task_dispatch.progress request.tdr_dispatch with
-       | Completed {outcome=(Not_sent _ | Server_error _ | Unconfirmed _);_} -> true
+       | Completed {outcome=(Not_sent _ | Kept_back _ | Server_error _ | Unconfirmed _);_} -> true
        | Not_started | Reserved | Preparing | Sending | Completed {outcome=Created _;_} -> false
 
 let retained_task_dispatch state ~keeper =
@@ -14732,7 +14860,7 @@ let apply_keeper_settings_save state request status =
         ksa_recoverable=(match status with
           | Settings_finished (_, (Settings_applied _ | Settings_unchanged)) -> false
           | Settings_checking | Settings_reading | Settings_posting _
-          | Settings_finished (_, (Settings_not_sent _ | Settings_refused _ | Settings_observation_required _
+          | Settings_finished (_, (Settings_not_sent _ | Settings_kept_back _ | Settings_refused _ | Settings_observation_required _
               | Settings_unconfirmed _)) -> attempt.ksa_recoverable)}
     end else attempt) state.keeper_settings_saves;
   !applied
@@ -14759,16 +14887,20 @@ let keeper_settings_save_phase = function
   | Settings_finished (_,Settings_applied _) -> "applied"
   | Settings_finished (_,Settings_unchanged) -> "unchanged"
   | Settings_finished (_,Settings_not_sent _) -> "not_sent"
+  | Settings_finished (_,Settings_kept_back _) -> "kept_back"
   | Settings_finished (_,Settings_refused _) -> "refused"
   | Settings_finished (_,Settings_observation_required (Settings_revision_conflict,_)) -> "conflict"
   | Settings_finished (_,Settings_observation_required (Settings_reconciliation_required,_)) -> "reconciliation_required"
   | Settings_finished (_,Settings_observation_required (Settings_runtime_sync_failed,_)) -> "runtime_sync_failed"
   | Settings_finished (_,Settings_unconfirmed _) -> "unconfirmed"
 
-let keeper_settings_save_outcome_detail = function
+let keeper_settings_save_outcome_detail ~ko = function
   | Settings_applied receipt -> receipt.message
   | Settings_unchanged -> "Selected sandbox profile already observed; no write sent"
   | Settings_not_sent detail -> "Settings not sent; input retained: " ^ detail
+  | Settings_kept_back refusal ->
+      Masc_tui_words.kept_back ~ko ~request:Masc_tui_words.Kept_request.Keeper_settings_save
+        (workspace_refusal_reason ~ko refusal) Masc_tui_words.Draft_kept
   | Settings_refused (_,detail) -> "Settings refused before write; input retained: " ^ detail
   | Settings_unconfirmed detail -> "Settings outcome unconfirmed; input retained: " ^ detail
   | Settings_observation_required (cause, _) ->
@@ -14799,13 +14931,19 @@ let keeper_settings_save_notice state =
         | Settings_reading -> Some (label ^ ": reading current settings; navigation stays available")
         | Settings_posting _ -> Some (label ^ ": awaiting save receipt; navigation stays available")
         | Settings_finished (_, (Settings_applied _ | Settings_unchanged)) -> None
-        | Settings_finished (_,((Settings_not_sent _ | Settings_refused _
+        | Settings_finished (_,((Settings_not_sent _ | Settings_kept_back _ | Settings_refused _
             | Settings_observation_required _ | Settings_unconfirmed _) as outcome)) ->
             if attempt.ksa_recoverable then
               let recovery = match attempt.ksa_request.ksv_input with
                 | Settings_editor_input _ -> "e/E reloads current and restores changed values"
                 | Sandbox_shortcut_input _ -> "Sandbox d/m/s reads current and saves the selected profile" in
-              Some (label ^ " · " ^ keeper_settings_save_outcome_detail outcome ^ " · " ^ recovery)
+              let detail = keeper_settings_save_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome in
+              (match outcome with
+               (* The kept-back notice leads, alone; the setting follows it. *)
+               | Settings_kept_back _ -> Some (detail ^ " · " ^ label ^ " · " ^ recovery)
+               | Settings_applied _ | Settings_unchanged | Settings_not_sent _ | Settings_refused _
+               | Settings_observation_required _ | Settings_unconfirmed _ ->
+                   Some (label ^ " · " ^ detail ^ " · " ^ recovery))
             else None
       else None) (Keeper_settings_saves.all state.keeper_settings_saves))
 
@@ -14874,7 +15012,14 @@ let keeper_settings_editor_notice state =
       then Some (prefix ^ "reading before editor · Esc cancels")
       else (match Masc_tui_fetched.view_for ~equal:keeper_settings_equal_key state.keeper_settings_editor ~key with
         | Ready _ -> Some (prefix ^ "ready to edit · Esc cancels")
-        | Failed detail | Stale (_, detail) -> Some (prefix ^ detail ^ " · e retries; Esc cancels")
+        | Failed (Request_failed detail) | Stale (_, Request_failed detail) ->
+            Some (prefix ^ detail ^ " · e retries; Esc cancels")
+        (* Kept back by the workspace guard: the notice leads, alone, and
+           the Keeper follows it (RFC §2). *)
+        | Failed (Request_withdrawn refusal) | Stale (_, Request_withdrawn refusal) ->
+            Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                    ~request:Masc_tui_words.Kept_request.Keeper_settings_read refusal
+                  ^ " · " ^ key.ksk_keeper ^ " · e retries; Esc cancels")
         | Absent | Loading -> None)
   | Some _ | None -> None
 
@@ -14955,8 +15100,9 @@ let invalidate_task_history_document state =
     tds_reading=Masc_tui_fetched.clear slot.tds_reading;tds_previous=None}
 
 let suspend_tools_async_task state =
-  state.tools_async_task_body <- Masc_tui_fetched.suspend state.tools_async_task_body;
-  state.tools_async_task_history <- Masc_tui_fetched.suspend state.tools_async_task_history;
+  let reason = Request_failed Masc_tui_fetched.suspend_reason in
+  state.tools_async_task_body <- Masc_tui_fetched.suspend_with ~reason state.tools_async_task_body;
+  state.tools_async_task_history <- Masc_tui_fetched.suspend_with ~reason state.tools_async_task_history;
   state.tools_async_task_body_request <- None;
   state.tools_async_task_history_request <- None;
   state.tools_task_visit <- ref ();
@@ -14964,7 +15110,8 @@ let suspend_tools_async_task state =
 
 let suspend_tools_async_detail state =
   suspend_tools_async_task state;
-  state.tools_async_detail <- Masc_tui_fetched.suspend state.tools_async_detail;
+  state.tools_async_detail <- Masc_tui_fetched.suspend_with
+      ~reason:(Request_failed Masc_tui_fetched.suspend_reason) state.tools_async_detail;
   state.tools_async_detail_request <- None
 
 let withdraw_tools_async_details state =
@@ -15098,8 +15245,8 @@ let apply_tools_async_observation_result state ~generation result =
            sync_tools_async_selection state
        | Ok (Tui_decode.Async_unavailable { kind; reason }) ->
            state.tools_async_observation_error <-
-             Some (kind ^ Option.fold ~none:"" ~some:(fun value -> ": " ^ value) reason)
-       | Error detail -> state.tools_async_observation_error <- Some detail);
+             Some (Request_failed (kind ^ Option.fold ~none:"" ~some:(fun value -> ": " ^ value) reason))
+       | Error failure -> state.tools_async_observation_error <- Some failure);
       true)
 
 let move_tools_async_selection state delta =
@@ -15238,7 +15385,7 @@ let complete_tools_async_detail state request result =
             match previous.nested with
             | Nested.Absent | Stored _ | Invalid _ -> Ok reading
             | Observed _ ->
-              if Detail.equal_source snapshot.source previous.source then Error detail else Ok reading) in
+              if Detail.equal_source snapshot.source previous.source then Error (Request_failed detail) else Ok reading) in
     (match result with
      | Error _ -> ()
      | Ok Masc.Tui_decode_async_request.Absent -> state.tools_async_last_logical <- None
@@ -15337,7 +15484,8 @@ let suspend_workspace_readings state =
   state.resource_share_recovery_prompt <- None;
   state.chat_call_reader <- None;
   state.chat_call_pending <- None;
-  state.task_history <- Masc_tui_fetched.suspend state.task_history;
+  state.task_history <- Masc_tui_fetched.suspend_with
+      ~reason:(Request_failed Masc_tui_fetched.suspend_reason) state.task_history;
   state.task_history_request <- None;
   state.task_history_last_reading <- None;
   suspend_task_documents state;
@@ -15464,7 +15612,8 @@ let suspend_workspace_readings state =
   state.schedules_agenda_owed <- Masc_tui_owed_read.settled;
   state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
-  state.keeper_story_turns <- Masc_tui_fetched.suspend state.keeper_story_turns;
+  state.keeper_story_turns <- Masc_tui_fetched.suspend_with
+      ~reason:(Request_failed Masc_tui_fetched.suspend_reason) state.keeper_story_turns;
   state.memory_activity <- Masc_tui_fetched.suspend state.memory_activity;
   state.memory_facts_owed <- Masc_tui_owed_read.settled;
   state.memory_activity_owed <- Masc_tui_owed_read.settled;
@@ -15475,20 +15624,27 @@ let suspend_workspace_readings state =
   state.gate_snapshot_owed <- Masc_tui_owed_read.settled;
   state.held_calls_owed <- Masc_tui_owed_read.settled;
   state.tool_modes_owed <- Masc_tui_owed_read.settled;
-  state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
+  state.acting_pane_changes <- Masc_tui_fetched.suspend_with
+    ~reason:(Request_failed Masc_tui_fetched.suspend_reason) state.acting_pane_changes;
   state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
-  state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
+  state.preset_detail <- Masc_tui_fetched.suspend_with
+      ~reason:(Request_failed Masc_tui_fetched.suspend_reason) state.preset_detail;
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
-  state.keeper_efficiency <- Masc_tui_fetched.suspend state.keeper_efficiency;
+  state.keeper_efficiency <- Masc_tui_fetched.suspend_with
+    ~reason:(Masc_tui_keeper_efficiency.Read_failed Masc_tui_fetched.suspend_reason)
+    state.keeper_efficiency;
   state.workspace_activity <- Masc_tui_fetched.suspend state.workspace_activity;
-  state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
+  state.artifact_checks <- Masc_tui_fetched.suspend_with
+    ~reason:(Masc_tui_artifact_checks.Read_failed Masc_tui_fetched.suspend_reason) state.artifact_checks;
   state.artifact_check_pending <- None;
   state.resources_list_owner <- None;
   state.resources_reports_complete <- false;
-  state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
+  state.memory_input <- Masc_tui_fetched.suspend_with
+      ~reason:(Request_failed Masc_tui_fetched.suspend_reason) state.memory_input;
   state.memory_input_owed <- Masc_tui_owed_read.settled;
-  state.memory_facts <- Masc_tui_fetched.suspend state.memory_facts;
+  state.memory_facts <- Masc_tui_fetched.suspend_with
+    ~reason:(Request_failed Masc_tui_fetched.suspend_reason) state.memory_facts;
   state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
   state.code_catalog <- Masc_tui_fetched.suspend state.code_catalog;
   state.code_finder_file <- Masc_tui_fetched.suspend state.code_finder_file;
@@ -15507,7 +15663,8 @@ let suspend_workspace_readings state =
   state.fusion_runs_awaiting_observer <- false;
   state.fusion_runs_open_at_start <- None;
   state.goal_confirmation_presented <- None;
-  state.goal_candle <- Masc_tui_fetched.suspend state.goal_candle;
+  state.goal_candle <- Masc_tui_fetched.suspend_with
+    ~reason:(Goal_candle_unread Masc_tui_fetched.suspend_reason) state.goal_candle;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
        state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
@@ -15633,7 +15790,7 @@ let begin_keeper_deletions_read state =
     Some state.keeper_deletions_generation)
 
 let apply_keeper_deletions_read state ~generation
-    (result : (Masc_tui_keeper_control.deletion_inventory, string) result) =
+    (result : (Masc_tui_keeper_control.deletion_inventory, request_failure) result) =
   if generation = state.keeper_deletions_generation then (
     state.keeper_deletions_loading <- false;
     if server_authority_ready state then (
@@ -15661,10 +15818,12 @@ let apply_keeper_deletions_read state ~generation
 
 (* Why a write launched under [authority] must not go out now: the workspace
    moved since launch, or the server identity is not confirmed (unread, or a
-   match kept unconfirmed). [None] means it may be sent. *)
+   match kept unconfirmed). [None] means it may be sent. The refusal stays
+   typed so the caller draws it as kept back, never as the write's failure
+   (RFC §2). *)
 let write_authority_refusal state authority =
-  if authority <> state.workspace_authority then Some "Workspace authority withdrawn"
-  else if not (server_authority_ready state) then Some "Workspace identity is unconfirmed"
+  if authority <> state.workspace_authority then Some Workspace_authority_withdrawn
+  else if not (server_authority_ready state) then Some Workspace_identity_not_confirmed
   else None
 
 let begin_preset_detail_read state ~name =
@@ -16462,8 +16621,23 @@ type text_input_target =
    experiences: a preset name being typed holds every letter, and the two
    identity fields come last because the surface under them reads letters as
    commands. *)
+(* The runtime.toml read's failure as the screen says it: the guard's
+   refusal as a kept-back notice, any other failure in its own words. *)
+let runtime_config_view_error_text (state : state) =
+  Option.map
+    (request_failure_text ~ko:(state.ui_language = Lang_ko)
+       ~request:Masc_tui_words.Kept_request.Runtime_config_read)
+    state.runtime_config_view_error
+
+(* The memory health read's failure as the screen says it. *)
+let memory_health_error_text (state : state) =
+  Option.map
+    (request_failure_text ~ko:(state.ui_language = Lang_ko)
+       ~request:Masc_tui_words.Kept_request.Memory_health_read)
+    state.memory_health_error
+
 let config_models_read_error (state : state) =
-  match state.runtime_config_view_error with
+  match runtime_config_view_error_text state with
   | Some _ as error -> error
   | None -> state.config_models_error
 
@@ -17005,7 +17179,7 @@ let receive_journal_result state ~keeper_name ~source ~started_at journal =
        | Masc_tui_keeper_chat_log.Unknown_operation | Journal_pruned | Journal_missing
        | Journal_unsupported_version _ | Journal_unavailable _ | Events_denied _ | Events_undecodable _ ->
            remember_journal_unavailable state key
-       | Cursor_refused _ | Events_refused _ | Events_transport _ -> ());
+       | Cursor_refused _ | Events_refused _ | Events_transport _ | Events_kept_back _ -> ());
       Error error
 ;;
 
@@ -18653,7 +18827,7 @@ let begin_runtime_form_save state ~draft ~started_ns =
             | Config_document_draft _, Durability_unconfirmed _ -> uncertain_basis attempt
             | Config_document_draft _, Durable
             | (Model_form_draft _ | Account_form_draft _), (Durable | Durability_unconfirmed _) -> false)
-       | Form_finished (_, (Form_not_sent _ | Form_invalid_account _
+       | Form_finished (_, (Form_not_sent _ | Form_kept_back _ | Form_invalid_account _
                            | Form_refused _ | Form_conflict _)) -> false)
       (Runtime_form_saves.all state.runtime_form_saves) in
   match state.server_identity with
@@ -18695,14 +18869,14 @@ let apply_runtime_form_save state request status =
                | Durability_unconfirmed _ -> Some state.runtime_config_generation
                | Durable -> attempt.rfa_revalidation_floor)
           | Config_document_draft _, (Form_checking | Form_previewing _ | Form_posting _
-              | Form_finished (_, (Form_not_sent _ | Form_invalid_account _
+              | Form_finished (_, (Form_not_sent _ | Form_kept_back _ | Form_invalid_account _
                                   | Form_refused _ | Form_conflict _)))
           | (Model_form_draft _ | Account_form_draft _),
               (Form_checking | Form_previewing _ | Form_posting _ | Form_finished _) -> attempt.rfa_revalidation_floor);
         rfa_recoverable=(match status with
           | Form_finished (_, Form_saved _) -> false
           | Form_checking | Form_previewing _ | Form_posting _
-          | Form_finished (_, (Form_not_sent _ | Form_invalid_account _ | Form_refused _
+          | Form_finished (_, (Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _
                               | Form_conflict _ | Form_unconfirmed _)) -> attempt.rfa_recoverable)}
     end else attempt) state.runtime_form_saves;
   !applied
@@ -18717,7 +18891,7 @@ let runtime_form_input_locked state =
   match runtime_form_focused_attempt state with
   | Some {rfa_status=(Form_checking | Form_previewing _ | Form_posting _
       | Form_finished (_, Form_unconfirmed _));_} -> true
-  | Some {rfa_status=Form_finished (_, (Form_saved _ | Form_not_sent _
+  | Some {rfa_status=Form_finished (_, (Form_saved _ | Form_not_sent _ | Form_kept_back _
       | Form_invalid_account _ | Form_refused _ | Form_conflict _));_} | None -> false
 
 let release_runtime_form_recovery state =
@@ -18727,9 +18901,12 @@ let release_runtime_form_recovery state =
     state.runtime_form_saves;
   state.runtime_form_save_focus <- None
 
-let runtime_form_outcome_detail = function
+let runtime_form_outcome_detail ~ko = function
   | Form_saved receipt -> Masc_tui_runtime_config_receipt.lane_summary receipt
   | Form_not_sent detail -> "Save not sent; input retained: " ^ detail
+  | Form_kept_back refusal ->
+      Masc_tui_words.kept_back ~ko ~request:Masc_tui_words.Kept_request.Runtime_config_save
+        (workspace_refusal_reason ~ko refusal) Masc_tui_words.Draft_kept
   | Form_invalid_account _ -> "Account fields rejected; input retained"
   | Form_refused detail -> "Save refused; input retained: " ^ detail
   | Form_conflict _ -> "runtime.toml changed; input and opening revision retained. Reopen a fresh form after reading current."
@@ -18745,7 +18922,7 @@ let recover_runtime_form_save state ~account =
   | Some attempt ->
       let detail = match attempt.rfa_status with
         | Form_checking | Form_previewing _ | Form_posting _ -> None
-        | Form_finished (_, outcome) -> Some (runtime_form_outcome_detail outcome) in
+        | Form_finished (_, outcome) -> Some (runtime_form_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome) in
       (match attempt.rfa_request.rfs_draft with
        | Model_form_draft form -> state.runtime_model_form <- Some
            (match detail with None -> form | Some detail -> Masc_tui_model_form.refused form detail)
@@ -18753,7 +18930,7 @@ let recover_runtime_form_save state ~account =
            (match attempt.rfa_status with
             | Form_finished (_, Form_invalid_account refused) -> refused
             | Form_checking | Form_previewing _ | Form_posting _
-            | Form_finished (_, (Form_saved _ | Form_not_sent _ | Form_refused _
+            | Form_finished (_, (Form_saved _ | Form_not_sent _ | Form_kept_back _ | Form_refused _
                                 | Form_conflict _ | Form_unconfirmed _)) ->
                 (match detail with
                  | None -> form
@@ -18781,7 +18958,7 @@ let runtime_form_save_notice state =
     | Form_checking -> "Checking runtime form save · Esc leaves; " ^ recover
     | Form_previewing _ -> "Validating runtime form save · Esc leaves; " ^ recover
     | Form_posting _ -> "Submitting runtime form; awaiting receipt · Esc leaves; " ^ recover
-    | Form_finished (_, outcome) -> runtime_form_outcome_detail outcome ^ " · " ^ recover
+    | Form_finished (_, outcome) -> runtime_form_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome ^ " · " ^ recover
         ^ (match attempt.rfa_request.rfs_draft with
            | Model_form_draft _ | Account_form_draft _ -> " · Ctrl-X closes retained form; next open starts fresh"
            | Config_document_draft _ -> " · X explicitly discards local draft")) attempt
@@ -18885,14 +19062,14 @@ let apply_keeper_creation_status state request status =
              && String.equal attempt.kca_request.kcr_keeper request.kcr_keeper
           then { attempt with kca_declaration = None } else attempt) state.keeper_creations
     | Creation_checking | Creation_posting
-    | Creation_finished (Creation_not_sent _ | Creation_refused _ | Creation_unconfirmed _) -> ());
+    | Creation_finished (Creation_not_sent _ | Creation_kept_back _ | Creation_refused _ | Creation_unconfirmed _) -> ());
   !applied
 
 let keeper_creation_recovery_draft state =
   List.find_map (fun attempt ->
     if attempt.kca_request.kcr_authority <> state.workspace_authority then None
     else match attempt.kca_status with
-      | Creation_finished (Creation_not_sent _ | Creation_refused _ | Creation_unconfirmed _) ->
+      | Creation_finished (Creation_not_sent _ | Creation_kept_back _ | Creation_refused _ | Creation_unconfirmed _) ->
           attempt.kca_declaration
       | Creation_checking | Creation_posting | Creation_finished Creation_created -> None)
     state.keeper_creations
@@ -18916,7 +19093,7 @@ let clear_created_keeper_draft state request =
     && match attempt.kca_status with
        | Creation_finished Creation_created -> true
        | Creation_checking | Creation_posting
-       | Creation_finished (Creation_not_sent _ | Creation_refused _ | Creation_unconfirmed _) -> false)
+       | Creation_finished (Creation_not_sent _ | Creation_kept_back _ | Creation_refused _ | Creation_unconfirmed _) -> false)
     state.keeper_creations in
   if confirmed && keeper_creation_origin_current state request
      && state.keeper_creation_draft_owner == request.kcr_draft_owner then begin
@@ -19873,6 +20050,12 @@ let current_detail_reading (state : state) =
 
 let keeper_peer_page_number position = List.length position.kpp_previous + 1
 
+(* A page read the workspace guard did not send: the notice is drawn alone,
+   never as the page's failure (RFC §2). *)
+let keeper_peer_kept_back_notice (state : state) refusal =
+  workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+    ~request:Masc_tui_words.Kept_request.Keeper_relationship_read refusal
+
 (* This state follows the reader, not its scrollable text: a kept page remains
    visibly kept while the next page is pending or failed. *)
 let keeper_peer_status state =
@@ -19889,8 +20072,12 @@ let keeper_peer_status state =
              | None -> Keeper_peer_loading {page; retained; retry}
              | Some (Ok _ | Error _) -> Keeper_peer_arrived {page; retained; retry})
         | None, Some failure, retained ->
-            Keeper_peer_failed {page = keeper_peer_page_number failure.kpf_position;
-                                retained; reason = failure.kpf_reason}
+            let page = keeper_peer_page_number failure.kpf_position in
+            (match failure.kpf_reason with
+             | Request_failed reason -> Keeper_peer_failed {page; retained; reason}
+             | Request_withdrawn refusal ->
+                 Keeper_peer_kept_back {page; retained;
+                   notice = keeper_peer_kept_back_notice state refusal})
         | None, None, Some page -> Keeper_peer_current page
         | None, None, None -> Keeper_peer_unread)
   | (Some _ | None), (Some _ | None) -> None
@@ -19980,10 +20167,14 @@ let keeper_peer_read_current (state : state) ~keeper_name ~token =
 (* The fixed status can be clipped by the terminal width. Retain the whole
    failure after the old page so it can wrap, scroll and be searched without
    shifting the old page's existing offsets. *)
-let keeper_peer_failure_lines failure =
-  [""; "r:retry";
-   Printf.sprintf "Page %d read failed:" (keeper_peer_page_number failure.kpf_position);
-   failure.kpf_reason]
+let keeper_peer_failure_lines state failure =
+  match failure.kpf_reason with
+  | Request_failed reason ->
+      [""; "r:retry";
+       Printf.sprintf "Page %d read failed:" (keeper_peer_page_number failure.kpf_position);
+       reason]
+  | Request_withdrawn refusal ->
+      [""; "r:retry"; keeper_peer_kept_back_notice state refusal]
 
 let keeper_peer_relation selected (page : Masc_tui_queue_inspection.peer_page) =
   Option.bind selected (fun selected ->
@@ -20017,7 +20208,7 @@ let finish_keeper_peer_reading (state : state) ~keeper_name ~token result =
                     ~page_number:(List.length old_position.kpp_previous + 1) page in
             let failure = {kpf_position = position; kpf_reason = reason} in
             peer.kpr_committed, Some failure,
-            retained @ keeper_peer_failure_lines failure in
+            retained @ keeper_peer_failure_lines state failure in
       let selected = match result with
         | Error _ -> peer.kpr_selected
         | Ok page ->
@@ -20119,7 +20310,7 @@ let move_keeper_peer_selection state ~move =
            let selected = Some relation.operation_id in
            let lines = Masc_tui_queue_inspection.peer_lines
                ~page_number:(keeper_peer_page_number position) page in
-           let lines = lines @ Option.fold ~none:[] ~some:keeper_peer_failure_lines peer.kpr_failure in
+           let lines = lines @ Option.fold ~none:[] ~some:(keeper_peer_failure_lines state) peer.kpr_failure in
            let reading = Masc_tui_detail_reading.replace
                ~title:("Keeper relationships · " ^ peer.kpr_keeper)
                (keeper_peer_sections ~selected ~committed:peer.kpr_committed ~lines) reading in
@@ -20333,40 +20524,53 @@ let complete_goal_candle_read (state : state) ~credential_is_current request res
   match result with
     | Ok (owner, Error (Goal_candle_access_denied status)) when credential_is_current owner ->
       state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
-        (if status = 401 then "Candle authentication failed (HTTP 401); check the credential"
-         else Printf.sprintf "Candle access denied (HTTP %d); administrator permission is required" status)
+        (Goal_candle_unread
+          (if status = 401 then "Candle authentication failed (HTTP 401); check the credential"
+           else Printf.sprintf "Candle access denied (HTTP %d); administrator permission is required" status))
     | Ok (owner, Error (Goal_candle_authority_changed status)) when credential_is_current owner ->
       state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
-        (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d); read again" code
-         | None -> "Candle server or workspace identity changed; read again")
+        (Goal_candle_unread
+          (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d); read again" code
+           | None -> "Candle server or workspace identity changed; read again"))
     | Ok (owner, Ok (instance, _))
       when credential_is_current owner
            && not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
       state.goal_candle <- Masc_tui_fetched.refuse ~equal:String.equal state.goal_candle request
-        "Candle server process changed; read again"
+        (Goal_candle_unread "Candle server process changed; read again")
     | Error _ | Ok (_, (Ok _ | Error (Goal_candle_access_denied _ | Goal_candle_authority_changed _ | Goal_candle_http_status _ | Goal_candle_read_failed _))) ->
+  let unread detail = Error (Goal_candle_unread detail) in
   let result = match result with
-    | Error _ -> Error "Candle read unavailable; check the connection and read again"
+    | Error (Request_failed _) -> unread "Candle read unavailable; check the connection and read again"
+    | Error (Request_withdrawn refusal) ->
+      Error (Goal_candle_kept_back
+        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Masc_tui_words.Kept_request.Goal_candle_read refusal))
     | Ok (owner, _) when not (credential_is_current owner) ->
-      Error "Candle credential changed; read again"
-    | Ok (_, Error (Goal_candle_access_denied status)) -> Error (Printf.sprintf "Candle access denied (HTTP %d)" status)
-    | Ok (_, Error (Goal_candle_authority_changed status)) -> Error
+      unread "Candle credential changed; read again"
+    | Ok (_, Error (Goal_candle_access_denied status)) -> unread (Printf.sprintf "Candle access denied (HTTP %d)" status)
+    | Ok (_, Error (Goal_candle_authority_changed status)) -> unread
         (match status with Some code -> Printf.sprintf "Candle server or workspace identity changed (HTTP %d)" code
          | None -> "Candle server or workspace identity changed")
-    | Ok (_, Error (Goal_candle_http_status status)) -> Error (Printf.sprintf "Candle read failed (HTTP %d)" status)
-    | Ok (_, Error (Goal_candle_read_failed _)) -> Error "Candle read failed; check the connection and read again"
+    | Ok (_, Error (Goal_candle_http_status status)) -> unread (Printf.sprintf "Candle read failed (HTTP %d)" status)
+    | Ok (_, Error (Goal_candle_read_failed _)) -> unread "Candle read failed; check the connection and read again"
     | Ok (owner, Ok (instance_id, observation)) ->
       (match state.server_identity with
        | Some identity when identity.Tui_decode.sid_runtime_instance_id = Some instance_id ->
          Ok (owner, instance_id, observation)
-       | Some _ | None -> Error "Candle server instance changed; read again") in
+       | Some _ | None -> unread "Candle server instance changed; read again") in
   state.goal_candle <- Masc_tui_fetched.complete ~equal:String.equal state.goal_candle request result
 
 let complete_goal_timeline_read (state : state) request result =
-  let result = Result.bind result (function
-    | Tui_decode.Goal_timeline_ready events -> Ok events
-    | Tui_decode.Goal_timeline_unavailable failure ->
-      Error (Masc_tui_planning_detail.timeline_unavailability_detail failure)) in
+  let result = match result with
+    | Ok (Tui_decode.Goal_timeline_ready events) -> Ok events
+    | Ok (Tui_decode.Goal_timeline_unavailable failure) ->
+      Error (Masc_tui_planning_detail.Timeline_failed
+        (Masc_tui_planning_detail.timeline_unavailability_detail failure))
+    | Error (Request_failed detail) -> Error (Masc_tui_planning_detail.Timeline_failed detail)
+    | Error (Request_withdrawn refusal) ->
+      Error (Masc_tui_planning_detail.Timeline_kept_back
+        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Masc_tui_words.Kept_request.Goal_timeline_read refusal)) in
   state.goal_timeline <- Masc_tui_fetched.complete ~equal:String.equal state.goal_timeline request result
 
 let begin_task_history_read ?(older=false) ?(progressive=false) (state : state) ~task_id ~limit =
@@ -20414,7 +20618,7 @@ let prepare_task_history_for_open state ~task_id =
 
 let cancel_task_history_for_view_exit state =
   state.task_history <- Masc_tui_fetched.cancel_pending
-    ~reason:"Task view closed before history loaded." state.task_history;
+    ~reason:(Request_failed "Task view closed before history loaded.") state.task_history;
   state.task_history_request <- None
 
 let ui_text (state : state) ~ko ~en =
@@ -20486,6 +20690,9 @@ let resource_save_summary state phase =
       else describe_effect ~interrupted:false (Masc_tui_resource_export.error_target_effect error)
   | Resource_save_settled (Resource_save_not_started _) ->
       ui_text state ~ko:"저장 요청을 시작하지 않았습니다" ~en:"Save not started"
+  | Resource_save_settled (Resource_save_kept_back refusal) ->
+      workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+        ~request:Masc_tui_words.Kept_request.Original_save refusal
   | Resource_save_settled (Resource_save_unconfirmed _) -> describe_effect ~interrupted:false None
   | Resource_save_settled (Resource_save_interrupted cancellation) ->
       describe_effect ~interrupted:true
@@ -20508,7 +20715,8 @@ let settle_resource_save state request outcome =
         && Masc_tui_message_input.contents prompt.rsp_path = request.save_input_path ->
         state.resource_save_prompt <- None
     | (Resource_save_result (Ok () | Error _) | Resource_save_not_started _
-        | Resource_save_unconfirmed _ | Resource_save_interrupted _), (Some _ | None) -> ()
+        | Resource_save_kept_back _ | Resource_save_unconfirmed _
+        | Resource_save_interrupted _), (Some _ | None) -> ()
   end;
   !accepted
 
@@ -21679,33 +21887,6 @@ let browser_lane_picker_empty_line ~ko (view : Browser_lane_view.t) =
    renderer, so a module that cannot see this one says them too. Included
    here so the callers of this module name them as before. *)
 include Masc_tui_words
-
-(* Why the workspace guard withdrew a request. *)
-let workspace_refusal_reason ~ko = function
-  | Workspace_authority_withdrawn ->
-      if ko then "워크스페이스가 바뀜" else "workspace authority withdrawn"
-  | Workspace_identity_not_confirmed -> workspace_identity_unconfirmed ~ko
-  | Workspace_identity_changed ->
-      if ko then "워크스페이스 식별이 바뀌었거나 읽히지 않음"
-      else "workspace identity changed or unavailable"
-
-(* The guard's refusal of a request its caller names, in the shape of every
-   request kept back. *)
-let workspace_refusal_text ~ko ~request refusal =
-  kept_back ~ko ~request (workspace_refusal_reason ~ko refusal) Nothing_kept
-
-(* The guard's refusal for the callers that do not name their request yet:
-   the English sentences those surfaces, still English, have always drawn.
-   They move to [workspace_refusal_text] with the surface (#52022). *)
-let workspace_guard_refusal_english = function
-  | Workspace_authority_withdrawn -> "Workspace authority withdrawn"
-  | Workspace_identity_not_confirmed -> "Workspace identity is unconfirmed"
-  | Workspace_identity_changed ->
-      "Workspace identity changed or is unavailable; request withdrawn"
-
-let request_failure_text ~ko ~request = function
-  | Request_withdrawn refusal -> workspace_refusal_text ~ko ~request refusal
-  | Request_failed detail -> detail
 
 let schedule_form_refusal_text ~ko { sfr_change; sfr_reason; _ } =
   let reason =
@@ -23798,7 +23979,7 @@ let apply_runtime_document_save state request status =
         | Form_unconfirmed _ -> true
         | Form_saved receipt -> (match receipt.Masc_tui_runtime_config_receipt.durability with
            | Durable -> false | Durability_unconfirmed _ -> true)
-        | Form_not_sent _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> false in
+        | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> false in
       (match List.find_opt (fun edit -> edit.rce_workspace=workspace
           && (Edit.same_draft edit.rce_session submitted
               || (uncertain && Edit.same_basis edit.rce_session submitted))) state.runtime_config_edits with
@@ -23815,18 +23996,18 @@ let apply_runtime_document_save state request status =
             | Form_unconfirmed _ ->
                 put_runtime_config_edit ~preserve_view:true state ~workspace
                   (Edit.unconfirmed ~after_read:state.runtime_config_generation
-                     (runtime_form_outcome_detail outcome) edit.rce_session)
-            | Form_not_sent _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ ->
+                     (runtime_form_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome) edit.rce_session)
+            | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ ->
                 let session = match outcome, edit.rce_session.current with
                   | Form_conflict current, None ->
                       (match Edit.observe current edit.rce_session with
                        | Ok session -> session | Error _ -> edit.rce_session)
-                  | (Form_not_sent _ | Form_invalid_account _ | Form_refused _ | Form_unconfirmed _),
+                  | (Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _ | Form_unconfirmed _),
                       (None | Some _)
                   | Form_conflict _, Some _ -> edit.rce_session
                   | Form_saved _, (None | Some _) -> edit.rce_session in
                 put_runtime_config_edit ~preserve_view:true state ~workspace
-                  (Edit.failed (runtime_form_outcome_detail outcome) session));
+                  (Edit.failed (runtime_form_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome) session));
            true)
   | Config_document_draft _, (Form_checking | Form_previewing _ | Form_posting _)
   | (Model_form_draft _ | Account_form_draft _),
@@ -23885,6 +24066,7 @@ let set_runtime_lane_list_freshness (state : state) list freshness =
 let runtime_lane_stale_lines (state : state) =
   let line name = function
     | Lane_list_read -> None
+    | Lane_list_kept_back notice -> Some notice
     | Lane_list_unread detail ->
       Some
         (Printf.sprintf
@@ -24145,11 +24327,21 @@ let memory_overview_scrolled ~header_rows ~refused_rows ~context_rows (state : s
   ; sc_preview_keep = None
   }
 
-(* What the fact browser knows about the keeper it is open on. *)
-let memory_facts_view (state : state) =
+(* What the fact browser knows about the keeper it is open on, with the
+   failure kept typed for the line that must draw a kept-back notice alone. *)
+let memory_facts_reading (state : state) =
   match state.memory_facts_keeper with
   | None -> Masc_tui_fetched.Absent
   | Some keeper -> Masc_tui_fetched.view_for ~equal:String.equal state.memory_facts ~key:keeper
+
+(* One Keeper's fact reading with its failure as text: the read's own
+   failure, or the kept-back notice alone (RFC §2). *)
+let memory_facts_said (state : state) view =
+  observation_failure_said
+    (request_failure_text ~ko:(state.ui_language = Lang_ko)
+       ~request:Masc_tui_words.Kept_request.Memory_facts_read) view
+
+let memory_facts_view (state : state) = memory_facts_said state (memory_facts_reading state)
 
 (* The facts on screen: the last answer, also when the refresh after it
    failed -- that failure is drawn beside them, not instead of them. *)
@@ -25067,7 +25259,7 @@ let runtime_lane_candidate_write_refusal (state : state) =
   else
     match state.runtime_surface_lane_freshness with
     | Lane_list_read -> None
-    | Lane_list_unread _ ->
+    | Lane_list_unread _ | Lane_list_kept_back _ ->
       Some (Lane_write_refused Lane_list_may_be_stale)
 
 let runtime_lane_list_generation (state : state) = function
@@ -25089,8 +25281,11 @@ let settle_runtime_lane_write (state : state) ~written = function
     state.runtime_lane_notice <- Some (Lane_write_committed receipt);
     state.runtime_lane_write <-
       Lane_write_rereading (written, runtime_lane_list_generation state written, receipt)
-  | Error detail ->
+  | Error (Request_failed detail) ->
     state.runtime_lane_notice <- Some (Lane_write_refused (Refused_by_server detail));
+    state.runtime_lane_write <- Lane_write_idle
+  | Error (Request_withdrawn refusal) ->
+    state.runtime_lane_notice <- Some (Lane_write_kept_back refusal);
     state.runtime_lane_write <- Lane_write_idle
 
 (* A load of [list] with [generation] landed. Any load of it that comes back
@@ -25105,14 +25300,22 @@ let runtime_lane_list_reread (state : state) ~list ~generation result =
     when same_runtime_lane_list written list && generation > answered_at ->
     state.runtime_lane_write <- Lane_write_idle;
     (match result with
-     | Error detail -> set_runtime_lane_list_freshness state list (Lane_list_unread detail)
+     | Error (Request_failed detail) ->
+       set_runtime_lane_list_freshness state list (Lane_list_unread detail)
+     | Error (Request_withdrawn refusal) ->
+       let request = match list with
+         | Runtime_surface_list -> Masc_tui_words.Kept_request.Runtime_surface_read
+         | Standalone_lanes_list -> Masc_tui_words.Kept_request.Lanes_read in
+       set_runtime_lane_list_freshness state list
+         (Lane_list_kept_back
+            (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal))
      | Ok () -> ());
     (* A pending-key notice may cover the receipt while this read is out.
        Navigation dismissal and newer refusals must survive its completion. *)
     (match state.runtime_lane_notice with
      | Some Lane_write_pending ->
          state.runtime_lane_notice <- Some (Lane_write_committed receipt)
-     | Some (Lane_write_committed _ | Lane_write_refused _) | None -> ())
+     | Some (Lane_write_committed _ | Lane_write_refused _ | Lane_write_kept_back _) | None -> ())
   | Lane_write_rereading _ | Lane_write_posting | Lane_write_idle -> ()
 
 type runtime_lane_write_request =
@@ -26896,13 +27099,15 @@ let keeper_message_saved_preparation_rows state live =
        | Details.Not_loaded -> [row (say "저장된 준비 기록 조회 대기" "saved preparation records waiting to load")]
        | Loading -> [row (say "저장된 준비 기록 조회 중" "loading saved preparation records")]
        | Failed detail -> [row (say "준비 기록 조회 실패 · " "preparation records failed to load · " ^ detail)]
+       | Kept_back notice -> [row notice]
        | Loaded snapshot -> snapshot_rows snapshot
        | Retained {snapshot;recheck} ->
          let kept = saved ^ say "이전 관측 유지 · " "keeping the last observation · " in
          let note = match recheck with
            | Details.Recheck_pending -> kept ^ say "재조회 대기" "recheck pending"
            | Recheck_loading -> kept ^ say "재조회 중" "rechecking"
-           | Recheck_failed detail -> kept ^ say "재조회 실패 · " "recheck failed · " ^ detail in
+           | Recheck_failed detail -> kept ^ say "재조회 실패 · " "recheck failed · " ^ detail
+           | Recheck_kept_back notice -> kept ^ notice in
          row note :: snapshot_rows snapshot)
   | Some _ | None -> []
 ;;
@@ -27013,7 +27218,7 @@ let keeper_observed_interrupt_action (state : state) keeper_name =
     state.keeper_observed_interrupts
     |> Option.map (fun item -> item.oi_token, item.oi_sent_ns,
       match item.oi_status with
-        | Interrupt_declined _ | Interrupt_failed _ -> true
+        | Interrupt_declined _ | Interrupt_failed _ | Interrupt_kept_back _ -> true
         | Interrupt_sending | Interrupt_signalled -> false) in
   Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
 ;;
@@ -27058,7 +27263,10 @@ let keeper_observed_interrupt_rows (state : state) =
                 say "중단 접수됨 · 지금 턴이 끝나기를 기다리는 중"
                   "Interrupt received; waiting for the current turn to settle"
             | Interrupt_declined detail -> say "턴을 중단하지 못함: " "Turn was not interrupted: " ^ detail
-            | Interrupt_failed detail -> say "중단 요청 실패: " "Interrupt request failed: " ^ detail) ]
+            | Interrupt_failed detail -> say "중단 요청 실패: " "Interrupt request failed: " ^ detail
+            | Interrupt_kept_back refusal ->
+                workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                  ~request:Kept_request.Keeper_interrupt refusal) ]
        | None -> [])
 ;;
 
@@ -27118,7 +27326,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
           ~ko:(state.ui_language = Lang_ko)
           ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
-          ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+          ~now:(Unix.gettimeofday ()) ~keeper_name ~error:(keeper_turns_poll_error state)
           state.keeper_turns
     in
     let waiting_items = keeper_message_waiting_requests state ~keeper_name in
@@ -27201,16 +27409,28 @@ let keeper_message_activity_rows (state : state) =
         | None -> []
         | Some name ->
           let provisional = provisional_requests () in
+          let request_id request =
+            Masc_tui_keeper_chat_projection.terminal_safe_text request.Masc_tui_keeper_chat_projection.request_id in
+          let row lead rest = { Masc_tui_answering.lead; rest = " · " ^ rest;
+            motion = Masc_tui_answering.Still; keys = "" } in
+          let pending_lead request =
+            ui_text state ~ko:"다음 순서 (제어 대기) " ~en:"Priority (control pending) " ^ request_id request in
+          let kept_back refusal = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+            ~request:Masc_tui_words.Kept_request.Run_next refusal in
+          let said detail = Masc_tui_keeper_chat_projection.terminal_safe_text detail in
           List.filter_map (fun (request, result) ->
             if request.Masc_tui_keeper_chat_projection.keeper_name <> name then None
-            else Some { Masc_tui_answering.lead = (if Requests.mem request provisional then
-                  ui_text state ~ko:"다음 순서 (제어 대기) " ~en:"Priority (control pending) "
-                else match result with
-                  | Ok _ -> ui_text state ~ko:"다음 순서 " ~en:"Priority "
-                  | Error _ -> ui_text state ~ko:"다음 순서 확인 불가 " ~en:"Priority confirmation unavailable ")
-                ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
-              rest = " · " ^ (match result with Ok detail | Error detail ->
-                Masc_tui_keeper_chat_projection.terminal_safe_text detail); motion = Masc_tui_answering.Still; keys = "" })
+            else Some (match Requests.mem request provisional, result with
+              | true, (Ok detail | Error (Request_failed detail)) -> row (pending_lead request) (said detail)
+              | true, Error (Request_withdrawn refusal) -> row (pending_lead request) (kept_back refusal)
+              | false, Ok detail ->
+                  row (ui_text state ~ko:"다음 순서 " ~en:"Priority " ^ request_id request) (said detail)
+              | false, Error (Request_failed detail) ->
+                  row (ui_text state ~ko:"다음 순서 확인 불가 " ~en:"Priority confirmation unavailable "
+                       ^ request_id request) (said detail)
+              | false, Error (Request_withdrawn refusal) ->
+                  (* Not sent: the kept-back notice alone, the request id after it (RFC §2). *)
+                  row (kept_back refusal) (request_id request)))
             state.keeper_run_next_receipts in
       keeper_message_diagnostic_activity_rows state @ receipts
   | (Tools_compact | Tools_results), None -> []
@@ -27302,14 +27522,21 @@ let keeper_message_activity_rows (state : state) =
         let pending = List.exists (fun (request, _) -> Requests.mem request provisional) waiting
             || List.exists holds
             (state.keeper_run_next_pending @ state.keeper_run_next_ready @ state.keeper_run_next_inflight) in
-        let failed, received, successful = List.fold_left (fun (failed, received, successful) (request, result) ->
-            if not (holds request) || Requests.mem request provisional then failed, received, successful
+        let failed, kept_back, received, successful = List.fold_left
+            (fun (failed, kept_back, received, successful) (request, result) ->
+            if not (holds request) || Requests.mem request provisional then failed, kept_back, received, successful
             else match result with
-              | Error _ -> true, true, successful
-              | Ok _ -> failed, true, Requests.add request successful)
-            (false, false, Requests.empty) state.keeper_run_next_receipts in
+              | Error (Request_failed _) -> true, kept_back, true, successful
+              | Error (Request_withdrawn refusal) ->
+                  failed, (if Option.is_some kept_back then kept_back else Some refusal), true, successful
+              | Ok _ -> failed, kept_back, true, Requests.add request successful)
+            (false, None, false, Requests.empty) state.keeper_run_next_receipts in
         if failed then
           attention (say "다음 순서 확인 불가" "priority confirmation unavailable")
+        else if Option.is_some kept_back then
+          (* Not sent: the kept-back notice alone (RFC §2). *)
+          Option.iter (fun refusal -> attention (workspace_refusal_text ~ko
+            ~request:Masc_tui_words.Kept_request.Run_next refusal)) kept_back
         else if pending then add (say "다음 순서 확인 중" "confirming priority")
         else if List.for_all (fun (request, _) -> Requests.mem request successful) waiting then
           add (say "다음 순서로 전달 대기" "waiting to go next")

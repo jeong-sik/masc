@@ -21,12 +21,12 @@ val listed :
     Only the current pending owner may apply success or failure, once. *)
 
 val checks_loaded : Masc_tui_types.state -> unit Masc_tui_fetched.request ->
-  (Masc_tui_artifact_checks.inventory, string) result -> unit
+  (Masc_tui_artifact_checks.inventory, Masc_tui_artifact_checks.read_failure) result -> unit
 (** Settle only the current shared-check read, independently of report bodies
     and MCP inventory. Never creates a confirmation or changes selection. *)
 
 val begin_check : Masc_tui_types.state -> report:Masc_tui_resource_catalog.report ->
-  (Masc_tui_artifact_check_action.request, string) result
+  (Masc_tui_artifact_check_action.request, Masc_tui_types.request_failure) result
 (** Only a confirmed workspace, complete settled inventory and no pending write
     permit a toggle. Retire cached confirmation authority before dispatch. *)
 val check_changed : Masc_tui_types.state -> Masc_tui_artifact_check_action.request ->
@@ -42,7 +42,7 @@ val begin_share_recovery_lookup : Masc_tui_types.state ->
 
 val begin_share_change : ?recovery:bool -> Masc_tui_types.state ->
   report:Masc_tui_resource_catalog.report -> entry:Masc_tui_artifact_share_pending.entry ->
-  (Masc_tui_types.resource_share_request, string) result
+  (Masc_tui_types.resource_share_request, Masc_tui_types.request_failure) result
 (** Allocate a workspace-bound owner before dispatch, allowing at most one
     outstanding share mutation per workspace and artifact. Refuse an artifact whose prior write has an
     unknown outcome unless an explicit recovery attempt is being made. Retire
@@ -73,7 +73,7 @@ val open_selected :
     An empty or invalid selection leaves state unchanged and invokes no callback. *)
 
 val select_next_unchecked : Masc_tui_types.state ->
-  (Masc_tui_resource_catalog.key option, string) result
+  (Masc_tui_resource_catalog.key option, Masc_tui_types.request_failure) result
 (** Select the next unchecked report in the current format/day projection.
     Preserve focus. Return its immutable key for the caller's existing read
     boundary when the detail is focused; this function does not fetch or confirm.

@@ -35,9 +35,16 @@ val inventory_decision : t -> inventory_decision
 
 type name_report
 
+type lookup_failure =
+  | Lookup_failed of string
+  | Lookup_kept_back of string
+(** [Lookup_failed] carries the read's own cause. [Lookup_kept_back] carries
+    the notice the TUI already wrote for a read the workspace guard did not
+    send; it is drawn as it is, with no failure label. *)
+
 type load_result =
-  | Inventory_result of (t, string) result
-  | Name_result of (name_report, string) result
+  | Inventory_result of (t, lookup_failure) result
+  | Name_result of (name_report, lookup_failure) result
 
 type partial
 
@@ -45,7 +52,7 @@ val empty_partial : partial
 val add_partial : partial -> load_result -> partial
 val partial_complete : partial -> bool
 val partial_results : partial ->
-  (t, string) result option * (name_report, string) result option
+  (t, lookup_failure) result option * (name_report, lookup_failure) result option
 val decode_name :
   sanitize:(string -> string) -> keeper_name:string -> Yojson.Safe.t ->
   (name_report, string) result

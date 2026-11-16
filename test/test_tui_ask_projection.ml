@@ -592,7 +592,7 @@ let test_feedback_preserves_receipt_and_canonical_winner () =
         None, "already_recorded", `String "stored"
     ; Ok (Decode.Ask_answer_written_unconfirmed "private append detail"), None, "winner_unconfirmed", `Null
     ; Ok (Decode.Ask_answer_refused "private refusal detail"), None, "refused", `Null
-    ; Error "private transport detail", None, "unconfirmed", `Null ] in
+    ; Error (Ask.Answer_unconfirmed "private transport detail"), None, "unconfirmed", `Null ] in
   List.iter (fun (receipt, expected_label, recording, delivery) ->
     let receipt = Result.map (fun receipt -> Decode.Keeper_answer_receipt receipt) receipt in
     let feedback = Ask.answer_feedback ~asker:(Decode.Ask_keeper "reader") ~ask_id:"wire-ask"

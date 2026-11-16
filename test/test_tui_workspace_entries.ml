@@ -2096,7 +2096,9 @@ let test_revision_read_and_draft_reconciliation () =
   let must = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let draft = must (Code_results.prepare_draft state) in
   ignore (must (Code_results.edit_draft state draft "candidate\r\n"));
-  let saving, _ = must (Code_results.begin_draft_save state) in
+  let saving, _ = must (Result.map_error
+    (request_failure_text ~ko:false ~request:Kept_request.File_save)
+    (Code_results.begin_draft_save state)) in
   let next, earlier_read = start_read ~equal:String.equal state.code_file "source.ml" in
   state.code_file <- next;
   ignore (Code_results.complete_draft_save state saving
@@ -2113,7 +2115,9 @@ let test_revision_read_and_draft_reconciliation () =
   check_string "candidate survives explicit comparison" "candidate\r\n" (Masc_tui_code_draft.text current);
   check_string "only explicit adoption changes the save revision" (String.make 64 'b')
     (Masc_tui_code_draft.base current).revision;
-  let submitted, _ = must (Code_results.begin_draft_save state) in
+  let submitted, _ = must (Result.map_error
+    (request_failure_text ~ko:false ~request:Kept_request.File_save)
+    (Code_results.begin_draft_save state)) in
   let next, newer_read = start_read ~equal:String.equal state.code_file "source.ml" in
   state.code_file <- next;
   Alcotest.(check bool) "save acknowledgement cannot supersede a newer read" false

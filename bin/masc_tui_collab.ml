@@ -2,12 +2,13 @@ module Fetched = Masc_tui_fetched
 
 type form = Browsing | Name of string | Hours of string * string | Confirm_revoke of string | Confirm_resolution of string
 type write_access = Writable | Pending of string | Uncertain of { request_id : string; notice : string } | Read_only of string
+type read_failure = Read_failed of string | Read_kept_back of string
 type read = Read of unit ref
 type mutation = Mutation of unit ref
 type t = {
   owner : unit ref;
   read : read option;
-  inventory : Masc.Tui_decode.play_invites Fetched.view;
+  inventory : (Masc.Tui_decode.play_invites, read_failure) Fetched.observation;
   selected : string option;
   form : form;
   pending : mutation option;
@@ -41,8 +42,8 @@ let listed t read result =
       (match result with
        | Error error ->
            let inventory = match Fetched.value t.inventory with
-             | Some listed -> Fetched.Stale (listed, error)
-             | None -> Fetched.Failed error in
+             | Some listed -> Fetched.Stale (listed, Read_failed error)
+             | None -> Fetched.Failed (Read_failed error) in
            {t with inventory}
        | Ok listed ->
            let rows = listed.Masc.Tui_decode.pis_rows in
@@ -50,6 +51,11 @@ let listed t read result =
              | Some name when List.exists (fun row -> String.equal row.Masc.Tui_decode.pi_name name) rows -> Some name
              | Some _ | None -> Option.map (fun row -> row.Masc.Tui_decode.pi_name) (List.nth_opt rows 0) in
            {t with inventory = Fetched.Ready listed; selected})
+let kept_back t read notice =
+  match t.read with
+  | None -> t
+  | Some current when current != read -> t
+  | Some _ -> {t with read = None; inventory = Fetched.Failed (Read_kept_back notice)}
 let notice t message = {t with message = Some message}
 let busy t =
   let mutation = Mutation (ref ()) in
@@ -223,8 +229,10 @@ let lines ~height ~width t =
      | Some _, _ | None, (Fetched.Absent | Fetched.Loading) -> ["Reading invites…"]
      | None, (Fetched.Ready _ | Fetched.Stale _ | Fetched.Failed _) -> [])
     @ (match t.inventory with
-       | Fetched.Stale (_, error) | Fetched.Failed error ->
+       | Fetched.Stale (_, Read_failed error) | Fetched.Failed (Read_failed error) ->
            ["Could not read invites: " ^ error; "r retries the read; machine observation remains available."]
+       | Fetched.Stale (_, Read_kept_back notice) | Fetched.Failed (Read_kept_back notice) ->
+           [notice; "r retries the read; machine observation remains available."]
        | Fetched.Absent | Fetched.Loading | Fetched.Ready _ -> [])
     @ (match t.read, t.inventory with
        | Some _, (Fetched.Ready _ | Fetched.Stale _) | None, Fetched.Stale _ ->

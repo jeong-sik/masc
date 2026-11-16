@@ -37,7 +37,7 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
   let target : Detail.target={submitted_by="original-submitter";keeper_name="different-target";request_id} in
   let wire () = Server_async_request_observability.project_request ~base_path
       ~submitted_by:target.submitted_by ~request_id in
-  let read () = Detail.decode ~target (wire ()) in
+  let read () = Detail.decode ~target (wire ()) |> Result.map_error (fun detail -> Request_failed detail) in
   let state=create_state ~workspace:"fixture" ~local_base_path:base_path ~port:0 () in
   state.view <- Tools;state.tools_pane <- Tools_async;
   state.tools_async_observation <- Some (Server_async_request_observability.project ~base_path
@@ -61,7 +61,7 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
   complete_tools_async_detail state current (read ());
   check bool "physical worker remains running after status reads" true ((observed state target).phase=Detail.Running);
   let refresh=begin_read state ~force:true in
-  complete_tools_async_detail state refresh (Error "original source unavailable");
+  complete_tools_async_detail state refresh (Error (Request_failed "original source unavailable"));
   check bool "failed refresh keeps original physical observation" true
     (match Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail ~key:target with
      | Stale (Detail.Observed snapshot,_) -> snapshot.phase=Detail.Running
@@ -73,7 +73,8 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
           key,if key="continuation" then `Assoc ["kind",`String "unavailable";"detail",`String "logical authority unavailable"] else value) fields)
          | _ -> fail "physical request envelope absent") else value) envelope)
     | _ -> fail "status envelope absent" in
-  complete_tools_async_detail state retry (Detail.decode ~target unavailable);
+  complete_tools_async_detail state retry
+    (Detail.decode ~target unavailable |> Result.map_error (fun detail -> Request_failed detail));
   check bool "logical failure retains an independently read physical worker" true
     ((observed state target).phase=Detail.Running && match (observed state target).logical with
       | Detail.Unavailable _ -> true | Confirmed _ -> false);

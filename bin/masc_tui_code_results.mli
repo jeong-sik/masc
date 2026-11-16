@@ -195,7 +195,8 @@ val prepare_draft : Masc_tui_types.state -> (Masc_tui_code_draft.t, string) resu
 val edit_draft : Masc_tui_types.state -> Masc_tui_code_draft.t -> string -> (unit, string) result
 val discard_draft : Masc_tui_types.state -> (unit, string) result
 val adopt_draft_revision : Masc_tui_types.state -> (unit, string) result
-val begin_draft_save : Masc_tui_types.state -> (Masc_tui_types.code_save_request * Masc_tui_code_draft.t, string) result
+val begin_draft_save : Masc_tui_types.state ->
+  (Masc_tui_types.code_save_request * Masc_tui_code_draft.t, Masc_tui_types.request_failure) result
 val complete_draft_save : Masc_tui_types.state -> Masc_tui_types.code_save_request -> Masc_tui_code_draft.outcome -> bool
 (** Settle only the submitted draft regardless of the current view. [true] means
     the original reading still owns an optional post-save refresh. *)

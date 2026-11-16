@@ -34,7 +34,7 @@ let answer ~now t request result =
    retired. *)
 let cause = function
   | World.Suspended -> "suspended"
-  | World.Request_failed text -> text
+  | World.Request_failed text | World.Kept_back text -> text
 
 (* What a reading holds, as a name, so a failure prints both sides. *)
 let held t =

@@ -116,11 +116,11 @@ let a_picture ?(incarnation = "inc-1") count =
 
 let mark_of = function
   | Some (Live.Showing p) -> Some (p.mark.count, p.mark.incarnation)
-  | Some (Live.Unread | Live.Not_loaded | Live.Failed _) | None -> None
+  | Some (Live.Unread | Live.Not_loaded | Live.Failed _ | Live.Kept_back _) | None -> None
 
 let is_failed = function
   | Some (Live.Failed _) -> true
-  | Some (Live.Unread | Live.Not_loaded | Live.Showing _) | None -> false
+  | Some (Live.Unread | Live.Not_loaded | Live.Showing _ | Live.Kept_back _) | None -> false
 
 let test_since () =
   let mark = testable (fun fmt (m : Live.mark) -> Format.fprintf fmt "%d/%s" m.count m.incarnation) ( = ) in

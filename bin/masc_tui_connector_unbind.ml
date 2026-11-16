@@ -16,6 +16,7 @@ type outcome =
   | Rebound
   | Not_found of string
   | Failed of string
+  | Kept_back of string
 
 let channel_label ~ko ~channel_id ~channel_name =
   match channel_name with
@@ -93,12 +94,20 @@ let outcome_text = function
   | Rebound -> "kept: now bound to another Keeper"
   | Not_found words -> "not removed, server found nothing: " ^ Terminal_text.single_line words
   | Failed reason -> "FAILED: " ^ Terminal_text.single_line reason
+  | Kept_back notice -> notice
 
+(* A kept-back notice leads its line, drawn alone, with the binding after it
+   (RFC-tui-one-screen-grammar §2). *)
 let outcome_line (target, outcome) =
-  Printf.sprintf "unbind %s %s: %s"
-    (Terminal_text.single_line target.connector_name)
-    (target_label target)
-    (outcome_text outcome)
+  match outcome with
+  | Kept_back _ ->
+      Printf.sprintf "%s · %s %s" (outcome_text outcome)
+        (Terminal_text.single_line target.connector_name) (target_label target)
+  | Removed | Rebound | Not_found _ | Failed _ ->
+      Printf.sprintf "unbind %s %s: %s"
+        (Terminal_text.single_line target.connector_name)
+        (target_label target)
+        (outcome_text outcome)
 
 (* Failures last: the event log keeps a handful of rows, and the lines that
    need acting on are the ones that must still be there when it is read. *)
@@ -106,7 +115,8 @@ let report_rank = function
   | Removed -> 0
   | Rebound -> 1
   | Not_found _ -> 2
-  | Failed _ -> 3
+  | Kept_back _ -> 3
+  | Failed _ -> 4
 
 let report_order results =
   List.stable_sort
@@ -117,21 +127,24 @@ let count predicate results =
   List.length (List.filter (fun (_, outcome) -> predicate outcome) results)
 
 let summary ~keeper_name results =
-  let removed = count (function Removed -> true | Rebound | Not_found _ | Failed _ -> false) results in
-  let rebound = count (function Rebound -> true | Removed | Not_found _ | Failed _ -> false) results in
-  let not_found = count (function Not_found _ -> true | Removed | Rebound | Failed _ -> false) results in
+  let removed = count (function Removed -> true | Rebound | Not_found _ | Failed _ | Kept_back _ -> false) results in
+  let rebound = count (function Rebound -> true | Removed | Not_found _ | Failed _ | Kept_back _ -> false) results in
+  let not_found = count (function Not_found _ -> true | Removed | Rebound | Failed _ | Kept_back _ -> false) results in
+  let not_sent = count (function Kept_back _ -> true | Removed | Rebound | Not_found _ | Failed _ -> false) results in
   let failed =
     List.filter_map
       (fun (target, outcome) ->
          match outcome with
          | Failed _ -> Some (target_label target)
-         | Removed | Rebound | Not_found _ -> None)
+         | Removed | Rebound | Not_found _ | Kept_back _ -> None)
       results
   in
   Printf.sprintf
-    "unbind all of %s: %d removed, %d kept, %d not found, %d failed%s"
+    "unbind all of %s: %d removed, %d kept, %d not found%s, %d failed%s"
     (Terminal_text.single_line keeper_name)
-    removed rebound not_found (List.length failed)
+    removed rebound not_found
+    (if not_sent = 0 then "" else Printf.sprintf ", %d not sent" not_sent)
+    (List.length failed)
     (match failed with
      | [] -> ""
      | labels -> " -- " ^ String.concat ", " labels)
@@ -141,7 +154,15 @@ let any_failed results =
     (fun (_, outcome) ->
        match outcome with
        | Failed _ -> true
-       | Removed | Rebound | Not_found _ -> false)
+       | Removed | Rebound | Not_found _ | Kept_back _ -> false)
+    results
+
+let any_kept_back results =
+  List.exists
+    (fun (_, outcome) ->
+       match outcome with
+       | Kept_back _ -> true
+       | Removed | Rebound | Not_found _ | Failed _ -> false)
     results
 
 let unreadable_note = function
@@ -246,3 +267,8 @@ let offer_read_failed ~keeper_name ~detail =
     "unbind-all offer for %s unavailable: %s"
     (Terminal_text.single_line keeper_name)
     (Terminal_text.single_line detail)
+
+(* The read the offer waited for was not sent: its kept-back notice alone,
+   then the Keeper (RFC §2). *)
+let offer_read_kept_back ~keeper_name ~notice =
+  Terminal_text.single_line notice ^ " · " ^ Terminal_text.single_line keeper_name

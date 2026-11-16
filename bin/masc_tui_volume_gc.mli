@@ -76,8 +76,11 @@ type shown =
   | Nothing_asked
   | Answered of answer
   | Unanswered of request * string
-      (** No answer came back: transport, timeout or workspace. After a
-          reclaim this does not say nothing was deleted. *)
+      (** No answer came back: transport or timeout. After a reclaim this
+          does not say nothing was deleted. *)
+  | Kept_back of request * string
+      (** The workspace guard stopped the request before it left, so the
+          server did nothing; the string is the caller's kept-back notice. *)
 
 type t = { phase : phase; shown : shown }
 
@@ -98,6 +101,9 @@ val sending : t -> request -> t
 val answered : answer -> t
 
 val unanswered : request -> string -> t
+
+(** The request was not sent; [notice] says so in the screen language. *)
+val kept_back : request -> string -> t
 
 (** Any input other than the second press takes an armed reclaim back. A
     request in flight stays in flight. *)

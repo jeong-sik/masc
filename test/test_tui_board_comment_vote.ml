@@ -265,7 +265,7 @@ let test_completion_refreshes_the_open_post () =
     (run ~mode:Board_list (Vote_post "p-1") (Ok "voted"));
   Alcotest.(check (pair int (list string))) "a refused vote refreshes nothing"
     (0, [])
-    (run ~mode:(Board_read "p-1") on_comment (Error "refused"))
+    (run ~mode:(Board_read "p-1") on_comment (Error (Request_failed "refused")))
 
 (* Multi-page loaders (such as connector directory pages) decode several kept
    JSON bodies per refresh pass through one shared [json_memo]. Verify that

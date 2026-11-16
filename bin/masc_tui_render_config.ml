@@ -57,9 +57,13 @@ let render_runtime_params (state : state) =
        (ui_text state
           ~ko:"  저장 위치: .masc/runtime_params.json · E:JSON 편집"
           ~en:"  Saved in .masc/runtime_params.json · E:edit JSON")
-   | Some (ok, detail) ->
+   | Some (Params_said (ok, detail)) ->
      box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
-       ("  " ^ Terminal_text.single_line detail));
+       ("  " ^ Terminal_text.single_line detail)
+   | Some (Params_kept_back refusal) ->
+     box_line_styled buf cols ~style:(Theme.bad ())
+       ("  " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:Kept_request.Runtime_param_write refusal));
   let rows = Option.value state.runtime_params ~default:[] in
   let selected = List.nth_opt rows state.runtime_params_cursor in
   (* The panel below draws [framed_inner_width - 4] cells a line, and a field
@@ -94,8 +98,14 @@ let render_runtime_params (state : state) =
   let selected_lines =
     (match state.runtime_params_notice with
      | None -> []
-     | Some (ok, text) -> field (if ok then ui_text state ~ko:"결과" ~en:"Result"
-                                else ui_text state ~ko:"거절" ~en:"Refused") text)
+     | Some (Params_said (ok, text)) -> field (if ok then ui_text state ~ko:"결과" ~en:"Result"
+                                else ui_text state ~ko:"거절" ~en:"Refused") text
+     | Some (Params_kept_back refusal) ->
+       (* Kept back before it left: the notice alone, without the refusal label. *)
+       Masc_tui_text_block.rows ~max_cells:(max 1 (panel_cells - 2))
+         (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+            ~request:Kept_request.Runtime_param_write refusal)
+       |> List.map (fun line -> "  " ^ line))
     @
     match selected with
     | None ->
@@ -143,9 +153,15 @@ let render_runtime_params (state : state) =
   let count = List.length rows in
   let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
   (match state.runtime_params_error with
-   | Some detail ->
+   | Some (Request_failed detail) ->
      box_line buf cols ((Theme.bad ()) ^ ui_text state ~ko:"설정을 읽지 못했습니다: " ~en:"Could not read settings: " ^ Ansi.reset
                         ^ Terminal_text.single_line detail);
+     for _ = 2 to list_height do box_empty buf cols done
+   | Some (Request_withdrawn refusal) ->
+     box_line buf cols ((Theme.bad ())
+                        ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                            ~request:Kept_request.Runtime_params_read refusal
+                        ^ Ansi.reset);
      for _ = 2 to list_height do box_empty buf cols done
    | None ->
      if state.runtime_params_loading && rows = []
@@ -820,6 +836,9 @@ let preset_save_receipt_rows ~ko (receipt : preset_save_receipt) =
   | Error (Preset_save_not_sent detail) ->
     [P.failure (text "! 프리셋 저장 미전송 · " "! Preset save not sent · " ^ name);
      reason detail]
+  (* Kept back by the workspace guard: the notice alone, then the name. *)
+  | Error (Preset_save_kept_back refusal) ->
+    [P.failure (workspace_refusal_text ~ko ~request:Kept_request.Preset_save refusal ^ " · " ^ name)]
   | Error (Preset_save_refused detail) ->
     [P.failure (text "! 프리셋 저장 거절 · " "! Preset save refused · " ^ name);
      reason detail]
@@ -836,11 +855,11 @@ let preset_save_receipt_rows ~ko (receipt : preset_save_receipt) =
        "  Hiding this notice keeps the same-name retry warning");
      reason detail] in
   match receipt.psr_result, receipt.psr_request.psp_chat_input with
-  | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _), Some input ->
+  | Error (Preset_save_not_sent _ | Preset_save_kept_back _ | Preset_save_auth_retry_not_sent _), Some input ->
     outcome @ [P.plain (text "  미전송 채팅 명령 원문" "  Unsent chat command")]
     @ List.map P.plain (Masc_tui_text_block.lines input)
   | (Ok _ | Error (Preset_save_refused _ | Preset_save_unconfirmed _)), _
-  | Error (Preset_save_not_sent _ | Preset_save_auth_retry_not_sent _), None -> outcome
+  | Error (Preset_save_not_sent _ | Preset_save_kept_back _ | Preset_save_auth_retry_not_sent _), None -> outcome
 
 let preset_save_receipt_lines ~ko receipt =
   List.map (fun (row : Masc_tui_preset_text.row) -> row.text)
@@ -967,8 +986,21 @@ let preset_detail_lines (state : state) ~cols ~selected =
   let detail = P.detail_rows ~ko:(state.ui_language = Lang_ko) ~selected
     ~detail:(match selected with
       | None -> Masc_tui_fetched.Absent
-      | Some m -> Masc_tui_fetched.view_for ~equal:String.equal
-          state.preset_detail ~key:m.Tui_decode.pm_name)
+      | Some m ->
+        (* The guard's refusal is drawn as a kept-back notice and every other
+           failure under the pane's own read-failure words. *)
+        let failure = function
+          | Request_failed detail -> P.Detail_read_failed detail
+          | Request_withdrawn refusal ->
+            P.Detail_kept_back (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Preset_read refusal) in
+        match Masc_tui_fetched.view_for ~equal:String.equal
+          state.preset_detail ~key:m.Tui_decode.pm_name with
+        | Masc_tui_fetched.Absent -> Masc_tui_fetched.Absent
+        | Masc_tui_fetched.Loading -> Masc_tui_fetched.Loading
+        | Masc_tui_fetched.Ready d -> Masc_tui_fetched.Ready d
+        | Masc_tui_fetched.Stale (d, error) -> Masc_tui_fetched.Stale (d, failure error)
+        | Masc_tui_fetched.Failed error -> Masc_tui_fetched.Failed (failure error))
     ~report:state.preset_report
   in
   let warning = match unreadable with
@@ -982,8 +1014,13 @@ let preset_detail_lines (state : state) ~cols ~selected =
     | [], None -> []
     | rows, error ->
       [P.plain ""; P.heading (ui_text state ~ko:"▸ 읽기 오류" ~en:"▸ Read errors")]
-      @ (match error with None -> [] | Some reason ->
-          [P.failure (ui_text state ~ko:"새로고침 실패 · " ~en:"Refresh failed · " ^ reason)])
+      @ (match error with
+         | None -> []
+         | Some (Request_failed reason) ->
+           [P.failure (ui_text state ~ko:"새로고침 실패 · " ~en:"Refresh failed · " ^ reason)]
+         | Some (Request_withdrawn refusal) ->
+           [P.failure (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Preset_list_read refusal)])
       @ List.map (fun (name, reason) -> P.failure ("! " ^ name ^ " — " ^ reason)) rows
   in
   let remaining =
@@ -1053,7 +1090,9 @@ let render_presets (state : state) =
   let preset_rows = list_height in
   let first = if cursor < preset_rows then 0 else cursor - preset_rows + 1 in
   (match state.presets_error with
-   | Some detail ->
+   | Some failure ->
+     let detail = request_failure_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Preset_list_read failure in
      box_line buf cols
        (Theme.bad () ^ "  " ^ fit_width (Terminal_text.single_line detail) (framed_inner_width cols - 2)
         ^ Ansi.reset)
@@ -1392,8 +1431,14 @@ let selected_model_reading (state : state) =
     (fun (row : Masc_tui_model_runtime_table.row) ->
       let sections =
         (match state.runtime_config_view_error with
-         | None -> [] | Some reason ->
-             [{Masc_tui_detail_reading.heading="Refresh failed · retained reading";body=reason}])
+         | None -> []
+         | Some (Request_failed reason) ->
+             [{Masc_tui_detail_reading.heading="Refresh failed · retained reading";body=reason}]
+         | Some (Request_withdrawn refusal) ->
+             [{Masc_tui_detail_reading.heading=
+                 workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                   ~request:Kept_request.Runtime_config_read refusal;
+               body=""}])
         @ (match state.runtime_config_view with
            | None -> [] | Some reading ->
                [{Masc_tui_detail_reading.heading=
@@ -1710,7 +1755,7 @@ let runtime_status_cache = Domain.DLS.new_key (fun () -> None)
 
 let runtime_config_status_body state ~cols =
   let source = state.runtime_config_view in
-  let error = state.runtime_config_view_error in
+  let error = runtime_config_view_error_text state in
   let current = runtime_config_unmatched_current state in
   let palette = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
   let lift = Masc_tui_theme.lift_is_enabled () in
@@ -2298,7 +2343,7 @@ let render_config (state : state) =
             (Masc_tui_typesafeai_exclusion_form.rows ~width:(framed_inner_width cols)
                ~height:content_height form)
       | None ->
-      (match state.runtime_config_view_error with
+      (match runtime_config_view_error_text state with
        | Some detail ->
          c.push ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
        | None -> ());

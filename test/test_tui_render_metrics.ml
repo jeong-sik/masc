@@ -281,7 +281,7 @@ let test_calculate_kpis_populated () =
   check int "only actual running owners count as running" 1 turns.running;
   check int "idle is distinct" 1 turns.idle;
   check int "unavailable is distinct" 1 turns.unavailable;
-  state.keeper_turns_error <- Some "keeper turns load failed: HTTP 503";
+  state.keeper_turns_error <- Some (Types.Request_failed "keeper turns load failed: HTTP 503");
   check bool "stale rows do not remain a current count" true
     (Option.is_none (Render_metrics.calculate_kpis state).turns);
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in

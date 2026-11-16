@@ -982,10 +982,11 @@ let test_first_loss_retains_unproven_effects mode () =
          supplies a current Task/list row or inspects rendered text. *)
       let module Ui = Masc_tui_types in
       let module Task_read = Masc.Tui_decode_task_inspection in
+      let failed_request result = Result.map_error (fun detail -> Ui.Request_failed detail) result in
       let ui=Ui.create_state ~workspace:"source-task" ~local_base_path:base_path ~port:0 () in
       ui.tools_async_selection <- Some target;ui.tools_async_detail_open <- true;
       let request=Ui.begin_tools_async_detail ui ~force:false |> Option.get in
-      Ui.complete_tools_async_detail ui request (Detail.decode ~target projected);
+      Ui.complete_tools_async_detail ui request (failed_request (Detail.decode ~target projected));
       let source=match Ui.tools_async_source_task ui with
         | Ui.Async_source_task source -> source
         | _ -> fail "real original run lost its Task source" in
@@ -1095,11 +1096,11 @@ let test_first_loss_retains_unproven_effects mode () =
       Ui.suspend_workspace_readings ui;
       let current_body=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
       let current_history=Ui.begin_tools_async_task_history ui ~force:true ~limit:1 |> Option.get in
-      Ui.complete_tools_async_task_body ui old_body (read_body source.ats_task_id);
-      Ui.complete_tools_async_task_history ui old_history (read_history old_history.thr_page);
+      Ui.complete_tools_async_task_body ui old_body (failed_request (read_body source.ats_task_id));
+      Ui.complete_tools_async_task_history ui old_history (failed_request (read_history old_history.thr_page));
       check bool "retired Task reads cannot settle replacement reads" true
         (Masc_tui_fetched.in_flight ui.tools_async_task_body && Masc_tui_fetched.in_flight ui.tools_async_task_history);
-      Ui.complete_tools_async_task_history ui current_history (read_history current_history.thr_page);
+      Ui.complete_tools_async_task_history ui current_history (failed_request (read_history current_history.thr_page));
       check bool "history is observed while the body remains pending" true
         (Masc_tui_fetched.in_flight ui.tools_async_task_body &&
          match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history ~key:source with
@@ -1109,7 +1110,7 @@ let test_first_loss_retains_unproven_effects mode () =
       let observed ()=Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history ~key:source in
       let prefix=Masc_tui_fetched.value (observed ()) |> Option.get in
       let failed=Ui.begin_tools_async_task_history ~older:true ui ~force:false ~limit:1 |> Option.get in
-      Ui.complete_tools_async_task_history ui failed (Error "older original store unavailable");
+      Ui.complete_tools_async_task_history ui failed (Error (Ui.Request_failed "older original store unavailable"));
       check bool "failed older read retains exact observed prefix and retry cursor" true
         (match observed () with Stale (retained,_) -> retained==prefix | _ -> false);
       check bool "cadence cannot replace the failed original continuation" true
@@ -1117,16 +1118,16 @@ let test_first_loss_retains_unproven_effects mode () =
       let retry=Ui.begin_tools_async_task_history ~older:true ui ~force:false ~limit:1 |> Option.get in
       check bool "explicit retry captures the same older boundary" true
         (retry.thr_page.hr_cursor=failed.thr_page.hr_cursor);
-      Ui.complete_tools_async_task_history ui failed (read_history failed.thr_page);
+      Ui.complete_tools_async_task_history ui failed (failed_request (read_history failed.thr_page));
       check bool "late success cannot settle the replacement continuation" true
         (Masc_tui_fetched.is_current ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_history retry.thr_ticket);
-      Ui.complete_tools_async_task_history ui retry (read_history retry.thr_page);
+      Ui.complete_tools_async_task_history ui retry (failed_request (read_history retry.thr_page));
       let rec read_earlier ()=match Ui.begin_tools_async_task_history ~older:true ui ~force:false ~limit:1 with
         | None -> ()
         | Some request ->
           let result=read_history request.thr_page in
           (match result with Ok _ -> () | Error detail -> fail detail);
-          Ui.complete_tools_async_task_history ui request result;read_earlier () in
+          Ui.complete_tools_async_task_history ui request (failed_request result);read_earlier () in
       read_earlier ();
       let retained=Masc_tui_fetched.value (observed ()) |> Option.get in
       check bool "TUI continuation retains original transition evidence with its prefix" true
@@ -1134,7 +1135,7 @@ let test_first_loss_retains_unproven_effects mode () =
          List.exists (fun (event : Masc.Tui_decode.task_history_event) ->
            event.th_actor=Some keeper && event.th_from_status=Some "todo"
            && event.th_to_status=Some "claimed") retained.history_events);
-      Ui.complete_tools_async_task_body ui current_body (read_body source.ats_task_id);
+      Ui.complete_tools_async_task_body ui current_body (failed_request (read_body source.ats_task_id));
       let module Document = Masc_tui_task_document in
       let module Observation = Masc_tui_task_document_observation in
       ui.view <- Ui.Tools;ui.tools_pane <- Ui.Tools_async;
@@ -1188,7 +1189,7 @@ let test_first_loss_retains_unproven_effects mode () =
       let unchanged_document=find Document.Body resized in
       let reread=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
       Ui.complete_tools_async_task_body ui reread
-        (read_body ?previous:reread.atr_previous source.ats_task_id);
+        (failed_request (read_body ?previous:reread.atr_previous source.ats_task_id));
       Ui.complete_task_document ui ~cols:72 unchanged_document (prepare unchanged_document);
       check bool "fresh identical original Task observations keep the actual preparation owner admissible" true
         (match (Observation.facts unchanged_document.tdr_observation).ui_disposition with
@@ -1202,7 +1203,7 @@ let test_first_loss_retains_unproven_effects mode () =
         backlog.tasks};
       let changed=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
       Ui.complete_tools_async_task_body ui changed
-        (read_body ?previous:changed.atr_previous source.ats_task_id);
+        (failed_request (read_body ?previous:changed.atr_previous source.ats_task_id));
       let changed_documents=Ui.sync_task_documents ui ~cols:72 in
       let old_document=find Document.Body changed_documents in
       (* The same authoritative Task object, under another actual consumer,
@@ -1343,7 +1344,7 @@ let test_first_loss_retains_unproven_effects mode () =
       List.iter (fun request -> Ui.complete_task_document ui ~cols:72 request (prepare request)) restored_language;
       ui.view <- Ui.Tools;ui.task_payloads <- Ui.Task_payloads.empty;
       let refresh=Ui.begin_tools_async_task_body ui ~force:true |> Option.get in
-      Ui.complete_tools_async_task_body ui refresh (Error "Task storage unavailable");
+      Ui.complete_tools_async_task_body ui refresh (Error (Ui.Request_failed "Task storage unavailable"));
       check bool "body failure retains full original Task independently of list membership" true
         ((Ui.task_domain_values ui)=[] && match Masc_tui_fetched.view_for ~equal:Ui.equal_tools_async_task_source ui.tools_async_task_body ~key:source with
          | Stale (detail,_) -> detail.task.id=source.ats_task_id && detail.task.description=description
@@ -1354,9 +1355,9 @@ let test_first_loss_retains_unproven_effects mode () =
       Ui.withdraw_tools_async_details ui;
       ui.tools_async_selection <- Some target;ui.tools_async_detail_open <- true;ui.tools_async_task_source <- Some source;
       let replacement=Ui.begin_tools_async_task_body ui ~force:false |> Option.get in
-      Ui.complete_tools_async_task_body ui late (read_body source.ats_task_id);
+      Ui.complete_tools_async_task_body ui late (failed_request (read_body source.ats_task_id));
       check bool "withdrawn same-ID Task reader cannot settle its replacement" true (Masc_tui_fetched.in_flight ui.tools_async_task_body);
-      Ui.complete_tools_async_task_body ui replacement (read_body source.ats_task_id);
+      Ui.complete_tools_async_task_body ui replacement (failed_request (read_body source.ats_task_id));
       check_json "exact marker retired after durable resolution" (`Bool true)
         (Yojson.Safe.Util.member "marker_retired" resolved);
       check bool "resolved marker no longer indexed" false (Sys.file_exists marker_path);

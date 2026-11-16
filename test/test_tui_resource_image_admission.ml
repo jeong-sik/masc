@@ -171,7 +171,7 @@ let test_skill_image_owner () =
   check bool "A inventory does not match B" false
     (Types.tools_skill_inventory_matches_keeper state (Some "keeper-b"));
   state.keepers <- [keeper_row "keeper-a"];
-  state.tools_error <- Some "temporary failure";
+  state.tools_error <- Some (Types.Request_failed "temporary failure");
   check bool "failed skill refresh retains displayed source" true (displayed ());
   check bool "failed skill refresh is indicated" true (Types.image_cell_source_unconfirmed state image);
   state.tools_error <- None;

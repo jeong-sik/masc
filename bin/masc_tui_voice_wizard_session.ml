@@ -140,11 +140,13 @@ let voice_wizard_sending session ~request =
   { session with vws_save = Save_sending request; vws_status = Some "saving…"; vws_probe = [] }
 
 (* What came back for a save, already told apart: an answer that carries the
-   revision the write produced, a refusal the server gave in words, and no
-   answer at all. *)
+   revision the write produced, a refusal the server gave in words, a save
+   the workspace guard kept back before it left (the caller's notice, drawn
+   in the screen's language), and no answer at all. *)
 type voice_wizard_save_reply =
   | Save_written of string
   | Save_refused of string
+  | Save_kept_back of string
   | Save_unanswered_reply of string
 
 (* [None] when the reply is not for the save this session is waiting on. *)
@@ -170,7 +172,7 @@ let voice_wizard_after_save session ~request reply =
               vws_save = Save_settled
             ; vws_status = Some "saved. run  masc voice-verify --audio FILE  to hear it back"
             })
-       | Save_refused message ->
+       | Save_refused message | Save_kept_back message ->
          { session with vws_save = Save_not_sent; vws_status = Some message }
        | Save_unanswered_reply detail ->
          { session with

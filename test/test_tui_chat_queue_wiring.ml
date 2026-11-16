@@ -5225,7 +5225,7 @@ let test_priority_completion_survives_controls () =
   check bool "current receipt is retained" true
     (List.exists (fun (request, result) -> Keeper_chat.same_request_identity beta.sent_request request && result = Ok "current priority") state.keeper_run_next_receipts);
   check bool "duplicate callback has no effect" true
-    (Tui_types.settle_keeper_run_next state beta.sent_request (Error "duplicate") = Tui_types.Run_next_untracked)
+    (Tui_types.settle_keeper_run_next state beta.sent_request (Error (Tui_types.Request_failed "duplicate")) = Tui_types.Run_next_untracked)
 
 let test_priority_workspace_withdrawal () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in

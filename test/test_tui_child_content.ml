@@ -188,7 +188,7 @@ let test_changed_hint_cannot_clear_known_rewrite_with_suffix () =
     (fun _ -> Ok (200,json (page "stable" 4 broken))) in
   let failed,_=read Consumer.Poll refused [receiver,Ok ("stable",5)] (fun uri ->
     check (option string) "known rewrite requires full request" None (after uri);
-    Error "temporary transport failure") in
+    Error (Consumer.Transport "temporary transport failure")) in
   (match (one failed).error with Some (Consumer.History_rewritten _) -> ()
    | _ -> fail "temporary failure erased known prefix rewrite");
   let suffix,_=read Consumer.Poll failed [receiver,Ok ("stable",6)] (fun uri ->
@@ -213,7 +213,7 @@ let test_bad_pages_and_guarded_fetch_keep_cache () =
     let failed,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)] (fun _ -> Ok (status,body)) in
     check int "malformed/refused/foreign/gapped read retains old rows" 1 (records_count failed);
     check bool "failed read is visible" true (Consumer.errors failed<>[])) variants;
-  let withdrawn,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)] (fun _ -> Error "workspace authority withdrawn") in
+  let withdrawn,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)] (fun _ -> Error (Consumer.Kept_back "workspace authority withdrawn")) in
   check int "guarded fetch refuses before cache replacement" 1 (records_count withdrawn);
   check bool "guarded transport refusal visible" true (Consumer.errors withdrawn<>[]);
   (match Consumer.read ~mode:Consumer.Poll ~keeper_name:"beta" ~previous:first
@@ -223,9 +223,9 @@ let test_bad_pages_and_guarded_fetch_keep_cache () =
 let test_failed_store_incarnations_remain_distinct () =
   let first=initial () in
   let old_failed,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)]
-    (fun _ -> Error "read unavailable") in
+    (fun _ -> Error (Consumer.Transport "read unavailable")) in
   let both_failed,_=read Consumer.Poll old_failed [receiver,Ok ("replacement",1)]
-    (fun _ -> Error "read unavailable") in
+    (fun _ -> Error (Consumer.Transport "read unavailable")) in
   let incarnations=List.map (function
     | Consumer.Receiver_read (owner,store_id,Consumer.Transport _) ->
         check bool "failure retains exact receiver" true (owner=receiver);store_id

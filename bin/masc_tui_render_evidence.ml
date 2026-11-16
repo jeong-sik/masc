@@ -90,6 +90,9 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
     | Launch_failure detail ->
         wrap ~prefix:(text "    읽기를 끝내지 못함: " "    Read did not complete: ") detail
     | Workspace_unconfirmed detail -> wrap ~prefix:("    " ^ workspace_unconfirmed ^ ": ") detail
+    | Kept_back refusal ->
+        wrap ~prefix:"    " (Masc_tui_types.workspace_refusal_text ~ko
+          ~request:Masc_tui_types.Kept_request.Verification_evidence_read refusal)
     | Interrupted detail -> wrap ~prefix:(text "    읽기 중단: " "    Read interrupted: ") detail in
   let contents = function
         | Picture.Items [] ->

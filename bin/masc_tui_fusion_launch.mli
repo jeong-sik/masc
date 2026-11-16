@@ -53,6 +53,11 @@ val refused : detail:string -> t -> t
 (** The server declined the submitted launch. The form returns to editing
     with the server's sentence on its refusal line, the values intact. *)
 
+val kept_back : notice:string -> t -> t
+(** The workspace guard stopped the launch before it left. The form returns
+    to editing with [notice], the caller's kept-back notice, the values
+    intact. *)
+
 val submitting : t -> bool
 
 val request_body : request -> Yojson.Safe.t

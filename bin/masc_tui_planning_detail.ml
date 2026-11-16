@@ -280,6 +280,9 @@ type confirmation_read_error =
   | Read_failed of unit ref option * string
   | Read_http_error of unit ref * int
   | Server_changed of unit ref
+  | Read_kept_back of string
+      (* The workspace guard stopped the read before it left; the caller's
+         kept-back notice, drawn as it is. *)
 
 type confirmation_read = (string, confirmation, confirmation_read_error) Masc_tui_fetched.source
 
@@ -300,6 +303,7 @@ let confirmation_read_error_message ~ko ~credential_is_current =
   | Read_http_error _ -> (text "인증 정보가 바뀌었습니다 · 증거를 다시 조회하세요" "Goal confirmation credential changed; read the proof again")
   | Server_changed owner when credential_is_current owner -> (text "서버가 바뀌었습니다 · 서버 식별 재확인 중" "Goal confirmation server changed; rechecking server identity")
   | Server_changed _ -> (text "인증 정보가 바뀌었습니다 · 증거를 다시 조회하세요" "Goal confirmation credential changed; read the proof again")
+  | Read_kept_back notice -> notice
 
 let suspend_confirmation_read read =
   let read = match Masc_tui_fetched.current_key read with
@@ -772,8 +776,12 @@ let timeline_unavailability_detail = function
   | Tui_decode.Approval_queue_failure detail ->
       "Approval queue unavailable · Cause: " ^ detail
 
+type timeline_failure =
+  | Timeline_failed of string
+  | Timeline_kept_back of string
+
 let timeline ~ko ~now ~width ~goal_id
-    (loaded : (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t) =
+    (loaded : (string, Tui_decode.goal_timeline_event list, timeline_failure) Masc_tui_fetched.source) =
   let text korean english = if ko then korean else english in
   let header =
     { tone = Heading; text = (text "관련 기록 · 연결 항목별 마지막 상태" "RELATED ACTIVITY · latest state per linked item") }
@@ -823,12 +831,17 @@ let timeline ~ko ~now ~width ~goal_id
   let rows =
     match view with
     | Masc_tui_fetched.Ready value -> observed value
-    | Masc_tui_fetched.Stale (value, detail) ->
+    | Masc_tui_fetched.Stale (value, Timeline_failed detail) ->
         wrapped ~width Unreadable
           ((text "  갱신 실패 · 이전 관측: " "  refresh failed; previous observation: ") ^ Terminal_text.single_line detail)
         @ observed value
-    | Masc_tui_fetched.Failed detail -> wrapped ~width Unreadable
+    | Masc_tui_fetched.Stale (value, Timeline_kept_back notice) ->
+        wrapped ~width Unreadable ("  " ^ Terminal_text.single_line notice)
+        @ observed value
+    | Masc_tui_fetched.Failed (Timeline_failed detail) -> wrapped ~width Unreadable
         ((text "  기록 조회 실패: " "  timeline load failed: ") ^ Terminal_text.single_line detail)
+    | Masc_tui_fetched.Failed (Timeline_kept_back notice) -> wrapped ~width Unreadable
+        ("  " ^ Terminal_text.single_line notice)
     | Masc_tui_fetched.Absent -> [ { tone = Quiet; text = (text "  기록 미조회" "  timeline not requested") } ]
     | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = (text "  조회 중" "  loading...") } ]
   in

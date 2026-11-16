@@ -13,6 +13,10 @@ type intent = {
 type outcome =
   | Created of { task_id : string; workspace : Masc.Tui_decode.server_identity }
   | Not_sent of string
+  | Kept_back of string
+      (** The caller's kept-back notice: the workspace guard withdrew the
+          creation before it was sent, so it is said as kept back, never as a
+          failure of the send (RFC-tui-one-screen-grammar §2). *)
   | Server_error of string
   | Unconfirmed of string
 type completion = { ready_at_ns : int64; outcome : outcome }
@@ -21,10 +25,17 @@ type t
 val create : intent -> t
 val intent : t -> intent
 val progress : t -> progress
+(** Why [prepare] did not hand over a session: its own failure, which becomes
+    [Not_sent], or the caller's kept-back notice for a creation the workspace
+    guard withdrew, which becomes [Kept_back]. *)
+type preparation_failure = Preparation_failed of string | Preparation_kept_back of string
 val reject : t -> string -> unit
 (** Refuse an unstarted intent. Never replaces another producer or terminal fact. *)
+val keep_back : t -> string -> unit
+(** Settle an unstarted intent as [Kept_back] with the caller's notice, under
+    the same rule as [reject]. *)
 val launch :
-  t -> prepare:(unit -> (string, string) result) ->
+  t -> prepare:(unit -> (string, preparation_failure) result) ->
   send:(session_id:string -> request_id:string -> arguments:(string * Yojson.Safe.t) list ->
     (Masc_tui_mcp.outcome, string) result) -> unit
 (** Claim the original intent once, prepare/validate its original MCP session,

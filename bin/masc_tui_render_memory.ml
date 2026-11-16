@@ -112,14 +112,22 @@ let category_count state snapshot category =
 
 let memory_facts_scope_lines ?(full = false) ~cols (state : state) =
   let text ko en = ui_text state ~ko ~en in
-  let lines = (match memory_facts_view state with
-    | Masc_tui_fetched.Stale ((_, unread), detail) ->
-        [text "이전 관측 · 갱신 실패: " "Previous observation; refresh failed: " ^ Terminal_text.single_line detail]
+  let kept_back refusal =
+    Terminal_text.single_line
+      (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Memory_facts_read refusal) in
+  let lines = (match memory_facts_reading state with
+    | Masc_tui_fetched.Stale ((_, unread), failure) ->
+        (match failure with
+         | Request_failed detail ->
+             [text "이전 관측 · 갱신 실패: " "Previous observation; refresh failed: " ^ Terminal_text.single_line detail]
+         | Request_withdrawn refusal -> [kept_back refusal])
         @ (match unread with None -> [] | Some detail ->
             [text "일부 관측: " "Partial observation: " ^ Terminal_text.single_line detail])
     | Ready (_, Some detail) ->
         [text "일부 관측: " "Partial observation: " ^ Terminal_text.single_line detail]
-    | Failed detail -> [text "조회 실패: " "Read failed: " ^ Terminal_text.single_line detail]
+    | Failed (Request_failed detail) -> [text "조회 실패: " "Read failed: " ^ Terminal_text.single_line detail]
+    | Failed (Request_withdrawn refusal) -> [kept_back refusal]
     | Absent | Loading | Ready (_, None) -> [])
     @ (match memory_facts_snapshot state with
        | None -> []
@@ -240,10 +248,14 @@ let memory_input_lines ~ko ~cols ~unit reading =
   match reading with
   | Masc_tui_fetched.Absent -> wrap [label ^ ": " ^ text "관측 없음" "no observation"]
   | Loading -> wrap [label ^ ": " ^ text "조회 중" "loading"]
-  | Failed detail -> wrap [label ^ ": " ^ Terminal_text.single_line detail]
+  | Failed failure ->
+      wrap [label ^ ": " ^ Terminal_text.single_line
+              (request_failure_text ~ko ~request:Kept_request.Memory_input_read failure)]
   | Ready snapshot -> values snapshot
-  | Stale (snapshot, detail) ->
-      wrap [label ^ ": " ^ text "이전 관측 · " "stale · " ^ Terminal_text.single_line detail] @ values snapshot
+  | Stale (snapshot, failure) ->
+      wrap [label ^ ": " ^ text "이전 관측 · " "stale · " ^ Terminal_text.single_line
+              (request_failure_text ~ko ~request:Kept_request.Memory_input_read failure)]
+      @ values snapshot
 
 (* #39831: the Librarian clauses the block under the selected keeper draws
    before the operator asks for detail. A clause is an action: a lag or a
@@ -1085,8 +1097,11 @@ let memory_world_axis (state : state) ~room =
   let provenance = match reading with
     | Masc_tui_memory_world.Not_read -> [ui_text state ~ko:"미조회" ~en:"not read"]
     | Masc_tui_memory_world.Reading -> [ui_text state ~ko:"조회 중" ~en:"reading"]
-    | Masc_tui_memory_world.Read_failed _ -> [ui_text state ~ko:"조회 실패 · 현재 값 미확인" ~en:"read failed; current value unknown"]
-    | Masc_tui_memory_world.Loaded { refresh_failure = Some _; _ } ->
+    | Masc_tui_memory_world.Read_failed (Kept_back _) -> [ui_text state ~ko:"현재 값 미확인" ~en:"current value unknown"]
+    | Masc_tui_memory_world.Read_failed (Suspended | Request_failed _) -> [ui_text state ~ko:"조회 실패 · 현재 값 미확인" ~en:"read failed; current value unknown"]
+    | Masc_tui_memory_world.Loaded { refresh_failure = Some (Kept_back _); _ } ->
+        [ui_text state ~ko:"마지막 관측" ~en:"last observation"]
+    | Masc_tui_memory_world.Loaded { refresh_failure = Some (Suspended | Request_failed _); _ } ->
         [ui_text state ~ko:"마지막 관측 · 갱신 실패" ~en:"last observation; refresh failed"]
     | Masc_tui_memory_world.Loaded { refresh_failure = None; _ } -> []
   in
@@ -1208,8 +1223,11 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
           ^ memory_date snapshot.mhs_generated_at ]
   in
   let warnings =
-    Option.to_list (Option.map (fun detail ->
-      (if ko then "조회 오류 · " else "Read error · ") ^ Terminal_text.single_line detail)
+    Option.to_list (Option.map (function
+      | Request_failed detail ->
+        (if ko then "조회 오류 · " else "Read error · ") ^ Terminal_text.single_line detail
+      | Request_withdrawn refusal ->
+        workspace_refusal_text ~ko ~request:Kept_request.Memory_health_read refusal)
       state.memory_health_error)
     @ memory_refused_keeper_lines state
   in
@@ -1506,7 +1524,7 @@ let render_memory_body ~cols ~budget (state : state)
        ~ko:"  Keeper · 상태"
        ~en:"  Keeper · state");
   push_divider ();
-  (match state.memory_health_error with
+  (match memory_health_error_text state with
    | None -> ()
    | Some detail ->
        push_styled ~style:(Theme.bad ())

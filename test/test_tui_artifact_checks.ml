@@ -10,6 +10,7 @@ module Types = Masc_tui_types
 module Routes = Server_routes_http_routes_published_artifacts
 
 let get = function Ok value -> value | Error detail -> fail detail
+let get_sent ~request result = get (Result.map_error (Types.request_failure_text ~ko:false ~request) result)
 let id = "artifact-0123456789abcdef0123456789abcdef"
 let published_at = "2026-10-21T00:00:00Z"
 let day = Catalog.local_day (match Time_codec.parse_rfc3339 published_at with
@@ -45,7 +46,7 @@ let begin_read reading = match Fetched.refresh ~equal:Unit.equal reading ~key:()
 let settle reading request result = Fetched.complete ~equal:Unit.equal reading request result
 let ready inventory = let reading, request = begin_read Fetched.initial in
   settle reading request (Ok inventory)
-let unknown = function Checks.Unknown _ -> true | Known _ -> false
+let unknown = function Checks.Unknown _ -> true | Known _ | Kept_back _ -> false
 let count ?(complete=true) entries reading =
   Checks.unchecked_on_day ~reports_complete:complete ~day ~entries reading
 
@@ -55,7 +56,7 @@ let exact_revision () =
   let reading = ready (inventory [checked]) in
   (match Checks.resolve reading first with
    | Known (Some actual) -> check string "shared actor retained" "dashboard-human" actual.changed_by
-   | Known None | Unknown _ -> fail "old revision lost confirmation");
+   | Known None | Unknown _ | Kept_back _ -> fail "old revision lost confirmation");
   check bool "new revision absent despite same bytes" true
     (Checks.resolve reading second = Known None);
   check (option int) "new revision is unchecked" (Some 1) (count [Catalog.Report second] reading);
@@ -87,10 +88,11 @@ let late_replies () =
   let reading, current = begin_read reading in
   let reading = settle reading old (Ok unchecked) in
   check bool "superseded completion cannot settle replacement" true (Fetched.in_flight reading);
-  let reading = settle reading current (Error "403") in
+  let reading = settle reading current (Error (Checks.Read_failed "403")) in
   check bool "failed refresh cannot certify cached check" true (unknown (Checks.resolve reading report));
   let reading, pending = begin_read reading in
-  let suspended = settle (Fetched.suspend reading) pending (Ok unchecked) in
+  let suspended = settle (Fetched.suspend_with ~reason:(Checks.Read_failed Fetched.suspend_reason) reading)
+    pending (Ok unchecked) in
   check bool "suspended completion stays unknown" true (unknown (Checks.resolve suspended report));
   let reading, pending = begin_read (Fetched.clear reading) in
   let cleared = settle (Fetched.clear reading) pending (Ok checked) in
@@ -160,7 +162,7 @@ let write_ownership () =
   state.artifact_checks <- ready (inventory []);
   refused (Updates.begin_check state ~report);
   state.server_identity <- Some (identity "/workspace");
-  let first = get (Updates.begin_check state ~report) in
+  let first = get_sent ~request:Types.Kept_request.Report_check (Updates.begin_check state ~report) in
   check bool "pending change withdraws confirmation authority" true
     (unknown (Types.resource_check_status state report));
   refused (Updates.begin_check state ~report);
@@ -177,7 +179,7 @@ let write_ownership () =
   refused (Updates.begin_check state ~report);
   check bool "duplicate completion has no reread demand" false (Updates.check_changed state first);
   state.artifact_checks <- ready (inventory []);
-  let second = get (Updates.begin_check state ~report) in
+  let second = get_sent ~request:Types.Kept_request.Report_check (Updates.begin_check state ~report) in
   check bool "late write cannot settle replacement" false (Updates.check_changed state first);
   check bool "replacement stays pending" true (Option.is_some state.artifact_check_pending);
   Types.suspend_workspace_readings state;
@@ -227,7 +229,7 @@ let uncertain_navigation () =
   let entries = [Catalog.Report report] in
   let reading = ready (inventory []) in
   let pending, request = begin_read reading in
-  let failed = settle pending request (Error "403") in
+  let failed = settle pending request (Error (Checks.Read_failed "403")) in
   let partial = ready (inventory ~diagnostics:[`Assoc
     ["file",`String "damaged.json";"error",`String "unreadable"]] []) in
   let mismatch = ready (inventory [confirmation ~sha:(String.make 64 '0') report]) in
@@ -252,7 +254,7 @@ let navigation_retains_read_owner () =
   state.resource_read_owner <- Some owner;
   state.resource_pending_key <- Some (Catalog.Report_revision first);
   state.resource_focus <- Types.Right_pane;
-  let selected = get (Updates.select_next_unchecked state) in
+  let selected = get_sent ~request:Types.Kept_request.Unchecked_report_move (Updates.select_next_unchecked state) in
   check bool "selected current unchecked immutable key" true
     (Option.equal Catalog.equal_key selected (Some (Catalog.Report_revision second)));
   check int "cursor follows selected candidate" 1 state.resources_cursor;
@@ -264,12 +266,12 @@ let navigation_retains_read_owner () =
       (Option.equal Catalog.equal_key state.resource_pending_key (Some (Catalog.Report_revision first))) in
   read_preserved ();
   state.resource_scope <- Catalog.Html_reports;
-  check bool "current format scope respected" true (get (Updates.select_next_unchecked state)=None);
+  check bool "current format scope respected" true (get_sent ~request:Types.Kept_request.Unchecked_report_move (Updates.select_next_unchecked state)=None);
   state.resource_scope <- Catalog.Markdown_reports;
   state.resource_day <- Some {day with year=day.year+1};
-  check bool "current captured day respected" true (get (Updates.select_next_unchecked state)=None);
+  check bool "current captured day respected" true (get_sent ~request:Types.Kept_request.Unchecked_report_move (Updates.select_next_unchecked state)=None);
   state.resource_day <- None;
-  let pending = get (Updates.begin_check state ~report:second) in
+  let pending = get_sent ~request:Types.Kept_request.Report_check (Updates.begin_check state ~report:second) in
   (* A shared read may finish before the explicit check write. It cannot
      classify a target for navigation until that write settles. *)
   state.artifact_checks <- ready (inventory []);

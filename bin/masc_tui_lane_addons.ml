@@ -93,6 +93,7 @@ type diagnostic =
   | Detail_read_failure of string
   | Request_failure of string
   | Input_failure of string
+  | Kept_back of string
 (* Marked rows leave the view as one frozen bundle under their owning worker.
    Handing the bundle's reference to a Keeper is a separate choice made here by
    name, so the operator neither types JSON nor delivers by accident. [choice] 0
@@ -206,6 +207,9 @@ let begin_application_read view =
 let finish_application_read view ticket result =
   {view with application_reading=Application.finish ~generation:view.generation
       ticket result view.application_reading}
+let withdraw_application_read view ticket notice =
+  {view with application_reading=Application.withdraw ticket view.application_reading;
+    error=Some (Kept_back notice)}
 let receive_application_inventory view result =
   {view with application_reading=Application.accept result}
 let phase json =
@@ -1068,6 +1072,7 @@ let diagnostic_text = function
   | Detail_read_failure detail -> "Detail read: " ^ detail
   | Request_failure detail -> "Request: " ^ detail
   | Input_failure detail -> "Input: " ^ detail
+  | Kept_back notice -> notice
 
 let detail_read_note view =
   match view.screen, view.detail_read_error with
@@ -1079,7 +1084,7 @@ let detail_read_note view =
 
 let previous_read_note (view : t) =
   match view.snapshot_read_error, view.error with
-  | Some detail, Some (Detail_read_failure _ | Request_failure _ | Input_failure _) ->
+  | Some detail, Some (Detail_read_failure _ | Request_failure _ | Input_failure _ | Kept_back _) ->
       Some ("Previous Plugins read: " ^ detail)
   | (Some _ | None), None | None, Some _ -> None
 
@@ -2077,7 +2082,7 @@ let reconcile_read_snapshot view ~target ~diagnostic snapshot =
         Some (id, incarnation, detail)
     | Read_detail _, None | Read_installation_results _, None -> None
     | (Read_screen | Read_detail _ | Read_installation_results _),
-      (Some (Request_failure _ | Input_failure _ | Detail_read_failure _))
+      (Some (Request_failure _ | Input_failure _ | Detail_read_failure _ | Kept_back _))
     | Read_screen, None -> view.detail_read_error in
   let detail_read_error = Option.bind detail_read_error (fun ((id, incarnation, _) as failure) ->
     match view.screen with
@@ -2484,7 +2489,7 @@ let flow_rows ?(embedded=false) view =
      Fact_text "Layer placement describes wiring; execution and delivery need their own receipts."]
   @ (match view.error with
      | None -> []
-     | Some ((Detail_read_failure _ | Request_failure _ | Input_failure _) as diagnostic) ->
+     | Some ((Detail_read_failure _ | Request_failure _ | Input_failure _ | Kept_back _) as diagnostic) ->
          [Fact_text (diagnostic_text diagnostic)])
   @ (match view.snapshot_read_error, view.snapshot with
      | Some detail, Some _ ->

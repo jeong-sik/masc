@@ -78,6 +78,8 @@ type outcome_kind =
   | Accepted
   | Refused
   | Uncertain
+  | Kept_back
+      (** The workspace guard stopped this row's request before it was sent. *)
 
 type batch_counts =
   { attempted : int
@@ -85,6 +87,7 @@ type batch_counts =
   ; accepted : int
   ; refused : int
   ; uncertain : int
+  ; kept_back : int
   }
 
 val requeue_all :

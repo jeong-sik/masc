@@ -181,6 +181,9 @@ type schedules =
   | Not_read
   | Reading
   | Read_failed of string
+  | Read_kept_back of string
+      (** The workspace guard stopped the read before it left: its kept-back
+          notice, drawn alone (RFC §2). *)
   | Store_unreadable of string option
   | Page of { snapshot : Masc_tui_types.schedule_snapshot; refresh : refresh }
 
@@ -189,6 +192,7 @@ and refresh =
   | Current
   | Refreshing
   | Refresh_failed of string
+  | Refresh_kept_back of string
 
 let schedules (state : Masc_tui_types.state) ~keeper_name =
   (* A page another pane left (the Automation tab on its third page) is not the
@@ -207,17 +211,24 @@ let schedules (state : Masc_tui_types.state) ~keeper_name =
     | Some (name, detail) when String.equal name keeper_name -> Some detail
     | Some _ | None -> None
   in
+  let kept_back refusal =
+    Masc_tui_types.workspace_refusal_text ~ko:(state.ui_language = Masc_tui_types.Lang_ko)
+      ~request:Masc_tui_types.Kept_request.Schedule_read refusal in
   let waiting =
     Masc_tui_types.detail_read_waiting state ~tab:Masc_tui_types.Detail_automation
       ~keeper:keeper_name
   in
   match first_page, failure with
-  | None, Some detail -> Read_failed detail
+  | None, Some (Masc_tui_types.Request_failed detail) -> Read_failed detail
+  | None, Some (Masc_tui_types.Request_withdrawn refusal) -> Read_kept_back (kept_back refusal)
   | None, None -> if waiting then Reading else Not_read
   | Some snapshot, (Some _ | None)
     when Option.is_some snapshot.scs_read_error || Option.is_none snapshot.scs_request_count ->
       Store_unreadable snapshot.scs_read_error
-  | Some snapshot, Some detail -> Page { snapshot; refresh = Refresh_failed detail }
+  | Some snapshot, Some (Masc_tui_types.Request_failed detail) ->
+      Page { snapshot; refresh = Refresh_failed detail }
+  | Some snapshot, Some (Masc_tui_types.Request_withdrawn refusal) ->
+      Page { snapshot; refresh = Refresh_kept_back (kept_back refusal) }
   | Some snapshot, None -> Page { snapshot; refresh = (if waiting then Refreshing else Current) }
 ;;
 
@@ -227,6 +238,7 @@ let refresh_suffix = function
   | Current -> ""
   | Refreshing -> " (reading again)"
   | Refresh_failed _ -> " (schedule read failed)"
+  | Refresh_kept_back notice -> " · " ^ notice
 ;;
 
 (* What a source says about itself where its events may be missing from the
@@ -304,6 +316,10 @@ let with_detail text detail =
    that failed. A failed read with nothing held to show leaves it unknown
    whether a turn came, and a failed re-read leaves the held turns as the last
    reading. *)
+let turns_kept_back (state : Masc_tui_types.state) refusal =
+  Masc_tui_types.workspace_refusal_text ~ko:(state.ui_language = Masc_tui_types.Lang_ko)
+    ~request:Masc_tui_types.Kept_request.Keeper_turns_read refusal
+
 let turns_source (state : Masc_tui_types.state) ~keeper_name =
   match
     Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name
@@ -311,10 +327,16 @@ let turns_source (state : Masc_tui_types.state) ~keeper_name =
   | Masc_tui_fetched.Absent -> [], [ Notice "turns not read yet" ]
   | Masc_tui_fetched.Loading -> [], [ Notice "turns reading…" ]
   | Masc_tui_fetched.Ready turns -> turns, []
-  | Masc_tui_fetched.Stale ([], detail) | Masc_tui_fetched.Failed detail ->
+  | Masc_tui_fetched.Stale ([], Masc_tui_types.Request_failed detail)
+  | Masc_tui_fetched.Failed (Masc_tui_types.Request_failed detail) ->
       [], [ Caution (with_detail "turns unknown, the read failed" detail) ]
-  | Masc_tui_fetched.Stale ((_ :: _ as turns), detail) ->
+  | Masc_tui_fetched.Stale ((_ :: _ as turns), Masc_tui_types.Request_failed detail) ->
       turns, [ Caution (with_detail "turns (read failed)" detail) ]
+  (* Not sent, so not failed: the kept-back notice alone (RFC §2). *)
+  | Masc_tui_fetched.Stale (turns, Masc_tui_types.Request_withdrawn refusal) ->
+      turns, [ Caution (turns_kept_back state refusal) ]
+  | Masc_tui_fetched.Failed (Masc_tui_types.Request_withdrawn refusal) ->
+      [], [ Caution (turns_kept_back state refusal) ]
 ;;
 
 (* The note of a schedule page that is not the Keeper's present reading. *)
@@ -322,6 +344,7 @@ let refresh_note refresh text =
   match refresh with
   | Current | Refreshing -> Notice (text ^ refresh_suffix refresh)
   | Refresh_failed detail -> Caution (with_detail (text ^ refresh_suffix refresh) detail)
+  | Refresh_kept_back _ -> Caution (text ^ refresh_suffix refresh)
 ;;
 
 (* The Keeper's wakes on its schedule page, newest first, and a note for a
@@ -333,6 +356,7 @@ let wakes_source (state : Masc_tui_types.state) ~keeper_name =
   | Reading -> [], [ Notice "wakes reading…" ]
   | Read_failed detail ->
       [], [ Caution (with_detail "wakes unknown, the schedule read failed" detail) ]
+  | Read_kept_back notice -> [], [ Caution notice ]
   | Store_unreadable detail ->
       let text = "wakes unknown, the schedule store is unreadable" in
       ( []
@@ -351,15 +375,16 @@ let wakes_source (state : Masc_tui_types.state) ~keeper_name =
            , [ Caution
                  (match refresh with
                   | Refresh_failed detail -> with_detail text detail
-                  | Current | Refreshing -> text)
+                  | Current | Refreshing | Refresh_kept_back _ -> text)
              ] )
        | Masc_tui_keeper_wakes.Wakes { newest_first; coverage } ->
            ( newest_first
            , (match coverage, refresh with
               | Masc_tui_keeper_wakes.Whole_page, Current -> []
-              | Masc_tui_keeper_wakes.Whole_page, (Refreshing | Refresh_failed _) ->
+              | Masc_tui_keeper_wakes.Whole_page, (Refreshing | Refresh_failed _ | Refresh_kept_back _) ->
                   [ refresh_note refresh "wakes" ]
-              | Masc_tui_keeper_wakes.First_page, (Current | Refreshing | Refresh_failed _) ->
+              | Masc_tui_keeper_wakes.First_page,
+                (Current | Refreshing | Refresh_failed _ | Refresh_kept_back _) ->
                   [ refresh_note refresh "wakes from the first page only" ]) ))
 ;;
 
@@ -377,13 +402,20 @@ let digest_source (state : Masc_tui_types.state) ~keeper_name =
   in
   match state.memory_health_error with
   | None -> digest_at, notes
-  | Some detail ->
+  | Some (Masc_tui_types.Request_failed detail) ->
       let text = match digest_at with
         | Some _ -> "digest (earlier read, refresh failed)"
         | None -> "digest unknown, memory read failed"
       in
       let refusals = List.filter (function Caution _ -> true | Notice _ -> false) notes in
       digest_at, Caution (with_detail text detail) :: refusals
+  | Some (Masc_tui_types.Request_withdrawn refusal) ->
+      let refusals = List.filter (function Caution _ -> true | Notice _ -> false) notes in
+      digest_at,
+      Caution (Masc_tui_types.workspace_refusal_text
+                 ~ko:(state.ui_language = Masc_tui_types.Lang_ko)
+                 ~request:Masc_tui_types.Kept_request.Memory_health_read refusal)
+      :: refusals
 ;;
 
 (* The past group of the story page as one feed: the newest turns, the newest
@@ -425,6 +457,7 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
   | Reading -> [ dim "  ◷ reading this Keeper's schedules…" ]
   | Read_failed detail ->
       [ warn ("  ◷ schedule read failed: " ^ Terminal_text.single_line detail) ]
+  | Read_kept_back notice -> [ warn ("  ◷ " ^ Terminal_text.single_line notice) ]
   | Store_unreadable detail ->
       [ warn
           ("  ◷ schedule store unreadable"
@@ -464,6 +497,11 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
                [ warn
                    (Printf.sprintf "  read failed, showing the reading of %s: %s" observed
                       (Terminal_text.single_line detail))
+               ]
+           | Refresh_kept_back notice ->
+               [ warn
+                   (Printf.sprintf "  %s · showing the reading of %s"
+                      (Terminal_text.single_line notice) observed)
                ])
       in
       (* The window cuts its body to the available rows. Keep the read's

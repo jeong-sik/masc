@@ -2,6 +2,7 @@ module Fetched = Masc_tui_fetched
 module Reading = Masc_tui_detail_reading
 type choice = { execution_id : string; tool : string; args : string; subject : string option }
 type request = string Fetched.request
+type failure = Read_failed of string | Read_kept_back of string
 let path ~keeper ~execution_id =
   Printf.sprintf "/api/v1/keepers/%s/tool-calls?execution_id=%s"
     (Uri.pct_encode ~component:`Generic keeper) (Uri.pct_encode ~component:`Generic execution_id)
@@ -9,7 +10,7 @@ type t = {
   choices : choice list;
   cursor : int;
   choosing : bool;
-  fetched : (string, Masc.Tui_decode.keeper_call) Fetched.t;
+  fetched : (string, Masc.Tui_decode.keeper_call, failure) Fetched.source;
   document : Reading.t;
 }
 (* This reader's titles and section names are written in English only, so the
@@ -100,12 +101,15 @@ let result_document t =
     let observation = match state with
       | Fetched.Absent -> [section "Not read" "Open this original call to read it."]
       | Loading -> [section "Reading" "Reading the selected original execution."]
-      | Failed reason -> [section "Read failed" reason]
+      | Failed (Read_failed reason) -> [section "Read failed" reason]
+      | Failed (Read_kept_back notice) -> [section "Not read" notice]
       | Ready call | Stale (call, _) ->
           [section "Tool" call.Masc.Tui_decode.kc_tool;
            section "Input" call.kc_input;
            ] @ output_sections call
-          @ (match state with Stale (_,reason) -> [section "Refresh failed · retained reading" reason]
+          @ (match state with
+             | Stale (_,Read_failed reason) -> [section "Refresh failed · retained reading" reason]
+             | Stale (_,Read_kept_back notice) -> [section "Retained reading" notice]
              | Absent | Loading | Failed _ | Ready _ -> []) in
     let pending = if Fetched.in_flight t.fetched then
       [section "Read pending" "Reading this original execution; any retained result and failure remain below."]
@@ -139,11 +143,18 @@ let complete t request result =
             | Original_unavailable _ | Original_failed _ -> Error reason)
          | Original_not_read | Original_pending | Original_unavailable _ | Original_failed _ -> Ok call)
     | (None | Some _), (Fetched.Absent | Loading | Failed _ | Ready _ | Stale _) -> Ok call) in
+  let result = Result.map_error (fun reason -> Read_failed reason) result in
   if not (Fetched.is_current ~equal:String.equal t.fetched request) then t
   else let t={t with fetched=Fetched.complete ~equal:String.equal t.fetched request result} in
     {t with document=result_document t}
+let withdraw t request notice =
+  if not (Fetched.is_current ~equal:String.equal t.fetched request) then t
+  else let t={t with fetched=Fetched.complete ~equal:String.equal t.fetched request
+      (Error (Read_kept_back notice))} in
+    {t with document=result_document t}
 let back t =
-  let t={t with choosing=true;fetched=Fetched.cancel_pending ~reason:"Reader closed" t.fetched} in
+  let t={t with choosing=true;
+    fetched=Fetched.cancel_pending ~reason:(Read_failed "Reader closed") t.fetched} in
   {t with document=selection_document t.choices t.cursor}
 let document t = t.document
 let move ~count ~height movement t =

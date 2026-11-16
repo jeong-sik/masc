@@ -26,7 +26,7 @@ let fail_memory_facts_refresh (state : Types.state) detail =
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
   | Masc_tui_fetched.Started (next, request) ->
       state.Types.memory_facts <-
-        Masc_tui_fetched.complete ~equal:String.equal next request (Error detail)
+        Masc_tui_fetched.complete ~equal:String.equal next request (Error (Types.Request_failed detail))
 ;;
 
 let contains needle haystack =
@@ -548,7 +548,7 @@ let test_retained_health_filter_keeps_the_selected_owner () =
   check (option string) "a negative cursor selects the first Keeper" (Some "keeper-0") (selected ());
   state.memory_health_cursor <- 99;
   check (option string) "an excessive cursor selects the last Keeper" (Some "keeper-4") (selected ());
-  state.memory_health_error <- Some "refresh failed";
+  state.memory_health_error <- Some (Types.Request_failed "refresh failed");
   state.search_last <- "keeper-4";
   check (list string) "a retained snapshot still filters by Keeper identity" ["keeper-4"]
     (List.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id)
@@ -562,8 +562,8 @@ let test_retained_health_filter_keeps_the_selected_owner () =
   check (option string) "an unmatched query has no fallback owner" None (selected ());
   check bool "search does not replace the retained health data" true
     (state.memory_health = Some health);
-  check (option string) "search does not clear the refresh failure" (Some "refresh failed")
-    state.memory_health_error
+  check bool "search does not clear the refresh failure" true
+    (state.memory_health_error = Some (Types.Request_failed "refresh failed"))
 ;;
 
 let test_a_failed_facts_refresh_keeps_facts_and_unread_scope () =

@@ -1,6 +1,7 @@
 type t =
   | Given of string
   | Read_failed of string
+  | Kept_back of string
   | Save_unconfirmed of string
   | Saving_when_workspace_changed
   | Reading_withdrawn
@@ -27,6 +28,7 @@ let text ~ko notice =
   match notice with
   | Given detail -> detail
   | Read_failed detail -> detail ^ t " · 초안 유지" " · draft retained"
+  | Kept_back notice -> notice
   | Save_unconfirmed detail ->
     detail
     ^ t " · 다시 시도하기 전에 현재 설정을 읽으세요" " · read current before retrying"

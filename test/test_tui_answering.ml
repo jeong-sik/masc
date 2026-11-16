@@ -114,7 +114,7 @@ let test_advance_finishes_tracks_the_transition () =
 let test_target_indexes_skip_prose () =
   let lines =
     Masc_tui_answering.overlay ~ko:false ~now:1000. ~chat_target:None
-      ~error:(Some "boom") ~observed_at:(Some 988.) ~finishes:[ ("analyst", 995.) ]
+      ~error:(Some (Masc_tui_answering.Poll_failed "boom")) ~observed_at:(Some 988.) ~finishes:[ ("analyst", 995.) ]
       [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:990. "echo"
       ; row "delta" Tui_decode.Keeper_turn_idle
       ]
@@ -262,7 +262,7 @@ let test_chat_shows_background_work_and_uncertainty () =
   let waiting = activity "other" rows |> text |> String.concat "\n" in
   Alcotest.(check bool) "missing events are not invented work" true
     (Astring.String.is_infix ~affix:"progress has not been reported" waiting);
-  let stale = activity ~error:(Some "timeout") "echo" rows |> text in
+  let stale = activity ~error:(Some (Masc_tui_answering.Poll_failed "timeout")) "echo" rows |> text in
   Alcotest.(check bool) "failed observation is labelled" true
     (Astring.String.is_infix ~affix:"Activity unavailable" (List.hd stale));
   Alcotest.(check bool) "cached progress is marked last observed" true
@@ -286,7 +286,7 @@ let test_motion_demand_uses_only_a_fresh_running_observation () =
   Alcotest.(check bool) "a fresh observed turn requests the motion clock" true
     (has_motion (activity ~error:None running));
   Alcotest.(check bool) "a stale observation keeps the seconds clock only" false
-    (has_motion (activity ~error:(Some "timeout") running));
+    (has_motion (activity ~error:(Some (Masc_tui_answering.Poll_failed "timeout")) running));
   Alcotest.(check bool) "an idle observation cannot request motion" false
     (has_motion (activity ~error:None (row "echo" Tui_decode.Keeper_turn_idle)))
 ;;

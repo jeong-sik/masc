@@ -46,7 +46,7 @@ let launch_switch state ~host ~deliver ~fork ~keeper_name ~provider_id ~enabled 
     let result =
       try
         match write_authority_refusal state authority with
-        | Some reason -> Error reason
+        | Some refusal -> Error (Request_withdrawn refusal)
         | None ->
           Masc_tui_http.post_identity_switch
             ~host
@@ -54,9 +54,10 @@ let launch_switch state ~host ~deliver ~fork ~keeper_name ~provider_id ~enabled 
             ~keeper_name
             ~provider_id
             ~enabled
+          |> Result.map_error (fun detail -> Request_failed detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     deliver (Identity_msg (Identity_switch_set (keeper_name, provider_id, enabled, result)))
   in
@@ -65,7 +66,7 @@ let launch_switch state ~host ~deliver ~fork ~keeper_name ~provider_id ~enabled 
   | None ->
     deliver
       (Identity_msg (Identity_switch_set
-         (keeper_name, provider_id, enabled, Error "Eio switch is unavailable")))
+         (keeper_name, provider_id, enabled, Error (Request_failed "Eio switch is unavailable"))))
 ;;
 
 (* Recording an app the operator made. Answers on the same notice line a
@@ -93,7 +94,7 @@ let launch_app_save
       try
         match
           match write_authority_refusal state authority with
-          | Some reason -> Error reason
+          | Some refusal -> Error (Request_withdrawn refusal)
           | None ->
             Masc_tui_http.post_keeper_oauth_client
               ~host
@@ -102,15 +103,16 @@ let launch_app_save
               ~client_id
               ~client_secret
               ~scopes
+            |> Result.map_error (fun detail -> Request_failed detail)
         with
-        | Error err -> Error err
+        | Error failure -> Error failure
         | Ok json ->
           Masc.Tui_decode.decode_oauth_client_saved json
           |> Result.map_error (fun detail ->
-            "app recorded, but the reply could not be read: " ^ detail)
+            Request_failed ("app recorded, but the reply could not be read: " ^ detail))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     deliver (Identity_msg (Identity_app_saved (keeper_name, provider_id, result)))
   in
@@ -118,7 +120,8 @@ let launch_app_save
   | Some sw -> fork ~sw run
   | None ->
     deliver
-      (Identity_msg (Identity_app_saved (keeper_name, provider_id, Error "Eio switch is unavailable")))
+      (Identity_msg (Identity_app_saved (keeper_name, provider_id,
+         Error (Request_failed "Eio switch is unavailable"))))
 ;;
 
 (* Begin a login. The answer is a URL the operator has to open; nothing is
@@ -136,11 +139,14 @@ let launch_login state ~host ~deliver ~fork ~keeper_name ~provider_id ~label =
       try
         match
           match write_authority_refusal state authority with
-          | Some reason -> Error reason
-          | None when not (request_current ()) -> Error "login request retired"
-          | None -> Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name ~provider_id
+          | Some refusal -> Error (Request_withdrawn refusal)
+          | None when not (request_current ()) -> Error (Request_failed "login request retired")
+          | None ->
+            Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name ~provider_id
+            |> Result.map_error (fun detail -> Request_failed detail)
         with
-        | Error err -> Login_failed err
+        | Error (Request_withdrawn refusal) -> Error refusal
+        | Error (Request_failed err) -> Ok (Login_failed err)
         | Ok json ->
           let result = decode_identity_login ~provider_id ~label
             ~now:(Unix.gettimeofday ()) json in
@@ -154,17 +160,17 @@ let launch_login state ~host ~deliver ~fork ~keeper_name ~provider_id ~label =
                then (match Masc_tui_browser.open_url url with
                      | Ok _ | Error _ -> ())
            | Login_failed _ -> ());
-          result
+          Ok result
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Login_failed (Printexc.to_string exn)
+      | exn -> Ok (Login_failed (Printexc.to_string exn))
     in
     deliver (Identity_msg (Identity_login_started (request, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
   | None ->
-    deliver (Identity_msg (Identity_login_started (request, Login_failed "Eio switch is unavailable")))
+    deliver (Identity_msg (Identity_login_started (request, Ok (Login_failed "Eio switch is unavailable"))))
 ;;
 
 (* Ask every attached service again what tools it has. An operator action
@@ -182,29 +188,31 @@ let launch_refresh state ~host ~deliver ~fork ~keeper_name ~provider_ids =
              match acc with
              | Error _ as err -> err
              | Ok () ->
-               (match
-                  match write_authority_refusal state authority with
-                  | Some reason -> Error reason
-                  | None ->
+               (match write_authority_refusal state authority with
+                | Some refusal -> Error (Request_withdrawn refusal)
+                | None ->
+                  match
                     Masc_tui_http.post_keeper_identity_refresh
                       ~host
                       ~port
                       ~keeper_name
                       ~provider_id
-                with
-                | Ok _ -> Ok ()
-                | Error err -> Error (provider_id ^ ": " ^ err)))
+                  with
+                  | Ok _ -> Ok ()
+                  | Error err -> Error (Request_failed (provider_id ^ ": " ^ err))))
           (Ok ())
           provider_ids
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     deliver (Identity_msg (Identity_refreshed (keeper_name, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
-  | None -> deliver (Identity_msg (Identity_refreshed (keeper_name, Error "Eio switch is unavailable")))
+  | None ->
+    deliver (Identity_msg (Identity_refreshed (keeper_name,
+      Error (Request_failed "Eio switch is unavailable"))))
 ;;
 
 (* Detach one attached service: forget the stored token, drop the catalog,
@@ -219,12 +227,13 @@ let launch_disconnect state ~host ~deliver ~fork ~keeper_name ~provider_id =
     let result =
       try
         match write_authority_refusal state authority with
-        | Some reason -> Error reason
+        | Some refusal -> Error (Request_withdrawn refusal)
         | None ->
           Masc_tui_http.post_identity_disconnect ~host ~port ~keeper_name ~provider_id
+          |> Result.map_error (fun detail -> Request_failed detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     deliver (Identity_msg (Identity_disconnected (keeper_name, provider_id, result)))
   in
@@ -233,5 +242,5 @@ let launch_disconnect state ~host ~deliver ~fork ~keeper_name ~provider_id =
   | None ->
     deliver
       (Identity_msg (Identity_disconnected
-         (keeper_name, provider_id, Error "Eio switch is unavailable")))
+         (keeper_name, provider_id, Error (Request_failed "Eio switch is unavailable"))))
 ;;

@@ -1,10 +1,15 @@
 (** Pure join of transcript execution identity to an immutable durable call-log
     snapshot. A refresh can keep exact evidence; an incomplete log cannot prove
     absence, and a duplicate execution identity cannot select a receipt. *)
+(** Why the call log has no answer: its read's own failure, or the caller's
+    kept-back notice for a read the workspace guard did not send. *)
+type log_error = Log_failed of string | Log_kept_back of string
+
 type keeper_call_association =
   | Call_log_not_loaded
   | Call_log_loading
   | Call_log_unavailable of string
+  | Call_log_kept_back of string
   | Call_execution_unrecorded
   | Call_execution_missing
   | Call_execution_coverage_gap of string
@@ -13,7 +18,7 @@ type keeper_call_association =
 
 val resolve :
   keeper_name:string -> execution_id:string option ->
-  loaded_keeper:string option -> loading:bool -> error:string option ->
+  loaded_keeper:string option -> loading:bool -> error:log_error option ->
   snapshot:Masc.Tui_decode.keeper_calls_snapshot option -> keeper_call_association
 
 val durable_call_failed : keeper_call_association -> bool

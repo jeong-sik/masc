@@ -13,12 +13,12 @@ val launch_list
   -> host:string
   -> launch:
        (deliver:
-          ((Masc_tui_resource_catalog.listing, string) result
+          ((Masc_tui_resource_catalog.listing, Masc_tui_types.request_failure) result
            -> Masc_tui_async_protocol.async_msg)
         -> (unit
-            -> (Masc_tui_resource_catalog.listing, string) result)
+            -> (Masc_tui_resource_catalog.listing, Masc_tui_types.request_failure) result)
         -> unit)
-  -> check:(unit -> (unit, string) result)
+  -> check:(unit -> (unit, Masc_tui_types.workspace_refusal) result)
   -> unit
 
 (** Mark the pending key before launching. Changing resources clears the old
@@ -34,10 +34,12 @@ val launch_read
   -> share_origin:Masc_tui_types.workspace_input_identity option
   -> launch:
        (deliver:
-          (((Masc_tui_resource_catalog.reading, string) result * Masc_tui_types.resource_share_journal_observation, string) result
+          (((Masc_tui_resource_catalog.reading, Masc_tui_types.request_failure) result
+            * Masc_tui_types.resource_share_journal_observation, Masc_tui_types.request_failure) result
            -> Masc_tui_async_protocol.async_msg)
-        -> (unit -> ((Masc_tui_resource_catalog.reading, string) result * Masc_tui_types.resource_share_journal_observation, string) result)
+        -> (unit -> ((Masc_tui_resource_catalog.reading, Masc_tui_types.request_failure) result
+                     * Masc_tui_types.resource_share_journal_observation, Masc_tui_types.request_failure) result)
         -> unit)
-  -> check:(unit -> (unit, string) result)
+  -> check:(unit -> (unit, Masc_tui_types.workspace_refusal) result)
   -> key:Masc_tui_resource_catalog.key
   -> unit

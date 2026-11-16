@@ -44,6 +44,6 @@ let launch ?source ?on_not_run ~deliver read =
   in
   launch_with ?on_not_run ~boundary_error:Fun.id ~deliver read
 
-let launch_independent_pair ~deliver_first ~deliver_second first second =
-  launch ~deliver:deliver_first first;
-  launch ~deliver:deliver_second second
+let launch_independent_pair ~boundary_error ~deliver_first ~deliver_second first second =
+  launch_with ~boundary_error ~deliver:deliver_first first;
+  launch_with ~boundary_error ~deliver:deliver_second second

@@ -55,13 +55,23 @@ let apply_board_post_load state ~report_error request result =
              (if state.ui_language = Lang_ko then "응답 글 ID 다름 · 요청 %s · 받음 %s"
               else "response ID mismatch · expected %s · received %s")
              post_id post.bp_id)
-    | Error err -> fail err
+    | Error (Request_failed err) -> fail err
+    | Error (Request_withdrawn refusal) ->
+        (* The guard stopped the read before it left: the detail draws the
+           kept-back notice alone, without the read-failure prefix. *)
+        let notice = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+            ~request:Kept_request.Board_post_read refusal in
+        state.board_detail <-
+          Board_detail.complete state.board_detail request (Error notice);
+        if state.view <> Board then
+          report_error notice
 
 module Publication = Masc_tui_board_publication
 
 let publication_diagnostic ~ko = function
   | Publication.Not_attempted { detail; _ } ->
       (if ko then "글 " else "Board post ") ^ not_sent ~ko ^ ": " ^ detail
+  | Publication.Kept_back { notice; _ } -> notice
   | Publication.Returned { response; _ } ->
       let detail = Option.value (Publication.response_diagnostic ~ko response)
           ~default:(if ko then "응답 없음" else "no acknowledgement received") in
@@ -76,13 +86,13 @@ let apply_current_publication state ~report ~refresh outcome request =
   state.board_write <- Board_idle;
   let ko = state.ui_language = Lang_ko in
   let committed_post_id = match outcome with
-    | Publication.Not_attempted _ -> None
+    | Publication.Not_attempted _ | Publication.Kept_back _ -> None
     | Publication.Returned { response; _ } -> Publication.committed_post_id response in
   match committed_post_id with
   | Some post_id ->
       let post_id = Board_types.Post_id.to_string post_id in
       let diagnostic = match outcome with
-        | Publication.Not_attempted _ -> None
+        | Publication.Not_attempted _ | Publication.Kept_back _ -> None
         | Publication.Returned { response; _ } -> Publication.response_diagnostic ~ko response in
       state.board_compose_attachments <-
         List.filter (fun staged -> not (List.memq staged request.Publication.staged))
@@ -150,9 +160,16 @@ let comment_done state ~request_id ~post_id ~sent_draft ~report ~refresh ~refres
         report "system" ((if state.ui_language = Lang_ko then "게시판: " else "Board: ") ^ message);
         refresh ();
         refresh_detail post_id
-    | Error err ->
+    | Error (Request_failed err) ->
         state.board_compose_armed <- false;
-        state.board_post_error <- Some err)
+        state.board_post_error <- Some err
+    | Error (Request_withdrawn refusal) ->
+        (* Not sent: the kept-back notice with the draft it kept (RFC §2). *)
+        let ko = state.ui_language = Lang_ko in
+        state.board_compose_armed <- false;
+        state.board_post_error <-
+          Some (kept_back ~ko ~request:Kept_request.Board_comment
+                  (workspace_refusal_reason ~ko refusal) Draft_kept))
   | Board_idle | Board_posting _ | Board_commenting _ -> ()
 
 let vote_done state ~report ~refresh ~refresh_detail target result =
@@ -170,6 +187,10 @@ let vote_done state ~report ~refresh ~refresh_detail target result =
        | Board_read open_post when String.equal open_post voted_post ->
            refresh_detail voted_post
        | Board_read _ | Board_list | Board_compose -> ())
-  | Error err ->
+  | Error (Request_failed err) ->
       state.board_vote_armed <- None;
       report "error" ((if state.ui_language = Lang_ko then "투표 실패: " else "Board vote failed: ") ^ err)
+  | Error (Request_withdrawn refusal) ->
+      state.board_vote_armed <- None;
+      report "error" (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+        ~request:Kept_request.Board_vote refusal)

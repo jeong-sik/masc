@@ -28,6 +28,10 @@ type outcome =
           the route does not know the connector. The status alone cannot tell
           which, so neither "already gone" nor a failure is claimed. *)
   | Failed of string  (** Any other refusal, or no answer, in its own words. *)
+  | Kept_back of string
+      (** The caller's kept-back notice: the workspace guard withdrew this
+          unbind before it was sent, so it is neither removed nor failed
+          (RFC-tui-one-screen-grammar §2). *)
 
 (** ["name (id)"] when the name directory knows the channel, otherwise
     ["id (name unknown)"], Korean when [ko]. Both parts are made single-line
@@ -78,11 +82,15 @@ val outcome_line : target * outcome -> string
 val report_order : (target * outcome) list -> (target * outcome) list
 
 (** ["unbind all of <keeper>: N removed, M kept, K not found, F failed"],
+    with [", S not sent"] before the failures when the guard kept any back,
     followed by the failed channels' labels. Short enough for an 80-column
     footer; "kept" is spelled out on each binding's own line. *)
 val summary : keeper_name:string -> (target * outcome) list -> string
 
 val any_failed : (target * outcome) list -> bool
+
+(** Whether the workspace guard kept back any unbind. *)
+val any_kept_back : (target * outcome) list -> bool
 
 (** The line shown after the first press: the key, how many bindings and
     whose, and any transport left out because its binding list is
@@ -161,3 +169,8 @@ val still_bound : keeper_name:string -> target list -> string
 
 (** The line when the connector read an offer waited for failed. *)
 val offer_read_failed : keeper_name:string -> detail:string -> string
+
+(** The line when the workspace guard did not send the connector read an
+    offer waited for: [notice], the caller's kept-back notice, then the
+    Keeper. *)
+val offer_read_kept_back : keeper_name:string -> notice:string -> string

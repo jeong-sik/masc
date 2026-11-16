@@ -131,20 +131,20 @@ let test_independent_partial_observations () =
   let inventory_first = K.add_partial K.empty_partial (K.Inventory_result (Ok inventory)) in
   Alcotest.(check bool) "inventory arrives before name" true
     (K.partial_results inventory_first = (Some (Ok inventory), None));
-  let duplicate = K.add_partial inventory_first (K.Inventory_result (Error "duplicate")) in
+  let duplicate = K.add_partial inventory_first (K.Inventory_result (Error (K.Lookup_failed "duplicate"))) in
   Alcotest.(check bool) "duplicate completion cannot replace first result" true
     (K.partial_results duplicate = (Some (Ok inventory), None));
   Alcotest.(check bool) "pending does not complete" false (K.partial_complete inventory_first);
-  let inventory_then_failure = K.add_partial inventory_first (K.Name_result (Error "name timeout")) in
+  let inventory_then_failure = K.add_partial inventory_first (K.Name_result (Error (K.Lookup_failed "name timeout"))) in
   Alcotest.(check bool) "name timeout preserves inventory" true
-    (K.partial_results inventory_then_failure = (Some (Ok inventory), Some (Error "name timeout")));
+    (K.partial_results inventory_then_failure = (Some (Ok inventory), Some (Error (K.Lookup_failed "name timeout"))));
   Alcotest.(check bool) "both results settle" true (K.partial_complete inventory_then_failure);
   let name_first = K.add_partial K.empty_partial (K.Name_result (Ok name)) in
   Alcotest.(check bool) "name arrives before inventory" true
     (K.partial_results name_first = (None, Some (Ok name)));
-  let name_then_failure = K.add_partial name_first (K.Inventory_result (Error "inventory timeout")) in
+  let name_then_failure = K.add_partial name_first (K.Inventory_result (Error (K.Lookup_failed "inventory timeout"))) in
   Alcotest.(check bool) "inventory timeout preserves name" true
-    (K.partial_results name_then_failure = (Some (Error "inventory timeout"), Some (Ok name)));
+    (K.partial_results name_then_failure = (Some (Error (K.Lookup_failed "inventory timeout")), Some (Ok name)));
   let both = K.add_partial name_first (K.Inventory_result (Ok inventory)) in
   Alcotest.(check bool) "both independent observations retained" true
     (K.partial_results both = (Some (Ok inventory), Some (Ok name)))

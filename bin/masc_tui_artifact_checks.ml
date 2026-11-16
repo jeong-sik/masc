@@ -6,7 +6,8 @@ type inventory =
   { checks : Check.t list
   ; diagnostics : (string * string) list
   ; received_at : float }
-type status = Known of Check.t option | Unknown of string
+type read_failure = Read_failed of string | Read_kept_back of string
+type status = Known of Check.t option | Unknown of string | Kept_back of string
 
 open Result.Syntax
 let fields names = function
@@ -48,7 +49,8 @@ let resolve inventory (report : Catalog.report) =
   else match Fetched.view_for ~equal:Unit.equal inventory ~key:() with
     | Absent -> Unknown "confirmation inventory has not been read"
     | Loading -> Unknown "confirmation query in progress"
-    | Stale (_, detail) | Failed detail -> Unknown detail
+    | Stale (_, Read_failed detail) | Failed (Read_failed detail) -> Unknown detail
+    | Stale (_, Read_kept_back notice) | Failed (Read_kept_back notice) -> Kept_back notice
     | Ready { diagnostics = _ :: _; _ } -> Unknown "some confirmation records could not be read"
     | Ready { checks; diagnostics = []; _ } ->
       match List.find_opt (fun (check : Check.t) ->
@@ -72,7 +74,7 @@ let unchecked_on_day ~reports_complete ~day ~entries inventory =
       | Some count, Catalog.Mcp _ -> Some count
       | Some count, Catalog.Report report ->
         match resolve inventory report with
-        | Unknown _ -> None
+        | Unknown _ | Kept_back _ -> None
         | Known check ->
           let unchecked = match check with
             | None -> true
@@ -88,11 +90,12 @@ let next_unchecked ~reports_complete ~entries ~cursor inventory =
       | Ready { diagnostics = _ :: _; _ } -> Error "some confirmation records could not be read"
       | Absent -> Error "confirmation inventory has not been read"
       | Loading -> Error "confirmation query in progress"
-      | Stale (_, detail) | Failed detail -> Error detail in
+      | Stale (_, (Read_failed detail | Read_kept_back detail))
+      | Failed (Read_failed detail | Read_kept_back detail) -> Error detail in
   let* candidates = traverse (fun (index, entry) -> match entry with
     | Catalog.Mcp _ -> Ok None
     | Report report -> match resolve inventory report with
-      | Unknown detail -> Error detail
+      | Unknown detail | Kept_back detail -> Error detail
       | Known None | Known (Some {state=Check.Unchecked;_}) -> Ok (Some index)
       | Known (Some {state=Check.Checked;_}) -> Ok None)
     (List.mapi (fun index entry -> index, entry) entries) in
@@ -102,11 +105,12 @@ let next_unchecked ~reports_complete ~entries ~cursor inventory =
     | None -> List.nth_opt candidates 0)
 
 let label = function
-  | Unknown _ -> "? check unknown"
+  | Unknown _ | Kept_back _ -> "? check unknown"
   | Known None | Known (Some {state=Check.Unchecked;_}) -> "○ unchecked"
   | Known (Some {state=Check.Checked;_}) -> "✓ checked"
 
 let description status = match status with
   | Unknown detail -> "Confirmation unknown: " ^ detail
+  | Kept_back notice -> notice
   | Known None -> "No confirmation for this exact report revision."
   | Known (Some check) -> label status ^ " · " ^ check.changed_by ^ " · " ^ check.changed_at

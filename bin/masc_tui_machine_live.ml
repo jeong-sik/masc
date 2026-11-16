@@ -151,22 +151,23 @@ let decode source json =
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error "live: expected an object"
 
-type view = Unread | Not_loaded | Showing of picture | Failed of string
+type view = Unread | Not_loaded | Showing of picture | Failed of string | Kept_back of string
 
 let since = function
   | Showing picture -> Some picture.mark
-  | Unread | Not_loaded | Failed _ -> None
+  | Unread | Not_loaded | Failed _ | Kept_back _ -> None
 
 let same_mark a b = a.count = b.count && String.equal a.incarnation b.incarnation
 
 let advance view result =
   match result, view with
   | Ok (Unchanged mark), Showing drawn when same_mark mark drawn.mark -> None
-  | Ok (Unchanged mark), (Showing _ | Unread | Not_loaded | Failed _) ->
+  | Ok (Unchanged mark), (Showing _ | Unread | Not_loaded | Failed _ | Kept_back _) ->
       Some (Failed (Printf.sprintf
         "the server answered unchanged at change %d, which is not the drawn picture's"
         mark.count))
   | Ok No_machine, Not_loaded -> None
-  | Ok No_machine, (Unread | Showing _ | Failed _) -> Some Not_loaded
-  | Ok (Picture picture), (Unread | Not_loaded | Showing _ | Failed _) -> Some (Showing picture)
-  | Error detail, (Unread | Not_loaded | Showing _ | Failed _) -> Some (Failed detail)
+  | Ok No_machine, (Unread | Showing _ | Failed _ | Kept_back _) -> Some Not_loaded
+  | Ok (Picture picture), (Unread | Not_loaded | Showing _ | Failed _ | Kept_back _) ->
+      Some (Showing picture)
+  | Error detail, (Unread | Not_loaded | Showing _ | Failed _ | Kept_back _) -> Some (Failed detail)

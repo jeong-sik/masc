@@ -103,6 +103,9 @@ type diagnostic =
   | Detail_read_failure of string
   | Request_failure of string
   | Input_failure of string
+  | Kept_back of string
+      (** The workspace guard stopped the request before it left; the
+          string is the caller's kept-back notice, drawn as it is. *)
 type evidence_prompt = {
   evidence : Yojson.Safe.t; owner_title : string; row_count : int;
   keepers : string list; choice : int; broadcast_request_id : string;
@@ -205,6 +208,10 @@ val installation_results : t -> installation_id:string -> t
 val decode_configuration : Yojson.Safe.t -> (configuration, string) result
 val begin_application_read : t -> (t * Application.ticket) option
 val finish_application_read : t -> Application.ticket -> (configuration, string) result -> t
+val withdraw_application_read : t -> Application.ticket -> string -> t
+(** The workspace guard stopped the read [ticket] owns before it left: the
+    read settles with the last observation kept, and [notice], the caller's
+    kept-back notice, is the diagnostic. *)
 val receive_application_inventory : t -> (configuration, string) result -> t
 (** Independent observation ownership. These functions preserve editor, receipt,
     explicit-action diagnostics, selected rows and any frozen Slice. *)

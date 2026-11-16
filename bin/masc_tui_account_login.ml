@@ -25,7 +25,7 @@ type saved =
   | Saved_verified
   | Saved_unverified of unverified * unverified list
   | Saved_partly of { unverified : unverified list; not_rechecked : string list }
-type activation = Activating | Activation_failed of string
+type activation = Activating | Activation_failed of string | Activation_kept_back of string
   | Active of { exact_output_available : bool }
 (* The list opens on the clients; choosing one lists its accounts under a row
    that adds a new one. *)
@@ -238,7 +238,7 @@ let requested_matches t (p:provider) =
   || (not (List.exists (fun (row:provider) -> String.equal row.id t.requested) t.providers)
       && requested_client t.requested = Some p.client)
 let activation_incomplete t = match t.phase with
-  | Saving | Finished {activation = Activating | Activation_failed _; _} -> true
+  | Saving | Finished {activation = Activating | Activation_failed _ | Activation_kept_back _; _} -> true
   | Failed -> t.recovery = Refresh_configuration
   | Finished {activation = Active _; _}
   | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Removing | Removal _ -> false
@@ -433,7 +433,11 @@ let activated t saved result =
   let activation = activation_of_result result in
   t.phase <- Finished {saved; activation; refresh_failed = false};
   t.cursor <- 0; t.notice <- saved_notice saved;
-  match activation with Active _ -> true | Activating | Activation_failed _ -> false
+  match activation with Active _ -> true | Activating | Activation_failed _ | Activation_kept_back _ -> false
+let activation_kept_back t saved notice =
+  t.result_scroll <- 0;
+  t.phase <- Finished {saved; activation = Activation_kept_back notice; refresh_failed = false};
+  t.cursor <- 0; t.notice <- saved_notice saved
 let reconcile_saved_account t json =
   match t.provider, t.saved_runtime_ids, field "runtimes" json with
   | Some original, (_ :: _ as ids), `List runtimes ->
@@ -466,6 +470,14 @@ let refresh_saved t saved result =
   t.cursor <- 0; t.result_scroll <- 0;
   t.phase <- Finished {saved; activation; refresh_failed = Result.is_error refreshed};
   t.notice <- saved_notice saved
+let refresh_saved_kept_back t saved notice =
+  let activation = match t.phase with
+    | Finished {activation; _} -> activation
+    | Loading | Providers _ | Logging | Models | Documented_context _ | Saving | Removing | Failed | Removal _ ->
+      Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
+  t.cursor <- 0; t.result_scroll <- 0;
+  t.phase <- Finished {saved; activation; refresh_failed = false};
+  t.notice <- notice
 let input_response ~sequence t result =
   match result with
   | Error _ when sequence=t.input_sequence && t.input_pending ->
@@ -727,9 +739,9 @@ let key t key =
   | (Finished _ | Failed) when key="down" || key="j" ->
     t.result_scroll <- min t.saved_scroll_max (t.result_scroll + 1); Nothing
   | Finished {activation = Activating; _} -> Nothing
-  | Finished {saved; activation = Activation_failed _; _}
+  | Finished {saved; activation = (Activation_failed _ | Activation_kept_back _); _}
     when List.mem key ["r"; "\r"; "\n"; "enter"] -> Activate_saved saved
-  | Finished {activation = Activation_failed _; _} -> Nothing
+  | Finished {activation = (Activation_failed _ | Activation_kept_back _); _} -> Nothing
   | Providers _ | Models | Finished {activation = Active _; _} | Failed ->
     if key="up" || key="k" then (t.cursor<-max 0 (t.cursor-1); Nothing)
     else if key="down" || key="j" then (
@@ -822,7 +834,7 @@ let hints t = match t.phase with
   | Refreshing_models -> "모델 목록 확인 중  Esc:닫기"
   | Preparing_context _ -> "입력 한도 확인 중  Esc:닫기"
   | Finished {activation = Activating; _} -> "j/k:스크롤  런타임 활성화 중  Esc:닫기"
-  | Finished {activation = Activation_failed _; _} -> "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기"
+  | Finished {activation = (Activation_failed _ | Activation_kept_back _); _} -> "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기"
   | Finished {activation = Active _; _} -> "j/k:스크롤  r:목록 새로고침  n:새 계정  Esc:닫기"
   | Saving -> "저장 결과 대기 중 · Esc:닫기 (백그라운드에서 계속)"
   | Failed when t.recovery=Refresh_model_inventory -> "↑↓/j/k:결과 스크롤  r:모델 다시 읽기  e:재로그인  n:새 계정  Esc:닫기"
@@ -896,6 +908,10 @@ let body_rows t =
      | Activating -> [Text "저장 완료 · 런타임 활성화 중입니다."]
      | Activation_failed detail ->
        [Text "저장 완료 · 런타임 활성화 미확인"; Text detail;
+        Text "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다."]
+     (* The activation was not sent: the kept-back notice, alone. *)
+     | Activation_kept_back notice ->
+       [Text "저장 완료"; Text notice;
         Text "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다."]
      | Active {exact_output_available} ->
        Text "저장한 설정을 런타임에 활성화했습니다." ::

@@ -16,10 +16,15 @@ let login_lines (state : state) ~keeper_name lines =
   state.github_identity_view_error <- None
 ;;
 
-let login_finished ~keeper_name ~report ~refresh result =
+let login_finished (state : state) ~keeper_name ~report ~refresh result =
   (match result with
    | Ok () -> report "system" (keeper_name ^ ": github login stream ended")
-   | Error detail -> report "error" (keeper_name ^ ": github login: " ^ detail));
+   | Error (Request_failed detail) -> report "error" (keeper_name ^ ": github login: " ^ detail)
+   | Error (Request_withdrawn refusal) ->
+     report "error"
+       (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+          ~request:Kept_request.Github_login refusal
+        ^ " · " ^ keeper_name));
   refresh keeper_name
 ;;
 
@@ -36,10 +41,18 @@ let token_saved (state : state) ~keeper_name ~report ~refresh result =
               ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text
               json );
      state.github_identity_view_error <- None
-   | Error detail ->
+   | Error (Request_failed detail) ->
      report "error" (keeper_name ^ ": github token save: " ^ detail);
      state.github_token_save_status
-     <- Some (Theme.bad () ^ "✗ Token save failed: " ^ detail ^ Ansi.reset));
+     <- Some (Theme.bad () ^ "✗ Token save failed: " ^ detail ^ Ansi.reset)
+   | Error (Request_withdrawn refusal) ->
+     (* Not sent: the kept-back notice alone, never a failed save (RFC §2). *)
+     let notice =
+       workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Github_token_save refusal
+     in
+     report "error" (notice ^ " · " ^ keeper_name);
+     state.github_token_save_status <- Some (Theme.bad () ^ notice ^ Ansi.reset));
   refresh keeper_name
 ;;
 

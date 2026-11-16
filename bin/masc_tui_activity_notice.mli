@@ -6,6 +6,9 @@ type t =
   (** Text from the server or the TOML parser, drawn as it came. *)
   | Read_failed of string
   (** The server's detail; the draft is kept. *)
+  | Kept_back of string
+  (** The workspace guard stopped the request before it left; the string is
+      the caller's kept-back notice, drawn as it came. *)
   | Save_unconfirmed of string
   (** The server's detail; the current file must be read before a retry. *)
   | Saving_when_workspace_changed

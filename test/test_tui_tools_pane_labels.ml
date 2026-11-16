@@ -151,11 +151,11 @@ let test_usage_pane_joins_each_keepers_answer () =
 let test_a_failed_read_keeps_the_last_answer () =
   let state = usage_state () in
   record_keeper_skill_usage state ~keeper:"alpha" (ready [ usage_row 2 ]);
-  record_keeper_skill_usage state ~keeper:"alpha" (Error "timed out");
-  record_keeper_skill_usage state ~keeper:"bravo" (Error "connection refused");
+  record_keeper_skill_usage state ~keeper:"alpha" (Error (Request_failed "timed out"));
+  record_keeper_skill_usage state ~keeper:"bravo" (Error (Request_failed "connection refused"));
   (match List.assoc_opt "alpha" state.tools_keeper_usage with
    | Some (Skill_usage_read_failed { last = Some (Masc.Tui_decode_tools.Keeper_usage_ready [ _ ]); detail }) ->
-     Alcotest.(check string) "the failure is kept" "timed out" detail
+     Alcotest.(check bool) "the failure is kept" true (detail = Request_failed "timed out")
    | Some (Skill_usage_read _ | Skill_usage_read_failed _) | None ->
      Alcotest.fail "alpha should keep its last answer beside the failure")
 
@@ -193,7 +193,7 @@ let test_readings_and_failures_belong_to_their_keeper () =
     Some (Activations_read
             (Masc.Tui_decode_tools.Skill_activations_no_session { sap_keeper_name = keeper }))
   in
-  let failure keeper = Some { taf_keeper = keeper; taf_detail = "read failed" } in
+  let failure keeper = Some { taf_keeper = keeper; taf_detail = Request_failed "read failed" } in
   let held ~selected reading failure = activations_held_for_another ~selected reading failure in
   Alcotest.(check bool) "the selected Keeper's reading" false (held ~selected:(Some "a") (reading "a") None);
   Alcotest.(check bool) "another Keeper's reading" true (held ~selected:(Some "b") (reading "a") None);

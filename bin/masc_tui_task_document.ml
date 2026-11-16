@@ -107,16 +107,25 @@ let history_blocks ~ko =
                     | None -> []))
               events
 
-let history_status_lines ~ko ~width ~(view : Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view) ~in_flight ~continuing =
+type history_failure = History_read_failed of string | History_kept_back of string
+
+let history_status_lines ~ko ~width
+    ~(view : (Masc.Tui_decode_task_inspection.history, history_failure) Masc_tui_fetched.observation)
+    ~in_flight ~continuing =
   let text korean english = if ko then korean else english in
   let rows =
     match view with
     | Masc_tui_fetched.Ready _ -> []
-    | Masc_tui_fetched.Stale (_, detail) ->
+    | Masc_tui_fetched.Stale (_, History_read_failed detail) ->
         Masc_tui_text_block.rows ~max_cells:width
           ((text "    기록 조회 실패 · 이전 관측: " "    history read failed; previous observation: ") ^ Terminal_text.single_line detail)
-    | Masc_tui_fetched.Failed detail -> Masc_tui_text_block.rows ~max_cells:width
+    | Masc_tui_fetched.Stale (_, History_kept_back notice) ->
+        Masc_tui_text_block.rows ~max_cells:width
+          ("    " ^ Terminal_text.single_line notice ^ text " · 이전 관측" " · previous observation")
+    | Masc_tui_fetched.Failed (History_read_failed detail) -> Masc_tui_text_block.rows ~max_cells:width
         ((text "    조회 실패: " "    load failed: ") ^ Terminal_text.single_line detail)
+    | Masc_tui_fetched.Failed (History_kept_back notice) -> Masc_tui_text_block.rows ~max_cells:width
+        ("    " ^ Terminal_text.single_line notice)
     | Masc_tui_fetched.Absent -> [ (text "    기록 미조회" "    history not requested") ]
     | Masc_tui_fetched.Loading -> [ (text "    조회 중" "    loading...") ]
   in

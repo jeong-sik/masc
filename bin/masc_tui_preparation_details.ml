@@ -160,15 +160,18 @@ let decode ~target json =
 ;;
 
 type request = {target : target; nonce : unit ref}
+(* Why a settled read holds no snapshot: it failed, or the workspace guard
+   stopped it before it left and the caller worded that as a notice. *)
+type failure = Read_failed of string | Read_kept_back of string
 type t =
   { selected : target option
   ; pending : request option
-  ; cached : (target * (snapshot, string) result) option
+  ; cached : (target * (snapshot, failure) result) option
   ; retained : (target * snapshot) option
   }
-type recheck = Recheck_pending | Recheck_loading | Recheck_failed of string
+type recheck = Recheck_pending | Recheck_loading | Recheck_failed of string | Recheck_kept_back of string
 type view =
-  | Not_loaded | Loading | Failed of string | Loaded of snapshot
+  | Not_loaded | Loading | Failed of string | Kept_back of string | Loaded of snapshot
   | Retained of { snapshot : snapshot; recheck : recheck }
 let empty = {selected=None; pending=None; cached=None; retained=None}
 
@@ -213,13 +216,13 @@ let last_observed target state =
     | Some _ | None -> None
 ;;
 
-let receive request result state =
+let settle request result state =
   match state.pending with
   | Some pending when pending.nonce==request.nonce && equal pending.target request.target ->
     let target = pending.target in
     let result = match result with
       | Ok snapshot when not (equal target snapshot.observed_target) ->
-        Error "preparation observation belongs to another selection"
+        Error (Read_failed "preparation observation belongs to another selection")
       | Ok _ | Error _ -> result in
     let retained = match result with
       | Ok _ -> None
@@ -227,6 +230,11 @@ let receive request result state =
     {state with pending=None; cached=Some (target,result); retained}
   | Some _ | None -> state
 ;;
+
+let receive request result state =
+  settle request (Result.map_error (fun detail -> Read_failed detail) result) state
+
+let withdraw request notice state = settle request (Error (Read_kept_back notice)) state
 
 let view target state =
   match state.selected with
@@ -238,8 +246,11 @@ let view target state =
      | Some request, (Some (_, (Ok _ | Error _)) | None) when equal request.target target ->
        retained Recheck_loading Loading
      | (Some _ | None), Some (cached, Ok snapshot) when equal cached target -> Loaded snapshot
-     | (Some _ | None), Some (cached, Error detail) when equal cached target ->
+     | (Some _ | None), Some (cached, Error (Read_failed detail)) when equal cached target ->
        retained (Recheck_failed detail) (Failed detail)
-     | (Some _ | None), (Some (_, (Ok _ | Error _)) | None) -> retained Recheck_pending Not_loaded)
+     | (Some _ | None), Some (cached, Error (Read_kept_back notice)) when equal cached target ->
+       retained (Recheck_kept_back notice) (Kept_back notice)
+     | (Some _ | None), (Some (_, (Ok _ | Error (Read_failed _ | Read_kept_back _))) | None) ->
+       retained Recheck_pending Not_loaded)
   | Some _ | None -> Not_loaded
 ;;

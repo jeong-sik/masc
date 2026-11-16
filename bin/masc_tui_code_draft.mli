@@ -11,6 +11,9 @@ type phase =
   | Editable
   | Saving of ticket
   | Rejected of string
+  | Kept_back of string
+      (** The caller's kept-back notice: the workspace guard stopped the save
+          before it was sent, so the draft is editable as after a refusal. *)
   | Needs_review of review_reason * source option
 
 type t
@@ -38,6 +41,8 @@ type outcome =
   | Save_refused of string
   | Save_conflict of string
   | Save_uncertain of string
+  | Save_kept_back of string
+      (** The caller's kept-back notice for a save the guard did not send. *)
 
 type completion = Ignored | Retained of t | Committed of source
 val complete : ticket -> outcome -> t -> completion

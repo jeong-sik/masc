@@ -113,7 +113,7 @@ val start_lsp_question
   -> unit
 
 val save_draft : Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_code_results.msg -> unit) -> (unit, string) result
+  deliver:(Masc_tui_code_results.msg -> unit) -> (unit, Masc_tui_types.request_failure) result
 (** The outcome is a [Save] answer, which the loop delivers without a
     workspace stamp so navigation cannot lose the submitted draft's outcome.
     The UI still settles only its original ticket. *)

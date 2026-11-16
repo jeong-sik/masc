@@ -1,10 +1,13 @@
 module Tui_decode = Masc.Tui_decode
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 
+type log_error = Log_failed of string | Log_kept_back of string
+
 type keeper_call_association =
   | Call_log_not_loaded
   | Call_log_loading
   | Call_log_unavailable of string
+  | Call_log_kept_back of string
   | Call_execution_unrecorded
   | Call_execution_missing
   | Call_execution_coverage_gap of string
@@ -27,8 +30,11 @@ let resolve ~keeper_name ~execution_id ~loaded_keeper ~loading ~error ~snapshot 
       else if loading && Option.is_none snapshot
       then Call_log_loading
       else
+      let missing = function
+        | Log_failed detail -> Call_log_unavailable detail
+        | Log_kept_back notice -> Call_log_kept_back notice in
       match error, snapshot with
-      | Some detail, None -> Call_log_unavailable detail
+      | Some error, None -> missing error
       | None, None -> Call_log_not_loaded
       | _, Some snapshot
         when not (String.equal snapshot.Tui_decode.kcs_keeper keeper_name) ->
@@ -44,7 +50,7 @@ let resolve ~keeper_name ~execution_id ~loaded_keeper ~loading ~error ~snapshot 
           match matches with
           | [] ->
               (match error with
-               | Some detail -> Call_log_unavailable detail
+               | Some error -> missing error
                | None when snapshot.Tui_decode.kcs_mismatched > 0 ->
                    (* Filtered foreign rows never join. One of them may carry
                       the queried execution id, so a nonzero mismatch count
@@ -84,7 +90,7 @@ let durable_call_failed = function
   | Call_execution_exact call ->
       call.kc_outcome = Tool_result.Recorded_failed
       || call.kc_disposition = Some Tui_decode.Keeper_call_failed
-  | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+  | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _ | Call_log_kept_back _
   | Call_execution_unrecorded | Call_execution_missing
   | Call_execution_coverage_gap _ | Call_execution_ambiguous _ -> false
 
@@ -125,7 +131,7 @@ let result_state outcome association =
       Call_execution_exact call when Option.is_some call.kc_output -> Durable_output
     | (Started | Awaiting_result | Returned | Native_running | Native_ended
       | Native_failed | Failed | Never_returned | Outcome_unrecorded),
-      ( Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+      ( Call_log_not_loaded | Call_log_loading | Call_log_unavailable _ | Call_log_kept_back _
       | Call_execution_unrecorded | Call_execution_missing
       | Call_execution_coverage_gap _ | Call_execution_ambiguous _
       | Call_execution_exact _ ) ->

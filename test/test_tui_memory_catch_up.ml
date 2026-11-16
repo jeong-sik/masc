@@ -13,6 +13,7 @@ let label = function
   | Http.Catch_up_submitted -> "submitted"
   | Catch_up_coalesced -> "coalesced"
   | Catch_up_not_sent _ -> "not sent"
+  | Catch_up_kept_back _ -> "kept back"
   | Catch_up_refused _ -> "refused"
   | Catch_up_unconfirmed _ -> "unconfirmed"
 

@@ -146,7 +146,7 @@ let test_workspace_and_draft () =
   let state=state () in
   Masc_tui_message_input.insert state.msg_input "unsent draft";
   state.msg_scroll <- 51;
-  state.msg_loaded_error <- Some "original history error";
+  state.msg_loaded_error <- Some (Request_failed "original history error");
   let history=state.msg_history and loaded=state.msg_loaded in
   let initial=request state in
   check bool "exact response applies" true
@@ -154,7 +154,8 @@ let test_workspace_and_draft () =
   check string "draft unchanged" "unsent draft" (Masc_tui_message_input.contents state.msg_input);
   check int "conversation scroll unchanged" 51 state.msg_scroll;
   check bool "original conversation unchanged" true (state.msg_history == history && state.msg_loaded == loaded);
-  check (option string) "original failure unchanged" (Some "original history error") state.msg_loaded_error;
+  check bool "original failure unchanged" true
+    (state.msg_loaded_error = Some (Request_failed "original history error"));
   let retired=request state in
   suspend_workspace_readings state;
   state.workspace_identity <- Workspace_identity_match;
@@ -165,7 +166,7 @@ let test_replacement_and_authority () =
   List.iter (fun replace ->
     let state=state () in let pending=request state in replace state;
     check bool "old owner cannot settle current state" false
-      (complete_chat_call_read state pending (Error "late")))
+      (complete_chat_call_read state pending (Error (Request_failed "late"))))
     [ (fun state -> state.msg_target_keeper_name <- Some "beta");
       (fun state -> state.workspace_read_authority <- ref ());
       (fun state -> state.workspace_authority <- Workspace_authority 42);

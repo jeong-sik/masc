@@ -18,7 +18,7 @@ val switch_set
        (keeper_name:string option
         -> Masc_tui_identity_model.identity_notice_kind * string
         -> unit)
-  -> (unit, string) result
+  -> (unit, Masc_tui_types.request_failure) result
   -> unit
 
 (** What one reading of a Keeper's providers and attempts tells the read that
@@ -61,17 +61,18 @@ val login_started
        (keeper_name:string option
         -> Masc_tui_identity_model.identity_notice_kind * string
         -> unit)
-  -> Masc_tui_identity_model.identity_login_result
+  -> (Masc_tui_identity_model.identity_login_result, Masc_tui_types.workspace_refusal) result
   -> unit
 
 val app_saved
-  :  keeper_name:string option
+  :  ko:bool
+  -> keeper_name:string option
   -> provider_id:string
   -> notice:
        (keeper_name:string option
         -> Masc_tui_identity_model.identity_notice_kind * string
         -> unit)
-  -> (int, string) result
+  -> (int, Masc_tui_types.request_failure) result
   -> unit
 
 (** Refresh the selected Keeper; report offscreen outcomes without clearing
@@ -81,7 +82,7 @@ val refreshed
   -> keeper_name:string
   -> refresh:(string -> unit)
   -> report:(string -> string -> unit)
-  -> (unit, string) result
+  -> (unit, Masc_tui_types.request_failure) result
   -> unit
 
 val disconnected
@@ -93,5 +94,5 @@ val disconnected
         -> Masc_tui_identity_model.identity_notice_kind * string
         -> unit)
   -> refresh:(string -> unit)
-  -> (string, string) result
+  -> (string, Masc_tui_types.request_failure) result
   -> unit

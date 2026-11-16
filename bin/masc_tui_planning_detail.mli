@@ -75,6 +75,9 @@ type confirmation_read_error =
   | Read_failed of unit ref option * string
   | Read_http_error of unit ref * int
   | Server_changed of unit ref
+  | Read_kept_back of string
+      (* The workspace guard stopped the read before it left; the caller's
+         kept-back notice, drawn as it is. *)
 
 type confirmation_read = (string, confirmation, confirmation_read_error) Masc_tui_fetched.source
 
@@ -151,10 +154,17 @@ val moment_text : now:float -> string -> string
 val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> string
 (** Preserve the typed source failure's cause at the history read boundary. *)
 
+type timeline_failure =
+  | Timeline_failed of string
+  | Timeline_kept_back of string
+(** [Timeline_failed] carries the read's own cause. [Timeline_kept_back]
+    carries the notice the TUI wrote for a read the workspace guard did not
+    send; it is drawn alone, never as a failed load. *)
+
 val timeline :
   ko:bool -> now:float -> width:int ->
   goal_id:string ->
-  (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t ->
+  (string, Tui_decode.goal_timeline_event list, timeline_failure) Masc_tui_fetched.source ->
   line list
 (** The goal's merged event timeline, appended after [body] so it rides the
     same scroll. Loaded lazily on detail entry; every non-ready state (still

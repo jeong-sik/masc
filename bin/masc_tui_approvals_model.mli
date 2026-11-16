@@ -10,6 +10,7 @@ type approval_not_read =
   | Approval_failed of string
   | Approval_stale of string
   | Approval_unavailable of string
+  | Approval_kept_back of string
 
 type approval_list_reading =
   | List_read

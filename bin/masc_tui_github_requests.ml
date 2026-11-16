@@ -11,7 +11,7 @@ let launch_login state ~host ~deliver ~fork ~check keeper_name =
   let run () =
     match Eio_context.get_clock_opt () with
     | None ->
-      deliver (Github_msg (Github_login_finished (keeper_name, Error "Eio clock is unavailable")))
+      deliver (Github_msg (Github_login_finished (keeper_name, Error (Request_failed "Eio clock is unavailable"))))
     | Some clock ->
       let reader = Masc_tui_sse_lines.create () in
       let flush_lines chunk =
@@ -40,25 +40,27 @@ let launch_login state ~host ~deliver ~fork ~check keeper_name =
       in
       let result =
         try
-          let open Result.Syntax in
-          let* () = check () in
-          Masc_tui_http.post_keeper_github_login_streaming
-            ~clock
-            ~host
-            ~port
-            ~keeper_name
-            ~scopes
-            ~on_chunk:flush_lines
+          match check () with
+          | Error refusal -> Error (Request_withdrawn refusal)
+          | Ok () ->
+            Masc_tui_http.post_keeper_github_login_streaming
+              ~clock
+              ~host
+              ~port
+              ~keeper_name
+              ~scopes
+              ~on_chunk:flush_lines
+            |> Result.map_error (fun detail -> Request_failed detail)
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error (Request_failed (Printexc.to_string exn))
       in
       deliver (Github_msg (Github_login_finished (keeper_name, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
   | None ->
-    deliver (Github_msg (Github_login_finished (keeper_name, Error "Eio switch is unavailable")))
+    deliver (Github_msg (Github_login_finished (keeper_name, Error (Request_failed "Eio switch is unavailable"))))
 ;;
 
 let launch_token_save state ~host ~deliver ~fork ~check keeper_name token =
@@ -66,16 +68,18 @@ let launch_token_save state ~host ~deliver ~fork ~check keeper_name token =
   let run () =
     let result =
       try
-        let open Result.Syntax in
-        let* () = check () in
-        Masc_tui_http.post_keeper_github_token ~host ~port ~keeper_name ~token ()
+        match check () with
+        | Error refusal -> Error (Request_withdrawn refusal)
+        | Ok () ->
+          Masc_tui_http.post_keeper_github_token ~host ~port ~keeper_name ~token ()
+          |> Result.map_error (fun detail -> Request_failed detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     deliver (Github_msg (Github_token_saved (keeper_name, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
-  | None -> deliver (Github_msg (Github_token_saved (keeper_name, Error "Eio switch is unavailable")))
+  | None -> deliver (Github_msg (Github_token_saved (keeper_name, Error (Request_failed "Eio switch is unavailable"))))
 ;;

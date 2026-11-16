@@ -34,8 +34,10 @@ let share_entry s (report : Catalog.report) ~shared =
     requested=shared; expected_artifact_revision=1; expected_artifact_sha256=String.make 64 'a' } in
   { Masc_tui_artifact_share_pending.base_path=origin.wi_base_path;
     masc_root=origin.wi_masc_root; artifact_id=report.id; request }
+let said_share_failure = Types.request_failure_text ~ko:false ~request:Types.Kept_request.Resource_share
 let begin_share_change ?recovery s ~report ~shared =
   Updates.begin_share_change ?recovery s ~report ~entry:(share_entry s report ~shared)
+  |> Result.map_error said_share_failure
 
 let source s = match Doc.copy_source s with
   | Ok (_,raw) -> raw | Error detail -> fail detail
@@ -182,7 +184,7 @@ let public_link () =
       check bool "prepared intent remains uncertain after a pre-dispatch refusal" true
         (Types.resource_share_uncertain s report);
       let retry = match Updates.begin_share_change ~recovery:true s ~report ~entry:not_sent.share_entry with
-        | Ok request -> request | Error detail -> fail detail in
+        | Ok request -> request | Error failure -> fail (said_share_failure failure) in
       ignore (Updates.share_changed s retry ~result:(Ok (Types.Resource_share_conflict true)));
       check bool "the matching receipt resolves the prepared intent" false
         (Types.resource_share_uncertain s report);
@@ -484,7 +486,7 @@ let public_link () =
         operation_id="01890e2a-4c8e-7b21-9f3c-000000000032"}} in
       Types.observe_resource_share witnessed second_entry;
       let second = match Updates.begin_share_change ~recovery:true witnessed ~report ~entry:second_entry with
-        | Ok request -> request | Error detail -> fail detail in
+        | Ok request -> request | Error failure -> fail (said_share_failure failure) in
       let impostor = {second with share_owner=ref ()} in
       ignore (Updates.share_changed witnessed impostor ~result:(Ok (Types.Resource_share_applied false)));
       check int "an unowned receipt cannot settle either request" 2 (List.length witnessed.resource_share_witnesses);
@@ -492,7 +494,7 @@ let public_link () =
       check bool "another operation receipt cannot resolve the original" true
         (Types.resource_share_uncertain witnessed report && witnessed.resource_share_witnesses=[first_entry]);
       let first_retry = match Updates.begin_share_change ~recovery:true witnessed ~report ~entry:first_entry with
-        | Ok request -> request | Error detail -> fail detail in
+        | Ok request -> request | Error failure -> fail (said_share_failure failure) in
       ignore (Updates.share_changed witnessed first_retry ~result:(Ok (Types.Resource_share_conflict true)));
       check bool "the original receipt resolves only the original" false (Types.resource_share_uncertain witnessed report);
       Types.observe_resource_share witnessed first_entry;

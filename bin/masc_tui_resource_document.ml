@@ -33,6 +33,7 @@ let save_notice state entry =
               Some (Masc_tui_resource_export.error_to_string error)
           | Resource_save_settled (Resource_save_not_started detail
               | Resource_save_unconfirmed {detail;cause=_}) -> Some detail
+          | Resource_save_settled (Resource_save_kept_back _) -> None
           | Resource_save_settled (Resource_save_interrupted cancellation) ->
               Some (match cancellation with
                 | None -> "No authoritative target effect was observed."

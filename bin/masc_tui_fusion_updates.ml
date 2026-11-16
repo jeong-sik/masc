@@ -437,11 +437,18 @@ let launched state ~generation ~report ~refresh result =
      when generation = state.fusion_launch_generation
           && Masc_tui_fusion_launch.submitting launch ->
        (match result with
-        | Error detail ->
+        | Error (Request_failed detail) ->
             state.fusion_launch <-
               Some (Fusion_launch_open (Masc_tui_fusion_launch.refused ~detail launch));
             state.fusion_scroll <- 0;
             report ("Fusion launch refused: " ^ detail)
+        | Error (Request_withdrawn refusal) ->
+            let notice = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Fusion_launch refusal in
+            state.fusion_launch <-
+              Some (Fusion_launch_open (Masc_tui_fusion_launch.kept_back ~notice launch));
+            state.fusion_scroll <- 0;
+            report notice
         | Ok run_id ->
             (* The list selects the run once it carries it; a list read
                already in flight may answer without it. *)

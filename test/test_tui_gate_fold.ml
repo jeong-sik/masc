@@ -172,7 +172,7 @@ let test_narrow_chat_notice_has_no_old_row_action () =
       check bool "the supported results view has a folded action" true
         (has_action (Render.chat_row_actions ()));
       state.keeper_calls_keeper <- Some "k";
-      state.keeper_calls_error <- Some "test refresh failure";
+      state.keeper_calls_error <- Some (Masc_tui_types.Request_failed "test refresh failure");
       set_size (minimum, 100);
       let frame, _ = Render.render_keeper_message state in
       check bool "warning rows make an insufficient-height viewport show a notice" true

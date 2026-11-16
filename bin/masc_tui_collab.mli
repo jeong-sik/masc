@@ -31,6 +31,10 @@ val listed : t -> read -> (Masc.Tui_decode.play_invites, string) result -> t
 (** Only the latest read of this view may replace its inventory. Failed reads
     retain the previous inventory for observation, with its failure attached.
     A successful empty inventory clears the retained rows. *)
+val kept_back : t -> read -> string -> t
+(** The workspace guard stopped the latest read before it left; [notice] is
+    the caller's kept-back notice, drawn in place of the inventory. A refusal
+    for a superseded read leaves the current observation unchanged. *)
 val notice : t -> string -> t
 val settled : t -> mutation -> t
 (** Release only the pending mutation whose receipt arrived. Notices and

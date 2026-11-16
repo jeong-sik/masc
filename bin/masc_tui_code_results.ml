@@ -300,7 +300,8 @@ let apply_open_file ~preserve_view (state : state) request result = (
           | None -> false in
         let observe = match Masc_tui_code_draft.phase draft with
           | Masc_tui_code_draft.Needs_review _ -> review_owned
-          | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _ -> true
+          | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
+          | Masc_tui_code_draft.Kept_back _ -> true
           | Masc_tui_code_draft.Saving _ -> false in
         if observe then put_code_draft state (Masc_tui_code_draft.observe
           { text = content; revision = source.wfs_revision } draft);
@@ -761,7 +762,7 @@ let prepare_draft state =
   else match current_code_draft state with
     | Some draft -> (match Draft.phase draft with
         | Draft.Saving _ -> Error "Wait for this draft's save before editing"
-        | Draft.Editable | Draft.Rejected _ | Draft.Needs_review _ -> Ok draft)
+        | Draft.Editable | Draft.Rejected _ | Draft.Kept_back _ | Draft.Needs_review _ -> Ok draft)
     | None -> match code_draft_address state, Masc_tui_fetched.current state.code_file with
       | Some address, Some (_, Masc_tui_fetched.Ready { cfd_body = Code_text text; cfd_revision; _ }) ->
         Ok (Draft.create ~address ~source:{text; revision=cfd_revision})
@@ -796,15 +797,18 @@ let adopt_draft_revision state = match
   | None -> Error "No draft for this file"
   | Some draft -> Result.map (put_code_draft state) (Draft.adopt_current draft)
 
+(* A save the workspace guard refuses here is not sent; it comes back as
+   [Request_withdrawn] so the caller says it is kept back (RFC §2). *)
 let begin_draft_save state =
   let open Result.Syntax in
+  let failed result = Result.map_error (fun detail -> Request_failed detail) result in
   let* () = match write_authority_refusal state state.workspace_authority with
     | None when code_edit_focus state -> Ok ()
-    | None -> Error "Focus the file or its draft before saving"
-    | Some detail -> Error detail in
+    | None -> Error (Request_failed "Focus the file or its draft before saving")
+    | Some refusal -> Error (Request_withdrawn refusal) in
   let* draft = match current_code_draft state with
-    | Some draft -> Ok draft | None -> Error "No edited draft to save" in
-  let* submitted, ticket = Draft.begin_save draft in
+    | Some draft -> Ok draft | None -> Error (Request_failed "No edited draft to save") in
+  let* submitted, ticket = failed (Draft.begin_save draft) in
   put_code_draft state submitted;
   state.code_draft_open <- true;
   state.code_draft_review <- None;

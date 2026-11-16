@@ -39,6 +39,10 @@ type list_view = Clients | Accounts of client | Account_providers of client * st
 (** The list opens on [Clients]; choosing one shows [Accounts] of that client:
     a row that adds a new account, then its configured accounts. *)
 type activation = Activating | Activation_failed of string
+  | Activation_kept_back of string
+      (** The caller's kept-back notice: the workspace guard withdrew the
+          activation before it was sent, so it is not an unconfirmed one
+          (RFC-tui-one-screen-grammar §2). r/Enter retries as after a failure. *)
   | Active of { exact_output_available : bool }
   (** Saving and owner activation are separate receipts. *)
 type phase = Loading | Providers of list_view | Logging | Models | Refreshing_models | Preparing_context of model
@@ -146,6 +150,9 @@ val activating : t -> saved -> unit
 val activated : t -> saved -> (Yojson.Safe.t, string) result -> bool
 (** Record the owner activation receipt; [true] only when runtime readiness and
     setup availability are confirmed. Failure keeps an activation-only retry. *)
+val activation_kept_back : t -> saved -> string -> unit
+(** Record an activation the workspace guard kept back, with the caller's
+    notice, keeping the activation-only retry. *)
 val activation_incomplete : t -> bool
 (** A model save whose receipt is pending, a failed save awaiting reconciliation,
     or a saved receipt whose activation is pending/unconfirmed. Closing retains
@@ -163,6 +170,9 @@ val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
 (** Re-read the list after a save, keeping what the save published on screen.
     Reconcile introduced runtime IDs with their explicit inventory provider IDs
     so account-specific recovery uses the generated configured account. *)
+val refresh_saved_kept_back : t -> saved -> string -> unit
+(** The list read after a save was kept back by the workspace guard: the saved
+    receipt stays on screen under the caller's notice. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit
 val models : t -> Yojson.Safe.t -> (unit, string) result
 val refreshing_models : t -> unit

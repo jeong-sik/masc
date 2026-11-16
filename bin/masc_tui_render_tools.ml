@@ -173,8 +173,12 @@ let skill_action_lines actions =
     actions
 
 let async_request_inventory_lines (state : state) =
-  let errors = Option.to_list (Option.map (fun detail -> Theme.bad (),
-    " Async broker — 재확인 실패 · 이전 목록 유지: " ^ Terminal_text.single_line detail)
+  let errors = Option.to_list (Option.map (function
+    | Request_failed detail -> Theme.bad (),
+        " Async broker — 재확인 실패 · 이전 목록 유지: " ^ Terminal_text.single_line detail
+    | Request_withdrawn refusal -> Theme.bad (),
+        " " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+          ~request:Kept_request.Async_requests_read refusal)
     state.tools_async_observation_error) in
   errors @ (match state.tools_async_observation with
   | None -> if errors=[] then [ Theme.warn (), " Async broker — not loaded" ] else []
@@ -258,8 +262,14 @@ let async_request_detail_lines ~cols state target =
   let failures = match view with
     | Masc_tui_fetched.Absent -> [Ansi.dim," 미조회"]
     | Loading -> []
-    | Failed detail -> [Theme.bad ()," 조회 실패: " ^ Terminal_text.single_line detail]
-    | Stale (_,detail) -> [Theme.warn ()," 마지막 관측 · 재확인 실패: " ^ Terminal_text.single_line detail]
+    | Failed (Request_failed detail) -> [Theme.bad ()," 조회 실패: " ^ Terminal_text.single_line detail]
+    | Failed (Request_withdrawn refusal) ->
+      [Theme.bad ()," " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Async_request_read refusal]
+    | Stale (_,Request_failed detail) -> [Theme.warn ()," 마지막 관측 · 재확인 실패: " ^ Terminal_text.single_line detail]
+    | Stale (_,Request_withdrawn refusal) ->
+      [Theme.warn ()," 마지막 관측 · " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Async_request_read refusal]
     | Ready _ -> [] in
   let snapshot = match Masc_tui_fetched.value view with
     | None -> []
@@ -303,8 +313,14 @@ let async_source_task_lines ~cols state source =
   let errors=match body with
     | Masc_tui_fetched.Absent -> text Ansi.dim " Task 본문 미조회"
     | Loading | Ready _ -> []
-    | Failed detail -> text (Theme.bad ()) (" Task 본문 조회 실패: " ^ detail)
-    | Stale (_,detail) -> text (Theme.warn ()) (" Task 본문 재확인 실패 · 마지막 관측: " ^ detail) in
+    | Failed (Request_failed detail) -> text (Theme.bad ()) (" Task 본문 조회 실패: " ^ detail)
+    | Failed (Request_withdrawn refusal) -> text (Theme.bad ())
+        (" " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Kept_request.Original_task_read refusal)
+    | Stale (_,Request_failed detail) -> text (Theme.warn ()) (" Task 본문 재확인 실패 · 마지막 관측: " ^ detail)
+    | Stale (_,Request_withdrawn refusal) -> text (Theme.warn ())
+        (" " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Kept_request.Original_task_read refusal ^ " · 마지막 관측") in
   let content=match Masc_tui_fetched.value body with
     | None -> []
     | Some (detail : Masc.Tui_decode_task_inspection.detail) ->
@@ -321,7 +337,9 @@ let async_source_task_lines ~cols state source =
   @ [ "", "" ]
   @ (Masc_tui_task_document.history_heading_rows ~ko:(state.ui_language = Lang_ko) ~width:(max 1 (width - 2))
      |> List.map (fun row -> "", row))
-  @ (Masc_tui_task_document.history_status_lines ~ko:(state.ui_language = Lang_ko) ~width ~view:history
+  @ (Masc_tui_task_document.history_status_lines ~ko:(state.ui_language = Lang_ko) ~width
+       ~view:(observation_failure_said (history_failure_said ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Task_history_read) history)
        ~in_flight:(Masc_tui_fetched.in_flight state.tools_async_task_history)
        ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
          state.tools_async_task_history_request)
@@ -1772,8 +1790,11 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     lazy begin
       (match state.tools_activations_error with
        | None -> []
-       | Some { taf_detail; _ } ->
-           [ Theme.bad (), " Skill activations read failed: " ^ Terminal_text.single_line taf_detail ])
+       | Some { taf_detail = Request_failed taf_detail; _ } ->
+           [ Theme.bad (), " Skill activations read failed: " ^ Terminal_text.single_line taf_detail ]
+       | Some { taf_detail = Request_withdrawn refusal; _ } ->
+           [ Theme.bad (), " " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Skill_activations_read refusal ])
       @ Lazy.force activation_reading_lines
     end
   in
@@ -1861,7 +1882,9 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
       match state.skills_catalog_error with
       | None -> []
       | Some error ->
-          [ Theme.bad (), " " ^ Terminal_text.single_line error ]
+          [ Theme.bad (), " " ^ Terminal_text.single_line
+              (request_failure_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:Kept_request.Skill_catalog_read error) ]
           @ (match state.skills_catalog with
              | None -> []
              | Some _ -> [ Theme.warn (), " Previous catalog reading retained" ])
@@ -1979,10 +2002,19 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                  match failure, answer_note with
                  | None, None -> None
                  | None, Some note -> Some (Printf.sprintf "Unavailable: %s: %s" keeper note)
-                 | Some detail, None when counted ->
+                 (* A read the workspace guard stopped is its kept-back
+                    notice, named by the Keeper after it (RFC §2). *)
+                 | Some (Request_withdrawn refusal), None ->
+                   Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                     ~request:Kept_request.Skill_usage_read refusal ^ " · " ^ keeper)
+                 | Some (Request_withdrawn refusal), Some note ->
+                   Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                     ~request:Kept_request.Skill_usage_read refusal ^ " · " ^ keeper
+                     ^ "; earlier answer: " ^ note)
+                 | Some (Request_failed detail), None when counted ->
                    Some (Printf.sprintf "Read failed, counts from the earlier answer: %s: %s" keeper detail)
-                 | Some detail, None -> Some (Printf.sprintf "Read failed: %s: %s" keeper detail)
-                 | Some detail, Some note ->
+                 | Some (Request_failed detail), None -> Some (Printf.sprintf "Read failed: %s: %s" keeper detail)
+                 | Some (Request_failed detail), Some note ->
                    Some (Printf.sprintf "Read failed: %s: %s; earlier answer: %s" keeper detail note)
                in
                ( (if counted then read + 1 else read)
@@ -2255,7 +2287,10 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
   in
   let error_lines = match (selected_tools_error state) with
     | None -> []
-    | Some detail -> [Theme.bad (), "Tools read failed: " ^ Terminal_text.single_line detail]
+    | Some (Request_failed detail) -> [Theme.bad (), "Tools read failed: " ^ Terminal_text.single_line detail]
+    | Some (Request_withdrawn refusal) ->
+        [Theme.bad (), workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Kept_request.Tool_inventory_read refusal]
   in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
   let wrap lines = List.concat_map (fun (style, text) ->

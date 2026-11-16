@@ -12,7 +12,8 @@ let clean = Terminal_text.single_line
 let age ~now at = Option.value (Layout.age_text ~now ~since:at) ~default:"—"
 
 let facts_view (state : Masc_tui_types.state) keeper_name =
-  Fetched.view_for ~equal:String.equal state.memory_facts ~key:keeper_name
+  Masc_tui_types.memory_facts_said state
+    (Fetched.view_for ~equal:String.equal state.memory_facts ~key:keeper_name)
 let activity_view (state : Masc_tui_types.state) keeper_name =
   Fetched.view_for ~equal:String.equal state.memory_activity ~key:keeper_name
 let facts state keeper_name =

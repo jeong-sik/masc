@@ -19,7 +19,7 @@ let snapshot ?(keeper="alpha") ?(health="ok") rows =
 let resolve ?(loaded_keeper=Some "alpha") ?(loading=false) ?error
     ?(execution_id=Some "exec-1") snapshot =
   Evidence.resolve ~keeper_name:"alpha" ~execution_id ~loaded_keeper
-    ~loading ~error ~snapshot
+    ~loading ~error:(Option.map (fun detail -> Evidence.Log_failed detail) error) ~snapshot
 
 let exact = function Evidence.Call_execution_exact _ -> true | _ -> false
 let missing = function Evidence.Call_execution_missing -> true | _ -> false

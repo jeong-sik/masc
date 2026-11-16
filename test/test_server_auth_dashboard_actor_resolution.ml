@@ -503,7 +503,8 @@ let test_history_read_keeps_original_workspace_through_replacement () =
     | None -> fail "original history did not acquire its read owner" in
   let complete owner result =
     Masc_tui_types.complete_task_history_read state owner
-      (Result.bind result (Masc.Tui_decode_task_inspection.history_page ~request:owner.thr_page)) in
+      (Result.bind result (Masc.Tui_decode_task_inspection.history_page ~request:owner.thr_page)
+       |> Result.map_error (fun detail -> Masc_tui_types.Request_failed detail)) in
   let initial_owner = begin_read () in
   complete initial_owner original;
   let old_refresh = begin_read () in

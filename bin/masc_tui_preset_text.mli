@@ -39,10 +39,15 @@ val failure : string -> row
 val detail : string -> row
 val plain : string -> row
 
+(** Why the selected preset's contents are not drawn: the read failed, or the
+    workspace guard stopped it before it left, which the caller has worded as
+    a kept-back notice. *)
+type detail_failure = Detail_read_failed of string | Detail_kept_back of string
+
 val detail_rows :
   ko:bool ->
   selected:Masc.Tui_decode.preset_manifest option ->
-  detail:Masc.Tui_decode.preset_detail Masc_tui_fetched.view ->
+  detail:(Masc.Tui_decode.preset_detail, detail_failure) Masc_tui_fetched.observation ->
   report:Masc.Tui_decode.preset_restore_report option ->
   row list
 (** The pane's detail: what the selected preset holds, then the last restore

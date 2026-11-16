@@ -23,6 +23,9 @@ type request = unit Masc_tui_fetched.request
 type failure =
   | Suspended
   | Request_failed of string
+  | Kept_back of string
+      (** The notice the TUI wrote for a read the workspace guard did not
+          send. It stands in place of the read-failed word, never beside it. *)
 
 type t
 
@@ -44,6 +47,12 @@ val complete :
     current success settles the read, preserving a change that arrived in
     flight. A failure retries using the shared owed-read backoff, keeps the
     last inventory if any, and carries its text as [Request_failed]. *)
+
+val withdraw :
+  retry_s:float -> max_retry_s:float -> now:float ->
+  t -> request -> string -> t
+(** Settle the current read the workspace guard did not send, as [complete]
+    settles a failure, carrying the notice as [Kept_back]. *)
 
 val suspend : t -> t
 (** The workspace is no longer confirmed: retire the read in flight, whose

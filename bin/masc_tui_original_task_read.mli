@@ -9,6 +9,10 @@ type error =
   | Read_failed of string
   | Invalid_reply of string
   | Interrupted
+  | Kept_back of string
+      (** The caller's kept-back notice for a read the workspace guard
+          withdrew before it was sent; drawn alone, never as a failed read
+          (RFC-tui-one-screen-grammar §2). *)
 
 type t
 type request = string Masc_tui_fetched.request

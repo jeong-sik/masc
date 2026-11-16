@@ -34,9 +34,12 @@ val decode : target:target -> Yojson.Safe.t -> (snapshot, string) result
 
 type t
 type request
-type recheck = Recheck_pending | Recheck_loading | Recheck_failed of string
+type recheck = Recheck_pending | Recheck_loading | Recheck_failed of string | Recheck_kept_back of string
+(** [Recheck_kept_back] and [Kept_back] hold the caller's kept-back notice for
+    a read the workspace guard stopped before it left; the screen draws it as
+    it is, never as a failed read. *)
 type view =
-  | Not_loaded | Loading | Failed of string | Loaded of snapshot
+  | Not_loaded | Loading | Failed of string | Kept_back of string | Loaded of snapshot
   | Retained of { snapshot : snapshot; recheck : recheck }
 val empty : t
 val refresh : keeper_name:string -> t -> t
@@ -52,6 +55,9 @@ val select : target option -> t -> t * request option
 val requested_target : request -> target
 val receive : request -> (snapshot, string) result -> t -> t
 (** Only the still-current request capability may settle this selection. *)
+val withdraw : request -> string -> t -> t
+(** The workspace guard stopped the read before it left: it settles as a
+    failed read does, and [notice], the caller's kept-back notice, is drawn. *)
 val view : target -> t -> view
 (** Retained observations are never confirmed by a pending/failed recheck.
     A changed journal/revision or original execution cannot display them.

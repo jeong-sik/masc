@@ -232,7 +232,7 @@ let login_result ?(expires_at = 100.) () =
 
 let apply_login state request ~now result =
   Masc_tui_identity_updates.login_started state request ~now
-    ~report:(fun _ _ -> ()) ~notice:(fun ~keeper_name:_ _ -> ()) result
+    ~report:(fun _ _ -> ()) ~notice:(fun ~keeper_name:_ _ -> ()) (Ok result)
 
 let test_login_wire_preserves_the_server_deadline () =
   let decode json = Masc_tui_identity_model.decode_identity_login
@@ -591,7 +591,7 @@ let test_login_that_expires_while_queued_cannot_start () =
   let noticed = ref "" in
   Masc_tui_identity_updates.login_started state request ~now:20.
     ~report:(fun _ _ -> ()) ~notice:(fun ~keeper_name:_ (_, detail) -> noticed := detail)
-    (login_result ~expires_at:20. ());
+    (Ok (login_result ~expires_at:20. ()));
   check Alcotest.bool "expiry is explained" true (contains "expired" !noticed);
   check (Alcotest.list Alcotest.string) "expired queued URL never appears" [] (pending_urls state "A");
   check (Alcotest.list Alcotest.string) "expired queued login is never read" []
@@ -688,8 +688,8 @@ let test_late_callback_is_observed_after_authority_recovery () =
   Masc_tui_identity_updates.login_started state request ~now:10.
     ~report:(fun _ _ -> ())
     ~notice:(fun ~keeper_name:_ _ -> ())
-    (Masc_tui_identity_model.Login_started
-       { provider_id = "slack"; label = "Slack"; url = "https://auth/A/consent"; expires_at = 100.; attempt_id = "attempt-slack" });
+    (Ok (Masc_tui_identity_model.Login_started
+       { provider_id = "slack"; label = "Slack"; url = "https://auth/A/consent"; expires_at = 100.; attempt_id = "attempt-slack" }));
   check (Alcotest.list Alcotest.string) "consent was presented"
     [ "https://auth/A/consent" ] (pending_urls state "A");
   check (Alcotest.list Alcotest.string) "the wait was recorded" [ "slack" ]
@@ -876,9 +876,9 @@ let test_login_receipt_during_unconfirmation_keeps_waiting () =
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match_unconfirmed "health unavailable";
   Masc_tui_identity_updates.login_started state request ~now:10.
     ~report:(fun _ _ -> ()) ~notice:(fun ~keeper_name:_ _ -> ())
-    (Masc_tui_identity_model.Login_started
+    (Ok (Masc_tui_identity_model.Login_started
        { provider_id = "slack"; label = "Slack"; url = "https://auth/A/consent";
-         expires_at = 100.; attempt_id = "attempt-slack" });
+         expires_at = 100.; attempt_id = "attempt-slack" }));
   check (Alcotest.list Alcotest.string) "late receipt retains its wait" ["slack"]
     (held_expectations state "A");
   check Alcotest.bool "unconfirmed workspace cannot read" false

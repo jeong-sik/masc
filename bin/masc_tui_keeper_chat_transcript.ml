@@ -24,6 +24,7 @@ type interrupt =
   | Admission_paused
   | Signal_declined of string
   | Signal_error of string
+  | Signal_kept_back of string
 
 type tool_outcome = Masc_tui_keeper_chat_activity_projection.tool_outcome =
   | Started
@@ -1199,6 +1200,7 @@ let interrupt_text ~ko t =
            turn_id)
   | Signal_declined reason -> Some (say "중단 신호를 보내지 못함: " "interrupt was not signalled: " ^ reason)
   | Signal_error detail -> Some (say "중단 요청에 답이 없음: " "interrupt request got no answer: " ^ detail)
+  | Signal_kept_back notice -> Some notice
 
 let unreadable_text ~ko t =
   if t.unreadable_count = 0 then None

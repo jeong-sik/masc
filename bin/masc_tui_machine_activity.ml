@@ -17,6 +17,7 @@ type write_result =
   | Conflict of document
   | Refused of string
   | Unconfirmed of string
+  | Kept_back of string
 open Result.Syntax
 module L = Masc_tui_page_line
 let same_owner a b = a.workspace = b.workspace && a.machine = b.machine
@@ -63,6 +64,9 @@ let start_read ~generation t =
   if busy t then None else
     Some ({t with phase=Reading generation;current=None;observed=None;message=None},
       {owner=t.owner;generation;operation=Read})
+let withdraw_read request notice t =
+  if not (matches request t) then t else
+  {t with phase=Idle;current=None;observed=None;message=Some (Notice.Kept_back notice)}
 let finish_read request result t =
   if not (matches request t) then t else
   let t = {t with phase=Idle;current=None;observed=None} in
@@ -134,6 +138,7 @@ let finish_save request result t =
       message=Some Notice.Receipt_received}
   | Save _,Conflict current -> {t with current=Some current;observed=None;message=Some Notice.Conflict_kept}
   | Save _,Refused detail -> {t with message=Some (Notice.Given detail)}
+  | Save _,Kept_back notice -> {t with message=Some (Notice.Kept_back notice)}
   | Save _,Unconfirmed detail -> {t with current=None;observed=None;message=Some (Notice.Save_unconfirmed detail)}
   | Read,_ -> t
 let lines ~ko (t : t) =

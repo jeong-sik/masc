@@ -195,24 +195,24 @@ let test_sandbox_partial_results_follow_authority_and_generation () =
   let partial () = match state.keeper_sandbox_view with
     | Some (_, value) -> value | None -> fail "expected sandbox partial" in
   let old = start "alpha" in
-  apply old (Some "alpha") (K.Name_result (Error "name unavailable"));
+  apply old (Some "alpha") (K.Name_result (Error (K.Lookup_failed "name unavailable")));
   check bool "one result leaves the other in flight" true
     (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"alpha");
   check bool "first result is retained" true
-    (K.partial_results (partial ()) = (None, Some (Error "name unavailable")));
+    (K.partial_results (partial ()) = (None, Some (Error (K.Lookup_failed "name unavailable"))));
   let current = start "alpha" in
-  apply old (Some "alpha") (K.Inventory_result (Error "old inventory"));
+  apply old (Some "alpha") (K.Inventory_result (Error (K.Lookup_failed "old inventory")));
   check bool "superseded result cannot alter newer request" true
     (K.partial_results (partial ()) = (None, None));
-  apply current (Some "alpha") (K.Inventory_result (Error "inventory timeout"));
-  apply current (Some "alpha") (K.Name_result (Error "name timeout"));
+  apply current (Some "alpha") (K.Inventory_result (Error (K.Lookup_failed "inventory timeout")));
+  apply current (Some "alpha") (K.Name_result (Error (K.Lookup_failed "name timeout")));
   check bool "both terminal results are stored" true
     (K.partial_results (partial ()) =
-       (Some (Error "inventory timeout"), Some (Error "name timeout")));
+       (Some (Error (K.Lookup_failed "inventory timeout")), Some (Error (K.Lookup_failed "name timeout"))));
   check bool "both terminal results release wait" false
     (Types.detail_read_waiting state ~tab:Types.Detail_sandbox ~keeper:"alpha");
   let switched = start "alpha" in
-  apply switched (Some "beta") (K.Name_result (Error "offscreen"));
+  apply switched (Some "beta") (K.Name_result (Error (K.Lookup_failed "offscreen")));
   check bool "another selected Keeper cannot accept the result" true
     (K.partial_results (partial ()) = (None, None));
   check bool "offscreen request is retired" false
@@ -222,12 +222,12 @@ let test_sandbox_partial_results_follow_authority_and_generation () =
   check bool "authority withdrawal clears pending partial state" true
     (Option.is_none state.keeper_sandbox_view);
   let successor = start "alpha" in
-  apply withdrawn (Some "alpha") (K.Name_result (Error "old workspace"));
+  apply withdrawn (Some "alpha") (K.Name_result (Error (K.Lookup_failed "old workspace")));
   check bool "old workspace completion cannot fill successor" true
     (K.partial_results (partial ()) = (None, None));
-  apply successor (Some "alpha") (K.Name_result (Error "current workspace"));
+  apply successor (Some "alpha") (K.Name_result (Error (K.Lookup_failed "current workspace")));
   check bool "successor remains current" true
-    (K.partial_results (partial ()) = (None, Some (Error "current workspace")))
+    (K.partial_results (partial ()) = (None, Some (Error (K.Lookup_failed "current workspace"))))
 
 let test_schedule_responses_follow_keeper_and_generation () =
   let keeper name : Types.keeper =
@@ -266,11 +266,11 @@ let test_schedule_responses_follow_keeper_and_generation () =
   state.keeper_cursor <- 1;
   let beta = ask "beta" in
   apply beta (Ok (snapshot 2));
-  apply alpha (Error "late alpha failure");
+  apply alpha (Error (Types.Request_failed "late alpha failure"));
   check (option string) "late A cannot replace B's page" (Some "beta")
     (Option.map fst state.keeper_schedules);
-  check (option (pair string string)) "late A error is not B's error" None
-    state.keeper_schedules_error;
+  check bool "late A error is not B's error" true
+    (Option.is_none state.keeper_schedules_error);
   check bool "offscreen A's request is retired" false
     (Types.detail_read_waiting state ~tab:Types.Detail_automation ~keeper:"alpha");
   let old_beta = ask "beta" in
@@ -280,11 +280,11 @@ let test_schedule_responses_follow_keeper_and_generation () =
   check (option int) "older generation cannot regress the current page" (Some 3)
     (Option.bind state.keeper_schedules (fun (_, page) -> page.scs_request_count));
   let failed = ask "beta" in
-  apply failed (Error "beta offline");
+  apply failed (Error (Types.Request_failed "beta offline"));
   check (option int) "failed refresh retains the last read" (Some 3)
     (Option.bind state.keeper_schedules (fun (_, page) -> page.scs_request_count));
-  check (option (pair string string)) "failed refresh is attributed to B"
-    (Some ("beta", "beta offline")) state.keeper_schedules_error;
+  check bool "failed refresh is attributed to B" true
+    (state.keeper_schedules_error = Some ("beta", Types.Request_failed "beta offline"));
   let first =
     { (snapshot 25) with
       scs_paging = Types.Schedule_paging { page_cursor = None; next_cursor = Some "next" } }
@@ -301,7 +301,7 @@ let test_schedule_responses_follow_keeper_and_generation () =
   let failed_page = ask "beta" in
   Types.apply_keeper_schedules_read state
     { kspr_detail = failed_page; kspr_page = page2;
-      kspr_navigation = false; kspr_scroll = 0 } (Error "page failed");
+      kspr_navigation = false; kspr_scroll = 0 } (Error (Types.Request_failed "page failed"));
   check (option string) "a failed page read retains the current page" None
     (Option.bind state.keeper_schedules_page (fun (_, page) -> page.sp_cursor));
   let superseded = ask "beta" in
@@ -386,11 +386,11 @@ let test_schedule_responses_follow_keeper_and_generation () =
   check (option string) "chat target owns its schedules even while roster selects B" (Some "alpha")
     (Option.map fst state.keeper_schedules);
   let off_target = ask "beta" in
-  apply off_target (Error "off-target failure");
+  apply off_target (Error (Types.Request_failed "off-target failure"));
   check (option string) "another Keeper cannot replace chat observation" (Some "alpha")
     (Option.map fst state.keeper_schedules);
-  check (option (pair string string)) "another Keeper cannot set chat read error" None
-    state.keeper_schedules_error;
+  check bool "another Keeper cannot set chat read error" true
+    (Option.is_none state.keeper_schedules_error);
   state.view <- Types.Keepers Types.Keeper_detail;
   state.detail_tab <- Types.Detail_automation;
   state.keeper_cursor <- 1;

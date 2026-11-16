@@ -495,9 +495,12 @@ let render_keeper_calls (state : state) =
   box_divider buf cols;
   (match state.keeper_calls_error with
    | None -> ()
-   | Some detail ->
+   | Some failure ->
+       (* A read the guard stopped says its kept-back notice alone (RFC §2). *)
        box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
+         ("  " ^ Keeper_chat.terminal_safe_text
+            (request_failure_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Call_log_read failure));
        box_divider buf cols);
   (match state.keeper_calls with
    | Some snapshot when snapshot.Masc.Tui_decode.kcs_mismatched > 0 ->

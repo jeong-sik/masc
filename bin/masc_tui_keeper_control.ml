@@ -433,6 +433,11 @@ type failure =
   | Refused of { status : int; detail : string }
   | Unbound_receipt of int
   | No_answer of string
+  | Kept_back of string
+  | Later_step_kept_back of string
+
+(* What a later step's kept-back notice adds: a step before it did leave. *)
+let earlier_step_sent ~ko = if ko then "앞 단계는 보냄" else "earlier step sent"
 
 let failure_text ~ko = function
   | Empty_plan -> if ko then "보낼 요청 없음" else "no request to send"
@@ -447,6 +452,8 @@ let failure_text ~ko = function
          else "HTTP %d: invalid Keeper purge acceptance: target or operation identity missing")
         status
   | No_answer text -> text
+  | Kept_back notice -> notice
+  | Later_step_kept_back notice -> notice
 
 type pending = {
   pending_keeper : string;

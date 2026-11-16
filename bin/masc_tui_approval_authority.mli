@@ -58,7 +58,7 @@ val after_answer :
   keeper_name:string ->
   tool_call_id:string ->
   approval_id:string ->
-  result:(Masc_tui_http.tool_approval_answer, string) result ->
+  result:(Masc_tui_http.tool_approval_answer, 'error) result ->
   Masc_tui_types.Tui_decode.keeper_tool_approval list ->
   Masc_tui_types.Tui_decode.keeper_tool_approval list
 (** Remove only the answered waiter after the server confirms settlement or

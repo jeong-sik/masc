@@ -527,6 +527,7 @@ type events_error =
   | Events_denied of string
   | Events_undecodable of string
   | Events_transport of string
+  | Events_kept_back of string
 
 let cursor_refusal_to_string = function
   | Journal.Offset_past_rows -> "the byte cursor lies past the journal"
@@ -549,6 +550,7 @@ let events_error_to_string = function
   | Events_denied detail -> "events request denied: " ^ detail
   | Events_undecodable detail -> "events body unreadable: " ^ detail
   | Events_transport detail -> "events request failed: " ^ detail
+  | Events_kept_back notice -> notice
 ;;
 
 (* The error envelope is [masc.keeper_chat_operation.error.v1]:

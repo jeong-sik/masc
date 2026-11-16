@@ -136,7 +136,8 @@ let test_accepted_cancel_outlives_workspace_withdrawal env () =
   check string "receipt retains its original physical workspace" (Masc.Tui_decode.Canonical_path.to_string expected_a.sid_masc_root) (Masc.Tui_decode.Canonical_path.to_string expected.sid_masc_root);
   (match result with
    | Protocol.Task_cancel_confirmed _ -> ()
-   | Protocol.Task_cancel_refused _ | Protocol.Task_cancel_unconfirmed _ ->
+   | Protocol.Task_cancel_refused _ | Protocol.Task_cancel_unconfirmed _
+   | Protocol.Task_cancel_kept_back _ ->
        fail "accepted cancellation lost its confirmed receipt");
   remember_task_followup state ~expected_workspace:expected
     (Task_cancel_refresh {task_id;certainty=Cancellation_confirmed});
@@ -167,7 +168,8 @@ let test_no_switch_closed_owner_and_real_workspace_refusal env () =
   check string "no-switch refusal retains workspace identity" (Masc.Tui_decode.Canonical_path.to_string expected.sid_masc_root) (Masc.Tui_decode.Canonical_path.to_string workspace.sid_masc_root);
   (match result with
    | Protocol.Task_cancel_unconfirmed _ -> ()
-   | Protocol.Task_cancel_confirmed _ | Protocol.Task_cancel_refused _ ->
+   | Protocol.Task_cancel_confirmed _ | Protocol.Task_cancel_refused _
+   | Protocol.Task_cancel_kept_back _ ->
        fail "unstarted cancellation lost its boundary receipt");
   claimed config "cancel-owner-original";
   Results.close results;
@@ -189,7 +191,8 @@ let test_no_switch_closed_owner_and_real_workspace_refusal env () =
   check string "server refusal remains associated with the original receipt" (Masc.Tui_decode.Canonical_path.to_string expected.sid_masc_root) (Masc.Tui_decode.Canonical_path.to_string workspace.sid_masc_root);
   (match result with
    | Protocol.Task_cancel_refused _ -> ()
-   | Protocol.Task_cancel_confirmed _ | Protocol.Task_cancel_unconfirmed _ ->
+   | Protocol.Task_cancel_confirmed _ | Protocol.Task_cancel_unconfirmed _
+   | Protocol.Task_cancel_kept_back _ ->
        fail "server refusal lost its refused receipt");
   claimed config "cancel-owner-original";
   claimed foreign_config "cancel-owner-foreign"

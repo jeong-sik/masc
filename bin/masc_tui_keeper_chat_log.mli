@@ -183,6 +183,9 @@ type events_error =
           status and what came back), or a page that claimed more without
           advancing ({!read_whole_journal}). *)
   | Events_transport of string  (** The request never got an answer. *)
+  | Events_kept_back of string
+      (** The workspace guard stopped the request before it left: the
+          caller's kept-back notice, drawn in the screen's language. *)
 
 val events_error_to_string : events_error -> string
 
@@ -228,9 +231,9 @@ val read_whole_journal :
     {!Events_undecodable}, naming the positions, never a shorter [Ok]. *)
 
 val read_with_operation_state :
-  read_operation:(unit -> (Keeper_chat_operation.state option, string) result) ->
+  read_operation:(unit -> (Keeper_chat_operation.state option, 'operation_error) result) ->
   read_journal:(unit -> (Masc.Keeper_chat_event_log.journaled_event list, events_error) result) ->
-  (Keeper_chat_operation.state option, string) result
+  (Keeper_chat_operation.state option, 'operation_error) result
   * (Masc.Keeper_chat_event_log.journaled_event list, events_error) result
   * terminal_replay
 (** Read operation state before its journal. Recheck queued and running observations after reading the journal. If the

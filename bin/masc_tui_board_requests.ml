@@ -6,9 +6,9 @@ open Masc_tui_async_protocol
 module Board_detail = Masc_tui_board_detail
 module Publication = Masc_tui_board_publication
 
-type 'a launch =
-  deliver:(('a, string) result -> Masc_tui_async_protocol.async_msg) ->
-  (unit -> ('a, string) result) -> unit
+type ('a, 'error) launch =
+  deliver:(('a, 'error) result -> Masc_tui_async_protocol.async_msg) ->
+  (unit -> ('a, 'error) result) -> unit
 
 (* Kept back before it starts, because the workspace is not confirmed. *)
 let refuse_unconfirmed state ~report ~request kept =
@@ -32,7 +32,8 @@ let start_board_post_refresh state ~host ~port ~post_id ~launch =
       (fun () ->
         Masc_tui_workspace_read.with_binding ~host ~port ~expected
           ~proof:Request_precondition (fun () ->
-            Masc_tui_loader.load_board_post ~full_history ~host ~port ~post_id ()))
+            Masc_tui_loader.load_board_post ~full_history ~host ~port ~post_id ())
+        |> Result.map_error (fun detail -> Request_failed detail))
 
   end
   | None | Some _ -> ()
@@ -90,11 +91,18 @@ let start_board_post state ~host ~results ~admit ~report
       | Ok outcome | Error outcome -> Board_msg (Board_publication_done outcome))
     (fun () ->
       let open Result.Syntax in
-      let* () = admit request |> Result.map_error boundary_error in
+      (* A post the workspace guard stops, or one with no server identity to
+         carry, was not sent: the kept-back notice, never "not sent: <why>"
+         (RFC §2). *)
+      let kept_back_by refusal =
+        Publication.kept_back request
+          ~notice:(kept_back ~ko ~request:Kept_request.Board_post
+                     (workspace_refusal_reason ~ko refusal) Draft_kept) in
+      let* () = admit request |> Result.map_error kept_back_by in
       let* () =
         match request.expected_workspace with
         | Some _ -> Ok ()
-        | None -> Error (boundary_error (workspace_identity_unread ~ko))
+        | None -> Error (kept_back_by Workspace_identity_not_confirmed)
       in
       (* Staged files upload before the post: a failure here means the post
          was not sent, and the draft and staged list stay as they were. The
@@ -142,13 +150,14 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
   launch
     ~deliver:(fun result -> Board_msg (Board_comment_done { request_id; post_id; sent_draft; result }))
     (fun () ->
-      let open Result.Syntax in
-      let* expected_workspace = match expected_workspace with
-        | Some identity -> Ok identity
-        | None -> Error (kept_back ~ko ~request:Kept_request.Board_comment (workspace_identity_unread ~ko) Draft_kept) in
-      match Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json );
+      (* No server identity to carry: kept back, not sent (RFC §2). *)
+      match expected_workspace with
+      | None -> Error (Request_withdrawn Workspace_identity_not_confirmed)
+      | Some expected_workspace ->
+        (match Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content with
+         | Error err -> Error err
+         | Ok json -> Masc.Tui_decode.tool_envelope_outcome json)
+        |> Result.map_error (fun detail -> Request_failed detail));
   (match state.board_write with
    | Board_commenting current when current == request_id ->
      report "system" (if ko then "댓글 보내는 중" else "commenting on Board")
@@ -173,13 +182,15 @@ let start_vote state ~launch ~report ~target ~(up : bool) ~send =
   launch
     ~deliver:(fun result -> Board_msg (Board_vote_done (target, result)))
     (fun () ->
-      let open Result.Syntax in
-      let* expected_workspace = match expected_workspace with
-        | Some identity -> Ok identity
-        | None -> Error (kept_back ~ko ~request:Kept_request.Board_vote (workspace_identity_unread ~ko) Nothing_kept) in
-      match send ~expected_workspace ~port with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )
+      (* No server identity to carry: kept back, not sent, and never drawn
+         after the vote-failure prefix (RFC §2). *)
+      match expected_workspace with
+      | None -> Error (Request_withdrawn Workspace_identity_not_confirmed)
+      | Some expected_workspace ->
+        (match send ~expected_workspace ~port with
+         | Error err -> Error err
+         | Ok json -> Masc.Tui_decode.tool_envelope_outcome json)
+        |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 let start_board_vote state ~host ~launch ~report ~(post_id : string) ~(up : bool) =

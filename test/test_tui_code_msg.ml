@@ -143,7 +143,9 @@ let test_a_committed_save_rereads_its_file () =
   let must = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let draft = must (Code.prepare_draft state) in
   must (Code.edit_draft state draft "b\n");
-  let saving, _ = must (Code.begin_draft_save state) in
+  let saving, _ = must (Result.map_error
+    (Types.request_failure_text ~ko:false ~request:Types.Kept_request.File_save)
+    (Code.begin_draft_save state)) in
   Alcotest.(check (option string)) "the committed save asks to read its file again"
     (Some "src/a.ml")
     (match Code.apply state (Code.Code_draft_saved (saving, Draft.Save_succeeded (String.make 64 'b'))) with

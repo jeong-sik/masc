@@ -65,14 +65,18 @@ let test_with_lock_inside_eio () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let calls = ref 0 in
+  let tracked_while_held = ref false in
   let result =
     File_lock_eio.with_lock path (fun () ->
         incr calls;
+        tracked_while_held := File_lock_eio.lock_count () >= 1;
         "ok")
   in
   check string "result" "ok" result;
   check int "single call" 1 !calls;
-  check bool "lock table tracked" true (File_lock_eio.lock_count () >= 1)
+  check bool "lock table tracked while held" true !tracked_while_held;
+  check int "lock entry evicted on last release" 0
+    (File_lock_eio.For_testing.holders_and_waiters ~lock_path:path)
 
 let test_durable_lock_open_failure_is_typed () =
   with_temp_path @@ fun path ->
@@ -232,6 +236,50 @@ let test_try_durable_lock_held_by_another_process () =
   held_elsewhere "held by another process" body_ran
     (File_lock_eio.try_with_durable_lock_observed ~lock_path (fun () -> body_ran := true))
 
+exception Test_lock_cancelled
+
+let test_with_lock_symlink_convergence_and_cancelled_release () =
+  let root = Filename.temp_dir "masc-file-lock-alias-" "" in
+  let real_dir = Filename.concat root "real" in
+  let alias_dir = Filename.concat root "alias" in
+  Unix.mkdir real_dir 0o755;
+  Unix.symlink real_dir alias_dir;
+  let rec rm_tree p =
+    match Unix.lstat p with
+    | exception Unix.Unix_error _ -> ()
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter (fun e -> rm_tree (Filename.concat p e)) (Sys.readdir p);
+      Unix.rmdir p
+    | _ -> Unix.unlink p
+  in
+  Fun.protect
+    ~finally:(fun () -> rm_tree root)
+    (fun () ->
+       let real_path = Filename.concat real_dir "target.json" in
+       let alias_path = Filename.concat alias_dir "target.json" in
+       Eio_main.run @@ fun _env ->
+       let entered, resolve_entered = Eio.Promise.create () in
+       let block, _resolve_block = Eio.Promise.create () in
+       (try
+          Eio.Switch.run @@ fun sw ->
+          Eio.Fiber.fork ~sw (fun () ->
+            File_lock_eio.with_lock real_path (fun () ->
+              check int "alias shares active lock holder count" 1
+                (File_lock_eio.For_testing.holders_and_waiters ~lock_path:alias_path);
+              Eio.Promise.resolve resolve_entered ();
+              Eio.Promise.await block));
+          Eio.Promise.await entered;
+          raise Test_lock_cancelled
+        with
+        | Test_lock_cancelled -> ());
+       check int "zero active holders after cancellation" 0
+         (File_lock_eio.For_testing.holders_and_waiters ~lock_path:real_path);
+       let acquired_after_cancel =
+         File_lock_eio.with_lock alias_path (fun () -> "reacquired")
+       in
+       check string "lock reusable immediately after cancellation"
+         "reacquired" acquired_after_cancel)
+
 let () =
   run "file_lock_eio"
     [
@@ -251,5 +299,7 @@ let () =
             test_try_durable_lock_never_waits;
           test_case "a durable lock attempt sees another process" `Quick
             test_try_durable_lock_held_by_another_process;
+          test_case "with_lock symlink convergence and cancelled release" `Quick
+            test_with_lock_symlink_convergence_and_cancelled_release;
         ] );
     ]

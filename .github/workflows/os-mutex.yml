@@ -1,0 +1,61 @@
+name: Os_mutex sections
+# RFC a-fiber-that-suspends-while-holding-an-os-mutex-fails-at-unlock §6.1
+# cases 11 and 12. The Os_mutex suites run on the posix backend of Linux and
+# macOS (the cases call Eio_posix.run), and the cost bench prints what
+# Os_mutex.protect costs next to Mutex.protect on each runner.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  os-mutex:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install coreutils openssl@3 gmp zstd libpq
+          openssl_prefix="$(brew --prefix openssl@3)"
+          libpq_prefix="$(brew --prefix libpq)"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+          echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+      - name: Build the Os_mutex suites and the cost bench
+        run: opam exec -- dune build test/test_os_mutex.exe test/test_systhread_host.exe test/test_keeper_efficiency.exe test/bench_os_mutex_cost.exe
+      - name: Run the Os_mutex suites
+        env:
+          ALCOTEST_VERBOSE: '1'
+        run: |
+          _build/default/test/test_os_mutex.exe
+          _build/default/test/test_systhread_host.exe
+          _build/default/test/test_keeper_efficiency.exe
+      - name: Print what Os_mutex.protect costs
+        env:
+          RUNNER_LABEL: ${{ matrix.os }}
+        run: |
+          _build/default/test/bench_os_mutex_cost.exe > "$RUNNER_TEMP/os-mutex-cost.txt"
+          cat "$RUNNER_TEMP/os-mutex-cost.txt"
+          {
+            echo "### Os_mutex cost on $RUNNER_LABEL"
+            echo '```'
+            cat "$RUNNER_TEMP/os-mutex-cost.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

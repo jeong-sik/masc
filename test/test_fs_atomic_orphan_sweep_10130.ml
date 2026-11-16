@@ -74,8 +74,12 @@ let test_name_matcher () =
   yes ".atomic_abc.tmp";
   yes ".atomic_946c84.tmp";
   yes ".atomic_.tmp";
+  yes ".private_jsonl_a1b2c3.stage";
+  yes ".private_jsonl_.stage";
   no "atomic_abc.tmp";
   no ".atomic_abc";
+  no ".private_jsonl_abc";
+  no "private_jsonl_abc.stage";
   no "normal.json";
   no "alpha.json";
   no ".atomic_prefix_only";
@@ -246,6 +250,39 @@ let test_recovery_creation_failure_is_reported () =
   Alcotest.(check bool) "failure surfaced" true (report.failures <> []);
   Alcotest.(check bool) "source retained" true (Sys.file_exists orphan)
 
+let test_private_jsonl_stage_reclaims_stranded_and_skips_active () =
+  with_temp_base @@ fun base_path ->
+  let empty_stage = Filename.concat base_path ".private_jsonl_empty01.stage" in
+  let data_stage = Filename.concat base_path ".private_jsonl_data01.stage" in
+  let active_stage = Filename.concat base_path ".private_jsonl_live01.stage" in
+  touch empty_stage;
+  write_file ~path:data_stage ~content:"{\"row\":1}\n";
+  write_file ~path:active_stage ~content:"{\"in_flight\":true}\n";
+  let active_fd =
+    Unix.openfile active_stage [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0o600
+  in
+  let locked = Fs_compat.try_lock_stage_fd_for_testing active_fd in
+  Alcotest.(check bool) "stage flock acquired" true locked;
+  let first =
+    Fun.protect
+      ~finally:(fun () -> Unix.close active_fd)
+      (fun () ->
+         let report = cleanup base_path in
+         check_no_failures report;
+         Alcotest.(check bool) "active stage skipped while locked" true
+           (Sys.file_exists active_stage);
+         report)
+  in
+  Alcotest.(check int) "2 stranded stages inspected" 2 first.inspected;
+  Alcotest.(check int) "1 empty stage deleted" 1 first.deleted;
+  Alcotest.(check int) "1 nonempty stage preserved" 1 first.preserved;
+  Alcotest.(check bool) "empty stage removed" false (Sys.file_exists empty_stage);
+  Alcotest.(check bool) "data stage moved" false (Sys.file_exists data_stage);
+  let second = cleanup base_path in
+  check_no_failures second;
+  Alcotest.(check int) "released stage reclaimed on next sweep" 1 second.preserved;
+  Alcotest.(check bool) "released stage moved" false (Sys.file_exists active_stage)
+
 let () =
   Alcotest.run "fs_atomic_orphan_sweep_10130"
     [
@@ -274,5 +311,7 @@ let () =
             test_preservation_never_overwrites_existing_evidence;
           Alcotest.test_case "recovery creation failure surfaced" `Quick
             test_recovery_creation_failure_is_reported;
+          Alcotest.test_case "private_jsonl stage stranded vs active" `Quick
+            test_private_jsonl_stage_reclaims_stranded_and_skips_active;
         ] );
     ]

@@ -221,13 +221,12 @@ class LaneInventoryPushTest(unittest.TestCase):
             self.assertEqual(lane.response_count("open", ADDONS), 1, "Add-on reads continued while idle")
             step("keys", "\r")
             step("wait", lambda: lane.response_count("open", ADDONS) == 2,
-                 "the selected Add-on detail did not open")
-            step("drain", 0.3)
+                 "the selected Add-on detail did not read its inventory")
 
             lane.set_phase("inspect")
             lane.events.put(dataset("lane_addons", "quiz-1"))
             step("wait", lambda: lane.response_count("inspect", ADDONS) == 1,
-                 "the instance above Lanes was not reread")
+                 "the open Add-on did not reread on its dataset push")
             lane.events.put(dataset("lane_addons", "someone-else"))
             step("drain", 0.5)
             self.assertEqual(lane.response_count("inspect", ADDONS), 1)
@@ -277,8 +276,8 @@ class LaneInventoryPushTest(unittest.TestCase):
                  "Add-ons did not reopen")
             step("drain", 0.3)
             step("keys", "\r")
-            step("wait", lambda: lane.response_count("reopen", ADDONS) >= 2,
-                 "the Add-on detail did not reopen")
+            step("wait", lambda: lane.response_count("reopen", ADDONS) == 2,
+                 "the reopened Add-on detail did not read its inventory")
             step("drain", 0.3)
             lane.set_phase("manual")
             step("keys", "r")

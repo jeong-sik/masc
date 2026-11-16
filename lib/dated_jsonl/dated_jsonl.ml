@@ -271,7 +271,7 @@ let list_month_dirs_result base_dir =
     entries
 ;;
 
-let list_day_files_result month_path =
+let list_day_entries_result month_path =
   let open Result.Syntax in
   let month_entry = Filename.basename month_path in
   let* year, month =
@@ -286,12 +286,18 @@ let list_day_files_result month_path =
            })
   in
   let* entries = list_directory_result ~missing_is_empty:false month_path in
-  validate_layout_entries
-    ~parent:month_path
-    ~expected:Day_file
-    ~is_valid:(day_file_name_is_valid ~year ~month)
-    entries
-  |> Result.map (List.sort (fun left right -> compare_day_files right left))
+  let* days =
+    validate_layout_entries
+      ~parent:month_path
+      ~expected:Day_file
+      ~is_valid:(day_file_name_is_valid ~year ~month)
+      entries
+  in
+  Ok (entries, List.sort (fun left right -> compare_day_files right left) days)
+;;
+
+let list_day_files_result month_path =
+  list_day_entries_result month_path |> Result.map snd
 ;;
 
 let month_dir_paths_newest_first_result t =
@@ -1076,34 +1082,55 @@ let day_file_paths_newest_first_listed t =
   in
   collect [] months
 
+(* Counts have always included every .jsonl name; recent views ignore foreign
+   dotfiles. Keep both selections from the same successful directory reads so
+   switching to permissive fallback does not add previously omitted dotfiles
+   to the count. *)
+let day_file_paths_for_summary t =
+  let open Result.Syntax in
+  let* months = month_dir_paths_newest_first_result t in
+  let rec collect count_parts recent_parts = function
+    | [] -> Ok (List.concat (List.rev count_parts), List.concat (List.rev recent_parts))
+    | month :: older ->
+      let* entries, days = list_day_entries_result month in
+      let counted =
+        entries
+        |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+        |> List.sort (fun left right -> compare_day_files right left)
+        |> List.map (Filename.concat month)
+      in
+      let recent = List.map (Filename.concat month) days in
+      collect (counted :: count_parts) (recent :: recent_parts) older
+  in
+  collect [] [] months
+
+let read_recent_view_over view t day_files =
+  let kept =
+    Stdlib.Mutex.protect view.rv_mu (fun () ->
+      Hashtbl.find_opt view.rv_answers t.base_dir)
+  in
+  match kept with
+  | Some answer when recent_answer_is_current answer ~day_files -> answer.ra_values
+  | Some _ | None ->
+    let read_files = ref [] and every_file_identified = ref true in
+    let values =
+      filter_map_recent_over t view.rv_rows ~f:view.rv_project
+        ~before_read:(fun path ->
+          match identity_if_present path with
+          | Some identity -> read_files := (path, identity) :: !read_files
+          | None -> every_file_identified := false)
+        (List.to_seq day_files)
+    in
+    if !every_file_identified then
+      Stdlib.Mutex.protect view.rv_mu (fun () ->
+        Hashtbl.replace view.rv_answers t.base_dir
+          { ra_day_files = day_files; ra_read_files = !read_files; ra_values = values });
+    values
+
 let read_recent_view view t =
   match day_file_paths_newest_first_listed t with
-  | Error _ ->
-    (* No complete list to keep an answer under: read the way the plain
-       reader does and keep nothing. *)
-    filter_map_recent t view.rv_rows ~f:view.rv_project
-  | Ok day_files ->
-    let kept =
-      Stdlib.Mutex.protect view.rv_mu (fun () ->
-        Hashtbl.find_opt view.rv_answers t.base_dir)
-    in
-    (match kept with
-     | Some answer when recent_answer_is_current answer ~day_files -> answer.ra_values
-     | Some _ | None ->
-       let read_files = ref [] and every_file_identified = ref true in
-       let values =
-         filter_map_recent_over t view.rv_rows ~f:view.rv_project
-           ~before_read:(fun path ->
-             match identity_if_present path with
-             | Some identity -> read_files := (path, identity) :: !read_files
-             | None -> every_file_identified := false)
-           (List.to_seq day_files)
-       in
-       if !every_file_identified then
-         Stdlib.Mutex.protect view.rv_mu (fun () ->
-           Hashtbl.replace view.rv_answers t.base_dir
-             { ra_day_files = day_files; ra_read_files = !read_files; ra_values = values });
-       values)
+  | Error _ -> filter_map_recent t view.rv_rows ~f:view.rv_project
+  | Ok day_files -> read_recent_view_over view t day_files
 
 (* [n] counts the values [f] produced, where [filter_map_recent]'s [n] counts
    rows visited. Each day file is scanned backwards in 8 KB chunks through the
@@ -1570,18 +1597,27 @@ let fold_day_file_counts t ~counter =
    that must not observe any caching use this directly. *)
 let count_entries_uncached t = fold_day_file_counts t ~counter:count_non_empty_lines
 
-(* Per-file-cached full count. O(appended bytes) in steady state: closed
-   day-files hit [file_count_cache] outright and the growing current-day
-   file re-reads only its delta. *)
+(* Per-file-cached full count. Every retained file is listed and statted;
+   only appended bytes are read from files whose cached boundary grew. *)
 let count_entries_incremental t =
   fold_day_file_counts t ~counter:count_non_empty_lines_cached
 
 (* The RFC-0162 §3.2 10s-TTL store-level cache that used to sit here is
-   removed: the boundary-keyed per-file cache above makes a [count_entries]
-   call O(appended bytes), so the TTL layer no longer bought anything and
-   only added a staleness window plus a second cache surface to reason
-   about. *)
+   removed: the boundary-keyed cache bounds content reads to appended bytes.
+   Metadata still scales with retained file count; a TTL would hide changes
+   by external writers rather than remove that work while staying current. *)
 let count_entries = count_entries_incremental
+
+let count_and_read_recent_view view t =
+  match day_file_paths_for_summary t with
+  | Error _ ->
+    let count = count_entries t in
+    count, filter_map_recent t view.rv_rows ~f:view.rv_project
+  | Ok (counted_files, recent_files) ->
+    let count = List.fold_left
+      (fun total path -> total + count_non_empty_lines_cached path) 0 counted_files in
+    count, read_recent_view_over view t recent_files
+;;
 
 let reset_count_cache_for_testing () =
   Stdlib.Mutex.protect file_count_cache_mu (fun () -> Hashtbl.reset file_count_cache)

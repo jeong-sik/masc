@@ -279,6 +279,119 @@ let queued_workspace_messages ~base_path ~keeper_name =
       | Keeper_event_queue.Composition_completed _ -> None)
 ;;
 
+let retry_row ?provenance ~id ~role content =
+  let fields =
+    [ "id", `String id; "role", `String role; "content", `String content
+    ; "ts", `Float 1.0; "mentions", `List [ `String "beta" ] ]
+  in
+  let provenance_fields =
+    match provenance with
+    | None -> []
+    | Some provenance ->
+      Keeper_chat_delivery_identity.delivery_provenance_fields provenance
+  in
+  Yojson.Safe.to_string (`Assoc (fields @ provenance_fields)) ^ "\n"
+;;
+
+let check_indexed_retry ?ack_id ?(running = true) ~rows ~outcome ~pending () =
+  with_workspace @@ fun config ->
+  let target = "beta" and request_id = "wmsg-indexed-retry" in
+  persist_meta config target;
+  let request =
+    match Keeper_chat_delivery_identity.Request_id.of_string request_id with
+    | Ok request -> request
+    | Error detail -> failf "request fixture failed: %s" detail
+  in
+  let delivery_key = Keeper_chat_delivery_identity.Workspace_message request in
+  let provenance transcript_slot =
+    { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
+  in
+  let path = Keeper_chat_store.chat_path ~base_dir:config.base_path ~keeper_name:target in
+  mkdir_p (Filename.dirname path);
+  write_file path (String.concat "" (rows provenance));
+  let meta = make_meta target in
+  let meta = { meta with runtime = { meta.runtime with message_scope_ack_id = ack_id } } in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> failf "ack fixture failed: %s" detail);
+  (* Prove that even an unreadable observation row reaches Already_present,
+     rather than testing the unrelated append-error deferral branch. *)
+  (match Keeper_chat_store.append_user_message_once
+      ~base_dir:config.base_path ~keeper_name:target ~delivery_key ~content:"retry" () with
+   | Ok (Keeper_chat_store.Already_present { row_id }) ->
+     check string "accepted row identity" "accepted" row_id
+   | Ok (Keeper_chat_store.Appended _) -> fail "retry fixture was not already accepted"
+   | Error detail -> failf "retry fixture append failed: %s" detail);
+  let snapshot () =
+    Keeper_chat_store.load_observation ~base_dir:config.base_path ~keeper_name:target
+  in
+  let before = snapshot () in
+  let wakes = ref 0 in
+  let retry () =
+    let result = Broadcast_wakeup.deliver_broadcast_mention
+        ~config ~base_path:config.base_path ~is_running:(fun _ -> running)
+        ~is_registered_keeper:(fun _ -> false) ~wakeup:(fun _ -> incr wakes)
+        (delivery ~target ~request_id ~seq:8 ~content:"retry") in
+    check bool "duplicate delivery outcome" true (result = outcome)
+  in
+  retry ();
+  retry ();
+  check int "only pending running input wakes" (if pending && running then 2 else 0) !wakes;
+  check int "only pending input enters the queue, once" (if pending then 1 else 0)
+    (List.length (queued_workspace_messages ~base_path:config.base_path ~keeper_name:target));
+  check bool "unchanged retries keep the same observation snapshot" true (before == snapshot ())
+;;
+
+let accepted_retry_row provenance content =
+  retry_row ~provenance:(provenance Keeper_chat_delivery_identity.Accepted_user)
+    ~id:"accepted" ~role:"user" content
+;;
+
+let test_indexed_retry_after_ack () =
+  check_indexed_retry ~ack_id:"accepted"
+    ~rows:(fun provenance -> [ accepted_retry_row provenance "@beta request" ])
+    ~outcome:Workspace_broadcast.Already_accepted ~pending:false ()
+;;
+
+let test_indexed_retry_with_historical_answer () =
+  check_indexed_retry ~ack_id:"ack"
+    ~rows:(fun provenance ->
+      [ retry_row ~provenance:(provenance Keeper_chat_delivery_identity.Terminal_result)
+          ~id:"answer" ~role:"assistant" "already answered"
+      ; retry_row ~id:"ack" ~role:"system" "checkpoint"
+      ; accepted_retry_row provenance "@beta request" ])
+    ~outcome:Workspace_broadcast.Already_accepted ~pending:false ()
+;;
+
+let test_indexed_retry_with_duplicate_ids () =
+  check_indexed_retry ~ack_id:"ack"
+    ~rows:(fun provenance ->
+      [ retry_row ~id:"accepted" ~role:"system" "first matching ID is not user input"
+      ; retry_row ~id:"accepted" ~role:"user" "@beta earlier input"
+      ; retry_row ~id:"ack" ~role:"system" "checkpoint"
+      ; accepted_retry_row provenance "@beta pending input" ])
+    ~outcome:Workspace_broadcast.Already_accepted ~pending:true ()
+;;
+
+let test_indexed_retry_with_missing_ack () =
+  check_indexed_retry ~ack_id:"missing"
+    ~rows:(fun provenance -> [ accepted_retry_row provenance "@beta request" ])
+    ~outcome:Workspace_broadcast.Already_accepted ~pending:true ()
+;;
+
+let test_indexed_retry_with_unreadable_row () =
+  check_indexed_retry
+    ~rows:(fun provenance -> [ accepted_retry_row provenance "" ])
+    ~outcome:(Workspace_broadcast.Deferred Workspace_broadcast.Intake_store_unavailable)
+    ~pending:false ()
+;;
+
+let test_indexed_retry_for_stopped_keeper () =
+  check_indexed_retry ~running:false
+    ~rows:(fun provenance -> [ accepted_retry_row provenance "@beta request" ])
+    ~outcome:Workspace_broadcast.Already_accepted ~pending:true ()
+;;
+
 (* A workspace message that names a Keeper has to reach the same linear drain
    every other stimulus arrives on. Before this, the delivery boundary wrote a
    transcript row and flipped a wake flag, so the message existed for the
@@ -935,6 +1048,18 @@ let () =
             test_delivery_enqueues_linear_queue_entry
         ; test_case "stopped Keeper keeps the queue entry" `Quick
             test_stopped_keeper_keeps_queue_entry
+        ; test_case "indexed retry after exact ack does not wake" `Quick
+            test_indexed_retry_after_ack
+        ; test_case "indexed retry keeps answers before ack" `Quick
+            test_indexed_retry_with_historical_answer
+        ; test_case "indexed retry finds pending duplicate IDs after ack" `Quick
+            test_indexed_retry_with_duplicate_ids
+        ; test_case "indexed retry with missing ack remains pending" `Quick
+            test_indexed_retry_with_missing_ack
+        ; test_case "indexed retry defers an unreadable accepted row" `Quick
+            test_indexed_retry_with_unreadable_row
+        ; test_case "indexed retry queues stopped Keeper without waking" `Quick
+            test_indexed_retry_for_stopped_keeper
         ] )
     ; ( "fleet_projection"
       , [

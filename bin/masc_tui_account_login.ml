@@ -487,8 +487,7 @@ let models t json =
         | Some (_, true) | None -> None) parsed in
       t.connected_models <- List.filter_map (function Some (model, true) -> Some model | Some (_, false) | None -> None) parsed;
       t.models <- available @ t.connected_models;
-      t.selected_models <- List.filter_map (fun (model:model) ->
-        if model.tools <> Some false && Option.is_some model.context then Some model.id else None) available;
+      t.selected_models <- [];
       t.cursor <- 0; t.phase <- Models;
       t.notice <- (if available = [] && t.connected_models <> [] then
         "이 계정의 모델은 모두 연결되어 있습니다. ↑↓:확인  r:새로고침  Esc:닫기"

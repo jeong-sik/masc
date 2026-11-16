@@ -519,7 +519,10 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
         ~dir:base_path
         ~dir_stat:base_stat
         ~on_entry:(fun report ~base_stat ~dir ~dir_stat name ->
-          if Atomic_temp_name.is_name name
+          if Atomic_temp_name.is_private_jsonl_stage_name name
+             && Stage_flock.is_path_flocked (Filename.concat dir name)
+          then report
+          else if Atomic_temp_name.is_name name
           then
             handle_orphan
               { report with inspected = report.inspected + 1 }

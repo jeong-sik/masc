@@ -44,13 +44,13 @@ type 'a private_file_read_plan =
       * ('kept private_jsonl_rows_from_cursor -> string option * 'a)
       -> 'a private_file_read_plan
 
-let with_private_path_lock ~locking ~path mutex f =
+let with_private_path_lock ~locking ~path f =
   match locking with
-  | Wait_for_lock -> Stdlib.Mutex.protect mutex f
+  | Wait_for_lock -> with_append_path_mutex path f
   | Try_lock ->
-    if not (Stdlib.Mutex.try_lock mutex) then
-      raise (Sys_error ("private file is busy: " ^ path));
-    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f
+    (match try_with_append_path_mutex path f with
+     | Some result -> result
+     | None -> raise (Sys_error ("private file is busy: " ^ path)))
 
 let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for_lock) ?validate_prefix
     ?(confirm_existing=(fun () -> false)) ?(verify_content=false)
@@ -58,12 +58,12 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   if create then mkdir_p_memoized dir;
-  let path_mu = get_append_path_mutex path in
   run_blocking_private_file_transaction
     ~label:"fs-compat-durable-update"
     ~path
     (fun () ->
-    with_private_path_lock ~locking ~path path_mu (fun () ->
+    with_private_path_lock ~locking ~path (fun () ->
+      evict_inactive_cached_writer_for_path path;
       let require_binding = function
         | Ok () -> ()
         | Error (Private_jsonl_operation_failed failure) ->
@@ -339,12 +339,12 @@ let update_private_file_durable_locked_with_io_for_testing ?(create=true) ~io pa
 
 let update_existing_private_file_durable_locked_with_io ~io path decide =
   test_exec_home_guard ~op:"update_existing_private_file_durable_locked" path;
-  let path_mu = get_append_path_mutex path in
   run_blocking_private_file_transaction
     ~label:"fs-compat-existing-durable-update"
     ~path
     (fun () ->
-       Stdlib.Mutex.protect path_mu (fun () ->
+       with_append_path_mutex path (fun () ->
+         evict_inactive_cached_writer_for_path path;
          (* Reject special files before opening them; O_NONBLOCK also prevents a
             raced FIFO substitution from blocking before descriptor validation. *)
          let inspected =
@@ -423,12 +423,12 @@ let rewrite_private_file_durable_locked_result path decide =
   test_exec_home_guard ~op:"rewrite_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   mkdir_p_memoized dir;
-  let path_mu = get_append_path_mutex path in
   run_blocking_private_file_transaction
     ~label:"fs-compat-durable-rewrite"
     ~path
     (fun () ->
-    Stdlib.Mutex.protect path_mu (fun () ->
+    with_append_path_mutex path (fun () ->
+      evict_inactive_cached_writer_for_path path;
       let existing = Option.value (load_file_opt path) ~default:"" in
       let content, result = decide existing in
       match content with
@@ -555,8 +555,8 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
                test_exec_home_guard ~op:"mkdir_p" dir;
                mkdir_p_unix dir)
              dir;
-           let path_mu = get_append_path_mutex path in
-           Stdlib.Mutex.protect path_mu (fun () ->
+           with_append_path_mutex path (fun () ->
+             evict_inactive_cached_writer_for_path path;
              match
                (match Unix.lstat path with
                 | stats when stats.Unix.st_kind <> Unix.S_REG ->

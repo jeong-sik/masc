@@ -411,6 +411,8 @@ let pending_model_context () =
     `Assoc ["id", `String m.id; "label", `String m.label; "bound", `Bool false;
       "context", (match m.context with Some n -> `Int n | None -> `Null);
       "tools", `Bool true]) rows)]));
+  t.selected_models <- [];
+  ignore (Login.key t "a");
   t.cursor <- 17;
   let selection = t.selected_models in
   check bool "unknown model requests only its native context" true
@@ -1016,9 +1018,19 @@ let multi_model_selection () =
     `Assoc ["id",`String "blocked";"label",`String "Blocked";"context",`Int 32768;"tools",`Bool false;"bound",`Bool false];
     `Assoc ["id",`String "second";"label",`String "Second";"context",`Int 65536;"tools",`Bool true;"bound",`Bool false]]] in
   ok (Login.models t catalog);
-  check (list string) "usable models start selected in catalog order"
-    ["first";"second"] (List.map (fun (m:Login.model) -> m.id)
-      (List.filter (fun (m:Login.model) -> List.mem m.id t.selected_models) t.models));
+  check (list string) "discovery does not select models for verification" [] t.selected_models;
+  check bool "Enter cannot submit an unchosen catalog" true (Login.key t "enter"=Login.Nothing);
+  ignore (Login.key t " ");
+  (match Login.key t "enter" with
+   | Login.Save selected ->
+     check (list string) "only the explicitly chosen model is submitted"
+       ["first"] (List.map (fun (m:Login.model) -> m.id) selected);
+     let open Yojson.Safe.Util in
+     check (list string) "unchosen models stay out of the save request" ["first"]
+       (Login.save_body t selected |> member "connections" |> to_list |> List.hd
+        |> member "models" |> to_list |> List.map (fun row -> row |> member "id" |> to_string))
+   | _ -> fail "Enter did not submit the chosen model");
+  ignore (Login.key t "a");
   (match Login.key t "\r" with
    | Login.Save selected ->
      check (list string) "Enter submits all selected models in screen order"
@@ -1073,10 +1085,10 @@ let already_bound_model_is_not_offered () =
     ok (Login.models t catalog);
     check (list string) ("bound models remain visible for " ^ selected_provider.id)
       ["third"; "first"; "second"] (List.map (fun (m:Login.model) -> m.id) t.models);
-    check (list string) "only the new model is selected" ["third"] t.selected_models;
+    check (list string) "discovering a new model does not select it" [] t.selected_models;
     ignore (Login.key t "j"); ignore (Login.key t " ");
-    check (list string) "connected model cannot be selected" ["third"] t.selected_models;
-    ignore (Login.key t "a"); ignore (Login.key t "a");
+    check (list string) "connected model cannot be selected" [] t.selected_models;
+    ignore (Login.key t "a");
     check (list string) "select all excludes connected models" ["third"] t.selected_models;
     check (list string) "save submits only the new model" ["third"]
       (match Login.key t "enter" with

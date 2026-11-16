@@ -204,109 +204,6 @@ let render_recent_direct_conversation_context
     String.concat "\n" (header_lines @ List.map render_line lines)
 ;;
 
-module StringSet = Set_util.StringSet
-
-(* An utterance answers a delivery only when it actually spoke. Checkpoint and
-   defer boundaries persist an empty-content assistant row as the carrier for
-   the typed status block, and a reasoning-only reply leaves no text either;
-   counting those rows as answers dropped the user message they followed
-   without it ever reaching a turn (2026-09-10 drain investigation). An audio
-   reply speaks without text, and a media-only reply (empty content carrying
-   Image/Attach/Voice blocks) is a delivered answer — the stream handler
-   completes those as Delivered, so excluding them would park their delivery
-   pending forever. [Status] blocks are the carrier itself, and [Thinking] /
-   [Trace] blocks are observability, not user-facing answer content. *)
-let block_is_answer_content = function
-  | Keeper_chat_blocks.Status _ | Keeper_chat_blocks.Thinking _ | Keeper_chat_blocks.Trace _ ->
-    false
-  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Heading _
-  | Keeper_chat_blocks.Unordered_list _ | Keeper_chat_blocks.Callout _
-  | Keeper_chat_blocks.Table _ | Keeper_chat_blocks.Code _
-  | Keeper_chat_blocks.Mermaid _ | Keeper_chat_blocks.Svg _
-  | Keeper_chat_blocks.Voice _ | Keeper_chat_blocks.Attach _
-  | Keeper_chat_blocks.Image _ | Keeper_chat_blocks.Link _
-  | Keeper_chat_blocks.Fusion _ ->
-    true
-;;
-
-let utterance_spoke (message : Keeper_chat_store.chat_message) =
-  String.trim message.content <> ""
-  || Option.is_some message.audio
-  || (match message.blocks with
-      | Some blocks -> List.exists block_is_answer_content blocks
-      | None -> false)
-;;
-
-let acknowledged_turn_refs messages =
-  List.fold_left
-    (fun refs (message : Keeper_chat_store.chat_message) ->
-      match message.role, message.turn_ref with
-      | Keeper_chat_store.Role.Assistant, Some turn_ref ->
-        if utterance_spoke message
-        then StringSet.add (Ids.Turn_ref.to_string turn_ref) refs else refs
-      | Keeper_chat_store.Role.Assistant, None
-      | (Keeper_chat_store.Role.User | Keeper_chat_store.Role.System
-        | Keeper_chat_store.Role.Tool | Keeper_chat_store.Role.Request_failure), _ -> refs)
-    StringSet.empty messages
-;;
-
-let answered_delivery_keys messages =
-  List.filter_map
-    (fun (message : Keeper_chat_store.chat_message) ->
-      match message.role, message.delivery_provenance with
-      | Keeper_chat_store.Role.Assistant, Some provenance ->
-        if utterance_spoke message
-        then Some provenance.Keeper_chat_delivery_identity.delivery_key else None
-      | Keeper_chat_store.Role.Assistant, None
-      | (Keeper_chat_store.Role.User | Keeper_chat_store.Role.System
-        | Keeper_chat_store.Role.Tool | Keeper_chat_store.Role.Request_failure), _ -> None)
-    messages
-;;
-
-let exact_delivery_was_answered answered = function
-  | None -> false
-  | Some provenance ->
-    List.exists
-      (Keeper_chat_delivery_identity.delivery_key_equal
-         provenance.Keeper_chat_delivery_identity.delivery_key)
-      answered
-;;
-
-let messages_after_ack ~ack_id messages =
-  match ack_id with
-  | None -> messages
-  | Some acknowledged_id ->
-    let rec drop = function
-      | [] -> None
-      | (message : Keeper_chat_store.chat_message) :: rest ->
-        if String.equal message.id acknowledged_id then Some rest else drop rest
-    in
-    Option.value ~default:messages (drop messages)
-;;
-
-let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) =
-  let acknowledged = acknowledged_turn_refs messages in
-  let answered_deliveries = answered_delivery_keys messages in
-  messages_after_ack ~ack_id messages
-  |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
-    match message.role, message.turn_ref with
-    | Keeper_chat_store.Role.User, Some turn_ref ->
-      not (StringSet.mem (Ids.Turn_ref.to_string turn_ref) acknowledged)
-      && not
-           (exact_delivery_was_answered
-              answered_deliveries
-              message.delivery_provenance)
-    | Keeper_chat_store.Role.User, None ->
-      not
-        (exact_delivery_was_answered
-           answered_deliveries
-           message.delivery_provenance)
-    | Keeper_chat_store.Role.Assistant, _
-    | Keeper_chat_store.Role.Request_failure, _
-    | Keeper_chat_store.Role.System, _
-    | Keeper_chat_store.Role.Tool, _ -> false)
-;;
-
 (* The scope lane: an unmentioned line addressed to this Keeper that it owes
    an answer. The operator's lines are. A direct Keeper-to-Keeper message
    ([Surface_ref.Agent], written for masc_keeper_msg / delegate) is too: it
@@ -346,14 +243,14 @@ let lane_of ~target_ids (m : Keeper_chat_store.chat_message) : pending_kind opti
   else None
 ;;
 
-let pending_messages_of_messages
+let pending_messages_of_index
       ?ack_id
       ~(targets : string list)
-      (messages : Keeper_chat_store.chat_message list)
+      (index : Keeper_chat_observation_index.t)
   : pending_message list
   =
   let target_ids = Keeper_lane_mentions.target_ids_of targets in
-  pending_user_lines ?ack_id messages
+  Keeper_chat_observation_index.pending_users ?ack_id index
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
     lane_of ~target_ids m
     |> Option.map (fun kind ->
@@ -364,70 +261,49 @@ let pending_messages_of_messages
       }))
 ;;
 
-(* Fleet messages: keeper broadcasts projected into this keeper's transcript.
-   [Surface_ref.Broadcast] is the typed marker the fleet fanout writes; an
-   [Surface_ref.Agent] row (direct keeper-to-keeper delivery) that lands in no
-   reactive lane is the same standing context, so the filter reads the two
-   variants rather than inspecting content.
-
-   Unlike the two reactive lanes this layer carries no watermark. A projected
-   broadcast is context, not an outstanding obligation, and the lane
-   acknowledgement only advances on autonomous turns — a keeper with
-   [proactive_enabled = false] would accumulate rows forever. Newest [limit]
-   rows, rendered in arrival order. *)
-let fleet_messages_of_messages
-      ~(limit : int)
-      ~(targets : string list)
-      (messages : Keeper_chat_store.chat_message list)
-  : fleet_message list
-  =
-  if limit <= 0
-  then []
-  else (
-    let target_ids = Keeper_lane_mentions.target_ids_of targets in
-    messages
-    |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
-      match m.role, m.surface with
-      | Keeper_chat_store.Role.User, Some (Surface_ref.Agent | Surface_ref.Broadcast)
-        -> Option.is_none (lane_of ~target_ids m)
-      | ( Keeper_chat_store.Role.User
-        , Some
-            ( Surface_ref.Dashboard _
-            | Surface_ref.Discord _
-            | Surface_ref.Slack _
-            | Surface_ref.Webhook _
-            | Surface_ref.Gate _ ) )
-      | Keeper_chat_store.Role.User, None
-      | Keeper_chat_store.Role.Assistant, _
-      | Keeper_chat_store.Role.Request_failure, _
-      | Keeper_chat_store.Role.System, _
-      | Keeper_chat_store.Role.Tool, _ -> false)
-    |> List.rev
-    |> List.take limit
-    |> List.rev
-    |> List.map (fun (m : Keeper_chat_store.chat_message) ->
-      { fleet_speaker = speaker_display m; fleet_content = m.content }))
+let pending_messages_of_messages ?ack_id ~targets messages =
+  pending_messages_of_index ?ack_id ~targets
+    (Keeper_chat_observation_index.of_messages messages)
 ;;
 
-(* Both layers read the same transcript, which reaches 1.8 MB in production.
-   Loading once and deriving both keeps the per-turn read count at one and
-   makes the disjointness visible: the same rows feed both filters. *)
+let fleet_messages_of_index ~limit ~targets index =
+  let target_ids = Keeper_lane_mentions.target_ids_of targets in
+  let rec take remaining acc = function
+    | [] -> acc
+    | _ when remaining <= 0 -> acc
+    | (message : Keeper_chat_store.chat_message) :: rest ->
+      (match lane_of ~target_ids message with
+       | Some (Mention | Scope) -> take remaining acc rest
+       | None ->
+         take (remaining - 1)
+           ({ fleet_speaker = speaker_display message; fleet_content = message.content } :: acc)
+           rest)
+  in
+  (* Candidates are newest first; prepending selected rows restores append order.
+     The current targets are applied before the limit, independent of ack. *)
+  take limit [] (Keeper_chat_observation_index.fleet_candidates_rev index)
+;;
+
+let fleet_messages_of_messages ~limit ~targets messages =
+  fleet_messages_of_index ~limit ~targets (Keeper_chat_observation_index.of_messages messages)
+;;
+
 let collect_message_scope_and_fleet
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(fleet_limit : int)
   : pending_message list * fleet_message list
   =
-  let messages =
-    Keeper_chat_store.load_all ~base_dir:config.base_path ~keeper_name:meta.name
+  let index =
+    Keeper_chat_store.load_observation ~base_dir:config.base_path ~keeper_name:meta.name
   in
   let targets = message_feed_targets meta in
   let pending =
-    pending_messages_of_messages
+    pending_messages_of_index
       ?ack_id:meta.runtime.message_scope_ack_id
       ~targets
-      messages
+      index
   in
-  let fleet = fleet_messages_of_messages ~limit:fleet_limit ~targets messages in
+  let fleet = fleet_messages_of_index ~limit:fleet_limit ~targets index in
   pending, fleet
 ;;

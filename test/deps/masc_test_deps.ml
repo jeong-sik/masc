@@ -549,6 +549,24 @@ let auth_off_principal =
   | Error (Auth.Token_required | Auth.Bearer_refused _) ->
       failwith "auth_off_principal: a workspace with auth off admits every request"
 
+(** The dispatcher's sender for a request carrying [auth_token] on
+    [base_path]'s workspace, for a test that calls the dispatcher directly:
+    the principal the /mcp door admits. A request without a bearer, or one
+    whose bearer the door refuses, is one no door admitted: over HTTP the
+    door answers it, and the dispatcher keeps the methods that require auth
+    from it. Reads the auth store, so it runs inside Eio. *)
+let door_sender ~base_path auth_token =
+  match auth_token with
+  | None -> Masc.Mcp_server_eio.Unadmitted
+  | Some _ ->
+    (match
+       Auth.admit_request base_path ~auth_cfg:(Auth.load_auth_config base_path)
+         ~token:auth_token ~internal_keeper_agent:None
+     with
+     | Ok principal -> Masc.Mcp_server_eio.Admitted principal
+     | Error (Auth.Token_required | Auth.Bearer_refused _) ->
+       Masc.Mcp_server_eio.Unadmitted)
+
 (* Which sandbox a fixture's keeper runs in.
 
    Nothing used to answer this, so the profile came from the placeholder

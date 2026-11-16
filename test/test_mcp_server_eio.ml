@@ -127,8 +127,8 @@ let tools_list_response ~clock ~sw ?profile ?cursor state =
         ])
   in
   match profile with
-  | Some profile -> Mcp_eio.handle_request ~clock ~sw ~profile state request
-  | None -> Mcp_eio.handle_request ~clock ~sw state request
+  | Some profile -> Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile state request
+  | None -> Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request
 
 let tools_from_response response =
   match response with
@@ -233,7 +233,7 @@ let resources_list_response ~clock ~sw ?cursor state =
           ("params", params);
         ])
   in
-  Mcp_eio.handle_request ~clock ~sw state request
+  Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request
 
 let resources_from_response response =
   match response with
@@ -535,7 +535,7 @@ let test_handle_request_initialize () =
     ]);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
 
   (match response with
    | `Assoc fields ->
@@ -586,7 +586,7 @@ let test_handle_request_initialize_counteroffers_legacy_version () =
        | Some (`String version) -> Some version
        | Some _ | None -> None)
   in
-  expect_legacy (Mcp_eio.handle_request ~clock ~sw state request);
+  expect_legacy (Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request);
   let modern_request =
     Yojson.Safe.from_string request
     |> (function
@@ -600,7 +600,7 @@ let test_handle_request_initialize_counteroffers_legacy_version () =
         | json -> json)
     |> Yojson.Safe.to_string
   in
-  expect_legacy (Mcp_eio.handle_request ~clock ~sw state modern_request);
+  expect_legacy (Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state modern_request);
 
   cleanup_dir base_path
 
@@ -635,7 +635,7 @@ let test_handle_request_server_discover_2026 () =
               ] );
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let result = result_fields_exn response in
   Alcotest.(check (option string)) "complete result"
     (Some "complete")
@@ -689,7 +689,7 @@ let run_stdio_messages ?(on_handled = fun _ _ _ -> ()) ~clock ~sw state messages
     method stdout = output_writer
   end in
   let handle_request ~clock ~sw ~mcp_session_id state request =
-    let response = Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+    let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request in
     on_handled mcp_session_id request response;
     response
   in
@@ -797,7 +797,7 @@ let parked_tool_call ~release ~on_enter ~on_cancel ~clock ~sw ~mcp_session_id st
       [ "jsonrpc", `String "2.0"
       ; "id", Yojson.Safe.Util.member "id" json
       ; "result", `Assoc [] ]
-  | _ -> Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request
+  | _ -> Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request
 
 (* A legacy session, so a legacy [ping] (no [_meta]) is admitted and answers
    with a result. *)
@@ -1193,7 +1193,7 @@ let test_stdio_parent_cancel_drains_external_subscription_send () =
         method stdout = stdout
       end in
       let handle_request ~clock ~sw ~mcp_session_id state request =
-        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request in
       Eio.Fiber.fork ~sw (fun () ->
         let cancelled =
           try Eio.Cancel.sub (fun context ->
@@ -1296,7 +1296,7 @@ let test_stdio_prior_failure_precedes_drain_cancellation () =
         method stdout = stdout
       end in
       let handle_request ~clock ~sw ~mcp_session_id state request =
-        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request in
       Eio.Fiber.fork ~sw (fun () ->
         let error =
           try Eio.Cancel.sub (fun context ->
@@ -1352,7 +1352,7 @@ let test_stdio_eof_reports_external_send_failure () =
         method stdout = stdout
       end in
       let handle_request ~clock ~sw ~mcp_session_id state request =
-        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request in
       Eio.Fiber.fork ~sw (fun () ->
         let error =
           try Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state; None
@@ -1630,6 +1630,11 @@ let test_stdio_forwards_external_credential () =
       (error_code_exn (execute ~auth_token:"invalid" ()));
     Alcotest.(check int) "player cannot read full workspace resources" (-32001)
       (error_code_exn (execute ~auth_token:player ()));
+    (* Stdio sends no x-masc-keeper-name, so its door refuses the internal
+       Keeper token, as the credential lookup refused it before the door. *)
+    let internal = Auth.ensure_internal_keeper_token base_path in
+    Alcotest.(check int) "the internal Keeper token is refused on stdio" (-32001)
+      (error_code_exn (execute ~auth_token:internal ()));
     Alcotest.(check bool) "explicit caller credential admitted" true
       (Yojson.Safe.Util.member "result" (execute ~auth_token:token ()) <> `Null))
 
@@ -1755,7 +1760,7 @@ let test_handle_request_initialize_operator_profile () =
     ]);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
   in
   (match response with
    | `Assoc fields ->
@@ -1790,7 +1795,7 @@ let test_handle_request_tools_list_operator_profile () =
     ("params", `Assoc []);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
   in
   (match response with
    | `Assoc fields ->
@@ -1894,7 +1899,7 @@ let test_handle_request_initialize_managed_profile () =
     ]);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
   in
   (match response with
    | `Assoc fields ->
@@ -1927,7 +1932,7 @@ let test_handle_request_tools_list_managed_profile () =
     ("params", `Assoc []);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
   in
   (match response with
    | `Assoc fields ->
@@ -2023,7 +2028,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
     Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
   in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Managed_agent
       ~mcp_session_id:sid
       ~otel_mcp_protocol_version:"2025-06-18"
       ~otel_transport_context:(Otel_dispatch_hook.http_transport_context ~protocol_version:"2")
@@ -2072,7 +2077,7 @@ let test_handle_request_tools_call_missing_params_records_duration () =
     Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
   in
   let response =
-    Mcp_eio.handle_request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted
       ~clock
       ~sw
       ~profile:Mcp_eio.Managed_agent
@@ -2130,7 +2135,7 @@ let test_handle_request_tools_call_managed_invalid_arguments_records_duration ()
     Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
   in
   let response =
-    Mcp_eio.handle_request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted
       ~clock
       ~sw
       ~profile:Mcp_eio.Managed_agent
@@ -2197,7 +2202,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
         ])
   in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:sid state request
   in
   let steps = workflow_next_step_names response in
   Alcotest.(check (option string)) "claim binds current_task" (Some "task-001")
@@ -2253,7 +2258,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
         ])
   in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:sid state request
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "missing action rejected" true
@@ -2278,7 +2283,7 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
     ]);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
   in
   (match response with
    | `Assoc fields ->
@@ -2309,7 +2314,7 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
     ]);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request
   in
   let tools = tools_from_response response in
   let names =
@@ -2396,7 +2401,7 @@ let test_handle_request_tools_list_include_usage_metadata () =
     ("method", `String "tools/list");
     ("params", `Assoc [ ("include_usage", `Bool true) ]);
   ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let result_fields = result_fields_exn response in
   let result_usage =
     `Assoc result_fields
@@ -2942,7 +2947,7 @@ let test_handle_request_invalid_json () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state "not valid json {{{" in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state "not valid json {{{" in
 
   (match response with
    | `Assoc fields ->
@@ -2979,7 +2984,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
       ]);
     ]);
   ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let structured = structured_content_exn response in
   Alcotest.(check string) "canonical board body" "hello board"
     Yojson.Safe.Util.(structured |> member "body" |> to_string);
@@ -3029,7 +3034,7 @@ let test_handle_request_tools_call_logs_structured_mcp_details () =
             ])
       in
       let response =
-        Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-log" state
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:"session-log" state
           request
       in
       ignore (result_fields_exn response);
@@ -3102,7 +3107,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
                   ] );
             ])
       in
-      let response = Mcp_eio.handle_request ~clock ~sw state request in
+      let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
       ignore (result_fields_exn response);
       match List.assoc_opt "masc_status" (Keeper_registry.tool_usage_of ~base_path keeper_name) with
       | Some entry ->
@@ -3203,7 +3208,7 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
       ("arguments", `Assoc []);
     ]);
   ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let result = result_fields_exn response in
   Alcotest.(check bool) "unknown keeper internal tool isError" true
     (match List.assoc_opt "isError" result with
@@ -3301,8 +3306,9 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
         ("params", `Assoc []);
       ]) in
       let response =
-        Mcp_eio.handle_request ~clock ~sw ~auth_token:token
-          ~internal_keeper_runtime:true state request
+        Mcp_eio.handle_request ~clock ~sw
+          ~sender:(Masc_test_deps.door_sender ~base_path (Some token))
+          ~auth_token:token ~internal_keeper_runtime:true state request
       in
       let names = tool_names_from_list_response response in
       Alcotest.(check bool) "tool_execute is not externally discovered" false
@@ -3342,8 +3348,9 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execu
         ]);
       ]) in
       let response =
-        Mcp_eio.handle_request ~clock ~sw ~auth_token:token
-          ~internal_keeper_runtime:true state request
+        Mcp_eio.handle_request ~clock ~sw
+          ~sender:(Masc_test_deps.door_sender ~base_path (Some token))
+          ~auth_token:token ~internal_keeper_runtime:true state request
       in
       let result = result_fields_exn response in
       Alcotest.(check bool) "tool_execute is an MCP tool-result error" true
@@ -3388,7 +3395,7 @@ let test_handle_request_batch_rejected () =
             ];
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "batch rejected" (-32600) (error_code_exn response);
   Alcotest.(check bool) "mentions batch unsupported" true
     (String_util.contains_substring (error_message_exn response) "batch requests are not supported");
@@ -3410,7 +3417,7 @@ let test_handle_request_jsonrpc_response_returns_null () =
           ("result", `String "already a response");
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check bool) "response ignored" true (response = `Null);
   cleanup_dir base_path
 
@@ -3430,7 +3437,7 @@ let test_handle_request_method_not_found () =
     ("params", `Assoc []);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
 
   (match response with
    | `Assoc fields ->
@@ -3461,7 +3468,7 @@ let test_handle_request_tools_list_rejects_empty_cursor () =
           ("params", `Assoc [ ("cursor", `String "   ") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check string) "empty cursor error"
     "Invalid params: cursor must not be empty"
@@ -3485,7 +3492,7 @@ let test_handle_request_tools_list_rejects_tier_field () =
           ("params", `Assoc [ ("tier", `String "impossible") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unsupported tier error" true
     (String_util.contains_substring (error_message_exn response) "unsupported field(s): tier");
@@ -3508,7 +3515,7 @@ let test_handle_request_resources_list_rejects_unknown_field () =
           ("params", `Assoc [ ("page", `Int 2) ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unknown field rejected" true
     (String_util.contains_substring (error_message_exn response) "unsupported field");
@@ -3531,7 +3538,7 @@ let test_handle_request_resources_templates_rejects_invalid_cursor () =
           ("params", `Assoc [ ("cursor", `String "not-base64") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   let msg = error_message_exn response in
   Alcotest.(check bool)
@@ -3559,7 +3566,7 @@ let test_handle_request_prompts_list_rejects_invalid_cursor () =
           ("params", `Assoc [ ("cursor", `String "bad-cursor") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   let msg = error_message_exn response in
   Alcotest.(check bool)
@@ -3587,7 +3594,7 @@ let test_handle_request_prompts_list_non_empty () =
           ("params", `Assoc []);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let prompts =
     match response with
     | `Assoc fields -> (
@@ -3621,7 +3628,7 @@ let test_handle_request_prompts_list_cursor () =
           ("params", `Assoc [ ("cursor", `String cursor) ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let prompts =
     match response with
     | `Assoc fields -> (
@@ -3658,7 +3665,7 @@ let test_handle_request_prompts_get_tool_help () =
               ] );
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let description, messages =
     match response with
     | `Assoc fields -> (
@@ -3757,7 +3764,7 @@ let test_handle_request_resources_list_paginates () =
           ("params", `Assoc []);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let resources =
     match response with
     | `Assoc fields -> (
@@ -3852,7 +3859,7 @@ let test_handle_request_tools_list_paginates () =
           ("params", `Assoc [ ("cursor", `String cursor) ]);
         ])
   in
-  let second_page = Mcp_eio.handle_request ~clock ~sw state request in
+  let second_page = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let second_tools = tools_from_response second_page in
   let first_name =
     match List.hd first_tools with
@@ -3894,7 +3901,7 @@ let test_handle_request_tool_help_resource_read () =
           ("params", `Assoc [ ("uri", `String "masc://tool-help/masc_status") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let text =
     match response with
     | `Assoc fields -> (
@@ -3966,7 +3973,7 @@ Alpha body
               ("params", `Assoc [ ("uri", `String uri) ]);
             ])
       in
-      let response = Mcp_eio.handle_request ~clock ~sw state request in
+      let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
       Alcotest.(check string) (uri ^ " mime type") expected_mime
         (resource_mime_type_exn response);
       Alcotest.(check bool) (uri ^ " text contains expected") true
@@ -3991,7 +3998,7 @@ let test_handle_request_resources_subscribe_requires_session () =
           ("params", `Assoc [ ("uri", `String "masc://status") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   (match response with
    | `Assoc fields ->
        Alcotest.(check bool) "subscribe requires session" true
@@ -4016,7 +4023,7 @@ let test_handle_request_dashboard_ping_requires_session () =
           ("params", `Assoc []);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check bool) "ping requires ws session" true
     (String_util.contains_substring
        (Yojson.Safe.to_string response)
@@ -4041,7 +4048,7 @@ let test_handle_request_dashboard_ping_reports_unknown_ws_session () =
         ])
   in
   let response =
-    Mcp_eio.handle_request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted
       ~clock
       ~sw
       ~mcp_session_id:"missing-dashboard-ws-session"
@@ -4072,7 +4079,7 @@ let test_handle_request_resources_subscribe_roundtrip () =
         ])
   in
   let subscribe_response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-spec" state
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:"session-spec" state
       subscribe_request
   in
   (match subscribe_response with
@@ -4091,7 +4098,7 @@ let test_handle_request_resources_subscribe_roundtrip () =
         ])
   in
   let unsubscribe_response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-spec" state
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:"session-spec" state
       unsubscribe_request
   in
   (match unsubscribe_response with

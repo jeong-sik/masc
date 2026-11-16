@@ -79,17 +79,22 @@ let parent_judgment (parent : Owner.retained) = match Progress.phase parent.prog
   | Committing commit | Commit_unknown (commit, _) | Finished commit | Conflicted (commit, _) -> Ok commit.judgment
   | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
     Error "Original gate parent has no answered judgment"
+type transcript = {evaluations : Gate.retained_evaluation list; aborted : Yojson.Safe.t option}
+type restored = {proposal:Yojson.Safe.t;authority:Gate.replay_authority;guidance:Gate.guidance option;
+  input:inputs;transcript:transcript;complete:Gate.run_result option}
 type reading = {
   load : scope:string -> request_id:string -> (Owner.retained option, string) result;
   records : scope:string -> (Owner.retained list, string) result;
   successor : scope:string -> Progress.successor -> (Yojson.Safe.t, string) result;
   mutable confirmed_parents : (Yojson.Safe.t * Owner.retained) list;
+  mutable restored_attempts : (string * Owner.retained * restored) list;
 }
 let current_reading store = {
   load=(fun ~scope ~request_id -> owned (Owner.load ~store ~scope ~request_id));
   records=(fun ~scope -> owned (Owner.load_scope ~store ~scope));
   successor=(fun ~scope successor -> owned (Owner.load_successor_request ~store ~scope successor));
   confirmed_parents=[];
+  restored_attempts=[];
 }
 let parent_final_with ~decode ~capture ~proposal (parent:Owner.retained) =
   let* () = equal parent.request (Capture.to_json capture) "Gate parent capture differs" in
@@ -136,7 +141,6 @@ let load_parent_with ~read ~store ~owner ~capture ~proposal =
 let load_parent ~store ~owner ~capture ~proposal =
   load_parent_with ~read:(current_reading store) ~store ~owner ~capture ~proposal
 
-type transcript = {evaluations : Gate.retained_evaluation list; aborted : Yojson.Safe.t option}
 let empty = {evaluations=[];aborted=None}
 let transcript_json transcript =
   `Assoc ["version", `Int 1; "evaluations", `List (List.map (fun (evaluation : Gate.retained_evaluation) ->
@@ -199,8 +203,6 @@ let transcript_step previous next =
     | ([] | _::_), ([] | _::_) -> Error "Gate transcript did not append or complete exactly one original request" in
   transition previous.evaluations next.evaluations
 
-type restored = {proposal:Yojson.Safe.t;authority:Gate.replay_authority;guidance:Gate.guidance option;
-  input:inputs;transcript:transcript;complete:Gate.run_result option}
 let guidance_for_input (input:inputs) authority =
   match input.absorbed with
   | [] -> Ok None
@@ -345,8 +347,23 @@ let validate_successor_request_with ~read ~store ~owner ~capture ~(prior:Owner.r
     ~request_id:successor.request_id ~authority ~guidance ~predecessor:(Some prior.request_id))
     "Gate successor differs from its complete original request"
 
+(* An attempt a reading restored for a capture stays restored for the rest of
+   that call, as its confirmed parent does: a predecessor settled later in the
+   same call is not read again. Restoring an attempt restores its predecessor
+   first, so a call that read a journal of n attempts restored them n(n+1)/2
+   times without this. A record of the same identity, digest and progress is
+   the same attempt: the digest fixes its request and its progress only grows.
+   A failed restoration is not kept. *)
+let restored_attempt read ~capture (record : Owner.retained) =
+  let capture_id = Capture.request_id capture in
+  List.find_map (fun (restored_for, seen, restored) ->
+    if String.equal restored_for capture_id && Owner.same_record seen record then Some restored
+    else None) read.restored_attempts
 let rec restore_record_with ~read ~store ~owner ~capture ~visited (record : Owner.retained) =
   let* () = require (not (List.mem record.request_id visited)) "Cyclic gate retry ancestry" in
+  match restored_attempt read ~capture record with
+  | Some restored -> Ok restored
+  | None ->
   let* members = request_members record.request in
   let proposal = value "proposal" members in
   let* parent = load_parent_with ~read ~store ~owner ~capture ~proposal in
@@ -396,7 +413,9 @@ let rec restore_record_with ~read ~store ~owner ~capture ~visited (record : Owne
       let* () = require (failed=Option.is_some (Gate.failure_detail ~absorbed:input.absorbed result))
         "Gate terminal refusal differs from its original complete result" in Ok (Some result)
     | Some _, None -> Error "Gate terminal has incomplete original evaluations" in
-  Ok {proposal;authority;guidance;input;transcript;complete}
+  let restored = {proposal;authority;guidance;input;transcript;complete} in
+  read.restored_attempts <- (Capture.request_id capture, record, restored) :: read.restored_attempts;
+  Ok restored
 
 let restore_record ~store ~owner ~capture ~visited record =
   restore_record_with ~read:(current_reading store) ~store ~owner ~capture ~visited record
@@ -616,6 +635,7 @@ module Inventory = struct
              Read that exact digest; absence never authorizes a new child. *)
           owned (Owner.load_successor_request ~store ~scope:requested successor));
       confirmed_parents=[];
+      restored_attempts=[];
     } in
     let* matching = read_chain_with ~read ~store ~owner ~capture in
     let* root = match List.filter (fun (_,predecessor) -> Option.is_none predecessor) matching with

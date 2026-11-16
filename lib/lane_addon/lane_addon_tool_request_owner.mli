@@ -228,6 +228,9 @@ module For_testing : sig
 end
 val listed : retained -> Record.t
 (** The record {!discover} lists for this retained original, without its body. *)
+val same_record : retained -> retained -> bool
+(** The same identity, request digest, summary and progress: one version of
+    one record. Progress only grows, so a later version differs. *)
 val record_to_json : Record.t -> Yojson.Safe.t
 (** Complete canonical owner metadata, including the original destination,
     summary and progress. Carries no request body or execution authority. *)

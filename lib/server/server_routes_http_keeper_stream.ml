@@ -3020,6 +3020,16 @@ let keeper_chat_stream_headers origin =
      ]
     @ cors_headers origin)
 
+let keeper_chat_stream_request_headers request =
+  Httpun.Headers.of_list
+    ([
+       ("content-type", "text/event-stream");
+       ("cache-control", "no-cache");
+       ("connection", "close");
+       ("x-accel-buffering", "no");
+     ]
+    @ admitted_cors_headers request)
+
 
 
 (* Reconnect dedup (RFC-0412 §3.2): a live or buffered event is dropped only
@@ -3226,7 +3236,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       reqd
-      (Httpun.Response.create ~headers:(keeper_chat_stream_headers (get_origin request)) `OK)
+      (Httpun.Response.create ~headers:(keeper_chat_stream_request_headers request) `OK)
   in
   let thread_id = "keeper:" ^ payload.name in
   let operation_id =

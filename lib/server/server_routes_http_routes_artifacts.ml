@@ -219,7 +219,7 @@ let add_routes router =
                        ([ "cache-control", "no-store"
                         ; "x-content-type-options", "nosniff"
                         ; "content-disposition", "attachment; filename=artifact-" ^ sha256 ^ ".bin"
-                        ] @ cors_headers (get_origin request))
+                        ] @ Server_auth.admitted_cors_headers request)
                      bytes reqd
                  | Ok None ->
                    respond_json_value_with_cors ~status:`Not_found request reqd

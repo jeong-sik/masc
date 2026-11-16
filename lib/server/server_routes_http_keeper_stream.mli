@@ -155,6 +155,10 @@ val keeper_chat_stream_headers : string -> Httpun.Headers.t
     connection closes with the writer: Httpun adds no Content-Length to a
     streaming body, so the writer close is the only end of the response. *)
 
+val keeper_chat_stream_request_headers : Httpun.Request.t -> Httpun.Headers.t
+(** Same as {!keeper_chat_stream_headers}, emitting CORS headers only for an
+    authority-admitted [Origin]. *)
+
 (** {1 SSE handler} *)
 
 val handle_keeper_chat_stream :

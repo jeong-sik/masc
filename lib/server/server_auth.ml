@@ -854,15 +854,21 @@ let cors_headers origin =
   else
     base
 
+let admitted_cors_headers request =
+  match Server_request_authority.current () with
+  | None -> [ "vary", "Origin" ]
+  | Some request_authority ->
+    (match public_read_cors_origin_opt ~request_authority request with
+     | Some origin -> cors_headers origin
+     | None -> [ "vary", "Origin" ])
+
 let respond_json_with_cors ?(status = `OK) request reqd body =
-  let origin = get_origin request in
   Http_server_eio.Response.json ~status ~request
-    ~extra_headers:(cors_headers origin) body reqd
+    ~extra_headers:(admitted_cors_headers request) body reqd
 
 let respond_json_value_with_cors ?(status = `OK) request reqd value =
-  let origin = get_origin request in
   Http_server_eio.Response.json_value ~status ~request
-    ~extra_headers:(cors_headers origin) value reqd
+    ~extra_headers:(admitted_cors_headers request) value reqd
 
 let public_read_cors_headers request =
   match Httpun.Headers.get_multi request.Httpun.Request.headers "origin" with
@@ -915,13 +921,7 @@ let auth_error_headers ~(status : Httpun.Status.t) ~cors =
    (#28166). Admission is the answer that holds: a 401 is not the place to hand
    an unadmitted origin permission to read the response, and a malformed Origin
    header should not raise out of the error responder. *)
-let auth_error_cors_headers request =
-  match Server_request_authority.current () with
-  | None -> [ "vary", "Origin" ]
-  | Some request_authority ->
-    (match public_read_cors_origin_opt ~request_authority request with
-     | Some origin -> cors_headers origin
-     | None -> [ "vary", "Origin" ])
+let auth_error_cors_headers request = admitted_cors_headers request
 ;;
 
 (* A 401/403 is about the credential the client presented, and the client is
@@ -977,14 +977,13 @@ let respond_auth_error request reqd err =
     exceeded.  Includes standard rate-limit headers and CORS so browser
     clients can inspect the response. *)
 let respond_agent_rate_limited ~rl_key request reqd =
-  let origin = get_origin request in
   let body = Rate_limit.too_many_agent_requests_body () in
   let rl_headers = Rate_limit.headers_agent_global ~key:rl_key in
   let headers = Httpun.Headers.of_list (
     ("content-type", "application/json") ::
     ("content-length", string_of_int (String.length body)) ::
     rl_headers @
-    cors_headers origin
+    admitted_cors_headers request
   ) in
   let acceptance =
     Http_reqd.try_respond_with_string reqd
@@ -1057,6 +1056,10 @@ let resolve_request_authorization_actor ~token = function
                "Bearer token did not resolve to a credential identity.")))
 ;;
 
+let is_safe_http_method = function
+  | `GET | `HEAD | `OPTIONS -> true
+  | _ -> false
+
 let authorize_permission_request ~base_path ~permission request :
     (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
@@ -1075,6 +1078,14 @@ let authorize_permission_request ~base_path ~permission request :
       let* admitted = admit_bearer ~base_path ~auth_cfg request ~token in
       authorize_admitted_bearer ~permission admitted
   | None ->
+      let* () =
+        match Server_request_authority.current () with
+        | None -> Ok ()
+        | Some request_authority ->
+          if is_safe_http_method request.Httpun.Request.meth
+          then ensure_same_origin_if_browser_request ~request_authority request
+          else ensure_same_origin_browser_request ~request_authority request
+      in
       let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token:None in
       let* actor = resolve_request_authorization_actor ~token:None agent_name_opt in
       Auth.check_permission

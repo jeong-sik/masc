@@ -53,6 +53,15 @@ let test_should_sync_negative_elapsed () =
   let now = Int64.of_int 1700000000 in
   Alcotest.(check bool) "now < updated_at means elapsed < 0" false (Repo_sync.should_sync repo ~now)
 
+let test_should_sync_skips_paused_and_cloning () =
+  let now = Int64.of_int 1700004000 in
+  let paused = { (sample_repo ~auto_sync:true ~sync_interval:60 "r1") with status = Paused } in
+  let cloning = { (sample_repo ~auto_sync:true ~sync_interval:60 "r2") with status = Cloning } in
+  let errored = { (sample_repo ~auto_sync:true ~sync_interval:60 "r3") with status = Error "transient" } in
+  Alcotest.(check bool) "paused skipped" false (Repo_sync.should_sync paused ~now);
+  Alcotest.(check bool) "cloning skipped" false (Repo_sync.should_sync cloning ~now);
+  Alcotest.(check bool) "errored retried" true (Repo_sync.should_sync errored ~now)
+
 let with_temp_base_path f =
   let dir = Filename.temp_file "repo_sync_test" "" in
   Sys.remove dir;
@@ -283,6 +292,7 @@ let () =
           Alcotest.test_case "zero interval" `Quick test_should_sync_zero_interval;
           Alcotest.test_case "large elapsed" `Quick test_should_sync_large_elapsed;
           Alcotest.test_case "negative elapsed" `Quick test_should_sync_negative_elapsed;
+          Alcotest.test_case "paused and cloning skipped" `Quick test_should_sync_skips_paused_and_cloning;
         ] );
       ( "sync_all",
         [

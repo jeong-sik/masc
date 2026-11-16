@@ -1715,6 +1715,12 @@ let handle_workspace_children_get
     (reqd : Http_reqd.t) =
   let uri = Uri.of_string request.target in
   let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+    json_response ~status:`Not_found request reqd
+      (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
   match Uri.get_query_param uri "path" with
   | None ->
     json_response ~status:`Bad_request request reqd
@@ -1908,7 +1914,13 @@ let handle_lsp_question_get
     (request : Httpun.Request.t)
     (reqd : Http_reqd.t) =
   let uri = Uri.of_string request.target in
-  let base, _source = resolve_workspace_base ~state ~uri in
+  let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+    json_response ~status:`Not_found request reqd
+      (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
   let param name = Uri.get_query_param uri name in
   let bad message =
     json_response ~status:`Bad_request request reqd
@@ -2065,6 +2077,12 @@ let handle_git_blame_get
     (reqd : Http_reqd.t) =
   let uri = Uri.of_string request.target in
   let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+    json_response ~status:`Not_found request reqd
+      (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
   let file_path =
     match Uri.get_query_param uri "path" with
     | Some p -> p
@@ -2113,6 +2131,12 @@ let handle_git_log_get
     (reqd : Http_reqd.t) =
   let uri = Uri.of_string request.target in
   let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+    json_response ~status:`Not_found request reqd
+      (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
   let limit =
     match
       Option.bind (Uri.get_query_param uri "limit") int_of_string_opt
@@ -2175,6 +2199,12 @@ let handle_git_diff_get
     (reqd : Http_reqd.t) =
   let uri = Uri.of_string request.target in
   let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+    json_response ~status:`Not_found request reqd
+      (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
   let file_path =
     match Uri.get_query_param uri "path" with
     | Some p -> p

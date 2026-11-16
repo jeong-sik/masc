@@ -298,6 +298,11 @@ val cors_allow_headers_value : string
 val cors_headers : string -> (string * string) list
 (** Build a CORS header set for [origin]. *)
 
+val admitted_cors_headers : Httpun.Request.t -> (string * string) list
+(** CORS header set for an HTTP response after running [Origin] through
+    authority admission; unadmitted or absent origins receive only
+    [vary: Origin]. *)
+
 val respond_json_with_cors :
   ?status:Httpun.Status.t ->
   Httpun.Request.t -> Http_reqd.t -> string -> unit

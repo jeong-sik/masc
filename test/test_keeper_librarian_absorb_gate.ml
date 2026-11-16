@@ -1255,6 +1255,79 @@ let test_run_records_the_destination_passed_over () =
   | evaluations -> Alcotest.failf "one evaluation, got %d" (List.length evaluations)
 ;;
 
+(* RFC librarian-gate-waits-on-the-destination-not-on-passes §3.2–3.3. A
+   run refused by its only destination for that destination's state waits
+   while the destination keeps refusing so; an answer, or a refusal of one
+   request, ends the wait and calls the recovery listener once. *)
+let test_a_refusing_destination_holds_the_next_attempt_until_it_answers () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module Client = Masc.Typesafeai_client in
+  let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "fixture has no TCP address" in
+  let endpoint = Printf.sprintf "http://127.0.0.1:%d/evaluate" port in
+  let reply = ref (`Payment_required, "no credits") in
+  let handler _ _ body =
+    ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
+    let status, body = !reply in
+    Cohttp_eio.Server.respond_string ~status ~body () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
+      ~on_error:(fun exn -> Alcotest.fail (Printexc.to_string exn)));
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with
+      destinations =
+        ( { Runtime_schema.endpoint; model = "wait-model"; api_key_env = "TYPESAFEAI_API_KEY" }, [] )
+    } @@ fun () ->
+  let keeper_id = "destination-wait-fixture" in
+  let first = fact (List.nth sources 0) in
+  let absorbed = absorbed_into merged [ first ] in
+  let run () =
+    Gate.run ~cited_observations:(nothing_cited absorbed) ~clock ~keeper_id ~superseding:[]
+      ~facts:[ first ]
+      ~before_evaluate:(fun ~direction ~destinations ~state ~questions ->
+        Gate.evaluation_request_to_yojson ~direction ~destinations ~state ~questions)
+      ~after_evaluate:(fun ~evaluation_id:_ _ -> ())
+      ~new_claims:[ merged ] ~absorbed () in
+  let recovered = ref 0 in
+  let stop = Client.on_destination_recovered (fun _ -> incr recovered) in
+  Fun.protect ~finally:stop @@ fun () ->
+  let after result =
+    match Gate.after_failure (Gate.resolve ~keeper_id) result with
+    | Gate.Retain_new_attempt -> "retain"
+    | Wait_for_destination -> "wait" in
+  let failed what result =
+    Alcotest.(check bool) (what ^ " fails") true
+      (Option.is_some (Gate.failure_detail ~absorbed result)) in
+  let refused = run () in
+  failed "a 402 run" refused;
+  Alcotest.(check string) "a 402 waits while the destination refuses for its credit" "wait"
+    (after refused);
+  Alcotest.(check string) "a second 402 still waits" "wait" (after (run ()));
+  Alcotest.(check int) "refusals call no listener" 0 !recovered;
+  reply := `OK, choice_response "mergeable";
+  let answered = run () in
+  Alcotest.(check (option string)) "the answered run passes" None
+    (Gate.failure_detail ~absorbed answered);
+  Alcotest.(check int) "the first answer after refusing calls the listener once" 1 !recovered;
+  Alcotest.(check string) "the earlier 402 run may retain a new attempt now" "retain"
+    (after refused);
+  ignore (run () : Gate.run_result);
+  Alcotest.(check int) "a second answer calls no listener" 1 !recovered;
+  reply := `Payment_required, "no credits";
+  let refused_again = run () in
+  Alcotest.(check string) "a new 402 waits again" "wait" (after refused_again);
+  reply := `Bad_request, "malformed request";
+  let request_refused = run () in
+  failed "a 400 run" request_refused;
+  Alcotest.(check string) "a refusal of the request itself retains a new attempt" "retain"
+    (after request_refused);
+  Alcotest.(check int) "a refusal of one request ends the state refusal once" 2 !recovered;
+  Alcotest.(check string) "the earlier 402 run no longer waits" "retain" (after refused_again)
+;;
+
 let test_run_uses_one_destination_and_model_snapshot () =
   with_gate_http_fixture @@ fun ~sw ~net ~clock ->
   let module F = Exact_output_fixture in
@@ -3358,6 +3431,8 @@ let () =
             test_run_uses_one_destination_and_model_snapshot
         ; Alcotest.test_case "a run records the destination passed over" `Quick
             test_run_records_the_destination_passed_over
+        ; Alcotest.test_case "a refusing destination holds the next attempt until it answers" `Quick
+            test_a_refusing_destination_holds_the_next_attempt_until_it_answers
         ; Alcotest.test_case "cancelled next request retains its completed observation" `Quick
             test_cancelled_next_request_keeps_the_completed_observation
         ; Alcotest.test_case "finish callback cancellation still publishes the observation" `Quick

@@ -88,21 +88,32 @@ let capacity_released ~config ~installation_id =
 
 (* RFC librarian-gate-waits-on-the-destination-not-on-passes §3.3. A gate
    that waited on refusing destinations ends its pass pending, in admission
-   or durable history, without naming which wait it is. A destination that
-   answers again wakes every pending pass of this root once; each pass reads
-   its own wait again. *)
+   or durable history, without naming which wait it is, so every pass that
+   ends pending is a recovery waiter of its site. A recovery replaces the
+   mark and wakes the waiters of this root; a pass that read the destinations
+   before the recovery and records itself after it sees a different mark and
+   wakes itself, the same race [capacity_marks] closes. *)
+type recovery_site = Durable_history | Admission
+
+let recovery_mark : unit ref Atomic.t = Atomic.make (ref ())
+let recovery_waiters : ((string * string * recovery_site), unit) Hashtbl.t = Hashtbl.create 16
+
+let recovery_mark_snapshot () = Atomic.get recovery_mark
+
+let note_recovery_wait ~config ~keeper_name ~site ~before ~pending =
+  let root = Workspace.keepers_runtime_dir config in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    if pending then Hashtbl.replace recovery_waiters (root, keeper_name, site) ()
+    else Hashtbl.remove recovery_waiters (root, keeper_name, site));
+  if pending && not (Atomic.get recovery_mark == before)
+  then Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name
+
 let destination_recovered ~config =
   let root = Workspace.keepers_runtime_dir config in
   let keepers = Stdlib.Mutex.protect measurements_mu (fun () ->
-    let durable = Hashtbl.fold (fun (directory, keeper) (measurement : measurement) names ->
-      match measurement.last_pass with
-      | Pending _ when String.equal directory root -> keeper :: names
-      | Pending _ | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
-      | Not_committed | Stopped _ | Raised _ -> names) measurements [] in
-    Hashtbl.fold (fun (directory, keeper) (admission : Keeper_librarian_pending.admission) names ->
-      match admission with
-      | Admission_waiting _ when String.equal directory root -> keeper :: names
-      | Admission_waiting _ | Admission_failed _ -> names) admission_waits durable
+    Atomic.set recovery_mark (ref ());
+    Hashtbl.fold (fun (directory, keeper, (_ : recovery_site)) () names ->
+      if String.equal directory root then keeper :: names else names) recovery_waiters []
     |> List.sort_uniq String.compare) in
   List.iter (fun keeper_name ->
     Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
@@ -333,6 +344,7 @@ let uncommitted_pass () =
 
 let run_durable_with_consumer ~config ~keeper_name ~consume =
   let capacity_before = capacity_mark_snapshot ~config in
+  let recovery_before = recovery_mark_snapshot () in
   let rec drain () =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
     | Disabled | Invalid ->
@@ -420,6 +432,11 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
         measure_unread ~config ~keeper_name
     in
     publish_measurement ~config ~keeper_name ~last_pass ~unread;
+    note_recovery_wait ~config ~keeper_name ~site:Durable_history ~before:recovery_before
+      ~pending:(match last_pass with
+        | Pending _ -> true
+        | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+        | Not_committed | Stopped _ | Raised _ -> false);
     (match last_pass with
      | Pending pending ->
        (match pending with
@@ -1102,6 +1119,7 @@ let run_memory_cleanup ~base_path ~keeper_name =
 let run_explicit_admission_with ~base_path ~keeper_name ~run =
   let config = Workspace.default_config base_path in
   let capacity_before = capacity_mark_snapshot ~config in
+  let recovery_before = recovery_mark_snapshot () in
   let outcome = run () in
   let observed = match outcome with
     | Keeper_memory_admission_worker.Awaiting_worker waiting ->
@@ -1114,6 +1132,11 @@ let run_explicit_admission_with ~base_path ~keeper_name ~run =
     match observed with
     | Some admission -> Hashtbl.replace admission_waits key admission
     | None -> Hashtbl.remove admission_waits key);
+  note_recovery_wait ~config ~keeper_name ~site:Admission ~before:recovery_before
+    ~pending:(match outcome with
+      | Keeper_memory_admission_worker.Awaiting_worker _ | Pending _ -> true
+      | Disabled | Idle | Recheck_new_input | Settled _ | Unavailable _
+      | Addon_unattached _ -> false);
   !change_observer ~config ~keeper_name;
   Keeper_memory_health_input.written
     ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name;

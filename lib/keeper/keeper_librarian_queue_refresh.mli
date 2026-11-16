@@ -27,9 +27,10 @@ val last_measurement : config:Workspace.config -> keeper_name:string -> measurem
     [None], not the prior pass's count. *)
 
 val destination_recovered : config:Workspace.config -> unit
-(** A gate destination answered again after refusing. Wake once every Keeper
-    of [config]'s root whose last observed durable pass or admission ended
-    pending; each pass reads its own wait again. *)
+(** A gate destination stopped refusing for its own state. Wake once every
+    Keeper of [config]'s root whose last durable pass or explicit admission
+    ended pending; each pass reads its own wait again. A pass that was
+    running across the recovery and ends pending wakes itself. *)
 
 val capacity_released : config:Workspace.config -> installation_id:string -> unit
 (** A delivered worker result freed space in its pending-request listing.

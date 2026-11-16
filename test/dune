@@ -4072,6 +4072,24 @@
   yojson))
 
 (test
+ (name test_keeper_stream_retry_consumers)
+ (modules test_keeper_stream_retry_consumers)
+ (libraries
+  alcotest
+  masc
+  masc.runtime
+  masc.agent_core
+  masc.masc_types
+  masc.keeper_chat_delivery_identity
+  masc.keeper_chat_operations
+  masc.ag_ui
+  masc.server
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_log
+  eio_main
+  unix))
+
+(test
  (name test_tui_keeper_chat_history)
  (modules test_tui_keeper_chat_history)
  (libraries

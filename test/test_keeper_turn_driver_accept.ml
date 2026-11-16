@@ -1487,6 +1487,161 @@ let test_runtime_exhaustion_label_caps_free_text_detail () =
   Alcotest.(check bool) "label has no newline" false (contains ~needle:"\n" label);
   Alcotest.(check bool) "label is marked truncated" true (contains ~needle:"..." label)
 
+(* Use the same registry probe as [run_named], with a clock that advances only
+   when the fixture asks it to. No watchdog sleep or provider request runs. *)
+let with_live_progress_observation test =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let module Registry = Masc.Keeper_registry in
+  let previous_context = Eio_context.snapshot_state () in
+  let previous_clock = Eio_context.get_clock_opt () in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let base_path = Filename.temp_file "keeper-watchdog-progress-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  let keeper_name = "watchdog-progress" in
+  Eio.Switch.on_release sw (fun () ->
+    Fun.protect
+      ~finally:(fun () ->
+        Eio_context.restore_state previous_context;
+        (match previous_clock with
+         | Some clock -> Time_compat.set_clock clock
+         | None -> Time_compat.clear_clock ());
+        Masc_test_deps.cleanup_test_workspace base_path;
+        match previous_fs with
+        | Some fs -> Fs_compat.set_fs fs
+        | None -> Fs_compat.clear_fs ())
+      (fun () -> Registry.For_testing.unregister ~base_path keeper_name));
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1_000.0;
+  let wall_clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
+  Time_compat.set_clock wall_clock;
+  Eio_context.set_clock wall_clock;
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String keeper_name;
+               "trace_id", `String "trace-watchdog-progress";
+               "activation_mode", `String "manual"]) with
+    | Ok meta -> meta
+    | Error detail -> Alcotest.fail detail in
+  ignore (Registry.For_testing.register ~base_path keeper_name meta);
+  let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+  Registry.mark_turn_started ~observation_token ~base_path
+    ~wake:Masc.Keeper_registry_types.Chat_request keeper_name;
+  test ~clock ~base_path ~keeper_name ~observation_token
+    ~config:(Masc.Workspace.default_config base_path)
+;;
+
+let live_progress_stalled ~base_path ~keeper_name ~attempt_started_at () =
+  let module Attempt = Masc.Keeper_turn_driver_try_provider in
+  Attempt.provider_lease_stalled
+    ~lease_phase:(Attempt.Provider_active_since attempt_started_at)
+    ~now:(Time_compat.now ()) ~threshold_sec:60.0 ~attempt_started_at
+    ~permit_wait:Llm_provider.Provider_admission.Before_any_wait
+    ~sample:(Masc.Keeper_turn_driver.For_testing.read_provider_progress
+      ~base_path ~keeper_name ())
+;;
+
+let test_reasoning_refreshes_live_registry_but_is_not_a_completed_answer () =
+  with_live_progress_observation
+  @@ fun ~clock ~base_path ~keeper_name ~observation_token ~config ->
+  let open Agent_core.Types in
+  let module Acc = Agent_core.Llm_provider.Complete_stream_acc in
+  let _, _, _, on_event =
+    Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
+      ~preview:None ~observation_token:(Some observation_token)
+      ~config ~keeper_name ~downstream:None in
+  let on_event = match on_event with
+    | Some on_event -> on_event
+    | None -> Alcotest.fail "the live turn has no progress callback" in
+  let stream = Acc.create_stream_acc () in
+  let send event = match Acc.resolve_event stream event with
+    | Stream_event_accepted event -> on_event event
+    | Stream_event_suppressed -> Alcotest.fail "the fixture event was suppressed"
+    | Stream_event_rejected _ -> Alcotest.fail "the fixture stream was rejected" in
+  let stalled = live_progress_stalled ~base_path ~keeper_name
+    ~attempt_started_at:(Time_compat.now ()) in
+  send (MessageStart {id="reasoning-progress"; model="fixture"; usage=None});
+  send (ContentBlockStart
+    {index=0; content_type="thinking"; tool_id=None; tool_name=None});
+  List.iter (fun text ->
+    Eio_mock.Clock.set_time clock (Time_compat.now () +. 61.0);
+    Alcotest.(check bool) "the real registry sample has gone stale" true (stalled ());
+    send (ContentBlockDelta {index=0; delta=ThinkingDelta text});
+    Alcotest.(check bool) "reasoning clears the stall through the real probe" false
+      (stalled ());
+    match Masc.Keeper_turn_driver.For_testing.read_provider_progress
+      ~base_path ~keeper_name () with
+    | Some sample -> Alcotest.(check (float 0.))
+        "the callback stamped the controlled clock" (Time_compat.now ()) sample.last_progress_at
+    | None -> Alcotest.fail "reasoning lost its registry observation")
+    ["first reasoning step"; "a later reasoning step"];
+  send (ContentBlockStop {index=0});
+  send (MessageDelta {stop_reason=Some EndTurn; usage=None});
+  send MessageStop;
+  let response = match Acc.finalize_stream_acc stream with
+    | Ok response -> response
+    | Error _ -> Alcotest.fail "the reasoning stream did not complete" in
+  let result = Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.reasoning-progress"
+      ~accept:Keeper_tooling.Response.accepts_response
+      { (run_result ()) with response } in
+  let error, reason_kind, _ = expect_accept_rejected result in
+  Alcotest.(check bool) "completed reasoning is not deliverable progress" true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  match Keeper_internal_error.classify_masc_internal_error error with
+  | Some (Keeper_internal_error.Accept_rejected {response_shape; stop_reason; _}) ->
+    Alcotest.(check bool) "the completed response retains its typed thinking-only shape"
+      true (response_shape = Some Keeper_internal_error.Accept_response_thinking_only);
+    Alcotest.(check bool) "the rejection preserves the completed terminal"
+      true (stop_reason = Some EndTurn)
+  | Some _ | None -> Alcotest.fail "the thinking-only response lost its typed rejection"
+;;
+
+let test_carriers_and_stale_owners_do_not_refresh_live_progress () =
+  with_live_progress_observation
+  @@ fun ~clock ~base_path ~keeper_name ~observation_token ~config ->
+  let open Agent_core.Types in
+  let module Registry = Masc.Keeper_registry in
+  let forwarded = ref 0 in
+  let callback observation_token =
+    let _, _, _, on_event =
+      Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
+        ~preview:None ~observation_token ~config ~keeper_name
+        ~downstream:(Some (fun _ -> incr forwarded)) in
+    match on_event with Some on_event -> on_event
+    | None -> Alcotest.fail "the live turn has no progress callback" in
+  let old_owner = callback (Some observation_token) in
+  let started_at = Time_compat.now () in
+  let stalled = live_progress_stalled ~base_path ~keeper_name
+    ~attempt_started_at:started_at in
+  Eio_mock.Clock.set_time clock (started_at +. 61.0);
+  Alcotest.(check bool) "the owner starts with stale progress" true (stalled ());
+  List.iter old_owner
+    [ContentBlockDelta {index=0; delta=TextDelta ""};
+     ContentBlockDelta {index=0; delta=ThinkingDelta ""};
+     ContentBlockDelta {index=0; delta=ThinkingSignatureDelta "signature"}];
+  Alcotest.(check bool) "empty carriers and signatures leave the real sample stalled"
+    true (stalled ());
+  let successor = Masc.Keeper_turn_observation_token.fresh () in
+  Registry.mark_turn_started ~observation_token:successor ~base_path
+    ~wake:Masc.Keeper_registry_types.Chat_request keeper_name;
+  let successor_started_at = Time_compat.now () in
+  let successor_stalled = live_progress_stalled ~base_path ~keeper_name
+    ~attempt_started_at:successor_started_at in
+  Eio_mock.Clock.set_time clock (successor_started_at +. 61.0);
+  let reasoning = ContentBlockDelta {index=0; delta=ThinkingDelta "late reasoning"} in
+  old_owner reasoning;
+  (callback None) reasoning;
+  Alcotest.(check bool) "old and absent ownership cannot refresh the successor"
+    true (successor_stalled ());
+  (callback (Some successor)) reasoning;
+  Alcotest.(check bool) "the matching owner refreshes the successor"
+    false (successor_stalled ());
+  Alcotest.(check int) "all carrier and ownership cases still reach the downstream"
+    6 !forwarded
+;;
+
 let test_keeper_tool_slot_callbacks_are_always_wired () =
   let config = Masc.Workspace.default_config (Filename.get_temp_dir_name ()) in
   (* The lease callbacks are plain functions: the type admits no turn
@@ -1712,6 +1867,14 @@ let () =
             "a reasoning-only stream keeps refreshing watchdog progress"
             `Quick
             test_a_reasoning_only_stream_keeps_refreshing_watchdog_progress;
+          Alcotest.test_case
+            "reasoning refreshes the live registry but is not a completed answer"
+            `Quick
+            test_reasoning_refreshes_live_registry_but_is_not_a_completed_answer;
+          Alcotest.test_case
+            "carriers and stale owners cannot refresh live watchdog progress"
+            `Quick
+            test_carriers_and_stale_owners_do_not_refresh_live_progress;
           Alcotest.test_case
             "carrier-only stream remains observable without lifecycle gate"
             `Quick

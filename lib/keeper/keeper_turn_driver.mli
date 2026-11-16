@@ -632,6 +632,14 @@ module For_testing : sig
       count is zero; [InputRequired] has no such witness. Runtime-specific or
       restored turn counts alone never clear candidate failure evidence. *)
 
+  val read_provider_progress :
+    base_path:string ->
+    keeper_name:string ->
+    unit -> Keeper_turn_driver_try_provider.provider_progress_sample option
+  (** The production watchdog's registry probe. Missing observations and read
+      failures return [None]; Eio cancellation propagates. Approval waits are
+      read from the shared approval registry, not copied onto the turn. *)
+
   val make_deferred_runtime_lane :
     assignment_id:string ->
     failed_runtime_id:string ->

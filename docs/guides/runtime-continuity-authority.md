@@ -69,6 +69,16 @@ checkpoint·취소 조합의 Agent 회귀 소스는
 source-extracted replay, 문법 검사, 실제 통합 시험, vendor 세션 실측, 설치 후 관측은
 각각 실행한 범위로 기록한다. 하나의 성공을 다른 범위의 증거로 이월하지 않는다.
 
+후보 실패에서 다음 후보의 답까지 같은 Slack·Discord adapter와 TUI wire·journal을
+잇는 시험은 `test_keeper_stream_retry_consumers`에 있다. 실제 registry callback에서
+production progress probe·stall 판정·완료 응답 accept까지 잇는 시험은
+`test_keeper_turn_driver_accept`에 있다. fixture의 stream과 제어 시계가 실제 provider
+호출·watchdog fiber 실행을 대신 증명하지는 않는다.
+
+[native Muse 압축·세션 재적재 실측](../evidence/muse-compaction-native-20261116/README.md)은
+완료 턴 수 3→1과 같은 마지막 턴 ID, release 후 reload·다음 턴 완료를 확인한다.
+같은 host 프로세스에서 측정했으며 MASC adapter 실행·서버 재시작 복구 증거는 아니다.
+
 ## Native System 갱신의 검증 범위
 
 issued 관측을 공통 Resume projection이 별도로 고른다는 사실만으로 native adapter가

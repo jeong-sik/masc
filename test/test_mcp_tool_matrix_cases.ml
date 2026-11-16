@@ -299,7 +299,9 @@ let execute_tool fixture ~name ~arguments =
     ~sw:fixture.sw
     ~clock:fixture.clock
     ~workspace_scope:(Mcp_server.workspace_scope fixture.state)
-    ~auth_token:fixture.auth_token
+    ~bearer:
+      (Masc_test_deps.door_bearer ~base_path:fixture.base_path
+         (Some fixture.auth_token))
     ~mcp_session_id:fixture.sid fixture.state ~name ~arguments
 
 let execute_tool_ok fixture ~name ~arguments =

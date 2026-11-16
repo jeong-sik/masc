@@ -241,6 +241,20 @@ let handle_flow_error ~queue_ops (prepared : prepared_flow) = function
       prepared.entry
       ~reason:"HITL exact-output candidates exhausted before dispatch"
       ~cause:Exact_flow_execution_failed
+  | Exact_output.Flow_before_dispatch_admission_timed_out _ as error ->
+    record_outcome Candidates_exhausted;
+    log_exact_error
+      prepared.entry
+      "admission wait before dispatch"
+      (Exact_output.flow_execution_error_to_string
+         ~callback_error_to_string:flow_callback_error_to_string
+         ~raw_response_to_string:Keeper_exact_flow_detail.raw_response_excerpt
+         error);
+    settle_current_or_signal
+      ~queue_ops
+      prepared.entry
+      ~reason:"HITL exact-output provider admission timed out before dispatch"
+      ~cause:Exact_flow_execution_failed
   | Exact_output.Flow_before_measurement_dispatch_callback_failed
       { cause; _ }
   | Exact_output.Flow_measurement_terminal_callback_failed

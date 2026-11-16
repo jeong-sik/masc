@@ -53,14 +53,22 @@ let visit_of_admission = function
   | Candidate_rejected rejection -> Exact.candidate_rejection_visit rejection
 let rejection_outcome rejection = Admission_rejected
   (Failure.local_rejection (Exact.candidate_rejection_disposition rejection))
+let predispatch_queue_timeout =
+  Execution_failed
+    (Failure.Completion_failed
+       { sent = false; cause = Failure.Deadline Llm_provider.Http_client.Queue })
 let failed_snapshot = function
   | Exact.Flow_advance_candidate_rejected rejection ->
     (Exact.candidate_rejection_visit rejection).ordinal,rejection_outcome rejection
+  | Flow_advance_before_dispatch_admission_timed_out {candidate;timeout=_} ->
+    candidate.visit.ordinal,predispatch_queue_timeout
   | Flow_advance_execution_failed {candidate;cause;_} ->
     candidate.visit.ordinal,Execution_failed (Failure.api_observation cause)
 let failed_candidate = function
   | Exact.Flow_candidate_rejected rejection ->
     (Exact.candidate_rejection_visit rejection).ordinal,rejection_outcome rejection
+  | Flow_candidate_before_dispatch_admission_timed_out {candidate;timeout=_} ->
+    candidate.visit.ordinal,predispatch_queue_timeout
   | Flow_candidate_execution_failed {candidate;cause} ->
     candidate.visit.ordinal,Execution_failed (Failure.api_observation cause.cause)
 let semantic (rejection:'a Exact.semantic_rejection_receipt) =
@@ -111,6 +119,8 @@ let terminal_evidence = function
   | Flow_before_advance_callback_failed {evidence;failed;_} -> evidence,[failed_candidate failed]
   | Flow_candidates_exhausted {evidence;rejection} ->
     evidence,[(Exact.candidate_rejection_visit rejection).ordinal,rejection_outcome rejection]
+  | Flow_before_dispatch_admission_timed_out {evidence;candidate;timeout=_} ->
+    evidence,[candidate.visit.ordinal,predispatch_queue_timeout]
   | Flow_exact_execution_failed {evidence;candidate;cause} ->
     evidence,[candidate.visit.ordinal,Execution_failed (Failure.api_observation cause.cause)]
 let of_result = function

@@ -33,9 +33,12 @@ let parent ~read ~scope ~request_id =
   Option.to_result ~none:("Original Librarian source parent is absent: " ^ request_id) record
 (* Values derived from what one scope of the scan reads. The scan meets a
    scope's records together, and its reader gives back the record it read
-   before for bytes that did not change, so a value derived from that record
-   holds while the scan stays in the scope. Moving to another scope drops
-   them: the next scope's reader reads every record anew. *)
+   before for bytes that did not change. A value derived from a record is
+   used again while the scan stays in the scope and the record reads the
+   same. Only that record is compared: the parts, predecessors, fences and
+   Exact files read to derive the value are not read again, as the check is
+   not a snapshot. Moving to another scope drops them: the next scope's
+   reader reads every record anew. *)
 let per_scope fresh =
   let current=ref None in
   fun scope -> match !current with
@@ -66,9 +69,11 @@ let floor_capture ~read ~owner record =
 (* What one scope's gate records proved about the executions they name. A
    journal's records all name one execution, and restoring its capture and
    proving its ancestry for each record did that dozens of times. A passed
-   capture is kept while the execution reads the same, and the chains proved
-   under it with it. A failed one is not: each record that names the
-   execution restores it again and is refused as before. *)
+   capture is kept while the reader returns the same execution record. The
+   chains proved from that execution are kept while it reads the same, also
+   when it is decoded again (Keeper_librarian_original_gate.proofs). A failed
+   capture is not kept: each record that names the execution restores it
+   again and is refused as before. *)
 type ('capture,'proofs) gate_parents =
   {captures:(string, string * Owner.retained * 'capture) Hashtbl.t; proofs:'proofs}
 let gate_parents proofs = {captures=Hashtbl.create 8; proofs=proofs ()}
@@ -94,7 +99,7 @@ let validator () =
      root. Chains proved earlier in the scope are not proved again. An
      execution's own record proves only its journal's first attempt, with
      proofs of its own. *)
-  let scope_gates=per_scope fresh_gates in
+  let scope_gates=per_scope fresh_gates and closure_gates=per_scope fresh_gates in
   let admission_capture ~read ~read_scope ~owner record =
     let* ()=forest ~read_scope ~owner in
     Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
@@ -177,10 +182,13 @@ let validator () =
           | Some current when Yojson.Safe.equal (Owner.record_to_json (Owner.listed current))
               (Owner.record_to_json (Owner.listed record)) -> Ok ()
           | None | Some _ -> Error "Admission closure member changed during preflight" in
-      (* The closure's reads answer what the live reads may not, so what they
-         prove is not kept for the live ones. *)
-      let check=validate ~gates:(fresh_gates ()) ~read:view.read ~read_scope:view.read_scope ~read_body:view.read_body
-          ~read_fence ~read_resolution in
+      (* The closure's reads answer what the live reads may not, so the
+         captures and chains they prove are kept apart from the live ones, for
+         the scope as those are. Every record of an owner that has a closure
+         is checked here, a gate journal's attempts too. The owner's forest
+         proof is kept for both reads ([forest_proof]). *)
+      let check=validate ~gates:(closure_gates record.scope) ~read:view.read ~read_scope:view.read_scope
+          ~read_body:view.read_body ~read_fence ~read_resolution in
       let* ()=check record in
       if Closure.is_scope record.scope then
         List.fold_left (fun result original -> let* ()=result in check original)

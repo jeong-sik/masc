@@ -27,21 +27,24 @@ let rec fill slot value =
 ;;
 
 (* Not cancellable: no cancel function is set, as in Eio's thread pool. The
-   scheduler's [enqueue] may be called from any domain or thread. *)
+   scheduler's [enqueue] may be called from any domain or thread.
+
+   The caller suspends even when the outcome is already in. A fiber that
+   handed work to the host has then switched, however early the host
+   answered, so an [Os_mutex] section around the call fails on every run
+   (RFC a-fiber-that-suspends-while-holding-an-os-mutex-fails-at-unlock,
+   L1). *)
 let await ~label slot =
-  match Atomic.get slot with
-  | Filled value -> value
-  | Empty | Waiting _ ->
-    Eio.Private.Suspend.enter_unchecked label (fun _context enqueue ->
-      let wake value = enqueue (Ok value) in
-      let rec register () =
-        match Atomic.get slot with
-        | Filled value -> wake value
-        | Waiting _ -> invalid_arg "Systhread_host: a slot has one waiter"
-        | Empty as seen ->
-          if not (Atomic.compare_and_set slot seen (Waiting wake)) then register ()
-      in
-      register ())
+  Eio.Private.Suspend.enter_unchecked label (fun _context enqueue ->
+    let wake value = enqueue (Ok value) in
+    let rec register () =
+      match Atomic.get slot with
+      | Filled value -> wake value
+      | Waiting _ -> invalid_arg "Systhread_host: a slot has one waiter"
+      | Empty as seen ->
+        if not (Atomic.compare_and_set slot seen (Waiting wake)) then register ()
+    in
+    register ())
 ;;
 
 (* Who has a job. Each move is one compare-and-set, so one side makes it.

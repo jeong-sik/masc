@@ -588,9 +588,10 @@ let test_a_journal_read_restores_each_attempt_once () = with_fixture (fun fixtur
    attempt's predecessor, and the successor that predecessor names. A check
    that proved each record's whole chain again would also read every earlier
    attempt once more: three more reads for the third attempt and five for the
-   fifth. The proofs hold only while the check gives back the same step and
-   the same capture restored from it, so a check that read the step anew or
-   restored it again for each record proves each whole chain again too. *)
+   fifth. A check that reads each record anew, as a running owner's closure
+   recovery does, gets a new step value for each record. It finds the step
+   its proofs were made under by the step's listed content, so it also proves
+   each attempt once. *)
 let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture ->
   fixture.respond := (fun body ->
     if contains body second_text then `OK, F.openai_response (answer ~claim:"claim 2" ~state:"state 2")
@@ -616,15 +617,19 @@ let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture 
         if runs = 0 then failf "the first step's journal did not reach %d attempts" count
         else (fail_once (); grow_to count (runs - 1)) in
     let gate_scope = Gate.scope owner in
-    (* One deploy check, counting the reads of the journal's gate scope. *)
-    let gate_reads () =
+    (* One deploy check, counting the reads of the journal's gate scope. A
+       check that reads anew loads the record from the store for each read,
+       so no two reads give the same value. *)
+    let gate_reads ~read_anew () =
       let reads = ref 0 in
       let counting () =
         let validate = Keeper_librarian_store_preflight.validator () in
         fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_ record ->
           let read ~scope ~request_id =
             if String.equal scope gate_scope then incr reads;
-            read ~scope ~request_id in
+            if read_anew then
+              Owner.load ~store:fixture.store ~scope ~request_id |> Result.map_error Owner.error_to_string
+            else read ~scope ~request_id in
           match validate ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record with
           | Ok () -> Lane_addon_store_preflight.Payload_valid
           | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
@@ -633,18 +638,22 @@ let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture 
       check (list string) "the deploy check refuses no record" []
         (List.map (fun (refusal : Lane_addon_store_preflight.refusal) -> refusal.detail) report.refusals);
       !reads in
+    let both () = let kept = gate_reads ~read_anew:false () in kept, gate_reads ~read_anew:true () in
     grow_to 2 3;
-    let two = gate_reads () in
+    let two, two_anew = both () in
     grow_to 3 2;
-    let three = gate_reads () in
+    let three, three_anew = both () in
     grow_to 4 2;
-    let four = gate_reads () in
+    let four, four_anew = both () in
     grow_to 5 2;
-    let five = gate_reads () in
+    let five, five_anew = both () in
     check int "the first step's journal holds five attempts" 5 (attempts ());
     check bool "a longer journal costs the check more gate reads" true (three > two);
     check int "the fifth attempt adds as many gate reads to the check as the third"
-      (three - two) (five - four)))
+      (three - two) (five - four);
+    check bool "a longer journal costs a check that reads anew more gate reads" true (three_anew > two_anew);
+    check int "the fifth attempt adds as many gate reads to a check that reads anew as the third"
+      (three_anew - two_anew) (five_anew - four_anew)))
 
 (* A gate record's consumer reads the Exact files of the step its journal
    names, so a deploy check judges that step's files for each gate record. A

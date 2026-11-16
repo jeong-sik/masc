@@ -608,6 +608,12 @@ val load_result :
 val load_all :
   base_dir:string -> keeper_name:string -> chat_message list
 
+val load_observation :
+  base_dir:string -> keeper_name:string -> Keeper_chat_observation_index.t
+(** Shares [load_all]'s parsed prefix and invalidation rules, updating the
+    immutable observation indexes only for newly parsed rows. An unchanged
+    transcript returns the same snapshot without traversing its history. *)
+
 type strict_decode_cause =
   | Invalid_surface of string
   | Unknown_speaker_authority of string

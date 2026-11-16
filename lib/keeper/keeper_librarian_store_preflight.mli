@@ -17,9 +17,11 @@ val purpose : string -> purpose option
     already read and passed, so the records of one owner share a single read of
     that owner's scopes. A forest that failed is read again by the next record
     that names it. While the scan stays in one scope, it also keeps the capture
-    of each execution the scope's gate records name, and the retry chains it
-    proved under that capture, as long as the reader returns the same
-    execution record. A capture that failed is restored again. *)
+    of each execution the scope's gate records name, as long as the reader
+    returns the same execution record, and the retry chains it proved from
+    that execution, as long as the execution reads the same. A capture that
+    failed is restored again. Records checked through an admission closure's
+    reads keep their own captures and chains for the scope. *)
 val validator : unit ->
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   read_scope:(scope:string -> (Lane_addon_tool_request_owner.retained list, string) result) ->

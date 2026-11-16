@@ -972,7 +972,6 @@ let prepare_presentation ?max_bytes ?max_cells ~run ~cache_dir display source =
 
 type remote_image =
   | Remote_unfetched
-  | Remote_png of string
   | Remote_native of { source : string; png : string }
   | Remote_bounded_source of string
   | Remote_cells of { source : string; cells : (presentation, string) result }
@@ -1005,7 +1004,6 @@ let decide_remote ~graphics ~colour image =
       Hold_remote_source {source;reason;detail;requested_save}
   | (None | Some true), (true | false), Remote_unfetched -> Fetch_remote
   | (None | Some true), (true | false), Remote_bounded_failure _ -> Fetch_remote
-  | (None | Some true), (true | false), Remote_png png -> Draw_remote_png png
   | (None | Some true), (true | false), Remote_native {png;_} -> Draw_remote_png png
   | (None | Some true), (true | false),
     (Remote_bounded_source source | Remote_cells {source;_} | Remote_busy (Some source)) ->
@@ -1014,14 +1012,14 @@ let decide_remote ~graphics ~colour image =
       Open_remote_page {reason=detail;source=Some source}
   | (None | Some true), (true | false), Remote_busy None ->
       Open_remote_page {reason="another image is still preparing";source=None}
-  | Some false, false, (Remote_png source | Remote_bounded_source source
+  | Some false, false, (Remote_bounded_source source
       | Remote_cells {source;_} | Remote_busy (Some source) | Remote_native_failed {source;_}
       | Remote_native {source;_}) ->
       Open_remote_page {reason="terminal does not support pixel or colour-cell images";source=Some source}
   | Some false, false, (Remote_unfetched | Remote_busy None | Remote_bounded_failure _) ->
       Open_remote_page {reason="terminal does not support pixel or colour-cell images";source=None}
   | Some false, true, Remote_unfetched -> Fetch_remote
-  | Some false, true, (Remote_png source | Remote_bounded_source source
+  | Some false, true, (Remote_bounded_source source
       | Remote_native_failed {source;_} | Remote_native {source;_}) ->
       Prepare_remote_cells source
   | Some false, true, Remote_cells {source;cells=Ok (Rgba _ as cells)} -> Draw_remote_cells {source;cells}

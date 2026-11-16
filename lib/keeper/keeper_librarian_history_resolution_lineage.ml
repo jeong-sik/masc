@@ -88,7 +88,7 @@ let validate ~read_node ~read ~read_fence ~read_resolution ~require_confirmed re
     ~basis:(fun () -> Request.source_basis_digest request) ~body:(fun () -> Ok request)
 (* A reader that has the body: the index it hands on is made from the request
    it restored, and the record's summary must be that index. *)
-let body_node ~restore ~read ~owner ~request_id =
+let body_node ~restore ~read ~verified ~owner ~request_id =
   let* parent=read ~scope:(Request.scope owner) ~request_id in
   match parent with
   | None -> Ok None
@@ -99,17 +99,46 @@ let body_node ~restore ~read ~owner ~request_id =
        read back and not computed again. *)
     let* ()=Request.confirm_index request record in
     let+ index=Request.index_of_summary record in
+    verified parent index;
     Some {record;index;body=(fun () -> Ok request)}
 let validate_predecessor_payload ~read ~read_fence ~read_resolution ~require_confirmed request =
-  validate ~read_node:(body_node ~restore:Request.restore_payload ~read) ~read ~read_fence ~read_resolution
+  validate ~read_node:(body_node ~restore:Request.restore_payload ~read ~verified:(fun _ _ -> ())) ~read ~read_fence ~read_resolution
     ~require_confirmed request
 let store_readers ~store =
   (fun ~scope ~request_id -> Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string),
   Store.load_history_fence store,Store.load_history_resolution store
 let confirm_predecessor_by_body ~store ~require_confirmed request =
   let read,read_fence,read_resolution=store_readers ~store in
-  validate ~read_node:(body_node ~restore:Request.restore ~read) ~read ~read_fence ~read_resolution
+  validate ~read_node:(body_node ~restore:Request.restore ~read ~verified:(fun _ _ -> ())) ~read ~read_fence ~read_resolution
     ~require_confirmed request
+type verified_node = {verified_body:Owner.verified_body;verified_index:Request.index}
+module Predecessor_map = Map.Make (String)
+type verified_predecessors = {store:Store.t;request:Request.t;nodes:verified_node Predecessor_map.t}
+let verify_predecessors ~store ~require_confirmed request =
+  let nodes=ref Predecessor_map.empty in
+  let verified (original:Owner.retained) index =
+    nodes := Predecessor_map.add original.request_id
+      {verified_body=Owner.verified_body original;verified_index=index} !nodes in
+  let read,read_fence,read_resolution=store_readers ~store in
+  let+ ()=validate ~read_node:(body_node ~restore:Request.restore ~read ~verified)
+    ~read ~read_fence ~read_resolution ~require_confirmed request in
+  {store;request;nodes= !nodes}
+let recheck_predecessors ~store ~require_confirmed request verified =
+  let* ()=require (store==verified.store && request==verified.request)
+    "Verified history predecessors belong to another authorization" in
+  let read_node ~owner ~request_id =
+    let* previous=Option.to_result ~none:"History predecessor was not verified by this authorization"
+      (Predecessor_map.find_opt request_id verified.nodes) in
+    let* record=Owner.recheck_body ~store previous.verified_body |> Result.map_error Owner.error_to_string in
+    let index=previous.verified_index in
+    let* ()=require (Owner.Record.scope record=Request.scope owner)
+      "Verified history predecessor belongs to another owner scope" in
+    let+ ()=Request.confirm_index_source_root index in
+    Some {record;index;body=(fun () ->
+      let* original=Owner.load_listed ~store record |> Result.map_error Owner.error_to_string in
+      Request.restore ~owner:index.owner original)} in
+  let read,read_fence,read_resolution=store_readers ~store in
+  validate ~read_node ~read ~read_fence ~read_resolution ~require_confirmed request
 (* The Keeper's pass: an original is its record and the index in that
    record's summary. Its body is read only for a known-basis link. *)
 let record_body ~store record (index:Request.index) () =

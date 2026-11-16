@@ -29,7 +29,7 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
     let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let* owner=History.observe_record_owner ~base_path ~keepers_dir record in
     let* capture=History.restore ~owner record in
-    let* ()=Keeper_librarian_history_resolution_lineage.confirm_predecessor_by_body ~store ~require_confirmed:true capture in
+    let* predecessors=Keeper_librarian_history_resolution_lineage.verify_predecessors ~store ~require_confirmed:true capture in
     let destination=History.destination capture in
     let* ()=if destination.installation_id=Owner.installation_id (Owner.Configuration declaration_id)
         && destination.package_id=History.package_id && package.id=History.package_id
@@ -48,7 +48,7 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
           let* actual=History.observe_record_owner ~base_path ~keepers_dir fresh in
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
           let* ()=History.confirm_record capture fresh in
-          let* ()=Keeper_librarian_history_resolution_lineage.confirm_predecessor_by_body ~store ~require_confirmed:true capture in
+          let* ()=Keeper_librarian_history_resolution_lineage.recheck_predecessors ~store ~require_confirmed:true capture predecessors in
           Keeper_librarian_runtime.require_counterpart_template (History.preparation capture)) in
         Lane_addon_runtime.authorize_captured_exact_dispatch ~store ~declaration_id
           ~package_id:destination.package_id ~configuration_revision:destination.configuration_revision);

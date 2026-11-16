@@ -36,6 +36,11 @@ dune build --root . ./proto.exe
 
 ## 결과
 
+아래 표와 「다시 돌린 결과」는 취소 보존 갈래를 넣기 전 프로그램의 실행 기록이다.
+경우 10 의 `record` 는 취소를 `Held_across_suspension` 으로 바꿨으므로 RFC D2 의 취소 규칙을 입증하지 않는다.
+문서 끝 재현 프로그램에는 리뷰 대응으로 취소를 그대로 다시 던지는 갈래를 더했다. 이 수정본은 다시 실행하지 않았고, 아래 관측값을 수정본의 결과로 바꾸어 쓰지 않는다.
+구현 층의 `test_os_mutex` 는 `Fiber.first` 와 `Switch.fail` 로 취소된 구역에 대해 원래 결과·stderr 기록·잠금 해제를 확인하도록 한다.
+
 두 실행 모두 끝 코드 0 으로 끝났다.
 
 | 경우 | discontinue | record |
@@ -192,6 +197,8 @@ U.L.protect          uid=[intf]Stdlib__Mutex.5 loc=File "mutex.mli", line 62, ch
 
 ## 프로그램
 
+현재 재현용 수정본이다. 위 표를 낸 원본과 달리 `recording.finish` 는 취소를 기록한 뒤 `Held_across_suspension` 을 만들지 않고, `exnc` 가 원래 취소와 backtrace 를 다시 던진다. 수정 뒤 실행 결과는 아직 없다.
+
 ```ocaml
 (* Probe for the RFC "a fiber that suspends while holding an OS mutex fails at
    unlock". Not masc code. Runs a Stdlib.Mutex critical section under an
@@ -254,11 +261,17 @@ let recording name f =
     | None -> ()
     | Some stack ->
       Printf.eprintf "--- %s: first suspension recorded at\n%s%!" name stack;
-      raise (Held_across_suspension { mutex = name; body_raised })
+      (match body_raised with
+       | Some (Eio.Cancel.Cancelled _) -> ()
+       | None | Some _ ->
+         raise (Held_across_suspension { mutex = name; body_raised }))
   in
   Effect.Deep.match_with f ()
     { retc = (fun v -> finish None; v)
-    ; exnc = (fun e -> finish (Some e); raise e)
+    ; exnc = (fun e ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        finish (Some e);
+        Printexc.raise_with_backtrace e backtrace)
     ; effc =
         (fun (type c) (eff : c Effect.t) ->
           if not (switches eff) then None

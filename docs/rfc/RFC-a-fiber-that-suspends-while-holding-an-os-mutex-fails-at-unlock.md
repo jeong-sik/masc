@@ -52,8 +52,8 @@ lib·bin·`packages/agent_core/lib` 에는 `Stdlib.Mutex` 를 잡는 자리가 7
 - 함수는 넷이다.
   - `create : name:string -> unit -> t` — 이름은 기록과 예외에 실린다.
   - `protect : t -> (unit -> 'a) -> 'a`
-  - `try_protect : t -> (unit -> 'a) -> 'a option` — 지금 비어 있을 때만 돈다.
-  - `wait : Condition.t -> t -> unit` — `protect` 안에서만 부른다.
+  - `try_protect : t -> (unit -> 'a) -> 'a option` — 지금 비어 있을 때만 돈다. `None` 은 잠금을 잡지 못했다는 뜻이다. 잡은 뒤에는 `protect` 와 같아서, 본문이 멈추면 `Held_across_suspension` 을 던진다.
+  - `wait : Condition.t -> t -> unit` — `protect` 안에서만 부른다. fiber 가 아니라 시스템 스레드를 막고 effect 를 내지 않으므로 D2 가 잡지 못한다.
 - `lock`·`unlock` 은 두지 않는다. `Mutex.lock` 을 쓰는 89곳은 `protect` 로 바꾼다. 잠그는 함수와 푸는 함수가 다른 자리는 그 자리의 설계를 다시 본다.
 - `t` 는 추상 타입이다. `Mutex.create` 를 `Os_mutex.create` 로 바꾸면, 그 mutex 를 아직 `Mutex.protect` 로 잡는 자리는 타입 검사에서 실패한다. 빠진 자리를 컴파일러가 찾는다.
 - 예외를 다시 던질 때 backtrace 를 지킨다. `Stdlib.Mutex.protect` 는 `%reraise` 로 그렇게 한다(`mutex.ml:23-34`).
@@ -68,9 +68,10 @@ lib·bin·`packages/agent_core/lib` 에는 `Stdlib.Mutex` 를 잡는 자리가 7
   - 넘긴 effect 가 값으로 돌아오거나 `Effect.Unhandled` 가 아닌 예외로 돌아오면, 구역에 「멈췄음」을 표시한다.
 - 표시가 생긴 뒤의 effect 는 기록 없이 넘긴다.
 - 본문이 끝나면 `protect` 가 표시를 본다. 표시가 있으면 mutex 를 풀고 이렇게 끝맺는다.
-  - 본문이 값을 돌려줬거나 예외로 끝났으면 `Os_mutex.Held_across_suspension` 을 던진다. 예외는 mutex 이름, 표시를 남긴 effect 의 기록, 본문이 낸 예외를 싣는다.
+  - 본문이 값을 돌려줬거나 예외로 끝났으면 `Os_mutex.Held_across_suspension` 을 던진다. 예외는 mutex 이름, 표시를 남긴 effect 의 기록, 본문이 낸 예외를 싣는다. `body_raised = None` 이면 본문은 정상 종료했다는 뜻이다. 예외로 끝난 본문도 그 전에 부작용을 남겼을 수 있다.
   - 본문이 취소(`Eio.Cancel.Cancelled`)로 끝났으면 그 예외를 바꾸지 않고 다시 던진다. Eio 문서는 취소를 보통 알릴 필요가 없는 일로 본다(`eio__core.mli:559-563`). 기록은 이미 stderr 에 있다.
   - 예외는 본문이 끝난 뒤에 난다. 그래서 본문은 이 예외를 잡을 수 없다(기록 4).
+- `Held_across_suspension` 을 받아 본문을 자동으로 재시도하지 않는다. 파일 쓰기 같은 부작용은 이미 적용됐을 수 있다. 실패한 잠금 구역을 고친다.
 - 호출 스택을 둘 남기는 까닭: effect 를 낸 쪽 스택은 꼬리 호출 때문에 자주 비거나 Eio 함수만 남는다. 시험의 기록 12개 가운데 넷은 비었고, 다섯은 Eio 함수만 담았다.
   - handler 는 `protect` 를 부른 쪽 스택 위에서 돈다. 그 스택에서는 `protect` 와 그 위 호출 줄이 잡힌다(시험 기록의 「다시 돌린 결과」).
   - `protect` 가 꼬리 호출이면 한 단계 위 호출 줄이 잡힌다. 어느 잠금인지는 mutex 이름이 알려 준다.
@@ -276,6 +277,7 @@ D4 를 두는 까닭이 있다. 2026-10-27 의 일괄 수정 나흘 뒤 같은 �
 - 옮긴 층 뒤: 그 층에 쥔 채 멈추는 자리가 남아 있으면, 그 경로를 지나는 요청과 작업이 매번 `Held_across_suspension` 으로 끝난다.
   - stderr 에 mutex 이름, effect 종류, 호출 스택 둘이 남는다.
   - 구역 안에서 한 일은 남는다.
+  - `Held_across_suspension` 은 자동 재시도하지 않는다. 본문이 정상 종료했어도 나는 예외라서, 재시도하면 부작용이 두 번 적용될 수 있다.
 - 마지막 층 뒤: `Stdlib.Mutex` 를 새로 부르는 PR 은 CI 에서 실패한다.
 
 ## 5. 한계와 열린 질문
@@ -313,18 +315,20 @@ D4 를 두는 까닭이 있다. 2026-10-27 의 일괄 수정 나흘 뒤 같은 �
 3. 본문이 예외로 끝나도 표시가 있으면 `Held_across_suspension` 으로 끝나고, 본문 예외와 그 backtrace 를 싣는다.
 4. 실패 뒤 다음 `protect` 가 기다리지 않고 잡는다.
 5. 다른 fiber 가 쥔 `Eio.Mutex` 를 잡으려던 구역, 용량이 1 이상인 빈 `Eio.Stream` 에서 꺼내려던 구역은 실패한다. 그 `Eio.Mutex` 와 `Eio.Stream` 은 그 뒤에도 쓸 수 있다.
-6. `Fiber.first` 의 진 쪽이 구역 안에서 멈춰 있다가 취소되면, `Fiber.first` 는 이긴 쪽 값을 돌려준다. 진 쪽 기록은 stderr 에 있다.
+6. `Fiber.first` 의 진 쪽이 구역 안에서 멈춰 있다가 취소되면, `Fiber.first` 는 이긴 쪽 값을 돌려준다. `Switch.fail` 로 멈춘 구역을 취소하면 switch 는 원래 실패만 전하고 `Held_across_suspension` 을 섞지 않는다. 두 경우 모두 기록은 stderr 에 있고 mutex 는 풀려 있다. 시험 기록의 경우 10 은 취소 보존 갈래를 넣기 전 결과이며 이 규칙의 성공 증거가 아니다.
 7. `Cross_context_mutex.with_lock` 안에서는 1 의 호출이 끝까지 돈다.
 8. 변이 시험: #52362 전 `read_month` 의 잠금을 `Os_mutex` 로 바꾸고 fiber 하나에서 부른다. 겹침 없이, 돌릴 때마다 실패해야 한다.
 9. 시스템 스레드 작업이 같은 mutex 를 잡는 구역을 하위 프로세스에서 돌린다. 시간 제한이 지나면 부모가 하위 프로세스를 끝내고, stderr 에 그 mutex 의 기록이 있는지 본다.
 10. Eio 밖에서는 `Fs_compat.Systhread_host.run` 을 부른 구역이 끝까지 돌고, `Fs_compat.Execution_context.current` 가 `Non_eio` 를 돌려준다.
 11. 1~10 을 macOS 와 Linux CI 에서 posix 백엔드로 돌린다(D6).
-12. 잠금이 많은 masc 경로 하나를 골라 `Stdlib.Mutex` 와 `Os_mutex` 의 시간을 CI 에서 견준다.
+12. Eio 안과 밖의 빈 본문, 잠금이 많은 masc 경로 하나에서 `Stdlib.Mutex` 와 `Os_mutex` 의 시간을 CI 에서 견준다.
 
 ### 6.2 옮기는 층
 
 - 층마다 CI 전체를 통과한다.
 - 실패한 자리를 고친 커밋은 mutex 이름을 적는다.
+- `Held_across_suspension` 을 재시도 래퍼로 감싸지 않는다. 잠금 종류를 바꾸거나 멈추는 일을 잠금 밖으로 뺀다.
+- 옮길 라이브러리마다 `masc.agent_core.os_mutex` 의존성을 순환 없이 더할 수 있는지 확인한다.
 
 ### 6.3 마지막 층
 

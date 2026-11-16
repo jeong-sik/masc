@@ -16,6 +16,7 @@ module Gate = Keeper_librarian_admission_gate
 module Commit = Keeper_librarian_admission_commit
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
+module Exact = Lane_addon_exact
 module Store = Lane_addon_store
 module Runtime = Lane_addon_runtime
 module Protocol = Lane_addon_worker_protocol
@@ -283,7 +284,12 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) ?(one_worker_pool=
           (member "response_format" body);
         let captures=io (fun () ->
           Queue.list_keeper_ids ~keepers_dir |> get
-          |> List.concat_map (fun keeper_name -> originals_for ~keeper_name base_path keepers_dir store)) in
+          |> List.concat_map (fun keeper_name ->
+            let owner=Capture.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name |> get in
+            let inventory=Parts.discover ~store ~owner |> get in
+            let active=List.map Parts.part_id (Parts.runnable inventory) in
+            originals_for ~keeper_name base_path keepers_dir store
+            |> List.filter (fun (_,capture) -> List.mem (Capture.parent_part_id capture) active))) in
         let matches=List.filter (fun (_,capture) ->
           let original=Capture.request capture |> get in
           let schema=match original.Lane_addon_exact.schema with
@@ -1539,6 +1545,305 @@ let test_admission_capture_keeps_original_policy ()=with_fixture (fun ~sw:_ fixt
     refuse "capture-with-old-schema" "Unknown original Librarian execution schema/kind"
       (`Assoc (("schema",`Int 2)::List.remove_assoc "schema" fields))))
 
+let seed_unexecuted_part fixture =
+  with_missing_librarian_fragment "admission_policy" (fun () -> run_worker fixture |> assert_unavailable);
+  io (fun () ->
+    let owner=original_owner fixture.base_path fixture.keepers_dir in
+    let inventory=Parts.discover ~store:fixture.store ~owner |> get in
+    match Parts.runnable inventory with
+    | [part] -> owner,part
+    | [] | _::_::_ -> fail "one unexecuted candidate part expected")
+let retain_unadmitted fixture ~owner ~part ~capacity_wait =
+  memory_action fixture (fun () ->
+  let snapshot=io (fun () -> current fixture.keepers_dir) in
+  let expected_revision=Option.map (fun (snapshot:Current.t) -> snapshot.revision) snapshot in
+  let keeper_id=Keeper_identity.Keeper_id.of_string keeper_name
+    |> Option.to_result ~none:"fixture Keeper identity invalid" |> get in
+  let input:Keeper_librarian.input={keeper_id;keeper_instructions=keeper_name ^ " fixture instructions";
+    turn_ref=Ids.Turn_ref.make ~trace_id:"librarian-original-owner" ~absolute_turn:0;
+    current=Option.map (fun (snapshot:Current.t) -> ({Keeper_librarian.facts=snapshot.facts}:Keeper_librarian.current_selection)) snapshot;
+    historical_task_contexts=[];goal_context=Keeper_librarian.No_task;working_context=Keeper_librarian_context.empty;
+    messages=[];tool_observations=[];counterpart_observations=[]} in
+  let retirement=io (fun () ->
+    match Current.read_retirement_context ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+      ~expected_revision ~current_facts:(match input.current with None -> [] | Some current -> current.facts) with
+    | Current.Retirement_archive (Ok archive) -> Keeper_memory_admission_judgment.Available archive
+    | Retirement_archive (Error detail) -> Keeper_memory_admission_judgment.Unavailable detail
+    | Retirement_source_changed -> fail "fixture Memory changed before capture"
+    | Retirement_source_unavailable detail -> fail detail) in
+  let source_lines=io (fun () -> Keeper_memory_source_current.read_budget_lines
+    ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get) in
+  let preparation=Keeper_librarian_runtime.prepare_admission ~batch:(Parts.batch part)
+    ~retirement ~source_lines input |> get in
+  let request_id=Capture.fresh_request_id owner in
+  let capture=Capture.create ~request_id ~parent_part_id:(Parts.part_id part) ~owner
+    ~destination:(Parts.destination part) ~batch:(Parts.batch part) ~input ~expected_revision
+    ~now:(Time_compat.now ()) ~retirement ~preparation |> get in
+  let record=io (fun () ->
+    let destination=Parts.destination part in
+    Owner.retain ~store:fixture.store ~scope:(Capture.scope owner) ~request_id
+      ~installation_id:destination.installation_id ~package_id:destination.package_id
+      ~tool:destination.tool ~summary:`Null ~request:(Capture.to_json capture) |> owned;
+    Owner.load ~store:fixture.store ~scope:(Capture.scope owner) ~request_id |> owned
+      |> Option.to_result ~none:"fixture original absent" |> get) in
+  let advance record event=io (fun () ->
+    match Owner.advance ~store:fixture.store ~expected:record ~event with
+    | Ok (Owner.Stored record | Already_stored record) -> record
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error)) in
+  let record=if capacity_wait then
+      advance (advance record Progress.Dispatch_intended)
+        (Progress.Admission_declined (`Assoc ["state",`String "capacity_wait"]))
+    else record in
+  record,capture)
+let replacement_source fixture = fixture.declaration true |> String.split_on_char '\n'
+  |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-replacement\"" | line -> line)
+  |> String.concat "\n"
+let replace_admission_configuration fixture ~sw source =
+  let export ()=Keeper_librarian_addon.resolve ~config:fixture.config
+    ~reserved:Keeper_librarian_addon.reserved Keeper_librarian_addon.Admission
+    |> Result.map_error Keeper_librarian_addon.unavailable_to_string |> get in
+  let old=(export ()).Runtime.instance_id in
+  let changed=Eio.Condition.create () in
+  let stop=Runtime.subscribe_owner_events ~config:fixture.config ~package_id:Capture.package_id
+    (fun (Configuration_observed | Export_inventory_changed | Exact_result_delivered _) ->
+      Eio.Condition.broadcast changed) in
+  Fun.protect ~finally:stop (fun () ->
+    Runtime.start_configuration_service ~config:fixture.config ~sw ~clock:fixture.clock;
+    io (fun () -> write fixture.source source);reconcile fixture;
+    Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+      Eio.Condition.loop_no_mutex changed (fun () ->
+        let snapshot=Runtime.tool_export_snapshot ~config:fixture.config
+          ~reserved:Keeper_librarian_addon.reserved ~access:Lane_addon_sources.Operator_configuration in
+        List.find_opt (fun (candidate:Runtime.tool_export) ->
+          candidate.tool.name=Capture.tool && candidate.instance_id<>old) snapshot.exports)) |> ignore;
+    reconcile fixture)
+let test_unexecuted_part_follows_replacement ()=with_fixture (fun ~sw fixture ->
+  let owner,part=seed_unexecuted_part fixture in
+  let queued=io (fun () -> Queue.batch_to_json (pending fixture.keepers_dir |> Option.get)) in
+  replace_admission_configuration fixture ~sw (replacement_source fixture);
+  with_missing_librarian_fragment "admission_policy" (fun () ->
+    run_worker fixture |> assert_unavailable;
+    run_worker fixture |> assert_unavailable);
+  check int "a part without an execution was never sent" 0 (F.post_count fixture.server);
+  check int "recovery reuses the published replacement root" 2
+    (io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Parts.scope owner) |> owned |> List.length));
+  check int "part-only replacement passes deployment preflight" 0 (List.length (closure_preflight fixture).refusals);
+  check json "replacement itself consumes no pending input" queued
+    (io (fun () -> Queue.batch_to_json (pending fixture.keepers_dir |> Option.get)));
+  drive_until fixture settled |> assert_settled;
+  check int "one new request judges the complete unexecuted batch" 1 (F.post_count fixture.server);
+  let inventory=io (fun () -> Parts.discover ~store:fixture.store ~owner |> get) in
+  check bool "the stored predecessor part cannot run again" false
+    (List.exists (fun active -> Parts.part_id active=Parts.part_id part) (Parts.runnable inventory));
+  check (list string) "new judgment commits both original candidates" ["Durable A";"Durable B"]
+    (io (fun () -> claims fixture.keepers_dir));
+  check int "the replacement forest passes preflight" 0 (List.length (closure_preflight fixture).refusals);
+  ignore (run_worker fixture);
+  check int "all predecessor parts close only after actual receipt and ACK" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length)))
+let test_lost_pending_candidate_is_refused_by_preflight_and_runtime ()=with_fixture (fun ~sw fixture ->
+  let owner,_=seed_unexecuted_part fixture in
+  replace_admission_configuration fixture ~sw (replacement_source fixture);
+  with_missing_librarian_fragment "admission_policy" (fun () -> run_worker fixture |> assert_unavailable);
+  let inventory=io (fun () -> Parts.discover ~store:fixture.store ~owner |> get) in
+  let root=match Parts.roots inventory with [root] -> root
+    | [] | _::_::_ -> fail "one replacement root expected" in
+  let left=match Queue.split (Parts.batch root) with Some (left,_) -> left
+    | None -> fail "two pending candidates expected" in
+  let rec ordered (json:Yojson.Safe.t) : Yojson.Safe.t = match json with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,ordered value) fields
+        |> List.sort (fun (a,_) (b,_) -> String.compare a b))
+    | `List values -> `List (List.map ordered values)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json -> json in
+  let batch=Queue.batch_to_json left in
+  let digest=Store.digest (Yojson.Safe.to_string (ordered batch)) in
+  let store=Store.create ~root:(Filename.concat fixture.base_path "lost-pending-candidate") in
+  io (fun () ->
+    let records=Owner.load_scope ~store:fixture.store ~scope:(Parts.scope owner) |> owned in
+    List.iter (fun (record:Owner.retained) ->
+      let request=if record.request_id<>Parts.part_id root then record.request else
+        let ids=member "candidate_ids" record.request |> Yojson.Safe.Util.to_list |> List.take 1 in
+        let through=List.fold_left (fun n (row:Queue.candidate) -> max n row.sequence) 0 (Queue.candidates left) in
+        record.request |> with_field "batch" batch |> with_field "candidate_ids" (`List ids)
+        |> with_field "original_through" (`Int through)
+        |> with_field "supersession" (member "supersession" record.request
+            |> with_field "pending_digest" (`String digest)) in
+      Owner.retain ~store ~scope:record.scope ~request_id:record.request_id
+        ~installation_id:record.installation_id ~package_id:record.package_id ~tool:record.tool
+        ~summary:record.summary ~request |> owned) records;
+    let read_scope ~scope=Owner.load_scope ~store ~scope |> Result.map_error Owner.error_to_string in
+    let expected=Error "Original uncommitted frontier gaps were lost from the replacement input" in
+    check (result unit string) "the pure preflight inventory refuses a lost pending candidate" expected
+      (Parts.payload_inventory ~read_scope ~owner |> Result.map (fun _ -> ()));
+    check (result unit string) "runtime discovery refuses the same otherwise canonical root" expected
+      (Parts.discover ~store ~owner |> Result.map (fun _ -> ())));
+  check int "neither validation path calls a model" 0 (F.post_count fixture.server);
+  check int "the actual owner still retains both pending inputs" 2
+    (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
+let test_unexecuted_absence_requires_the_complete_valid_scope ()=with_fixture (fun ~sw fixture ->
+  let owner,part=seed_unexecuted_part fixture in
+  let destination=Parts.destination part in
+  io (fun () -> Owner.retain ~store:fixture.store ~scope:(Capture.scope owner)
+    ~request_id:(Capture.fresh_request_id owner) ~installation_id:destination.installation_id
+    ~package_id:destination.package_id ~tool:destination.tool ~summary:`Null
+    ~request:(`Assoc ["unreadable_original",`Bool true]) |> owned);
+  replace_admission_configuration fixture ~sw (replacement_source fixture);
+  run_worker fixture |> assert_unavailable;
+  check int "a malformed original never becomes positive execution absence" 0 (F.post_count fixture.server);
+  check int "malformed execution evidence creates no replacement root" 1
+    (io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Parts.scope owner) |> owned |> List.length));
+  check int "malformed original preserves both pending inputs" 2
+    (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
+let test_comment_only_part_capture_keeps_semantic_identity ()=with_fixture (fun ~sw:_ fixture ->
+  let owner,part=seed_unexecuted_part fixture in
+  io (fun () -> write fixture.source ("# source bytes changed\n" ^ fixture.declaration true));
+  reconcile fixture;
+  fixture.set_response (fun capture -> `OK,F.openai_response (answer (fun _ -> false) capture));
+  drive_original_terminal fixture;
+  let record,capture=match observed_originals fixture with [original] -> original
+    | [] | _::_::_ -> fail "comment-only capture lost its original" in
+  check bool "source provenance records the changed bytes" true
+    ((Capture.destination capture).source_revision<>(Parts.destination part).source_revision);
+  check string "a comment preserves semantic configuration"
+    (Parts.destination part).configuration_revision (Capture.destination capture).configuration_revision;
+  check bool "host authorization reached the actual provider" true (terminal (record,capture));
+  let inventory=io (fun () -> Parts.discover ~store:fixture.store ~owner |> get) in
+  check int "no replacement root is minted for comments" 1 (List.length (Parts.roots inventory));
+  check int "comment-only provenance passes deployment preflight" 0 (List.length (closure_preflight fixture).refusals);
+  ignore (run_worker fixture);
+  check int "an unchanged deferred wake sends no additional request" 1 (F.post_count fixture.server))
+let test_unadmitted_admission_ending_survives_rollback capacity_wait ()=with_fixture (fun ~sw fixture ->
+  let owner,part=seed_unexecuted_part fixture in
+  let original,_capture=retain_unadmitted fixture ~owner ~part ~capacity_wait in
+  let queued=io (fun () -> Fs_compat.load_file (Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)) in
+  replace_admission_configuration fixture ~sw (replacement_source fixture);
+  ignore (run_worker fixture);
+  let ended=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> owned |> Option.to_result ~none:"ended original vanished" |> get) in
+  check bool "the original ends before dispatch" true
+    (match Progress.phase ended.progress with Rejected {stage=Before_dispatch;_} -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected {stage=Execution;_} | Subdividing _ | Subdivided _ -> false);
+  check int "ending sends no provider request" 0 (F.post_count fixture.server);
+  check string "ending leaves the exact queue bytes intact" queued
+    (io (fun () -> Fs_compat.load_file (Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)));
+  check int "strict before-dispatch ending passes preflight" 0 (List.length (closure_preflight fixture).refusals);
+  replace_admission_configuration fixture ~sw (fixture.declaration true);
+  drive_until fixture settled |> assert_settled;
+  check int "rollback permits one new ID and never revives the old request" 1 (F.post_count fixture.server);
+  check bool "only a new request judged the original pending candidates" true
+    (List.for_all (fun ((record:Owner.retained),_) -> record.request_id<>original.request_id
+      || Progress.to_json record.progress=Progress.to_json ended.progress) (observed_originals fixture));
+  check int "both candidates have actual ACKs" 0 (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
+let test_admitted_unstarted_host_ending_survives_rollback ()=with_fixture (fun ~sw fixture ->
+  let owner,part=seed_unexecuted_part fixture in
+  let record,capture=retain_unadmitted fixture ~owner ~part ~capacity_wait:false in
+  io (fun () -> match Owner.advance ~store:fixture.store ~expected:record ~event:Progress.Dispatch_intended with
+    | Ok (Owner.Stored _ | Already_stored _) -> ()
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error));
+  replace_admission_configuration fixture ~sw (replacement_source fixture);
+  let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+    |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+  let exact=Capture.request capture |> get in
+  (match memory_action fixture (fun () -> Exact.run ~store:fixture.store ~declaration_id:"librarian"
+      ~package ~runner:(Server_lane_addon_exact.runner ~base_path:fixture.base_path)
+      ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path) exact) |> get with
+   | Exact.Final (Not_allowed _) -> ()
+   | Final _ | Not_final _ -> fail "an unstarted admitted request must retain its declaration ending");
+  check int "a declaration guard never enters the provider" 0 (F.post_count fixture.server);
+  replace_admission_configuration fixture ~sw (fixture.declaration true);
+  ignore (run_worker fixture);
+  let ended=io (fun () -> Owner.load ~store:fixture.store ~scope:record.scope ~request_id:record.request_id
+    |> owned |> Option.to_result ~none:"host-ended original disappeared" |> get) in
+  check bool "the consumer confirms the retained host cause after rollback" true
+    (io (fun () -> Capture.declaration_ended ~store:fixture.store capture ended |> get));
+  check int "host ending and consumer retention consume no input" 2
+    (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+  check int "host-ended forest passes deployment preflight" 0 (List.length (closure_preflight fixture).refusals);
+  drive_until fixture settled |> assert_settled;
+  check int "only the fresh ID calls the provider" 1 (F.post_count fixture.server))
+let test_deferred_and_ended_siblings_rejudge_the_full_batch_after_rollback ()=with_fixture (fun ~sw fixture ->
+  fixture.delivery_loss:=true;
+  fixture.set_response (fun _ -> `Request_entity_too_large,refusal "invalid_request_error");
+  let before= !(fixture.deliveries) in
+  ignore (run_worker fixture);await_delivery fixture ~after:before;
+  let root_record,root_capture=match observed_originals fixture with [original] -> original
+    | [] | _::_::_ -> fail "one actual capacity-refused root expected" in
+  let final=match (latest_execution fixture root_capture).Exact.outcome with
+    | Exact.Call_ended (Input_refused _ as final) -> Exact.Call_final final
+    | Call_ended (Answered _ | Invalid_output _ | Output_limit_reached _) | Call_refused _ ->
+      fail "the partition requires actual host input-capacity evidence" in
+  io (fun () -> match Owner.advance ~store:fixture.store ~expected:root_record
+      ~event:(Progress.Refused {stage=Execution;evidence=Exact.final_to_json final}) with
+    | Ok (Owner.Stored _ | Already_stored _) -> ()
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error));
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let inventory=io (fun () -> Parts.discover ~store:fixture.store ~owner |> get) in
+  let root=Parts.find inventory ~part_id:(Capture.parent_part_id root_capture) |> get in
+  let evidence=io (fun () -> Parts.execution_size_evidence ~store:fixture.store ~owner ~inventory
+    ~parent:root ~execution_id:root_record.request_id |> get) in
+  let left,right=memory_action fixture (fun () ->
+    let export=Keeper_librarian_addon.resolve ~config:fixture.config ~reserved:Keeper_librarian_addon.reserved
+      Keeper_librarian_addon.Admission |> Result.map_error Keeper_librarian_addon.unavailable_to_string |> get in
+    Runtime.with_tool_request_destination ~config:fixture.config ~reserved:Keeper_librarian_addon.reserved ~export
+      ~access:Lane_addon_sources.Operator_configuration ~publish:(fun actual ->
+        let actual=Lane_addon_captured_destination.of_runtime actual in
+        io (fun () -> Parts.partition ~store:fixture.store ~owner ~parent:root ~evidence
+          ~partition_id:(Capture.fresh_request_id owner) ~left_id:(Capture.fresh_request_id owner)
+          ~right_id:(Capture.fresh_request_id owner)
+          ~admit:(fun ~destination ~publish ->
+            if Lane_addon_captured_destination.same_semantic actual destination then publish ()
+            else Error "fixture destination changed"))
+        |> Result.map_error (fun detail -> Runtime.Unavailable detail))
+    |> Result.map_error (fun error -> Lane_addon_submit_once.error_of_runtime error
+      |> Lane_addon_submit_once.error_to_string) |> get) in
+  fixture.set_response (fun capture -> `OK,F.openai_response (answer (fun _ -> false) capture));
+  let before= !(fixture.deliveries) in
+  ignore (run_worker fixture);await_delivery fixture ~after:before;
+  let left_record,left_capture=List.find (fun (_,capture) -> Capture.parent_part_id capture=Parts.part_id left)
+    (observed_originals fixture) in
+  let final=match (latest_execution fixture left_capture).Exact.outcome with
+    | Exact.Call_ended (Answered _ as final) -> Exact.Call_final final
+    | Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Call_refused _ ->
+      fail "the left original must have a real Deferred answer" in
+  ignore (memory_action fixture (fun () -> retain_judgment fixture left_record final));
+  let right_record,_=retain_unadmitted fixture ~owner ~part:right ~capacity_wait:false in
+  replace_admission_configuration fixture ~sw (replacement_source fixture);
+  ignore (run_worker fixture);
+  check int "Deferred and ending preserve the entire pending batch" 2
+    (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+  check int "the ended right original never calls the provider" 2 (F.post_count fixture.server);
+  replace_admission_configuration fixture ~sw (fixture.declaration true);
+  fixture.delivery_loss:=false;
+  let selected=ref [] in
+  fixture.set_response (fun capture ->
+    selected:=List.map (fun (row:Queue.candidate) -> row.request_id) (Queue.candidates (Capture.batch capture)):: !selected;
+    `OK,F.openai_response (answer (fun _ -> true) capture));
+  drive_until fixture settled |> assert_settled;
+  check (list (list string)) "the approved whole pending batch is reconsidered once" [["a";"b"]] (List.rev !selected);
+  check int "root capacity, old Deferred, and the new whole answer are the only calls" 3 (F.post_count fixture.server);
+  check bool "the old ended ID is never dispatched again" true
+    (List.for_all (fun ((record:Owner.retained),capture) -> record.request_id<>right_record.request_id
+      || io (fun () -> Capture.declaration_ended ~store:fixture.store capture record |> get)) (observed_originals fixture));
+  check int "historical witnesses and the new root pass preflight" 0 (List.length (closure_preflight fixture).refusals);
+  ignore (run_worker fixture);
+  check int "the fully committed and acknowledged forest closes together" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length)))
+let test_cut_admission_does_not_borrow_declaration_replacement ()=with_fixture (fun ~sw fixture ->
+  with_cut_original fixture ~before_cut:(fun _ -> None) (fun record ->
+    drive_original_terminal fixture;
+    let posts=F.post_count fixture.server in
+    replace_admission_configuration fixture ~sw (replacement_source fixture);
+    (match run_worker fixture with Worker.Pending _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Awaiting_worker _ | Addon_unattached _ | Unavailable _ ->
+       fail "unknown admission Cut must retain its original pending frontier");
+    check int "history Cut policy does not authorize admission replay" posts (F.post_count fixture.server);
+    check bool "unknown admission original remains retained" true (listed fixture record);
+    check int "unknown admission consumes no candidates" 2 (io (fun () -> List.length (pending_rows fixture.keepers_dir)))))
+
 let test_missing_admission_policy_refuses_before_capture ()=with_fixture (fun ~sw:_ fixture ->
   with_missing_librarian_fragment "admission_policy" (fun () ->
     let posts=F.post_count fixture.server in
@@ -2493,6 +2798,23 @@ let () =
   test_case "retirement policy is required only for its actual suffix" `Quick test_retirement_policy_is_required_only_for_its_suffix;
   test_case "used retirement policy stays frozen across current policy changes" `Quick test_used_retirement_policy_survives_current_policy_changes;
   test_case "missing admission policy refuses before capture or dispatch" `Quick test_missing_admission_policy_refuses_before_capture;
+  test_case "unexecuted parts recover one whole replacement root" `Quick test_unexecuted_part_follows_replacement;
+  test_case "unexecuted absence requires a complete valid execution inventory" `Quick
+    test_unexecuted_absence_requires_the_complete_valid_scope;
+  test_case "preflight and runtime both refuse a replacement that loses pending input" `Quick
+    test_lost_pending_candidate_is_refused_by_preflight_and_runtime;
+  test_case "comment-only source edits preserve original semantic ownership" `Quick
+    test_comment_only_part_capture_keeps_semantic_identity;
+  test_case "captured admission endings survive rollback without old dispatch" `Quick
+    (test_unadmitted_admission_ending_survives_rollback false);
+  test_case "capacity-wait admission endings survive rollback without old dispatch" `Quick
+    (test_unadmitted_admission_ending_survives_rollback true);
+  test_case "admitted unstarted host declaration endings survive rollback" `Quick
+    test_admitted_unstarted_host_ending_survives_rollback;
+  test_case "Deferred and ended siblings rejudge their full pending batch after rollback" `Quick
+    test_deferred_and_ended_siblings_rejudge_the_full_batch_after_rollback;
+  test_case "history Cut permission never authorizes admission replay" `Quick
+    test_cut_admission_does_not_borrow_declaration_replacement;
   test_case "missing absorb policy refuses before root publication" `Quick test_missing_absorb_policy_refuses_before_preparation;
   test_case "off and excluded gates capture and replay without unused policy" `Quick test_unused_absorb_policy_is_captured_and_replayed;
   test_case "enabled empty absorption captures and replays without unused policy" `Quick test_enabled_empty_absorptions_need_no_guidance;

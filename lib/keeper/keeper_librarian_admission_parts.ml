@@ -65,6 +65,7 @@ let candidate_of_json json =
 
 type terminal_source =
   | Original_execution of {part_id:string;execution_id:string}
+  | Unexecuted_part of string
 type memory_basis = {revision:int option;snapshot_sha256:string option;facts:Keeper_memory_os_types.fact list}
 type terminal_witness = {reference:terminal_source;evidence:Yojson.Safe.t}
 type supersession_proof = {predecessors:string list;frontier:terminal_witness list;
@@ -72,6 +73,7 @@ type supersession_proof = {predecessors:string list;frontier:terminal_witness li
 let terminal_json (source:terminal_source) : Yojson.Safe.t = match source with
   | Original_execution {part_id;execution_id} -> `Assoc ["kind",`String "execution";
       "part_id",`String part_id;"execution_id",`String execution_id]
+  | Unexecuted_part part_id -> `Assoc ["kind",`String "unexecuted_part";"part_id",`String part_id]
 let terminal_of_json json =
   let* header=match json with `Assoc fields -> Ok fields | _ -> Error "Terminal reference is not an object" in
   let* kind=match List.assoc_opt "kind" header with Some json -> text json | None -> Error "Terminal reference kind missing" in
@@ -79,8 +81,10 @@ let terminal_of_json json =
   | "execution" -> let* f=fields ["kind";"part_id";"execution_id"] json in
     let* part_id=text (value "part_id" f) in let+ execution_id=text (value "execution_id" f) in
     Original_execution {part_id;execution_id}
+  | "unexecuted_part" -> let* f=fields ["kind";"part_id"] json in
+    let+ part_id=text (value "part_id" f) in Unexecuted_part part_id
   | _ -> Error "Unknown terminal frontier reference"
-let terminal_part = function Original_execution {part_id;_} -> part_id
+let terminal_part = function Original_execution {part_id;_} | Unexecuted_part part_id -> part_id
 let facts_json facts = `List (List.map Keeper_memory_os_types.fact_to_json facts)
 let memory_json (memory:memory_basis) : Yojson.Safe.t = `Assoc [
   "revision",optional (fun n -> `Int n) memory.revision;
@@ -227,16 +231,34 @@ let declaration_id (destination:Capture.destination) =
    leaves (Keeper_librarian_store_preflight). *)
 type execution_reads = {
   load : request_id:string -> (Owner.retained option, string) result;
+  load_scope : unit -> (Owner.retained list, string) result;
   read_latest : declaration_id:string -> schema:Yojson.Safe.t -> Exact.request ->
     (Exact.latest_original_execution, string) result;
   confirm : Capture.t -> Exact.final -> (unit, string) result;
+  declaration_ended : Capture.t -> Owner.retained -> (bool, string) result;
 }
 let store_reads ~store ~owner = {
   load=(fun ~request_id -> Owner.load ~store ~scope:(Capture.scope owner) ~request_id |> owner_error);
+  load_scope=(fun () -> Owner.load_scope ~store ~scope:(Capture.scope owner) |> owner_error);
   read_latest=(fun ~declaration_id ~schema request ->
     Exact.read_latest_original_execution ~store ~declaration_id ~schema request);
   confirm=Capture.confirm_final ~store;
+  declaration_ended=Capture.declaration_ended ~store;
 }
+let captures_of_records ~owner inventory records =
+  let* captures=List.fold_left (fun result record ->
+    let* captures=result in
+    let* capture=Capture.restore ~owner ~load_parent:(load_parent inventory) record in
+    let* parent=find inventory ~part_id:(Capture.parent_part_id capture) in
+    let+ ()=require (Destination.same_semantic (Capture.destination capture) parent.destination)
+      "Original execution destination differs from its part" in capture::captures)
+    (Ok []) records in
+  let parents=List.map Capture.parent_part_id captures in
+  let+ ()=require (List.length parents=List.length (List.sort_uniq String.compare parents))
+    "Multiple original executions claim the same immutable candidate part" in captures
+let execution_captures ~(reads:execution_reads) ~owner inventory =
+  let* records=reads.load_scope () in
+  captures_of_records ~owner inventory records
 let original_capture ~(reads:execution_reads) ~owner ~inventory ~(parent:part) execution_id =
   let* current=find inventory ~part_id:parent.id in
   let* ()=equal (to_json current) (to_json parent) "Original size-evidence parent changed" in
@@ -245,7 +267,7 @@ let original_capture ~(reads:execution_reads) ~owner ~inventory ~(parent:part) e
   let* original=match original with Some original -> Ok original | None -> Error "Original parent execution is missing" in
   let* capture=Capture.restore ~owner ~load_parent:(load_parent inventory) original in
   let* ()=require (Capture.parent_part_id capture=parent.id) "Size proof belongs to another candidate part" in
-  let* ()=equal (Destination.to_json (Capture.destination capture)) (Destination.to_json parent.destination) "Size proof destination differs" in
+  let* ()=require (Destination.same_semantic (Capture.destination capture) parent.destination) "Size proof destination differs" in
   let* request=Capture.request capture in
   let* schema=match request.Exact.schema with Some schema -> Ok schema | None -> Error "Original Librarian execution schema missing" in
   let+ declaration_id=declaration_id (Capture.destination capture) in
@@ -415,31 +437,43 @@ let answered_original ~(reads:execution_reads) ({record;capture;latest;_}:observ
     record,capture,proposal,authority
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
   | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Original frontier requires a completed semantic answer"
+type frontier_basis = Captured_context of Capture.t | Ended_declaration of Capture.t
+  | Part_without_execution of part
 let terminal_witness ~reads ~owner ~inventory ~committed reference =
   let id=terminal_part reference in
   let* parent=find inventory ~part_id:id in
   let* ()=eligible inventory [] parent in
   let singleton=List.length (Queue.candidates parent.original_batch)=1 in
-  let* capture,kind,authority=match reference with
+  let* basis,kind,authority=match reference with
+    | Unexecuted_part _ ->
+      let* captures=execution_captures ~reads ~owner inventory in
+      let+ ()=require (not (List.exists (fun capture -> Capture.parent_part_id capture=parent.id) captures))
+        "Unexecuted frontier part has an original execution" in
+      Part_without_execution parent,"unexecuted_part",`Null
     | Original_execution {execution_id;_} ->
       let* observed=observe_execution ~reads ~owner ~inventory ~parent execution_id in
-      (match observed.latest with
+      let* ended=reads.declaration_ended observed.capture observed.record in
+      if ended then Ok (Ended_declaration observed.capture,"declaration_ended",
+        `Assoc ["request_id",`String observed.record.request_id;
+          "request_digest",`String observed.record.request_digest;
+          "progress",Progress.to_json observed.record.progress])
+      else (match observed.latest with
        | Exact.Completed_latest {execution={outcome=Exact.Call_ended (Input_refused _);_};_} ->
          let* ()=require singleton "A divisible size frontier must retain its original two-child partition" in
          let+ evidence=size_evidence_of ~reads ~parent (Exact_source execution_id) observed in
-         observed.capture,"singleton_capacity",evidence.proof
+         Captured_context observed.capture,"singleton_capacity",evidence.proof
        | Completed_latest {execution={outcome=Call_ended (Answered _ | Invalid_output _ | Output_limit_reached _)
            | Call_refused _;_};_} | No_completed_latest ->
          let* record,capture,proposal,authority=answered_original ~reads observed in
          match proposal with
-         | Keeper_librarian_runtime.Deferred -> Ok (capture,"semantic_deferred",authority)
+         | Keeper_librarian_runtime.Deferred -> Ok (Captured_context capture,"semantic_deferred",authority)
          | Accepted accepted ->
            (match Progress.phase record.progress with
             | Progress.Finished commit ->
               let* ()=require (accepted.explicit_candidate_ids<>[] &&
                 List.for_all (fun id -> List.mem id committed) accepted.explicit_candidate_ids)
                 "Finished original admission has no exact committed candidate proof" in
-              Ok (capture,"committed_frontier",`Assoc ["answer",authority;"commit",commit_json commit;
+              Ok (Captured_context capture,"committed_frontier",`Assoc ["answer",authority;"commit",commit_json commit;
                 "accepted_candidates",`List (List.map candidate_json accepted.explicit_candidate_ids)])
             | Conflicted (commit,conflict) ->
               (* The locked plan refused a destination of this answer before any
@@ -450,16 +484,20 @@ let terminal_witness ~reads ~owner ~inventory ~committed reference =
                 "Conflicted original admission names a Memory its answer does not write into" in
               let* ()=require (not (List.exists (fun id -> List.mem id committed) accepted.explicit_candidate_ids))
                 "Conflicted original admission has a committed candidate proof" in
-              Ok (capture,"destination_absent_frontier",`Assoc ["answer",authority;"commit",commit_json commit;
+              Ok (Captured_context capture,"destination_absent_frontier",`Assoc ["answer",authority;"commit",commit_json commit;
                 "conflict",conflict])
             | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
             | Rejected _ | Subdividing _ | Subdivided _ ->
               Error "Accepted original work has not completed its Memory transaction")) in
-  let evidence=`Assoc ["kind",`String kind;
-    "capture_digest",`String (Lane_addon_store.digest (Yojson.Safe.to_string (ordered (Capture.to_json capture))));
-    "original_revision",optional (fun n -> `Int n) (Capture.expected_revision capture);
-    "original_facts",facts_json (original_facts capture);"authority",authority] in
-  Ok ({reference;evidence},capture)
+  let identity=match basis with
+    | Part_without_execution part -> ["part_digest",`String
+        (Lane_addon_store.digest (Yojson.Safe.to_string (ordered (to_json part))))]
+    | Captured_context capture | Ended_declaration capture -> [
+        "capture_digest",`String (Lane_addon_store.digest (Yojson.Safe.to_string (ordered (Capture.to_json capture))));
+        "original_revision",optional (fun n -> `Int n) (Capture.expected_revision capture);
+        "original_facts",facts_json (original_facts capture)] in
+  let evidence=`Assoc (["kind",`String kind] @ identity @ ["authority",authority]) in
+  Ok ({reference;evidence},basis)
 let root_candidates root_parts = List.concat_map (fun (part:part) -> Queue.candidate_ids part.original_batch) root_parts
 let compare_explicit_candidate_id
     (a : Current.explicit_candidate_id)
@@ -496,27 +534,46 @@ let check_pending owner expected =
   | Some pending -> equal (Queue.batch_to_json pending) (Queue.batch_to_json expected) "Current full pending batch differs from captured replacement"
 let frontier_ids frontier = List.map (fun (witness:terminal_witness) -> terminal_part witness.reference) frontier
 type reconsideration = Changed_frontier | Unchanged_frontier
-(* The capture behind one retained frontier witness, once the witness its
-   execution shows now equals the retained one. *)
-let witnessed_capture ~reads ~owner ~inventory ~committed (witness:terminal_witness) =
-  let* actual,capture=terminal_witness ~reads ~owner ~inventory ~committed witness.reference in
+(* An ending or complete original execution absence stays bound to the same
+   immutable part when a later root owns its input. *)
+let witnessed_basis ~reads ~owner ~inventory ~committed (witness:terminal_witness) =
+  let* actual,basis=terminal_witness ~reads ~owner ~inventory ~committed witness.reference in
   let+ ()=equal actual.evidence witness.evidence "Original terminal frontier evidence changed" in
-  capture
-let check_replacement ~store ~owner ~inventory (proof:supersession_proof) =
+  basis
+let reconsideration ~destination ~inventory ~(proof:supersession_proof) ~new_tail bases =
+  let changed_declaration=List.exists (function
+    | Ended_declaration _ -> true
+    | Captured_context capture -> Destination.relation ~captured:(Capture.destination capture)
+        ~current:destination=Destination.Replaced
+    | Part_without_execution part -> Destination.relation ~captured:part.destination
+        ~current:destination=Destination.Replaced) bases in
+  let* eligible=traverse (fun (witness,basis) ->
+    let* part=find inventory ~part_id:(terminal_part witness.reference) in
+    let has_gap=List.exists (fun id -> not (List.mem id proof.committed)) (Queue.candidate_ids part.original_batch) in
+    match basis with
+    | Part_without_execution _ -> Ok changed_declaration
+    | Ended_declaration _ -> Ok true
+    | Captured_context capture ->
+      let+ unchanged=same (facts_json proof.memory.facts) (facts_json (original_facts capture)) in
+      not has_gap || changed_declaration || new_tail || not unchanged)
+    (List.combine proof.frontier bases) in
+  Ok (if List.for_all Fun.id eligible then Changed_frontier else Unchanged_frontier)
+let replacement_frontier ~inventory (proof:supersession_proof) =
   let* predecessors=traverse (fun id -> let* part=find inventory ~part_id:id in
     let+ ()=require (part.predecessor=None) "Frontier predecessor is not an original root" in part) proof.predecessors in
   let predecessors=List.sort root_order predecessors in
   let* leaves=leaves_of_roots inventory predecessors in
   let expected_ids=List.map (fun (part:part) -> part.id) leaves in
-  let* ()=require (frontier_ids proof.frontier=expected_ids) "Replacement does not retain the entire original ordered frontier" in
+  let+ ()=require (frontier_ids proof.frontier=expected_ids) "Replacement does not retain the entire original ordered frontier" in
+  predecessors
+let replacement_input ~inventory (proof:supersession_proof) =
+  let* predecessors=replacement_frontier ~inventory proof in
   let ids=root_candidates predecessors in
   let* ()=require (List.for_all (fun id -> List.mem id ids) proof.committed &&
     List.length proof.committed=List.length (List.sort_uniq compare_explicit_candidate_id proof.committed))
     "Replacement has unrelated or duplicate committed candidate identities" in
   let* ()=require (proof.committed=List.filter (fun id -> List.mem id proof.committed) ids)
     "Original committed frontier identities are out of order" in
-  let* actual_committed=read_committed ~owner proof.committed in
-  let* ()=require (actual_committed=proof.committed) "Original committed frontier proof is no longer authoritative" in
   let new_ids=Queue.candidate_ids proof.pending in
   let* ()=require (not (List.exists (fun id -> List.mem id proof.committed) new_ids))
     "Committed old input is still present in the replacement pending batch; finish ACK first" in
@@ -527,18 +584,18 @@ let check_replacement ~store ~owner ~inventory (proof:supersession_proof) =
   let* ()=require (List.for_all (fun (id:Current.explicit_candidate_id) -> id.sequence>through &&
     not (List.exists (candidate_collision id) ids)) fresh) "Replacement introduces reused or non-tail input" in
   let new_tail=fresh<>[] in
-  let reads=store_reads ~store ~owner in
-  let* eligible=traverse (fun (witness:terminal_witness) ->
-    let* capture=witnessed_capture ~reads ~owner ~inventory ~committed:proof.committed witness in
-    let* part=find inventory ~part_id:(terminal_part witness.reference) in
-    let has_gap=List.exists (fun id -> not (List.mem id proof.committed)) (Queue.candidate_ids part.original_batch) in
-    let+ unchanged=same (facts_json proof.memory.facts) (facts_json (original_facts capture)) in
-    not has_gap || new_tail || not unchanged) proof.frontier in
   let+ ()=require (new_tail || List.exists (fun id -> List.mem id new_ids) ids)
     "Replacement contains no pending original gap or actual new tail" in
-  if List.for_all Fun.id eligible then Changed_frontier else Unchanged_frontier
-let validate_replacement ~store ~owner ~inventory proof =
-  let* result=check_replacement ~store ~owner ~inventory proof in
+  new_tail
+let check_replacement ~store ~owner ~inventory ~destination (proof:supersession_proof) =
+  let* new_tail=replacement_input ~inventory proof in
+  let* actual_committed=read_committed ~owner proof.committed in
+  let* ()=require (actual_committed=proof.committed) "Original committed frontier proof is no longer authoritative" in
+  let reads=store_reads ~store ~owner in
+  let* bases=traverse (witnessed_basis ~reads ~owner ~inventory ~committed:proof.committed) proof.frontier in
+  reconsideration ~destination ~inventory ~proof ~new_tail bases
+let validate_replacement ~store ~owner ~inventory ~destination proof =
+  let* result=check_replacement ~store ~owner ~inventory ~destination proof in
   match result with
   | Changed_frontier -> Ok ()
   | Unchanged_frontier -> Error "Unchanged terminal input and Memory context cannot mint a new root"
@@ -569,10 +626,7 @@ let validate_root_lineage inventory =
           "Overlapping roots have no original terminal supersession lineage") rest in pairs rest in
   pairs lineage
 let validate_execution_records ~owner inventory records =
-  let* captures=traverse (Capture.restore ~owner ~load_parent:(load_parent inventory)) records in
-  let parents=List.map Capture.parent_part_id captures in
-  require (List.length parents=List.length (List.sort_uniq String.compare parents))
-    "Multiple original executions claim the same immutable candidate part"
+  let+ _=captures_of_records ~owner inventory records in ()
 let validate_forest_structure inventory =
   let* ()=List.map (fun (partition:partition_record) ->
     let* parent=find inventory ~part_id:partition.parent_id in
@@ -599,6 +653,9 @@ let validate_forest_structure inventory =
   let all_ids=List.map (fun (p:part) -> p.id) inventory.parts @ List.map (fun (p:partition_record) -> p.id) inventory.partitions in
   let* ()=require (unique all_ids) "Original part and transaction identities collide" in
   let* ()=validate_root_lineage inventory in
+  let* _=traverse (fun (part:part) -> match part.supersession with
+    | None -> Ok ()
+    | Some proof -> let+ _=replacement_input ~inventory proof in ()) (all_roots inventory) in
   let rec root_ids seen = function
     | [] -> Ok ()
     | (part:part)::rest ->
@@ -635,7 +692,11 @@ let check_frontier_evidence ~reads ~owner ~inventory record =
   | Some _,_ | None,None -> Ok ()
   | None,Some proof ->
     let* inventory=inventory () in
-    let+ _=traverse (witnessed_capture ~reads ~owner ~inventory ~committed:proof.committed) proof.frontier in ()
+    let* bases=traverse (witnessed_basis ~reads ~owner ~inventory ~committed:proof.committed) proof.frontier in
+    let* new_tail=replacement_input ~inventory proof in
+    let* qualification=reconsideration ~destination:part.destination ~inventory ~proof ~new_tail bases in
+    (match qualification with Changed_frontier -> Ok ()
+     | Unchanged_frontier -> Error "Retained root has no changed frontier context")
 let validate_forest ~read_executions ~store ~owner inventory =
   let* ()=validate_forest_structure inventory in
   let reads=store_reads ~store ~owner in
@@ -644,7 +705,7 @@ let validate_forest ~read_executions ~store ~owner inventory =
   let* ()=validate_execution_records ~owner inventory records in
   let+ _=traverse (fun (part:part) -> match part.supersession with
     | None -> Ok ()
-    | Some proof -> validate_replacement ~store ~owner ~inventory proof) (all_roots inventory) in observation
+    | Some proof -> validate_replacement ~store ~owner ~inventory ~destination:part.destination proof) (all_roots inventory) in observation
 let check_current_owner owner =
   let* current=Capture.observe_owner ~base_path:(Capture.base_path owner)
     ~keepers_dir:(Capture.keepers_dir owner) ~keeper_id:(Capture.keeper_id owner) in
@@ -687,7 +748,7 @@ let live_supersession ~owner ~inventory (proof:supersession_proof) =
   equal (`List (List.map candidate_json proof.committed))
     (`List (List.map candidate_json (List.filter (fun id -> List.mem id receipts) ids)))
     "Current committed frontier evidence changed"
-let prove_supersession ~store ~owner ~inventory ~batch ~frontier =
+let prove_supersession ~store ~owner ~destination ~inventory ~batch ~frontier =
   let* fresh=discover ~store ~owner in
   let active=roots fresh in
   let* ()=require (active<>[] && List.map (fun (p:part) -> p.id) active=
@@ -703,7 +764,7 @@ let prove_supersession ~store ~owner ~inventory ~batch ~frontier =
     terminal_witness ~reads ~owner ~inventory:fresh ~committed reference in witness) frontier in
   let proof={predecessors=List.map (fun (p:part) -> p.id) active |> List.sort String.compare;
     frontier=witnesses;pending=batch;memory;committed} in
-  let* qualification=check_replacement ~store ~owner ~inventory:fresh proof in
+  let* qualification=check_replacement ~store ~owner ~inventory:fresh ~destination proof in
   let+ ()=live_supersession ~owner ~inventory:fresh proof in
   match qualification with Changed_frontier -> Some proof | Unchanged_frontier -> None
 let retain_root ~store ~owner ?supersession ~part_id ~destination ~batch ~admit () =
@@ -718,7 +779,7 @@ let retain_root ~store ~owner ?supersession ~part_id ~destination ~batch ~admit 
       let* ()=check_current_owner owner in
       match supersession with
       | Some proof ->
-        let* ()=validate_replacement ~store ~owner ~inventory proof in
+        let* ()=validate_replacement ~store ~owner ~inventory ~destination proof in
         live_supersession ~owner ~inventory proof
       | None ->
         let* ()=require (roots inventory=[]) "A new root must explicitly supersede the original terminal frontier" in

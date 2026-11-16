@@ -141,12 +141,39 @@ host 기록과 잘못된 별도 종료 증거를 preflight·inventory가 함께 
 기존 committed candidate receipt와 ACK로 완료된 후보는 제외한다. 저장된 종료 후 rollback한 혼합 묶음도
 그 종료 사실을 새 frontier의 한 번의 재생성 근거로 쓰며, 새 root의 소유권이 옛 근거의 반복 사용을 막아야 한다.
 실행 결과가 불명확하거나 Memory 반영이 끝나지 않은 후보의 권한으로 넓히지 않는다.
-이 결정에 따른 admission forest 구현은 아직 남아 있다.
+이 결정은 다음 일곱 번째 소스 단위에 반영했다. 동작 검증은 남아 있다.
+
+## 일곱 번째 단위: admission 전체 미소비 묶음 이어가기
+
+접수 전 admission도 원래 host 기록·proof가 모두 없는지 확인한 뒤 두 선언을 묶은 종료 증거를 남긴다.
+이미 접수됐지만 provider를 시작하지 않은 요청은 서버 guard의 typed 선언 교체 사유를 보존한다.
+일반 거절이나 admission Cut·Raised, 아직 Memory에 반영하지 않은 Accepted 답은 새 root 권한이 아니다.
+종료를 새로 저장했을 때만 기존 큐를 깨운다. 종료 자체는 Memory 반영이나 후보 ACK가 아니다.
+
+실행 요청보다 먼저 저장된 part에는 가짜 capture를 만들지 않는다. owner의 실행 scope 전체를 엄격히
+복원하고 그 part를 가리키는 실행이 없음을 확인한다. 새 선언 또는 저장된 종료 사실이 있으면
+완료 receipt와 ACK로 빠진 후보를 제외한 pending 묶음 전체에 새 root를 저장한다.
+기존 보류 후보도 함께 재판단하며, 종료 후 rollback해도 옛 ID를 다시 실행하지 않는다.
+새 root가 이전 root 전체를 소유하므로 같은 종료 사실을 반복해서 새 요청의 근거로 쓰지 못한다.
+
+새 root 목적지는 당시 저장된 목적지로 검증한다. part와 execution은 의미 설정을 비교하고 각각의
+전체 원본·digest·후보 binding을 보존한다. 주석만 바뀐 source revision으로 정상 실행을 거부하지 않는다.
+runtime과 preflight는 같은 전체 frontier·후보 보존·identity·종료 검사를 사용한다.
+과거 part와 실행은 새 active leaf가 모두 실제로 Finished에 도달하고 전체 후보 receipt·ACK가 확인된 뒤
+기존 forest closure로 함께 정리한다.
+
+Runtime·실제 HTTP fixture에 실행 없는 root의 게시 후 재개, 손상 실행 inventory의 부재 증명 거부,
+주석 변경, Captured·Admission_wait의 종료와 rollback, 접수됐지만 provider가 시작되지 않은 host 종료,
+Deferred와 종료된 sibling의 전체 묶음 재판단·rollback·closure, admission Cut 보존을 작성했다.
+**이 회귀는 실행하지 않았다.** 독립 소스 리뷰에서 발견한 source revision 비교 불일치와 서버 guard의
+누락을 수정했다. 기존 preflight가 일부 후보를 잃은 supersession을 넘기던 차이도 순수 검사 공유로 막았다.
+정상 root의 후보 묶음·digest를 일관되게 줄인 대조 fixture에서 preflight와 runtime이 같은 후보 보존
+검사를 적용하도록 작성했다. 이 대조를 포함한 새 회귀는 아홉 경우이며 모두 미실행이다.
 
 ## 확인한 범위
 
 변경 OCaml 파일의 `ocamlc -stop-after parsing -c`와 `git diff --check`를 확인한다.
-파일별 해시와 결과는 `artifacts/farm-librarian-replacement-20261116/`에 둔다.
+파일별 해시와 결과는 각 단위의 `artifacts/farm-librarian-*/`에 둔다.
 독립 소스 리뷰는 그 리뷰가 지정한 head와 diff에만 적용한다.
 
 회귀 코드를 추가했다. 실제 Runtime·Server Exact fixture의 새 worker 준비 전후, 종결 뒤 worker 비활성화·rollback,
@@ -159,6 +186,6 @@ typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 - 연결된 history의 접수 전 상태·Cut 해소는 위 소스 변경과 작성한 회귀의 범위이며, 실제 타입·회귀·운영 검증은 남는다.
 - preflight가 손상된 저장 본문을 만난 기동 경계와 연결된 요청의 본문 손상 복구는 별도 확인이 남는다.
 - floor 본문 손상 복구와 이미 답한 앞 step의 반영 경계는 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
-- `raised`·floor Cut와 이미 받은 `Judged` 결과·admission part는 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
+- `raised`·floor Cut·admission Cut와 이미 받은 Accepted `Judged` 결과의 Gate 반영은 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.
 - native stack 발행은 이전 시도에서 GitHub CLI 인증을 얻지 못했다. 연결된 GitHub 읽기 도구의 인증과 CLI/native stack 발행 인증은 다르다.

@@ -97,6 +97,13 @@ val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
     retained that request, so an absent host record confirms it and no proof is
     read. Offload the complete operation in an Eio caller; no provider, write
     or ACK occurs. *)
+val declaration_ended_with : reads:Keeper_librarian_declaration_replacement.ending_reads ->
+  t -> Lane_addon_tool_request_owner.retained -> (bool, string) result
+val declaration_ended : store:Lane_addon_store.t -> t ->
+  Lane_addon_tool_request_owner.retained -> (bool, string) result
+(** Strict bound pre-admission or host declaration ending. Unknown Cut/Raised
+    results never qualify for admission recreation. The explicit read ports
+    let deploy preflight apply the same rule without mutating the store. *)
 val unconfirmed_detail : Keeper_librarian_original_final.unconfirmed -> string
 (** The error {!confirm_final} returns for each reason the host evidence does
     not confirm a final. *)

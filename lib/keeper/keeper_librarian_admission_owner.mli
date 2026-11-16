@@ -10,7 +10,7 @@ val run : base_path:string -> keeper_name:string -> outcome
 (** Strictly discover the complete original forest/executions/gates before new
     work. Resume original IDs without resubmitting unknown work. Fresh Memory
     is captured separately at each runnable part's actual turn. Semantic
-    Deferred and positively size-refused singletons retain their gaps and let
+    Deferred, declaration-ended work and positively size-refused singletons retain their gaps and let
     untouched siblings run; ordinary failures stop this pass. Only typed whole
     host execution evidence permits disjoint two-child partition. Addon Off
     prevents new calls while completed original proof/commit/ACK can recover.
@@ -26,7 +26,11 @@ val run : base_path:string -> keeper_name:string -> outcome
     acknowledged forest closes on a subsequent pass. A retained closing
     transaction recovers before ordinary discovery, with fresh physical owner,
     exact candidate receipt and ACK checks, and never performs a provider call,
-    Memory commit or queue ACK. *)
+    Memory commit or queue ACK. A ready declaration replacement can publish a
+    new root over the complete pending frontier, including already Deferred
+    siblings. Stored endings survive rollback, while predecessor ownership
+    prevents using the same old frontier twice. Part-only absence and every
+    old ending remain retained until actual full receipt-backed closure. *)
 module For_testing : sig
   val run : after_settle:(Lane_addon_tool_request_owner.Record.t -> (unit, string) result) ->
     base_path:string -> keeper_name:string -> outcome

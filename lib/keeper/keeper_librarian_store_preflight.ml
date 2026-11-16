@@ -312,6 +312,22 @@ let recover_files ~wording ~body_refusal (target:Final.target) (files:Preflight.
   match observed with
   | Exact.Retained_absent | Retained_open -> Ok ()
   | Retained_terminal retained -> confirm_files ~wording target recovered (Exact.delivered retained)
+let ending_reads (target:Final.target) (files:Preflight.exact_files)
+    : Keeper_librarian_declaration_replacement.ending_reads = {
+  before_dispatch=(fun () ->
+    match files.deleted,files.record,files.proof with
+    | None,None,Preflight.No_proof -> Ok ()
+    | Some (Deleted_open | Deleted_terminal _ | Deleted_unknown),_,_ ->
+      Error "The Exact check removes original host evidence; absence cannot confirm a before-dispatch ending"
+    | None,(Some _),_ | None,None,(Proof _ | Unreadable_proof _) ->
+      Error "A before-dispatch declaration ending has original host execution evidence");
+  observe=(fun () ->
+    let* proof=proof_json files in
+    let* record=Exact.recovery_of_files ~store:files.store ~declaration_id:target.declaration_id
+      ~schema:target.schema target.exact ~record:files.record ~proof in
+    Exact.observe_record ~declaration_id:target.declaration_id ~schema:target.schema target.exact record);
+  latest=(fun () -> latest_files ~declaration_id:target.declaration_id ~schema:target.schema target.exact files);
+}
 let judge_files ~wording ~body_refusal (target:Final.target) (files:Preflight.exact_files) = function
   | Recover_record -> recover_files ~wording ~body_refusal target files
   | Decode_judgment judgment ->
@@ -325,21 +341,7 @@ let judge_files ~wording ~body_refusal (target:Final.target) (files:Preflight.ex
     let* ()=confirm_files ~wording target files final in
     if Exact.refused_before_host final then size_proof_kept body_refusal files.deleted else Ok ()
   | Confirm_ending (original,captured) ->
-    let reads:Keeper_librarian_declaration_replacement.ending_reads={
-      before_dispatch=(fun () ->
-        match files.deleted,files.record,files.proof with
-        | None,None,Preflight.No_proof -> Ok ()
-        | Some (Deleted_open | Deleted_terminal _ | Deleted_unknown),_,_ ->
-          Error "The Exact check removes original host evidence; absence cannot confirm a before-dispatch ending"
-        | None,(Some _),_ | None,None,(Proof _ | Unreadable_proof _) ->
-          Error "A before-dispatch declaration ending has original host execution evidence");
-      observe=(fun () ->
-        let* proof=proof_json files in
-        let* record=Exact.recovery_of_files ~store:files.store ~declaration_id:target.declaration_id
-          ~schema:target.schema target.exact ~record:files.record ~proof in
-        Exact.observe_record ~declaration_id:target.declaration_id ~schema:target.schema target.exact record);
-      latest=(fun () -> latest_files ~declaration_id:target.declaration_id ~schema:target.schema target.exact files);
-    } in
+    let reads=ending_reads target files in
     let* ended=Keeper_librarian_declaration_replacement.ended_with ~reads ~original
       ~exact:target.exact ~captured in
     if ended then Ok () else Error "Original Librarian has no confirmed declaration ending"
@@ -436,6 +438,7 @@ let forest_verdict ~forest ~read ~read_scope ~(read_exact:Preflight.exact_reader
     Result.iter_error (fun detail -> root:=Some detail) files;
     files in
   let reads={Parts.load=(fun ~request_id -> read ~scope:(Admission.scope owner) ~request_id);
+    load_scope=(fun () -> read_scope ~scope:(Admission.scope owner));
     read_latest=(fun ~declaration_id ~schema request ->
       let* files=read_exact ~declaration_id request in
       latest_files ~declaration_id ~schema request files);
@@ -443,7 +446,12 @@ let forest_verdict ~forest ~read ~read_scope ~(read_exact:Preflight.exact_reader
       let* exact=Admission.request capture in
       let* target=Final.target ~installation_id:(installation_id (Admission.destination capture)) exact in
       let* files=read_exact ~declaration_id:target.Final.declaration_id target.Final.exact in
-      confirm_files ~wording:Admission.unconfirmed_detail target files final)} in
+      confirm_files ~wording:Admission.unconfirmed_detail target files final);
+    declaration_ended=(fun capture original ->
+      let* exact=Admission.request capture in
+      let* target=Final.target ~installation_id:(installation_id (Admission.destination capture)) exact in
+      let* files=read_exact ~declaration_id:target.Final.declaration_id target.Final.exact in
+      Admission.declaration_ended_with ~reads:(ending_reads target files) capture original)} in
   let checked ~again = check ~reads ~owner ~inventory:(fun () -> forest ~again ~read_scope ~owner) record in
   let outcome=match checked ~again:false with
     | Ok () -> Ok ()

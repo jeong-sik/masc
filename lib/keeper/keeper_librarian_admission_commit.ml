@@ -136,12 +136,20 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
   | Rejected {stage=Progress.Execution;evidence} ->
     let* retained=Exact.retained_final_of_json ~schema evidence in
     let final=Exact.delivered retained in
-    let* ()=Capture.confirm_final ~store capture final in
+    let* ()=match retained with
+      | Exact.Retained_declaration_replaced ->
+        let* ended=Capture.declaration_ended ~store capture record in
+        require ended "Original admission declaration ending is unconfirmed"
+      | Retained_unknown _ | Retained_call _ | Retained_not_allowed _ | Retained_request_id_reused ->
+        Capture.confirm_final ~store capture final in
     (match final with
      | Exact.Call_final (Answered _) -> Error "Original refusal contains an answered proposal"
      | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
      | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok ())
-  | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+  | Rejected {stage=Progress.Before_dispatch;_} ->
+    let* ended=Capture.declaration_ended ~store capture record in
+    require ended "Original admission before-dispatch ending is unconfirmed"
+  | Subdividing _ | Subdivided _ ->
     Error "Original Librarian execution has an unsupported domain phase"
 type preparation = Prepared of Owner.retained | Reload_original
 let begin_gate ~store ~owner ~capture ~(record : Owner.retained) ~gate_root_id ~authority =

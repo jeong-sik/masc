@@ -27,7 +27,9 @@ val validate : store:Lane_addon_store.t ->
     requires matching actual committed candidate receipts. Conflicted requires
     its exact destination-absent conflict and a destination the proposal writes
     into. Its candidates' receipts are not read: a replacement root takes the
-    candidates over and commits them while this record stays retained. *)
+    candidates over and commits them while this record stays retained.
+    Before-dispatch and typed host declaration endings use strict bound ending
+    confirmation; no generic refusal or unknown result grants recreation. *)
 val destination_absent_of_json : Lane_addon_tool_request_owner.retained ->
   Yojson.Safe.t -> (string, string) Stdlib.result
 (** The Memory identity an original admission's conflict names, when the

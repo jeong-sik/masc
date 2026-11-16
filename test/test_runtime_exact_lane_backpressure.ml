@@ -424,6 +424,30 @@ let test_typed_quota_uses_actual_generation_dispatch_receipt env () =
           (Atomic.get server.posts)))
     [false;true]
 
+let test_http_credential_refusal_records_operator_observation env () =
+  List.iter (fun status ->
+    with_http_observation_fixture env
+      (Exact_output_fixture.Reply_with (fun _ _ -> status, {|{"error":"forbidden"}|}))
+      (fun ~server resolved ->
+        let scope = runtime_scope primary in
+        Runtime_credential_refusal.note_answered ~scope;
+        check (option (float 0.0)) "scope starts without a credential refusal" None
+          (Runtime_credential_refusal.refused_at ~scope);
+        let before = Unix.gettimeofday () in
+        let result = execute_first_slot env resolved ~validate:(fun _ -> Agent_core.Exact_output.Accept ()) in
+        Lane.observe ~resolved result;
+        let after = Unix.gettimeofday () in
+        (match Runtime_credential_refusal.refused_at ~scope with
+         | Some at ->
+           check bool "credential refusal timestamp is recorded on the scope" true
+             (at >= before && at <= after)
+         | None -> fail "401/403 credential refusal was dropped");
+        let ordered = Lane.order_at ~now:after resolved in
+        check (list string) "credential observation does not hold or reorder slots" declared
+          (walked ordered);
+        check int "one actual HTTP generation refusal" 1 (Atomic.get server.posts)))
+    [`Unauthorized; `Forbidden]
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -453,4 +477,6 @@ let () =
         test_case "actual answer clears undated quota before semantic validation" `Quick
           (test_http_answer_clears_undated_account_before_semantic_validation env);
         test_case "typed quota port respects actual generation dispatch receipts" `Quick
-          (test_typed_quota_uses_actual_generation_dispatch_receipt env) ] ]
+          (test_typed_quota_uses_actual_generation_dispatch_receipt env);
+        test_case "HTTP 401 and 403 record credential refusal without holding slots" `Quick
+          (test_http_credential_refusal_records_operator_observation env) ] ]

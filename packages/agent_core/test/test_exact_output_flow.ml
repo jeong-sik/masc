@@ -4063,6 +4063,38 @@ let test_every_candidate_rate_limited_is_every_binding_resting () =
   | Error _ -> fail "a rate-limited lane did not end on its last candidate's refusal"
 ;;
 
+let test_every_candidate_server_error_is_every_binding_resting () =
+  let response = {|{"error":{"message":"Provider returned error","code":503}}|} in
+  let result, posts =
+    with_server ~status:(Cohttp.Code.status_of_code 503) ~response
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_catalog
+      [ catalog_entry ~id:"outage-a" ~base_url ~native:true ~json:true ()
+      ; catalog_entry ~id:"outage-b" ~base_url ~native:true ~json:true ()
+      ]
+    @@ fun snapshot ->
+    execute_with_accepting_test_validator
+      ~clock
+      ~net
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      (start_flow (frozen_flow snapshot [ "outage-a"; "outage-b" ]))
+  in
+  check int "both 503 candidates were dispatched" 2 posts;
+  match result with
+  | Error (EO.Flow_exact_execution_failed failure) ->
+    check
+      bool
+      "upstream 503 across every visited binding is at rest"
+      true
+      (EO.flow_execution_binding_standing (EO.Flow_exact_execution_failed failure)
+       = EO.Every_binding_resting)
+  | Ok _ -> fail "a 503 lane produced an answer"
+  | Error _ -> fail "a 503 lane did not end on its last candidate's refusal"
+;;
+
 (* A connection to a port nothing listens on is refused before any byte of the
    request is written, so it is [Connect_failed] (RFC #52028 §2.3). No provider
    read the input, so the input cannot be the reason, and the lane waits for
@@ -6733,6 +6765,10 @@ let () =
             "guarded cancellation after dispatch propagates"
             `Quick
             test_guarded_cancellation_after_dispatch
+        ; test_case
+            "upstream 503 across every candidate reports every binding resting"
+            `Quick
+            test_every_candidate_server_error_is_every_binding_resting
         ] )
     ]
 ;;

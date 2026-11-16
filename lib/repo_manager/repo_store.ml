@@ -357,7 +357,21 @@ let list_branches ~base_path id : (string list, string) result =
     else
       b
   in
-  Ok (List.filter (fun b -> b <> "HEAD") (List.map normalize branches))
+  let seen = Hashtbl.create 16 in
+  let deduped =
+    List.fold_left
+      (fun acc raw ->
+         let name = normalize raw in
+         if String.equal name "" || Hashtbl.mem seen name
+         then acc
+         else (
+           Hashtbl.add seen name ();
+           name :: acc))
+      []
+      branches
+    |> List.rev
+  in
+  Ok deduped
 
 let slugify_id s =
   String.map

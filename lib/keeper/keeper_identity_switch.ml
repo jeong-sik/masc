@@ -94,60 +94,72 @@ let disabled_providers_for_keeper ~base_path ~keeper_name =
 
 let set (config : Workspace.config) ~actor ~keeper_name ~provider_id ~enabled =
   let base_path = config.base_path in
-  match disabled_rows ~base_path with
+  let file = path ~base_path in
+  let committed =
+    Workspace_utils_ops.with_file_lock_r config file (fun () ->
+      match disabled_rows ~base_path with
+      | Error _ as error -> error
+      | Ok rows ->
+        let currently_disabled =
+          List.exists
+            (fun row ->
+              String.equal row.keeper_name keeper_name
+              && String.equal row.provider_id provider_id)
+            rows
+        in
+        let already_as_requested = enabled = not currently_disabled in
+        if already_as_requested
+        then Ok None
+        else (
+          let changed_at = Masc_domain.now_iso () in
+          let without =
+            List.filter
+              (fun row ->
+                not
+                  (String.equal row.keeper_name keeper_name
+                   && String.equal row.provider_id provider_id))
+              rows
+          in
+          (* Removing rather than storing a synonym for "on": the file is then
+             also the list of switches an operator has actually thrown, and a
+             screen showing it does not have to filter. *)
+          let rows =
+            if enabled
+            then without
+            else without @ [ { keeper_name; provider_id; actor; changed_at } ]
+          in
+          Fs_compat.mkdir_p (Filename.dirname file);
+          match
+            Fs_compat.save_file_atomic
+              file
+              (Yojson.Safe.pretty_to_string (`List (List.map row_json rows)))
+          with
+          | Error detail ->
+            Error (Printf.sprintf "identity switch store write failed: %s" detail)
+          | Ok () -> Ok (Some changed_at)))
+    |> Result.map_error (fun error ->
+         Printf.sprintf
+           "identity switch store lock failed: %s"
+           (Masc_domain.masc_error_to_string error))
+    |> Result.join
+  in
+  match committed with
   | Error _ as error -> error
-  | Ok rows ->
-    let currently_disabled =
-      List.exists
-        (fun row ->
-          String.equal row.keeper_name keeper_name
-          && String.equal row.provider_id provider_id)
-        rows
-    in
-    let already_as_requested = enabled = not currently_disabled in
-    if already_as_requested
-    then Ok ()
-    else (
-      let changed_at = Masc_domain.now_iso () in
-      let without =
-        List.filter
-          (fun row ->
-            not
-              (String.equal row.keeper_name keeper_name
-               && String.equal row.provider_id provider_id))
-          rows
-      in
-      (* Removing rather than storing a synonym for "on": the file is then
-         also the list of switches an operator has actually thrown, and a
-         screen showing it does not have to filter. *)
-      let rows =
-        if enabled
-        then without
-        else without @ [ { keeper_name; provider_id; actor; changed_at } ]
-      in
-      let file = path ~base_path in
-      Fs_compat.mkdir_p (Filename.dirname file);
-      match
-        Fs_compat.save_file_atomic
-          file
-          (Yojson.Safe.pretty_to_string (`List (List.map row_json rows)))
-      with
-      | Error detail ->
-        Error (Printf.sprintf "identity switch store write failed: %s" detail)
-      | Ok () ->
-        Audit_log.log_action
-          config
-          ~agent_id:actor
-          ~action:(Audit_log.Custom "keeper_identity_switch_set")
-          ~details:
-            (`Assoc
-               [ "keeper_name", `String keeper_name
-               ; "provider_id", `String provider_id
-               ; "enabled", `Bool enabled
-               ; "changed_at", `String changed_at
-               ; "actor", `String actor
-               ])
-          ~outcome:Audit_log.Success
-          ();
-        Ok ())
+  | Ok None -> Ok ()
+  | Ok (Some changed_at) ->
+    Audit_log.log_action
+      config
+      ~agent_id:actor
+      ~action:(Audit_log.Custom "keeper_identity_switch_set")
+      ~details:
+        (`Assoc
+           [ "keeper_name", `String keeper_name
+           ; "provider_id", `String provider_id
+           ; "enabled", `Bool enabled
+           ; "changed_at", `String changed_at
+           ; "actor", `String actor
+           ])
+      ~outcome:Audit_log.Success
+      ();
+    Ok ()
 ;;

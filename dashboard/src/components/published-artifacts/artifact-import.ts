@@ -20,21 +20,32 @@ export function ArtifactImport({ workspaceRoot, draftRetention, isCurrent, onMut
     if (files.length !== 1) { setMessage('문서 파일 하나를 선택해 주세요.'); return }
     const file = files[0]!
     const extension = file.name.split('.').at(-1)?.toLocaleLowerCase()
-    if (extension !== 'html' && extension !== 'htm' && extension !== 'md' && extension !== 'markdown') {
-      setMessage('HTML 또는 Markdown 파일을 선택해 주세요.'); return
+    if (!['html', 'htm', 'md', 'markdown', 'docx', 'hwpx'].includes(extension ?? '')) {
+      setMessage('HWPX, DOCX, HTML 또는 Markdown 파일을 선택해 주세요. .doc 파일은 DOCX로 저장한 뒤 가져올 수 있습니다.'); return
     }
     setMessage('파일을 읽고 있습니다.')
     try {
-      // Fatal decoding refuses a non-UTF-8 file rather than publishing replacement
-      // characters. ignoreBOM preserves a source BOM in the exact stored body.
-      const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer())
+      let content: string, notices: readonly string[] = []
+      if (extension === 'docx' || extension === 'hwpx') {
+        const { officeImportLimits } = await import('../../lib/artifact-office-xml')
+        if (!active.current || key !== reading.current || !isCurrent()) return
+        if (file.size > officeImportLimits.inputBytes) throw new Error('가져올 문서는 32 MiB 이하여야 합니다.')
+        const convert = extension === 'docx' ? (await import('../../lib/artifact-docx-import')).importArtifactDocx
+          : (await import('../../lib/artifact-hwpx-import')).importArtifactHwpx
+        if (!active.current || key !== reading.current || !isCurrent()) return
+        const result = await convert(await file.arrayBuffer())
+        content = result.content; notices = result.notices
+      } else {
+        // Fatal decoding preserves the exact UTF-8 source, including its BOM.
+        content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer())
+      }
       if (!active.current || key !== reading.current || !isCurrent()) return
       const snapshot = { key, identity: {}, value: { title: file.name, summary: `${file.name} 파일에서 가져온 문서입니다.`,
-        content, format: extension === 'html' || extension === 'htm' ? 'html' as const : 'markdown' as const } }
+        content, format: extension === 'md' || extension === 'markdown' ? 'markdown' as const : 'html' as const } }
       if (draft) draftRetention.forget(draft.identity)
       draftRetention.remember(snapshot)
       setDraft(snapshot)
-      setMessage('파일을 읽었습니다. 제목과 내용을 확인한 뒤 등록해 주세요.')
+      setMessage('파일을 읽었습니다. 제목과 내용을 확인한 뒤 등록해 주세요. ' + notices.join(' '))
     } catch (error) {
       if (active.current && key === reading.current && isCurrent()) {
         setMessage(error instanceof Error ? error.message : '파일을 읽지 못했습니다.')
@@ -45,8 +56,9 @@ export function ArtifactImport({ workspaceRoot, draftRetention, isCurrent, onMut
     ${draft ? null : html`<div class="space-y-3 p-6" onDragOver=${(event: DragEvent) => event.preventDefault()}
       onDrop=${(event: DragEvent) => { event.preventDefault(); void read(event.dataTransfer?.files ?? null) }}>
       <h2 class="m-0 text-lg">파일 가져오기</h2>
-      <p>HTML이나 Markdown 파일 하나를 여기에 놓거나 선택해 주세요.</p>
-      <input type="file" aria-label="가져올 문서 파일" accept=".html,.htm,.md,.markdown"
+      <p>HWPX, DOCX, HTML 또는 Markdown 파일 하나를 여기에 놓거나 선택해 주세요.</p>
+      <p>문서의 글·병합 표·차트 데이터를 가져옵니다. 원본의 글꼴과 페이지 배치는 달라질 수 있습니다.</p>
+      <input type="file" aria-label="가져올 문서 파일" accept=".hwpx,.docx,.html,.htm,.md,.markdown"
         onChange=${(event: Event) => { void read((event.target as HTMLInputElement).files) }} />
       <button type="button" onClick=${onCancel}>닫기</button>
     </div>`}

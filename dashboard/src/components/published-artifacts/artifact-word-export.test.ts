@@ -3,13 +3,15 @@ import { act,cleanup,fireEvent,render,screen,waitFor } from '@testing-library/pr
 import { expect,it,vi,beforeEach,afterEach } from 'vitest'
 import { setStoredToken,clearStoredToken,currentStoredTokenRevision } from '../../api/core'
 import { artifactWordFile,type ArtifactWordFile } from '../../lib/artifact-word-export'
+import { artifactHwpxFile } from '../../lib/artifact-hwpx-export'
 import type { ArtifactDocument } from '../../api/published-artifacts'
 import { ArtifactWordExport } from './artifact-word-export'
 vi.mock('../../lib/artifact-word-export',()=>({artifactWordFile:vi.fn()}))
+vi.mock('../../lib/artifact-hwpx-export',()=>({artifactHwpxFile:vi.fn()}))
 const doc:ArtifactDocument={content:'# 원본',revisions:[],artifact:{id:`artifact-${'a'.repeat(32)}`,revision:3,title:'문서',summary:'요약',format:'markdown',author:'keeper',created_at:'now',task_id:null,goal_id:null,url:'/',body:{_blob:{sha256:'f'.repeat(64)}}}}
 const file:ArtifactWordFile={data:new Uint8Array([1,2,3]).buffer,notices:['외부 그림을 링크로 바꿨습니다.']}
 function deferred(){let resolve!:(value:ArtifactWordFile)=>void;const promise=new Promise<ArtifactWordFile>(ok=>{resolve=ok});return {promise,resolve}}
-beforeEach(()=>{setStoredToken('word-export-user');vi.mocked(artifactWordFile).mockReset();vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:word-export');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{})})
+beforeEach(()=>{setStoredToken('word-export-user');vi.mocked(artifactWordFile).mockReset();vi.mocked(artifactHwpxFile).mockReset();vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:word-export');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{})})
 afterEach(()=>{cleanup();clearStoredToken();vi.restoreAllMocks()})
 function open(isCurrent=()=>true){return render(html`<${ArtifactWordExport} doc=${doc} authRevision=${currentStoredTokenRevision()} isCurrent=${isCurrent} disabled=${false} />`)}
 it('downloads the captured publication revision once and reports conversion notices',async()=>{
@@ -46,4 +48,21 @@ it('keeps source after conversion failure and retries only on another explicit c
   fireEvent.click(screen.getByRole('button',{name:'Word 파일 다운로드'}))
   await screen.findByRole('status');expect(artifactWordFile).toHaveBeenCalledTimes(2)
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+})
+it('downloads the captured HWPX revision through the same reader ownership checks',async()=>{
+  vi.mocked(artifactHwpxFile).mockResolvedValueOnce(file)
+  open();fireEvent.click(screen.getByRole('button',{name:'HWPX 파일 다운로드'}))
+  await screen.findByRole('status')
+  expect(artifactHwpxFile).toHaveBeenCalledWith(doc)
+  expect(artifactWordFile).not.toHaveBeenCalled()
+  expect(vi.mocked(HTMLAnchorElement.prototype.click).mock.instances[0]).toMatchObject({download:`${doc.artifact.id}-v3.hwpx`})
+  expect(vi.mocked(URL.createObjectURL).mock.calls[0]![0]).toMatchObject({type:'application/hwp+zip'})
+})
+it('discards a late HWPX conversion after the reader has changed',async()=>{
+  const pending=deferred();vi.mocked(artifactHwpxFile).mockReturnValueOnce(pending.promise)
+  let current=true
+  open(()=>current);fireEvent.click(screen.getByRole('button',{name:'HWPX 파일 다운로드'}))
+  await waitFor(()=>expect(artifactHwpxFile).toHaveBeenCalledTimes(1))
+  current=false;await act(async()=>pending.resolve(file))
+  expect(URL.createObjectURL).not.toHaveBeenCalled()
 })

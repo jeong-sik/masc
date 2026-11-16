@@ -40,7 +40,13 @@ required = true
 name = "content"
 type = "string"
 required = true
-description = "Complete Markdown or self-contained HTML source text, preserved exactly. The text itself, not a file path."
+description = """
+Complete Markdown or self-contained HTML source text, preserved exactly. The text itself, not a file path. \
+For editable charts in Word/HWPX exports, publish HTML with figure data-masc-chart set to column, bar, line or pie. \
+Use a plain-text figcaption and one data table: <figure data-masc-chart="column"><figcaption>실적</figcaption><table><tr><th>항목</th><th>건수</th></tr><tr><td>서울</td><td>12</td></tr></table></figure>. \
+Keep the first header 항목, use the remaining headers for series names, and use the first cell in each data row for the category. \
+Numeric cells contain plain numbers or are empty for missing values; zero is a value. Pie charts require one series with no negative values. Do not merge cells or use nested formatting in a chart table. \
+Ordinary document tables can use rowspan/colspan. Canvas/SVG alone does not supply editable chart data."""
 
 [[params]]
 name = "id"

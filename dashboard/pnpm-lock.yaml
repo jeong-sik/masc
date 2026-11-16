@@ -129,6 +129,9 @@ importers:
       preact:
         specifier: ^10.29.1
         version: 10.29.1
+      saxes:
+        specifier: 6.0.0
+        version: 6.0.0
       shiki:
         specifier: ^4.0.2
         version: 4.0.2

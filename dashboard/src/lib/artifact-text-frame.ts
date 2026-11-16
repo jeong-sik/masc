@@ -17,7 +17,7 @@ export function artifactTextFrame(document: Nodes.Document, token: string, parts
       node.attrs=node.attrs.filter(attr=>![binding,marker,'nonce','contenteditable','autofocus','href','action','formaction','target'].includes(attr.name))
       if(bound!==undefined && node.namespaceURI===html.NS.HTML) {
         const id=Number(bound),part=Number.isSafeInteger(id)?parts[id]:undefined
-        if(part)node.attrs.push({name:marker,value:String(id)},{name:'tabindex',value:'0'},{name:'role',value:'button'},{name:'aria-label',value:`문장 편집: ${part.text}`})
+        if(part)node.attrs.push({name:marker,value:String(id)},{name:'tabindex',value:'0'},{name:'role',value:'button'},{name:'aria-label',value:part.text?`문장 편집: ${part.text}`:'빈 셀 편집'})
       }
       if(controls.has(node.tagName))node.attrs.push({name:'disabled',value:''})
       visit(node)
@@ -32,7 +32,7 @@ export function artifactTextFrame(document: Nodes.Document, token: string, parts
   const policy=tree.createElement('meta',html.NS.HTML,[{name:'http-equiv',value:'Content-Security-Policy'},
     {name:'content',value:`default-src 'none'; script-src 'nonce-${token}'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`}])
   const style=tree.createElement('style',html.NS.HTML,[])
-  tree.insertText(style,`[${marker}]{cursor:text}[${marker}]:hover,[${marker}]:focus-visible{outline:2px solid #1684c9;outline-offset:2px}`);tree.appendChild(head,style)
+  tree.insertText(style,`[${marker}]{cursor:text}[${marker}]:empty{display:inline-block;min-width:1.5em;min-height:1em}[${marker}]:hover,[${marker}]:focus-visible{outline:2px solid #1684c9;outline-offset:2px}`);tree.appendChild(head,style)
   const script=tree.createElement('script',html.NS.HTML,[{name:'nonce',value:token}])
   tree.insertText(script,`(()=>{
     const nodes=new Map(Array.from(document.querySelectorAll('[${marker}]'),node=>[node,node.getAttribute('${marker}')]))

@@ -236,7 +236,15 @@ let execute_tool_eio
        gave it answers, with no read: [Auth.authorize_tool] would resolve the
        same role from the same owner file, and the door ran with auth on.
        Any other name is paired with the token as before, since alias rules
-       decide whether that name may use this credential. *)
+       decide whether that name may use this credential.
+
+       The owner's call reads nothing between the door and here. Whatever
+       changes in that window is judged by the next request, not this one:
+       the credential replaced or revoked, its OAuth family revoked, auth
+       turned off, or the auth config or store becoming unreadable. So this
+       call no longer fails with [Auth.Auth_config_error], an I/O error or
+       [Invalid_grant] that a read in the window would have raised; a lower
+       role is still refused after auth is turned off (RFC §3.3). *)
     let authorize_role ~role =
       match profile with
       | Mcp_server_eio_tool_profile.Operator_remote ->

@@ -3328,9 +3328,12 @@ let test_door_bearer_answers_caller_identity_as_the_token_did () =
           | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
         in
         let admitted = Masc_test_deps.door_bearer ~base_path (Some raw) in
-        Alcotest.(check bool) (owner ^ ": the door resolved the bearer") true
+        (* Both authorization branches of D5 rest on this: the door's role is
+           the one [Auth.resolve_role] gives the owner and the token. *)
+        Alcotest.(check bool) (owner ^ ": the door's role is the token's role") true
           (match admitted with
-           | Masc.Mcp_server_eio_caller_identity.Admitted _ -> true
+           | Masc.Mcp_server_eio_caller_identity.Admitted { role; _ } ->
+             Auth.resolve_role base_path ~agent_name:owner ~token:(Some raw) = Ok role
            | Masc.Mcp_server_eio_caller_identity.Unread _ -> false);
         let unread =
           Masc.Mcp_server_eio_caller_identity.unread (Some raw)
@@ -3361,7 +3364,27 @@ let test_door_bearer_answers_caller_identity_as_the_token_did () =
       [ Masc_domain.Admin, "door-admin"
       ; Masc_domain.Worker, "door-worker"
       ; Masc_domain.Player, "door-player"
-      ])
+      ];
+    (* The internal Keeper token passes the door with its Keeper header, and
+       dispatch still looks it up (D3), so the executor reads it as before. *)
+    let internal = Auth.ensure_internal_keeper_token base_path in
+    match
+      Auth.admit_request base_path ~auth_cfg:(Auth.load_auth_config base_path)
+        ~token:(Some internal) ~internal_keeper_agent:(Some "door-keeper")
+    with
+    | Error _ -> Alcotest.fail "the door refused the internal Keeper token"
+    | Ok principal ->
+      Alcotest.(check bool) "the internal Keeper token stays unread" true
+        (match
+           Masc.Mcp_server_eio_caller_identity.of_sender
+             (Masc.Mcp_server_eio.Admitted principal)
+             ~auth_token:(Some internal) ~internal_keeper_runtime:true
+         with
+         | Masc.Mcp_server_eio_caller_identity.Unread
+             { token = Some token; internal_keeper_runtime = true } ->
+           String.equal token internal
+         | Masc.Mcp_server_eio_caller_identity.Unread _
+         | Masc.Mcp_server_eio_caller_identity.Admitted _ -> false))
 
 (* D5: a call that names the credential's owner is authorized by the role the
    door gave, without reading the token again. The credential is deleted

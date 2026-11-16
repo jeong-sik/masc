@@ -201,26 +201,108 @@ let save_file_unix (path : string) (content : string) : unit =
    fd per call restores those three syscalls. A future domain-safe
    cache (per-domain fd, or a single-writer workspace fiber) can
    reinstate the optimization without giving up correctness. *)
-let append_path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
+type append_path_mutex_entry =
+  { mutex : Stdlib.Mutex.t
+  ; mutable active_waiters_and_holders : int
+  }
+
+let append_path_mutex_registry : (string, append_path_mutex_entry) Hashtbl.t =
   Hashtbl.create 32
 let append_path_mutex_registry_mu = Stdlib.Mutex.create ()
 
-let get_append_path_mutex path =
-  Stdlib.Mutex.lock append_path_mutex_registry_mu;
+(* Canonicalize the nearest existing ancestor directory via [Unix.realpath] and
+   reattach any not-yet-created directory segments plus the leaf basename.
+   Never call [Unix.realpath] directly on the target file path: at lock
+   acquisition time the target file may not exist yet, and leaf symlinks must
+   keep their directory-entry identity while symlinked parent directories
+   converge to one mutex key. *)
+let canonical_append_mutex_path path =
+  let rec strip_trailing_slashes s =
+    let len = String.length s in
+    if len > 1 && Char.equal s.[len - 1] '/'
+    then strip_trailing_slashes (String.sub s 0 (len - 1))
+    else s
+  in
+  let trimmed = strip_trailing_slashes path in
+  if String.equal trimmed "" || String.equal trimmed "/"
+  then trimmed
+  else (
+    let rec resolve_dir dir suffix =
+      match Unix.realpath dir with
+      | real_dir -> List.fold_left Filename.concat real_dir suffix
+      | exception Unix.Unix_error _ ->
+        let parent = Filename.dirname dir in
+        if String.equal parent dir
+        then List.fold_left Filename.concat dir suffix
+        else resolve_dir parent (Filename.basename dir :: suffix)
+    in
+    if String.equal trimmed "." || String.equal trimmed ".."
+    then resolve_dir trimmed []
+    else
+      Filename.concat
+        (resolve_dir (Filename.dirname trimmed) [])
+        (Filename.basename trimmed))
+;;
+
+let acquire_append_path_entry key =
+  Stdlib.Mutex.protect append_path_mutex_registry_mu (fun () ->
+    match Hashtbl.find_opt append_path_mutex_registry key with
+    | Some entry ->
+      entry.active_waiters_and_holders <- entry.active_waiters_and_holders + 1;
+      entry
+    | None ->
+      let entry =
+        { mutex = Stdlib.Mutex.create ()
+        ; active_waiters_and_holders = 1
+        }
+      in
+      Hashtbl.add append_path_mutex_registry key entry;
+      entry)
+;;
+
+let release_append_path_entry key entry =
+  Stdlib.Mutex.protect append_path_mutex_registry_mu (fun () ->
+    entry.active_waiters_and_holders <- entry.active_waiters_and_holders - 1;
+    if entry.active_waiters_and_holders <= 0
+    then Hashtbl.remove append_path_mutex_registry key)
+;;
+
+let with_append_path_mutex path f =
+  let key = canonical_append_mutex_path path in
+  let entry = acquire_append_path_entry key in
   Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock append_path_mutex_registry_mu)
+    ~finally:(fun () -> release_append_path_entry key entry)
+    (fun () -> Stdlib.Mutex.protect entry.mutex f)
+;;
+
+let try_with_append_path_mutex path f =
+  let key = canonical_append_mutex_path path in
+  let entry = acquire_append_path_entry key in
+  Fun.protect
+    ~finally:(fun () -> release_append_path_entry key entry)
     (fun () ->
-      match Hashtbl.find_opt append_path_mutex_registry path with
-      | Some m -> m
-      | None ->
-        let m = Stdlib.Mutex.create () in
-        Hashtbl.add append_path_mutex_registry path m;
-        m)
+       if not (Stdlib.Mutex.try_lock entry.mutex)
+       then None
+       else Some (Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock entry.mutex) f))
+;;
+
+let evict_inactive_cached_writer_for_path path =
+  let canonical = canonical_append_mutex_path path in
+  Fd_cache.invalidate canonical;
+  if not (String.equal canonical path) then Fd_cache.invalidate path
+;;
+
+let append_path_mutex_count_for_testing () =
+  Stdlib.Mutex.protect append_path_mutex_registry_mu (fun () ->
+    Hashtbl.length append_path_mutex_registry)
+;;
+
+let canonical_append_mutex_path_for_testing = canonical_append_mutex_path
 
 let append_file_unix (path : string) (content : string) : unit =
-  let mu = get_append_path_mutex path in
-  Stdlib.Mutex.protect mu (fun () ->
-    Fd_cache.with_writer path (fun oc ->
+  let canonical = canonical_append_mutex_path path in
+  with_append_path_mutex canonical (fun () ->
+    Fd_cache.with_writer canonical (fun oc ->
       Stdlib.output_string oc content;
       Stdlib.flush oc))
 ;;

@@ -170,6 +170,39 @@ let test_eio_atomic_update () =
   | Ok v -> check string "updated value" "initial_updated" v
   | Error _ -> fail "atomic_update failed"
 
+let test_eio_concurrent_atomic_increment_and_sidecar_isolation () =
+  with_eio_backend @@ fun backend ->
+  let key = make_unique_key "concurrent_counter" in
+  (match Backend.FileSystem.atomic_increment backend key with
+   | Ok 1 -> ()
+   | _ -> fail "seed increment failed");
+  let saw_zero_after_seed = Atomic.make false in
+  Eio.Fiber.all
+    (List.init 8 (fun worker ->
+       fun () ->
+         for _ = 1 to 10 do
+           if worker mod 2 = 0 then (
+             match Backend.FileSystem.atomic_increment backend key with
+             | Ok _ -> ()
+             | Error e -> fail ("concurrent increment: " ^ Backend.show_error e))
+           else (
+             (match Backend.FileSystem.atomic_get backend key with
+              | Ok v -> if v <= 0 then Atomic.set saw_zero_after_seed true
+              | Error e -> fail ("concurrent atomic_get: " ^ Backend.show_error e));
+             ignore (Backend.FileSystem.get backend key))
+         done));
+  check bool "atomic_get never saw transient 0 during ftruncate" false
+    (Atomic.get saw_zero_after_seed);
+  (match Backend.FileSystem.atomic_get backend key with
+   | Ok n -> check int "1 seed + 4*10 increments = 41" 41 n
+   | Error e -> fail ("final atomic_get: " ^ Backend.show_error e));
+  match Backend.FileSystem.list_keys backend ~prefix:"" with
+  | Ok keys ->
+    check bool "counter key listed" true (List.mem key keys);
+    check bool ".lock sidecar hidden from list_keys" false
+      (List.exists (String.ends_with ~suffix:".lock") keys)
+  | Error e -> fail ("list_keys: " ^ Backend.show_error e)
+
 (* ============================================================ *)
 (* Backend.ml - Memory Backend                               *)
 (* ============================================================ *)
@@ -355,6 +388,8 @@ let () =
       test_case "increment" `Quick test_eio_atomic_increment;
       test_case "get" `Quick test_eio_atomic_get;
       test_case "update" `Quick test_eio_atomic_update;
+      test_case "concurrent increment and sidecar isolation" `Quick
+        test_eio_concurrent_atomic_increment_and_sidecar_isolation;
     ];
     "eio_memory", [
       test_case "list_keys" `Quick test_eio_memory_list_keys;

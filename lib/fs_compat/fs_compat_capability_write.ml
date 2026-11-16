@@ -485,6 +485,7 @@ let capability_write_failure_to_string = Atomic_write.capability_write_failure_t
 let sync_directory_capability = Atomic_write.sync_directory_capability
 
 let is_atomic_orphan_name = Atomic_temp_name.is_name
+let try_lock_stage_fd_for_testing = Stage_flock.try_lock_exclusive_fd
 type atomic_orphan_cleanup_operation = Atomic_orphan_cleanup.atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory

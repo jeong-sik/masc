@@ -684,8 +684,7 @@ let with_private_jsonl_stable_lock_fd ~io ~success requested_path f =
           | Ok dir ->
             let path = Filename.concat dir (Filename.basename requested_path) in
             let lock_path = private_jsonl_lock_path path in
-            let path_mu = get_append_path_mutex path in
-            Stdlib.Mutex.protect path_mu (fun () ->
+            with_append_path_mutex path (fun () ->
               match private_jsonl_open_stable_lock lock_path with
               | Error _ as error -> error
               | Ok stable_lock ->

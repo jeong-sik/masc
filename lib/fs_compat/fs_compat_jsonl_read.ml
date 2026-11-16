@@ -1,6 +1,5 @@
 open Fs_compat_internal
 open Fs_compat_base_io
-open Fs_compat_owned_file
 
 (** Parse pre-read string lines as JSONL.
     Use when lines come from typed tail readers such as
@@ -63,41 +62,125 @@ let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t l
 ;;
 
 (** Load JSONL file, returning parsed values and count of malformed lines.
-    Delegates to [parse_jsonl_lines] for the actual parsing. *)
+    Delegates to [parse_jsonl_lines] for the actual parsing.
+    Serializes descriptor open/read/close through the per-path append mutex
+    so an in-process reader cannot close an fd on the same inode while a
+    durable writer holds a POSIX [lockf] record lock. *)
+let read_file_under_append_mutex (path : string) : string option =
+  let read () =
+    with_append_path_mutex path (fun () ->
+      match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+      | fd ->
+        let ic =
+          match Unix.in_channel_of_descr fd with
+          | ic -> ic
+          | exception exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            (try Unix.close fd with Unix.Unix_error _ -> ());
+            Printexc.raise_with_backtrace exn bt
+        in
+        Some (read_channel_and_close ~before_read:ignore path ic)
+      | exception Unix.Unix_error (err, _, _) when err = Unix.ENOENT -> None
+      | exception Unix.Unix_error (err, _, _) ->
+        raise (Sys_error (Printf.sprintf "%s: %s" path (Unix.error_message err))))
+  in
+  with_fs_or_fallback
+    ~path
+    ~fallback:read
+    (fun _fs -> on_systhread ~label:(labelled "fs-compat-load-jsonl" path) read)
+;;
+
 let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
-  if not (file_exists path)
-  then [], 0
-  else (
-    let content = load_file path in
+  match read_file_under_append_mutex path with
+  | None -> [], 0
+  | Some content ->
     let lines = String.split_on_char '\n' content in
-    parse_jsonl_lines ~source:path lines)
+    parse_jsonl_lines ~source:path lines
 ;;
 
 (** Load JSONL file as list of JSON values.
     Malformed lines are logged and dropped. *)
 let load_jsonl (path : string) : Yojson.Safe.t list = fst (load_jsonl_diagnostics path)
 
-(* Bounded byte slice of a file. Clamps to the current size; a missing
-   file or an empty clamped range returns "". Stdlib-blocking like the
-   other tail-readers — callers bound [len], so the read cost is fixed
-   regardless of file size (RFC-0228 P1). *)
-let read_slice ~path ~from ~len =
-  if not (file_exists path) || len <= 0 then ""
-  else begin
-    let ic = Stdlib.open_in_bin path in
-    Stdlib.Fun.protect
-      ~finally:(fun () -> Stdlib.close_in_noerr ic)
-      (fun () ->
-         let size = Stdlib.in_channel_length ic in
-         let from = if from < 0 then 0 else if from > size then size else from in
-         let len = Stdlib.min len (size - from) in
-         if len <= 0 then ""
-         else begin
-           Stdlib.seek_in ic from;
-           Stdlib.really_input_string ic len
-         end)
-  end
+type slice_chunk =
+  | Slice_missing
+  | Slice_present of
+      { file_size : int
+      ; actual_from : int
+      ; data : string
+      }
+
+let read_chunk_under_append_mutex ~label ~path ~from ~clamp_beyond_eof ~max_len =
+  let read () =
+    with_append_path_mutex path (fun () ->
+      match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+      | exception Unix.Unix_error (err, _, _) when err = Unix.ENOENT ->
+        Slice_missing
+      | exception Unix.Unix_error (err, _, _) ->
+        raise (Sys_error (Printf.sprintf "%s: %s" path (Unix.error_message err)))
+      | fd ->
+        let ic =
+          match Unix.in_channel_of_descr fd with
+          | ic -> ic
+          | exception exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            (try Unix.close fd with Unix.Unix_error _ -> ());
+            Printexc.raise_with_backtrace exn bt
+        in
+        Stdlib.Fun.protect
+          ~finally:(fun () -> Stdlib.close_in_noerr ic)
+          (fun () ->
+             let size = Stdlib.in_channel_length ic in
+             let actual_from =
+               if from < 0 then 0
+               else if from > size then (if clamp_beyond_eof then size else 0)
+               else from
+             in
+             let to_read = Int.min max_len (size - actual_from) in
+             if to_read <= 0 then
+               Slice_present { file_size = size; actual_from; data = "" }
+             else (
+               Stdlib.seek_in ic actual_from;
+               let buf = Bytes.create to_read in
+               let rec read_loop ofs =
+                 if ofs >= to_read then ofs
+                 else
+                   let n = Stdlib.input ic buf ofs (to_read - ofs) in
+                   if n = 0 then ofs else read_loop (ofs + n)
+               in
+               let n = read_loop 0 in
+               let data =
+                 if n = to_read then Bytes.unsafe_to_string buf
+                 else Bytes.sub_string buf 0 n
+               in
+               Slice_present { file_size = size; actual_from; data })))
+  in
+  with_fs_or_fallback
+    ~path
+    ~fallback:read
+    (fun _fs -> on_systhread ~label:(labelled label path) read)
 ;;
+
+(* Bounded byte slice of a file. Clamps to the current size; a missing
+   file or an empty clamped range returns "". Serialized under the per-path
+   append mutex so closing the read fd never drops an in-process writer's
+   POSIX record lock. *)
+let read_slice ~path ~from ~len =
+  if len <= 0 then ""
+  else
+    match
+      read_chunk_under_append_mutex
+        ~label:"fs-compat-read-slice"
+        ~path
+        ~from
+        ~clamp_beyond_eof:true
+        ~max_len:len
+    with
+    | Slice_missing -> ""
+    | Slice_present { file_size = _; actual_from = _; data } -> data
+;;
+
+let streaming_jsonl_chunk_bytes = 262_144
 
 (* Fold over newline-terminated lines appended after byte offset [from].
    Append-only JSONL stores never rewrite earlier bytes, so a (offset,
@@ -108,53 +191,55 @@ let read_slice ~path ~from ~len =
    completes the line. A [from] beyond EOF (file truncated/rotated) falls
    back to a full scan from byte 0; callers detect shrinkage the same way
    via the returned boundary. Blank lines advance the boundary but are not
-   folded. *)
+   folded. Each bounded chunk open/read/close is serialized under the
+   per-path append mutex and released before calling [f]. *)
 let fold_appended_lines ~path ~from ~init ~f =
-  if not (file_exists path)
-  then init, 0
-  else begin
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         let len = in_channel_length ic in
-         let from = if from < 0 || from > len then 0 else from in
-         seek_in ic from;
-         let chunk = Bytes.create 65536 in
-         let line_buf = Buffer.create 256 in
-         let acc = ref init in
-         let boundary = ref from in
-         let pos = ref from in
-         let rec loop () =
-           let n = input ic chunk 0 (Bytes.length chunk) in
-           if n > 0
-           then begin
-             for i = 0 to n - 1 do
-               match Bytes.get chunk i with
-               | '\n' ->
-                 let line = Buffer.contents line_buf in
-                 Buffer.clear line_buf;
-                 boundary := !pos + i + 1;
-                 if not (String.equal (String.trim line) "")
-                 then acc := f !acc line
-               | c -> Buffer.add_char line_buf c
-             done;
-             pos := !pos + n;
-             loop ()
-           end
-         in
-         loop ();
-         !acc, !boundary)
-  end
+  let line_buf = Buffer.create 256 in
+  let acc = ref init in
+  let boundary = ref 0 in
+  let pos = ref 0 in
+  let rec loop ~first =
+    let req_from = if first then from else !pos in
+    match
+      read_chunk_under_append_mutex
+        ~label:"fs-compat-fold-appended"
+        ~path
+        ~from:req_from
+        ~clamp_beyond_eof:(not first)
+        ~max_len:streaming_jsonl_chunk_bytes
+    with
+    | Slice_missing ->
+      if first then init, 0 else !acc, !boundary
+    | Slice_present { file_size; actual_from; data } ->
+      if first then (
+        boundary := actual_from;
+        pos := actual_from);
+      let n = String.length data in
+      if n > 0 then (
+        for i = 0 to n - 1 do
+          match String.unsafe_get data i with
+          | '\n' ->
+            let line = Buffer.contents line_buf in
+            Buffer.clear line_buf;
+            boundary := !pos + i + 1;
+            if not (String.equal (String.trim line) "")
+            then acc := f !acc line
+          | c -> Buffer.add_char line_buf c
+        done;
+        pos := !pos + n;
+        if !pos < file_size then loop ~first:false
+        else !acc, !boundary)
+      else !acc, !boundary
+  in
+  loop ~first:true
 ;;
 
 (** Stream JSONL line-by-line, folding [f] over parsed values.
 
-    Uses [Eio.Buf_read.lines] over [Eio.Path.with_open_in] when the
-    global fs is registered ([set_fs] called at boot), giving O(1)
-    memory regardless of file size and non-blocking IO inside
-    the Eio scheduler.  Falls back to {!load_jsonl} + [List.fold_left]
-    when no fs is available (tests, pre-boot helpers).
+    Reads bounded chunks under the per-path append mutex (on a systhread
+    when Eio is active) and releases both descriptor and mutex before
+    invoking [f], preserving O(1) memory, non-blocking Eio scheduling,
+    and POSIX [lockf] safety for concurrent in-process writers.
 
     [line_no] is 1-based and skips blank lines so it tracks the
     {b printed} JSONL row number rather than the raw byte stream
@@ -165,69 +250,68 @@ let fold_appended_lines ~path ~from ~init ~f =
     exist (no read attempt).  Raises [Sys_error] on read failures of
     an existing file (e.g. permission denied, mid-stream IO error). *)
 let fold_jsonl_lines ~init ~f path =
-  if not (file_exists path)
-  then init
-  else
-    (* 16 MiB per-line cap — protects [Eio.Buf_read.of_flow] from a
-       corrupted/attacker-controlled JSONL with no newlines (which
-       would otherwise force the buf_read to grow unbounded).  Real
-       audit/metric rows are <1 KiB; 16 MiB is two orders of
-       magnitude over expected and still bounds the OOM blast. *)
-    let max_line_bytes = 16 * 1024 * 1024 in
-    with_fs_or_fallback
-      ~path
-      ~fallback:(fun () ->
-        (* Iterate raw lines so [line_no] reflects the same "non-blank
-           index, malformed counted but skipped" semantics as the Eio
-           branch; folding over [fst (load_jsonl_diagnostics ...)] alone
-           would skip malformed rows and desync the index. *)
-        let line_idx = ref 0 in
-        let acc = ref init in
-        let chan = Stdlib.open_in path in
-        Fun.protect
-          ~finally:(fun () -> Stdlib.close_in_noerr chan)
-          (fun () ->
-            try
-              while true do
-                let raw = Stdlib.input_line chan in
-                let trimmed = String.trim raw in
-                if not (String.equal trimmed "")
-                then begin
-                  incr line_idx;
-                  match Yojson.Safe.from_string trimmed with
-                  | json -> acc := f !acc ~line_no:!line_idx json
-                  | exception Yojson.Json_error msg ->
-                    Stdlib.Printf.eprintf
-                      "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-                      path
-                      !line_idx
-                      msg
-                end
-              done
-            with End_of_file -> ());
+  let max_line_bytes = 16 * 1024 * 1024 in
+  let line_buf = Buffer.create 256 in
+  let line_idx = ref 0 in
+  let acc = ref init in
+  let pos = ref 0 in
+  let add_slice s ofs len =
+    if Buffer.length line_buf + len > max_line_bytes then
+      raise
+        (Sys_error
+           (Printf.sprintf "%s: JSONL line exceeds %d bytes" path max_line_bytes));
+    Buffer.add_substring line_buf s ofs len
+  in
+  let emit_buffered_line () =
+    let raw = Buffer.contents line_buf in
+    Buffer.clear line_buf;
+    let trimmed = String.trim raw in
+    if not (String.equal trimmed "") then (
+      incr line_idx;
+      match Yojson.Safe.from_string trimmed with
+      | json -> acc := f !acc ~line_no:!line_idx json
+      | exception Yojson.Json_error msg ->
+        Stdlib.Printf.eprintf
+          "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+          path
+          !line_idx
+          msg)
+  in
+  let rec loop ~first =
+    match
+      read_chunk_under_append_mutex
+        ~label:"fs-compat-fold-jsonl"
+        ~path
+        ~from:!pos
+        ~clamp_beyond_eof:true
+        ~max_len:streaming_jsonl_chunk_bytes
+    with
+    | Slice_missing ->
+      if first then init
+      else (
+        if Buffer.length line_buf > 0 then emit_buffered_line ();
         !acc)
-      (fun fs ->
-         let eio_path = Eio.Path.(fs / path) in
-         Eio.Path.with_open_in eio_path (fun flow ->
-           let buf = Eio.Buf_read.of_flow ~max_size:max_line_bytes flow in
-           let line_idx = ref 0 in
-           let acc = ref init in
-           Eio.Buf_read.lines buf
-           |> Seq.iter (fun raw ->
-             let trimmed = String.trim raw in
-             if not (String.equal trimmed "")
-             then begin
-               incr line_idx;
-               match Yojson.Safe.from_string trimmed with
-               | json -> acc := f !acc ~line_no:!line_idx json
-               | exception Yojson.Json_error msg ->
-                 Stdlib.Printf.eprintf
-                   "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-                   path
-                   !line_idx
-                   msg
-             end);
-           !acc))
+    | Slice_present { file_size; actual_from = _; data } ->
+      let n = String.length data in
+      if n > 0 then (
+        let seg_start = ref 0 in
+        for i = 0 to n - 1 do
+          if Char.equal (String.unsafe_get data i) '\n' then (
+            add_slice data !seg_start (i - !seg_start);
+            emit_buffered_line ();
+            seg_start := i + 1)
+        done;
+        if !seg_start < n then add_slice data !seg_start (n - !seg_start);
+        pos := !pos + n;
+        if !pos < file_size then loop ~first:false
+        else (
+          if Buffer.length line_buf > 0 then emit_buffered_line ();
+          !acc))
+      else (
+        if Buffer.length line_buf > 0 then emit_buffered_line ();
+        !acc)
+  in
+  loop ~first:true
 ;;
 
 (** Append JSON value as line to JSONL file.
@@ -268,13 +352,13 @@ let fold_jsonl_lines ~init ~f path =
      ([fd_cache_mu]) so two appends to *different* paths never
      contend on a global fd-cache lock. *)
 let invalidate_cached_writer path =
-  let path_mu = get_append_path_mutex path in
-  Stdlib.Mutex.protect path_mu (fun () -> Fd_cache.invalidate path)
+  with_append_path_mutex path (fun () -> evict_inactive_cached_writer_for_path path)
 ;;
 
 let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
-let with_cached_writer_for_testing path f = Fd_cache.with_writer path f
+let with_cached_writer_for_testing path f =
+  Fd_cache.with_writer (canonical_append_mutex_path path) f
 
 (* The rest of [fd], from its current position to its end. The buffer starts
    at the length the file reports and one chunk serves every read, so a file

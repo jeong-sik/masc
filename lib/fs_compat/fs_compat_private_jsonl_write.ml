@@ -366,12 +366,27 @@ let private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content =
     Filename.open_temp_file
       ~mode:[ Open_binary ]
       ~temp_dir:dir
-      ".private_jsonl_"
-      ".stage")
+      Fs_compat_internal.Atomic_temp_name.private_jsonl_stage_prefix
+      Fs_compat_internal.Atomic_temp_name.private_jsonl_stage_suffix)
   with
   | Error failure -> Error (Private_jsonl_operation_failed failure)
   | Ok (temp_path, output) ->
     let descriptor = Unix.descr_of_out_channel output in
+    let stage_lease_fd =
+      if Fs_compat_internal.Stage_flock.try_lock_exclusive_fd descriptor
+      then
+        (try Some (Unix.dup ~cloexec:true descriptor) with
+         | Unix.Unix_error _ -> None)
+      else None
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        match stage_lease_fd with
+        | Some lease_fd ->
+          (try Unix.close lease_fd with
+           | Unix.Unix_error _ -> ())
+        | None -> ())
+    @@ fun () ->
     let first_failure = ref None in
     let run_until_failure operation f =
       match !first_failure with

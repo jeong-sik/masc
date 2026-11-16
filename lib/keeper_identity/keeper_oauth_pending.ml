@@ -48,7 +48,8 @@ type scope_state = {
    changing the credential that was already attached. *)
 type t = {
   base_path : string;
-  mutex : Mutex.t;
+  eio_mutex : Eio.Mutex.t;
+  fallback_mutex : Mutex.t;
   mutable entries : entry list;
   mutable admitted : admission;
   mutable scopes : ((string * string) * scope_state) list;
@@ -64,7 +65,13 @@ type catalog_publication = { attachment : attachment; revision : unit ref }
 type 'a publication = Published of 'a | Publication_superseded | Publication_failed of string
 
 let create ~base_path () : t =
-  { base_path; mutex = Mutex.create (); entries = []; admitted = 0; scopes = [] }
+  { base_path
+  ; eio_mutex = Eio.Mutex.create ()
+  ; fallback_mutex = Mutex.create ()
+  ; entries = []
+  ; admitted = 0
+  ; scopes = []
+  }
 
 (* The change observer runs under the table's lock, after the change it
    reports, with the table's workspace and the Keeper a status reader would
@@ -77,9 +84,28 @@ let install_change_observer observer = Atomic.set changed_observer observer
 
 let notify_changed (t : t) ~keeper =
   (Atomic.get changed_observer) ~base_path:t.base_path ~keeper
+
+let in_eio_context () =
+  match Eio.Fiber.is_cancelled () with
+  | true | false -> true
+  | exception Effect.Unhandled _ -> false
+
+(* [Eio.Mutex.use_ro] is exclusive and releases rather than poisoning on
+   callback exceptions, while avoiding holding an OS pthread mutex across Eio
+   filesystem yields inside [publish_*] and [retire_scope] callbacks. *)
 let with_lock (t : t) f =
-  Mutex.lock t.mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
+  if in_eio_context ()
+  then Eio.Mutex.use_ro t.eio_mutex f
+  else (
+    Mutex.lock t.fallback_mutex;
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.fallback_mutex) f)
+
+let with_durable_lock (t : t) f =
+  if in_eio_context ()
+  then Eio.Cancel.protect (fun () -> Eio.Mutex.use_ro t.eio_mutex f)
+  else (
+    Mutex.lock t.fallback_mutex;
+    Fun.protect ~finally:(fun () -> Mutex.unlock t.fallback_mutex) f)
 
 let registry_mutex = Mutex.create ()
 let by_workspace = Hashtbl.create 1
@@ -122,6 +148,14 @@ let attachment_current_locked attachment =
 
 let attachment_current attachment =
   with_lock attachment.owner (fun () -> attachment_current_locked attachment)
+
+let same_attachment left right =
+  left.owner == right.owner
+  && left.epoch == right.epoch
+  && left.credential_revision == right.credential_revision
+  && String.equal left.scope.base_path right.scope.base_path
+  && String.equal left.scope.keeper right.scope.keeper
+  && String.equal left.scope.provider_id right.scope.provider_id
 
 let begin_catalog attachment =
   with_lock attachment.owner (fun () ->
@@ -260,7 +294,7 @@ let status t ~now ~attempt_id ~keeper ~provider_id =
 type settlement = Recorded | Not_admitted
 
 let finish t ~state outcome =
-  with_lock t (fun () ->
+  with_durable_lock t (fun () ->
     let recorded = ref None in
     t.entries <- List.map (fun entry ->
       if entry.state=state && entry.status=Callback_admitted

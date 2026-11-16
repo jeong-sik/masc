@@ -214,46 +214,95 @@ let redact_prefixes s prefixes =
   Buffer.contents buf
 ;;
 
+let is_authority_delimiter = function
+  | '/' | '?' | '#' | ' ' | '\t' | '\r' | '\n' | '"' | '\'' | ')' | ']' | '>' -> true
+  | _ -> false
+;;
+
+let has_scheme_sep_at s ~stop i =
+  i + 3 <= stop
+  && Char.equal s.[i] ':'
+  && Char.equal s.[i + 1] '/'
+  && Char.equal s.[i + 2] '/'
+;;
+
+let find_authority_end s ~pos ~stop =
+  let rec loop i =
+    if i >= stop || is_authority_delimiter s.[i] || has_scheme_sep_at s ~stop i
+    then i
+    else loop (i + 1)
+  in
+  loop pos
+;;
+
+let last_char_in_range s ~start ~stop target =
+  let rec loop i found =
+    if i >= stop then found
+    else loop (i + 1) (if Char.equal s.[i] target then Some i else found)
+  in
+  loop start None
+;;
+
 let redact_url_userinfo s =
-  match String.index_opt s '/' with
-  | Some i1 when i1 + 2 <= String.length s && s.[i1 + 1] = '/' ->
-    let auth_start = i1 + 2 in
-    let auth_end =
-      match String.index_from_opt s auth_start '/' with
-      | Some j -> j
-      | None -> String.length s
+  let stop = String.length s in
+  match find_prefix s 0 "://" with
+  | None -> s
+  | Some first_sep ->
+    let buf = Buffer.create stop in
+    let rec scan pos next_sep_opt =
+      match next_sep_opt with
+      | None -> Buffer.add_substring buf s pos (stop - pos)
+      | Some sep ->
+        let auth_start = sep + 3 in
+        let auth_end = find_authority_end s ~pos:auth_start ~stop in
+        let authority_colon =
+          let rec find_colon i =
+            if i >= auth_end then None
+            else if Char.equal s.[i] ':' then Some i
+            else find_colon (i + 1)
+          in
+          find_colon auth_start
+        in
+        (match authority_colon with
+         | Some colon ->
+           (match last_char_in_range s ~start:(colon + 1) ~stop:auth_end '@' with
+            | Some at ->
+              Buffer.add_substring buf s pos (auth_start - pos);
+              Buffer.add_string buf redaction_marker;
+              Buffer.add_char buf '@';
+              Buffer.add_substring buf s (at + 1) (auth_end - at - 1)
+            | None -> Buffer.add_substring buf s pos (auth_end - pos))
+         | None -> Buffer.add_substring buf s pos (auth_end - pos));
+        scan auth_end (find_prefix s auth_end "://")
     in
-    let authority = String.sub s auth_start (auth_end - auth_start) in
-    (match String.index_opt authority ':' with
-     | Some colon ->
-       (match String.index_from_opt authority colon '@' with
-        | Some at ->
-          let host = String.sub authority (at + 1) (String.length authority - at - 1) in
-          let prefix = String.sub s 0 auth_start in
-          let suffix = String.sub s auth_end (String.length s - auth_end) in
-          prefix ^ "[REDACTED]@" ^ host ^ suffix
-        | None -> s)
-     | None -> s)
-  | _ -> s
+    scan 0 (Some first_sep);
+    Buffer.contents buf
 ;;
 
 let redact_private_key_block s =
+  let stop = String.length s in
   match find_prefix s 0 "-----BEGIN" with
   | None -> s
-  | Some start ->
-    (match find_prefix s (start + 10) "-----END" with
-     | None ->
-       let before = String.sub s 0 start in
-       before ^ redaction_marker
-     | Some end_pos ->
-       let block_end =
-         match String.index_from_opt s end_pos '\n' with
-         | Some nl -> nl + 1
-         | None -> String.length s
-       in
-       let before = String.sub s 0 start in
-       let after = String.sub s block_end (String.length s - block_end) in
-       before ^ redaction_marker ^ after)
+  | Some first_start ->
+    let buf = Buffer.create stop in
+    let rec scan pos next_start_opt =
+      match next_start_opt with
+      | None -> Buffer.add_substring buf s pos (stop - pos)
+      | Some start ->
+        Buffer.add_substring buf s pos (start - pos);
+        Buffer.add_string buf redaction_marker;
+        (match find_prefix s (start + 10) "-----END" with
+         | None -> ()
+         | Some end_pos ->
+           let block_end =
+             match String.index_from_opt s end_pos '\n' with
+             | Some nl -> nl + 1
+             | None -> stop
+           in
+           scan block_end (find_prefix s block_end "-----BEGIN"))
+    in
+    scan 0 (Some first_start);
+    Buffer.contents buf
 ;;
 
 let builtin_prefixes = [ "Bearer "; "api-key: "; "x-api-key: "; "Authorization:"; "key=" ]
@@ -270,11 +319,12 @@ let redact_string s =
   | None -> redact_common_tokens s
 ;;
 
-let rec redact_json = function
+let rec redact_json (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
   | `String s -> `String (redact_string s)
   | `Assoc pairs -> `Assoc (List.map (fun (k, v) -> k, redact_json v) pairs)
   | `List xs -> `List (List.map redact_json xs)
-  | other -> other
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as leaf -> leaf
 ;;
 
 let%test "redact_string masks Bearer token" =

@@ -57,6 +57,23 @@ let test_a_long_run_of_one_prefix_ahead_of_another_is_one_pass () =
     (elapsed < linear_scan_cpu_budget_s)
 ;;
 
+let test_multiple_urls_and_pem_blocks_are_redacted () =
+  check string "URL userinfo after slash-containing path and multiple URLs"
+    "reading /var/log/app: https://[REDACTED]@a.example.com?x=1 then https://[REDACTED]@b.example.com/v1"
+    (redact "reading /var/log/app: https://u1:secret1@a.example.com?x=1 then https://u2:secret2@b.example.com/v1");
+  check string "comma-separated URLs without path slash still redact second URL"
+    "http://localhost:8080,https://[REDACTED]@api.example.com/v1"
+    (redact "http://localhost:8080,https://user:secret@api.example.com/v1");
+  let multi_pem =
+    "-----BEGIN PRIVATE KEY-----\nFIRST_SECRET\n-----END PRIVATE KEY-----\n"
+    ^ "middle\n"
+    ^ "-----BEGIN EC PRIVATE KEY-----\nSECOND_SECRET\n-----END EC PRIVATE KEY-----\ntail"
+  in
+  check string "all PEM blocks in string are redacted"
+    "[REDACTED]middle\n[REDACTED]tail"
+    (redact multi_pem)
+;;
+
 let () =
   run
     "Secret_redactor"
@@ -73,6 +90,10 @@ let () =
             "a long run of one prefix ahead of another is one pass"
             `Quick
             test_a_long_run_of_one_prefix_ahead_of_another_is_one_pass
+        ; test_case
+            "multiple URLs after slashes and multiple PEM blocks are redacted"
+            `Quick
+            test_multiple_urls_and_pem_blocks_are_redacted
         ] )
     ]
 ;;

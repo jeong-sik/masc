@@ -617,7 +617,7 @@ let renewal_error_message = function
    [renew_if_needed] when the declared window has opened, and the reactive path
    in [run_call] when the endpoint answered 401 -- the only renewal a provider
    that issued no expiry ever gets. *)
-let force_refresh ~attachment ~token_post ~discover ~base_path ~keeper_name
+let force_refresh_once ~attachment ~token_post ~discover ~base_path ~keeper_name
       ~(provider : Provider.t) ~now () =
   let current () =
     attachment_matches attachment ~base_path ~keeper_name ~provider
@@ -697,6 +697,62 @@ let force_refresh ~attachment ~token_post ~discover ~base_path ~keeper_name
       Ok {access_token=tokens.Keeper_oauth_flow.access_token; attachment}
   | Keeper_oauth_pending.Publication_superseded -> Error (Renew_permanent superseded_operation)
   | Keeper_oauth_pending.Publication_failed message -> Error (Renew_permanent message)
+;;
+
+type inflight_renewal =
+  { attachment : Keeper_oauth_pending.attachment
+  ; promise : (credential, renewal_error) result option Eio.Promise.t
+  }
+
+let inflight_renewals : inflight_renewal list ref = ref []
+let inflight_renewals_mu = Eio.Mutex.create ()
+
+(* Coalesce concurrent Eio fibers refreshing the exact same captured attachment
+   revision so a rotating single-use refresh_token is never redeemed twice. *)
+let rec force_refresh ~attachment ~token_post ~discover ~base_path ~keeper_name
+      ~(provider : Provider.t) ~now () =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio ->
+    force_refresh_once ~attachment ~token_post ~discover ~base_path ~keeper_name ~provider ~now ()
+  | Eio_guard.Eio_fiber ->
+    let action =
+      Eio.Mutex.use_ro inflight_renewals_mu (fun () ->
+        match
+          List.find_opt
+            (fun entry -> Keeper_oauth_pending.same_attachment entry.attachment attachment)
+            !inflight_renewals
+        with
+        | Some existing -> `Join existing.promise
+        | None ->
+          let promise, resolver = Eio.Promise.create () in
+          let entry = { attachment; promise } in
+          inflight_renewals := entry :: !inflight_renewals;
+          `Lead (entry, resolver))
+    in
+    (match action with
+     | `Join promise ->
+       (match Eio.Promise.await promise with
+        | Some result -> result
+        | None ->
+          (* Leader fiber was cancelled before settling; retry on this live fiber. *)
+          force_refresh ~attachment ~token_post ~discover ~base_path ~keeper_name ~provider ~now ())
+     | `Lead (entry, resolver) ->
+       let settled = ref false in
+       Fun.protect
+         ~finally:(fun () ->
+           Eio.Cancel.protect (fun () ->
+             Eio.Mutex.use_ro inflight_renewals_mu (fun () ->
+               inflight_renewals :=
+                 List.filter (fun candidate -> candidate != entry) !inflight_renewals);
+             if not !settled then Eio.Promise.resolve resolver None))
+         (fun () ->
+           let result =
+             force_refresh_once ~attachment ~token_post ~discover ~base_path
+               ~keeper_name ~provider ~now ()
+           in
+           settled := true;
+           Eio.Promise.resolve resolver (Some result);
+           result))
 ;;
 
 let renew_if_needed ~attachment ~token_post ~discover ~base_path ~keeper_name

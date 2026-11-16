@@ -1,26 +1,37 @@
 #!/usr/bin/env python3
 # pyright: strict
-"""Hold the reads of a raw bearer to the places that may make them.
+"""Pin references to four legacy token APIs to their per-file allow-list.
 
-RFC a-request-reads-its-bearer-once-at-the-door, D6. A request's bearer is
-read once, at the door, and the layers below take the door's answer. The
-functions in WATCHED read a raw token again. A call to one of them outside
-lib/auth/ is counted per file, and the count must equal the one in ALLOWED.
+RFC a-request-reads-its-bearer-once-at-the-door, stage 4a (D6). Only
+find_credential_by_token, resolve_agent_from_token, check_permission and
+authorize_tool on Auth or Auth_credential_token are counted in lib/**/*.ml
+outside lib/auth/. These are source references before PPX expansion, not
+dynamic calls, request I/O counts or a dataflow analysis. This step
+holds the four migrated legacy APIs steady; it does not prove the whole
+ingress, credential-management or internal-token boundary.
 
-- A count that grew is a new read. Pass the door's answer to it instead, or
+find_token_credential, find_static_token_credential,
+find_static_credential_by_token, verify_token, verify_internal_keeper_token,
+internal_keeper_bearer, identify_bearer, resolve_role and resolve_role_* are
+outside this guard, as are raw token comparisons. Their separate contracts
+are not assessed by this four-API migration check.
+
+- A count that grew is a new guarded reference. Pass the door's answer instead, or
   write in RFC D6 why it must read, and raise the count here.
 - A count that shrank must shrink here too, so a removed read stays removed.
-- A file not in ALLOWED may not call these functions at all.
+- A scanned file not in ALLOWED may not reference these four functions.
 
-Comments, string literals and character literals are blanked before
-matching, so a function named in a comment is not a call. The match needs
-the module's name, so a file may not reach these modules without it: an
-`open`, `include`, local open (`Auth.( ... )`) or alias under another name
-fails the check. `module Auth = Auth` keeps the name and is allowed.
+Comments, string literals and character literals are blanked before tokens
+are read. Whitespace and comments around a qualified name's dots do not
+hide it. Bare auth-module references are rejected conservatively: opens,
+wrapped or typed aliases, first-class modules and functor arguments can all
+hide the four guarded names. Only simple aliases that keep the name, such
+as `module Auth = Auth` or `module Auth = Masc_auth.Auth`, are exempt.
 
 Run: python3 -I scripts/ci/raw_token_auth_calls.py [--root DIR]
-Exits 0 when every count matches and no file hides the name, 1 otherwise,
-naming each place.
+Exits 0 when the four APIs' counts match and no bare module reference hides
+their names, 1 otherwise, naming each place. Other token helpers remain out
+of scope even when this check succeeds.
 """
 
 from __future__ import annotations
@@ -38,21 +49,13 @@ WATCHED = (
     "authorize_tool",
 )
 QUALIFIERS = ("Auth", "Auth_credential_token")
-_QUALIFIER = "(?:" + "|".join(QUALIFIERS) + ")"
-CALL = re.compile(r"\b" + _QUALIFIER + r"\.(" + "|".join(WATCHED) + r")\b")
-# Ways to reach a qualifier's functions without writing its name. A module
-# path may precede it (`open Masc_auth.Auth`).
-_PATH = r"(?:[A-Z]\w*\.)*"
-HIDING = re.compile(
-    r"\b(?:open!?|include)\s+" + _PATH + r"(?P<opened>" + _QUALIFIER + r")\b"
-    r"|\bmodule\s+(?P<alias>[A-Z]\w*)\s*=\s*" + _PATH + r"(?P<aliased>" + _QUALIFIER + r")\b"
-    r"|\b(?P<local>" + _QUALIFIER + r")\.[(\[{]"
-)
+_IDENTIFIER = re.compile(r"[^\W\d][\w']*")
+_TOKEN = re.compile(r"[^\W\d][\w']*|\d+|[^\s]")
 # lib/auth/ defines these functions and is the store they read.
 EXEMPT_PREFIX = "lib/auth/"
 
-# (file, function) -> number of calls. Each entry says why the file reads a
-# raw bearer.
+# (file, function) -> static references to the four guarded legacy APIs.
+# Each entry says why the file retains that reference.
 ALLOWED: dict[tuple[str, str], int] = {
     # The HTTP doors: /mcp, seat, observer, operator, dashboard and the
     # credential administration routes.
@@ -154,7 +157,7 @@ class Call:
 
 @dataclass(frozen=True, slots=True)
 class Hidden:
-    """A place that reaches a qualifier without writing its name."""
+    """A bare auth module that can hide a guarded member's name."""
 
     path: str
     line: int
@@ -171,18 +174,139 @@ def _line(code: str, offset: int) -> int:
     return code.count("\n", 0, offset) + 1
 
 
+@dataclass(frozen=True, slots=True)
+class _Token:
+    text: str
+    offset: int
+
+
+def _module_name(text: str) -> bool:
+    return bool(_IDENTIFIER.fullmatch(text)) and text[0].isupper()
+
+
+def _name_preserving_aliases(tokens: list[_Token]) -> set[int]:
+    """Only `module Auth = Pkg.Auth`-shaped simple aliases keep the name."""
+    exempt: set[int] = set()
+    for index, token in enumerate(tokens):
+        if token.text != "module" or index + 3 >= len(tokens):
+            continue
+        name = tokens[index + 1].text
+        if name not in QUALIFIERS or tokens[index + 2].text != "=":
+            continue
+        end = index + 3
+        if not _module_name(tokens[end].text):
+            continue
+        while (
+            end + 2 < len(tokens)
+            and tokens[end + 1].text == "."
+            and _module_name(tokens[end + 2].text)
+        ):
+            end += 2
+        if end + 1 < len(tokens) and tokens[end + 1].text in (".", "("):
+            continue
+        if tokens[end].text == name:
+            exempt.update((index + 1, end))
+    return exempt
+
+
+def _in_module_expression(tokens: list[_Token], index: int) -> bool:
+    """A bare module path needs a module context; `Error (Auth x)` does not.
+
+    Walk back through the path's wrapping parentheses and module binding's
+    annotation, stopping at a value/type declaration or structure body.
+    Closed groups before this path are skipped, so a preceding first-class
+    package does not turn a later value constructor into a module reference.
+    """
+    if index > 0 and tokens[index - 1].text == "`":
+        return False
+    if (
+        index > 0
+        and tokens[index - 1].text == "module"
+        and index + 1 < len(tokens)
+        and tokens[index + 1].text in ("=", ":")
+        and (index < 2 or tokens[index - 2].text != "(")
+    ):
+        return False  # A module binding's name, not its right-hand side.
+    closing = {")": "(", "]": "[", "}": "{"}
+    skip: list[str] = []
+    bound = False
+    position = index - 1
+    while position >= 0:
+        text = tokens[position].text
+        if text in closing:
+            skip.append(closing[text])
+        elif skip:
+            if text == skip[-1]:
+                skip.pop()
+        elif text == "=":
+            bound = True
+        elif text == "end":
+            if not bound:
+                return False
+            # A binding's `: sig ... end` annotation may precede its RHS.
+            blocks = 1
+            position -= 1
+            while position >= 0 and blocks:
+                part = tokens[position].text
+                if part == "end":
+                    blocks += 1
+                elif part in ("sig", "struct", "object", "begin"):
+                    blocks -= 1
+                position -= 1
+            continue
+        elif (
+            text == "type"
+            and position > 0
+            and tokens[position - 1].text == "module"
+            and position + 1 < len(tokens)
+            and tokens[position + 1].text == "of"
+        ):
+            return True
+        elif text == "type" and position > 0 and tokens[position - 1].text in ("with", "and"):
+            # These are module-type constraints, not a type declaration in
+            # a structure. Keep looking for the binding's module context.
+            position -= 2
+            continue
+        elif text in ("module", "open", "include", "functor"):
+            return True
+        elif text in (
+            "let", "in", "type", "val", "external", "exception", "struct",
+            "sig", "object", "begin", "fun", "function", "match", "with",
+            "try", "then", "else", "do", "done", "while", "for", "|", ";", ",",
+        ):
+            return False
+        position -= 1
+    return False
+
+
 def scan_text(path: str, text: str) -> Scan:
     code = code_only(text)
-    calls = tuple(
-        Call(path, _line(code, match.start()), match.group(1))
-        for match in CALL.finditer(code)
-    )
-    hidden = tuple(
-        Hidden(path, _line(code, match.start()), match.group(0))
-        for match in HIDING.finditer(code)
-        if match.group("alias") is None or match.group("alias") != match.group("aliased")
-    )
-    return Scan(calls, hidden)
+    tokens = [_Token(match.group(0), match.start()) for match in _TOKEN.finditer(code)]
+    aliases = _name_preserving_aliases(tokens)
+    calls: list[Call] = []
+    hidden: list[Hidden] = []
+    for index, token in enumerate(tokens):
+        if token.text not in QUALIFIERS:
+            continue
+        member = (
+            tokens[index + 2].text
+            if index + 2 < len(tokens)
+            and tokens[index + 1].text == "."
+            and _IDENTIFIER.fullmatch(tokens[index + 2].text)
+            else None
+        )
+        if member is not None and member in WATCHED:
+            calls.append(Call(path, _line(code, token.offset), member))
+        local_open = (
+            index + 2 < len(tokens)
+            and tokens[index + 1].text == "."
+            and tokens[index + 2].text in ("(", "[", "{")
+        )
+        if member is None and index not in aliases and (
+            local_open or _in_module_expression(tokens, index)
+        ):
+            hidden.append(Hidden(path, _line(code, token.offset), token.text))
+    return Scan(tuple(calls), tuple(hidden))
 
 
 def scan(root: pathlib.Path) -> Scan:
@@ -228,14 +352,14 @@ def report(mismatch: Mismatch) -> str:
     lines.extend(f"  {call.path}:{call.line}" for call in mismatch.found)
     if len(mismatch.found) > mismatch.allowed:
         lines.append(
-            "  A new call reads the raw bearer again. Pass the door's answer "
+            "  A new reference to a guarded legacy token API was added. Pass the door's answer "
             "(Auth.request_principal, Mcp_server_eio_caller_identity.bearer) "
             "instead, or give the reason in RFC D6 and raise the count in "
             "scripts/ci/raw_token_auth_calls.py."
         )
     else:
         lines.append(
-            "  A read was removed. Lower the count in "
+            "  A guarded reference was removed. Lower the count in "
             "scripts/ci/raw_token_auth_calls.py so it stays removed."
         )
     return "\n".join(lines)
@@ -243,9 +367,9 @@ def report(mismatch: Mismatch) -> str:
 
 def report_hidden(hidden: Hidden) -> str:
     return (
-        f"{hidden.path}:{hidden.line}: `{hidden.text}` reaches the module "
-        "without its name, so this check cannot see the calls. Write "
-        "Auth.<function> or Auth_credential_token.<function> at each call."
+        f"{hidden.path}:{hidden.line}: bare module `{hidden.text}` can hide "
+        "the four guarded API names. Use a qualified member or a simple "
+        "alias that keeps the module's name."
     )
 
 
@@ -257,7 +381,10 @@ def main(argv: list[str]) -> int:
     found = scan(root)
     wrong = mismatches(found.calls, ALLOWED)
     if not wrong and not found.hidden:
-        print("raw token auth calls: every count matches RFC D6's allow-list")
+        print(
+            "four legacy auth API references: counts match the allow-list; "
+            "other token helpers/raw comparisons are out of scope"
+        )
         return 0
     for hidden in found.hidden:
         print(report_hidden(hidden), file=sys.stderr)

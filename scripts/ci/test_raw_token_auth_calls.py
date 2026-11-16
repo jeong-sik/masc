@@ -8,6 +8,8 @@ Run: python3 -I scripts/ci/test_raw_token_auth_calls.py
 from __future__ import annotations
 
 import pathlib
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import sys
 import tempfile
 import unittest
@@ -64,6 +66,51 @@ class CodeOnly(unittest.TestCase):
 
 
 class Calls(unittest.TestCase):
+    def test_qualified_calls_ignore_trivia(self) -> None:
+        for text in (
+            "Auth .check_permission",
+            "Auth. check_permission",
+            "Auth.\n check_permission",
+            "Auth(* explained *).check_permission",
+            "Masc_auth (* explained *) . Auth . check_permission",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(functions(text), ["check_permission"])
+
+    def test_an_apostrophe_does_not_truncate_an_identifier(self) -> None:
+        self.assertEqual(
+            functions("Auth.check_permission' Auth.resolve_agent_from_token' Auth'.authorize_tool"),
+            [],
+        )
+
+    def test_other_token_helpers_remain_out_of_scope(self) -> None:
+        for function in (
+            "find_token_credential", "find_static_token_credential",
+            "find_static_credential_by_token", "verify_token",
+            "verify_internal_keeper_token", "internal_keeper_bearer",
+            "identify_bearer", "resolve_role", "resolve_role_of_resolved_bearer",
+        ):
+            with self.subTest(function=function):
+                text = "Auth." + function
+                self.assertEqual(functions(text), [])
+                self.assertEqual(hidden(text), [])
+
+    def test_auth_value_constructors_are_not_module_references(self) -> None:
+        for text in (
+            "type error = Auth of string",
+            "let error = Auth",
+            "let error = Error Auth",
+            "let error = `Auth",
+            "let error = Error (Api_error.Auth message)",
+            "let show = function Auth -> true | _ -> false",
+            "module M = struct type error = Auth let error = Auth end",
+            "module M = struct end\ntype error = Auth",
+            "module type S = sig end\ntype error = Auth of string",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(functions(text), [])
+                self.assertEqual(hidden(text), [])
+
     def test_counts_each_watched_call_with_its_line(self) -> None:
         text = (
             "let a = Auth.find_credential_by_token\n"
@@ -90,6 +137,50 @@ class Calls(unittest.TestCase):
 
 
 class Hiding(unittest.TestCase):
+    def test_with_type_constraints_do_not_hide_aliases(self) -> None:
+        for text in (
+            "module A : S with type credential_transaction = Auth.credential_transaction = Auth",
+            "module A : S with type credential_transaction = Auth.credential_transaction "
+            "and type marker = Auth.marker = Auth",
+            "module A : S with type credential_transaction := Auth.credential_transaction = Auth",
+            "let f () = let module A : S with type credential_transaction = "
+            "Auth.credential_transaction = (Auth) in A.check_permission ()",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(hidden(text))
+
+    def test_wrapped_module_values_cannot_hide_the_guarded_names(self) -> None:
+        for text in (
+            "module A = (Auth)\nlet f = A.check_permission",
+            "module A : module type of Auth = Auth\nlet f = A.check_permission",
+            "module A = (Auth : S)\nlet f = A.check_permission",
+            "module A = Identity(Auth)\nlet f = A.check_permission",
+            "module type S = module type of Auth\n"
+            "let f () = let module A = (val (module Auth : S)) in A.check_permission ()",
+            "module Auth = Identity(Auth)",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(hidden(text))
+
+    def test_trivia_does_not_hide_opens(self) -> None:
+        for text in (
+            "Auth. (check_permission ())",
+            "Auth .(check_permission ())",
+            "open Masc_auth . Auth",
+            "include (Auth)",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(hidden(text))
+
+    def test_name_preserving_aliases_allow_trivia(self) -> None:
+        for text in (
+            "module Auth = Auth",
+            "module Auth = Masc_auth (* explained *) . Auth",
+            "module Auth_credential_token = Masc_auth . Auth_credential_token",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(hidden(text), [])
+
     def test_reaching_the_module_without_its_name_is_reported(self) -> None:
         for text in (
             "open Auth",
@@ -130,7 +221,7 @@ class Mismatches(unittest.TestCase):
         found = self.calls(("lib/a.ml", "check_permission"), ("lib/a.ml", "check_permission"))
         [wrong] = check.mismatches(found, {("lib/a.ml", "check_permission"): 1})
         self.assertEqual((wrong.allowed, len(wrong.found)), (1, 2))
-        self.assertIn("reads the raw bearer again", check.report(wrong))
+        self.assertIn("guarded legacy token API", check.report(wrong))
 
     def test_a_file_not_in_the_list_fails(self) -> None:
         found = self.calls(("lib/b.ml", "authorize_tool"))
@@ -154,6 +245,35 @@ class Allowed(unittest.TestCase):
 
 
 class Scan(unittest.TestCase):
+    def test_the_whole_gate_rejects_the_nine_bypasses(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            for (path, function), count in check.ALLOWED.items():
+                file = root / path
+                file.parent.mkdir(parents=True, exist_ok=True)
+                with file.open("a", encoding="utf-8") as stream:
+                    for index in range(count):
+                        stream.write(f"let allowed_{function}_{index} = Auth.{function}\n")
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                self.assertEqual(check.main(["--root", str(root)]), 0)
+            extra = root / "lib/new_reader.ml"
+            for text in (
+                "let f () = Auth .check_permission ()",
+                "let f () = Auth. check_permission ()",
+                "let f () = Auth.\n check_permission ()",
+                "let f () = Auth(* explained *).check_permission ()",
+                "module A = (Auth)\nlet f () = A.check_permission ()",
+                "module A : module type of Auth = Auth\nlet f () = A.check_permission ()",
+                "module type S = module type of Auth\n"
+                "let f () = let module A = (val (module Auth : S)) in A.check_permission ()",
+                "let f () = Auth. (check_permission ())",
+                "open Masc_auth . Auth\nlet f () = check_permission ()",
+            ):
+                with self.subTest(text=text):
+                    extra.write_text(text, encoding="utf-8")
+                    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                        self.assertEqual(check.main(["--root", str(root)]), 1)
+
     def test_reads_lib_ml_files_outside_lib_auth(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

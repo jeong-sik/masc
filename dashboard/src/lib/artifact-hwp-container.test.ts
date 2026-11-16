@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readHwpCompound, preflightArtifactHwp } from './artifact-hwp-container'
 import { officeImportLimits } from './artifact-office-xml'
+import { hwpxTableLimits } from './artifact-hwpx-template'
 import { writeHwpTestCompound as compound } from './artifact-hwp-test-fixture'
 
 const encoder = new TextEncoder(), decoder = new TextDecoder(), paragraphHeader = new Uint8Array(24)
@@ -136,8 +137,8 @@ it('validates original OLE reference indices without recovering a missing slot',
   const payload = words(1, 7200, 7200, 2), body = bytes(record(66, 0, paragraph(9)), record(67, 1, controlText(id.graphic)), record(71, 1, words(id.graphic)), record(76, 2, words(id.ole)), record(84, 3, payload))
   expect(() => preflightArtifactHwp(source({ body, info: bytes(documentProperties(), binding()), binary: [Uint8Array.of(1)] }))).toThrow('바이너리 참조')
 })
-function tableBody(cells: readonly { column: number; row: number; columns: number; rows: number }[]): Uint8Array {
-  const shape = new Uint8Array(18); new DataView(shape.buffer).setUint16(4, 1, true); new DataView(shape.buffer).setUint16(6, 1, true)
+function tableBody(cells: readonly { column: number; row: number; columns: number; rows: number }[], dimensions = { rows: 1, columns: 1 }): Uint8Array {
+  const shape = new Uint8Array(18); new DataView(shape.buffer).setUint16(4, dimensions.rows, true); new DataView(shape.buffer).setUint16(6, dimensions.columns, true)
   return bytes(record(66, 0, paragraph(9)), record(67, 1, controlText(id.table)), record(71, 1, words(id.table)), record(77, 2, shape), ...cells.flatMap(cell => {
     const data = new Uint8Array(34), view = new DataView(data.buffer)
     for (const [index, value] of [cell.column, cell.row, cell.columns, cell.rows].entries()) view.setUint16(8 + index * 2, value, true)
@@ -149,6 +150,20 @@ it('accepts a complete table grid and rejects missing, overlapping or zero-span 
   expect(() => preflightArtifactHwp(source({ body: tableBody([cell]) }))).not.toThrow()
   for (const cells of [[], [cell, cell], [{ ...cell, rows: 0 }], [{ ...cell, columns: 2 }]]) expect(() => preflightArtifactHwp(source({ body: tableBody(cells) }))).toThrow()
 })
+for (const dimensions of [hwpxTableLimits, { rows: 4001, columns: hwpxTableLimits.columns }]) {
+  it(`accepts supported table axes ${dimensions.rows}x${dimensions.columns} without imposing a grid area cap`, () => {
+    const cell = { row: 0, column: 0, ...dimensions }
+    expect(() => preflightArtifactHwp(source({ body: tableBody([cell], dimensions) }))).not.toThrow()
+  })
+}
+const maximumHwpTableAxis = 0xFFFF
+for (const dimensions of [{ rows: hwpxTableLimits.rows + 1, columns: 1 }, { rows: 1, columns: hwpxTableLimits.columns + 1 },
+  { rows: maximumHwpTableAxis, columns: maximumHwpTableAxis }]) {
+  it(`refuses unsupported destination table axes ${dimensions.rows}x${dimensions.columns} before native conversion`, () => {
+    const cell = { row: 0, column: 0, ...dimensions }
+    expect(() => preflightArtifactHwp(source({ body: tableBody([cell], dimensions) }))).toThrow('행·열 수가 가져오기 지원 범위를')
+  })
+}
 it('accepts 64 active paragraph ancestors and refuses the 65th upstream parser boundary', () => {
   const nested = (depth: number): Uint8Array => {
     const parts: Uint8Array[] = [], table = new Uint8Array(18), cell = new Uint8Array(34)

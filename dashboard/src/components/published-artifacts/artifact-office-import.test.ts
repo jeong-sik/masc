@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { clearStoredToken, get, getWithResponse, post, setStoredToken } from '../../api/core'
 import type { ArtifactDocument } from '../../api/published-artifacts'
@@ -27,11 +27,16 @@ function file(bytes: ArrayBuffer, name: string): File {
   return value
 }
 function open(isCurrent = () => true) {
-  const drafts: ArtifactDraftSnapshot[] = [], saved = vi.fn(), forget = vi.fn()
+  const drafts: ArtifactDraftSnapshot[] = [], saved = vi.fn(), forget = vi.fn(), cancelled = vi.fn()
   const view = render(html`<${ArtifactImport} workspaceRoot="/office-fixture" isCurrent=${isCurrent}
     draftRetention=${{ remember: (draft: ArtifactDraftSnapshot) => drafts.push(draft), release: vi.fn(), forget }}
-    onMutation=${vi.fn()} onSaved=${saved} onCancel=${vi.fn()} />`)
-  return { ...view, drafts, saved, forget }
+    onMutation=${vi.fn()} onSaved=${saved} onCancel=${cancelled} />`)
+  return { ...view, drafts, saved, forget, cancelled }
+}
+function pendingHwp() {
+  let resolve!: (value: Awaited<ReturnType<typeof importArtifactHwp>>) => void
+  const promise = new Promise<Awaited<ReturnType<typeof importArtifactHwp>>>(done => { resolve = done })
+  return { promise, resolve }
 }
 beforeEach(() => {
   setStoredToken('office-fixture')
@@ -109,6 +114,65 @@ it('aborts an outstanding HWP worker when the import surface closes', async () =
   const signal = vi.mocked(importArtifactHwp).mock.calls[0]![1]!
   view.unmount()
   expect(signal.aborted).toBe(true)
+  expect(view.drafts).toHaveLength(0)
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('cancels a non-responding HWP read, retries the same file and ignores the old result', async () => {
+  const old = pendingHwp(), next = pendingHwp(), view = open()
+  const input = screen.getByLabelText('가져올 문서 파일') as HTMLInputElement, selected = file(new ArrayBuffer(0), '문서.hwp')
+  const select = () => {
+    const transfer = new DataTransfer(); transfer.items.add(selected)
+    input.files = transfer.files
+    fireEvent.change(input)
+  }
+  vi.mocked(importArtifactHwp).mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise)
+  select()
+  expect(input.value).toBe('')
+  expect(input.files).toHaveLength(0)
+  await waitFor(() => expect(importArtifactHwp).toHaveBeenCalledTimes(1))
+  const oldSignal = vi.mocked(importArtifactHwp).mock.calls[0]![1]!
+  fireEvent.click(screen.getByRole('button', { name: '가져오기 취소', exact: true }))
+  expect(oldSignal.aborted).toBe(true)
+  expect(view.cancelled).not.toHaveBeenCalled()
+  expect(screen.getByRole('status').textContent).toBe('파일 가져오기를 취소했습니다.')
+  expect(screen.queryByRole('button', { name: '가져오기 취소', exact: true })).toBeNull()
+  select()
+  expect(input.value).toBe('')
+  await waitFor(() => expect(importArtifactHwp).toHaveBeenCalledTimes(2))
+  await act(async () => { old.resolve({ content: '<p>취소한 원고</p>', notices: [] }) })
+  expect(screen.queryByLabelText('문서 본문')).toBeNull()
+  expect(screen.getByRole('status').textContent).toBe('파일을 읽고 있습니다.')
+  await act(async () => { next.resolve({ content: '<p>새 원고</p>', notices: [] }) })
+  expect((await screen.findByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe('<p>새 원고</p>')
+  expect(view.drafts).toHaveLength(1)
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('aborts immediately on Close even before the owner unmounts the surface', async () => {
+  const old = pendingHwp(), view = open()
+  vi.mocked(importArtifactHwp).mockReturnValue(old.promise)
+  fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file(new ArrayBuffer(0), '이전.hwp')] } })
+  await waitFor(() => expect(importArtifactHwp).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(importArtifactHwp).mock.calls[0]![1]!
+  fireEvent.click(screen.getByRole('button', { name: '닫기', exact: true }))
+  expect(signal.aborted).toBe(true)
+  expect(view.cancelled).toHaveBeenCalledTimes(1)
+  await act(async () => { old.resolve({ content: '<p>늦은 원고</p>', notices: [] }) })
+  expect(view.drafts).toHaveLength(0)
+  expect(screen.queryByLabelText('문서 본문')).toBeNull()
+})
+
+it('does not start an HWP worker when the user cancels while file bytes are still being read', async () => {
+  let finish!: (bytes: ArrayBuffer) => void
+  const bytes = new Promise<ArrayBuffer>(resolve => { finish = resolve }), selected = new File([], '읽는 중.hwp'), view = open()
+  const read = vi.fn(() => bytes)
+  Object.defineProperty(selected, 'arrayBuffer', { value: read })
+  fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [selected] } })
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('button', { name: '가져오기 취소', exact: true }))
+  await act(async () => { finish(new ArrayBuffer(0)) })
+  expect(importArtifactHwp).not.toHaveBeenCalled()
   expect(view.drafts).toHaveLength(0)
   expect(post).not.toHaveBeenCalled()
 })

@@ -102,9 +102,9 @@ related: ["masc-restart-replaces-the-workspace-server"]
 
 ### 4.3 종료 문구는 leaf 모듈 하나에서 만든다
 
-- **[사실]** `lib/process/process_eio.ml:187-200` 의 `signal_name` 은 OCaml 신호 상수 28개를 이름으로 바꾸고, 모르는 신호는 호스트 번호로 쓴다. `.mli:53` 에 열려 있다.
+- **[사실]** `lib/process/process_eio.ml:187-200` 의 `signal_name` 은 OCaml 신호 상수 28개를 이름으로 바꾸고, 모르는 신호는 호스트 번호로 쓴다. `.mli:53` 에 열려 있다. 저장소가 고정한 OCaml 5.5.2 의 `Sys` 는 상수 30개를 둔다. 5.4 에서 더한 `sigio`·`sigwinch` 가 표에 없어 `signal -29`·`signal -30` 으로 나온다.
 - **[사실]** 이 표를 `Posix_spawn_detached` 에서 부를 수 없다. `Process_eio` 가 `Posix_spawn_process_mgr` 를 쓰고(`process_eio.ml:1105`), 그것이 `Posix_spawn_detached` 를 쓴다(`posix_spawn_process_mgr.ml:91`). 같은 라이브러리 안에서 순환이 된다.
-- **[제안]** 신호 표와 `Unix.process_status` 문구를 의존이 없는 leaf 모듈 하나(`lib/process/process_exit_text.ml`)로 옮긴다. `Process_eio.signal_name` 을 부르던 6곳(`lib/` 5곳, `test/test_browser_addon_live_ego.ml:69`)은 이 모듈을 부른다. restart 의 9개짜리 표와 `exit_description` 은 지우고 이 모듈을 쓴다. witness 도 같은 모듈을 쓴다.
+- **[제안]** 신호 표와 `Unix.process_status` 문구를 의존이 없는 leaf 모듈 하나(`lib/process/process_exit_text.ml`)로 옮긴다. `Process_eio.signal_name` 을 부르던 6곳(`lib/` 5곳, `test/test_browser_addon_live_ego.ml:69`)은 이 모듈을 부른다. restart 의 9개짜리 표와 `exit_description` 은 지우고 이 모듈을 쓴다. witness 도 같은 모듈을 쓴다. 표는 `Sys` 상수 30개를 모두 담는다.
 - **[사실]** 같은 일을 하는 곳이 이 밖에도 많다. `rg 'WSIGNALED .*sprintf'` 로 20곳이 넘는다. 예: `bin/masc_tui_server_lifecycle.ml:184-187`(`killed by OCaml signal -7` 처럼 OCaml 내부 번호를 보임), `lib/process/with_process.ml:24`, `lib/build_identity.ml:112`, `lib/process/forked_map.ml:6-13`, `bin/masc_tui.ml:260-264`. 시험 몇 개가 지금 문구를 본다.
 - 이 정리는 몇 곳만 손으로 고치면 AGENTS.md 가 금지하는 N-of-M 이 된다. 그래서 이 RFC 에서는 leaf 모듈만 만들고, 나머지는 `rg` 목록 전체를 한 번에 옮기는 이슈로 남긴다.
 
@@ -186,7 +186,7 @@ related: ["masc-restart-replaces-the-workspace-server"]
 
 ## 9. 층
 
-1. 문구: `lib/process/process_exit_text.ml` 을 만들고, `Process_eio.signal_name` 과 restart 의 표를 옮긴다. 동작은 그대로다.
+1. 문구: `lib/process/process_exit_text.ml` 을 만들고, `Process_eio.signal_name` 과 restart 의 표를 옮긴다. 문장 모양은 그대로다. restart 는 예전 표 9개 밖의 신호도 이름으로 쓰고, 모든 호출처가 `SIGIO`·`SIGWINCH` 를 이름으로 쓴다.
 2. 부모 읽기: `parent_pid`(Darwin·Linux)와 단위 시험.
 3. witness: `masc exit-witness` 하위 명령.
 4. restart: witness 를 띄우고, 준비 확인을 `parent_pid` 로 바꾸고, 문서와 시험을 고친다(HIGH-RISK).

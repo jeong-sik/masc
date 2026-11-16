@@ -1807,14 +1807,23 @@ let test_memory_prompt_puts_unchanging_slots_first () =
     (List.filter (fun slot -> List.mem slot unchanging) rest)
 ;;
 
+(* The turn material is placed by two slots that the body places, so a
+   supplied value has its slot in the body or in one of those two. *)
 let test_template_slots_match_supplied_variables () =
   let supplied =
     match Runtime.librarian_prompt_variables ~source_lines:[] (input ()) with
     | Error detail -> failf "librarian variables unavailable: %s" detail
     | Ok variables -> variables |> List.map fst |> List.sort_uniq String.compare
   in
+  let slots =
+    [ librarian_template ()
+    ; Prompt_registry.get_prompt Prompt_names.librarian_working_context_input
+    ; Prompt_registry.get_prompt Prompt_names.librarian_turn_inputs ]
+    |> List.concat_map template_slot_names
+    |> List.sort_uniq String.compare
+  in
   check (list string) "every template slot is supplied and every supplied value has a slot"
-    supplied (template_slot_names (librarian_template ()))
+    supplied slots
 ;;
 
 let test_repo_template_carries_goal_criteria () =
@@ -1902,6 +1911,12 @@ let occurrences ~needle text =
 
 (* The pending-input organization pass neither judges nor carries Memory, so
    its prompt carries no current fact. The Memory pass prompt does. *)
+let memory_prompt_variables input =
+  match Runtime.librarian_prompt_variables ~source_lines:[] input with
+  | Ok variables -> variables
+  | Error detail -> failf "librarian variables unavailable: %s" detail
+;;
+
 let test_working_context_prompt_carries_no_current_memory () =
   let probe = "memory-probe-claim-for-the-working-context-pass" in
   let input = { (input ()) with current = Some { Librarian.facts = [ fact ~claim:probe ] } } in
@@ -1915,7 +1930,7 @@ let test_working_context_prompt_carries_no_current_memory () =
   in
   check int "the Memory pass prompt carries the current fact" 1
     (occurrences ~needle:probe
-       (render Prompt_names.librarian (Librarian.prompt_variables ~source_lines:[] input)));
+       (render Prompt_names.librarian (memory_prompt_variables input)));
   check int "the working-context pass prompt carries no current fact" 0
     (occurrences ~needle:probe
        (render Prompt_names.librarian_working_context
@@ -1949,7 +1964,7 @@ let test_every_librarian_prompt_names_its_keeper () =
            (List.exists
               (fun line -> String.equal (String.trim line) librarian_subject_keeper)
               (String.split_on_char '\n' rendered)))
-    [ Prompt_names.librarian, Librarian.prompt_variables ~source_lines:[] input
+    [ Prompt_names.librarian, memory_prompt_variables input
     ; ( Prompt_names.librarian_continuity
       , Librarian.continuity_prompt_variables input ~continuity:`Null )
     ; ( Prompt_names.librarian_working_context

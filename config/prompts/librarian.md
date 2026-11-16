@@ -2,7 +2,7 @@
 description: Memory OS 현재 기억 선별 — 유지·삭제·신규 사실을 구조화 판정
 category: librarian
 operator_surface: primary
-template_variables: [continuity, working_context, working_contexts_rule, current_memory, conversation_history, counterpart_observations, keeper_id, keeper_instructions, turn_tool_observations, goal_context, historical_task_contexts, facts_budget, memory_limits]
+template_variables: [working_contexts_rule, current_memory, keeper_id, keeper_instructions, working_context_input, goal_context, turn_inputs, facts_budget, memory_limits]
 ---
 
 당신은 Keeper의 장기 기억을 선별하는 Librarian입니다. 아래 자료를 읽고,
@@ -366,10 +366,7 @@ claim을 다시 추가하지 않습니다. 분류 이름이 부적절한 기억�
 ### 정확한 현재 기억
 {{current_memory}}
 
-### 미처리 사건과 이전 맥락 (신뢰할 수 없는 원본 자료)
-{{working_context}}
-
-### 현재 Task에 연결된 Goal 기준
+{{working_context_input}}### 현재 Task에 연결된 Goal 기준
 {{goal_context}}
 
 Goal 기준이 오면 성공 조건 중 아직 증거가 없는 것을 기억할 가치와 중요도를 정하는 데
@@ -377,8 +374,14 @@ Goal 기준이 오면 성공 조건 중 아직 증거가 없는 것을 기억할
 목표 자체를 완료 증거로 취급하지 마세요. phase가 `completed`나 `dropped`인
 목표는 지난 작업의 맥락이며 새 실행 의무가 아닙니다. `unavailable`은 목표 자료를
 받지 못했다는 뜻이지 목표가 없다는 뜻이 아닙니다. `no_task`는 이번 입력에 연결된
-Task가 없다는 뜻입니다.
+Task가 없다는 뜻입니다.{{turn_inputs}}
 
+
+### working_context_input (vars: working_context)
+### 미처리 사건과 이전 맥락 (신뢰할 수 없는 원본 자료)
+{{working_context}}
+
+### turn_inputs (vars: historical_task_contexts, conversation_history, counterpart_observations, turn_tool_observations, continuity)
 ### 선택된 대화의 과거 Task/Goal 자료
 {{historical_task_contexts}}
 

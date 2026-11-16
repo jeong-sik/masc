@@ -352,7 +352,7 @@ F1 만으로는 아무것도 고쳐지지 않는다. 지우기가 보여도 틀�
 ### 7.3 admission 이 빈 입력 칸을 그릴지
 
 admission 은 대화·도구·continuity·working_context 칸을 빈 값으로 그리고, 그 칸을 읽는 설명도 같이 보낸다.
-고정 템플릿 `575a6849…` 에서는 369-371행과 381-420행이다. 빈 칸과 그 설명은 요청마다 2,494바이트다.
+고정 템플릿 `575a6849…` 에서는 369-371행과 381-419행이다. 빈 칸과 그 설명은 요청마다 2,494바이트다.
 
 | 안 | 무엇 | 좋은 점 | 나쁜 점 |
 | --- | --- | --- | --- |
@@ -399,7 +399,7 @@ GLM 한 번에서도 나빠진 지표가 없다(`complete` true, `worse` 없음)
 
 #### C1 을 넣는 방법
 
-본문은 durable·cleanup 도 같이 쓴다. 세 패스 모두 `keeper_librarian.ml` 의 `prompt_variables` 로 같은 칸을 채운다. admission 만 그 칸을 빈 값으로 넘기고, durable 은 대화·도구·상대방 관측을 채운다. 그래서 `librarian.md` 에서 그 줄을 지우면 durable 이 입력을 잃는다.
+본문은 durable·cleanup 도 같이 쓴다. 세 패스 모두 `keeper_librarian.ml` 의 `prompt_variables` 로 같은 칸을 채운다. admission 과 cleanup 은 그 칸을 빈 값으로 넘기고, durable 은 대화·도구·상대방 관측을 채운다. 그래서 `librarian.md` 에서 그 줄을 지우면 durable 이 입력을 잃는다.
 
 | 방법 | 좋은 점 | 나쁜 점 |
 | --- | --- | --- |
@@ -411,8 +411,25 @@ GLM 한 번에서도 나빠진 지표가 없다(`complete` true, `worse` 없음)
 - 본문에는 `{{working_context_input}}` 과 `{{turn_inputs}}` 두 변수가 남는다. durable·memory 패스와 cleanup 은 두 slot 을 그려 넣고, admission 은 빈 문자열을 넣는다. 이 갈림은 pass variant 를 빠짐없이 match 해서 정한다.
 - cleanup 도 그 칸이 비지만 하네스가 cleanup 을 재지 않으므로 지금대로 그린다.
 - 조건은 둘이다. durable 프롬프트가 지금과 바이트까지 같고, admission 프롬프트가 잰 초안과 바이트까지 같아야 한다. 고정 템플릿으로 만든 시안에서 두 조건을 확인했다. 그리기는 치환뿐이라 변수마다 다른 표시 글로 대조하면 모든 값에 대한 대조가 된다.
+- 잰 초안 파일은 sha256 `26ac3c3c…` 다. 고정 템플릿 `575a6849…`(main 의 `fd501102eae1`)에서 369-371행과 381-419행을 지우면 같은 파일이 나온다. slot 으로 옮긴 파일은 sha256 `ffa870b9…` 다. 하네스 로더 `template_from_markdown` 으로 두 파일을 읽으면 admission 조각과 정책 글이 같다. 아래 명령은 #52348 이 넣은 `config/prompts/librarian.md` 에서 `True` 를 낸다.
+
+  ```sh
+  draft=$(mktemp)
+  git show fd501102eae1:config/prompts/librarian.md | sed '369,371d;381,419d' > "$draft"
+  shasum -a 256 "$draft" config/prompts/librarian.md
+  PYTHONPATH=scripts/tinker/librarian python3 -c "
+  import sys
+  from admission_template import template_from_markdown as read
+  a, b = (read(open(p, encoding='utf-8').read()) for p in sys.argv[1:])
+  print((a.pieces, a.admission_policy, a.working_contexts_rule, a.retirement_policy)
+        == (b.pieces, b.admission_policy, b.working_contexts_rule, b.retirement_policy))
+  " "$draft" config/prompts/librarian.md
+  ```
+
+- 하네스는 실행을 템플릿 파일의 sha256 으로 가른다. 초안으로 잰 실행은 `26ac3c3c…` 로 적혀 있어 새 고정값 `ffa870b9…` 의 기준선이 되지 못한다. 새 고정값의 기준선은 slot 파일로 다시 잰다.
+- admission 은 두 slot 을 그리지 않는다. 그래서 대화·도구·상대방 관측·과거 Task/Goal 자료·미처리 맥락이 든 입력은 `Error` 로 거절한다.
 - 상대방 관측은 본문이 `{{turn_inputs}}` 를 두고 그 slot 이 `{{counterpart_observations}}` 를 둘 때만 모델에 닿는다. 상대방 관측이 남은 질문을 받는 검사도 두 곳을 다 본다.
-- durable 질문은 두 slot 의 해석 결과를 `turn_prompts` 로 얼려 두고, 되살릴 때 그것으로 다시 그린다. `turn_prompts` 가 없는 옛 질문과 두 변수가 없는 옛 admission capture 는 읽지 않는다. 1.0 전이라 하드컷으로 한다.
+- durable 질문은 두 slot 의 해석 결과를 `turn_prompts` 로 얼려 두고, 되살릴 때 그것으로 다시 그린다. `turn_prompts` 가 없는 옛 질문과 두 변수가 없는 옛 admission capture 는 읽지 않는다. admission capture 는 `schema` 번호를 3 으로 올려 옛 기록을 형식이 다른 기록으로 거절한다. 1.0 전이라 하드컷으로 한다.
 
 ## 8. 참고
 

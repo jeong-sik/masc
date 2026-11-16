@@ -3410,7 +3410,7 @@ let test_published_floor_with_omitted_observations_keeps_pending_ack () =
       let preparation = seed.preparation in
       let omitted = R.restore_durable_step_preparation ~context:valid.context ~source_input:input
         ~parsing_now:preparation.parsing_now ~policy:preparation.policy
-        ~rule_prompt:preparation.rule_prompt ~prompt:preparation.prompt
+        ~rule_prompt:preparation.rule_prompt ~turn_prompts:preparation.turn_prompts ~prompt:preparation.prompt
         ~output_schema:preparation.output_schema |> get in
       let request_id = Step.fresh_request_id owner in
       let payload = match Step.to_json step with
@@ -3985,7 +3985,7 @@ let with_legacy_omitted_original fixture f =
     let module R=Keeper_librarian_runtime in
     let seed=R.prepare_durable ~source_lines:[] ~now:(Time_compat.now ()) {input with counterpart_observations=[]} |> get in
     let preparation=R.restore_durable_preparation ~source_input:input ~parsing_now:seed.parsing_now
-      ~policy:seed.policy ~rule_prompt:seed.rule_prompt ~prompt:seed.prompt ~output_schema:seed.output_schema |> get in
+      ~policy:seed.policy ~rule_prompt:seed.rule_prompt ~turn_prompts:seed.turn_prompts ~prompt:seed.prompt ~output_schema:seed.output_schema |> get in
     R.validate_durable_preparation preparation |> get;
     let original,request=memory_action fixture (fun () ->
       let owner=io (fun () ->

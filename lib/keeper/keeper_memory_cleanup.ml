@@ -73,6 +73,10 @@ let run_with ~execute ~base_path ~keeper_name =
                   ; "template", `String (Prompt_registry.get_prompt Prompt_names.librarian)
                   ; "context_rule", `String
                       (Prompt_registry.get_prompt Prompt_names.librarian_working_contexts_rule)
+                  ; "working_context_input", `String
+                      (Prompt_registry.get_prompt Prompt_names.librarian_working_context_input)
+                  ; "turn_inputs", `String
+                      (Prompt_registry.get_prompt Prompt_names.librarian_turn_inputs)
                   ])))) in
             let seen = Stdlib.Mutex.protect mutex (fun () ->
               Hashtbl.find_opt reviewed key = Some signature) in

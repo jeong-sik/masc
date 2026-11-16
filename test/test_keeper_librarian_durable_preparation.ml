@@ -28,15 +28,17 @@ let input () : L.input =
 let with_prompts f =
   Prompt_registry.set_markdown_dir "../config/prompts";
   Prompt_defaults.init ();
-  let keys=[Prompt_names.librarian;Prompt_names.librarian_working_contexts_rule] in
+  let keys=[Prompt_names.librarian;Prompt_names.librarian_working_contexts_rule;
+    Prompt_names.librarian_working_context_input;Prompt_names.librarian_turn_inputs] in
   let originals=List.map (fun key -> key,(Prompt_registry.resolve_prompt key).override_value) keys in
   Fun.protect ~finally:(fun () -> List.iter (fun (key,value) -> match value with
     | None -> Prompt_registry.clear_prompt_override key
     | Some value -> Prompt_registry.set_override key value |> get) originals) (fun () ->
     Prompt_registry.set_override Prompt_names.librarian_working_contexts_rule
       "Original shared working-context rule" |> get;
+    Prompt_registry.set_override Prompt_names.librarian_turn_inputs "{{conversation_history}}" |> get;
     Prompt_registry.set_override Prompt_names.librarian
-      "Original Memory prompt\n{{keeper_instructions}}\n{{conversation_history}}\n{{working_contexts_rule}}\n{{facts_budget}}"
+      "Original Memory prompt\n{{keeper_instructions}}{{turn_inputs}}\n{{working_contexts_rule}}\n{{facts_budget}}"
       |> get;
     f ())
 
@@ -53,6 +55,7 @@ let test_original_preparation () = with_prompts (fun () ->
   let saved=prepared.rendered_prompt in
   Prompt_registry.set_override Prompt_names.librarian "Changed current prompt" |> get;
   Prompt_registry.set_override Prompt_names.librarian_working_contexts_rule "Changed current rule" |> get;
+  Prompt_registry.set_override Prompt_names.librarian_turn_inputs "Changed current turn slot" |> get;
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key (Some "1") (fun () ->
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.category_cap_env_key (Some "1") (fun () ->
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.facts_per_category_cap_env_key (Some "1") (fun () ->
@@ -117,6 +120,10 @@ let test_restore_refuses_tampering () = with_prompts (fun () ->
     {original with policy={original.policy with facts_max_bytes=0}};
     {original with variables=("unexpected","invented")::original.variables};
     {original with rule_prompt={original.rule_prompt with effective="Different effective rule"}};
+    {original with turn_prompts={original.turn_prompts with
+      turn_inputs={original.turn_prompts.turn_inputs with effective="Different turn slot"}}};
+    {original with turn_prompts={original.turn_prompts with
+      working_context_input={original.turn_prompts.working_context_input with source=Prompt_registry.Missing}}};
     {original with prompt={original.prompt with source=Prompt_registry.Missing}};
     {original with rendered_prompt=original.rendered_prompt ^ " changed"};
     {original with output_schema=`Assoc ["type",`String "string"]}] in
@@ -140,7 +147,8 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
      asking the fresh admission path to make a new incomplete original. *)
   let old=R.prepare_durable ~source_lines:[] ~now:123. original |> get in
   let legacy=R.restore_durable_preparation ~source_input:with_counterpart ~parsing_now:old.parsing_now
-    ~policy:old.policy ~rule_prompt:old.rule_prompt ~prompt:old.prompt ~output_schema:old.output_schema |> get in
+    ~policy:old.policy ~rule_prompt:old.rule_prompt ~turn_prompts:old.turn_prompts ~prompt:old.prompt
+    ~output_schema:old.output_schema |> get in
   R.validate_durable_preparation legacy |> get;
   check bool "old incomplete original still restores" true (legacy.source_input=with_counterpart);
   check bool "restoration does not authorize a new effect from the legacy prompt" true
@@ -153,28 +161,30 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
   let p=old_step.preparation in
   let restored_step=R.restore_durable_step_preparation ~context
     ~source_input:(R.durable_step_source_input with_counterpart) ~parsing_now:p.parsing_now
-    ~policy:p.policy ~rule_prompt:p.rule_prompt ~prompt:p.prompt ~output_schema:p.output_schema |> get in
+    ~policy:p.policy ~rule_prompt:p.rule_prompt ~turn_prompts:p.turn_prompts ~prompt:p.prompt
+    ~output_schema:p.output_schema |> get in
   R.validate_durable_step_preparation restored_step |> get;
   check bool "a restored floor question must still pass the live input policy" true
     (Result.is_error (R.require_counterpart_template restored_step.preparation));
   check bool "fresh counterpart floor step also refuses the missing variable" true
     (Result.is_error (R.prepare_durable_step ~source_lines:[] ~now:123. ~context with_counterpart));
   let refs value variable = Prompt_registry.resolution_references_variable
-    {old.prompt with effective=value} ~variable in
+    {old.turn_prompts.turn_inputs with effective=value} ~variable in
   check bool "plain text is not a substitution" false (refs "counterpart_observations" "counterpart_observations");
   check bool "a longer variable name is not the counterpart variable" false
     (refs "{{counterpart_observations_extra}}" "counterpart_observations");
   check bool "spaced placeholders use the renderer's parser" true
     (refs "{{ counterpart_observations }}" "counterpart_observations");
-  Prompt_registry.set_override Prompt_names.librarian
+  Prompt_registry.set_override Prompt_names.librarian_turn_inputs
     "Input: {{ counterpart_observations }}\nAgain: {{counterpart_observations}}" |> get;
+  Prompt_registry.set_override Prompt_names.librarian "Prompt{{turn_inputs}}" |> get;
   let expected=Keeper_counterpart_observation.render_for_prompt [counterpart] in
   let fresh=R.prepare_durable ~source_lines:[] ~now:124. with_counterpart |> get in
   R.require_counterpart_template fresh |> get;
   check bool "repairing today's override does not rewrite the old frozen question" true
     (Result.is_error (R.require_counterpart_template legacy));
   check string "both actual substitutions contain the original serialized counterpart"
-    ("Input: " ^ expected ^ "\nAgain: " ^ expected) fresh.rendered_prompt;
+    ("Prompt\n\nInput: " ^ expected ^ "\nAgain: " ^ expected) fresh.rendered_prompt;
   let fresh_step=R.prepare_durable_step ~source_lines:[] ~now:124. ~context with_counterpart |> get in
   check string "floor question uses the same captured counterpart substitution"
     fresh.rendered_prompt fresh_step.preparation.rendered_prompt)
@@ -207,7 +217,8 @@ let test_restored_budget_counts_source_memory () = with_prompts (fun () ->
   let restored=Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key
     (Some "1") (fun () ->
       R.restore_durable_preparation ~source_input:original ~parsing_now:frozen.parsing_now
-        ~policy:frozen.policy ~rule_prompt:frozen.rule_prompt ~prompt:frozen.prompt
+        ~policy:frozen.policy ~rule_prompt:frozen.rule_prompt ~turn_prompts:frozen.turn_prompts
+        ~prompt:frozen.prompt
         ~output_schema:frozen.output_schema |> get) in
   Keeper_librarian_durable_question.rendered_matches frozen restored |> get;
   check string "a restored question renders the budget it was sent" prepared.rendered_prompt
@@ -216,6 +227,120 @@ let test_restored_budget_counts_source_memory () = with_prompts (fun () ->
     (Result.is_error (R.validate_durable_preparation
       {prepared with policy={prepared.policy with facts_source_lines=[]}})))
 
+(* The turn material lives in two slots of librarian.md. A durable question
+   renders both into the body; admission carries no turn material, so its
+   prompt holds neither slot and the rest of the body is unchanged. *)
+let admission_batch () =
+  let module Queue=Keeper_memory_admission_queue in
+  let keepers_dir=Filename.temp_dir "admission-turn-slots-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree keepers_dir) (fun () ->
+    Queue.append ~keepers_dir ~keeper_id:"history-owner" ~request_id:"source" (fact "Pending evidence")
+      |> Result.map_error Queue.append_error_to_string |> get |> ignore;
+    match Queue.read_pending ~keepers_dir ~keeper_id:"history-owner" |> get with
+    | Some batch -> batch
+    | None -> fail "the appended candidate is not pending")
+
+let test_admission_omits_turn_material () =
+  Prompt_registry.set_markdown_dir "../config/prompts";
+  Prompt_defaults.init ();
+  let slot_head key=match String.split_on_char '\n'
+      (String.trim (Prompt_registry.resolve_prompt key).effective) with
+    | head :: _ when String.trim head<>"" -> head
+    | _ -> failf "%s has no first line" key in
+  let heads=[slot_head Prompt_names.librarian_working_context_input;
+    slot_head Prompt_names.librarian_turn_inputs] in
+  let contains text piece=Astring.String.is_infix ~affix:piece text in
+  let durable=R.prepare_durable ~source_lines:[] ~now:123. (input ()) |> get in
+  List.iter (fun head -> check bool ("a durable question shows " ^ head) true
+    (contains durable.rendered_prompt head)) heads;
+  let blank=List.map (fun (name,value) ->
+    if name="working_context_input" || name="turn_inputs" then name,"" else name,value) durable.variables in
+  let empty=Prompt_registry.render_resolved_prompt_template Prompt_names.librarian durable.prompt blank |> get in
+  let remove text name=match Astring.String.cut ~sep:(List.assoc name durable.variables) text with
+    | Some (before,after) -> before ^ after
+    | None -> failf "the durable prompt does not hold its %s substitution" name in
+  check string "emptying the two slots removes exactly their text from the durable body"
+    (remove (remove durable.rendered_prompt "working_context_input") "turn_inputs") empty;
+  let admission_input={(input ()) with working_context=C.empty;messages=[];tool_observations=[]} in
+  let batch=admission_batch () and retirement=Keeper_memory_admission_judgment.Available [] in
+  let admission=R.prepare_admission ~batch ~retirement ~source_lines:[] admission_input |> get in
+  List.iter (fun name -> check (option string) ("admission leaves " ^ name ^ " empty") (Some "")
+    (List.assoc_opt name admission.variables)) ["working_context_input";"turn_inputs"];
+  List.iter (fun head -> check bool ("admission omits " ^ head) false
+    (contains admission.rendered_prompt head)) heads;
+  R.validate_admission_preparation ~batch ~retirement ~input:admission_input admission |> get
+
+(* Where the body places the two slots, and the blank line the runtime puts on
+   the far side of each. The expected prompt is built apart from the runtime's
+   slot rendering: the body is rendered around two markers and each marker is
+   then replaced by the slot text and its blank line. Moving a line break in
+   librarian.md or in the runtime fails here. *)
+let test_slots_join_the_body_with_one_blank_line () =
+  Prompt_registry.set_markdown_dir "../config/prompts";
+  Prompt_defaults.init ();
+  let durable=R.prepare_durable ~source_lines:[] ~now:123. (input ()) |> get in
+  let cut ~sep text=match Astring.String.cut ~sep text with
+    | Some parts -> parts
+    | None -> failf "%S is not in the text" sep in
+  let above,rest=cut ~sep:"{{working_context_input}}" durable.prompt.effective in
+  let goal,below=cut ~sep:"{{turn_inputs}}" rest in
+  let blank_line_then_slot text=Astring.String.is_suffix ~affix:"\n\n" text
+    && not (Astring.String.is_suffix ~affix:"\n\n\n" text) in
+  let edge_is_text c=not (Astring.Char.Ascii.is_white c) in
+  check bool "one blank line separates the current Memory from the pending-context slot" true
+    (blank_line_then_slot above);
+  check bool "the Goal heading starts where the pending-context slot ends" true
+    (goal<>"" && edge_is_text goal.[0]);
+  check bool "the turn slot starts where the Goal paragraph ends" true
+    (goal<>"" && edge_is_text goal.[String.length goal-1]);
+  check string "the turn slot ends the body" "" below;
+  let marker name="<<slot " ^ name ^ ">>" in
+  let slots=["working_context_input";"turn_inputs"] in
+  let marked=List.map (fun (name,value) ->
+    if List.mem name slots then name,marker name else name,value) durable.variables in
+  let around=Prompt_registry.render_resolved_prompt_template Prompt_names.librarian durable.prompt marked
+    |> get in
+  let slot key resolution=Prompt_registry.render_resolved_prompt_template key resolution durable.variables
+    |> get in
+  let place name text into=let before,after=cut ~sep:(marker name) into in before ^ text ^ after in
+  let expected=around
+    |> place "working_context_input"
+      (slot Prompt_names.librarian_working_context_input durable.turn_prompts.working_context_input ^ "\n\n")
+    |> place "turn_inputs"
+      ("\n\n" ^ slot Prompt_names.librarian_turn_inputs durable.turn_prompts.turn_inputs) in
+  check string "a durable question joins each slot to the body with one blank line"
+    expected durable.rendered_prompt
+
+(* Admission renders neither slot, so an input that carries turn material would
+   be judged without it. Every kind of turn material is refused, both when the
+   question is prepared and when a captured one is checked. *)
+let test_admission_refuses_turn_material () =
+  Prompt_registry.set_markdown_dir "../config/prompts";
+  Prompt_defaults.init ();
+  let original=input () in
+  let empty={original with working_context=C.empty;messages=[];tool_observations=[]} in
+  let counterpart : Keeper_counterpart_observation.t =
+    {origin=Durable_chat;channel="direct";workspace_id=None;user_id=Some "speaker";
+     user_name=Some "Speaker";authority=External;content="Original counterpart evidence"} in
+  let task_context : Keeper_librarian_task_context.t =
+    {scope={source=Boundary_only;attribution=Unattributed};first_message=0;after_message=0;
+     first_tool_observation=0;after_tool_observation=0} in
+  let batch=admission_batch () and retirement=Keeper_memory_admission_judgment.Available [] in
+  let prepared=R.prepare_admission ~batch ~retirement ~source_lines:[] empty |> get in
+  let refusal=Error "Admission input carries turn material that its prompt does not render" in
+  List.iter (fun (kind,(carrying : L.input)) ->
+    check bool ("the fixture carries " ^ kind) true (L.carries_turn_material carrying);
+    check (result unit string) ("preparing refuses " ^ kind) refusal
+      (R.prepare_admission ~batch ~retirement ~source_lines:[] carrying |> Result.map ignore);
+    check (result unit string) ("checking a capture refuses " ^ kind) refusal
+      (R.validate_admission_preparation ~batch ~retirement ~input:carrying prepared))
+    ["a pending working context",{empty with working_context=original.working_context};
+     "messages",{empty with messages=original.messages};
+     "tool observations",{empty with tool_observations=original.tool_observations};
+     "counterpart observations",{empty with counterpart_observations=[counterpart]};
+     "past Task/Goal records",{empty with historical_task_contexts=[task_context]}];
+  check bool "an input without turn material carries none" false (L.carries_turn_material empty)
+
 let () = run "Original history Memory preparation" ["preparation",[
   test_case "a restored question's facts budget counts source memory" `Quick
     test_restored_budget_counts_source_memory;
@@ -223,4 +348,10 @@ let () = run "Original history Memory preparation" ["preparation",[
   test_case "normal raw parser and absorption inputs remain original" `Quick test_original_validation_and_absorption;
   test_case "restore inconsistency never reaches domain parsing" `Quick test_restore_refuses_tampering;
   test_case "counterpart admission requires a substitution while legacy restores" `Quick
-    test_counterpart_template_admission_and_legacy_restore]]
+    test_counterpart_template_admission_and_legacy_restore;
+  test_case "admission omits the turn-material slots that durable questions render" `Quick
+    test_admission_omits_turn_material;
+  test_case "each slot joins the body with one blank line" `Quick
+    test_slots_join_the_body_with_one_blank_line;
+  test_case "admission refuses an input that carries turn material" `Quick
+    test_admission_refuses_turn_material]]

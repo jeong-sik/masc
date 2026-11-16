@@ -328,6 +328,14 @@ let observation_entries (inp : input) =
   messages @ tools @ counterparts @ historical_contexts
 ;;
 
+let carries_turn_material (inp : input) =
+  inp.historical_task_contexts <> []
+  || inp.working_context <> Keeper_librarian_context.empty
+  || inp.messages <> []
+  || inp.tool_observations <> []
+  || inp.counterpart_observations <> []
+;;
+
 let observations_for_absorption (inp : input) =
   List.map (fun (_, render) -> render ()) (observation_entries inp)
 ;;

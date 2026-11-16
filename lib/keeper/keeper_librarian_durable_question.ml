@@ -18,6 +18,7 @@ let prompt_json = Prompt_registry.prompt_resolution_to_yojson
 let prompt_of_json json =
   Result.map_error (fun detail -> "Original history request: " ^ detail) (Prompt_registry.prompt_resolution_of_yojson json)
 type frozen = {parsing_now:float;policy:Runtime.durable_policy;rule_prompt:Prompt_registry.prompt_resolution;
+  turn_prompts:Runtime.turn_input_prompts;
   prompt:Prompt_registry.prompt_resolution;rendered_prompt_sha256:string;output_schema:Yojson.Safe.t}
 (* The substitutions and the rendered prompt repeat the input, so they are
    rendered again on restore; the digest names the prompt the host was sent. *)
@@ -26,10 +27,14 @@ let to_json (p:Runtime.durable_preparation) = `Assoc [
   "policy",`Assoc ["facts_max_bytes",`Int p.policy.facts_max_bytes;
     "facts_source_lines",`List (List.map (fun line -> `String line) p.policy.facts_source_lines);
     "category_cap",`Int p.policy.category_cap;"facts_per_category_cap",`Int p.policy.facts_per_category_cap];
-  "rule_prompt",prompt_json p.rule_prompt;"prompt",prompt_json p.prompt;
+  "rule_prompt",prompt_json p.rule_prompt;
+  "turn_prompts",`Assoc ["working_context_input",prompt_json p.turn_prompts.working_context_input;
+    "turn_inputs",prompt_json p.turn_prompts.turn_inputs];
+  "prompt",prompt_json p.prompt;
   "rendered_prompt_sha256",`String (hash p.rendered_prompt);"output_schema",p.output_schema]
 let of_json json =
-  let* f=fields ["parsing_now";"policy";"rule_prompt";"prompt";"rendered_prompt_sha256";"output_schema"] json in
+  let* f=fields ["parsing_now";"policy";"rule_prompt";"turn_prompts";"prompt";"rendered_prompt_sha256";
+    "output_schema"] json in
   let* parsing_now=match value "parsing_now" f with
     | `Float time when Float.is_finite time -> Ok time | `Int time -> Ok (float_of_int time)
     | _ -> Error "Original history parse time is not finite" in
@@ -41,9 +46,13 @@ let of_json json =
   let* facts_per_category_cap=integer (value "facts_per_category_cap" limits) in
   let policy : Runtime.durable_policy = {facts_max_bytes;facts_source_lines;category_cap;facts_per_category_cap} in
   let* rule_prompt=prompt_of_json (value "rule_prompt" f) in
+  let* turn=fields ["working_context_input";"turn_inputs"] (value "turn_prompts" f) in
+  let* working_context_input=prompt_of_json (value "working_context_input" turn) in
+  let* turn_inputs=prompt_of_json (value "turn_inputs" turn) in
+  let turn_prompts : Runtime.turn_input_prompts = {working_context_input;turn_inputs} in
   let* prompt=prompt_of_json (value "prompt" f) in
   let+ rendered_prompt_sha256=text (value "rendered_prompt_sha256" f) in
-  {parsing_now;policy;rule_prompt;prompt;rendered_prompt_sha256;output_schema=value "output_schema" f}
+  {parsing_now;policy;rule_prompt;turn_prompts;prompt;rendered_prompt_sha256;output_schema=value "output_schema" f}
 let rendered_matches frozen (p:Runtime.durable_preparation) =
   require (String.equal (hash p.rendered_prompt) frozen.rendered_prompt_sha256)
     "Original history prompt differs from the one its host request named"

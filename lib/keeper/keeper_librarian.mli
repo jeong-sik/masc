@@ -62,6 +62,13 @@ type input =
         direct turns on runtimes that return no AGENT_CORE checkpoint. *)
   }
 
+val carries_turn_material : input -> bool
+(** Whether the input holds material of a turn: past Task/Goal records, a
+    pending working context, messages, tool observations or counterpart
+    observations. The Memory prompt shows these fields only through its two
+    turn-material slots, so a prompt rendered without the slots shows none of
+    them. *)
+
 val observations_for_absorption : input -> Yojson.Safe.t list
 (** Source observations from the same selected input as the Librarian pass.
     [batch_turn_ref] identifies the selected batch, never an individual source

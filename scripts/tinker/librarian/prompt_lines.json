@@ -1,7 +1,7 @@
 {
  "schema": "masc.tinker.librarian.prompt_lines.v3",
- "pass_lines_sha256": "9b62a25507a2fd4fb7fc585651d0b3570a0f1405b6bc8405c11f6ca2a9bf0397",
- "baseline_template_sha256": "575a68497f00d3171d00a298d816e6ade8c0a5b7c4e2329364e725e90861d623",
+ "pass_lines_sha256": "69729c6a0a96f7c5f4ce6971840497e77fbb5ff5b7634156941bcf05fe56ae8c",
+ "baseline_template_sha256": "ffa870b91c6d6be84fad57e4eb01b59584ad0e7a3b574fc0567d3b38e7460f20",
  "worse_sigmas": 2.5,
  "better_sigmas": 2.0,
  "better_from": [

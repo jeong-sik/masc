@@ -174,9 +174,9 @@ let decode ~owner ~digest json =
   let* {request_id=id;destination;transaction_id;range;previous;position;sources}=header_of_fields ~owner f in
   let* context=context_of_json (value "context" f) in
   let* source_input=Input.of_json (value "input" f) in
-  let* {Question.parsing_now;policy;rule_prompt;prompt;output_schema;_} as frozen=Question.of_json (value "preparation" f) in
+  let* {Question.parsing_now;policy;rule_prompt;turn_prompts;prompt;output_schema;_} as frozen=Question.of_json (value "preparation" f) in
   let* step=Runtime.restore_durable_step_preparation ~context ~source_input
-    ~parsing_now ~policy ~rule_prompt ~prompt ~output_schema in
+    ~parsing_now ~policy ~rule_prompt ~turn_prompts ~prompt ~output_schema in
   let* ()=Question.rendered_matches frozen step.preparation in
   let draft={id;owner;destination;transaction_id;range;previous;position;sources;step;digest=""} in
   let* ()=validate draft in

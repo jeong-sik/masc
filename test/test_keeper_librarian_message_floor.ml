@@ -489,7 +489,7 @@ let test_a_restored_omitted_step_cannot_become_a_live_program_decision () =
     let p=prepared.preparation in
     let legacy=Runtime.restore_durable_step_preparation ~context
       ~source_input:{p.source_input with counterpart_observations=[counterpart]} ~parsing_now:p.parsing_now
-      ~policy:p.policy ~rule_prompt:p.rule_prompt ~prompt:(Prompt_registry.resolve_prompt key)
+      ~policy:p.policy ~rule_prompt:p.rule_prompt ~turn_prompts:p.turn_prompts ~prompt:(Prompt_registry.resolve_prompt key)
       ~output_schema:p.output_schema |> ok in
     Runtime.validate_durable_step_preparation legacy |> ok;
     let proposal=Runtime.validate_durable_step_proposal legacy first_answer
@@ -507,7 +507,8 @@ let test_a_step_preparation_restores_and_refuses_tampering () =
   let restored =
     Runtime.restore_durable_step_preparation ~context ~source_input:prepared.preparation.source_input
       ~parsing_now:prepared.preparation.parsing_now ~policy:prepared.preparation.policy
-      ~rule_prompt:prepared.preparation.rule_prompt ~prompt:prepared.preparation.prompt
+      ~rule_prompt:prepared.preparation.rule_prompt ~turn_prompts:prepared.preparation.turn_prompts
+      ~prompt:prepared.preparation.prompt
       ~output_schema:prepared.preparation.output_schema |> ok in
   check bool "restoring from the frozen parts renders the same step" true (restored = prepared);
   let refused label step =
@@ -540,7 +541,8 @@ let test_a_step_preparation_restores_and_refuses_tampering () =
            { prepared.preparation.source_input with
              working_context = { Masc.Keeper_librarian_context.empty with unavailable = [ "pending" ] } }
          ~parsing_now:prepared.preparation.parsing_now ~policy:prepared.preparation.policy
-         ~rule_prompt:prepared.preparation.rule_prompt ~prompt:prepared.preparation.prompt
+         ~rule_prompt:prepared.preparation.rule_prompt ~turn_prompts:prepared.preparation.turn_prompts
+         ~prompt:prepared.preparation.prompt
          ~output_schema:prepared.preparation.output_schema
      with
      | Error (_ : string) -> true

@@ -4494,6 +4494,11 @@
  (libraries alcotest masc_tui_observation_layout masc))
 
 (test
+ (name test_tui_chat_facts)
+ (modules test_tui_chat_facts)
+ (libraries alcotest masc_tui_chat_facts masc_tui_message_layout))
+
+(test
  (name test_tui_context_state)
  (modules test_tui_context_state)
  (libraries masc.keeper_cost_coverage alcotest masc_tui_context_state masc_tui_fetched masc))

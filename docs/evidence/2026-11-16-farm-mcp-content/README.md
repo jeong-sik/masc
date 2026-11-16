@@ -108,12 +108,13 @@ approved calls, user-only content, stored byte readback, post-tool log retention
 missing execution identity, remote errors, projection/storage failure, generic
 binary resources, reserved MIME authority, truthful result bounds, history-only
 ownership after interim stores retire, and chat fsync/rollback failure repair.
-Planned executable targets are
+Executable targets planned at that checkpoint were
 `test_keeper_mcp_content`, `test_keeper_identity_gate`,
 `test_keeper_identity_tools`, `test_keeper_identity_transports`, and
 `test_keeper_attached_tools_lane_scope`, `test_keeper_gate_replay`,
 `test_keeper_approval_queue`, and `test_keeper_approval_input_admission`.
-These are not executed results.
+That list was not an executed result. The later projection-only execution is
+recorded below; the remaining consumer suites are still unrun.
 The latest full regression run/head/TARGET_SUITES have not been verified in
 this work unit; full regression for this candidate is unrun.
 
@@ -134,7 +135,7 @@ The later connector snapshot of main was
 `test/test_keeper_tool_dispatch_runtime.ml`; no integration/rebase verdict has
 been issued for that snapshot.
 
-Remaining evidence includes executable tests on this source, actual media from
+Remaining evidence includes the other consumer tests, actual media from
 an MCP service, provider requests and responses, restart and garbage-collection
 retention, and multiple Keepers using independent execution identities. The
 external interpretation path and other WIM-S04 requirements remain open.
@@ -174,8 +175,8 @@ submission, merge or runtime change was performed by this rebase.
 The reviewed base is still `e0e819e29968366c1dffb59ad625ba4e17d4ac22`.
 Current Core is `db69904f29c6f4a6166957fbdffa4f7e8e910a7a`, MASC is
 `01c94838471b1cbff986e5a78f2c14597a8df564`, and MCP source is
-`e392aa3a7f8fafdfe18045c92bc0fe1d023e44b5`. The integrated top before this
-update is `6134e0a42aae676f63143d1473aaeca7fb99053f`.
+`e392aa3a7f8fafdfe18045c92bc0fe1d023e44b5`. The integrated top at that
+checkpoint was `6134e0a42aae676f63143d1473aaeca7fb99053f`.
 
 Three Core files were corrected after real compilation: the generic document
 projection implementation/interface and its existing media test. The interface
@@ -197,9 +198,68 @@ and the document worktree's
 
 Those tests exercise Core admission and codecs; they do not execute the MCP
 consumer suites listed above, approval replay/restart/GC, a real MCP service,
-provider HTTP, PDF/STT, installed MASC, UI or full Dune. Those remain the next
-execution targets. The latest agent `gh api user` still failed to connect
+provider HTTP, PDF/STT, installed MASC, UI or full Dune. The projection suite's
+separate later execution follows below. The latest agent `gh api user` still failed to connect
 (exit 1); it is an environment observation, not proof of invalid user credentials.
 PR publication, GitHub approval, merge, deployment and original recovery are
 not established. The full Farm scope and `U02:IA-S13` old-volume approval remain
 unchanged in the [execution record](../../reports/2026-11-16-agent-farm-execution.md).
+
+## Actual MCP content projection — 2026-11-16
+
+The unchanged `test_keeper_mcp_content` suite passed all eight cases, with no
+skips, at fixed head `ad6ba29aec18597a474bdaa717517ca5b3c1261c`. Final `run-4`
+records 16 successful commands under OCaml 5.5.2. Its 239 original inputs are
+89 ML files including the test, 144 original interfaces and six C files. Ninety
+inputs belong to Core, but only 16 Core implementations enter the native runtime
+closure. This is a bounded suite build, not the earlier 635-file inventory or a
+whole Core/MASC build.
+
+The cases exercise actual SDK decoding, mixed text/media/structured order,
+audience filtering, malformed annotations and duplicate fields, resource links,
+embedded binary resources, and diagnostics that do not echo payloads. The
+captured SDK is `mcp_protocol v0.12.0-48-g24ee1d3`. `Agent_core.mli` remains the
+real public interface; `Mcp_client` and other type-only dependencies use their
+original interfaces. All required value dependencies use complete original
+implementations. Normal namespace aliases preserve separate Core/Base/MASC
+units; no partial facade, replacement implementation or extracted function was
+used. Linking storage implementations does not mean these cases exercised
+durable storage.
+
+Three earlier compiler failures were missing-interface scheduling errors in
+the standalone runner and remain recorded. No product change was needed.
+Run-4 reused verified successful objects from earlier attempts in this unit,
+then freshly compiled and linked the test with its normal empty executable
+interface and test warning policy. It did not reuse Core18 or repository
+`_build` objects. The repeated run-3/run-4 execution is eight cases, not sixteen.
+All 377 final outputs had identical hashes before and after the final test;
+318 imported CMI bindings were checked. Package content hashes were collected
+after execution, while compiler environment and package discovery were recorded
+before compilation. Standalone package visibility is broader than Dune's, so
+this is not a Dune dependency-declaration verdict.
+
+The local record is `artifacts/farm-masc-consumer-20261116/next-unit-2/` in the
+document worktree. Its `receipt-manifest.json` SHA-256 is
+`bbe257ca010dec201ae8eba6192b61c4d331af1f070e4603debd74782d2f3ff3`;
+`run-4/source-manifest.json` is
+`0b45ef55d1e125cf6750075f851034220930d4891729d4e37753a2d5aa7ce5fa`, and
+`run-4/results.json` is
+`88d020f9836a7e65a903f539fd0132c6c45749487d2837e02a368f18846266dc`.
+The document update checked the 34 sealed receipt files and all 239 current
+source hashes without rerunning tests. The separate `root-receipt-review.json`
+also binds the 239 Git/copied/current inputs and 377 outputs to this execution;
+it is a receipt review, not another run or a GitHub approval.
+
+Normal MCP invocation, Gate replay/pending repair, raw/public artifact ownership
+and GC, H5, official-client transport, real MCP/provider traffic, full TUI,
+installation, Linux and full Dune/CI remain unexecuted by this suite.
+
+The publication handoff preserves its original 53 files for Schedule3 plus
+Document5. The separate main-checkout
+`artifacts/farm-publication-handoff-20261116-update.json` records the documentation
+leaf change from `3bdedcea` to `ad6ba29`; this document change requires another
+leaf/evidence update after commit. The packet and update note must be read
+together. Fresh remote main, exact refs/PRs, semantic duplicates and REST stack
+inspection remain required before publication. The latest outbound handoff's
+transport failed and delivery is unconfirmed; this local evidence does not
+establish a PR, approval, merge or deployment.

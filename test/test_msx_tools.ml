@@ -1957,6 +1957,43 @@ let test_backspace_sequence_ledger () =
   check int "four frame windows" (Msx_lane.boot_frames + 16) (frame_of r)
 ;;
 
+let test_msx_path_containment () =
+  with_workspace @@ fun base_path ->
+  with_workspace @@ fun outside_dir ->
+  let ext_roms = blank_bios_dir outside_dir in
+  Fs_compat.mkdir_p (carts_dir base_path);
+  write_cart (carts_dir base_path) "hero.rom" "x";
+  let r_ext_roms =
+    dispatch ~base_path "masc_msx_load"
+      [ ("roms_dir", `String ext_roms); ("cart", `String "hero") ]
+  in
+  check bool "external roms_dir outside workspace is rejected" true (rejected r_ext_roms);
+  let ws_roms = blank_bios_dir base_path in
+  let outside_secret = Filename.concat outside_dir "secret.rom" in
+  Out_channel.with_open_bin outside_secret (fun oc -> output_string oc (String.make 16384 '\000'));
+  Unix.symlink outside_secret (Filename.concat (carts_dir base_path) "escape.rom");
+  let r_sym_cart =
+    dispatch ~base_path "masc_msx_load"
+      [ ("roms_dir", `String ws_roms); ("cart", `String "escape") ]
+  in
+  check bool "symlinked cart pointing outside workspace is rejected" true (rejected r_sym_cart);
+  let sym_bios_dir = Filename.concat base_path "sym_bios" in
+  Fs_compat.mkdir_p sym_bios_dir;
+  Unix.symlink outside_secret (Filename.concat sym_bios_dir "cbios_main_msx2.rom");
+  Unix.symlink outside_secret (Filename.concat sym_bios_dir "cbios_logo_msx2.rom");
+  Unix.symlink outside_secret (Filename.concat sym_bios_dir "cbios_sub.rom");
+  let r_sym_bios =
+    dispatch ~base_path "masc_msx_load"
+      [ ("roms_dir", `String sym_bios_dir); ("cart", `String "hero") ]
+  in
+  check bool "symlinked BIOS ROM inside workspace roms_dir is rejected" true (rejected r_sym_bios);
+  let r_ok =
+    dispatch ~base_path "masc_msx_load"
+      [ ("roms_dir", `String ws_roms); ("cart", `String "hero") ]
+  in
+  check bool "workspace-contained roms_dir and regular cart succeed" true (is_completed r_ok)
+;;
+
 let () =
   run "msx tools"
     [ ( "lane"
@@ -2021,6 +2058,8 @@ let () =
             test_xspelunker_two_presses
         ; test_case "two keepers share one machine" `Quick
             test_two_keepers_share_one_machine
+        ; test_case "roms_dir and cart symlink escapes are refused" `Quick
+            test_msx_path_containment
         ] )
     ]
 ;;

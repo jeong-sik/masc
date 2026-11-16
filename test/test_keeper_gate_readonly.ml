@@ -136,6 +136,14 @@ let test_gh_write_shapes_require_observation () =
   requires_observation "bare gh" [ "gh" ];
   (* --web opens a browser on the host, outside the guest. *)
   requires_observation "pr view --web" [ "gh"; "pr"; "view"; "1"; "--web" ];
+  requires_observation "pr view --web=true" [ "gh"; "pr"; "view"; "1"; "--web=true" ];
+  requires_observation "pr view clustered -w" [ "gh"; "pr"; "view"; "1"; "-cw" ];
+  requires_observation "base64 -o writes output file" [ "base64"; "-d"; "-o"; "out.bin"; "in.b64" ];
+  requires_observation "base64 clustered -do writes output file" [ "base64"; "-do"; "out.bin"; "in.b64" ];
+  requires_observation "base64 --output= writes output file" [ "base64"; "--output=out.bin"; "in.b64" ];
+  requires_observation "git describe --dirty refreshes index" [ "git"; "describe"; "--dirty" ];
+  requires_observation "git describe --broken refreshes index" [ "git"; "describe"; "--broken=x" ];
+  passes "git describe --tags remains static" [ "git"; "describe"; "--tags" ];
   (* A field flag alone flips gh api to POST. *)
   requires_observation "api with a method" [ "gh"; "api"; "-X"; "POST"; "repos/x/y/issues" ];
   requires_observation "api with --method=" [ "gh"; "api"; "--method=DELETE"; "x" ];

@@ -552,8 +552,12 @@ let install_shim ssh ~privilege endpoint shim_path =
            ~mode:remote_root_mode ())
     in
     let* () = run_inherited prepare_root in
-    let remote_temp = Printf.sprintf "/tmp/masc-exec-shim.%d" (Unix.getpid ()) in
-    let* upload = pinned_ssh ssh ("umask 077; cat > " ^ shell_quote remote_temp) in
+    let remote_temp =
+      Printf.sprintf "/tmp/masc-exec-shim.%s" (Random_id.hex ~bytes:16)
+    in
+    let* upload =
+      pinned_ssh ssh ("set -C; umask 077; cat > " ^ shell_quote remote_temp)
+    in
     let* () = run_with_file_stdin upload shim_path in
     let command =
       String.concat " && "

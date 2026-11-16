@@ -881,8 +881,12 @@ let test_drain_fd () =
    | Exec_shim.Drain_again -> ()
    | _ -> fail "empty pipe must report Drain_again");
   ignore (Unix.write_substring w "abc" 0 3);
+  (match Exec_shim.drain_fd ~max_bytes:2 r buf with
+   | Exec_shim.Drain_bytes n -> check int "bounded to two bytes" 2 n
+   | _ -> fail "expected Drain_bytes");
+  check string "bounded content" "ab" (Buffer.contents buf);
   (match Exec_shim.drain_fd r buf with
-   | Exec_shim.Drain_bytes n -> check int "three bytes drained" 3 n
+   | Exec_shim.Drain_bytes n -> check int "remaining byte drained" 1 n
    | _ -> fail "expected Drain_bytes");
   check string "drained content" "abc" (Buffer.contents buf);
   Unix.close w;

@@ -410,10 +410,17 @@ type drain_result =
   | Drain_eof  (** peer closed the pipe *)
   | Drain_again  (** nothing available right now (EAGAIN) *)
 
-val drain_fd : Unix.file_descr -> Buffer.t -> drain_result
-(** [drain_fd fd buf] reads [fd] (which MUST be [O_NONBLOCK]) until
-    [EAGAIN] or EOF, appending to [buf].  The supervision loop keeps all
-    child pipes nonblocking so draining never stalls the timeout/EOF
+val max_drain_bytes_per_pump : int
+(** [= 262_144] (256 KiB). Upper bound on bytes read in one {!drain_fd}
+    call when [max_bytes] is omitted, so a chatty payload cannot grow the
+    per-pump heap buffer without bound or starve the [select] loop's
+    deadline and stdin-EOF checks. *)
+
+val drain_fd : ?max_bytes:int -> Unix.file_descr -> Buffer.t -> drain_result
+(** [drain_fd ?max_bytes fd buf] reads [fd] (which MUST be [O_NONBLOCK]) until
+    [EAGAIN], EOF, or [max_bytes] bytes have been appended to [buf]
+    (defaulting to {!max_drain_bytes_per_pump}).  The supervision loop keeps
+    all child pipes nonblocking so draining never stalls the timeout/EOF
     watchdogs. *)
 
 (** {1 Standard descriptors} *)

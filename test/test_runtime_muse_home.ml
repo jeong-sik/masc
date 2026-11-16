@@ -103,6 +103,36 @@ let test_missing_signin_refuses () = with_fixture (fun root ->
   | Error error -> fail (Home.error_to_string error)
   | Ok _ -> fail "missing selected account fell back to ambient credentials")
 
+let test_private_workspace_stops_ancestor_project_discovery () = with_fixture (fun root ->
+  let root = Unix.realpath root in
+  let git arguments =
+    match Process_eio.run_argv_with_status ("git" :: arguments) with
+    | Unix.WEXITED 0, output -> String.trim output
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), output -> fail output in
+  ignore (git [ "init"; "--quiet"; "--template="; "--"; root ]);
+  write (Filename.concat root ".mcp.json")
+    {|{"mcpServers":{"unrelated":{"type":"http","url":"http://127.0.0.1:1/mcp","headers":{"Authorization":"Bearer ${UNRELATED_SECRET}"}}}}|};
+  write (Filename.concat root "AGENTS.md") "Unrelated ancestor instructions";
+  let parent = Filename.concat root "private-project" in
+  Unix.mkdir parent 0o700;
+  let workspace = ok (Home.prepare_private_workspace ~parent) in
+  check string "project discovery stops before ancestor MCP and instructions" parent
+    (git [ "-C"; workspace; "rev-parse"; "--show-toplevel" ]);
+  check int "project metadata does not make the workspace non-empty" 0
+    (Array.length (Sys.readdir workspace));
+  write (Filename.concat workspace "kept.txt") "preserve native files";
+  check string "preparation reuses the existing workspace" workspace
+    (ok (Home.prepare_private_workspace ~parent));
+  check string "preparation preserves existing files" "preserve native files"
+    (Fs_compat.load_file (Filename.concat workspace "kept.txt"));
+  let other = Filename.concat root "other-project" in
+  Unix.mkdir other 0o700;
+  Unix.symlink (Filename.concat parent ".git") (Filename.concat other ".git");
+  match Home.prepare_private_workspace ~parent:other with
+  | Error (Home.State_unavailable _) -> ()
+  | Error error -> fail (Home.error_to_string error)
+  | Ok _ -> fail "a redirected project boundary was admitted")
+
 let auth_with_storage storage = Yojson.Safe.to_string (`Assoc [ "schema_version", `Int 1;
   "providers", `Assoc [ "meta", `Assoc [ "mechanism", `String "oauth"; "storage", storage ] ] ])
 
@@ -351,6 +381,7 @@ let () = run "Muse managed account home"
       test_case "every accepted directory syncs its parent" `Quick test_directory_creation_syncs_each_parent;
       test_case "vendor refresh and external re-login" `Quick test_refresh_survives_and_source_relogin_gets_a_new_identity;
       test_case "accounts, settings and workspaces" `Quick test_accounts_settings_and_native_workspaces_are_separate;
+      test_case "private project stops ancestor discovery" `Quick test_private_workspace_stops_ancestor_project_discovery;
       test_case "missing auth refuses" `Quick test_missing_signin_refuses;
       test_case "other settings get a generation carrying the sign-in" `Quick test_other_settings_are_replaced_by_a_generation_carrying_the_sign_in;
       test_case "only a sign-in held in auth.json is admitted" `Quick test_only_a_sign_in_held_in_auth_json_is_admitted;

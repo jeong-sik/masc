@@ -86,11 +86,10 @@ let grant_of_json = function
      | Some _ | None -> Error "a record grant requires a string kind")
   | _ -> Error "a record grant must be an object"
 
-let grants ~operator_owned = function
+let grants_of_binding = function
   | `Assoc fields ->
     (match List.assoc_opt "records" fields with
      | None -> Ok []
-     | Some _ when not operator_owned -> Error "only an operator-owned declaration may hold record grants"
      | Some (`List values) ->
        let* grants = map_result grant_of_json values in
        let ids = List.map source_id grants in
@@ -98,6 +97,12 @@ let grants ~operator_owned = function
        else Error "records names the same source_id twice"
      | Some _ -> Error "records requires an array of grants")
   | _ -> Error "a binding must be an object"
+
+let grants ~operator_owned binding =
+  match binding with
+  | `Assoc fields when List.mem_assoc "records" fields && not operator_owned ->
+    Error "only an operator-owned declaration may hold record grants"
+  | _ -> grants_of_binding binding
 
 let covers ~paths file =
   valid_path file

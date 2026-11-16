@@ -531,6 +531,17 @@ let test_invalid_inventory_preserves_existing_activity () =
     check bool "malformed declaration is visible" true (values "issues" malformed <> []);
     check string "parse failure preserves the previous owner" id
       (declared_instance config "observer" |> text "instance_id");
+    (* A record grant is read with its declaration (#52373). A grant without
+       the field its kind needs leaves the declaration unapplied, so the
+       running worker is not replaced by one that cannot attach. *)
+    write path (bytes ^ "[[binding.records]]\nsource_id = \"notes\"\nkind = \"board\"\n");
+    let refused_grant = reconcile config directory in
+    check bool "a refused record grant is an issue of its declaration" true
+      (values "issues" refused_grant |> List.exists (fun issue ->
+         text "source_path" issue = path
+         && text "message" issue = "binding.records: visibilities requires a non-empty array"));
+    check string "a refused record grant preserves the previous owner" id
+      (declared_instance config "observer" |> text "instance_id");
     write path bytes;
     let duplicate = Filename.concat directory "duplicate.toml" in
     write duplicate bytes;

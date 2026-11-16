@@ -530,6 +530,20 @@ visibilities = ["public"]
     following ~selection:"" "scenes";
     check_refusal "a lesson source without its selection is refused" path
       "lane_output selection must be latest_completed";
+    (* Then each record grant (#52373). The schema asks a grant for source_id
+       and kind only, so before the host read grants here a Board grant
+       without visibilities was saved and refused only when its worker was
+       attached. *)
+    let grant fields = declaration ("timezone = \"Asia/Seoul\"\n\n[[binding.records]]\n" ^ fields) in
+    grant "source_id = \"notes\"\nkind = \"board\"\n";
+    check_refusal "a Board grant without visibilities is refused" path
+      "binding.records: visibilities requires a non-empty array";
+    grant "source_id = \"wiki\"\nkind = \"wiki\"\npaths = [\"docs/\"]\n";
+    check_refusal "a wiki grant with paths is refused" path
+      "binding.records: a record grant has no key paths";
+    grant "source_id = \"board\"\nkind = \"wiki\"\n";
+    check_refusal "a second grant under a granted source_id is refused" path
+      "binding.records: records names the same source_id twice";
     following ~more:"\n[[binding.sources]]\nsource_id = \"lesson-2\"\nkind = \"lane_output\"\n\
                      installation_id = \"operator-lesson-2\"\noutput_id = \"scenes\"\n\
                      selection = \"latest_completed\"\n" "scenes";

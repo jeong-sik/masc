@@ -750,6 +750,38 @@ let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   check_inventory "Eio"
 ;;
 
+let test_missing_path_kind_avoids_discarded_context ~fs () =
+  with_tmp_dir @@ fun base ->
+  let path = Filename.concat base "fresh-kind" in
+  let (Eio.Resource.T (dir, ops), prefix) = fs in
+  let module Dir = (val Eio.Resource.get ops Eio.Fs.Pi.Dir) in
+  let stats = ref 0 and formats = ref 0 in
+  let module Observed = struct
+    include Dir
+    let stat dir ~follow path =
+      incr stats;
+      Dir.stat dir ~follow path
+    let pp fmt dir =
+      incr formats;
+      Dir.pp fmt dir
+  end in
+  let observed_fs : Eio.Fs.dir_ty Eio.Path.t =
+    Eio.Resource.T (dir, Eio.Resource.handler
+      [Eio.Resource.H (Eio.Fs.Pi.Dir, (module Observed))]), prefix
+  in
+  with_optional_read_fs (Some observed_fs) (fun () ->
+    check bool "missing leaf" true
+      (Fs_compat.exact_path_kind path = Fs_compat.Exact_missing);
+    Out_channel.with_open_bin path (fun out -> output_string out "fresh");
+    check bool "a new file is observed immediately" true
+      (Fs_compat.exact_path_kind path = Fs_compat.Exact_kind Unix.S_REG);
+    Unix.unlink path;
+    check bool "the removed file is observed immediately" true
+      (Fs_compat.exact_path_kind path = Fs_compat.Exact_missing);
+    check int "each observation calls the supplied provider" 3 !stats;
+    check int "absence does not format discarded error context" 0 !formats) ()
+;;
+
 let test_owned_read_checks_uid_in_each_parent_snapshot () =
   with_tmp_dir @@ fun raw_base ->
   let base = Unix.realpath raw_base in
@@ -1291,6 +1323,10 @@ let () =
             `Quick
             (test_read_dir_and_path_kind_use_typed_inventory
                ~fs:(Eio.Stdenv.fs env))
+        ; test_case
+            "fresh missing paths do not format discarded context"
+            `Quick
+            (test_missing_path_kind_avoids_discarded_context ~fs:(Eio.Stdenv.fs env))
         ; test_case
             "load, save and append agree inside and outside Eio"
             `Quick

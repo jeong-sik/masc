@@ -52,7 +52,19 @@ let exact_path_kind ?(follow = true) (path : string) : exact_path_kind =
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Exact_missing
       | Unix.Unix_error (Unix.ENOTDIR, _, _) -> Exact_unknown)
     (fun fs ->
-       match Eio.Path.kind ~follow Eio.Path.(fs / path) with
+       let eio_path = Eio.Path.(fs / path) in
+       let (Eio.Resource.T (dir, ops), leaf) = eio_path in
+       let module Dir = (val Eio.Resource.get ops Eio.Fs.Pi.Dir) in
+       let kind =
+         try ((Dir.stat dir ~follow leaf).kind :> [Eio.File.Stat.kind | `Not_found]) with
+         | Eio.Io (Eio.Fs.E (Not_found _), _) -> `Not_found
+         | Eio.Io _ as exn ->
+           let bt = Printexc.get_raw_backtrace () in
+           Eio.Exn.reraise_with_context exn bt "examining %a" Eio.Path.pp eio_path
+       in
+       (* Missing paths are ordinary observations. Add the same context as
+          [Eio.Path.stat] only when the caller will receive the error. *)
+       match kind with
        | `Not_found -> Exact_missing
        | `Directory -> Exact_kind Unix.S_DIR
        | `Fifo -> Exact_kind Unix.S_FIFO

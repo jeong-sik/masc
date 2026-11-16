@@ -328,6 +328,56 @@ let test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified () =
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "0-byte sqlite with companion WAL must not bypass sqlite inspection"))
 
+let test_lane_addon_records_keep_embedded_tool_blobs_live () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let addon_root =
+        Lane_addon_store.directory
+          ~masc_dir:(Common.masc_dir_from_base_path ~base_path)
+      in
+      let directories =
+        [ "host-results"
+        ; "sampling"
+        ; "sampling-outcomes"
+        ; Lane_addon_store.exact_requests_directory
+        ; Lane_addon_store.tool_request_owners_directory
+        ; Lane_addon_store.tool_request_bodies_directory
+        ; Lane_addon_store.history_fences_directory
+        ; Lane_addon_store.history_resolutions_directory
+        ]
+      in
+      let references =
+        List.map
+          (fun directory -> put store ("output retained only by " ^ directory))
+          directories
+      in
+      List.iter (fun reference -> set_mtime store reference (long_ago ())) references;
+      forget_marks ();
+      let first = observe_ok ~base_path in
+      Alcotest.(check int) "every blob initially unreferenced"
+        (List.length references) first.candidates;
+      List.iter2
+        (fun directory reference ->
+           let path = Filename.concat addon_root (directory ^ "/instance/retained.json") in
+           Fs_compat.mkdir_p (Filename.dirname path);
+           Fs_compat.save_file path
+             (Yojson.Safe.to_string
+                (`Assoc
+                  [ "retained_input",
+                    `Assoc
+                      [ "output_ref",
+                        `String (O.encode_for_agent_core (O.Stored reference))
+                      ]
+                  ])))
+        directories references;
+      let second = observe_ok ~base_path in
+      Alcotest.(check (list string)) "all record namespaces classified" []
+        second.unclassified;
+      Alcotest.(check int) "each record namespace owns its embedded blob"
+        (List.length references) second.live_digests;
+      Alcotest.(check int) "new owners remove every previous candidate" 0 second.candidates;
+      Alcotest.(check int) "no retained blob is deletable" 0 second.deletable)
+
 let () =
   Alcotest.run "tool_blob_sweep"
     [ ( "sweep"
@@ -349,5 +399,7 @@ let () =
             test_finder_file_below_a_store_does_not_end_the_scan
         ; Alcotest.test_case "empty sqlite and lane-addon stores leave sweep classified" `Quick
             test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified
+        ; Alcotest.test_case "lane-addon records keep embedded tool blobs live" `Quick
+            test_lane_addon_records_keep_embedded_tool_blobs_live
         ] )
     ]

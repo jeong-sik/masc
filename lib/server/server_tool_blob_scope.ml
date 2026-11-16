@@ -48,16 +48,19 @@ let lane_addons =
         ; excluded M.Settled_archive Lane_addon_store.tool_request_archive_directory
         ; excluded M.Other_media_store "evidence"
         ; excluded M.Other_media_store "sampling-evidence"
-        ; no_reference "host-results"
-        ; no_reference "sampling"
-        ; no_reference "sampling-outcomes"
+          (* These records can retain original input, summaries or model
+             output. Their own evidence hashes name another media store,
+             but embedded tool blob references still belong to this scan. *)
+        ; tree "host-results"
+        ; tree "sampling"
+        ; tree "sampling-outcomes"
         ; no_reference Lane_addon_store.actions_directory
         ; no_reference Lane_addon_store.bindings_directory
-        ; no_reference Lane_addon_store.exact_requests_directory
-        ; no_reference Lane_addon_store.tool_request_owners_directory
-        ; no_reference Lane_addon_store.tool_request_bodies_directory
-        ; no_reference Lane_addon_store.history_fences_directory
-        ; no_reference Lane_addon_store.history_resolutions_directory
+        ; tree Lane_addon_store.exact_requests_directory
+        ; tree Lane_addon_store.tool_request_owners_directory
+        ; tree Lane_addon_store.tool_request_bodies_directory
+        ; tree Lane_addon_store.history_fences_directory
+        ; tree Lane_addon_store.history_resolutions_directory
         ; no_reference Lane_addon_store.observations_directory
         ; no_reference Lane_addon_store.sequences_directory
         ; no_reference Lane_addon_asks.dirname

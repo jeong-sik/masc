@@ -27,6 +27,7 @@ type store =
   ; dir : Eio.Fs.dir_ty Eio.Path.t
   ; on_scope_ready : (locator -> (unit, string) result) option
   ; on_terminal_disposition : (terminal_disposition -> (unit, string) result) option
+  ; host_stop : (exn -> bool) option
   ; mode : store_mode
   }
 
@@ -45,13 +46,21 @@ let create_runtime ~sw ~domain_mgr ~domain_count =
 
 let runtime_codec (runtime : runtime) = runtime.codec
 
-let store ~(runtime : runtime) ~dir ?on_scope_ready ?on_terminal_disposition ?resume () =
+let store
+      ~(runtime : runtime)
+      ~dir
+      ?on_scope_ready
+      ?on_terminal_disposition
+      ?host_stop
+      ?resume
+      ()
+  =
   let mode =
     match resume with
     | None -> Fresh
     | Some locator -> Resume locator
   in
-  { codec = runtime.codec; dir; on_scope_ready; on_terminal_disposition; mode }
+  { codec = runtime.codec; dir; on_scope_ready; on_terminal_disposition; host_stop; mode }
 ;;
 
 let locator_to_yojson = Execution_agent_scope.scope_locator_to_yojson
@@ -173,7 +182,19 @@ let%test "abort failure preserves reserved runtime exception" =
         abort failure"
 ;;
 
-let abort_after_exception scope on_terminal_disposition exn backtrace =
+(* The wrappers Eio and Stdlib put around a cancellation reason. The host
+   names only the reasons themselves; a wrapped reason is the host's stop when
+   every reason inside it is. *)
+let rec stopped_by_host host_stop = function
+  | Eio.Cancel.Cancelled inner -> stopped_by_host host_stop inner
+  | Stdlib.Fun.Finally_raised inner -> stopped_by_host host_stop inner
+  | Eio.Exn.Multiple [] -> false
+  | Eio.Exn.Multiple members ->
+    List.for_all (fun (member, _backtrace) -> stopped_by_host host_stop member) members
+  | reason -> host_stop reason
+;;
+
+let close_after_exception scope on_terminal_disposition exn backtrace =
   let reason =
     match exn with
     | Eio.Cancel.Cancelled _ ->
@@ -201,6 +222,16 @@ let abort_after_exception scope on_terminal_disposition exn backtrace =
   with
   | Ok () -> Printexc.raise_with_backtrace exn backtrace
   | Error cleanup_detail -> reraise_after_abort_failure exn backtrace cleanup_detail
+;;
+
+let abort_after_exception ?host_stop scope on_terminal_disposition exn backtrace =
+  match host_stop with
+  | Some host_stop when stopped_by_host host_stop exn ->
+    (* The host stopped this call to continue it later. The journal stays as
+       a process death leaves it: no terminal, so no terminal disposition, and
+       the writer closes without one. *)
+    Printexc.raise_with_backtrace exn backtrace
+  | Some _ | None -> close_after_exception scope on_terminal_disposition exn backtrace
 ;;
 
 let abort_error scope on_terminal_disposition detailed =
@@ -249,17 +280,17 @@ let settle_success scope on_terminal_disposition value =
                (Execution_agent_scope.error_to_string abort_error))))
 ;;
 
-let settle_success_after_run scope on_terminal_disposition value =
+let settle_success_after_run ?host_stop scope on_terminal_disposition value =
   match
     Eio.Cancel.protect (fun () -> settle_success scope on_terminal_disposition value)
   with
   | result -> result
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
-    abort_after_exception scope on_terminal_disposition exn backtrace
+    abort_after_exception ?host_stop scope on_terminal_disposition exn backtrace
 ;;
 
-let with_scope ?on_terminal_disposition ~event_bus scope run =
+let with_scope ?on_terminal_disposition ?host_stop ~event_bus scope run =
   let observer=match Execution_context.bus_observer () with
     | Some observer when observer.owns_journal scope -> observer
     | Some _ | None -> Agent_bus_observer.create ~publish:Event_bus.publish scope in
@@ -268,11 +299,11 @@ let with_scope ?on_terminal_disposition ~event_bus scope run =
   Execution_context.with_bus_observer observer (fun () ->
     Execution_context.with_agent_scope scope (fun () ->
       match (let result=run () in observer.flush ();result) with
-      | Ok value -> settle_success_after_run scope on_terminal_disposition value
+      | Ok value -> settle_success_after_run ?host_stop scope on_terminal_disposition value
       | Error detailed -> abort_error scope on_terminal_disposition detailed
       | exception exn ->
         let backtrace = Printexc.get_raw_backtrace () in
-        abort_after_exception scope on_terminal_disposition exn backtrace))
+        abort_after_exception ?host_stop scope on_terminal_disposition exn backtrace))
 ;;
 
 let prepare_scope store on_terminal_disposition scope =
@@ -284,7 +315,7 @@ let prepare_scope store on_terminal_disposition scope =
      | result -> result
      | exception exn ->
        let backtrace = Printexc.get_raw_backtrace () in
-       abort_after_exception scope on_terminal_disposition exn backtrace)
+       abort_after_exception ?host_stop:store.host_stop scope on_terminal_disposition exn backtrace)
 ;;
 
 let captured_terminal_sink store captured =
@@ -375,7 +406,7 @@ let with_fresh store agent run = with_writer_lifetime @@ fun caller_sw ->
            on_terminal_disposition
            (execution_failure ("scope locator sink failed: " ^ detail))
        | Ok () ->
-         with_scope ?on_terminal_disposition ~event_bus:agent.Agent_types.options.event_bus scope (fun () ->
+         with_scope ?on_terminal_disposition ?host_stop:store.host_stop ~event_bus:agent.Agent_types.options.event_bus scope (fun () ->
            in_caller_switch ~sw:caller_sw (fun sw -> run ~sw scope))))
 ;;
 
@@ -406,7 +437,7 @@ let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw
               (execution_failure ("scope locator sink failed: " ^ detail))
           | Ok () ->
             Execution_context.with_resume_once (fun () ->
-              with_scope ?on_terminal_disposition ~event_bus:agent.Agent_types.options.event_bus scope (fun () ->
+              with_scope ?on_terminal_disposition ?host_stop:store.host_stop ~event_bus:agent.Agent_types.options.event_bus scope (fun () ->
                 in_caller_switch ~sw:caller_sw (fun sw -> run ~sw scope))))))
 ;;
 

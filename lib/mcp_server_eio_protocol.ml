@@ -102,19 +102,19 @@ let find_required_credential ~base_path ~id token =
 let require_auth ~base_path ~requirement ~id ~sender ?auth_token () =
   let module T = Mcp_server_eio_types in
   match sender, requirement with
-  | T.Admitted Auth.Auth_off, (Auth_requirement.Public | Requires_auth) ->
+  | T.Admitted Auth.Auth_off, (Auth_requirement.Public | Auth_requirement.Requires_auth) ->
     Ok (auth_token, None)
   | T.Admitted (Auth.Anonymous | Auth.Bearer _), Auth_requirement.Public ->
     Ok (auth_token, None)
-  | T.Admitted Auth.Anonymous, Requires_auth -> Error (make_auth_error ~id Missing_token)
+  | T.Admitted Auth.Anonymous, Auth_requirement.Requires_auth -> Error (make_auth_error ~id Missing_token)
   | T.Admitted (Auth.Bearer { resolved = Auth.Token_credential credential; token; _ }),
-    Requires_auth ->
+    Auth_requirement.Requires_auth ->
     Ok (Some token, Some (Auth.token_credential_agent_credential credential))
   | T.Admitted (Auth.Bearer { resolved = Auth.Internal_keeper_bearer; token; _ }),
-    Requires_auth ->
+    Auth_requirement.Requires_auth ->
     find_required_credential ~base_path ~id token
   | T.Unadmitted, Auth_requirement.Public -> Ok (auth_token, None)
-  | T.Unadmitted, Requires_auth ->
+  | T.Unadmitted, Auth_requirement.Requires_auth ->
     if Auth.is_auth_enabled base_path
     then Error (make_auth_error ~id Missing_token)
     else Ok (auth_token, None)

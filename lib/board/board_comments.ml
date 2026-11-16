@@ -203,9 +203,7 @@ let add_comment_with_audience
                      store.comments_by_post
                      post_key
                      (comment_key :: existing);
-                   Hashtbl.replace
-                     store.posts
-                     post_key
+                   put_post store
                      { post with
                        reply_count = post.reply_count + 1
                      ; updated_at =

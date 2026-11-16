@@ -75,7 +75,7 @@ let set_thread_id store ~post_id ~thread_id : (unit, board_error) Result.t =
         | None -> Error (Post_not_found post_id)
         | Some post ->
             let updated = { post with thread_id = Some thread_id } in
-            Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+            put_post store updated;
             Ok ()
       )
 
@@ -96,7 +96,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
           | Some post ->
               let now = Time_compat.now () in
               let updated = { post with pinned; updated_at = now } in
-              Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+              put_post store updated;
               invalidate_post_caches store;
               Ok (post, updated))
       in
@@ -112,7 +112,7 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
                   | Some current
                     when current.pinned = updated.pinned
                          && Stdlib.Float.equal current.updated_at updated.updated_at ->
-                    Hashtbl.replace store.posts key previous;
+                    put_post store previous;
                     invalidate_post_caches store
                   | _ -> ()));
                finish_posts_write outcome))
@@ -199,7 +199,7 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
                  Some { closed_by = closed_by_id; closed_at = now; successor_id; summary = Some summary }
                in
                let updated = { post with closed; updated_at = now } in
-               Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+               put_post store updated;
                invalidate_post_caches store;
                Ok (post, updated))
          in
@@ -215,7 +215,7 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
                  | Some current
                    when Option.is_some current.closed = Option.is_some updated.closed
                         && Stdlib.Float.equal current.updated_at updated.updated_at ->
-                   Hashtbl.replace store.posts key previous;
+                   put_post store previous;
                    invalidate_post_caches store
                  | _ -> ()));
               finish_posts_write outcome)))
@@ -240,7 +240,7 @@ let reopen store ~post_id : (unit, board_error) Result.t =
           | Some post ->
             let now = Time_compat.now () in
             let updated = { post with closed = None; updated_at = now } in
-            Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+            put_post store updated;
             invalidate_post_caches store;
             Ok (Some (post, updated)))
       in
@@ -257,7 +257,7 @@ let reopen store ~post_id : (unit, board_error) Result.t =
               | Some current
                 when Option.is_none current.closed
                      && Stdlib.Float.equal current.updated_at updated.updated_at ->
-                Hashtbl.replace store.posts key previous;
+                put_post store previous;
                 invalidate_post_caches store
               | _ -> ()));
            finish_posts_write outcome))

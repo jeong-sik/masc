@@ -18,7 +18,7 @@ let recalculate_reply_counts store =
     let post_key = Post_id.to_string c.post_id in
     match Hashtbl.find_opt store.posts post_key with
     | Some p ->
-        Hashtbl.replace store.posts post_key
+        put_post store
           { p with
             reply_count = p.reply_count + 1
           ; updated_at = Stdlib.Float.max p.updated_at c.created_at }

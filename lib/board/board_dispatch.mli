@@ -337,6 +337,10 @@ val list_recent_posts_matching_author_unchecked :
     canonical identity ownership without routing through the public
     substring-based author search. *)
 
+val list_posts_after_cursor_unchecked : float * string option -> Board.post list
+(** Internal observer range in [updated_at ASC, post_id ASC] order, exclusive
+    of the exact cursor. Like [list_posts_unchecked], includes every visibility. *)
+
 val current_post_cursor : unit -> float * string option
 (** Atomic high-water mark for initializing a Board observation cursor: the
     current Board cursor head, read without sorting or materializing the full

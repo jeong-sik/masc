@@ -315,24 +315,8 @@ let board_routing_pending_stimulus ~arrived_at
   }
 ;;
 
-let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
-
-let compare_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
-  let cmp = Float.compare ts_a ts_b in
-  if cmp <> 0 then cmp else String.compare post_id_a post_id_b
-;;
-
-let cursor_token_of_post (post : Board.post) = post.updated_at, post_id_string post
-
-let list_posts_after_cursor (cursor_ts, cursor_post_id) =
-  let cursor_post_id = Option.value ~default:"" cursor_post_id in
-  let is_after_cursor post =
-    compare_cursor_token (cursor_token_of_post post) (cursor_ts, cursor_post_id) > 0
-  in
-  Board_dispatch.list_posts_unchecked ~sort_by:Board_dispatch.Updated ~limit:max_int ()
-  |> List.filter is_after_cursor
-  |> List.sort (fun (a : Board.post) (b : Board.post) ->
-    compare_cursor_token (cursor_token_of_post a) (cursor_token_of_post b))
+let list_posts_after_cursor cursor =
+  Board_dispatch.list_posts_after_cursor_unchecked cursor
 ;;
 
 let text (signal : Board_dispatch.board_signal) =

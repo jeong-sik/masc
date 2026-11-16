@@ -32,10 +32,10 @@ let trust_policy ?(bind_host = "127.0.0.1") ?(bind_port = 8935) ?https_port
 let loopback_policy = trust_policy ()
 let example_https_policy = trust_policy ~explicit_base_url:"https://example.com" ()
 
-let http1_request ?(headers = []) path =
+let http1_request ?(meth = `GET) ?(headers = []) path =
   Httpun.Request.create
     ~headers:(Httpun.Headers.of_list headers)
-    `GET
+    meth
     path
 ;;
 
@@ -919,10 +919,125 @@ let test_fiber_binding_has_no_fallback () =
     check bool "unbound after request" true (Option.is_none (Authority.current ())))
 ;;
 
+let with_anonymous_mutation_policy enabled f =
+  let config =
+    resolve_auth_config
+      { allow_anonymous_mutations = Some (string_of_bool enabled)
+      ; loopback_dev_mutation_origins = None
+      }
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_auth_config (Some default_auth_config))
+    (fun () ->
+      Server_auth.For_testing.restore_auth_config (Some config);
+      f ())
+;;
+
+let with_local_permission_request f =
+  let base_path = Filename.temp_file "masc-permission-origin-" "" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o700;
+  let env =
+    [ "MASC_HTTP_AUTH_STRICT", "false"
+    ; "MASC_HTTP_BASE_URL", "http://localhost:8935"
+    ; "MASC_HOST", "127.0.0.1"
+    ]
+  in
+  let inherited = List.map (fun (key, _) -> key, Sys.getenv_opt key) env in
+  let rec remove path =
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    | _ -> Unix.unlink path
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (key, value) ->
+           match value with Some value -> Unix.putenv key value | None -> Unix.unsetenv key)
+        inherited;
+      remove base_path)
+    (fun () ->
+      List.iter (fun (key, value) -> Unix.putenv key value) env;
+      Auth.save_auth_config base_path
+        { Masc_domain.default_auth_config with enabled = false; require_token = false };
+      Eio_main.run (fun _ ->
+        Authority.with_current
+          (admitted_http1 [ "host", "localhost:8935" ])
+          (fun () -> f base_path)))
+;;
+
+let test_admitted_cors_headers_reject_foreign_origin () =
+  Eio_main.run (fun _ ->
+    Authority.with_current
+      (admitted_http1 [ "host", "localhost:8935" ])
+      (fun () ->
+         let headers origin =
+           Server_auth.admitted_cors_headers
+             (http1_request ~headers:[ "origin", origin ] "/api/v1/dashboard/shell")
+         in
+         let admitted = headers "http://localhost:8935" in
+         check (option string) "admitted origin is reflected"
+           (Some "http://localhost:8935")
+           (List.assoc_opt "access-control-allow-origin" admitted);
+         check (list (pair string string)) "foreign origin receives only Vary"
+           [ "vary", "Origin" ] (headers "https://attacker.invalid")))
+;;
+
+let permission_request base_path meth =
+  (* The public read entry point delegates to permission admission for
+     CanReadState, including its method-sensitive browser-provenance check. *)
+  Server_auth.authorize_read_request ~base_path
+    (http1_request ~meth ~headers:[ "host", "localhost:8935" ] "/api/v1/dashboard/shell")
+;;
+
+let test_anonymous_permission_mutations_require_browser_provenance () =
+  with_local_permission_request @@ fun base_path ->
+  with_anonymous_mutation_policy false @@ fun () ->
+  List.iter
+    (fun meth ->
+       match permission_request base_path meth with
+       | Error
+           (Masc_domain.Auth
+              (Masc_domain.Auth_error.Unauthorized { reason = Missing_token; _ }) as error) ->
+         check bool "missing provenance maps to HTTP 401" true
+           (Server_auth.http_status_of_auth_error error = `Unauthorized)
+       | Error error -> fail (Masc_domain.masc_error_to_string error)
+       | Ok () -> fail "anonymous mutation without Origin or Referer was admitted")
+    [ `POST; `PUT; `DELETE ];
+  List.iter
+    (fun meth ->
+       match permission_request base_path meth with
+       | Ok () -> ()
+       | Error error -> fail (Masc_domain.masc_error_to_string error))
+    [ `GET; `HEAD ]
+;;
+
+let test_explicit_anonymous_mutation_policy_keeps_compatibility () =
+  with_local_permission_request @@ fun base_path ->
+  with_anonymous_mutation_policy true @@ fun () ->
+  List.iter
+    (fun meth ->
+       match permission_request base_path meth with
+       | Ok () -> ()
+       | Error error -> fail (Masc_domain.masc_error_to_string error))
+    [ `POST; `PUT; `DELETE ]
+;;
+
 let () =
   run
     "server-request-authority"
-    [ ( "auth config"
+    [ ( "permission and response boundaries"
+      , [ test_case "only admitted Origin is reflected" `Quick
+            test_admitted_cors_headers_reject_foreign_origin
+        ; test_case "anonymous mutations require provenance while reads remain open" `Quick
+            test_anonymous_permission_mutations_require_browser_provenance
+        ; test_case "explicit anonymous-mutation policy admits missing provenance" `Quick
+            test_explicit_anonymous_mutation_policy_keeps_compatibility
+        ] )
+    ; ( "auth config"
       , [ test_case
             "malformed values are rejected"
             `Quick

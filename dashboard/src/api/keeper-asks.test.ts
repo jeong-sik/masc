@@ -14,6 +14,9 @@ vi.mock('./core', async importOriginal => {
 
 import { ApiRequestError } from './core'
 import { answerKeeperAsk, AskAnswerConflict } from './keeper-asks'
+import type { AnswerRequestBody } from '../lib/keeper-ask-draft'
+
+const requestBody: AnswerRequestBody = { name: 'keeper-a', ask_id: 'a1', answers: [] }
 
 describe('answerKeeperAsk', () => {
   beforeEach(() => {
@@ -36,7 +39,7 @@ describe('answerKeeperAsk', () => {
         },
       }),
     )
-    const result = await answerKeeperAsk({ ask_id: 'a1', answers: [] })
+    const result = await answerKeeperAsk(requestBody)
     expect(result).toEqual({
       askId: 'a1',
       answerCount: 2,
@@ -57,7 +60,7 @@ describe('answerKeeperAsk', () => {
       },
     })
     post.mockRejectedValue(err)
-    await expect(answerKeeperAsk({ ask_id: 'a1', answers: [] })).rejects.toBe(err)
+    await expect(answerKeeperAsk(requestBody)).rejects.toBe(err)
   })
 
   it('maps HTTP 409 to AskAnswerConflict', async () => {
@@ -69,7 +72,7 @@ describe('answerKeeperAsk', () => {
         detail: 'already answered',
       }),
     )
-    await expect(answerKeeperAsk({ ask_id: 'a1', answers: [] })).rejects.toBeInstanceOf(
+    await expect(answerKeeperAsk(requestBody)).rejects.toBeInstanceOf(
       AskAnswerConflict,
     )
   })

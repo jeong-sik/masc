@@ -408,16 +408,41 @@ def quota():
         return None
 
 
+def sweep_target(arguments):
+    """The pull request a dispatched sweep is scoped to (None = walk all).
+
+    The quota re-dispatch names one pull request and the workflow passes it
+    as --pr. An empty value (the scheduled sweep, or a dispatch without the
+    input) walks every approved scope as before.
+    """
+    if '--pr' not in arguments:
+        return None
+    index = arguments.index('--pr')
+    if index + 1 >= len(arguments):
+        raise SystemExit('--pr needs a pull request number')
+    raw = arguments[index + 1]
+    if not raw:
+        return None
+    if not raw.isascii() or not raw.isdecimal():
+        raise SystemExit('--pr needs a pull request number')
+    return int(raw)
+
+
 def main():
     repo = os.environ['GITHUB_REPOSITORY']
     if REPO.fullmatch(repo) is None:
         raise SystemExit('invalid repository')
     dry_run = '--dry-run' in sys.argv[1:]
+    target = sweep_target(sys.argv[1:])
     started = time.monotonic()
     report: dict[str, object] = {'quota_before': quota()}
     try:
         rows = open_pulls(repo)
         candidates = select(rows, lambda number: in_native_stack(repo, number))
+        if target is not None:
+            # A quota re-dispatch walks exactly its own pull request, so the
+            # payload's quota_retry count can never reach another worker.
+            candidates = [number for number in candidates if number == target]
     except (ValueError, KeyError, TypeError) as error:
         # The quota read before the listing says which budget was empty.
         print(f'approval-merge-sweep: cannot read the open pull requests: {error}\n'
@@ -425,7 +450,8 @@ def main():
         return 1
     runs: list[dict[str, object]] = []
     not_reached: list[int] = []
-    report.update(open=len(rows), candidates=candidates, runs=runs, not_reached=not_reached)
+    report.update(open=len(rows), candidates=candidates, scoped_to=target, runs=runs,
+                  not_reached=not_reached)
     worker = Path(__file__).with_name('approval-auto-merge.py')
     environment = dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', DISPATCH_RECEIPT='',
                        # The worker's kill budget, so its cleanup keeps a

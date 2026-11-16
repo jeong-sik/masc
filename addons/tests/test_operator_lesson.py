@@ -17,7 +17,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "operator-lesson"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # records.py
 
-from test_operator_quiz_flow import REPO, FakeHost, commit, exact_payload, post  # noqa: E402
+from test_operator_quiz_flow import REPO, WIKI, FakeHost, commit, exact_payload, post, wiki_page  # noqa: E402
 import lesson_flow as f  # noqa: E402
 import lesson_log as l  # noqa: E402
 import lesson_projection as p  # noqa: E402
@@ -102,6 +102,16 @@ class Base(unittest.TestCase):
 
     def session(self, session_id) -> l.Session:
         return next(s for s in self.flow.sessions() if s.session_id == session_id)
+
+    def starts(self, session_id) -> dict[str, dict]:
+        """Where a session began reading each record source: after a cursor,
+        or from a time."""
+        first: dict[str, dict] = {}
+        for request in self.host.listed:
+            if request["kind"] == "read_records" and request["request_id"].startswith(session_id):
+                first.setdefault(request["source_id"],
+                                 {key: request[key] for key in ("after", "since") if key in request})
+        return first
 
     def lesson(self, action="act-1", scenes=3) -> l.Session:
         """A whole lesson with a host that outlines and writes."""
@@ -389,11 +399,128 @@ class Sessions(Base):
         self.assertEqual((reads[0]["after"], "since" in reads[0]), ("000002", False))
         self.assertEqual([e.sources[0].pin for e in self.session(third).entries], ["p-4"])
 
+    def test_a_source_no_outlined_lesson_read_is_read_from_the_since_of_the_lesson_reading_it(self):
+        """The cursor is one per record source. After a lesson was outlined,
+        a source added to the binding has none, and the next lesson reads it
+        from its own since: not from the time it opened, and not from the
+        since the first lesson had."""
+        self.host.outline, self.host.scene = one_entry_per_record, quoting
+        first = self.compose("act-1", binding=BINDING | {"since": 2})
+        self.host.run(self.flow)
+        self.assertIsNotNone(self.session(first).outlined)
+        self.host.listed.clear()
+        second = self.compose("act-2", binding=BINDING | {"since": 1, "records": [BOARD, WIKI]})
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(second), {"board": {"after": "000002"}, "wiki": {"after": None, "since": 1.0}})
+
+    def test_a_source_no_outlined_lesson_read_is_read_from_a_later_since_too(self):
+        """The same with since moved later: the new source is read from the
+        since of the lesson reading it, not from the earliest since a lesson
+        had."""
+        self.host.outline, self.host.scene = one_entry_per_record, quoting
+        first = self.compose("act-1", binding=BINDING | {"since": 1})
+        self.host.run(self.flow)
+        self.assertIsNotNone(self.session(first).outlined)
+        self.host.listed.clear()
+        second = self.compose("act-2", binding=BINDING | {"since": 2, "records": [BOARD, WIKI]})
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(second), {"board": {"after": "000002"}, "wiki": {"after": None, "since": 2.0}})
+
+    def test_a_lesson_outlined_and_still_writing_moves_the_cursor(self):
+        """The cursor moves with a lesson once it reached its outline, before
+        its scenes are written."""
+        self.host.outline = one_entry_per_record
+        first = self.compose("act-1")
+        self.host.run(self.flow)
+        self.assertEqual(self.session(first).state, l.WRITING)
+        self.host.board.append(post(4, "a lane rests after a refusal"))
+        self.host.listed.clear()
+        second = self.compose("act-2")
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(second), {"board": {"after": "000002"}})
+
+    def test_a_cursor_the_host_refused_is_not_asked_for_again(self):
+        """A lesson the host refused a cursor keeps that read with its
+        failure, so the next lesson does not ask for the same cursor: with
+        no cursor before it, it reads from since."""
+        self.lesson()
+        produce = self.host.produce
+        self.host.produce = lambda request: ({"status": "not_allowed", "reason": "after is not a cursor this host gave"}
+                                             if request["kind"] == "read_records" and request.get("after") == "000002"
+                                             else produce(request))
+        refused = self.compose("act-2")
+        self.host.run(self.flow)
+        self.assertEqual(self.session(refused).state, l.FAILED)
+        self.host.listed.clear()
+        last = self.compose("act-3")
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(last), {"board": {"after": None, "since": 0.0}})
+
+    def test_a_lesson_that_did_not_reach_its_outline_does_not_hide_the_cursor_before_it(self):
+        """The cursor is looked for over every earlier lesson that was
+        outlined, however many lessons since were superseded while they
+        waited for their outline: here three. They leave the cursor where
+        the outlined lesson before them stopped."""
+        self.host.outline, self.host.scene = one_entry_per_record, quoting
+        first = self.compose("act-1", binding=BINDING | {"since": 2})
+        self.host.run(self.flow)
+        self.host.outline = lambda payload: None
+        self.host.board.append(post(4, "a lane rests after a refusal"))
+        superseded = []
+        for action in ("act-2", "act-3", "act-4"):
+            superseded.append(self.compose(action, binding=BINDING | {"since": 2}))
+            self.host.run(self.flow)
+        self.host.listed.clear()
+        last = self.compose("act-5", binding=BINDING | {"since": 2})
+        self.host.run(self.flow)
+        self.assertIsNotNone(self.session(first).outlined)
+        self.assertEqual([(self.session(s).state, self.session(s).outlined) for s in superseded],
+                         [(l.SUPERSEDED, None)] * 3)
+        self.assertEqual(self.starts(last), {"board": {"after": "000002"}})
+
+    def test_a_source_taken_out_and_put_back_is_read_from_the_cursor_it_had(self):
+        """The cursor goes by source_id over every earlier lesson that was
+        outlined, however many lessons between did not read that source:
+        here three. A source_id an operator removes and adds again is read
+        from the cursor left before, not from since."""
+        self.host.outline, self.host.scene = one_entry_per_record, quoting
+        self.host.wiki = [wiki_page("guide", 1, "a page of the wiki")]
+        both = BINDING | {"records": [BOARD, WIKI]}
+        first = self.compose("act-1", binding=both)
+        self.host.run(self.flow)
+        between = []
+        for n in (4, 5, 6):
+            self.host.board.append(post(n, f"decision number {n}"))
+            between.append(self.compose(f"act-{n}"))
+            self.host.run(self.flow)
+        self.assertEqual([self.session(s).outlined is not None for s in (first, *between)], [True] * 4)
+        self.host.wiki.append(wiki_page("later", 1, "a page written later"))
+        self.host.listed.clear()
+        last = self.compose("act-7", binding=both)
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(last), {"board": {"after": "000005"}, "wiki": {"after": "000000"}})
+
     def test_a_refused_read_fails_the_session_with_the_hosts_reason(self):
         session_id = self.compose()
         (request,) = self.flow.listing()
         self.assertTrue(self.flow.deliver(request["request_id"], {"status": "not_allowed", "reason": "no grant"}, 1.0))
         self.assertEqual(self.session(session_id).failure, l.NotAllowed(request["request_id"], "no grant"))
+
+    def test_a_refused_piece_of_a_result_ends_the_lesson(self):
+        """The host refuses a piece of a result too large for the frame
+        when it no longer keeps that result. Like a refused page, the
+        refusal ends the lesson; only a refused file is skipped."""
+        self.host.page_size, self.host.frame = 3, 180
+        self.host.board = [post(1, "the ledger records facts " * 4), post(2, "keepers choose"), post(3, "asks wait")]
+        reason = "no retained result for this installation and original request"
+        produce = self.host.produce
+        self.host.produce = lambda request: ({"status": "not_allowed", "reason": reason}
+                                             if request["kind"] == "read_result" else produce(request))
+        session_id = self.compose()
+        self.host.run(self.flow)
+        (piece,) = {r["request_id"] for r in self.host.listed if r["kind"] == "read_result"}
+        session = self.session(session_id)
+        self.assertEqual((session.state, session.failure), (l.FAILED, l.NotAllowed(piece, reason)))
 
     def test_an_unreadable_log_refuses_every_write(self):
         self.compose()

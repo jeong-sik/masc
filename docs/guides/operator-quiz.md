@@ -7,7 +7,7 @@
 ## 한 번의 퀴즈가 지나가는 길
 
 1. Schedule 이 정한 시각에 `compose` 를 보낸다. 패키지는 세션을 하나 열고 `confirmed` 로 답한다.
-2. 패키지가 host 에게 기록을 한 번에 하나씩 요청한다. 지난번에 질문까지 간 세션이 멈춘 자리부터 읽는다. 실패했거나 다음 세션으로 대체된 세션이 읽은 기록은 다시 읽는다.
+2. 패키지가 host 에게 기록을 한 번에 하나씩 요청한다. 지난번에 질문까지 간 세션이 멈춘 자리부터 읽는다. 질문까지 가지 못하고 실패했거나 다음 세션으로 대체된 세션이 읽은 기록은 다시 읽는다.
 3. 다 읽으면 `author` 출력을 한 번 요청한다. 읽은 기록, 지난 문제들의 풀이 기록, 문제 수, 언어를 함께 보낸다. 새 기록이 없어도 지난 문제가 있으면 요청한다. 이때 `author` 는 지난 문제를 그 출처 그대로 다시 낼 수 있다.
    - 요청 하나에 다 들어가지 않으면 가장 최근에 읽은 기록만 담는다. 그래서 worker 는 읽는 동안 결과의 요약(상태, cursor, 커밋과 경로)만 메모리에 두고, 본문은 이때 보관한 페이지에서 최근 것부터 요청에 들어가는 만큼만 다시 읽는다. 퀴즈를 오래 꺼 두었다가 다시 켜도 worker 메모리는 요청 하나 크기 근처에 머문다.
 4. 돌아온 문제마다 확인한다. 선택형 문제는 선택지가 둘 이상인지, 정답 선택지가 선택지 안에 있는지, `single` 이 정답을 하나만 갖는지 본다. 서술형 문제(`text`)는 선택지와 정답 key 없이, 맞는 답이 말해야 할 점(rubric)을 갖는지 본다. 어느 쪽이든 인용문이 그 기록의 보관된 바이트에 글자 그대로 있는지 본다. 통과하지 못한 문제는 이유와 함께 버린다. 하나도 통과하지 못하면 세션은 `no_question_passed` 로 끝난다.
@@ -30,9 +30,9 @@ docker build -f addons/operator-quiz/Dockerfile -t masc-lane-operator-quiz:0.2.2
 
 ```toml
 [binding]
-sources = []
 language = "ko"
 timezone = "Asia/Seoul"
+sources = []
 
 [[binding.records]]
 source_id = "board"
@@ -53,7 +53,7 @@ paths = ["changelog.d/"]
 - Board 글은 공개 범위를 따로 정하지 않으면 `internal` 이다. `public`, `unlisted` 만 적으면 그렇게 정한 글만 읽으므로, 문제 재료가 거의 없을 수 있다.
 - `repository` 권한은 등록된 저장소 clone 의 기본 브랜치를 읽고, fetch 하지 않는다. 새 changelog 조각을 문제로 내려면 그 저장소의 `auto_sync` 를 켜 둔다.
 - `repository` 권한의 커밋 메시지도 문제 재료가 된다. `paths` 에는 `changelog.d/` 말고도 `CHANGELOG.md`, `docs/rfc/` 처럼 읽힐 파일이나 폴더를 더 적을 수 있다.
-- `sources` 는 늘 빈 배열이다. 이 패키지는 관측 source 를 읽지 않는다.
+- `sources` 는 수업을 묶지 않으면 빈 배열이다. 수업을 묶는 법은 아래 「수업 뒤에 묻기」에 있다.
 
 wiki 와 merge 된 PR 도 읽게 하려면 권한을 더한다.
 
@@ -169,9 +169,50 @@ selection = "latest_completed"
 
 `since`, `language`, `timezone` 은 `[[binding.sources]]` 보다 위에 둔다. 아래에 두면 TOML 이 그 줄을 source 항목의 키로 읽어 선언이 저장되지 않는다.
 
+host 는 선언을 저장하기 전에 `[binding]` 을 아래 순서로 본다. 걸리면 저장하지 않고, 처음 걸린 문구 하나만 낸다.
+
+| 순서 | host 가 보는 것 | 걸리는 예 | 문구 |
+| --- | --- | --- | --- |
+| 1 | 파일이 TOML 로 읽히는가 | `sources = []` 를 지우지 않고 바로 아래에 `[[binding.sources]]` 를 더했다 | `table [binding.sources] is duplicated by an array of tables [[binding.sources]]` |
+| 2 | 값을 JSON 으로 옮길 수 있는가 | `since = 2026-11-12` | `binding.since: TOML date/time values are unsupported; use an explicit string` |
+| 2 | | `since = nan`, `since = inf` | `binding.since: non-finite numbers are not supported` |
+| 3 | `sources` 항목의 모양 | `since`·`language`·`timezone` 이 `[[binding.sources]]` 아래에 있다 | `lane_output contains duplicate or unknown fields` |
+| 3 | | `selection` 이 없다 | `lane_output selection must be latest_completed` |
+| 3 | | `sources` 가 없거나 배열이 아니다 | `binding.sources requires an array of observation sources` |
+| 4 | `[binding]` 이 패키지의 스키마에 맞는가 | 아래 목록 | `lane binding must match exactly one schema alternative` |
+
+1 번 문구는 TOML 을 읽는 라이브러리(Otoml)가 낸다. 같은 실수라도 줄의 자리에 따라 문구가 다르다. `[[binding.sources]]` 를 `[[binding.records]]` 둘 뒤에 더하면 `otoml internal error` 로 시작하는 문구가 나온다.
+
+4 번 문구는 어느 칸이 틀렸는지 말하지 않는다(#52319). 이럴 때 나온다.
+
+- `since` 가 없다. 문자열이다. 0 보다 작다.
+- 수업을 묶지 않은 선언에 `since` 가 있다.
+- `timezone` 이 없다. 패키지가 읽지 않는 키가 있다. `output_id` 가 `scenes` 가 아니다.
+
+`since` 는 Unix 시각(초)을 숫자로 적는다. 2 번 문구는 문자열로 적으라고 하지만, 문자열로 적은 `since` 는 4 번에서 걸린다.
+
+스키마는 `records` 항목마다 `source_id` 와 `kind` 만 요구한다. 나머지는 host 가 worker 를 붙일 때 본다(#52373). 종류에 맞는 칸이 다 있는지, 다른 칸이 섞이지 않았는지, `source_id` 가 겹치지 않는지, `paths` 가 저장소 안을 가리키는지다. 그래서 Board 항목에 `visibilities` 가 없는 선언도 저장된다. 돌던 퀴즈의 선언을 그렇게 고쳐 저장하면 돌던 worker 는 내려가고, 새 worker 는 붙지 않는다. 거절 이유는 `configuration.issues` 에 선언 파일 경로와 함께 나온다.
+
 맞춰야 하는 것이 넷이다.
 
-- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. 질문을 낸 세션이 아직 없으면 퀴즈는 이 시각부터 읽는다. 수업도 첫 수업을 이 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다.
+- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다. 퀴즈가 읽기 시작하는 곳은 `records` 의 항목마다 따로 정해진다.
+
+  | 그 항목에 | 읽기 시작하는 곳 |
+  | --- | --- |
+  | 질문을 낸 세션이 멈춘 자리(cursor)가 남아 있다 | 그 자리 |
+  | 남은 자리가 없다 | `since` |
+
+  남은 자리가 없는 항목은 셋이다.
+
+  - 질문을 낸 세션이 읽은 적 없는 항목. 질문을 낸 적 없는 퀴즈는 모든 항목이 그렇다. 나중에 새 `source_id` 로 더한 항목도 그렇다.
+  - `since` 부터 읽었는데 기록이 하나도 없던 항목. 다음 세션이 다시 `since` 부터 읽는다. `github_pulls` 항목은 다를 수 있다. 그 사이에 PR 의 병합 커밋이 아닌 커밋(브랜치에 바로 올린 커밋, rebase 병합의 앞쪽 커밋)이 있으면 host 가 그 커밋을 지나친 자리를 준다. 그 세션이 질문을 냈으면 다음 세션은 그 자리부터 읽는다.
+  - 남은 자리를 host 가 모두 거절한 항목. 저장소·`github_pulls` 항목은 그 커밋이 기본 브랜치에 더는 없을 때, wiki 항목은 `log.md` 가 다시 쓰여 그 자리의 줄이 달라졌을 때 거절된다. Board 항목은 모양이 맞는 자리면 지운 글의 자리도 받는다. 거절당한 세션은 실패로 끝나고, 다음 세션은 그보다 앞서 남은 자리부터 읽는다. 그런 자리도 없으면 `since` 부터 읽는다.
+
+  자리는 `source_id` 로 찾는다. 뺐다가 같은 `source_id` 로 다시 더한 항목은 전에 멈춘 자리부터 읽는다. 다만 뺄 때 읽기를 마치지 않은 세션은 그 항목을 읽으려다 host 에게 거절당하고 실패한다(#52372). 그 읽기가 앞 세션이 멈춘 자리를 물었으면 그 자리는 거절된 자리로 남는다. 그러면 다시 더한 항목은 그보다 앞서 남은 자리나 `since` 부터 읽는다. 저장소 항목에서 거절된 것이 파일 읽기면 세션은 실패하지 않는다. 지운 파일처럼 건너뛰어 커밋 기록만으로 묻고, 그 파일은 다시 읽지 않는다.
+
+  쓰던 `source_id` 를 다른 기록에 다시 쓰지 않는다. 새 기록이 옛 자리를 이어받는다. host 가 그 자리를 받으면 새 기록은 그 자리 뒤부터 읽혀, `since` 부터는 읽지 않는다. host 가 거절하면 거절할 때마다 세션이 하나씩 실패한다.
+
+  질문을 낸 적 없는 퀴즈는 첫 수업과 같은 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. 이미 질문을 낸 퀴즈에 수업을 묶으면 퀴즈는 전에 멈춘 자리부터 읽는다. 수업이 그 자리보다 앞선 기록을 인용해도 퀴즈는 그 기록을 읽지 않는다.
 - 두 설치 선언의 `run_id` 가 같아야 한다. 다르면 퀴즈는 수업 출력을 받지 못하고, `quiz/measures` 의 `lesson.source.detail` 에 `upstream installation belongs to another run` 이 나온다. `run_id` 를 바꿔 저장하면 worker 는 다시 뜨지만 volume 과 log 는 그대로다.
 - 두 선언이 같은 기록에 같은 `source_id` 를 써야 한다. 수업이 `board` 라고 부른 기록을 퀴즈가 `notes` 라고 부르면 같은 글이어도 맞지 않는다.
 - 퀴즈 Schedule 을 수업 Schedule 바로 뒤에 둔다. 이유는 아래 표에 있다.
@@ -253,7 +294,7 @@ Results 에 일곱 lane 이 나온다.
 | `kind` | 뜻 |
 |---|---|
 | `not_allowed` | host 가 규칙으로 요청을 거절했다(권한이 없는 기록, 선언하지 않은 출력, `[world.asks]` 없음). 질문을 낸 세션도 그 질문이 거절되면 여기서 끝난다. |
-| `no_material` | 모든 권한을 읽었지만 새 기록이 없었고, 전에 낸 문제도 없었다. 아직 문제를 낸 세션이 없으면 퀴즈를 켠 뒤(첫 세션이 열린 뒤) 생긴 기록만 읽으므로, 켜자마자 보낸 `compose` 는 이렇게 끝나기 쉽다. |
+| `no_material` | 모든 권한을 읽었지만 새 기록이 없었고, 전에 낸 문제도 없었다. 아직 문제를 낸 세션이 없으면 퀴즈를 켠 뒤(첫 세션이 열린 뒤) 생긴 기록만 읽으므로, 켜자마자 보낸 `compose` 는 이렇게 끝나기 쉽다. 수업을 묶은 설치는 binding 의 `since` 부터 읽는다. 읽은 기록 가운데 수업이 인용한 것이 없고 전에 낸 문제도 없으면 이렇게 끝난다. |
 | `author_invalid_output` | `author` 답이 schema 에 맞지 않았다. |
 | `author_input_refused` | provider 가 입력이 크다고 거절했고, 줄일 것이 더 없었다. |
 | `author_outcome_unknown` | 호출이 갔는지 알 수 없다. |
@@ -306,7 +347,7 @@ Results 에 일곱 lane 이 나온다.
    ```
 
 4. `manifest_path` 를 새 package 로 바꾸고 `enabled = false` 를 지운다.
-5. 바로 `compose` 를 한 번 보낸다. 아직 문제를 낸 세션이 없으면 첫 세션이 열린 시각부터 기록을 읽는다. 그래서 이 세션은 `no_material` 로 끝나기 쉽지만, 다음 세션은 이 시각부터 쌓인 기록을 읽는다. 보내지 않으면 다음 정기 `compose` 가 첫 세션이 되어, 그 시각 전의 기록은 읽지 않는다. 수업을 묶은 설치는 첫 세션을 연 시각이 아니라 binding 의 `since` 부터 읽는다. 질문을 낸 세션이 생길 때까지 세션마다 그 시각부터 읽으므로, `since` 가 오래될수록 한 번에 읽는 기록이 많다.
+5. 바로 `compose` 를 한 번 보낸다. 아직 문제를 낸 세션이 없으면 첫 세션이 열린 시각부터 기록을 읽는다. 그래서 이 세션은 `no_material` 로 끝나기 쉽지만, 다음 세션은 이 시각부터 쌓인 기록을 읽는다. 보내지 않으면 다음 정기 `compose` 가 첫 세션이 되어, 그 시각 전의 기록은 읽지 않는다. 수업을 묶은 설치는 첫 세션을 연 시각이 아니라 binding 의 `since` 부터 읽는다. `records` 의 항목마다, 질문을 낸 세션이 멈춘 자리를 남길 때까지 세션마다 그 시각부터 읽는다. 그래서 `since` 가 오래될수록 한 번에 읽는 기록이 많다.
 
 - 옮긴 log 는 volume 안에 그대로 남는다. 새 package 는 그 파일을 읽지 않는다.
 - 옮기기 전에 답한 문제의 풀이와 판정은 옮긴 log 에만 있다. 새 package 의 R, G, P 는 빈 log 에서 다시 센다.

@@ -16,6 +16,10 @@
     {!Held_across_suspension}, unless it ended in [Eio.Cancel.Cancelled],
     which is re-raised unchanged.
 
+    Never automatically retry a section after {!Held_across_suspension}.
+    Its work has already run and may have applied side effects, even if the
+    section ended in an exception. Repair the critical section instead.
+
     The section still suspends once, as it did before. What changes is the
     holder: it fails every time the path runs, whether or not anything
     overlapped. A section whose suspended work waits for this same mutex
@@ -51,7 +55,9 @@ exception
   Held_across_suspension of
     { record : record
     ; body_raised : (exn * Printexc.raw_backtrace) option
-    (** The section's own exception, if it ended in one. *)
+    (** [None] means the section returned normally. [Some (exn, backtrace)]
+        is the section's own exception. Neither means its side effects were
+        rolled back. *)
     }
 (** Raised when a section ends after its fiber switched while holding the
     mutex. The mutex is already released. *)
@@ -60,12 +66,15 @@ val create : name:string -> unit -> t
 (** [name] is written into every record and {!Held_across_suspension}. *)
 
 val protect : t -> (unit -> 'a) -> 'a
-(** Run [f] holding the mutex, and release it however [f] ends. An exception
-    of [f]'s own is re-raised with its backtrace. *)
+(** Run [f] holding the mutex, and release it however [f] ends. Without a
+    switching effect, an exception of [f]'s own is re-raised with its
+    backtrace. A marked section follows the rules above and must not be
+    automatically retried. *)
 
 val try_protect : t -> (unit -> 'a) -> 'a option
 (** {!protect} when the mutex is free now; [None] when it is held, without
-    waiting. *)
+    waiting. Once acquired, the same rules as {!protect} apply, including
+    {!Held_across_suspension}; [None] never means that the section failed. *)
 
 val wait : Condition.t -> t -> unit
 (** [Condition.wait] on this mutex. Call it only inside {!protect} or

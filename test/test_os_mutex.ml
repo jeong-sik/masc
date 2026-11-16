@@ -232,6 +232,39 @@ let cancelled_section () =
   check (option unit) "the mutex is free" (Some ()) (Os_mutex.try_protect mutex ignore)
 ;;
 
+(* §6.1 case 6, the Switch.fail path from probe case 10. The promise is
+   resolved before the section suspends, so the switch fails only after
+   that section has entered. Eio ignores its Cancelled when reporting the
+   switch's own failure; replacing it with Held would create Multiple. *)
+let switch_failure_preserves_cancellation () =
+  let mutex_name = "switch-fail-cancelled-section" in
+  let mutex = Os_mutex.create ~name:mutex_name () in
+  let cause = Failure "the switch's own failure" in
+  let written =
+    stderr_of (fun () ->
+      Eio_posix.run
+      @@ fun _env ->
+      let entered, set_entered = Eio.Promise.create () in
+      let never, _ = Eio.Promise.create () in
+      match
+        Eio.Switch.run (fun sw ->
+          Eio.Fiber.fork ~sw (fun () ->
+            Os_mutex.protect mutex (fun () ->
+              Eio.Promise.resolve set_entered ();
+              Eio.Promise.await never));
+          Eio.Promise.await entered;
+          Eio.Switch.fail sw cause)
+      with
+      | () -> fail "the switch did not report its failure"
+      | exception exn ->
+        check bool "only the switch's original exception is reported" true (exn == cause))
+  in
+  check bool "the cancelled section's record is on stderr" true
+    (contains ~needle:mutex_name written);
+  check (option unit) "the cancelled section released its mutex" (Some ())
+    (Os_mutex.try_protect mutex ignore)
+;;
+
 (* §6.1 case 7. A fiber waits for a Cross_context_mutex as a fiber, so a
    section of one may switch. *)
 let cross_context_sections () =
@@ -353,6 +386,10 @@ let () =
               "a cancelled section re-raises Cancelled and leaves its record"
               `Quick
               cancelled_section
+          ; test_case
+              "Switch.fail does not replace a section's cancellation with Held"
+              `Quick
+              switch_failure_preserves_cancellation
           ; test_case
               "a Cross_context_mutex section may switch"
               `Quick

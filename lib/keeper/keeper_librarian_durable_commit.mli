@@ -2,8 +2,12 @@
     Memory lane/purge fence. No explicit-candidate generation or admission
     receipt is used. The full original host answer and original Gate journal
     are revalidated before any Memory effect. New Gate questions require
-    [fresh_authority]; already-completed original evaluations and a committed
-    Memory receipt can settle locally while the Addon is Off, provided the
+    [fresh_authority], which confirms the physical Keeper/epoch and a ready
+    configured destination with the original installation/package/tool. Its
+    semantic revision may change after the answer; this never resubmits the
+    parent or replaces its proposal. The Gate still requires its own captured
+    authority for a new question. Already-completed original evaluations and
+    a committed Memory receipt can settle locally while the Addon is Off, provided the
     original question passes the live counterpart-template policy. An unsafe
     legacy question cannot use that receipt to publish a new external ACK.
 

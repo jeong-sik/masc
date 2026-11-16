@@ -116,7 +116,7 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~
         let* record = Step_owner.retain ~store step |> Result.map_error owner_error in
         Ok (record, step)) in
   let fresh_authority step () =
-    Edge.fresh_authority ~config ~reserved ~owner ~expected:(Step.destination step) () in
+    Edge.fresh_gate_authority ~config ~reserved ~owner ~expected:(Step.destination step) () in
   let rec go machine ~previous =
     let* next = Machine.next machine in
     match next with

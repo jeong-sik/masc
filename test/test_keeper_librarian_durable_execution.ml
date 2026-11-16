@@ -1806,6 +1806,41 @@ let replace_actual_worker_configuration fixture ~sw source =
 (* The Add-on is off and no worker is attached. *)
 let attach_actual_worker_configuration fixture ~sw source =
   await_configured_worker fixture ~sw ~old:None source
+let test_answered_history_gate_follows_replacement ~foreign_installation () =
+  with_fixture (fun ~sw fixture ->
+    fixture.delivery_loss:=true;
+    let delivered= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);await_delivery fixture ~after:delivered;
+    let original,capture=only_original fixture in
+    let captured=Capture.to_json capture and posts=F.post_count fixture.server and positions=progress fixture in
+    let replacement=fixture.declaration true |> String.split_on_char '\n'
+      |> List.map (function
+        | "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-answered-gate\""
+        | "id=\"librarian\"" when foreign_installation -> "id=\"different-librarian\""
+        | line -> line) |> String.concat "\n" in
+    io (fun () -> write fixture.source replacement);
+    assert_pending (run_worker fixture);
+    check bool "a changed file alone grants no Gate authority" true (progress fixture=positions);
+    no_memory fixture;
+    io (fun () -> write fixture.source (fixture.declaration true));reconcile fixture;
+    replace_actual_worker_configuration fixture ~sw replacement;
+    if foreign_installation then (
+      assert_pending (run_worker fixture);
+      no_memory fixture;
+      check bool "a different installation cannot settle the original source" true (progress fixture=positions);
+      check int "a different installation cannot prepare a Gate for this history answer" 0
+        (List.length (gate_records fixture capture)))
+    else (
+      drive_advanced fixture;
+      check (list string) "the retained answer commits through its Gate after replacement"
+        ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+      check bool "only receipt-backed completion moves source progress" true (progress fixture<>positions);
+      check int "the same history answer has exactly one Gate" 1 (List.length (gate_records fixture capture)));
+    let current,restored=only_original fixture in
+    check string "the original history ID remains authoritative" original.request_id current.request_id;
+    check json "the complete source and original proposal input stay frozen" captured (Capture.to_json restored);
+    check int "the answered history request is never sent to the replacement worker" posts (F.post_count fixture.server))
+
 (* An official turn can have no turn-tagged fragments while its independent
    counterpart sources still have unread evidence. Exercise the configured
    Addon path, including the actual receipt and both source acknowledgements. *)
@@ -3466,7 +3501,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
       ~call:(Keeper_librarian_durable_edge.call ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ()))
       ~publish:(fun ~original ~request ~proposal ->
         Keeper_librarian_durable_commit.publish ~store:fixture.store ~config:fixture.config
-          ~original ~request ~proposal ~fresh_authority:(Keeper_librarian_durable_edge.fresh_authority
+          ~original ~request ~proposal ~fresh_authority:(Keeper_librarian_durable_edge.fresh_gate_authority
             ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ())
             ~owner:(Capture.physical_owner request) ~expected:(Capture.destination request))
         |> Result.map_error (fun detail -> Durable_owner.Rejected detail))) in
@@ -3866,6 +3901,52 @@ let candidate_and_request fixture =
   match candidate_of fixture with
   | Some candidate -> candidate,request
   | None -> fail "the refused original must be a floor candidate"
+let test_answered_floor_gate_follows_replacement ~foreign_installation () =
+  with_fixture (fun ~sw fixture ->
+    let module Step=Keeper_librarian_floor_step_request in
+    let module Journal=Keeper_librarian_floor_step_gate in
+    let module Judgment=Keeper_librarian_floor_step_judgment in
+    let module Edge=Keeper_librarian_durable_edge in
+    seed_absorb_source fixture;
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate,request=candidate_and_request fixture in
+    fixture.set_step_response (fun _ -> `OK,F.openai_response (add_absorption (step_answer 1)));
+    with_enabled_absorb_gate fixture (fun () -> with_absorb_guidance_gap ~empty:true (fun () ->
+      check bool "an actual answered step remains before its first Gate" true
+        (Result.is_error (descend fixture candidate))));
+    let parent,step=first_step fixture request in
+    check bool "the answered step has no Gate preparation" true (Progress.preparation parent.progress=None);
+    let captured=Step.to_json step and posts=F.post_count fixture.server and positions=progress fixture in
+    let replacement=fixture.declaration true |> String.split_on_char '\n'
+      |> List.map (function
+        | "run_id=\"librarian-original-owner\"" -> "run_id=\"answered-floor-gate\""
+        | "id=\"librarian\"" when foreign_installation -> "id=\"different-librarian\""
+        | line -> line) |> String.concat "\n" in
+    replace_actual_worker_configuration fixture ~sw replacement;
+    let owner=Capture.physical_owner request in
+    let answer,current=memory_action fixture (fun () ->
+      match Step_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[] ~original:parent ~step
+        ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "an answered floor step was resubmitted")
+        |> Result.map_error Step_owner.error_to_string |> get with
+      | Step_owner.Answered (answer,current) -> answer,current
+      | Pending _ | Refused _ | Before_dispatch_replaced _ -> fail "the original step lost its host answer") in
+    let inventory=io (fun () -> Journal.Inventory.read ~store:fixture.store ~owner) |> get in
+    let result=memory_action fixture (fun () -> Judgment.judge ~store:fixture.store ~step ~record:current ~answer
+      ~fresh_authority:(Edge.fresh_gate_authority ~config:fixture.config ~reserved:[] ~owner
+        ~expected:(Step.destination step)) ~inventory |> get) in
+    (match result with
+     | Judgment.Pending _ -> check bool "only a foreign installation keeps the Gate waiting" true foreign_installation
+     | Decided decision ->
+       check bool "the same owner can finish the original Gate" false foreign_installation;
+       check (list string) "the original step's claim survives declaration replacement" ["claim number 1"]
+         (List.map (fun (fact:Types.fact) -> fact.claim) decision.new_claims));
+    let gate=io (fun () -> Journal.root ~store:fixture.store ~owner ~capture:step) |> get in
+    check int "only the same installation may prepare the first floor Gate" (if foreign_installation then 0 else 1)
+      (Option.fold ~none:0 ~some:(fun _ -> 1) gate);
+    check json "the full answered floor input stays unchanged" captured (Step.to_json step);
+    check bool "a floor judgment alone never settles history progress" true (progress fixture=positions);
+    check int "the floor answer is never requested again" posts (F.post_count fixture.server))
+
 let test_floor_guidance_is_required_only_for_actual_absorptions () =
   let module Journal = Keeper_librarian_floor_step_gate in
   let module Step = Keeper_librarian_floor_step_request in
@@ -5432,6 +5513,14 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "production durable queue stops following phases on actual Pending" `Quick test_production_queue_pending_retains_all_sources;
   test_case "actual host result bridge resumes production queue" `Quick test_actual_result_bridge_uses_production_queue;
   test_case "host answer without original gate waits while Off" `Quick test_host_answer_without_gate_waits_while_off;
+  test_case "an answered history Gate waits for the replacement worker then commits the same answer" `Quick
+    (test_answered_history_gate_follows_replacement ~foreign_installation:false);
+  test_case "a different installation cannot prepare an answered history Gate" `Quick
+    (test_answered_history_gate_follows_replacement ~foreign_installation:true);
+  test_case "an answered floor step keeps its answer when its first Gate follows a replacement" `Quick
+    (test_answered_floor_gate_follows_replacement ~foreign_installation:false);
+  test_case "a different installation cannot prepare an answered floor Gate" `Quick
+    (test_answered_floor_gate_follows_replacement ~foreign_installation:true);
   test_case "actual Memory receipt with failed ACK settles while Off" `Quick test_real_memory_receipt_then_failed_ack_recovers_while_off;
   test_case "a worker call reads the record and writes nothing" `Quick test_a_worker_call_reads_the_record_and_writes_nothing;
   test_case "a waiting pass reads no body" `Quick test_a_waiting_pass_reads_no_body;

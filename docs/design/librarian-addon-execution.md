@@ -286,6 +286,15 @@ was repaired before this unit's freeze. Cancellation execution tests remain
 required. Raw source revision is provenance, not a reason to transfer or rewrite
 an existing request after an otherwise equivalent configuration edit.
 
+After the host has proved an original answer, history, floor-step and admission
+Gates may continue under a ready changed Librarian declaration for the same
+physical Keeper/Memory epoch and original installation/package/tool. They keep
+the original answer, input and Gate request; this does not resubmit the original
+Librarian call. Each new evaluation still requires the Gate's own captured
+authority. Completed evaluations replay locally; sent unanswered evaluations
+retain their uncertainty. A changed file without its ready worker, another
+installation or an unavailable destination grants no new evaluation.
+
 The absorption journal must replay returned evaluations through the gate's
 existing derivation before continuing only the next not-yet-intended question.
 An intended request without its returned evidence remains unknown. The actual

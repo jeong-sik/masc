@@ -1618,6 +1618,96 @@ let replace_admission_configuration fixture ~sw source =
         List.find_opt (fun (candidate:Runtime.tool_export) ->
           candidate.tool.name=Capture.tool && candidate.instance_id<>old) snapshot.exports)) |> ignore;
     reconcile fixture)
+type answered_gate_start = No_gate | Captured_gate | Uncertain_gate | Foreign_installation
+let test_answered_admission_gate_follows_replacement start ()=with_fixture (fun ~sw fixture ->
+  let module Absorb=Keeper_librarian_absorb_gate in
+  let module T=Typesafeai_types in
+  let record,capture,final=retained_absorbing_answer_before_gate fixture in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let record=memory_action fixture (fun () -> retain_judgment fixture record final) in
+  let captured=Capture.to_json capture and posts=F.post_count fixture.server in
+  let queued=io (fun () -> Fs_compat.load_file (Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)) in
+  let before=io (fun () -> claims fixture.keepers_dir) in
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  let net=Eio_context.get_net_opt () |> Option.to_result ~none:"fixture network missing" |> get in
+  let server=F.start_server ~sw ~net ~clock:fixture.clock (F.Reply_with (fun _ body ->
+    let request=Yojson.Safe.from_string body in
+    let answers=member "questions" request |> Yojson.Safe.Util.to_assoc |> List.map (fun (id,_) ->
+      id,T.answer_to_yojson (T.Choice_answer {choice="mergeable";confidence=1.;
+        probabilities=["mergeable",1.;"different_context",0.;"loses_knowledge",0.;"uncertain",0.]})) in
+    ignore (Eio.Promise.try_resolve signal ());
+    (match start with Uncertain_gate -> Eio.Promise.await release
+     | No_gate | Captured_gate | Foreign_installation -> ());
+    `OK,Yojson.Safe.to_string (`Assoc ["model",`String "replacement-gate";"answers",`Assoc answers]))) in
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "replacement-gate-key") (fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=true;absorb_gate=true;excluded_keepers=[];
+     destinations=({Runtime_schema.endpoint=server.base_url;model="replacement-gate";api_key_env="TYPESAFEAI_API_KEY"},[])} (fun () ->
+    let authority=Absorb.resolve ~keeper_id:keeper_name in
+    let prior=match start with
+      | No_gate | Foreign_installation -> None
+      | Captured_gate | Uncertain_gate -> Some (memory_action fixture (fun () ->
+        (match Commit.begin_gate ~store:fixture.store ~owner ~capture ~record
+          ~gate_root_id:(Random_id.uuid_v7 ()) ~authority |> get with
+         | Prepared _ -> () | Reload_original -> fail "fresh gate preparation expected");
+        io (fun () ->
+          ignore (Gate.recover_root ~store:fixture.store ~owner ~capture |> get);
+          Gate.latest ~store:fixture.store ~owner ~capture |> get |> Option.get))) in
+    (match start,prior with
+     | Uncertain_gate,Some gate ->
+       memory_action fixture (fun () ->
+         try Eio.Cancel.sub (fun context -> Eio.Fiber.both
+           (fun () -> ignore (Gate.resume ~store:fixture.store ~owner ~capture ~record:gate
+             ~live_authority:(Some authority) ~request_clock:(fun () -> Ok fixture.clock)
+             ~before_dispatch:(fun () -> Ok ()) |> get);fail "the unresolved Gate returned")
+           (fun () -> Eio.Promise.await arrived;Eio.Cancel.cancel context Exit))
+         with Eio.Cancel.Cancelled Exit -> ())
+     | (No_gate | Captured_gate | Foreign_installation),_ -> ()
+     | Uncertain_gate,None -> fail "the unknown Gate needs its original request");
+    let prior=Option.map (fun _ -> io (fun () -> Gate.latest ~store:fixture.store ~owner ~capture
+      |> get |> Option.get)) prior in
+    let replacement=match start with
+      | Foreign_installation -> replacement_source fixture |> String.split_on_char '\n'
+        |> List.map (function "id=\"librarian\"" -> "id=\"different-librarian\"" | line -> line)
+        |> String.concat "\n"
+      | No_gate | Captured_gate | Uncertain_gate -> replacement_source fixture in
+    replace_admission_configuration fixture ~sw replacement;
+    let result=run_worker fixture in
+    (match start with
+     | No_gate | Captured_gate ->
+       assert_settled result;
+       check int "only the next original Gate question was sent" 1 (F.post_count server);
+       check int "the actual committed proposal ACKs its original candidates" 0
+         (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+       check (list string) "the original answer enters Memory after replacement" ["Durable A";"Durable B"]
+         (io (fun () -> claims fixture.keepers_dir))
+     | Uncertain_gate | Foreign_installation ->
+       (match result with Worker.Pending _ -> ()
+        | Disabled | Idle | Recheck_new_input | Settled _ | Awaiting_worker _ | Addon_unattached _ | Unavailable _ ->
+          fail "an unknown evaluation or foreign installation must keep the original pending");
+       check int "neither uncertainty nor a different owner grants another Gate call"
+         (match start with Uncertain_gate -> 1 | No_gate | Captured_gate | Foreign_installation -> 0)
+         (F.post_count server);
+       check string "a pending Gate cannot ACK candidates" queued
+         (io (fun () -> Fs_compat.load_file (Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)));
+       check (list string) "a pending Gate cannot change Memory" before
+         (io (fun () -> claims fixture.keepers_dir)));
+    let unchanged=io (fun () -> Owner.load ~store:fixture.store ~scope:record.scope
+      ~request_id:record.request_id |> owned |> Option.get) in
+    check json "replacement preserves the full original accepted capture" captured unchanged.request;
+    check int "replacement never resends the answered Librarian request" posts (F.post_count fixture.server);
+    (match prior with
+     | None -> ()
+     | Some prior ->
+       let current=io (fun () -> Gate.latest ~store:fixture.store ~owner ~capture |> get |> Option.get) in
+       check string "the same immutable Gate request remains the runnable leaf" prior.request_id current.request_id;
+       check json "the Gate's captured authority and original proposal stay unchanged" prior.request current.request;
+       (match start with
+        | Uncertain_gate -> check json "the sent evaluation retains its exact uncertainty"
+            (Progress.to_json prior.progress) (Progress.to_json current.progress)
+        | No_gate | Captured_gate | Foreign_installation -> ()))))))
+
 let test_unexecuted_part_follows_replacement ()=with_fixture (fun ~sw fixture ->
   let owner,part=seed_unexecuted_part fixture in
   let queued=io (fun () -> Queue.batch_to_json (pending fixture.keepers_dir |> Option.get)) in
@@ -2815,6 +2905,14 @@ let () =
     test_deferred_and_ended_siblings_rejudge_the_full_batch_after_rollback;
   test_case "history Cut permission never authorizes admission replay" `Quick
     test_cut_admission_does_not_borrow_declaration_replacement;
+  test_case "an answered admission starts only its Gate after declaration replacement" `Quick
+    (test_answered_admission_gate_follows_replacement No_gate);
+  test_case "a captured Gate continues its original question after declaration replacement" `Quick
+    (test_answered_admission_gate_follows_replacement Captured_gate);
+  test_case "an uncertain Gate is never resent after declaration replacement" `Quick
+    (test_answered_admission_gate_follows_replacement Uncertain_gate);
+  test_case "a different installation cannot execute an answered admission's Gate" `Quick
+    (test_answered_admission_gate_follows_replacement Foreign_installation);
   test_case "missing absorb policy refuses before root publication" `Quick test_missing_absorb_policy_refuses_before_preparation;
   test_case "off and excluded gates capture and replay without unused policy" `Quick test_unused_absorb_policy_is_captured_and_replayed;
   test_case "enabled empty absorption captures and replays without unused policy" `Quick test_enabled_empty_absorptions_need_no_guidance;

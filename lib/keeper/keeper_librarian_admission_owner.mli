@@ -14,6 +14,11 @@ val run : base_path:string -> keeper_name:string -> outcome
     untouched siblings run; ordinary failures stop this pass. Only typed whole
     host execution evidence permits disjoint two-child partition. Addon Off
     prevents new calls while completed original proof/commit/ACK can recover.
+    The Gate of a proved accepted answer may continue after a ready semantic
+    declaration change for the same physical Keeper/epoch and original
+    installation/package/tool. The answer and Gate transcript remain original;
+    a new evaluation still requires the Gate's own captured authority. A
+    sent or uncertain evaluation is never replayed as a new request.
     Pending retains a non-worker evidence or publication wait. Awaiting_worker
     retains the actual original's installation, request and submit-once wait,
     including after earlier siblings committed. Existing owner events wake the lane.

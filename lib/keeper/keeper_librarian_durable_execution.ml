@@ -29,7 +29,7 @@ let reserved = Edge.reserved
 let resolve = Edge.resolve
 let with_destination = Edge.with_destination
 let fresh_authority ~config ~reserved request () =
-  Edge.fresh_authority ~config ~reserved ~owner:(Request.physical_owner request)
+  Edge.fresh_gate_authority ~config ~reserved ~owner:(Request.physical_owner request)
     ~expected:(Request.destination request) ()
 let call = Edge.call
 let resume ~store ~config ~reserved ~wake ~current original =

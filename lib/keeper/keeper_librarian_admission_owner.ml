@@ -47,18 +47,16 @@ let with_destination ~config ~reserved publish =
       then Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected "Librarian requires its configured package/tool"))
       else match publish actual with Ok value -> Ok value | Error detail -> Error (Runtime.Unavailable detail))
   |> Result.map_error runtime_error
-let admit ~config ~reserved ~destination:expected ~publish =
-  with_destination ~config ~reserved (fun actual ->
-    let* ()=require (Destination.same_semantic actual expected) "Original Librarian semantic configuration changed" in
-    Pool_work.submit publish)
 let check_owner owner = Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
   let* actual=Capture.observe_owner ~base_path:(Capture.base_path owner)
     ~keepers_dir:(Capture.keepers_dir owner) ~keeper_id:(Capture.keeper_id owner) in
   Capture.owner_matches_json actual (Capture.owner_to_json owner)))
-let fresh_authority ~config ~reserved owner capture =
+let fresh_gate_authority ~config ~reserved owner capture =
   let* ()=check_owner owner in
-  admit ~config ~reserved ~destination:(Capture.destination capture)
-    ~publish:(Pool_work.io ~name:__FUNCTION__ (fun () -> Ok ()))
+  with_destination ~config ~reserved (fun actual ->
+    match Destination.relation ~captured:(Capture.destination capture) ~current:actual with
+    | Destination.Same | Replaced -> Ok ()
+    | Other_owner -> Error "Original admission Gate belongs to another destination owner")
 
 type outcome = Disabled | Idle | Recheck_new_input | Settled of {has_more:bool}
   | Pending of string | Awaiting_worker of Keeper_librarian_pending.worker
@@ -237,12 +235,12 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
          let* record=Option.to_result ~none:"Original gate root publication disappeared" record in
          Ok ({original with record=parent},record))
     | Some record -> Ok (original,record) in
-  let live=match fresh_authority ~config ~reserved owner capture with
+  let live=match fresh_gate_authority ~config ~reserved owner capture with
     | Ok () -> Some (Gate.resolve ~keeper_id:(Capture.keeper_id owner))
     | Error _ -> None in
   let resume record=Gate_journal.resume ~request_clock:Eio_context.get_clock
     ~store ~owner ~capture ~record ~live_authority:live
-    ~before_dispatch:(fun () -> fresh_authority ~config ~reserved owner capture) in
+    ~before_dispatch:(fun () -> fresh_gate_authority ~config ~reserved owner capture) in
   let* completed=resume record in
   let apply gate record =
     match Gate.failure_detail ~absorbed:accepted.Keeper_librarian_runtime.selection.absorbed gate with

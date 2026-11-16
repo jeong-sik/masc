@@ -170,6 +170,26 @@ Deferred와 종료된 sibling의 전체 묶음 재판단·rollback·closure, adm
 정상 root의 후보 묶음·digest를 일관되게 줄인 대조 fixture에서 preflight와 runtime이 같은 후보 보존
 검사를 적용하도록 작성했다. 이 대조를 포함한 새 회귀는 아홉 경우이며 모두 미실행이다.
 
+## 여덟 번째 단위: 이미 받은 답의 Gate 이어가기
+
+추가 질문에서 사용자는 **받은 답을 보존하고 Gate를 이어가는 쪽**을 선택했다.
+history·floor step·admission은 실제 원래 host 답과 proof를 다시 확인한다. Gate의 새 질문을
+실행하기 전에 같은 물리 Keeper·Memory epoch와 원래 설치·package·tool의 준비된 worker를 확인한다.
+선언 revision만 달라졌다는 이유로 답을 버리거나 Librarian 요청을 다시 보내지 않는다.
+
+Gate의 판정 목적지와 원본 질문·부모 결속은 기존 journal이 계속 검증한다. 이미 받은 판정은 복원하고,
+전송 중이거나 취소로 불명확해진 판정은 그대로 남긴다. 새 Gate 권한을 답 없는 원본의 실행 권한으로
+사용하지 않는다. 기존 접수·provider 전송·새 part 실행의 semantic revision 검사는 유지한다.
+
+실제 Runtime fixture에 history의 worker 준비 전 대기와 새 설정 뒤 원래 답 반영, floor의 받은 답 보존,
+각 경로의 다른 설치 거부를 작성했다. admission에는 Gate가 없던 경우, 이미 캡처한 미실행 Gate,
+실제 HTTP 전송 중 취소된 Gate, 다른 설치의 네 경우를 작성했다. 여덟 회귀 모두 미실행이다.
+history 두 경우의 Gate에는 흡수 항목이 없고, floor 두 경우는 실제 원래 응답을 복원한 뒤
+`Judgment.judge`와 새 권한 함수의 경계를 직접 다룬다. 이 네 경우를 Gate HTTP 전송이나
+전체 floor chain의 동작 증거로 세지 않는다. admission 세 경우는 별도 Gate HTTP fixture를 쓰며,
+다른 설치 사례는 전송 0건을 기대한다. 취소 사례는 그 fixture의 취소 원인만 처리한다.
+이 단위의 문법·독립 소스 검토 기록은 `artifacts/farm-librarian-answered-gate-20261116/`에 따로 둔다.
+
 ## 확인한 범위
 
 변경 OCaml 파일의 `ocamlc -stop-after parsing -c`와 `git diff --check`를 확인한다.
@@ -185,7 +205,7 @@ typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 
 - 연결된 history의 접수 전 상태·Cut 해소는 위 소스 변경과 작성한 회귀의 범위이며, 실제 타입·회귀·운영 검증은 남는다.
 - preflight가 손상된 저장 본문을 만난 기동 경계와 연결된 요청의 본문 손상 복구는 별도 확인이 남는다.
-- floor 본문 손상 복구와 이미 답한 앞 step의 반영 경계는 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
-- `raised`·floor Cut·admission Cut와 이미 받은 Accepted `Judged` 결과의 Gate 반영은 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
+- floor 본문 손상 복구는 남는다. 이미 받은 답의 Gate는 여덟 번째 소스 단위로 이으며 실제 반영 검증은 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
+- `raised`·floor Cut·admission Cut는 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.
 - native stack 발행은 이전 시도에서 GitHub CLI 인증을 얻지 못했다. 연결된 GitHub 읽기 도구의 인증과 CLI/native stack 발행 인증은 다르다.

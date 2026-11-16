@@ -5,7 +5,8 @@
 이 문서는 그 계획의 현재 실행 위치를 적는다. 계획의 `covered`는 설계에서 다루었다는
 뜻이지 구현·실측 완료가 아니다. 아래 후보로 전체 목표나 어느 단계를 완료 처리하지 않는다.
 
-조사 기준은 로컬 `85f2823f053a693cecc8b63d6d0cb460dd10f9d0`과 아래 후보 커밋이다.
+초기 조사 기준은 로컬 `85f2823f053a693cecc8b63d6d0cb460dd10f9d0`이며,
+후속 후보의 별도 base와 검토 head는 아래에 적는다.
 다른 세션의 작업은 별도 worktree에서 확인했다. 현재 원격 main 전체와 모든 열린 PR의
 구현을 대조한 기록은 없다. 이 기록의 미확인은 기능 부재 판정이 아니다.
 
@@ -15,15 +16,31 @@
 | --- | --- | --- |
 | Schedule 저장 권위 | `921754a8947c89fc78ddb9992abd88c09d994c66`: 복구 mirror를 변경 근거로 쓰지 않으며 읽기 출처를 보존한다. 별도 스택 `fix/farm-schedule-authority-20261116` | 독립 소스 리뷰·구문 검사 기록. 동작 시험·PR 게시·병합·설치·원래 장애 회복 미확인. 증거는 별도 문서 커밋 `5b326829b1002244dd1cb4f7cb874b938c6ea823`의 `docs/evidence/2026-11-16-schedule-primary-authority/README.md` |
 | WIM-S03 문서 입력 | Core `0ecf7bd04792cf97d0cab2ab07e61da09bac2445`, MASC `6b4589d360235b79b43b40dd6d4b379c836a8322`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 독립 소스 리뷰·구문 검사, Dashboard 타입 검사와 선택 decoder 시험 1건 통과. OCaml 동작 시험·실제 provider·PDF/STT·브라우저·설치 미확인 |
-| TLJ-S01 위임 결과 | 협업 세션 `01a1e1b9…`, `.worktrees/farm-evolution-20261116`. 검토한 두 층은 `e1926081bd7794d449f60cbd72df9cbaec50366a`·`8126949f025107666813cae32bbd3b88e4abf031`: 중복 방지와 canonical 종단 상태·기동 재투영 | 교차 소스 리뷰에서 ACK 원장의 보관 기간 뒤 중복 전달, fail-open journal append 뒤 답 유실을 지적했다. 상대 세션이 두 P2를 인정하고 영속 전달 의도·원문·수신 증거로 보강 중이다. 이 head는 최종 clean이 아니며 동작 시험·복구 미확인 |
+| TLJ-S01 위임 결과 | 협업 세션 `01a1e1b9…`, `.worktrees/farm-evolution-20261116`. 세 층 최종 head `e6ea78da93a1ebac6f6020aafb134631024ba769`, base `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`. canonical 종단 상태, 기동 재투영, 영속 전달 의도·답 원문·전달 영수증을 연결 | 두 P2였던 보관 기간 뒤 중복 전달과 fail-open journal 뒤 답 유실을 소스에서 수정했다. 재기반 후 독립 검토에서 미해결 P0/P1/P2 없음. 기존 세 패치와 range-diff가 같고 32개 후보 파일이 이전 최종 head와 일치함을 확인했다. 작성 세션의 OCaml 31개 구문 검사 기록이 있다. 타입·동작·CI·설치·원래 요청 회복·GitHub 정식 승인·게시 미확인 |
 | WIM-S04 MCP 결과 | `fb6858311cc67bc743d7c0fcbe9165dbffc2dbc3`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 독립 소스 리뷰의 미해결 P0/P1/P2 없음, OCaml 38개 구문 검사 통과. 타입·동작 시험·실제 MCP/provider·재시작·GC 실행은 미확인 |
-| IA-S13 공유 SSH 이름 | 충돌 소스 확인 후 `.worktrees/farm-remote-namespace-20261116`에서 기반 UID 계약을 준비 중. 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5` | Keeper 생성 UID는 있으나 공통 workspace 생성 UID가 없다. 새 root를 실제 만든 근거와 영속 UID를 먼저 연결한다. 원격 실행·데이터 이동·삭제·설치 없음. `U02:IA-S13`은 삭제 승인 대기 항목이며 승인 완료로 해석하지 않음 |
+| IA-S13 공유 SSH 이름 | `.worktrees/farm-remote-namespace-20261116`, 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 동기/Eio I/O 기반 `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 공용 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`를 커밋했다. 영속 workspace UID와 Keeper 생성 UID를 SSH 경로에 연결하는 변경은 미커밋 | 기반 I/O 14개 실제 파일 시험과 타입·링크 검증이 통과했다. 후속 엔진은 그 14개를 포함한 격리 시험 62개가 통과했고, 해당 29개 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. 실제 워크스페이스 시작·UID 생성 연동, SSH 실행, VM·volume GC 이름 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
 
 본 세션은 저장·add-on·입력 경계와 이 실행 기록을 맡는다. TLJ-S01의 같은 구현을
-다시 만들지 않고 해당 세션의 산출물을 현재 head에서 대조한다. 두 스택의 게시 시도는
+다시 만들지 않고 해당 세션의 산출물을 현재 head에서 대조한다. 기록된 스택 게시 시도는
 로컬 `gh stack` 인증 토큰 부재로 종료됐다고 각 증거 기록에 남아 있다. connector 조회가
 가능하다는 사실은 native stack 게시 완료를 뜻하지 않는다. 원격 반영 전에 실제 main,
 스택 구성과 겹치는 작업을 다시 확인한다.
+
+TLJ-S01의 재기반 소스 diff SHA-256은
+`efdf0d71026e4a684de9210f2aca82aae4451df2c7ff8848ec5c88ed071cd585`다.
+전달 의도가 없는 기존 operation의 과거 전달 여부는 여전히 불명확하며,
+이 수리로 원래 멈춘 요청이 실제 회복됐다고 판단하지 않는다.
+상대 세션의 추가 MCP 교차 검토도 `fb685831`의 보관·effect 경계에 한정된 소스 기록이다.
+
+IA-S13의 격리 검사는 OCaml 5.5.2로 실제 모듈·C 구현을 컴파일해 임시 파일시스템에서
+실행했다. 부모 경로 교체, no-replace, rename 뒤 프로세스 종료·복구와 정리 실패를
+다뤘으며 MASC 전체 빌드나 실제 SSH·설치 증거는 아니다. 로컬 영수증은 해당 worktree의
+`artifacts/farm-blocking-publication-20261116/run-5/`에 있다.
+62개는 게시 시험 7개, I/O 14개, 기존 reconciliation 34개와 실제 SIGKILL·재열기 7개다.
+98개 컴파일·링크·실행 명령이 성공했으며 전체 Dune 의존 그래프 검증은 아니다.
+Keeper 재시작 전체를 SSH 가용성으로 막던 중간 후보는 철회했다. 작업 디렉터리 준비는
+승인된 SSH 효과의 실행 경계로 옮기는 중이다. 원격 장애가 다른 Keeper 활동을 막지
+않도록 하는 변경이며, 동작은 아직 검증하지 않았다.
 
 ## 원래 25개 요구의 현재 위치
 
@@ -53,7 +70,7 @@
 | 19. File I/O 병목 | SP-S01·S03·S04·S09·S10a·S10c, CA-S11a~S11c, POC-S16 | Schedule 수리는 정확성 후보이며 I/O 절감 후보가 아님 | store 크기·동시 writer별 읽고 쓴 바이트와 지연 측정. Board·Task·이력 경로의 전후 비교 |
 | 20. BasePath 백업·이식·외부 동기화 | SP-S11~S16 | 복구 사본의 최신성을 추정하지 않는 Schedule 후보만 있음. 백업·이식·동기화 미검증 | owner가 만든 snapshot/export의 목록·계보·참조 검증, 새 위치에서 부팅·원래 작업 재개. 동기화 방향/동시 writer 계약도 확인 |
 | 21. 기억과 그래프 | CMG-S08~S13·S15·S16 | 현재 관계 조회·공유 기억 개선 동작 미확인 | typed 관계의 작성·조회·변경·권한 사례, 서로 다른 Keeper가 같은 사실의 수정과 근거를 읽는 기록 |
-| 22. Anything/Keeper/Async/Batch/Memory As Tools | TLJ-S01·S02·S08·S13~S15, CMG-S04·S10, WIM-S04·S05·S07, IA-S12 | 별도 세션의 TLJ-S01 중복 전달 수리 커밋 확인. 전체 위임 종단 전달은 미검증 | ACK 뒤 재시작, enqueue/기록 사이 중단, 초기 실패·stream 종료·재투영, batch 원본별 결과. 다른 도구화 범위도 실제 소비자로 검증 |
+| 22. Anything/Keeper/Async/Batch/Memory As Tools | TLJ-S01·S02·S08·S13~S15, CMG-S04·S10, WIM-S04·S05·S07, IA-S12 | TLJ-S01의 종단 원문·영구 전달 증거를 소스에서 구현하고 재기반 후 독립 검토했다. 실제 위임 종단 전달·기존 요청 회복은 미검증 | ACK 뒤 재시작, enqueue/기록 사이 중단, 초기 실패·stream 종료·재투영, batch 원본별 결과. 다른 도구화 범위도 실제 소비자로 검증 |
 | 23. Proactive·Reactive와 여러 턴/큐의 주의력 | CA-S07~S10·S12a~S14 | Schedule stale mirror→중복 wake 방지 사례 작성. 여러 출처 동시 운용 미실행 | 수신·기록·ACK 연결, 동일 Keeper의 여러 큐와 proactive 출처 동시 주입, provider 전환·재시작 후 누락/중복 대조 |
 | 24. 유머 유지 | SP-S12, CMG-S09, TLJ-S08, WIM-S12, OD-S20 | 이번 실행에서 문구 견본·사용자 선택 미확인 | 실제 화면·작업대 문구를 읽은 사용자 선택. 상태·숫자·판정 의미를 흐리지 않는지 확인 |
 | 25. 구체적 사실·검증된 연구와 사용자 관점을 구현 | SP-S16, CMG-S02·S14, FE-S07·S09, POC-S05·S14, IA-S14, TLJ-S04·S10, CA-S15a~S15c | 기존 [선행 사례 조사](../research/2026-11-12-agent-farm-prior-art.md)의 위치와 후보별 근거 기록을 확인함. 모든 외부 출처를 이번에 재검증하지 않음 | 각 채택 주장→원문→설계→실행 결과 연결, 추정과 관측 구분. 현재 변경의 실측이 기존 연구를 MASC 성능 증거로 대신하지 않음 |

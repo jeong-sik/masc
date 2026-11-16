@@ -282,7 +282,7 @@ let handle_keeper_get_subroutes state req request reqd =
         ~keeper_name:name req
     in
     Http.Response.json_value_on_cpu ~status ~request
-      ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
+      ~extra_headers:(Server_auth.admitted_cors_headers request)
       json reqd)
   | Some Route.(Keeper (Github_identity, name)) -> (
     if not (Keeper_config.validate_name name) then

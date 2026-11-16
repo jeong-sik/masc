@@ -357,7 +357,7 @@ let handle_read read state request reqd name =
      | Ok body ->
        Http.Response.json_value_on_cpu
          ~status:`OK ~request
-         ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
+         ~extra_headers:(Server_auth.admitted_cors_headers request)
          body reqd
      | Error error ->
        let status = match error with

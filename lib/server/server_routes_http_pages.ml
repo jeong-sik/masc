@@ -3,9 +3,9 @@ open Server_auth
 
 module Http = Http_server_eio
 
-let graphql_headers origin =
+let graphql_headers request =
   [("content-type", "application/json")]
-  @ cors_headers origin
+  @ admitted_cors_headers request
 
 (** GraphQL Playground HTML (GET /graphql) *)
 let graphql_playground_html ~nonce =
@@ -558,7 +558,7 @@ let handle_get_graphql _request reqd =
   Http.Response.html ~headers body reqd
 
 let handle_post_graphql request reqd =
-  let origin = get_origin request in
+  let cors = graphql_headers request in
   Http.Request.read_body_async reqd (fun body_str ->
     match get_server_state_result () with
     | Error message ->
@@ -570,7 +570,7 @@ let handle_post_graphql request reqd =
         let status = http_status_of_graphql response.status in
         let headers = Httpun.Headers.of_list (
           ("content-length", string_of_int (String.length response.body))
-          :: graphql_headers origin
+          :: cors
         ) in
         let http_response = Httpun.Response.create ~headers status in
         Http_reqd.respond_with_string reqd http_response response.body

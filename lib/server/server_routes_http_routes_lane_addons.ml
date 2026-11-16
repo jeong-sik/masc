@@ -475,7 +475,7 @@ let live_workspace_precondition ~config fields =
      | _ -> Error (`Bad_request, "expected_base_path and expected_masc_root go together"))
 
 let respond_live_frame request reqd frame =
-  let extra_headers = cors_headers (get_origin request) in
+  let extra_headers = Server_auth.admitted_cors_headers request in
   let validator = [ "etag", frame.etag
                   ; "cache-control", Http.Response.json_revalidate_cache_control ] in
   match Httpun.Headers.get request.Httpun.Request.headers "if-none-match" with
@@ -499,7 +499,7 @@ let get_live = (fun state request reqd ->
     | Ok (source, since) ->
         (match live_read ~config:(Mcp_server.workspace_config state) source ~since with
          | Ok (Live_answer json) -> Http.Response.json_value_on_cpu ~compress:true ~request
-             ~extra_headers:(cors_headers (get_origin request)) json reqd
+             ~extra_headers:(Server_auth.admitted_cors_headers request) json reqd
          | Ok (Live_full { blob; blob_bytes; screen; fields; observation_seq; refreshing }) ->
              let key = (Workspace.masc_dir (Mcp_server.workspace_config state), source) in
              respond_live_frame request reqd

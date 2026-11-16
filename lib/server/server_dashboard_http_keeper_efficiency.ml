@@ -52,6 +52,6 @@ let handle_get state req reqd =
         (error_json "keeper_efficiency_unavailable" detail)
     | Ok view ->
       Http.Response.json_value ~status:`OK ~compress:true ~request:req
-        ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin req))
+        ~extra_headers:(Server_auth.admitted_cors_headers req)
         (Keeper_efficiency.month_view_to_json view) reqd
 ;;

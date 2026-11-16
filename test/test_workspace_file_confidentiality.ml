@@ -1032,6 +1032,17 @@ let test_file_read_rejects_lost_scope lost () =
               (Yojson.Safe.Util.member "content" body = `Null);
             let status, body = request "/api/v1/workspace/files" "" in
             check_workspace_http_status "catalog and selected file agree on unavailable scope" 404 status body;
+            List.iter
+              (fun route ->
+                let status, body = request route path in
+                check_workspace_http_status
+                  (route ^ " refuses unavailable scope instead of falling back to project")
+                  404 status body)
+              [ "/api/v1/workspace/children"
+              ; "/api/v1/git/blame"
+              ; "/api/v1/git/log"
+              ; "/api/v1/git/diff"
+              ];
             let status, body = workspace_http_response ~token ~router
                 ("/api/v1/workspace/file?path=" ^ encode path ^ "&" ^ binding) in
             check_workspace_http_status "explicit project reading remains available" 200 status body;

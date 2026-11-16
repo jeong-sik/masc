@@ -196,7 +196,7 @@ let stream_keeper_ask_followup ~clock ~base_path ~workspace ~state_ready ~keeper
         let output = Server_sse_response.respond ~clock
             ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
             (Httpun.Response.create
-               ~headers:(Stream.keeper_chat_stream_headers (get_origin request)) `OK) in
+               ~headers:(Stream.keeper_chat_stream_request_headers request) `OK) in
         response := Some output;
         output in
     let json=ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id:ask.ask_id frame in

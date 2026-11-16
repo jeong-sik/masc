@@ -1,5 +1,10 @@
 open Repo_manager_types
 
+val validate_argument : field:string -> string -> (unit, string) result
+(** Reject a blank argument, NUL, or a leading [-] after trimming. Repository
+    URL and ref declarations use this at HTTP, catalog and Git boundaries so
+    they cannot become command options. *)
+
 val inspection_timeout_sec : float
 (** Total default budget for one request's repository Git inspection. *)
 

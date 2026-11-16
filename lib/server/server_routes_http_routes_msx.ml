@@ -266,7 +266,7 @@ let handle_tick ~config request reqd =
   Http.Request.read_body_async reqd (fun body ->
       let status, json = tick_response ~config ~body in
       Http.Response.json_value_on_cpu ~status:(status :> Httpun.Status.t) ~request
-        ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request)) json reqd)
+        ~extra_headers:(Server_auth.admitted_cors_headers request) json reqd)
 ;;
 
 let activity_json ~config:_ =

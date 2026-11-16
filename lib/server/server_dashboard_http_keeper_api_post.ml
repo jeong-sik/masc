@@ -47,6 +47,16 @@ let github_login_stream_headers origin =
      @ Server_auth.cors_headers origin)
 ;;
 
+let github_login_stream_request_headers req =
+  Httpun.Headers.of_list
+    ([ "content-type", "text/event-stream"
+     ; "cache-control", "no-cache"
+     ; "connection", "close"
+     ; "x-accel-buffering", "no"
+     ]
+     @ Server_auth.admitted_cors_headers req)
+;;
+
 let github_login_stream_frame event json =
   Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json)
 ;;
@@ -116,7 +126,7 @@ let handle_keeper_github_login_post ~clock state req reqd =
       with
       | Error message -> respond_error ~status:`Bad_request reqd message
       | Ok scopes ->
-      let headers = github_login_stream_headers (Server_auth.get_origin req) in
+      let headers = github_login_stream_request_headers req in
       let response =
         Server_sse_response.respond ~clock
           ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s

@@ -227,6 +227,7 @@ let parse_repository_json body_str =
       let url = Option.value ~default:"" raw_url |> String.trim in
       if url = "" then Error "field url is required"
       else
+        let* () = Repo_git.validate_argument ~field:"url" url in
         let inferred_name =
           match raw_name with
           | Some name ->
@@ -249,6 +250,10 @@ let parse_repository_json body_str =
             let* raw_default_branch =
               get_string_field fields "default_branch"
             in
+            let default_branch = Option.value ~default:"main" raw_default_branch in
+            let* () =
+              Repo_git.validate_argument ~field:"default_branch" default_branch
+            in
             let* aliases = get_string_list_field fields "aliases" [] in
             let* keepers = get_string_list_field fields "keepers" [] in
             let* auto_sync = get_bool_field fields "auto_sync" false in
@@ -267,7 +272,7 @@ let parse_repository_json body_str =
                     ~default:(Config_dir_resolver.repos_relative_path ~id)
                     raw_local_path;
                 aliases;
-                default_branch = Option.value ~default:"main" raw_default_branch;
+                default_branch;
                 keepers;
                 status = Active;
                 auto_sync;
@@ -358,6 +363,130 @@ let handle_get_repository_path state req reqd =
           json_response ~status:`Not_found req reqd
             (json_error "unknown repository endpoint"))
 
+let path_is_within ~root candidate =
+  String.equal candidate root
+  || String.starts_with
+       ~prefix:(if String.ends_with ~suffix:"/" root then root else root ^ "/")
+       candidate
+
+let rec has_escaping_or_dangling_symlink ~real_base path =
+  if String.equal path real_base || String.equal (Filename.dirname path) path
+  then false
+  else
+    has_escaping_or_dangling_symlink ~real_base (Filename.dirname path)
+    ||
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_LNK; _ } ->
+      (match Unix.realpath path with
+       | resolved -> not (path_is_within ~root:real_base resolved)
+       | exception Unix.Unix_error _ -> true)
+    | { Unix.st_kind =
+          (Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)
+      ; _
+      } -> false
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
+    | exception Unix.Unix_error _ -> true
+
+let validate_http_local_path ~base_path raw_local_path =
+  let trimmed = String.trim raw_local_path in
+  if trimmed = "" then
+    Error "field local_path must not be blank"
+  else if String.contains trimmed '\000' then
+    Error "field local_path contains an invalid NUL byte"
+  else if
+    List.exists
+      (fun seg -> String.equal seg "..")
+      (String.split_on_char '/' trimmed)
+  then
+    Error "field local_path must not contain parent-directory traversal"
+  else
+    let real_base = Fs_compat.realpath_lenient base_path in
+    let candidate =
+      if Filename.is_relative trimmed then Filename.concat real_base trimmed
+      else trimmed
+    in
+    let resolved = Fs_compat.realpath_lenient candidate in
+    if not (path_is_within ~root:real_base resolved)
+       || has_escaping_or_dangling_symlink ~real_base candidate
+    then
+      Error "field local_path must resolve within the workspace base_path"
+    else
+      Ok trimmed
+
+let parse_updatable_status = function
+  | "active" -> Ok Repo_manager_types.Active
+  | "paused" -> Ok Repo_manager_types.Paused
+  | other ->
+    Error
+      (Printf.sprintf
+         "field status must be \"active\" or \"paused\", got %S"
+         other)
+
+let apply_repository_update_json ~base_path ~(existing : Repo_manager_types.repository) body_str =
+  match Yojson.Safe.from_string body_str with
+  | `Assoc fields ->
+      let open Result.Syntax in
+      let* raw_name = get_string_field fields "name" in
+      let* raw_url = get_string_field fields "url" in
+      let* raw_local_path = get_string_field fields "local_path" in
+      let* raw_default_branch = get_string_field fields "default_branch" in
+      let* raw_status = get_string_field fields "status" in
+      let* aliases = get_string_list_field fields "aliases" existing.aliases in
+      let* keepers = get_string_list_field fields "keepers" existing.keepers in
+      let* auto_sync = get_bool_field fields "auto_sync" existing.auto_sync in
+      let* sync_interval =
+        get_int_field fields "sync_interval" existing.sync_interval
+      in
+      let* url =
+        match raw_url with
+        | None -> Ok existing.url
+        | Some u ->
+          let t = String.trim u in
+          if t = "" then Error "field url must not be blank" else Ok t
+      in
+      let name =
+        match raw_name with
+        | None -> existing.name
+        | Some n ->
+          let t = String.trim n in
+          if t = "" then existing.name else t
+      in
+      let* local_path =
+        match raw_local_path with
+        | None -> Ok existing.local_path
+        | Some p -> validate_http_local_path ~base_path p
+      in
+      let default_branch =
+        match raw_default_branch with
+        | None -> existing.default_branch
+        | Some b ->
+          let t = String.trim b in
+          if t = "" then existing.default_branch else t
+      in
+      let* () = Repo_git.validate_argument ~field:"url" url in
+      let* () = Repo_git.validate_argument ~field:"default_branch" default_branch in
+      let* status =
+        match raw_status with
+        | None -> Ok existing.status
+        | Some s -> parse_updatable_status (String.lowercase_ascii (String.trim s))
+      in
+      Ok
+        {
+          existing with
+          name;
+          url;
+          local_path;
+          aliases;
+          default_branch;
+          keepers;
+          status;
+          auto_sync;
+          sync_interval;
+        }
+  | _ -> Error "invalid repository JSON: expected object"
+  | exception Yojson.Json_error msg ->
+      Error ("invalid JSON body: " ^ msg)
+
 let handle_add_repository state _agent_name req reqd =
   let base_path = base_path_of_state state in
   Http.Request.read_body_async reqd (fun body_str ->
@@ -365,12 +494,16 @@ let handle_add_repository state _agent_name req reqd =
       | Error msg ->
           json_response ~status:`Bad_request req reqd (json_error msg)
       | Ok repo -> (
-          match Repo_store.add ~base_path repo with
+          match validate_http_local_path ~base_path repo.local_path with
           | Error msg ->
               json_response ~status:`Bad_request req reqd (json_error msg)
-          | Ok added_repo ->
-              let json = repository_json ~base_path added_repo in
-              Http.Response.json_value ~request:req json reqd))
+          | Ok safe_local_path -> (
+              match Repo_store.add ~base_path { repo with local_path = safe_local_path } with
+              | Error msg ->
+                  json_response ~status:`Bad_request req reqd (json_error msg)
+              | Ok added_repo ->
+                  let json = repository_json ~base_path added_repo in
+                  Http.Response.json_value ~request:req json reqd)))
 
 let handle_remove_repository state _agent_name req reqd =
   let base_path = base_path_of_state state in
@@ -403,18 +536,17 @@ let handle_update_repository state _agent_name req reqd =
       match path_parts rest with
       | [id] -> (
           Http.Request.read_body_async reqd (fun body_str ->
-              match parse_repository_json body_str with
-              | Error msg ->
-                  json_response ~status:`Bad_request req reqd (json_error msg)
-              | Ok repo -> (
-                  (* Check existence first so we can return 404 vs 500 *)
-                  match Repo_store.find ~base_path id with
-                  | Error _ ->
-                      json_response ~status:`Not_found req reqd
-                        (json_error (Printf.sprintf "Repository not found: %s" id))
-                  | Ok _ -> (
-                      let repo = { repo with id } in
-                      match Repo_store.update ~base_path id repo with
+              (* Check existence first so we can return 404 and merge partial updates *)
+              match Repo_store.find ~base_path id with
+              | Error _ ->
+                  json_response ~status:`Not_found req reqd
+                    (json_error (Printf.sprintf "Repository not found: %s" id))
+              | Ok existing -> (
+                  match apply_repository_update_json ~base_path ~existing body_str with
+                  | Error msg ->
+                      json_response ~status:`Bad_request req reqd (json_error msg)
+                  | Ok updated_repo -> (
+                      match Repo_store.update ~base_path id updated_repo with
                       | Error msg ->
                           json_response ~status:`Internal_server_error req reqd
                             (json_error msg)

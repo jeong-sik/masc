@@ -116,6 +116,19 @@ let test_clone_bad_url () =
       | Ok () -> Alcotest.fail "expected clone to fail"
       | Error _ -> ())
 
+let test_clone_rejects_options_before_creating_checkout_parent () =
+  with_temp_dir (fun tmp ->
+      List.iteri
+        (fun index url ->
+          let parent = Filename.concat tmp ("uncreated-" ^ string_of_int index) in
+          let repository = sample_repo ~url (Filename.concat parent "dest") in
+          (match Repo_git.clone ~repository with
+           | Error _ -> ()
+           | Ok () -> Alcotest.fail "option-shaped clone source was admitted");
+          Alcotest.(check bool) "rejected input has no checkout side effect"
+            false (Sys.file_exists parent))
+        [ "--upload-pack=unwanted"; "  -c core.sshCommand=unwanted" ])
+
 let test_get_branches () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -1000,6 +1013,8 @@ let () =
         [
           Alcotest.test_case "ok" `Quick test_clone_ok;
           Alcotest.test_case "bad_url" `Quick test_clone_bad_url;
+          Alcotest.test_case "options rejected before checkout creation" `Quick
+            test_clone_rejects_options_before_creating_checkout_parent;
         ] );
       ( "get_branches",
         [ Alcotest.test_case "returns branches" `Quick test_get_branches ] );

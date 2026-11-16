@@ -82,8 +82,10 @@ let sync_repository ~base_path repo : (advance_outcome, string) result =
 let should_sync repo ~now =
   if not repo.auto_sync then false
   else
-    let elapsed = Int64.sub now repo.updated_at in
-    Int64.to_int elapsed >= repo.sync_interval
+    match repo.status with
+    | Paused | Cloning -> false
+    | Active | Error _ ->
+      Int64.sub now repo.updated_at >= Int64.of_int repo.sync_interval
 
 let sync_all ~base_path ~now :
     ((repository * advance_outcome) list, string) result =

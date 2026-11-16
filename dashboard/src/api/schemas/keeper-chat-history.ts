@@ -202,6 +202,7 @@ export const KeeperChatBlockSchema = union([
   object({
     t: literal('trace'),
     trace: array(KeeperChatTraceStepSchema),
+    omitted: optional(number()),
   }),
   object({
     t: literal('thinking'),

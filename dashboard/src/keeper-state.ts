@@ -643,7 +643,13 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
       }
       if (t === 'trace') {
         const trace = normalizeTraceSteps(item.trace)
-        return trace && trace.length > 0 ? { t: 'trace', trace } : null
+        const rawOmitted =
+          typeof item.omitted === 'number' && Number.isFinite(item.omitted)
+            ? Math.trunc(item.omitted)
+            : 0
+        const omitted = rawOmitted > 0 ? rawOmitted : undefined
+        if (!trace || (trace.length === 0 && omitted === undefined)) return null
+        return withoutUndefined({ t: 'trace', trace, omitted })
       }
       if (t === 'thinking') {
         const content = typeof item.content === 'string' ? item.content : undefined

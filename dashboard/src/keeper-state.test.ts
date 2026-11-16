@@ -981,6 +981,36 @@ describe('thread history merge & persistence', () => {
     expect(entries[0]?.turnRef).toBe('trace-ui#12')
   })
 
+  it('preserves omitted trace step count through chatHistoryEntriesFromRest', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'done',
+        ts: 1_780_000_001,
+        blocks: [
+          {
+            t: 'trace',
+            trace: [{ kind: 'think', text: 'kept step' }],
+            omitted: 7,
+          },
+          {
+            t: 'trace',
+            trace: [],
+            omitted: 0.5,
+          },
+        ] as unknown as ChatBlock[],
+      },
+    ])
+    const traceBlocks = (entries[0]?.blocks ?? []).filter((block): block is Extract<ChatBlock, { t: 'trace' }> => block.t === 'trace')
+    expect(traceBlocks).toEqual([
+      {
+        t: 'trace',
+        trace: [{ kind: 'think', text: 'kept step' }],
+        omitted: 7,
+      },
+    ])
+  })
+
   it('keeps the server row id and explicit tool identities', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'run checks', ts: 1_780_000_000 },

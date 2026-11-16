@@ -288,7 +288,8 @@ let ensure_resolution_chat_projection
     }
 ;;
 
-let reconcile_replay_chat_projection
+let replay_chat_projection
+      ~reconcile
       ~base_path
       ~keeper_name
       ~approval_id
@@ -307,7 +308,7 @@ let reconcile_replay_chat_projection
     | Replay_indeterminate { artifact_ref; retained_artifacts = _ } ->
       Keeper_approval_lifecycle.Approval_replay_indeterminate, artifact_ref
   in
-  Keeper_chat_store.reconcile_approval_replay_lifecycle_once
+  reconcile
     ~base_dir:base_path
     ~keeper_name
     ~lifecycle:
@@ -319,10 +320,24 @@ let reconcile_replay_chat_projection
       }
 ;;
 
+let reconcile_replay_chat_projection ~base_path ~keeper_name ~approval_id ~tool_name ~outcome =
+  replay_chat_projection
+    ~reconcile:Keeper_chat_store_approval_lifecycle.reconcile_approval_replay_lifecycle_durable
+    ~base_path ~keeper_name ~approval_id ~tool_name ~outcome
+;;
+
 let ensure_replay_chat_projection ~base_path ~keeper_name ~approval_id ~tool_name ~outcome =
-  reconcile_replay_chat_projection ~base_path ~keeper_name ~approval_id ~tool_name ~outcome
+  replay_chat_projection ~reconcile:Keeper_chat_store.reconcile_approval_replay_lifecycle_once
+    ~base_path ~keeper_name ~approval_id ~tool_name ~outcome
   |> Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ())
 ;;
+
+module For_testing = struct
+  let reconcile_replay_chat_projection ~append_io ~base_path ~keeper_name ~approval_id ~tool_name ~outcome =
+    replay_chat_projection
+      ~reconcile:(Keeper_chat_store_approval_lifecycle.For_testing.reconcile_approval_replay_lifecycle_durable ~append_io)
+      ~base_path ~keeper_name ~approval_id ~tool_name ~outcome
+end
 
 let continuation_settled_chat_projection_present
       ~base_path

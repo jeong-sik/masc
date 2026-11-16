@@ -2871,6 +2871,85 @@ let test_replay_retirement_repairs_public_artifact_owner () =
      | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)))
 ;;
 
+let test_replay_retirement_confirms_visible_existing_rows () =
+  List.iter (fun correction ->
+    with_spent_fixture (if correction then "queue-confirm-correction" else "queue-confirm-replay")
+      (fun ~base_path ~keeper_name ->
+        let input = `Assoc [ "target", `String "visible unconfirmed replay" ] in
+        let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+        consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+        let output_ref = store_replay_artifact ~base_path "canonical public result" in
+        let outcome = Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence output_ref) in
+        (match AQ.record_consumed_resolution_replay ~base_path ~id:approval_id ~outcome with
+         | Ok _ -> ()
+         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+        let project outcome = match AQ.ensure_replay_chat_projection ~base_path ~keeper_name
+            ~approval_id ~tool_name:(Some "external-effect") ~outcome with
+          | Ok () -> () | Error detail -> Alcotest.fail detail in
+        if correction then project (Masc.Keeper_approval_queue_result.Replay_failed
+          (replay_evidence (store_replay_artifact ~base_path "stale projection")));
+        let chat_path = Chat_store.chat_path ~base_dir:base_path ~keeper_name in
+        let before = Fs_compat.load_file chat_path in
+        project outcome;
+        let complete = Fs_compat.load_file chat_path in
+        let suffix = String.sub complete (String.length before) (String.length complete - String.length before) in
+        Alcotest.(check bool) "fixture produced the canonical replay row" true (suffix <> "");
+        Chat_store.purge_transcript chat_path ~remove:Unix.unlink;
+        Fs_compat.save_file chat_path before;
+        let failed_append : Fs_compat.durable_append_io_for_testing =
+          { write = Unix.write
+          ; ftruncate = (fun _ _ -> raise (Unix.Unix_error (Unix.EIO, "ftruncate", "fixture rollback")))
+          ; fsync = (fun _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "fixture append"))) } in
+        (match Fs_compat.reconcile_private_file_durable_locked_with_append_io_for_testing
+            ~append_io:failed_append chat_path
+            (fun _ -> Fs_compat.Append_confirmed (suffix, ())) with
+         | Fs_compat.Private_file_failed _ | Private_file_failed_with_cleanup_failure _ -> ()
+         | Private_file_succeeded _ | Private_file_succeeded_with_cleanup_failure _ ->
+           Alcotest.fail "fixture failed to create an unconfirmed append");
+        Alcotest.(check string) "failed rollback leaves the complete row visible"
+          complete (Fs_compat.load_file chat_path);
+        acknowledge_wake ~base_path ~keeper_name;
+        let sidecar = AQ.For_testing.replay_results_store_path ~base_path in
+        let sidecar_before = Fs_compat.load_file sidecar in
+        let install append_io =
+          AQ.For_testing.reset_runtime_state ();
+          match AQ.For_testing.install_persistence_with_replay_confirmation_io ~append_io ~base_path with
+          | Ok report -> report
+          | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error) in
+        let confirmations = ref 0 in
+        let confirmation_io : Fs_compat.durable_append_io_for_testing =
+          { write = Unix.write; ftruncate = Unix.ftruncate
+          ; fsync = (fun _ -> incr confirmations;
+              raise (Unix.Unix_error (Unix.EIO, "fsync", "fixture confirmation"))) } in
+        let failed = install confirmation_io in
+        Alcotest.(check bool) "existing row requires data confirmation" true (!confirmations > 0);
+        Alcotest.(check int) "unconfirmed existing row retains sidecar" 0 failed.retired_deliveries;
+        Alcotest.(check bool) "confirmation failure is reported" true
+          (Option.is_some failed.delivery_retirement_error);
+        Alcotest.(check string) "confirmation failure leaves exact sidecar"
+          sidecar_before (Fs_compat.load_file sidecar);
+        check_delivery_kept ~base_path approval_id;
+        confirmations := 0;
+        let confirmed : Fs_compat.durable_append_io_for_testing =
+          { write = Unix.write; ftruncate = Unix.ftruncate
+          ; fsync = (fun fd ->
+              incr confirmations;
+              let visible_sidecar = In_channel.with_open_bin sidecar In_channel.input_all in
+              Alcotest.(check string) "old owner remains until data sync"
+                sidecar_before visible_sidecar;
+              Unix.fsync fd) } in
+        let repaired = install confirmed in
+        Alcotest.(check bool) "retry confirms the held data descriptor" true (!confirmations > 0);
+        Alcotest.(check int) "confirmed row permits retirement" 1 repaired.retired_deliveries;
+        Alcotest.(check int) "confirmation retry does not replay service" 0 repaired.replayed_deliveries;
+        Alcotest.(check bool) "confirmation retry clears diagnostic" true
+          (Option.is_none repaired.delivery_retirement_error);
+        Alcotest.(check string) "confirmation neither rewrites nor duplicates the row"
+          complete (Fs_compat.load_file chat_path);
+        check_delivery_retired ~base_path approval_id))
+    [ false; true ]
+;;
+
 let test_consumed_delivery_with_queued_wake_survives_a_restart () =
   with_spent_fixture "queue-spent-delivery-wake-queued" (fun ~base_path ~keeper_name ->
     let input = `Assoc [ "target", `String "wake-queued" ] in
@@ -7531,6 +7610,10 @@ let () =
             "replay retirement repairs the public chat artifact owner"
             `Quick
             test_replay_retirement_repairs_public_artifact_owner
+        ; Alcotest.test_case
+            "replay retirement confirms visible ordinary and correction rows"
+            `Quick
+            test_replay_retirement_confirms_visible_existing_rows
         ; Alcotest.test_case
             "consumed delivery with queued wake survives a restart"
             `Quick

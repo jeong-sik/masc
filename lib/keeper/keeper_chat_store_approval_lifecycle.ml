@@ -267,6 +267,61 @@ let reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle =
             Error "approval replay correction exists with conflicting content"))
 ;;
 
+let reconcile_approval_replay_lifecycle_with_confirmation
+    ~transaction ~base_dir ~keeper_name ~lifecycle =
+  try (match reconcile_approval_replay_lifecycle_once ~base_dir ~keeper_name ~lifecycle with
+  | Error _ as error -> error
+  | Ok (Appended _ as result) -> Ok result
+  | Ok (Already_present { row_id } as result) ->
+    let path = chat_path ~base_dir ~keeper_name in
+    let redaction = redaction_for ~base_dir ~keeper_name in
+    let expected = redact_approval_lifecycle redaction lifecycle in
+    let decide rows =
+      if not (String.ends_with ~suffix:"\n" rows) then
+        Fs_compat.Refuse_update (Error "approval replay transcript has no complete final row")
+      else
+      match Keeper_chat_store_transcript_rows.parse_transcript_rows_result
+          ~path ~redaction rows with
+      | Error error -> Fs_compat.Refuse_update
+          (Error (Keeper_chat_store_line_decode.strict_decode_error_to_string error))
+      | Ok messages ->
+        (match List.filter (fun message -> String.equal message.id row_id) messages with
+         | [ { approval_lifecycle = Some actual; _ } ]
+           when approval_lifecycle_equal actual expected ->
+           Fs_compat.Confirm_existing (Ok result)
+         | [] | _ :: _ -> Fs_compat.Refuse_update
+             (Error "approval replay root changed before durable confirmation"))
+    in
+    match transaction path decide with
+    | Fs_compat.Private_file_succeeded outcome -> outcome
+    | Private_file_succeeded_with_cleanup_failure { value = outcome; cleanup_failure } ->
+      Log.Keeper.error ~keeper_name
+        "approval replay root confirmed with descriptor settlement failure: %s"
+        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+      outcome
+    | Private_file_failed error -> Error (Fs_compat.durable_append_error_to_string error)
+    | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+      Error (Printf.sprintf "%s; descriptor settlement failed: %s"
+        (Fs_compat.durable_append_error_to_string error)
+        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | (Sys_error _ | Unix.Unix_error _) as error -> Error (Printexc.to_string error)
+;;
+
+let reconcile_approval_replay_lifecycle_durable ~base_dir ~keeper_name ~lifecycle =
+  reconcile_approval_replay_lifecycle_with_confirmation
+    ~transaction:(fun path decide -> Fs_compat.reconcile_private_file_durable_locked_result path decide)
+    ~base_dir ~keeper_name ~lifecycle
+;;
+
+module For_testing = struct
+  let reconcile_approval_replay_lifecycle_durable ~append_io ~base_dir ~keeper_name ~lifecycle =
+    reconcile_approval_replay_lifecycle_with_confirmation
+      ~transaction:(Fs_compat.reconcile_private_file_durable_locked_with_append_io_for_testing ~append_io)
+      ~base_dir ~keeper_name ~lifecycle
+end
+
 let approval_lifecycle_phase_present
       ~base_dir
       ~keeper_name

@@ -129,7 +129,7 @@ let delivery_is_spent readers delivery =
     && delivery_wake_was_observed delivery
 ;;
 
-let spent_deliveries ~base_path loaded_deliveries =
+let spent_deliveries ~replay_projection ~base_path loaded_deliveries =
   let readers_by_keeper = Hashtbl.create 8 in
   let readers_of keeper_name =
     match Hashtbl.find_opt readers_by_keeper keeper_name with
@@ -164,7 +164,7 @@ let spent_deliveries ~base_path loaded_deliveries =
             delivery again under that lock before deleting it. *)
          let retained = match readers, delivery.replay_outcome with
            | Keeper_readers _, Some outcome ->
-             (match Keeper_approval_queue_projection.reconcile_replay_chat_projection
+             (match replay_projection
                  ~base_path ~keeper_name ~approval_id:delivery.entry.id
                  ~tool_name:(Some delivery.entry.tool_name) ~outcome with
               | Ok (Keeper_chat_store.Appended _ | Keeper_chat_store.Already_present _) -> Ok ()
@@ -229,7 +229,8 @@ let retire_spent_deliveries ~base_path candidates =
               Ok retired))))
 ;;
 
-let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
+let install_persistence_internal_with_replay_projection
+    ~replay_projection ~after_load ~after_pending_publish ~base_path =
   (* Snapshot read and installation are one transition. The hybrid pending
      store lock serializes Eio and non-Eio callers, cooperatively gates Eio
      waiters, and protects cancellation across the durable transition. Keeping
@@ -368,7 +369,7 @@ let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
   | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
-    let candidates, preparation_error = spent_deliveries ~base_path loaded_deliveries in
+    let candidates, preparation_error = spent_deliveries ~replay_projection ~base_path loaded_deliveries in
     let retired_deliveries, delivery_retirement_error, loaded_deliveries =
       match retire_spent_deliveries ~base_path candidates with
       | Ok retired_ids ->
@@ -406,6 +407,12 @@ let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
              replay count (failure :: failures) rest)
     in
     replay 0 [] loaded_deliveries
+;;
+
+let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
+  install_persistence_internal_with_replay_projection
+    ~replay_projection:Keeper_approval_queue_projection.reconcile_replay_chat_projection
+    ~after_load ~after_pending_publish ~base_path
 ;;
 
 let install_persistence ~base_path =

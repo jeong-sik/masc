@@ -29,6 +29,15 @@
     [Keeper_approval_queue] includes this module. *)
 open Keeper_approval_queue_result
 
+val install_persistence_internal_with_replay_projection :
+  replay_projection:(base_path:string -> keeper_name:string -> approval_id:string ->
+    tool_name:string option -> outcome:resolution_replay_outcome ->
+    (Keeper_chat_store.append_once_result, string) result) ->
+  after_load:(unit -> 'a) -> after_pending_publish:(unit -> 'b) ->
+  base_path:string -> (install_report, install_error) result
+(** Same install with the replay owner transaction supplied explicitly, for
+    actual confirmation I/O failure tests without ambient overrides. *)
+
 val install_persistence_internal :
   after_load:(unit -> 'a) ->
   after_pending_publish:(unit -> 'b) ->

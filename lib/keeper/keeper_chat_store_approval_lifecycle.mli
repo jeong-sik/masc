@@ -37,6 +37,20 @@ val reconcile_approval_replay_lifecycle_once :
   lifecycle:approval_lifecycle ->
   (append_once_result, string) result
 
+val reconcile_approval_replay_lifecycle_durable :
+  base_dir:string -> keeper_name:string -> lifecycle:approval_lifecycle ->
+  (append_once_result, string) result
+(** Cleanup handoff: an existing ordinary or correction row is reread under
+    the private-file transaction and its exact lifecycle is confirmed by data
+    fsync before success. Ordinary projection need not pay this confirmation. *)
+
+module For_testing : sig
+  val reconcile_approval_replay_lifecycle_durable :
+    append_io:Fs_compat.durable_append_io_for_testing ->
+    base_dir:string -> keeper_name:string -> lifecycle:approval_lifecycle ->
+    (append_once_result, string) result
+end
+
 val approval_lifecycle_phase_present :
   base_dir:string ->
   keeper_name:string ->

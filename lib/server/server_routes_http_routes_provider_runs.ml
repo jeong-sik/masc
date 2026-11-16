@@ -58,9 +58,9 @@ let add_routes ~sw router =
              (`Assoc ["error", `String detail]) reqd
          | Ok request ->
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let _, result = Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-           Server_model_metrics_stream.read_snapshot ~base_path ~request ~now:(Time_compat.now ())
-             Model_inference_metrics_kept.empty)) in
+         let result = Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+           Server_model_metrics_stream.read_cached_snapshot ~base_path ~request
+             ~now:(Time_compat.now ()))) in
          match result with
          | Ok snapshot -> Http.Response.json_value ~compress:true ~request:req snapshot.json reqd
          | Error detail -> Http.Response.json_value ~status:`Service_unavailable ~request:req

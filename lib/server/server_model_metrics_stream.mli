@@ -1,7 +1,13 @@
 (** Direct model-metric snapshots shared by REST and mounted native queries.
-    Each stream owns its immutable query, retained file reading, typed source
-    subscription and semantic deadline. It retains no background query after
-    closing, and does not depend on the former asynchronous TTL cache. *)
+    REST reads and open streams share a bounded [(base_path, window_minutes)]
+    LRU of {!Model_inference_metrics_kept.t} cursors so subsequent queries fold
+    only newly appended rows. Each stream still owns its immutable query, typed
+    source subscription and semantic deadline, and retains no background fiber
+    after closing. *)
+
+val max_window_minutes : int
+val max_cached_windows : int
+val max_cached_staleness_s : float
 
 type request = {
   window_minutes : int;
@@ -26,6 +32,13 @@ val read_snapshot :
     so the stream closes after delivering it and the client retains failed-read
     recovery. Schema diagnostics instead expire at their actual row/day edge.
     Empty windows and empty buckets do not create clock deadlines. *)
+
+val read_cached_snapshot :
+  base_path:string -> request:request -> now:float -> (snapshot, string) result
+(** Refresh and answer [request] through the bounded shared
+    [(base_path, window_minutes)] retained-row LRU. Call it on an existing pool
+    lane; atomic CAS state updates touch only the in-memory table, never disk
+    I/O. *)
 
 val is_invalidation : Masc.Sse.external_event -> bool
 (** Select the existing typed [Model_metrics] input. Workspace authority is

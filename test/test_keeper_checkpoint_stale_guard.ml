@@ -2787,6 +2787,138 @@ let test_one_keeper_name_in_two_workspaces_keeps_both_values () =
     (again.messages == kept.messages)
 ;;
 
+let test_written_lineages_evict_least_recently_used_keeper () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let first_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir first_dir) @@ fun () ->
+  let max_entries = Keeper_checkpoint_store.For_testing.default_max_retained_lineages in
+  let total = max_entries + 1 in
+  let keepers =
+    List.init total (fun index ->
+      let dir =
+        if index = 0 then first_dir
+        else sibling_session_dir first_dir (Printf.sprintf "lru-keeper-%d" index)
+      in
+      let name = Printf.sprintf "lru-keeper-%d" index in
+      let sid = Printf.sprintf "lru-trace-%d" index in
+      dir, name, sid)
+  in
+  List.iteri
+    (fun index (dir, name, sid) ->
+       if index < max_entries
+       then
+         save_kept_ok ~keeper_name:name ~session_dir:dir
+           (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:name)
+           ("save " ^ name))
+    keepers;
+  (* Touch index 0 so index 1 becomes the least recently used entry. *)
+  let dir0, _name0, sid0 = List.hd keepers in
+  ignore (load_or_fail ~session_dir:dir0 ~session_id:sid0 "touch first keeper" : Agent_core.Checkpoint.t);
+  let last_dir, last_name, last_sid = List.nth keepers max_entries in
+  save_kept_ok ~keeper_name:last_name ~session_dir:last_dir
+    (make_checkpoint ~session_id:last_sid ~turn_count:1 ~marker:last_name)
+    ("save " ^ last_name);
+  List.iteri
+    (fun index (dir, name, sid) ->
+       let path = Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir:dir ~session_id:sid in
+       if index = 1
+       then
+         unreadable_load_refused ~session_dir:dir ~session_id:sid ~path
+           (name ^ " should have been evicted as LRU")
+       else (
+         Unix.chmod path 0o000;
+         Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
+         ignore (load_or_fail ~session_dir:dir ~session_id:sid ("kept " ^ name) : Agent_core.Checkpoint.t)))
+    keepers
+;;
+
+let test_written_lineages_evict_when_byte_budget_exceeded () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let first_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir first_dir) @@ fun () ->
+  let second_dir = sibling_session_dir first_dir "byte-budget-second" in
+  Keeper_checkpoint_store.For_testing.with_written_lineage_limits
+    ~max_entries:8
+    ~max_bytes:256
+    (fun () ->
+       save_kept_ok ~keeper_name:"byte-first" ~session_dir:first_dir
+         (make_checkpoint ~session_id:"byte-first-trace" ~turn_count:1 ~marker:"first-payload")
+         "save byte-first";
+       save_kept_ok ~keeper_name:"byte-second" ~session_dir:second_dir
+         (make_checkpoint ~session_id:"byte-second-trace" ~turn_count:1 ~marker:"second-payload")
+         "save byte-second";
+       let first_path =
+         Keeper_checkpoint_store.agent_core_checkpoint_path
+           ~session_dir:first_dir ~session_id:"byte-first-trace"
+       in
+       let second_path =
+         Keeper_checkpoint_store.agent_core_checkpoint_path
+           ~session_dir:second_dir ~session_id:"byte-second-trace"
+       in
+       unreadable_load_refused ~session_dir:first_dir ~session_id:"byte-first-trace"
+         ~path:first_path "older lineage exceeded byte budget";
+       Unix.chmod second_path 0o000;
+       Fun.protect ~finally:(fun () -> Unix.chmod second_path 0o644) @@ fun () ->
+       ignore
+         (load_or_fail ~session_dir:second_dir ~session_id:"byte-second-trace"
+            "newest lineage stays within single-active allowance"
+          : Agent_core.Checkpoint.t))
+;;
+
+let test_in_flight_save_pins_lineage_against_concurrent_eviction () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let first_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir first_dir) @@ fun () ->
+  let second_dir = sibling_session_dir first_dir "pinned-other-1" in
+  let third_dir = sibling_session_dir first_dir "pinned-other-2" in
+  Keeper_checkpoint_store.For_testing.with_written_lineage_limits
+    ~max_entries:2
+    ~max_bytes:Keeper_checkpoint_store.For_testing.default_max_retained_lineage_bytes
+    (fun () ->
+       save_kept_ok ~keeper_name:"pinned-keeper" ~session_dir:first_dir
+         (make_checkpoint ~session_id:"pinned-trace" ~turn_count:1 ~marker:"turn1")
+         "seed pinned-keeper";
+       let competed = ref false in
+       (match
+          Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_with_before_stage
+            ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+            ~before_stage:(function
+              | Keeper_fs.Temp_file_sync when not !competed ->
+                competed := true;
+                save_kept_ok ~keeper_name:"other-1" ~session_dir:second_dir
+                  (make_checkpoint ~session_id:"other-trace-1" ~turn_count:1 ~marker:"o1")
+                  "save other-1";
+                save_kept_ok ~keeper_name:"other-2" ~session_dir:third_dir
+                  (make_checkpoint ~session_id:"other-trace-2" ~turn_count:1 ~marker:"o2")
+                  "save other-2"
+              | _ -> ())
+            ~keeper_name:"pinned-keeper"
+            ~history_retained:(history_retained ())
+            ~session_dir:first_dir
+            { (make_checkpoint ~session_id:"pinned-trace" ~turn_count:2 ~marker:"turn2") with
+              agent_name = shared_runtime_agent_name }
+        with
+        | Ok _ -> ()
+        | Error err -> fail ("pinned save failed: " ^ err));
+       let pinned_path =
+         Keeper_checkpoint_store.agent_core_checkpoint_path
+           ~session_dir:first_dir ~session_id:"pinned-trace"
+       in
+       Unix.chmod pinned_path 0o000;
+       Fun.protect ~finally:(fun () -> Unix.chmod pinned_path 0o644) @@ fun () ->
+       let loaded =
+         load_or_fail ~session_dir:first_dir ~session_id:"pinned-trace"
+           "pinned keeper remains cached after write settles"
+       in
+       check int "pinned save turn count" 2 loaded.turn_count)
+;;
+
 let test_summary_follows_a_checkpoint_replaced_behind_it () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -3510,6 +3642,12 @@ let () =
             test_a_bundle_lost_behind_a_segment_is_written_again;
           test_case "one keeper name in two workspaces keeps both values" `Quick
             test_one_keeper_name_in_two_workspaces_keeps_both_values;
+          test_case "written lineages evict least recently used keeper" `Quick
+            test_written_lineages_evict_least_recently_used_keeper;
+          test_case "written lineages evict when byte budget exceeded" `Quick
+            test_written_lineages_evict_when_byte_budget_exceeded;
+          test_case "in-flight save pins lineage against concurrent eviction" `Quick
+            test_in_flight_save_pins_lineage_against_concurrent_eviction;
           test_case "a message count without a summary reads no object" `Quick
             test_a_message_count_without_a_summary_reads_no_object;
           test_case "a message count refuses an overflowing head" `Quick

@@ -357,6 +357,18 @@ type memo = { mutable last : last option }
 
 let create_memo () = { last = None }
 
+let memo_encoded_bytes memo =
+  match memo.last with
+  | None -> 0
+  | Some last ->
+    Array.fold_left
+      (fun total entry ->
+         let len = String.length entry.bytes in
+         if len > max_int - total then max_int else total + len)
+      0
+      last.last_entries
+;;
+
 let encoded_entry message =
   match known_entry message with
   | Some entry -> Ok entry

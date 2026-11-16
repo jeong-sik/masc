@@ -120,10 +120,41 @@ let test_subscribe_read_and_retirement () = with_workspace (fun config ->
       ~base_path:config.base_path ~scope:`Workspace `Model_metrics;
     Alcotest.(check bool) "retired query receives no work" false !owed))
 
+let test_cached_snapshot_reuses_kept_and_caps_windows () = with_workspace (fun config ->
+  let now = Unix.gettimeofday () in
+  let base_path = config.Masc.Workspace.base_path in
+  let read_cached query =
+    match Stream.read_cached_snapshot ~base_path ~request:query ~now with
+    | Ok snapshot -> snapshot
+    | Error error -> Alcotest.fail error
+  in
+  append config (row ~id:"cached-first" ~at:(now -. 30.));
+  let first = read_cached request in
+  Alcotest.(check int) "cold cached snapshot reads committed row" 1 (count first);
+  append config (row ~id:"cached-second" ~at:(now -. 10.));
+  let second = read_cached { request with bucket_minutes = 0 } in
+  Alcotest.(check int) "shared window cursor folds appended row across bucket variants" 2 (count second);
+  for w = 1 to Stream.max_cached_windows + 2 do
+    let snap = read_cached { window_minutes = w * 10; bucket_minutes = 0 } in
+    Alcotest.(check int) "distinct window after LRU rotation answers exact count" 2 (count snap)
+  done;
+  let after_ttl = now +. Stream.max_cached_staleness_s +. 1.0 in
+  append config (row ~id:"cached-after-ttl" ~at:(after_ttl -. 5.));
+  match Stream.read_cached_snapshot ~base_path ~request:{ window_minutes = 60; bucket_minutes = 0 } ~now:after_ttl with
+  | Ok refreshed ->
+    Alcotest.(check int) "stale cached entry refreshes cleanly after TTL expiry" 1 (count refreshed)
+  | Error error -> Alcotest.fail error)
+
 let test_typed_query_and_invalidation () =
   let parse target = Stream.request (Httpun.Request.create `GET target) in
   Alcotest.(check bool) "zero/negative windows refused" true
     (Result.is_error (parse "/?window=0") && Result.is_error (parse "/?window=-1"));
+  Alcotest.(check bool) "7-day max window accepted" true
+    (Result.is_ok (parse "/?window=60")
+     && Result.is_ok (parse "/?window=1440")
+     && Result.is_ok (parse (Printf.sprintf "/?window=%d" Stream.max_window_minutes)));
+  Alcotest.(check bool) "unbounded window above max refused" true
+    (Result.is_error (parse (Printf.sprintf "/?window=%d" (Stream.max_window_minutes + 1))));
   Alcotest.(check bool) "malformed query refused" true (Result.is_error (parse "/?bucket_min=NaN"));
   Alcotest.(check bool) "model input wakes model query" true (Stream.is_invalidation (event `Model_metrics));
   Alcotest.(check bool) "unrelated input does no aggregate work" false (Stream.is_invalidation (event `Health))
@@ -133,6 +164,7 @@ let eio_test name f = Alcotest.test_case name `Quick (fun () -> Eio_main.run (fu
 
 let () = Alcotest.run "Native model metrics query"
   ["reader", [eio_test "cold and committed snapshots" test_cold_and_subsequent_direct_reads;
+    eio_test "cached snapshot reuses kept and caps windows" test_cached_snapshot_reuses_kept_and_caps_windows;
     eio_test "query row expiry and empty buckets" test_row_deadline_and_empty_bucket;
     eio_test "actual cost diagnostic day expiry" test_cost_diagnostics_have_only_semantic_day_deadline;
     eio_test "empty file creates no clock deadline" test_empty_cost_file_does_not_make_a_clock_deadline;

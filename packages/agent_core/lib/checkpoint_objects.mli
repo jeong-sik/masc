@@ -129,6 +129,10 @@ type memo
 
 val create_memo : unit -> memo
 
+(** Encoded byte count of the messages [memo] currently holds, or [0] when
+    empty. *)
+val memo_encoded_bytes : memo -> int
+
 (** What a save writes: [objects] first, in order, each named by its digest,
     then [head_bytes] in place of the head. [content] is the checkpoint's
     content digest. [decoded] is what a load of the written head and objects

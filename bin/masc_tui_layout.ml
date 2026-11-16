@@ -67,8 +67,12 @@ let board_read_side_minimum_cols =
   board_read_side_body_minimum_cols + board_read_side_gutter_cols
   + board_read_side_comment_cols
 
+type board_read_arrangement =
+  | Stacked
+  | Side of { body_cols : int; comment_cols : int }
+
 let board_read_side_layout ~cols =
-  if cols < board_read_side_minimum_cols then None
+  if cols < board_read_side_minimum_cols then Stacked
   else
     (* Keep the old 78/40 minimum. Above it, give half of each extra pair
        of cells to comments and the other half to the post. *)
@@ -77,7 +81,7 @@ let board_read_side_layout ~cols =
       + ((cols - board_read_side_minimum_cols) / 2)
       + board_read_side_gutter_cols
     in
-    Some (cols - comment_cols, comment_cols)
+    Side { body_cols = cols - comment_cols; comment_cols }
 
 type board_read_side_allocation = {
   body_rows : int;

@@ -23627,6 +23627,34 @@ let board_read_layout ~cols ~wide =
   else Board_read_split
 ;;
 
+(* Where the open post draws its comments, in a pane [cols] wide. [z] hides
+   the post list so the thread can be read wider, so the wide layout draws it
+   under the post, as wide as the terminal. Asked of the width alone, the
+   answer put the thread beside the post from 120 cells on, with 40 cells
+   plus half the excess: on a 140-cell terminal [z] took the thread from the
+   split's 106 cells down to 52 (#40134). The split and the single pane keep
+   that answer of the width. *)
+let board_read_arrangement layout ~cols ~has_comments =
+  match layout with
+  | Board_read_wide -> Masc_tui_layout.Stacked
+  | Board_read_split | Board_read_one_pane ->
+      if has_comments then Masc_tui_layout.board_read_side_layout ~cols
+      else Masc_tui_layout.Stacked
+;;
+
+(* [z] on the open post hides the post list or gives it back. On one pane the
+   two layouts draw the same screen, so the footer does not offer [z] and
+   pressing it must not leave the flag set for the next widening. The place
+   the reader stands in the post and in the thread is left as stored; the
+   next frame measures it against the layout it draws. *)
+let toggle_board_read_wide (state : state) ~cols =
+  match board_read_layout ~cols ~wide:state.board_detail_wide with
+  | Board_read_one_pane -> ()
+  | Board_read_split | Board_read_wide ->
+      state.board_detail_wide <- not state.board_detail_wide;
+      state.board_focus <- Right_pane
+;;
+
 (* The pane the Board read keys act on. [board_focus] is the operator's choice
    and stays as chosen; whether that pane is on screen is the layout's answer,
    asked every time. Only the split draws the post list, so in the other two

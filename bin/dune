@@ -1908,6 +1908,8 @@
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
+  ;; [board_read_arrangement] reads that layout to place the comments.
+  masc_tui_layout
   masc_tui_overview_tasks
   masc_tui_machine_live
   masc_tui_connector_unbind

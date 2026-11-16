@@ -1,14 +1,17 @@
-import { officeChartFigure } from './artifact-office-chart'
+import { officeChartFigure, type OfficeChart } from './artifact-office-chart'
 import { officeHtmlText } from './artifact-office-text'
 import { readOfficeChart } from './artifact-office-chart-read'
 import { fromByteArray } from 'base64-js'
 import { officeImageDimensions } from './artifact-office-image'
+import { checkOfficeTableGrid, type OfficeTableCellBounds } from './artifact-office-table-grid'
 import { loadOfficeArchive, readOfficeBytes, readOfficeXml, resolveOfficePart, xmlChild, xmlChildren, xmlDescendants, type OfficeXmlElement } from './artifact-office-xml'
 import { hwpUnitsPerCssPixel, hwpxTableLimits, hwpxNs } from './artifact-hwpx-template'
 
 type Fragment = { readonly kind: 'inline' | 'block'; readonly content: string }
 type ManifestItem = { readonly path: string; readonly mime: string }
-type Cell = { readonly element: OfficeXmlElement; readonly row: number; readonly col: number; readonly rows: number; readonly cols: number }
+type Cell = OfficeTableCellBounds & { readonly element: OfficeXmlElement }
+export type HwpxImportSource = { readonly kind: 'hwpx' }
+  | { readonly kind: 'hwp5'; readonly readOleChart: (data: Uint8Array) => Promise<OfficeChart> }
 const hwpxChartNamespace = 'http://www.hancom.co.kr/hwpml/2016/ooxmlchart'
 function cellHeader(element: OfficeXmlElement): boolean {
   switch (element.getAttribute('header')) {
@@ -47,7 +50,7 @@ function automaticNumber(element: OfficeXmlElement): string {
 }
 
 /** Import the HWPX package spine and explicit native table/chart structures without executing its contents. */
-export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array): Promise<{ content: string; notices: readonly string[] }> {
+export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array, source: HwpxImportSource = { kind: 'hwpx' }): Promise<{ content: string; notices: readonly string[] }> {
   const zip = await loadOfficeArchive(data), notices = new Set<string>()
   let omittedContent = false, supportedContent = false
   if (new TextDecoder('utf-8', { fatal: true }).decode(await readOfficeBytes(zip, 'mimetype')) !== 'application/hwp+zip') throw new Error('HWPX 문서 형식이 아닙니다.')
@@ -113,32 +116,23 @@ export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array): Promis
     const rows = tableInteger(element.getAttribute('rowCnt'), '행 수', 1, hwpxTableLimits.rows), columns = tableInteger(element.getAttribute('colCnt'), '열 수', 1, hwpxTableLimits.columns)
     const rowElements = xmlChildren(element, hwpxNs.paragraph, 'tr')
     if (rowElements.length !== rows) throw new Error('HWPX 표의 행 수가 본문과 다릅니다.')
-    const cells: Cell[] = []
-    for (const [rowIndex, row] of rowElements.entries()) for (const cell of xmlChildren(row, hwpxNs.paragraph, 'tc')) {
+    const cellsByRow: Cell[][] = rowElements.map((row, rowIndex) => xmlChildren(row, hwpxNs.paragraph, 'tc').map(cell => {
       const address = xmlChild(cell, hwpxNs.paragraph, 'cellAddr'), span = xmlChild(cell, hwpxNs.paragraph, 'cellSpan')
       if (!address || !span) throw new Error('HWPX 표의 셀 주소 또는 병합 정보가 없습니다.')
-      const item = { element: cell, row: tableInteger(address.getAttribute('rowAddr'), '셀 행', 0, rows - 1), col: tableInteger(address.getAttribute('colAddr'), '셀 열', 0, columns - 1),
-        rows: tableInteger(span.getAttribute('rowSpan'), '행 병합', 1, rows), cols: tableInteger(span.getAttribute('colSpan'), '열 병합', 1, columns) }
-      if (item.row !== rowIndex || item.row + item.rows > rows || item.col + item.cols > columns) throw new Error('HWPX 표의 셀 범위가 올바르지 않습니다.')
-      cells.push(item)
-    }
-    // Rectangles are checked without allocating rowCnt * colCnt slots from untrusted dimensions.
-    const active: Cell[] = []
-    let area = 0n
-    for (const cell of [...cells].sort((a, b) => a.row - b.row || a.col - b.col)) {
-      for (let index = active.length - 1; index >= 0; index--) if (active[index]!.row + active[index]!.rows <= cell.row) active.splice(index, 1)
-      if (active.some(other => other.col < cell.col + cell.cols && cell.col < other.col + other.cols)) throw new Error('HWPX 표의 병합 셀이 겹칩니다.')
-      active.push(cell); area += BigInt(cell.rows) * BigInt(cell.cols)
-    }
-    if (area !== BigInt(rows) * BigInt(columns)) throw new Error('HWPX 표의 셀 격자가 비어 있습니다.')
+      const item = { element: cell, row: tableInteger(address.getAttribute('rowAddr'), '셀 행', 0, rows - 1), column: tableInteger(address.getAttribute('colAddr'), '셀 열', 0, columns - 1),
+        rows: tableInteger(span.getAttribute('rowSpan'), '행 병합', 1, rows), columns: tableInteger(span.getAttribute('colSpan'), '열 병합', 1, columns) }
+      if (item.row !== rowIndex || item.row + item.rows > rows || item.column + item.columns > columns) throw new Error('HWPX 표의 셀 범위가 올바르지 않습니다.')
+      return item
+    }))
+    checkOfficeTableGrid(rows, columns, cellsByRow.flat(), 'HWPX 표')
     const output: string[] = []
-    for (let index = 0; index < rows; index++) {
+    for (const cells of cellsByRow) {
       const row: string[] = []
-      for (const cell of cells.filter(cell => cell.row === index).sort((a, b) => a.col - b.col)) {
+      for (const cell of [...cells].sort((a, b) => a.column - b.column)) {
         const list = xmlChild(cell.element, hwpxNs.paragraph, 'subList')
         if (!list) throw new Error('HWPX 표 셀의 본문이 없습니다.')
         const contents = await paragraphs(list), tag = cellHeader(cell.element) ? 'th' : 'td'
-        row.push(`<${tag} rowspan="${cell.rows}" colspan="${cell.cols}">${contents}</${tag}>`)
+        row.push(`<${tag} rowspan="${cell.rows}" colspan="${cell.columns}">${contents}</${tag}>`)
       }
       output.push(`<tr>${row.join('')}</tr>`)
     }
@@ -168,6 +162,7 @@ export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array): Promis
 
   async function fragments(element: OfficeXmlElement): Promise<Fragment[]> {
     if (element.namespaceURI !== hwpxNs.paragraph) {
+      if (source.kind === 'hwp5') throw new Error(`HWP에서 가져올 수 없는 문서 개체입니다: ${element.localName}`)
       omittedContent = true
       notices.add('지원하지 않는 문서 개체의 배치는 옮기지 않았습니다.')
       return (await Promise.all(xmlChildren(element).map(fragments))).flat()
@@ -189,6 +184,8 @@ export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array): Promis
       }
       case 'lineBreak': return [{ kind: 'inline', content: '<br>' }]
       case 'tab': return [{ kind: 'inline', content: '\t' }]
+      case 'nbSpace': return [{ kind: 'inline', content: '\u00a0' }]
+      case 'fwSpace': return [{ kind: 'inline', content: '\u2007' }]
       case 'autoNum':
         supportedContent = true
         notices.add('자동 번호는 저장된 숫자를 본문 글자로 옮겼습니다.')
@@ -213,8 +210,16 @@ export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array): Promis
       }
       case 'ctrl': case 'subList': return (await Promise.all(xmlChildren(element).map(fragments))).flat()
       case 'secPr': case 'colPr': case 'linesegarray': case 'shapeComment': return []
-      case 'ole': throw new Error('OLE 개체의 차트 데이터는 가져올 수 없습니다. native HWPX 차트가 필요합니다.')
+      case 'ole': {
+        if (source.kind === 'hwpx') throw new Error('OLE 개체의 차트 데이터는 가져올 수 없습니다. native HWPX 차트가 필요합니다.')
+        const item = manifest.get(attr(element, 'binaryItemIDRef'))
+        if (!item) throw new Error('HWP 차트 개체의 파일 참조가 없습니다.')
+        const chart = await source.readOleChart(await readOfficeBytes(zip, item.path))
+        supportedContent = true
+        return withCaption(element, { kind: 'block', content: officeChartFigure(chart) })
+      }
       default:
+        if (source.kind === 'hwp5') throw new Error(`HWP에서 가져올 수 없는 문서 개체입니다: ${element.localName}`)
         omittedContent = true
         notices.add(`HWPX ${element.localName} 개체의 서식은 옮기지 않았습니다.`)
         return (await Promise.all(xmlChildren(element).map(fragments))).flat()

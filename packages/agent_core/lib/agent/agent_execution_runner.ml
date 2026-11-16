@@ -109,6 +109,14 @@ let abort_failure_of_error (detailed : Provider_failure_attribution.detailed_err
     { kind = Internal_failure; detail = Error.to_string detailed.error; data = None }
 ;;
 
+(* The caller has already selected the operation's primary exception. An
+   ordinary diagnostic failure cannot replace it; a new runtime/control
+   exception from the diagnostic still propagates through the shared policy. *)
+let report_cleanup_failure report =
+  try report () with
+  | exn -> Llm_provider.Reserved_exn.reraise_if_reserved exn
+;;
+
 let reraise_after_abort_failure exn backtrace abort_detail =
   match Llm_provider.Reserved_exn.reraise_if_reserved exn with
   | () ->
@@ -116,9 +124,10 @@ let reraise_after_abort_failure exn backtrace abort_detail =
       (Abort_failed_after_exception (exn, backtrace, abort_detail))
       backtrace
   | exception reserved ->
-    Eio.traceln
-      "durable execution cleanup failed while preserving reserved exception: %s"
-      abort_detail;
+    report_cleanup_failure (fun () ->
+      Eio.traceln
+        "durable execution cleanup failed while preserving reserved exception: %s"
+        abort_detail);
     Printexc.raise_with_backtrace reserved backtrace
 ;;
 
@@ -365,10 +374,11 @@ let finish_writer_scope store captured run_writer =
           in
           Printexc.raise_with_backtrace combined combined_backtrace
         | exception reserved ->
-          Eio.traceln
-            "durable execution terminal sink raised while preserving reserved exception: \
-             %s"
-            (Printexc.to_string notification_exn);
+          report_cleanup_failure (fun () ->
+            Eio.traceln
+              "durable execution terminal sink raised while preserving reserved exception: \
+               %s"
+              (Printexc.to_string notification_exn));
           Printexc.raise_with_backtrace reserved backtrace))
 ;;
 

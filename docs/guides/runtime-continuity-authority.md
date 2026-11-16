@@ -29,6 +29,7 @@
 | [#36169](https://github.com/jeong-sik/masc/pull/36169) | reasoning이 계속 와도 본문이 없어 진행 없음 timeout | watchdog의 생산 신호와 최종 답 수락 조건을 구분한다. ping·빈 carrier는 생산 증거가 아니다. |
 | [#45995](https://github.com/jeong-sik/masc/pull/45995) → [#51935](https://github.com/jeong-sik/masc/pull/51935) → [#52494](https://github.com/jeong-sik/masc/issues/52494) | 종료 기록, 중간 기록, 시작 기록 순서로 진단 실패의 실행 전파가 발견됨 | 개별 write만 고치지 말고 시작부터 종료까지 본다. trace 가용성과 관계없이 실행·예외 정산 경로는 하나다. 현재 실행 ID와 다른 완료 trace를 결과에 붙이지 않는다. |
 | [2026-11-16 tracer 후속 수리](../evidence/tracer-observer-authority-20261116/README.md) | Fmt 출력 채널 실패가 본문 실행을 막거나 성공값·원래 예외를 덮음 | preferred `Tracing.with_span`은 본문 진입 여부와 결과·예외/backtrace를 보존한다. 본문 진입 뒤에는 효과를 재실행하지 않는다. trace-context 조회의 일반 실패는 빈 관측이며, `Reserved_exn`은 cleanup·parallel wrapper 안의 취소도 원래 outer 예외 전체로 전파한다. |
+| [L3: canonical cleanup 진단 수리](../evidence/runner-cleanup-diagnostic-20261116/README.md) | abort·terminal receipt 실패 뒤의 Eio debug 출력 오류가 선택된 reserved 원본 예외를 덮음 | 실행 journal의 정산과 예외 선택은 `Agent_execution_runner`가 소유한다. 일반 진단 실패는 그 선택을 바꾸지 않고, 새 reserved 진단 예외는 기존 `Reserved_exn`으로 전파한다. HostStop의 모든 원인 판정과 Reserved의 한 원인 포함 판정을 합치지 않는다. public 실행 회귀는 작성·문법 검사만 했으며, 보존한 실행 증거는 추출한 helper 범위다. |
 | [#47097](https://github.com/jeong-sik/masc/pull/47097) → [#52487](https://github.com/jeong-sik/masc/pull/52487) | 누락된 최신 답의 거짓 성공을 막는 history 검증이 정상 압축을 거짓 실패로 처리 | 정확한 최종 답 검증을 유지하면서 압축된 앞부분과 훼손된 범위를 typed coverage로 구분한다. |
 
 이력에 같은 단어가 있어도 기존 guard를 그대로 지우지 않는다. Muse의 압축 count와

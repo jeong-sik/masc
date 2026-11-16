@@ -3483,15 +3483,26 @@ let test_an_owner_stop_after_turn_start_resumes_however_the_host_ended_it () =
     [true; false]
 ;;
 
+(* Each phase hangs under one window, and only that window is short. The
+   reads where [hang_init] and [hang_session] hang wait under the admission
+   window. The read where [hang_before_ack] hangs comes after [turn/start] is
+   written and waits under the idle window. A one-second admission window in
+   [hang_before_ack] also bounded every step before that write: the fixture's
+   start, its session replies and the session-ready bookkeeping. A busy
+   machine took longer than that (#52313). *)
 let test_admission_timeout_restores_only_undispatched_claims () =
   List.iter (fun seeded ->
-    List.iter (fun phase -> with_scripted_host (fun ~base_path ->
+    List.iter (fun (phase, window) -> with_scripted_host (fun ~base_path ->
       let tool = masc_probe_tool (ref `Null) in
       if seeded then (match (run_turn_with ~base_path ~tool ()).outcome.result with
         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
       let before = Store.load ~base_path ~keeper_name |> Result.get_ok in
       write_fixture ~base_path (scenario phase);
-      let run = run_turn_with ~admission_timeout_s:1. ~idle_timeout_s:1. ~base_path ~tool () in
+      let run =
+        match window with
+        | `Admission -> run_turn_with ~admission_timeout_s:1. ~base_path ~tool ()
+        | `Idle -> run_turn_with ~idle_timeout_s:1. ~base_path ~tool ()
+      in
       (match phase, run.outcome.result with
        | "hang_before_ack", Error (Agent_core.Error.Internal detail)
          when String.starts_with ~prefix:"Muse Code was silent for " detail -> ()
@@ -3522,7 +3533,8 @@ let test_admission_timeout_restores_only_undispatched_claims () =
         match (run_turn_with ~base_path ~tool ()).outcome.result with
         | Ok result -> check (option bool) "retry keeps valid conversation" (Some seeded) result.session_resumed
         | Error error -> fail (Agent_core.Error.to_string error))))
-      ["hang_init"; "hang_session"; "hang_before_ack"]) [false; true]
+      [ "hang_init", `Admission; "hang_session", `Admission; "hang_before_ack", `Idle ])
+    [false; true]
 ;;
 
 let test_changed_explicit_workspace_starts_fresh () =

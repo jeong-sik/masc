@@ -82,12 +82,14 @@ let discover ~store ~owner =
       "A Librarian part has multiple original executions" in
     Ok ({capture;record}::originals)) (Ok []) records in
   let* gates=owned (Owner.load_scope ~store ~scope:(Gate_journal.scope owner)) in
+  (* [validate_chain] below restores every attempt that names an execution, in
+     one reading per execution. Each gate needs only its execution here: one
+     reading per gate restored the gate's whole retry ancestry again. *)
   let* ()=List.fold_left (fun result gate ->
     let* ()=result in
     let* id=Gate_journal.parent_execution_id gate in
-    let* original=List.find_opt (fun original -> original.record.request_id=id) executions
-      |> Option.to_result ~none:"Original gate has no discovered execution" in
-    Gate_journal.validate ~store ~owner ~capture:original.capture ~record:gate) (Ok ()) gates in
+    require (List.exists (fun original -> original.record.request_id=id) executions)
+      "Original gate has no discovered execution") (Ok ()) gates in
   let* ()=List.fold_left (fun result original ->
     let* ()=result in
     Gate_journal.validate_chain ~store ~owner ~capture:original.capture) (Ok ()) executions in
@@ -266,7 +268,12 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
        match Gate.failure_detail ~absorbed:accepted.selection.absorbed gate with
        | None -> apply gate record
        | Some _ ->
-         match live with None -> apply gate record | Some authority -> retry authority)
+         match live with
+         | None -> apply gate record
+         | Some authority ->
+           (match Gate.after_failure authority gate with
+            | Gate.Retain_new_attempt -> retry authority
+            | Wait_for_destination -> apply gate record))
 let answered ~store ~config ~reserved ~owner ~inventory part original =
   let* proposal=original_answer ~store original in
   let* parsed=Capture.validate_proposal original.capture proposal in

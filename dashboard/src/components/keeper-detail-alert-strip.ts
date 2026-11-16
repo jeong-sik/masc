@@ -141,9 +141,9 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   )
   // Hide "종료 코드" when it references a past *success* turn while the
   // current stop_cause is a terminal failure -- that is the
-  // "정지 원인 · turn_timeout / 종료 코드 · success" time-axis mix the
-  // ckpt-2 follow-up addresses. Both-failure pairs (e.g. turn_timeout +
-  // provider_runtime_error) stay visible since they describe the same
+  // "정지 원인 · heartbeat_failures / 종료 코드 · success" time-axis mix the
+  // ckpt-2 follow-up addresses. Both-failure pairs (e.g. provider_runtime_error +
+  // fiber_unresolved) stay visible since they describe the same
   // failure surface from different observability layers.
   const suppressStaleLatestTerminal =
     latestTerminalCode !== null

@@ -100,7 +100,10 @@ val prepare
     account in a known CLI shape. A changed principal seeds a fresh
     generation; token refreshes for the same principal preserve the existing
     effective-user-owned regular 0600 managed credential only when its principal
-    still matches the generation record. A readable managed login-keychain item
+    still matches the generation record. A managed credential that is missing
+    is written again from the source: agy 1.5.9 moves the file into the HOME
+    keychain on every run, and the file is what binds the account (RFC-0490
+    §6.3). A readable managed login-keychain item
     naming another principal refuses the same way, since keyring-first CLI reads
     would resume that account, and so does a readable item that does not
     decode to a known login. A missing or unreadable item leaves the file
@@ -113,8 +116,10 @@ val prepare
     A missing pointer is first-time setup
     only in an empty owner store; populated stores refuse without reseeding.
     This local continuity
-    identity is not cryptographic authentication or readiness evidence. Missing
-    or corrupt current generation state refuses instead of recreating it. The
+    identity is not cryptographic authentication or readiness evidence. A
+    missing or corrupt generation record, and a managed credential that is
+    present but unreadable, divergent or unrecognized, refuse instead of
+    recreating it. The
     returned actual HOME is the opaque account identity for session binding. *)
 
 val prepare_account

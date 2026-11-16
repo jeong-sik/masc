@@ -3,11 +3,10 @@
 server announces that the schedules changed, and again after a failed read
 (RFC-0480 L8).
 
-The refresh cadence is pushed out of the test's lifetime, so every read
-after the chat opens comes from an announcement or a failed read. One case
-runs the cadence every second and checks that it does not read them.
-Opening the chat reads them once, again after the pane was closed, and again
-after that read failed.
+The shared refresh cadence was removed (#48677), so an idle open chat makes
+no schedule reads at all until an announcement arrives; one case checks
+that. Opening the chat reads them once, again after the pane was closed,
+and again after that read failed.
 """
 
 import os
@@ -189,18 +188,29 @@ class KeeperSchedulesSignalTest(unittest.TestCase):
 
         self.run_keeper_schedules(scenario, before_open=before_open)
 
-    def test_the_cadence_does_not_read_the_keepers_schedules(self) -> None:
+    def test_idle_period_does_not_read_the_keepers_schedules(self) -> None:
         def scenario(server: KeeperSchedulesServer, step: Callable[..., None]) -> None:
-            server.set_phase("cadence")
-            with server.condition:
-                health_before = server.health_reads
+            server.set_phase("idle")
             step("drain", 3.5)
-            with server.condition:
-                cadence_passes = server.health_reads - health_before
-            self.assertGreaterEqual(cadence_passes, 2, "the cadence did not run")
-            self.assertEqual(server.count("cadence", KEEPER_SCHEDULES), 0)
+            self.assertEqual(
+                server.count("idle", KEEPER_SCHEDULES),
+                0,
+                "an idle chat read the Keeper's schedules",
+            )
+            # The chat stayed alive the whole time: the same announcement that
+            # always reads also reads here. (#48677 removed the shared refresh
+            # cadence, so an idle chat performs no reads at all until the
+            # server announces a change.)
+            server.set_phase("idle_changed")
+            server.events.put(schedule_store_invalidated())
+            step(
+                "wait",
+                lambda: server.response_count("idle_changed", KEEPER_SCHEDULES) == 1,
+                "the schedule change did not read the Keeper's schedules",
+            )
+            self.assertEqual(server.count("idle_changed", KEEPER_SCHEDULES), 1)
 
-        self.run_keeper_schedules(scenario, refresh_seconds=1.0)
+        self.run_keeper_schedules(scenario)
 
     def test_failed_keeper_schedule_reads_are_read_again_with_growing_waits(self) -> None:
         def scenario(server: KeeperSchedulesServer, step: Callable[..., None]) -> None:

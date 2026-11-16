@@ -524,14 +524,20 @@ workspace authority on failure. An older successful collection may still apply
 independent datasets if its dispatch authority and generation remain current,
 its verified identity matches the current workspace, and it owns those datasets.
 Finishing a newer collector does not restore identity authority to an older one.
-The full pass retains its existing final interval authority.
+The full pass follows the same rule. It owns the identity reading of its
+generation until a navigation joins it or a withdrawal follows it. After that,
+its verified bundle applies no identity and keeps its datasets only when its
+identity matches the current workspace. A same-port replacement that a joining
+navigation already read therefore stays in place when the older pass arrives.
+The full pass's unconfirmed, booting and failed outcomes apply as before: each
+reports a change, a booting server or no answer, never a workspace that stayed.
 
 Dataset application and collector completion are separate. Taking a source does
 not release its active collector. One mailbox item applies its result, releases
 only that collector, recomputes the aggregate inflight state and then considers a
 retained full revalidation. Duplicate navigation completion cannot reapply an
 identity or release another request. Workspace withdrawal revokes publication
-and latest-navigation authority while actual collectors remain tracked until
+and identity authority while actual collectors remain tracked until
 their own completion. Ask/approval-only collectors are tracked even when they
 have no generic dataset claims.
 
@@ -560,7 +566,7 @@ same immutable `context` JSON described below; synchronous fallback now records
 normal-return cleanup too. Logging stays outside finalizers, preserving existing
 exception unwinding. A start without a finish remains an unfinished observation,
 not a claimed worker exit or inferred timeout. `tui_surface_read_refused`
-separately records current workspace/generation and latest-navigation eligibility;
+separately records current workspace/generation and identity ownership (`owns_identity`);
 it contains no response text. Counts describe UI-owned collectors rather than
 physical HTTP requests or running Keeper actions. Existing full refresh clocks
 continue to describe the entire pass.

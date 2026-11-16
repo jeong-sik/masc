@@ -445,11 +445,17 @@ let verify_dashboard_token ~base_path token =
         match Auth.find_static_credential_by_token base_path ~token:raw_token with
         | Error err -> Error (Masc_domain.masc_error_to_string err)
         | Ok cred -> (
+            let agent_name = cred.Masc_domain.agent_name in
             match
-              Auth.check_permission base_path ~agent_name:cred.Masc_domain.agent_name
-                ~token:(Some raw_token) ~permission:Masc_domain.CanReadState
+              Result.bind
+                (Auth.resolve_role_of_resolved_bearer base_path ~auth_cfg
+                   ~token:raw_token
+                   (Auth.Token_credential (Auth.Static_bearer cred)))
+                (fun role ->
+                  Auth.authorize_permission_for_role ~agent_name ~role
+                    ~permission:Masc_domain.CanReadState)
             with
-            | Ok () -> Ok (Some cred.Masc_domain.agent_name)
+            | Ok () -> Ok (Some agent_name)
             | Error err -> Error (Masc_domain.masc_error_to_string err)))
 
 let dashboard_hello ~base_path ~session_id ?token () =

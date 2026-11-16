@@ -35,6 +35,16 @@ let sign_in ~cli_path home =
     let (_ : Unix.process_status) = Masc_cli_setup.wait_for_child pid in
     Setup.capture_login home)
 
+let with_catalog_home ~host ~oauth_source f =
+  try
+    let runtime_root = Filename.temp_dir "masc-agy-models-" "" |> Unix.realpath in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree runtime_root) (fun () ->
+      let* home =
+        Setup.prepare_from_credential_file ~host ~runtime_root ~account_id:"catalog" ~oauth_source
+      in
+      f home)
+    with Unix.Unix_error _ | Sys_error _ -> Error Setup.Private_home_unavailable
+
 let account ~base_path ~cli_path ~timeout_s ~action =
   match host ~base_path with
   | Error message -> refused message
@@ -54,11 +64,15 @@ let account ~base_path ~cli_path ~timeout_s ~action =
         | Some source_home -> Setup.import_signed_in ~source_home home)
       | Sign_in -> sign_in ~cli_path home in
     let* credential = Setup.credential_reference home in
-    let models, catalog_error = match Setup.discover_models ~cli_path ~timeout_s home with
-      | Ok models -> Setup.models_json models, `Null
-      | Error error -> Setup.models_json [], `String (Setup.error_message error) in
     match credential with
     | Runtime_schema.File path ->
+      (* agy 1.5.9 moves the login file of the HOME it runs in into that
+         HOME's keychain (#52369). Asking for the catalog in this HOME would
+         take away the file this command hands back. *)
+      let models, catalog_error =
+        match with_catalog_home ~host ~oauth_source:path (Setup.discover_models ~cli_path ~timeout_s) with
+        | Ok models -> Setup.models_json models, `Null
+        | Error error -> Setup.models_json [], `String (Setup.error_message error) in
       Ok (`Assoc ["schema", `String "masc.antigravity_account.v1";
         "credential_file", `String path; "catalog", models; "catalog_error", catalog_error;
         "provider_timeout_s", `Float Runtime_antigravity.default_timeout_s;
@@ -66,16 +80,6 @@ let account ~base_path ~cli_path ~timeout_s ~action =
     | Env _ | Inline _ -> Error Setup.Unsafe_credential
     with Unix.Unix_error _ | Sys_error _ -> Error Setup.Private_home_unavailable in
   report result
-
-let with_catalog_home ~host ~oauth_source f =
-  try
-    let runtime_root = Filename.temp_dir "masc-agy-models-" "" |> Unix.realpath in
-    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree runtime_root) (fun () ->
-      let* home =
-        Setup.prepare_from_credential_file ~host ~runtime_root ~account_id:"catalog" ~oauth_source
-      in
-      f home)
-    with Unix.Unix_error _ | Sys_error _ -> Error Setup.Private_home_unavailable
 
 let models ~base_path ~cli_path ~timeout_s ~oauth_source =
   match host ~base_path with

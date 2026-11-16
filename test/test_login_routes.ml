@@ -421,7 +421,7 @@ let clears_the_transaction answer =
 ;;
 
 (* The value of a source ['nonce-<value>'] when the value is one
-   [Account_page.Nonce.draw] gives: hex digits, never empty. *)
+   [Csp_nonce.draw] gives: hex digits, never empty. *)
 let drawn_nonce source =
   let prefix = "nonce-" in
   if String.starts_with ~prefix source

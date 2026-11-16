@@ -611,111 +611,8 @@ let render_palette (state : state) =
                          ^ snd (palette_noun state.palette_mode)
                          ^ " · Ctrl-U clears the filter")))
 
-(* The patch review overlay. [surface_chrome] owns the box, the fill and the
-   footer's row, so the rows are not counted here and the keys on screen are
-   the footer's alone. *)
-(* The diff's rows and the rows the overlay shows, computed once for the
-   renderer that draws them and the keys that scroll them. The keys used to
-   move ten rows whatever the window was, and to reach the end by leaving five
-   rows on screen -- a number the renderer's own clamp then corrected, which is
-   why it went unnoticed. *)
-let patch_modal_horizontal_limit (state : state) =
-  let _, cols = get_terminal_size () in
-  let width = framed_inner_width cols in
-  match state.patch_modal_diff with
-  | None -> 0
-  | Some (_, diff) ->
-      List.fold_left
-        (fun limit row ->
-          let body_width = max 1 (width - Message_layout.display_width (tree_diff_gutter row)) in
-          let cells =
-            Message_layout.display_width (Terminal_text.single_line row.Tui_decode.gdr_text)
-          in
-          max limit (max 0 (cells - body_width)))
-        0 diff.Tui_decode.gd_rows
-;;
-
-let patch_modal_viewport (state : state) =
-  let terminal_rows, _cols = get_terminal_size () in
-  let diff_opt =
-    match state.patch_modal_diff with
-    | Some (_, d) -> Some d
-    | None -> None
-  in
-  let total =
-    match diff_opt with
-    | Some diff -> List.length diff.Masc.Tui_decode.gd_rows
-    | None -> 0
-  in
-  (* The column heading and the divider under it open the body. *)
-  let heading_rows = 2 in
-  ( total
-  , Masc_tui_scroll.content_height
-      ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
-      ~chrome:(surface_chrome_rows + heading_rows) ~count:total
-      ~preview_keep:None ~overflow_takes_row:true )
-
-let render_patch_modal (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  let path_label =
-    match state.patch_modal_path with
-    | Some p -> p
-    | None -> "Active Working Tree"
-  in
-  let diff_opt =
-    match state.patch_modal_diff with
-    | Some (_, d) -> Some d
-    | None -> None
-  in
-  let diff_rows =
-    match diff_opt with
-    | Some diff -> diff.Masc.Tui_decode.gd_rows
-    | None -> []
-  in
-  let total, content_height = patch_modal_viewport state in
-  let max_scroll = max 0 (total - content_height) in
-  let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
-  let limit = patch_modal_horizontal_limit state in
-  let hscroll = max 0 (min state.patch_modal_hscroll limit) in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"patch-modal"
-    ~frame:Chrome_overlay
-    ~overflow:(Self_scrolled (fun () -> Patch_modal_scroll (scroll, hscroll)))
-    ~title:
-      (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
-       ^ Terminal_text.single_line path_label ^ Ansi.reset)
-    ~hints:(Masc_tui_keys.footer_hints_patch_review ~lang:state.ui_language)
-    ~body:(fun ~budget:_ c ->
-      c.push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  old / new · col %d/%d" (hscroll + 1) (limit + 1));
-      c.push_divider ();
-      if total = 0 then
-        c.push
-          (Ansi.dim
-           ^ (match state.patch_modal_error with
-              | Some e ->
-                  Printf.sprintf "   (diff load error: %s)" (Terminal_text.single_line e)
-              | None ->
-                  (match diff_opt with
-                   | None -> "   (reading patch diff…)"
-                   | Some _ -> "   (no pending patch diff loaded)"))
-           ^ Ansi.reset)
-      else begin
-        let width = framed_inner_width cols in
-        List.iteri
-          (fun index row ->
-            if index >= scroll && index < scroll + content_height then
-              c.push
-                (fit_width
-                   (Masc_tui_span.render (tree_diff_row_span ~hscroll ~width row))
-                   width))
-          diff_rows
-      end;
-      (* The window's position is a body row, as on the other overlays, and
-         [patch_modal_viewport] took its row off when the diff overflows. *)
-      Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height total))
-
-(* The link preview overlay, through the same contract. The title names the
-   site, so the footer carries only keys. *)
+(* The link preview overlay. [surface_chrome] owns the box, the fill and the
+   footer's row. The title names the site, so the footer carries only keys. *)
 (* The card, its height and the line count, computed once for the two readers
    that need to agree: the renderer that draws it and the keys that scroll it.
    They did not agree before -- the renderer sized the card to the window while
@@ -1545,6 +1442,61 @@ let render_account_login state view =
           | Masc_tui_account_login.Terminal line ->
             Masc_tui_sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text line) in
       List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
+
+(* The address answers as the account server of a multi-account installation
+   ([Masc_tui_types.Account_server]), which serves none of the screens. This
+   one says what the address is for, where people and Admins go, and where
+   the operator screens are. A browser opens the same address: its page at /
+   signs a person in. Each value wraps under itself rather than being cut,
+   since the words are what the screen is for. *)
+let render_account_server state ~version =
+  let terminal_rows, cols = get_terminal_size () in
+  let say ko_text en_text = ui_text state ~ko:ko_text ~en:en_text in
+  let address =
+    Masc_tui_http.url_of ~host:Masc_network_defaults.masc_http_loopback_peer
+      ~port:state.port ~path:""
+  in
+  let rows =
+    [ say "주소" "Address", address
+    (* The server's own string: one printable row, whatever it carries. *)
+    ; say "버전" "Version", Masc.Tui_terminal_text.sanitize_terminal_text version
+    ; say "사람" "People",
+      say "브라우저로 주소를 열고 로그인해 자기 구독과 키퍼를 써요."
+        "Open the address in a browser, sign in, and use your own subscriptions and Keepers."
+    ; "Admin",
+      say "같은 곳에서 로그인한 뒤 초대 링크와 허용 계정을 관리해요."
+        "Sign in there too, then manage invitation links and allowed accounts."
+    ; say "운영 화면" "Operator screens",
+      say "이 주소에서는 열 수 없어요. 단일 사용자 masc 서버라면 그 포트로 masc-tui 를 다시 열어요(--port)."
+        "Not served at this address. For a single-user masc server, open masc-tui again on its port (--port)."
+    ]
+  in
+  let label_cells =
+    List.fold_left (fun widest (label, _) -> max widest (Message_layout.display_width label)) 0 rows
+  in
+  (* [?] opens nothing here: the screen takes every key. *)
+  surface_chrome ~overflow:Fits ~help_door:false ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~surface_key:"account-server"
+    ~title:(screen_title (" " ^ say "다계정 설치" "Multi-account installation"))
+    ~hints:(say "r:다시 확인  q:종료" "r:check again  q:quit")
+    ~body:(fun ~budget:_ c ->
+      let width = framed_inner_width cols in
+      let wrapped ~indent text =
+        Message_layout.split_styled_cells ~max_cells:(max 1 (width - indent)) text
+      in
+      List.iter (fun line -> c.push (fit_width (" " ^ line) width))
+        (wrapped ~indent:1
+           (say "이 주소는 다계정 설치의 계정 서버예요. 운영 화면(키퍼·작업·저장소)은 여기에 없어요."
+              "This address is the account server of a multi-account installation. The operator screens (Keepers, Tasks, Repositories) are not served here."));
+      c.push_empty ();
+      let value_indent = 1 + label_cells + 2 in
+      List.iter (fun (label, value) ->
+        match wrapped ~indent:value_indent value with
+        | [] -> c.push (fit_width (" " ^ label) width)
+        | first :: rest ->
+          c.push (fit_width (" " ^ fit_width label label_cells ^ "  " ^ first) width);
+          List.iter (fun line -> c.push (fit_width (String.make value_indent ' ' ^ line) width)) rest)
+        rows)
 
 
 let render_collab state view =

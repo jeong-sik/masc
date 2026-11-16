@@ -532,6 +532,55 @@ let test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_in
         (List.map (first_attempt_id inventory) steps)
         (List.map (fun step -> (decision_of (judge_from fixture ~owner ~inventory step)).run_id) steps))))
 
+(* Each run with the gate declared on and its lane off fails the first step's
+   gate once more, and the next run retains one more attempt naming the failed
+   one. Restoring an attempt restores its predecessor first. A read of the
+   journal that restored every attempt again for each later attempt would grow
+   with the square of the journal: from 4 to 8 attempts it would add about
+   three times what 1 to 4 added (26 restorations against 9). Restoring each
+   attempt once adds 4 against 3. *)
+let test_a_journal_read_restores_each_attempt_once () = with_fixture (fun fixture ->
+  fixture.respond := (fun body ->
+    if contains body second_text then `OK, F.openai_response (answer ~claim:"claim 2" ~state:"state 2")
+    else `OK, F.openai_response absorbing_answer);
+  let owner = owner fixture and range = range_link (owner fixture) in
+  let starting : Chain.fresh = { fresh with current = Some { Keeper_librarian.facts = [ stale_fact ] } } in
+  let original = Runtime_typesafeai_policy.current () in
+  Fun.protect ~finally:(fun () -> Runtime_typesafeai_policy.publish original) (fun () ->
+    Runtime_typesafeai_policy.publish { original with absorb_gate = true; lane_enabled = false };
+    let fail_once () =
+      match run_through_workers fixture ~owner ~range ~fresh:starting () with
+      | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
+      | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Error detail -> failf "the chain refused: %s" detail in
+    let first_step () = match in_position_order (steps_of fixture ~owner) with
+      | (record, (_ : Step.header)) :: _ -> Some record
+      | [] -> None in
+    let attempts () = match first_step () with
+      | None -> 0
+      | Some (step : Owner.retained) ->
+        let inventory = Gate.Inventory.read ~store:fixture.store ~owner |> get in
+        List.length (Gate.Inventory.execution_records inventory ~execution_id:step.request_id) in
+    let rec grow_to count runs =
+      if attempts () < count then
+        if runs = 0 then failf "the first step's journal did not reach %d attempts" count
+        else (fail_once (); grow_to count (runs - 1)) in
+    let read_cost () = match first_step () with
+      | None -> fail "the chain retained no step"
+      | Some record ->
+        let step = Step.restore ~owner record |> get in
+        allocated_by (fun () -> Gate.latest ~store:fixture.store ~owner ~capture:step) in
+    grow_to 1 2;
+    let one = read_cost () in
+    grow_to 4 4;
+    let four = read_cost () in
+    grow_to 8 5;
+    let eight = read_cost () in
+    check int "the first step's journal holds eight attempts" 8 (attempts ());
+    check bool "a journal read grows with its attempts and not with their square" true
+      (eight -. four < 2. *. (four -. one))))
+
 let () =
   run "keeper_librarian_floor_chain"
     [ ( "chain"
@@ -564,5 +613,7 @@ let () =
             test_a_pass_with_no_answered_step_does_not_read_the_gate_scope
         ; test_case "a failed gate is not a decision and a retried one is judged from the inventory" `Slow
             test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_inventory
+        ; test_case "a journal read restores each attempt once" `Slow
+            test_a_journal_read_restores_each_attempt_once
         ] )
     ]

@@ -98,6 +98,9 @@ type decode_failure =
   | No_frame_written  (** ffmpeg exited 0 and wrote no frame. *)
   | Frame_unreadable of { detail : string }
       (** The frame file could not be read back. *)
+  | Frame_not_png
+      (** A converter exited 0 and wrote bytes that fail
+          {!has_png_structure}. *)
 
 val decode_failure_of_ending :
   ending -> output_present:bool -> decode_failure option
@@ -135,7 +138,10 @@ val download :
 (** Fetch or reuse nonempty input bytes. Failed fetches and empty bodies are
     removed; unknown signatures remain eligible for a decoder. The result owns
     the bytes read, rather than naming the shared URL cache file. [force_fetch]
-    bypasses the cache for an explicit retry. [max_bytes] bounds each read,
+    bypasses the cache for an explicit retry and starts a new generation for
+    the URL: a download that began earlier, in this process or another, still
+    returns its own bytes but no longer publishes them to the shared cache
+    file, so it cannot replace the retry's response. [max_bytes] bounds each read,
     retains shared cache files on refusals and does not publish a new cache
     entry. Callers must also bound the fetcher's output file while it runs. *)
 
@@ -176,7 +182,9 @@ val convert_to_png :
 (** Try the existing converter sequence, preserving every failed attempt's
     typed status. Each converter writes its own reserved output. A runner
     failure, signal or stop ends the sequence: a descendant could still be
-    running. Input is retained even when no converter succeeds. *)
+    running. Output that fails {!has_png_structure} is [Frame_not_png] and
+    the next converter runs. A cached frame is reused only when it passes the
+    same check. Input is retained even when no converter succeeds. *)
 
 val prepare_png :
   run:(string -> ending) -> cache_dir:string -> string ->
@@ -186,7 +194,9 @@ val prepare_png :
 val prepare_downloaded_png :
   run:(string -> ending) -> cache_dir:string -> url:string -> download ->
   (string, string) result
-(** Prepare an already captured download, retaining the source for the caller. *)
+(** Prepare an already captured download, retaining the source for the caller.
+    A converted frame, fresh or cached, is returned only when it passes
+    {!has_png_structure}; otherwise the result is an error. *)
 
 val prepare_captured_png :
   run:(string -> ending) -> cache_dir:string -> string ->

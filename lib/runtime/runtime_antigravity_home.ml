@@ -556,9 +556,10 @@ let inspect_keychain_path path =
    keychain is created with no auto-lock, and securityd outlives every turn
    but not a boot — which restarts masc too. Rebuilding the keychain the first
    time a process prepares a given home therefore covers every case masc can
-   distinguish, at the cost of the token copy the old keychain held. The 0600
-   seed beside it carries the same token, and the CLI writes a fresh copy on
-   its next refresh. *)
+   distinguish, at the cost of the login the old keychain held. The 0600 file
+   beside it carries the same account: when the CLI has moved that file into
+   the keychain, account selection writes it again from the selected source
+   before this rebuild, and the CLI refreshes from it on its next run. *)
 let provisioned_this_process = Hashtbl.create 8
 let provisioned_lock = Mutex.create ()
 
@@ -600,8 +601,8 @@ let create_login_keychain ~home_dir path =
   let* () = verify_owned_directory keychains in
   (* The passphrase is inert for this name — nothing can unlock the keychain
      later, whatever it is — and it guards nothing the filesystem does not
-     already guard: the keychain holds a copy of the OAuth token that sits
-     beside it at 0600 inside a 0700 home. *)
+     already guard: inside a 0700 home it holds the login the 0600 file beside
+     it holds, or held until the CLI moved it in. *)
   let* () = run_security ~home_dir [ "create-keychain"; "-p"; ""; path ] in
   (* No [-l], no [-u] and no [-t]: the keychain reports `no-timeout` and stops
      relocking five minutes after the last read or when the machine sleeps.
@@ -777,7 +778,17 @@ let check_managed_keychain ~home_dir ~account_sha256 ~read_keychain =
     else Error (generation_error keychain_path "managed keychain principal differs from the selected generation")
 ;;
 
-let existing_generation ~store ~revision ~account_sha256 ~read_keychain =
+(* agy 1.5.9 keeps its login in the HOME's default keychain: a run that finds
+   the login file moves it into the keychain masc provisioned and deletes the
+   file (#52369). The file is still what binds the account (RFC-0490 §6.3), so
+   a generation whose file the CLI moved away gets it again from the selected
+   source. The caller admits this generation only when the source names the
+   principal its record names, so the copy cannot select another account.
+   The keychain is compared before anything is written, so a refusal leaves
+   the HOME as it was. A file that is present still has to be private and
+   name that principal.
+   HIGH-RISK-UNREVIEWED: a human must review this account boundary. *)
+let existing_generation ~store ~revision ~account_sha256 ~source_bytes ~read_keychain =
   let home_dir = Filename.concat store revision in
   let gemini_dir = Filename.concat home_dir ".gemini" in
   let cli_dir = Filename.concat gemini_dir "antigravity-cli" in
@@ -787,12 +798,17 @@ let existing_generation ~store ~revision ~account_sha256 ~read_keychain =
       (Ok ()) [home_dir; gemini_dir; cli_dir; config_dir] in
   let oauth_path = Filename.concat cli_dir "antigravity-oauth-token" in
   let* credential = load_private_oauth_file ~make_error:generation_error oauth_path in
-  let* managed_sha256 = match credential with
-    | Some file -> account_digest ~unrecognized:managed_unrecognized ~path:oauth_path file.content
-    | None -> Error (generation_error oauth_path "account generation credential is missing") in
-  let* () = if String.equal managed_sha256 account_sha256 then Ok ()
-    else Error (generation_error oauth_path "managed credential principal differs from the selected generation") in
+  let* () = match credential with
+    | None -> Ok ()
+    | Some file ->
+      let* managed_sha256 =
+        account_digest ~unrecognized:managed_unrecognized ~path:oauth_path file.content in
+      if String.equal managed_sha256 account_sha256 then Ok ()
+      else Error (generation_error oauth_path "managed credential principal differs from the selected generation") in
   let* () = check_managed_keychain ~home_dir ~account_sha256 ~read_keychain in
+  let* () = match credential with
+    | Some _ -> Ok ()
+    | None -> write_private_file ~make_error:generation_error oauth_path source_bytes in
   Ok (home_dir, Filename.concat cli_dir "settings.json",
       Filename.concat config_dir "mcp_config.json", oauth_path)
 ;;
@@ -916,7 +932,8 @@ let select_generation ~sync_store
     | Some file -> parse_generation_record ~path:record_path file.content |> Result.map Option.some in
   match previous with
   | Some (previous_sha256, revision) when String.equal account_sha256 previous_sha256 ->
-    let* paths = existing_generation ~store ~revision ~account_sha256 ~read_keychain in
+    let* paths =
+      existing_generation ~store ~revision ~account_sha256 ~source_bytes ~read_keychain in
     (* A prior pointer rename can be visible after its parent fsync failed.
        Confirm current.json publication before admitting the existing account. *)
     sync_store store;

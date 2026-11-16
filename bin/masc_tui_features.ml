@@ -90,8 +90,6 @@ let sections =
       ; { opener = Command "errors"
         ; description = "this chat's loading failures, in a scrollable log" }
       ; { opener = Command "diff"; description = "Git working-tree changes and diff" }
-      ; { opener = Command "patch"
-        ; description = "patch review for pending changes (alias /review)" }
       ] )
   ; ( "Bring media in"
     , [ { opener = Command "image"

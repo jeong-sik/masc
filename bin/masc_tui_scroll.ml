@@ -174,10 +174,8 @@ let window_reading ~noun ~scroll ~height count =
   noun ^ " " ^ window_text ~scroll ~height count
 
 (* The reading goes first and the hint after it, both indented like a body
-   row. The overlays wrote "  [lines ...]", the Changes diff and the tree diff
-   "[lines ...]  esc closes" flush against the frame, and the patch review
-   put it in its footer, where the fitter reads it as one more key item
-   (#38820). *)
+   row. The overlays wrote "  [lines ...]", and the Changes diff and the tree
+   diff "[lines ...]  esc closes" flush against the frame (#38820). *)
 let position_row ~ko ~scroll ~height ?hint count =
   let reading =
     if count > height then

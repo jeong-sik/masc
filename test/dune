@@ -2865,6 +2865,7 @@
 (include stanzas/test_sandbox_image_catalog.inc)
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_credential_expiry.inc)
+(include stanzas/test_csp_nonce.inc)
 (include stanzas/test_auth_token_prune_transaction.inc)
 (include stanzas/test_auth_token_rotation_transaction.inc)
 (include stanzas/test_auth_file_backed_transaction.inc)
@@ -3097,6 +3098,7 @@
 (include stanzas/test_tui_fleet_stream.inc)
 (include stanzas/test_tui_observer_handshake.inc)
 (include stanzas/test_tui_observer_cold_start.inc)
+(include stanzas/test_tui_account_server.inc)
 (include stanzas/test_tui_observer_loss.inc)
 (include stanzas/test_tui_observer_session_log.inc)
 (include stanzas/test_tui_approval_readability.inc)
@@ -4185,6 +4187,11 @@
  (libraries alcotest masc_tui_fetched))
 
 (test
+ (name test_tui_list_idle)
+ (modules test_tui_list_idle)
+ (libraries alcotest masc_tui_fetched masc_tui_list_idle))
+
+(test
  (name test_tui_owed_read)
  (modules test_tui_owed_read)
  (libraries alcotest masc_tui_owed_read))
@@ -4725,7 +4732,7 @@
  (name test_tui_board_read_layout)
  (modules test_tui_board_read_layout)
  (libraries alcotest masc_tui_board_read_layout masc_tui_roster_pane masc_tui_types
-  masc_tui_board_detail))
+  masc_tui_board_detail masc_tui_layout))
 
 ; Its own anchor, under the other board stanza, so two pull requests adding a
 ; suite do not both land on the head of this file.

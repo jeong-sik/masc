@@ -857,6 +857,142 @@ let test_file_paths_report_git_failure () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "a nonrepository must not become an empty catalog")
 
+(* Stands for what git printed: file lines, paths, a remote URL. No failure
+   text may carry it. It holds no space, comma or tab, is not a number, and its
+   capitals are not hex digits, so each reader below refuses a field holding it. *)
+let printed_marker = "PRINTED52175"
+
+(* Runs [f] in a fresh directory with a git on PATH that prints [stdout],
+   says nothing on standard error and exits [exit_code]. *)
+let with_fake_git ~stdout ~exit_code f =
+  with_temp_dir (fun tmp ->
+      let fake_bin = Filename.concat tmp "bin" in
+      Unix.mkdir fake_bin 0o755;
+      let printed = Filename.concat tmp "printed" in
+      write_file printed stdout;
+      let fake_git = Filename.concat fake_bin "git" in
+      write_file fake_git
+        (Printf.sprintf "#!/bin/sh\ncat %s\nexit %d\n" (Filename.quote printed) exit_code);
+      Unix.chmod fake_git 0o755;
+      let old_path = Sys.getenv "PATH" in
+      Fun.protect
+        ~finally:(fun () -> Unix.putenv "PATH" old_path)
+        (fun () ->
+          Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+          f tmp))
+
+(* Labels of the outcomes that quote [printed_marker], or that accepted what
+   they should have refused. *)
+let quoting_printed_output outcomes =
+  List.filter_map
+    (fun (label, outcome) ->
+      match outcome with
+      | Stdlib.Ok () -> Some (label ^ " (accepted)")
+      | Stdlib.Error detail ->
+          if String_util.contains_substring detail printed_marker then Some label else None)
+    outcomes
+
+(* Exit 124 with an empty standard error is how Process_eio reports a run it
+   timed out; standard output then holds what the run had read so far. *)
+let test_stopped_run_does_not_quote_what_it_printed () =
+  with_fake_git ~stdout:(printed_marker ^ "\n") ~exit_code:124 (fun local_path ->
+      let outcomes =
+        [ ("ls-files", Result.map ignore (Repo_git.file_paths_at ~local_path ()))
+        ; ( "cat-file"
+          , Result.map ignore
+              (Repo_git.run_git_read_only_raw ~cwd:local_path [ "cat-file"; "blob"; "HEAD:.env" ]) )
+        ; ( "grep"
+          , Result.map ignore
+              (Repo_git.grep_at ~local_path ~pathspec:"" ~pattern:"API_KEY" ~ignore_case:false
+                 ~max_matches:10 ()) )
+        ; ( "merge"
+          , Repo_git.fast_forward
+              ~repository:(sample_repo ~url:"unused" local_path)
+              ~target_ref:"origin/main" )
+        ]
+      in
+      Alcotest.(check (list string)) "no failure quotes standard output" []
+        (quoting_printed_output outcomes);
+      List.iter
+        (fun (label, outcome) ->
+          match outcome with
+          | Stdlib.Ok () -> ()
+          | Stdlib.Error detail ->
+              Alcotest.(check bool) (label ^ " keeps the exit status") true
+                (String_util.contains_substring detail "exit 124"))
+        outcomes)
+
+(* What the process capture keeps of [output] when it outgrows the capture: the
+   head, a truncation marker, and the tail. The caps are small stand-ins for
+   the capture's own, so the cut lands where each case needs it. *)
+let captured ~head_cap ~tail_cap output =
+  let buffer = Exec_buffer.create ~head_cap ~tail_cap in
+  Exec_buffer.add_string buffer output;
+  Exec_buffer.render buffer
+
+let test_refused_output_is_not_quoted () =
+  let m = printed_marker in
+  let through_git stdout run =
+    with_fake_git ~stdout ~exit_code:0 (fun local_path -> Result.map ignore (run local_path))
+  in
+  let repository local_path = sample_repo ~url:"unused" local_path in
+  let status_summary local_path = Repo_git.status_summary ~repository:(repository local_path) () in
+  let status_files local_path = Repo_git.status_files_at ~local_path () in
+  let ahead_behind local_path =
+    Repo_git.ahead_behind ~repository:(repository local_path) ~target_ref:"origin/main" ()
+  in
+  let branch_status output = Result.map ignore (Repo_git.branch_status_of_porcelain_v2_z output) in
+  let branches fields =
+    Result.map ignore
+      (Repo_git.branch_list_of_for_each_ref ~max_entries:10 (String.concat "\000" fields ^ "\n"))
+  in
+  let worktrees output =
+    Result.map ignore (Repo_git.worktree_list_of_porcelain ~max_entries:10 output)
+  in
+  let grep output = Result.map ignore (Repo_git.grep_result_of_z_output ~max_matches:10 output) in
+  (* A row of file text that ends in [m]; the tail of each cut below starts
+     inside it. *)
+  let text_ending_in_marker = String.make 60 'y' ^ "KEY=" ^ m ^ "\n" in
+  let first_row = "a.txt\0001\000x\n" in
+  let outcomes =
+    [ ("status unknown code", through_git ("ZZ " ^ m ^ "\n") status_summary)
+    ; ("status unknown code pair", through_git ("?M " ^ m ^ "\n") status_summary)
+    ; ("status -z unknown code", through_git ("ZZ " ^ m ^ "\000") status_files)
+    ; ("status -z unknown code pair", through_git ("?M " ^ m ^ "\000") status_files)
+    ; ("rev-list non-numeric count", through_git (m ^ "\t1\n") ahead_behind)
+    ; ("rev-list one field", through_git (m ^ "\n") ahead_behind)
+    ; ( "branch.ab non-numeric count"
+      , branch_status
+          ("# branch.head main\000# branch.upstream origin/main\000# branch.ab +" ^ m ^ " -1\000") )
+    ; ( "branch.ab one field"
+      , branch_status ("# branch.head main\000# branch.upstream origin/main\000# branch.ab " ^ m ^ "\000") )
+    ; ("branch track", branches [ "*"; "main"; "origin/main"; m; "1"; "s" ])
+    ; ("branch track pair", branches [ "*"; "main"; "origin/main"; "ahead 1, " ^ m; "1"; "s" ])
+    ; ("branch track triple", branches [ "*"; "main"; "origin/main"; m ^ "," ^ m ^ "," ^ m; "1"; "s" ])
+    ; ("branch HEAD mark", branches [ m; "main"; ""; ""; "1"; "s" ])
+    ; ("branch commit time", branches [ "*"; "main"; ""; ""; m; "s" ])
+    ; ("worktree HEAD", worktrees ("worktree /r\000HEAD " ^ m ^ "\000branch refs/heads/main\000\000"))
+    ; ("worktree unknown field", worktrees ("worktree /r\000" ^ m ^ "\000\000"))
+    ; ("worktree without a path", worktrees (m ^ "\000\000"))
+    ; ("worktree without a state", worktrees ("worktree /r/" ^ m ^ "\000HEAD 0123abcd\000\000"))
+    ; ("worktree without a HEAD", worktrees ("worktree /r/" ^ m ^ "\000branch refs/heads/main\000\000"))
+    ; ( "grep cut at a row boundary"
+      , grep
+          (captured ~head_cap:(String.length first_row) ~tail_cap:32
+             (first_row ^ "b.txt\0002\000" ^ text_ending_in_marker)) )
+    ; ( "grep cut after a path"
+      , grep
+          (captured ~head_cap:(String.length first_row + 6) ~tail_cap:32
+             (first_row ^ "b.txt\0002\000" ^ text_ending_in_marker)) )
+    ; ( "grep cut inside a line number"
+      , grep
+          (captured ~head_cap:7 ~tail_cap:32
+             ("a.txt\00012\000" ^ text_ending_in_marker ^ "b.txt\0003\000z\n")) )
+    ]
+  in
+  Alcotest.(check (list string)) "no refusal quotes what git printed" []
+    (quoting_printed_output outcomes)
+
 let () =
   Alcotest.run "Repo_git"
     [
@@ -888,6 +1024,12 @@ let () =
             test_file_paths_preserve_exact_names_and_ignore_policy
         ; Alcotest.test_case "reports Git failure" `Quick
             test_file_paths_report_git_failure
+        ] );
+      ( "failure text",
+        [ Alcotest.test_case "a stopped run does not quote what it printed" `Quick
+            test_stopped_run_does_not_quote_what_it_printed
+        ; Alcotest.test_case "a refused row is not quoted" `Quick
+            test_refused_output_is_not_quoted
         ] );
       ( "get_recent_commits",
         [ Alcotest.test_case "returns commits" `Quick test_get_recent_commits ] );

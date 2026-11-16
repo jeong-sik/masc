@@ -106,6 +106,16 @@ val refusal_class : refusal -> refusal_class
 
 val refusal_class_to_string : refusal_class -> string
 
+type refusal_owner =
+  | Destination_state
+      (** the destination refuses whatever it is sent until its own state
+          changes: credit, credential, rate, server or transport *)
+  | This_request
+      (** the destination refused this request; the same request is refused
+          again *)
+
+val refusal_owner : refusal_class -> refusal_owner
+
 type destination_outcome =
   | Answered of { at : float }
   | Refusing of
@@ -119,8 +129,13 @@ type destination_outcome =
 val destination_outcomes : unit -> (destination_id * destination_outcome) list
 (** Every destination {!evaluate} asked since the process started, with its
     latest outcome (RFC-0484 §3.2). Process memory only: empty after a
-    restart until the next ask. A projection for health; nothing reads it to
-    decide a call. *)
+    restart until the next ask. A projection for health. No call is refused
+    on it; the Librarian gate reads {!destination_outcome} only to decide
+    whether a refused original retains a new attempt. *)
+
+val destination_outcome : destination_id -> destination_outcome option
+(** The latest outcome of one destination; [None] when this process has not
+    asked it. *)
 
 type failure_kind = Capacity_refused | Other_refusal
 val failure_kind : failure -> failure_kind

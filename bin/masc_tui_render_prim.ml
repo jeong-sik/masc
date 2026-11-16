@@ -172,7 +172,6 @@ let clamped_scroll_now (state : state) = function
                        card_rows = state.metrics_scroll_card_rows }
   | Approval_detail_scroll (_, viewport) ->
       Approval_detail_scroll (state.approval_detail_scroll, viewport)
-  | Patch_modal_scroll _ -> Patch_modal_scroll (state.patch_modal_scroll, state.patch_modal_hscroll)
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll (card, _) -> Play_invite_scroll (card, state.play_invite_scroll)
   | Queue_panel_presented owner -> Queue_panel_presented owner
@@ -253,8 +252,6 @@ let reader_after_wheel (reader : clamped_scroll)
         (move ~count:viewport.adv_count ~height:viewport.adv_height value, Some viewport))
   | Approval_detail_scroll (value, None) ->
       Some (Approval_detail_scroll (step value, None))
-  | Patch_modal_scroll (vertical, horizontal) ->
-      Some (Patch_modal_scroll (step vertical, horizontal))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Play_invite_scroll (card, value) -> Some (Play_invite_scroll (card, step value))
   | Queue_panel_presented _ | Help_presented -> None
@@ -995,6 +992,9 @@ let connection_status_parts ~ko (status : Masc_tui_types.connection_status) =
   | Booting -> Theme.text_status Masc_tui_theme.Warn,
       (if ko then "서버 시작 중" else "server booting"),
       (if ko then ["서버 시작 중", false; "시작 중", true] else ["server booting", false; "booting", true])
+  | Account_server _ -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "계정 서버" else "account server"),
+      (if ko then ["계정 서버", false] else ["account server", false; "accounts", true])
   | Disconnected -> Theme.text_status Masc_tui_theme.Bad,
       (if ko then "조회 실패" else "refresh failed"),
       (if ko then ["HTTP 조회 실패", false; "조회 실패", true] else ["HTTP refresh failed", false; "HTTP failed", true; "failed", true])
@@ -1034,6 +1034,11 @@ let compact_connection_state (state : state) =
         interrupted || counts.interrupted > 0, unfinished,
         (match progress.phase with In_flight -> true | Finished _ -> false) in
   let scoped_reading = surface_reads_pending state <> [] in
+  match state.connection_status with
+  (* An account server serves no surface, so what a pass left unread there
+     is not a failed read. *)
+  | Account_server _ as status -> Compact_http status
+  | Connected | Degraded | Connecting | Booting | Disconnected ->
   match state.workspace_identity with
   | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
   | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed
@@ -1048,7 +1053,8 @@ let compact_connection_state (state : state) =
       else if unfinished then Compact_read_unfinished
       else match state.connection_status with
         | Connected when in_flight || scoped_reading -> Compact_reading
-        | Connected | Degraded | Connecting | Booting | Disconnected as status -> Compact_http status
+        | Connected | Degraded | Connecting | Booting | Account_server _ | Disconnected as status ->
+            Compact_http status
 
 (* The words for each connection state, longest first, with whether a
    spelling leaves out what the full badge says and whether the state needs
@@ -1087,7 +1093,7 @@ let strip_connection_reading (state : state) =
     match compact with
     | Compact_http Connected -> Settled
     | Compact_http (Connecting | Booting) | Compact_reading -> Under_way
-    | Compact_http Degraded | Compact_workspace_unconfirmed
+    | Compact_http (Degraded | Account_server _) | Compact_workspace_unconfirmed
     | Compact_workspace_unread | Compact_read_partial
     | Compact_read_interrupted | Compact_read_unfinished -> Caution
     | Compact_http Disconnected | Compact_workspace_mismatch
@@ -1128,7 +1134,12 @@ let surface_strip (state : state) ~cols =
      label and the cell each read entry [i], and a list answers that by
      walking. The short ring makes that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
-  let ring = Array.of_list Masc_tui_types.surface_ring in
+  (* An account server serves none of the surfaces, so there is no ring to
+     walk: the strip keeps the connection and the clock. *)
+  let ring = match state.connection_status with
+    | Account_server _ -> [||]
+    | Disconnected | Connecting | Booting | Degraded | Connected ->
+        Array.of_list Masc_tui_types.surface_ring in
   let n = Array.length ring in
   let active = Masc_tui_surface_navigation.surface_ring_index state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
@@ -1745,9 +1756,13 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
        ~ko:(state.ui_language = Lang_ko) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
+  (* An account server has no Keeper to write to, so no composer is drawn. *)
   let composer, cursor =
-    if state.keeper_navigation_open then ("", Frame_presenter.Hidden)
-    else composer_row state ~rows ~cols:full_cols in
+    match state.connection_status with
+    | Account_server _ -> ("", Frame_presenter.Hidden)
+    | Disconnected | Connecting | Booting | Degraded | Connected ->
+      if state.keeper_navigation_open then ("", Frame_presenter.Hidden)
+      else composer_row state ~rows ~cols:full_cols in
   Buffer.add_string framed (composer ^ "\n");
   Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
   Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->
@@ -2106,7 +2121,7 @@ let reading_connection_notice (state : state) =
        | Compact_workspace_mismatch | Compact_workspace_unconfirmed
        | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
        | Compact_read_interrupted | Compact_read_unfinished
-       | Compact_http (Degraded | Connecting | Booting | Disconnected) -> true
+       | Compact_http (Degraded | Connecting | Booting | Account_server _ | Disconnected) -> true
   in
   if exceptional then
     match connection_badge state with
@@ -2774,6 +2789,41 @@ let box_wrapped_field buf cols ~head ~style body =
         (fun segment -> box_line buf cols (hang ^ style ^ segment ^ Ansi.reset))
         rest
 
+(* The wide pane beside a list, with nothing open in it. The narrow pane fits
+   the list's reason to one row of its own width, which keeps the label and
+   cuts the cause; here it wraps at this pane's width, kept to [height] with
+   its head and its tail, and the page note under it says what the list
+   holds. The rows the reading leaves are blank, so the pane keeps its height
+   whatever it says. *)
+let draw_list_idle buf cols ~ko ~empty ~height idle =
+  let drawn = ref 0 in
+  let reason ~keep detail =
+    let budget = max (min height 1) (height - keep) in
+    if budget > 0 then begin
+      let detail = Keeper_chat.terminal_safe_text ~preserve_newlines:true detail in
+      box_lines_styled_bounded buf cols ~style:(Theme.bad ()) ~budget detail;
+      drawn := !drawn + min budget (box_lines_row_count ~cols detail)
+    end
+  in
+  let note text =
+    if !drawn < height then begin
+      box_line_styled buf cols ~style:Ansi.dim text;
+      incr drawn
+    end
+  in
+  (match idle with
+   | Masc_tui_list_idle.List_failed detail ->
+       reason ~keep:1 detail;
+       note (page_failed_note ~ko)
+   | List_unread -> note (page_unread_note ~ko)
+   | List_loading -> note (page_reading_note ~ko)
+   | List_empty detail ->
+       Option.iter (reason ~keep:1) detail;
+       note ("  " ^ empty)
+   | Rows_ready detail -> Option.iter (reason ~keep:0) detail);
+  for _ = !drawn + 1 to height do
+    box_empty buf cols
+  done
 
 let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
   box_wrapped_field buf cols
@@ -3627,7 +3677,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
              | Disconnected ->
                  (Theme.accent ()) ^ "s" ^ Ansi.reset ^ ":"
                  ^ say "서버 시작" "start server"
-             | Connecting | Booting | Degraded | Connected ->
+             | Connecting | Booting | Account_server _ | Degraded | Connected ->
                  hint Keeper_control.Shutdown (action_word Keeper_control.Shutdown))
             (* Delete is the only action a keeper whose configuration failed to
                read still offers, and [primary] deliberately withholds it from

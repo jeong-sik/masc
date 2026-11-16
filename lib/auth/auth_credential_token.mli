@@ -43,6 +43,19 @@ val compare_credentials :
 
 (** {1 Token lookup} *)
 
+(** The credential a bearer token resolved to, and which store answered:
+    an OAuth access record, or a static bearer whose owner's current file
+    still holds it. *)
+type token_credential =
+  | Oauth_access of agent_credential
+  | Static_bearer of agent_credential
+
+val token_credential_agent_credential : token_credential -> agent_credential
+
+val find_token_credential :
+  string -> token:string -> (token_credential, masc_error) result
+(** {!find_credential_by_token}, saying which store answered. *)
+
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 

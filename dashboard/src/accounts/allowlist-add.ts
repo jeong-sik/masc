@@ -59,12 +59,13 @@ function addWords(adding: Add): string {
 
 /** The words of a refusal the page can say more of than that it was
     refused. A 403 on a request from this page comes of a session another
-    tab replaced, as on the invitations panel. */
+    tab replaced, and the next press carries the token of now, as on the
+    invitations panel. */
 function refusedWords(status: number, step: 'add' | 'remove'): readonly string[] | null {
   if (status === forbidden) {
     return [
       '서버가 이 요청을 받지 않았어요.',
-      '다른 탭에서 다시 로그인했거나 다른 계정으로 로그인했다면, 이 화면을 새로 고친 뒤 다시 해 주세요.',
+      '다른 탭에서 다시 로그인했다면 한 번 더 해 주세요.',
     ]
   }
   // A 409 also answers an earlier try of this page that landed though the page did not hear so.

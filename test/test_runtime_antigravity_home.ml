@@ -519,7 +519,6 @@ let test_corrupt_generation_never_reseeds_managed_state () =
      | `Record -> write_file ~mode:0o600 pointer "{broken"
      | `Record_permissions -> Unix.chmod pointer 0o644
      | `Missing_record -> Unix.unlink pointer
-     | `Missing_token -> Unix.unlink token
      | `Managed_principal -> write_file ~mode:0o600 token
          (Masc_test_deps.antigravity_oauth_fixture "different-native-account")
      | `Managed_malformed -> write_file ~mode:0o600 token "{broken");
@@ -530,7 +529,7 @@ let test_corrupt_generation_never_reseeds_managed_state () =
        Error (Runtime_antigravity_home.Unrecognized_managed_oauth
                 { path; rejection = Runtime_antigravity_oauth_credential.Not_json_object }) ->
        check string "the refusal names the managed copy" token path
-     | (`Record | `Record_permissions | `Missing_record | `Missing_token | `Managed_principal),
+     | (`Record | `Record_permissions | `Missing_record | `Managed_principal),
        Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
      | _, Error error -> fail (Runtime_antigravity_home.error_to_string error)
      | _, Ok _ -> fail "corrupt authoritative generation was admitted");
@@ -541,11 +540,54 @@ let test_corrupt_generation_never_reseeds_managed_state () =
     check string "external source remains unchanged" source (Fs_compat.load_file oauth_source);
     match corruption with
     | `Missing_record -> check bool "missing pointer was not silently recreated" false (Sys.file_exists pointer)
-    | `Managed_principal | `Managed_malformed | `Missing_token ->
+    | `Managed_principal | `Managed_malformed ->
       check string "authoritative pointer remains unchanged" original_pointer (Fs_compat.load_file pointer)
     | `Record | `Record_permissions -> ())
-    [`Record; `Record_permissions; `Missing_record; `Missing_token;
-     `Managed_principal; `Managed_malformed]
+    [`Record; `Record_permissions; `Missing_record; `Managed_principal; `Managed_malformed]
+;;
+
+(* agy 1.5.9 moves the login file into the HOME keychain on every run
+   (#52369). Selecting the same account again writes the file from the source
+   and keeps the generation. A keychain item naming another account still
+   refuses, before anything is written. *)
+let test_login_the_cli_moved_away_is_written_again () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  let login ?revision account = Masc_test_deps.antigravity_oauth_fixture ?revision account in
+  let saved value = Apple_keychain.Found (Masc_test_deps.antigravity_keychain_value value) in
+  let source = login "account-a" in
+  write_file ~mode:0o600 oauth_source source;
+  let prepare_with keychain =
+    Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~sync_store:(fun _ -> ()) ~read_keychain:(fun ~path:_ -> keychain)
+      ~runtime_root ~owner_leaf:"moved-login" ~oauth_source () in
+  let first = prepare_with Apple_keychain.Missing |> require_ok in
+  let token = Runtime_antigravity_home.oauth_path first in
+  let store = Filename.dirname (Runtime_antigravity_home.home_dir first) in
+  let pointer = Filename.concat store "current.json" in
+  let pointer_before = Fs_compat.load_file pointer in
+  let entries () = Sys.readdir store |> Array.to_list |> List.sort String.compare in
+  let entries_before = entries () in
+  let move_away () = if Sys.file_exists token then Unix.unlink token in
+  move_away ();
+  (match prepare_with (saved (login "account-b")) with
+   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "a keychain item naming another account was admitted");
+  check bool "the refusal writes no login file" false (Sys.file_exists token);
+  List.iter (fun (label, keychain) ->
+    move_away ();
+    let again = prepare_with keychain |> require_ok in
+    check string (label ^ ": keeps the generation")
+      (Runtime_antigravity_home.home_dir first) (Runtime_antigravity_home.home_dir again);
+    check string (label ^ ": writes the source login") source (Fs_compat.load_file token);
+    check int (label ^ ": the file is private") 0o600 ((Unix.lstat token).Unix.st_perm land 0o7777);
+    check string (label ^ ": keeps the pointer") pointer_before (Fs_compat.load_file pointer);
+    check (list string) (label ^ ": creates no generation") entries_before (entries ()))
+    [ "the CLI holds the login", saved (login ~revision:"cli-refresh" "account-a")
+    ; "the keychain was rebuilt", Apple_keychain.Missing
+    ; "the keychain is locked", Apple_keychain.Unavailable ];
+  check string "the source stays unchanged" source (Fs_compat.load_file oauth_source)
 ;;
 
 let test_interrupted_generation_creation_leaves_no_orphan () =
@@ -1724,6 +1766,8 @@ let () =
             test_keeper_account_switch_preserves_each_refreshed_home
         ; test_case "corrupt generation refuses without reseed" `Quick
             test_corrupt_generation_never_reseeds_managed_state
+        ; test_case "a login the CLI moved away is written again" `Quick
+            test_login_the_cli_moved_away_is_written_again
         ; test_case "pre-rename pointer failure removes only staged HOME" `Quick
             (test_generation_pointer_failure_retry ~after_rename:false)
         ; test_case "post-rename pointer failure preserves HOME until retry" `Quick

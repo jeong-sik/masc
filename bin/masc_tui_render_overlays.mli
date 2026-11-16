@@ -1,5 +1,5 @@
 (** Overlay and modal screens (About, Keeper navigation, Context inspector,
-    Command palette, Patch review, Link preview, Play invite card, Keeper
+    Command palette, Link preview, Play invite card, Keeper
     deletions, Cheat sheet, Agenda, Answering, Terminal-too-small, Account
     login, Collab, and Lane add-ons) and their viewport calculators. *)
 
@@ -39,14 +39,6 @@ val render_context_inspector :
 val help_viewport : Masc_tui_types.state -> int * int
 
 val render_palette :
-  Masc_tui_types.state ->
-  Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
-
-val patch_modal_horizontal_limit : Masc_tui_types.state -> int
-
-val patch_modal_viewport : Masc_tui_types.state -> int * int
-
-val render_patch_modal :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
@@ -115,6 +107,14 @@ val render_terminal_too_small :
 val render_account_login :
   Masc_tui_types.state ->
   Masc_tui_account_login.t ->
+  Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+(** The screen that covers the others while the address answers as the
+    account server of a multi-account installation, with the version that
+    server names. *)
+val render_account_server :
+  Masc_tui_types.state ->
+  version:string ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
 val render_collab :

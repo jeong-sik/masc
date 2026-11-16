@@ -112,14 +112,6 @@ val context_inspector_viewport : Masc_tui_types.state -> int * int
 val context_inspector_detail_viewport : Masc_tui_types.state -> int * int
 val keeper_deletions_viewport : Masc_tui_types.state -> int * int
 val help_viewport : Masc_tui_types.state -> int * int
-val patch_modal_horizontal_limit : Masc_tui_types.state -> int
-(** Largest body-cell offset needed to read a patch line while keeping its
-    old/new line numbers and change marker fixed. *)
-
-val patch_modal_viewport : Masc_tui_types.state -> int * int
-(** The patch review overlay's diff-row count and the rows it shows, so the
-    page keys move a window and the end key reaches the end. *)
-
 val link_modal_viewport : Masc_tui_types.state -> int * int
 (** The link preview overlay's line count and the rows it shows, so the page
     keys move a window rather than a fixed number of lines. *)
@@ -161,13 +153,14 @@ val compact_frame_required :
 val frame_choice :
   Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int -> now:float ->
   [ `Too_small of int
+  | `Account_server of string
   | `Play_card of Masc_tui_play_card.t
   | `Collab of Masc_tui_collab.t
   | `Account_login of Masc_tui_account_login.t
   | `Lane_addons of Masc_tui_lane_addons.t
   | `Detail_reading of Masc_tui_detail_reading.t
   | `About | `Palette | `Context | `Keeper_deletions | `Help
-  | `Agenda | `Answering | `Patch | `Link
+  | `Agenda | `Answering | `Link
   | `Queue of Masc_tui_types.queue_panel
   | `Client_detail of Masc.Tui_decode.client_row | `Surface ]
 (** The visible surface or overlay, also used before preparing Home focus. *)

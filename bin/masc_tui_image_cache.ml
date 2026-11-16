@@ -138,6 +138,7 @@ type decode_failure =
   | Decoder_runner_failed of runner_failure
   | No_frame_written
   | Frame_unreadable of { detail : string }
+  | Frame_not_png
 
 let decode_failure_of_ending ending ~output_present =
   match ending with
@@ -161,6 +162,12 @@ let decode_failure_text = function
   | Decoder_runner_failed failure -> "could not run decoder: " ^ runner_failure_text failure
   | No_frame_written -> "decoder wrote no frame"
   | Frame_unreadable { detail } -> "the decoded frame could not be read: " ^ detail
+  | Frame_not_png -> "decoder wrote a frame that is not a PNG"
+
+(* A converter is asked for a PNG, but neither its exit status nor the name of
+   the file it wrote makes the bytes one. A converted frame read back from a
+   cache passes the same check. *)
+let png_frame bytes = if has_png_structure bytes then Ok bytes else Error Frame_not_png
 
 (* How often a bounded run looks at its child. A decoder that finishes is
    noticed within one interval; the interval is not a cost of its own, since
@@ -351,6 +358,43 @@ let publish ~attempt ~target =
   try Sys.rename attempt target; Ok target with
   | Sys_error detail -> discard attempt; Error detail
 
+(* The rename keeps a reader from seeing half a file, but downloads of one URL
+   -- in this TUI or another on the same cache directory -- finish in any
+   order, and the last rename would win. So an explicit retry starts a new
+   generation for the URL by replacing a token file beside the cache entry. A
+   download notes the generation it began in and publishes only while that
+   generation is still the URL's: one that began before the latest retry keeps
+   its own bytes but cannot replace or refill the retry's entry. The token is
+   replaced, never held, so nothing waits on it and a cancelled or killed
+   download leaves nothing for another to clear. *)
+type generation = Before_any_retry | Since_retry of string
+
+let generation_path ~cache_dir url = input_path ~cache_dir url ^ ".generation"
+
+(* Reading and starting give [None] when the token cannot be read or written:
+   a download that cannot show its generation is current does not publish. *)
+let read_generation path =
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Some Before_any_retry
+  | exception Unix.Unix_error _ -> None
+  | descriptor ->
+    let channel = Unix.in_channel_of_descr descriptor in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      match In_channel.input_all channel with
+      | token -> Some (Since_retry token)
+      | exception Sys_error _ -> None)
+
+let start_generation ~cache_dir path =
+  let random = Random.State.make_self_init () in
+  let token = Printf.sprintf "%016Lx%016Lx"
+      (Random.State.bits64 random) (Random.State.bits64 random) in
+  match attempt_path ~cache_dir ~prefix:"generation_" ~suffix:".token" with
+  | Error _ -> None
+  | Ok attempt ->
+    match Out_channel.with_open_bin attempt (fun oc -> Out_channel.output_string oc token) with
+    | exception Sys_error _ -> discard attempt; None
+    | () -> Result.to_option (publish ~attempt ~target:path) |> Option.map (fun _ -> Since_retry token)
+
 (* The converter may still hold its output open after it reports success.
    Publish a new file so later writes through that handle cannot change the
    cached frame. This does not prove the converter had finished writing when
@@ -387,6 +431,13 @@ let with_download_snapshot ~cache_dir (Download bytes) f =
 
 let download ?(force_fetch = false) ?max_bytes ~run ~cache_dir url =
   let target = input_path ~cache_dir url in
+  let generation = generation_path ~cache_dir url in
+  let began =
+    if force_fetch then start_generation ~cache_dir generation else read_generation generation in
+  let still_current () =
+    match began, read_generation generation with
+    | Some began, Some now -> began = now
+    | None, (Some _ | None) | Some _, None -> false in
   let judge bytes = verdict_of_bytes bytes in
   let read_cached () =
     let reading = match max_bytes with
@@ -426,7 +477,7 @@ let download ?(force_fetch = false) ?max_bytes ~run ~cache_dir url =
               match judge bytes with
               | Empty -> Error Empty_body
               | Known_image _ | Unknown_signature ->
-                if Option.is_some max_bytes then Ok (Download bytes)
+                if Option.is_some max_bytes || not (still_current ()) then Ok (Download bytes)
                 else begin
                   let result = publish ~attempt ~target in
                   owns_attempt := false;
@@ -497,7 +548,8 @@ let convert_frame ~run ~cache_dir input =
         (* The fallback starts while this converter's output is still
            reserved, so it is handed another name and a late write to this
            one cannot land in its frame. *)
-        with_decoder_output ~run ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" command (function
+        with_decoder_output ~run ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" command (fun output ->
+          match Result.bind output png_frame with
           | Ok bytes -> Ok (converter, failures, bytes)
           (* A signal, a stop, a deadline kill, a cancellation or a runner
              failure means the converter did not finish on its own, and its
@@ -506,7 +558,10 @@ let convert_frame ~run ~cache_dir input =
           | Error ((Decoder_runner_failed _ | Decoder_signaled _ | Decoder_stopped _
                    | Decoder_killed_at_deadline | Decoder_cancelled) as failure) ->
             Error (List.rev ((converter, failure) :: failures))
-          | Error ((Decoder_missing | Decoder_exit _ | No_frame_written | Frame_unreadable _) as failure) ->
+          (* These converters ended on their own, including one that exited 0
+             after writing bytes that are not a PNG, so the next one starts. *)
+          | Error ((Decoder_missing | Decoder_exit _ | No_frame_written | Frame_unreadable _
+                   | Frame_not_png) as failure) ->
             attempt ((converter, failure) :: failures) rest)
     in
     attempt [] commands
@@ -524,7 +579,7 @@ let convert_and_publish ~run ~cache_dir ~target ~encode input =
 let convert_to_png ~run ~cache_dir input =
   let target = png_path ~cache_dir input in
   match read_bytes target with
-  | Ok bytes when String.length bytes > 0 -> Ok target
+  | Ok bytes when Result.is_ok (png_frame bytes) -> Ok target
   | Ok _ | Error _ ->
     Result.map (fun _ -> target)
       (convert_and_publish ~run ~cache_dir ~target ~encode:(fun bytes -> [bytes]) input)
@@ -541,7 +596,7 @@ let cached_downloaded_frame ~prefix path =
         match int_of_string_opt size with
         | Some size when size > 0 ->
           let frame = In_channel.input_all channel in
-          if String.length frame = size then Some frame else None
+          if String.length frame = size then Result.to_option (png_frame frame) else None
         | Some _ | None -> None)
   with Sys_error _ | End_of_file -> None
 

@@ -404,4 +404,38 @@ let month_tests =
       check bool "lifecycle_event" true (classified "lifecycle_event" "lifecycle_event") )
   ]
 
-let () = run "Keeper_efficiency" [ ("month", month_tests) ]
+(* The server runs [read_month] as a job of an executor-pool worker, where
+   several jobs are fibers of one domain. A read from a fiber suspends while
+   it holds the lock -- its cache write runs as a system-thread job -- so the
+   next read on that domain starts while the first still holds it (#52360).
+   The test installs an Eio filesystem as the server does, which adds a
+   suspension at each day file. *)
+let overlap_tests =
+  [ ( "reads that overlap on one domain all answer"
+    , `Quick
+    , fun () ->
+      with_masc_root (fun root ->
+          Dated_jsonl.append (costs_store root)
+            (CL.to_json (cost_row ~agent:"polisher" ~turn:1 ~input_tokens:1
+                           ~output_tokens:1 ~cost_usd:0.0 Resolved));
+          Dated_jsonl.append (tool_store root) (tool_row ~keeper:"polisher" ());
+          Eio_main.run @@ fun env ->
+          Fs_compat.set_fs (Eio.Stdenv.fs env);
+          Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
+              let read () = KE.read_month ~masc_root:root ~month:(today_month ()) in
+              let answers = Eio.Fiber.List.map read [ (); (); () ] in
+              List.iteri
+                (fun index answer ->
+                  match answer with
+                  | Error detail -> Alcotest.failf "read %d: %s" (index + 1) detail
+                  | Ok view ->
+                    let polisher = keeper_row view "polisher" |> Option.get in
+                    check int (Printf.sprintf "read %d turns" (index + 1)) 1
+                      polisher.KE.turns;
+                    check int (Printf.sprintf "read %d calls" (index + 1)) 1
+                      polisher.KE.calls)
+                answers)) )
+  ]
+
+let () =
+  run "Keeper_efficiency" [ ("month", month_tests); ("overlap", overlap_tests) ]

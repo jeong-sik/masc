@@ -1804,17 +1804,6 @@ let voice_agent_bindings =
   ; b ~ko:"뒤로" Act "Esc" "back" ~help:"leave the screen; nothing is written"
   ]
 
-let patch_review_bindings =
-  [ b ~ko:"좌우 이동" Navigate "Shift+←/→" "pan"
-      ~help:"Shift-Left / Shift-Right moves diff text horizontally while file coordinates remain fixed"
-  ; b ~ko:"스크롤" Navigate "j/k" "scroll"
-  ; b ~ko:"페이지" Navigate "PgUp/PgDn / d/u" "page"
-  ; b ~ko:"처음/끝" Navigate "Home/End / g/G" "edges"
-  ; b ~ko:"편집" Act "e" "edit" ~help:"leave review and open the project file in your editor"
-  ; b ~ko:"도움말" Meta "?" "help"
-  ; b ~ko:"닫기" Meta "Esc" "close" ~help:"Esc, q or Q closes the patch reader"
-  ]
-
 let runtime_detail_bindings_for ~routes =
   (if routes then [] else [ b ~ko:"모델 설정" Act "e" "model settings" ])
   @ [ b ~ko:"스크롤" Navigate "j/k" "scroll"
@@ -1825,8 +1814,6 @@ let runtime_detail_bindings_for ~routes =
     ; b ~ko:"다음 화면" Meta "Tab" "next"
     ; b ~ko:"도움말" Meta "?" "help"
     ]
-
-let footer_hints_patch_review ~lang = hints_of_bindings ~lang patch_review_bindings
 
 let footer_hints_runtime_detail ~lang ~routes =
   hints_of_bindings ~lang (runtime_detail_bindings_for ~routes)
@@ -3172,7 +3159,6 @@ let help_sections_for_state ~cols (state : state) =
     else if state.context_inspector_open then Some ("Context", context_bindings ~cols state)
     else if Option.is_some state.queue_panel then
       Option.map (fun panel -> "Queue", queue_bindings state panel) state.queue_panel
-    else if state.patch_modal_open then Some ("Patch review", patch_review_bindings)
     else if state.view = Lanes && Option.is_some state.exact_activity_open then
       Some ("Exact activity", exact_activity_bindings)
     else if state.view = Lanes && Option.is_some state.machine_activity_open then

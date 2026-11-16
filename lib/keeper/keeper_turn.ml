@@ -906,16 +906,22 @@ let run_keeper_invocation_turn_admitted_inner
                       keeper_turn_id
                       (Keeper_turn_spend_commit.error_to_string error)
                 in
-                (* A Gate whose original session is full cannot continue
-                   anywhere: suspending it again would resume into the same
-                   refusal. The operation fails with that typed cause, and the
-                   session record lets the next ordinary turn start fresh. *)
-                let gate_session_full = match gate_resume, run_result with
-                  | Some admission, Error _ ->
-                    Keeper_direct_gate_continuation.session_full ~config:ctx.config
-                      ~keeper_name:meta.name admission
+                (* The cause a failed run names when nothing else ends it. *)
+                let run_failure_cause err =
+                  (Keeper_request_failure.of_core_error
+                     (Keeper_internal_error.without_guidance_preparation_authority err)).cause in
+                (* A failed official-client Gate continuation cannot be
+                   suspended again: its lane returns no checkpoint and its
+                   session is no longer settled. The operation fails with the
+                   cause the Gate layer names (the full session, or the run's
+                   own failure), and the session record lets the next ordinary
+                   turn start fresh. *)
+                let gate_failed_end = match gate_resume, run_result with
+                  | Some admission, Error err ->
+                    Keeper_direct_gate_continuation.failed_run_end ~config:ctx.config
+                      ~keeper_name:meta.name ~run_failure:(run_failure_cause err) admission
                   | Some _, Ok _ | None, (Ok _ | Error _) -> Ok None in
-                match gate_session_full with
+                match gate_failed_end with
                 | Error detail ->
                   commit_ended_turn ();
                   Progress.stop_tracking turn_task_id;
@@ -1011,8 +1017,7 @@ let run_keeper_invocation_turn_admitted_inner
                 | None, _ -> Ok () in
               let e_str = Agent_core.Error.to_string err in
               let cause = match preparation_retained with
-                | Ok () -> (Keeper_request_failure.of_core_error
-                    (Keeper_internal_error.without_guidance_preparation_authority err)).cause
+                | Ok () -> run_failure_cause err
                 | Error detail -> Keeper_request_failure.Turn_continuation_unpersisted
                     {stage=Keeper_request_failure.Checkpoint_retain;detail} in
               Keeper_turn_helpers.finalize_trajectory_acc

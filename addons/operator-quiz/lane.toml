@@ -1,9 +1,9 @@
 id = "operator-quiz"
-revision = "0.6.0"
+revision = "0.6.1"
 title = "Operator quiz"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]
-image = "masc-lane-operator-quiz:0.2.1"
+image = "masc-lane-operator-quiz:0.2.2"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world.actions]

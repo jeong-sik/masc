@@ -1253,6 +1253,41 @@ let test_resolve_role_workspace_secret_grants_admin () =
   | Ok role -> fail (Printf.sprintf "expected Admin, got %s" (Masc_domain.show_agent_role role))
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
+(* An endpoint resolves a bearer once and takes the role from that
+   resolution. It must be the role [resolve_role_with_auth_config] gives the
+   same bearer, which reads the auth store again: a static bearer of each
+   role, and the internal Keeper token. *)
+let test_resolved_bearer_role_matches_resolve_role () =
+  let dir = setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_test_workspace dir) (fun () ->
+    let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+    let auth_cfg = Auth.load_auth_config dir in
+    let same label ~agent_name ~token resolved =
+      match
+        Auth.resolve_role_with_auth_config dir ~auth_cfg ~agent_name ~token:(Some token),
+        Auth.resolve_role_of_resolved_bearer dir ~auth_cfg ~token resolved
+      with
+      | Ok expected, Ok actual ->
+          check string label
+            (Masc_domain.show_agent_role expected) (Masc_domain.show_agent_role actual)
+      | Error error, _ | _, Error error ->
+          fail (label ^ ": " ^ Masc_domain.masc_error_to_string error)
+    in
+    let static_bearer agent_name role =
+      match Auth.create_token dir ~agent_name ~role with
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+      | Ok (raw_token, _) ->
+          (match Auth.find_token_credential dir ~token:raw_token with
+           | Ok (Auth.Static_bearer _ as credential) ->
+               same agent_name ~agent_name ~token:raw_token (Auth.Token_credential credential)
+           | Ok (Auth.Oauth_access _) -> fail "a static bearer resolved as an OAuth record"
+           | Error error -> fail (Masc_domain.masc_error_to_string error))
+    in
+    static_bearer "worker_agent" Masc_domain.Worker;
+    static_bearer "admin_agent" Masc_domain.Admin;
+    let internal = Auth.ensure_internal_keeper_token dir in
+    same "internal keeper" ~agent_name:"keeper-a" ~token:internal Auth.Internal_keeper_bearer)
+
 let test_authorize_unknown_masc_tool_strict_denied () =
   let dir = setup_test_workspace () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
@@ -1540,6 +1575,8 @@ let () =
         `Quick test_resolve_role_rejects_agent_name_impersonation_without_token;
       test_case "resolve_role workspace secret grants admin"
         `Quick test_resolve_role_workspace_secret_grants_admin;
+      test_case "a resolved bearer's role matches resolve_role"
+        `Quick test_resolved_bearer_role_matches_resolve_role;
       test_case "strict unknown masc tool denied"
         `Quick test_authorize_unknown_masc_tool_strict_denied;
       test_case "strict unknown non-masc tool denied"

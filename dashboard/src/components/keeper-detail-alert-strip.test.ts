@@ -371,3 +371,29 @@ describe('local claim refusal with earlier success', () => {
     },
   )
 })
+
+// The labels and summaries are the server's own
+// (Keeper_status_bridge_blocker.runtime_blocker_surface_of_failure_reason).
+describe('runtime failure blocker with earlier success', () => {
+  it.each([
+    ['heartbeat_failures', 'Heartbeat failed 3 consecutive cycle(s); supervisor recovery is required.'],
+    ['turn_failures', 'Keeper turn failed 2 consecutive cycle(s); no execution receipt names the cause'],
+    ['turn_configuration_error', 'Keeper configuration error (missing_env_var field=OPENAI_API_KEY): required environment variable is missing; operator configuration change is required.'],
+    ['exception', 'Keeper runtime exception: fiber_crash'],
+  ])('hides the earlier success while %s blocks the keeper', (blockerClass, summary) => {
+    const [blocked] = normalizeKeepers([{
+      name: 'blocked-keeper', status: 'active', keepalive_running: true,
+      runtime_blocker_class: blockerClass, runtime_blocker_summary: summary,
+      runtime_trust: {
+        latest_terminal_reason: { code: 'success', summary: 'earlier successful turn' },
+        execution: { runtime_outcome: 'completed', provider_attempt_count: 1 },
+      },
+    }])
+    if (!blocked) throw new Error('normalized keeper missing')
+    expect(blocked.stop_cause?.code).toBe(blockerClass)
+    const { container } = render(h(KeeperRuntimeAlertStrip, { keeper: blocked }))
+    expect(container.textContent).toContain(summary)
+    expect(container.textContent).not.toContain('종료 코드')
+    expect(container.textContent).not.toContain('마지막 시도')
+  })
+})

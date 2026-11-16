@@ -1241,6 +1241,88 @@ let test_current_observation_reads_commits_inside_actor_ttls () =
       check (option (float 0.0)) "the exact authoritative expiry travels with that observation"
         (Some judgment.fresh_until_unix) current.next_deadline_unix)))
 
+(* The digest lists of a briefing whose operator digest was not read. Each
+   one says nothing about what the digest holds, so none is an empty list. *)
+let digest_lists = [ "incidents"; "recommended_actions"; "attention_queue"; "internal_signals" ]
+
+let check_digest_not_read label ~read ~error json =
+  let open Yojson.Safe.Util in
+  List.iter (fun field ->
+    check string (Printf.sprintf "%s: %s is not an empty list" label field) "null"
+      (Yojson.Safe.to_string (member field json)))
+    digest_lists;
+  check string (label ^ ": an unread digest names no workspace health") "unknown"
+    (json |> member "summary" |> member "workspace_health" |> to_string);
+  check string (label ^ ": the briefing says how the digest read ended")
+    (Printf.sprintf "%S" read) (Yojson.Safe.to_string (member "digest_read" json));
+  check string (label ^ ": the briefing carries the read failure") error
+    (Yojson.Safe.to_string (member "digest_read_error" json))
+
+(* #43101: the briefing turned a failed digest computation into a digest with
+   no attention items, so "the digest could not be read" and "nothing needs
+   attention" gave the same briefing. *)
+let test_an_unreadable_digest_is_not_an_empty_attention_list () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    with_test_env (fun ~clock ~sw ->
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:None);
+      let actor = "digest-unreadable-reader" in
+      let detail = "operator digest store refused the read" in
+      Dashboard_projection_cache.register_operator_digest_observer
+        { Dashboard_projection_cache.observe_digest =
+            (fun ?actor:_ ?target_type:_ ?target_id:_ ?include_workers:_ _ctx -> Error detail) };
+      Fun.protect
+        ~finally:(fun () ->
+          Dashboard_projection_cache.register_operator_digest_observer
+            { Dashboard_projection_cache.observe_digest = Operator_control.observe })
+        (fun () ->
+          Dashboard_briefing.json ~actor ~config ~sw ~clock ~proc_mgr:None ()
+          |> check_digest_not_read "Reuse" ~read:"unreadable" ~error:(Printf.sprintf "%S" detail);
+          let current = Dashboard_briefing.observe_current ~actor ~config ~sw ~clock
+              ~proc_mgr:None () in
+          check_digest_not_read "Current" ~read:"unreadable" ~error:(Printf.sprintf "%S" detail)
+            current.json;
+          match current.completeness with
+          | Dashboard_projection_read.Partial _ -> ()
+          | Complete -> fail "a briefing with an unread digest settled as complete")))
+
+(* #43101: the projection cache answers a closed compute window with its
+   timeout envelope in the place of the digest. The briefing read the envelope
+   as a digest with no attention items and a healthy workspace. *)
+let test_a_digest_cache_timeout_is_not_an_empty_attention_list () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    with_test_env (fun ~clock ~sw ->
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:None);
+      let actor = "digest-timeout-reader" in
+      (* The key the [Reuse] digest read computes under. *)
+      let key = Printf.sprintf "digest:%s:%s" (Workspace_utils.masc_dir config) actor in
+      Fun.protect ~finally:(fun () -> Dashboard_cache.invalidate key) (fun () ->
+        Dashboard_cache.invalidate key;
+        (* Three computes that outlast their window, with no stale value, open
+           the key's circuit. *)
+        for _attempt = 1 to 3 do
+          let timeout = Dashboard_cache.get_or_compute_with_timeout key
+              ~ttl:10.0 ~clock ~timeout_sec:0.01
+              (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                Eio.Time.sleep clock 1.0;
+                `Null)) in
+          check bool "the cache answers with its timeout envelope" true
+            (Dashboard_cache.is_timeout_envelope timeout)
+        done;
+        Dashboard_cache.For_testing.with_default_clock clock (fun () ->
+          Dashboard_briefing.json ~actor ~config ~sw ~clock ~proc_mgr:None ())
+        |> check_digest_not_read "Reuse" ~read:"timed_out" ~error:"null";
+        let current = Dashboard_briefing.observe_current ~actor ~config ~sw ~clock
+            ~proc_mgr:None () in
+        let open Yojson.Safe.Util in
+        check string "a Current read has no cache window to time out" "\"read\""
+          (Yojson.Safe.to_string (member "digest_read" current.json));
+        check bool "a read digest publishes its incidents as a list" true
+          (match member "incidents" current.json with `List _ -> true | _ -> false))))
+
 let test_agent_truth_keeps_its_integer_policy_deadline () =
   let dir = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
@@ -1284,6 +1366,10 @@ let () =
             test_dashboard_briefing_projection;
           Alcotest.test_case "Current reads commits inside actor and operator TTLs" `Quick
             test_current_observation_reads_commits_inside_actor_ttls;
+          Alcotest.test_case "an unreadable digest is not an empty attention list" `Quick
+            test_an_unreadable_digest_is_not_an_empty_attention_list;
+          Alcotest.test_case "a digest cache timeout is not an empty attention list" `Quick
+            test_a_digest_cache_timeout_is_not_an_empty_attention_list;
           Alcotest.test_case "agent truth retains its actual integer policy deadline" `Quick
             test_agent_truth_keeps_its_integer_policy_deadline;
           Alcotest.test_case "http mission keeps full contract" `Quick

@@ -10003,7 +10003,7 @@ let test_workspace_memory_read_dispatch () =
 
 (* Model responses are a real app-server process fixture. Gate authority and
    replay below use the existing Keeper dispatcher and durable stores. *)
-let native_gate_fixture ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~deferred () =
+let native_gate_fixture ?(refuse_resumed_input=false) ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) ~deferred () =
   let write path text = Out_channel.with_open_bin path (fun out -> output_string out text) in
   let capture = Filename.concat config.Workspace.base_path "native-gate-requests.jsonl" in
   let command = Filename.concat config.base_path "native-gate-codex" in
@@ -10012,6 +10012,7 @@ import json, sys
 if '--masc-warmup' in sys.argv:
     sys.exit(0)
 capture = %S
+refuse_resumed_input = %s
 resumed = False
 turn = 'original-turn'
 def emit(x): print(json.dumps(x), flush=True)
@@ -10033,12 +10034,14 @@ for line in sys.stdin:
         emit({'id':ident,'result':{'thread':{'id':'gate-thread'},'model':'gate-fixture'}})
     elif method == 'thread/inject_items':
         emit({'id':ident,'result':{}})
+    elif method == 'turn/start' and resumed and refuse_resumed_input:
+        emit({'id':ident,'error':{'code':-32602,'message':'Input exceeds the maximum length','data':{'input_error_code':'input_too_large','actual_chars':2000000,'max_chars':1048576}}})
     elif method == 'turn/start':
         emit({'id':ident,'result':{'turn':{'id':turn}}})
         if resumed: finish()
         else: emit({'id':'gate-call','method':'item/tool/call','params':{'threadId':'gate-thread','turnId':turn,'callId':'gate-call','tool':'WebSearch','namespace':None,'arguments':{}}})
     elif method is None and ident == 'gate-call': finish()
-|} capture);
+|} capture (if refuse_resumed_input then "True" else "False"));
   Unix.chmod command 0o700;
   let config_path = Filename.concat config.base_path "native-gate-runtime.toml" in
   write config_path (Printf.sprintf {|
@@ -10091,7 +10094,7 @@ default = "official.primary"
         ~config:native_config ()) in
   run, capture, executions
 
-let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_unavailable=false) ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_unavailable=false) ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_resume_refused=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
   with_exec_fixture ~process:native ~bind_eio_context:native "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -10136,7 +10139,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
         | Some (Masc.Keeper_tool_execution.Owned_job_result_wait _)
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=None}) -> fail "producer lost typed Gate identity" in
       let native_settlement = ref None in
-      let native_fixture = if native then Some (native_gate_fixture ~config ~meta ~deferred ()) else None in
+      let native_fixture = if native then Some (native_gate_fixture ~refuse_resumed_input:native_resume_refused ~config ~meta ~deferred ()) else None in
       let () = match native_fixture with
         | None -> ()
         | Some (run, _, executions) ->
@@ -10487,6 +10490,33 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          let resumed = run ~continuation ~goal_blocks ~goal:model.text ~on_transmitted:(fun _ ->
            Gate.observe_native_input ?blocks:goal_blocks ~prepared:model ~config ~user_message:"Finish the original research" admission ~transmitted:model.text
              |> require "actual native input transmission") () in
+         if native_resume_refused then (
+           (* The app-server refuses the resumed Gate input for size (#50398).
+              Nothing can carry the continuation, so the operation ends with
+              that refusal, not as a Gate that failed to persist. *)
+           let failure = match resumed.Masc.Keeper_codex_runtime.result with
+             | Error (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
+                 {reason=Agent_core.Retry.Request_body_refused_by_provider {status=413}; _}) as failure) -> failure
+             | Error e -> fail ("resume refusal lost its typed size: " ^ Agent_core.Error.to_string e)
+             | Ok _ -> fail "a resume refused for input size completed" in
+           check bool "refused resume keeps its own error" true
+             (Gate.finish_run ~config ~keeper_name ~operation_id admission (Error failure) = Error failure);
+           check bool "refused resume leaves its Gate obligation undischarged" true
+             ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id
+               |> require "refused obligations") <> []);
+           (match Masc.Keeper_official_client_session_store.load ~base_path ~keeper_name
+                  |> require "refused native session" with
+            | Some {Masc.Keeper_official_client_session_store.phase=Masc.Keeper_official_client_session_store.Recovery_required
+                {failure=Masc.Keeper_official_client_session_store.Protocol_failed; _}; _} -> ()
+            | Some _ | None -> fail "refused resume did not leave a Protocol_failed session record");
+           let run_failure = (Keeper_request_failure.of_core_error failure).cause in
+           match Gate.failed_run_end ~config ~keeper_name ~run_failure admission
+                 |> require "refused continuation end" with
+           | Some (Keeper_request_failure.Core {category=Agent_core.Error.Api_category; _} as cause) ->
+             check bool "operation ends with the refusal itself" true (cause = run_failure)
+           | Some _ -> fail "a refused Gate continuation ended with another cause than its refusal"
+           | None -> fail "a refused official-client Gate continuation was suspended again")
+         else (
          (match resumed.Masc.Keeper_codex_runtime.result with Ok _ -> () | Error e -> fail (Agent_core.Error.to_string e));
          if native_output_rejected then (
            let rejected = Error (Agent_core.Error.Internal "fixture output rejected after native settlement") in
@@ -10518,12 +10548,13 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          check int "native model receives the original input once" 1 (occurrences "Finish the original research");
          check bool "native model receives each resolution fragment once" true
            (model.resolution_blocks <> [] && List.for_all (fun block ->
-              occurrences (Agent_core.Types.text_of_content [block]) = 1) model.resolution_blocks)
+              occurrences (Agent_core.Types.text_of_content [block]) = 1) model.resolution_blocks))
        | None ->
       Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
         ~checkpoint admission |> require "discharge only admitted evidence";
       Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
         ~checkpoint admission |> require "same admitted evidence survives a same-operation runtime setup retry");
+      if not native_resume_refused then (
       check bool "all Gate obligations accounted" true
         ((Registry.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> require "obligations") = []);
       (match Gate.record_completed ~config ~keeper_name admission |> require "completed direct continuation receipt" with
@@ -10559,7 +10590,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          | {state=Masc.Keeper_approval_queue_result.Resolution_consumed; replay_outcome=None; _} -> ()
          | _ -> fail "exact call did not consume only its one-shot authorization"));
       Masc.Keeper_owner.succeed_running_operation owner ~operation_id ~outcome_ref:"same-operation-completed"
-        |> require "same operation completion" |> ignore))
+        |> require "same operation completion" |> ignore)))
 
 let test_edit_manifest_through_model_projection () =
   List.iter (fun fail_manifest ->
@@ -10912,6 +10943,8 @@ let () =
         (test_direct_gate_current_history_resume ~native:true ~one_shot:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "native Gate input settles despite rejected output" `Quick
         (test_direct_gate_current_history_resume ~native:true ~native_output_rejected:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "official-client Gate resume refused for input size ends with that refusal" `Quick
+        (test_direct_gate_current_history_resume ~native:true ~native_resume_refused:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "official-client structured Gate input sends the original once with its resolution" `Quick
         (test_direct_gate_current_history_resume ~native:true ~native_blocks:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "official-client Gate resumes original native session and exact replay" `Quick

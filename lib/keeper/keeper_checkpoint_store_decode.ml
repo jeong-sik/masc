@@ -31,6 +31,14 @@ let decode_head_off_scheduler ~session_dir ~memo (content : string) :
       Objects.load memo ~read_object:(Keeper_checkpoint_object_store.read ~session_dir) head
       |> Result.map (fun checkpoint -> head, checkpoint))
 
+let decode_head_read_only_off_scheduler ~session_dir (content : string) =
+  offload_checkpoint_cpu (fun () ->
+    match Objects.head_of_string content with
+    | Error _ as error -> error
+    | Ok head ->
+      Objects.load_read_only ~read_object:(Keeper_checkpoint_object_store.read ~session_dir) head
+      |> Result.map (fun checkpoint -> head, checkpoint))
+
 type checkpoint_read_failure =
   | Os_error of Unix.error
   | Changed_while_read
@@ -148,7 +156,7 @@ let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string)
         match read_checkpoint_bytes ~session_dir path with
         | Error e -> Error e
         | Ok bytes ->
-          (match decode_head_off_scheduler ~session_dir ~memo:(Objects.create_memo ()) bytes with
+          (match decode_head_read_only_off_scheduler ~session_dir bytes with
            | Ok (_head, ckpt) -> Ok ckpt
            | Error e -> Error (classify_objects_error e))
       with

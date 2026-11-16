@@ -24,6 +24,13 @@ val decode_head_off_scheduler :
   string ->
   (Agent_core.Checkpoint_objects.head * Agent_core.Checkpoint.t, Agent_core.Checkpoint_objects.load_error) result
 
+(** Complete snapshot decode with the same checks, without populating an
+    encoding memo that the reader would discard. *)
+val decode_head_read_only_off_scheduler :
+  session_dir:string ->
+  string ->
+  (Agent_core.Checkpoint_objects.head * Agent_core.Checkpoint.t, Agent_core.Checkpoint_objects.load_error) result
+
 type checkpoint_read_failure =
   | Os_error of Unix.error
   | Changed_while_read

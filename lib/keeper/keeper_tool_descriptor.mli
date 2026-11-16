@@ -297,6 +297,13 @@ val declared_loading : t -> Tool_definition_toml.loading
     [Always_loaded]. *)
 val declared_loading_of_model_name : string -> Tool_definition_toml.loading
 
+(** The names a Keeper model calls the tools whose file declares
+    [same_turn_result_stub = true] by, sorted (RFC-0510 D6). The request
+    assembly matches these against the name in a history [ToolUse] block. A
+    tool file that belongs to no descriptor, or to one with no model name,
+    contributes nothing here. *)
+val same_turn_result_pointer_model_names : unit -> string list
+
 (** Every name owned by a descriptor, including transport-alias names. This is
     for name-integrity checks, never Keeper execution admission. *)
 val registered_names : t -> string list

@@ -3295,6 +3295,19 @@ let declared_loading_of_model_name name =
      | None -> Tool_definition_toml.Always_loaded)
 ;;
 
+(* The declaration sits in the tool file named for the internal name; a
+   result in the history names its tool as the model called it. An add-on
+   export has no tool file and declares nothing. *)
+let same_turn_result_pointer_model_names () =
+  List.concat_map
+    (fun descriptor ->
+       match Tool_same_turn_result_declarations.declared descriptor.internal_name with
+       | Some Tool_definition_toml.Repeat_sent_as_pointer -> keeper_model_names descriptor
+       | Some Tool_definition_toml.Repeat_sent_whole | None -> [])
+    (all_descriptors ())
+  |> List.sort_uniq String.compare
+;;
+
 let registered_names descriptor =
   [ descriptor.internal_name; descriptor.public_name ]
   |> List.sort_uniq String.compare

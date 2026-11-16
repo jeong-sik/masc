@@ -966,11 +966,18 @@ module For_testing : sig
   (** The least body, in bytes, of a result {!Finished_turns_as_markers}
       sends as a marker. *)
 
+  (** [same_turn_result_as_pointer], asked with the name in a history
+      [ToolUse] block, says whether that tool's repeated results leave as a
+      pointer to the turn's first one ({!Keeper_same_turn_result_stub},
+      RFC-0510). Omitted, no tool does. The pointer is placed before the
+      demotion plan, on the range the checkpoint history chose. *)
+
   val compose_carried_model_input :
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?finished_turn_results:finished_turn_results ->
     ?history_at_start:Keeper_turn_boundaries.history_at_start ->
+    ?same_turn_result_as_pointer:(string -> bool) ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     measure_wire_bytes:(Agent_core.Types.message -> int option) ->
     front:Keeper_carried_front.seed option ->
@@ -987,6 +994,7 @@ module For_testing : sig
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?finished_turn_results:finished_turn_results ->
     ?history_at_start:Keeper_turn_boundaries.history_at_start ->
+    ?same_turn_result_as_pointer:(string -> bool) ->
     ?tools:Yojson.Safe.t list ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->

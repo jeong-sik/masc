@@ -7583,3 +7583,4 @@
 (include stanzas/test_tui_termios_reclaim.inc)
 
 (include stanzas/test_keeper_same_turn_result_stub.inc)
+(include stanzas/test_tool_same_turn_result_declarations.inc)

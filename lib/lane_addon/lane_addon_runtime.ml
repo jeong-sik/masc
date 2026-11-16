@@ -3639,6 +3639,13 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_declaration;message;current=None}) in
           let* () = Lane_addon_sources.authorize ~access declaration.binding
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
+          (* HIGH-RISK-UNREVIEWED: reconcile attaches a Shared declaration as
+             operator configuration and records no saver for it, so a record
+             grant saved by this caller would read records as the operator.
+             Only the operator saves one. *)
+          let* (_ : Lane_addon_records.grant list) =
+            Lane_addon_records.grants ~operator_owned:false declaration.binding
+            |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
           let* visibility = binding_visibility m ~access declaration.binding
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
           (match access, visibility with

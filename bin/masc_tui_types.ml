@@ -27714,10 +27714,42 @@ let keeper_message_inflight_rows (state : state) ~now =
       , ui_text state ~ko:"  대화 기록 조회 중…" ~en:"  Loading conversation history…" ]
     else []
 
-let keeper_message_schedule_rows state ~now ~max_rows =
+(* One drawn row of the chat's schedule block: what leads it and the facts it
+   holds. A row that continues the one above leads with blanks of the same
+   width. *)
+type chat_schedule_line =
+  { csl_lead : string
+  ; csl_pieces : chat_schedule_proximity Masc_tui_chat_facts.piece list
+  }
+
+(* Jobs listed under the header when the block is open. A viewport choice,
+   never a limit on stored jobs or their execution. *)
+let chat_schedule_open_entries = 3
+
+(* The block's facts are laid out here, at the width the pane draws them, so
+   the rows the viewport counts are the rows it draws (RFC
+   tui-one-screen-grammar section 5.5). [max_rows] is what the viewport can
+   spare: a line that needs more ends with how many facts it left out. *)
+let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
   if state.view <> Keepers Keeper_message || max_rows <= 0 then [] else
+  let module Facts = Masc_tui_chat_facts in
   let plain = Masc_tui_keeper_chat_projection.terminal_safe_text in
-  let notice text = [Schedule_unknown, "  Job · " ^ text ^ " · " ^ chat_schedule_toggle_label] in
+  let fact = Facts.fact in
+  let lines ~lead ~rows_left facts =
+    let lead_cells = Masc_tui_message_layout.display_width lead in
+    let layout =
+      Facts.layout ~max_cells:(max 1 (max_cells - lead_cells)) ~max_rows:rows_left
+        ~more:(Printf.sprintf "외 %d") facts in
+    List.mapi
+      (fun index pieces ->
+        { csl_lead = (if index = 0 then lead else String.make lead_cells ' ')
+        ; csl_pieces = pieces
+        })
+      layout.Facts.rows in
+  let notice facts =
+    lines ~lead:"  " ~rows_left:max_rows
+      (fact Facts.Plain "Job" :: facts @ [fact Facts.Plain chat_schedule_toggle_label]) in
+  let unread text = notice [fact (Facts.Reading Schedule_unknown) text] in
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
@@ -27732,22 +27764,26 @@ let keeper_message_schedule_rows state ~now ~max_rows =
         | None -> false in
       let reading = detail_read_waiting state ~tab:Detail_automation ~keeper:keeper_name in
       match snapshot with
-      | None -> notice (if failed then "조회 실패" else if reading then "조회 중" else "미조회")
+      | None -> unread (if failed then "조회 실패" else if reading then "조회 중" else "미조회")
       | Some snapshot when Option.is_some snapshot.scs_read_error
-                           || Option.is_none snapshot.scs_request_count -> notice "저장소 조회 불가"
+                           || Option.is_none snapshot.scs_request_count -> unread "저장소 조회 불가"
       | Some snapshot ->
           let entries = chat_schedule_entries ~keeper_name snapshot in
           let kept = failed || reading in
-          let observed = match Time_codec.parse_rfc3339_opt snapshot.scs_observed_at_iso with
-            | None -> plain snapshot.scs_observed_at_iso
+          (* A server instant in the operator's time zone, to the minute. One
+             that does not parse is shown as the server wrote it. *)
+          let local_minute iso = match Time_codec.parse_rfc3339_opt iso with
+            | None -> plain iso
             | Some at ->
                 let tm = Unix.localtime at in
                 Printf.sprintf "%02d-%02d %02d:%02d" (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
-          let with_freshness text =
-            if kept then "이전 관측 " ^ observed
-              ^ (if failed then "/갱신 실패" else "/갱신 중") ^ " · " ^ text
-            else text in
-          let partial = if snapshot.scs_truncated then " · 일부 목록" else "" in
+          let observed = local_minute snapshot.scs_observed_at_iso in
+          let freshness =
+            if kept
+            then [fact ~label:"이전 관측 " Facts.Plain
+                    (observed ^ if failed then "/갱신 실패" else "/갱신 중")]
+            else [] in
+          let partial = if snapshot.scs_truncated then [fact Facts.Plain "일부 목록"] else [] in
           let describe (row, due) =
             let proximity = chat_schedule_proximity ~now due in
             let clock = match due with
@@ -27757,39 +27793,40 @@ let keeper_message_schedule_rows state ~now ~max_rows =
                   Printf.sprintf "%02d-%02d %02d:%02d 예정"
                     (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
             let reason label = function
-              | None -> label
-              | Some reason -> label ^ ": " ^ plain reason in
+              | None -> [label]
+              | Some reason -> [label ^ ": " ^ plain reason] in
             let stage = row.sch_occurrence.Tui_schedule_observation.stage in
+            (* What became of the latest occurrence, one fact a clause. *)
             let tone, occurrence = match stage with
               | No_occurrence ->
                   (match Schedule_domain.schedule_status_of_string row.sch_status with
-                   | Ok Running -> Schedule_pending, "예약 전달 중"
-                   | Ok Failed -> Schedule_failed, "예약 전달 실패"
+                   | Ok Running -> Schedule_pending, ["예약 전달 중"]
+                   | Ok Failed -> Schedule_failed, ["예약 전달 실패"]
                    | Ok (Scheduled | Due) ->
                        (match proximity with
-                        | Schedule_elapsed -> Schedule_pending, "예정 시각 지남 · 실행 상태 미확인"
-                        | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, "예약 대기"
-                        | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, "예약 대기")
-                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, "실행 상태 미확인")
-              | Dispatching -> Schedule_pending, "예약 전달 중"
+                        | Schedule_elapsed -> Schedule_pending, ["예정 시각 지남"; "실행 상태 미확인"]
+                        | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown -> proximity, ["예약 대기"]
+                        | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled -> proximity, ["예약 대기"])
+                   | Ok (Succeeded | Cancelled | Expired) | Error _ -> Schedule_unknown, ["실행 상태 미확인"])
+              | Dispatching -> Schedule_pending, ["예약 전달 중"]
               | Dispatch_failed error -> Schedule_failed, reason "최근 회차 전달 실패" error
-              | Queued -> Schedule_pending, "예약 도착 · 처리 대기"
-              | Queued_at owner -> Schedule_pending, "최근 회차 인계 · " ^ plain owner ^ " 처리 대기"
-              | Missing -> Schedule_pending, "최근 회차 큐 누락 · 실행 미확인"
-              | Turn_started -> Schedule_running, "최근 회차 턴 시작 확인"
-              | Turn_ended -> Schedule_pending, "최근 회차 턴 종료 · 결과 확인 중"
-              | Consumed -> Schedule_pending, "최근 회차 소비 확인 · 결과 미확인"
-              | Completed -> Schedule_settled, "최근 회차 턴 완료"
+              | Queued -> Schedule_pending, ["예약 도착"; "처리 대기"]
+              | Queued_at owner -> Schedule_pending, ["최근 회차 인계"; plain owner ^ " 처리 대기"]
+              | Missing -> Schedule_pending, ["최근 회차 큐 누락"; "실행 미확인"]
+              | Turn_started -> Schedule_running, ["최근 회차 턴 시작 확인"]
+              | Turn_ended -> Schedule_pending, ["최근 회차 턴 종료"; "결과 확인 중"]
+              | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 미확인"]
+              | Completed -> Schedule_settled, ["최근 회차 턴 완료"]
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
-              | Settling _ -> Schedule_pending, "최근 회차 결과 기록 중"
-              | Transferring _ -> Schedule_pending, "최근 회차 인계 기록 중"
-              | Unknown why -> Schedule_pending, plain why in
+              | Settling _ -> Schedule_pending, ["최근 회차 결과 기록 중"]
+              | Transferring _ -> Schedule_pending, ["최근 회차 인계 기록 중"]
+              | Unknown why -> Schedule_pending, [plain why] in
             let hold = match row.sch_runner_hold with
-              | None -> ""
+              | None -> []
               | Some hold ->
                   let wording = match hold.Tui_decode.srh_reason with
-                    | Hold_previous_wake_untaken -> "다음 회차 보류: 이전 예약 미소비"
-                    | Hold_target_shutdown_fenced _ -> "다음 회차 보류: Keeper 종료 처리 중" in
+                    | Hold_previous_wake_untaken -> "이전 예약 미소비"
+                    | Hold_target_shutdown_fenced _ -> "Keeper 종료 처리 중" in
                   let freshness = if kept then Tui_decode.List_kept else Tui_decode.List_latest in
                   let as_of = match Tui_decode.schedule_hold_reading
                       ~freshness ~runner:snapshot.scs_runner_status hold with
@@ -27798,43 +27835,57 @@ let keeper_message_schedule_rows state ~now ~max_rows =
                         let tm = Unix.localtime checked in
                         Printf.sprintf " (%02d-%02d %02d:%02d 관측)"
                           (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min in
-                  " · " ^ wording ^ as_of in
+                  [fact ~label:"다음 회차 보류: " (Facts.Reading Schedule_pending) (wording ^ as_of)] in
             let title = match row.sch_payload_summary with
               | Some value -> value | None -> row.sch_schedule_id in
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
                          | Cancelled _ | Settling _ | Transferring _) ->
-                  " · 다음 예정 " ^ plain at
+                  [fact ~label:"다음 예정 " Facts.Plain (local_minute at)]
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
-                      | Cancelled _ | Settling _ | Transferring _) -> "" in
-            tone, occurrence ^ hold ^ " · " ^ plain title ^ " · " ^ clock ^ next in
-          let toggle = chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기") in
+                      | Cancelled _ | Settling _ | Transferring _) -> [] in
+            List.map (fact (Facts.Reading tone)) occurrence
+            @ hold
+            @ [fact Facts.Plain (plain title); fact (Facts.Reading proximity) clock]
+            @ next in
+          let toggle = fact Facts.Plain
+              (chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기")) in
           match entries with
-          | [] -> notice (with_freshness ("관측된 예약 없음" ^ partial))
+          | [] -> notice (freshness @ [fact (Facts.Reading Schedule_unknown) "관측된 예약 없음"] @ partial)
           | first :: _ ->
-              let proximity, text = describe first in
-              let header_text = if state.msg_schedules_expanded && max_rows > 1
-                then Printf.sprintf "예약 Job %d개" (List.length entries)
-                else "예약 Job · " ^ text in
-              let header = proximity, "  " ^ with_freshness header_text ^ partial ^ " · " ^ toggle in
-              if not state.msg_schedules_expanded || max_rows = 1 then [header] else
-              let available = min 3 (max_rows - 1) in
-              let shown = List.take available entries in
-              let remaining = List.length entries - List.length shown in
-              header :: List.map (fun entry ->
-                let proximity, text = describe entry in proximity, "    · " ^ text) shown
-              @ (if remaining > 0 && List.length shown + 1 < max_rows then
-                   [Schedule_unknown, Printf.sprintf "    +%d개 · Keeper Automation에서 전체 확인" remaining]
-                 else [])
+              let headed subject = lines ~lead:"  " ~rows_left:max_rows
+                  (freshness @ subject @ partial @ [toggle]) in
+              let closed () = headed (fact Facts.Plain "예약 Job" :: describe first) in
+              if not state.msg_schedules_expanded then closed () else
+              let header = headed
+                  [fact ~label:"예약 Job " Facts.Amount (Printf.sprintf "%d개" (List.length entries))] in
+              (* An open block whose heading leaves no row for a job would list
+                 none. The closed row describes the next job in the same rows. *)
+              if max_rows - List.length header <= 0 then closed () else
+              let rows, shown, rows_left =
+                List.fold_left
+                  (fun (rows, shown, rows_left) entry ->
+                    if rows_left <= 0 then rows, shown, rows_left
+                    else
+                      let drawn = lines ~lead:"    \xc2\xb7 " ~rows_left (describe entry) in
+                      rows @ drawn, shown + 1, rows_left - List.length drawn)
+                  (header, 0, max_rows - List.length header)
+                  (List.take chat_schedule_open_entries entries) in
+              let remaining = List.length entries - shown in
+              if remaining > 0 && rows_left > 0
+              then rows @ lines ~lead:"    " ~rows_left
+                  [ fact Facts.Plain (Printf.sprintf "+%d개" remaining)
+                  ; fact Facts.Plain "Keeper Automation에서 전체 확인" ]
+              else rows
 
 type keeper_message_status_frame =
   { kmsf_source : keeper_message_status_source
   ; kmsf_inflight_rows : (bool * string) list
   ; kmsf_activity_rows : Masc_tui_answering.chat_activity_row list
   ; kmsf_interrupt_rows : string list
-  ; kmsf_schedule_rows : (chat_schedule_proximity * string) list
+  ; kmsf_schedule_rows : chat_schedule_line list
   ; kmsf_evidence_rows : string list
   ; kmsf_title_suffix : string
   ; kmsf_status_block_rows : int
@@ -27910,6 +27961,11 @@ let keeper_message_evidence_layout state ~terminal_cols =
 
 (* These are the same original rows used by the budget and the draw. The
    frame is local to that synchronous call, never a state or worker cache. *)
+let keeper_message_schedule_cells state ~terminal_cols =
+  Masc_tui_frame.inner_width
+    ~cols:(Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state)
+             ~cols:terminal_cols)
+
 let keeper_message_status_frame ?(schedule_budget = 1) ?(terminal_cols = max_int) state ~now =
   let evidence_rows, title_suffix = keeper_message_evidence_layout state ~terminal_cols in
   { kmsf_source = keeper_message_status_source state ~now
@@ -27917,6 +27973,7 @@ let keeper_message_status_frame ?(schedule_budget = 1) ?(terminal_cols = max_int
   ; kmsf_activity_rows = keeper_message_activity_rows state
   ; kmsf_interrupt_rows = keeper_observed_interrupt_rows state
   ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:schedule_budget
+      ~max_cells:(keeper_message_schedule_cells state ~terminal_cols)
   ; kmsf_evidence_rows = evidence_rows
   ; kmsf_title_suffix = title_suffix
   ; kmsf_status_block_rows = 1
@@ -27981,15 +28038,18 @@ let keeper_message_frame_for_viewport ?scroll ~status_block_rows state ~now ~ter
     + (if keeper_message_reading_back ?scroll state then 0 else 1) in
   (* Keep the existing three-row transcript minimum. The status block takes
      what it needs of the rows above that first, because it names whom the
-     next Enter reaches; extra schedule rows are a viewport choice, never a
-     limit on stored jobs or their execution, and take what is left. *)
+     next Enter reaches; schedule rows are a viewport choice, never a limit on
+     stored jobs or their execution, and take what is left. How many jobs an
+     open block lists is [chat_schedule_open_entries]; how many rows they
+     wrap to follows the width. *)
   let spare = max 0
       (Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows - 3) in
   let block_extra = min spare (max 0 (status_block_rows - 1)) in
-  let budget = min 5 (spare - block_extra) in
   { frame with
     kmsf_status_block_rows = 1 + block_extra
-  ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:budget
+  ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now
+      ~max_rows:(spare - block_extra)
+      ~max_cells:(keeper_message_schedule_cells state ~terminal_cols)
   }
 
 let keeper_message_command_window ~status_frame ?scroll state ~terminal_rows ~terminal_cols =

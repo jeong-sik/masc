@@ -4711,13 +4711,26 @@ let render_keeper_message (state : state) =
        [chat_tail_entries] -- so the conversation holds one time axis and
        these rows scroll with the lines they follow. *)
 
-    List.iter (fun (proximity, line) ->
-      let style = match proximity with
-        | Schedule_failed -> Theme.bad ()
-        | Schedule_elapsed | Schedule_soon | Schedule_pending -> Theme.warn ()
-        | Schedule_today | Schedule_running -> Theme.info ()
-        | Schedule_later | Schedule_unknown | Schedule_settled -> Theme.recede () in
-      box_line_styled chat_buf chat_cols ~style line)
+    (* A schedule reading keeps its status colour; the job's title and the
+       keys around it are drawn plain, so the colour marks the state and not
+       the whole row. *)
+    let schedule_palette =
+      { Chat_facts.label_style = Theme.recede ()
+      ; who_style = Theme.category Theme.Slot_1
+      ; amount_style = Theme.category Theme.Slot_2
+      ; reading_style =
+          (function
+            | Schedule_failed -> Theme.bad ()
+            | Schedule_elapsed | Schedule_soon | Schedule_pending -> Theme.warn ()
+            | Schedule_today | Schedule_running -> Theme.info ()
+            | Schedule_later | Schedule_unknown | Schedule_settled -> Theme.recede ())
+      ; reset = Ansi.reset
+      }
+    in
+    List.iter
+      (fun (line : Masc_tui_types.chat_schedule_line) ->
+        box_line chat_buf chat_cols
+          (line.csl_lead ^ Chat_facts.draw schedule_palette line.csl_pieces))
       status_frame.kmsf_schedule_rows;
 
     (* Input area divider *)

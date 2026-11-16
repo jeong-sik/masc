@@ -133,19 +133,22 @@ shim 은 서버 릴리즈의 자산이고(RFC-0427 B-1), 설치기가 놓는다(
 다르면 `microvm_shim_hash_mismatch` 로 거절한다. 따로 할 일은 없다. microvm
 keeper 를 돌리지 않는 호스트는 `--no-guest-shim` 으로 건너뛴다.
 
-로컬 빌드로 배포할 때는 `scripts/install-local-build.sh` 가 이미 있는 릴리즈 shim 을
-맞춘다. 새로 놓지는 않는다. workspace 에 바이너리와 sidecar 가 둘 다 있으면, 빌드한
+평소 로컬 빌드 설치는 게스트 shim 을 그대로 두며 릴리즈를 조회하지 않는다.
+microVM 에 서버·shim 변경을 배포하거나 `remote_shim_outdated` 를 해결할 때는
+`scripts/install-local-build.sh --refresh-guest-shim` 으로 이미 있는 릴리즈 shim 을
+맞춘다. 빌드가 끝났으면 `--skip-build` 도 붙인다. 새로 놓지는 않는다.
+이 옵션을 주고 workspace 에 바이너리와 sidecar 가 둘 다 있으면, 빌드한
 서버가 말하는 버전의 릴리즈에서 같은 자산을 받아 `SHA256SUMS` 와 맞춰 보고 두 파일을
-바꾼다. 어느 자산(arm64, amd64)인지는 sidecar 에 적힌 이름에서 읽는다. `--no-guest-shim`
-을 주면 이 단계를 건너뛴다.
+바꾼다. 어느 자산(arm64, amd64)인지는 sidecar 에 적힌 이름에서 읽는다.
+아래 표는 `--refresh-guest-shim` 을 준 경우다.
 
 | 경우 | 하는 일 |
 |---|---|
 | shim 이 없다 | 아무것도 안 한다 |
-| shim 이 이미 그 릴리즈의 것 | 받지 않는다 |
+| shim 이 이미 그 릴리즈의 것 | 체크섬은 조회하고, 바이너리는 다시 받지 않는다 |
 | sidecar 가 없다 (손으로 빌드한 shim) | 건드리지 않는다 |
 | sidecar 에 릴리즈 자산 이름이 없다 | shim 을 그대로 두고 WARN 한 줄, 설치는 계속 |
-| 릴리즈를 읽을 수 없거나, 릴리즈에 그 자산이 없다 | shim 을 그대로 두고 WARN 한 줄(curl 이 말한 이유 포함), 설치는 계속. 다음 설치 때 다시 받는다 |
+| 릴리즈를 읽을 수 없거나, 릴리즈에 그 자산이 없다 | shim 을 그대로 두고 WARN 한 줄(curl 이 말한 이유 포함), 설치는 계속. 다음 명시적 갱신 때 다시 받는다 |
 | 받은 자산이 `SHA256SUMS` 와 다르다 | 아무것도 설치하지 않고 멈춘다 |
 
 켜져 있는 게스트는 다음 요청부터 새 shim 을 쓴다. 서버는 옛 shim 이 probe 에 답한

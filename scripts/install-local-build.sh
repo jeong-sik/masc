@@ -15,11 +15,11 @@
 # install says so and goes on. A non-directory path, a broken symlink or an
 # unobservable path is not a new workspace and stops the install.
 #
-# The guest exec shim of a microVM workspace goes with the server too. The
-# release installer places it (RFC-0427 B-2); a workspace deployed from local
-# builds has only this script, and its shim stayed three releases behind the
-# server until a keeper log said so (#42726). When the workspace already holds
-# a release shim (masc-exec-shim with its sha256 sidecar), it is replaced by
+# Local installs leave the guest exec shim alone and make no release request
+# for it. --refresh-guest-shim updates an existing release shim when deploying
+# a server/shim change to microVM Keepers. The release installer places it
+# initially (RFC-0427 B-2). With this option, an existing release shim
+# (masc-exec-shim with its sha256 sidecar) is replaced by
 # the same asset of the release this build names, checked against that
 # release's SHA256SUMS. Which asset is read from the sidecar, which records
 # the one that was installed; nothing is guessed from this shell. A workspace
@@ -27,7 +27,7 @@
 # and is left alone. A release that cannot be read leaves the shim as it is
 # and says so; an asset that does not match its checksum installs nothing.
 # MASC_RELEASE_BASE_URL and MASC_REPO name the release the way
-# scripts/install.sh does; --no-guest-shim skips the step.
+# scripts/install.sh does.
 #
 # The dashboard bundle goes the same way (scripts/lib/install-workspace-dashboard.sh,
 # #49980). A workspace that holds <workspace>/assets/dashboard gets this
@@ -43,7 +43,7 @@
 #
 # Usage: scripts/install-local-build.sh [--prefix DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
-#                                       [--no-guest-shim]
+#                                       [--refresh-guest-shim]
 #                                       [--no-browser-addon]
 #                                       [--print-build-targets]
 #   --prefix        where masc, masc-tui, the browser Add-on programs, SSH
@@ -62,7 +62,8 @@
 #   --no-browser-addon do not build or install the browser Add-on programs, and
 #                   leave the workspace's browser Add-on package and declaration
 #                   as they are. Without the Add-on no browser route works.
-#   --no-guest-shim leave the workspace's guest exec shim as it is
+#   --refresh-guest-shim fetch release checksums and refresh an existing guest
+#                   exec shim; default installation leaves it as it is
 #   --print-build-targets print the exact Dune inputs for this install and exit
 #                   without locking, building, checking or changing a workspace
 set -euo pipefail
@@ -71,7 +72,7 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 prefix="$HOME/.local/bin"
 build_dir="$repo/_build/default/bin"
 skip_build=false
-guest_shim=true
+guest_shim=false
 # Every browser route runs in the browser Add-on, so its programs are installed with masc, from the same build, unless
 # --no-browser-addon says the workspace needs no browser.
 browser_addon=true
@@ -90,7 +91,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
     --build-dir) build_dir=${2:?--build-dir needs a directory}; shift 2 ;;
-    --no-guest-shim) guest_shim=false; shift ;;
+    --refresh-guest-shim) guest_shim=true; shift ;;
     --no-browser-addon) browser_addon=false; shift ;;
     --skip-build) skip_build=true; shift ;;
     --print-build-targets) print_build_targets=true; shift ;;
@@ -335,7 +336,7 @@ sha256_of() {
 guest_shim_assets="masc-exec-shim-linux-arm64 masc-exec-shim-linux-amd64"
 
 # One attempt each, because the build lock is held while this waits and the
-# next install tries again: SHA256SUMS is a few kilobytes, the shim about five
+# next explicit refresh tries again: SHA256SUMS is a few kilobytes, the shim about five
 # megabytes.
 guest_shim_sums_timeout_s=20
 guest_shim_asset_timeout_s=120
@@ -384,7 +385,7 @@ refresh_guest_shim() (
   trap remove_staged EXIT
   sums=$(mktemp "${TMPDIR:-/tmp}/masc-guest-shim-sums.XXXXXX")
   if ! refused=$(curl -fsSL --max-time "$guest_shim_sums_timeout_s" -o "$sums" "$release_base/$tag/SHA256SUMS" 2>&1); then
-    echo "install-local-build: WARN guest exec shim left as it is: $release_base/$tag/SHA256SUMS could not be read ($(printf '%s' "$refused" | tr '\n' ' ')); the next install tries again" >&2
+    echo "install-local-build: WARN guest exec shim left as it is: $release_base/$tag/SHA256SUMS could not be read ($(printf '%s' "$refused" | tr '\n' ' ')); rerun with --refresh-guest-shim to retry" >&2
     exit 0
   fi
   expected=$(awk -v asset="$asset" '$2 == asset { print $1; exit }' "$sums")
@@ -402,7 +403,7 @@ refresh_guest_shim() (
   fi
   staged_shim=$(mktemp "$shim_dir/masc-exec-shim.partial.XXXXXX")
   if ! refused=$(curl -fsSL --max-time "$guest_shim_asset_timeout_s" -o "$staged_shim" "$release_base/$tag/$asset" 2>&1); then
-    echo "install-local-build: WARN guest exec shim left as it is: $release_base/$tag/$asset could not be downloaded ($(printf '%s' "$refused" | tr '\n' ' ')); the next install tries again" >&2
+    echo "install-local-build: WARN guest exec shim left as it is: $release_base/$tag/$asset could not be downloaded ($(printf '%s' "$refused" | tr '\n' ' ')); rerun with --refresh-guest-shim to retry" >&2
     exit 0
   fi
   if ! downloaded=$(sha256_of "$staged_shim"); then

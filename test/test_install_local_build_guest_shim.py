@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A local install brings a workspace's release guest shim to the build's release."""
+"""Local installs refresh a workspace's release guest shim only when requested."""
 import hashlib
 import os
 from pathlib import Path
@@ -83,12 +83,13 @@ def workspace_with_shim(root, content=OLD_SHIM, sidecar: str | None = sidecar_li
     return base, shim, directory / "masc-exec-shim.sha256"
 
 
-def install(root, build, releases, base=None, *more, env=None):
+def install(root, build, releases, base=None, *more, env=None, refresh=True):
     named = [] if base is None else ["--base-path", str(base)]
+    refresh_args = ["--refresh-guest-shim"] if refresh else []
     return subprocess.run(
         ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
          "--prefix", str(root / "prefix"),
-         *named, *more],
+         *named, *refresh_args, *more],
         env=dict(os.environ if env is None else env, MASC_RELEASE_BASE_URL=releases),
         cwd=root, capture_output=True, text=True)
 
@@ -217,14 +218,24 @@ class GuestShim(unittest.TestCase):
             self.assertFalse((base / ".masc/microvm").exists())
             self.assertNotIn("guest exec shim", result.stdout + result.stderr)
 
-    def test_no_guest_shim_leaves_the_shim_and_asks_no_release(self):
+    def test_default_install_leaves_the_shim_and_asks_no_release(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             base, shim, sidecar = workspace_with_shim(root)
-            result = install(root, build_naming(root), release_base(root), base, "--no-guest-shim")
+            hooks = root / "hooks"
+            hooks.mkdir()
+            requested = root / "release-requested"
+            curl = hooks / "curl"
+            curl.write_text(f'#!/bin/sh\ntouch "{requested}"\nexit 99\n')
+            curl.chmod(0o755)
+            env = local_build.unnamed_env(root)
+            env["PATH"] = str(hooks) + os.pathsep + env["PATH"]
+            result = install(root, build_naming(root), release_base(root), base,
+                             env=env, refresh=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(shim.read_bytes(), OLD_SHIM)
             self.assertEqual(sidecar.read_text(), sidecar_line(OLD_SHIM))
+            self.assertFalse(requested.exists(), "a default install requested a release")
             self.assertNotIn("guest exec shim", result.stdout + result.stderr)
             self.assertTrue((root / "prefix/masc").is_file())
 
@@ -323,7 +334,7 @@ class GuestShim(unittest.TestCase):
         lines = result.stdout.splitlines()
         self.assertTrue(lines[0].startswith("# Usage: scripts/install-local-build.sh"), lines[0])
         for option in ("--prefix", "--skip-build", "--build-dir",
-                       "--base-path", "--no-guest-shim", "--print-build-targets"):
+                       "--base-path", "--refresh-guest-shim", "--print-build-targets"):
             self.assertEqual(sum(line.startswith(f"#   {option} ") for line in lines), 1, option)
 
 

@@ -133,9 +133,9 @@ let event_of_json json =
 let invalid () = Error "event does not follow the original request progress"
 let step phase = function
   | Replacement_intended _ | Replacement_observed _ -> (match phase with
-      | Conflicted _ -> Ok phase
+      | Conflicted _ | Rejected _ -> Ok phase
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Commit_unknown _ | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> invalid ())
+      | Commit_unknown _ | Finished _ | Subdividing _ | Subdivided _ -> invalid ())
   | Preparation_intended _ | Preparation_observed _ -> (match phase with
       | Judged _ -> Ok phase
       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
@@ -233,10 +233,13 @@ let append_validated t event =
     | Replacement_intended _,Some (Preparation_pending _ | Preparation_confirmed _)
     | Replacement_observed _,(None | Some (Preparation_pending _ | Preparation_confirmed _)) ->
       Error "replacement acknowledgement does not follow its exact immutable intent"
+    | (Successor_intended _ | Refusal_settled _),Some (Preparation_pending _ | Preparation_confirmed _) ->
+      Error "a replacement publication cannot acquire another refusal disposition"
+    | (Successor_intended _ | Refusal_settled _),None -> Ok None
     | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
       | Preparation_intended _ | Preparation_observed _ | Commit_intended _ | Commit_uncertain _
       | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
-      | Refusal_settled _ | Successor_intended _ | Successor_observed _ | Observer _),
+      | Successor_observed _ | Observer _),
       (None | Some (Preparation_pending _ | Preparation_confirmed _)) -> Ok t.replacement in
   let* settlement = match event,t.settlement with
     | Refusal_settled evidence,None -> Ok (Some evidence)

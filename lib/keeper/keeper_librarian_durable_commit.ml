@@ -253,11 +253,11 @@ let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_re
      | Retained_unknown Exact.Interrupted
      | Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
      | Retained_not_allowed _ | Retained_request_id_reused -> Ok Settled)
-  | Rejected {stage=Progress.Before_dispatch;evidence} ->
-    (* Its declaration was replaced before any worker received it. The
-       original settles and the next pass selects its range again. *)
-    let* _=Request.confirm_replaced request evidence in
-    Ok Settled
+  | Rejected {stage=Progress.Before_dispatch;_} ->
+    let* exact=Request.request request in
+    let* ended=Keeper_librarian_declaration_replacement.ended ~store
+      ~original:(Owner.listed record) ~exact ~captured:(Request.destination request) in
+    if ended then Ok Settled else Error "Original history has no declaration replacement ending"
   | Subdividing _ | Subdivided _ ->
     Error "Original history record has an unsupported domain phase"
 let validate ~store ~request ~record =

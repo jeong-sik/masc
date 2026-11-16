@@ -56,6 +56,15 @@ let advance_original ~store record event =
     | Ok (Retained.Stored record | Already_stored record) -> Ok record
     | Ok (Unconfirmed detail) -> Error detail
     | Error error -> Error (Retained.update_error_to_string error))
+let can_replace ~store ~(record:Retained.retained) ~request =
+  let* superseded=Commit.is_superseded ~request ~record in
+  if superseded then Ok true else
+  match Request.predecessor request with
+  | None -> Ok false
+  | Some _ -> io (fun () ->
+    let* exact=Request.request request in
+    Declaration_replacement.ended ~store ~original:(Retained.listed record)
+      ~exact ~captured:(Request.destination request))
 let replacement_request (parent:Retained.retained) parent_request (intended:Progress.preparation_intent) =
   let* child=Request.of_json ~owner:(Request.physical_owner parent_request) intended.request in
   let* ()=require (Request.request_id child=intended.request_id)
@@ -73,6 +82,8 @@ let replacement_request (parent:Retained.retained) parent_request (intended:Prog
     "Original history replacement intent changed its immutable source" in
   Ok child
 let recover_replacement ~store ((parent:Retained.retained),parent_request) =
+  let* allowed=can_replace ~store ~record:parent ~request:parent_request in
+  let* ()=require allowed "Original history has no confirmed replacement authority" in
   let* intended,pending=match Progress.replacement parent.progress with
     | Some (Preparation_pending intended) -> Ok (intended,true)
     | Some (Preparation_confirmed intended) -> Ok (intended,false)
@@ -124,6 +135,8 @@ let capture ?replacement_parent ?(before_retain=fun _ -> Ok ())
       let* original=Owner.retain ~store request |> Result.map_error Owner.error_to_string in
       Ok (original,request)
     | Some (parent,parent_request) ->
+      let* allowed=can_replace ~store ~record:parent ~request:parent_request in
+      let* ()=require allowed "Original history has no confirmed replacement authority" in
       let intended:Progress.preparation_intent={request_id;request=Request.to_json request} in
       let* parent=advance_original ~store parent (Progress.Replacement_intended intended) in
       recover_replacement ~store (parent,parent_request))
@@ -169,8 +182,8 @@ let validate_lineage ~store ~fenced ~read listed =
       else
       let* child,request=body (Record.request_id child_record) in
       let* parent,parent_request=body (Record.request_id parent_record) in
-      let* superseded=Keeper_librarian_durable_commit.is_superseded ~request:parent_request ~record:parent in
-      let* ()=require superseded "Original history successor has no known superseded basis" in
+      let* allowed=can_replace ~store ~request:parent_request ~record:parent in
+      let* ()=require allowed "Original history successor has no confirmed replacement authority" in
       let* intended,pending=match Progress.replacement parent.progress with
         | Some (Preparation_pending intended) -> Ok (intended,true)
         | Some (Preparation_confirmed intended) -> Ok (intended,false)
@@ -197,8 +210,8 @@ let validate_lineage ~store ~fenced ~read listed =
       let* intended=match Progress.replacement parent.progress with
         | Some (Preparation_pending intended | Preparation_confirmed intended) -> Ok intended
         | None -> Error "Original history replacement intent disappeared" in
-      let* superseded=Keeper_librarian_durable_commit.is_superseded ~request ~record:parent in
-      let* ()=require superseded "Original history replacement intent has no superseded basis" in
+      let* allowed=can_replace ~store ~request ~record:parent in
+      let* ()=require allowed "Original history replacement intent has no confirmed authority" in
       let* _=replacement_request parent request intended in
       (match find intended.request_id,Progress.replacement parent.progress with
        | None,Some (Preparation_confirmed _) -> Error "Acknowledged original history replacement is missing"
@@ -215,11 +228,12 @@ let validate_lineage ~store ~fenced ~read listed =
       ancestry (predecessor.request_id::seen) parent in
   let* ()=List.fold_left (fun result (record,index) ->
     let* ()=result in ancestry [Record.request_id record] index) (Ok ()) listed in
-  Ok (List.filter (fun ((record:Retained.retained),_) ->
-    match Progress.phase record.progress with
-    | Progress.Conflicted _ -> not (List.mem record.request_id parent_ids) && not (fenced record.request_id)
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-    | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> false) read)
+  let+ candidates=List.fold_left (fun result (((record:Retained.retained),request) as original) ->
+    let* candidates=result in
+    if List.mem record.request_id parent_ids || fenced record.request_id then Ok candidates else
+    let+ allowed=can_replace ~store ~record ~request in
+    if allowed then original::candidates else candidates) (Ok []) read in
+  List.rev candidates
 (* RFC-librarian-history-settles-finished-originals. A chain settles leaf
    first under the day its root was minted, as Workspace Curator chains do:
    each history record, then the gate records of that execution. Every body
@@ -282,6 +296,19 @@ let finish_settling ~store listed =
   (* [original] and its ancestors as the root ID and the chain leaf first.
      Each ancestor must hold the one below it as its acknowledged replacement. *)
   let rec upward above ((record,(index:Request.index)) as original) =
+    let* ()=match Progress.phase (Record.progress record) with
+      | Rejected _ ->
+        let* parent,request=io (fun () ->
+          let* parent=Retained.load_listed ~store record |> Result.map_error Retained.error_to_string in
+          let+ request=Request.restore ~owner:index.owner parent in parent,request) in
+        let* allowed=can_replace ~store ~record:parent ~request in
+        let* ()=require allowed "Archived replacement has no confirmed declaration ending" in
+        let* intended=match Progress.replacement parent.progress with
+          | Some (Preparation_confirmed intended) -> Ok intended
+          | None | Some (Preparation_pending _) -> Error "Archived replacement has no exact publication ACK" in
+        let+ _=replacement_request parent request intended in ()
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok () in
     let above=original::above in
     match index.predecessor with
     | None -> Ok (Record.request_id record,List.rev above)

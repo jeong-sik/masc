@@ -2867,7 +2867,8 @@ let test_history_fence_uncertain_publication_still_blocks () = with_fixture (fun
    | History_fence_stored | History_fence_already_stored | History_fence_owner_changed ->
      fail "post-replacement error was reported as a confirmed fence");
   refuse_fenced_resume fixture original request)
-let test_linked_replacement_preserves_the_resolution_protocol ~cut () = with_fixture (fun ~sw fixture ->
+type linked_recovery = Ended_only | Intent_only | Child_before_ack
+let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () = with_fixture (fun ~sw fixture ->
   let parent,parent_request=retain_absent_history_original ~failed_selection:false fixture in
   let expected=(fence_preview fixture parent_request).expected in
   io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name ~request_id:parent.request_id
@@ -2886,16 +2887,16 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut () = with_fix
     child,request) in
   check bool "the actual continuation is linked to its fenced parent" true (Option.is_some (Capture.predecessor request));
   let exact=Capture.request request |> get in
+  let advance child event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:child ~event with
+    | Ok (Owner.Stored child | Already_stored child) -> child
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error)) in
   let child=if not cut then child else (
     io (fun () -> Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id
       (`Assoc ["declaration_id",`String "librarian";"request_id",`String exact.request_id;
         "digest",`String (Exact.digest exact);"request",Exact.request_to_json exact;
         "attempts",`List [Exact.retained_final_to_json (Exact.Retained_unknown Exact.Cut)];
         "final",Exact.final_to_json Exact.Outcome_unknown]) |> get);
-    let advance child event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:child ~event with
-      | Ok (Owner.Stored child | Already_stored child) -> child
-      | Ok (Unconfirmed detail) -> fail detail
-      | Error error -> fail (Owner.update_error_to_string error)) in
     let child=advance child Progress.Dispatch_intended in
     advance child (Progress.Refused {stage=Execution;
       evidence=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Cut)})) in
@@ -2907,26 +2908,110 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut () = with_fix
   let wakes=ref 0 in
   (match memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
     ~wake:(fun () -> incr wakes)) with
-   | Ok (Consumer.Pending _) | Error (Original_publication_blocked _) -> ()
+   | Ok (Consumer.Memory_not_committed _) -> ()
    | Error error -> fail (Consumer.error_to_string error)
-   | Ok _ -> fail "a linked continuation bypassed its resolution protocol");
+   | Ok _ -> fail "a linked continuation did not retain its declaration ending");
   let actual=io (fun () -> Owner.load ~store:fixture.store ~scope:child.scope ~request_id:child.request_id |> owned |> Option.get) in
-  check json "a linked original retains its phase and has no replacement disposition"
-    (Progress.to_json child.progress) (Progress.to_json actual.progress);
-  check int "a linked original grants no replacement wake" 0 !wakes;
-  check int "a linked original grants no provider replay" 0 (F.post_count fixture.server);
-  check bool "a linked original advances no source" true (progress fixture=positions);
-  check bool "the operator resolution is still awaiting its same child" true ((view ()).completion=Resolution_work.Not_observed);
-  if cut then (
-    let current=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
-      ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun current -> Ok current) |> get in
-    check bool "the proof writer independently rejects linked Cut release" true
-      (Result.is_error (io (fun () -> Keeper_librarian_declaration_replacement.release_cut ~store:fixture.store
-        ~original:(Owner.listed actual) ~exact ~captured:(Capture.destination request) ~current))))
-  else (
+  check bool "a linked original has a host-confirmed declaration ending" true
+    (io (fun () -> Keeper_librarian_declaration_replacement.ended ~store:fixture.store
+      ~original:(Owner.listed actual) ~exact ~captured:(Capture.destination request) |> get));
+  if cut then check bool "Cut keeps its original refusal and separate disposition" true
+    (Progress.phase actual.progress=Progress.phase child.progress
+      && Option.is_some (Progress.settlement actual.progress));
+  check int "the retained ending wakes the serialized lane once" 1 !wakes;
+  check int "ending alone sends no new model request" 0 (F.post_count fixture.server);
+  check bool "ending alone advances no source" true (progress fixture=positions);
+  check bool "ending is not the operator resolution's Memory completion" true
+    ((view ()).completion=Resolution_work.Not_observed);
+  let intended_id=match recovery with
+  | Ended_only ->
+    (* The ending is durable before an intent exists. A rollback still makes
+       a new request; it cannot revive the ended original. *)
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
-    drive_advanced fixture;
-    check int "rollback still admits the original captured child once" 1 (F.post_count fixture.server)))
+    None
+  | Intent_only | Child_before_ack ->
+    let owner=Capture.physical_owner request in
+    let request_id=Capture.fresh_request_id owner in
+    let successor=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination ->
+        io (fun () -> Capture.create ~request_id ~owner ~destination
+          ~predecessor:{request_id=child.request_id;request_digest=child.request_digest}
+          ~source:(Capture.source request) ~preparation:(Capture.preparation request) ())) |> get in
+    let intended:Progress.preparation_intent={request_id;request=Capture.to_json successor} in
+    let parent=advance actual (Progress.Replacement_intended intended) in
+    let inspect ~require_confirmed ()=io (fun () -> Keeper_librarian_history_resolution_lineage.validate_predecessor_payload
+      ~read:(fun ~scope ~request_id -> Owner.load ~store:fixture.store ~scope ~request_id
+        |> Result.map_error Owner.error_to_string)
+      ~read_fence:(Store.load_history_fence fixture.store)
+      ~read_resolution:(Store.load_history_resolution fixture.store) ~require_confirmed successor) in
+    inspect ~require_confirmed:false () |> get;
+    check bool "the staged whole request does not claim its parent's ACK" true
+      (Result.is_error (inspect ~require_confirmed:true ()));
+    if cut then (
+      let raised=List.fold_left (fun result event ->
+        let event=match event with
+          | Progress.Refused {stage=Execution;_} -> Progress.Refused {stage=Execution;
+              evidence=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Raised)}
+          | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+          | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
+          | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
+          | Commit_conflicted _ | Refused {stage=Before_dispatch;_} | Refusal_settled _
+          | Successor_intended _ | Successor_observed _ | Observer _ -> event in
+        Result.bind result (fun progress -> Progress.append progress event))
+        (Ok Progress.captured) (Progress.events parent.progress) |> get in
+      let forged={parent with progress=raised} in
+      check bool "preflight does not turn a linked Raised into replacement permission" true
+        (Result.is_error (io (fun () -> Keeper_librarian_history_resolution_lineage.validate_predecessor_payload
+          ~read:(fun ~scope ~request_id ->
+            if request_id=parent.request_id then Ok (Some forged)
+            else Owner.load ~store:fixture.store ~scope ~request_id |> Result.map_error Owner.error_to_string)
+          ~read_fence:(Store.load_history_fence fixture.store)
+          ~read_resolution:(Store.load_history_resolution fixture.store) ~require_confirmed:false successor))));
+    (match recovery with
+     | Ended_only -> fail "unexpected recovery branch"
+     | Intent_only -> ()
+     | Child_before_ack ->
+       let retained=Durable_owner.retain ~store:fixture.store successor
+         |> Result.map_error Durable_owner.error_to_string |> get in
+       check bool "the child is retained before its parent's ACK" true
+         (Progress.phase retained.progress=Progress.Captured);
+       let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+         |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+       check bool "actual Exact authorization refuses a child before the parent's ACK" true
+         (Result.is_error (Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+           ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request successor |> get))));
+    check bool "staged publication preserves the one parent intent" true
+      (Progress.replacement parent.progress=Some (Progress.Preparation_pending intended));
+    check int "an interrupted publication has no provider effect" 0 (F.post_count fixture.server);
+    Some request_id in
+  drive_advanced fixture;
+  let view=view () in
+  let completed_id=match view.completion with
+    | Resolution_work.Memory_committed {request_id} -> request_id
+    | Not_observed -> fail "the original operator resolution lost its descendant completion"
+    | Completion_unavailable detail -> fail detail in
+  check bool "the new committed request has another identity" true (completed_id<>child_id);
+  Option.iter (fun intended -> check string "restart recovers the same staged child" intended completed_id) intended_id;
+  let completed,completed_request=io (fun () ->
+    let completed=Owner.load ~store:fixture.store ~scope:child.scope ~request_id:completed_id |> owned |> Option.get in
+    let request=Capture.restore ~owner:(Capture.physical_owner request) completed |> get in
+    completed,request) in
+  check bool "completion belongs to a descendant of the ended original" true
+    (Capture.predecessor completed_request=Some {Capture.request_id=child.request_id;request_digest=child.request_digest});
+  check json "the committed descendant preserves the exact original source"
+    (Source.to_json (Capture.source request)) (Source.to_json (Capture.source completed_request));
+  check bool "actual Memory commit is the completion evidence" true
+    (match Progress.phase completed.progress with
+     | Finished _ -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+  check int "only the new linked request reaches the provider" 1 (F.post_count fixture.server);
+  check bool "source positions advance only after the descendant commit" false (progress fixture=positions);
+  check int "the original resolution retains committed range receipts" 1
+    (List.length (List.filter (fun intent -> Option.is_some intent.Resolution_intent.memory_commit) view.intents));
+  check bool "the fenced parent and ended child remain available to completion recovery" true
+    (io (fun () -> Owner.load_record ~store:fixture.store ~scope:parent.scope ~request_id:parent.request_id |> owned |> Option.is_some)
+      && io (fun () -> Owner.load_record ~store:fixture.store ~scope:child.scope ~request_id:child.request_id |> owned |> Option.is_some)))
 let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fun ~sw:_ fixture ->
   let submit request expected=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
     ~request_id:(Capture.request_id request) ~expected ~actor:"operator" ~reason:"resume the exact history"
@@ -5242,10 +5327,18 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_cut_replacement_releases_unread_source_and_survives_rollback;
   test_case "a replacement does not release an original Raised outcome" `Quick
     test_replaced_raised_original_stays_unknown;
-  test_case "a linked Captured keeps its resolution protocol across replacement" `Quick
-    (test_linked_replacement_preserves_the_resolution_protocol ~cut:false);
-  test_case "a linked Cut keeps its resolution protocol across replacement" `Quick
-    (test_linked_replacement_preserves_the_resolution_protocol ~cut:true);
+  test_case "a linked Captured keeps resolution completion after ending and rollback" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~cut:false ~recovery:Ended_only);
+  test_case "a linked Cut keeps resolution completion after ending and rollback" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~cut:true ~recovery:Ended_only);
+  test_case "a linked Captured recovers the same full child intent" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~cut:false ~recovery:Intent_only);
+  test_case "a linked Cut recovers the same full child intent" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~cut:true ~recovery:Intent_only);
+  test_case "a linked Captured child cannot dispatch before its parent ACK" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~cut:false ~recovery:Child_before_ack);
+  test_case "a linked Cut child cannot dispatch before its parent ACK" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~cut:true ~recovery:Child_before_ack);
   test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
     test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
   test_case "legacy omitted original blocks admission but prepares a safe continuation" `Quick

@@ -92,6 +92,33 @@ predecessor가 있는 접수 전 요청은 기존 publication 절차를 유지�
 연결된 Cut도 현재 operator resolution의 완료 추적이 새 root를 잇지 못하므로 이번 producer에서 제외했다.
 원본 index를 검증하는 proof helper도 연결된 Cut 증거를 거부한다. 그 요청은 기존 대기를 유지하며 후속 lineage 작업이 남는다.
 
+## 다섯 번째 단위: 연결된 요청과 운영자 해소의 완료 추적
+
+연결된 history의 접수 전 상태와 Cut도 같은 종료 증거를 사용한다. 종료된 원본은 그대로 두고,
+기존 full replacement intent에 새 요청의 ID와 전체 내용을 저장한 뒤 게시한다. 부모가 정확히 그 요청을
+다시 읽고 ACK하기 전에는 실행하지 않는다. 중간에 끊기면 같은 intent를 복구하며 새 ID를 더 만들지 않는다.
+
+이 연결은 일반 refusal이나 `Settled`라는 판정만으로 허용하지 않는다. 접수 전의 strict 선언 교체 증거,
+typed host 선언 교체 결과, 별도 해소 증거를 가진 Cut만 허용한다. payload 검증은 원본 binding과 종료 증거를
+검사하고, 소비자와 host의 실제 lineage 검증은 원래 Exact 기록과 실행 proof까지 확인한다.
+이 순수 검증을 preflight도 공유한다. generic progress는 Rejected에서도 불변 게시 intent와 ACK만 담으며,
+한 거절에 subdivision과 replacement를 함께 남기거나 게시 뒤 종료 근거를 덧붙이는 것은 거부한다.
+
+연결된 새 요청은 원래 source·읽기 위치·외부 ACK 대상을 유지하고 current Memory만 다시 캡처한다.
+종료만 저장된 leaf를 다음 연결 대상으로 고르므로 일반 fresh root로 빠져 운영자 해소와 분리되지 않는다.
+당시 종료 증거의 A→B는 역사적 권한이다. 새 intent를 만들기 전 rollback하면 지금 준비된 A로 새 ID를
+만들 수 있고, intent를 만든 뒤에는 그 목적지를 바꾸지 않는다.
+
+운영자 해소 조회는 종료된 부모의 확인된 replacement를 따라간다. 새 descendant가 실제로 Finished에
+도달한 뒤 기존 range receipt를 해소 intent에 저장해야 완료다. 종료 사실이나 child 게시만으로 완료하지 않는다.
+operator fence 아래의 연결 기록은 기존처럼 보존한다. 별도의 suffix archive는 이번 범위에 넣지 않았다.
+일반 replacement chain의 중단된 archive 복구도 새 Rejected 부모의 종료 권한과 전체 source 파생을 다시 확인한다.
+
+Runtime·Exact·operator resolution fixture에 접수 전/Cut 각각의 종료 직후 rollback, intent만 저장된 중단,
+child 저장 후 부모 ACK 전 중단을 다루는 여섯 시나리오를 작성했다. 같은 ID 복구, ACK 전 host 실행 거부,
+source 보존, 실제 새 요청의 Memory receipt와 원래 해소 완료 연결을 확인하도록 했다.
+linked Raised에 대한 순수 검증 거부와 서로 다른 후속 게시의 상호 배제도 추가했다. **실행은 미실행이다.**
+
 ## 확인한 범위
 
 변경 OCaml 파일의 `ocamlc -stop-after parsing -c`와 `git diff --check`를 확인한다.
@@ -105,7 +132,8 @@ typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 
 ## 남은 범위
 
-- 연결된 history의 접수 전 상태·Cut 해소와 preflight가 손상된 저장 본문을 만난 기동 경계는 별도 확인이 남는다.
+- 연결된 history의 접수 전 상태·Cut 해소는 위 소스 변경과 작성한 회귀의 범위이며, 실제 타입·회귀·운영 검증은 남는다.
+- preflight가 손상된 저장 본문을 만난 기동 경계와 연결된 요청의 본문 손상 복구는 별도 확인이 남는다.
 - floor 본문 손상 복구와 이미 답한 앞 step의 반영 경계는 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
 - `raised`·floor Cut와 이미 받은 `Judged` 결과·admission part는 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.

@@ -1,31 +1,27 @@
 (** Production completed-history Addon adapter. Call only inside the Keeper's
     serialized Memory lane and purge fence. Resume immutable retained work before
-    invoking a fresh selector; never send an unknown request again. *)
+    invoking a fresh selector. A new request after an unknown result requires
+    the explicit retained declaration-replacement policy; never redispatch the
+    same unknown original. *)
 val consume_one : config:Workspace.config -> keeper_name:string ->
   wake:(unit -> unit) ->
   (Keeper_librarian_durable_consumer.outcome,
    Keeper_librarian_durable_consumer.error) result
 (** An unavailable attachment reports [Original_publication_blocked] and leaves
-    the original source unread. A verified host terminal [Outcome_unknown] is
-    read by its cause. An attempt that raised, and one cut off in this process
-    under the declaration it was captured for, remain the original unfinished
-    frontier and return [Pending] on the first and later wakes, without fresh
-    selection or a new provider call. An attempt a stopped process interrupted
-    settles (RFC-0500), and so does one cut off in this process whose
-    declaration was replaced since (RFC
-    librarian-ends-waiting-requests-of-a-replaced-declaration 3.5): the pass
-    that reads the refusal asks [wake], and the next pass moves the original
-    and selects its range again, whole, under a new ID, which asks the model
-    once more. For the cut one that holds only while the destination the pass
-    reads names another configuration revision of the same installation,
-    package and tool; the end is the move, so an original not yet moved waits
-    again once its declaration is put back. Observed
-    worker absence after dispatch may instead prepare the existing fenced
-    history resolution, only after its host-proof, receipt and source guards
-    pass. Its durable continuation requests a later Memory-lane unit before
-    dispatch; neither the original RPC nor its source is replayed or ACKed by
-    that preparation. The same durable intent and child resume after a stop.
-    Definite terminal host refusals preserve their actual diagnostic in
+    the original source unread. A verified host terminal [Outcome_unknown]
+    remains the original unfinished frontier and returns [Pending] unless its
+    typed [Cut] has a strict declaration-replacement disposition. That retained
+    decision permits another provider call under a new ID and leaves source
+    unread. Unlinked work is archived before fresh selection. Linked work keeps
+    its complete source and uses a full replacement intent/ACK; a committed
+    descendant completes the original operator resolution through actual range
+    receipts. Records below an operator fence remain retained. Observed worker
+    absence after dispatch may prepare the existing fenced history resolution,
+    only after its host-proof, receipt and source guards pass. Its durable
+    continuation requests a later Memory-lane unit before dispatch; neither the
+    original RPC nor its source is replayed or ACKed by that preparation. The
+    same durable intent and child resume after a stop. Definite terminal host
+    refusals preserve their actual diagnostic in
     [Memory_not_committed] without remaining an unfinished frontier; a later
     wake may freshly select their still-unread source under a new ID, except
     capacity-only counterpart refusals: {!Keeper_librarian_durable_refusal}
@@ -60,7 +56,7 @@ val consume_one : config:Workspace.config -> keeper_name:string ->
     completed local publication may still recover while the Addon is Off.
     [wake] schedules the same Memory lane after a newly observed Finished fact;
     it also schedules after known basis supersession. Full scope validation
-    binds each successor to one strictly superseded predecessor and preserves
+    binds each successor to one strictly superseded or declaration-ended predecessor and preserves
     that predecessor's complete original source/frontier while rebasing only
     current Memory. The parent retains its full child intent before publication
     and acknowledges the strictly reread child before dispatch. Missing pending

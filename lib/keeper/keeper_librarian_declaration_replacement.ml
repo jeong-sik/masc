@@ -6,6 +6,25 @@ module Exact = Lane_addon_exact
 module Submit = Lane_addon_submit_once
 open Result.Syntax
 
+type replaced = {captured:Destination.t;current:Destination.t}
+let replaced_to_json {captured;current} =
+  `Assoc ["declaration_replaced",`Assoc
+    ["captured",Destination.to_json captured;"current",Destination.to_json current]]
+let confirm_replaced ~captured:expected json =
+  let context="History declaration-replaced evidence" in
+  match json with
+  | `Assoc ["declaration_replaced",`Assoc ["captured",captured;"current",current]] ->
+    let* captured=Destination.of_json ~context captured in
+    let* current=Destination.of_json ~context current in
+    let* ()=if captured=expected then Ok ()
+      else Error (context ^ " names another captured destination") in
+    (match Destination.relation ~captured ~current with
+     | Destination.Replaced -> Ok {captured;current}
+     | Destination.Same | Destination.Other_owner ->
+       Error (context ^ " does not show a replaced declaration"))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+    Error (context ^ " is not the declaration-replaced object")
+
 type ending = Before_admission | Cut_release of Yojson.Safe.t
 let evidence ~ending ~original ~(captured:Destination.t) ~(current:Destination.t) =
   let* ()=if Record.installation_id original=captured.installation_id
@@ -14,16 +33,22 @@ let evidence ~ending ~original ~(captured:Destination.t) ~(current:Destination.t
   let* ()=match Destination.relation ~captured ~current with
     | Destination.Replaced -> Ok ()
     | Same | Other_owner -> Error "Before-admission refusal requires a replacement declaration" in
-  let kind,fields=match ending with
-    | Before_admission -> "librarian-declaration-replacement",[]
-    | Cut_release refusal -> "librarian-cut-declaration-replacement",["refusal",refusal] in
-  Ok (`Assoc (fields @ ["version",`Int 1;"kind",`String kind;
+  match ending with
+  | Before_admission -> Ok (replaced_to_json {captured;current})
+  | Cut_release refusal ->
+  Ok (`Assoc ["refusal",refusal;"version",`Int 1;
+    "kind",`String "librarian-cut-declaration-replacement";
     "scope",`String (Record.scope original);"request_id",`String (Record.request_id original);
     "request_digest",`String (Record.request_digest original);"summary",Record.summary original;
-    "captured",Destination.to_json captured;"replacement",Destination.to_json current]))
+    "captured",Destination.to_json captured;"replacement",Destination.to_json current])
 
 let validate ~ending ~original ~captured json =
   let* normalized=Lane_addon_action.canonical json in
+  match ending with
+  | Before_admission ->
+    let* replacement=confirm_replaced ~captured normalized in
+    let+ _=evidence ~ending ~original ~captured ~current:replacement.current in ()
+  | Cut_release _ ->
   let* fields=match normalized with
     | `Assoc fields -> Ok fields
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
@@ -78,10 +103,7 @@ let cut_evidence ~original ~(exact:Exact.request) =
     let* schema=Option.to_result ~none:"Cut original lacks its captured schema" exact.schema in
     let* retained=Exact.retained_final_of_json ~schema evidence in
     (match retained with
-     | Exact.Retained_unknown Cut ->
-       let* index=Keeper_librarian_durable_request.index_of_summary original in
-       if Option.is_none index.predecessor then Ok (Some evidence)
-       else Error "Cut release requires an unlinked history original"
+     | Exact.Retained_unknown Cut -> Ok (Some evidence)
      | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed _
      | Retained_request_id_reused -> Ok None)
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
@@ -107,7 +129,7 @@ let confirm_host_cut ~store ~original ~(exact:Exact.request) =
     | Retained_not_allowed _ | Retained_request_id_reused) ->
     Error "Cut replacement is not confirmed by its original host record and proofs"
 
-let released_cut ~store ~original ~exact ~captured =
+let released_cut_payload ~original ~exact ~captured =
   match Progress.settlement (Record.progress original) with
   | None -> Ok false
   | Some disposition ->
@@ -115,8 +137,12 @@ let released_cut ~store ~original ~exact ~captured =
     (match refusal with
      | None -> Ok false
      | Some refusal ->
-       let* ()=validate ~ending:(Cut_release refusal) ~original ~captured disposition in
-       let+ ()=confirm_host_cut ~store ~original ~exact in true)
+       let+ ()=validate ~ending:(Cut_release refusal) ~original ~captured disposition in true)
+
+let released_cut ~store ~original ~exact ~captured =
+  let* released=released_cut_payload ~original ~exact ~captured in
+  if not released then Ok false else
+  let+ ()=confirm_host_cut ~store ~original ~exact in true
 
 let release_cut ~store ~original ~exact ~captured ~current =
   let rejected result=Result.map_error (fun detail -> Submit.Rejected detail) result in
@@ -128,3 +154,51 @@ let release_cut ~store ~original ~exact ~captured ~current =
   | Ok (Owner.Record_stored record | Record_already_stored record) -> Ok record
   | Ok (Record_unconfirmed detail) -> Error (Submit.Uncertain detail)
   | Error error -> Error (Submit.Unavailable (Owner.update_error_to_string error))
+
+let ended_payload ~original ~(exact:Exact.request) ~captured =
+  let* ()=if exact.request_id=Record.request_id original then Ok ()
+    else Error "Declaration ending names another original request" in
+  match Progress.phase (Record.progress original) with
+  | Progress.Rejected {stage=Before_dispatch;_} -> retained ~original ~captured
+  | Rejected {stage=Execution;evidence} ->
+    let* schema=Option.to_result ~none:"Declaration ending lacks its original schema" exact.schema in
+    let* final=Exact.retained_final_of_json ~schema evidence in
+    (match final with
+     | Exact.Retained_not_allowed {reason=Replaced_declaration} -> Ok true
+     | Retained_unknown Cut -> released_cut_payload ~original ~exact ~captured
+     | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed {reason=Permission_refused _}
+     | Retained_request_id_reused -> Ok false)
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false
+
+let ended ~store ~original ~exact ~captured =
+  let* permitted=ended_payload ~original ~exact ~captured in
+  if not permitted then Ok false else
+  match Progress.phase (Record.progress original) with
+  | Progress.Rejected {stage=Before_dispatch;_} ->
+    let+ ()=confirm_no_execution ~store ~original ~exact_digest:(Exact.digest exact) in true
+  | Rejected {stage=Execution;evidence} ->
+    let* schema=Option.to_result ~none:"Declaration ending lacks its original schema" exact.Exact.schema in
+    let* final=Exact.retained_final_of_json ~schema evidence in
+    (match final with
+     | Exact.Retained_unknown Cut -> let+ ()=confirm_host_cut ~store ~original ~exact in true
+     | Retained_not_allowed {reason=Replaced_declaration} ->
+       let* installation=Owner.installation_of_id (Record.installation_id original) in
+       let* declaration_id=match installation with
+         | Owner.Configuration id -> Ok id
+         | Manual _ -> Error "Declaration ending requires a configured original" in
+       let* observed=Exact.recover_retained ~store ~declaration_id ~schema exact
+         |> Result.map_error Exact.describe_recovery_error in
+       (match observed with
+        | Exact.Retained_terminal (Retained_not_allowed {reason=Replaced_declaration}) ->
+          let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in
+          (match latest with
+           | Exact.No_completed_latest -> Ok true
+           | Completed_latest _ -> Error "Declaration ending has a completed original execution")
+        | Retained_absent | Retained_open
+        | Retained_terminal (Retained_unknown (Interrupted | Raised | Cut) | Retained_call _ | Retained_not_allowed {reason=Permission_refused _}
+          | Retained_request_id_reused) -> Error "Declaration ending differs from its original host record")
+     | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed {reason=Permission_refused _}
+     | Retained_request_id_reused -> Ok false)
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false

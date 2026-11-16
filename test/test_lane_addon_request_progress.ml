@@ -592,14 +592,39 @@ let test_replacement_cannot_infer_away_unknown_or_other_phases () =
   let invalid_histories=[[];dispatch;
     dispatch@[Progress.Execution_observed (Progress.Outcome_unknown (evidence "accepted but reply lost"))];
     judged;committing;committing@[Progress.Commit_uncertain (evidence "Memory effect unknown")];
-    committing@[Progress.Commit_observed after];refused;
+    committing@[Progress.Commit_observed after];
     refused@[Progress.Successor_intended successor];
     refused@[Progress.Successor_intended successor;Progress.Successor_observed child.request_id]] in
   List.iter (fun history ->
     let state=fold history in
     List.iter (fun event -> match Progress.append state event with
-      | Error _ -> () | Ok _ -> Alcotest.fail "a non-conflicted original acquired replacement authority")
+      | Error _ -> () | Ok _ -> Alcotest.fail "a nonterminal original acquired a replacement publication")
       [Progress.Replacement_intended child;Progress.Replacement_observed child.request_id]) invalid_histories
+
+let test_rejected_replacement_preserves_one_publication_without_subdivision () =
+  let fold events=get (List.fold_left (fun result event ->
+    Result.bind result (fun state -> Progress.append state event)) (Ok Progress.captured) events) in
+  let child:Progress.preparation_intent={request_id="one-replacement";request} in
+  let successor:Progress.successor={request_id="another-subdivision";request_digest=get (Owner.request_digest request)} in
+  List.iter (fun events ->
+    let rejected=fold events in
+    let intended=get (Progress.append rejected (Progress.Replacement_intended child)) in
+    let reopened=get (Progress.of_json (Progress.to_json intended)) in
+    Alcotest.(check bool) "a replacement intent preserves the exact refusal" true
+      (Progress.phase reopened=Progress.phase rejected);
+    List.iter (fun event -> match Progress.append reopened event with
+      | Error _ -> () | Ok _ -> Alcotest.fail "one refusal acquired conflicting publication histories")
+      [Progress.Successor_intended successor;Progress.Refusal_settled (evidence "late settlement");
+       Progress.Replacement_intended child;Progress.Replacement_observed "different-child"];
+    let confirmed=get (Progress.append reopened (Progress.Replacement_observed child.request_id)) in
+    Alcotest.(check bool) "the exact replacement ACK survives a strict roundtrip" true
+      (Progress.replacement (get (Progress.of_json (Progress.to_json confirmed)))
+        =Some (Progress.Preparation_confirmed child));
+    let subdividing=get (Progress.append rejected (Progress.Successor_intended successor)) in
+    match Progress.append subdividing (Progress.Replacement_intended child) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "a subdivision also acquired a replacement")
+    [[Progress.Refused {stage=Before_dispatch;evidence=evidence "consumer-owned ending"}];
+     [Progress.Dispatch_intended;Progress.Refused {stage=Execution;evidence=evidence "consumer-owned ending"}]]
 
 let test_replacement_strict_codec_rejects_malformed_and_changed_intents () =
   let state=get (Progress.append Progress.captured Progress.Dispatch_intended) in
@@ -714,8 +739,10 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
     test_staged_successor_input_survives_publication_cuts;
   Alcotest.test_case "conflicted replacement survives actual partial child publication and lost ACK" `Quick
     test_conflicted_replacement_survives_partial_child_publication;
-  Alcotest.test_case "replacement cannot infer away unknown or non-conflicted work" `Quick
+  Alcotest.test_case "replacement cannot infer away unknown or nonterminal work" `Quick
     test_replacement_cannot_infer_away_unknown_or_other_phases;
+  Alcotest.test_case "a refused original preserves one replacement without subdivision" `Quick
+    test_rejected_replacement_preserves_one_publication_without_subdivision;
   Alcotest.test_case "refusal settlement is one orthogonal fact on an execution refusal" `Quick
     test_refusal_settlement_is_one_orthogonal_fact_on_an_execution_refusal;
   Alcotest.test_case "a successor intent follows either refusal stage" `Quick

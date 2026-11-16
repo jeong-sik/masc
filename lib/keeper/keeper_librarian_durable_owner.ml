@@ -188,9 +188,6 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     | Read (_,request) -> Request.index request |> rejected in
   let* admission=match Progress.phase (Owner.Record.progress record) with
     | Progress.Captured | Admission_wait _ ->
-      (* The bodyless replacement inventory owns unlinked originals. Linked
-         captures keep their existing predecessor/publication protocol. *)
-      if Option.is_some index.predecessor then Ok Admission_continues else
       (match Keeper_librarian_durable_edge.observe_destination ~config ~reserved destination with
        | Error (Submit.Unavailable _ | Rejected _ | Uncertain _) -> Ok Admission_unavailable
        | Ok current ->
@@ -322,7 +319,6 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
      | Some Exact.Interrupted -> wake ();wait ()
      | None | Some Exact.Raised -> wait ()
      | Some Exact.Cut ->
-       if Option.is_some index.predecessor then wait () else
        let* released=io (fun () -> Keeper_librarian_declaration_replacement.released_cut
          ~store ~original ~exact:body.exact ~captured:destination) |> rejected in
        if released then finish_replacement original else

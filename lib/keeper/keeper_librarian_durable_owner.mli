@@ -85,9 +85,10 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
     publication callback, including recovery while Off. An actual host terminal
     [Outcome_unknown] returns [Waited (Worker_unknown, original)] after its
     immutable refusal is verified and retained. It grants no submission of that
-    original. An unlinked history's host-confirmed [cut] may retain a separate replacement
+    original. A history's host-confirmed [cut] may retain a separate replacement
     disposition after a ready new declaration is observed; that disposition
-    permits fresh selection without consuming input, including after rollback.
+    permits a fresh request without consuming input, including after rollback.
+    Linked work preserves its source and acknowledged predecessor lineage.
     An
     [interrupted] cause also calls [wake]: inventory validation reads that
     refusal as settled, so the next pass moves the original and selects its

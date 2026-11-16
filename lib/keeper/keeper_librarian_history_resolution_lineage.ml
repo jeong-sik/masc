@@ -37,7 +37,7 @@ let fenced_record ~store ~record ~index =
    fence and the resolution record. Only the known-basis link, whose parent
    holds the child's whole request in its progress, reads requests. The walk
    starts from one original given as those values. *)
-let validate_node ~read_node ~read ~read_fence ~read_resolution ~require_confirmed
+let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed
     ~id ~digest ~owner ~predecessor ~basis ~body =
   let rec visit seen ~require_confirmed ~id ~digest ~owner ~predecessor ~basis ~body =
     let* ()=require (not (List.mem id seen)) "History resolution ancestry contains a cycle" in
@@ -54,7 +54,8 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~require_confirm
       let* ()=match fence with
         | None ->
           let* request=body () in
-          Request.validate_predecessor_link_payload ~read ~require_confirmed request
+          let* ()=Request.validate_predecessor_link_payload ~read ~require_confirmed request in
+          confirm_ending parent
         | Some json ->
           let* fence=Fence.of_json json in
           let* ()=Fence.confirm_binding_index ~index:parent.index ~original:parent.record fence in
@@ -81,8 +82,8 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~require_confirm
         ~owner:parent.index.owner ~predecessor:parent.index.predecessor
         ~basis:(fun () -> Ok parent.index.source_basis_digest) ~body:parent.body in
   visit [] ~require_confirmed ~id ~digest ~owner ~predecessor ~basis ~body
-let validate ~read_node ~read ~read_fence ~read_resolution ~require_confirmed request =
-  validate_node ~read_node ~read ~read_fence ~read_resolution ~require_confirmed
+let validate ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed request =
+  validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed
     ~id:(Request.request_id request) ~digest:(Request.body_digest request)
     ~owner:(Request.physical_owner request) ~predecessor:(Request.predecessor request)
     ~basis:(fun () -> Request.source_basis_digest request) ~body:(fun () -> Ok request)
@@ -145,14 +146,24 @@ let validate_predecessor_payload ?indexes ~read ~read_fence ~read_resolution ~re
     | None -> body_node ~restore:Request.restore_payload ~read ~verified:(fun _ _ -> ())
     | Some indexes -> payload_node ~indexes ~read in
   validate ~read_node ~read ~read_fence ~read_resolution
-    ~require_confirmed request
+    ~confirm_ending:(fun _ -> Ok ()) ~require_confirmed request
 let store_readers ~store =
   (fun ~scope ~request_id -> Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string),
   Store.load_history_fence store,Store.load_history_resolution store
+let confirm_ending ~store parent =
+  match Lane_addon_request_progress.phase (Owner.Record.progress parent.record) with
+  | Rejected _ ->
+    let* request=parent.body () in
+    let* exact=Request.request request in
+    let* ended=Keeper_librarian_declaration_replacement.ended ~store
+      ~original:parent.record ~exact ~captured:(Request.destination request) in
+    require ended "History predecessor has no confirmed declaration ending"
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok ()
 let confirm_predecessor_by_body ~store ~require_confirmed request =
   let read,read_fence,read_resolution=store_readers ~store in
   validate ~read_node:(body_node ~restore:Request.restore ~read ~verified:(fun _ _ -> ())) ~read ~read_fence ~read_resolution
-    ~require_confirmed request
+    ~confirm_ending:(confirm_ending ~store) ~require_confirmed request
 type verified_node = {verified_body:Owner.verified_body;verified_index:Request.index}
 module Predecessor_map = Map.Make (String)
 type verified_predecessors = {store:Store.t;request:Request.t;nodes:verified_node Predecessor_map.t}
@@ -163,7 +174,7 @@ let verify_predecessors ~store ~require_confirmed request =
       {verified_body=Owner.verified_body original;verified_index=index} !nodes in
   let read,read_fence,read_resolution=store_readers ~store in
   let+ ()=validate ~read_node:(body_node ~restore:Request.restore ~read ~verified)
-    ~read ~read_fence ~read_resolution ~require_confirmed request in
+    ~read ~read_fence ~read_resolution ~confirm_ending:(confirm_ending ~store) ~require_confirmed request in
   {store;request;nodes= !nodes}
 let recheck_predecessors ~store ~require_confirmed request verified =
   let* ()=require (store==verified.store && request==verified.request)
@@ -180,7 +191,7 @@ let recheck_predecessors ~store ~require_confirmed request verified =
       let* original=Owner.load_listed ~store record |> Result.map_error Owner.error_to_string in
       Request.restore ~owner:index.owner original)} in
   let read,read_fence,read_resolution=store_readers ~store in
-  validate ~read_node ~read ~read_fence ~read_resolution ~require_confirmed request
+  validate ~read_node ~read ~read_fence ~read_resolution ~confirm_ending:(confirm_ending ~store) ~require_confirmed request
 (* The Keeper's pass: an original is its record and the index in that
    record's summary. Its body is read only for a known-basis link. *)
 let record_body ~store record (index:Request.index) () =
@@ -197,10 +208,12 @@ let record_node ~store ~owner ~request_id =
     Some {record;index;body=record_body ~store record index}
 let confirm_predecessor ~store ~require_confirmed request =
   let read,read_fence,read_resolution=store_readers ~store in
-  validate ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution ~require_confirmed request
+  validate ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution
+    ~confirm_ending:(confirm_ending ~store) ~require_confirmed request
 let confirm_predecessor_record ~store ~require_confirmed record (index:Request.index) =
   let read,read_fence,read_resolution=store_readers ~store in
-  validate_node ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution ~require_confirmed
+  validate_node ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution
+    ~confirm_ending:(confirm_ending ~store) ~require_confirmed
     ~id:(Owner.Record.request_id record) ~digest:(Owner.Record.request_digest record)
     ~owner:index.owner ~predecessor:index.predecessor
     ~basis:(fun () -> Ok index.source_basis_digest) ~body:(record_body ~store record index)

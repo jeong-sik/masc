@@ -162,29 +162,12 @@ let request_id capture=capture.id
 let body_digest capture=capture.digest
 let physical_owner capture=capture.owner
 let destination capture=capture.destination
-type replaced = {captured:destination;current:destination}
-let replaced_to_json {captured;current} =
-  `Assoc ["declaration_replaced",`Assoc
-    ["captured",Destination.to_json captured;"current",Destination.to_json current]]
+type replaced = Keeper_librarian_declaration_replacement.replaced = {
+  captured:destination;current:destination
+}
+let replaced_to_json = Keeper_librarian_declaration_replacement.replaced_to_json
 let confirm_replaced capture json =
-  let context="History declaration-replaced evidence" in
-  match json with
-  | `Assoc ["declaration_replaced",`Assoc ["captured",captured;"current",current]] ->
-    let* captured=Destination.of_json ~context captured in
-    let* current=Destination.of_json ~context current in
-    let* ()=require (captured=capture.destination) (context ^ " names another captured destination") in
-    (match Destination.relation ~captured ~current with
-     | Destination.Replaced -> Ok {captured;current}
-     | Destination.Same | Destination.Other_owner ->
-       Error (context ^ " does not show a replaced declaration"))
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
-    Error (context ^ " is not the declaration-replaced object")
-let replaced_since ~current capture = match current with
-  | None -> false
-  | Some current ->
-    (match Destination.relation ~captured:capture.destination ~current with
-     | Destination.Replaced -> true
-     | Destination.Same | Destination.Other_owner -> false)
+  Keeper_librarian_declaration_replacement.confirm_replaced ~captured:capture.destination json
 let source capture=capture.source
 let preparation capture=capture.preparation
 let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "completed-history-execution";
@@ -357,12 +340,23 @@ let check_predecessor ~read ~restore_parent ~require_confirmed capture =
     let* (parent:Owner.retained)=Option.to_result ~none:"History replacement predecessor is absent" parent in
     let* ()=require (parent.request_digest=predecessor.request_digest)
       "History replacement predecessor digest changed" in
-    let* ()=restore_parent ~owner parent in
+    let* parent_request=restore_parent ~owner parent in
     let* ()=match Progress.phase parent.progress with
       | Progress.Conflicted _ -> Ok ()
+      | Rejected _ ->
+        let* exact=request parent_request in
+        let* ended=Keeper_librarian_declaration_replacement.ended_payload
+          ~original:(Owner.listed parent) ~exact ~captured:(destination parent_request) in
+        let* ()=require ended "History replacement predecessor has no declaration ending" in
+        let child_source=capture.source in
+        let* expected=Source.with_current ~expected_revision:(Source.expected_revision child_source)
+          ~current:(Source.input child_source).current parent_request.source
+          |> Result.map_error Source.error_to_string in
+        require (Source.to_json expected=Source.to_json child_source)
+          "Declaration replacement changed its original source or acknowledgement frontier"
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Rejected _ | Subdividing _ | Subdivided _ ->
-        Error "History replacement predecessor is not conflicted" in
+      | Finished _ | Subdividing _ | Subdivided _ ->
+        Error "History replacement predecessor has no terminal replacement authority" in
     let* intended=match Progress.replacement parent.progress with
       | Some (Preparation_confirmed intended) -> Ok intended
       | Some (Preparation_pending intended) when not require_confirmed -> Ok intended
@@ -375,17 +369,17 @@ let confirm_predecessor ~store ~require_confirmed capture =
   check_predecessor ~require_confirmed capture
     ~read:(fun ~scope ~request_id -> Owner.load ~store ~scope ~request_id
       |> Result.map_error Owner.error_to_string)
-    ~restore_parent:(fun ~owner parent -> restore ~owner parent |> Result.map (fun _ -> ()))
+    ~restore_parent:restore
 let validate_predecessor_link_payload ~read ~require_confirmed capture =
   check_predecessor ~read ~require_confirmed capture
-    ~restore_parent:(fun ~owner parent -> restore_payload ~owner parent |> Result.map (fun _ -> ()))
+    ~restore_parent:restore_payload
 let validate_predecessor_payload ~read ~require_confirmed capture =
   let rec visit seen ~require_confirmed capture =
     let* ()=require (not (List.mem capture.id seen)) "History replacement ancestry contains a cycle" in
     check_predecessor ~read ~require_confirmed capture
       ~restore_parent:(fun ~owner parent ->
         let* parent=restore_payload ~owner parent in
-        visit (capture.id::seen) ~require_confirmed:true parent) in
+        let+ ()=visit (capture.id::seen) ~require_confirmed:true parent in parent) in
   visit [] ~require_confirmed capture
 let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
   let* f=header_fields record.request in

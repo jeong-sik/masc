@@ -1,8 +1,32 @@
 # Resolve stored-state deployment refusals
 
-`install-local-build.sh` checks stored state with the candidate build's
-`deployment_preflight_helper.exe validate-stores`. It changes no installed
-binary when this check fails. `rows` is the number examined by a store;
+`install-local-build.sh` checks `runtime.toml` and replaces local binaries; it
+does not scan stored history or restart the server. Its cost should not grow
+with every retained conversation, provider input or original request. Local
+installation is not a stored-state compatibility verdict.
+
+Before deploying a storage-format change onto existing state, stop the writers
+and run the candidate build's explicit audit:
+
+```sh
+_build/default/bin/deployment_preflight_helper.exe validate-stores \
+  --base-path /path/to/workspace
+```
+
+`scripts/check-runtime-deployment-preflight.sh` still runs this audit as part of
+the full deployment gate under the workspace writer lease. The container
+entrypoint uses that gate. `masc start` and `masc restart` use boot's own store
+policies: some stores refuse boot, while `Preflight_only` stores are read only
+when their consumers need them. Neither command automatically runs this full
+audit. An audit while writers are running is only a live observation; it cannot
+certify state written after the scan. No audit moves or deletes stored data.
+
+An incompatible `Preflight_only` queue or journal can block Memory writes or
+Librarian progress after the server is already running. The installer does not
+detect whether a build changes a stored format. When stored-data readers change,
+run the explicit audit; a successful local install does not rule out these failures.
+
+`rows` is the number examined by a store;
 `refused` is the number that its current reader rejected. The final error sums
 refusals across stores, not just the last lines printed. A store with
 `refused=0` needs nothing because another store failed.
@@ -26,8 +50,8 @@ store order, after the reports of the stores before it, whatever N is.
 
 The `memory OS current snapshot` scan also reports `pending recovery` for a
 readable publication receipt. That receipt is current state, not a refusal: the
-running owner finishes the publication, and installation waits until a later
-scan passes.
+compatible owner finishes the publication; the deployment audit refuses until
+a later scan confirms that recovery is complete.
 
 ## Fresh state
 

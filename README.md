@@ -163,11 +163,16 @@ run it in a shell where `eval "$(opam env)"` has been applied.
 A workspace that holds a release guest shim for microVM Keepers gets the shim
 of the release the build names (`docs/MICROVM-REMOTE-RUNBOOK.md`).
 Before it replaces anything, the script checks the workspace's `runtime.toml`
-and stored state with the new build. A resolved workspace that observably does
-not exist yet is treated as a new workspace, with those checks reported as not
+with the new build. A resolved workspace that observably does
+not exist yet is treated as a new workspace, with that check reported as not
 run. If the workspace cannot be resolved or observed, installation stops before
 replacement; pass `--base-path DIR` or set `MASC_BASE_PATH` when
-no workspace is found. A configuration or stored-state rejection also stops installation.
+no workspace is found. A configuration rejection also stops installation.
+Routine local installation does not scan stored history or restart the server.
+It does not certify stored-state compatibility. For a storage-format change,
+run the candidate's explicit audit before starting it on existing state; see
+[stored-state deployment checks](docs/guides/DURABLE-STORE-HARD-CUT.md).
+`masc restart` performs boot checks, not the full history audit.
 
 The browser route runs in the browser Lane Add-on, so the script also builds
 and installs `masc-native-addon-launcher` and `masc-browser-addon-worker` into

@@ -5,8 +5,9 @@
 # (#39224).
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
-# workspace its server runs on (#39311) and reads every durable store there,
-# as the deploy preflight does (#43483). A refusal leaves every binary and
+# workspace its server runs on (#39311). Stored-history audits are a separate
+# deployment operation; local binary replacement does not read every store.
+# A runtime.toml refusal leaves every binary and
 # process as it was. An install that cannot run the check stops the same way,
 # with exit status 2: no workspace found, no helper in --build-dir, or a helper
 # that predates the check. A workspace that does not exist yet has no
@@ -279,18 +280,6 @@ PY
           "$repo/scripts/check-runtime-deployment-preflight.sh" \
           --base-path "$workspace_root" \
           --runtime-config-only
-        # Boot reads only the stores it refuses on; a Preflight_only store is
-        # read before a start by the deploy preflight alone (RFC
-        # every-durable-store-has-one-boot-policy). This install read
-        # runtime.toml alone, so the Memory admission queues #42020 hard-cut
-        # stayed unreadable from 2026-10-10 to 10-17 while every server ran
-        # (#43483). The scan uses this build's decoders; Memory publication
-        # recovery remains the running owner's responsibility.
-        echo "install-local-build: checking stored state of $workspace_root"
-        if ! "$preflight_helper" validate-stores --base-path "$workspace_root"; then
-          echo "install-local-build: this build could not confirm compatibility with the stored state listed above; nothing installed. Stop every writer on $workspace_root, delete what each refused store's Fresh state required entry (CHANGELOG.md, or changelog.d/ before a release) or fresh state line above names, and run this install again before starting the server. See docs/guides/DURABLE-STORE-HARD-CUT.md." >&2
-          exit 1
-        fi
       else
         echo "install-local-build: runtime.toml not checked: workspace $workspace_root (from $workspace_source) does not exist yet"
       fi
@@ -466,6 +455,7 @@ else
   echo "installed masc, masc-tui, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix (no browser Add-on)"
 fi
 echo "install-local-build: a running server keeps its old build; masc restart replaces it with this one"
+echo "install-local-build: stored history was not audited; for storage-format changes, follow docs/guides/DURABLE-STORE-HARD-CUT.md before restarting"
 
 # The TUI draws graphs and charts with the masc-pele that PATH finds, and drops
 # an answer without the protocol receipt it expects. An install that replaced

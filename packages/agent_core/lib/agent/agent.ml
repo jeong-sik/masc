@@ -356,7 +356,6 @@ let run_loop_detailed
   in
   let trace_prompt = trace_prompt_of_blocks user_blocks in
   with_raw_trace_run_result
-    ~of_core_error:detailed_error_of_core_error
     ~error_to_string:(fun detailed -> Error.to_string detailed.error)
     agent
     trace_prompt
@@ -1020,7 +1019,6 @@ module Advanced = struct
     in
     let trace_prompt = trace_prompt_of_blocks user_blocks in
     with_raw_trace_run_classified_result
-      ~of_core_error:detailed_error_of_core_error
       ~error_to_string:(fun detailed -> Error.to_string detailed.error)
       ~classify_success:classify_trace_success
       agent
@@ -1117,7 +1115,6 @@ module Advanced = struct
         agent
     =
     with_raw_trace_run_classified_result
-      ~of_core_error:detailed_error_of_core_error
       ~error_to_string:(fun detailed -> Error.to_string detailed.error)
       ~classify_success:classify_trace_success
       agent

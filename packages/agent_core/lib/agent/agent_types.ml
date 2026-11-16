@@ -443,9 +443,13 @@ let clone ?(copy_context = false) agent =
 ;;
 
 let last_raw_trace_run agent =
-  match agent.options.raw_trace with
-  | Some sink -> Raw_trace.last_run sink
-  | None -> None
+  match agent.lifecycle, agent.options.raw_trace with
+  | Some { current_run_id = Some current; _ }, Some sink ->
+    Option.bind (Raw_trace.last_run sink) (fun (run : Raw_trace.run_ref) ->
+      if String.equal current run.worker_run_id then Some run else None)
+  | Some { current_run_id = None; _ }, (Some _ | None)
+  | None, (Some _ | None)
+  | Some { current_run_id = Some _; _ }, None -> None
 ;;
 
 let lifecycle_snapshot agent = agent.lifecycle

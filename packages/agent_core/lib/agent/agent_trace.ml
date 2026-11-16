@@ -14,12 +14,14 @@ let report_observer_failure report message fields =
    evidence, never execution authority: the provider response, the tool result
    and the hook decision are already decided when their record is written. *)
 type trace_boundary =
+  | Run_start
   | Hook_invocation
   | Tool_execution_started
   | Tool_execution_finished
   | Assistant_block of int
 
 let trace_boundary_fields = function
+  | Run_start -> [ Log.S ("trace_boundary", "run_start") ]
   | Hook_invocation -> [ Log.S ("trace_boundary", "hook_invocation") ]
   | Tool_execution_started -> [ Log.S ("trace_boundary", "tool_execution_started") ]
   | Tool_execution_finished -> [ Log.S ("trace_boundary", "tool_execution_finished") ]
@@ -30,15 +32,17 @@ let trace_boundary_fields = function
 (* A record the sink refused is reported as missing evidence and nothing else:
    it neither fails the stage that produced the fact nor reaches the tool
    dispatcher as an observer failure. *)
-let report_missing_trace_record active boundary = function
+let report_missing_trace_record ?active boundary = function
   | Ok () -> ()
   | Error trace_error ->
     report_observer_failure
       Log.warn
       "raw trace record not written"
-      (Log.S ("worker_run_id", Raw_trace.active_run_id active)
-       :: Log.S ("trace_error", Error.to_string trace_error)
-       :: trace_boundary_fields boundary)
+      (Log.S ("trace_error", Error.to_string trace_error)
+       :: trace_boundary_fields boundary
+       @ match active with
+         | None -> []
+         | Some active -> [ Log.S ("worker_run_id", Raw_trace.active_run_id active) ])
 ;;
 
 let record_hook_invocation active_run ?invocation ~hook_name ~decision ?detail () =
@@ -46,7 +50,7 @@ let record_hook_invocation active_run ?invocation ~hook_name ~decision ?detail (
   | None -> ()
   | Some active ->
     report_missing_trace_record
-      active
+      ~active
       Hook_invocation
       (Raw_trace.record_hook_invoked
          active
@@ -96,7 +100,7 @@ let execute_tools_with_trace agent active_run ~turn ?before_tool_execution tool_
             ~last_progress_at:ts
             Running;
           report_missing_trace_record
-            active
+            ~active
             Tool_execution_started
             (Raw_trace.record_tool_execution_started
                active
@@ -118,7 +122,7 @@ let execute_tools_with_trace agent active_run ~turn ?before_tool_execution tool_
             ~last_progress_at:ts
             Running;
           report_missing_trace_record
-            active
+            ~active
             Tool_execution_finished
             (Raw_trace.record_tool_execution_finished
                active
@@ -157,7 +161,7 @@ let trace_assistant_blocks active_run blocks =
     List.iteri
       (fun block_index block ->
          report_missing_trace_record
-           active
+           ~active
            (Assistant_block block_index)
            (Raw_trace.record_assistant_block active ~block_index block))
       blocks
@@ -225,7 +229,6 @@ let%test "raw trace final_text is absent for thinking-only responses" =
 ;;
 
 let with_raw_trace_run_classified_result
-      ~of_core_error
       ~error_to_string
       ~classify_success
       agent
@@ -257,103 +260,89 @@ let with_raw_trace_run_classified_result
        | Run_completed _ -> invoke_on_run_complete agent ~ok:true
        | Run_yielded _ -> ())
   in
-  match agent.options.raw_trace with
-  | None ->
-    let ts = Unix.gettimeofday () in
-    set_lifecycle agent ~accepted_at:ts ~started_at:ts Accepted;
-    let result = f None in
-    (* Contract (agent_types.mli): on_run_complete runs *before* lifecycle is
-       updated, so completion hooks observe the pre-terminal run state.
-       Reserved exceptions (e.g. Eio.Cancel.Cancelled) still propagate, but the
-       terminal lifecycle transition must not be skipped. *)
-    (try invoke_completion_for_result result with
-     | exn ->
-       set_lifecycle_for_result result;
-       raise exn);
-    set_lifecycle_for_result result;
-    result
-  | Some sink ->
-    (match
-       Raw_trace.start_run
-         sink
-         ~agent_name:agent.state.config.name
-         ~prompt:user_prompt
-         ~model:agent.state.config.model
-         ?tool_choice:agent.state.config.tool_choice
-         ?enable_thinking:agent.state.config.enable_thinking
-         ?preserve_thinking:agent.state.config.preserve_thinking
-         ?reasoning_effort:
-           (Option.map
-              Llm_provider.Reasoning_effort.to_string
-              agent.state.config.reasoning_effort)
-         ()
-     with
-     | Error error -> Error (of_core_error error)
-     | Ok active ->
-       let ts = Unix.gettimeofday () in
-       set_lifecycle
-         agent
-         ~current_run_id:(Raw_trace.active_run_id active)
-         ~accepted_at:ts
-         ~started_at:ts
-         Accepted;
-       let finalize result =
-         let final_text, stop_reason, error =
-           match result with
-           | Ok value ->
-             (match classify_success value with
-              | Run_completed { final_text; stop_reason } -> final_text, stop_reason, None
-              | Run_yielded { stop_reason } -> None, Some stop_reason, None)
-           | Error err -> None, None, Some (error_to_string err)
-         in
-         (* Raw trace is finished first (so a reserved exception re-raised from the
-         callback cannot leave the trace open), then on_run_complete runs before
-         the lifecycle transition per the agent_types.mli contract. *)
-         Fun.protect
-           ~finally:(fun () -> set_lifecycle_for_result result)
-           (fun () ->
-             (match Raw_trace.finish_run active ~final_text ~stop_reason ~error with
-              | Ok _ -> ()
-              | Error trace_error ->
-                report_observer_failure Log.error
-                  "raw trace finalization failed after run result"
-                  [ Log.S ("worker_run_id", Raw_trace.active_run_id active)
-                  ; Log.S ("finalization_error", Error.to_string trace_error)
-                  ]);
-             invoke_completion_for_result result;
-             result)
-       in
-       (match f (Some active) with
-        | result -> finalize result
-        | exception exn ->
-          let backtrace = Printexc.get_raw_backtrace () in
-          (* The trace field is a string, so the classification has to be
-             rendered rather than carried — but it is the same classification
-             the lifecycle event publishes, so a raw trace and its event cannot
-             describe the same failure differently. A timeout reads as one here
-             instead of as an unhandled exception. *)
-          let error_msg = Error.to_string (Error.of_raised_exn exn) in
-          Fun.protect
-            ~finally:(fun () ->
-              set_lifecycle agent ~finished_at:(Unix.gettimeofday ())
-                ~last_error:error_msg Failed)
-            (fun () ->
-              (match Raw_trace.finish_run active ~final_text:None ~stop_reason:None
-                       ~error:(Some error_msg) with
-               | Ok _ -> ()
-               | Error trace_error ->
-                 report_observer_failure Log.error
-                   "raw trace finalization failed after run exception"
-                   [ Log.S ("worker_run_id", Raw_trace.active_run_id active)
-                   ; Log.S ("primary_exception", Printexc.to_string exn)
-                   ; Log.S ("finalization_error", Error.to_string trace_error)
-                   ]);
-              Printexc.raise_with_backtrace exn backtrace)))
+  let active_run =
+    match agent.options.raw_trace with
+    | None -> None
+    | Some sink ->
+      (match
+         Raw_trace.start_run
+           sink
+           ~agent_name:agent.state.config.name
+           ~prompt:user_prompt
+           ~model:agent.state.config.model
+           ?tool_choice:agent.state.config.tool_choice
+           ?enable_thinking:agent.state.config.enable_thinking
+           ?preserve_thinking:agent.state.config.preserve_thinking
+           ?reasoning_effort:
+             (Option.map
+                Llm_provider.Reasoning_effort.to_string
+                agent.state.config.reasoning_effort)
+           ()
+       with
+       | Ok active -> Some active
+       | Error error ->
+         report_missing_trace_record Run_start (Error error);
+         None)
+  in
+  let ts = Unix.gettimeofday () in
+  set_lifecycle
+    agent
+    ?current_run_id:(Option.map Raw_trace.active_run_id active_run)
+    ~accepted_at:ts
+    ~started_at:ts
+    Accepted;
+  (* Traced and untraced runs share one execution/finalization path. Trace
+     availability cannot select a different lifecycle or execution outcome. *)
+  let finish_trace ~final_text ~stop_reason ~error ~message ~fields =
+    match active_run with
+    | None -> ()
+    | Some active ->
+      (match Raw_trace.finish_run active ~final_text ~stop_reason ~error with
+       | Ok _ -> ()
+       | Error trace_error ->
+         report_observer_failure Log.error message
+           (Log.S ("worker_run_id", Raw_trace.active_run_id active)
+            :: Log.S ("finalization_error", Error.to_string trace_error)
+            :: fields))
+  in
+  let finalize result =
+    let final_text, stop_reason, error =
+      match result with
+      | Ok value ->
+        (match classify_success value with
+         | Run_completed { final_text; stop_reason } -> final_text, stop_reason, None
+         | Run_yielded { stop_reason } -> None, Some stop_reason, None)
+      | Error err -> None, None, Some (error_to_string err)
+    in
+    (* Trace finalization precedes the completion callback. The callback sees
+       the pre-terminal lifecycle; even a reserved callback/diagnostic exception
+       cannot skip the lifecycle transition from the authoritative result. *)
+    Fun.protect
+      ~finally:(fun () -> set_lifecycle_for_result result)
+      (fun () ->
+        finish_trace ~final_text ~stop_reason ~error
+          ~message:"raw trace finalization failed after run result" ~fields:[];
+        invoke_completion_for_result result;
+        result)
+  in
+  match f active_run with
+  | result -> finalize result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    let error_msg = Error.to_string (Error.of_raised_exn exn) in
+    Fun.protect
+      ~finally:(fun () ->
+        set_lifecycle agent ~finished_at:(Unix.gettimeofday ())
+          ~last_error:error_msg Failed)
+      (fun () ->
+        finish_trace ~final_text:None ~stop_reason:None ~error:(Some error_msg)
+          ~message:"raw trace finalization failed after run exception"
+          ~fields:[ Log.S ("primary_exception", Printexc.to_string exn) ];
+        Printexc.raise_with_backtrace exn backtrace)
 ;;
 
-let with_raw_trace_run_result ~of_core_error ~error_to_string agent user_prompt f =
+let with_raw_trace_run_result ~error_to_string agent user_prompt f =
   with_raw_trace_run_classified_result
-    ~of_core_error
     ~error_to_string
     ~classify_success:(fun response ->
       Run_completed

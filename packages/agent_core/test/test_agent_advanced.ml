@@ -69,7 +69,7 @@ let make_agent_with_options
       ?max_tool_rounds
       ~net
       ~transport
-      ~raw_trace
+      ?raw_trace
       ~checkpoint_sink
       ~context_injector
       ~on_run_complete
@@ -80,7 +80,7 @@ let make_agent_with_options
     { Agent.default_options with
       provider_config = Some mock_provider
     ; transport = Some transport
-    ; raw_trace = Some raw_trace
+    ; raw_trace
     ; context_injector
     ; on_run_complete
     }
@@ -162,8 +162,24 @@ let last_record path =
 let with_temp_trace f =
   let path = Filename.temp_file "agent_core-agent-advanced" ".jsonl" in
   Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    ~finally:(fun () ->
+      if Sys.file_exists path then
+        if Sys.is_directory path then Unix.rmdir path else Sys.remove path)
     (fun () -> f path)
+;;
+
+type trace_mode = Trace_disabled | Trace_ready | Trace_start_refused
+
+let raw_trace_for_mode mode ~path =
+  match mode with
+  | Trace_disabled -> None
+  | Trace_ready -> Some (Raw_trace.create ~path () |> Result.get_ok)
+  | Trace_start_refused ->
+    let trace = Raw_trace.create ~path () |> Result.get_ok in
+    (* Fail the real start append after sink creation, before execution. *)
+    Sys.remove path;
+    Unix.mkdir path 0o700;
+    Some trace
 ;;
 
 let test_advanced_run_emits_lifecycle_events () =
@@ -369,14 +385,14 @@ let test_advanced_continue_does_not_append_user_input () =
       (List.length messages)
 ;;
 
-let test_yield_after_context_checkpoint () =
+let test_yield_after_context_checkpoint trace_mode () =
   with_temp_trace
   @@ fun trace_path ->
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let raw_trace = raw_trace_for_mode trace_mode ~path:trace_path in
   let event_bus = Event_bus.create () in
   let subscription =
     Event_bus.subscribe
@@ -414,7 +430,7 @@ let test_yield_after_context_checkpoint () =
       ~event_bus
       ~net:env#net
       ~transport
-      ~raw_trace:trace
+      ?raw_trace
       ~checkpoint_sink
       ~context_injector:(Some context_injector)
       ~on_run_complete:(Some (fun completed -> completions := completed :: !completions))
@@ -504,13 +520,18 @@ let test_yield_after_context_checkpoint () =
      Alcotest.(check bool) "lifecycle ready" true (snapshot.status = Agent.Ready);
      Alcotest.(check (option string)) "no lifecycle error" None snapshot.last_error
    | None -> Alcotest.fail "missing lifecycle snapshot");
-  let record = last_record trace_path in
-  Alcotest.(check bool) "trace finished" true (record.record_type = Raw_trace.Run_finished);
-  Alcotest.(check (option string)) "trace error" None record.error;
-  Alcotest.(check (option string))
-    "trace yield outcome"
-    (Some "cooperative_tool_boundary_yield")
-    record.stop_reason
+  match trace_mode with
+  | Trace_disabled | Trace_start_refused ->
+    Alcotest.(check bool) "no trace run was invented" true
+      (Option.is_none (Agent.last_raw_trace_run agent))
+  | Trace_ready ->
+    let record = last_record trace_path in
+    Alcotest.(check bool) "trace finished" true (record.record_type = Raw_trace.Run_finished);
+    Alcotest.(check (option string)) "trace error" None record.error;
+    Alcotest.(check (option string))
+      "trace yield outcome"
+      (Some "cooperative_tool_boundary_yield")
+      record.stop_reason
 ;;
 
 let test_continue_reaches_terminal_completion () =
@@ -741,33 +762,37 @@ let test_assistant_checkpoint_failure_suppresses_release_and_tool () =
     Alcotest.(check int) "turn advanced" 1 live.turn_count
 ;;
 
-let test_release_callback_failure_prevents_tool_execution () =
+let test_release_callback_failure_prevents_tool_execution trace_mode () =
   with_temp_trace
   @@ fun trace_path ->
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  let trace = Raw_trace.create ~path:trace_path () |> Result.get_ok in
+  let raw_trace = raw_trace_for_mode trace_mode ~path:trace_path in
   let tool_executed = ref false in
   let boundary_count = ref 0 in
   let resume_count = ref 0 in
-  let transport, _call_count = sequence_transport [ tool_use_response ] in
+  let release_count = ref 0 in
+  let completions = ref [] in
+  let release_error = Failure "provider lease release failed" in
+  let transport, call_count = sequence_transport [ tool_use_response ] in
   let agent =
-    make_agent
+    make_agent_with_options
       ~net:env#net
       ~transport
-      ~raw_trace:trace
+      ?raw_trace
       ~checkpoint_sink:(fun _snapshot -> Ok ())
       ~context_injector:None
-      ~on_run_complete:None
+      ~on_run_complete:(Some (fun completed -> completions := completed :: !completions))
       ~tool:(time_tool (fun () -> tool_executed := true))
+      ()
   in
   let callback_failed =
     match
       Agent.Advanced.run_blocks
         ~sw
-        ~on_yield:(fun () -> raise (Failure "provider lease release failed"))
+        ~on_yield:(fun () -> incr release_count; raise release_error)
         ~on_resume:(fun () -> incr resume_count)
         ~api_strategy:Agent.Sync
         ~on_tool_boundary:(fun _boundary ->
@@ -777,16 +802,30 @@ let test_release_callback_failure_prevents_tool_execution () =
         [ Types.Text "what time is it?" ]
     with
     | Ok _ | Error _ -> false
-    | exception Failure _ -> true
+    | exception (Failure _ as exn) -> exn == release_error
   in
-  Alcotest.(check bool) "release callback failure propagated" true callback_failed;
+  Alcotest.(check bool) "original release callback exception propagated" true callback_failed;
+  Alcotest.(check int) "provider called once" 1 !call_count;
+  Alcotest.(check int) "release callback called once" 1 !release_count;
   Alcotest.(check bool) "tool did not start" false !tool_executed;
   Alcotest.(check int) "boundary did not run" 0 !boundary_count;
   Alcotest.(check int) "lease was not reacquired" 0 !resume_count;
-  match Agent.lifecycle agent with
-  | Some snapshot ->
-    Alcotest.(check bool) "lifecycle failed" true (snapshot.status = Agent.Failed)
-  | None -> Alcotest.fail "missing lifecycle snapshot"
+  Alcotest.(check (list bool)) "raised execution did not complete" [] !completions;
+  (match Agent.lifecycle agent with
+   | Some snapshot ->
+     Alcotest.(check bool) "lifecycle failed" true (snapshot.status = Agent.Failed)
+   | None -> Alcotest.fail "missing lifecycle snapshot");
+  match trace_mode with
+  | Trace_disabled | Trace_start_refused ->
+    Alcotest.(check bool) "no trace run was invented" true
+      (Option.is_none (Agent.last_raw_trace_run agent))
+  | Trace_ready ->
+    let record = last_record trace_path in
+    Alcotest.(check bool) "trace finished after exception" true
+      (record.record_type = Raw_trace.Run_finished);
+    Alcotest.(check (option string)) "trace records the execution exception"
+      (Some (Error.to_string (Error.of_raised_exn release_error))) record.error;
+    Alcotest.(check (option string)) "no yield stop reason" None record.stop_reason
 ;;
 
 let test_regular_run_releases_before_tool_execution () =
@@ -1433,9 +1472,17 @@ let () =
         ] )
     ; ( "tool boundary"
       , [ Alcotest.test_case
-            "yield after context checkpoint"
+            "yield after context checkpoint without trace"
             `Quick
-            test_yield_after_context_checkpoint
+            (test_yield_after_context_checkpoint Trace_disabled)
+        ; Alcotest.test_case
+            "yield after context checkpoint with trace"
+            `Quick
+            (test_yield_after_context_checkpoint Trace_ready)
+        ; Alcotest.test_case
+            "yield after context checkpoint with refused trace start"
+            `Quick
+            (test_yield_after_context_checkpoint Trace_start_refused)
         ; Alcotest.test_case
             "continue reaches terminal completion"
             `Quick
@@ -1449,9 +1496,17 @@ let () =
             `Quick
             test_assistant_checkpoint_failure_suppresses_release_and_tool
         ; Alcotest.test_case
-            "release callback failure prevents tool execution"
+            "release callback failure prevents tool execution without trace"
             `Quick
-            test_release_callback_failure_prevents_tool_execution
+            (test_release_callback_failure_prevents_tool_execution Trace_disabled)
+        ; Alcotest.test_case
+            "release callback failure prevents tool execution with trace"
+            `Quick
+            (test_release_callback_failure_prevents_tool_execution Trace_ready)
+        ; Alcotest.test_case
+            "release callback failure prevents tool execution with refused trace start"
+            `Quick
+            (test_release_callback_failure_prevents_tool_execution Trace_start_refused)
         ; Alcotest.test_case
             "regular run releases before tool execution"
             `Quick

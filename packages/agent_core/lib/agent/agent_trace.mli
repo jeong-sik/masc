@@ -68,8 +68,7 @@ type trace_success =
     raw-trace error, leaves the agent lifecycle [Ready], and does not invoke
     [on_run_complete]. *)
 val with_raw_trace_run_classified_result
-  :  of_core_error:(Error.t -> 'error)
-  -> error_to_string:('error -> string)
+  :  error_to_string:('error -> string)
   -> classify_success:('value -> trace_success)
   -> t
   -> string
@@ -78,8 +77,9 @@ val with_raw_trace_run_classified_result
 
 (** Execute [f] within a raw-trace run, handling start/finish recording
     and lifecycle status updates.  [f] receives [Some active_run] when
-    raw-trace is configured, [None] otherwise.  [of_core_error] lifts
-    trace-start failures into the caller's carrier, while
+    raw-trace starts successfully, [None] when disabled or its start record is
+    refused. A refused start is reported and execution continues without a
+    trace. No trace error can be lifted into the execution error carrier;
     [error_to_string] is used only for lifecycle/raw-trace diagnostics.
 
     A trace-finalization error is reported separately and cannot replace [f]'s
@@ -93,8 +93,7 @@ val with_raw_trace_run_classified_result
     A secondary failure to finalize the raw trace is emitted as a structured
     error log before the original exception is re-raised. *)
 val with_raw_trace_run_result
-  :  of_core_error:(Error.t -> 'error)
-  -> error_to_string:('error -> string)
+  :  error_to_string:('error -> string)
   -> t
   -> string
   -> (Raw_trace.active_run option -> (Types.api_response, 'error) result)

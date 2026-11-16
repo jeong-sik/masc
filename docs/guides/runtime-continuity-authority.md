@@ -1,0 +1,64 @@
+# 런타임 연속성: 무엇을 근거로 판정하는가
+
+압축·재연결·후보 전환·진단 기록을 고칠 때는, 관측한 사실과 그 사실로 내릴 수 있는
+판정을 먼저 구분한다. 이 문서는 기존 계약의 위치와 수리 이력을 연결하는 지도다.
+타입·상태 전이·전송 계약의 정본은 아래 모듈 인터페이스다.
+
+## 판정별 소유자
+
+| 질문 | 정본과 소비자 | 별도로 유지할 사실 |
+| --- | --- | --- |
+| Muse 세션을 이어도 되는가? | [Runtime_muse_serve.resume_last_turn](../../lib/runtime/runtime_muse_serve.mli) → session/resume admission | 완료 턴 개수는 압축 때 다시 센다. 정확한 턴 ID·끝난 상태·미확정 dispatch의 관계가 재개 근거다. |
+| 공식 클라이언트가 어떤 문맥을 보유하는가? | [Keeper_official_client_session_store](../../lib/keeper/keeper_official_client_session_store.mli)의 frontier·settlement·held_context → 각 adapter | 정본 입력, 전송한 입력, 완료를 확인한 입력, vendor가 보존하는 문맥은 서로 다른 사실이다. |
+| 채팅 턴이 끝났는가? | [Keeper_chat_run_signal](../../lib/keeper/keeper_chat_run_signal.mli) → TUI·connector·journal 소비자 | 한 provider 후보의 StreamIncomplete/진단은 전체 턴의 종료가 아니다. |
+| provider가 생산 중인가? | [Streaming](../../packages/agent_core/lib/llm_provider/streaming.mli)의 first-token·deliverable predicates → [Keeper_agent_run_turn_helpers](../../lib/keeper/keeper_agent_run_turn_helpers.mli) watchdog | reasoning 생산은 진행이다. 이를 최종 답으로 전달할 수 있는지는 완료 시 accept gate가 판정한다. |
+| 실행 결과와 진단 기록이 누구의 것인가? | [Agent_trace](../../packages/agent_core/lib/agent/agent_trace.mli)의 실행 정산 → [Agent.last_raw_trace_run](../../packages/agent_core/lib/agent/agent.mli) → Runtime_agent 결과 | 정본 실행·checkpoint 실패는 실행 권위다. raw trace의 시작·중간·종료 실패는 진단 실패이며, 이전 실행의 기록은 현재 실행 증거가 아니다. |
+
+소유자가 다른 판정을 한 enum으로 합치지 않는다. 예를 들어 `Run_yielded`는 trace의
+관측 분류이고, cooperative 실행의 실제 중단 지점과 다음 실행 허가는 별도 소유자가 정한다.
+반대로 같은 판정을 소비자마다 다시 만들지도 않는다. 채팅 종료는
+`Keeper_chat_run_signal`, 생성된 내용인지는 canonical Streaming predicates를 따른다.
+
+## 수리 이력에서 빠졌던 경계
+
+| 수리 | 원래 고장 | 후속 변경에서 유지할 경계 |
+| --- | --- | --- |
+| [#48054](https://github.com/jeong-sik/masc/pull/48054) | Muse 압축 후 줄어든 count를 세션 불일치로 처리 | 관측용 count를 세션 identity로 쓰지 않는다. 마지막 턴 ID와 끝난 상태를 검증한다. |
+| [#48737](https://github.com/jeong-sik/masc/pull/48737) | Codex 압축이 보존한 standing System의 receipt를 지워 전체 System 재주입 | 실제로 보존된 System과 재전달할 문맥을 구분한다. 미확정 전송을 성공 receipt로 바꾸지는 않는다. |
+| [#35986](https://github.com/jeong-sik/masc/pull/35986) | 후보 실패를 Event_error로 전송해 다음 후보의 답 수신을 중단 | 실패 범위는 후보이며 최종 턴 판정 전까지 소비자가 계속 읽는다. |
+| [#36169](https://github.com/jeong-sik/masc/pull/36169) | reasoning이 계속 와도 본문이 없어 진행 없음 timeout | watchdog의 생산 신호와 최종 답 수락 조건을 구분한다. ping·빈 carrier는 생산 증거가 아니다. |
+| [#45995](https://github.com/jeong-sik/masc/pull/45995) → [#51935](https://github.com/jeong-sik/masc/pull/51935) → [#52494](https://github.com/jeong-sik/masc/issues/52494) | 종료 기록, 중간 기록, 시작 기록 순서로 진단 실패의 실행 전파가 발견됨 | 개별 write만 고치지 말고 시작부터 종료까지 본다. trace 가용성과 관계없이 실행·예외 정산 경로는 하나다. 현재 실행 ID와 다른 완료 trace를 결과에 붙이지 않는다. |
+| [#47097](https://github.com/jeong-sik/masc/pull/47097) → [#52487](https://github.com/jeong-sik/masc/pull/52487) | 누락된 최신 답의 거짓 성공을 막는 history 검증이 정상 압축을 거짓 실패로 처리 | 정확한 최종 답 검증을 유지하면서 압축된 앞부분과 훼손된 범위를 typed coverage로 구분한다. |
+
+이력에 같은 단어가 있어도 기존 guard를 그대로 지우지 않는다. Muse의 압축 count와
+Agent Core의 checkpoint/durable turn count는 다른 계약이다. 후자는 실행 단계와
+소유권을 검증하며, [#52341](https://github.com/jeong-sik/masc/issues/52341)의 복구는 그 단계에 맞춰야 한다.
+
+## 변경을 확인하는 방법
+
+먼저 `입력 사실 → 판정 소유자 → 직접 소비자 → 실제 시나리오`를 적는다.
+문자열·정규식으로 로그를 분류하거나 임의 횟수·시간으로 성공과 실패를 정하지 않는다.
+프로토콜 파싱, 정확한 ID·digest 비교, 실제 저장 실패와 명시적 취소는 각 계약에 따라 처리한다.
+
+유사 수리의 확인 범위는 다음처럼 실제 동작을 따라간다.
+
+- 압축: 같은 세션의 시작 → 압축 → 재개. 변한 count와 안정된 턴 ID를 함께 두고,
+  다른 턴 ID·잘못된 완료 범위는 계속 거절되는지 확인한다.
+- 보유 문맥: Start → 완료 → Resume → compaction → Resume의 실제 전송을 확인한다.
+  System·Goal·승인 관측은 issuer의 partition과 순서를 보존한다. pure projection의
+  digest가 같다는 사실만으로 adapter의 세션 유지나 vendor 보유를 증명하지 않는다.
+- 후보 전환: 첫 후보의 스트림 실패 뒤 다음 후보의 답과 최종 종료를 같은 소비자로 읽는다.
+- 생산 신호: reasoning이 오는 동안 watchdog 진행을 확인하되, 같은 응답의 전달 가능성은
+  종료 시 별도 판정한다. 화면의 receiving 표시는 실행 진행의 정본이 아니다.
+- 진단 실패: 같은 Agent/sink로 한 번 성공한 뒤 시작·응답 기록·도구 기록·종료를 각각
+  실패시킨다. 응답, 효과 횟수, 정본 terminal, callback, lifecycle, 현재 trace 귀속을 확인한다.
+  실제 checkpoint/journal 거절과 취소는 원래 결과로 남는 대조군을 둔다.
+
+기존 실행 시험은 `test_runtime_muse_serve`, `test_keeper_codex_current_context`,
+`test_keeper_stream_tool_accum`, `test_keeper_run_tools_hooks`, `test_pipeline`,
+`test_agent_advanced`에서 찾는다.
+source-extracted replay, 문법 검사, 실제 통합 시험, vendor 세션 실측, 설치 후 관측은
+각각 실행한 범위로 기록한다. 하나의 성공을 다른 범위의 증거로 이월하지 않는다.
+
+이번 trace 시작·귀속 수리의 직접 기록은
+[trace-start-authority 증거](../evidence/trace-start-authority-20261116/README.md)에 있다.

@@ -769,6 +769,10 @@ val checkpoint : ?session_id:string -> ?working_context:Yojson.Safe.t -> t -> Ch
 (** {1 Lifecycle} *)
 
 val last_raw_trace_run : t -> Raw_trace.run_ref option
+(** Completed raw-trace evidence for this agent's current lifecycle run ID.
+    [None] when this execution has no completed trace; a previous run from a
+    reused sink is never substituted. Historical traces remain available
+    through [Raw_trace_query]. *)
 val lifecycle_snapshot : t -> lifecycle_snapshot option
 
 (** {1 Internal (testing only -- do not use in production code)} *)

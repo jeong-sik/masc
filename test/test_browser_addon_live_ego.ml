@@ -66,7 +66,7 @@ let test_installations_resolve_independent_spaces () =
 
 let failure_name = function
   | Peer.Exited {code; _} -> Printf.sprintf "exited %d" code
-  | Peer.Signaled signal -> "signaled " ^ Process_eio.signal_name signal
+  | Peer.Signaled signal -> "signaled " ^ Process_exit_text.signal_name signal
   | Peer.Timed_out -> "timed out" | Peer.Output_exceeded -> "output exceeded"
   | Peer.Unobserved _ -> "unobserved" | Peer.Unstarted _ -> "unstarted"
 

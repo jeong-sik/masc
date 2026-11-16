@@ -5,6 +5,7 @@ they do not execute the host Exact provider or Memory commit.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import runpy
 from pathlib import Path
@@ -46,6 +47,15 @@ def admitted(name, arguments, caller=None):
 def submit(original, name=None, caller=None):
     return admitted(tool(original["output"]) if name is None else name,
                     {"kind": "submit", "request": original}, caller)
+
+
+def refuse_body(original, request_bytes=None, name=None, caller=None):
+    encoded = json.dumps(original, sort_keys=True, ensure_ascii=False,
+                         allow_nan=False, separators=(",", ":")).encode("utf-8")
+    return admitted(tool(original["output"]) if name is None else name,
+                    {"kind": "refuse_body", "request_id": original["request_id"],
+                     "request_digest": hashlib.sha256(encoded).hexdigest(),
+                     "request_bytes": len(encoded) if request_bytes is None else request_bytes}, caller)
 
 
 def read(original, name=None):
@@ -163,6 +173,92 @@ class LibrarianWorker(unittest.TestCase):
                 self.assertEqual(worker.store.path(original["request_id"]).read_text(), changed)
                 worker.store.path(original["request_id"]).write_text(json.dumps(retained))
 
+    def test_measured_body_refusal_survives_restart_without_sending_the_body(self):
+        limit = tomllib.loads((SERVER.parent / "lane.toml").read_text())["resources"]["max_reply_bytes"]
+        with tempfile.TemporaryDirectory() as directory:
+            originals = [{**request(output), "system": "큰" * (limit // len("큰".encode("utf-8")) + 1)}
+                         for output in ("admission", "durable")]
+            compact = list(map(refuse_body, originals))
+            self.assertTrue(all(len(json.dumps(x).encode("utf-8")) < limit for x in compact))
+            replies = self.run_worker(directory, [*compact, listing()])
+            expected = {"status": "input_refused", "kind": "request_body_refused"}
+            for original, reply in zip(originals, replies):
+                self.assertEqual(self.output(reply), {"request_id": original["request_id"],
+                                                     "state": "finished", "result": expected})
+            self.assertEqual(self.output(replies[-1]), {"requests": []})
+            records = list((Path(directory) / "keeper-librarian").glob("*.json"))
+            self.assertEqual(len(records), 2)
+            before = {path.name: path.read_bytes() for path in records}
+            for raw in before.values():
+                retained = json.loads(raw)
+                self.assertEqual(set(retained), {"version", "request_id", "digest", "result", "tool"})
+                self.assertEqual(retained["version"], 2)
+                self.assertEqual(retained["result"], expected)
+            restored = self.run_worker(directory, [*compact, *map(read, originals), listing()])
+            self.assertTrue(all(self.output(x)["result"] == expected for x in restored[:-1]))
+            self.assertEqual(self.output(restored[-1]), {"requests": []})
+            self.assertEqual({path.name: path.read_bytes() for path in records}, before)
+
+    def test_compact_refusal_preserves_existing_pending_and_final_records(self):
+        limit = tomllib.loads((SERVER.parent / "lane.toml").read_text())["resources"]["max_reply_bytes"]
+        originals = [request("admission"), request("durable")]
+        compact = [refuse_body(original, limit + 1) for original in originals]
+        with tempfile.TemporaryDirectory() as directory:
+            self.run_worker(directory, list(map(submit, originals)))
+            records = list((Path(directory) / "keeper-librarian").glob("*.json"))
+            for results in (None, [{"status": "outcome_unknown"},
+                                   {"status": "answered", "slot": "original-slot",
+                                    "output": {"original": "retained answer"}}]):
+                if results is not None:
+                    self.run_worker(directory, [deliver(x, y) for x, y in zip(originals, results)])
+                before = {path.name: path.read_bytes() for path in records}
+                wrong_digest = []
+                wrong_tool = []
+                for original in originals:
+                    bad = refuse_body(original, limit + 1)
+                    bad["params"]["arguments"]["arguments"]["request_digest"] = "0" * 64
+                    wrong_digest.append(bad)
+                    wrong_tool.append(refuse_body(original, limit + 1,
+                                      name="derive_memory" if original["output"] == "admission" else "admit_memory"))
+                replies = self.run_worker(directory, [*wrong_digest, *wrong_tool, *compact, listing()])
+                self.assertTrue(all(reply["isError"] for reply in replies[:4]))
+                for i, reply in enumerate(replies[4:6]):
+                    if results is None:
+                        self.assertEqual(self.output(reply)["state"], "pending")
+                    else:
+                        self.assertEqual(self.output(reply)["result"], results[i])
+                self.assertCountEqual(self.output(replies[-1])["requests"],
+                                      originals if results is None else [])
+                self.assertEqual({path.name: path.read_bytes() for path in records}, before)
+
+    def test_compact_refusal_requires_a_strict_host_measurement_above_the_frame(self):
+        limit = tomllib.loads((SERVER.parent / "lane.toml").read_text())["resources"]["max_reply_bytes"]
+        original = request("durable")
+        operations = []
+        for value in (True, False, 0, -1, 1.5, "9999999", None, limit - 1, limit):
+            bad = refuse_body(original, limit + 1)
+            bad["params"]["arguments"]["arguments"]["request_bytes"] = value
+            operations.append(bad)
+        for value in (None, [], {}, "", "a" * 63, "A" * 64, "z" * 64):
+            bad = refuse_body(original, limit + 1)
+            bad["params"]["arguments"]["arguments"]["request_digest"] = value
+            operations.append(bad)
+        for caller in ({"kind": "anonymous"}, {"kind": "keeper", "name": "keeper"},
+                       {"kind": "agent", "name": "agent"}, {"kind": "host_actor", "name": "actor"},
+                       {"kind": "operator", "name": "extra"}):
+            operations.append(refuse_body(original, limit + 1, caller=caller))
+        bad = refuse_body(original, limit + 1)
+        bad["params"]["arguments"]["arguments"]["extra"] = True
+        operations.append(bad)
+        direct = refuse_body(original, limit + 1)["params"]["arguments"]["arguments"]
+        operations.append(call("derive_memory", direct))
+        with tempfile.TemporaryDirectory() as directory:
+            replies = self.run_worker(directory, [*operations, listing(), read(original)])
+            self.assertTrue(all(reply["isError"] for reply in replies[:-2]))
+            self.assertEqual(self.output(replies[-2]), {"requests": []})
+            self.assertEqual(self.output(replies[-1])["state"], "absent")
+            self.assertEqual(list((Path(directory) / "keeper-librarian").glob("*.json")), [])
+
     def test_request_identity_cannot_change_purpose_or_original_input(self):
         with tempfile.TemporaryDirectory() as directory:
             original = request("durable", "same-original-id")
@@ -246,6 +342,11 @@ class LibrarianWorker(unittest.TestCase):
             for output in ("admission", "durable"):
                 schema = exported[tool(output)]["inputSchema"]["oneOf"][0]["properties"]["request"]
                 self.assertEqual(schema["properties"]["output"], {"type": "string", "const": output})
+                compact = exported[tool(output)]["inputSchema"]["oneOf"][1]
+                self.assertEqual(compact["properties"]["kind"]["const"], "refuse_body")
+                self.assertEqual(set(compact["required"]),
+                                 {"kind", "request_id", "request_digest", "request_bytes"})
+                self.assertFalse(compact["additionalProperties"])
 
 
 if __name__ == "__main__":

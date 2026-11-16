@@ -94,6 +94,26 @@ retention, strict reread and acknowledgement need original identities. A
 temporary implementation that only parks size-refused work has not preserved
 this behavior and does not complete the unit.
 
+The host prepares a captured worker command under the same fresh declaration
+and original-record confirmation that authorize its send. If the complete Exact
+request's sorted-canonical UTF-8 bytes exceed the worker's declared reply frame,
+no pending-request listing could carry that request. The host sends only
+`refuse_body`, its request ID, worker digest and measured byte count. The admitted
+operator command retains the existing body-free v2 `Request_body_refused`
+terminal. It preserves an existing pending or final with the same digest and
+tool. The ordinary consumer then handles that actual refusal; no Memory or ACK
+is synthesized. Requests that fit this sufficient check still use the worker's
+full listing-envelope check, including contention with other pending requests.
+
+This avoids allocating the oversized question in the small worker before it
+can refuse it. It adds no input-size setting and does not repurpose the reply
+frame as a general transport input limit. The worker digest uses sorted JSON,
+not the host Exact record's field-order digest. Librarian's generated schemas
+use integer bounds; an oversized input with residual non-integral numbers is
+refused locally because the two language serializers can produce different
+float bytes. Python documents JSON decoding's memory use and its encoder options
+in the [JSON reference](https://docs.python.org/3/library/json.html).
+
 The queue now exposes `batch_to_json` / `batch_of_json` for that immutable input
 boundary. The closed envelope preserves the original generation and full
 ordered candidate rows. Restore must match an independently retained host

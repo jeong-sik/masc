@@ -88,19 +88,22 @@ let test_unreadable_shape_stays_a_reviewer_refusal () =
   | V.Run_ended _ | V.Owner_exited _ | V.Authority_moved _ ->
     fail "an unreadable object must not be decoded by resemblance"
 
-(* A run time that is not finite cannot name a run; the record falls back. *)
-let test_non_finite_run_time_falls_back () =
+(* A run record the store cannot even carry — a non-finite number is refused by
+   Yojson itself, so it can never arrive here — falls back through the same
+   path as any other unreadable shape: the run must name a finite start time,
+   and a run without one is not a run this module may decode. *)
+let test_run_without_a_start_time_falls_back () =
   let evidence =
     `Assoc
       [ "cause", `String "review_cancelled"
-      ; "run", `Assoc [ "run_id", `String "run-7"; "started_at", `Float Float.nan ]
+      ; "run", `Assoc [ "run_id", `String "run-7" ]
       ; "tools", `List []
       ; "observations", `List []
       ] in
   match execution_refusal evidence with
   | V.Reviewer_refused _ -> ()
   | V.Run_ended _ | V.Owner_exited _ | V.Authority_moved _ ->
-    fail "a run without a finite start time must not read as a named run"
+    fail "a run without a start time must not read as a named run"
 
 (* The writer and this reader must agree on one shape. *)
 let test_writer_reproduces_the_read_shape () =
@@ -142,7 +145,8 @@ let () =
             test_reviewer_refusal_keeps_its_bytes
         ; Alcotest.test_case "unreadable shape" `Quick
             test_unreadable_shape_stays_a_reviewer_refusal
-        ; Alcotest.test_case "non-finite run time" `Quick test_non_finite_run_time_falls_back
+        ; Alcotest.test_case "run without a start time" `Quick
+            test_run_without_a_start_time_falls_back
         ; Alcotest.test_case "writer shape" `Quick test_writer_reproduces_the_read_shape
         ; Alcotest.test_case "run end labels" `Quick test_run_end_labels_round_trip
         ] )

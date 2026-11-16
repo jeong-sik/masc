@@ -11,7 +11,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account ~quota_scope ~c
   | Ok home ->
     Eio.Switch.run (fun sw ->
       let root = Filename.concat directory ("muse-readiness-" ^ Random_id.hex ~bytes:16) in
-      let prepared = Eio.Cancel.protect (fun () ->
+      let* () = Eio.Cancel.protect (fun () ->
         let created = Eio_guard.run_in_systhread ~label:"muse readiness workspace" (fun () ->
           try Unix.mkdir root 0o700; true
           with Unix.Unix_error _ -> false) in
@@ -20,17 +20,18 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account ~quota_scope ~c
              The turn's own switch reaps its child before returning; listener
              releases run before this whole temporary tree is removed. *)
           Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree root);
-          Eio_guard.run_in_systhread ~label:"muse readiness native storage" (fun () ->
-            try
-              let workspace = Filename.concat root "workspace" in
-              let storage_root = Filename.concat root "native" in
-              Unix.mkdir workspace 0o700;
-              Runtime_muse_serve.ensure_storage_dirs storage_root;
-              (match Runtime_muse_serve.origin_of_masc_directory workspace with
-               | Ok origin -> Ok (workspace, storage_root, origin)
-               | Error _ -> Error Private_workspace_unavailable)
-            with Unix.Unix_error _ -> Error Private_workspace_unavailable))) in
-      let* workspace, storage_root, workspace_origin = prepared in
+          Ok ())) in
+      let* workspace = Runtime_muse_home.prepare_private_workspace ~parent:root
+        |> Result.map_error (fun error -> Home_error error) in
+      let* storage_root, workspace_origin =
+        Eio_guard.run_in_systhread ~label:"muse readiness native storage" (fun () ->
+          try
+            let storage_root = Filename.concat root "native" in
+            Runtime_muse_serve.ensure_storage_dirs storage_root;
+            (match Runtime_muse_serve.origin_of_masc_directory workspace with
+             | Ok origin -> Ok (storage_root, origin)
+             | Error _ -> Error Private_workspace_unavailable)
+          with Unix.Unix_error _ -> Error Private_workspace_unavailable) in
       let bridge = Runtime_official_client_mcp_http.start ~sw ~net ~secure_random
         ~server_name:"masc"
         ~tool_specs:(fun () -> [`Assoc [

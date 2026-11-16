@@ -301,14 +301,38 @@ let keeper_identity_dir ~runtime_root ~keeper_name ~account_home =
     [ "official-clients"; "muse"; keeper_identity ~keeper_name ~account_home ]
 ;;
 
+let prepare_private_workspace ~parent =
+  if Filename.is_relative parent then unavailable "private project root must be absolute"
+  else protect (fun () ->
+    let* () = Eio_guard.run_in_systhread ~label:"muse-private-project-directory" (fun () ->
+      let* () = check_directory ~private_:true parent in
+      let* _ = directories parent [ ".git", true ] in
+      Ok ()) in
+    (* A directory merely named .git does not stop Muse's discovery: it uses
+       Git's repository root. Keep the real repository outside the workspace
+       so the existing empty-directory trust check still applies. *)
+    let env = Array.of_list
+      ([ "GIT_CONFIG_NOSYSTEM=1"; "GIT_CONFIG_GLOBAL=/dev/null" ]
+       @ Option.to_list (Option.map (fun path -> "PATH=" ^ path) (Sys.getenv_opt "PATH"))) in
+    let* () =
+      match Process_eio.run_argv_with_status ~env
+          [ "git"; "init"; "--quiet"; "--template="; "--"; parent ] with
+      | Unix.WEXITED 0, _ -> Ok ()
+      | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), detail ->
+        unavailable ("private project initialization failed: " ^ detail)
+    in
+    Eio_guard.run_in_systhread ~label:"muse-private-workspace-directory" (fun () ->
+      directories parent [ "workspace", true ]))
+
 let prepare_native_workspace ~runtime_root ~keeper_name ~account_home =
   let* account_home = Runtime_account_home.of_string account_home
     |> Result.map_error (fun detail -> Invalid_account_home detail) in
   if Filename.is_relative runtime_root then unavailable "runtime root must be absolute"
   else protect (fun () ->
     let identity = keeper_identity ~keeper_name ~account_home in
-    Eio_guard.run_in_systhread ~label:"muse-native-workspace" (fun () ->
-      directories runtime_root [ "official-clients", true; "muse", true; identity, true; "workspace", true ]))
+    let* parent = Eio_guard.run_in_systhread ~label:"muse-native-workspace" (fun () ->
+      directories runtime_root [ "official-clients", true; "muse", true; identity, true ]) in
+    prepare_private_workspace ~parent)
 
 module For_testing = struct
   let prepare_with_store_sync = prepare_with_store_sync

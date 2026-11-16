@@ -4,94 +4,113 @@ Retained records for `docs/rfc/RFC-a-keeper-takes-every-waiting-message-in-one-t
 
 ## Source and environment
 
-- Runtime data: the operator's `<base-path>/.masc` on 2026-11-16, read between 02:10Z and 02:40Z.
-- Source head when reading: `706704b625a5`.
+- Runtime data: the operator's `<base-path>/.masc` on 2026-11-16, read at 03:56Z.
+- Server logs: `<base-path>/.masc/logs/masc-start-*.log`. Their timestamps are KST (UTC+9).
 - Every read opens SQLite with `mode=ro` or reads JSONL files. Nothing was written to the runtime.
 
 ## Windows
 
-| Name | UTC |
+| Name | UTC | Epoch |
+|---|---|---|
+| Earlier | 2026-11-10T00:48:28Z ~ 11-13T00:48:28Z | 1794271708 ~ 1794530908 |
+| Later | 2026-11-13T00:48:28Z ~ 11-16T00:48:28Z | 1794530908 ~ 1794790108 |
+
+## Files
+
+| File | What |
 |---|---|
-| Earlier | 2026-11-10T00:48:28Z ~ 11-13T00:48:28Z |
-| Later | 2026-11-13T00:48:28Z ~ 11-16T00:48:28Z |
+| `chat_queue_split.py` | Per Keeper: received, waited, executions, wait, queued, idle, turn overlap, gaps. Definitions in its docstring. |
+| `gap_causes.py` | Splits the gaps by cause windows given on the command line. |
+| `runtime_by_window.py` | Direct turns per `runtime_profile` from the tool-call ledger. |
+| `result-split-all-*.json` | `chat_queue_split.py` over every Keeper with a chat operation store. |
+| `result-split-*.json` | The same over the seven review Keepers. |
+| `gaps-2026-11-13..16.jsonl` | Every later-window idle interval that overlaps no turn, from `--gaps-out`. |
+| `result-gap-causes-2026-11-13..16.json` | `gap_causes.py` over the later gaps. |
+| `result-runtime-by-window.json` | `runtime_by_window.py` over the seven review Keepers. |
 
 ## Commands
 
 ```bash
-python3 docs/evidence/tool-efficiency-before-after-2026-11/queue_wait_overlap.py \
-  --base-path ~/me --since 2026-11-13T00:48:28 --end 2026-11-16T00:48:28 \
-  --json-out result-queue-wait-overlap-2026-11-13T00-48-28Z_11-16T00-48-28Z.json
+cd docs/evidence/chat-queue-wait-2026-11-16
+R="context-reviewer code-reviewer-uncle code-reviewer-father code-reviewer code-reviewer-sister code-reviewer-brother code-reviewer-mother"
+ALL=$(cd ~/me/.masc/keepers && for d in */; do [ -f "$d/chat-operations.sqlite3" ] && echo "${d%/}"; done)
 
-python3 docs/evidence/chat-queue-wait-2026-11-16/chat_queue_split.py \
-  --base-path ~/me --since 1794530908 --end 1794790108 \
-  context-reviewer code-reviewer-father code-reviewer code-reviewer-uncle \
-  code-reviewer-brother code-reviewer-sister code-reviewer-mother \
-  > result-split-2026-11-13T00-48-28Z_11-16T00-48-28Z.json
+python3 chat_queue_split.py --base-path ~/me --since 1794530908 --end 1794790108 \
+  --gaps-out gaps-2026-11-13..16.jsonl $R > result-split-2026-11-13..16.json
+python3 chat_queue_split.py --base-path ~/me --since 1794271708 --end 1794530908 $R > result-split-2026-11-10..13.json
+python3 chat_queue_split.py --base-path ~/me --since 1794530908 --end 1794790108 $ALL > result-split-all-2026-11-13..16.json
+python3 chat_queue_split.py --base-path ~/me --since 1794271708 --end 1794530908 $ALL > result-split-all-2026-11-10..13.json
+
+python3 gap_causes.py gaps-2026-11-13..16.jsonl \
+  --cause disk_full_and_server_down '*' 2026-11-15T13:43:51Z 2026-11-15T17:06:02Z \
+  --cause deploy_restart_cut_turns code-reviewer-brother,code-reviewer,context-reviewer,code-reviewer-uncle,code-reviewer-sister \
+    2026-11-13T05:08:18Z 2026-11-13T06:31:04Z > result-gap-causes-2026-11-13..16.json
+
+python3 runtime_by_window.py --base-path ~/me --since 1794271708 --mid 1794530908 --end 1794790108 $R \
+  > result-runtime-by-window.json
 ```
 
-The earlier window uses `--since 2026-11-10T00:48:28 --end 2026-11-13T00:48:28` and
-`--since 1794271708 --end 1794530908`.
+In zsh, write `${=R}` and `${=ALL}` so the lists split into words.
 
 ## Results
 
-All Keepers, `queue_wait_overlap.py` (sum of `created_at -> started_at`):
+All Keepers (`result-split-all-*.json`, `sum`):
 
-| Window | Operations | Wait hours |
+| Window | Received | Wait h |
 |---|---|---|
 | Earlier | 765 | 14.2 |
-| Later | 875 | 934.8 |
+| Later | 891 | 1,032.5 |
 
-The seven review Keepers in the later window, `chat_queue_split.py`:
+The seven review Keepers (`result-split-*.json`):
 
-| Keeper | Operations | Executions | Wait h | Idle h | Idle under an autonomous turn h | Autonomous turns / h | Direct turns / h |
-|---|---|---|---|---|---|---|---|
-| context-reviewer | 123 | 108 | 355.0 | 13.6 | 5.2 | 128 / 26.6 | 111 / 32.7 |
-| code-reviewer-father | 138 | 114 | 128.9 | 11.8 | 3.6 | 172 / 25.4 | 121 / 30.1 |
-| code-reviewer | 115 | 101 | 121.9 | 9.6 | 3.8 | 330 / 23.6 | 102 / 24.0 |
-| code-reviewer-uncle | 101 | 95 | 130.2 | 17.6 | 3.7 | 247 / 16.9 | 93 / 10.7 |
-| code-reviewer-brother | 116 | 107 | 38.8 | 13.5 | 6.0 | 69 / 14.6 | 108 / 23.0 |
-| code-reviewer-sister | 92 | 79 | 98.3 | 43.5 | 31.3 | 169 / 33.7 | 78 / 26.2 |
-| code-reviewer-mother | 87 | 82 | 24.9 | 7.5 | 3.3 | 67 / 14.3 | 83 / 25.0 |
-| Sum | 772 | 686 | 898.0 | 117.1 | 56.9 | 1,182 / 155.1 | 696 / 171.7 |
+| Keeper | Received earlier → later | Later started / executions | Later wait h | Mean run min earlier → later |
+|---|---|---|---|---|
+| context-reviewer | 17 → 123 | 123 / 108 | 355.0 | 6.1 → 15.8 |
+| code-reviewer-uncle | 320 → 111 | 102 / 96 | 226.9 | 2.7 → 11.0 |
+| code-reviewer-father | 52 → 138 | 138 / 114 | 128.9 | 2.6 → 13.9 |
+| code-reviewer | 155 → 115 | 115 / 101 | 121.9 | 3.0 → 13.0 |
+| code-reviewer-sister | 60 → 93 | 92 / 79 | 98.6 | 2.6 → 18.7 |
+| code-reviewer-brother | 42 → 117 | 116 / 107 | 38.9 | 1.8 → 12.7 |
+| code-reviewer-mother | 42 → 87 | 87 / 82 | 24.9 | 2.3 → 17.4 |
+| Sum | 688 → 784 | 773 / 687 | 995.1 | |
 
-Mean run minutes per completed chat operation, for each window `[a, b)`:
+Later window, the seven review Keepers together:
 
-```sql
-SELECT count(*), avg(completed_at - started_at) / 60.0 FROM operations
-WHERE completed_at IS NOT NULL AND started_at < b AND completed_at > a;
-```
+| | Hours |
+|---|---|
+| Queued with no chat operation running (`idle_h`) | 81.0 |
+| ... overlapping an autonomous turn | 31.1 |
+| ... overlapping a direct turn | 32.6 |
+| ... overlapping no turn (`idle_without_turn_h`) | 17.3 |
 
-| Keeper | Earlier | Later |
+Turns: autonomous 1,183 / 155.6 h, direct 699 / 179.8 h. 86 of the 773 started operations ran inside another
+operation's execution.
+
+The 17.3 hours with no turn, by cause (`result-gap-causes-2026-11-13..16.json`):
+
+| Cause | Hours | Log evidence |
 |---|---|---|
-| context-reviewer | 6.1 | 15.9 |
-| code-reviewer-father | 2.6 | 13.9 |
-| code-reviewer | 3.0 | 13.0 |
-| code-reviewer-uncle | 2.7 | 10.4 |
-| code-reviewer-brother | 1.8 | 12.7 |
-| code-reviewer-sister | 2.6 | 18.9 |
-| code-reviewer-mother | 2.3 | 17.4 |
+| Disk full, then server down | 11.2 | `masc-start-20261115T103255Z.log`: `ENOSPC` at 22:43:51 KST (13:43:51Z), last line 00:42:29 KST (15:42:29Z). The next server starts at 17:00:53Z and 17:06:02Z. |
+| Turns cut by the 11-13 deploy restart | 3.7 | `masc-start-20261113T004828Z.log` ends at 06:30:04Z and the next server starts at 06:30:03Z. Inside each of the five gaps the Keeper logs `checkpoint_save` 6 to 45 times. No turn record and no raw trace covers these turns. |
+| Not separated | 2.4 | 676 intervals, 13 seconds on average. |
+
+Mean run minutes are `completed_at - started_at` over operations that started in the window and completed.
+`code-reviewer-mother` ran its direct turns mostly on `glm-coding.glm-5.3-flash` in both windows (330 and 283
+turns in `result-runtime-by-window.json`), and its mean run still grew 7.6 times.
 
 ## Limits
 
-- `wait_h` reads `started_at`, which a requeued continuation clears and writes again. It also
-  counts earlier run segments of the same operation. `first_call_wait_h` in the result files is the
-  lower bound (context-reviewer 346.1 against 355.0).
-- The sum depends on when it is read. Operations that were still queued at the window end count
-  only after they start. A read at 01:50Z gave 921.6 hours and 873 operations for the same window.
-- `idle_h` treats only `started_at..completed_at` as running, so it is an upper bound.
-- Turn spans start at the millisecond stamp in the raw-trace file name. Turn records start on
-  2026-11-13, so the earlier window has no turn split.
-- 35.5 of the 117.1 idle hours overlap no recorded turn (`idle_without_turn_h`,
-  `longest_idle_without_turn`). The server logs `masc-start-20261113T004828Z.log`,
-  `masc-start-20261115T103255Z.log` and `masc-start-20261115T170602Z.log` explain 22.6 of them:
-  `ENOSPC` from 2026-11-15T13:43Z and the server down 15:42Z~17:00Z (11.1 h, five Keepers), one
-  code-reviewer-uncle chat turn holding the slot from 17:07:55Z until the 02:01Z restart (7.7 h
-  inside the window, logged as `turn_busy holder_lane=chat_operation holder_started_at=1794762475`),
-  and turns cut by the 11-13 06:30Z deploy restart (3.8 h; all five Keepers log `checkpoint_save`
-  in that span). A turn that ends by a restart writes
-  no turn record, and its operation rewrites `started_at` when it resumes. The other 12.9 hours
-  are not separated.
-- The longer runs coincide with a runtime change. In the tool-call ledger, direct turns of these
-  Keepers in the earlier window ran mostly on deepseek-v4-1-flash, gpt-6.1 and sonnet-5-5 profiles,
-  and in the later window mostly on glm-5.3-flash profiles. Neither the cause of the change nor
-  its effect on run time is established.
+- `wait_h` reads `started_at`, which a requeued continuation clears and writes again. For a continuation it also
+  counts earlier run segments.
+- `first_claim_wait_h` uses `semantic_executions.created_at`. Those records start on 2026-11-13 11:29Z, so most
+  operations of the earlier window and 151 of the later window have none (`operations_without_execution`). The RFC
+  does not use this field.
+- An operation still waiting at read time counts until the window end. A later read gives a larger or equal sum.
+- `idle_h` treats only `started_at..completed_at` as running, so it is an upper bound. Most of the time that
+  overlaps a direct turn is this gap: a code-reviewer-uncle direct turn ran from 2026-11-15T17:08Z to
+  2026-11-16T01:00:26Z, and its operation later rewrote `started_at` to 02:10:48Z.
+- A turn spans from the millisecond stamp in its raw-trace file name to its turn record `ts`. Delivery and Owner
+  settlement after the record are not in the span. Turn records start on 2026-11-13, so the earlier window has
+  no turn split.
+- `runtime_by_window.py` counts only turns that called a tool, because a turn without a tool call has no ledger
+  record.

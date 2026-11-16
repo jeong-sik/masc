@@ -52,13 +52,28 @@ let load ~config ~keeper_name ~request_id =
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path) original) in
   let* request = unavailable (Request.restore ~owner original) in
   Ok (store, original, request)
-let eligible ~(original:Owner.retained) =
-  let* () = match Progress.phase original.progress with
-    | Dispatch_pending (Some (Absent _)) -> Ok ()
-    | Captured | Admission_wait _ | Dispatch_pending (None | Some (Waiting _ | Outcome_unknown _))
-    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
-    | Subdividing _ | Subdivided _ ->
-      Error (Ineligible "Only an original with an observed worker absence after dispatch can be fenced") in
+type original_kind = Absent_original | Cut_original
+let eligible ~kind ~request ~(original:Owner.retained) =
+  let* () = match kind,Progress.phase original.progress with
+    | Absent_original,Dispatch_pending (Some (Absent _)) -> Ok ()
+    | Cut_original,Rejected {stage=Execution;evidence} ->
+      let* exact=unavailable (Request.request request) in
+      let* schema=Option.to_result ~none:(Ineligible "Cut original has no captured schema") exact.Exact.schema in
+      let* final=unavailable (Exact.retained_final_of_json ~schema evidence) in
+      (match final with
+       | Exact.Retained_unknown Cut ->
+         require (Option.is_none (Progress.settlement original.progress))
+           (Ineligible "Cut original already has a source disposition")
+       | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed _
+       | Retained_declaration_replaced | Retained_request_id_reused ->
+         Error (Ineligible "Original is not a retained execution-stage Cut"))
+    | Absent_original,(Captured | Admission_wait _ | Dispatch_pending (None | Some (Waiting _ | Outcome_unknown _))
+      | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
+      | Subdividing _ | Subdivided _)
+    | Cut_original,(Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_}
+      | Subdividing _ | Subdivided _) ->
+      Error (Ineligible "Original phase does not carry the requested fence authority") in
   require (Option.is_none (Progress.preparation original.progress)
     && Option.is_none (Progress.replacement original.progress))
     (Ineligible "Original already owns gate or replacement preparation")
@@ -79,6 +94,21 @@ let no_host_result ~store request =
   match proof with
   | Exact.No_completed_latest -> Ok ()
   | Completed_latest _ -> Error (Ineligible "Original host execution proof is available")
+let with_host_exclusion ~kind ~store ~request consume = match kind with
+  | Absent_original -> let* ()=no_host_result ~store request in consume None
+  | Cut_original ->
+    let* exact=unavailable (Request.request request) in
+    let* schema=Option.to_result ~none:(Ineligible "Cut original has no captured schema") exact.Exact.schema in
+    let* installation=unavailable (Owner.installation_of_id (Request.destination request).installation_id) in
+    let* declaration_id=match installation with Owner.Configuration id -> Ok id
+      | Manual _ -> Error (Ineligible "Cut original is not configured") in
+    let* outcome=Exact.with_cut_exclusion ~store ~declaration_id ~schema exact
+      ~use:(fun exclusion -> consume (Some exclusion))
+      |> Result.map_error (fun error -> Unavailable (Exact.describe_recovery_error error)) in
+    match outcome with
+    | Exact.Cut_busy -> Error (Ineligible "Original host execution claim is busy")
+    | Cut_not_retained _ -> Error (Ineligible "Original host no longer retains a terminal Cut")
+    | Cut_excluded result -> result
 let no_range_receipt request =
   let owner = Request.physical_owner request and source = Request.source request in
   let* reading = unavailable (Receipts.read_durable_range_receipts_cached
@@ -111,7 +141,7 @@ let cursors request =
   let* external_cursor = unavailable (Cursor.observe ~runtime_keepers_dir:keepers_dir ~keeper_name:keeper_id) in
   digest (`Assoc ["atom",optional Atom.to_json atom;"official",optional Official.to_json official;
     "external",Cursor.observation_to_json external_cursor])
-let with_observation ~store ~(original:Owner.retained) ~request consume =
+let with_observation ~kind ~store ~(original:Owner.retained) ~request consume =
   Keeper_librarian_durable_source_lock.with_original_snapshot ~request (fun ~messages:_ ->
     let owner = Request.physical_owner request in
     let keepers_dir = Request.keepers_dir owner and keeper_id = Request.keeper_id owner in
@@ -121,12 +151,12 @@ let with_observation ~store ~(original:Owner.retained) ~request consume =
         let* current = Owner.reload ~store original |> Result.map_error (fun error ->
           Unavailable (Owner.error_to_string error)) in
         let* current = match current with None -> Error Observation_changed | Some value -> Ok value in
-        let* () = eligible ~original:current in
+        let* () = eligible ~kind ~request ~original:current in
         let* record_sha256 = digest (Owner.to_json current) in
         let* original_sha256 = digest (Owner.to_json original) in
         let* () = require (record_sha256=original_sha256) Observation_changed in
         let* () = unavailable (State.check_unfenced ~store ~request ~original:current) in
-        let* () = no_host_result ~store request in
+        with_host_exclusion ~kind ~store ~request (fun exclusion ->
         let* snapshot = unavailable (Current.read_locked_for_keepers_dir ~keepers_dir ~keeper_id) in
         let* memory_sha256 = match snapshot with
           | None -> Ok None | Some snapshot -> let+ digest = digest (Current.to_json snapshot) in Some digest in
@@ -137,23 +167,32 @@ let with_observation ~store ~(original:Owner.retained) ~request consume =
         let* cursors_sha256 = cursors request in
         consume current {State.owner_record_sha256=record_sha256;
           memory_revision=Option.map (fun (snapshot:Current.t) -> snapshot.revision) snapshot;
-          memory_sha256;cursors_sha256}))))
+          memory_sha256;cursors_sha256} exclusion)))))
   |> unavailable |> Result.join
-let observe ~config ~keeper_name ~request_id consume =
+let observe ~kind ~config ~keeper_name ~request_id consume =
   let* store, original, request = load ~config ~keeper_name ~request_id in
-  with_observation ~store ~original ~request (fun current expected -> consume store request current expected)
-let preview ~config ~keeper_name ~request_id =
-  try observe ~config ~keeper_name ~request_id (fun _store _request original expected ->
+  with_observation ~kind ~store ~original ~request
+    (fun current expected exclusion -> consume store request current expected exclusion)
+let preview_kind ~kind ~config ~keeper_name ~request_id =
+  try observe ~kind ~config ~keeper_name ~request_id (fun _store _request original expected _exclusion ->
     Ok {expected;scope=original.Owner.scope;request_id;request_digest=original.request_digest})
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Unavailable (Printexc.to_string exn))
-let fence_serialized ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
+let preview ~config ~keeper_name ~request_id =
+  preview_kind ~kind:Absent_original ~config ~keeper_name ~request_id
+let preview_cut ~config ~keeper_name ~request_id =
+  preview_kind ~kind:Cut_original ~config ~keeper_name ~request_id
+let fence_kind ~kind ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
   try
     let* expected = State.guard_of_json (State.guard_to_json expected) |> unavailable in
-    observe ~config ~keeper_name ~request_id (fun store request original actual ->
+    observe ~kind ~config ~keeper_name ~request_id (fun store request original actual exclusion ->
       let* () = require (actual=expected) Observation_changed in
-      let* fence = unavailable (State.create ~request ~original ~expected ~actor ~reason ~now) in
+      let* fence = unavailable (match kind,exclusion with
+        | Absent_original,None -> State.create ~request ~original ~expected ~actor ~reason ~now
+        | Cut_original,Some exclusion ->
+          State.create_cut ~store ~request ~original ~expected ~exclusion ~actor ~reason ~now
+        | Absent_original,Some _ | Cut_original,None -> Error "History fence exclusion kind differs") in
       match State.publish ~store fence with
       | Error detail -> Error (Publication_uncertain detail)
       | Ok Store.History_fence_unconfirmed detail -> Error (Publication_uncertain detail)
@@ -167,3 +206,7 @@ let fence_serialized ~config ~keeper_name ~request_id ~expected ~actor ~reason ~
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Publication_uncertain (Printexc.to_string exn))
+let fence_serialized ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
+  fence_kind ~kind:Absent_original ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now
+let fence_cut_serialized ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
+  fence_kind ~kind:Cut_original ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now

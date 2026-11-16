@@ -2707,6 +2707,137 @@ let refuse_fenced_resume fixture original request =
   check bool "fenced original refuses before any worker or Memory action" true (Result.is_error result);
   check bool "fence refusal preserves Memory and source position" true
     (before = (io (fun () -> current fixture.keepers_dir), progress fixture))
+(* Real host cancellation/join and worker restoration, without declaration
+   replacement. The same Cut fixture remains outside automatic ingress. *)
+let with_same_binding_cut ?(history_kind=Atoms) use =
+  with_fixture ~history_kind (fun ~sw fixture ->
+    let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+    fixture.set_response (fun capture ->
+      ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
+      `OK,F.openai_response (answer capture));
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+      assert_pending (run_worker fixture);Eio.Promise.await arrived;
+      let before_delivery= !(fixture.deliveries) in
+      (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () -> ()) with
+       | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
+      ignore (Eio.Promise.try_resolve unblock ());
+      fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
+      restart_actual_worker fixture ~sw;
+      await_delivery fixture ~after:before_delivery;
+      assert_pending (run_worker fixture);
+      let original,request=only_original fixture in
+      let exact=Capture.request request |> get in
+      let schema=Option.to_result ~none:"Cut original schema" exact.Exact.schema |> get in
+      (match Progress.phase original.progress with
+       | Rejected {stage=Execution;evidence} ->
+         check bool "fixture joined the actual cancelled host and retained Cut" true
+           ((Exact.retained_final_of_json ~schema evidence |> get) = Exact.Retained_unknown Exact.Cut)
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+         fail "actual cancellation did not retain an execution-stage Cut");
+      use fixture original request exact schema))
+let cut_preview fixture original = io (fun () ->
+  Resolution.preview_cut ~config:fixture.config ~keeper_name ~request_id:original.Owner.request_id
+  |> Result.map_error Resolution.error_to_string |> get)
+let cut_fence fixture original expected = memory_action fixture (fun () -> io (fun () ->
+  Resolution.fence_cut_serialized ~config:fixture.config ~keeper_name ~request_id:original.Owner.request_id
+    ~expected ~actor:"operator" ~reason:"Exclude this original's future local effects"
+    ~now:(Time_compat.now ())))
+let cut_source_positions fixture = io (fun () ->
+  let runtime_keepers_dir=Workspace.keepers_runtime_dir fixture.config in
+  let atom=Position.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    |> Result.map_error Position.read_error_to_string |> get in
+  let official=Keeper_librarian_official_progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get in
+  let external_cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
+  atom,official,Keeper_external_read_cursor.observation_to_json external_cursor)
+let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () =
+  with_same_binding_cut ~history_kind (fun fixture original request exact _schema ->
+    let positions=cut_source_positions fixture and posts=F.post_count fixture.server in
+    let parent=Owner.to_json original in
+    let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+      ~request_id:exact.Exact.request_id |> get) in
+    check bool "absence preview never borrows terminal Cut authority" true
+      (Result.is_error (io (fun () -> Resolution.preview ~config:fixture.config
+        ~keeper_name ~request_id:original.request_id)));
+    let preview=cut_preview fixture original in
+    check bool "ordinary intent submission cannot consume the Cut preview" true
+      (Result.is_error (io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+        ~request_id:original.request_id ~expected:preview.expected ~actor:"operator"
+        ~reason:"Cut is not yet a continuation grant" ~now:(Time_compat.now ()))));
+    let fence=cut_fence fixture original preview.expected |> Result.map_error Resolution.error_to_string |> get in
+    let roundtrip=Fence.of_json (Fence.to_json fence) |> get in
+    (match roundtrip.authority with
+     | Fence.Excluded_cut basis ->
+       check string "Cut basis names the original ID" original.request_id basis.request_id;
+       check string "Cut basis binds the Exact digest" (Exact.digest exact) basis.exact_digest;
+       check bool "Cut basis retains the real attempt" true (basis.attempt_ordinal>0)
+     | Worker_absent -> fail "Cut was relabelled as worker absence");
+    check json "fence preserves the complete original Unknown" parent fence.original_record;
+    check bool "fence consumes no checkpoint, official or external source" true (cut_source_positions fixture=positions);
+    no_memory fixture;
+    check int "fence makes no further provider call" posts (F.post_count fixture.server);
+    check bool "fence retains the host outcome exactly" true
+      (io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+        ~request_id:exact.request_id |> get)=host);
+    let current_parent=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+      ~request_id:original.request_id |> owned |> Option.get) in
+    check json "parent progress was not settled or rewritten" parent (Owner.to_json current_parent);
+    check bool "fence creates no child intent" true
+      (io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+        ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)=[]);
+    refuse_fenced_resume fixture current_parent request)
+let test_cut_effect_fence_refuses_a_busy_claim_and_late_bad_proof () =
+  with_same_binding_cut (fun fixture original _request exact schema ->
+    let preview=cut_preview fixture original in
+    let positions=cut_source_positions fixture in
+    let held=memory_action fixture (fun () -> io (fun () ->
+      Exact.with_cut_exclusion ~store:fixture.store ~declaration_id:"librarian"
+      ~schema exact ~use:(fun _ ->
+        check bool "another Cut claim cannot authorize the fence" true
+          (Result.is_error (Resolution.fence_cut_serialized ~config:fixture.config ~keeper_name
+            ~request_id:original.request_id ~expected:preview.expected ~actor:"operator"
+            ~reason:"busy is no authority" ~now:(Time_compat.now ()))))))
+      |> Result.map_error Exact.describe_recovery_error |> get in
+    (match held with Exact.Cut_excluded () -> ()
+     | Cut_busy | Cut_not_retained _ -> fail "fixture failed to acquire its original claim");
+    let proof=proof_path fixture exact in
+    io (fun () -> write proof "{late unreadable execution proof");
+    check bool "proof changed after preview cannot authorize a fence" true
+      (Result.is_error (cut_fence fixture original preview.expected));
+    check bool "both denied attempts leave no fence" true
+      (io (fun () -> Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get)=None);
+    check bool "denied attempts acknowledge no source" true (cut_source_positions fixture=positions);
+    no_memory fixture)
+let test_cut_effect_fence_refuses_an_actual_range_receipt () =
+  with_same_binding_cut (fun fixture original request _exact _schema ->
+    let source=Capture.source request and positions=cut_source_positions fixture in
+    memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+      ~pass:Keeper_memory_commit_pass.Durable ?durable_range_id:(Source.range_id source)
+      ?official_range_id:(Source.official_range_id source) ~absorbed:[] ~revisions:[]
+      ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+      ~source:{kind=Current.Librarian;trace_id} ~new_claims:[] () |> get)) |> ignore;
+    (match io (fun () -> Resolution.preview_cut ~config:fixture.config ~keeper_name
+       ~request_id:original.request_id) with
+     | Error Resolution.Range_already_recorded -> ()
+     | Error error -> fail (Resolution.error_to_string error)
+     | Ok _ -> fail "an actual Memory range receipt permitted a Cut fence");
+    check bool "apply-first does not create a Cut fence" true
+      (io (fun () -> Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get)=None);
+    check bool "the denied fence does not move positions" true (cut_source_positions fixture=positions))
+let test_cut_effect_fence_refuses_moved_source_positions () =
+  with_same_binding_cut (fun fixture original request _exact _schema ->
+    let preview=cut_preview fixture original in
+    let range=Source.range_id (Capture.source request) |> Option.get in
+    let next:Position.t={position={trace_id=range.trace_id;end_atom=range.end_atom;
+      last_atom_digest=range.last_atom_digest};boundary_lines_seen=range.boundary_lines_seen} in
+    io (fun () -> Position.write ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
+      ~keeper_id:keeper_name next |> Result.map_error Position.write_error_to_string |> get);
+    let positions=cut_source_positions fixture in
+    check bool "a changed source position invalidates the Cut preview" true
+      (Result.is_error (cut_fence fixture original preview.expected));
+    check bool "the refusal does not change positions again" true (cut_source_positions fixture=positions);
+    no_memory fixture)
 let test_missing_history_recovers_without_operator_submission history_kind () =
   with_fixture ~history_kind (fun ~sw:_ fixture ->
   let original,request=retain_absent_history_original fixture in
@@ -5885,6 +6016,16 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_an_absent_continuation_yields_before_its_next_child;
   test_case "an explicit history fence blocks late observations and unreadable fence state" `Quick
     test_history_fence_retains_unknown_and_blocks_late_observations;
+  test_case "a same-binding Cut effect fence preserves Unknown without creating a successor" `Quick
+    (test_cut_effect_fence_preserves_unknown_without_a_successor Atoms);
+  test_case "a mixed-source Cut effect fence preserves every original frontier" `Quick
+    (test_cut_effect_fence_preserves_unknown_without_a_successor Mixed);
+  test_case "a Cut effect fence refuses active claims and a proof changed after preview" `Quick
+    test_cut_effect_fence_refuses_a_busy_claim_and_late_bad_proof;
+  test_case "a Cut effect fence refuses an actual original Memory range receipt" `Quick
+    test_cut_effect_fence_refuses_an_actual_range_receipt;
+  test_case "a Cut effect fence refuses source positions moved after preview" `Quick
+    test_cut_effect_fence_refuses_moved_source_positions;
   test_case "a fenced unknown original does not block the next history pass" `Quick
     test_history_fence_allows_the_next_history_pass;
   test_case "the deploy check reads no Exact file of a fenced original" `Quick

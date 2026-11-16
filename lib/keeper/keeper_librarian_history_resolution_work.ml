@@ -37,7 +37,10 @@ let original ~config ~keeper_name ~store intent =
   let* ()=require (Request.keeper_id owner=keeper_name) "Resolution original belongs to another Keeper" in
   let+ request=Request.restore ~owner parent in parent,request
 let fence_matches intent fence =
-  require (fence.Fence.scope=intent.Intent.scope && fence.request_id=intent.original_request_id
+  let* ()=match fence.Fence.authority with
+    | Fence.Worker_absent -> Ok ()
+    | Excluded_cut _ -> Error "A Cut effect fence alone does not grant a resolution successor" in
+  require (fence.scope=intent.Intent.scope && fence.request_id=intent.original_request_id
     && fence.expected=intent.expected && fence.actor=intent.actor && fence.reason=intent.reason)
     "Existing history fence belongs to another resolution"
 type child_source = Replayable of Source.t | Unreplayable of string

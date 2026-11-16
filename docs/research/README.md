@@ -12,6 +12,7 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 | — | [Vibe Code official-client lane — research (2026-11-07)](vibe-official-client-lane-20261107.md) |
 | — | [TUI frame cost and terminal output: prior art and what applies to masc](tui-frame-cost-and-terminal-output-prior-art-20261104.md) |
 | — | [Extreme TUI/server performance: measured baseline and next decisions](extreme-performance-20261030.md) |
+| 2026-11-16 | [librarian 이 정해진 날에 쓸 기억을 미리 지우는가 — 판정 시각과 쓸 날 문장을 넣어 잰 값](2026-11-16-librarian-dated-records-and-pass-time.md) |
 | 2026-11-13 | [OpenMAIC 메커니즘 조사와 Lane Add-on 으로 가져올 것](2026-11-13-openmaic-mechanisms-and-lane-addon-absorption.md) |
 | 2026-11-12 | [에이전트 의사결정 farm 의 바깥 근거 168개 재확인](2026-11-12-agent-farm-prior-art.md) |
 | 2026-11-11 | [TUI 화면 문법 감사](2026-11-11-tui-screen-grammar-audit.md) |

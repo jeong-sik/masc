@@ -1143,7 +1143,9 @@ let test_mcp_attribution_does_not_authorize_private_lane () =
       (fun () ->
         let mcp ?auth_token name fields = Mcp_server_eio.execute_tool_eio
           ~sw ~clock ~workspace_scope:(Mcp_server.workspace_scope state)
-          ~mcp_session_id:session_id ?auth_token state ~name ~arguments:(`Assoc fields) in
+          ~mcp_session_id:session_id
+          ~bearer:(Masc_test_deps.door_bearer ~base_path:config.base_path auth_token)
+          state ~name ~arguments:(`Assoc fields) in
         let failed = mcp "masc_lane_observe" ["_agent_name",`String owner] in
         check bool "first attribution-only call fails" false (Tool_result.is_success failed);
         check bool "failed first call cached attribution" true
@@ -1322,7 +1324,9 @@ let test_mcp_attributed_name_is_not_private_lane_authority () =
       let execute ?auth_token ~session ~name arguments =
         Mcp_server_eio_execute.execute_tool_eio ~sw ~clock
           ~workspace_scope:(Mcp_server.workspace_scope state)
-          ~mcp_session_id:session ?auth_token state ~name ~arguments in
+          ~mcp_session_id:session
+          ~bearer:(Masc_test_deps.door_bearer ~base_path:dir auth_token)
+          state ~name ~arguments in
       let inspect ?auth_token session arguments =
         execute ?auth_token ~session ~name:"masc_lane_inspect" arguments in
       let empty = `Assoc [] in

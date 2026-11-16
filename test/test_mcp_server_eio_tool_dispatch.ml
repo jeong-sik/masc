@@ -51,7 +51,7 @@ let test_execute_tool_help_tool () =
       ~sw
       ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~auth_token:raw_token
+      ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token))
       state
       ~name:"masc_tool_help"
       ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
@@ -98,7 +98,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
           ~sw
           ~clock
           ~workspace_scope:(Mcp_server.workspace_scope state)
-          ~auth_token:raw_token
+          ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token))
           state
           ~name:"masc_tool_help"
           ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
@@ -148,7 +148,7 @@ let test_tool_call_heartbeats () =
            ~sw
            ~clock
            ~workspace_scope:(Mcp_server.workspace_scope state)
-           ~auth_token:raw_token
+           ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token))
            state
            ~name:tool_name
            ~arguments:(`Assoc [ "tool_name", `String "masc_status" ]));
@@ -181,7 +181,11 @@ let test_direct_executor_enforces_profile_before_hooks () =
       let call profile internal_keeper_runtime name =
         Masc.Mcp_server_eio_execute.execute_tool_eio ~sw ~clock:env#clock
           ~workspace_scope:(Mcp_server.workspace_scope state)
-          ~profile ~auth_token:raw_token ~internal_keeper_runtime state ~name
+          ~profile
+          ~bearer:
+            (Masc.Mcp_server_eio_caller_identity.unread (Some raw_token)
+               ~internal_keeper_runtime)
+          state ~name
           ~arguments:(`Assoc ["tool_name", `String "masc_status"]) in
       Tool_dispatch.register_pre_hook (fun ~schema:_ ~name:_ ~args:_ ->
         incr entered; Tool_dispatch.Pass);

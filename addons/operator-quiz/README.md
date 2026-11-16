@@ -25,15 +25,20 @@ questions only from records it read that a lesson cited. That binding also
 gives `since`, the lesson's own: a session that follows the lesson reads a
 record source from it (`follows_lesson`) until a session that asked has left
 a cursor on that source. A quiz that has not asked yet reads every source
-from `since`, so the records the lesson cited are read; one that asked
+from `since`, so the records the lesson cited are read, except a wiki page
+edited after the lesson cited it and before the quiz read it: the host
+gives the page at its new revision, and a cite names the revision. One that
+asked
 before the lesson was bound reads on from its cursors, and a record the
 lesson cites from before them is not read. A read from `since` that finds
 no record leaves no cursor, unless the host passed over items that have no
 record (`github_pulls`: commits that are not the merge commit of a pull
 request). The cursor goes by `source_id`: a source taken out and put back
 is read from the cursor it had, unless a session that had not finished
-reading when it was taken out asked for that cursor and was refused
-(#52372).
+reading that source when it was taken out asked for that cursor and was
+refused (#52372). Then the source is read from the cursor before it, or
+from `since`, and a session that asked after that read leaves its own
+cursor, even the one refused (#52417).
 Design:
 [RFC](../../docs/rfc/RFC-operator-quiz-follows-lesson.md).
 

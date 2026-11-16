@@ -83,6 +83,27 @@ let steps_of fixture ~owner =
 let in_position_order steps =
   List.sort (fun (_, (a : Step.header)) (_, (b : Step.header)) -> Int.compare a.position b.position) steps
 
+let test_unadmitted_replacement_returns_a_restart_without_a_hole () = with_fixture (fun fixture ->
+  let owner=owner fixture in
+  let range=range_link owner in
+  let step=new_step fixture ~owner ~range ~previous:None (ask (machine ())) in
+  let record=retain fixture step in
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-floor-step\"" -> "run_id=\"librarian-floor-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_configuration fixture replacement;
+  let assert_restart ()=match run_once fixture ~owner ~range () with
+    | Ok (Chain.Declaration_replaced {position;request_id}) ->
+      check int "the original first step ends" 0 position;
+      check string "the restart names the ended original" record.request_id request_id
+    | Ok (Finished _ | Pending _ | Stopped _ | Superseded) -> fail "replacement became a Memory decision or input failure"
+    | Error detail -> fail detail in
+  assert_restart ();
+  check int "a replaced declaration cannot make a later message into a hole" 1 (List.length (steps_of fixture ~owner));
+  replace_configuration fixture (fixture.declaration true);
+  assert_restart ();
+  check int "neither replacement nor rollback calls a provider" 0 (F.post_count fixture.server))
+
 (* The directory a scope's records sit in: one directory per scope, named by the
    scope's digest. *)
 let scope_directory fixture ~scope =
@@ -106,7 +127,7 @@ let retained_answer fixture ~owner (record : Owner.retained) =
   match Step_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ())
           ~original:record ~step ~call with
   | Ok (Step_owner.Answered (answer, record)) -> step, record, answer
-  | Ok (Step_owner.Pending _ | Step_owner.Refused _) -> fail "a finished step has its answer"
+  | Ok (Step_owner.Pending _ | Step_owner.Refused _ | Step_owner.Before_dispatch_replaced _) -> fail "a finished step has its answer"
   | Error error -> failf "the finished step did not restore: %s" (Step_owner.error_to_string error)
 
 let judge_from fixture ~owner ~inventory (record, (_ : Step.header)) =
@@ -721,6 +742,8 @@ let () =
     [ ( "chain"
       , [ test_case "each step runs once and a restart replays it" `Slow
             test_a_chain_runs_each_step_once_and_a_restart_replays_it
+        ; test_case "an unadmitted replacement restarts the chain without a hole" `Slow
+            test_unadmitted_replacement_returns_a_restart_without_a_hole
         ; test_case "a message every slot refuses as too large becomes a hole" `Slow
             test_a_message_every_slot_refuses_as_too_large_becomes_a_hole
         ; test_case "a refusal that shows nothing about reading less stops it" `Slow

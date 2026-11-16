@@ -9,6 +9,49 @@ open Librarian_floor_fixture
 module Exact = Lane_addon_exact
 module Failure = Keeper_exact_walk_failure
 module Refusal = Keeper_librarian_input_refusal
+let json=Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
+
+let test_unadmitted_step_ends_only_for_a_ready_replacement ~capacity_wait () = with_fixture (fun fixture ->
+  let owner=owner fixture in
+  let step=new_step fixture ~owner ~range:(range_link owner) ~previous:None (ask (machine ())) in
+  let record=retain fixture step in
+  let advance record event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:record ~event with
+    | Ok (Owner.Stored record | Already_stored record) -> record
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error)) in
+  let record=if capacity_wait then (
+    let record=advance record Progress.Dispatch_intended in
+    advance record (Progress.Admission_declined (`Assoc ["state",`String "capacity_wait"]))) else record in
+  let resume_without_rpc original=Step_owner.resume ~store:fixture.store ~config:fixture.config
+    ~reserved:(Edge.reserved ()) ~original ~step
+    ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "unadmitted replacement reached a worker RPC")
+    |> Result.map_error Step_owner.error_to_string |> get in
+  io (fun () -> write fixture.source (fixture.declaration false));
+  (match resume_without_rpc record with
+   | Step_owner.Pending (Worker_unreachable,unchanged) ->
+     check json "an unavailable declaration retains the original phase" (Progress.to_json record.progress)
+       (Progress.to_json unchanged.progress)
+   | Pending ((Capacity | Worker_pending | Worker_unknown | Missing_after_dispatch | Journal_recheck),_)
+   | Answered _ | Refused _ | Before_dispatch_replaced _ ->
+     fail "an unavailable declaration ended or dispatched the original step");
+  io (fun () -> write fixture.source (fixture.declaration true));
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-floor-step\"" -> "run_id=\"librarian-floor-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_configuration fixture replacement;
+  let ended=match resume_without_rpc record with
+    | Step_owner.Before_dispatch_replaced record -> record
+    | Pending _ | Answered _ | Refused _ -> fail "the ready replacement did not end the unadmitted step" in
+  check bool "the step holds a bound replacement refusal" true
+    (Keeper_librarian_declaration_replacement.retained ~original:(Owner.listed ended)
+      ~captured:(Step.destination step) |> get);
+  check int "neither the unavailable declaration nor its replacement sends a model request" 0 (F.post_count fixture.server);
+  replace_configuration fixture (fixture.declaration true);
+  (match resume_without_rpc ended with
+   | Step_owner.Before_dispatch_replaced restored ->
+     check json "rollback retains the terminal proof" (Progress.to_json ended.progress) (Progress.to_json restored.progress)
+   | Pending _ | Answered _ | Refused _ -> fail "rollback revived the old floor step");
+  check int "rollback never replays the old original" 0 (F.post_count fixture.server))
 
 let test_a_step_runs_once_and_keeps_its_answer () = with_fixture (fun fixture ->
   fixture.respond := (fun _ -> `OK, F.openai_response (answer ~claim:"claim of the first step" ~state:"state of the first step"));
@@ -25,6 +68,7 @@ let test_a_step_runs_once_and_keeps_its_answer () = with_fixture (fun fixture ->
         (List.map (fun (fact : Keeper_memory_os_types.fact) -> fact.claim) proposal.proposal.absorption.new_claims
          = [ "claim of the first step" ]);
       record
+    | Step_owner.Before_dispatch_replaced _ -> fail "unexpected declaration replacement"
     | Step_owner.Pending _ -> fail "the step was still pending after its worker delivered"
     | Step_owner.Refused (final, _) ->
       failf "the provider's answer was refused: %s" (Yojson.Safe.to_string (Exact.final_to_json final)) in
@@ -39,7 +83,7 @@ let test_a_step_runs_once_and_keeps_its_answer () = with_fixture (fun fixture ->
   (match resume fixture answered_record restored with
    | Step_owner.Answered ({ proposal; _ }, _) ->
      check string "the second resume reads the same answer" "state of the first step" proposal.working_state
-   | Step_owner.Pending _ | Step_owner.Refused _ -> fail "the retained answer was not read back");
+   | Step_owner.Pending _ | Step_owner.Refused _ | Step_owner.Before_dispatch_replaced _ -> fail "the retained answer was not read back");
   check int "and calls no provider again" 1 (F.post_count fixture.server))
 
 let test_a_size_refused_step_is_refused_with_its_evidence () = with_fixture (fun fixture ->
@@ -51,6 +95,7 @@ let test_a_size_refused_step_is_refused_with_its_evidence () = with_fixture (fun
   let refused_record, final = match run_step fixture record step with
     | Step_owner.Refused (final, record) -> record, final
     | Step_owner.Answered _ -> fail "a refused request was answered"
+    | Step_owner.Before_dispatch_replaced _ -> fail "unexpected declaration replacement"
     | Step_owner.Pending _ -> fail "the step was still pending after its worker delivered" in
   check string "a refused step is a rejected record" "rejected" (phase_name refused_record);
   let calls = F.post_count fixture.server in
@@ -60,7 +105,8 @@ let test_a_size_refused_step_is_refused_with_its_evidence () = with_fixture (fun
   check bool "and names the refusal" true (evidence.provider_input_refusals <> []);
   (match resume fixture refused_record step with
    | Step_owner.Refused (_, record) -> check string "the refusal is read back" "rejected" (phase_name record)
-   | Step_owner.Answered _ | Step_owner.Pending _ -> fail "the retained refusal was not read back");
+   | Step_owner.Answered _ | Step_owner.Pending _ | Step_owner.Before_dispatch_replaced _ ->
+     fail "the retained refusal was not read back");
   check int "and no provider is asked again" calls (F.post_count fixture.server))
 
 (* The floor's first message was unreadable: it becomes a hole and the floor
@@ -131,6 +177,7 @@ let test_the_host_does_not_take_an_answer_the_step_cannot_use () = with_fixture 
   | Step_owner.Refused (final, _) ->
     failf "the refusal was not invalid output: %s" (Yojson.Safe.to_string (Exact.final_to_json final))
   | Step_owner.Answered _ -> fail "an answer that names an unknown memory was taken"
+  | Step_owner.Before_dispatch_replaced _ -> fail "unexpected declaration replacement"
   | Step_owner.Pending _ -> fail "the step was still pending after its worker delivered")
 
 (* The worker's word is no proof. A reply that says the request finished with
@@ -149,7 +196,7 @@ let test_a_worker_reply_the_host_has_no_record_of_is_not_an_answer () = with_fix
     let record = retain fixture step in
     (match resume fixture record step with
      | Step_owner.Pending (_, _) -> ()
-     | Step_owner.Answered _ | Step_owner.Refused _ -> fail "the provider had not answered yet");
+     | Step_owner.Answered _ | Step_owner.Refused _ | Step_owner.Before_dispatch_replaced _ -> fail "the provider had not answered yet");
     Eio.Promise.await arrived;
     let forged = `Assoc [ "status", `String "answered"; "slot", `String "forged-worker-slot";
                           "output", answer ~claim:"a claim the host never saw" ~state:"a forged state" ] in
@@ -165,7 +212,7 @@ let test_a_worker_reply_the_host_has_no_record_of_is_not_an_answer () = with_fix
     (match Step_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ())
              ~original:record ~step ~call:(Edge.call ~config:fixture.config ~reserved:(Edge.reserved ())) with
      | Ok (Step_owner.Answered _) -> fail "a worker reply with no host record was taken as an answer"
-     | Ok (Step_owner.Pending _ | Step_owner.Refused _) | Error _ -> ());
+     | Ok (Step_owner.Pending _ | Step_owner.Refused _ | Step_owner.Before_dispatch_replaced _) | Error _ -> ());
     check bool "the untrusted reply reached the step owner" true (!forged_reads > 0);
     let fresh = Owner.load ~store:fixture.store ~scope:record.scope ~request_id:record.request_id in
     check bool "and the step is still not judged" true
@@ -228,6 +275,10 @@ let () =
   run "keeper_librarian_floor_step_owner"
     [ ( "step owner"
       , [ test_case "a step runs once and keeps its answer" `Slow test_a_step_runs_once_and_keeps_its_answer
+        ; test_case "Captured step ends only for a ready replacement" `Slow
+            (test_unadmitted_step_ends_only_for_a_ready_replacement ~capacity_wait:false)
+        ; test_case "Admission_wait step ends only for a ready replacement" `Slow
+            (test_unadmitted_step_ends_only_for_a_ready_replacement ~capacity_wait:true)
         ; test_case "a size-refused step is refused with its evidence" `Slow
             test_a_size_refused_step_is_refused_with_its_evidence
         ; test_case "the host does not take an answer the step cannot use" `Slow

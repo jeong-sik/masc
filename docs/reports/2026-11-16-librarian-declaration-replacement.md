@@ -41,6 +41,21 @@ worker가 아직 준비되지 않았으면 요청을 그대로 기다리며, 실
 실제 Runtime fixture에 두 접수 전 상태의 손상된 본문, 준비 전 대기, 종결·archive 사이 rollback,
 새 요청만 한 번 실행되는 경우와 기존 host 실행 기록 때문에 교체를 거부하는 회귀를 추가했다. 실행은 미실행이다.
 
+접수 전 history 단위는 `bd05129f62322f6c001f61c7738b7eef289e5133`으로 고정했다.
+두 독립 세션이 그 9개 파일과 관련 Store·Exact·lineage 소스를 읽고 범위 안에서 P0/P1/P2를 찾지 못했다.
+8개 OCaml 파일은 문법 검사만 통과했다. 정식 GitHub 승인이나 동작 증거는 아니다.
+
+## 세 번째 단위: 접수 전 floor step
+
+floor의 `Captured`·`Admission_wait`도 같은 목적지·원본·실행 부재 증거를 사용한다.
+step owner는 교체 종결을 일반 모델 거절과 다른 반환값으로 전달한다. chain은 이를 입력 크기 실패나
+읽지 못한 메시지의 hole로 바꾸지 않고 기존 교체 반환값을 사용한다.
+상위 execution은 기존 교체 step 정리 경로를 거쳐 다음 pass를 깨운다. 앞서 실제 크기 실패로 좁힌 범위는 유지한다.
+
+floor step의 본문은 기존 chain 복구가 읽는다. 이 단위는 floor 본문 손상 복구를 약속하지 않는다.
+이미 답한 앞 step의 Gate와 Memory 반영은 원래 선언의 권한을 따르므로 별도 범위다.
+실제 Runtime fixture에 접수 전 두 상태의 준비 전 대기·교체·rollback과 chain이 hole 없이 교체를 반환하는 회귀를 추가했다.
+
 ## 확인한 범위
 
 변경 OCaml 파일의 `ocamlc -stop-after parsing -c`와 `git diff --check`를 확인한다.
@@ -55,7 +70,7 @@ typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 ## 남은 범위
 
 - 연결된 history의 접수 전 상태와 preflight가 손상된 저장 본문을 만난 기동 경계는 별도 확인이 남는다.
-- preAdmission floor 처리는 다음 단위다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
+- floor 본문 손상 복구와 이미 답한 앞 step의 반영 경계는 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
 - `cut`·`raised`와 이미 받은 `Judged` 결과·admission part는 별도 상태다. 이번 단위는 불확실한 외부 실행을 자동 재전송하지 않는다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.
 - native stack 발행은 이전 시도에서 GitHub CLI 인증을 얻지 못했다. 연결된 GitHub 읽기 도구의 인증과 CLI/native stack 발행 인증은 다르다.

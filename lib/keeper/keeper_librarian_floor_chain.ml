@@ -133,6 +133,8 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~
          Ok (Pending (Keeper_librarian_pending.Worker
            (Keeper_librarian_pending.of_worker_wait ~installation_id:record.installation_id
               ~request_id:record.request_id wait)))
+       | Step_owner.Before_dispatch_replaced record ->
+         Ok (Declaration_replaced {position=question.position;request_id=record.request_id})
        | Step_owner.Refused (final, record) ->
          let* replacement=match final with
            | Exact.Not_allowed _ ->

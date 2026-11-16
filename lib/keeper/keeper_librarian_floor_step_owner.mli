@@ -24,6 +24,9 @@ type outcome =
   | Pending of wait * Lane_addon_tool_request_owner.retained
   | Answered of answer * Lane_addon_tool_request_owner.retained
   | Refused of Lane_addon_exact.final * Lane_addon_tool_request_owner.retained
+  | Before_dispatch_replaced of Lane_addon_tool_request_owner.retained
+      (** An unadmitted step ended with bound before-dispatch evidence. Its
+          source stays unread; this supplies no hole or smaller-input evidence. *)
 (** [Pending] covers a host terminal [Outcome_unknown] as {!Keeper_librarian_durable_owner}
     does: it is never a refusal and never permits another submission. [Refused]
     holds a terminal host refusal whose final the host's records confirm. *)

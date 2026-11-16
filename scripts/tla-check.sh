@@ -169,6 +169,8 @@ run_tlc "$REPO_ROOT/specs/boundary" "TurnEvidenceChain.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "TurnEvidenceChain.tla"
 run_tlc "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla"
 run_tlc_buggy "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla"
+run_tlc_buggy "$REPO_ROOT/specs/auth" "AuthIdentityFSM.tla" \
+  "AuthIdentityFSM-reread-buggy.cfg" "reread-buggy"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla" \

@@ -17,7 +17,7 @@ related: ["0340", "main-domain-scheduler-latency"]
 - 먼저 있는 결정:
   - #51752: 입구 판정(`verify_mcp_auth` 등)이 늘 `None` 인 `'a option` 을 돌려주던 것을 `unit` 으로 줄였다. 오지 않는 `Some` 을 약속했기 때문이다. 「자격을 확인해서 통과」와 「자격이 필요 없어서 통과」를 갈라야 하는 호출처가 생기면 그때 닫힌 variant 를 돌려주라고 적었다. D1 의 요청 주체가 그 variant 다.
   - RFC-0340 「Request identity」: bearer 가 붙은 요청은 credential 신원으로 풀려야 한다. 풀리지 않으면 `invalid_token` 이다. 문자열 `dashboard` 로 바꾸지 않는다.
-  - `specs/auth/AuthIdentityFSM.tla`: I1 `IdentityBindsToken`(풀린 주체가 요청 token 의 주인이다), I2 `NoSilentRewrite`(풀린 주체는 token 으로 정해진다), I3 `FailClosedDefault`(token 이 없으면 Pending 이나 Deny).
+  - `specs/auth/AuthIdentityFSM.tla`: I1 `IdentityBindsToken`(풀린 주체가 요청 token 의 주인이다), I2 `NoSilentRewrite`(풀린 주체는 token 으로 정해진다), I3 `FailClosedDefault`(token 이 없으면 Pending 이나 Deny). 4b 가 I4 `OneIdentityPerRequest` 를 더했다(§5.3).
   - static bearer 는 요청마다 owner 의 현재 파일 전체와 맞아야 한다. 캐시를 다시 만든 뒤에도 같다(`Auth.find_static_credential_by_token` 의 `.mli` 설명). 이 RFC 는 이 결정을 바꾸지 않는다. 요청마다 한 번은 지금처럼 owner 파일을 읽는다.
   - 호출자 신원(`Mcp_server_eio_caller_identity`): 호출자가 누구인지는 bearer credential 이 정한다. display alias 는 credential 이 이미 가진 이름을 바꾸지 못한다.
   - `Auth.verify_token` 의 alias 규칙: 생성된 nickname 은 stable prefix 가 가진 token 을 쓸 수 있다. 단, 그 token 이 그 prefix 로 풀릴 때만이다. Keeper transport alias(`keeper-<name>-agent`)는 canonical alias credential 이 없는 동안에만 stable keeper token 을 쓴다.
@@ -289,6 +289,12 @@ type bearer = private
 - `BugAction`: 아래 층이 token 으로 주체를 다시 정하고, 그 사이 credential 이 바뀌어 다른 답을 얻는다.
 - 새 invariant `OneIdentityPerRequest`: 한 요청 안의 모든 층이 같은 주체를 본다.
 - 정상 cfg 는 통과하고, buggy cfg 는 실패해야 한다.
+- 4b 에서 이렇게 썼다.
+  - 아래 층은 `dispatch`, `identity`, `execute` 셋이다(cfg 의 `Layers`). credential 교체·폐기(`ReplaceCredential`)는 `Next` 에 있다. 요청이 도는 중에도 일어난다.
+  - I1·I2 는 입구가 읽은 저장소(`door_credentials`) 위에서 본다. 입구 뒤에 바뀐 credential 은 그 요청의 주체를 바꾸지 않는다(§3.3).
+  - `BugAction` 은 `LayerRereadsToken` 이다. `SpecReread` 를 `AuthIdentityFSM-reread-buggy.cfg` 로 돌리고, 이 cfg 는 `OneIdentityPerRequest` 만 본다.
+  - TLC 결과: 정상 cfg 는 상태 308,625개에서 통과한다. reread-buggy cfg 는 「입구가 a2 를 받음 → Allow → a2 credential 폐기 → dispatch 층이 token 을 다시 읽어 NULL」로 실패한다. 기존 buggy cfg 도 그대로 실패한다.
+  - 대조: `ReplaceCredential` 을 빼면 reread-buggy cfg 도 통과한다(상태 30개). 다시 읽기의 해는 credential 이 바뀔 때 생긴다.
 
 ## 6. 단계
 
@@ -302,7 +308,7 @@ type bearer = private
 | 3b | Add-on 노출(`addon_exports_for_request`)이 `bearer` 를 받는다. `tools/list` 와 `tools/call` 이 같은 값을 쓴다 | L1, `tools/list` 의 L2 |
 | 3c | transport 의 OAuth step-up(`Server_oauth_step_up.required_scope`)이 주체의 OAuth credential 을 쓴다. Keeper stream 과 SDK adapter 가 받고 버리는 `?auth_token` 을 지운다 | L1 |
 | 4a | 네 legacy API의 정적 참조 허용 목록 검사(D6) | 검사 스크립트의 단위 시험, 지금 트리에서 통과 |
-| 4b | TLA+ 갱신 | TLC 정상·buggy |
+| 4b | TLA+ 에 아래 층과 `OneIdentityPerRequest` 를 더한다 | TLC 정상·buggy·reread-buggy |
 
 D4 는 처음에 단계 2 에 있었다. 1b 로 옮긴 이유는 두 가지다.
 

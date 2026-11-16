@@ -103,3 +103,24 @@ The next implementation boundaries remain:
 
 All other Farm requirements remain in their original plan. This candidate does
 not establish full external-tool support, scale, world portability or completion.
+
+
+## Rebased source checkpoint — 2026-11-16
+
+The complete document/MCP stack now has base
+`e0e819e29968366c1dffb59ad625ba4e17d4ac22`. Its first three layer heads are
+`8872ec3b9fe89052ce0329e0a4227caf4dbde081` (Core),
+`295cb5a23d3eb5c6f45568b7f06f8f53faa46291` (MASC), and
+`a7e3f683d30338130ba34829f0a5f17e03ffa5e3` (original evidence).
+MCP source and the integrated documentation checkpoint follow at
+`23508a998d3b559334c8b127cc14aad7c5244b82` and
+`980892260bf73193e8251b0ac1d54bedf6ad76f0`.
+
+Independent review re-read all changed integrations and their current-base
+consumers, including conservative Connect_failed/Connection_not_opened handling
+and frozen per-candidate document/image admission. No actionable P0/P1/P2 remained
+in the 79-path combined scope. The new receipt parses five changed OCaml files;
+old byte-identical source/syntax evidence remains bound to its recorded inputs.
+Historical Dashboard checks are not a new-base typecheck. Actual provider wire,
+PDF/STT, UI, restart and full-runtime evidence remain unrun. No PR or GitHub
+approval was created by this local rebase.

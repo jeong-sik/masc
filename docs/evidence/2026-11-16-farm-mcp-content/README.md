@@ -136,3 +136,32 @@ Remaining evidence includes executable tests on this source, actual media from
 an MCP service, provider requests and responses, restart and garbage-collection
 retention, and multiple Keepers using independent execution identities. The
 external interpretation path and other WIM-S04 requirements remain open.
+
+
+## Rebased source checkpoint — 2026-11-16
+
+The whole five-layer native stack was rebased onto
+`e0e819e29968366c1dffb59ad625ba4e17d4ac22`. MCP source is now
+`23508a998d3b559334c8b127cc14aad7c5244b82`; the integrated documentation checkpoint
+reviewed before this evidence update is `980892260bf73193e8251b0ac1d54bedf6ad76f0`.
+Independent changed-base review by `continuity_audit` found no actionable P0/P1/P2
+in the complete 79-path scope and direct consumers. Seventy-three files retain
+old bytes; six integration paths changed. The sole native rebase conflict was
+resolved by keeping main's four appended test includes and the MCP include once.
+
+The review retained main's connection-failure variants and official Gate resume
+refusal. Transcript observation caching does not authorize replay-root cleanup:
+that path still validates the held complete transcript bytes and confirms
+existing storage before retiring the sidecar. Same-turn request stubbing does
+not replace canonical media retention. These are source findings, not runtime
+execution or GitHub approval.
+
+The new receipt has five changed OCaml parses, a compiler-version check and a
+whitespace check: seven successful commands. It does not re-run the old full
+syntax set, compile types, execute the listed MCP suites or prove installed
+behavior. Full-stack diff SHA-256 is
+`ec79f302706a76e2f953b0436d27cff91831485b0fbc3db93fd78b81c41c9716`;
+local rebase receipts are under the main worktree's ignored
+`artifacts/farm-publication-rebase-20261116/execution-1/`.
+The dated old-head evidence above is retained unchanged. No remote push,
+submission, merge or runtime change was performed by this rebase.

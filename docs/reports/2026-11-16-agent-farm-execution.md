@@ -14,10 +14,10 @@
 
 | 작업 | 확인한 산출물 | 증거와 남은 일 |
 | --- | --- | --- |
-| Schedule 저장 권위 | `921754a8947c89fc78ddb9992abd88c09d994c66`: 복구 mirror를 변경 근거로 쓰지 않으며 읽기 출처를 보존한다. 별도 스택 `fix/farm-schedule-authority-20261116` | 독립 소스 리뷰·구문 검사 기록. 동작 시험·PR 게시·병합·설치·원래 장애 회복 미확인. 증거는 별도 문서 커밋 `5b326829b1002244dd1cb4f7cb874b938c6ea823`의 `docs/evidence/2026-11-16-schedule-primary-authority/README.md` |
-| WIM-S03 문서 입력 | Core `0ecf7bd04792cf97d0cab2ab07e61da09bac2445`, MASC `6b4589d360235b79b43b40dd6d4b379c836a8322`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 독립 소스 리뷰·구문 검사, Dashboard 타입 검사와 선택 decoder 시험 1건 통과. OCaml 동작 시험·실제 provider·PDF/STT·브라우저·설치 미확인 |
+| Schedule 저장 권위 | 재기반한 소스 `236754fcfb72f49ef9c365465dfd1e63cf3e6010`: 복구 mirror를 변경 근거로 쓰지 않으며 읽기 출처를 보존한다. 별도 스택 `fix/farm-schedule-authority-20261116` | 재기반 뒤 독립 소스 리뷰에 P0/P1/P2 없음. 후속 실제 FileSystem 시험 11개·새 프로세스 재열기 6회 통과. 아래 범위로 한정하며 서버·provider·PR 게시·설치·원래 장애 회복은 미확인. 별도 스택의 `docs/evidence/2026-11-16-schedule-primary-authority/README.md`에 이전 구문 기록과 후속 실행을 구분한다. |
+| WIM-S03 문서 입력 | 재기반한 Core `8872ec3b9fe89052ce0329e0a4227caf4dbde081`, MASC `295cb5a23d3eb5c6f45568b7f06f8f53faa46291`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 현재 base의 독립 소스 리뷰와 통합 파일 구문 검사를 확인했다. 이전 Dashboard 타입 검사와 decoder 1건은 당시 source 범위이며 새 base의 타입 검사가 아니다. 실제 provider·PDF/STT·브라우저·설치 미확인 |
 | TLJ-S01 위임 결과 | 협업 세션 `01a1e1b9…`, `.worktrees/farm-evolution-20261116`. 세 층 최종 head `e6ea78da93a1ebac6f6020aafb134631024ba769`, base `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`. canonical 종단 상태, 기동 재투영, 영속 전달 의도·답 원문·전달 영수증을 연결 | 두 P2였던 보관 기간 뒤 중복 전달과 fail-open journal 뒤 답 유실을 소스에서 수정했다. 재기반 후 독립 검토에서 미해결 P0/P1/P2 없음. 기존 세 패치와 range-diff가 같고 32개 후보 파일이 이전 최종 head와 일치함을 확인했다. 작성 세션의 OCaml 31개 구문 검사 기록이 있다. 타입·동작·CI·설치·원래 요청 회복·GitHub 정식 승인·게시 미확인 |
-| WIM-S04 MCP 결과 | `fb6858311cc67bc743d7c0fcbe9165dbffc2dbc3`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 독립 소스 리뷰의 미해결 P0/P1/P2 없음, OCaml 38개 구문 검사 통과. 타입·동작 시험·실제 MCP/provider·재시작·GC 실행은 미확인 |
+| WIM-S04 MCP 결과 | 재기반한 소스 `23508a998d3b559334c8b127cc14aad7c5244b82`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 현재 base의 독립 소스 리뷰에 미해결 P0/P1/P2 없음. 이전 38개 구문 영수증과 새 통합 파일 5개의 구문 검사는 별도 범위다. 타입·동작·실제 MCP/provider·재시작·GC 실행은 미확인 |
 | IA-S13 공유 SSH 이름 | `.worktrees/farm-remote-namespace-20261116`, 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버·Workspace와 첫 쓰기 연결의 후속 커밋은 아래에 적었다. 전체 시작 흐름·실제 SSH·VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
 
 본 세션은 저장·add-on·입력 경계와 이 실행 기록을 맡는다. TLJ-S01의 같은 구현을
@@ -83,6 +83,36 @@ head `4aae41288a5dbba0fb27bfeafea5999dd7fec77c`와 clean 상태를
 이 관측은 앞선 충돌 snapshot 이후의 상태이며, root가 전체 소스를 다시 승인한 것은 아니다.
 작성 세션의 submit은 token 조회에서 실패했고, root의 후속 `gh api user`도 연결 실패였다.
 원격 게시와 재기반은 구분한다. 이전 다섯 층만 게시하라는 위임은 계속 철회 상태다.
+
+## 두 기존 스택의 재기반과 Schedule 실행
+
+보유 Git 객체를 읽는 임시 local remote를 써서 두 스택 전체를 native rebase했다.
+명시한 중간 점검 시점은 처음에 10e51ac였지만, native가 실제로 선택한 base는
+`e0e819e29968366c1dffb59ad625ba4e17d4ac22`였고 connector의 main 조회로 이를 확인했다.
+원격 main은 계속 바뀔 수 있으므로 게시 전 다시 대조한다. origin 설정은 보존했고
+자체 임시 remote만 제거했다. 다른 세션의 refs 변화는 되돌리지 않았다.
+
+Schedule의 두 층은 `236754fcfb72f49ef9c365465dfd1e63cf3e6010`과
+`8d4a43c0f7832ef93d64eaaa165293db032efb1d`로 재기반됐으며 기존 두 패치와
+9개 파일 바이트가 같다. 문서/MCP 다섯 층의 통합 checkpoint는
+`980892260bf73193e8251b0ac1d54bedf6ad76f0`다. 전체 79개 파일 중 73개는 이전과
+같고 6개는 main의 변경과 통합됐다. test/dune의 충돌은 양쪽 등록을 보존해 해소했다.
+두 스택 모두 바뀐 base와 직접 소비자를 읽은 독립 소스 리뷰에 P0/P1/P2가 없다.
+구문 검사와 현재 소스 검토를 전체 타입·동작 검증으로 확대하지 않는다.
+
+Schedule 후속 시험은 고정 `8d4a43c0`의 실제 FileSystem backend와 store/service/runner를
+사용했다. 11개 시험과 새 자식 프로세스 재열기 6회에서 원본 부재·손상 시 stale mirror를
+변경 권위로 삼지 않고, 복원한 종단 상태를 다시 실행하지 않음을 확인했다.
+새 저장소는 계속 초기화할 수 있다. service의 withdrawal callback 검사는 별도 서버
+teardown의 queue purge까지 다루지 않는다. 273개 source 입력과 430개 config asset에서
+생성한 설정을 사용한 standalone 실행이며, 전체 Dune·기존 전체 suite·Memory backend·
+provider·실제 서버·crash-mid-write 검증은 아니다. 실패한 C stub 연결과 부모 waitpid의
+EINTR 처리 시도도 보존했다. 후속 시험은 별도 native test 층
+`24557f69e8f86f77b0af3fa2651bff8a78c43f01`에 등록하고 독립 소스 리뷰를 마쳤다.
+
+로컬 게시 packet은 재기반 전 head를 그대로 사용하지 못하도록 갱신 중이다.
+원격 push·PR 생성·GitHub 정식 승인·병합·설치는 수행하지 않았다. `gh pr view`도
+여전히 API 연결 실패였고, 상대 세션에 대한 답변 전달도 확인하지 못했다.
 
 ## UID 생성과 실제 첫 쓰기의 연결
 

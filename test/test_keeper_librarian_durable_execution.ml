@@ -4237,13 +4237,42 @@ let test_legacy_omitted_original_refuses_admission_but_observes_pending () =
     assert_omitted_original_blocked (run_worker fixture);
     let dispatched=advance_legacy fixture held Progress.Dispatch_intended in
     assert_pending (run_worker fixture);
-    let pending,restored=only_original fixture in
+    let retained ()=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+      ~request_id:original.request_id |> owned |> Option.get) in
+    let pending=retained () in
+    let restored=io (fun () -> Capture.restore ~owner:(Capture.physical_owner request) pending |> get) in
     check string "unknown delivery keeps the old ID" dispatched.request_id pending.Owner.request_id;
     check json "pending observation never rerenders the question" source_json (Capture.to_json restored);
+    let recovery ()=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+    let child_id=match (recovery ()).intents with
+      | [{Resolution_intent.actor="librarian";phase=Child_confirmed child;_}] -> child.request_id
+      | _ -> fail "the absent legacy original has no single automatic continuation" in
+    let child=io (fun () ->
+      let child=Owner.load ~store:fixture.store ~scope:original.scope ~request_id:child_id
+        |> owned |> Option.get in
+      Capture.restore ~owner:(Capture.physical_owner request) child |> get) in
+    check string "the new question retains the exact original source basis"
+      (Capture.source_basis_digest request |> get) (Capture.source_basis_digest child |> get);
+    check bool "the frozen original still fails its input guard" true
+      (Result.is_error (Keeper_librarian_runtime.require_counterpart_template (Capture.preparation restored)));
+    Keeper_librarian_runtime.require_counterpart_template (Capture.preparation child) |> get;
     check json "no external preparation is ACKed" cursor_before (cursor ());
     check bool "no read position advances" true (progress fixture=position_before);
     check int "admission, provider guard and pending wakes dispatch no model" 0 (F.post_count fixture.server);
-    no_memory fixture))
+    no_memory fixture;
+    drive_advanced fixture;
+    check int "only the safe new question reaches the provider" 1 (F.post_count fixture.server);
+    check bool "the new question reaches Memory and advances the atom position" true
+      ((recovery ()).completion=Resolution_work.Memory_committed {request_id=child_id}
+        && progress fixture<>position_before);
+    let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source request)) in
+    let acknowledged=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    check bool "the safe new question acknowledges the original counterpart frontier" true
+      (Keeper_external_read_cursor.observation_matches_preparation acknowledged
+        ~after:through ~through ~atom:None ~official:None);
+    check json "recovery leaves the blocked original question unchanged" source_json (retained ()).request))
 (* Seed one actual host answer using the pre-policy authority boundary. This
    test-only dispatcher removes the new guard only while modeling that earlier
    HTTP call; original binding/schema/domain validation and receipts stay real. *)

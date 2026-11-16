@@ -15,8 +15,9 @@ if (root === null) throw new Error('the page of the console has no #app element'
 
 const leave = (): void => { location.replace('/') }
 const model = createConsole({ send: (path, init) => fetch(path, init), leave })
-// The panels send through the console, which reads the session again when
-// the server refuses one of their requests (`ConsoleModel.send`).
+// The panels send through the console, which sends only while it shows
+// someone and reads the session again when the server refuses one of their
+// requests (`ConsoleModel.send`).
 const { send } = model
 const subscriptions = createSubscriptions({ send, leave })
 const keepers = createKeepers({ send, leave })

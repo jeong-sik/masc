@@ -994,7 +994,7 @@ let capture_workspace_message state =
    this match exhaustive: a new reply must choose whether it is a replaceable
    observation or the outcome of an operation already sent. *)
 let account_login_action_is_read = function
-  | Masc_tui_account_login.Inventory | Refresh_saved _ | Refresh_retry | Recover | Discover | Preview_removal _
+  | Masc_tui_account_login.Inventory | Refresh_saved _ | Refresh_retry | Recover | Discover | Refresh_models | Preview_removal _
   | Refresh_removed _ | Refresh_list _ -> true
   | Activate_saved _ | Select_existing _ | Start _ | Input _
   | Cancel | Prepare _ | Save _ | Close | Nothing | Remove _ -> false

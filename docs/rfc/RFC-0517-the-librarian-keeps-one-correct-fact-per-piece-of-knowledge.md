@@ -3,7 +3,7 @@ rfc: "0517"
 title: "librarian 은 지식마다 맞는 fact 하나를 남긴다"
 status: Draft
 created: 2026-11-09
-updated: 2026-11-13
+updated: 2026-11-16
 author: claude
 supersedes: []
 superseded_by: null
@@ -351,18 +351,68 @@ F1 만으로는 아무것도 고쳐지지 않는다. 지우기가 보여도 틀�
 
 ### 7.3 admission 이 빈 입력 칸을 그릴지
 
-admission 은 대화·도구·continuity 칸을 빈 값으로 그린다. 그 칸을 읽는 설명 3,618바이트도 같이 보낸다(343-359, 385-422행).
+admission 은 대화·도구·continuity·working_context 칸을 빈 값으로 그리고, 그 칸을 읽는 설명도 같이 보낸다.
+고정 템플릿 `575a6849…` 에서는 369-371행과 381-420행이다. 빈 칸과 그 설명은 요청마다 2,494바이트다.
 
 | 안 | 무엇 | 좋은 점 | 나쁜 점 |
 | --- | --- | --- | --- |
-| C1 | admission 은 빈 칸과 그 설명을 그리지 않는다 | 요청마다 약 3.6 KB 가 준다 | 템플릿이 패스마다 갈린다. 효과를 아직 모른다 |
+| C1 | admission 은 빈 칸과 그 설명을 그리지 않는다 | 요청마다 2,494바이트가 준다 | 템플릿이 패스마다 갈린다. 효과를 아직 모른다 |
 | C2 (추천) | 먼저 P 의 한 갈래로 잰다(`--template`). 나빠지지 않으면 C1 로 간다 | 하네스가 잰다 | P 를 한 바퀴 더 돈다 |
-| C3 | 지금대로 둔다 | 바꿀 것이 없다 | 요청마다 약 3.6 KB 가 간다 |
+| C3 | 지금대로 둔다 | 바꿀 것이 없다 | 요청마다 2,494바이트가 간다 |
 
 사용자는 2026-11-13 에 C2 를 골랐다. 빈 칸과 그 설명을 뺀 템플릿을 P 의 한 갈래로 재고, 나빠지지 않으면 C1 로 간다.
 
-- 라이브 저장소에 남은 admission 요청 44건의 프롬프트는 65,618~651,797바이트다(2026-11-13 에 읽음). 빈 칸 설명 약 3.6 KB 는 그 0.6~5.5% 다. 요청 크기는 현재 기억과 쌓인 후보가 정한다.
-- 재는 데 Inkling 초안 실행 한 번과 GLM 실행 한 번이 든다. 돌리기 전에 비용을 사용자에게 묻는다.
+- 라이브 저장소에 남은 admission 요청 44건의 프롬프트는 65,618~651,797바이트다(2026-11-13 에 읽음). 2,494바이트는 그 0.4~3.8% 다. 요청 크기는 현재 기억과 쌓인 후보가 정한다.
+- 재는 데 Inkling 초안 실행 두 번과 GLM 실행 한 번이 든다. `prompt_lines.json` 이 고정한 수다.
+- 「나빠지지 않으면」은 `prompt_compare.py compare` 의 `worse` 가 비고 `complete` 가 true 인 경우다. `goes_in` 은 §2.3 기준이라 좋아진 지표까지 요구하므로 이 판단에 쓰지 않는다.
+
+#### 잰 결과 (2026-11-14~16)
+
+- 첫 초안은 이 절이 처음 적은 범위를 그대로 뺐다. 그 범위는 빈 칸 설명과 함께 출력 필드 `evidence`·`working_contexts` 를 채우는 설명도 담고 있었다. 프롬프트는 요청마다 5,845바이트 줄었다.
+  - Inkling E-real 유효 답이 90/100 에서 71/100 으로 줄었다(약 −3.4σ). 늘어난 무효 답은 대부분 입력에 없는 번호를 `evidence` 에 적은 답이다.
+- 둘째 초안은 출력 설명을 두고 빈 입력 칸과 그 설명만 뺀다. Inkling 두 번에서 나빠진 지표도, 좋아진 지표도 없다.
+
+| 지표 (Inkling 두 실행 합) | 기준선 | 둘째 초안 |
+| --- | --- | --- |
+| `synth_valid_rate` | 175/180 | 174/180 |
+| `real_valid_rate` | 90/100 | 85/100 |
+| `memory_state_accuracy` | 226/250 | 229/250 |
+| `stale_drop_recall` | 52/204 | 65/204 |
+| `judged_merge_recall` | 19/88 | 19/88 |
+| `drop_precision` | 82/111 | 96/123 |
+| `absorb_precision` | 56/89 | 41/82 |
+
+GLM 한 번에서도 나빠진 지표가 없다(`complete` true, `worse` 없음). 그래서 C1 로 간다.
+
+| 지표 (GLM 한 실행) | 기준선 | 둘째 초안 |
+| --- | --- | --- |
+| `synth_valid_rate` | 82/90 | 79/90 |
+| `real_valid_rate` | 42/50 | 38/50 |
+| `memory_state_accuracy` | 110/125 | 107/125 |
+| `stale_drop_recall` | 60/102 | 56/102 |
+| `judged_merge_recall` | 19/44 | 23/44 |
+| `drop_precision` | 76/99 | 71/93 |
+| `absorb_precision` | 30/55 | 57/71 |
+
+- GLM 유효 답은 E-synth 에서 −0.7σ, E-real 에서 −1.0σ 다. `worse_sigmas` 2.5 안이다.
+- GLM `absorb_precision` 은 +3.1σ 다. `better_from` 이 Inkling 만 보므로 `better` 에는 들지 않는다.
+
+#### C1 을 넣는 방법
+
+본문은 durable·cleanup 도 같이 쓴다. 세 패스 모두 `keeper_librarian.ml` 의 `prompt_variables` 로 같은 칸을 채운다. admission 만 그 칸을 빈 값으로 넘기고, durable 은 대화·도구·상대방 관측을 채운다. 그래서 `librarian.md` 에서 그 줄을 지우면 durable 이 입력을 잃는다.
+
+| 방법 | 좋은 점 | 나쁜 점 |
+| --- | --- | --- |
+| A. 두 블록을 slot 으로 옮기고 admission 만 그리지 않는다 | 규칙 글이 한 벌이다. `working_contexts_rule` 과 같은 방식이다 | slot 이름 둘, 패스별 렌더, 하네스가 새 구조를 따라야 한다 |
+| B. admission 전용 템플릿 파일 | 코드가 가장 적다 | 약 45KB 본문이 두 벌이 되어 규칙 글이 갈라진다 |
+
+사용자는 2026-11-15 에 A 를 골랐다.
+
+- 본문에는 `{{working_context_input}}` 과 `{{turn_inputs}}` 두 변수가 남는다. durable·memory 패스와 cleanup 은 두 slot 을 그려 넣고, admission 은 빈 문자열을 넣는다. 이 갈림은 pass variant 를 빠짐없이 match 해서 정한다.
+- cleanup 도 그 칸이 비지만 하네스가 cleanup 을 재지 않으므로 지금대로 그린다.
+- 조건은 둘이다. durable 프롬프트가 지금과 바이트까지 같고, admission 프롬프트가 잰 초안과 바이트까지 같아야 한다. 고정 템플릿으로 만든 시안에서 두 조건을 확인했다. 그리기는 치환뿐이라 변수마다 다른 표시 글로 대조하면 모든 값에 대한 대조가 된다.
+- 상대방 관측은 본문이 `{{turn_inputs}}` 를 두고 그 slot 이 `{{counterpart_observations}}` 를 둘 때만 모델에 닿는다. 상대방 관측이 남은 질문을 받는 검사도 두 곳을 다 본다.
+- durable 질문은 두 slot 의 해석 결과를 `turn_prompts` 로 얼려 두고, 되살릴 때 그것으로 다시 그린다. `turn_prompts` 가 없는 옛 질문과 두 변수가 없는 옛 admission capture 는 읽지 않는다. 1.0 전이라 하드컷으로 한다.
 
 ## 8. 참고
 

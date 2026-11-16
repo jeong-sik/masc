@@ -18,7 +18,7 @@
 | WIM-S03 문서 입력 | 현재 Core `db69904f29c6f4a6166957fbdffa4f7e8e910a7a`, MASC `01c94838471b1cbff986e5a78f2c14597a8df564`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 기존 79개 파일의 소스 리뷰와 후속 Core 3개 파일 수리를 구분한다. 실제 Core 미디어 suite 18개 통과; 최종 커밋과 소스 118개·metadata 9개가 일치한다. 이전 Dashboard 타입 검사와 decoder 1건은 당시 범위다. MASC 전체 타입·실제 provider·PDF/STT·브라우저·설치 미확인 |
 | TLJ-S01 위임 결과 | 협업 세션 `01a1e1b9…`, `.worktrees/farm-evolution-20261116`. 세 층 최종 head `e6ea78da93a1ebac6f6020aafb134631024ba769`, base `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`. canonical 종단 상태, 기동 재투영, 영속 전달 의도·답 원문·전달 영수증을 연결 | 두 P2였던 보관 기간 뒤 중복 전달과 fail-open journal 뒤 답 유실을 소스에서 수정했다. 재기반 후 독립 검토에서 미해결 P0/P1/P2 없음. 기존 세 패치와 range-diff가 같고 32개 후보 파일이 이전 최종 head와 일치함을 확인했다. 작성 세션의 OCaml 31개 구문 검사 기록이 있다. 타입·동작·CI·설치·원래 요청 회복·GitHub 정식 승인·게시 미확인 |
 | WIM-S04 MCP 결과 | 현재 소스 `e392aa3a7f8fafdfe18045c92bc0fe1d023e44b5`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 현재 base의 독립 소스 리뷰에 미해결 P0/P1/P2 없음. 이전 38개 구문 영수증과 새 통합 파일 5개의 구문 검사는 별도 범위다. MCP 소비자의 타입·동작·실제 MCP/provider·재시작·GC 실행은 미확인. 후속 Core 18개 시험을 MCP 실행으로 세지 않는다 |
-| IA-S13 공유 SSH 이름 | 현재 23층 top `2719eb32a7d77941cc4a2216d3e4912f89ff81c1`, base `b584e03211e6bb60e63a566853e855dd49544b3b`. `.worktrees/farm-remote-namespace-20261116`의 재기반 전 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 재기반 21층의 독립 소스 리뷰와 새 소스 263개의 집중 시험 76개를 후속 checkpoint에서 확인했다. 이전 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버·Workspace와 첫 쓰기 연결의 후속 커밋은 아래에 적었다. 전체 시작 흐름·실제 SSH·VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
+| IA-S13 공유 SSH 이름 | 현재 25층 top `8951cb0676e7bc9a6336344f4c057fcad88f2f35`, base `b584e03211e6bb60e63a566853e855dd49544b3b`. `.worktrees/farm-remote-namespace-20261116`의 재기반 전 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 재기반 21층의 독립 소스 리뷰와 새 소스 263개의 집중 시험 76개를 후속 checkpoint에서 확인했다. 이전 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버·Workspace와 첫 쓰기 연결의 후속 커밋은 아래에 적었다. 전체 시작 흐름·실제 SSH·VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
 
 본 세션은 저장·add-on·입력 경계와 이 실행 기록을 맡는다. TLJ-S01의 같은 구현을
 다시 만들지 않고 해당 세션의 산출물을 현재 head에서 대조한다. 기록된 스택 게시 시도는
@@ -259,6 +259,51 @@ SHA-256은 `81b85a9ed213b1b64dac5afa4fc890c2e6c7d33c8c5be3282b4fbc495b7fed3d`다
 미완료다. 후속 `gh api user`도 해당 실행 환경에서 API 연결 실패(exit 1)였으며,
 사용자 계정 무효 판정이나 게시 성공을 뜻하지 않는다.
 
+## 공용 하네스 환경과 UID 생성 경쟁의 후속 확인
+
+UID 스택의 24층 head는 `1de468bc16d2566470f63ac5676cee6454391c6a`다.
+공용 shell 하네스의 `workspace-create`와 `login` 준비 자식에서만
+`OCAML_RUNTIME_EVENTS_START`를 제거했다. 실제 서버 실행에는 원래 값이 전달된다.
+수정 전 경계 시험 3개에서 5개 assertion 실패를 재현했고, 수정 후 유지 중인 suite
+18개가 통과했다. 미설정·빈 값·일반 값과 부모 환경 보존을 확인했다.
+실제 shell과 기록용 후보를 사용한 환경·인자 검증이며 native login, C runtime 시작,
+서버 daemon이나 설치 검증은 아니다. 영수증은 UID worktree의
+`artifacts/farm-harness-preparation-env-20261116/`에 있다.
+
+그 독립 소스 리뷰에서 scheduler의 별도 준비 호출과 request-cost의 승인 전 telemetry
+쓰기가 남아 있음을 찾았다. 후속 25층 `8951cb0676e7bc9a6336344f4c057fcad88f2f35`는
+두 성능 하네스가 공용 admission을 거친 뒤 fixture를 쓰도록 바꿨다. 수정 전 새 사례
+4개가 실패했고 수정 후 기존 18개를 포함한 전체 22개가 통과했다. 실제 작은 telemetry
+fixture와 설정 덮어쓰기를 확인한 뒤 기록용 후보의 두 번째 confirmation에서 멈췄다.
+실제 서버·성능 측정은 하지 않았다. root가 4개 파일의 전체 diff와 직접 소비자,
+선언 입력 19개·실행 영수증을 검토했고 미해결 P0/P1/P2는 없다. 두 층 모두 로컬
+커밋이며 GitHub 정식 승인이나 게시를 뜻하지 않는다. 후속 증거는 같은 worktree의
+`artifacts/farm-harness-seed-order-20261116/`에 있다.
+
+별도로 같은 worktree의 `artifacts/farm-uid-consumer-20261116/run-2/`에서
+고정 `2719eb32a7d77941cc4a2216d3e4912f89ff81c1`의 UID 생성 suite 15개가 모두
+통과했다. C 구현 8개를 포함한 실제 소스 173개의 의존성을 OCaml 5.5.2로 새로
+컴파일했고 이전 객체는 사용하지 않았다. 컴파일·링크·실행 등 187개 명령이 성공했다.
+root는 173개 소스의 Git·실행 사본·24층 head 바이트와 산출물 282개의 해시를
+별도로 대조했다. 24층에서 재실행했다는 뜻은 아니다.
+같은 프로세스의 경로 별칭, 여러 프로세스의 동시 생성과 오래된 잠금 소유권을
+다뤘으며 skip은 없다. `_exit` 지점의 재열기는 SIGKILL이나 쓰기 도중 crash 증거가
+아니다. Backend/Workspace 소비자, Running host, 고아 파일 정리, 실제 SSH·서버·Linux와
+fleet 행렬은 이 15개에 포함되지 않는다.
+
+실제 lifecycle의 pre-OCaml 시작 문제는 별도다. UID worktree의
+`artifacts/farm-lifecycle-events-20261116/plan-1/PLAN.md`는 선택한 두 실행 파일의
+C 진입점에서 기존 START 의도를 보존하고, 최종 서버의 소유권 확인 뒤 적용하는
+설계안이다. 새 환경변수나 부모 프로세스의 서버 lease는 제안하지 않는다.
+구현·링크·플랫폼 실행은 아직 하지 않았으며, native/bytecode 범위와 기존 명시적
+START의 우선순위·출력 위치를 확정하고 검증하는 다음 작업으로 남긴다.
+
+MCP 소비자의 첫 실행 대상은 기존 `test_keeper_mcp_content` 8개 사례로 좁혔다.
+아직 실행하지 않았다. 이 worktree의 `artifacts/farm-masc-consumer-20261116/plan-1/`은
+실제 공개 인터페이스만 필요한 타입 의존성과 전체 구현이 필요한 값 의존성을 구분한다.
+이전 Core 객체의 같은 이름 모듈을 그대로 섞거나 Core 전체를 편의상 빌드하지 않고,
+실제 namespace를 유지한 해당 suite의 의존성만 확정하는 것이 다음 실행 단위다.
+
 ## 원래 25개 요구의 현재 위치
 
 아래 조각은 원래 계획 §8의 핵심 연결이다. 전체 연결과 의존·결정은 원래 표를 따른다.
@@ -281,7 +326,7 @@ SHA-256은 `81b85a9ed213b1b64dac5afa4fc890c2e6c7d33c8c5be3282b4fbc495b7fed3d`다
 | 13. Identity·MCP·Artifact·Wiki·Web Renderer·Search·Browser 완전 지원 | WIM-S01·S02·S04·S08, CMG-S15 | WIM-S04 후보가 MCP 결과의 일반/승인 경로와 보관 소유자를 연결. 실제 호출은 미실행 | 실제 MCP non-text 결과가 도구 소비자·저장·후속 입력에 보존됨. 각 외부 도구의 자격·실패·재접속·산출물 확인은 따로 필요 |
 | 14. 프롬프트·Keeper 설정을 포함한 세계 Export/Import | WIM-S09~S12, SP-S11·S12·S14·S15 | 현재 round-trip 동작 미확인 | 세계 묶음을 다른 위치에 import한 뒤 설정·identity·참조·권한 대조와 재기동. 파일 복사 성공만으로 판정하지 않음 |
 | 15. 모델에 가는 글과 설정을 TOML·Markdown 등으로 외부화 | WIM-S13~S16, TLJ-S14a·S14b, X08 | 이번 수리는 전체 문자열 외부화를 수행하지 않음 | 모델 입력·도구 설명·화면 문구별 소유 정본, 텍스트 변경 후 실제 소비 결과. 타입/wire 식별자와 자연어 본문 범위를 구분 |
-| 16. 에이전트 개발을 전제로 CI·검사 병목 완화 | OD-S07·S09~S12·S14, POC-S14 | 작은 소스 단위와 독립 리뷰 사용. CI 기다림 없이 후속 구현 진행. 게시는 로컬 인증에서 막힘 | ready→review, fix→rereview, freeze→검증 시간과 미완료 표본. 기존 release 필수 검증을 빠뜨리지 않고 병목이 줄었는지 측정 |
+| 16. 에이전트 개발을 전제로 CI·검사 병목 완화 | OD-S07·S09~S12·S14, POC-S14 | 작은 소스 단위와 독립 리뷰 사용. CI 기다림 없이 후속 구현 진행. 직접 gh 조회는 연결 실패이며 원격 게시는 미완료 | ready→review, fix→rereview, freeze→검증 시간과 미완료 표본. 기존 release 필수 검증을 빠뜨리지 않고 병목이 줄었는지 측정 |
 | 17. MultiModal과 외부 도구 해석 | WIM-S03~S07 | WIM-S03 후보에 문서·혼합 투영, 중첩 ToolResult, canonical 복원 사례 작성 | 같은 후보에서 실제 PDF/STT·provider failover·재시작 실행. active tool round의 문서, connector 첨부, video·외부 reader는 별도 남음 |
 | 18. 일관되고 편한 TUI 조작 | OD-S02·S03a·S03b | 이번 실행의 키 조작·화면 흐름 미확인 | 키 입력→요청·저장 상태·결정의 일관성, 실제 사용 관측. 문구·행 순서 snapshot으로 대체하지 않음 |
 | 19. File I/O 병목 | SP-S01·S03·S04·S09·S10a·S10c, CA-S11a~S11c, POC-S16 | Schedule 수리는 정확성 후보이며 I/O 절감 후보가 아님 | store 크기·동시 writer별 읽고 쓴 바이트와 지연 측정. Board·Task·이력 경로의 전후 비교 |

@@ -5,6 +5,7 @@ type key = Enter | Up | Down | Tab | Eof
 type input = Text of string | Key of key
 type error = Already_running | Not_found | Not_running | Input_pending | Invalid_input
   | Cancelled | Transport_failed | Process_failed of int | Interpreter_missing
+  | Completion_failed of string
 type pipe = Stdout | Stderr
 (** What the login shows, as the process writes it. *)
 type output =
@@ -43,7 +44,8 @@ val python : binary:string -> string option
     entries are ignored because the child runs from the Keeper workspace.
     [None] when neither exists. *)
 
-val run : t -> env:Eio_unix.Stdenv.base -> child_env:string array ->
+val run : ?saved_login:(unit -> (bool, string) result) ->
+  t -> env:Eio_unix.Stdenv.base -> child_env:string array ->
   cwd:string -> argv:string list -> terminal:bool ->
   is_closed:(unit -> bool) -> on_ready:(unit -> unit) ->
   on_input_ready:(unit -> unit) ->
@@ -52,4 +54,7 @@ val run : t -> env:Eio_unix.Stdenv.base -> child_env:string array ->
     shutdown own termination. The helper kills/reaps its complete child group.
     With [~terminal:false] the process writes to pipes and [on_output] gets
     {!Piped}; with [~terminal:true] it runs in an 80 x 24 terminal and gets
-    {!Screen}. *)
+    {!Screen}. [saved_login] is a read-only observation for clients without a
+    login-only command. A saved login closes input and ends/reaps the child
+    before returning [Ok ()]; a failed observation returns [Completion_failed].
+    It is checked while waiting and before forwarding input. *)

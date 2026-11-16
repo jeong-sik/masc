@@ -2,7 +2,7 @@
 type t
 type error = Private_home_unavailable | Sign_in_required | Unsafe_credential
   | Unrecognized_credential | Unrecognized_managed_credential | Command_failed | Invalid_catalog
-  | Keychain_unavailable
+  | Keychain_unavailable | Login_write_in_progress
 val error_message : error -> string
 val prepare :
   host:Runtime_account_access.host_account -> runtime_root:string -> account_id:string ->
@@ -24,6 +24,12 @@ val import_signed_in : source_home:string -> t -> (unit, error) result
     Never modify the source; call only after account selection. *)
 val capture_login : t -> (unit, error) result
 (** Capture authentication created by an explicit interactive [agy] sign-in. *)
+val login_saved : t -> (bool, error) result
+(** Read the selected login without changing its keychain or file. [false]
+    means no login has been saved yet. A file changing during the read returns
+    [Login_write_in_progress]; unreadable/unknown content remains an error.
+    Stop and reap the interactive client
+    before {!capture_login}, which moves its saved login out of the keychain. *)
 val credential_reference : t -> (Runtime_schema.credential, error) result
 type model = { id : string; label : string }
 val parse_models : string -> (model list, error) result
@@ -39,6 +45,8 @@ val parse_context : model:model -> cli_version:string -> string -> (context_obse
     Nonzero token usage rejects the zero-turn metadata observation. *)
 
 module For_testing : sig
+  val login_saved_with :
+    read_keychain:(path:string -> Apple_keychain.observation) -> t -> (bool, error) result
   val import_with :
     read_keychain:(path:string -> Apple_keychain.observation) ->
     clear_keychain:(path:string -> (unit, unit) result) ->

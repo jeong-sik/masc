@@ -29,6 +29,49 @@ let normal_exit () = run_process (fun env path session ->
     ~on_output:(function S.Piped (_, text) -> Buffer.add_string output text
                          | S.Screen _ -> fail "a pipe login drew a screen") in
   get result; check string "output delivered before exit" "ready\n" (Buffer.contents output); Ok ())
+let saved_login_closes_input () = run_process (fun env path session ->
+  let saved = ref false in
+  let received = Filename.concat path "received" in
+  let pid_file = Filename.concat path "child-pid" in
+  let queued = ref false in
+  let result = S.run ~saved_login:(fun () -> Ok !saved)
+    session ~env ~child_env:(Unix.environment ()) ~cwd:path
+    ~argv:["python3";"-c";
+      "import os,sys,time\nopen('child-pid','w').write(str(os.getpid()))\n"
+      ^ "print('ready',flush=True)\nsys.stdin.readline()\nopen('received','w').write('received')\n"
+      ^ "while True: time.sleep(1)\n"]
+    ~terminal:true ~is_closed:(fun () -> false) ~on_ready:(fun () -> ())
+    ~on_input_ready:(fun () -> ()) ~on_output:(fun _ ->
+      if not !queued && Sys.file_exists pid_file then (
+        queued := true; saved := true;
+        S.submit ~workspace:path ~actor:(S.Agent "operator") ~login_id:(S.id session)
+          (S.Text "synthetic-login-code") |> get)) in
+  get result;
+  check bool "input was queued at login completion" true !queued;
+  check bool "code never reaches the conversation" false (Sys.file_exists received);
+  check bool "completed login rejects new input" true
+    (S.submit ~workspace:path ~actor:(S.Agent "operator") ~login_id:(S.id session)
+       (S.Text "late-code") = Error S.Not_running);
+  let pid = Fs_compat.load_file pid_file |> int_of_string in
+  let alive = try Unix.kill pid 0; true with Unix.Unix_error (Unix.ESRCH, _, _) -> false in
+  check bool "interactive client is reaped before capture" false alive;
+  Ok ())
+let saved_login_without_terminal_output () = run_process (fun env path session ->
+  let saved = Filename.concat path "saved" in
+  let result = S.run ~saved_login:(fun () -> Ok (Sys.file_exists saved))
+    session ~env ~child_env:(Unix.environment ()) ~cwd:path
+    ~argv:["python3";"-c";"import time\nopen('saved','w').write('saved')\nwhile True: time.sleep(1)\n"]
+    ~terminal:true ~is_closed:(fun () -> false) ~on_ready:(fun () -> ())
+    ~on_input_ready:(fun () -> ()) ~on_output:(fun _ -> ()) in
+  get result; Ok ())
+let failed_login_observation () = run_process (fun env path session ->
+  let result = S.run ~saved_login:(fun () -> Error "selected login unreadable")
+    session ~env ~child_env:(Unix.environment ()) ~cwd:path
+    ~argv:["python3";"-c";"import time\nwhile True: time.sleep(1)\n"]
+    ~terminal:true ~is_closed:(fun () -> false) ~on_ready:(fun () -> ())
+    ~on_input_ready:(fun () -> ()) ~on_output:(fun _ -> ()) in
+  check bool "unreadable login is not successful completion" true
+    (result = Error (S.Completion_failed "selected login unreadable")); Ok ())
 (* The program overwrites a line the way a full-screen login redraws: a
    carriage return, then the cursor moved up. The screen shows the result,
    not the bytes, in the size the PTY reports, and a line longer than the
@@ -154,6 +197,9 @@ let python_ignores_relative_path_before_workspace_change () = temporary (fun roo
           (Unix.realpath expected) (Unix.realpath path))))
 let () = run "setup-login-session" ["ownership", [test_case "scope and physical account locks" `Quick isolated_scope];
   "process lifetime", [test_case "normal exit" `Quick normal_exit;
+    test_case "saved login closes input and reaps client" `Quick saved_login_closes_input;
+    test_case "browser login finishes without terminal activity" `Quick saved_login_without_terminal_output;
+    test_case "failed login observation" `Quick failed_login_observation;
     test_case "terminal screen" `Quick terminal_screen; test_case "cancel" `Quick explicit_cancel;
     test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof; test_case "server shutdown" `Quick server_shutdown];
   "interpreter", [test_case "bundled release preferred" `Quick python_prefers_the_bundled_release;

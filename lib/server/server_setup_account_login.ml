@@ -30,7 +30,8 @@ let session_status = function
   | Session.Already_running | Not_running | Input_pending -> `Conflict
   | Not_found -> `Not_found
   | Invalid_input -> `Bad_request
-  | Cancelled | Transport_failed | Process_failed _ | Interpreter_missing -> `Bad_gateway
+  | Cancelled | Transport_failed | Process_failed _ | Interpreter_missing
+  | Completion_failed _ -> `Bad_gateway
 
 let receipt_failure = "The private login recovery record could not be saved."
 let account_failure = "The private login account could not be prepared."
@@ -249,14 +250,16 @@ let start ~owner ~base_path ~body request reqd =
           let completed =
             try
               Session.monitor session ~env ~is_closed (fun () ->
-                let* () = Session.run session ~env ~child_env ~cwd:(Client.home_dir home)
+                let* () = Session.run ?saved_login:(Client.saved_login_check home)
+                  session ~env ~child_env ~cwd:(Client.home_dir home)
                   ~argv:(Client.argv ~cli_path:spawn_path home) ~terminal:(Client.is_pty home)
                   ~is_closed ~on_ready ~on_output ~on_input_ready
                   |> Result.map_error (fun error ->
                     let status = match error with
                       | Session.Cancelled -> Receipt.Cancelled
                       | Already_running | Not_found | Not_running | Input_pending
-                      | Invalid_input | Transport_failed | Process_failed _ | Interpreter_missing -> Receipt.Failed in
+                      | Invalid_input | Transport_failed | Process_failed _ | Interpreter_missing
+                      | Completion_failed _ -> Receipt.Failed in
                     status, Session.error_message error) in
                 let* observed = observe () |> Result.map_error (fun _ ->
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in
@@ -286,7 +289,7 @@ let start ~owner ~base_path ~body request reqd =
                    ((Session.Already_running | Session.Not_found | Session.Not_running
                     | Session.Input_pending | Session.Invalid_input
                     | Session.Transport_failed | Session.Process_failed _
-                    | Session.Interpreter_missing) as error) ->
+                    | Session.Interpreter_missing | Session.Completion_failed _) as error) ->
                  Receipt.Failed, Session.error_message error
                | Ok (Error (status, message)) -> status, message
                | Ok (Ok ()) -> Receipt.Failed, receipt_failure in

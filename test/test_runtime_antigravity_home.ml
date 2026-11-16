@@ -1683,6 +1683,31 @@ let test_keychain_selection_and_private_account_switch () =
     check string "source file never changed" "stale-file-account" (Fs_compat.load_file source_file))
 ;;
 
+let test_saved_login_observation_preserves_live_credentials () =
+  with_temp_root (fun runtime_root ->
+    let module S = Runtime_antigravity_setup in
+    let account = match S.prepare ~host:(antigravity_host ()) ~runtime_root ~account_id:"observed-login" with
+      | Ok account -> account | Error error -> fail (S.error_message error) in
+    let keychain = Filename.concat (S.home_dir account) "Library/Keychains/login.keychain-db" in
+    if not (Sys.file_exists keychain) then (
+      Fs_compat.mkdir_p (Filename.dirname keychain);
+      write_file ~mode:0o600 keychain "synthetic keychain");
+    let original = Fs_compat.load_file keychain in
+    let observed = ref Apple_keychain.Missing in
+    let check_saved () = S.For_testing.login_saved_with account ~read_keychain:(fun ~path ->
+      check string "reads only the selected login keychain" keychain path; !observed) in
+    check bool "no saved login yet" true (check_saved () = Ok false);
+    observed := Apple_keychain.Found (Masc_test_deps.antigravity_keychain_value
+      (Masc_test_deps.antigravity_oauth_fixture "fresh-login"));
+    check bool "new login is observed without capture" true (check_saved () = Ok true);
+    check bool "observation has not created a credential copy" true
+      (S.credential_reference account = Error S.Sign_in_required);
+    check string "live keychain is untouched" original (Fs_compat.load_file keychain);
+    observed := Apple_keychain.Unavailable;
+    check bool "unreadable keychain cannot complete login" true
+      (check_saved () = Error S.Keychain_unavailable))
+;;
+
 let test_official_models_response_is_not_model_output () =
   let response turns = Printf.sprintf {|{"status":"SUCCESS","num_turns":%d,"usage":{"total_tokens":0},"command":{"name":"models","data":{"models":[{"id":"gemini-3.8-flash-high","label":"Gemini 3.8 Flash (High)"}]}}}|} turns in
   let models = match Runtime_antigravity_setup.parse_models (response 0) with
@@ -1747,6 +1772,7 @@ let () =
     [ ( "setup", [test_case "explicit private account import" `Quick test_explicit_setup_import_and_login_home;
       test_case "linked runtime root is a private home failure" `Quick test_setup_reports_a_linked_runtime_root_as_the_private_home;
       test_case "keychain precedence and repeated account switch" `Quick test_keychain_selection_and_private_account_switch;
+      test_case "saved login observation leaves live credentials untouched" `Quick test_saved_login_observation_preserves_live_credentials;
                        test_case "official model catalog envelope" `Quick test_official_models_response_is_not_model_output;
                        test_case "selected zero-turn context" `Quick test_selected_model_zero_turn_context] )
     ; ( "layout"

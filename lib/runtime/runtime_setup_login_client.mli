@@ -1,5 +1,5 @@
-(** Official-client login adapters. The caller owns the login process and calls
-    [observe] only after its successful exit; authentication and invocation are
+(** Official-client login adapters. The caller owns and reaps the login process
+    before calling [observe]; authentication and invocation are
     separate observations. No operation changes the host process environment. *)
 type client = Codex | Claude | Antigravity | Muse
 type native = Runtime_account_home_layout.client = Codex_home | Claude_home | Muse_home
@@ -22,6 +22,12 @@ val home_dir : t -> string
 val argv : cli_path:string -> t -> string list
 val environment : t -> (string array, string) result
 val is_pty : t -> bool
+val saved_login_check : t -> (unit -> (bool, string) result) option
+(** Antigravity runs its full interactive client, so its newly saved login
+    ends the login process before it accepts a conversation. Other clients
+    have a login command whose exit owns completion and return [None].
+    This check only reads; a changing or not-yet-parseable credential waits
+    for the writer. [observe] captures the login after process cleanup. *)
 val observe : mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t -> cli_path:string ->
   account_request:Runtime_account_access.request -> t -> (observation, string) result

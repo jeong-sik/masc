@@ -2,6 +2,7 @@ type key = Enter | Up | Down | Tab | Eof
 type input = Text of string | Key of key
 type error = Already_running | Not_found | Not_running | Input_pending | Invalid_input
   | Cancelled | Transport_failed | Process_failed of int | Interpreter_missing
+  | Completion_failed of string
 type pipe = Stdout | Stderr
 type output = Piped of pipe * string | Screen of string
 type command = Input of input | Cancel
@@ -28,6 +29,7 @@ let error_message = function
   | Process_failed code -> Printf.sprintf "The official login process exited with status %d." code
   | Interpreter_missing ->
     "Login needs Python 3. Reinstall the complete MASC release to restore its bundled Python, or install Python 3 and retry."
+  | Completion_failed detail -> detail
 
 let input_of_json = function
   | `Assoc fields when List.length fields = 2 ->
@@ -164,7 +166,7 @@ let screen_text screen =
   done;
   Buffer.contents buffer
 
-let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
+let run_with interpreter t ~saved_login ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
   let clock = Eio.Stdenv.clock env in
   Atomic.set t.terminal terminal;
   let run_child () = Eio.Switch.run (fun sw ->
@@ -186,6 +188,22 @@ let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_r
     Eio.Switch.on_release sw (fun () ->
       Atomic.set t.phase Observing;
       Eio.Flow.close stdin_w);
+    let completion, completed = Eio.Promise.create () in
+    let completion_found = Atomic.make false in
+    let check_saved_login () =
+      if Atomic.get completion_found then true else
+      match saved_login with
+      | None -> false
+      | Some check ->
+        (match check () with
+         | Ok false -> Atomic.get completion_found
+         | (Ok true | Error _) as result ->
+           if Atomic.compare_and_set completion_found false true then (
+             Atomic.set t.phase Observing;
+             Eio.Promise.resolve completed
+               (result |> Result.map (fun _ -> ())
+                |> Result.map_error (fun detail -> Completion_failed detail)));
+           true) in
     Eio.Fiber.fork_daemon ~sw (fun () ->
       let buffer = Cstruct.create 4096 in
       (* See helper protocol: stderr is drained for liveness; only typed stdout frames are exposed. *)
@@ -194,11 +212,23 @@ let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_r
     Eio.Fiber.fork_daemon ~sw (fun () ->
       let rec send () =
         let command = Eio.Stream.take t.commands in
-        Eio.Flow.copy_string (Yojson.Safe.to_string (command_json command) ^ "\n") stdin_w;
-        match command with Cancel -> `Stop_daemon | Input _ -> send () in
+        match command with
+        | Input _ when check_saved_login () -> `Stop_daemon
+        | Cancel | Input _ ->
+          Eio.Flow.copy_string (Yojson.Safe.to_string (command_json command) ^ "\n") stdin_w;
+          (match command with Cancel -> `Stop_daemon | Input _ -> send ()) in
       send ());
     Atomic.set t.phase Running;
     on_ready ();
+    (match saved_login with
+     | None -> ()
+     | Some _ -> Eio.Fiber.fork_daemon ~sw (fun () ->
+         (* The sign-in can finish in the browser without terminal output or
+            another key. This interval observes it; it never expires a login. *)
+         let rec watch () =
+           Eio.Time.sleep clock 0.1;
+           if check_saved_login () then `Stop_daemon else watch () in
+         watch ()));
     (* The helper reads at most 64 KiB per chunk; JSON escaping expands one
        byte at most sixfold. This is a wire-frame bound, never a login budget. *)
     let reader = Eio.Buf_read.of_flow ~max_size:(6 * 65536 + 1024) stdout_r in
@@ -234,7 +264,7 @@ let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_r
          | Some (`String "transport_error") -> Error Transport_failed
          | _ -> Error Transport_failed)
       | _ -> Error Transport_failed in
-    let result = receive () in
+    let result = Eio.Fiber.first receive (fun () -> Eio.Promise.await completion) in
     Atomic.set t.phase Observing;
     result) in
   try Eio.Fiber.first run_child (fun () ->
@@ -249,11 +279,11 @@ let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_r
   | Yojson.Json_error _ | Eio.Buf_read.Buffer_limit_exceeded -> Error Transport_failed
 ;;
 
-let run t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
+let run ?saved_login t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
   let binary =
     try Unix.realpath Sys.executable_name with Unix.Unix_error _ | Sys_error _ -> Sys.executable_name
   in
   match python ~binary with
   | None -> Error Interpreter_missing
   | Some interpreter ->
-    run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output
+    run_with interpreter t ~saved_login ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output

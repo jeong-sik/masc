@@ -497,7 +497,7 @@ let test_backpressure_gate_stale_ack_throttles_delivery () =
   Ws.__test_reset_env_caches ();
   with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.001" (fun () ->
     let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:"stale-ack" in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"stale-ack" () in
     Atomic.set session.dashboard_auth (Ws.Authenticated { agent = None });
     Atomic.set session.dashboard_last_delta_seq 1;
     Atomic.set session.dashboard_last_delta_at (Unix.gettimeofday () -. 10.0);
@@ -538,7 +538,7 @@ let test_dashboard_hello_keeps_upgrade_runtime_authority () =
     let auth_b = Masc_test_deps.make_sse_auth base_b "same-reader" in
     let id = "ws-runtime-authority" in
     let session = Ws.new_session ~id
-      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:base_a) in
+      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:base_a) () in
     let hello (auth : Sse.registration_auth) request_id =
       let state = Masc.Mcp_server.For_testing.create_state ~base_path:auth.config in
       let params = match auth.token with
@@ -598,7 +598,7 @@ let test_dashboard_hello_internal_token_held_by_a_static_credential () =
      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
     let id = "ws-internal-token-held-by-static" in
     let session = Ws.new_session ~id
-      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:base) in
+      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:base) () in
     let state = Masc.Mcp_server.For_testing.create_state ~base_path:base in
     let request = Yojson.Safe.to_string (`Assoc [
       "jsonrpc", `String "2.0"; "id", `Int 1;
@@ -622,7 +622,7 @@ let test_dashboard_hello_internal_token_held_by_a_static_credential () =
 
 let with_registered_test_session sid f =
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:sid in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:sid () in
   Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions sid session);
   Fun.protect
     ~finally:(fun () ->
@@ -1062,7 +1062,7 @@ let test_dashboard_auth_authenticated_tokenless () =
 
 let test_new_session_initializes_pong_state () =
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-state-init" in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-state-init" () in
   Alcotest.(check bool) "closed starts false" false (Atomic.get session.closed);
   Alcotest.(check bool) "last_pong_at is in the recent past"
     true
@@ -1076,11 +1076,40 @@ let test_new_session_initializes_pong_state () =
     true
     (Atomic.get session.dashboard_last_delta_at <= Unix.gettimeofday ());
   Alcotest.(check int) "inbound dispatch count starts empty"
-    0 (Atomic.get session.inbound_dispatches)
+    0 (Atomic.get session.inbound_dispatches);
+  Alcotest.(check int) "outbound queue count starts empty"
+    0 (Atomic.get session.outbound_queued)
+
+let test_session_mcp_auth_and_outbound_cap () =
+  let id = "ws-auth-and-cap-test" in
+  let session =
+    Ws.new_session
+      ~mcp_auth_token:"tok-worker-1"
+      ~mcp_internal_keeper:true
+      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:(Filename.get_temp_dir_name ()))
+      ~id ()
+  in
+  Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions id session);
+  Fun.protect
+    ~finally:(fun () -> Ws.with_sessions_rw (fun () -> Hashtbl.remove Ws.sessions id))
+    (fun () ->
+      Alcotest.(check (option (pair (option string) bool)))
+        "session_mcp_auth returns upgrade credentials"
+        (Some (Some "tok-worker-1", true))
+        (Ws.session_mcp_auth id);
+      Atomic.set session.outbound_queued Ws.max_outbound_frames_per_session;
+      Alcotest.(check bool)
+        "send past outbound cap closes slow session"
+        false
+        (Ws.send_to_session_result id "{\"jsonrpc\":\"2.0\"}" = Ws.Sent);
+      Alcotest.(check bool)
+        "session marked closed on outbound saturation"
+        true
+        (Atomic.get session.closed))
 
 let test_record_pong_refreshes_last_pong_at () =
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-refresh" in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-refresh" () in
   let before = Atomic.get session.last_pong_at in
   Unix.sleepf 0.005;
   Ws.record_pong session;
@@ -1163,7 +1192,7 @@ let test_dashboard_seq_no_lost_updates_across_domains () =
   if Domain.recommended_domain_count () < 2 then ()
   else
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:"seq-xdomain" in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"seq-xdomain" () in
   let iters = 1_000_000 in
   (* Two-way start barrier: each domain announces arrival and spins until both
      are present, so the increment loops run in true overlap.  Without it the
@@ -1346,6 +1375,8 @@ let () =
     ("pong_state", [
       Alcotest.test_case "new session initializes pong atomics" `Quick
         test_new_session_initializes_pong_state;
+      Alcotest.test_case "session_mcp_auth and outbound queue cap" `Quick
+        test_session_mcp_auth_and_outbound_cap;
       Alcotest.test_case "record_pong refreshes last_pong_at" `Quick
         test_record_pong_refreshes_last_pong_at;
     ]);

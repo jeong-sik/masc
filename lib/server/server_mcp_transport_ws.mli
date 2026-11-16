@@ -107,6 +107,9 @@ type ws_session = {
   dashboard_last_delta_seq : int Atomic.t;
   dashboard_last_delta_at : float Atomic.t;
   inbound_dispatches : int Atomic.t;
+  outbound_queued : int Atomic.t;
+  mcp_auth_token : string option;
+  mcp_internal_keeper : bool;
 }
 (** Per-WS session state.  Concrete record; see the note on the external
     surface at the top of this file for what that claim used to rest on and
@@ -191,7 +194,21 @@ val try_session_count : unit -> int option
     mutex was free, [None] when another domain holds it. For fatal paths
     (the scheduler-EINTR report) that must not hang. *)
 
-val new_session : runtime_authority:Sse.runtime_authority -> id:string -> ws_session
+val max_outbound_frames_per_session : int
+(** Upper bound on queued outbound text frames per WS session before closing
+    a slow consumer. *)
+
+val new_session :
+  ?mcp_auth_token:string ->
+  ?mcp_internal_keeper:bool ->
+  runtime_authority:Sse.runtime_authority ->
+  id:string ->
+  unit ->
+  ws_session
+
+val session_mcp_auth : string -> (string option * bool) option
+(** Authenticated bearer token and internal-keeper flag captured at [/ws]
+    upgrade time for [session_id], or [None] when the session is gone. *)
 (** Builds a fresh {!ws_session} with [closed = false]
     and the dashboard handshake state cleared.  Caller
     inserts the result into {!sessions} under
@@ -278,6 +295,8 @@ val respond_and_drive_upgrade :
     drop-in for the former Httpun_ws.Server_connection.  RFC-0287 §4.1. *)
 
 val mcp_websocket_handler :
+  ?mcp_auth_token:string ->
+  ?mcp_internal_keeper:bool ->
   runtime_authority:Sse.runtime_authority ->
   scope:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -298,6 +317,8 @@ val mcp_websocket_handler :
     connection's fiber with the session id and each complete text message. *)
 
 val upgrade_connection :
+  ?mcp_auth_token:string ->
+  ?mcp_internal_keeper:bool ->
   runtime_authority:Sse.runtime_authority ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?on_message:(string -> string -> unit) ->

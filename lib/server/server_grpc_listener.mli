@@ -17,7 +17,17 @@ val with_listener :
     are released before return. Cancellation propagates and records [Stopped];
     failures record a typed cause and remain failed after resource release. *)
 
+type rpc_auth_identity = {
+  auth_token : string option;
+  internal_keeper : bool;
+}
+
+val current_auth_token : unit -> string option
+val current_internal_keeper : unit -> bool
+val with_rpc_auth_identity : rpc_auth_identity -> (unit -> 'a) -> 'a
+
 val serve_socket :
+  ?authorize_request:(H2.Request.t -> (rpc_auth_identity, string) result) ->
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
@@ -33,6 +43,7 @@ val serve_socket :
     [clock]. *)
 
 val serve :
+  ?authorize_request:(H2.Request.t -> (rpc_auth_identity, string) result) ->
   env:Eio_unix.Stdenv.base ->
   port:int ->
   Grpc_eio.Server.t ->

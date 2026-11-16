@@ -62,7 +62,6 @@ let handle_ag_ui_events ~deps request reqd =
               respond_sse_rate_limited ~deps ~origin ~session_id:(Some session_id) ~protocol_version
                 ~reason ~retry_after_s reqd
           | Ok () ->
-              stop_sse_session_preserve_guard session_id;
               if Option.is_some last_event_id then
                 Transport_metrics.inc_sse_reconnect ();
               ensure_sse_backing_session_for_known_transport_session
@@ -80,6 +79,7 @@ let handle_ag_ui_events ~deps request reqd =
                    Log.Server.warn "%s" msg;
                    respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
                | Ok (client_id, event_stream, evicted) ->
+                  stop_sse_session_before ~client_id session_id;
                   let headers =
                     Httpun.Headers.of_list
                       (sse_stream_headers ~deps session_id protocol_version origin)

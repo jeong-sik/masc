@@ -432,16 +432,143 @@ let create_server
       ~service_name:Reflection_bridge.reflection_v1alpha_service_name
       server_ref
   in
+  let auth_interceptor =
+    Grpc_eio.Interceptor.make
+      ~name:"masc_rpc_auth"
+      (fun (ctx : Grpc_eio.Interceptor.context) next ->
+         let headers = H2.Headers.of_list ctx.metadata in
+         let raw_token_opt =
+           match H2.Headers.get headers Server_auth.authorization_header_name with
+           | Some raw ->
+             let trimmed = String.trim raw in
+             if String.length trimmed > 7
+                && String.equal
+                     (String.lowercase_ascii (String.sub trimmed 0 7))
+                     "bearer "
+             then (
+               let tok = String.trim (String.sub trimmed 7 (String.length trimmed - 7)) in
+               if tok = "" then None else Some tok)
+             else None
+           | None ->
+             (match H2.Headers.get headers Server_auth.internal_token_header_name with
+              | Some raw ->
+                let tok = String.trim raw in
+                if tok = "" then None else Some tok
+              | None -> None)
+         in
+         let identity =
+           match raw_token_opt with
+           | None -> { Server_grpc_listener.auth_token = None; internal_keeper = false }
+           | Some tok ->
+             let internal_keeper =
+               Option.is_some
+                 (Auth.internal_keeper_bearer workspace_config.base_path ~token:tok)
+             in
+             { Server_grpc_listener.auth_token = Some tok; internal_keeper }
+         in
+         Server_grpc_listener.with_rpc_auth_identity identity (fun () -> next ctx))
+  in
   let server =
     server
     |> Grpc_eio.Server.add_service (Grpc_eio.Health.to_service health)
     |> Grpc_eio.Server.add_service service
     |> Grpc_eio.Server.add_service reflection_service_v1
     |> Grpc_eio.Server.add_service reflection_service_v1alpha
+    |> Grpc_eio.Server.with_interceptor auth_interceptor
     |> Grpc_eio.Server.with_interceptor (Grpc_eio.Interceptor.logging ())
   in
   server_ref := server;
   server
+;;
+
+let extract_bearer_from_h2_headers headers =
+  match H2.Headers.get headers Server_auth.authorization_header_name with
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.length trimmed > 7
+       && String.equal
+            (String.lowercase_ascii (String.sub trimmed 0 7))
+            "bearer "
+    then
+      let tok = String.trim (String.sub trimmed 7 (String.length trimmed - 7)) in
+      if tok = "" then Error "Malformed Authorization header: empty bearer token"
+      else Ok (Some (tok, false))
+    else Error "Malformed Authorization header: expected Bearer <token>"
+  | None ->
+    (match H2.Headers.get headers Server_auth.internal_token_header_name with
+     | Some raw ->
+       let tok = String.trim raw in
+       if tok = "" then Error "Malformed internal token header"
+       else Ok (Some (tok, true))
+     | None -> Ok None)
+;;
+
+let authorize_grpc_request ~base_path (req : H2.Request.t)
+  : (Server_grpc_listener.rpc_auth_identity, string) result
+  =
+  if String.starts_with ~prefix:("/" ^ health_service_name ^ "/") req.target
+  then Ok { Server_grpc_listener.auth_token = None; internal_keeper = false }
+  else
+    let auth_cfg = Auth.load_auth_config base_path in
+    match extract_bearer_from_h2_headers req.headers with
+    | Error msg -> Error msg
+    | Ok None ->
+      if not auth_cfg.Masc_domain.enabled
+      then Ok { auth_token = None; internal_keeper = false }
+      else if (not auth_cfg.require_token) && not (Server_auth.http_auth_strict_enabled ())
+      then (
+        match
+          Auth.check_permission
+            base_path
+            ~agent_name:"grpc"
+            ~token:None
+            ~permission:Masc_domain.CanReadState
+        with
+        | Ok () -> Ok { auth_token = None; internal_keeper = false }
+        | Error err -> Error (Masc_domain.masc_error_to_string err))
+      else Error "Unauthorized: bearer token required for gRPC workspace RPCs"
+    | Ok (Some (raw_token, via_internal_header)) ->
+      if not auth_cfg.Masc_domain.enabled
+      then Ok { auth_token = Some raw_token; internal_keeper = false }
+      else (
+        match Auth.internal_keeper_bearer base_path ~token:raw_token with
+        | Some internal ->
+          (match
+             Auth.resolve_role_of_resolved_bearer
+               base_path
+               ~auth_cfg
+               ~token:raw_token
+               internal
+           with
+           | Ok role when Masc_domain.has_permission role Masc_domain.CanReadState ->
+             Ok { auth_token = Some raw_token; internal_keeper = true }
+           | Ok _ -> Error "Forbidden: gRPC endpoint requires CanReadState"
+           | Error err -> Error (Masc_domain.masc_error_to_string err))
+        | None when via_internal_header ->
+          Error "Unauthorized: invalid internal keeper token"
+        | None ->
+          (match Auth.find_token_credential base_path ~token:raw_token with
+           | Error err -> Error (Masc_domain.masc_error_to_string err)
+           | Ok credential ->
+             let agent_name =
+               (Auth.token_credential_agent_credential credential).Masc_domain.agent_name
+             in
+             let resolved = Auth.token_credential_bearer credential in
+             (match
+                Result.bind
+                  (Auth.resolve_role_of_resolved_bearer
+                     base_path
+                     ~auth_cfg
+                     ~token:raw_token
+                     resolved)
+                  (fun role ->
+                    Auth.authorize_permission_for_role
+                      ~agent_name
+                      ~role
+                      ~permission:Masc_domain.CanReadState)
+              with
+              | Ok () -> Ok { auth_token = Some raw_token; internal_keeper = false }
+              | Error err -> Error (Masc_domain.masc_error_to_string err))))
 ;;
 
 (** Start the gRPC workspace server.
@@ -475,7 +602,14 @@ let start
         Log.Server.info
           "gRPC workspace server binding loopback port %d (health + reflection enabled)"
           port;
-        match Server_grpc_listener.serve ~env ~port server with
+        match
+          Server_grpc_listener.serve
+            ~authorize_request:
+              (authorize_grpc_request ~base_path:workspace_config.base_path)
+            ~env
+            ~port
+            server
+        with
         | Ok () -> ()
         | Error failure ->
             Log.Server.error "gRPC workspace transport unavailable on loopback:%d: %s"

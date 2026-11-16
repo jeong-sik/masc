@@ -179,19 +179,22 @@ host 는 선언을 저장하기 전에 `[binding]` 을 아래 순서로 본다. 
 | 3 | `sources` 항목의 모양 | `since`·`language`·`timezone` 이 `[[binding.sources]]` 아래에 있다 | `lane_output contains duplicate or unknown fields` |
 | 3 | | `selection` 이 없다 | `lane_output selection must be latest_completed` |
 | 3 | | `sources` 가 없거나 배열이 아니다 | `binding.sources requires an array of observation sources` |
-| 4 | `[binding]` 이 패키지의 스키마에 맞는가 | 아래 목록 | `lane binding must match exactly one schema alternative` |
+| 4 | `records` 항목의 모양 | Board 항목에 `visibilities` 가 없다 | `binding.records: visibilities requires a non-empty array` |
+| 4 | | `wiki` 항목에 `paths` 가 있다 | `binding.records: a record grant has no key paths` |
+| 4 | | 두 항목의 `source_id` 가 같다 | `binding.records: records names the same source_id twice` |
+| 5 | `[binding]` 이 패키지의 스키마에 맞는가 | 아래 목록 | `lane binding must match exactly one schema alternative` |
 
 1 번 문구는 TOML 을 읽는 라이브러리(Otoml)가 낸다. 같은 실수라도 줄의 자리에 따라 문구가 다르다. `[[binding.sources]]` 를 `[[binding.records]]` 둘 뒤에 더하면 `otoml internal error` 로 시작하는 문구가 나온다.
 
-4 번 문구는 어느 칸이 틀렸는지 말하지 않는다(#52319). 이럴 때 나온다.
+5 번 문구는 어느 칸이 틀렸는지 말하지 않는다(#52319). 이럴 때 나온다.
 
 - `since` 가 없다. 문자열이다. 0 보다 작다.
 - 수업을 묶지 않은 선언에 `since` 가 있다.
 - `timezone` 이 없다. 패키지가 읽지 않는 키가 있다. `output_id` 가 `scenes` 가 아니다.
 
-`since` 는 Unix 시각(초)을 숫자로 적는다. 2 번 문구는 문자열로 적으라고 하지만, 문자열로 적은 `since` 는 4 번에서 걸린다.
+`since` 는 Unix 시각(초)을 숫자로 적는다. 2 번 문구는 문자열로 적으라고 하지만, 문자열로 적은 `since` 는 5 번에서 걸린다.
 
-스키마는 `records` 항목마다 `source_id` 와 `kind` 만 요구한다. 나머지는 host 가 worker 를 붙일 때 본다(#52373). 종류에 맞는 칸이 다 있는지, 다른 칸이 섞이지 않았는지, `source_id` 가 겹치지 않는지, `paths` 가 저장소 안을 가리키는지다. 그래서 Board 항목에 `visibilities` 가 없는 선언도 저장된다. 돌던 퀴즈의 선언을 그렇게 고쳐 저장하면 돌던 worker 는 내려가고, 새 worker 는 붙지 않는다. 거절 이유는 `configuration.issues` 에 선언 파일 경로와 함께 나온다.
+`records` 항목은 스키마보다 먼저 host 가 4 번에서 본다(#52373). 종류에 맞는 칸이 다 있는지, 그 종류에 없는 칸이 섞이지 않았는지, `source_id` 가 겹치지 않는지, `paths` 가 저장소 안을 가리키는지다. `records` 가 없거나 빈 배열이면 5 번에서 걸린다. 돌던 퀴즈의 선언 파일을 직접 고쳐 4 번에 걸리면 고친 선언은 반영되지 않고, 돌던 worker 가 그대로 돈다. 거절 이유는 `configuration.issues` 에 선언 파일 경로와 함께 나온다.
 
 맞춰야 하는 것이 넷이다.
 

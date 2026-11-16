@@ -9,6 +9,11 @@ let repos_toml_path base_path =
 
 let now_unix_seconds () = Int64.of_float (Unix.time ())
 
+let validate_git_arguments (repo : repository) =
+  let* () = Repo_git.validate_argument ~field:"url" repo.url in
+  Repo_git.validate_argument ~field:"default_branch" repo.default_branch
+;;
+
 let string_of_status = function
   | Active -> "Active"
   | Paused -> "Paused"
@@ -213,6 +218,11 @@ let written_observer : (base_path:string -> unit) Atomic.t =
 let install_written_observer observer = Atomic.set written_observer observer
 
 let write_all ~base_path (repos : repository list) =
+  let* () =
+    List.fold_left
+      (fun checked repo -> let* () = checked in validate_git_arguments repo)
+      (Ok ()) repos
+  in
   let path = repos_toml_path base_path in
   let config_dir = Filename.dirname path in
   Fs_compat.mkdir_p config_dir;
@@ -249,6 +259,7 @@ let find ~base_path id =
   | None -> Error (Printf.sprintf "Repository not found: %s" id)
 
 let add ~base_path (repo : repository) =
+  let* () = validate_git_arguments repo in
   if String.trim repo.local_path = "" then
     Stdlib.Error "Repository local_path must be non-empty"
   else
@@ -297,6 +308,7 @@ let update_status ~base_path id status =
       else write_all ~base_path updated)
 
 let update ~base_path id (repo : repository) =
+  let* () = validate_git_arguments repo in
   if String.trim repo.local_path = "" then
     Stdlib.Error "Repository local_path must be non-empty"
   else

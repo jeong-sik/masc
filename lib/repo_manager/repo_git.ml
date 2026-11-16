@@ -1,5 +1,16 @@
 open Repo_manager_types
 
+let validate_argument ~field value : (unit, string) result =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then
+    Stdlib.Error (Printf.sprintf "field %s must not be blank" field)
+  else if String.contains value '\000' then
+    Stdlib.Error (Printf.sprintf "field %s contains an invalid NUL byte" field)
+  else if Char.equal trimmed.[0] '-' then
+    Stdlib.Error (Printf.sprintf "field %s must not start with '-'" field)
+  else Stdlib.Ok ()
+;;
+
 let merge_env overrides =
   let keys = List.map fst overrides in
   let has_key entry =
@@ -217,12 +228,14 @@ let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
 let run_git_read_only_raw ~cwd args = run_git_raw ~cwd ~env:read_only_git_env args
 
 let clone ~repository =
+  let open Result.Syntax in
+  let* () = validate_argument ~field:"url" repository.url in
   let env = network_git_env in
   let parent_dir = Filename.dirname repository.local_path in
   Fs_compat.mkdir_p parent_dir;
   match
     run_git ~cwd:parent_dir ~env
-      ["clone"; repository.url; repository.local_path]
+      ["clone"; "--"; repository.url; repository.local_path]
   with
   | Ok _ -> Ok ()
   | Error msg -> Error msg
@@ -297,9 +310,11 @@ let fetch ~repository : (string list, string) result =
    preserve the tree rather than force the move. No credential is needed (the
    merge is local; the ref must already be fetched). *)
 let fast_forward ~repository ~target_ref : (unit, string) result =
+  let open Result.Syntax in
+  let* () = validate_argument ~field:"target_ref" target_ref in
   match
     run_git ~cwd:repository.local_path
-      [ "-c"; "core.hooksPath=/dev/null"; "merge"; "--ff-only"; target_ref ]
+      [ "-c"; "core.hooksPath=/dev/null"; "merge"; "--ff-only"; "--"; target_ref ]
   with
   | Ok _ -> Ok ()
   | Error msg -> Error msg
@@ -399,6 +414,8 @@ let ahead_behind
     ()
     : (int * int, string) result
   =
+  let open Result.Syntax in
+  let* () = validate_argument ~field:"target_ref" target_ref in
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
       ~timeout_sec

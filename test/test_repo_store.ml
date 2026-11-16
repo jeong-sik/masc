@@ -775,6 +775,32 @@ let test_lookup_preserves_catalog_error () =
           (String_util.contains_substring error "repository must be a table")
       | Ok _ -> Alcotest.fail "catalog error must not become a missing lookup")
 
+let test_catalog_writers_reject_option_shaped_git_arguments () =
+  with_temp_base_path (fun base_path ->
+      let original = sample_repo "safe" in
+      (match Repo_store.save_all ~base_path [ original ] with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail error);
+      let reject = function
+        | Stdlib.Error _ -> ()
+        | Stdlib.Ok _ -> Alcotest.fail "option-shaped Git argument was persisted"
+      in
+      List.iter
+        (fun invalid ->
+          reject (Repo_store.add ~base_path { invalid with id = "new" });
+          reject (Repo_store.update ~base_path original.id invalid);
+          reject (Repo_store.save_all ~base_path [ invalid ]);
+          match Repo_store.find ~base_path original.id with
+          | Error error -> Alcotest.fail error
+          | Ok preserved ->
+            Alcotest.(check string) "original URL is preserved" original.url preserved.url;
+            Alcotest.(check string) "original branch is preserved"
+              original.default_branch preserved.default_branch)
+        [ { original with url = "--upload-pack=touch /tmp/unwanted" }
+        ; { original with url = "  -c core.sshCommand=unwanted" }
+        ; { original with default_branch = "--output=unwanted" }
+        ])
+
 let () =
   Alcotest.run "Repo_store"
     [
@@ -785,6 +811,8 @@ let () =
           Alcotest.test_case "save and load roundtrip" `Quick test_save_and_load_roundtrip;
           Alcotest.test_case "empty catalog roundtrip" `Quick
             test_empty_catalog_roundtrip;
+          Alcotest.test_case "writers refuse option-shaped Git arguments without overwrite" `Quick
+            test_catalog_writers_reject_option_shaped_git_arguments;
         ] );
       ( "add",
         [

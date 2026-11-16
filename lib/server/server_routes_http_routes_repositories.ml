@@ -227,6 +227,7 @@ let parse_repository_json body_str =
       let url = Option.value ~default:"" raw_url |> String.trim in
       if url = "" then Error "field url is required"
       else
+        let* () = Repo_git.validate_argument ~field:"url" url in
         let inferred_name =
           match raw_name with
           | Some name ->
@@ -249,6 +250,10 @@ let parse_repository_json body_str =
             let* raw_default_branch =
               get_string_field fields "default_branch"
             in
+            let default_branch = Option.value ~default:"main" raw_default_branch in
+            let* () =
+              Repo_git.validate_argument ~field:"default_branch" default_branch
+            in
             let* aliases = get_string_list_field fields "aliases" [] in
             let* keepers = get_string_list_field fields "keepers" [] in
             let* auto_sync = get_bool_field fields "auto_sync" false in
@@ -267,7 +272,7 @@ let parse_repository_json body_str =
                     ~default:(Config_dir_resolver.repos_relative_path ~id)
                     raw_local_path;
                 aliases;
-                default_branch = Option.value ~default:"main" raw_default_branch;
+                default_branch;
                 keepers;
                 status = Active;
                 auto_sync;
@@ -375,7 +380,10 @@ let rec has_escaping_or_dangling_symlink ~real_base path =
       (match Unix.realpath path with
        | resolved -> not (path_is_within ~root:real_base resolved)
        | exception Unix.Unix_error _ -> true)
-    | _ -> false
+    | { Unix.st_kind =
+          (Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)
+      ; _
+      } -> false
     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
     | exception Unix.Unix_error _ -> true
 
@@ -455,6 +463,8 @@ let apply_repository_update_json ~base_path ~(existing : Repo_manager_types.repo
           let t = String.trim b in
           if t = "" then existing.default_branch else t
       in
+      let* () = Repo_git.validate_argument ~field:"url" url in
+      let* () = Repo_git.validate_argument ~field:"default_branch" default_branch in
       let* status =
         match raw_status with
         | None -> Ok existing.status

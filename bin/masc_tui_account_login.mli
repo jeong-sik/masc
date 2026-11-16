@@ -41,7 +41,10 @@ type list_view = Clients | Accounts of client | Account_providers of client * st
 type activation = Activating | Activation_failed of string
   | Active of { exact_output_available : bool }
   (** Saving and owner activation are separate receipts. *)
-type phase = Loading | Providers of list_view | Logging | Models | Documented_context of model | Saving | Removing
+type phase = Loading | Providers of list_view | Logging | Models | Preparing_context of model
+      (** The model selection remains available as an observation, while its
+          context request owns further input until it settles or is closed. *)
+  | Documented_context of model | Saving | Removing
   | Finished of { saved : saved; activation : activation; refresh_failed : bool }
       (** [refresh_failed]: the list read after the save did not arrive. *)
   | Failed
@@ -164,6 +167,12 @@ val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit
 val models : t -> Yojson.Safe.t -> (unit, string) result
 val selected_account : t -> provider -> Yojson.Safe.t -> (unit, string) result
 (** Accept an existing account selection's reference before discovering its models. *)
+val preparing : t -> model -> unit
+(** Keep the model inventory and selection while the selected model's context
+    observation is pending. Further selection/save requests wait for its result. *)
+val prepare_failed : t -> string -> unit
+(** Return to the retained model selection without inventing a context or
+    restarting login. The request's failure remains the notice. *)
 val prepared : t -> model -> Yojson.Safe.t -> (unit, string) result
 val receipt : t -> Yojson.Safe.t -> (bool, string) result
 val event : generation:int -> t -> event -> action

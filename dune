@@ -1,5 +1,9 @@
 (dirs
  (:standard
+  ; :standard leaves dot-directories out. The release-list consistency suite
+  ; (test/stanzas/test_release_companion_consistency.inc) depends on the
+  ; release workflows, so their directory is named here.
+  .github
   \
   .worktrees
   worktrees

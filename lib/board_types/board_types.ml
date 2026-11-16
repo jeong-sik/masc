@@ -815,6 +815,15 @@ module Recent_post_set = Set.Make (struct
     let compare = compare_recent_post_key
   end)
 
+let updated_post_key_of_post (post : post) = post.updated_at, Post_id.to_string post.id
+
+module Updated_post_set = Set.Make (struct
+  type t = float * string
+  let compare (left_ts, left_id) (right_ts, right_id) =
+    let order = Float.compare left_ts right_ts in
+    if order <> 0 then order else String.compare left_id right_id
+end)
+
 (** {1 In-Memory Store} *)
 
 type flusher_msg =
@@ -1363,6 +1372,7 @@ type store = {
   (* Phase 2 caches *)
   mutable karma_cache: ((string * int) list * (string * (string * int) list) list) option;       (** None = stale *)
   mutable hot_post_index: Hot_post_set.t;                 (** Incremental immutable Hot index *)
+  mutable updated_post_index: Updated_post_set.t;         (** Incremental observation cursor index *)
   mutable recent_post_index: Recent_post_set.t;           (** Incremental immutable Recent index *)
   comments_by_post: (string, string list) Hashtbl.t;      (** post_id -> comment_id list *)
   reactions: (string, reaction) Hashtbl.t;                 (** unique target/user/emoji reactions *)

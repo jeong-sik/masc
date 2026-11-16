@@ -9,7 +9,7 @@ Keeper 턴 완료와 Memory 반영은 별도 단계다. 턴을 마치면 보존�
 |---|---|---|
 | `processing` | 기존 worker 결과를 기다림 | 기존 원 요청의 결과를 관측한다. |
 | `capacity` | worker 접수 전 용량 거절 | 해당 installation의 실제 용량 반환 신호로 다시 진행한다. |
-| `missing_after_dispatch` | 전송 의도 뒤 worker에서 원 요청을 찾지 못함 | 원 요청·host Exact·실행 proof를 확인한다. 실행되지 않았다는 뜻은 아니다. |
+| `missing_after_dispatch` | 전송 의도 뒤 worker에서 원 요청을 찾지 못함 | Memory lane이 원 요청·host Exact·실행 proof·범위 receipt를 확인해 적격한 원본의 복구를 자동으로 잇는다. 실행되지 않았다는 뜻은 아니다. |
 | `outcome_unknown` | 원 실행 결과가 불명확함 | 원인과 권위 있는 결과 증거를 확인한다. |
 | `local_failure` | 로컬 복구 작업이 결과를 반환하지 못했거나, 명시적 memory admission pass가 자기 오류로 끝남 | 표시된 원인과 복구 근거를 확인한다. |
 
@@ -47,13 +47,21 @@ durable history와 명시적 memory admission 중 하나라도 해당하면 Keep
 ## 결과 증거가 없는 정확한 원 요청의 처리
 
 worker와 host Exact record 및 결과 증거가 모두 없는 dispatched original은 위 복원으로
-해결되지 않는다. 기다리거나 sync를 반복한 사실은 재전송 근거가 되지 않는다.
+해결되지 않는다. Memory lane은 원본의 worker 부재를 새로 관측하면 아래의 차단과
+같은 범위의 새 판정을 자동으로 준비한다. 운영자가 Keeper마다 복구를 요청할 필요는 없다.
+기다리거나 sync를 반복한 사실은 재전송 근거가 되지 않는다.
 원본·커서·Memory·worker volume을 지워 미실행 상태로 바꾸지 않는다.
 
-이 변경은 개별 history 원본의 향후 Memory 적용을 내구적으로 차단하고, 그 원본이
-포착한 범위를 현재 Memory로 새로 판단하는 API를 추가한다. 아래는 소스 계약이며
-배포나 실제 복구를 수행한 기록이 아니다. 대상 서버에 이 구현이 배포됐는지 먼저
-확인한다. 기존 catch-up의 202나 정상 health만으로 새 API의 가용성을 판단하지 않는다.
+자동 복구는 개별 history 원본의 향후 Memory 적용을 내구적으로 차단하고, 그 원본이
+포착한 범위를 현재 Memory로 새로 판단하는 기존 경로를 쓴다. actor는 `librarian`이며,
+이미 운영자가 접수한 복구가 있으면 그 actor와 intent를 유지한다. 같은 관측으로 거절된
+복구를 계속 새로 만들지 않는다. 차단·새 요청의 보존과 연결 확인 뒤 다음 Memory lane
+실행으로 넘긴다. 재시작은 같은 내구 intent와 child를 읽는다. 시간·lag 수치나 새 타이머로
+원본을 포기하지 않는다. 실제 Memory receipt와 원문 ACK가 있어야 처리가 끝난다.
+
+아래 API는 개별 원본을 관측하거나 명시적으로 복구를 요청할 때도 사용할 수 있다.
+이 안내는 소스 계약이며 배포나 실제 복구를 수행한 기록이 아니다. 대상 서버에 이 구현이
+배포됐는지 먼저 확인한다. 기존 catch-up의 202나 정상 health만으로 판단하지 않는다.
 
 GET과 POST의 경로는 같다. 두 메서드 모두 bearer의 `CanAdmin` 권한이 필요하다.
 

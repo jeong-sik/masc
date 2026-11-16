@@ -334,11 +334,30 @@ let rec consume_one ~config ~keeper_name ~wake =
   let store=Lane_addon_store.of_config config in
   let reserved=reserved () in
   let error detail=Error (Consumer.Original_publication_blocked detail) in
+  let wait_for_original wait record =
+    let+ resolution=match wait with
+      | Owner.Missing_after_dispatch ->
+        Resolution_work.resolve_missing_serialized ~config ~keeper_name ~request_id:(Record.request_id record)
+        |> Result.map_error Keeper_librarian_history_resolution_intent.error_to_string
+      | Capacity | Worker_pending | Worker_unknown | Worker_unreachable | Journal_recheck ->
+        Ok Resolution_work.Original_waiting in
+    match resolution with
+    | Resolution_work.Original_waiting -> pending_worker wait record
+    | Reobserve_original -> wake (); pending_worker wait record
+    | Resume_history ->
+      (* The continuation is durable before the next unit is requested. Do
+         not recursively dispatch it here: another absence must yield too. *)
+      wake ();
+      Keeper_librarian_pending.Publication
+        {request_id=Record.request_id record;
+         detail="History resolution advanced; the next Memory unit will read its continuation"} in
   let resume_original original =
     match resume ~store ~config ~reserved ~wake original with
     | Error detail -> error detail
     | Ok (Owner.Waited (wait, record)) ->
-      Ok (Consumer.Pending (pending_worker wait record))
+      (match wait_for_original wait record with
+       | Ok pending -> Ok (Consumer.Pending pending)
+       | Error detail -> error detail)
     | Ok (Resumed (Finished completed,request)) ->
       (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
        | Ok () -> Ok (completed_outcome request)
@@ -616,7 +635,9 @@ let rec consume_one ~config ~keeper_name ~wake =
             match resume ~store ~config ~reserved ~wake (Owner.Read original) with
             | Error detail -> stop detail
             | Ok (Owner.Waited (wait, record)) ->
-              Consumer.Memory_pending (pending_worker wait record)
+              (match wait_for_original wait record with
+               | Ok pending -> Consumer.Memory_pending pending
+               | Error detail -> stop detail)
             | Ok (Resumed (Finished completed,request)) ->
               (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
                | Ok () -> Consumer.Memory_committed

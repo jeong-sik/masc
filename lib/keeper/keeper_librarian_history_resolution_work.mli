@@ -1,4 +1,4 @@
-(** Durable operator work on the existing serialized Memory lane. HTTP only
+(** Durable recovery on the existing serialized Memory lane. HTTP only
     persists/observes here and schedules the ordinary catch-up separately. *)
 type error = Keeper_librarian_history_resolution_intent.error
 type submission = {
@@ -40,6 +40,18 @@ val run_serialized : config:Workspace.config -> keeper_name:string ->
     retaining its fence so ordinary discovery can continue. Unknown
     publication or unreadable state stops this unit. Restart and a
     coalesced ordinary wake discover the same durable intent/child ID. *)
+type automatic_resolution = Original_waiting | Reobserve_original | Resume_history
+val resolve_missing_serialized : config:Workspace.config -> keeper_name:string ->
+  request_id:string -> (automatic_resolution, error) result
+(** After the original owner freshly observes [Missing_after_dispatch], reuse
+    an active resolution or prepare one through the same strict preview and
+    fenced continuation as operator recovery. An unchanged refused observation
+    stays waiting. [Reobserve_original] follows a new durable refusal and
+    requests a later unit to read its changed basis or newly available result.
+    [Resume_history] proves a durable fence, not Memory commit
+    or source consumption: yield to the next Memory-lane unit before reading
+    the continuation. No original RPC is replayed. Host execution evidence,
+    an existing range receipt or unreadable state cannot authorize a fence. *)
 val record_completed_serialized : config:Workspace.config -> keeper_name:string ->
   request:Keeper_librarian_durable_request.t ->
   completed:Lane_addon_tool_request_owner.retained -> (unit, error) result

@@ -212,6 +212,38 @@ let test_indexed_reads_lifecycle_across_votes_deletions_and_reloads () =
     [ "p-3"; "p-2" ]
     (recent_ids ~limit:10)
 
+let test_updated_cursor_range_lifecycle () =
+  Eio_main.run @@ fun _env ->
+  let base_path = Filename.temp_dir "masc-board-cursor-" "" in
+  Fun.protect ~finally:(fun () -> Unix.rmdir base_path) @@ fun () ->
+  let store = Board.create_store ~base_path () in
+  let post id created updated =
+    { (make_post ~id ~created_at:created ~votes_up:0 ~votes_down:0 ~reply_count:0 ())
+      with updated_at = updated }
+  in
+  let older = post "p-old" 1.0 10.0 in
+  let tie_a = post "p-a" 2.0 20.0 in
+  let tie_b = post "p-b" 3.0 20.0 in
+  List.iter (Board.put_post store) [ tie_b; older; tie_a ];
+  let ids cursor = Board.posts_after_cursor store cursor
+    |> List.map (fun (p : Board.post) -> Board.Post_id.to_string p.id) in
+  Alcotest.(check (list string)) "timestamp-only cursor includes all ties" [ "p-a"; "p-b" ] (ids (20.0, None));
+  Alcotest.(check (list string)) "exact cursor is exclusive, ID breaks ties" [ "p-b" ] (ids (20.0, Some "p-a"));
+  Alcotest.(check (list string)) "end cursor has no suffix" [] (ids (Board.current_post_cursor store));
+  let updated = { older with updated_at = 30.0; reply_count = 1 } in
+  Board.put_post store updated;
+  Alcotest.(check (list string)) "an old post updated after cursor reappears" [ "p-old" ] (ids (20.0, Some "p-b"));
+  Alcotest.(check (list string)) "the old index key is removed" [ "p-a"; "p-b"; "p-old" ] (ids (0.0, None));
+  Board.put_post store older;
+  Alcotest.(check (list string)) "rollback removes the attempted timestamp" [] (ids (20.0, Some "p-b"));
+  Board.unindex_hot_post store tie_b;
+  Hashtbl.remove store.Board.posts "p-b";
+  Board.rebuild_hot_post_index store;
+  Alcotest.(check (list string)) "delete and rebuild preserve range order" [ "p-old"; "p-a" ] (ids (0.0, None));
+  Alcotest.(check (pair (float 0.0) (option string))) "head follows delete and rebuild"
+    (20.0, Some "p-a") (Board.current_post_cursor store)
+;;
+
 let () =
   Alcotest.run "Board_sort"
     [ ( "trending"
@@ -221,6 +253,7 @@ let () =
             test_trending_tiebreaks_on_created_at_desc
         ; Alcotest.test_case "Hot_post_set matches hot_compare total order" `Quick
             test_hot_post_set_matches_hot_compare
+        ; Alcotest.test_case "updated cursor range lifecycle" `Quick test_updated_cursor_range_lifecycle
         ; Alcotest.test_case "indexed reads across votes, deletions, and reloads" `Quick
             test_indexed_reads_lifecycle_across_votes_deletions_and_reloads
         ] )

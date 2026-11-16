@@ -77,6 +77,8 @@ release_binaries=(
   bin/deployment_preflight_helper.exe
   bin/masc_exec_ssh_bootstrap.exe
   bin/masc_antigravity_path_hook.exe
+  bin/masc_native_addon_launcher.exe
+  bin/masc_browser_addon_worker.exe
 )
 
 # Test executables release.yml runs on the host next to the release binaries:

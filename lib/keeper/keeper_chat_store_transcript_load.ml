@@ -17,7 +17,7 @@ let load_transcript_fully ~path ~redaction =
   | Private_file_succeeded_with_cleanup_failure
       { value = Fs_compat.Private_jsonl_rows.Rows_missing; _ } ->
     forget_transcript path;
-    []
+    Keeper_chat_observation_index.empty
   | Private_file_succeeded
       (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset = _ })
   | Private_file_succeeded_with_cleanup_failure
@@ -25,10 +25,11 @@ let load_transcript_fully ~path ~redaction =
           Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset = _ }
       ; _
       } ->
-    let messages =
+    let observation =
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let redaction = Keeper_secret_redaction.copy_for_current_domain redaction in
-        parse_transcript_rows ~path ~redaction rows)
+        parse_transcript_rows ~path ~redaction rows
+        |> Keeper_chat_observation_index.of_messages)
     in
     (* Register only when the file the rows came from is the one statted
        before the read: a replacement between the two would pair a new
@@ -38,9 +39,9 @@ let load_transcript_fully ~path ~redaction =
        when device = device' && inode = inode' ->
        remember_transcript
          path
-         { device; inode; parsed_end = rows_end; messages_rev = List.rev messages; redaction }
+         { device; inode; parsed_end = rows_end; observation; redaction }
      | Some _, Some _ | Some _, None | None, Some _ | None, None -> forget_transcript path);
-    messages
+    observation
   | Private_file_failed error
   | Private_file_failed_with_cleanup_failure { error; cleanup_failure = _ } ->
     report_persistence_read_drop
@@ -48,14 +49,14 @@ let load_transcript_fully ~path ~redaction =
       ~path
       ~detail:(Fs_compat.Private_jsonl_rows.error_to_string error);
     forget_transcript path;
-    []
+    Keeper_chat_observation_index.empty
 ;;
 
-let load_all ~base_dir ~keeper_name : chat_message list =
+let load_observation ~base_dir ~keeper_name =
   let path = chat_path ~base_dir ~keeper_name in
   if not (Sys.file_exists path) then (
     forget_transcript path;
-    [])
+    Keeper_chat_observation_index.empty)
   else
     let redaction = redaction_for ~base_dir ~keeper_name in
     let cached =
@@ -78,23 +79,27 @@ let load_all ~base_dir ~keeper_name : chat_message list =
        | Private_file_succeeded { Fs_compat.Private_jsonl_slice.bytes; end_offset }
        | Private_file_succeeded_with_cleanup_failure
            { value = { Fs_compat.Private_jsonl_slice.bytes; end_offset }; _ } ->
-         let fresh =
+         let observation =
            if String.equal bytes ""
-           then []
+           then cache.observation
            else
              Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                let redaction = Keeper_secret_redaction.copy_for_current_domain redaction in
-               parse_transcript_rows ~path ~redaction bytes)
+               parse_transcript_rows ~path ~redaction bytes
+               |> Keeper_chat_observation_index.append cache.observation)
          in
-         let messages_rev = List.rev_append fresh cache.messages_rev in
          (* The read and the parse above can suspend this fiber, and a purge of
             the transcript can run meanwhile. These rows are then those of a
             file that is gone, so they are registered only while the table
             still holds the cache this load went on from. *)
-         advance_transcript path ~from:cache { cache with parsed_end = end_offset; messages_rev };
-         List.rev messages_rev
+         advance_transcript path ~from:cache { cache with parsed_end = end_offset; observation };
+         observation
        | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ ->
          load_transcript_fully ~path ~redaction)
+
+let load_all ~base_dir ~keeper_name : chat_message list =
+  load_observation ~base_dir ~keeper_name |> Keeper_chat_observation_index.messages
+;;
 
 let load_all_using ~base_dir ~keeper_name ~parse_rows =
   let path = chat_path ~base_dir ~keeper_name in

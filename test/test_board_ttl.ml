@@ -192,7 +192,7 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
   in
   let add_reply ~ttl_hours =
     match
-      add_comment store ~post_id ~author:"commenter" ~content:"reply" ~ttl_hours ()
+      add_comment store ~post_id ~author:"commenter" ~content:("reply " ^ string_of_int ttl_hours) ~ttl_hours ()
     with
     | Ok comment -> Comment_id.to_string comment.id
     | Error e -> Alcotest.fail (show_board_error e)

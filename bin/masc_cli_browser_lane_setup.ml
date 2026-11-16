@@ -136,8 +136,9 @@ let print_addon (installed : Addon_setup.installed) =
   | [] -> ()
   | missing ->
     Printf.printf
-      "Not found beside masc or on PATH: %s. scripts/install-local-build.sh installs them \
-       beside masc; the server looks for them the same way.\n"
+      "Not found beside masc or on PATH: %s. The release installer (scripts/install.sh) and \
+       scripts/install-local-build.sh install them beside masc; the server looks for them \
+       the same way.\n"
       (String.concat ", " missing)
 
 let print_addons (installed : Addon_setup.installed list) =

@@ -188,6 +188,8 @@ val handle_keeper_directive_post :
     committed through the typed paused-work disposition transaction. *)
 
 val handle_keeper_paused_work_post :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
   Httpun.Request.t ->
   Http_reqd.t ->

@@ -636,3 +636,75 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               log_lifecycle_result Dispatch_none;
               respond_error ~status:`Internal_server_error ~request:req ~ok:false
                 reqd "dispatch returned None")))
+
+let complete_resume_missing_registry_lane
+      ~sw
+      ~clock
+      state
+      ~config
+      ~name
+      ~request
+      (success : Keeper_paused_work_resume_transaction.success)
+  =
+  match success.projection with
+  | Keeper_paused_work_resume_transaction.Applied _
+  | Keeper_paused_work_resume_transaction.Committed_followup_failed
+      ( Keeper_paused_work_resume_transaction.Invalid_request _
+      | Keeper_paused_work_resume_transaction.Reservation_conflict _
+      | Keeper_paused_work_resume_transaction.Receipt_lock_failed _
+      | Keeper_paused_work_resume_transaction.Receipt_read_failed _
+      | Keeper_paused_work_resume_transaction.Receipt_conflict _
+      | Keeper_paused_work_resume_transaction.Receipt_write_failed _
+      | Keeper_paused_work_resume_transaction.Durable_meta_read_failed _
+      | Keeper_paused_work_resume_transaction.Durable_meta_missing
+      | Keeper_paused_work_resume_transaction.Durable_owner_identity_changed
+      | Keeper_paused_work_resume_transaction.Durable_owner_not_paused
+      | Keeper_paused_work_resume_transaction.Registry_owner_identity_changed
+      | Keeper_paused_work_resume_transaction.Registry_owner_not_paused _
+      | Keeper_paused_work_resume_transaction.Projection_failed _ ) ->
+    success
+  | Keeper_paused_work_resume_transaction.Committed_followup_failed
+      Keeper_paused_work_resume_transaction.Registry_owner_missing ->
+    (match Keeper_meta_store.read_meta config name with
+     | Error _ | Ok None -> success
+     | Ok (Some meta)
+       when meta.paused
+            || not
+                 (Keeper_id.Trace_id.equal
+                    meta.runtime.trace_id
+                    success.receipt.expected_trace_id) ->
+       success
+     | Ok (Some meta) ->
+       let keeper_ctx : _ Keeper_types_profile.context =
+         { config
+         ; agent_name = meta.name
+         ; sw
+         ; clock
+         ; proc_mgr = state.Mcp_server.proc_mgr
+         ; net = state.Mcp_server.net
+         ; publication_recovery_provider =
+             Mcp_server.publication_recovery_availability_provider state
+         }
+       in
+       (match Keeper_keepalive.start_keepalive keeper_ctx meta with
+        | Keeper_keepalive.Keepalive_started _
+        | Keeper_keepalive.Keepalive_already_registered _ ->
+          (match
+             Keeper_paused_work_resume_transaction.resume
+               config
+               ~keeper_name:name
+               request
+           with
+           | Ok replayed -> { replayed with commit_status = success.commit_status }
+           | Error _ -> success)
+        | ( Keeper_keepalive.Keepalive_lane_ownership_lost
+          | Keeper_keepalive.Keepalive_lifecycle_denied _
+          | Keeper_keepalive.Keepalive_registration_rejected _
+          | Keeper_keepalive.Keepalive_fiber_start_rejected _
+          | Keeper_keepalive.Keepalive_launch_callback_failed _
+          | Keeper_keepalive.Keepalive_fork_rejected _ ) as outcome ->
+          Log.Keeper.warn
+            "resume_owner keepalive launch failed for %s: %s"
+            name
+            (Keeper_keepalive.start_keepalive_outcome_to_string outcome);
+          success))

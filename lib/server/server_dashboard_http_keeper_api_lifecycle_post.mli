@@ -81,3 +81,17 @@ val validate_up_workspace :
 (** Validate an optional canonical base/root precondition before Up dispatch,
     stripping the HTTP-only field from tool arguments. A mismatched or
     unreadable receiving workspace fails closed. Other Up clients may omit it. *)
+
+val complete_resume_missing_registry_lane :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
+  Mcp_server.server_state ->
+  config:Workspace.config ->
+  name:string ->
+  request:Keeper_paused_work_resume_transaction.request ->
+  Keeper_paused_work_resume_transaction.success ->
+  Keeper_paused_work_resume_transaction.success
+(** When [Resume_owner] cleared durable pause for a Keeper that had no live
+    registry entry (e.g. paused before server restart), start keepalive for
+    the exact resumed trace and replay registry projection while preserving the
+    initial [commit_status]. *)

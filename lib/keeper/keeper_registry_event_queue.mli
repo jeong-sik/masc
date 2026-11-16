@@ -89,6 +89,13 @@ val pending_selections_result :
 (** Read every exact pending selection in durable queue order without
     consuming it. *)
 
+val intake_selections_result :
+  base_path:string ->
+  string ->
+  (Keeper_event_queue_state.pending_selection list, string) result
+(** Read every exact pending selection ordered under strict [Immediate]
+    priority and deterministic [Normal]/[Low] alternation without consuming it. *)
+
 val admitted_selection_standing_result :
   base_path:string ->
   string ->

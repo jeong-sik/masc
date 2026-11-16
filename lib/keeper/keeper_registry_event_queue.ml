@@ -707,6 +707,16 @@ let pending_selections_result ~base_path name =
       ~keeper_name:name
 ;;
 
+let intake_selections_result ~base_path name =
+  match Keeper_registry.get ~base_path name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.load_state_result
+      ~base_path
+      ~keeper_name:name
+    |> Result.map Keeper_event_queue_state.intake_ordered_selections
+;;
+
 let admitted_selection_standing_result ~base_path name ~selection =
   Keeper_event_queue_persistence.admitted_selection_standing_result
     ~base_path
@@ -872,11 +882,10 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
                 also makes a retry of the same cancellation a replay rather
                 than a conflict. *)
              let operation_id =
-               Printf.sprintf
-                 "schedule-cancel:%s:%s:%Ld"
-                 name
-                 (Keeper_event_queue_state.source_snapshot_ref selection.source)
-                 selection.admitted_revision
+               Keeper_event_queue_state.schedule_cancel_operation_id
+                 ~keeper_name:name
+                 ~admitted_revision:selection.admitted_revision
+                 selection.source
              in
              Some
                { Keeper_event_queue_state.source = selection.source

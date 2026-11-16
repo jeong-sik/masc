@@ -584,6 +584,108 @@ let test_resume_owner_commits_for_unregistered_durable_lane () =
          (Queue.to_list (State.pending queue_state) = [ source ]))
 ;;
 
+let test_consecutive_cancellations_project_outbox_and_retain_witness () =
+  with_pending_lane
+    ~registered:false
+    ~paused:true
+    (fun config keeper_name first_request ->
+       let base_path = config.Workspace.base_path in
+       let second_source : Queue.stimulus =
+         { post_id = "second-cancellation-source"
+         ; urgency = Queue.Normal
+         ; arrived_at = 2.0
+         ; payload = Queue.Bootstrap
+         }
+       in
+       Persistence.update_result ~base_path ~keeper_name (fun pending ->
+         Queue.enqueue pending second_source)
+       |> require_ok "enqueue second cancellation source";
+       let second_incarnation =
+         Persistence.pending_selections_result ~base_path ~keeper_name
+         |> require_ok "read pending selections for second cancel"
+         |> List.find (fun (s : State.pending_selection) ->
+              Queue.stimulus_identity_equal s.source second_source)
+         |> fun s -> s.admitted_revision
+       in
+       let second_request : Transaction.pending_request =
+         { source = second_source
+         ; source_incarnation = second_incarnation
+         ; operator_operation_id = "operator-cancel-2"
+         ; reason = "cancel second source"
+         }
+       in
+       let first =
+         Transaction.cancel_pending config ~keeper_name first_request
+         |> Result.map_error Transaction.error_to_string
+         |> require_ok "first pending cancellation"
+       in
+       (match first.transition with
+        | Registry_queue.Transition_applied _ -> ()
+        | Registry_queue.Transition_already_applied _
+        | Registry_queue.Transition_committed_followup_failed _ ->
+          Alcotest.fail "first pending cancellation did not project cleanly");
+       let second =
+         Transaction.cancel_pending config ~keeper_name second_request
+         |> Result.map_error Transaction.error_to_string
+         |> require_ok "second consecutive pending cancellation"
+       in
+       (match second.transition with
+        | Registry_queue.Transition_applied _ -> ()
+        | Registry_queue.Transition_already_applied _
+        | Registry_queue.Transition_committed_followup_failed _ ->
+          Alcotest.fail "second pending cancellation did not project cleanly");
+       let replay_first =
+         Transaction.cancel_pending config ~keeper_name first_request
+         |> Result.map_error Transaction.error_to_string
+         |> require_ok "replay first cancellation after displacement"
+       in
+       (match replay_first.transition with
+        | Registry_queue.Transition_already_applied _ -> ()
+        | Registry_queue.Transition_applied _
+        | Registry_queue.Transition_committed_followup_failed _ ->
+          Alcotest.fail "displaced operator cancellation lost idempotent witness");
+       let final_state =
+         Persistence.load_state_result ~base_path ~keeper_name
+         |> require_ok "load state after consecutive cancellations"
+       in
+       Alcotest.(check int)
+         "outbox is empty after consecutive cancellations"
+         0
+         (List.length (State.transition_outbox final_state)))
+;;
+
+let test_intake_ordered_selections_alternates_low_lane () =
+  let mk post_id urgency arrived_at : Queue.stimulus =
+    { post_id; urgency; arrived_at; payload = Queue.Bootstrap }
+  in
+  let normal_1 = mk "normal-1" Queue.Normal 1.0 in
+  let normal_2 = mk "normal-2" Queue.Normal 2.0 in
+  let low_1 = mk "low-1" Queue.Low 3.0 in
+  let queue =
+    List.fold_left Queue.enqueue Queue.empty [ normal_1; normal_2; low_1 ]
+  in
+  let state0 = State.with_pending queue State.empty in
+  let first_sel =
+    List.hd (State.intake_ordered_selections state0)
+  in
+  Alcotest.(check string)
+    "initial intake selects Normal first"
+    "normal-1"
+    first_sel.source.post_id;
+  let state1 =
+    State.ack_pending ~selection:first_sel state0
+    |> require_ok "ack normal-1"
+  in
+  let next_ids =
+    State.intake_ordered_selections state1
+    |> List.map (fun (s : State.pending_selection) -> s.source.post_id)
+  in
+  Alcotest.(check (list string))
+    "intake alternates to Low ahead of remaining Normal"
+    [ "low-1"; "normal-2" ]
+    next_ids
+;;
+
 
 
 (* Why the recovery commits Pause and not Reset_latch. Both clear the
@@ -638,7 +740,14 @@ let () =
             "Resume_owner commits for unregistered durable lane"
             `Quick
             test_resume_owner_commits_for_unregistered_durable_lane
-
+        ; Alcotest.test_case
+            "consecutive cancellations project outbox and retain witness"
+            `Quick
+            test_consecutive_cancellations_project_outbox_and_retain_witness
+        ; Alcotest.test_case
+            "intake ordered selections alternates low lane"
+            `Quick
+            test_intake_ordered_selections_alternates_low_lane
         ] )
     ]
 ;;

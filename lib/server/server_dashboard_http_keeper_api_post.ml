@@ -1663,8 +1663,17 @@ let resume_result_json ~name
        | None -> []
        | Some message -> [ "error", `String message ])
 
-let run_resume_owner config ~name request =
+let run_resume_owner ~sw ~clock state config ~name request =
   Keeper_paused_work_resume_transaction.resume config ~keeper_name:name request
+  |> Result.map
+       (Server_dashboard_http_keeper_api_lifecycle_post
+        .complete_resume_missing_registry_lane
+          ~sw
+          ~clock
+          state
+          ~config
+          ~name
+          ~request)
 
 let persist_directive_pause ~config ~name =
   match
@@ -1723,7 +1732,7 @@ let respond_directive_request_error ~request reqd = function
          "workspace changed since identity probe; Keeper directive was not applied")
       reqd
 
-let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
+let handle_keeper_directive_post ~sw ~clock state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
   if String.length name = 0 then
@@ -1734,7 +1743,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
     match parse_workspace_directive ~config parse_keeper_directive_json body_str with
     | Error error -> respond_directive_request_error ~request:req reqd error
     | Ok (Resume_owner request) ->
-      (match run_resume_owner config ~name request with
+      (match run_resume_owner ~sw ~clock state config ~name request with
        | Error error ->
          Log.Keeper.warn
            "directive resume_owner rejected for %s operation_id=%s: %s"
@@ -1884,7 +1893,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
     [{names: [name, ...]}]. Resume accepts exact per-owner
     [{targets: [{name, operator_operation_id}, ...]}] fences.
     Cache invalidation still runs once for the whole batch. *)
-let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
+let handle_keeper_bulk_directive_post ~sw ~clock state _agent_name req reqd body_str =
   let config = Mcp_server.workspace_config state in
   match parse_workspace_directive ~config parse_bulk_directive_json body_str with
   | Error error -> respond_directive_request_error ~request:req reqd error
@@ -1893,7 +1902,7 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
         match parsed with
         | Bulk_resume_owner targets ->
           let process_target target =
-            match run_resume_owner config ~name:target.name target.request with
+            match run_resume_owner ~sw ~clock state config ~name:target.name target.request with
             | Error error ->
               `Assoc
                 [ "name", `String target.name

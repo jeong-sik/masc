@@ -4,4 +4,10 @@ val handle_get :
   Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 
 val handle_post :
-  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  Http_reqd.t ->
+  string ->
+  unit

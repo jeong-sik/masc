@@ -351,6 +351,7 @@ let execute_transfer ~config ~base_path ~keeper_name prepared =
         ~applied_at:prepared.applied_at
         ~transfer
       |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
+      |> Result.map (project_cancellation_result ~base_path ~keeper_name)
     in
     match source_result with
     | Keeper_registry_event_queue.Transition_committed_followup_failed _ ->

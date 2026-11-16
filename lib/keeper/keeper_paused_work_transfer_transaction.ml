@@ -251,6 +251,35 @@ let accepted_transfer (receipt : Keeper_paused_work_disposition_receipt.t)
   }
 ;;
 
+let project_source_outbox_if_pending ~base_path ~keeper_name
+      (receipt : Keeper_event_queue_state.transition_receipt) =
+  let* state =
+    Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+    |> Result.map_error (fun detail ->
+      Committed_projection_failed { stage = Source_ack; detail })
+  in
+  match Keeper_event_queue_state.transition_outbox state with
+  | [ entry ]
+    when String.equal entry.receipt.transition_id receipt.transition_id ->
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+      ~expected_transition_id:receipt.transition_id
+    |> Result.map_error (fun detail ->
+      Committed_projection_failed
+        { stage = Source_ack
+        ; detail =
+            "source ACK committed but projection follow-up failed: " ^ detail
+        })
+  | [] | [ _ ] -> Ok ()
+  | _ :: _ :: _ ->
+    Error
+      (Committed_projection_failed
+         { stage = Source_ack
+         ; detail = "event queue transition outbox cardinality invalid"
+         })
+;;
+
 let ack_source ?intake_token config
       (receipt : Keeper_paused_work_disposition_receipt.t) transfer =
   let causal = accepted_transfer receipt transfer in
@@ -268,7 +297,11 @@ let ack_source ?intake_token config
       Committed_projection_failed { stage = Source_ack; detail })
   in
   match prior with
-  | Some _ -> Ok ()
+  | Some prior_receipt ->
+    project_source_outbox_if_pending
+      ~base_path
+      ~keeper_name:transfer.from_keeper
+      prior_receipt
   | None ->
     let* current = read_meta config transfer.from_keeper in
     let* () =
@@ -292,8 +325,12 @@ let ack_source ?intake_token config
           Source_transfer_shutdown_reserved operation_id)
     in
     (match outcome with
-     | Keeper_registry_event_queue.Transition_applied _
-     | Keeper_registry_event_queue.Transition_already_applied _ -> Ok ()
+     | Keeper_registry_event_queue.Transition_applied committed_receipt
+     | Keeper_registry_event_queue.Transition_already_applied committed_receipt ->
+       project_source_outbox_if_pending
+         ~base_path
+         ~keeper_name:transfer.from_keeper
+         committed_receipt
      | Keeper_registry_event_queue.Transition_committed_followup_failed
          { stage; detail; _ } ->
        let stage =
@@ -315,6 +352,14 @@ let ack_source ?intake_token config
 
 let target_enqueue ?intake_token config receipt transfer =
   let causal = accepted_transfer receipt transfer in
+  let wake_target () =
+    ignore
+      (Keeper_registry.wakeup_running
+         ~intent:Keeper_registry.Broadcast_signal
+         ~base_path:config.Workspace.base_path
+         transfer.Keeper_paused_work_disposition_receipt.to_keeper
+       : Keeper_registry.wakeup_outcome)
+  in
   match
     Keeper_registry_event_queue.project_accepted_transfer_durable_result
       ?intake_token
@@ -322,8 +367,11 @@ let target_enqueue ?intake_token config receipt transfer =
       transfer.Keeper_paused_work_disposition_receipt.to_keeper
       ~transfer:causal
   with
-  | Keeper_registry_event_queue.Transfer_projection_committed -> Ok Enqueued
+  | Keeper_registry_event_queue.Transfer_projection_committed ->
+    wake_target ();
+    Ok Enqueued
   | Keeper_registry_event_queue.Transfer_projection_already_committed ->
+    wake_target ();
     Ok Already_present
   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
     Error (Committed_projection_failed { stage = Target_enqueue; detail })

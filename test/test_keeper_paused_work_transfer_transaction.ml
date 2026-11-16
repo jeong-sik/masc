@@ -811,6 +811,59 @@ let test_target_shutdown_fences_transfer_before_source_ack () =
   assert_uncommitted_transfer config ~from_keeper ~to_keeper request
 ;;
 
+let test_transfer_projects_outbox_sorts_urgency_and_wakes_target () =
+  with_transfer_lane (fun config from_keeper to_keeper _source_meta target_meta request ->
+    let base_path = config.Workspace.base_path in
+    Keeper_reaction_ledger.record_event_queue_stimulus
+      ~base_path
+      ~keeper_name:from_keeper
+      request.source;
+    let low_existing : Queue.stimulus =
+      { post_id = "target-existing-low"
+      ; urgency = Queue.Low
+      ; arrived_at = 0.5
+      ; payload = Queue.Bootstrap
+      }
+    in
+    Persistence.update_result ~base_path ~keeper_name:to_keeper (fun pending ->
+      Queue.enqueue pending low_existing)
+    |> require_ok "seed target low stimulus";
+    let target_entry =
+      Keeper_registry.For_testing.register ~base_path to_keeper target_meta
+    in
+    Atomic.set target_entry.fiber_wakeup false;
+    let outcome =
+      Transaction.transfer_pending config ~from_keeper ~to_keeper request
+      |> Result.map_error Transaction.error_to_string
+      |> require_ok "commit Transfer_owner with target wake"
+    in
+    check_applied ~expected_target:Transaction.Enqueued outcome.projection;
+    let source_state =
+      Persistence.load_state_result ~base_path ~keeper_name:from_keeper
+      |> require_ok "load source state after transfer"
+    in
+    Alcotest.(check int)
+      "source transition outbox projected immediately"
+      0
+      (List.length (State.transition_outbox source_state));
+    let target_state =
+      Persistence.load_state_result ~base_path ~keeper_name:to_keeper
+      |> require_ok "load target state after transfer"
+    in
+    let target_ids =
+      State.pending_selections target_state
+      |> List.map (fun (s : State.pending_selection) -> s.source.post_id)
+    in
+    Alcotest.(check (list string))
+      "Immediate transfer inserted ahead of Low pending item"
+      [ request.source.post_id; low_existing.post_id ]
+      target_ids;
+    Alcotest.(check bool)
+      "running target lane received wakeup signal"
+      true
+      (Atomic.get target_entry.fiber_wakeup))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -868,6 +921,10 @@ let () =
             "exact projected replay survives target identity rotation"
             `Quick
             test_exact_projected_replay_survives_target_identity_rotation
+        ; Alcotest.test_case
+            "transfer projects outbox, sorts urgency, and wakes target"
+            `Quick
+            test_transfer_projects_outbox_sorts_urgency_and_wakes_target
         ] )
     ]
 ;;

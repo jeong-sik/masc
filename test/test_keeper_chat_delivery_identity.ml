@@ -218,7 +218,8 @@ let test_autonomous_input_wire () =
 let test_delivery_key_order_respects_identity () =
   let request value = Identity.Request_id.of_string value |> expect_ok in
   let checkpoint trace turn digest =
-    Keeper_checkpoint_ref.of_persisted ~trace_id:(Keeper_id.Trace_id.of_string trace)
+    let trace_id = Keeper_id.Trace_id.of_string trace |> expect_ok in
+    Keeper_checkpoint_ref.of_persisted ~trace_id
       ~turn_count:turn ~sha256:(String.make 64 digest) |> Result.get_ok
   in
   let keys =

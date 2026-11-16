@@ -50,8 +50,7 @@ val execute_tool_eio :
   ?profile:Mcp_server_eio_types.tool_profile ->
   ?mcp_session_id:string ->
   ?invocation_ref:Tool_invocation_ref.t ->
-  ?auth_token:string ->
-  ?internal_keeper_runtime:bool ->
+  bearer:Mcp_server_eio_caller_identity.bearer ->
   ?on_caller_resolved:(Mcp_server_eio_caller_identity.t -> unit) ->
   Mcp_server.server_state ->
   name:string ->
@@ -88,14 +87,12 @@ val execute_tool_eio :
     identity or replace token/role authorization. Protocol-level admission may
     reject earlier to preserve its JSON-RPC method-not-found envelope.
 
-    [profile] defaults to [Full]; [internal_keeper_runtime] defaults to [false].
-    The flag is verified against its internal bearer token when resolving
-    caller identity; it does not override profile membership.
-
-    Type variables [{'sw, 'clk, 'auth}] stay polymorphic
-    (cycle 205 lesson) so the dispatcher's body — which
-    only passes them through to internal helpers — does
-    not over-constrain the caller chain. *)
+    [profile] defaults to [Full]. [bearer] is what the call knows about its
+    bearer ({!Mcp_server_eio_caller_identity.bearer}). An [Admitted] bearer
+    answers caller identity, the per-tool lookups and, when the call names
+    the credential's owner, tool authorization without reading the token
+    again. An [Unread] one is read as before; its internal Keeper flag is
+    verified against the token and does not override profile membership. *)
 
 (** {1 Runtime re-exports} *)
 

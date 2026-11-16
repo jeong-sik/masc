@@ -14,6 +14,18 @@ let resolve_bind_state ~workspace_initialized ~bind_required ~agent_name ~check_
   && check_join agent_name
 ;;
 
+(* The credential that holds the caller's bearer: the one the door found, or
+   a lookup of a token no door read; [None] without a bearer
+   (RFC a-request-reads-its-bearer-once-at-the-door, D5). *)
+let bearer_credential ~(config : Workspace_utils_backend_setup.config)
+    (caller : Mcp_server_eio_caller_identity.t) =
+  match caller.bearer with
+  | Mcp_server_eio_caller_identity.Admitted { credential; _ } -> Some (Ok credential)
+  | Mcp_server_eio_caller_identity.Unread { token = None; _ } -> None
+  | Mcp_server_eio_caller_identity.Unread { token = Some raw; _ } ->
+    Some (Auth.find_credential_by_token config.base_path ~token:raw)
+;;
+
 let lane_access_for_caller ~config
     (caller : Mcp_server_eio_caller_identity.t) =
   if caller.verified_internal_keeper_runtime then
@@ -21,20 +33,17 @@ let lane_access_for_caller ~config
     | Ok (Some (keeper_name, _)) -> Lane_addon_sources.Keeper keeper_name
     | Ok None | Error _ -> Lane_addon_sources.Unauthenticated
   else
-    let token = caller.token in
     let owner_keeper_identity = caller.owner_keeper_identity in
-    match token with
+    match bearer_credential ~config caller with
     | None -> Lane_addon_sources.Unauthenticated
-    | Some raw ->
-      (match Auth.find_credential_by_token config.base_path ~token:raw with
-       | Ok { Masc_domain.role = Masc_domain.Admin; _ } ->
-         Lane_addon_sources.Operator_configuration
-       | Ok { Masc_domain.role = Masc_domain.Worker; _ } ->
-         (match owner_keeper_identity with
-          | Some (keeper_name, _) -> Lane_addon_sources.Keeper keeper_name
-          | None -> Lane_addon_sources.Unauthenticated)
-       | Ok { Masc_domain.role = Masc_domain.Player; _ } | Error _ ->
-         Lane_addon_sources.Unauthenticated)
+    | Some (Ok { Masc_domain.role = Masc_domain.Admin; _ }) ->
+      Lane_addon_sources.Operator_configuration
+    | Some (Ok { Masc_domain.role = Masc_domain.Worker; _ }) ->
+      (match owner_keeper_identity with
+       | Some (keeper_name, _) -> Lane_addon_sources.Keeper keeper_name
+       | None -> Lane_addon_sources.Unauthenticated)
+    | Some (Ok { Masc_domain.role = Masc_domain.Player; _ }) | Some (Error _) ->
+      Lane_addon_sources.Unauthenticated
 
 ;;
 
@@ -44,16 +53,13 @@ let browser_principal_for_caller ~config (caller:Mcp_server_eio_caller_identity.
     match access with
     | Lane_addon_sources.Keeper name -> Lane_addon_call_context.Keeper name
     | Operator_configuration|Unauthenticated -> Lane_addon_call_context.Anonymous
-  else match caller.token with
-    | None -> Lane_addon_call_context.Anonymous
-    | Some token ->
-        match Auth.find_credential_by_token config.base_path ~token with
-        | Error _ -> Lane_addon_call_context.Anonymous
-        | Ok credential ->
-            match access with
-            | Lane_addon_sources.Keeper name -> Lane_addon_call_context.Keeper name
-            | Operator_configuration|Unauthenticated ->
-                Lane_addon_call_context.Authenticated_agent credential.agent_name
+  else match bearer_credential ~config caller with
+    | None | Some (Error _) -> Lane_addon_call_context.Anonymous
+    | Some (Ok credential) ->
+        match access with
+        | Lane_addon_sources.Keeper name -> Lane_addon_call_context.Keeper name
+        | Operator_configuration|Unauthenticated ->
+            Lane_addon_call_context.Authenticated_agent credential.agent_name
 ;;
 
 let board_reader_for_caller ~config (caller : Mcp_server_eio_caller_identity.t) =
@@ -63,17 +69,15 @@ let board_reader_for_caller ~config (caller : Mcp_server_eio_caller_identity.t) 
     | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ -> Masc_board_handlers.Board_access.Anonymous
   in
   if caller.verified_internal_keeper_runtime then keeper_reader caller.agent_name
-  else match caller.token with
-    | Some token ->
-      (match Auth.find_credential_by_token config.Workspace.base_path ~token with
-       | Ok credential ->
-         (match credential.Masc_domain.role with
-          | Masc_domain.Admin -> Masc_board_handlers.Board_access.Operator
-          | Masc_domain.Worker | Masc_domain.Player ->
-            (match caller.owner_keeper_identity with
-             | Some (name, _) -> keeper_reader name
-             | None -> Masc_board_handlers.Board_access.named credential.agent_name))
-       | Error _ -> Masc_board_handlers.Board_access.Anonymous)
+  else match bearer_credential ~config caller with
+    | Some (Ok credential) ->
+      (match credential.Masc_domain.role with
+       | Masc_domain.Admin -> Masc_board_handlers.Board_access.Operator
+       | Masc_domain.Worker | Masc_domain.Player ->
+         (match caller.owner_keeper_identity with
+          | Some (name, _) -> keeper_reader name
+          | None -> Masc_board_handlers.Board_access.named credential.agent_name))
+    | Some (Error _) -> Masc_board_handlers.Board_access.Anonymous
     | None ->
       let auth = Auth.load_auth_config config.base_path in
       if auth.Masc_domain.enabled && auth.require_token then Masc_board_handlers.Board_access.Anonymous
@@ -87,8 +91,7 @@ let execute_tool_eio
       ?(profile = Mcp_server_eio_tool_profile.Full)
       ?mcp_session_id
       ?invocation_ref
-      ?auth_token
-      ?(internal_keeper_runtime = false)
+      ~bearer
       ?on_caller_resolved
       state
       ~name
@@ -135,13 +138,11 @@ let execute_tool_eio
   in
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
-      ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
-      ~direct_call_authority ~workspace_initialized:(fun () -> workspace_init_cached)
+      ~identity ~cached_resolved_agent ~bearer ~direct_call_authority ~workspace_initialized:(fun () -> workspace_init_cached)
       ~log_mcp_exn:Mcp_server_eio_helpers.log_mcp_exn
   in
   Option.iter (fun observe -> observe caller_identity) on_caller_resolved;
   let agent_name = caller_identity.agent_name in
-  let token = caller_identity.token in
   let owner_keeper_identity = caller_identity.owner_keeper_identity in
   let mode_gate_error = caller_identity.mode_gate_error in
   (* Cache resolved agent_name for this session (Fix 4), carrying the
@@ -229,32 +230,50 @@ let execute_tool_eio
   match mode_gate_error with
   | Some msg -> with_non_public_tool_audit ~agent_name (runtime_error_result msg)
   | None ->
-    (* Enforce tool authorization when enabled *)
-    let auth_enabled = Auth.is_auth_enabled config.base_path in
-    let auth_result =
-      if auth_enabled
+    (* HIGH-RISK-UNREVIEWED: tool authorization
+       (RFC a-request-reads-its-bearer-once-at-the-door, D5). When the call
+       names the owner of the credential the door found, the role the door
+       gave it answers, with no read: [Auth.authorize_tool] would resolve the
+       same role from the same owner file, and the door ran with auth on.
+       Any other name is paired with the token as before, since alias rules
+       decide whether that name may use this credential. *)
+    let authorize_role ~role =
+      match profile with
+      | Mcp_server_eio_tool_profile.Operator_remote ->
+        Auth.authorize_permission_for_role
+          ~agent_name
+          ~role
+          ~permission:Masc_domain.CanAdmin
+      (* A seat tool asks for CanPlayMachine through the same catalog check
+         every other tool uses; the profile already refused anything else. *)
+      | Full | Managed_agent | Seat ->
+        Auth.authorize_tool_for_role ~agent_name ~role ~tool_name:name
+    in
+    let authorize_token token =
+      if Auth.is_auth_enabled config.base_path
       then (
-        let permission_result =
-          match profile with
-          | Mcp_server_eio_tool_profile.Operator_remote ->
-            Auth.check_permission
-              config.base_path
-              ~agent_name
-              ~token
-              ~permission:Masc_domain.CanAdmin
-          (* A seat tool asks for CanPlayMachine through the same catalog check
-             every other tool uses; the profile already refused anything else. *)
-          | Full | Managed_agent | Seat ->
-            Auth.authorize_tool
-              config.base_path
-              ~agent_name
-              ~token
-              ~tool_name:name
-        in
-        match permission_result with
-        | Ok () -> Ok ()
-        | Error err -> Error err)
+        match profile with
+        | Mcp_server_eio_tool_profile.Operator_remote ->
+          Auth.check_permission
+            config.base_path
+            ~agent_name
+            ~token
+            ~permission:Masc_domain.CanAdmin
+        | Full | Managed_agent | Seat ->
+          Auth.authorize_tool
+            config.base_path
+            ~agent_name
+            ~token
+            ~tool_name:name)
       else Ok ()
+    in
+    let auth_result =
+      match caller_identity.bearer with
+      | Mcp_server_eio_caller_identity.Admitted { credential; role; token } ->
+        if String.equal credential.Masc_domain.agent_name agent_name
+        then authorize_role ~role
+        else authorize_token (Some token)
+      | Mcp_server_eio_caller_identity.Unread { token; _ } -> authorize_token token
     in
     (match auth_result with
      | Error err ->

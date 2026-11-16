@@ -2810,7 +2810,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                        let delivered = Keeper_delegate_completion_wake.deliver
                          ~base_path:(Mcp_server.workspace_config state).base_path ~asked_by
                          ~operation_id:(Keeper_chat_operation.Operation_id.to_string member_id)
-                         ~delegate:keeper_name ~terminal in
+                         ~delegate:keeper_name ~terminal () in
                        match prior, delivered with
                        | Error _, _ -> prior
                        | Ok (), result -> result) (Ok ()) member_ids)

@@ -20,4 +20,5 @@ val deliver
   -> operation_id:string
   -> delegate:string
   -> terminal:Keeper_event_queue.delegate_terminal
+  -> unit
   -> (unit, string) result

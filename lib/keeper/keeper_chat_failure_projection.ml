@@ -87,6 +87,7 @@ let finish ~base_path ~keeper_name (failed : failed) appended =
           ~operation_id:failed.operation_id
           ~delegate:keeper_name
           ~terminal:(Keeper_event_queue.Delegate_failed (summary failed.failure_kind))
+          ()
       with
       | Ok () -> ()
       | Error detail ->

@@ -8,7 +8,7 @@
    as the Board and Fusion wakes do. Its failure is logged rather than raised
    because the stimulus is already committed and the Keeper reads it on its
    next admitted turn. Eio structural cancellation is re-raised. *)
-let deliver ?not_before ~base_path ~asked_by ~operation_id ~delegate ~terminal =
+let deliver ?not_before ~base_path ~asked_by ~operation_id ~delegate ~terminal () =
   let completion =
     { Keeper_event_queue.dc_operation_id = operation_id
     ; dc_keeper = delegate

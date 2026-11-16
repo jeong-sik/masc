@@ -118,6 +118,7 @@ let deliver_or_fail config ~terminal =
       ~operation_id
       ~delegate
       ~terminal
+      ()
   with
   | Ok () -> ()
   | Error detail -> fail ("deliver failed: " ^ detail)
@@ -247,6 +248,7 @@ let a_cut_reply_names_the_read_path () =
           ~operation_id:op
           ~delegate
           ~terminal:(Event_queue.Delegate_replied reply)
+          ()
       with
       | Ok () -> ()
       | Error detail -> fail ("deliver failed: " ^ detail)
@@ -335,6 +337,7 @@ let the_full_reply_rides_lossless_through_the_projection () =
           ~operation_id:op
           ~delegate
           ~terminal
+          ()
       with
       | Ok () -> ()
       | Error detail -> fail ("deliver failed: " ^ detail)
@@ -428,6 +431,7 @@ let a_padded_short_reply_is_not_cut () =
         ~operation_id
         ~delegate
         ~terminal:(Event_queue.Delegate_replied padded)
+        ()
     with
     | Error detail -> fail ("deliver failed: " ^ detail)
     | Ok () ->

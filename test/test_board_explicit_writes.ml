@@ -60,29 +60,47 @@ let test_identical_posts_are_distinct_writes () =
 let test_identical_comments_are_distinct_writes () =
   let post = create_post ~content:"comment target" in
   let post_id = Board.Post_id.to_string post.id in
-  let add () =
+  let add ~author =
     match
-      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
-        ~post_id
-        ~author:"explicit-writer"
-        ~content:"intentional duplicate comment"
-        ()
+      Board_dispatch.add_comment
+        ~reader:Masc_board_handlers.Board_access.Operator
+        ~post_id ~author ~content:"intentional duplicate comment" ()
     with
     | Ok comment -> comment
     | Error error -> Alcotest.fail (Board.show_board_error error)
   in
-  let first = add () in
-  let second = add () in
+  (* #52239: the duplicate guard refuses the same author repeating the same
+     content under the same parent. Identical comments stay distinct across
+     different authors, and the same-author repeat is refused with the guard
+     message instead of a second row. *)
+  let first = add ~author:"explicit-writer" in
+  let second = add ~author:"explicit-writer-2" in
   Alcotest.(check bool)
-    "distinct ids"
-    true
+    "distinct ids" true
     (not
        (String.equal
-          (Board.Comment_id.to_string first.id)
-          (Board.Comment_id.to_string second.id)));
-  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
-  | Error error -> Alcotest.fail (Board.show_board_error error)
-  | Ok updated -> Alcotest.(check int) "reply count" 2 updated.reply_count
+          (Board.Comment_id.to_string first.Board.comment_id)
+          (Board.Comment_id.to_string second.Board.comment_id)));
+  let substring needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  (match
+     Board_dispatch.add_comment
+       ~reader:Masc_board_handlers.Board_access.Operator
+       ~post_id ~author:"explicit-writer" ~content:"intentional duplicate comment" ()
+   with
+   | Ok _ -> Alcotest.fail "the duplicate guard should have refused the same-author repeat"
+   | Error error ->
+     Alcotest.(check bool)
+       "duplicate repeat refused" true
+       (substring "already has this exact comment" (Board.show_board_error error)));
+  (match
+     Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id
+   with
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok updated -> Alcotest.(check int) "reply count" 2 updated.Board.reply_count)
 ;;
 
 let test_long_post_is_not_locally_rejected () =

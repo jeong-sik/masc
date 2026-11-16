@@ -13,8 +13,9 @@ open Keeper_chat_store_line_decode
    row boundary and appends them to what was parsed before. The cache is per
    path and holds while the file keeps its identity (device, inode), has not
    shrunk below the parsed boundary, and the redaction snapshot the messages
-   were redacted with is the one in force ([redaction_for] hands back the
-   same value while the secret sources are unchanged). Anything else, and a
+   were redacted with has the same exact values as the one in force. Compiled
+   redaction patterns are domain-local; their identity is not a revision of
+   the policy. Anything else, and a
    torn tail, reload the whole transcript through the rows reader. Parsing
    and redaction run on the domain pool when one is installed. *)
 type transcript_cache =

@@ -437,5 +437,35 @@ let overlap_tests =
                 answers)) )
   ]
 
+(* RFC a-fiber-that-suspends-while-holding-an-os-mutex-fails-at-unlock §6.1
+   case 8. Before #52362 one Stdlib.Mutex covered all of [read_month]. An
+   Os_mutex over the same span fails a single read on every run, with
+   nothing overlapping it. The backend is posix, the one masc pins (D6). *)
+let os_mutex_tests =
+  [ ( "one read under an Os_mutex fails without an overlap"
+    , `Quick
+    , fun () ->
+      with_masc_root (fun root ->
+          Dated_jsonl.append (costs_store root)
+            (CL.to_json (cost_row ~agent:"polisher" ~turn:1 ~input_tokens:1
+                           ~output_tokens:1 ~cost_usd:0.0 Resolved));
+          Dated_jsonl.append (tool_store root) (tool_row ~keeper:"polisher" ());
+          Eio_posix.run @@ fun env ->
+          Fs_compat.set_fs (Eio.Stdenv.fs env);
+          Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
+              let month_lock = Os_mutex.create ~name:"keeper-efficiency-month" () in
+              match
+                Os_mutex.protect month_lock (fun () ->
+                    KE.read_month ~masc_root:root ~month:(today_month ()))
+              with
+              | Ok _ -> Alcotest.fail "the read ran to the end"
+              | Error detail -> Alcotest.failf "the read ran to the end: %s" detail
+              | exception Os_mutex.Held_across_suspension { body_raised = None; _ } -> ()
+              | exception
+                  Os_mutex.Held_across_suspension { body_raised = Some (exn, _); _ } ->
+                Alcotest.failf "the read raised %s" (Printexc.to_string exn))) )
+  ]
+
 let () =
-  run "Keeper_efficiency" [ ("month", month_tests); ("overlap", overlap_tests) ]
+  run "Keeper_efficiency"
+    [ ("month", month_tests); ("overlap", overlap_tests); ("os_mutex", os_mutex_tests) ]

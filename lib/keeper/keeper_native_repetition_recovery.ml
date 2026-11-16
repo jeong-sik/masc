@@ -32,6 +32,9 @@ let observation ?base_path (settled : Projection.settled_tool_invocation) =
         | Agent_core.Types.Tool_succeeded
         | Tool_failed {failure_kind=(Recoverable_tool_error | Non_retryable_tool_error); _} -> Ok true
         | Tool_failed {failure_kind=Validation_error; _} -> Ok false
+        (* The handler never returned, so there is no output to fingerprint;
+           the content is Core's notice, not handler output. *)
+        | Tool_failed {failure_kind=Writer_exited_tool_error; _} -> Ok false
         | Tool_failed {failure_kind=(Reported_tool_error | Unattributed_tool_error); _} ->
           Error Unsupported_result_provenance in
     if not executed then Ok None

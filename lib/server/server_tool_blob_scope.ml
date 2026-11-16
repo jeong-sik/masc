@@ -2,6 +2,7 @@ module M = Tool_blob_maintenance
 module Board = Masc_board_handlers.Board_paths
 
 let tree name = M.Store { name; classification = M.In_scope M.Tree }
+let payload_tree name = M.Store { name; classification = M.In_scope M.Payload_tree }
 let file name = M.Store { name; classification = M.In_scope M.File }
 let excluded reason name = M.Store { name; classification = M.Excluded reason }
 let no_reference = excluded M.Writes_no_reference
@@ -46,8 +47,21 @@ let lane_addons =
         [ (* Prepared evidence stays owned before its message commits. *)
           tree Lane_addon_store.broadcasts_directory
         ; excluded M.Settled_archive Lane_addon_store.tool_request_archive_directory
+          (* Evidence retains original packet bytes as well as JSON input
+             and model output. Scan embedded tool blob references without
+             requiring arbitrary packet payloads to be JSON records. *)
+        ; payload_tree "evidence"
+        ; payload_tree "sampling-evidence"
+        ; tree "host-results"
+        ; tree "sampling"
+        ; tree "sampling-outcomes"
         ; no_reference Lane_addon_store.actions_directory
         ; no_reference Lane_addon_store.bindings_directory
+        ; tree Lane_addon_store.exact_requests_directory
+        ; tree Lane_addon_store.tool_request_owners_directory
+        ; tree Lane_addon_store.tool_request_bodies_directory
+        ; tree Lane_addon_store.history_fences_directory
+        ; tree Lane_addon_store.history_resolutions_directory
         ; no_reference Lane_addon_store.observations_directory
         ; no_reference Lane_addon_store.sequences_directory
         ; no_reference Lane_addon_asks.dirname
@@ -258,6 +272,10 @@ let config_keepers =
       }
   ; M.Keeper_files
       { suffix = Keeper_librarian_unread_ledger.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = ".turn-boundaries.jsonl"
       ; reason = M.Writes_no_reference
       }
   ; finder_metadata

@@ -38,8 +38,10 @@
     hashes that were candidates in the previous durable snapshot and remain
     unreferenced in the new complete scan. The offline deployment helper runs
     it only while holding the BasePath process lease, so two complete offline
-    scans are required. Registered sources must decode as JSON documents,
+    scans are required. Record sources must decode as JSON documents,
     JSONL rows, or exact canonical marker rows; blank rows carry no references.
+    Retained payload sources accept raw bytes and scan their exact tool blob
+    markers; a complete JSON payload also exposes its structured references.
     A lock file below a store ({!Fs_compat.is_lock_name}) holds no record and
     is not read. Nor is a Finder file ({!finder_metadata_name}) below one.
     An undecodable row, malformed reference, scan failure, or candidate-store
@@ -158,6 +160,10 @@ type exclusion =
 
 type source =
   | Tree  (** Every regular file below the entry is read. *)
+  | Payload_tree
+      (** Retained raw bytes below the entry. Complete JSON is traversed;
+          other payloads are scanned as text for exact tool blob markers.
+          Malformed recognized references still stop the scan. *)
   | File  (** The entry is one file; absent, it holds nothing. *)
 
 type classification =

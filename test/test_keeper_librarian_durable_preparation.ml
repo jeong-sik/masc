@@ -382,6 +382,57 @@ let test_admission_refuses_turn_material () =
      "past Task/Goal records",{empty with historical_task_contexts=[task_context]}];
   check bool "an input without turn material carries none" false (L.carries_turn_material empty)
 
+let test_admission_proposal_enforces_facts_commit_budget () =
+  let original = input () in
+  let base_input = {original with working_context=C.empty; messages=[]; tool_observations=[]} in
+  let batch = admission_batch () in
+  let empty_evidence = `Assoc ["conversation",`List [];"tools",`List [];
+    "counterpart",`Bool false;"task_contexts",`Bool false] in
+  let grow_output = `Assoc [
+    "memory", `Assoc [
+      "new_claims", `List [`Assoc [
+        "claim", `String "Pending evidence admitted without dropping existing memory";
+        "category", `String "fact"; "board_post_id", `Null; "board_comment_id", `Null;
+        "supersedes", `Null; "absorbs", `List []; "evidence", empty_evidence]];
+      "dropped", `List []; "working_state", `Null; "working_contexts", `List []];
+    "candidates", `List [`Assoc [
+      "request_id", `String "source"; "outcome", `String "incorporated";
+      "memory_claim", `String "Pending evidence admitted without dropping existing memory";
+      "reason", `String "durable candidate"]];
+    "change_support", `List [`String "source"]] in
+  let tight_policy : R.admission_policy = {
+    facts_max_bytes = 64; facts_source_lines = []; category_cap = 10; facts_per_category_cap = 50} in
+  (match R.validate_admission_proposal ~policy:tight_policy ~now:123. ~batch ~input:base_input grow_output with
+   | Error error ->
+     let rendered = L.parse_error_to_string error in
+     check bool "oversized admission proposal is rejected before commit" true
+       (String.starts_with ~prefix:"admission_invalid: " rendered
+        && Astring.String.is_infix ~affix:"exceed commit budget" rendered)
+   | Ok (R.Accepted _ | R.Deferred) -> fail "oversized admission proposal should be rejected at validation");
+  let bloated_input = {base_input with current=Some {L.facts=[
+    fact "Bloated fact one that already pushed the snapshot far past the tight byte cap";
+    fact "Bloated fact two that also needs to be retired so the snapshot can shrink"]}} in
+  let shrink_output = `Assoc [
+    "memory", `Assoc [
+      "new_claims", `List [`Assoc [
+        "claim", `String "Short summary";
+        "category", `String "fact"; "board_post_id", `Null; "board_comment_id", `Null;
+        "supersedes", `Null; "absorbs", `List [`String "m1"; `String "m2"];
+        "evidence", empty_evidence]];
+      "dropped", `List [
+        `Assoc ["memory_id", `String "m1"; "reason", `String "absorbed into summary"];
+        `Assoc ["memory_id", `String "m2"; "reason", `String "absorbed into summary"]];
+      "working_state", `Null; "working_contexts", `List []];
+    "candidates", `List [`Assoc [
+      "request_id", `String "source"; "outcome", `String "incorporated";
+      "memory_claim", `String "Short summary";
+      "reason", `String "shrinks bloated memory"]];
+    "change_support", `List [`String "source"]] in
+  (match R.validate_admission_proposal ~policy:tight_policy ~now:123. ~batch ~input:bloated_input shrink_output with
+   | Ok (R.Accepted _) -> ()
+   | Ok R.Deferred -> fail "shrinking proposal should be accepted, not deferred"
+   | Error err -> fail (L.parse_error_to_string err))
+
 let () = run "Original history Memory preparation" ["preparation",[
   test_case "a restored question's facts budget counts source memory" `Quick
     test_restored_budget_counts_source_memory;
@@ -397,4 +448,6 @@ let () = run "Original history Memory preparation" ["preparation",[
   test_case "each slot joins the body with one blank line" `Quick
     test_slots_join_the_body_with_one_blank_line;
   test_case "admission refuses an input that carries turn material" `Quick
-    test_admission_refuses_turn_material]]
+    test_admission_refuses_turn_material;
+  test_case "admission proposal enforces captured facts commit budget while permitting net shrinkage" `Quick
+    test_admission_proposal_enforces_facts_commit_budget]]

@@ -520,6 +520,54 @@ let references_in_file ~ownership_root path =
        |> snd
 ;;
 
+let references_in_payload_file ~ownership_root path =
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Error error ->
+    Error
+      (Durable_source_read_failed
+         { path
+         ; reason = Fs_compat.owned_regular_file_read_error_to_string error
+         })
+  | Ok None ->
+    Error
+      (Durable_source_read_failed
+         { path; reason = "retained payload disappeared during scan" })
+  | Ok (Some payload) ->
+    (match Yojson.Safe.from_string payload with
+     | json -> references_in_json ~path ~line:1 Live_reference_set.empty json
+     | exception Yojson.Json_error _ ->
+       payload
+       |> String.split_on_char '\n'
+       |> List.fold_left
+            (fun (line_number, result) line ->
+               let next = Result.bind result (fun references ->
+                 match Yojson.Safe.from_string line with
+                 | json -> references_in_json ~path ~line:line_number references json
+                 | exception Yojson.Json_error _ ->
+                   add_references ~path ~line:line_number references line)
+               in
+               line_number + 1, next)
+            (1, Ok Live_reference_set.empty)
+       |> snd)
+;;
+
+let sqlite_companions_absent path =
+  let rec check = function
+    | [] -> Ok true
+    | suffix :: rest ->
+      (match Unix.lstat (path ^ suffix) with
+       | _ -> Ok false
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> check rest
+       | exception Unix.Unix_error (error, _, _) ->
+         Error (Unix.error_message error))
+  in
+  check
+    [ Common.sqlite_journal_suffix
+    ; Common.sqlite_wal_suffix
+    ; Common.sqlite_shm_suffix
+    ]
+;;
+
 let references_in_chat_operation_store ~ownership_root path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error ->
@@ -532,8 +580,19 @@ let references_in_chat_operation_store ~ownership_root path =
     Error
       (Durable_source_read_failed
          { path; reason = "durable source disappeared during scan" })
-  | Ok (Some _) ->
-    (match Keeper_chat_operation_store.inspect_durable_records ~path with
+  | Ok (Some payload) ->
+    let empty_without_companions =
+      if String.equal payload ""
+      then sqlite_companions_absent path
+      else Ok false
+    in
+    (match empty_without_companions with
+     | Ok true ->
+       (* An uninitialized 0-byte SQLite file with no WAL/journal/SHM companion holds no schema or durable rows yet. *)
+       Ok Live_reference_set.empty
+     | Error reason -> Error (Durable_source_read_failed { path; reason })
+     | Ok false ->
+       (match Keeper_chat_operation_store.inspect_durable_records ~path with
      | Error error ->
        Error
          (Durable_source_parse_failed
@@ -602,7 +661,7 @@ let references_in_chat_operation_store ~ownership_root path =
             | Keeper_semantic_execution.Settled _ ->
               after_record)
          with_batch_inputs
-         semantic_executions)
+         semantic_executions))
 ;;
 
 let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =
@@ -630,6 +689,7 @@ type exclusion =
 
 type source =
   | Tree
+  | Payload_tree
   | File
 
 type classification =
@@ -676,12 +736,14 @@ type scope =
    belongs to. *)
 type consumer_source =
   | Tree_source of string (* scanned recursively; an absent root holds no references *)
+  | Payload_tree_source of string
   | Optional_file of string (* a single file; absent means no references *)
 
 let rec sources_of ~dir entries =
   List.concat_map
     (function
       | Store { name; classification = In_scope Tree } -> [ Tree_source (Filename.concat dir name) ]
+      | Store { name; classification = In_scope Payload_tree } -> [ Payload_tree_source (Filename.concat dir name) ]
       | Store { name; classification = In_scope File } -> [ Optional_file (Filename.concat dir name) ]
       | Store { classification = Excluded _; name = _ }
       | Keeper_files _
@@ -697,7 +759,7 @@ let workspace_sources scope ~workspace_masc_dir =
 
 let consumer_paths scope ~base_path =
   workspace_sources scope ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path)
-  |> List.map (function Tree_source path | Optional_file path -> path)
+  |> List.map (function Tree_source path | Payload_tree_source path | Optional_file path -> path)
 ;;
 
 type place =
@@ -921,10 +983,10 @@ let scan_live_references ~base_path ~scope =
                  Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
              })
   in
-  let rec scan_entry path references =
+  let rec scan_entry read_file path references =
     try
       match (Unix.lstat path).Unix.st_kind with
-      | Unix.S_DIR -> scan_directory path references
+      | Unix.S_DIR -> scan_directory read_file path references
       | Unix.S_REG ->
         let basename = Filename.basename path in
         (* Offline maintenance holds the exclusive BasePath writer lease.
@@ -985,7 +1047,7 @@ let scan_live_references ~base_path ~scope =
         else
           Result.map
             (Live_reference_set.union references)
-            (references_in_file ~ownership_root:base_path path)
+            (read_file ~ownership_root:base_path path)
         | Unix.S_LNK ->
           Error
             (Durable_source_stat_failed
@@ -1006,7 +1068,7 @@ let scan_live_references ~base_path ~scope =
            ; reason =
                Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
            })
-  and scan_directory path references =
+  and scan_directory read_file path references =
     match read_directory path with
     | Error _ as error -> error
     | Ok None -> Ok references
@@ -1017,17 +1079,18 @@ let scan_live_references ~base_path ~scope =
       |> List.fold_left
            (fun result name ->
               Result.bind result (fun current ->
-                scan_entry (Filename.concat path name) current))
+                scan_entry read_file (Filename.concat path name) current))
            (Ok references)
   in
   let scan_source references = function
-    | Tree_source root -> scan_directory root references
+    | Tree_source root -> scan_directory references_in_file root references
+    | Payload_tree_source root -> scan_directory references_in_payload_file root references
     | Optional_file path ->
       (match Unix.lstat path with
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok references
        | exception Unix.Unix_error (code, fn, arg) ->
          Error (Durable_source_stat_failed { path; reason = unix_reason fn arg code })
-       | _ -> scan_entry path references)
+       | _ -> scan_entry references_in_file path references)
   in
   let open Result.Syntax in
   let* workspace =

@@ -353,7 +353,8 @@ let request capture = Lane_addon_exact.request_of_json (`Assoc [
   "messages",`List [`Assoc ["role",`String "user";"text",`String capture.preparation.rendered_prompt]];
   "schema",capture.preparation.output_schema])
 let validate_proposal capture output =
-  Runtime.validate_admission_proposal ~now:capture.parsing_now ~batch:capture.original_batch
+  Runtime.validate_admission_proposal ~policy:capture.preparation.policy
+    ~now:capture.parsing_now ~batch:capture.original_batch
     ~input:capture.original_input output |> Result.map_error L.parse_error_to_string
 
 let decode_final ~store (capture:t) json =

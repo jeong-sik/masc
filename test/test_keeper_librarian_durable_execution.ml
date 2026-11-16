@@ -2761,10 +2761,11 @@ let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () 
       (Result.is_error (io (fun () -> Resolution.preview ~config:fixture.config
         ~keeper_name ~request_id:original.request_id)));
     let preview=cut_preview fixture original in
-    check bool "ordinary intent submission cannot consume the Cut preview" true
-      (Result.is_error (io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
-        ~request_id:original.request_id ~expected:preview.expected ~actor:"operator"
-        ~reason:"Cut is not yet a continuation grant" ~now:(Time_compat.now ()))));
+    (* Submission records work; the serial consumer decides its authority. *)
+    let accepted=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id ~expected:preview.expected ~actor:"operator"
+      ~reason:"Exclude this original's future local effects" ~now:(Time_compat.now ())
+      |> Result.map_error Resolution_intent.error_to_string |> get) in
     let fence=cut_fence fixture original preview.expected |> Result.map_error Resolution.error_to_string |> get in
     let roundtrip=Fence.of_json (Fence.to_json fence) |> get in
     (match roundtrip.authority with
@@ -2783,9 +2784,16 @@ let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () 
     let current_parent=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
       ~request_id:original.request_id |> owned |> Option.get) in
     check json "parent progress was not settled or rewritten" parent (Owner.to_json current_parent);
-    check bool "fence creates no child intent" true
-      (io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
-        ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)=[]);
+    check bool "the serial consumer refuses Cut as a successor grant" true
+      (Result.is_error (memory_action fixture (fun () ->
+        Resolution_work.run_serialized ~config:fixture.config ~keeper_name)));
+    let intents=io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+    check bool "Cut fence leaves the submitted intent without a child or completion" true
+      (match intents with
+       | [intent] -> intent.Resolution_intent.intent_id=accepted.intent.intent_id
+         && intent.phase=Resolution_intent.Requested && Option.is_none intent.memory_commit
+       | [] | _::_::_ -> false);
     refuse_fenced_resume fixture current_parent request)
 let test_cut_effect_fence_refuses_a_busy_claim_and_late_bad_proof () =
   with_same_binding_cut (fun fixture original _request exact schema ->

@@ -4,7 +4,7 @@ This is a local source candidate, dated 2026-11-16. It does not establish live
 MCP interoperability or complete WIM-S04. The remaining Farm scope is tracked
 in the [execution record](../../reports/2026-11-16-agent-farm-execution.md).
 
-## Candidate boundary
+## Initial candidate boundary
 
 The parent is `f2d871b18cf41bb0140cf9c45acbfd5f1ad1838e`, above the WIM-S03
 document capability changes. The implementation is on the local native stack
@@ -98,8 +98,10 @@ Its source manifest SHA-256 is
 The receipt is copied without modification from
 `artifacts/farm-mcp-content-20261116/parse-results-8c993d3d1aed.json`.
 Parsing is not typechecking.
-No Dune build, executable OCaml test, real MCP service call, provider request,
-restart, installed binary or UI check has run for this candidate.
+At that checkpoint no Dune build, executable OCaml test, real MCP service call,
+provider request, restart, installed binary or UI check had run for this
+candidate. The later Core media execution below does not execute these MCP
+consumers.
 
 Written focused cases cover decoder variants and malformed inputs, normal and
 approved calls, user-only content, stored byte readback, post-tool log retention,
@@ -138,10 +140,10 @@ retention, and multiple Keepers using independent execution identities. The
 external interpretation path and other WIM-S04 requirements remain open.
 
 
-## Rebased source checkpoint — 2026-11-16
+## Earlier rebased source checkpoint — 2026-11-16
 
 The whole five-layer native stack was rebased onto
-`e0e819e29968366c1dffb59ad625ba4e17d4ac22`. MCP source is now
+`e0e819e29968366c1dffb59ad625ba4e17d4ac22`. MCP source at that checkpoint was
 `23508a998d3b559334c8b127cc14aad7c5244b82`; the integrated documentation checkpoint
 reviewed before this evidence update is `980892260bf73193e8251b0ac1d54bedf6ad76f0`.
 Independent changed-base review by `continuity_audit` found no actionable P0/P1/P2
@@ -165,3 +167,39 @@ local rebase receipts are under the main worktree's ignored
 `artifacts/farm-publication-rebase-20261116/execution-1/`.
 The dated old-head evidence above is retained unchanged. No remote push,
 submission, merge or runtime change was performed by this rebase.
+
+
+## Current stack after the Core compile correction — 2026-11-16
+
+The reviewed base is still `e0e819e29968366c1dffb59ad625ba4e17d4ac22`.
+Current Core is `db69904f29c6f4a6166957fbdffa4f7e8e910a7a`, MASC is
+`01c94838471b1cbff986e5a78f2c14597a8df564`, and MCP source is
+`e392aa3a7f8fafdfe18045c92bc0fe1d023e44b5`. The integrated top before this
+update is `6134e0a42aae676f63143d1473aaeca7fb99053f`.
+
+Three Core files were corrected after real compilation: the generic document
+projection implementation/interface and its existing media test. The interface
+file `api_common.mli` is an additional path beyond the earlier 79-path review.
+The earlier changed-base review remains historical; separate independent reviews
+cover these corrections. Current combined scope is 80 paths. Fixes belong to
+the Core bottom layer, and `gh stack rebase --no-trunk` carried all five layers
+without changing the reviewed base. MCP implementation bytes were not changed
+by that correction. No push or new-main integration is implied.
+
+The complete existing Core media suite then passed all 18 cases under actual
+OCaml 5.5.2. Its 118 source inputs and nine metadata inputs match the final
+committed leaf; compilation/link failures from earlier runs remain recorded.
+The exact scope, source/result hashes and ownership of reused objects are in
+[the document-input record](../2026-11-16-farm-document-input/README.md#current-committed-core-correction-and-execution--2026-11-16)
+and the document worktree's
+`artifacts/farm-core-media-document-20261116/final-summary.json` and
+`restack-3/terminal.json`.
+
+Those tests exercise Core admission and codecs; they do not execute the MCP
+consumer suites listed above, approval replay/restart/GC, a real MCP service,
+provider HTTP, PDF/STT, installed MASC, UI or full Dune. Those remain the next
+execution targets. The latest agent `gh api user` still failed to connect
+(exit 1); it is an environment observation, not proof of invalid user credentials.
+PR publication, GitHub approval, merge, deployment and original recovery are
+not established. The full Farm scope and `U02:IA-S13` old-volume approval remain
+unchanged in the [execution record](../../reports/2026-11-16-agent-farm-execution.md).

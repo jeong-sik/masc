@@ -15,10 +15,10 @@
 | 작업 | 확인한 산출물 | 증거와 남은 일 |
 | --- | --- | --- |
 | Schedule 저장 권위 | 재기반한 소스 `236754fcfb72f49ef9c365465dfd1e63cf3e6010`: 복구 mirror를 변경 근거로 쓰지 않으며 읽기 출처를 보존한다. 별도 스택 `fix/farm-schedule-authority-20261116` | 재기반 뒤 독립 소스 리뷰에 P0/P1/P2 없음. 후속 실제 FileSystem 시험 11개·새 프로세스 재열기 6회 통과. 아래 범위로 한정하며 서버·provider·PR 게시·설치·원래 장애 회복은 미확인. 별도 스택의 `docs/evidence/2026-11-16-schedule-primary-authority/README.md`에 이전 구문 기록과 후속 실행을 구분한다. |
-| WIM-S03 문서 입력 | 재기반한 Core `8872ec3b9fe89052ce0329e0a4227caf4dbde081`, MASC `295cb5a23d3eb5c6f45568b7f06f8f53faa46291`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 현재 base의 독립 소스 리뷰와 통합 파일 구문 검사를 확인했다. 이전 Dashboard 타입 검사와 decoder 1건은 당시 source 범위이며 새 base의 타입 검사가 아니다. 실제 provider·PDF/STT·브라우저·설치 미확인 |
+| WIM-S03 문서 입력 | 현재 Core `db69904f29c6f4a6166957fbdffa4f7e8e910a7a`, MASC `01c94838471b1cbff986e5a78f2c14597a8df564`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 기존 79개 파일의 소스 리뷰와 후속 Core 3개 파일 수리를 구분한다. 실제 Core 미디어 suite 18개 통과; 최종 커밋과 소스 118개·metadata 9개가 일치한다. 이전 Dashboard 타입 검사와 decoder 1건은 당시 범위다. MASC 전체 타입·실제 provider·PDF/STT·브라우저·설치 미확인 |
 | TLJ-S01 위임 결과 | 협업 세션 `01a1e1b9…`, `.worktrees/farm-evolution-20261116`. 세 층 최종 head `e6ea78da93a1ebac6f6020aafb134631024ba769`, base `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`. canonical 종단 상태, 기동 재투영, 영속 전달 의도·답 원문·전달 영수증을 연결 | 두 P2였던 보관 기간 뒤 중복 전달과 fail-open journal 뒤 답 유실을 소스에서 수정했다. 재기반 후 독립 검토에서 미해결 P0/P1/P2 없음. 기존 세 패치와 range-diff가 같고 32개 후보 파일이 이전 최종 head와 일치함을 확인했다. 작성 세션의 OCaml 31개 구문 검사 기록이 있다. 타입·동작·CI·설치·원래 요청 회복·GitHub 정식 승인·게시 미확인 |
-| WIM-S04 MCP 결과 | 재기반한 소스 `23508a998d3b559334c8b127cc14aad7c5244b82`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 현재 base의 독립 소스 리뷰에 미해결 P0/P1/P2 없음. 이전 38개 구문 영수증과 새 통합 파일 5개의 구문 검사는 별도 범위다. 타입·동작·실제 MCP/provider·재시작·GC 실행은 미확인 |
-| IA-S13 공유 SSH 이름 | `.worktrees/farm-remote-namespace-20261116`, 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버·Workspace와 첫 쓰기 연결의 후속 커밋은 아래에 적었다. 전체 시작 흐름·실제 SSH·VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
+| WIM-S04 MCP 결과 | 현재 소스 `e392aa3a7f8fafdfe18045c92bc0fe1d023e44b5`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 현재 base의 독립 소스 리뷰에 미해결 P0/P1/P2 없음. 이전 38개 구문 영수증과 새 통합 파일 5개의 구문 검사는 별도 범위다. MCP 소비자의 타입·동작·실제 MCP/provider·재시작·GC 실행은 미확인. 후속 Core 18개 시험을 MCP 실행으로 세지 않는다 |
+| IA-S13 공유 SSH 이름 | 현재 23층 top `2719eb32a7d77941cc4a2216d3e4912f89ff81c1`, base `b584e03211e6bb60e63a566853e855dd49544b3b`. `.worktrees/farm-remote-namespace-20261116`의 재기반 전 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 재기반 21층의 독립 소스 리뷰와 새 소스 263개의 집중 시험 76개를 후속 checkpoint에서 확인했다. 이전 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버·Workspace와 첫 쓰기 연결의 후속 커밋은 아래에 적었다. 전체 시작 흐름·실제 SSH·VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
 
 본 세션은 저장·add-on·입력 경계와 이 실행 기록을 맡는다. TLJ-S01의 같은 구현을
 다시 만들지 않고 해당 세션의 산출물을 현재 head에서 대조한다. 기록된 스택 게시 시도는
@@ -84,6 +84,18 @@ head `4aae41288a5dbba0fb27bfeafea5999dd7fec77c`와 clean 상태를
 작성 세션의 submit은 token 조회에서 실패했고, root의 후속 `gh api user`도 연결 실패였다.
 원격 게시와 재기반은 구분한다. 이전 다섯 층만 게시하라는 위임은 계속 철회 상태다.
 
+후속 아홉 층은 `.worktrees/farm-librarian-bodyless-preflight-20261116`의
+`f08b9f38f01a6ba16af375f3c025209191f9a490`이며, 이 head와 clean 상태를 직접 확인했다.
+base는 `e0e819e29968366c1dffb59ad625ba4e17d4ac22`, 직전 여덟째 층은
+`9f5e4e22b65cbb6582cc8656470d3e84a519a5c8`다. 해당 worktree의
+`artifacts/farm-librarian-bodyless-preflight-20261116/source-review-f08b9f3.md`와
+`source-checks-f08b9f3.json`, `native-stack-f08b9f3.json`, `next-unit.md`를 읽었다.
+작성 세션은 고립된 strict Before_dispatch History의 종료 증거를 본문 복원보다 먼저
+판정하는 12개 파일 수리와 두 독립 소스 리뷰를 보고했다. 11개 OCaml 구문 검사는
+5.5.1이며 요구 버전은 5.5.2다. 이 문서의 작성자가 해당 스택의 타입이나 동작을
+검증한 것은 아니다. 원래 요청 회복·실행·설치·게시도 미확인이며 이전 checkpoint는
+역사적 기록으로 유지한다. 현재 main 통합 전에는 아홉 층 전체를 다시 대조해야 한다.
+
 ## 두 기존 스택의 재기반과 Schedule 실행
 
 보유 Git 객체를 읽는 임시 local remote를 써서 두 스택 전체를 native rebase했다.
@@ -114,9 +126,43 @@ EINTR 처리 시도도 보존했다. 후속 시험은 별도 native test 층
 원격 push·PR 생성·GitHub 정식 승인·병합·설치는 수행하지 않았다. `gh pr view`도
 여전히 API 연결 실패였고, 상대 세션에 대한 답변 전달도 확인하지 못했다.
 
+## Core 문서 투영의 후속 타입 수리와 실제 실행
+
+문서/MCP 스택의 검토 base `e0e819e29968366c1dffb59ad625ba4e17d4ac22`는 유지했다.
+Core `db69904f29c6f4a6166957fbdffa4f7e8e910a7a`, MASC
+`01c94838471b1cbff986e5a78f2c14597a8df564`, 원래 증거 층
+`5363a4d944f704962f4ea47623d29640cd0f1711`, MCP
+`e392aa3a7f8fafdfe18045c92bc0fe1d023e44b5`, 문서 갱신 전 통합 top
+`6134e0a42aae676f63143d1473aaeca7fb99053f`가 현재 다섯 층이다.
+
+실제 컴파일에서 document degrader가 generic history를 고정 미디어 타입으로 좁히는
+오류를 찾았다. `api_common.ml`/`.mli`가 source 타입을 보존하도록 고쳤다.
+실제 시험의 Yojson 3에 없는 두 생성자와 모호한 projection record annotation도
+수정했다. assertion과 기존 18개 등록은 유지했다. 소스 수리는 세 파일이며,
+`api_common.mli`는 앞선 79개 검토에 없던 추가 경로다. 현재 합집합 80개 경로 전체를
+새로 검토했다고 주장하지 않고, 앞선 79개 리뷰와 후속 세 파일의 독립 리뷰를 연결한다.
+수리는 Core 첫 층에 넣고 `gh stack rebase --no-trunk`로 위 네 층을 다시 쌓았다.
+새 main 통합이나 게시를 수행한 것은 아니다.
+
+실제 Core `test_media_document_admission`의 기존 18개가 전부 통과했다.
+소스 118개와 정상 생성 catalog·namespace alias를 사용한 OCaml 5.5.2 실행이다.
+초기 실제 컴파일·연결에서 실패한 run-1~5를 보존했다. run-6은 바이트가 같은
+입력과 객체 189개를 대조한 뒤 Digestif.c archive 순서를 바로잡아 새로 연결하고
+실행했다. 최종 6개 명령이 모두 성공했다. 실행 당시 시험 파일은 아직 커밋 전이었지만,
+그 뒤 최종 leaf의 소스 118개와 metadata 9개가 영수증과 모두 일치함을 확인했다.
+후속 독립 영수증 리뷰도 이 바이트 연결을 확인했으며 테스트를 다시 실행하지 않았다.
+
+문서 worktree의 `artifacts/farm-core-media-document-20261116/final-summary.json`,
+`run-6/`, `restack-3/terminal.json`이 정본이다. source manifest SHA-256은
+`715c55b1679ba25023e0e0d42771929a5ebbd3f1643a251a28580fa801f395e7`,
+실행 결과는 `67f5d9c7adffc749dd5cecee37dde4c790b590f0d9da37f1a04167f4801e6f3d`다.
+이는 로컬 문서 admission·codec·공유 투영의 실행이다. 별도 reasoning 65개,
+Keeper planner/token counting, MCP 소비자 suite, 실제 HTTP/provider, PDF/STT,
+설치된 MASC와 전체 Dune 실행 증거가 아니다.
+
 ## UID 생성과 실제 첫 쓰기의 연결
 
-같은 UID/SSH 스택에 아래 네 층을 추가했다. 앞서 적은 SSH 경로 분리의 동작 증거나
+아래는 재기반 전 커밋과 당시 증거다. 같은 UID/SSH 스택에 네 층을 추가했다. SSH 경로 분리의 동작 증거나
 전체 시작 경로의 완료 판정으로 합치지 않는다.
 
 | 커밋 | 변경 | 확인한 증거 |
@@ -162,10 +208,9 @@ SSH 로컬 시험 영수증은 `artifacts/farm-ssh-local-wire-20261116/wire-4/`�
 package 조회 결과를 사용했으며 product Build_version 구현을 대체하지 않았다.
 의존 package·metadata 연결 순서 때문에 실패한 wire-1~3도 보존했다.
 
-전체 시작 흐름의 완료 판정은 아직 아니다. installer의 preparation과 실제 lifecycle
-자식이 공유하는 START 환경은 별도 수리가 필요하다. 사용자 지정 BasePath를 받아 지우는
-harness도 반환 경로만 바꿔 삭제 범위를 넓히지 않도록 별도로 검토해야 한다.
-전체 CLI·설치·runtime과 원래 Farm 행렬은 실행하지 않았다.
+이 checkpoint 뒤 installer preparation과 dashboard harness의 첫 쓰기·정리 경계를
+아래 두 층에서 고쳤다. 실제 lifecycle 부모의 START 전달 계약과 다른 harness 경로는
+별도 남은 범위다. 전체 CLI·설치·runtime과 원래 Farm 행렬은 실행하지 않았다.
 읽기나 실패한 revoke를 계기로 UID를 자동 발급하거나, 기존 UID 없는 루트를 뒤늦게
 등록하는 방식으로 해결하지 않는다. raw credential 저장소와 명시적 host 도구 경로도
 자동으로 Workspace로 바꾸지 않는다.
@@ -174,6 +219,45 @@ harness도 반환 경로만 바꿔 삭제 범위를 넓히지 않도록 별도�
 `artifacts/farm-workspace-first-writers-20261116/`에 있다. 전체 Dune 그래프, Linux,
 설치된 바이너리, 실제 SSH, 원래 멈춘 요청 회복과 Farm 규모 행렬은 미검증이다.
 `U02:IA-S13`의 기존 volume 전환·삭제 승인 상태도 바뀌지 않았다.
+
+## UID 21층 재기반과 후속 두 층
+
+UID 스택은 base `b584e03211e6bb60e63a566853e855dd49544b3b` 위로 21층 전체를
+재기반해 `a093d15aeedf790fa7d14d8169a84aa5fcdeb367`에 도달했다. 독립 소스 리뷰는
+215개 경로의 해시, 전체 range-diff와 통합 차이를 읽었고 미해결 P0/P1/P2를 찾지 않았다.
+196개 이전 leaf 바이트는 같다. 이전 실행 영수증을 바뀐 의존성의 실행으로 승격하지 않았다.
+기록은 UID worktree의 `artifacts/farm-uid-rebase-20261116/execution-1/`와
+`root-review-1/review.json`이다.
+
+후속 두 층은 아래와 같다. 현재 top은 23층의 `2719eb32`다.
+
+| 커밋 | 변경 | 확인한 증거와 한계 |
+| --- | --- | --- |
+| `069831239eea50ba21aaa89bcff99533b30b19bb` | Dashboard smoke가 native 반환 BasePath로 fixture·기본 로그·argv를 맞춘다. 정리는 자신이 만든 임시 디렉터리에만 한정하며 supplied root와 KEEP_SERVER의 fixture를 보존한다. linked runtime은 쓰기 전에 거절한다. | 두 파일 독립 소스 리뷰. 실제 shell/env와 명시적 candidate/node/curl/nohup fixture를 쓴 16개 시험 통과. 실제 UID·daemon 분리·Dashboard·서버 동작 증거는 아니다. |
+| `2719eb32a7d77941cc4a2216d3e4912f89ff81c1` | Installer 준비 명령과 bundle의 native build-commit probe에서 START를 제거한다. 명시 workspace 환경, raw/canonical 경로, 혼합 native/external login 역할을 보존한다. parent·실제 lifecycle·외부 CLI 환경은 유지한다. | 네 파일 독립 소스 리뷰, 소스/의존성 22개 해시 대조. 통제된 Python/shell 113개 통과·native 필요 1개 skip. 실제 bundle probe 함수는 recording candidate로만 실행했다. 실제 설치·로그인·runtime·network는 미실행이다. |
+
+새 base의 실제 실행은 `069831`을 고정해 소스 263개를 모두 새로 컴파일하고
+네 실행 파일을 연결했다. 이전 repository CMI/CMX/O는 상속하지 않았다. OCaml 5.5.2의
+명령 287개가 성공했고 UID admission 23개, local SSH wire 4개, remote path 8개,
+SSH protocol 41개로 총 76개가 통과했다. 실행 전에 원래 PATH가 고른 5.5.1의 version
+관측을 남긴 뒤, 실제 compile 환경과 stdlib를 5.5.2로 고정했다.
+263개 입력은 이후 `2719eb32`에서도 바이트가 같지만, 현재 전체 head를 다시 실행한
+것은 아니다. Backend/default_config 연결, Running Systhread host, orphan sweep와
+creator 경합을 새로 실행하지 않았다. 실제 SSH 인증·원격 jail·VM·Linux·서버·전체
+Dune·설치 증거로 확대하지 않는다.
+
+정본은 UID worktree의 `artifacts/farm-uid-fresh-validation-20261116/fresh-1/`다.
+source manifest는 `d2dfeb4288e1d245391de0cb9b5d99f2bd61940e043ac108946efb98118815f6`,
+results는 `6568b6d5f09972e564d3ffb5f620f0c85eff32d1ec14de09fecc429311763a08`이다.
+독립 영수증 리뷰도 263개 소스를 실행한 `069831`과 후속 `2719eb32` 양쪽에 대조했다.
+`artifacts/farm-uid-fresh-validation-20261116/independent-review-continuity-1/review.json`
+SHA-256은 `81b85a9ed213b1b64dac5afa4fc890c2e6c7d33c8c5be3282b4fbc495b7fed3d`다.
+이는 영수증 범위의 검토이며 별도 installer 변경의 실행이나 GitHub 정식 승인이 아니다.
+후속 shell 검사는 `artifacts/farm-harness-coordinates-20261116/draft-1/`와
+`artifacts/farm-installer-preparation-env-20261116/run-3/`에 따로 있다.
+원래 멈춘 요청 회복, 기존 UID 없는 세계와 old volume 전환·삭제, `U02:IA-S13`은
+미완료다. 후속 `gh api user`도 해당 실행 환경에서 API 연결 실패(exit 1)였으며,
+사용자 계정 무효 판정이나 게시 성공을 뜻하지 않는다.
 
 ## 원래 25개 요구의 현재 위치
 
@@ -241,9 +325,12 @@ P=`tick·schedule·Board·maintenance·Goal`, H=`1·2·4`, M=`1·2`다.
 
 ## 다음 갱신
 
-남은 첫 쓰기 경로를 고치되 읽기 전용 동작과 서버의 strict admission을 보존한다.
-별도 TLJ-S02 후보는 현재 head의 실제 실행 근거를 이어서 확인한다.
-게시 가능한 시점에 두 기존 스택의 원격 head와 중복 작업을 다시 읽는다. 후보의 행동
-시험·설치·격리된 실패 재현·장시간 행렬은 실제 실행 영수증을 얻은 순서대로 이 기록에
-추가한다. 각 항목은 source/binary/config와 원본 증거 위치를 적고, 실행하지 않은 항목은
-계속 미실행으로 남긴다. 원래 25개 요구를 전부 입증하기 전에는 목표를 닫지 않는다.
+준비 명령의 START 수리를 실제 lifecycle 부모에 임의로 확대하지 않는다. TUI·setup·계정
+연속 실행의 pre-main 시점과 최종 서버 실행 소유자가 정확한 의도를 전달할 계약을 먼저
+정한다. MCP 소비자 suite, MASC declaration/H5·provider failover와 설치 후보의 실제
+PDF/STT·재시작·원래 요청 회복도 각 범위의 실행 영수증이 필요하다.
+별도 Librarian 아홉 층은 현재 main과 전체 스택을 대조하고 실제 Runtime/Exact/installer
+사례를 검증해야 한다. 게시 가능한 시점에는 모든 대상의 원격 head·REST stack·중복 작업을
+다시 읽고 변경된 base를 검토한다. 현재 로컬 통합을 원격 게시나 최신 main 완료로 세지 않는다.
+각 후속 증거는 source/binary/config와 원본 위치를 적고, 실행하지 않은 항목은 계속
+미실행으로 남긴다. 원래 25개 요구와 단계·규모 행렬은 유지하며 목표를 닫지 않는다.

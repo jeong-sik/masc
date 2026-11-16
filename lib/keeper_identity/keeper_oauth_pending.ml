@@ -48,8 +48,7 @@ type scope_state = {
    changing the credential that was already attached. *)
 type t = {
   base_path : string;
-  eio_mutex : Eio.Mutex.t;
-  fallback_mutex : Mutex.t;
+  mutex : Cross_context_mutex.t;
   mutable entries : entry list;
   mutable admitted : admission;
   mutable scopes : ((string * string) * scope_state) list;
@@ -66,8 +65,7 @@ type 'a publication = Published of 'a | Publication_superseded | Publication_fai
 
 let create ~base_path () : t =
   { base_path
-  ; eio_mutex = Eio.Mutex.create ()
-  ; fallback_mutex = Mutex.create ()
+  ; mutex = Cross_context_mutex.create ()
   ; entries = []
   ; admitted = 0
   ; scopes = []
@@ -85,27 +83,18 @@ let install_change_observer observer = Atomic.set changed_observer observer
 let notify_changed (t : t) ~keeper =
   (Atomic.get changed_observer) ~base_path:t.base_path ~keeper
 
-let in_eio_context () =
-  match Eio.Fiber.is_cancelled () with
-  | true | false -> true
-  | exception Effect.Unhandled _ -> false
-
-(* [Eio.Mutex.use_ro] is exclusive and releases rather than poisoning on
-   callback exceptions, while avoiding holding an OS pthread mutex across Eio
-   filesystem yields inside [publish_*] and [retire_scope] callbacks. *)
+(* Publication callbacks may yield during local filesystem work. Eio waiters
+   must yield too, while non-Eio callers must share the very same exclusion
+   gate. Both paths release the lock when a callback raises. *)
 let with_lock (t : t) f =
-  if in_eio_context ()
-  then Eio.Mutex.use_ro t.eio_mutex f
-  else (
-    Mutex.lock t.fallback_mutex;
-    Fun.protect ~finally:(fun () -> Mutex.unlock t.fallback_mutex) f)
+  Cross_context_mutex.with_lock t.mutex f
 
 let with_durable_lock (t : t) f =
-  if in_eio_context ()
-  then Eio.Cancel.protect (fun () -> Eio.Mutex.use_ro t.eio_mutex f)
-  else (
-    Mutex.lock t.fallback_mutex;
-    Fun.protect ~finally:(fun () -> Mutex.unlock t.fallback_mutex) f)
+  (* Settlement must survive cancellation while waiting for an in-progress
+     publication as well as while recording its terminal status. *)
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect (fun () -> with_lock t f)
+  | Eio_guard.Non_eio -> with_lock t f
 
 let registry_mutex = Mutex.create ()
 let by_workspace = Hashtbl.create 1

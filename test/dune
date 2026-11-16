@@ -5698,6 +5698,8 @@
 (include stanzas/test_keeper_identity_declarations.inc)
 (include stanzas/test_keeper_oauth_identity.inc)
 
+(include stanzas/test_keeper_oauth_pending_cross_context.inc)
+
 (include stanzas/test_tui_browser.inc)
 
 (include stanzas/test_mcp_client.inc)

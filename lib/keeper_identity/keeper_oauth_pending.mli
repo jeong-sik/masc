@@ -32,6 +32,9 @@ type in_flight = {
 }
 
 type t
+(** One table serializes Eio fibers and non-Eio callers, including system
+    threads and Domains. Publication and deletion callbacks participate in
+    that same exclusion; an Eio waiter yields while the table is busy. *)
 
 val create : base_path:string -> unit -> t
 (** A fresh owner for an explicitly resolved workspace namespace. Production

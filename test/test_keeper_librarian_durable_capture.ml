@@ -399,7 +399,46 @@ let test_source_changes_do_not_replace_the_original () = with_fixture Mixed @@ f
   check bool "the replaced checkpoint no longer loads" true (after.messages=None);
   expect_unconfirmed "replaced official files" {after with messages=before.messages} restored
 
+let test_official_projection_preserves_turn_identity_and_offsets () =
+  let turn trace_id absolute_turn = Ids.Turn_ref.make ~trace_id ~absolute_turn in
+  let a1 = turn "alpha#part" 1 and a2 = turn "alpha#part" 2 and b1 = turn "beta" 1 in
+  let row line turn_ref text = line, Ok (F.Fragment (F.Message
+    {turn_ref;recorded_at=Float.of_int line;source=None;message=message text})) in
+  let tool line turn_ref tool_name = line, Ok (F.Fragment (F.Tool_observation
+    {turn_ref;recorded_at=Float.of_int line;
+     observation={tool_name;outcome=Keeper_librarian.Succeeded}})) in
+  let cut line turn_ref : Keeper_librarian_range.official_line =
+    {line;turn_ref;recorded_at=Float.of_int line} in
+  let selected = [cut 30 a2;cut 10 a1;cut 20 b1;cut 40 (turn "alpha#part" 99);cut 50 a2] in
+  let traces : Capture.official_trace list =
+    [{trace_id="alpha#part";
+      main=[row 1 a2 "a2-main";2,Ok F.Untagged;row 3 a1 "a1-main";
+            row 4 a2 "a2-repeat";tool 5 a1 "a-tool"];
+      internal=[1,Error F.Incomplete_line;row 2 a1 "a1-internal";row 3 a2 "a2-internal"]};
+     {trace_id="beta";main=[row 1 b1 "b1-main"];internal=[tool 1 b1 "b-tool"]};
+     {trace_id="alpha#part";main=[row 1 a1 "later duplicate trace"];internal=[]}] in
+  let projected = Capture.project_source ~boundaries:[] (Capture.Official_only {selected;traces})
+    |> Result.map_error Capture.error_to_string |> get in
+  let expected = List.map message
+    ["a1-main";"a1-internal";"b1-main";"a2-main";"a2-repeat";"a2-internal";
+     "a2-main";"a2-repeat";"a2-internal"] in
+  check bool "whole messages keep main/internal order, identity and repeated cuts" true
+    (projected.messages=expected);
+  check (list string) "tools keep their turn order" ["a-tool";"b-tool"]
+    (List.map (fun (value:Keeper_librarian.tool_observation) -> value.tool_name) projected.tool_observations);
+  let offsets = List.map (fun (context:Keeper_librarian_task_context.t) ->
+    context.first_message,context.after_message,context.first_tool_observation,context.after_tool_observation)
+    projected.historical_task_contexts in
+  check bool "empty and repeated cuts retain their historical offsets" true
+    (offsets=[0,2,0,1;2,3,1,2;3,6,2,2;6,6,2,2;6,9,2,2]);
+  match Capture.project_source ~boundaries:[]
+    (Capture.Official_only {selected=[cut 1 (turn "missing" 1)];traces}) with
+  | Error (Capture.Inconsistent_source _) -> ()
+  | Error (Capture.Checkpoint_source _) | Ok _ -> fail "a missing trace must be refused"
+
 let () = Alcotest.run "durable source original capture" ["actual source retention",[
+  test_case "official projection preserves turn identity, order and historical offsets" `Quick
+    test_official_projection_preserves_turn_identity_and_offsets;
   test_case "checkpoint original survives strict disk roundtrip" `Quick (check_roundtrip Atoms);
   test_case "official Main and Internal originals survive strict disk roundtrip" `Quick (check_roundtrip Official);
   test_case "mixed original preserves source order and both receipt kinds" `Quick (check_roundtrip Mixed);

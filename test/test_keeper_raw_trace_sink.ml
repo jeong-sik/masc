@@ -628,12 +628,10 @@ let response ?(content = []) ?(stop_reason = Agent_core.Types.EndTurn) () =
     telemetry = None;
   }
 
-(* Consumer-level regression: a turn whose sink reached the Agent Core run
-   produces non-[None] result-level [trace_ref]/[run_validation]. The
-   projection below is exactly what [Runtime_agent.run] performs after
-   [Agent.run]: [trace_ref = Agent.last_raw_trace_run agent] (whose body
-   is [Raw_trace.last_run sink]) and
-   [run_validation = Raw_trace_query.validate_run trace_ref]. *)
+(* Storage projection: a materialized completed trace can be validated and
+   represented in a Runtime_agent result. This fixture does not run Agent.run
+   or check lifecycle ownership. test_pipeline's refused-start scenario
+   exercises that ownership against a reused sink through Agent.run. *)
 let test_traced_turn_yields_result_level_fields () =
   with_workspace @@ fun config ->
   let meta = make_test_meta () in

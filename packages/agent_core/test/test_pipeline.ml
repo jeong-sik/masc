@@ -2011,6 +2011,7 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
    doing real work.  Each site makes the trace path a directory from inside the
    very callback whose fact the trace records next. *)
 type trace_write_fault =
+  | Trace_fails_before_dispatch
   | Trace_fails_under_provider_response
   | Trace_fails_under_tool_effect
   | Trace_fails_under_allowing_hook
@@ -2037,6 +2038,7 @@ let test_trace_write_failure_keeps_execution fault () =
       (match fault with
        | Trace_fails_under_provider_response ->
          [ Provider_mock.text_response ~input_tokens:7 ~output_tokens:3 final_text [] ]
+       | Trace_fails_before_dispatch
        | Trace_fails_under_tool_effect
        | Trace_fails_under_allowing_hook
        | Trace_fails_under_blocking_hook ->
@@ -2048,11 +2050,17 @@ let test_trace_write_failure_keeps_execution fault () =
          ; Provider_mock.text_response ~input_tokens:7 ~output_tokens:3 final_text []
          ])
   in
+  (match fault with
+   | Trace_fails_before_dispatch ->
+     responses := Provider_mock.text_response "warmup trace" [] :: !responses
+   | Trace_fails_under_provider_response | Trace_fails_under_tool_effect
+   | Trace_fails_under_allowing_hook | Trace_fails_under_blocking_hook -> ());
   let provider_calls = ref 0 in
   let next_response () =
     incr provider_calls;
     (match fault with
      | Trace_fails_under_provider_response -> break_trace ()
+     | Trace_fails_before_dispatch
      | Trace_fails_under_tool_effect
      | Trace_fails_under_allowing_hook
      | Trace_fails_under_blocking_hook -> ());
@@ -2082,6 +2090,7 @@ let test_trace_write_failure_keeps_execution fault () =
          incr tool_calls;
          (match fault with
           | Trace_fails_under_tool_effect -> break_trace ()
+          | Trace_fails_before_dispatch
           | Trace_fails_under_provider_response
           | Trace_fails_under_allowing_hook
           | Trace_fails_under_blocking_hook -> ());
@@ -2089,6 +2098,7 @@ let test_trace_write_failure_keeps_execution fault () =
   in
   let hooks =
     match fault with
+    | Trace_fails_before_dispatch
     | Trace_fails_under_provider_response | Trace_fails_under_tool_effect -> Hooks.empty
     | Trace_fails_under_allowing_hook ->
       { Hooks.empty with
@@ -2148,6 +2158,16 @@ let test_trace_write_failure_keeps_execution fault () =
             missing_boundaries := boundary :: !missing_boundaries
           | Log.S _ | Log.I _ | Log.F _ | Log.B _ | Log.J _ | Log.Secret _ -> ())
         record.fields);
+  (match fault with
+   | Trace_fails_before_dispatch ->
+     (match Agent.run ~sw agent "warm up the reused sink" with
+      | Ok _ -> ()
+      | Error error -> Alcotest.fail (Error.to_string error));
+     Alcotest.(check bool) "the reused sink already has completed evidence" true
+       (Option.is_some (Agent.last_raw_trace_run agent));
+     break_trace ()
+   | Trace_fails_under_provider_response | Trace_fails_under_tool_effect
+   | Trace_fails_under_allowing_hook | Trace_fails_under_blocking_hook -> ());
   let result =
     Fun.protect
       ~finally:(fun () ->
@@ -2155,7 +2175,7 @@ let test_trace_write_failure_keeps_execution fault () =
         Log.set_global_level Log.Info)
       (fun () -> Agent.run ~sw ~execution_store agent "do the work")
   in
-  Alcotest.(check bool) "the trace was broken during the run" true !trace_broken;
+  Alcotest.(check bool) "the trace was broken at the selected boundary" true !trace_broken;
   (match result with
    | Ok response ->
      Alcotest.(check string)
@@ -2166,6 +2186,7 @@ let test_trace_write_failure_keeps_execution fault () =
      Alcotest.failf "trace write failure became a run failure: %s" (Error.to_string error));
   let expected_provider_calls, expected_tool_calls, expected_boundary =
     match fault with
+    | Trace_fails_before_dispatch -> 3, 1, "run_start"
     | Trace_fails_under_provider_response -> 1, 0, "assistant_block"
     | Trace_fails_under_tool_effect -> 2, 1, "tool_execution_finished"
     | Trace_fails_under_allowing_hook -> 2, 1, "hook_invocation"
@@ -2194,6 +2215,7 @@ let test_trace_write_failure_keeps_execution fault () =
   (match fault with
    | Trace_fails_under_provider_response ->
      Alcotest.(check (list string)) "no tool ran" [] tool_result_contents
+   | Trace_fails_before_dispatch
    | Trace_fails_under_tool_effect | Trace_fails_under_allowing_hook ->
      Alcotest.(check (list string))
        "the completed tool result stays in the transcript once"
@@ -2210,6 +2232,14 @@ let test_trace_write_failure_keeps_execution fault () =
     true
     (!terminal_outcome = Some Agent.Terminal_succeeded);
   Alcotest.(check (option bool)) "completion callback observes success" (Some true) !completion;
+  (match fault with
+   | Trace_fails_before_dispatch ->
+     Alcotest.(check bool) "the sink retains historical completed evidence" true
+       (Option.is_some (Raw_trace.last_run trace));
+     Alcotest.(check bool) "a refused trace start cannot borrow the previous run" true
+       (Option.is_none (Agent.last_raw_trace_run agent))
+   | Trace_fails_under_provider_response | Trace_fails_under_tool_effect
+   | Trace_fails_under_allowing_hook | Trace_fails_under_blocking_hook -> ());
   match Agent.lifecycle agent with
   | Some snapshot ->
     Alcotest.(check bool) "lifecycle is completed" true (snapshot.status = Agent.Completed)
@@ -5990,6 +6020,10 @@ let () =
             "completion callback diagnostic preserves committed success"
             `Quick
             (test_trace_finalization_preserves_committed_success Callback_diagnostic_failed)
+        ; Alcotest.test_case
+            "trace start failure still dispatches and commits the tool once"
+            `Quick
+            (test_trace_write_failure_keeps_execution Trace_fails_before_dispatch)
         ; Alcotest.test_case
             "trace write failure keeps an accepted provider response"
             `Quick

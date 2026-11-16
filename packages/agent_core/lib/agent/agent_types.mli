@@ -328,4 +328,8 @@ val set_lifecycle
 (** {1 Trace / Checkpoint} *)
 
 val last_raw_trace_run : t -> Raw_trace.run_ref option
+(** The completed trace belonging to the current lifecycle's exact run ID.
+    [None] before execution, after a refused trace start, or when this run's
+    final record is missing. Older runs remain queryable through [Raw_trace]
+    but cannot become this execution's evidence. *)
 val lifecycle_snapshot : t -> lifecycle_snapshot option

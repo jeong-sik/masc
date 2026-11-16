@@ -250,6 +250,11 @@ verification target → command and result`. A passing check that does not exerc
 that consumer is not a substitute. This helps risk-based check selection; it does
 not add a Core build or full CI admission requirement to every ordinary PR.
 
+For compaction, resume, streaming and trace changes, use the
+[runtime continuity authority map](runtime-continuity-authority.md) to locate
+the existing decision owner and related failure history before adding a new
+classifier or recovery path.
+
 ## 5. Review and integrate
 
 Ordinary PRs targeting main have [operator-requested automatic merge](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)

@@ -228,6 +228,10 @@ Dispatch에는 저장소 권한이 필요하며 fork 기여자는 maintainer에�
 위험별 검사 선택을 돕는 것이며 모든 일반 PR에 Core 빌드나 전체 CI를 추가하는 승인
 조건이 아닙니다.
 
+압축·재개·스트리밍·trace를 바꿀 때는
+[런타임 연속성 판정 지도](runtime-continuity-authority.md)에서 기존 판정 소유자와
+관련 수리 이력을 확인한 뒤 새 분류나 복구 경로를 추가합니다.
+
 ## 5. 리뷰하고 통합하기
 
 main으로 들어가는 일반 PR은 [운영자가 요청한 자동 병합](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)을 적용합니다.

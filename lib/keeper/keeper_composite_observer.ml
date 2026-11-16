@@ -114,10 +114,9 @@ let take_fsm_guard_buckets limit buckets =
 ;;
 
 let fsm_guard_violation_breakdown () =
-  Otel_metric_store.snapshot ()
+  Otel_metric_store.snapshot_named Otel_metric_store.metric_fsm_guard_violation
   |> List.filter_map (fun (metric : Otel_metric_store.metric) ->
-    if String.equal metric.name Otel_metric_store.metric_fsm_guard_violation
-       && metric.value > 0.0
+    if metric.value > 0.0
     then
       match List.assoc_opt "action" metric.labels, List.assoc_opt "stage" metric.labels with
       | Some action, Some stage ->

@@ -28,7 +28,9 @@ type error =
   | Authority_changed of Change.t
   | Execution_pending of string
 type interruption = Cancelled | Raised
-let interruption_label = function Cancelled -> "review_cancelled" | Raised -> "review_raised"
+(* [interruption_of_label] still reads the interruption labels written by the
+   pre-§2.2 handler. New writers put the same strings in a run end
+   ([View.run_end_label]) so one decoder keeps reading both. *)
 let interruption_of_label = function
   | "review_cancelled" -> Ok Cancelled
   | "review_raised" -> Ok Raised
@@ -858,11 +860,20 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         match reload ~store retained with
         | Ok saved -> (match View.view (Progress.phase (progress saved)) with
             | View.Dispatch_pending _ ->
-              (match advance ~store saved (Progress.Execution_observed
-                (Progress.Outcome_unknown (`Assoc ["cause", `String (interruption_label cause);
-                  "run", run_json retained.run;
-                  "tools", `List (List.map Verification_run_registry.tool_observation_to_yojson (List.rev !tools));
-                  "observations", `List (List.rev !facts)]))) with
+              (* RFC-0489 §2.2. The run was dispatched and this process is
+                 leaving without a verdict: no receipt exists to authenticate,
+                 so the run itself is the refusal's subject. The next scan then
+                 decides from the §2.7 row — a cancellation asks again
+                 automatically, a raised exception waits for an explicit
+                 request. Writing [Outcome_unknown] here instead left the
+                 original on "no new review was started" forever. *)
+              let ended = View.Run_ended
+                { cause = (match cause with Cancelled -> View.Cancelled | Raised -> View.Raised)
+                ; run = goal_run retained.run
+                ; tools = List.rev !tools
+                ; observations = List.rev !facts } in
+              (match advance ~store saved
+                 (Progress.Refused {stage=Progress.Execution; evidence=View.evidence_json ended}) with
                | Ok _ -> ()
                | Error error -> Log.Misc.error "Goal interrupted review retention failed: %s" (error_to_string error))
             | View.Captured | View.Admission_wait _ | View.Judged _ | View.Committing _

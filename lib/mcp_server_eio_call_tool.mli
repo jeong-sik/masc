@@ -127,8 +127,7 @@ val handle_call_tool_eio :
      ?profile:Mcp_server_eio_types.tool_profile ->
      ?mcp_session_id:string ->
      ?invocation_ref:Tool_invocation_ref.t ->
-     ?auth_token:'auth ->
-     ?internal_keeper_runtime:bool ->
+     bearer:Mcp_server_eio_caller_identity.bearer ->
      ?on_caller_resolved:(Mcp_server_eio_caller_identity.t -> unit) ->
      Mcp_server.server_state ->
      name:string ->
@@ -142,8 +141,7 @@ val handle_call_tool_eio :
   clock:'clk Eio.Resource.t ->
   ?profile:Mcp_server_eio_types.tool_profile ->
   ?mcp_session_id:string ->
-  ?auth_token:'auth ->
-  ?internal_keeper_runtime:bool ->
+  bearer:Mcp_server_eio_caller_identity.bearer ->
   Mcp_server.server_state ->
   Yojson.Safe.t ->
   Mcp_server_eio_call_request.t ->

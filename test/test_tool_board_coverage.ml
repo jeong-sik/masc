@@ -1772,7 +1772,7 @@ let test_committed_board_projection_failure_reaches_callers_as_completed () =
   let observed = ref None and dispatches = ref 0 in
   let response = Mcp_server_eio_call_tool.handle_call_tool_eio
     ~execute_tool_eio:(fun ~sw:_ ~clock:_ ~workspace_scope:_ ?profile:_
-      ?mcp_session_id:_ ?invocation_ref:_ ?auth_token:_ ?internal_keeper_runtime:_
+      ?mcp_session_id:_ ?invocation_ref:_ ~bearer:_
       ?on_caller_resolved:_ state ~name ~arguments ->
       incr dispatches;
       let result = match Mcp_tool_runtime_board.dispatch ~reader:Masc_board_handlers.Board_access.Operator ~config ~state ~name ~arguments
@@ -1781,7 +1781,7 @@ let test_committed_board_projection_failure_reaches_callers_as_completed () =
       observed := Some result;
       result)
     ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-    ~broadcast_tools_list_changed:(fun () -> ())
+    ~broadcast_tools_list_changed:(fun () -> ()) ~bearer:Masc_test_deps.no_bearer
     ~sw ~clock:(Eio.Stdenv.clock env) state (`Int 1) request in
   let open Yojson.Safe.Util in
   let wire = member "result" response in
@@ -3497,7 +3497,7 @@ let test_comment_write_evidence_crosses_mcp_and_native_projection () =
   let observed = ref None in
   let response = Mcp_server_eio_call_tool.handle_call_tool_eio
       ~execute_tool_eio:(fun ~sw:_ ~clock:_ ~workspace_scope:_ ?profile:_
-        ?mcp_session_id:_ ?invocation_ref:_ ?auth_token:_ ?internal_keeper_runtime:_
+        ?mcp_session_id:_ ?invocation_ref:_ ~bearer:_
         ?on_caller_resolved:_ state ~name ~arguments ->
         let result = match Mcp_tool_runtime_board.dispatch
             ~reader:Masc_board_handlers.Board_access.Operator ~config ~state ~name ~arguments
@@ -3507,7 +3507,7 @@ let test_comment_write_evidence_crosses_mcp_and_native_projection () =
         observed := Some result;
         result)
       ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-      ~broadcast_tools_list_changed:(fun () -> ())
+      ~broadcast_tools_list_changed:(fun () -> ()) ~bearer:Masc_test_deps.no_bearer
       ~sw ~clock:(Eio.Stdenv.clock env) state (`Int 1) request in
   let result = match !observed with
     | Some result -> result

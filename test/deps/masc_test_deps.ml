@@ -536,6 +536,51 @@ let make_sse_auth workspace agent_name =
            agent_name
            (Masc_domain.masc_error_to_string e))
 
+(** The /mcp door's principal on a workspace with auth off, made by the door
+    itself since [Auth.request_principal] is private. Transport deps that
+    admit every request answer it, as such a workspace does. *)
+let auth_off_principal =
+  match
+    Auth.admit_request ""
+      ~auth_cfg:{ Masc_domain.default_auth_config with enabled = false }
+      ~token:None ~internal_keeper_agent:None
+  with
+  | Ok principal -> principal
+  | Error (Auth.Token_required | Auth.Bearer_refused _) ->
+      failwith "auth_off_principal: a workspace with auth off admits every request"
+
+(** The dispatcher's sender for a request carrying [auth_token] on
+    [base_path]'s workspace, for a test that calls the dispatcher directly:
+    the principal the /mcp door admits. A request without a bearer, or one
+    whose bearer the door refuses, is one no door admitted: over HTTP the
+    door answers it, and the dispatcher keeps the methods that require auth
+    from it. Reads the auth store, so it runs inside Eio. *)
+let door_sender ~base_path auth_token =
+  match auth_token with
+  | None -> Masc.Mcp_server_eio.Unadmitted
+  | Some _ ->
+    (match
+       Auth.admit_request base_path ~auth_cfg:(Auth.load_auth_config base_path)
+         ~token:auth_token ~internal_keeper_agent:None
+     with
+     | Ok principal -> Masc.Mcp_server_eio.Admitted principal
+     | Error (Auth.Token_required | Auth.Bearer_refused _) ->
+       Masc.Mcp_server_eio.Unadmitted)
+
+(** What the executor knows about a bearer a test sends to it directly: the
+    bearer the /mcp door admits. With auth on a valid bearer arrives as the
+    credential the door found; with auth off, or a bearer the door refuses,
+    the executor reads the token itself. Reads the auth store, so it runs
+    inside Eio. *)
+let door_bearer ~base_path auth_token =
+  Masc.Mcp_server_eio_caller_identity.of_sender
+    (door_sender ~base_path auth_token)
+    ~auth_token ~internal_keeper_runtime:false
+
+(** A call that reaches the executor with no bearer, as gRPC does. *)
+let no_bearer =
+  Masc.Mcp_server_eio_caller_identity.unread None ~internal_keeper_runtime:false
+
 (* Which sandbox a fixture's keeper runs in.
 
    Nothing used to answer this, so the profile came from the placeholder

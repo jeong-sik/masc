@@ -251,9 +251,22 @@ let test_body_with_canonical_http_actor_uses_token_owner () =
       let body =
         {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_keeper_status","arguments":{"_agent_name":"dashboard","name":"alpha"}},"id":1}|}
       in
+      (* The principal the /mcp door makes for this bearer on a workspace
+         that requires a token. *)
+      let principal =
+        match
+          Auth.admit_request dir
+            ~auth_cfg:
+              { Masc_domain.default_auth_config with enabled = true; require_token = true }
+            ~token:(Some raw_token) ~internal_keeper_agent:None
+        with
+        | Ok principal -> principal
+        | Error (Auth.Token_required | Auth.Bearer_refused _) ->
+            fail "the door refused the codex bearer"
+      in
       let args =
         Http_transport.body_with_canonical_http_actor ~base_path:dir
-          ~auth_token:(Some raw_token) request body
+          ~auth_token:(Some raw_token) ~principal request body
         |> tool_arguments_of_body
       in
       let open Yojson.Safe.Util in

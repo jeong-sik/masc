@@ -616,7 +616,7 @@ let test_keeper_dispatch_and_mcp_use_trusted_self () =
         ~sw
         ~clock:(Eio.Stdenv.clock env)
         ~workspace_scope:(Mcp_server.workspace_scope state)
-        ?auth_token
+        ~bearer:(Masc_test_deps.door_bearer ~base_path:config.base_path auth_token)
         state
         ~name:"keeper_candle_balance"
         ~arguments:args

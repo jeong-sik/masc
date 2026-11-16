@@ -64,7 +64,7 @@ let with_worker f =
             Out_channel.with_open_bin (Filename.concat programs "game.com")
               (fun channel -> output_string channel hello_com);
             let state = Mcp_eio.For_testing.create_state ~base_path () in
-            let screen () = Mcp_eio.handle_request ~clock ~sw state
+            let screen () = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state
               {|{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"masc_dos_screen","arguments":{}}}|} in
             let unavailable label =
               let response = screen () in

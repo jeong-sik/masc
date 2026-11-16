@@ -135,7 +135,7 @@ let test_session_task_lifecycle () =
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       let session_id = "session-task-smoke" in
       let call request =
-        Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id state request
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:session_id state request
       in
 
       call initialize_request |> check_protocol_success "initialize";
@@ -223,7 +223,7 @@ let test_task_creation_failure_remains_typed_error () =
     (fun () ->
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       let call request =
-        Mcp_eio.handle_request
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted
           ~clock
           ~sw
           ~mcp_session_id:"session-task-failure"

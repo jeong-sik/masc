@@ -195,7 +195,7 @@ let test_mcp_auth_surfaces_preserve_typed_reasons () =
         check string label "missing_token" code
     | Error { auth_error_code = None; message } ->
         failf "%s lost auth_error_code: %s" label message
-    | Ok () -> failf "%s admitted a request without a token" label
+    | Ok _ -> failf "%s admitted a request without a token" label
   in
   expect_transport_code
     "observer transport auth code"
@@ -661,6 +661,84 @@ let test_operator_task_cancel_requires_token_bound_admin () =
   | Ok actor -> check string "operator comes from token" "operator" actor
   | Error error -> fail (Masc_domain.masc_error_to_string error)
 
+(* [key] is [value], or unset for [None], while [f] runs, then put back. *)
+let with_env key value f =
+  let inherited = Sys.getenv_opt key in
+  let install = function
+    | Some value -> Unix.putenv key value
+    | None -> Unix.unsetenv key
+  in
+  install value;
+  Fun.protect ~finally:(fun () -> install inherited) f
+
+(* RFC a-request-reads-its-bearer-once-at-the-door, D4: for a request the
+   /mcp door admitted, the actor and the internal Keeper answer read from its
+   principal equal what the identity step read from the auth store before. *)
+let test_principal_answers_match_the_reads_they_replace () =
+  (* The no-bearer and auth-off cases are local auth. A shell that exports a
+     public MASC_HTTP_BASE_URL would turn on strict auth, so the three inputs
+     of [Server_auth.http_auth_strict_enabled] are pinned. *)
+  with_env "MASC_HTTP_AUTH_STRICT" (Some "false") @@ fun () ->
+  with_env "MASC_HTTP_BASE_URL" None @@ fun () ->
+  with_env "MASC_HOST" None @@ fun () ->
+  with_temp_base_path @@ fun base_path ->
+  let post headers =
+    Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `POST "/mcp"
+  in
+  let answers label request =
+    let principal =
+      match Server_auth.verify_mcp_auth ~base_path request with
+      | Ok principal -> principal
+      | Error err ->
+          failf "%s: the door refused: %s" label
+            (Masc_domain.masc_error_to_string err)
+    in
+    let actor = Server_auth.dashboard_actor_for_request ~base_path request in
+    let internal = Server_auth.is_verified_internal_keeper_request ~base_path request in
+    check (option string) (label ^ ": actor from the principal") actor
+      (Server_auth.dashboard_actor_of_principal ~base_path request principal);
+    check bool (label ^ ": internal Keeper from the principal") internal
+      (Server_auth.is_internal_keeper_principal ~base_path request principal);
+    actor, internal
+  in
+  let expect label request ~actor ~internal =
+    check (pair (option string) bool) (label ^ ": answers") (actor, internal)
+      (answers label request)
+  in
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = true };
+  let worker =
+    match Auth.create_token base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
+    | Ok (token, _) -> token
+    | Error err -> failf "create_token failed: %s" (Masc_domain.masc_error_to_string err)
+  in
+  expect "a Worker bearer under a stale actor hint"
+    (post [ ("authorization", "Bearer " ^ worker); ("x-masc-agent", "dashboard") ])
+    ~actor:(Some "codex") ~internal:false;
+  let internal_token = Auth.ensure_internal_keeper_token base_path in
+  expect "the internal Keeper token as a bearer"
+    (post
+       [ ("authorization", "Bearer " ^ internal_token)
+       ; ("x-masc-keeper-name", "keeper-a")
+       ])
+    ~actor:(Some "keeper-a") ~internal:true;
+  expect "the internal Keeper token in its own header"
+    (post
+       [ ("x-masc-internal-token", internal_token)
+       ; ("x-masc-keeper-name", "keeper-a")
+       ])
+    ~actor:(Some "keeper-a") ~internal:true;
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = false };
+  expect "no bearer where none is required"
+    (post [ ("x-masc-agent", "public-reader") ])
+    ~actor:(Some "public-reader") ~internal:false;
+  Auth.save_auth_config base_path
+    { Masc_domain.default_auth_config with enabled = false };
+  expect "auth off reads the request's credential as before"
+    (post [ ("authorization", "Bearer " ^ worker); ("x-masc-agent", "dashboard") ])
+    ~actor:(Some "codex") ~internal:false
+
 let () =
   Eio_main.run @@ fun _env ->
   Server_request_authority.with_current
@@ -693,5 +771,7 @@ let () =
                  test_a_player_reaches_only_the_seat
              ; test_case "an unreadable credential is unknown, not absent" `Quick
                  test_unreadable_credential_standing_is_not_no_credential
+             ; test_case "principal answers match the reads they replace" `Quick
+                 test_principal_answers_match_the_reads_they_replace
              ] )
          ])

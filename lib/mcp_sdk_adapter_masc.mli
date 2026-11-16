@@ -21,11 +21,10 @@ val dispatch_request :
   sw:_ ->
   clock:_ ->
   ?mcp_session_id:_ ->
-  ?auth_token:_ ->
   Yojson.Safe.t ->
   Yojson.Safe.t option
 (** [dispatch_request ~handle_call_tool_eio ~state ~profile ~sw
-      ~clock ?mcp_session_id ?auth_token json] inspects [json] for
+      ~clock ?mcp_session_id json] inspects [json] for
     a JSON-RPC request whose method is in {!handles_method}'s set
     and returns:
 
@@ -37,7 +36,7 @@ val dispatch_request :
       MASC-native handler.
 
     The capability arguments ([handle_call_tool_eio], [state],
-    [profile], [sw], [clock], [mcp_session_id], [auth_token]) are
+    [profile], [sw], [clock], [mcp_session_id]) are
     threaded through for forward compatibility — the current ["ping"]
     dispatcher ignores them.  Polymorphic types intentional: the
     adapter does not own the runtime types. *)

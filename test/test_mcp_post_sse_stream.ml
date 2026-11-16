@@ -75,7 +75,7 @@ let post_handler ~workspace (runtime : Server_mcp_transport_http.runtime) =
     | Ok authority -> authority
     | Error `Malformed -> Alcotest.fail "fixture authority"
   in
-  let admit ~base_path:_ _request = Ok () in
+  let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal in
   let deps : Server_mcp_transport_http.deps =
     { get_origin = (fun _ -> "")
     ; cors_headers = (fun _ -> [])
@@ -104,7 +104,7 @@ let runtime_on ~sw ~workspace env ~handle : Server_mcp_transport_http.runtime =
   ; tool_allowed_in_profile = (fun _ _ -> true)
   ; handle_request =
       (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
-           ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> handle ())
+           ?otel_transport_context:_ ~principal:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> handle ())
   ; clear_resource_subscriptions_for_session = (fun _ -> ())
   }
 ;;

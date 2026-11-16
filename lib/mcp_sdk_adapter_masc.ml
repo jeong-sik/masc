@@ -16,7 +16,6 @@ let dispatch_request
     ~sw:_
     ~clock:_
     ?mcp_session_id:_
-    ?auth_token:_
     (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->

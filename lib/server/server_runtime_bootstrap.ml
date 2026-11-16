@@ -1810,6 +1810,10 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
               ~sw
               ~clock
               ~workspace_scope
+              (* gRPC carries no bearer, and no door reads one. *)
+              ~bearer:
+                (Mcp_server_eio_caller_identity.unread None
+                   ~internal_keeper_runtime:false)
               state
               ~name:tool_name ~arguments
           in
@@ -1894,7 +1898,8 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
                     try
                       let response_json =
                         Mcp_eio.handle_request ~clock ~sw
-                          ~mcp_session_id:ws_session_id state body_str
+                          ~mcp_session_id:ws_session_id
+                          ~sender:Mcp_eio.Unadmitted state body_str
                       in
                       let response_str = Yojson.Safe.to_string response_json in
                       if response_str <> "null" then begin

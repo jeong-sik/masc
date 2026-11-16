@@ -216,7 +216,6 @@ val process_single_turn :
   submission:turn_submission ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  auth_token:string option ->
   thread_id:string ->
   continuation_channel:Keeper_continuation_channel.t ->
   closed:bool ref ->

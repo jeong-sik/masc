@@ -37,11 +37,20 @@ let scope_granting permission =
     Auth_oauth.scopes_supported
 ;;
 
-let required_scope ~base_path ~auth_token ~allowed_tool ~body =
-  match auth_token with
-  | None -> None
-  | Some _ when not (Auth.is_auth_enabled base_path) -> None
-  | Some token ->
+(* The OAuth access record comes from the door's principal
+   (RFC a-request-reads-its-bearer-once-at-the-door, step 3c). The door
+   looked the token up under the same expected resource and checked OAuth
+   before static credentials, so a static bearer has no OAuth record. The
+   internal Keeper token is random like an OAuth access token, and no record
+   holds its hash. *)
+let required_scope ~(principal : Auth.request_principal) ~allowed_tool ~body =
+  match principal with
+  | Auth.Auth_off | Auth.Anonymous
+  | Auth.Bearer
+      { resolved = Auth.Internal_keeper_bearer | Auth.Token_credential (Auth.Static_bearer _)
+      ; _
+      } -> None
+  | Auth.Bearer { resolved = Auth.Token_credential (Auth.Oauth_access credential); _ } ->
     (match tools_call_name body with
      | None -> None
      (* The dispatcher audits non-public calls, including denied ones. Keep
@@ -51,11 +60,8 @@ let required_scope ~base_path ~auth_token ~allowed_tool ~body =
        (match Tool_catalog.registered_metadata tool_name with
         | None -> None
         | Some metadata ->
-          (match Auth_oauth.find_access_credential ~base_path ~token with
-           | Error _ | Ok None -> None
-           | Ok (Some credential) ->
-             if Masc_domain.has_permission credential.role metadata.required_permission
-                || not (allowed_tool tool_name)
-             then None
-             else scope_granting metadata.required_permission)))
+          if Masc_domain.has_permission credential.role metadata.required_permission
+             || not (allowed_tool tool_name)
+          then None
+          else scope_granting metadata.required_permission))
 ;;

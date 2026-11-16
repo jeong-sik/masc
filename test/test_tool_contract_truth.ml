@@ -88,7 +88,7 @@ let tools_list_response ~clock ~sw ?(include_hidden = false) ?names state =
           ("params", `Assoc (names_json @ hidden_json));
         ])
   in
-  Mcp_eio.handle_request ~clock ~sw state request
+  Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request
 
 let test_public_tools_expose_only_truthful_statuses () =
   Eio_main.run @@ fun env ->

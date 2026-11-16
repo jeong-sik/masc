@@ -113,17 +113,6 @@ let with_workspace f =
        f config)
 ;;
 
-let with_verification_persistence f =
-  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
-  Atomic.set
-    Workspace_hooks.verification_submit_request_fn
-    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~claim:_ -> Ok ());
-  Fun.protect
-    ~finally:(fun () ->
-      Atomic.set Workspace_hooks.verification_submit_request_fn previous)
-    f
-;;
-
 let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
 ;;

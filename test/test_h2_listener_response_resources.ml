@@ -26,7 +26,6 @@ type response = {
 type exchange = {
   id : int;
   received : (response, unit) result Eio.Promise.t;
-  failed : unit Eio.Promise.t;
 }
 
 let rec remove_tree path =
@@ -115,7 +114,6 @@ let with_listener mode ~capacity make_handler run =
 
 let request ?(body="") ?(headers=[]) ?(on_error=fun _ -> ()) client ~port path =
   let received,receive=Eio.Promise.create () in
-  let failed,fail_stream=Eio.Promise.create () in
   let id=client.next_id in client.next_id<-id+2;
   let writer=H2_eio.Client.request client.connection ~flush_headers_immediately:true
     (H2.Request.create ~scheme:"http" (if body="" then `GET else `POST) path
@@ -123,14 +121,13 @@ let request ?(body="") ?(headers=[]) ?(on_error=fun _ -> ()) client ~port path =
         ::("authorization",client.authorization)::headers)))
     ~error_handler:(fun error ->
       on_error error;
-      if not (Eio.Promise.is_resolved received) then Eio.Promise.resolve receive (Error ());
-      if not (Eio.Promise.is_resolved failed) then Eio.Promise.resolve fail_stream ())
+      if not (Eio.Promise.is_resolved received) then Eio.Promise.resolve receive (Error ()))
     ~response_handler:(fun response reader ->
       Eio.Promise.resolve receive (Ok {response;reader;bytes=Buffer.create 256})) in
   if body="" then H2.Body.Writer.close writer else (
     H2.Body.Writer.write_string writer body;
     H2.Body.Writer.flush writer (function `Written | `Closed -> H2.Body.Writer.close writer));
-  {id;received;failed}
+  {id;received}
 
 let response exchange = match Eio.Promise.await exchange.received with
   | Ok response -> response | Error () -> fail "stream failed before response headers"

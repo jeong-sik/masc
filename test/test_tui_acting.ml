@@ -175,19 +175,6 @@ let test_a_settle_joins_the_open_turn_it_ends_despite_the_number () =
     [ "\xe2\x96\xa0 kpr-08 turn 3084 | Read 12ms \xc2\xb7 in 2.0k out 40 \xc2\xb7 $0.0040" ]
     (List.map text rows)
 
-(* The feed row and the Acting pane's own block draw the same turn's token
-   figures. Captured live 2026-09-24: a wkbl-web-leader turn drew
-   "in 411465 out 3" on the Activity feed while the block beside it spelled
-   the same reading "411.5k". Six digits in a detail column are read as a
-   length, not a number, and two surfaces disagreeing about one figure is the
-   reader's problem either way. *)
-let holds needle haystack =
-  let n = String.length needle and h = String.length haystack in
-  let rec scan i =
-    i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1))
-  in
-  n = 0 || scan 0
-
 let turn_input =
   testable
     (fun ppf -> function

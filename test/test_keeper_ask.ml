@@ -212,11 +212,11 @@ let first_answer_wins_when_two_surfaces_race () =
 
 (* Another asker reuses the questions, the answer check and the fold with a
    record of its own; only the asked record's type differs. *)
-type installation_ask = { id : string; title : string; questions : question list }
+type installation_ask = { id : string; title : string }
 
 let another_askers_log_folds_the_same_way () =
   let questions = [ two_choice_question ~mode:Single ~free_text:Choices_only ] in
-  let asked = { id = "quiz-1"; title = "Operator quiz"; questions } in
+  let asked = { id = "quiz-1"; title = "Operator quiz" } in
   let answers_for choice_id =
     match parse_question_answers ~questions ~submissions:[ ("q1", Chose { choice_ids = [ choice_id ] }) ] with
     | Ok answers -> answers

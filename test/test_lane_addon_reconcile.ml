@@ -257,7 +257,6 @@ let instance config id =
   instances config |> List.find (fun value -> text "instance_id" value = id)
 let phase value = value |> member "phase" |> text "kind"
 let active config = instances config |> List.filter (fun value -> phase value <> "detached")
-let configuration_id value = value |> member "configuration" |> text "id"
 let declared_instance config id =
   active config |> List.find (fun value -> match member "configuration" value with
     | `Null -> false

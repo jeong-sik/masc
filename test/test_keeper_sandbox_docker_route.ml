@@ -39,19 +39,6 @@ let with_cwd path f =
   Sys.chdir path;
   Fun.protect ~finally:(fun () -> Sys.chdir prior) f
 
-let with_config_dir config_dir f =
-  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  Fun.protect
-    ~finally:(fun () ->
-      (match prior with
-       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
-       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Config_dir_resolver.reset ())
-    (fun () ->
-      Unix.putenv "MASC_CONFIG_DIR" config_dir;
-      Config_dir_resolver.reset ();
-      f ())
-
 let temp_dir () =
   let dir = Filename.temp_file "keeper_sandbox_docker_route_" "" in
   Unix.unlink dir;

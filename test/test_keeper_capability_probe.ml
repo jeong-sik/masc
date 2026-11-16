@@ -201,9 +201,6 @@ let test_readable_requested_call_wins_over_an_unreadable_one () =
 
 let dummy_now () = 0.0
 
-let invocation_error =
-  testable (Fmt.of_to_string Probe.invocation_error_to_string) ( = )
-
 let probe_offline ~runtime_id ~tool =
   (* sw/net are never forced on these paths. Eio.Switch.run gives a real
      switch; the net resource is only reached after the lane and surface

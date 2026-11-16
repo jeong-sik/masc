@@ -7,8 +7,6 @@
 module Ws = Server_mcp_transport_ws
 module Sse = Masc.Sse
 
-let sse_frame json = Printf.sprintf "data: %s\n\n" json
-
 let test_initial_session_count () =
   Eio_main.run (fun _env ->
     let count = Ws.session_count () in

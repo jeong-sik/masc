@@ -11,7 +11,6 @@ module Invocation = Masc.Keeper_invocation_contract
 module Turn = Masc.Keeper_turn
 module KHS = Masc.Keeper_keepalive_signal
 module KST = Keeper_state_machine
-module KFS = Masc.Keeper_fs
 module P = Masc.Otel_metric_store
 module Publication_scope = Masc.Keeper_publication_recovery_scope
 module Publication_availability =
@@ -33,57 +32,6 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
-
-let publication_recovery_registry env sw config =
-  let registry_root =
-    Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_dir config)
-  in
-  match
-    Fs_compat.Publication_recovery.open_registry
-      ~sw
-      ~fs:(Eio.Stdenv.fs env)
-      ~registry_root
-  with
-  | Ok registry -> registry
-  | Error error ->
-    fail
-      (Fs_compat.Publication_recovery.registry_error_to_string error)
-
-let write_lines path lines =
-  let dir = KFS.ensure_dir (Filename.dirname path) in
-  let path = Filename.concat dir (Filename.basename path) in
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      List.iter
-        (fun line ->
-          output_string oc line;
-          output_char oc '\n')
-        lines)
-
-let write_json path json =
-  let dir = KFS.ensure_dir (Filename.dirname path) in
-  let path = Filename.concat dir (Filename.basename path) in
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc (Yojson.Safe.pretty_to_string json))
-
-let keepers_dir_of ~base_dir =
-  Filename.concat
-    (Filename.concat (Filename.concat base_dir ".masc") "config")
-    "keepers"
-
-let write_keeper_toml ~base_dir name lines =
-  write_lines (Filename.concat (keepers_dir_of ~base_dir) (name ^ ".toml")) lines
-
-(* Instructions come from [keeper.instructions] in the TOML; it is
-   an unknown TOML key and rejecting it leaves the profile unloaded. *)
-let write_keeper_instructions ~base_dir name body =
-  write_lines
-    (Filename.concat (keepers_dir_of ~base_dir) (name ^ ".toml"))
-    [ "[keeper]"; Printf.sprintf "instructions = %S" body ]
 
 let test_runtime_toml =
   {|

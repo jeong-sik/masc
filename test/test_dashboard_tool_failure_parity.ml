@@ -9,13 +9,6 @@
     path used to count (ExecutionReceiptFailures,
     ToolExecuteFailures). *)
 
-let contains text fragment =
-  try
-    ignore (Str.search_forward (Str.regexp_string fragment) text 0);
-    true
-  with Not_found -> false
-;;
-
 let temp_dir () =
   let path = Filename.temp_file "dashboard-tool-failure-parity-" "" in
   Sys.remove path;

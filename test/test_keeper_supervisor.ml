@@ -121,18 +121,6 @@ let install_owner_inventory_exn ~sw config =
     fail (Keeper_owner_registry.install_error_to_string error)
 ;;
 
-let create_owner_meta_exn config meta =
-  match
-    Keeper_owner_registry.create_meta
-      ~base_path:config.Workspace.base_path
-      meta
-  with
-  | Ok (Some _) -> ()
-  | Ok None -> fail "owner metadata creation removed its snapshot"
-  | Error error ->
-    fail (Keeper_owner_registry.command_error_to_string error)
-;;
-
 let resolve_done_for_test reg value =
   ignore (Reg.resolve_done reg ~source:"test_fixture" value);
   match
@@ -144,14 +132,6 @@ let resolve_done_for_test reg value =
 let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
-
-let with_env name value f =
-  let original = Sys.getenv_opt name in
-  Fun.protect
-    ~finally:(fun () -> restore_env name original)
-    (fun () ->
-      Unix.putenv name value;
-      f ())
 
 let with_config_dir f =
   let dir = temp_dir () in

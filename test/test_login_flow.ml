@@ -260,7 +260,6 @@ type installation =
   ; client : Login_client.t
   ; github : github
   ; github_client : Login_client.t
-  ; log_path : string
   }
 
 let now t () = instant_of_ms !(t.google.clock)
@@ -344,7 +343,6 @@ let with_installation f =
                 ; github_token_requests = ref 0
                 }
             ; github_client
-            ; log_path
             }))
 ;;
 

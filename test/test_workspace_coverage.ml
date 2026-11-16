@@ -98,13 +98,6 @@ let verification_id_for_task config task_id =
   | Some _ -> Alcotest.failf "task %s is not awaiting verification" task_id
   | None -> Alcotest.failf "task %s not found" task_id
 
-(** Check for warning/problem result across legacy string result formats. *)
-let contains_warning result =
-  has_legacy_result_prefix "\xE2\x9A\xA0" result || contains_problem_result result
-
-(** Check for semantic error across legacy string result formats. *)
-let contains_error = contains_problem_result
-
 (** Check for cancel emoji *)
 let _contains_cancel result =
   String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB"  (* 🚫 *)
@@ -135,23 +128,6 @@ let with_test_env f =
     let _ = Workspace.reset config in
     Unix.rmdir tmp_dir;
     raise e
-;;
-
-let with_env key value f =
-  let prev = Sys.getenv_opt key in
-  Unix.putenv key value;
-  let result =
-    try f () with
-    | e ->
-      (match prev with
-       | Some v -> Unix.putenv key v
-       | None -> Unix.putenv key "");
-      raise e
-  in
-  (match prev with
-   | Some v -> Unix.putenv key v
-   | None -> Unix.putenv key "");
-  result
 ;;
 
 let latest_ring_seq () =

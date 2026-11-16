@@ -19,11 +19,8 @@ module Refresh = Keeper_librarian_queue_refresh
 module Source = Keeper_librarian_durable_capture
 module Durable_owner = Keeper_librarian_durable_owner
 module Boundary = Keeper_turn_boundaries
-module Position = Keeper_librarian_progress
 module Checkpoint = Keeper_checkpoint_store
 module Memory_lane = Keeper_memory_lane
-module Current = Keeper_memory_os_current
-module Types = Keeper_memory_os_types
 module Capture = Keeper_librarian_durable_request
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
@@ -38,7 +35,6 @@ let bench_wait_seconds = 600.0
    hundreds of passes. Each wait keeps the limit above; the whole run gets this one. *)
 let bench_run_seconds = 7200.0
 let get = function Ok value -> value | Error detail -> fail detail
-let owned result=get (Result.map_error Owner.error_to_string result)
 let member=Yojson.Safe.Util.member
 let json=testable Yojson.Safe.pp Yojson.Safe.equal
 let io f=Eio_unix.run_in_systhread f
@@ -62,9 +58,6 @@ let invocation_error = function
   | Protocol.Host_refusal refusal -> Lane_addon_call_context.Host_refusal refusal
   | (Protocol.Invalid_contract _ | Protocol_failed _ | Invalid_observation _ | Stopped) as e ->
     Lane_addon_call_context.Transport_error (protocol_error e)
-let current keepers_dir=Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get
-let claims keepers_dir=match current keepers_dir with None -> [] | Some snapshot ->
-  List.map (fun (f:Types.fact) -> f.claim) snapshot.facts |> List.sort String.compare
 let originals_for ~keeper_name base_path keepers_dir store =
   Durable_owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name
   |> Result.map_error Durable_owner.error_to_string |> get
@@ -80,7 +73,7 @@ let publish_routes base_path urls =
   ignore (F.publish_registry ~lane_id:"librarian/durable" ~slot_ids:(List.map (fun (s:F.target_fixture) -> s.id) slots)
     (F.resolver_snapshot ~source:base_path slots) : Runtime_exact_output_registry.t)
 
-let backend env base_path delivery delivery_observed : Runtime.For_testing.backend = {
+let backend env base_path delivery_observed : Runtime.For_testing.backend = {
   start=(fun ~sw ~state_owner ~instance_id ~installation_id:_ ~package ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let state_owner=match state_owner with Some owner -> owner | None -> fail "persistent worker has no state owner" in
     let state=Filename.concat base_path ("worker-state-" ^ Store.digest (Lane_addon_worker_state.identity state_owner)) in
@@ -112,8 +105,7 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
       host=Some {list_requests=(fun () ->
           Protocol.host_requests protocol |> Result.map_error protocol_error);
         deliver=(fun ~arguments ->
-          let result=if !delivery then Error "controlled reply loss before worker delivery"
-            else Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in
+          let result=Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in
           delivery_observed ();result)}} in
     on_created connection;Ok connection);
   package_ready=(fun ~package:_ -> Ok ());
@@ -129,14 +121,12 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
   condition_met=(fun ~runtime:_ _ -> true);sweep=(fun ~runtime:_ ~is_live_instance:_ -> Ok []) }
 
 type fixture = {
-  base_path:string; config:Workspace.config; keepers_dir:string; store:Store.t;
+  base_path:string; config:Workspace.config;
   source:string; declaration:bool -> string; server:F.test_server;
-  set_response:(Capture.t -> Cohttp.Code.status_code * string) -> unit;
   set_step_response:(string -> Cohttp.Code.status_code * string) -> unit;
-  delivery_loss:bool ref; deliveries:int ref; delivery_changed:Eio.Condition.t;
+  deliveries:int ref; delivery_changed:Eio.Condition.t;
   clock:float Eio.Time.clock_ty Eio.Resource.t;
 }
-let observed_originals fixture=originals fixture.base_path fixture.keepers_dir fixture.store
 let start_memory_action ?(keeper_name=keeper_name) fixture action =
   let completed,resolve=Eio.Promise.create () in
   let outcome=Memory_lane.submit ~base_path:fixture.base_path ~keeper_name (fun () ->
@@ -157,20 +147,6 @@ let run_worker fixture=Eio.Time.with_timeout_exn fixture.clock bench_wait_second
 let await_delivery fixture ~after=Eio.Time.with_timeout_exn fixture.clock bench_wait_seconds (fun () ->
   Eio.Condition.loop_no_mutex fixture.delivery_changed (fun () ->
     if !(fixture.deliveries)>after then Some () else None))
-let advanced = function
-  | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> true
-  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _ | Pending _) -> false
-  | Error error -> fail (Consumer.error_to_string error)
-let drive_advanced fixture =
-  let before= !(fixture.deliveries) in
-  match run_worker fixture with
-  | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> ()
-  | Ok (Consumer.Pending _) ->
-    await_delivery fixture ~after:before;
-    check bool "original delivered answer completes local publication" true (advanced (run_worker fixture))
-  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _) ->
-    fail "actual completed-history source was not submitted"
-  | Error error -> fail (Consumer.error_to_string error)
 (* A turn the worker frame refuses is read message by message, one pass per
    step: the first two passes are refused, as the consumer narrows its read,
    and the rest wait on the worker. Returns the passes it took. *)
@@ -300,8 +276,6 @@ let prepare_history config kind =
     ~now:(fun () -> now -. 5.) ~base_path:config.Workspace.base_path item with
   | `Recorded -> () | `Duplicate _ -> fail "duplicate original external fixture"
   | `Error detail -> fail detail
-let progress fixture = io (fun () -> Position.read ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
-  ~keeper_id:keeper_name |> Result.map_error Position.read_error_to_string |> get)
 let with_fixture ?(history_kind=Atoms) f =
   let base_path=Filename.temp_dir "librarian-addon-owner-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
@@ -335,7 +309,7 @@ let with_fixture ?(history_kind=Atoms) f =
       let declaration enabled=Printf.sprintf "id=\"librarian\"\nenabled=%b\nrun_id=\"librarian-original-owner\"\nmanifest_path=%s\n[binding]\nsources=[]\n"
         enabled (Yojson.Safe.to_string (`String (Filename.concat package.directory "lane.toml"))) in
       io (fun () -> write source (declaration true));
-      let response=ref (fun capture -> `OK,F.openai_response (answer capture)) in
+      let response capture=`OK,F.openai_response (answer capture) in
       (* A request that is no history original is a floor step. *)
       let step_response=ref (fun _ -> fail "a floor step has no answer in this run") in
       let original_for body=
@@ -376,18 +350,17 @@ let with_fixture ?(history_kind=Atoms) f =
         (F.Reply_with (fun _ body -> match original_for body with
           | Some capture -> respond capture
           | None -> !step_response body)) in
-      let server=start_server (fun capture -> !response capture) in
+      let server=start_server response in
       publish_routes base_path [server.base_url];
       Runtime.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
         (Server_lane_addon_exact.runner ~base_path);
-      let deliveries=ref 0 and delivery_changed=Eio.Condition.create () and delivery_loss=ref false in
+      let deliveries=ref 0 and delivery_changed=Eio.Condition.create () in
       let delivery_observed ()=incr deliveries;Eio.Condition.broadcast delivery_changed in
-      let fixture={base_path;config;keepers_dir;store;source;declaration;server;
-        set_response=(fun callback -> response:=callback);
-        set_step_response=(fun callback -> step_response:=callback);delivery_loss;deliveries;delivery_changed;
+      let fixture={base_path;config;source;declaration;server;
+        set_step_response=(fun callback -> step_response:=callback);deliveries;delivery_changed;
         clock=Eio.Stdenv.clock env} in
       Runtime.For_testing.with_backend
-        (backend env base_path delivery_loss delivery_observed) (fun () ->
+        (backend env base_path delivery_observed) (fun () ->
         let exported,ready=Eio.Promise.create () in
         let stop=Runtime.subscribe_owner_events ~config ~package_id:Capture.package_id (function
           | Runtime.Export_inventory_changed -> ignore (Eio.Promise.try_resolve ready ())
@@ -408,48 +381,6 @@ let with_fixture ?(history_kind=Atoms) f =
         set_enabled fixture false;
         Memory_lane.For_testing.reset ())))))))))))
 
-let assert_pending = function
-  | Ok (Consumer.Pending _) -> ()
-  | Ok (Consumer.Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
-    fail "actual original request must remain Pending"
-  | Error error -> fail (Consumer.error_to_string error)
-let only_original fixture = match observed_originals fixture with
-  | [record,capture] -> record,capture
-  | [] | _::_::_ -> fail "expected one strictly restored original history request"
-let latest fixture capture = io (fun () ->
-  let exact=Capture.request capture |> get in
-  let schema=match exact.Lane_addon_exact.schema with Some schema -> schema | None -> fail "missing schema" in
-  Lane_addon_exact.read_latest_original_execution ~store:fixture.store ~declaration_id:"librarian" ~schema exact |> get)
-let no_memory fixture = check (list string) "uncommitted original has no Memory facts" []
-  (io (fun () -> claims fixture.keepers_dir))
-module Gate = Keeper_librarian_durable_gate
-let canonical request=Lane_addon_action.canonical request |> get
-let day_of request_id=Capture.minted_on request_id |> get
-(* The same history request ID minted one UTC day earlier, for a chain whose
-   root and successor fall on different days. *)
-let day_ms=86_400_000L
-let minted_a_day_before request_id =
-  match Yojson.Safe.from_string request_id with
-  | `List [kind;hash;`String nonce] ->
-    let time=Printf.sprintf "%012Lx" (Int64.sub (Random_id.uuid_v7_time_ms nonce |> get) day_ms) in
-    let nonce=String.sub time 0 8 ^ "-" ^ String.sub time 8 4 ^ String.sub nonce 13 (String.length nonce-13) in
-    Yojson.Safe.to_string (`List [kind;hash;`String nonce])
-  | _ -> fail "a history request ID lists its kind, owner hash and nonce"
-(* Every gate record the owner's gate scope holds now. *)
-let gate_records fixture capture =
-  let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner capture)) |> get in
-  List.concat_map (fun execution_id -> Gate.Inventory.execution_records inventory ~execution_id)
-    (Gate.Inventory.executions inventory)
-let settled_on fixture ~date (record:Owner.retained) =
-  io (fun () -> Owner.settled ~store:fixture.store ~scope:record.scope ~date ~request_id:record.request_id) |> owned
-let settle_only fixture ~date (record:Owner.retained) =
-  io (fun () -> Owner.settle ~store:fixture.store ~date (Owner.listed record))
-  |> Result.map_error Owner.settle_error_to_string |> get
-let assert_unattached = function
-  | Error error ->
-    check bool "attachment is a blocked original publication" true (Consumer.publication_unfinished error);
-    check bool "attachment refusal has an actual diagnostic" true (String.length (Consumer.error_to_string error)>0)
-  | Ok _ -> fail "missing Addon must not silently return Pending or an empty report"
 
 let mib = 1024 * 1024
 let turn_bytes = 16 * 1024

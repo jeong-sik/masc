@@ -292,18 +292,6 @@ let test_recovery_blocks_interrupted_lane_join () =
    owns the keeper, and this operation must not write its retained meta over
    theirs. *)
 
-let meta_fixture_exn ~keeper_name =
-  let json =
-    `Assoc
-      [ "name", `String keeper_name
-      ; "trace_id", `String "trace-reconciliation-settlement-test"
-      ]
-  in
-  match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
-  | Error detail -> failf "meta fixture rejected: %s" detail
-;;
-
 let backlog_exn ~config =
   match Workspace_backlog.read_backlog_r config with
   | Ok backlog -> backlog

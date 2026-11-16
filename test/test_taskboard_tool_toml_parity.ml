@@ -30,14 +30,6 @@ let expected =
 
 let published = Tool_shard_types.taskboard_tools
 
-let find name =
-  match
-    List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) published
-  with
-  | Some schema -> schema
-  | None -> failwith (name ^ " is absent from Tool_shard_types.taskboard_tools")
-;;
-
 (* The order is what a model reads the tool list in, so a reordering is a
    change to the surface even when every schema still matches. *)
 let test_the_published_order_is_unchanged () =

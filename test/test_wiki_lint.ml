@@ -455,8 +455,6 @@ let test_revision_log_hole_does_not_start_at_r1 () =
 
 (* --- the report as the tool hands it back (RFC §4.2) -------------------- *)
 
-let member key json = Yojson.Safe.Util.member key json
-
 let render_with nodes log =
   let request : Report.request = { page = None; kind = None; limit = None; cursor = None } in
   match

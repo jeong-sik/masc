@@ -96,20 +96,6 @@ let git_fixture path arguments =
     failf "local Git fixture failed: %s" detail
 ;;
 
-let with_env name value f =
-  let previous = Sys.getenv_opt name in
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some old -> Unix.putenv name old
-      | None -> Unix.putenv name "")
-    (fun () ->
-       (match value with
-        | Some next -> Unix.putenv name next
-        | None -> Unix.putenv name "");
-       f ())
-;;
-
 let http_request ~meth ~path ?(body = "") ?(token = None) () =
   let headers =
     [ "host", "localhost"

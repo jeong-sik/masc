@@ -40,16 +40,6 @@ let read_file path =
     ~finally:(fun () -> close_in ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
-let write_file path content =
-  let oc = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out oc)
-    (fun () -> output_string oc content)
-
-let ensure_dir path =
-  if Sys.file_exists path then ()
-  else Unix.mkdir path 0o755
-
 (* Recursively collect every *.jsonl under [dir]. *)
 let rec find_jsonl dir =
   if not (Sys.file_exists dir) then []

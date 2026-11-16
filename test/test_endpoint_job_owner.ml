@@ -43,7 +43,6 @@ let rec remove path =
   | exception Unix.Unix_error (Unix.ENOENT,_,_) -> ()
 
 type fixture = {
-  root : string;
   work : string;
   registry_path : string;
   execution : L.execution;
@@ -70,7 +69,7 @@ let with_fixture f () =
   let execution : L.execution =
     {executable="/bin/sh";env=["PATH=/usr/bin:/bin";"EXPLICIT=original"];cwd=work;payload_gid=gid}
   in
-  let fixture={root;work;registry_path;execution;uid;next_id=ref 1000000} in
+  let fixture={work;registry_path;execution;uid;next_id=ref 1000000} in
   Fun.protect ~finally:(fun () -> remove root) (fun () ->
     Eio_main.run (fun env ->
       Eio.Time.with_timeout_exn env#clock 120. (fun () ->

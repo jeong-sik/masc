@@ -76,13 +76,6 @@ let find_section sections id =
   | Some json -> json
   | None -> fail ("missing section " ^ id)
 
-let iso_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
 let test_briefing_cold_call_returns_pending () =
   (* After #2094, cold calls (no cache) return "pending" and trigger async refresh.
      This avoids blocking the dashboard on cold-start computation. *)

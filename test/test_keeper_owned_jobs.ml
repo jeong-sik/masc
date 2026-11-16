@@ -1279,11 +1279,9 @@ value = { sha256 = %S }
 
 type parked_named_producer =
   { config : Workspace.config
-  ; publication_recovery : Masc.Keeper_publication_recovery_availability.turn_context
   ; surface : Masc.Keeper_capability_surface.t
   ; reference : Skill_reference.t
   ; binding : Dependency.composition
-  ; child : Yojson.Safe.t
   ; child_continuation : Journal.continuation
   ; parent_continuation : Journal.continuation
   ; job_id : string
@@ -1435,7 +1433,7 @@ pointer = "/artifacts/0/_blob/sha256"
      check bool "named journal retains original Task Skill selection" true
        (List.exists (Skill_reference.equal reference) (Recorder.bound_task_references original))
    | Named {activation=None;_} | Prepared -> fail "named original activation was not sealed");
-  f { config; publication_recovery; surface; reference; binding; child
+  f { config; surface; reference; binding
     ; child_continuation; parent_continuation; job_id=id }
 
 let resume_parked_continuation env fixture ?meta ?on_recovery_held surface continuation =

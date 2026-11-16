@@ -112,17 +112,6 @@ let seed_post_without_kind () =
     ~recipient_lookup:every_name_declared ());
   post_id
 
-let keeper_meta name =
-  match
-    Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-        [ "name", `String name
-        ; "trace_id", `String ("test-trace-" ^ name)
-        ])
-  with
-  | Ok meta -> meta
-  | Error error -> Alcotest.failf "keeper meta fixture invalid: %s" error
-
 (** {1 Backend Selection} *)
 
 let test_default_backend () =

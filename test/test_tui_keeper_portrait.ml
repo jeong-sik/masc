@@ -33,8 +33,6 @@ let test_no_picture_is_no_band () =
   check bool "NO_COLOR, or no colour to draw in" false
     (shows ~display:View.No_picture ~content_rows:400 ~content_cols:400 ())
 
-let facts n = List.init n (fun index -> Printf.sprintf "  fact %d" index)
-
 let test_pixels_go_only_where_the_whole_portrait_shows () =
   let placed = Option.get (band ~display:pixels ()) in
   let rows = placed.Portrait.box.View.rows in

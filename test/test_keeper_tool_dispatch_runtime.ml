@@ -289,10 +289,6 @@ let is_sandbox_available =
     | _ -> false
   )
 
-let require_sandbox () =
-  if not (Lazy.force is_sandbox_available) then
-    Alcotest.skip ()
-
 let with_exec_fixture
       ?(process = false)
       ?(always_allow = false)
@@ -444,11 +440,6 @@ let outcome_label = function
   | Tool_result.Completed () -> "success"
   | Tool_result.Deferred () -> "deferred"
   | Tool_result.Failed _ -> "failure"
-
-let non_empty_lines text =
-  String.split_on_char '\n' text
-  |> List.map String.trim
-  |> List.filter (fun line -> line <> "")
 
 let json_list_contains name = function
   | `List values ->

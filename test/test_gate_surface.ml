@@ -27,8 +27,6 @@ let surface_pp fmt (s : Surface.t) =
       Format.fprintf fmt "Gate{%s;ch=%s}" channel
         (Option.value channel_id ~default:"-")
 
-let surface : Surface.t testable = testable surface_pp ( = )
-
 let presence_pp fmt (p : Surface.surface_presence) =
   Format.fprintf fmt "{%a alive=%b}" surface_pp p.surface p.alive
 

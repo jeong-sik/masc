@@ -3688,17 +3688,6 @@ let test_runtime_toml_rejects_a_priority_run_limit_on_an_official_client () =
         default = \"subscription.seeded\"\n")
 ;;
 
-let sample_binding (cfg : Runtime_schema.config) =
-  match
-    List.find_opt
-      (fun (binding : Runtime_schema.binding) ->
-        String.equal (Runtime_schema.binding_key binding) "local.sample")
-      cfg.Runtime_schema.bindings
-  with
-  | Some binding -> binding
-  | None -> fail "missing binding local.sample"
-;;
-
 (* A binding declares a closed set of keys. A misspelled key must stop the
    load at its own path, not load as a binding without that key. *)
 let binding_with_extra line =

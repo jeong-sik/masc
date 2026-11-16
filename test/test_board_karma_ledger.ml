@@ -20,16 +20,6 @@ let fresh_test_base_path () =
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
-let with_env key value f =
-  let prev = Sys.getenv_opt key in
-  Unix.putenv key value;
-  Fun.protect
-    ~finally:(fun () ->
-      match prev with
-      | Some v -> Unix.putenv key v
-      | None -> Unix.putenv key "")
-    f
-
 (** Run [f] inside an Eio runtime with an isolated JSONL board *)
 let with_eio f () =
   Eio_main.run @@ fun env ->

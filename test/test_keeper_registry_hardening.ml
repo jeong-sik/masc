@@ -37,13 +37,6 @@ let make_meta name =
   | Error e -> failwith ("make_meta failed: " ^ e)
 ;;
 
-let write_text_file path content =
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
-;;
-
 let register name =
   let meta = make_meta name in
   KR.For_testing.register ~base_path meta.name meta

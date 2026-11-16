@@ -56,24 +56,6 @@ let without_env key f =
     f
 ;;
 
-let read_lines path =
-  if not (Sys.file_exists path)
-  then []
-  else (
-    let ic = open_in path in
-    let rec loop acc =
-      match input_line ic with
-      | line -> loop (line :: acc)
-      | exception End_of_file ->
-        close_in ic;
-        List.rev acc
-      | exception exn ->
-        close_in_noerr ic;
-        raise exn
-    in
-    loop [])
-;;
-
 let write_file path contents =
   let oc = open_out path in
   Fun.protect

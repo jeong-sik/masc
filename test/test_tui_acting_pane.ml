@@ -488,23 +488,6 @@ let test_the_order_cycles_through_all_four () =
 
 (* ── calls: a bracket per model response ───────────────────────────── *)
 
-(* The hook's per-call report: provider call [session] ran while runner had
-   eleven keeper turns done, so it belongs to keeper turn 12. With it the
-   fold files calls from two provider calls into one record, as the live
-   feed does. *)
-let observed ~at session =
-  ( at
-  , Observer.Keeper_turn_observation
-      { Observer.to_keeper = "runner"
-      ; to_session_turn = Some session
-      ; to_total_turns = Some 11
-      ; to_at = at
-      } )
-
-let opens = "\xe2\x94\x8c"
-let inside = "\xe2\x94\x82"
-let closes = "\xe2\x94\x94"
-
 let test_a_call_row_names_the_call_a_press_opens () =
   let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in
   check bool "by the provider's call id" true

@@ -6,8 +6,6 @@
 
 module Mermaid = Masc_tui_mermaid
 
-let rows = Alcotest.(list string)
-
 let node_id =
   let scope_text = function
     | Mermaid.Top_level -> ""

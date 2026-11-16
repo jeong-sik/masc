@@ -113,20 +113,6 @@ let skill_snapshot () =
   skill_snapshot_with_description "Read these instructions before working."
 ;;
 
-let skill_catalog_with_description description =
-  let catalog, diagnostics =
-    Keeper_skill_catalog.of_snapshot (skill_snapshot_with_description description)
-  in
-  match diagnostics with
-  | [] -> catalog
-  | diagnostics ->
-    failf "fixture catalog projected with %d diagnostics" (List.length diagnostics)
-;;
-
-let skill_catalog () =
-  skill_catalog_with_description "Read these instructions before working."
-;;
-
 let configured_external_skill_snapshot () =
   configured_snapshot
     ~source_id:"shared-catalog"

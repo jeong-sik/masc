@@ -579,12 +579,6 @@ let server_error_500 =
     (Retry.ServerError { status = 500; message = "Internal Server Error" })
 ;;
 
-let provider_unavailable =
-  CoreError.Provider
-    (Llm_provider.Error.ProviderUnavailable
-       { provider = "server-error-test"; detail = "HTTP 503 retry-after exhausted" })
-;;
-
 let generic_accept_rejected_err ~scope =
   KTD.core_error_of_masc_internal_error
     (KTD.Accept_rejected

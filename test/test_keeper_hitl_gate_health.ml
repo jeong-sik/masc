@@ -4,10 +4,6 @@ module H = Keeper_hitl_gate_health
 module Q = Keeper_approval_queue_rules_types
 module R = Masc.Keeper_tool_approval_registry
 
-let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
-
-let section = testable Yojson.Safe.pp Yojson.Safe.equal
-
 let field name = function
   | `Assoc fields -> List.assoc name fields
   | _ -> failwith "section is not an object"

@@ -4,20 +4,6 @@ open Masc
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
-let with_env key value f =
-  let prior = try Some (Sys.getenv key) with Not_found -> None in
-  Unix.putenv key value;
-  Fun.protect
-    ~finally:(fun () ->
-      match prior with
-      | Some v -> Unix.putenv key v
-      | None ->
-          (* No "unset" in stdlib Unix; clear via empty value. The
-             containment module reads via env_config which treats empty
-             as "not set" for booleans. *)
-          Unix.putenv key "")
-    f
-
 let with_tmp_base f =
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())

@@ -16,25 +16,6 @@ open Masc_tui_types
 
 let state () = create_state ~workspace:"test" ~port:8935 ()
 
-(* A read that answered with nothing. Enough to make the view row exist,
-   which is what the row budget turns on. *)
-let answered : Masc.Tui_decode.verification_snapshot =
-  { vs_requests = []
-  ; vs_total = 0
-  ; vs_view = Masc.Tui_decode.Awaiting_queue
-  ; vs_offset = 0
-  ; vs_truncated = false
-  ; vs_awaiting_unresolved = []
-  ; vs_awaiting_unresolved_total = 0
-  ; vs_backlog_error = None
-  ; vs_backlog_recovery = None
-  }
-
-let layout state =
-  match scrolled_surface_rows state ~cols:80 Verification with
-  | Some layout -> layout
-  | None -> Alcotest.fail "the Verification list has no scroll geometry"
-
 let test_an_open_detail_is_not_the_list () =
   let detail = state () in
   detail.verification_detail_request_id <- Some "request-1";

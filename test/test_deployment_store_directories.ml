@@ -995,7 +995,7 @@ let test_special_memory_paths_preflight exe () = with_memory_workspace (fun base
 
 type librarian_payload_fixture = {
   base:string; root:string; store:Lane_addon_store.t; owner:Admission.owner;
-  capture:Admission.t; parent:Original.retained; gate_id:string; gate_request:Yojson.Safe.t;
+  parent:Original.retained; gate_id:string; gate_request:Yojson.Safe.t;
 }
 (* The host retains an original's Exact record and proof when it answers.
    The deploy check reads them as the original's consumer does (RFC
@@ -1099,7 +1099,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
     (* The original producer captures no guidance for this unavailable gate
        and validated proposal without absorptions. *)
     "guidance",`Null;"predecessor",`Null] in
-  f {base;root;store;owner;capture;parent;gate_id;gate_request})
+  f {base;root;store;owner;parent;gate_id;gate_request})
 let retain_gate fixture ~request_id request =
   Original.retain ~store:fixture.store ~scope:(Original_gate.scope fixture.owner) ~request_id
     ~installation_id:fixture.parent.installation_id ~package_id:fixture.parent.package_id

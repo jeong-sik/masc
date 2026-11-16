@@ -1260,8 +1260,6 @@ let test_an_unknown_turn_start_carries_the_newest_atom () =
   check (list int) "the newest atom alone" [ 63 ]
     (carried (Keeper_carried_front.Turn_boundary_unknown { reason = "fixture" }))
 
-let turn_start_to_string = Keeper_carried_front.turn_start_to_string
-
 let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
   let seed_reads = ref 0 and librarian_reads = ref 0 in
   (* The review owns even an unread-tagged message: it is submitted evidence,

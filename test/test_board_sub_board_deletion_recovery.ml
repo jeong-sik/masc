@@ -19,9 +19,9 @@ let post store hearth body =
     ~content:body ~hearth ~post_kind:Board.Human_post ~ttl_hours:0 () with
   | Ok post -> post
   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
-let comment store (parent : Board.post) = require (Board.add_comment store ~reader
+let comment ?(content = "accepted reply") store (parent : Board.post) = require (Board.add_comment store ~reader
   ~lookup:Recipient_lookup.none_declared ~post_id:(Board.Post_id.to_string parent.id)
-  ~author:"room-reader" ~content:"accepted reply" ~ttl_hours:0 ())
+  ~author:"room-reader" ~content ~ttl_hours:0 ())
 let delete store (board : Board.sub_board) = Board.delete_sub_board store
   ~authorization:(Board.Owner_sub_board_deletion board.owner)
   ~sub_board_id:(Board.Sub_board_id.to_string board.id)
@@ -68,7 +68,7 @@ let test_durable_unlink_and_unselected_work base =
   Alcotest.(check bool) "unselected comment work remains owned" true store.dirty_comments;
   List.iter (fun (path, before) -> Alcotest.(check (option string)) "unselected source is not rewritten"
     before (bytes path)) untouched;
-  ignore (comment store parent);
+  ignore (comment ~content:"accepted reply after unlink" store parent);
   let restarted = fresh base in
   Alcotest.(check (option string)) "hearth unlink is durable without a flush" None (read restarted parent).hearth;
   ignore (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string reply.id)));

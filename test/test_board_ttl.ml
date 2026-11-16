@@ -190,15 +190,15 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
     | Ok post -> Post_id.to_string post.id
     | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
-  let add_reply ~ttl_hours =
+  let add_reply ~content ~ttl_hours =
     match
-      add_comment store ~post_id ~author:"commenter" ~content:"reply" ~ttl_hours ()
+      add_comment store ~post_id ~author:"commenter" ~content ~ttl_hours ()
     with
     | Ok comment -> Comment_id.to_string comment.id
     | Error e -> Alcotest.fail (show_board_error e)
   in
-  let (_ : string) = add_reply ~ttl_hours:0 in
-  let expiring_id = add_reply ~ttl_hours:1 in
+  let (_ : string) = add_reply ~content:"permanent reply" ~ttl_hours:0 in
+  let expiring_id = add_reply ~content:"expiring reply" ~ttl_hours:1 in
   let reply_count () = (Hashtbl.find store.posts post_id).reply_count in
   Alcotest.(check int) "both replies counted" 2 (reply_count ());
   let expiring = Hashtbl.find store.comments expiring_id in

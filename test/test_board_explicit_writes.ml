@@ -60,19 +60,21 @@ let test_identical_posts_are_distinct_writes () =
 let test_identical_comments_are_distinct_writes () =
   let post = create_post ~content:"comment target" in
   let post_id = Board.Post_id.to_string post.id in
-  let add () =
-    match
-      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
-        ~post_id
-        ~author:"explicit-writer"
-        ~content:"intentional duplicate comment"
-        ()
-    with
+  let add_as author =
+    Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
+      ~post_id
+      ~author
+      ~content:"intentional duplicate comment"
+      ()
+  in
+  let add author =
+    match add_as author with
     | Ok comment -> comment
     | Error error -> Alcotest.fail (Board.show_board_error error)
   in
-  let first = add () in
-  let second = add () in
+  (* The same text from two different authors is two distinct writes. *)
+  let first = add "explicit-writer" in
+  let second = add "explicit-writer-2" in
   Alcotest.(check bool)
     "distinct ids"
     true
@@ -80,9 +82,20 @@ let test_identical_comments_are_distinct_writes () =
        (String.equal
           (Board.Comment_id.to_string first.id)
           (Board.Comment_id.to_string second.id)));
-  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
-  | Error error -> Alcotest.fail (Board.show_board_error error)
-  | Ok updated -> Alcotest.(check int) "reply count" 2 updated.reply_count
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok updated -> Alcotest.(check int) "reply count" 2 updated.reply_count);
+  (* The same author repeating the same text on the same post is refused. *)
+  match add_as "explicit-writer" with
+  | Ok _ -> Alcotest.fail "the guard let an identical comment through"
+  | Error error ->
+    let message = Board.show_board_error error in
+    let needle = "already has this exact comment" in
+    let rec found i =
+      i + String.length needle <= String.length message
+      && (String.sub message i (String.length needle) = needle || found (i + 1))
+    in
+    Alcotest.(check bool) "guard names the duplicate" true (found 0)
 ;;
 
 let test_long_post_is_not_locally_rejected () =

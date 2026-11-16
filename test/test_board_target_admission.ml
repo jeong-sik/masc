@@ -17,9 +17,9 @@ let post store ?hearth ?(visibility = Board.Public) () =
   | Ok value -> value
   | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
 
-let reply store (parent : Board.post) =
+let reply ?(content = "original reply") store (parent : Board.post) =
   require (Board.add_comment store ~reader:Access.Operator ~lookup:Recipient_lookup.none_declared
-    ~post_id:(Board.Post_id.to_string parent.id) ~author:"owner" ~content:"original reply" ~ttl_hours:0 ())
+    ~post_id:(Board.Post_id.to_string parent.id) ~author:"owner" ~content ~ttl_hours:0 ())
 
 type mutation = Post_vote | Comment_vote | Post_reaction | Comment_reaction
 let all = [Post_vote; Comment_vote; Post_reaction; Comment_reaction]
@@ -173,7 +173,7 @@ let test_changed_comment_dependency base =
   let attempts = List.map (fun kind ->
     let calls = ref 0 in kind, counted_store base kind calls, calls) [Comment_vote; Comment_reaction] in
   let other = fresh base in
-  ignore (reply other parent);
+  ignore (reply ~content:"original reply (retry)" other parent);
   let before = capture_leaves other in
   List.iter (fun (kind, store, calls) ->
     calls := 0;

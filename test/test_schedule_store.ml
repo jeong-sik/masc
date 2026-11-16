@@ -1660,10 +1660,9 @@ let test_last_good_is_parseable_after_good_write () =
 ;;
 
 (* The out-of-band-deletion arm of the same silent-failure-to-data-loss
-   regression: [write_state] commits the primary and the .last-good mirror
-   together, so an absent primary next to a parseable mirror is a deletion, not a
-   fresh store. Reading it as an empty state let the next write mirror that empty
-   state over the surviving copy. *)
+   regression: an absent primary next to a parseable mirror is not a fresh
+   store. The mirror remains readable evidence even though mutations cannot
+   use it as authority. *)
 let test_absent_primary_recovers_from_last_good () =
   with_workspace
   @@ fun config ->
@@ -1676,23 +1675,88 @@ let test_absent_primary_recovers_from_last_good () =
     (List.hd recovered.schedules).schedule_id
 ;;
 
-let test_absent_primary_write_restores_primary_without_dropping_schedules () =
-  with_workspace
-  @@ fun config ->
-  let before_deletion = make_request ~schedule_id:"vanished-primary-write" () in
-  ignore (insert_ok config before_deletion);
+let test_mutations_refuse_stale_mirror () =
+  List.iter (fun cause ->
+    with_workspace @@ fun config ->
+    let request = insert_ok config (make_request ~schedule_id:"cancelled-primary" ()) in
+    let stale_mirror = Workspace_core.read_text config (recovery_path config) in
+    ignore (store_ok "cancel authoritative request"
+      (cancel_request config ~schedule_id:request.schedule_id));
+    ignore (insert_ok config (make_request ~schedule_id:"primary-only" ()));
+    let authoritative = Workspace_core.read_text config (schedules_path config) in
+    Workspace_core.write_text config (recovery_path config) stale_mirror;
+    let broken = "{unreadable primary" in
+    (match cause with
+     | Primary_missing -> delete_primary config
+     | Primary_unusable -> Workspace_core.write_text config (schedules_path config) broken);
+    let check_preserved () =
+      check string "stale mirror remains evidence" stale_mirror
+        (Workspace_core.read_text config (recovery_path config));
+      match cause with
+      | Primary_missing -> check bool "missing primary is not recreated" false
+          (Workspace_utils.path_exists config (schedules_path config))
+      | Primary_unusable -> check string "unreadable primary is not replaced" broken
+          (Workspace_core.read_text config (schedules_path config))
+    in
+    let operations =
+      [ "insert", (fun () -> insert_request config ~runner_tick_sec
+            (make_request ~schedule_id:"must-not-insert" ()) |> Result.map ignore)
+      ; "update", (fun () -> update_request config ~authority:Operator_authority
+            ~now:150.0 ~runner_tick_sec request |> Result.map ignore)
+      ; "cancel", (fun () -> cancel_request config ~schedule_id:request.schedule_id
+            |> Result.map ignore)
+      ; "append note", (fun () -> append_note config ~schedule_id:request.schedule_id
+            ~author_id:"operator" ~author_kind:Human_operator ~body:"must not append"
+            ~now:201.0 |> Result.map ignore)
+      ; "due tick", (fun () -> refresh_due config ~now:201.0 |> Result.map ignore)
+      ; "reschedule", (fun () -> reschedule_due_recurring config ~now:201.0
+            ~schedule_ids:[request.schedule_id] |> Result.map ignore)
+      ; "retire consumer", (fun () -> cancel_matching config ~should_cancel:(fun _ -> true))
+      ; "startup recovery", (fun () -> recover_running_on_startup config ~now:201.0
+            |> Result.map ignore)
+      ; "prune", (fun () -> prune_completed config |> Result.map ignore)
+      ]
+    in
+    List.iter (fun (label, mutate) ->
+      (match mutate () with
+       | Error (Primary_ledger_unavailable observed) ->
+         check bool (label ^ " preserves primary failure kind") true (observed = cause)
+       | Error err -> fail (label ^ ": " ^ store_error_to_string err)
+       | Ok () -> fail (label ^ " promoted a recovery mirror to authority"));
+      check_preserved ()) operations;
+    (match read_state_observed config with
+     | Ok (state, Recovery_mirror observed) ->
+       check bool "read retains provenance" true (observed = cause);
+       check int "mirror remains readable" 1 (List.length state.schedules)
+     | Ok (_, (Primary_ledger | Uninitialized)) -> fail "mirror became authoritative"
+     | Error err -> fail (read_error_to_string err));
+    check_preserved ();
+    (* Restoring the known authoritative bytes permits subsequent mutations. *)
+    Workspace_core.write_text config (schedules_path config) authoritative;
+    ignore (insert_ok config (make_request ~schedule_id:"after-authority-restored" ()));
+    match get_schedule config ~schedule_id:request.schedule_id with
+    | Some stored -> check_status "cancelled schedule stays cancelled" Cancelled stored.status
+    | None -> fail "cancelled schedule disappeared")
+    [Primary_missing; Primary_unusable]
+;;
+
+let test_startup_recovery_refuses_stale_running_mirror () =
+  with_workspace @@ fun config ->
+  let request = insert_ok config (make_request ~schedule_id:"already-settled" ()) in
+  ignore (store_ok "due" (refresh_due config ~now:201.0));
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id:request.schedule_id) in
+  let running_mirror = Workspace_core.read_text config (recovery_path config) in
+  ignore (store_ok "accept" (accept_running config ~now:203.0 ~attempt:started.attempt ()));
+  Workspace_core.write_text config (recovery_path config) running_mirror;
   delete_primary config;
-  let after_deletion = make_request ~schedule_id:"added-after-deletion" () in
-  ignore (insert_ok config after_deletion);
-  check bool "primary ledger is restored by the next write" true
+  (match recover_running_on_startup config ~now:204.0 with
+   | Error (Primary_ledger_unavailable Primary_missing) -> ()
+   | Error err -> fail (store_error_to_string err)
+   | Ok _ -> fail "startup recovery revived a settled wake from the mirror");
+  check bool "startup recovery does not recreate primary" false
     (Workspace_utils.path_exists config (schedules_path config));
-  check int "recovered and new schedule both persist" 2
-    (List.length (read_state config).schedules);
-  let mirror_json = Workspace_core.read_json config (recovery_path config) in
-  match Schedule_store.state_of_yojson mirror_json with
-  | Ok mirror ->
-    check int "last-good keeps both schedules" 2 (List.length mirror.schedules)
-  | Error msg -> fail (".last-good is not parseable: " ^ msg)
+  check string "running mirror preserved" running_mirror
+    (Workspace_core.read_text config (recovery_path config))
 ;;
 
 let test_absent_primary_and_absent_mirror_reads_fresh () =
@@ -2639,9 +2703,10 @@ let () =
             test_last_good_is_parseable_after_good_write;
           test_case "absent primary recovers from last-good" `Quick
             test_absent_primary_recovers_from_last_good;
-          test_case "write after absent primary restores it without dropping schedules"
-            `Quick
-            test_absent_primary_write_restores_primary_without_dropping_schedules;
+          test_case "all mutations refuse a stale recovery mirror" `Quick
+            test_mutations_refuse_stale_mirror;
+          test_case "startup recovery cannot revive a settled wake from a mirror" `Quick
+            test_startup_recovery_refuses_stale_running_mirror;
           test_case "absent primary and absent mirror read fresh" `Quick
             test_absent_primary_and_absent_mirror_reads_fresh;
           test_case "absent primary with unparseable mirror is corrupt" `Quick

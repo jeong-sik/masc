@@ -38,6 +38,8 @@ type mutation_authority =
     Both current-row and replacement ownership are checked under the ledger
     mutation lock; an earlier observation grants no authority. *)
 
+type recovery_cause = Primary_missing | Primary_unusable
+
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
@@ -100,6 +102,10 @@ type store_error =
           row is another one: the schedule was replaced after the caller read
           it. No write occurs. *)
   | Persistence_failed of string
+  | Primary_ledger_unavailable of recovery_cause
+      (** A readable recovery mirror is available, but the primary is missing
+          or unreadable. The mirror is observation only: no mutation, startup
+          recovery or runner tick may promote it to authoritative state. *)
   | Corrupt_ledger of
       { primary_err : string
       ; recovery_err : string option
@@ -168,8 +174,6 @@ val with_ledger_lock : Workspace_utils.config -> (unit -> 'a) -> 'a
     schedule mutation. Acquire any ordered Keeper intake fences before this
     lock and durable queue locks inside it. Never call this from a store
     mutation callback, which already owns the ledger lock. *)
-
-type recovery_cause = Primary_missing | Primary_unusable
 
 type read_source =
   | Uninitialized
@@ -386,7 +390,9 @@ val recover_running_on_startup :
     each exact current occurrence's wake attempt as [Failed]. Exact
     occurrence identity distinguishes an interrupted dispatch attempt. Intended
     for one-time runner startup recovery before any new dispatch can be active.
-    The recovery reason is fixed to [Interrupted_by_process_restart]. *)
+    The recovery reason is fixed to [Interrupted_by_process_restart]. A mirror
+    without readable primary authority returns [Primary_ledger_unavailable]
+    without rewriting the ledger or reviving its wakes. *)
 
 val fail_due_candidate :
   ?attempted_at:float ->
@@ -430,9 +436,10 @@ val append_note :
   (Schedule_domain.schedule_note * int, store_error) result
 (** Appends a note to one schedule's note history and returns it with the new
     note count for that schedule_id. The ledger load, note identity/count
-    derivation and publication run under the schedule-file lock. An unreadable
-    ledger returns [Corrupt_ledger]; an absent schedule returns
-    [Schedule_not_found].
+    derivation and publication run under the schedule-file lock. A readable
+    mirror without primary authority returns [Primary_ledger_unavailable];
+    unreadable ledger and mirror return [Corrupt_ledger]. An absent schedule
+    returns [Schedule_not_found].
 
     Notes are keyed by the stable
     [schedule_id], not the per-instance id, so a definition replacement

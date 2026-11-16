@@ -172,8 +172,14 @@ let install ~sw ~config =
           Keeper_librarian_queue_refresh.capacity_released ~config ~installation_id;
           run_discovery event)) in
   let unsubscribe=Runtime.subscribe_owner_events ~config ~package_id:Capture.package_id signal in
+  (* The listener runs inside a TypeSafe call; a wake failure must not lose
+     the answer that call already received. *)
   let stop_recovery=Typesafeai_client.on_destination_recovered (fun _ ->
-    if not (Atomic.get stopped) then Keeper_librarian_queue_refresh.destination_recovered ~config) in
+    if not (Atomic.get stopped) then
+      try Keeper_librarian_queue_refresh.destination_recovered ~config with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Log.Server.warn "Librarian gate destination recovery wake failed: %s"
+                 (Printexc.to_string exn)) in
   Eio.Switch.on_release sw (fun () -> Atomic.set stopped true;stop_recovery ();unsubscribe ())
 module For_testing = struct
   let discover ~config ~store ~after_inventory ~on_original ~event =

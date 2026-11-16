@@ -139,10 +139,12 @@ val destination_outcome : destination_id -> destination_outcome option
 
 val on_destination_recovered : (destination_id -> unit) -> unit -> unit
 (** [on_destination_recovered listener] calls [listener] once each time a
-    destination's latest outcome changes from [Refusing] to [Answered], on the
-    domain that received the answer, and returns the function that removes
-    it. An answer from a destination already [Answered] or never asked calls
-    nothing. RFC librarian-gate-waits-on-the-destination-not-on-passes §3.3. *)
+    destination stops refusing for its own state: its latest outcome was
+    [Refusing] with a {!Destination_state} refusal and becomes [Answered], or
+    a refusal of one request ({!This_request}). It runs on the domain that
+    received the response, before {!evaluate} returns, and must only signal.
+    Returns the function that removes it. Any other change calls nothing.
+    RFC librarian-gate-waits-on-the-destination-not-on-passes §3.3. *)
 
 type failure_kind = Capacity_refused | Other_refusal
 val failure_kind : failure -> failure_kind

@@ -264,24 +264,33 @@ let on_destination_recovered listener =
       (List.filter (fun (other, _) -> not (other == token)))
 ;;
 
+(* Whether an outcome still refuses whatever the destination is sent. *)
+let refuses_for_its_state = function
+  | Some (Refusing { last; _ }) ->
+    (match refusal_owner last with
+     | Destination_state -> true
+     | This_request -> false)
+  | Some (Answered _) | None -> false
+
 (* The update may run more than once under contention; the run that is
    stored is the last one, so [recovered] tells whether the stored change
-   ended a refusal. *)
-let note_answer key ~at =
+   ended a refusal for the destination's state: an answer, or a refusal of
+   one request only. *)
+let note_changing key next =
   let recovered = ref false in
   note_outcome key (fun previous ->
-    (recovered :=
-       match previous with
-       | Some (Refusing _) -> true
-       | Some (Answered _) | None -> false);
-    Answered { at });
+    let outcome = next previous in
+    recovered := refuses_for_its_state previous && not (refuses_for_its_state (Some outcome));
+    outcome);
   if !recovered
   then List.iter (fun (_, listener) -> listener key) (Atomic.get recovery_listeners)
 ;;
 
+let note_answer key ~at = note_changing key (fun _ -> Answered { at })
+
 let note_refusal key ~at refusal =
   let last = refusal_class refusal in
-  note_outcome key (function
+  note_changing key (function
     | None -> Refusing { since = at; last_at = at; last; last_answer_at = None }
     | Some (Answered { at = answered_at }) ->
       Refusing { since = at; last_at = at; last; last_answer_at = Some answered_at }

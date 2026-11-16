@@ -420,6 +420,10 @@ let render_code (state : state) =
   let entries = code_entries state in
   let total = List.length entries in
   let cursor = max 0 (min state.code_cursor (total - 1)) in
+  (* What the file pane says with no file open: the listing's own reading, so
+     it offers Enter only beside rows to choose and says a failure whole. *)
+  let listing_idle = Masc_tui_list_idle.of_listing (code_listing_view state) in
+  let empty_directory = ui_text state ~ko:"(빈 폴더)" ~en:"(empty directory)" in
   let span = lexed_span in
   let list_pane ~framed pane_buf pane_cols =
     (* Beside the file pane the box is the pane separator; alone on a narrow
@@ -475,7 +479,7 @@ let render_code (state : state) =
       | Masc_tui_fetched.Absent ->
           status_line (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
       | Masc_tui_fetched.Ready [] ->
-          status_line (Ansi.dim ^ ui_text state ~ko:" (빈 폴더)" ~en:" (empty directory)" ^ Ansi.reset)
+          status_line (Ansi.dim ^ " " ^ empty_directory ^ Ansi.reset)
       | Masc_tui_fetched.Ready (_ :: _) -> 0
     in
     let list_rows_budget = max 0 (list_rows_budget - status_rows) in
@@ -716,7 +720,11 @@ let render_code (state : state) =
                ^ ui_text state ~ko:"blame 읽는 중…" ~en:"reading blame…" ^ Ansi.reset
            | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent))
            | None -> with_note)
-      | None -> ui_text state ~ko:"(Enter 로 고른 파일 열기)" ~en:"(Enter opens the selected file)"
+      | None ->
+          (match listing_idle with
+           | Masc_tui_list_idle.Rows_ready _ ->
+               ui_text state ~ko:"(Enter 로 고른 파일 열기)" ~en:"(Enter opens the selected file)"
+           | List_unread | List_loading | List_failed _ | List_empty _ -> "")
     in
     if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
@@ -909,7 +917,8 @@ let render_code (state : state) =
        done
      else
        (* A blank pane used to mean three things: no file open, a file being
-          read, and a file that failed to read. Two of them now say so. *)
+          read, and a file that failed to read. Each now says so; with no file
+          open the pane says what the listing beside it holds. *)
        let say style text =
          box_line pane_buf pane_cols
            (style ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset);
@@ -923,9 +932,8 @@ let render_code (state : state) =
            say (Theme.recede ())
              (ui_text state ~ko:(path ^ " 읽는 중…") ~en:("reading " ^ path ^ "…"))
        | Some (_, Masc_tui_fetched.Absent) | None ->
-           for _ = 1 to content_height do
-             box_empty pane_buf pane_cols
-           done
+           draw_list_idle pane_buf pane_cols ~ko:(state.ui_language = Lang_ko)
+             ~empty:empty_directory ~height:content_height listing_idle
        | Some (_, Masc_tui_fetched.Ready { cfd_body = Code_binary { bytes }; _ }) ->
            (* Its bytes would draw as hundreds of rows of escapes. The title
               already names the file, so the pane says only what it is. *)

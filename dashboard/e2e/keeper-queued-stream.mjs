@@ -23,8 +23,12 @@ try {
   await submit(page, '첫 번째 요청')
   await submit(page, '두 번째 요청')
   await page.getByTestId('fixture-operation-status').getByText('Queued 2', { exact: true }).waitFor()
-  if (await page.getByText('Queued', { exact: true }).count() !== 2) {
-    throw new Error('two durable Queued placeholders were not rendered')
+  // A reply turns queued when the panel reads the acceptance frame, which
+  // comes after the fixture counts the submit.
+  const queuedReplies = page.locator('[data-chat-delivery-state="queued"]')
+  await queuedReplies.nth(1).waitFor()
+  if (await queuedReplies.count() !== 2) {
+    throw new Error('two durable queued replies were not rendered')
   }
   await page.screenshot({ path: queuedScreenshot, fullPage: true })
 

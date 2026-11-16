@@ -18973,15 +18973,17 @@ let apply_refused_workspace_identity state ~mailbox ~detail latest =
    A successful older full refresh cannot authorize a same-port replacement. *)
 let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
   if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
-    let latest = Surface_read_order.latest_navigation state.http_surface_reads
-      results.http_surface_request in
-    let identity_matches = server_workspace_matches ~expected:state.server_identity
+    let admission = Masc_tui_types.collector_admission state results.http_surface_request
       results.http_scoped_server_identity in
     let datasets = take_http_surface_datasets state results.http_surface_request in
-    (* Nonlatest collectors can still own independent data. Their older probe
-       cannot replace identity observed by a newer navigation request. *)
-    if latest then apply_server_identity_reading state ~mailbox results.http_scoped_server_identity;
-    if Result.is_ok results.http_scoped_server_identity && (latest || identity_matches) then begin
+    (* Older collectors can still own independent data. Their older probe
+       cannot replace identity observed by a newer collector. *)
+    (match admission with
+     | Admit_identity_and_data | Admit_identity_only ->
+         apply_server_identity_reading state ~mailbox results.http_scoped_server_identity
+     | Admit_data_only | Admit_nothing -> ());
+    match admission with
+    | Admit_identity_and_data | Admit_data_only ->
       (* Identity application can withdraw authority even when this response
          has the current ticket. Only the dispatch generation and workspace
          together authorize its roster; other datasets retain their ticket. *)
@@ -18992,7 +18994,7 @@ let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
       let results = if same_workspace then results
         else { results with http_keeper_roster = None } in
       apply_http_scoped_data state ~datasets results
-    end else false
+    | Admit_identity_only | Admit_nothing -> false
   end else false
 
 let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox =
@@ -19027,13 +19029,21 @@ let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
   let previous_items = visible_item_revision state in
-  let datasets = take_http_surface_datasets state results.http_scoped.http_surface_request in
-  apply_server_identity_reading state ~mailbox results.http_server_identity;
-  let roster_refreshed = if Result.is_ok results.http_server_identity then begin
-    if state.workspace_identity = Workspace_identity_match then
-      Option.iter (apply_approval_observation state) results.http_approvals;
-    apply_http_scoped_data state ~datasets results.http_scoped
-  end else false in
+  let request = results.http_scoped.http_surface_request in
+  (* Navigation joins this pass's ticket while it runs, so the ticket alone
+     cannot tell whether a newer collector already read the identity. *)
+  let admission = Masc_tui_types.collector_admission state request results.http_server_identity in
+  let datasets = take_http_surface_datasets state request in
+  (match admission with
+   | Admit_identity_and_data | Admit_identity_only ->
+       apply_server_identity_reading state ~mailbox results.http_server_identity
+   | Admit_data_only | Admit_nothing -> ());
+  let roster_refreshed = match admission with
+    | Admit_identity_and_data | Admit_data_only ->
+        if state.workspace_identity = Workspace_identity_match then
+          Option.iter (apply_approval_observation state) results.http_approvals;
+        apply_http_scoped_data state ~datasets results.http_scoped
+    | Admit_identity_only | Admit_nothing -> false in
   if roster_refreshed || Option.is_none results.http_scoped.http_keeper_roster then
     refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous_items;
   let reached result =
@@ -25569,10 +25579,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Http_msg (Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket, latest, request)) ->
       let current_authority = authority = state.workspace_authority in
       let current_generation = Http_refresh_order.is_current state.http_refresh_order refresh_ticket in
-      let latest_navigation = Surface_read_order.latest_navigation state.http_surface_reads request in
-      Log.Transport.info "tui_surface_read_refused request=%d current_authority=%b current_generation=%b latest_navigation=%b"
-        (Surface_read_order.request_id request) current_authority current_generation latest_navigation;
-      if current_authority && current_generation && latest_navigation then begin
+      let owns_identity = Surface_read_order.owns_identity state.http_surface_reads request in
+      Log.Transport.info "tui_surface_read_refused request=%d current_authority=%b current_generation=%b owns_identity=%b"
+        (Surface_read_order.request_id request) current_authority current_generation owns_identity;
+      if current_authority && current_generation && owns_identity then begin
         let before = read_authority state in
         apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_ticket ~latest err;
         resume_reads_after_authority_change state ~mailbox
@@ -31528,7 +31538,8 @@ let main
          | Runtime | Config | Resources | Tools | System_logs -> submit "")
   in
   (* [U] twice: every binding the selected Keeper holds, on every transport.
-     The first press names each channel; the second sends exactly those, each
+     The first press arms, and the Channels tab names each channel while the
+     arm stands; the second sends exactly those, each
      conditional on the Keeper still owning it. A snapshot that changed in
      between re-arms with the new list instead of sending a list the operator
      never read. *)
@@ -31554,19 +31565,20 @@ let main
         let unreadable =
           Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
         in
-        match targets, state.connector_unbind_all_armed with
-        | [], _ ->
+        match
+          Masc_tui_connector_unbind.next_press
+            ~named:state.connector_unbind_all_armed ~keeper_name targets
+        with
+        | Masc_tui_connector_unbind.Nothing_bound ->
             state.connector_unbind_all_armed <- None;
             report_action state "system"
               (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
                  ~unreadable)
-        | _ :: _, Some (armed_keeper, armed_targets)
-          when String.equal armed_keeper keeper_name && armed_targets = targets
-          ->
+        | Masc_tui_connector_unbind.Sends targets ->
             state.connector_unbind_all_armed <- None;
             launch_connector_unbind_all state ~mailbox:async_messages
               ~keeper_name targets
-        | _ :: _, (Some _ | None) ->
+        | Masc_tui_connector_unbind.Asks targets ->
             state.connector_unbind_all_armed <- Some (keeper_name, targets);
             report_action state "system"
               (Masc_tui_connector_unbind.arm_prompt ~keeper_name
@@ -31604,15 +31616,19 @@ let main
         let unreadable =
           Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
         in
-        match targets with
-        | [] ->
+        match
+          Masc_tui_connector_unbind.next_press
+            ~named:(Some (offer.offer_keeper, offer.offer_targets))
+            ~keeper_name targets
+        with
+        | Masc_tui_connector_unbind.Nothing_bound ->
             report_action state "system"
               (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
                  ~unreadable)
-        | _ :: _ when targets = offer.offer_targets ->
+        | Masc_tui_connector_unbind.Sends targets ->
             launch_connector_unbind_all state ~mailbox:async_messages
               ~keeper_name targets
-        | _ :: _ ->
+        | Masc_tui_connector_unbind.Asks targets ->
             state.connector_unbind_offer <-
               Some { offer with offer_targets = targets
                               ; offered_at = state.frames_presented };
@@ -40329,18 +40345,7 @@ Use relative paths for resources already held in the package. -->
             | Board_list | Board_compose | Board_read _ -> ());
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
-            | Board_read _ -> (
-                (* On one pane the two layouts draw the same screen, so the
-                   footer does not offer [z] and pressing it must not leave
-                   the flag set for the next widening. *)
-                match
-                  board_read_layout ~cols:terminal_columns
-                    ~wide:state.board_detail_wide
-                with
-                | Board_read_one_pane -> ()
-                | Board_read_split | Board_read_wide ->
-                    state.board_detail_wide <- not state.board_detail_wide;
-                    state.board_focus <- Right_pane)
+            | Board_read _ -> toggle_board_read_wide state ~cols:terminal_columns
             | Board_list | Board_compose -> ())
        | Some (("o" | "O" | "l") as sandbox_log_key)
          when state.view = Keepers Keeper_detail

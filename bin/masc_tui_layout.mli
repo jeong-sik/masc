@@ -43,11 +43,19 @@ val board_read_side_comment_cols : int
 val board_read_side_gutter_cols : int
 (** Separation included in the width returned for the right pane. *)
 
-val board_read_side_layout : cols:int -> (int * int) option
-(** [Some (body_cols, comment_cols)] when the pane can keep the 78-cell post,
-    two-cell gutter, and at least 40 cells for comments. Extra width is shared
-    between the post and comments. The returned comment width includes the
-    gutter because the renderer gives it to the right pane. *)
+(** Where the open post draws its comments. *)
+type board_read_arrangement =
+  | Stacked  (** Under the post, as wide as the pane. *)
+  | Side of { body_cols : int; comment_cols : int }
+      (** Beside the post. [comment_cols] includes the gutter because the
+          renderer gives it to the right column. *)
+
+val board_read_side_layout : cols:int -> board_read_arrangement
+(** [Side] when the pane can keep the 78-cell post, two-cell gutter, and at
+    least 40 cells for comments; extra width is shared between the post and
+    comments. [Stacked] below that. This is what the width allows, not which
+    layout the reader asked for: that choice is
+    [Masc_tui_types.board_read_arrangement]. *)
 
 type board_read_side_allocation = {
   body_rows : int;

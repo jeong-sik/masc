@@ -752,7 +752,8 @@ let draw_board_read_side ~focus buf (state : state) document ~rows ~body_cols
 (* The read post alone -- borders, header, body, comments -- at [cols]
    wide, footer excluded, so a caller can lay it beside the post list.
    Returns the scroll the frame used. *)
-let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols buf =
+let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~rows
+    ~cols buf =
   let prep_started = Masc_tui_frame_timing.start_stage () in
   let detail =
     Board_detail.view_for state.board_detail ~post_id:list_post.bp_id
@@ -819,37 +820,36 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
   box_divider buf cols;
 
   (* The thread sits beside the post, not under it, when the pane is wide
-     enough for both columns to stay readable (p-7784d032). A narrow pane
-     keeps the stacked layout below -- the same rows, drawn the way they were
-     before the side arrangement existed. Decided here, before the document
-     below wraps a single word of it, so the body and comment text get
-     wrapped to the column that will actually draw them -- not the full pane
-     width every layout used to assume, which is what let a wide-formatted
-     comment line get clipped down to its author chip in the narrow column
-     (p-7784d032 follow-up). *)
+     enough for both columns to stay readable (p-7784d032) and the post list
+     is not hidden: [z] gives the thread the whole width under the post
+     (#40134). Otherwise it keeps the stacked layout below -- the same rows,
+     drawn the way they were before the side arrangement existed. Decided
+     here, before the document below wraps a single word of it, so the body
+     and comment text get wrapped to the column that will actually draw them
+     -- not the full pane width every layout used to assume, which is what let
+     a wide-formatted comment line get clipped down to its author chip in the
+     narrow column (p-7784d032 follow-up). *)
   let has_detail_content =
     match detail with
     | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ ->
         false
     | Board_detail.Ready (_, comments, _) -> comments <> []
   in
-  let side_layout =
-    if has_detail_content then Layout.board_read_side_layout ~cols
-    else None
+  let arrangement =
+    Masc_tui_types.board_read_arrangement layout ~cols
+      ~has_comments:has_detail_content
   in
-  let body_wrap_cols =
-    match side_layout with Some (body_cols, _) -> body_cols | None -> cols
-  in
-  let comment_wrap_cols =
-    match side_layout with
-    | Some (_, comment_cols) -> comment_cols
-    | None -> cols
+  let body_wrap_cols, comment_wrap_cols =
+    match arrangement with
+    | Layout.Side { body_cols; comment_cols } -> (body_cols, comment_cols)
+    | Layout.Stacked -> (cols, cols)
   in
 
   let source : Board_read_layout.source =
     { post; detail; related_posts = (board_posts state);
       keeper_names = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers;
-      columns = cols; language = state.ui_language;
+      body_columns = body_wrap_cols; comment_columns = comment_wrap_cols;
+      language = state.ui_language;
       styles = [ Theme.info (); Theme.warn (); Theme.bad (); Theme.recede ();
                  Theme.accent () ];
       table_frame = !table_frame_enabled }
@@ -1141,11 +1141,11 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
      names but are different record types, so this match cannot return one
      of them -- only the scroll and the two drawn-row counts survive it. *)
   let scroll, body_lines_drawn, comment_lines_drawn =
-    match side_layout with
-    | Some (body_cols, comment_cols) ->
+    match arrangement with
+    | Layout.Side { body_cols; comment_cols } ->
         draw_board_read_side ~focus buf state document ~rows:content_rows ~body_cols
           ~comment_cols ~total_lines ~detail_line_count ~detail_comment_count
-    | None ->
+    | Layout.Stacked ->
         let row_budget =
           Layout.allocate_board_read ~terminal_rows:content_rows
             ~body_line_count:total_lines ~comment_line_count:detail_line_count
@@ -1281,7 +1281,7 @@ let render_board_read (state : state) (list_post : board_post) =
   Masc_tui_frame_timing.finish_stage ~name:"board.render_prep" prep_started;
   match layout with
   | Board_read_wide | Board_read_one_pane ->
-    let scroll = board_read_pane ~focus state list_post ~rows ~cols buf in
+    let scroll = board_read_pane ~focus ~layout state list_post ~rows ~cols buf in
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
@@ -1292,7 +1292,8 @@ let render_board_read (state : state) (list_post : board_post) =
     let right_buf = Buffer.create 4096 in
     board_list_pane state ~open_post:list_post ~rows ~cols:left_cols left_buf;
     let scroll =
-      board_read_pane ~focus state list_post ~rows ~cols:right_cols right_buf
+      board_read_pane ~focus ~layout state list_post ~rows ~cols:right_cols
+        right_buf
     in
     write_two_panes buf ~left_cols:left_cols ~left:left_buf
       ~right:right_buf;

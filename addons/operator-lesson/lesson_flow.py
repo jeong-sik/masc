@@ -27,7 +27,7 @@ from typing import Any, Callable
 import lesson_log as l
 import records
 from records import (  # noqa: F401  -- the names this package's modules and tests read from here
-    InvalidBinding, InvalidResult, digest, grants_of_binding, material, since_of_binding)
+    InvalidBinding, InvalidResult, Refused, digest, grants_of_binding, parse_result, since_of_binding)
 
 OUTLINE = "outline"
 SCENE = "scene"
@@ -115,8 +115,8 @@ class Flow:
 
     # -- listing --------------------------------------------------------------
 
-    def _session_reads(self, session: l.Session) -> list[dict]:
-        """The session's reads, each with the summary of its result."""
+    def _session_reads(self, session: l.Session) -> list[records.Read]:
+        """The session's reads, each with what the listing keeps of its result."""
         return self._reads.summaries([event.digest for event in session.material], session.grants)
 
     def _next_read(self, session: l.Session, sessions: list[l.Session]) -> dict | None:
@@ -175,9 +175,8 @@ class Flow:
         time the material doubles."""
         out: list[dict] = []
         checked = 0
-        grants = {grant.source_id: grant for grant in session.grants}
         for read in reversed(self._session_reads(session)):
-            out = material(self._reads.whole(read), grants) + out
+            out = self._reads.material(read, session.grants) + out
             if out and len(out) >= 2 * checked:
                 checked = len(out)
                 if not self.fits(self._outline_body(session, earlier=earlier, records_in=out)):
@@ -232,23 +231,19 @@ class Flow:
         raise l.LogError(f"{request_id} is listed and no session waits for it")
 
     def _deliver_read(self, session: l.Session, sessions: list[l.Session], request: dict, result: dict) -> None:
-        status = result["status"]
+        # Parsed before anything of it is kept: a result this package cannot
+        # read is refused, and the host keeps it and shows the failed delivery.
+        parsed, _ = parse_result(request, result, session.grants)
         entry = {"request": request, "result": result}
         key = digest(entry)
+        self.pages.write(key, entry)
         read = l.MaterialRead(session.session_id, request["request_id"], key)
         # A file a commit deleted is not a file at that commit. Its refusal is
         # kept as read and skipped. Any other refusal ends the session.
-        if status == "not_allowed" and request["kind"] != "read_file":
-            self.pages.write(key, entry)
+        if isinstance(parsed, Refused) and request["kind"] != "read_file":
             self.log.append([read, l.SessionFailed(session.session_id,
-                                                   l.NotAllowed(request["request_id"], str(result.get("reason"))))])
+                                                   l.NotAllowed(request["request_id"], parsed.reason))])
             return
-        expected = {"read_records": {"records", "result_exceeds_frame"},
-                    "read_file": {"file", "result_exceeds_frame", "not_allowed"},
-                    "read_result": {"result_chunk"}}[request["kind"]]
-        if status not in expected:
-            raise InvalidResult(f"{request['kind']} cannot end as {status}")
-        self.pages.write(key, entry)
         after = next(s for s in l.fold(self.log.read() + [read]) if s.session_id == session.session_id)
         if self._next_read(after, sessions) is not None:
             self.log.append([read])

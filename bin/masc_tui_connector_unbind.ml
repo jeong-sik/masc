@@ -33,22 +33,38 @@ let target_label target =
   channel_label ~ko:false ~channel_id:target.channel_id
     ~channel_name:target.channel_name
 
+let target_of_binding (connector : Masc.Tui_decode_connectors.connector)
+    (binding : Masc.Tui_decode_connectors.connector_binding) =
+  { connector_id = connector.cn_id
+  ; connector_name = connector.cn_display_name
+  ; channel_id = binding.cb_channel_id
+  ; channel_name = binding.cb_channel_name
+  ; keeper_name = binding.cb_keeper_name
+  }
+
 let targets ~keeper_name (connectors : Masc.Tui_decode_connectors.connector list) =
   List.concat_map
     (fun (connector : Masc.Tui_decode_connectors.connector) ->
        List.filter_map
          (fun (binding : Masc.Tui_decode_connectors.connector_binding) ->
             if String.equal binding.cb_keeper_name keeper_name then
-              Some
-                { connector_id = connector.cn_id
-                ; connector_name = connector.cn_display_name
-                ; channel_id = binding.cb_channel_id
-                ; channel_name = binding.cb_channel_name
-                ; keeper_name = binding.cb_keeper_name
-                }
+              Some (target_of_binding connector binding)
             else None)
          connector.cn_bindings)
     connectors
+
+type next_press =
+  | Nothing_bound
+  | Asks of target list
+  | Sends of target list
+
+let next_press ~named ~keeper_name targets =
+  match targets, named with
+  | [], (Some _ | None) -> Nothing_bound
+  | _ :: _, Some (named_keeper, named_targets)
+    when String.equal named_keeper keeper_name && named_targets = targets ->
+      Sends targets
+  | _ :: _, (Some _ | None) -> Asks targets
 
 let unreadable_transports (connectors : Masc.Tui_decode_connectors.connector list) =
   List.filter_map
@@ -133,12 +149,15 @@ let unreadable_note = function
   | names ->
       "; not included, binding list unreadable: " ^ String.concat ", " names
 
+(* The key leads and the channels are not repeated: the Channels tab lists
+   every one of them, and a footer cuts a long list from the right. *)
 let arm_prompt ~keeper_name ~confirm_key ~unreadable targets =
-  Printf.sprintf "unbind all armed: press %s again to remove %d binding%s of %s: %s%s"
+  Printf.sprintf
+    "unbind all armed: press %s again to remove the %d binding%s of %s listed \
+     on the Channels tab%s"
     confirm_key (List.length targets)
     (if List.length targets = 1 then "" else "s")
     (Terminal_text.single_line keeper_name)
-    (String.concat ", " (List.map target_label targets))
     (unreadable_note unreadable)
 
 let nothing_to_unbind ~keeper_name ~unreadable =
@@ -169,6 +188,38 @@ let read_offer_input offer ~frames_presented ~input_seen ~key =
     match key with
     | Some pressed when String.equal pressed offer_key -> Offer_accepted
     | Some _ | None -> Offer_dropped
+
+type confirmation = {
+  confirm_key : string;
+  confirm_targets : target list;
+}
+
+(* The TUI never holds both: an offer is made only while nothing is armed,
+   and the [U] that arms is a key the offer reads first and drops on. The
+   arm is read first only so every pair of fields has an answer. *)
+let confirmation ~armed ~offer ~keeper_name targets =
+  let sends key named =
+    match next_press ~named ~keeper_name targets with
+    | Sends targets -> Some { confirm_key = key; confirm_targets = targets }
+    | Nothing_bound | Asks _ -> None
+  in
+  match sends unbind_all_key armed with
+  | Some armed_confirmation -> Some armed_confirmation
+  | None ->
+      Option.bind offer (fun offer ->
+        sends offer_key (Some (offer.offer_keeper, offer.offer_targets)))
+
+type row_mark =
+  | Will_unbind of string
+  | Not_targeted
+
+let row_mark confirmation connector binding =
+  match confirmation with
+  | None -> Not_targeted
+  | Some { confirm_key; confirm_targets } ->
+      if List.mem (target_of_binding connector binding) confirm_targets then
+        Will_unbind confirm_key
+      else Not_targeted
 
 (* The key leads: a footer cuts from the right, and the channel list is the
    part that can be long. *)

@@ -24,8 +24,10 @@ import { SubscriptionsPanel } from './subscriptions'
 import { TokensPanel } from './token-rows'
 import type { TokensModel } from './tokens'
 import type { SubscriptionsModel } from './subscriptions'
-import { session as readSession, signOut as endSession, who as readWho } from './wire'
+import { csrfHeader, session as readSession, signOut as endSession, who as readWho } from './wire'
 import type { Answer, Problem, Role, Send, Session, Who } from './wire'
+
+const forbidden = 403
 
 export type { Failure, Next, Shown } from './notes'
 
@@ -41,8 +43,9 @@ export type View =
   /** The first reading of the session. `slow` once it has lasted long
       enough that the page says it is waiting. */
   | { readonly kind: 'reading'; readonly slow: boolean }
-  /** The first reading found no session, and the browser is on its way to
-      the sign-in page. */
+  /** A reading found no session, and the browser is on its way to the
+      sign-in page: the first reading, or one after the server refused a
+      request of a panel. */
   | { readonly kind: 'leaving' }
   /** The session could not be read. */
   | { readonly kind: 'failed'; readonly failure: Failure; readonly next: Next }
@@ -51,6 +54,8 @@ export type View =
       sends nothing for the person it showed. */
   | { readonly kind: 'changed'; readonly next: Next }
   | { readonly kind: 'signed_in'; readonly session: Session; readonly who: Who; readonly signOut: SignOut }
+
+type SignedInView = Extract<View, { readonly kind: 'signed_in' }>
 
 export interface Deps {
   readonly send: Send
@@ -66,6 +71,14 @@ export interface ConsoleModel {
       does nothing. */
   readonly load: () => Promise<void>
   readonly signOut: () => Promise<void>
+  /** The `send` of the panels. A request the server answers 403 makes the
+      console read the session again, as a sign-out does, and the page then
+      shows what it found: the same person with the session of now, the
+      account that changed, or the way to the sign-in page. A request that
+      carried a CSRF token older than the session of now, for the same
+      person, is sent once more with the token of now; the answer to that
+      one is the answer the panel gets. */
+  readonly send: Send
 }
 
 interface SignedIn {
@@ -165,7 +178,59 @@ export function createConsole({ send, leave }: Deps): ConsoleModel {
     view.value = { ...before, session, signOut: { kind: 'failed', failure: { problem: last.problem, attempts: refusedBefore + 1 } } }
   }
 
-  return { view, load, signOut }
+  // The server answers a request of a panel 403 for one of two things, and
+  // changes nothing for either: the CSRF token is not the one of the
+  // session the browser holds, which another tab replaced
+  // (lib/auth/authz_browser_request.ml checks it before any route runs), or
+  // the account of that session may not do it (the authorization log
+  // refuses the event). Reading the session again tells the page which.
+  // Refusals that come together share one reading.
+  let rereading: Promise<void> | null = null
+  const reread = (): Promise<void> => {
+    rereading ??= (async (): Promise<void> => {
+      const found = await readSignedIn(send)
+      const now = view.value
+      // The page left, or went to another state, while the reading ran.
+      if (now.kind !== 'signed_in' || now.signOut.kind === 'out') return
+      switch (found.kind) {
+        case 'signed_in':
+          view.value = found.value.who.id === now.who.id ? { ...now, ...found.value } : { kind: 'changed', next: 'idle' }
+          return
+        case 'changed':
+          view.value = { kind: 'changed', next: 'idle' }
+          return
+        case 'problem':
+          if (found.problem.kind !== 'signed_out') return
+          view.value = { kind: 'leaving' }
+          leave()
+      }
+    })().finally(() => { rereading = null })
+    return rereading
+  }
+
+  const panelSend: Send = async (path, init) => {
+    // The person the page shows as the request leaves. The request is sent
+    // again only for them: a page that shows another person by the time the
+    // answer is read does not do it as that person.
+    const sentFor = view.peek()
+    const answer = await send(path, init)
+    if (answer.status !== forbidden || sentFor.kind !== 'signed_in') return answer
+    const sameAsSent = (shown: View): shown is SignedInView => shown.kind === 'signed_in' && shown.who.id === sentFor.who.id
+    const sentToken = new Headers(init.headers).get(csrfHeader)
+    const shown = view.peek()
+    // A token of that person newer than the one sent is already on the page
+    // when another refusal read the session while this request was under way.
+    if (sentToken === null || !sameAsSent(shown) || sentToken === shown.session.csrfToken) await reread()
+    const now = view.peek()
+    if (sentToken === null || !sameAsSent(now) || now.session.csrfToken === sentToken) return answer
+    // The server refused the token before the route ran, so nothing was
+    // done: the request is sent once more, as the person asked it.
+    const headers = new Headers(init.headers)
+    headers.set(csrfHeader, now.session.csrfToken)
+    return send(path, { ...init, headers })
+  }
+
+  return { view, load, signOut, send: panelSend }
 }
 
 // ---- words ----

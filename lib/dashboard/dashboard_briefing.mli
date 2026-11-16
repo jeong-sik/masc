@@ -12,7 +12,8 @@ val observe_current :
     returned deadline belongs to the same source observation: source-dated
     agent truth, selected tool-host failure attention and active judgment.
     Typed Keeper roster/row and digest storage failures retain the readable
-    rows with [Partial] completeness. The caller owns timeout/failure retry.
+    rows with [Partial] completeness, and so does a digest that could not be
+    read. The caller owns timeout/failure retry.
     This API alone does not start or
     remove a server worker. *)
 
@@ -24,3 +25,9 @@ val json :
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
   unit ->
   Yojson.Safe.t
+(** The briefing through the actor snapshot and digest caches. Both reads
+    publish [digest_read] ([read], [timed_out] or [unreadable]) and
+    [digest_read_error], the diagnostic of an unreadable digest. A digest that
+    was not read publishes [incidents], [recommended_actions],
+    [attention_queue] and [internal_signals] as [null], not as empty lists,
+    and names the workspace health [unknown]. *)

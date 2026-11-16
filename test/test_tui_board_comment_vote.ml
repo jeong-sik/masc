@@ -137,7 +137,8 @@ let test_rows_know_their_comment () =
     in
     let source : Layout.source =
       { post; detail = Masc_tui_board_detail.Ready (post, thread, None)
-      ; related_posts = []; keeper_names = []; columns = 80; language = Masc_tui_types.Lang_en; styles = []
+      ; related_posts = []; keeper_names = []; body_columns = 80; comment_columns = 80
+      ; language = Masc_tui_types.Lang_en; styles = []
       ; table_frame = false }
     in
     let owned comment_id text = Layout.Comment_text { comment_id; text } in

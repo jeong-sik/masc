@@ -22,7 +22,7 @@ import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Generic, TypeVar, Union, cast
 
 
 class LogError(Exception):
@@ -353,64 +353,116 @@ def since_of_binding(binding: dict) -> float:
     return seconds
 
 
-# -- Read results, put back together. ---------------------------------------
+# -- Read results, parsed where they are delivered. --------------------------
+#
+# The host answers a read with one of the results below. A result is parsed
+# before anything of it is kept, so a kept body parses again whenever it is
+# read back, and nothing after the parse reads the host's fields. What the
+# listing keeps of a result holds no record text and no file content; those
+# are read again from disk for a model request (#44537).
 
-def assemble(marker: dict, chunks: list[dict]) -> dict:
-    """The original result of a read that came back in pieces."""
-    data = b""
-    for chunk in chunks:
-        if chunk.get("offset") != len(data) or chunk.get("encoding") != "base64":
-            raise InvalidResult("result pieces do not follow each other")
-        try:
-            data += base64.b64decode(chunk["content"], validate=True)
-        except (KeyError, TypeError, ValueError) as error:
-            raise InvalidResult(f"a result piece is not base64: {error}") from error
-    if len(data) != marker["bytes"] or hashlib.sha256(data).hexdigest() != marker["retained_sha256"]:
-        raise InvalidResult("the result put together does not match its digest")
-    try:
-        result = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise InvalidResult(f"the result put together is not JSON: {error}") from error
-    if not isinstance(result, dict):
-        raise InvalidResult("the result put together is not an object")
-    return result
+@dataclass(frozen=True, slots=True)
+class Page:
+    """A page of a grant's records. Of a repository page, [commits] holds each
+    commit's id with the changed paths its grant covers, which name the files
+    still to read; of any other page it is empty."""
+    sha256: str
+    next_cursor: str | None
+    complete: bool
+    commits: tuple[tuple[str, tuple[str, ...]], ...]
 
 
-def _assemble_whole(item: dict) -> dict:
-    return assemble(item["marker"], item["chunks"])
+@dataclass(frozen=True, slots=True)
+class File:
+    """A file read at a commit."""
+    sha256: str
 
 
-def reads(entries: list[tuple[str, dict]], assemble: Callable[[dict], dict] = _assemble_whole) -> list[dict]:
-    """Each read request of a session with its result, or with the pieces
-    received so far when it came back too large for the frame. [entries]
-    pairs each kept body with its digest, and each read names the digests it
-    was put together from. [assemble] gives the result of a read whose last
-    piece came."""
-    out: list[dict] = []
-    by_request: dict[str, dict] = {}
-    for key, entry in entries:
-        request, result = entry["request"], entry["result"]
-        if request["kind"] == "read_result":
-            target = by_request.get(request["original_request_id"])
-            if target is None or target["marker"] is None:
-                raise LogError(f"a piece of {request['original_request_id']}, which was not read in pieces")
-            target["chunks"].append(result)
-            target["digests"].append(key)
-            continue
-        item = {"request": request, "marker": None, "chunks": [], "result": None, "digests": [key]}
-        if result["status"] == "result_exceeds_frame":
-            item["marker"] = result
-        else:
-            item["result"] = result
+@dataclass(frozen=True, slots=True)
+class Refused:
+    """The host refused the read by rule."""
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class Retained:
+    """A result too large for the frame, which the host keeps to be read in
+    pieces."""
+    source_id: str | None
+    sha256: str
+    size: int
+
+
+@dataclass(frozen=True, slots=True)
+class Piece:
+    """One piece of a retained result."""
+    offset: int
+    next_offset: int
+    eof: bool
+
+
+Answer = Union[Page, File, Refused]  # what a read comes to
+ReadResult = Union[Page, File, Refused, Retained, Piece]  # what one delivered result is
+
+
+def _object(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise InvalidResult(f"{label} is not an object")
+    return cast("dict[str, object]", value)
+
+
+def _string(fields: dict[str, object], key: str, label: str) -> str:
+    value = fields.get(key)
+    if not isinstance(value, str):
+        raise InvalidResult(f"{label} has no string {key}")
+    return value
+
+
+def _nullable_string(fields: dict[str, object], key: str, label: str) -> str | None:
+    if key not in fields:
+        raise InvalidResult(f"{label} has no {key}")
+    value = fields[key]
+    if value is not None and not isinstance(value, str):
+        raise InvalidResult(f"{label} has a {key} that is neither a string nor null")
+    return value
+
+
+def _integer(fields: dict[str, object], key: str, label: str) -> int:
+    value = fields.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidResult(f"{label} has no integer {key}")
+    return value
+
+
+def _number(fields: dict[str, object], key: str, label: str) -> int | float:
+    value = fields.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InvalidResult(f"{label} has no number {key}")
+    return value
+
+
+def _flag(fields: dict[str, object], key: str, label: str) -> bool:
+    value = fields.get(key)
+    if not isinstance(value, bool):
+        raise InvalidResult(f"{label} has no boolean {key}")
+    return value
+
+
+def _array(fields: dict[str, object], key: str, label: str) -> list[object]:
+    value = fields.get(key)
+    if not isinstance(value, list):
+        raise InvalidResult(f"{label} has no array {key}")
+    return cast("list[object]", value)
+
+
+def _strings(fields: dict[str, object], key: str, label: str) -> tuple[str, ...]:
+    out: list[str] = []
+    for item in _array(fields, key, label):
+        if not isinstance(item, str):
+            raise InvalidResult(f"{label} has a {key} entry that is not a string")
         out.append(item)
-        by_request[request["request_id"]] = item
-    for item in out:
-        if item["marker"] is not None and item["chunks"] and item["chunks"][-1].get("eof") is True:
-            item["result"] = assemble(item)
-    return out
+    return tuple(out)
 
-
-# -- Material a model output may cite. --------------------------------------
 
 def _cite(pin: Pin) -> str:
     """The pin of a record the host named, as the log will read it back. A
@@ -424,57 +476,183 @@ def _cite(pin: Pin) -> str:
     return text
 
 
-def _entry(pin: Pin, result: dict, author: Any, at: Any, title: str, text: str) -> dict:
-    return {"kind": pin_kind(pin), "source_id": result["source_id"], "pin": _cite(pin),
-            "sha256": result["sha256"], "author": author, "at": at, "title": title, "text": text}
+def _entry(pin: Pin, source_id: str, sha256: str, author: str | None, at: int | float | str | None,
+           title: str, text: str) -> dict:
+    """One record a model output may cite."""
+    return {"kind": pin_kind(pin), "source_id": source_id, "pin": _cite(pin), "sha256": sha256,
+            "author": author, "at": at, "title": title, "text": text}
 
 
-def _records_of(grant: Grant, result: dict, record: dict) -> list[dict]:
-    """The citable records one host record holds. A pull request gives
-    itself, each review that says something, and each review comment."""
+def _records_of(grant: Grant, source_id: str, sha256: str, value: object) -> list[dict]:
+    """The citable records one host record holds. The grant a read names says
+    what its records are. A pull request gives itself, each review that says
+    something, and each review comment."""
+    record = _object(value, "a record")
+
+    def entry(pin: Pin, author: str | None, at: int | float | str | None, title: str, text: str) -> dict:
+        return _entry(pin, source_id, sha256, author, at, title, text)
+
     match grant.kind, record.get("kind"):
         case "board", "post":
-            return [_entry(BoardPostPin(record["id"]), result, record["author"], record["created_at"],
-                           record["title"], record["body"])]
+            label = "a post"
+            return [entry(BoardPostPin(_string(record, "id", label)), _string(record, "author", label),
+                          _number(record, "created_at", label), _string(record, "title", label),
+                          _string(record, "body", label))]
         case "board", "comment":
-            return [_entry(BoardCommentPin(record["post_id"], record["id"]), result, record["author"],
-                           record["created_at"], "", record["body"])]
+            label = "a comment"
+            return [entry(BoardCommentPin(_string(record, "post_id", label), _string(record, "id", label)),
+                          _string(record, "author", label), _number(record, "created_at", label), "",
+                          _string(record, "body", label))]
         case "repository", "commit":
-            return [_entry(CommitPin(record["sha"]), result, record["author"], record["committed_at"],
-                           record["subject"], record["body"])]
+            label = "a commit"
+            return [entry(CommitPin(_string(record, "sha", label)), _string(record, "author", label),
+                          _integer(record, "committed_at", label), _string(record, "subject", label),
+                          _string(record, "body", label))]
         case "wiki", "page":
-            return [_entry(WikiPagePin(record["name"], record["revision"]), result, record["author"], 0,
-                           record["title"], record["body"])]
+            label = "a wiki page"
+            return [entry(WikiPagePin(_string(record, "name", label), _integer(record, "revision", label)),
+                          _string(record, "author", label), 0, _string(record, "title", label),
+                          _string(record, "body", label))]
         case "github_pulls", "pull_request":
-            number = record["number"]
-            reviews = record["reviews"]
-            return ([_entry(PrPin(number, record["merge_commit"]), result, record["author"], record["merged_at"],
-                            record["title"], record["body"])]
-                    + [_entry(PrReviewPin(number, review["id"]), result, review["author"], review["submitted_at"],
-                              "", review["body"]) for review in reviews if review["body"].strip()]
-                    + [_entry(PrCommentPin(number, comment["id"]), result, comment["author"],
-                              comment["created_at"], "", comment["body"])
-                       for review in reviews for comment in review["comments"]])
+            label = "a pull request"
+            number = _integer(record, "number", label)
+            said = [entry(PrPin(number, _string(record, "merge_commit", label)),
+                          _nullable_string(record, "author", label), _string(record, "merged_at", label),
+                          _string(record, "title", label), _string(record, "body", label))]
+            comments: list[dict] = []
+            for item in _array(record, "reviews", label):
+                review = _object(item, "a review")
+                review_id = _integer(review, "id", "a review")
+                author = _nullable_string(review, "author", "a review")
+                submitted_at = _nullable_string(review, "submitted_at", "a review")
+                body = _string(review, "body", "a review")
+                if body.strip():
+                    said.append(entry(PrReviewPin(number, review_id), author, submitted_at, "", body))
+                for raw in _array(review, "comments", "a review"):
+                    comment = _object(raw, "a review comment")
+                    comments.append(entry(PrCommentPin(number, _integer(comment, "id", "a review comment")),
+                                          _nullable_string(comment, "author", "a review comment"),
+                                          _string(comment, "created_at", "a review comment"), "",
+                                          _string(comment, "body", "a review comment")))
+            return said + comments
         case kind, other:
             raise InvalidResult(f"a {kind} page holds a record of kind {other!r}")
 
 
-def material(session_reads: list[dict], grants: dict[str, Grant]) -> list[dict]:
-    """The records a request may cite, in the order read: what each grant's
-    pages hold, and the text files read at a commit. The grant a read names
-    says what its records are."""
-    out: list[dict] = []
-    for read in session_reads:
-        request, result = read["request"], read["result"]
-        grant = grants.get(request["source_id"])
-        if grant is None:
-            raise InvalidResult(f"a read of {request['source_id']}, which the session does not grant")
-        if request["kind"] == "read_records" and result["status"] == "records":
-            out += [entry for record in result["records"] for entry in _records_of(grant, result, record)]
-        elif request["kind"] == "read_file" and result["status"] == "file" and result["encoding"] == "utf-8":
-            out.append(_entry(RepoFilePin(result["commit"], result["path"]), result, "", 0, "", result["content"]))
-    return out
+def _changed(grant: Grant, value: object) -> tuple[str, tuple[str, ...]]:
+    """A commit's id with the changed paths the grant covers."""
+    record = _object(value, "a record")
+    return (_string(record, "sha", "a commit"),
+            tuple(path for path in _strings(record, "paths", "a commit") if covers(grant.paths, path)))
 
+
+def _page(fields: dict[str, object], grant: Grant) -> tuple[Page, list[dict]]:
+    label = "a page"
+    source_id, sha256 = _string(fields, "source_id", label), _string(fields, "sha256", label)
+    held = _array(fields, "records", label)
+    material = [entry for record in held for entry in _records_of(grant, source_id, sha256, record)]
+    commits = tuple(_changed(grant, record) for record in held) if grant.kind == "repository" else ()
+    return Page(sha256, _nullable_string(fields, "next_cursor", label), _flag(fields, "complete", label),
+                commits), material
+
+
+def _file(fields: dict[str, object]) -> tuple[File, list[dict]]:
+    label = "a file"
+    source_id, sha256 = _string(fields, "source_id", label), _string(fields, "sha256", label)
+    pin = RepoFilePin(_string(fields, "commit", label), _string(fields, "path", label))
+    content = _string(fields, "content", label)
+    match _string(fields, "encoding", label):
+        case "utf-8":
+            return File(sha256), [_entry(pin, source_id, sha256, "", 0, "", content)]
+        case "base64":
+            return File(sha256), []
+        case other:
+            raise InvalidResult(f"a file is encoded as {other!r}")
+
+
+def _retained(fields: dict[str, object]) -> Retained:
+    label = "a result too large for the frame"
+    return Retained(_nullable_string(fields, "source_id", label), _string(fields, "retained_sha256", label),
+                    _integer(fields, "bytes", label))
+
+
+def _piece(fields: dict[str, object]) -> tuple[Piece, bytes]:
+    """A piece and the bytes it carries."""
+    label = "a result piece"
+    if _string(fields, "encoding", label) != "base64":
+        raise InvalidResult("a result piece is not base64")
+    try:
+        data = base64.b64decode(_string(fields, "content", label), validate=True)
+    except ValueError as error:
+        raise InvalidResult(f"a result piece is not base64: {error}") from error
+    offset, next_offset = _integer(fields, "offset", label), _integer(fields, "next_offset", label)
+    if next_offset != offset + len(data):
+        raise InvalidResult("a result piece does not end at its next_offset")
+    return Piece(offset, next_offset, _flag(fields, "eof", label)), data
+
+
+def parse_result(request: dict, result: object, grants: tuple[Grant, ...]) -> tuple[ReadResult, list[dict]]:
+    """A delivered result of one of the package's reads: what the listing
+    keeps of it, and the records it holds that a model output may cite, in
+    the order read. A result of another shape is not one this package can
+    consume; it is refused here, before anything of it is kept."""
+    grant = next((grant for grant in grants if grant.source_id == request["source_id"]), None)
+    if grant is None:
+        raise InvalidResult(f"a read of {request['source_id']}, which the session does not grant")
+    fields = _object(result, "a read result")
+    match request["kind"], fields.get("status"):
+        case "read_records", "records":
+            return _page(fields, grant)
+        case "read_file", "file":
+            return _file(fields)
+        case ("read_records" | "read_file"), "result_exceeds_frame":
+            return _retained(fields), []
+        case "read_result", "result_chunk":
+            return _piece(fields)[0], []
+        case ("read_records" | "read_file" | "read_result"), "not_allowed":
+            return Refused(_string(fields, "reason", "a refusal")), []
+        case kind, status:
+            raise InvalidResult(f"{kind} cannot end as {status}")
+
+
+def _whole(request: dict, retained: Retained, pieces: list[object],
+           grants: tuple[Grant, ...]) -> tuple[Answer, list[dict]]:
+    """What a read that came back in pieces comes to: the original result put
+    together, checked against its digest and parsed as the read's own."""
+    data = b""
+    for value in pieces:
+        piece, part = _piece(_object(value, "a result piece"))
+        if piece.offset != len(data):
+            raise InvalidResult("result pieces do not follow each other")
+        data += part
+    if len(data) != retained.size or hashlib.sha256(data).hexdigest() != retained.sha256:
+        raise InvalidResult("the result put together does not match its digest")
+    try:
+        original = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise InvalidResult(f"the result put together is not JSON: {error}") from error
+    result, material = parse_result(request, original, grants)
+    match result:
+        case Page() | File() | Refused():
+            return result, material
+        case Retained() | Piece():
+            raise InvalidResult("the result put together is not an answer to its read")
+
+
+@dataclass(frozen=True, slots=True)
+class Read:
+    """One read request of a session with its result: the result the host
+    gave, or the one its pieces put together once the last came, or None while
+    pieces are missing. [digests] names the kept bodies it was read from, the
+    marker first."""
+    request: dict
+    retained: Retained | None
+    pieces: tuple[Piece, ...]
+    result: Answer | None
+    digests: tuple[str, ...]
+
+
+# -- Material a model output may cite. --------------------------------------
 
 def cited_record(cited: dict, input_material: list[dict]) -> dict | None:
     """The record of [input_material] that [cited] names by kind, grant and
@@ -488,28 +666,9 @@ def holds_quote(record: dict, quote: str) -> bool:
     return quote in record["text"] or quote in record["title"]
 
 
-def summary(request: dict, result: dict, paths: tuple[str, ...]) -> dict:
-    """What the listing uses of a result: its status and where reading goes
-    next. Board records and file contents are left out; they are read again
-    from disk only for a model request. A repository page keeps, of each
-    commit, its id and the changed paths the grant covers [paths], which
-    name the files still to read."""
-    match request["kind"], result["status"]:
-        case "read_records", "records":
-            if paths:
-                return result | {"records": [{"sha": record["sha"],
-                                              "paths": [path for path in record["paths"] if covers(paths, path)]}
-                                             for record in result["records"]]}
-            return {key: value for key, value in result.items() if key != "records"}
-        case ("read_file", "file") | ("read_result", "result_chunk"):
-            return {key: value for key, value in result.items() if key != "content"}
-        case _:
-            return result
-
-
 # -- Where reading goes next. ------------------------------------------------
 
-def last_cursor(grant: Grant, earlier: list[tuple[bool, list[dict]]]) -> str | None:
+def last_cursor(grant: Grant, earlier: list[tuple[bool, list[Read]]]) -> str | None:
     """Where the last earlier session that moves the cursor stopped reading
     this grant. [earlier] holds each earlier session's reads, oldest first,
     with whether that session moves the cursor; the package says which of
@@ -518,22 +677,20 @@ def last_cursor(grant: Grant, earlier: list[tuple[bool, list[dict]]]) -> str | N
     A cursor the host refused for this grant (the branch no longer reaches
     it, or the grant now names another repository) is skipped, so the next
     session starts from the cursor before it, or from none."""
-    refused = {(r["request"]["source_id"], r["request"]["after"])
+    refused = {(r.request["source_id"], r.request["after"])
                for _, session_reads in earlier for r in session_reads
-               if r["request"]["kind"] == "read_records" and r["result"] is not None
-               and r["result"]["status"] == "not_allowed"}
+               if r.request["kind"] == "read_records" and isinstance(r.result, Refused)}
     for moves, session_reads in reversed(earlier):
         if not moves:
             continue
-        pages = [r for r in session_reads if r["request"]["kind"] == "read_records"
-                 and r["request"]["source_id"] == grant.source_id and r["result"] is not None
-                 and r["result"]["status"] == "records"]
-        if pages and (grant.source_id, pages[-1]["result"]["next_cursor"]) not in refused:
-            return pages[-1]["result"]["next_cursor"]
+        pages = [r.result for r in session_reads if r.request["kind"] == "read_records"
+                 and r.request["source_id"] == grant.source_id and isinstance(r.result, Page)]
+        if pages and (grant.source_id, pages[-1].next_cursor) not in refused:
+            return pages[-1].next_cursor
     return None
 
 
-def next_read(request_id: str, grants: tuple[Grant, ...], session_reads: list[dict],
+def next_read(request_id: str, grants: tuple[Grant, ...], session_reads: list[Read],
               start: Callable[[Grant], dict]) -> dict | None:
     """The session's next read request, or None when everything is read: the
     next piece of a result that came back too large, then each grant's next
@@ -541,29 +698,30 @@ def next_read(request_id: str, grants: tuple[Grant, ...], session_reads: list[di
     [start] gives the fields that say where a grant's first page begins:
     after, and since when there is no cursor."""
     for read in session_reads:
-        if read["marker"] is not None and read["result"] is None:
-            offset = read["chunks"][-1]["next_offset"] if read["chunks"] else 0
+        if read.retained is not None and read.result is None:
+            offset = read.pieces[-1].next_offset if read.pieces else 0
             return {"kind": "read_result", "request_id": request_id,
-                    "original_request_id": read["request"]["request_id"],
-                    "source_id": read["marker"]["source_id"], "sha256": read["marker"]["retained_sha256"],
-                    "offset": offset}
+                    "original_request_id": read.request["request_id"],
+                    "source_id": read.retained.source_id, "sha256": read.retained.sha256, "offset": offset}
     for grant in grants:
-        pages = [r for r in session_reads if r["request"]["kind"] == "read_records"
-                 and r["request"]["source_id"] == grant.source_id]
+        # Every read still in pieces was asked for above, so each page read
+        # is answered: a refusal ends the session before it lists again.
+        pages = [r.result for r in session_reads if r.request["kind"] == "read_records"
+                 and r.request["source_id"] == grant.source_id and isinstance(r.result, Page)]
         if not pages:
             return {"kind": "read_records", "request_id": request_id, "source_id": grant.source_id} | start(grant)
-        if not pages[-1]["result"]["complete"]:
+        if not pages[-1].complete:
             return {"kind": "read_records", "request_id": request_id, "source_id": grant.source_id,
-                    "after": pages[-1]["result"]["next_cursor"]}
+                    "after": pages[-1].next_cursor}
         if grant.kind == "repository":
-            done = {(r["request"]["commit"], r["request"]["path"]) for r in session_reads
-                    if r["request"]["kind"] == "read_file" and r["request"]["source_id"] == grant.source_id}
+            done = {(r.request["commit"], r.request["path"]) for r in session_reads
+                    if r.request["kind"] == "read_file" and r.request["source_id"] == grant.source_id}
             for page in pages:
-                for record in page["result"]["records"]:
-                    for path in record["paths"]:
-                        if covers(grant.paths, path) and (record["sha"], path) not in done:
+                for commit, paths in page.commits:
+                    for path in paths:
+                        if (commit, path) not in done:
                             return {"kind": "read_file", "request_id": request_id, "source_id": grant.source_id,
-                                    "commit": record["sha"], "path": path}
+                                    "commit": commit, "path": path}
     return None
 
 
@@ -726,56 +884,94 @@ class Blobs:
 
 class Pages:
     """The kept reads of a package as its listing uses them: each request
-    with a summary of its result (see summary()). Only summaries stay in
-    memory, so what the worker holds does not grow with what its sessions
-    read (#44537). The kept bodies on disk stay whole, and are named by
-    their digest, so what is derived from one never goes stale."""
+    with what the listing keeps of its result (see parse_result). Only that
+    stays in memory, so what the worker holds does not grow with what its
+    sessions read (#44537). The kept bodies on disk stay whole, and are named
+    by their digest, so what is derived from one never goes stale. What a
+    body parses to depends on the grant it is read under, so it is kept per
+    grant."""
 
     def __init__(self, blobs: Blobs):
         self.blobs = blobs
-        self._entries: dict[tuple[str, tuple[str, ...]], dict] = {}
-        self._summaries: dict[tuple[str, tuple[str, ...]], dict] = {}
-        self._sources: dict[str, str | None] = {}
+        self._kept: dict[tuple[str, Grant | None], tuple[dict, ReadResult]] = {}
+        self._wholes: dict[tuple[str, Grant | None], Answer] = {}
+        self._sources: dict[str, object] = {}
 
     @staticmethod
-    def _paths(grants: dict[str, Grant], source: Any) -> tuple[str, ...]:
-        grant = grants.get(source) if isinstance(source, str) else None
-        return grant.paths if grant is not None and grant.kind == "repository" else ()
+    def _grant(grants: tuple[Grant, ...], source: object) -> Grant | None:
+        return next((grant for grant in grants if grant.source_id == source), None)
 
-    def _entry(self, digest: str, grants: dict[str, Grant]) -> dict:
-        source = self._sources.get(digest)
-        paths = self._paths(grants, source)
-        cached = self._entries.get((digest, paths))
-        if cached is not None:
-            return cached
+    def _parsed(self, digest: str, grants: tuple[Grant, ...]) -> tuple[dict, ReadResult, list[dict]]:
+        """A kept body parsed again. It parsed when it was delivered, so one
+        that does not now is not this package's history."""
         entry = self.blobs.read(digest)
-        source = entry["request"].get("source_id")
-        self._sources[digest] = source
-        paths = self._paths(grants, source)
-        self._entries[(digest, paths)] = {"request": entry["request"],
-                                          "result": summary(entry["request"], entry["result"], paths)}
-        return self._entries[(digest, paths)]
+        try:
+            result, material = parse_result(entry["request"], entry["result"], grants)
+        except InvalidResult as error:
+            raise LogError(f"the kept read {digest} does not parse: {error}") from error
+        return entry["request"], result, material
 
-    def _assembled(self, grants: dict[str, Grant], item: dict) -> dict:
-        """The summary of a read whose pieces have all come. The pieces are
-        read again from disk once and dropped; the summary is kept under the
-        digest of the whole result."""
-        paths = self._paths(grants, item["request"].get("source_id"))
-        key = (item["marker"]["retained_sha256"], paths)
-        cached = self._summaries.get(key)
+    def _read(self, digest: str, grants: tuple[Grant, ...]) -> tuple[dict, ReadResult]:
+        if digest in self._sources:
+            cached = self._kept.get((digest, self._grant(grants, self._sources[digest])))
+            if cached is not None:
+                return cached
+        request, result, _ = self._parsed(digest, grants)
+        self._sources[digest] = request["source_id"]
+        self._kept[(digest, self._grant(grants, request["source_id"]))] = (request, result)
+        return request, result
+
+    def _assembled(self, request: dict, retained: Retained, pieces: tuple[str, ...],
+                   grants: tuple[Grant, ...]) -> Answer:
+        """What a read whose pieces have all come comes to. The pieces are
+        read again from disk once and dropped; the result is kept under the
+        digest of the whole. A whole that does not parse is refused with the
+        delivery of its last piece."""
+        key = (retained.sha256, self._grant(grants, request["source_id"]))
+        cached = self._wholes.get(key)
         if cached is None:
-            pieces = [self.blobs.read(digest)["result"] for digest in item["digests"][1:]]
-            cached = summary(item["request"], assemble(item["marker"], pieces), paths)
-            self._summaries[key] = cached
+            cached, _ = _whole(request, retained, [self.blobs.read(digest)["result"] for digest in pieces], grants)
+            self._wholes[key] = cached
         return cached
 
-    def summaries(self, digests: list[str], grants: tuple[Grant, ...]) -> list[dict]:
-        """A session's reads, in the order kept, each with the summary of its
-        result."""
-        by_source = {grant.source_id: grant for grant in grants}
-        return reads([(digest, self._entry(digest, by_source)) for digest in digests],
-                     lambda item: self._assembled(by_source, item))
+    def summaries(self, digests: list[str], grants: tuple[Grant, ...]) -> list[Read]:
+        """A session's reads, in the order kept, each with what the listing
+        keeps of its result. A piece belongs to the read in pieces it names."""
+        started: list[tuple[str, dict, Answer | Retained]] = []
+        pieces: dict[str, list[tuple[str, Piece]]] = {}
+        for digest in digests:
+            request, result = self._read(digest, grants)
+            match result:
+                case Piece():
+                    taken = pieces.get(request["original_request_id"])
+                    if taken is None:
+                        raise LogError(f"a piece of {request['original_request_id']}, which was not read in pieces")
+                    taken.append((digest, result))
+                case Retained():
+                    pieces[request["request_id"]] = []
+                    started.append((digest, request, result))
+                case Page() | File() | Refused():
+                    started.append((digest, request, result))
+        out: list[Read] = []
+        for digest, request, result in started:
+            match result:
+                case Retained():
+                    taken = pieces[request["request_id"]]
+                    parts = tuple(piece for _, piece in taken)
+                    later = tuple(key for key, _ in taken)
+                    whole = self._assembled(request, result, later, grants) if parts and parts[-1].eof else None
+                    out.append(Read(request, result, parts, whole, (digest, *later)))
+                case Page() | File() | Refused():
+                    out.append(Read(request, None, (), result, (digest,)))
+        return out
 
-    def whole(self, read: dict) -> list[dict]:
-        """One read with its whole result, taken again from disk."""
-        return reads([(digest, self.blobs.read(digest)) for digest in read["digests"]])
+    def material(self, read: Read, grants: tuple[Grant, ...]) -> list[dict]:
+        """The records [read] holds that a model output may cite, read again
+        from disk. A refusal holds none, and neither does a read whose
+        pieces have not all come."""
+        if not isinstance(read.result, (Page, File)):
+            return []
+        if read.retained is None:
+            return self._parsed(read.digests[0], grants)[2]
+        pieces = [self.blobs.read(digest)["result"] for digest in read.digests[1:]]
+        return _whole(read.request, read.retained, pieces, grants)[1]

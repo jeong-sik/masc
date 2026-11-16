@@ -181,13 +181,25 @@ let marker_cells = String.length unselected_marker
 
 let save_prompt_height state = if Option.is_some state.resource_save_prompt then 3 else 0
 
+(* The inventory's reading, which both panes say from this one answer: the
+   list's status line and, with nothing open, the pane beside it. A read that
+   answered with no resources is an answer, not a wait -- flattened to [] it
+   said "(loading...)" for good on a server that exposes none -- and a list no
+   read is pending for is unread, not loading. *)
+let inventory_idle state =
+  Masc_tui_list_idle.of_inventory ~rows:(visible_resources state)
+    ~reason:(resource_inventory_status state)
+    ~reading:(Option.is_some state.resources_list_owner)
+
+let no_resources ~ko = if ko then "(리소스 없음)" else "(no resources)"
+
 (* Rows left for resources: the pane's content rows less the save prompt, the
    line that says which day and how many are unchecked, the column names, and
    the status line when there is one. *)
 let list_rows state ~rows =
-  let status = Option.is_some (resource_inventory_status state)
-    || Option.is_some
-         (resources_empty_note ~ko:(state.ui_language = Lang_ko) (visible_resources state)) in
+  let status = match inventory_idle state with
+    | Masc_tui_list_idle.Rows_ready None -> false
+    | List_unread | List_loading | List_failed _ | List_empty _ | Rows_ready (Some _) -> true in
   max 0 (pane_surface_content_height ~rows - save_prompt_height state - 2
     - (if status then 1 else 0))
 
@@ -263,19 +275,18 @@ let render_resources (state : state) =
     (* The status line spends one of the budgeted rows, not an extra one:
        an extra row pushed the pane past its height and the frame's last
        casualty was the footer. *)
-    (      match resource_inventory_status state with
-      | Some detail ->
-          framed_line pane_buf pane_cols
-            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
-          ()
-      | None ->
-          (match resources_empty_note ~ko:(state.ui_language = Lang_ko) (visible_resources state) with
-           | Some note ->
-               framed_line pane_buf pane_cols (Ansi.dim ^ note ^ Ansi.reset);
-               ()
-           | None -> ()));
-
     let ko = state.ui_language = Lang_ko in
+    let status_note note = framed_line pane_buf pane_cols (Ansi.dim ^ " " ^ note ^ Ansi.reset) in
+    (match inventory_idle state with
+     | Masc_tui_list_idle.List_failed detail
+     | List_empty (Some detail) | Rows_ready (Some detail) ->
+         framed_line pane_buf pane_cols
+           ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
+     | List_unread -> status_note (String.trim (page_unread_note ~ko))
+     | List_loading -> status_note (if ko then "(읽는 중\xe2\x80\xa6)" else "(loading\xe2\x80\xa6)")
+     | List_empty None -> status_note (no_resources ~ko)
+     | Rows_ready None -> ());
+
     let period = match state.resource_day with
       | None -> if ko then "모든 날짜" else "all dates"
       | Some day ->
@@ -371,9 +382,9 @@ let render_resources (state : state) =
     let content_height = pane_rows in
     (match reading with
      | None ->
-         for _ = 1 to content_height do
-           box_empty pane_buf pane_cols
-         done
+         let ko = state.ui_language = Lang_ko in
+         draw_list_idle pane_buf pane_cols ~ko ~empty:(no_resources ~ko)
+           ~height:content_height (inventory_idle state)
      | Some reading ->
          let rendered,pictures = Masc_tui_resource_document.layout_with_search ~cols:pane_cols state reading in
          let total_lines = List.length rendered in

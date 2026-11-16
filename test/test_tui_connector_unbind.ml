@@ -164,6 +164,92 @@ let test_offer_takes_its_key_only_after_it_was_drawn () =
     (Unbind.read_offer_input offer ~frames_presented:9 ~input_seen:false
        ~key:None)
 
+let next_press =
+  testable
+    (fun formatter press ->
+       let ids targets =
+         String.concat ", "
+           (List.map
+              (fun (t : Unbind.target) -> t.connector_id ^ "/" ^ t.channel_id)
+              targets)
+       in
+       Format.pp_print_string formatter
+         (match press with
+          | Unbind.Nothing_bound -> "Nothing_bound"
+          | Unbind.Asks targets -> "Asks [" ^ ids targets ^ "]"
+          | Unbind.Sends targets -> "Sends [" ^ ids targets ^ "]"))
+    ( = )
+
+(* The fixture Keeper's list with its first binding missing: what an arm made
+   before that binding was bound holds. *)
+let all_but_first targets =
+  match targets with
+  | _ :: rest -> rest
+  | [] -> fail "the fixture Keeper holds bindings"
+
+let test_second_press_sends_only_the_list_it_named () =
+  let keeper_name = "unbind-fixture-keeper" in
+  let targets = Unbind.targets ~keeper_name (snapshot ()) in
+  check next_press "nothing named: the press names the list" (Unbind.Asks targets)
+    (Unbind.next_press ~named:None ~keeper_name targets);
+  check next_press "named this list for this Keeper: the press sends it"
+    (Unbind.Sends targets)
+    (Unbind.next_press ~named:(Some (keeper_name, targets)) ~keeper_name targets);
+  check next_press "named for another Keeper: names this Keeper's list"
+    (Unbind.Asks targets)
+    (Unbind.next_press ~named:(Some ("other", targets)) ~keeper_name targets);
+  check next_press "a binding appeared since: names the new list, sends nothing"
+    (Unbind.Asks targets)
+    (Unbind.next_press
+       ~named:(Some (keeper_name, all_but_first targets))
+       ~keeper_name targets);
+  check next_press "no binding left" Unbind.Nothing_bound
+    (Unbind.next_press ~named:(Some (keeper_name, targets)) ~keeper_name [])
+
+(* Every binding on every transport as the Channels tab marks it: the key
+   that removes it, or "-". *)
+let marks confirmation connectors =
+  List.concat_map
+    (fun (connector : Masc.Tui_decode_connectors.connector) ->
+       List.map
+         (fun (binding : Masc.Tui_decode_connectors.connector_binding) ->
+            let mark =
+              match Unbind.row_mark confirmation connector binding with
+              | Unbind.Will_unbind key -> key
+              | Unbind.Not_targeted -> "-"
+            in
+            connector.cn_id ^ "/" ^ binding.cb_channel_id ^ ":" ^ mark)
+         connector.cn_bindings)
+    connectors
+
+let test_marked_rows_are_the_ones_the_key_sends () =
+  let keeper_name = "unbind-fixture-keeper" in
+  let connectors = snapshot () in
+  let targets = Unbind.targets ~keeper_name connectors in
+  let marks_for ~armed ~offer =
+    marks (Unbind.confirmation ~armed ~offer ~keeper_name targets) connectors
+  in
+  let marked_by key =
+    [ "discord/111:" ^ key; "discord/222:-"; "discord/333:" ^ key; "slack/C9:" ^ key ]
+  in
+  let unmarked = [ "discord/111:-"; "discord/222:-"; "discord/333:-"; "slack/C9:-" ] in
+  check (list string)
+    "armed for this Keeper: each of its bindings on every transport, not the other Keeper's"
+    (marked_by Unbind.unbind_all_key)
+    (marks_for ~armed:(Some (keeper_name, targets)) ~offer:None);
+  check (list string) "the pause offer marks the same bindings with its own key"
+    (marked_by Unbind.offer_key)
+    (marks_for ~armed:None ~offer:(Some (offer_at_frame_4 ())));
+  check (list string) "nothing armed or offered" unmarked
+    (marks_for ~armed:None ~offer:None);
+  check (list string) "armed for another Keeper" unmarked
+    (marks_for
+       ~armed:(Some ("other", Unbind.targets ~keeper_name:"other" connectors))
+       ~offer:None);
+  check (list string) "armed with a list the snapshot no longer holds: U asks again"
+    unmarked
+    (marks_for ~armed:(Some (keeper_name, all_but_first targets)) ~offer:None)
+
 let () =
   run "masc_tui_connector_unbind"
     [ ( "unbind all"
@@ -179,5 +265,9 @@ let () =
             test_offer_is_not_the_runtime_picker_key
         ; test_case "offer takes a key read after it was drawn" `Quick
             test_offer_takes_its_key_only_after_it_was_drawn
+        ; test_case "second press sends only the list it named" `Quick
+            test_second_press_sends_only_the_list_it_named
+        ; test_case "marked rows are the ones the key sends" `Quick
+            test_marked_rows_are_the_ones_the_key_sends
         ;] )
     ]

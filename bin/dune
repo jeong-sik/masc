@@ -1601,6 +1601,12 @@
  (modules masc_tui_fetched))
 
 (library
+ (name masc_tui_list_idle)
+ (wrapped false)
+ (modules masc_tui_list_idle)
+ (libraries masc_tui_fetched))
+
+(library
  (name masc_tui_memory_world)
  (wrapped false)
  (modules masc_tui_memory_world)
@@ -1902,6 +1908,8 @@
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
+  ;; [board_read_arrangement] reads that layout to place the comments.
+  masc_tui_layout
   masc_tui_overview_tasks
   masc_tui_machine_live
   masc_tui_connector_unbind
@@ -2541,6 +2549,7 @@
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
+  masc_tui_list_idle
   masc_tui_rows
   masc_tui_scroll
   masc_tui_code_lexer
@@ -2938,6 +2947,7 @@
   masc_tui_hint_lines
   masc_tui_numbered_list
   masc_tui_page_reading
+  masc_tui_list_idle
   masc_tui_chat_portrait
   masc_tui_keeper_list_model
   masc_tui_keeper_trail

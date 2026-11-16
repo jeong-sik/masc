@@ -170,6 +170,33 @@ let test_semantic_wait_cannot_resume_or_complete () = with_path @@ fun path -> w
 let respond store operation observed checkpoint = Store.resolve_direct_input_wait store ~now:7.
   ~operation_id:original ~execution_digest:operation.Operation.execution_digest ~observed ~checkpoint
 let consumed=checkpoint "consumed original input response bytes"
+let test_response_release_goes_behind_waiting_input () = with_path @@ fun path -> with_store path @@ fun store ->
+  let operation=admit store in
+  retire store operation Agent.Retire;
+  let queued=defer store operation waiting |> ok in
+  check bool "input wait cannot claim" true (Store.claim_next store ~now:7. |> ok=None);
+  Store.submit store ~now:8. ~operation_id:other ~source:(`Assoc []) ~input |> ok |> ignore;
+  let wrong=Semantic.input_wait ~checkpoint:owned ~pending:{pending with run_id="wrong-response-run"} |> value in
+  rejected (respond store operation wrong consumed);
+  check_wait store;
+  check int64 "wrong response preserves queue position" queued.sequence (current store).sequence;
+  Store.resolve_direct_input_wait store ~now:9. ~operation_id:original
+    ~execution_digest:operation.execution_digest ~observed:waiting ~checkpoint:consumed |> ok;
+  let third=Operation.Operation_id.of_string "input-response-third" |> value in
+  Store.submit store ~now:10. ~operation_id:third ~source:(`Assoc []) ~input |> ok |> ignore;
+  rejected (respond store operation waiting consumed);
+  let run now expected =
+    let row=Store.claim_next store ~now |> ok |> Option.get in
+    check bool "accepted input response preserves durable queue order" true
+      (Operation.Operation_id.equal expected row.operation_id) in
+  run 11. other;
+  Store.succeed_running store ~now:12. ~operation_id:other ~outcome_ref:"independent response" |> ok |> ignore;
+  run 13. original;
+  Store.resume_direct_checkpoint store ~now:14. ~operation_id:original ~observed:(Semantic.Agent_core consumed) |> ok;
+  Store.succeed_running store ~now:15. ~operation_id:original ~outcome_ref:"original response" |> ok |> ignore;
+  run 16. third;
+  Store.succeed_running store ~now:17. ~operation_id:third ~outcome_ref:"third response" |> ok |> ignore
+
 let test_response_advances_original_and_input_together () = with_path @@ fun path ->
   with_store path (fun store ->
     let operation=admit store in retire store operation Agent.Retire;ignore (defer store operation waiting |> ok);
@@ -618,6 +645,7 @@ let test_branch_destination_codec_and_direction () = with_path @@ fun path -> wi
 
 let () = run "durable original input wait"
   ["store",[
+    test_case "exact input response releases behind waiting input once" `Quick test_response_release_goes_behind_waiting_input;
     test_case "branch Store promotion and resume preserve independent input" `Quick test_branch_store_promotes_exact_intent_and_pins_after_resume;
     test_case "branch promotion precommit failure preserves canonical intent" `Quick (test_branch_store_promotion_commit_uncertainty false);
     test_case "uncertain committed branch promotion survives reopen" `Quick (test_branch_store_promotion_commit_uncertainty true);

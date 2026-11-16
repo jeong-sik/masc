@@ -42,16 +42,12 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
       validate_output=(fun proposal -> History.validate_proposal capture proposal |> Result.map (fun _ -> ()));
       before_dispatch=(fun () ->
         let* ()=io (fun () ->
-          let* fresh=Owner.load ~store ~scope ~request_id:request.request_id
+          let* fresh=Owner.reload ~store record
             |> Result.map_error Owner.error_to_string in
           let* fresh=Option.to_result ~none:"Original history request disappeared before provider dispatch" fresh in
-          let* ()=if fresh.request_digest=record.request_digest && fresh.request=record.request
-              && fresh.installation_id=record.installation_id && fresh.package_id=record.package_id
-              && fresh.tool=record.tool then Ok ()
-            else Error "Original history immutable host binding changed before provider dispatch" in
           let* actual=History.observe_record_owner ~base_path ~keepers_dir fresh in
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
-          let* capture=History.restore ~owner:actual fresh in
+          let* ()=History.confirm_record capture fresh in
           let* ()=Keeper_librarian_history_resolution_lineage.confirm_predecessor_by_body ~store ~require_confirmed:true capture in
           Keeper_librarian_runtime.require_counterpart_template (History.preparation capture)) in
         Lane_addon_runtime.authorize_captured_exact_dispatch ~store ~declaration_id
@@ -87,13 +83,9 @@ let authorize_floor_step ~base_path ~store ~declaration_id ~(package:Lane_addon_
       validate_output=(fun proposal -> Step.validate_proposal step proposal |> Result.map (fun _ -> ()));
       before_dispatch=(fun () ->
         let* ()=io (fun () ->
-          let* fresh=Owner.load ~store ~scope ~request_id:request.request_id
+          let* fresh=Owner.reload ~store record
             |> Result.map_error Owner.error_to_string in
           let* fresh=Option.to_result ~none:"Original floor step disappeared before provider dispatch" fresh in
-          let* ()=if fresh.request_digest=record.request_digest && fresh.request=record.request
-              && fresh.installation_id=record.installation_id && fresh.package_id=record.package_id
-              && fresh.tool=record.tool then Ok ()
-            else Error "Original floor step immutable host binding changed before provider dispatch" in
           let* actual=Step.observe_record_owner ~base_path ~keepers_dir fresh in
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
           Keeper_librarian_runtime.require_counterpart_template (Step.step step).preparation) in
@@ -137,14 +129,10 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
         validate_output=(fun proposal -> Capture.validate_proposal capture proposal |> Result.map (fun _ -> ()));
         before_dispatch=(fun () ->
           let* ()=io (fun () ->
-            let* fresh=Owner.load ~store ~scope ~request_id:request.request_id
+            let* fresh=Owner.reload ~store record
               |> Result.map_error Owner.error_to_string in
             let* fresh=match fresh with Some fresh -> Ok fresh
               | None -> Error "Original Librarian request disappeared before provider dispatch" in
-            let* ()=if fresh.request_digest=record.request_digest && fresh.request=record.request
-                && fresh.installation_id=record.installation_id && fresh.package_id=record.package_id
-                && fresh.tool=record.tool then Ok ()
-              else Error "Original Librarian immutable owner changed before provider dispatch" in
             let* actual=Capture.observe_record_owner ~base_path ~keepers_dir fresh in
             Capture.owner_matches_json actual (Capture.owner_to_json owner)) in
           Lane_addon_runtime.authorize_captured_exact_dispatch

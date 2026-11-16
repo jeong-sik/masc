@@ -112,10 +112,26 @@ write_mcp_client_env() {
 }
 
 # ---- readiness wait ----------------------------------------------------------
+port_has_listener() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1 && lsof -ti "tcp:${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+    return 0
+  fi
+  (: </dev/tcp/127.0.0.1/"${port}") >/dev/null 2>&1
+}
+
 wait_for_ready() {
-  local port="$1" max="${2:-60}" waited=0
+  local port="$1" max="${2:-60}" pid="${3:-}" waited=0
   while [ "$waited" -lt "$max" ]; do
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      echo >&2
+      return 1
+    fi
     if curl -fsS --max-time 2 "http://127.0.0.1:${port}/health/ready" >/dev/null 2>&1; then
+      if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+        echo >&2
+        return 1
+      fi
       return 0
     fi
     sleep 1; waited=$((waited + 1))
@@ -178,6 +194,10 @@ run_quickstart() {
     return 0
   fi
 
+  if port_has_listener "$PORT"; then
+    die "port $PORT is already in use; pass --port N or stop the existing listener"
+  fi
+
   step "Build + start server (this can take a while on first build)"
   MASC_LOG_FILE="$BASE_PATH/.masc/quickstart-server.log"
   export MASC_LOG_FILE
@@ -189,7 +209,7 @@ run_quickstart() {
   disown "$SERVER_PID" 2>/dev/null || true
   log "server starting (pid $SERVER_PID, log: $MASC_LOG_FILE)"
 
-  if wait_for_ready "$PORT" "${MASC_QUICKSTART_HEALTH_TIMEOUT:-180}"; then
+  if wait_for_ready "$PORT" "${MASC_QUICKSTART_HEALTH_TIMEOUT:-180}" "$SERVER_PID"; then
     write_mcp_client_env
     print_success
     open_browser

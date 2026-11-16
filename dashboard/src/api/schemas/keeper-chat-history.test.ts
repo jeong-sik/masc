@@ -44,6 +44,25 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     })
   })
 
+  it('preserves omitted count on truncated trace blocks', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        content: 'done',
+        blocks: [{
+          t: 'trace',
+          trace: [{ kind: 'tool', name: 'keeper_tasks_list', status: 'ok' }],
+          omitted: 3,
+        }],
+      }),
+    )
+    expect(out?.blocks?.[0]).toEqual({
+      t: 'trace',
+      trace: [{ kind: 'tool', name: 'keeper_tasks_list', status: 'ok' }],
+      omitted: 3,
+    })
+  })
+
   it('accepts a typed external-effect status block with empty content', () => {
     const out = safeParseKeeperChatHistoryMessage(
       validMessage({

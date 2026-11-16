@@ -18,7 +18,7 @@ related: ["masc-restart-replaces-the-workspace-server"]
 그 부모는 서버가 끝나면 exit code 나 신호 이름을 시작 로그에 한 줄 남긴다.
 
 - 다루는 것: `masc restart` 로 띄운 서버가 끝난 방식을 남기는 일(#52385).
-- 다루지 않는 것: 두 정지의 원인을 고치는 일. 이 기록으로 원인을 찾은 뒤 따로 고친다. 종료 절차 없이 끝난 뒤 Keeper 메시지가 실패하는 일(#52341). TUI·`masc setup` 이 띄우는 서버(§7). 종료 문구를 만드는 여러 곳을 하나로 모으는 일(§4.3).
+- 다루지 않는 것: 두 정지의 원인을 고치는 일. 이 기록으로 원인을 찾은 뒤 따로 고친다. 종료 절차 없이 끝난 뒤 Keeper 메시지가 실패하는 일(#52341). TUI·`masc setup` 이 띄우는 서버(§7, #52405). 종료 문구를 만드는 여러 곳을 하나로 모으는 일(§4.3).
 - 근거 기준: 코드는 `origin/main` `706704b625a5` 에서 읽었다. 관측은 운영 저장소 `~/me/.masc` 와 macOS 시스템 기록을 읽기만 했다.
 - 바꾸는 계약: RFC-masc-restart-replaces-the-workspace-server 와 `docs/guides/server-startup-ownership.md:51-61` 의 띄우기·준비 확인 단계(§6).
 - 표시: **[사실]** 코드·문서·데이터에서 확인한 것, **[제안]** 이 RFC 가 내놓는 것, **[확인 필요]** 모르는 것.
@@ -154,9 +154,10 @@ related: ["masc-restart-replaces-the-workspace-server"]
 
 ## 7. TUI·`masc setup` 이 띄우는 서버
 
-- **[사실]** 둘은 `Process_eio_detached` 로 서버를 새 세션에 띄우고, 자기가 살아 있는 동안 종료 상태를 받아 보여 준다(`bin/masc_tui_server_lifecycle.ml:113-128`, `:189-205`, `bin/masc_cli_setup.ml:263-270`, `bin/masc_tui.ml:2917`). TUI 가 끝나면 restart 와 같은 빈자리가 생긴다.
-- **[사실]** TUI 는 자기 서버를 프로세스 그룹째 멈춘다(`:250` `tree_kill ~pgid`). witness 가 서버를 새 세션에 두면 이 신호가 서버에 닿지 않는다.
-- 그래서 이 경로에 witness 를 쓰려면 TUI 가 멈추는 대상을 함께 정해야 한다. 이 RFC 에서는 정하지 않는다.
+- **[사실]** 둘은 `Process_eio_detached` 로 서버를 새 세션에 띄우고, 자기가 살아 있는 동안 종료 상태를 받아 보여 준다(`bin/masc_tui_server_lifecycle.ml:113-128`, `:189-205`, `bin/masc_cli_setup.ml:263-270`, `bin/masc_tui.ml:2917`).
+- **[사실]** TUI 는 서버를 멈추지 않는다. 준비되면 "it stays running when the TUI closes" 를 알린다(`bin/masc_tui.ml:2959`). `masc setup --no-tui` 는 서버를 놓고 끝난다(`bin/masc_cli_setup.ml:461`). 두 경로 모두 띄운 쪽이 끝나면 restart 와 같은 빈자리가 생긴다.
+- **[사실]** `masc setup` 이 TUI 를 연 경우는 TUI 가 끝난 뒤 setup 이 서버를 프로세스 그룹째 멈춘다(`bin/masc_cli_setup.ml:387-392`, `bin/masc_tui_server_lifecycle.ml:249-250` `tree_kill ~pgid`). witness 가 서버를 새 세션에 두면 이 신호는 witness 의 그룹에만 닿고 서버는 남는다.
+- 그래서 이 경로에 witness 를 쓰려면 setup 이 멈추는 대상을 함께 정해야 한다. 이 RFC 에서는 정하지 않고 #52405 로 남긴다.
 
 ## 8. 검증
 
@@ -192,17 +193,19 @@ related: ["masc-restart-replaces-the-workspace-server"]
 
 RFC 를 맨 아래 층으로 두는 native stack 으로 쌓는다.
 
-## 10. 정할 것
+## 10. 정한 것 (운영자, 2026-11-16)
 
-1. witness 를 별도 실행 파일 대신 `masc` 하위 명령으로 둘지.
-2. restart 준비 확인을 "쥔 프로세스의 커널 부모 == 띄운 witness" 로 바꿀지.
-3. 서버를 새 세션에 띄울지(§4.1).
-4. SIGHUP 종료 절차(#52385 의 B)를 witness 기록 뒤로 미룰지.
-5. TUI·`masc setup` 경로(§7)를 이어서 다룰지.
+1. **witness 는 `masc` 하위 명령이다(§4.1).** 설치·배포 목록이 그대로다. 대가는 서버가 떠 있는 동안 약 48.5 MiB 다(§4.4). 고르지 않은 길은 작은 별도 실행 파일이다(§5).
+2. **restart 준비 확인은 "쥔 프로세스의 커널 부모 == 띄운 witness" 다(§4.2).** `parent_pid` 를 읽을 수 없는 플랫폼은 앞 서버를 멈추기 전에 거절한다. HIGH-RISK 코드라 사람 리뷰를 받는다. 고르지 않은 길은 witness 가 파이프로 서버 pid 를 알리는 것이다(§5).
+3. **서버는 witness 와 다른 새 세션에 띄운다(§4.1).** 서버의 그룹이 지금처럼 고아로 남는다. 고르지 않은 길은 같은 세션의 새 그룹이다(§5).
+4. **SIGHUP 종료 절차(#52385 의 B)는 witness 기록 뒤로 미룬다.** witness 기록에서 처리할 수 있는 신호가 나오면 그 근거로 다시 연다(§5).
+5. **TUI·`masc setup` 경로는 이 RFC 밖이다.** #52405 로 남긴다(§7).
 
 ## 11. 관련
 
 - #52385 서버가 종료 절차 없이 끝나도 어떻게 끝났는지 남는 곳이 없다.
+- #52405 TUI·`masc setup --no-tui` 가 띄운 서버도 띄운 쪽이 끝나면 어떻게 끝났는지 남지 않는다.
+- #52397 종료 문구를 만드는 곳이 25곳이고, 몇 곳은 OCaml 내부 신호 번호를 보인다(§4.3).
 - #52341 종료 절차 없이 끝난 뒤 다시 띄우면 걸려 있던 Keeper 메시지가 turn counter 불일치로 실패한다.
 - task-3306 서버가 SIGTERM 으로 멈출 때 자기 native Lane Add-on instance 를 Detach 해 둔다.
 - RFC-masc-restart-replaces-the-workspace-server: 이 RFC 가 준비 확인 규칙을 바꾼다.

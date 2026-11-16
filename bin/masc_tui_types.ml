@@ -14443,7 +14443,7 @@ let suspend_keeper_deletions_read state =
 let suspend_account_login_read (view : Masc_tui_account_login.t) =
   view.phase <- (match view.phase with
     | Masc_tui_account_login.Finished outcome -> Finished {outcome with refresh_failed=true}
-    | Loading | Providers _ | Logging | Models | Preparing_context _ | Documented_context _ | Saving
+    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Saving
     | Removing | Failed | Removal _ -> Failed);
   view.notice <- "Workspace reading is unconfirmed; read again after identity returns."
 

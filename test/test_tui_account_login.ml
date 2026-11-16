@@ -346,6 +346,61 @@ let failed_activation_blocks_login_shortcuts () =
   check bool "new login is available after confirmed activation" true
     (Login.key t "n"=Login.Start {provider;existing=false})
 
+let refreshed_model_selection () =
+  let document rows = `Assoc ["models", `List (List.map (fun ((m:Login.model), bound) ->
+    `Assoc ["id",`String m.id; "label",`String m.label; "bound",`Bool bound;
+      "context",(match m.context with Some n -> `Int n | None -> `Null);
+      "tools",(match m.tools with Some b -> `Bool b | None -> `Null)]) rows)] in
+  let t = Login.create "codex" in
+  t.provider <- Some provider; t.account_ref <- Some account;
+  let initial = document [model 0,false; model 1,false; model 2,false] in
+  ok (Login.models t initial);
+  t.cursor <- 1; ignore (Login.key t " "); t.cursor <- 2;
+  check bool "refresh is distinct from first discovery" true (Login.key t "r"=Login.Refresh_models);
+  Login.refreshing_models t;
+  List.iter (fun key -> check bool "refresh cannot race a save or another selection" true
+    (Login.key t key=Login.Nothing)) ["enter";" ";"a";"r";"n";"e"];
+  check bool "refresh can be closed" true (Login.key t "esc"=Login.Close);
+  let current = document [model 3,false; {(model 2) with context=None},false;
+    {(model 0) with context=Some 65536},false; model 1,false] in
+  ok (Login.refreshed_models t current);
+  check int "cursor follows model identity after reordering" 1 t.cursor;
+  (match Login.key t "enter" with
+   | Login.Save [second; first] ->
+       check (list string) "deselected and newly discovered models stay out of save" ["2";"0"] [second.id;first.id];
+       check (option int) "unreported context retains the prior account value" (Some 32768) second.context;
+       check (option int) "newly reported context replaces the old value" (Some 65536) first.context
+   | _ -> fail "refresh changed the operator's save selection");
+  ignore (Login.key t "a"); ignore (Login.key t "a");
+  ok (Login.refreshed_models t current);
+  check (list string) "an intentionally empty selection stays empty" [] t.selected_models;
+  ok (Login.refreshed_models t (document []));
+  ok (Login.refreshed_models t current);
+  check (list string) "an empty inventory does not turn a refresh into initial discovery" [] t.selected_models;
+  t.selected_models <- ["0";"1";"2"];
+  ok (Login.refreshed_models t (document [model 0,true;{(model 1) with tools=Some false},false]));
+  check (list string) "bound, unsupported and removed models cannot be saved" [] t.selected_models;
+  ok (Login.selected_account t provider (`Assoc ["account_ref",`String other]));
+  ok (Login.models t initial);
+  check (list string) "another account starts with its own initial selection" ["0";"1";"2"] t.selected_models
+let model_refresh_failure () =
+  let t = Login.create "codex" in
+  t.provider <- Some provider; t.account_ref <- Some account;
+  t.models <- [model 0;model 1]; t.selected_models <- ["1"]; t.cursor <- 1; t.phase <- Login.Models;
+  Login.refreshing_models t;
+  Login.models_refresh_failed t "read failed";
+  check bool "a failed reread cannot save stale inventory" true
+    (t.phase=Login.Failed && Login.key t "enter"=Login.Nothing);
+  check bool "retry rereads models instead of restarting login" true (Login.key t "r"=Login.Refresh_models);
+  check bool "failure retains inventory, selection, cursor and account" true
+    (t.models=[model 0;model 1] && t.selected_models=["1"] && t.cursor=1 && t.account_ref=Some account);
+  Login.refreshing_models t;
+  (match Login.refreshed_models t (`Assoc ["models",`List [`Assoc ["id",`Null;"bound",`Bool false]]]) with
+   | Ok () -> fail "malformed model inventory was accepted"
+   | Error detail -> Login.models_refresh_failed t detail);
+  check bool "malformed reread retains selection and stays blocked" true
+    (t.selected_models=["1"] && t.cursor=1 && Login.key t "enter"=Login.Nothing
+     && Login.key t "r"=Login.Refresh_models)
 let pending_model_context () =
   let t = Login.create "antigravity" in
   t.provider <- Some {provider with client=Login.Antigravity};
@@ -404,7 +459,7 @@ let missing_model_context () =
     | Login.Antigravity -> check bool "native observation available" true (action=Login.Prepare unknown)
     | Login.Muse ->
       check bool "unreported Muse context is not invented" true (action=Login.Nothing && t.phase=Login.Models);
-      check bool "Muse can refresh native metadata" true (Login.key t "r"=Login.Discover)
+      check bool "Muse can refresh native metadata" true (Login.key t "r"=Login.Refresh_models)
     | Login.Codex | Login.Claude ->
       check bool "explicit documented limit requested" true (action=Login.Nothing && t.phase=Login.Documented_context unknown);
       check bool "empty context cannot save" true (Login.key t "\r"=Login.Nothing);
@@ -1184,6 +1239,8 @@ let () = run "TUI account login" ["workflow",[
   test_case "a partly checked save summarizes retained connections and names failures" `Quick partly_checked_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
   test_case "pending native context retains selection and recovery" `Quick pending_model_context;
+  test_case "refresh retains model choices and account-local limits" `Quick refreshed_model_selection;
+  test_case "failed model reread retains data without admitting saves" `Quick model_refresh_failure;
   test_case "fragmented remote login" `Quick decoder_fragments;
   test_case "malformed and unfinished streams" `Quick decoder_failures;
   test_case "explicit provider and preserved default" `Quick account_and_default;

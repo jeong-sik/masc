@@ -1878,6 +1878,65 @@ let stage_finish_run ?causes journal state ~run terminal =
     payload
 ;;
 
+let open_subtree_postorder (captured_state : journal_state) root =
+  match Reducer.open_subtree_postorder captured_state.reducer root with
+  | Ok order -> Ok order
+  | Error violation -> Error (Invariant_violation violation)
+;;
+
+(* Close the open nodes in [order] (children before parents) with one
+   terminal. Each close names the closes of its children as causes. The
+   caller validates the nodes and [terminal]. *)
+let stage_close_postorder ?causes journal captured_state order terminal =
+  let rec apply_closes state events_rev closed_by_node = function
+    | [] -> Ok (state, events_rev)
+    | node_id :: nodes ->
+      let* event_id = identity_result (Event.Event_id.fresh ()) in
+      let* record = node_record_or_error state node_id in
+      let* parent_event_id = node_last_event state node_id in
+      let payload = Event.close_payload ~node_id terminal in
+      let child_causes =
+        reverse_filter_map_cooperatively
+          (fun (child : Event.node event_record) ->
+             let child_id = Event.node_id child.value in
+             Option.map
+               (fun event -> Event.Internal_event (Event.event_id event))
+               (Node_id_map.find_opt child_id closed_by_node))
+          record.children_rev
+      in
+      let event_causes =
+        append_cooperatively (Option.value causes ~default:[]) child_causes
+      in
+      let* next_state, event =
+        append_to_state
+          state
+          ~event_id
+          ~correlation_id:journal.correlation_id
+          ~run_id:(Event.node_run_id record.node)
+          ~parent_event_id:(Some parent_event_id)
+          ~causes:event_causes
+          payload
+      in
+      Eio.Fiber.yield ();
+      apply_closes
+        next_state
+        (event :: events_rev)
+        (Node_id_map.add node_id event closed_by_node)
+        nodes
+  in
+  let+ next_state, events_rev =
+    apply_closes captured_state [] Node_id_map.empty order
+  in
+  let events = reverse_cooperatively events_rev in
+  { next_state; events; value = events }
+;;
+
+(* Close [root] and every open node under it with one terminal. *)
+let stage_close_open_subtree ?causes journal captured_state ~root terminal =
+  let* order = open_subtree_postorder captured_state root in
+  stage_close_postorder ?causes journal captured_state order terminal
+;;
+
 let stage_abort_run ?causes journal captured_state ~run terminal =
   match terminal with
   | Event.Succeeded ->
@@ -1885,52 +1944,111 @@ let stage_abort_run ?causes journal captured_state ~run terminal =
   | Event.Failed _ | Event.Cancelled _ ->
     let* terminal = payload_result (Event.validate_terminal terminal) in
     let* () = validate_run_handle captured_state run in
-    let* order =
-      match Reducer.open_subtree_postorder captured_state.reducer run.root with
-      | Ok order -> Ok order
-      | Error violation -> Error (Invariant_violation violation)
+    stage_close_open_subtree ?causes journal captured_state ~root:run.root terminal
+;;
+
+let stage_settle_unreturned_tool_attempt journal state ~attempt ~invocation ~result terminal
+  =
+  match terminal with
+  | Event.Succeeded ->
+    Error
+      (Invalid_argument "an unreturned tool attempt requires a failed or cancelled terminal")
+  | Event.Failed _ | Event.Cancelled _ ->
+    let* terminal = payload_result (Event.validate_terminal terminal) in
+    let* attempt_record = node_record_or_error state attempt in
+    let* () =
+      match
+        ( Event.node_kind attempt_record.node
+        , Event.parent_node_id attempt_record.node
+        , attempt_record.status )
+      with
+      | Event.Tool_attempt, Some parent, Open when Event.Node_id.equal parent invocation ->
+        Ok ()
+      | Event.Tool_attempt, Some _, Open | Event.Tool_attempt, None, Open ->
+        Error (Invalid_argument "tool attempt does not belong to the invocation")
+      | Event.Tool_attempt, (None | Some _), Closed _ ->
+        Error (Invalid_argument "an unreturned tool attempt must be open")
+      | ( ( Event.Agent_run _
+          | Event.Agent_turn _
+          | Event.Provider_attempt _
+          | Event.Output_block _
+          | Event.Tool_invocation _ )
+        , _
+        , _ ) -> Error (Invalid_argument "tool settlement requires a Tool_attempt node")
     in
-    let rec apply_closes state events_rev closed_by_node = function
-      | [] -> Ok (state, events_rev)
-      | node_id :: nodes ->
-        let* event_id = identity_result (Event.Event_id.fresh ()) in
-        let* record = node_record_or_error state node_id in
-        let* parent_event_id = node_last_event state node_id in
-        let payload = Event.close_payload ~node_id terminal in
-        let child_causes =
-          reverse_filter_map_cooperatively
-            (fun (child : Event.node event_record) ->
-               let child_id = Event.node_id child.value in
-               Option.map
-                 (fun event -> Event.Internal_event (Event.event_id event))
-                 (Node_id_map.find_opt child_id closed_by_node))
-            record.children_rev
-        in
-        let event_causes =
-          append_cooperatively (Option.value causes ~default:[]) child_causes
-        in
-        let* next_state, event =
-          append_to_state
-            state
-            ~event_id
-            ~correlation_id:journal.correlation_id
-            ~run_id:(Event.node_run_id record.node)
-            ~parent_event_id:(Some parent_event_id)
-            ~causes:event_causes
-            payload
-        in
+    let* invocation_record = node_record_or_error state invocation in
+    let* () =
+      match
+        ( Event.node_kind invocation_record.node
+        , invocation_record.tool_result
+        , invocation_record.status )
+      with
+      | Event.Tool_invocation _, None, Open -> Ok ()
+      | Event.Tool_invocation _, Some _, (Open | Closed _)
+      | Event.Tool_invocation _, None, Closed _ ->
+        Error
+          (Invalid_argument
+             "an unreturned tool attempt requires an open invocation without a result")
+      | ( ( Event.Agent_run _
+          | Event.Agent_turn _
+          | Event.Provider_attempt _
+          | Event.Output_block _
+          | Event.Tool_attempt )
+        , _
+        , _ ) ->
+        Error (Invalid_argument "tool settlement requires a Tool_invocation node")
+    in
+    let* order = open_subtree_postorder state attempt in
+    (* Recovery reads every descendant, including closed child runs. A child
+       invocation with an attempt but no result still needs operator repair
+       even if that child run was already aborted. Check the full history
+       before closing only the open nodes. Known child results stay valid. *)
+    let rec prepend_children work = function
+      | [] -> work
+      | (child : Event.node event_record) :: children ->
         Eio.Fiber.yield ();
-        apply_closes
-          next_state
-          (event :: events_rev)
-          (Node_id_map.add node_id event closed_by_node)
-          nodes
+        prepend_children (Event.node_id child.value :: work) children
     in
-    let+ next_state, events_rev =
-      apply_closes captured_state [] Node_id_map.empty order
+    let rec reject_cut_below = function
+      | [] -> Ok ()
+      | node_id :: nodes ->
+        let* record = node_record_or_error state node_id in
+        (match Event.node_kind record.node, record.tool_result, record.children_rev with
+         | Event.Tool_invocation _, None, _ :: _ ->
+           Error
+             (Invalid_argument
+                "a tool attempt cut inside a child run cannot be settled by its \
+                 parent's result")
+         | Event.Tool_invocation _, None, []
+         | Event.Tool_invocation _, Some _, _
+         | ( ( Event.Agent_run _
+             | Event.Agent_turn _
+             | Event.Provider_attempt _
+             | Event.Output_block _
+             | Event.Tool_attempt )
+           , _
+           , _ ) ->
+           Eio.Fiber.yield ();
+           reject_cut_below (prepend_children nodes record.children_rev))
     in
-    let events = reverse_cooperatively events_rev in
-    { next_state; events; value = events }
+    let* () = reject_cut_below [ attempt ] in
+    let* attempt_closed = stage_close_postorder journal state order terminal in
+    let* result_committed =
+      stage_update_node
+        journal
+        attempt_closed.next_state
+        ~node:invocation
+        (Event.Tool_result result)
+    in
+    let+ invocation_closed =
+      stage_close_node journal result_committed.next_state ~node:invocation Event.Succeeded
+    in
+    let events =
+      append_cooperatively
+        attempt_closed.events
+        [ result_committed.value; invocation_closed.value ]
+    in
+    { next_state = invocation_closed.next_state; events; value = events }
 ;;
 
 let start_run ?parent_attempt ?causes journal ~agent_name =
@@ -2045,6 +2163,13 @@ module Transaction = struct
         ; result : Llm_provider.Types.content_block
         }
         -> Event.t list t
+    | Settle_unreturned_tool_attempt :
+        { attempt : Event.Node_id.t
+        ; invocation : Event.Node_id.t
+        ; result : Llm_provider.Types.content_block
+        ; terminal : Event.terminal
+        }
+        -> Event.t list t
     | Finish_run :
         { causes : Event.cause list
         ; run : run
@@ -2080,6 +2205,10 @@ module Transaction = struct
 
   let settle_unattempted_tool_invocation ~invocation ~result () =
     Settle_unattempted_tool_invocation { invocation; result }
+  ;;
+
+  let settle_unreturned_tool_attempt ~attempt ~invocation ~result terminal =
+    Settle_unreturned_tool_attempt { attempt; invocation; result; terminal }
   ;;
 
   let finish_run ?(causes = []) ~run terminal = Finish_run { causes; run; terminal }
@@ -2150,6 +2279,15 @@ let stage : type value. batch -> value Transaction.t -> (batch * value, error) r
          batch.staged_state
          ~invocation
          ~result)
+  | Transaction.Settle_unreturned_tool_attempt { attempt; invocation; result; terminal } ->
+    stage_mutation
+      (stage_settle_unreturned_tool_attempt
+         batch.journal
+         batch.staged_state
+         ~attempt
+         ~invocation
+         ~result
+         terminal)
   | Transaction.Finish_run { causes; run; terminal } ->
     stage_mutation
       (stage_finish_run ~causes batch.journal batch.staged_state ~run terminal)

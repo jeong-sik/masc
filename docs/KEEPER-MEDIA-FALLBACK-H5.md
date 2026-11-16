@@ -84,6 +84,47 @@ receipt binds the content actually sent. Representable documents retain their
 native bytes when admitted. Responses tool-result documents still use its
 existing JSON-text representation; this is not native tool-result PDF support.
 
+## Attached MCP results
+
+Attached identity tools use `Keeper_mcp_content` for ordinary calls and approval
+replay. The shared decoder preserves the received order before lane projection.
+User-only content, raw `annotations` and per-block `_meta` do not enter that
+model projection; resource names, descriptions, URIs and MIME remain visible.
+Malformed annotations or media produce a visible failure without retrying the
+external operation. Resource links remain references; they are not fetched.
+
+A selected runtime can receive native images when its frozen runtime and
+transport admit them; Core calls also require the frozen wire capability.
+The path uses the existing supported image MIME types. Other images, audio and
+PDF results become references to their exact
+decoded bytes. The reference describes the original MIME, including parameters.
+Generic embedded blobs, including ZIP files and empty files without a MIME
+declaration, remain readable byte resources instead of being guessed into
+documents. External MIME declarations cannot mint internal manifest authority.
+Approval replay uses references for every media kind. A remote error remains an
+error; its visible media is still readable through references.
+
+The received MCP field set is retained separately for audit, including content
+excluded by audience. Ordinary calls own it through the tool-call ledger;
+approval replay owns it through the existing replay-result sidecar. The model's
+latest-call status omits that private envelope reference. Operator audit access
+remains separate from the model projection. This does not add a filesystem ACL.
+
+Public byte references belong to a separate typed manifest whose children come
+only from bytes this producer actually stored. An exact manifest marker in
+canonical tool and approval input blocks preserves those children after interim
+audit owners retire. The received private envelope is not a manifest child.
+Official-client continuation does not save a Core checkpoint. Its spent replay
+sidecar stays until the exact public chat lifecycle reference is durably appended,
+or its existing ordinary/correction row is verified and fsynced. Confirmation
+failure keeps the sidecar. This canonical chat ledger is outside dated audit
+pruning; explicit Keeper removal retains its existing removal semantics.
+
+This path preserves media bytes but does not invoke an external reader by itself.
+It does not turn MCP audio or documents into native tool-result media for every
+provider. Large text uses the lane's existing externalization threshold;
+attached tools no longer declare that text threshold as a bound on native media.
+
 ## Verification and remaining work
 
 The focused behavior fixtures are in `test_keeper_turn_driver_failover`,
@@ -100,6 +141,10 @@ coding session. Syntax checks are not behavior evidence. A real PDF extraction,
 STT endpoint, model response, restart and installed-binary continuity run remain
 separate evidence requirements.
 
-MCP identity tools that discard non-text blocks, generic non-PDF interpretation,
-URL/file-ID fetching and same-round external reading are separate outstanding
-work. This repair does not complete the whole Farm multimodal requirement.
+Attached MCP decoder, Gate and approval-sidecar cases are recorded in the
+[MCP candidate evidence](evidence/2026-11-16-farm-mcp-content/README.md). They are
+written source cases, not executed service/provider or restart evidence.
+
+Generic non-PDF interpretation, URL/file-ID fetching and same-round external
+reading remain outstanding. These repairs do not complete the whole Farm
+multimodal requirement.

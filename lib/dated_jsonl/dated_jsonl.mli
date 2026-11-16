@@ -240,6 +240,16 @@ val read_recent_view : 'a recent_view -> t -> 'a list
     with the same inode, size and modification time reads as unchanged; the
     store's writers only append and remove whole files. *)
 
+val count_and_read_recent_view : 'a recent_view -> t -> int * 'a list
+(** Count all retained complete lines and project the recent window from one
+    shared day-file listing. Reuses the existing per-file count cache and
+    recent-view invalidation; files are still checked for external changes.
+    Counts use [count_entries]'s [.jsonl] selection, including dot-prefixed
+    files. Recent rows keep the view's validated dated-file selection.
+    This is a best-effort observation, not an atomic multi-file snapshot.
+    On listing failure, uses the same permissive count/recent readers without
+    retaining a recent answer under an incomplete listing. *)
+
 val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
 (** [read_recent ?offset t n] returns the newest [n] entries in chronological
     order (oldest first), skipping the first [offset] newest entries.
@@ -484,11 +494,9 @@ val count_entries : t -> int
 (* [count_entries t] returns the total number of non-empty,
    newline-terminated lines across all day-files. Scans bytes without
    JSON parsing, backed by a per-file (boundary, count) cache: closed
-   day-files are never re-read and the growing current-day file only
-   re-reads the bytes appended since the previous call, so a call is
-   O(appended bytes) — exact, no TTL staleness window (the RFC-0162
-   §3.2 TTL layer this replaced traded 10 s of staleness for a bound
-   the incremental cache now provides structurally). A trailing line
+   files with unchanged sizes avoid content reads; growing files read only
+   appended bytes. Every call still lists retained files and stats each one,
+   with no TTL staleness window. A trailing line
    not yet terminated by '\n' is not counted until its newline lands;
    audit callers that must include it use [count_entries_uncached]. *)
 

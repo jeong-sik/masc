@@ -141,18 +141,18 @@ let latest_ts_view =
     let ts = extract_ts json in
     if ts > 0.0 then Some ts else None)
 
-let latest_store_ts source location label : float option =
-  if not (Sys.file_exists (Dated_jsonl.Store.dir location)) then None
+let store_summary_stats source location label =
+  if not (Sys.file_exists (Dated_jsonl.Store.dir location)) then 0, None
   else
     match Dated_jsonl.open_store location with
     | store ->
-      Dated_jsonl.read_recent_view latest_ts_view store
-      |> List.fold_left max_ts_opt None
+      let count, timestamps = Dated_jsonl.count_and_read_recent_view latest_ts_view store in
+      count, List.fold_left max_ts_opt None timestamps
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
-      observe_source_read_failure_exn source ~site:"latest_store_ts" exn;
-      Log.Telemetry.warn "latest_store_ts: %s store open failed" label;
-      None
+      observe_source_read_failure_exn source ~site:"store_summary_stats" exn;
+      Log.Telemetry.warn "store_summary_stats: %s store open failed" label;
+      0, None
 
 let sort_newest_first entries =
   List.sort (fun a b -> Float.compare (extract_ts b) (extract_ts a)) entries
@@ -853,48 +853,16 @@ let read_unified ~masc_root ?sources ?keeper_name ?session_id
 
 (* ── Summary ────────────────────────────────────────── *)
 
-let count_fixed_source_entries ~masc_root source : int =
-  match fixed_store_location ~masc_root source with
-  | None -> 0
-  | Some location ->
-    match
-      classify_store_dir source ~site:"count_fixed_source_entries_dir"
-        (Dated_jsonl.Store.dir location)
-    with
-    | Store_missing | Store_invalid -> 0
-    | Store_directory ->
-      (match Dated_jsonl.open_store location with
-       | store -> Dated_jsonl.count_entries store
-       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-       | exception exn ->
-         observe_source_read_failure_exn source
-           ~site:"count_fixed_source_entries" exn;
-         Log.Telemetry.warn "count_source_entries: %s store open failed"
-           (source_to_string source);
-         0)
-
 let execution_receipt_summary_stats ~masc_root =
   discover_execution_receipt_dirs masc_root
   |> List.fold_left
-       (fun (count_acc, latest_acc) (name, dir) ->
-         let location = execution_receipt_location ~masc_root name in
-         match Dated_jsonl.open_store location with
-         | store ->
-           let count = Dated_jsonl.count_entries store in
-           let latest =
-             latest_store_ts Execution_receipt location "execution_receipt"
-           in
-           ( count_acc + count,
-             match latest with
-             | Some ts -> max_ts_opt latest_acc ts
-             | None -> latest_acc )
-         | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-         | exception exn ->
-           observe_source_read_failure_exn Execution_receipt
-             ~site:"execution_receipt_summary_stats" exn;
-           Log.Telemetry.warn
-             "execution_receipt_summary_stats: store open failed for %s" dir;
-           (count_acc, latest_acc))
+       (fun (count_acc, latest_acc) (name, _dir) ->
+         let count, latest = store_summary_stats Execution_receipt
+           (execution_receipt_location ~masc_root name) "execution_receipt" in
+         count_acc + count,
+         match latest with
+         | Some ts -> max_ts_opt latest_acc ts
+         | None -> latest_acc)
        (0, None)
 
 (* Per-trace-file incremental summary cache for the snapshot loop.
@@ -1165,30 +1133,14 @@ let observe_summary ~now ?keeper_keepalive_interval_s
   in
   let coverage_gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:50 in
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
-  let keeper_total =
-    List.fold_left (fun acc (name, _dir) ->
-      acc +
-      (match Dated_jsonl.open_store (keeper_metric_location ~masc_root name) with
-       | store -> Dated_jsonl.count_entries store
-       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-       | exception exn ->
-         observe_source_read_failure_exn Keeper_metric
-           ~site:"summary_keeper_count" exn;
-         Log.Telemetry.warn "summary_json: keeper %s store open failed" name;
-         0)
-    ) 0 keeper_dirs
-  in
-  let keeper_latest_ts =
+  let keeper_total, keeper_latest_ts =
     List.fold_left
-      (fun acc (name, _dir) ->
-        match
-          latest_store_ts Keeper_metric
-            (keeper_metric_location ~masc_root name)
-            (Printf.sprintf "keeper %s" name)
-        with
-        | Some ts -> max_ts_opt acc ts
-        | None -> acc)
-      None keeper_dirs
+      (fun (total, latest) (name, _dir) ->
+        let count, timestamp = store_summary_stats Keeper_metric
+          (keeper_metric_location ~masc_root name) (Printf.sprintf "keeper %s" name) in
+        total + count,
+        match timestamp with Some ts -> max_ts_opt latest ts | None -> latest)
+      (0, None) keeper_dirs
   in
   let source_json_and_count source =
     let freshness_slo_s =
@@ -1398,16 +1350,11 @@ let observe_summary ~now ?keeper_keepalive_interval_s
         | Store_invalid -> true
         | Store_missing | Store_directory -> false
       in
-      let count =
-        if dir_state = Store_directory then
-          count_fixed_source_entries ~masc_root source
-        else 0
-      in
-      let latest_ts =
+      let count, latest_ts =
         match dir_state, fixed_store_location ~masc_root source with
         | Store_directory, Some location ->
-          latest_store_ts source location (source_to_string source)
-        | (Store_directory | Store_missing | Store_invalid), _ -> None
+          store_summary_stats source location (source_to_string source)
+        | (Store_directory | Store_missing | Store_invalid), _ -> 0, None
       in
       let coverage_gap_fields, coverage_gap =
         coverage_gap_status_fields coverage_gaps source ~latest_ts

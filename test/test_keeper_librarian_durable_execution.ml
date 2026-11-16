@@ -2345,6 +2345,39 @@ let test_missing_history_progresses_through_the_production_queue () =
       check (list string) "the actual queued provider result reaches Memory"
         ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
       check int "the production queue never replays the missing original" 1 (F.post_count fixture.server))))
+let test_an_absent_continuation_yields_before_its_next_child () = with_fixture (fun ~sw:_ fixture ->
+  let original,_request=retain_absent_history_original fixture in
+  assert_pending (run_worker fixture);
+  let observe request_id=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+    ~request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+  let child_id observation=match observation.Resolution_work.intents with
+    | [{Resolution_intent.phase=Child_confirmed child;_}] -> child.request_id
+    | _ -> fail "automatic recovery did not retain one confirmed child" in
+  let first_child=child_id (observe original.request_id) in
+  let child=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:first_child |> owned |> Option.get) in
+  (* A second interrupted dispatch has its own durable absence. The first
+     unknown original and its fence are still retained. *)
+  let advance child event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:child ~event with
+    | Ok (Owner.Stored child | Already_stored child) -> child
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error)) in
+  let child=advance child Progress.Dispatch_intended in
+  ignore (advance child (Progress.Execution_observed (Progress.Absent (`Assoc []))));
+  let wakes=ref 0 in
+  assert_pending (memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+    ~wake:(fun () -> incr wakes)));
+  let next_child=child_id (observe first_child) in
+  check bool "a newly absent child gets its own continuation" true (next_child<>first_child);
+  check int "a second absence schedules one later lane unit" 1 !wakes;
+  check int "that unit does not inline-dispatch the next child" 0 (F.post_count fixture.server);
+  check bool "the ancestor still names its same child" true
+    (child_id (observe original.request_id)=first_child);
+  no_memory fixture;
+  drive_advanced fixture;
+  check int "only the final continuation reaches the provider" 1 (F.post_count fixture.server);
+  check bool "the actual descendant commit completes the ancestor's original range" true
+    ((observe original.request_id).completion=Resolution_work.Memory_committed {request_id=next_child}))
 let test_history_fence_retains_unknown_and_blocks_late_observations () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let original_range = Source.range_id (Capture.source request) |> Option.get in
@@ -4314,6 +4347,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_automatic_history_reuses_an_operator_intent;
   test_case "one production catch-up signal automatically recovers missing history through Memory and ACK" `Quick
     test_missing_history_progresses_through_the_production_queue;
+  test_case "an absent automatic child yields before dispatching its own continuation" `Quick
+    test_an_absent_continuation_yields_before_its_next_child;
   test_case "an explicit history fence blocks late observations and unreadable fence state" `Quick
     test_history_fence_retains_unknown_and_blocks_late_observations;
   test_case "a fenced unknown original does not block the next history pass" `Quick

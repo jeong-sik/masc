@@ -9,8 +9,16 @@ external posix_spawn
 
 type t = { pid : int; started : string option; exited : Unix.process_status option Eio.Promise.t }
 
+type parent =
+  | Parent of int
+  | No_process
+  | Unreadable
+
 external darwin_start : int -> string option = "masc_process_start_time"
-external darwin_parent : int -> int option = "masc_process_parent_pid"
+
+(* [None]: the Darwin process table did not answer, on another platform or
+   because the sysctl failed. [Some None]: it answered with no such process. *)
+external darwin_parent : int -> int option option = "masc_process_parent_pid"
 
 (* starttime counts from boot, so the boot names it too. *)
 let linux_start pid =
@@ -27,15 +35,20 @@ let process_start pid =
   | Some _ as started -> started
   | None -> linux_start pid
 
+(* ENOENT names both a pid /proc does not hold and, on a host without /proc,
+   every pid; whether /proc/self is there tells the two apart. *)
 let linux_parent pid =
   match Linux_proc_stat.parse (Linux_proc_stat.read pid) with
-  | exception Unix.Unix_error (_, _, _) -> None
-  | Some line -> Some line.Linux_proc_stat.parent
-  | None -> None
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ESRCH), _, _) when Sys.file_exists "/proc/self/stat" ->
+    No_process
+  | exception Unix.Unix_error (_, _, _) -> Unreadable
+  | Some line -> Parent line.Linux_proc_stat.parent
+  | None -> Unreadable
 
 let parent_pid pid =
   match darwin_parent pid with
-  | Some _ as parent -> parent
+  | Some (Some parent) -> Parent parent
+  | Some None -> No_process
   | None -> linux_parent pid
 
 let rec reaped pid =

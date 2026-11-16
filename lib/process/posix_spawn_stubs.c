@@ -421,16 +421,24 @@ CAMLprim value masc_process_group_members(value v_pgid)
 }
 
 #if defined(__APPLE__)
-/* The kernel's process table row for process [pid]. Nonzero when it is
-   there. For a pid nobody holds the sysctl still answers 0, with no row
-   (size 0), so the size and the pid in the row are both checked. */
-static int masc_process_row(pid_t pid, struct kinfo_proc *info)
+/* The kernel's process table row for the process numbered [number]. A
+   number that is no pid (0 or less, or past pid_t) has no row; without this
+   check the cast would read another process's row. For a pid nobody holds
+   the sysctl still answers 0, with no row (size 0). Any other answer is a
+   table that did not say. */
+enum masc_process_row_answer { MASC_ROW_FOUND, MASC_ROW_ABSENT, MASC_ROW_UNREADABLE };
+
+static enum masc_process_row_answer masc_process_row(intnat number, struct kinfo_proc *info)
 {
+  pid_t pid = (pid_t)number;
+  if (number <= 0 || (intnat)pid != number) return MASC_ROW_ABSENT;
   size_t size = sizeof(*info);
   int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
   memset(info, 0, sizeof(*info));
-  return sysctl(mib, 4, info, &size, NULL, 0) == 0 && size == sizeof(*info) &&
-         info->kp_proc.p_pid == pid;
+  if (sysctl(mib, 4, info, &size, NULL, 0) != 0) return MASC_ROW_UNREADABLE;
+  if (size == 0) return MASC_ROW_ABSENT;
+  if (size == sizeof(*info) && info->kp_proc.p_pid == pid) return MASC_ROW_FOUND;
+  return MASC_ROW_UNREADABLE;
 }
 #endif
 
@@ -446,7 +454,7 @@ CAMLprim value masc_process_start_time(value v_pid)
   result = Val_none;
 #if defined(__APPLE__)
   struct kinfo_proc info;
-  if (masc_process_row((pid_t)Int_val(v_pid), &info)) {
+  if (masc_process_row(Long_val(v_pid), &info) == MASC_ROW_FOUND) {
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "darwin:%ld.%06ld",
              (long)info.kp_proc.p_starttime.tv_sec, (long)info.kp_proc.p_starttime.tv_usec);
@@ -459,18 +467,28 @@ CAMLprim value masc_process_start_time(value v_pid)
 
 /* Observe only: the parent the kernel records for process [pid], from the
    kernel's process table, without starting another process. A zombie is
-   still in the table, so a child not yet reaped reads too. Some ppid on
-   Darwin; None when no such process is there, and on every other
+   still in the table, so a child not yet reaped reads too. On Darwin,
+   Some (Some ppid) for a row, and Some None when the table holds no such
+   process. None when the table did not answer, and on every other
    platform. */
 CAMLprim value masc_process_parent_pid(value v_pid)
 {
   CAMLparam1(v_pid);
-  CAMLlocal1(result);
+  CAMLlocal2(result, parent);
   result = Val_none;
 #if defined(__APPLE__)
   struct kinfo_proc info;
-  if (masc_process_row((pid_t)Int_val(v_pid), &info))
-    result = caml_alloc_some(Val_int(info.kp_eproc.e_ppid));
+  switch (masc_process_row(Long_val(v_pid), &info)) {
+  case MASC_ROW_FOUND:
+    parent = caml_alloc_some(Val_int(info.kp_eproc.e_ppid));
+    result = caml_alloc_some(parent);
+    break;
+  case MASC_ROW_ABSENT:
+    result = caml_alloc_some(Val_none);
+    break;
+  case MASC_ROW_UNREADABLE:
+    break;
+  }
 #endif
   CAMLreturn(result);
 }

@@ -698,24 +698,73 @@ let test_turn_stop_reason_decides_the_grace ~spawn ~reason ~keeps_grace () =
 (* A restart's readiness check reads which process holds the server as its
    child (RFC #52396 §4.2). Darwin answers from the kernel's process table;
    Linux, which CI runs, from /proc. *)
+let parent =
+  testable
+    (fun ppf -> function
+       | Posix_spawn_detached.Parent pid -> Format.fprintf ppf "Parent %d" pid
+       | Posix_spawn_detached.No_process -> Format.pp_print_string ppf "No_process"
+       | Posix_spawn_detached.Unreadable -> Format.pp_print_string ppf "Unreadable")
+    ( = )
+
+external exited_without_reaping : int -> bool = "masc_process_exited_without_reaping"
+
 let test_parent_of_a_held_and_a_reaped_child () =
   Eio_main.run @@ fun env ->
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. @@ fun () ->
-  check (option int) "this process's own parent"
-    (Some (Unix.getppid ())) (Posix_spawn_detached.parent_pid (Unix.getpid ()));
+  check parent "this process's own parent"
+    (Posix_spawn_detached.Parent (Unix.getppid ())) (Posix_spawn_detached.parent_pid (Unix.getpid ()));
   Eio.Switch.run @@ fun sw ->
   let input, release = Eio_unix.pipe sw in
   let proc = Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr ~stdin:input
       [ "/bin/sh"; "-c"; "read release; exit 0" ] in
   let pid = Eio.Process.pid proc in
-  check (option int) "a child still running names this process"
-    (Some (Unix.getpid ())) (Posix_spawn_detached.parent_pid pid);
+  check parent "a child still running names this process"
+    (Posix_spawn_detached.Parent (Unix.getpid ())) (Posix_spawn_detached.parent_pid pid);
   Eio.Flow.copy_string "exit\n" release;
   (match Eio.Process.await proc with
    | `Exited code -> check int "the child exits" 0 code
    | `Signaled _ -> fail "the child was signalled");
-  check (option int) "a reaped child is no longer in the table" None
+  check parent "a reaped child is no longer in the table" Posix_spawn_detached.No_process
     (Posix_spawn_detached.parent_pid pid)
+;;
+
+(* A server that dies is a zombie until its parent reaps it, and the kernel
+   still names that parent. The child here is started outside every reaper,
+   so it stays a zombie until this test reaps it. *)
+let test_a_zombie_still_names_its_parent () =
+  let pid =
+    Unix.create_process "/bin/sh" [| "/bin/sh"; "-c"; "exit 0" |] Unix.stdin Unix.stdout Unix.stderr
+  in
+  let deadline = Unix.gettimeofday () +. 10. in
+  let rec until_exited () =
+    if not (exited_without_reaping pid) then
+      if Unix.gettimeofday () > deadline then fail "the child did not exit"
+      else (
+        (try Unix.sleepf 0.01 with Unix.Unix_error (Unix.EINTR, _, _) -> ());
+        until_exited ())
+  in
+  until_exited ();
+  check parent "an exited child not yet reaped" (Posix_spawn_detached.Parent (Unix.getpid ()))
+    (Posix_spawn_detached.parent_pid pid);
+  let rec reap () =
+    match Unix.waitpid [] pid with
+    | _ -> ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+  in
+  reap ();
+  check parent "the same child once reaped" Posix_spawn_detached.No_process (Posix_spawn_detached.parent_pid pid)
+;;
+
+(* Darwin casts the number to pid_t; a number past it would otherwise read
+   the row of the pid it wraps to. *)
+let test_a_number_that_is_no_pid_reads_no_process () =
+  List.iter
+    (fun (label, number) ->
+      check parent label Posix_spawn_detached.No_process (Posix_spawn_detached.parent_pid number))
+    [ "zero", 0
+    ; "negative", -1
+    ; "this pid past 32 bits", Unix.getpid () + (1 lsl 32)
+    ]
 ;;
 
 let stat_line =
@@ -810,6 +859,10 @@ let () =
     ; ( "the parent the kernel records",
         [ test_case "a held child names this process, a reaped one nobody" `Quick
             test_parent_of_a_held_and_a_reaped_child
+        ; test_case "a zombie still names its parent" `Quick
+            test_a_zombie_still_names_its_parent
+        ; test_case "a number that is no pid reads no process" `Quick
+            test_a_number_that_is_no_pid_reads_no_process
         ; test_case "/proc stat fields start after the last ')'" `Quick
             test_proc_stat_fields_start_after_the_last_parenthesis ])
     ; ( "foreground group ownership",

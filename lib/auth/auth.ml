@@ -288,6 +288,73 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
   | Ok role -> authorize_permission_for_role ~agent_name ~role ~permission
 ;;
 
+(* HIGH-RISK-UNREVIEWED: who a request is, decided once at the door.
+
+   [admit_request] reads a bearer the way the HTTP door has: the internal
+   Keeper token with the Keeper name its header gives, or else the
+   credential that holds the token, and then the role
+   [resolve_role_of_resolved_bearer] gives it. The answer is a value, so a
+   later layer can take it instead of reading the token again
+   (RFC-a-request-reads-its-bearer-once-at-the-door).
+
+   #51752 cut the door's old ['a option] answer to [unit] because it
+   promised a [Some] that never came, and asked for a closed variant once a
+   caller needed to tell "a credential was checked" from "none was needed".
+   [request_principal] is that variant. It is private, so a value always
+   stands for an admission that ran. *)
+type request_principal =
+  | Auth_off
+  | Anonymous
+  | Bearer of
+      { agent_name : string
+      ; role : agent_role
+      ; resolved : resolved_bearer
+      ; token : string
+      }
+
+type admission_refusal =
+  | Token_required
+  | Bearer_refused of masc_error
+
+let identify_bearer config ~token ~internal_keeper_agent
+  : (string * resolved_bearer, masc_error) result
+  =
+  match internal_keeper_bearer config ~token with
+  | Some internal ->
+    (match internal_keeper_agent with
+     | Some agent_name -> Ok (agent_name, internal)
+     | None ->
+       Error
+         (Auth
+            (Auth_error.Unauthorized
+               { reason = Missing_token
+               ; message = "Internal keeper auth requires x-masc-keeper-name header."
+               })))
+  | None ->
+    Result.map
+      (fun credential ->
+        ( (token_credential_agent_credential credential).agent_name
+        , token_credential_bearer credential ))
+      (find_token_credential config ~token)
+;;
+
+let admit_request config ~auth_cfg ~token ~internal_keeper_agent
+  : (request_principal, admission_refusal) result
+  =
+  if not auth_cfg.enabled
+  then Ok Auth_off
+  else (
+    match token with
+    | None -> if auth_cfg.require_token then Error Token_required else Ok Anonymous
+    | Some token ->
+      (match identify_bearer config ~token ~internal_keeper_agent with
+       | Error error -> Error (Bearer_refused error)
+       | Ok (agent_name, resolved) ->
+         (match resolve_role_of_resolved_bearer config ~auth_cfg ~token resolved with
+          | Error error -> Error (Bearer_refused error)
+          | Ok role -> Ok (Bearer { agent_name; role; resolved; token }))))
+;;
+
 let unknown_tool_class tool_name =
   if String.trim tool_name = "" then "empty" else "external"
 ;;

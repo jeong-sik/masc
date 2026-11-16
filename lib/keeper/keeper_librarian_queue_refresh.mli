@@ -26,6 +26,11 @@ val last_measurement : config:Workspace.config -> keeper_name:string -> measurem
     when that installation delivers a result. An unread count unavailable at that pass is
     [None], not the prior pass's count. *)
 
+val destination_recovered : config:Workspace.config -> unit
+(** A gate destination answered again after refusing. Wake once every Keeper
+    of [config]'s root whose last observed durable pass or admission ended
+    pending; each pass reads its own wait again. *)
+
 val capacity_released : config:Workspace.config -> installation_id:string -> unit
 (** A delivered worker result freed space in its pending-request listing.
     Wake only the same installation's last observed pre-admission capacity

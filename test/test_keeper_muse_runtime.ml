@@ -3483,11 +3483,13 @@ let test_an_owner_stop_after_turn_start_resumes_however_the_host_ended_it () =
     [true; false]
 ;;
 
-(* Each phase hangs under one window, and only that window is short. Reads
-   before [turn/start] is written wait under the admission window; once it is
-   written they wait under the idle window. A one-second admission window in
-   [hang_before_ack] also bounded the fixture's start, which a busy machine
-   took longer than a second to finish (#52313). *)
+(* Each phase hangs under one window, and only that window is short. The
+   reads where [hang_init] and [hang_session] hang wait under the admission
+   window. The read where [hang_before_ack] hangs comes after [turn/start] is
+   written and waits under the idle window. A one-second admission window in
+   [hang_before_ack] also bounded every step before that write: the fixture's
+   start, its session replies and the session-ready bookkeeping. A busy
+   machine took longer than that (#52313). *)
 let test_admission_timeout_restores_only_undispatched_claims () =
   List.iter (fun seeded ->
     List.iter (fun (phase, window) -> with_scripted_host (fun ~base_path ->

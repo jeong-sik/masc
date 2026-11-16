@@ -16,31 +16,82 @@
  * Acquire only after releasing the OCaml runtime, and restore before taking
  * it again so an OCaml exception cannot leave UI disabled or the lock held. */
 static pthread_mutex_t interaction_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* agy writes its login through go-keyring, which runs security(1). The item's
+ * decrypt ACL then names /usr/bin/security alone, so this process can never
+ * read the value itself; security(1) can. */
+static const char security_tool[] = "/usr/bin/security";
+
+static int names_security_tool(CFDataRef data) {
+  if (!data) return 0;
+  CFIndex length = CFDataGetLength(data);
+  const UInt8 *bytes = CFDataGetBytePtr(data);
+  CFIndex tool_length = (CFIndex)strlen(security_tool);
+  /* The trusted-application data is the path, NUL-terminated or not. */
+  if (length == tool_length + 1 && bytes[tool_length] != 0) return 0;
+  if (length != tool_length && length != tool_length + 1) return 0;
+  return memcmp(bytes, security_tool, (size_t)tool_length) == 0;
+}
+
+/* HIGH-RISK-UNREVIEWED: whether security(1) may decrypt without a prompt. One
+ * decrypt ACL must admit any application or name security(1), and must not
+ * ask for the keychain password on every use. Anything else would raise a
+ * dialog in security(1), so the caller must not run it. */
+static int decrypt_admits_security_tool(SecKeychainItemRef item) {
+  SecAccessRef access = NULL;
+  if (SecKeychainItemCopyAccess(item, &access) != errSecSuccess || !access) return 0;
+  CFArrayRef acls = SecAccessCopyMatchingACLList(access, kSecACLAuthorizationDecrypt);
+  int admitted = 0;
+  for (CFIndex i = 0; acls && !admitted && i < CFArrayGetCount(acls); i++) {
+    CFArrayRef applications = NULL;
+    CFStringRef description = NULL;
+    SecKeychainPromptSelector prompt = 0;
+    SecACLRef acl = (SecACLRef)CFArrayGetValueAtIndex(acls, i);
+    if (SecACLCopyContents(acl, &applications, &description, &prompt) == errSecSuccess
+        && !(prompt & kSecKeychainPromptRequirePassphase)) {
+      if (!applications) admitted = 1;
+      for (CFIndex j = 0; applications && !admitted && j < CFArrayGetCount(applications); j++) {
+        CFDataRef data = NULL;
+        SecTrustedApplicationRef application =
+          (SecTrustedApplicationRef)CFArrayGetValueAtIndex(applications, j);
+        if (SecTrustedApplicationCopyData(application, &data) == errSecSuccess)
+          admitted = names_security_tool(data);
+        if (data) CFRelease(data);
+      }
+    }
+    if (applications) CFRelease(applications);
+    if (description) CFRelease(description);
+  }
+  if (acls) CFRelease(acls);
+  CFRelease(access);
+  return admitted;
+}
 #endif
 
 /* security(1) find_first_generic_password collapses search errors to missing:
  * https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/keychain_find.c
- * Query Security directly, preserving locked/inaccessible vs absent. */
-CAMLprim value masc_antigravity_keychain_item(value path, value remove_item) {
-  CAMLparam2(path, remove_item);
-  CAMLlocal2(result, text);
+ * Query Security directly first, preserving locked/inaccessible vs absent,
+ * and decide here whether security(1) may touch the item without a dialog.
+ * 0 = present, unlocked and decryptable by security(1); 1 = absent;
+ * 2 = not macOS; 3 = locked, not decryptable by security(1), or unreadable. */
+CAMLprim value masc_antigravity_keychain_security_access(value path) {
+  CAMLparam1(path);
   int outcome = 2;
-  text = caml_alloc_string(0);
 #ifdef __APPLE__
   if (strlen(String_val(path)) != caml_string_length(path)) {
     outcome = 3;
   } else {
     char *owned_path = strdup(String_val(path));
     if (!owned_path) caml_raise_out_of_memory();
-    int remove = Bool_val(remove_item);
     SecKeychainRef keychain = NULL;
     CFArrayRef search = NULL;
     CFMutableDictionaryRef query = NULL;
-    CFTypeRef data = NULL;
+    CFTypeRef item = NULL;
     OSStatus status;
     SecKeychainStatus state = 0;
     Boolean previous_interaction = false;
     int restore_interaction = 0;
+    int admitted = 0;
     caml_enter_blocking_section();
     int locked = pthread_mutex_lock(&interaction_lock) == 0;
     status = locked ? SecKeychainGetUserInteractionAllowed(&previous_interaction)
@@ -66,14 +117,18 @@ CAMLprim value masc_antigravity_keychain_item(value path, value remove_item) {
         CFDictionarySetValue(query, kSecAttrAccount, CFSTR("antigravity"));
         CFDictionarySetValue(query, kSecMatchSearchList, search);
         CFDictionarySetValue(query, kSecUseAuthenticationUI, kSecUseAuthenticationUIFail);
-        if (remove) status = SecItemDelete(query);
-        else {
-          CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
-          CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
-          status = SecItemCopyMatching(query, &data);
-        }
+        /* A reference, not the value: no decrypt, so no ACL check here. */
+        CFDictionarySetValue(query, kSecReturnRef, kCFBooleanTrue);
+        CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
+        status = SecItemCopyMatching(query, &item);
       }
     }
+    if (status == errSecSuccess) {
+      if (item && CFGetTypeID(item) == SecKeychainItemGetTypeID())
+        admitted = decrypt_admits_security_tool((SecKeychainItemRef)item);
+      else status = errSecInvalidItemRef;
+    }
+    if (item) CFRelease(item);
     if (query) CFRelease(query);
     if (search) CFRelease(search);
     if (keychain) CFRelease(keychain);
@@ -85,17 +140,8 @@ CAMLprim value masc_antigravity_keychain_item(value path, value remove_item) {
     caml_leave_blocking_section();
     if (status == errSecItemNotFound) outcome = 1;
     else if (status != errSecSuccess) outcome = 3;
-    else if (remove) outcome = 0;
-    else if (data && CFGetTypeID(data) == CFDataGetTypeID()) {
-      text = caml_alloc_initialized_string((mlsize_t)CFDataGetLength(data),
-                                         (const char *)CFDataGetBytePtr(data));
-      outcome = 0;
-    } else outcome = 3;
-    if (data) CFRelease(data);
+    else outcome = admitted ? 0 : 3;
   }
 #endif
-  result = caml_alloc_tuple(2);
-  Store_field(result, 0, Val_int(outcome));
-  Store_field(result, 1, text);
-  CAMLreturn(result);
+  CAMLreturn(Val_int(outcome));
 }

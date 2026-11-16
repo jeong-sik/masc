@@ -1222,11 +1222,60 @@ let test_shared_consumer_refuses_new_private_producer () = with_fixture (fun clo
   check bool "ordinary consumer retains Shared visibility while refusing new private bytes" true
     (member "visibility" (instance config consumer) = `Assoc ["kind",`String "shared"]))
 
+(* A browser Add-on package. The fixture backend never starts its process;
+   the host reads only the declared service. *)
+let browser_manifest root =
+  let path = Filename.concat root "browser.toml" in
+  write path {|id="browser-service"
+revision="1"
+title="Browser service"
+runtime="host_process"
+service="browser"
+browser_backend="ego"
+command=["not-executed"]
+contributions=["observe"]
+[resources]
+max_reply_bytes=16384
+|}; path
+
+(* A browser_document source names its browser Add-on installation, in
+   another run. A reader attached before that browser reads again when the
+   browser publishes its first observation, and again when it leaves. The
+   reader's own commit wakes nothing back, so the two do not keep waking each
+   other. *)
+let test_document_reader_follows_its_named_browser () =
+  with_fixture (fun clock config root directory received _stopped ->
+    let sequence id = member "observation_seq" (instance config id) |> Yojson.Safe.Util.to_int in
+    let pending id = member "observation_pending" (instance config id) |> Yojson.Safe.Util.to_bool in
+    let page = {|[{source_id="page",kind="browser_document",installation_id="browser",lane="live",client_id="0c000000-0000-4000-8000-000000000001",tab_id=4,target_id="fixture",environment="fixture",request_id="read"}]|} in
+    ignore (declare ~run:"documents" directory (manifest ~name:"reader" root) "reader" page);
+    reconcile config directory;
+    let reader = active config "reader" |> text "instance_id" in
+    await clock (fun () -> sequence reader = 1);
+    let page_input () = source received reader |> require_some "the reader receives its page source" in
+    let before = page_input () in
+    check bool "without its browser the page is unavailable" true
+      (member "complete" before = `Bool false && list "observations" before = []);
+    let browser_declaration = declare ~run:"browsers" directory (browser_manifest root) "browser" "[]" in
+    reconcile config directory;
+    let browser = active config "browser" |> text "instance_id" in
+    await clock (fun () -> sequence reader = 2);
+    check int "the browser published one observation" 1 (sequence browser);
+    check bool "the reader's second read sees the attached browser" false
+      (member "detail" (page_input ()) = member "detail" before);
+    check bool "the reader's commit does not wake the browser" false (pending browser);
+    check bool "the browser's observation is read once" false (pending reader);
+    Unix.unlink browser_declaration;
+    reconcile config directory;
+    await clock (fun () -> sequence reader >= 3))
+
 let () = run "TOML cross-Lane composition" ["world inputs",[
   test_case "WKBL snapshot and PostToolUse agree on one supplied period" `Quick
     test_wkbl_snapshot_and_post_tool_use_agree;
   test_case "pending notifications preserve one call per completed input" `Quick
     test_pending_notification_does_not_repeat_same_completed_input;
+  test_case "a document reader follows the browser installation it names" `Quick
+    test_document_reader_follows_its_named_browser;
   test_case "native Fusion report crosses packages and remains Keeper-readable" `Quick
     test_native_fusion_report_is_readable_after_detach;
   test_case "namespaced output and oversized worker replies honor declared capacity" `Quick

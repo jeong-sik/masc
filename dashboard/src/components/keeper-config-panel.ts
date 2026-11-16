@@ -57,6 +57,7 @@ const PHASE_DOT_COLOR: Record<FleetTone, string> = {
   idle: 'var(--text-dim)',
 }
 import { MISSING_DATA_DASH } from '../lib/format-string'
+import { attentionReasonLabel } from '../lib/keeper-attention-labels'
 import { relativeTime } from '../lib/format-time'
 import type { AsyncState } from '../lib/async-state'
 import { showToast } from './common/toast'
@@ -1186,6 +1187,31 @@ function dedupeStrings(values: readonly string[]): string[] {
   return next
 }
 
+/** What the runtime_id select offers, split by kind. A keeper assignment names
+ *  a declared lane or a runtime (RFC-0457) and the server resolves a lane
+ *  first, so an id that is a declared lane is offered once, under lanes. The
+ *  draft and the server's current value stay under runtimes when they are not
+ *  lanes, so the select never shows another id in their place. */
+export interface RuntimeAssignmentChoices {
+  lanes: string[]
+  runtimes: string[]
+}
+
+export function runtimeAssignmentChoices(
+  draftRuntimeId: string,
+  execution: KeeperConfig['execution'],
+): RuntimeAssignmentChoices {
+  const lanes = dedupeStrings(execution.lane_options)
+  const laneIds = new Set(lanes)
+  const runtimes = dedupeStrings([
+    draftRuntimeId,
+    execution.selected_runtime_id ?? '',
+    execution.selected_runtime_canonical ?? '',
+    ...(execution.runtime_options ?? []),
+  ]).filter(id => !laneIds.has(id))
+  return { lanes, runtimes }
+}
+
 function runtimeCatalogRuntimeKey(entry: DashboardRuntimeProviderSnapshot): string {
   return entry.runtime_id?.trim() || entry.provider.trim()
 }
@@ -1549,13 +1575,22 @@ function renderConstitutionLedger(ledger: KeeperConstitutionLedgerPreview) {
       <div class="font-mono">${ledger.detail}</div>
     </div>`
   }
-  if (ledger.rejected_lines.length === 0) return null
-  return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-rejected-lines">
+  const rejected = ledger.rejected_lines.length === 0 ? null : html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-rejected-lines">
     헌법 원장에서 읽지 못한 줄은 이 프롬프트에 들어가지 않아요.
     ${ledger.rejected_lines.map((line) => html`<div class="font-mono mt-1" data-testid="kcf-constitution-rejected-line" data-line=${line.line} data-line-end=${line.line_end}>
       ${line.line}번째 줄${line.line_end === 'unterminated_final_line' ? ' (마지막 줄, 줄바꿈 없음)' : ''}: ${line.detail}
     </div>`)}
   </div>`
+  // RFC-0504 §2.4: a line written under a name the roster does not hold
+  // withholds the articles it touches, so it is named here beside the
+  // unreadable lines instead of the norm vanishing.
+  const isolated = ledger.isolated_lines.length === 0 ? null : html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-isolated-lines">
+    쓴 사람이 Keeper 명단에 없는 원장 줄의 조항은 이 프롬프트에서 빠져요.
+    ${ledger.isolated_lines.map((line) => html`<div class="font-mono mt-1" data-testid="kcf-constitution-isolated-line" data-line=${line.line} data-subject=${line.subject}>
+      ${line.line}번째 줄 (${line.subject}): ${line.article_ids.join(', ')}
+    </div>`)}
+  </div>`
+  return html`${rejected}${isolated}`
 }
 
 function renderSystemPromptPreview(preview: KeeperSystemPromptPreview) {
@@ -1665,9 +1700,14 @@ function InlineControlError(message: string | null) {
   `
 }
 
+export interface InlineSelectGroup {
+  label: string
+  options: readonly string[]
+}
+
 /** A labelled `<select>` over a closed option list.
  *
- *  When `value` is not one of `options`, a disabled placeholder option carrying
+ *  When `value` is not one of `options` or `groups`, a disabled placeholder option carrying
  *  that value is rendered first and stays selected. Without it the browser
  *  selects index 0, so a keeper whose sandbox_profile could not be read was
  *  displayed as 'docker' — and 'docker' was then unpickable, because selecting
@@ -1678,6 +1718,7 @@ export function InlineSelectRow({
   label,
   value,
   options,
+  groups = [],
   optionLabel,
   placeholder,
   onChange,
@@ -1687,13 +1728,17 @@ export function InlineSelectRow({
   label: string
   value: string
   options: readonly string[]
+  /** Rendered as `<optgroup>`s after `options`; an empty group is left out. */
+  groups?: readonly InlineSelectGroup[]
   optionLabel?: (value: string) => string
   placeholder?: string
   onChange: (v: string) => void
   dirty?: boolean
   tone?: 'neutral' | 'warn'
 }) {
-  const valueIsListed = options.includes(value)
+  const shownGroups = groups.filter(group => group.options.length > 0)
+  const valueIsListed =
+    options.includes(value) || shownGroups.some(group => group.options.includes(value))
   const controlClass =
     tone === 'warn'
       ? 'kcf-inline-control text-sm bg-[var(--warn-10)] border border-[var(--warn-20)] rounded-[var(--r-1)] px-3 py-1.5 text-[var(--color-status-warn)] font-semibold'
@@ -1711,6 +1756,11 @@ export function InlineSelectRow({
           ? null
           : html`<option value=${value} disabled>${placeholder ?? '(고르지 않음)'}</option>`}
         ${options.map(option => html`<option value=${option}>${optionLabel ? optionLabel(option) : option}</option>`)}
+        ${shownGroups.map(group => html`
+          <optgroup key=${group.label} label=${group.label}>
+            ${group.options.map(option => html`<option value=${option}>${optionLabel ? optionLabel(option) : option}</option>`)}
+          </optgroup>
+        `)}
       </select>
     </div>
   `
@@ -1786,7 +1836,9 @@ function runtimeTrustHealthRows(c: KeeperConfig): Array<[string, string, boolean
   const execution = recordValue(trust.execution)
   const latestReceipt = recordValue(trustRecord?.latest_receipt)
   const disposition = trust.disposition ?? MISSING_DATA_DASH
-  const reason = trust.attention_reason ?? trust.disposition_reason ?? MISSING_DATA_DASH
+  const reason =
+    attentionReasonLabel(trust.attention_reason ?? trust.disposition_reason ?? null, false)
+    ?? MISSING_DATA_DASH
   const completionContract =
     stringField(execution, 'completion_contract_result')
     ?? stringField(latestReceipt, 'completion_contract_result')
@@ -1907,13 +1959,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ? Object.keys(runtimePayloadResult.payload).length > 0
       : Object.values(dirtyFlags).some(flag => flag === true)
     : false
-  const runtimeOptions = rd
-    ? dedupeStrings([
-        rd.runtime_id,
-        c.execution.selected_runtime_id ?? '',
-        c.execution.selected_runtime_canonical ?? '',
-        ...(c.execution.runtime_options ?? []),
-      ])
+  const runtimeChoices = rd ? runtimeAssignmentChoices(rd.runtime_id, c.execution) : null
+  const runtimeGroups: readonly InlineSelectGroup[] = runtimeChoices
+    ? [
+        { label: '레인', options: runtimeChoices.lanes },
+        { label: '런타임', options: runtimeChoices.runtimes },
+      ]
     : []
   const runtimeCatalog = runtimeCatalogState.value
   const selectedRuntimeId = rd?.runtime_id || (c.execution.selected_runtime_id ?? '')
@@ -2307,7 +2358,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${InlineSelectRow}
           label="runtime_id"
           value=${rd.runtime_id}
-          options=${runtimeOptions}
+          options=${[]}
+          groups=${runtimeGroups}
           onChange=${(value: string) => updateRuntimeDraft('runtime_id', value)}
           dirty=${dirtyFlags.runtime_id}
         />

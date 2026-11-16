@@ -457,6 +457,48 @@ val recover_retained : store:Lane_addon_store.t -> declaration_id:string ->
     In Eio, protect the complete system-thread call from cancellation so
     publication and confirmation finish before returning its observation. *)
 
+val confirm_original_schema : declaration_id:string -> schema:Yojson.Safe.t -> request ->
+  (unit, string) result
+(** The check {!recover_retained} makes of the caller's own schema before it
+    reads anything: the output names a lane of [declaration_id], [schema] is
+    a canonical object, and it equals the grant the request holds, if any.
+    Reads nothing. *)
+
+type identity = private { identity_request_id : string; identity_digest : string }
+(** What names one original Exact request without holding it: its ID and
+    {!digest}. *)
+val identity : request -> identity
+val identity_of_digest : request_id:string -> digest:string -> identity
+(** For an owner that kept the digest of a request it validated and retained.
+    Nothing is checked here; {!observe_open} compares the digest with the host
+    record. *)
+
+type open_observation =
+  | No_record      (** Neither a host record nor an execution link exists. *)
+  | Open           (** A host record exists with no final and no execution link. *)
+  | Needs_request  (** A final or an execution link exists. Read it again with
+                       the whole request through {!recover_retained}. *)
+val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity ->
+  (open_observation, recovery_error) result
+(** Read the original host Exact record and whether its execution link exists,
+    for a caller that holds only the request's identity. Nothing is written
+    and no claim is held.
+
+    The record is checked against itself as {!recover_retained} checks it:
+    the complete canonical envelope, declaration and request ID, the stored
+    request decoding to the same canonical body, that request's digest equal
+    to the record's, and the attempt order. It is bound to the caller by
+    comparing the record's digest with [identity_digest]. Any mismatch is
+    [Recovery_invalid]; a file that cannot be read is [Recovery_unavailable].
+
+    An execution link is found by request ID and digest and is not decoded:
+    decoding and binding it to an attempt need the whole request, so its
+    existence alone answers [Needs_request], as does a record with a final.
+    [Open] and [No_record] therefore say only that there is nothing for the
+    whole request to read yet. Each read of an [Open] record still parses the
+    stored request and hashes it once. Run the blocking read on a system
+    thread in Eio. *)
+
 val recovery_of_files : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> record:Yojson.Safe.t option ->
   proof:Yojson.Safe.t option -> (Yojson.Safe.t option, string) result

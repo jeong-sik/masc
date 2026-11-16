@@ -1481,7 +1481,9 @@ let owner_capture_error_to_string = function
   | Current_process_owner -> "this process holds the lease"
 ;;
 
-let capture_existing_owner ~run_dir ~base_path =
+(* One kernel read of the lease of [base_path] through a descriptor opened
+   for it: [read] asks the kernel about the lock of the lease. *)
+let read_existing_owner ~run_dir ~base_path read =
   match prepare_base_path_lock ~run_dir base_path with
   | Error rejection -> Error (Owner_lease_rejected rejection)
   | Ok prepared ->
@@ -1498,9 +1500,15 @@ let capture_existing_owner ~run_dir ~base_path =
          | Error rejection -> Error (Owner_lease_rejected rejection)
          | Ok fd ->
            Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-             match Owner_process_identity.capture ~lease_fd:fd with
-             | Ok owner -> Ok owner
-             | Error other -> Error (Owner_identity_unavailable other))))
+             Result.map_error (fun other -> Owner_identity_unavailable other) (read fd))))
+
+let capture_existing_owner ~run_dir ~base_path =
+  read_existing_owner ~run_dir ~base_path (fun lease_fd ->
+    Owner_process_identity.capture ~lease_fd)
+
+let existing_owner_pid ~run_dir ~base_path =
+  read_existing_owner ~run_dir ~base_path (fun lease_fd ->
+    Owner_process_identity.lease_holder ~lease_fd)
 
 (* HIGH-RISK-UNREVIEWED: a reader takes [false] for "nobody holds this
    BasePath", and reads no owner. The path is the one [lease_run_dir] and

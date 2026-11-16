@@ -9,9 +9,9 @@ let github_authorize_origin = "https://github.com"
    [form-action] on that redirect too. *)
 let policy ~nonce =
   Printf.sprintf
-    "default-src 'none'; script-src 'nonce-%s'; %s; connect-src 'self'; form-action 'self' %s; \
+    "default-src 'none'; script-src %s; %s; connect-src 'self'; form-action 'self' %s; \
      base-uri 'none'; frame-ancestors 'none'"
-    nonce
+    (Account_page.Nonce.source nonce)
     (Account_page.style_source ~nonce)
     github_authorize_origin
 ;;
@@ -36,7 +36,11 @@ let page ~nonce ~title ~body ~script =
         ~title
         (String.concat
            "\n"
-           [ "<main>"; body; "</main>"; Printf.sprintf "<script nonce=\"%s\">%s</script>" nonce script ])
+           [ "<main>"
+           ; body
+           ; "</main>"
+           ; Printf.sprintf "<script %s>%s</script>" (Account_page.Nonce.attribute nonce) script
+           ])
   }
 ;;
 
@@ -54,7 +58,9 @@ let start_form ~invite ~github ~label =
     "\n"
     [ "<form method=\"post\" action=\"/auth/github/start\">"
     ; (if invite then "<input type=\"hidden\" id=\"invite\" name=\"invite\">" else "")
-    ; "<input type=\"hidden\" name=\"return_to\" value=\"/\">"
+    ; Printf.sprintf
+        "<input type=\"hidden\" id=\"return-to\" name=\"return_to\" value=\"%s\">"
+        Account_page.console_path
     ; Printf.sprintf
         "<button id=\"go\" class=\"primary block\"%s>%s</button>"
         (if github then "" else " disabled aria-describedby=\"go-note\"")
@@ -134,317 +140,97 @@ let connect_prefix = connect_path ^ "/"
 let provider_accounts_path = "/api/v1/auth/provider-accounts"
 let verify_path = "/api/v1/setup/accounts/verify"
 
-(* The session routes answer one of three things, and the page has a view for
-   each: a session (200), no session (401), and anything else, which leaves
-   that unknown. The sign-in is shown for a 401 alone. Shown for a server that
-   cannot tell, it would say to a signed-in person that the session is over.
+(* The session routes answer one of three things: a session (200), no
+   session (401), and anything else, which leaves that unknown. The page shows
+   the sign-in until it knows where the person goes, so a browser that runs no
+   script can still sign in; a signed-in person sees it meanwhile, while the
+   page reads the session and asks for the console. Once the answers come, the
+   sign-in is shown for a 401 alone: shown for a server that cannot tell, it
+   would say to a signed-in person that the session is over.
 
-   A sign-out ends the session when the server says so (204) or finds none
-   (401). The page loads itself again then, so nothing that it listed for the
-   person stays in it. After any other answer the page reads the session
-   again: a session that is still open is told that the sign-out did not
-   happen, and the next request carries the CSRF token that was read last. A
-   session that cannot be read hides the button that was pressed, so the
-   focus moves to the link that opens the page again. *)
+   A session goes on to the console of the person, the address the form
+   returns to, and the page takes itself out of the history of the tab, so
+   Back does not come here again. It asks for the console first. A server
+   that cannot give the console answers it with a page that links back here
+   (a 503 when the dashboard bundle cannot be read), and the two would send
+   the person to each other. The page then stays and says so, and offers the
+   sign-out that only the console has.
+
+   The server refuses a sign-out whose token is not the one of the session,
+   which is what the page holds when another tab signed in. After a refusal
+   the page reads the session again, as the console does: a session that
+   ended leaves the person out, a session of another person loads the page
+   again for that person, and a token of the same person that changed is sent
+   once more. *)
 let home_script =
   Printf.sprintf
-    {|const out = document.getElementById("out");
-const signout = document.getElementById("signout");
-const accounts = document.getElementById("accounts");
-const integration = document.getElementById("integration");
-const transcript = document.getElementById("transcript");
-const reply = document.getElementById("reply");
-const account = document.getElementById("account");
-const model = document.getElementById("model");
-const verdict = document.getElementById("verdict");
-const runtimes = document.getElementById("runtimes");
-const keepers = document.getElementById("keepers");
-const keeper = document.getElementById("keeper");
-const keeperRuntime = document.getElementById("keeper-runtime");
-const keeperVerdict = document.getElementById("keeper-verdict");
-const turnMessage = document.getElementById("turn-message");
-const turnAnswer = document.getElementById("turn-answer");
-const pats = document.getElementById("pats");
-const patScope = document.getElementById("pat-scope");
-const patExpiry = document.getElementById("pat-expiry");
-const patToken = document.getElementById("pat-token");
-const patId = document.getElementById("pat-id");
-const patVerdict = document.getElementById("pat-verdict");
-const signin = document.getElementById("signin");
-const signedIn = document.getElementById("signed-in");
-const unread = document.getElementById("unread");
-const reopen = document.getElementById("reopen");
-const allowSection = document.getElementById("allowlist");
-const allowProvider = document.getElementById("allow-provider");
-const allowIdentity = document.getElementById("allow-identity");
-const allowId = document.getElementById("allow-id");
-const allowVerdict = document.getElementById("allow-verdict");
-let csrf = null;
-let loginId = null;
-async function read(path) {
-  const answer = await fetch(path);
-  const text = await answer.text();
-  try { return [answer, JSON.parse(text)]; } catch (_) { return [answer, { error: text }]; }
+    {|const views = ["signin", "unread", "stuck"].map((id) => document.getElementById(id));
+const consolePath = document.getElementById("return-to").value;
+const leave = document.getElementById("leave");
+const leaveNote = document.getElementById("leave-note");
+let csrf = "";
+let user = "";
+let leaving = false;
+function only(id) {
+  for (const view of views) view.hidden = view.id !== id;
 }
-const unanswered = [{ ok: false, status: 0 }, { error: "the server did not answer" }];
+async function readSession() {
+  try {
+    const answer = await fetch("/auth/session");
+    if (answer.status !== 200) return { status: answer.status };
+    const session = await answer.json();
+    return typeof session.csrf_token === "string" && typeof session.user_id === "string"
+      ? { status: 200, csrf: session.csrf_token, user: session.user_id }
+      : { status: 0 };
+  } catch {
+    return { status: 0 };
+  }
+}
+const signOut = (token) =>
+  fetch("/auth/logout", { method: "POST", headers: { "%s": token } }).then((answer) => answer.status, () => 0);
+const out = (status) => status === 204 || status === 401;
 async function show() {
-  const [session, s] = await read("/auth/session").catch(() => unanswered);
-  const [who, w] = await read("/api/v1/auth/whoami").catch(() => unanswered);
-  const view = session.ok ? "signed_in" : (session.status === 401 ? "signed_out" : "unknown");
-  csrf = session.ok ? s.csrf_token : null;
-  signout.hidden = !session.ok;
-  signin.hidden = view !== "signed_out";
-  unread.hidden = view !== "unknown";
-  signedIn.hidden = view !== "signed_in";
-  allowSection.hidden = !(session.ok && w.role === "admin");
-  out.textContent =
-    (session.ok
-      ? "session of " + s.user_id + " until " + new Date(s.expires_at_ms).toISOString()
-      : view + " (" + session.status + "): " + s.error) +
-    "\nwhoami (" + who.status + "): " + JSON.stringify(w);
-  return view;
-}
-signout.addEventListener("click", async () => {
-  const status = await fetch("/auth/logout", { method: "POST", headers: { "%s": csrf } })
-    .then((answer) => answer.status, () => "no answer");
-  const view = status === 204 || status === 401 ? "signed_out" : await show();
-  if (view === "signed_out") location.reload();
-  if (view === "unknown") reopen.focus();
-  if (view === "signed_in") {
-    out.textContent =
-      "The sign-out did not happen (" + status + "), and the session is still open.\n" + out.textContent;
-  }
-});
-async function listAccounts() {
-  const [answer, json] = await read("%s");
-  accounts.textContent = answer.ok
-    ? (json.provider_accounts.length === 0 ? "none"
-       : json.provider_accounts.map((a) => a.provider_account_id).join("\n"))
-    : "(" + answer.status + "): " + json.error;
-  runtimes.textContent = answer.ok
-    ? (json.runtimes.length === 0 ? "none"
-       : json.runtimes.map((r) => r.runtime_id + " on " + r.provider_account_id).join("\n"))
-    : "";
-  if (answer.ok) {
-    fill(account, json.provider_accounts.map((a) => a.provider_account_id));
-    fill(keeperRuntime, json.runtimes.map((r) => r.runtime_id));
-  }
-}
-function fill(select, values) {
-  const previous = select.value;
-  select.replaceChildren(...values.map((value) => {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    return option;
-  }));
-  select.value = values.includes(previous) ? previous : (values.length === 0 ? "" : values[values.length - 1]);
-}
-function post(path, body) {
-  return fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json", "%s": csrf },
-    body: JSON.stringify(body)
-  });
-}
-function frame(text) {
-  const event = /^event: (.*)$/m.exec(text);
-  const data = /^data: (.*)$/m.exec(text);
-  if (event === null || data === null) return;
-  const json = JSON.parse(data[1]);
-  if (event[1] === "output") { transcript.textContent += json.text; return; }
-  if (event[1] === "started") loginId = json.login_id;
-  transcript.textContent += "\n[" + event[1] + "] " + (json.message || json.status || "") + "\n";
-}
-document.getElementById("connect").addEventListener("click", async () => {
-  transcript.textContent = "";
-  const answer = await post("%s", { integration_id: integration.value });
-  if (!answer.ok) {
-    transcript.textContent = "connect (" + answer.status + "): " + await answer.text();
+  const session = await readSession();
+  if (session.status !== 200) {
+    only(session.status === 401 ? "signin" : "unread");
     return;
   }
-  const reader = answer.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let cut;
-    while ((cut = buffer.indexOf("\n\n")) >= 0) {
-      frame(buffer.slice(0, cut));
-      buffer = buffer.slice(cut + 2);
+  const opened = await fetch(consolePath).then((answer) => answer.status, () => 0);
+  if (opened === 200) {
+    location.replace(consolePath);
+    return;
+  }
+  csrf = session.csrf;
+  user = session.user;
+  only("stuck");
+}
+leave.addEventListener("click", async () => {
+  if (leaving) return;
+  leaving = true;
+  leave.setAttribute("aria-disabled", "true");
+  leaveNote.textContent = "";
+  let status = await signOut(csrf);
+  if (!out(status)) {
+    const now = await readSession();
+    if (now.status === 401 || (now.status === 200 && now.user !== user)) {
+      location.reload();
+      return;
+    }
+    if (now.status === 200 && now.csrf !== csrf) {
+      csrf = now.csrf;
+      status = await signOut(csrf);
     }
   }
-  await listAccounts();
-});
-document.getElementById("send").addEventListener("click", async () => {
-  const path = "%s" + loginId + "/input";
-  const text = await post(path, { kind: "text", text: reply.value });
-  const enter = await post(path, { kind: "key", key: "enter" });
-  transcript.textContent += "\n[sent] " + text.status + " " + enter.status + "\n";
-  reply.value = "";
-});
-document.getElementById("verify").addEventListener("click", async () => {
-  verdict.textContent = "calling the account";
-  const answer = await post("%s", { provider_account_id: account.value, model: model.value });
-  verdict.textContent = "verify (" + answer.status + "): " + await answer.text();
-  await listAccounts();
-});
-async function listKeepers() {
-  const [answer, json] = await read("%s");
-  keepers.textContent = answer.ok
-    ? (json.keepers.length === 0 ? "none"
-       : json.keepers.map((k) =>
-           k.keeper_id + " on " + (k.runtime_id === null ? "no Runtime" : k.runtime_id)).join("\n"))
-    : "(" + answer.status + "): " + json.error;
-}
-document.getElementById("make-keeper").addEventListener("click", async () => {
-  const answer = await post("%s", { keeper_id: keeper.value });
-  keeperVerdict.textContent = "make (" + answer.status + "): " + await answer.text();
-  await listKeepers();
-});
-document.getElementById("assign").addEventListener("click", async () => {
-  const answer = await post("%s", { keeper_id: keeper.value, runtime_id: keeperRuntime.value });
-  keeperVerdict.textContent = "assign (" + answer.status + "): " + await answer.text();
-  await listKeepers();
-});
-document.getElementById("run-turn").addEventListener("click", async () => {
-  turnAnswer.textContent = "running the Keeper";
-  const answer = await post("%s", { keeper_id: keeper.value, message: turnMessage.value });
-  const text = await answer.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch (_) {}
-  turnAnswer.textContent = answer.ok && json !== null
-    ? json.keeper_id + " on " + json.runtime_id + " (" + json.model + "):\n" + json.text
-    : "run (" + answer.status + "): " + text;
-});
-async function listPats() {
-  function expiryLabel(milliseconds) {
-    const date = new Date(milliseconds);
-    return Number.isNaN(date.getTime())
-      ? String(milliseconds) + " ms since epoch"
-      : date.toISOString();
-  }
-  const [answer, json] = await read("%s");
-  pats.textContent = answer.ok
-    ? (json.pats.length === 0 ? "none"
-       : json.pats.map((p) =>
-           p.pat_id + " " + p.status + " " + JSON.stringify(p.scope) +
-           (p.expires_at_ms === null ? "" : " until " + expiryLabel(p.expires_at_ms))).join("\n"))
-    : "(" + answer.status + "): " + json.error;
-}
-document.getElementById("issue-pat").addEventListener("click", async () => {
-  let scope = null;
-  try { scope = JSON.parse(patScope.value); } catch (_) {
-    patToken.textContent = "the scope is not JSON";
+  if (out(status)) {
+    location.reload();
     return;
   }
-  const expiryText = patExpiry.value.trim();
-  const expiry = expiryText === "" ? null : new Date(expiryText).getTime();
-  if (expiry !== null && !Number.isSafeInteger(expiry)) {
-    patToken.textContent = "the expiry is not a date and time";
-    return;
-  }
-  const answer = await post("%s", { scope: scope, expires_at_ms: expiry });
-  const text = await answer.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch (_) {}
-  if (answer.ok && json !== null) {
-    patId.value = json.pat_id;
-    patToken.textContent =
-      "Shown once. Who it acts as:\ncurl -H 'Authorization: Bearer " + json.token + "' " +
-      location.origin + "/api/v1/auth/whoami";
-  } else {
-    patToken.textContent = "issue (" + answer.status + "): " + text;
-  }
-  await listPats();
+  leaving = false;
+  leave.removeAttribute("aria-disabled");
+  leaveNote.textContent = "로그아웃하지 못했어요. 잠시 뒤에 다시 눌러 주세요.";
 });
-document.getElementById("revoke-pat").addEventListener("click", async () => {
-  const answer = await fetch("%s/" + encodeURIComponent(patId.value), {
-    method: "DELETE",
-    headers: { "%s": csrf }
-  });
-  patVerdict.textContent = "revoke (" + answer.status + "): " + await answer.text();
-  await listPats();
-});
-function allowBody() {
-  const identity = allowIdentity.value.trim();
-  if (allowProvider.value === "github") {
-    const userId = Number(identity);
-    return identity !== "" && Number.isSafeInteger(userId) && userId > 0
-      ? { provider: "github", user_id: userId }
-      : null;
-  }
-  return identity === "" ? null : { provider: "google", sub: identity };
-}
-document.getElementById("allow-add").addEventListener("click", async () => {
-  const body = allowBody();
-  if (body === null) {
-    allowVerdict.textContent = allowProvider.value === "github"
-      ? "A GitHub user id is a whole number above 0: gh api users/LOGIN -q .id"
-      : "A Google sub is not empty.";
-    return;
-  }
-  allowVerdict.textContent = "registering";
-  const answer = await post("%s", body);
-  const text = await answer.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch (_) {}
-  if (answer.ok && json !== null) {
-    allowId.value = json.registration_id;
-    allowVerdict.textContent =
-      "Allowed. Registration id " + json.registration_id +
-      (json.previously_deleted ? "\nA deleted account had this identity." : "");
-  } else {
-    allowVerdict.textContent = "allow (" + answer.status + "): " + text;
-  }
-});
-document.getElementById("allow-remove").addEventListener("click", async () => {
-  const answer = await fetch("%s/" + encodeURIComponent(allowId.value), {
-    method: "DELETE",
-    headers: { "%s": csrf }
-  });
-  allowVerdict.textContent = answer.ok
-    ? "Removed."
-    : "remove (" + answer.status + "): " + await answer.text();
-});
-show().then(async (view) => {
-  if (view === "signed_in") {
-    await listAccounts();
-    await listKeepers();
-    await listPats();
-  }
-});|}
+show();|}
     Authz_browser_request.csrf_header
-    provider_accounts_path
-    Authz_browser_request.csrf_header
-    connect_path
-    connect_prefix
-    verify_path
-    Auth_preview_keeper.keepers_path
-    Auth_preview_keeper.keepers_path
-    Auth_preview_keeper.assign_path
-    Auth_preview_keeper.turn_path
-    Login_pat_routes.path
-    Login_pat_routes.path
-    Login_pat_routes.path
-    Authz_browser_request.csrf_header
-    Login_allowlist_routes.path
-    Login_allowlist_routes.path
-    Authz_browser_request.csrf_header
-;;
-
-(* A section is named by its heading, so a screen reader lists the page by
-   the same words that a sighted person scans. *)
-let section ~id ?(attrs = "") heading fields =
-  String.concat
-    "\n"
-    ([ Printf.sprintf "<section aria-labelledby=\"%s-heading\"%s>" id attrs
-     ; Printf.sprintf "<h2 id=\"%s-heading\">%s</h2>" id heading
-     ]
-     @ fields
-     @ [ "</section>" ])
 ;;
 
 let home_page ~nonce ~github =
@@ -462,83 +248,28 @@ let home_page ~nonce ~github =
          ; "</div>"
          ; "<p class=\"hint center\">초대 링크를 받았다면 그 링크를 먼저 열어 주세요. 초대는 이 서버를 운영하는 사람에게 요청할 수 있어요.</p>"
          ; "</div>"
-           (* Shown in place of the sign-in when the session routes did not
-              say whether a session is open. It replaces what the page showed
-              first, so it is an alert: a screen reader says it as it
-              appears. *)
+           (* The two views below are shown in place of the sign-in, so each
+              is an alert: a screen reader says it as it appears. This one is
+              for session routes that did not say whether a session is
+              open. *)
          ; "<div id=\"unread\" class=\"narrow\" role=\"alert\" hidden>"
          ; "<div class=\"card\">"
          ; "<h1>로그인 상태를 확인하지 못했어요</h1>"
          ; "<p>서버가 지금 로그인 상태를 알려 주지 못해요. 로그인은 그대로일 수 있어요. 잠시 뒤에 다시 열어 주세요.</p>"
-         ; "<p><a id=\"reopen\" class=\"button block\" href=\"/\">다시 열기</a></p>"
+         ; "<p><a class=\"button block\" href=\"/\">다시 열기</a></p>"
          ; "</div>"
          ; "<p class=\"hint center\">계속 이러면 이 서버를 운영하는 사람에게 알려 주세요.</p>"
          ; "</div>"
-           (* What a signed-in person uses, in English. The line that shows
-              what the session routes answered is inside it, so a browser with
-              no session sees the sign-in and no answer of a route. *)
-         ; "<div id=\"signed-in\" lang=\"en\" hidden>"
-         ; "<h1>MASC accounts</h1>"
-         ; "<pre id=\"out\" role=\"status\">reading</pre>"
-         ; "<button id=\"signout\">Sign out</button>"
-         ; section
-             ~id:"allowlist"
-             ~attrs:" id=\"allowlist\" hidden"
-             "Let someone join"
-             [ "<label>Provider <select id=\"allow-provider\"><option value=\"github\">GitHub</option><option value=\"google\">Google</option></select></label>"
-             ; "<label>GitHub user id, or Google sub <input id=\"allow-identity\" autocomplete=\"off\" aria-describedby=\"allow-hint\"></label>"
-             ; "<p id=\"allow-hint\">A GitHub user id is a number: gh api users/LOGIN -q .id</p>"
-             ; "<button id=\"allow-add\">Allow</button>"
-             ; "<label>Registration id <input id=\"allow-id\"></label>"
-             ; "<button id=\"allow-remove\">Remove</button>"
-             ; "<pre id=\"allow-verdict\" role=\"status\"></pre>"
-             ]
-         ; section
-             ~id:"subscriptions"
-             "My subscriptions"
-             [ "<pre id=\"accounts\">reading</pre>"
-             ; "<label>Integration (a provider of runtime.toml) <input id=\"integration\"></label>"
-             ; "<button id=\"connect\">Connect</button>"
-             ; "<pre id=\"transcript\" role=\"log\"></pre>"
-             ; "<label>Answer the login <input id=\"reply\" autocomplete=\"off\"></label>"
-             ; "<button id=\"send\">Send</button>"
-             ]
-         ; section
-             ~id:"verify"
-             "Call my subscription once"
-             [ "<label>Account <select id=\"account\"></select></label>"
-             ; "<label>Model (bound to the integration in runtime.toml) <input id=\"model\"></label>"
-             ; "<button id=\"verify\">Verify</button>"
-             ; "<pre id=\"verdict\" role=\"status\"></pre>"
-             ]
-         ; section ~id:"runtimes" "My Runtimes" [ "<pre id=\"runtimes\">reading</pre>" ]
-         ; section
-             ~id:"keepers"
-             "My Keepers"
-             [ "<pre id=\"keepers\">reading</pre>"
-             ; "<label>Keeper name <input id=\"keeper\"></label>"
-             ; "<button id=\"make-keeper\">Make</button>"
-             ; "<label>Runtime (one of My Runtimes) <select id=\"keeper-runtime\"></select></label>"
-             ; "<button id=\"assign\">Assign</button>"
-             ; "<pre id=\"keeper-verdict\" role=\"status\"></pre>"
-             ; "<label>Message to the Keeper <input id=\"turn-message\" autocomplete=\"off\"></label>"
-             ; "<button id=\"run-turn\">Run</button>"
-             ; "<pre id=\"turn-answer\" role=\"status\"></pre>"
-             ]
-         ; section
-             ~id:"pats"
-             "My PATs"
-             [ "<pre id=\"pats\">reading</pre>"
-             ; "<label>Scope <textarea id=\"pat-scope\" rows=\"2\" cols=\"72\">"
-               ^ {|{"runtimes":"all","channels":["direct"],"allowed_effects":["read_state"]}|}
-               ^ "</textarea></label>"
-             ; "<label>Expires (your local time, empty for none) <input id=\"pat-expiry\" type=\"datetime-local\"></label>"
-             ; "<button id=\"issue-pat\">Issue</button>"
-             ; "<pre id=\"pat-token\" role=\"status\"></pre>"
-             ; "<label>PAT id <input id=\"pat-id\"></label>"
-             ; "<button id=\"revoke-pat\">Revoke</button>"
-             ; "<pre id=\"pat-verdict\" role=\"status\"></pre>"
-             ]
+           (* For a session whose console the server cannot give now. *)
+         ; "<div id=\"stuck\" class=\"narrow\" role=\"alert\" hidden>"
+         ; "<div class=\"card\">"
+         ; "<h1>지금은 내 계정 화면을 열 수 없어요</h1>"
+         ; "<p>로그인은 되어 있어요. 서버가 지금 이 화면을 보여 주지 못해요. 잠시 뒤에 다시 열어 주세요.</p>"
+         ; "<p><a class=\"button primary block\" href=\"/\">다시 열기</a></p>"
+         ; "<p><button id=\"leave\" type=\"button\" class=\"block\">로그아웃</button></p>"
+         ; "<p id=\"leave-note\" class=\"hint\" role=\"status\"></p>"
+         ; "</div>"
+         ; "<p class=\"hint center\">계속 이러면 이 서버를 운영하는 사람에게 알려 주세요.</p>"
          ; "</div>"
          ])
     ~script:home_script

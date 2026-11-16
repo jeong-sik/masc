@@ -191,10 +191,17 @@ type slot =
       claim : claim option;
     }
 
-(* The caller's compute window, applied to whoever runs the compute. *)
-type compute_window = { within : 'a. (unit -> 'a) -> 'a }
+(* The caller's compute window, applied to whoever runs the compute. A bounded
+   window also bounds a waiter's wait, and its length is the one a timeout
+   envelope reports. *)
+type compute_window =
+  | Unbounded
+  | Bounded of { timeout_sec : float; within : 'a. (unit -> 'a) -> 'a }
 
-let unbounded_window = { within = (fun f -> f ()) }
+let within_window window f =
+  match window with
+  | Unbounded -> f ()
+  | Bounded { within; _ } -> within f
 
 let payload_of_entry entry = entry.payload
 
@@ -343,12 +350,6 @@ let is_compute_timeout exn =
   | Compute_timeout _ -> true
   | _ -> false
 
-let should_restore_stale_after_failure exn =
-  match exn with
-  | Compute_timeout _ -> true
-  | Eio.Cancel.Cancelled _ -> true
-  | _ -> false
-
 (* The one shape a timed-out compute takes on the wire.
 
    Every timeout path, in this module and outside it, goes through
@@ -420,6 +421,54 @@ let () =
 let timeout_kind_of_role = function
   | Compute_owner -> Timeout_owner
   | Compute_waiter -> Timeout_waiter
+
+(* How a compute that held a stale value ended without publishing one. *)
+type unfinished_compute =
+  | Gave_up  (* cancelled, or its refresh never started: nothing was learned *)
+  | Timed_out of { role : compute_timeout_role; timeout_sec : float }
+      (* the caller's window closed first *)
+  | Raised  (* the compute itself failed *)
+
+let unfinished_of_exn window exn =
+  match exn, window with
+  | Compute_timeout { role; _ }, Bounded { timeout_sec; _ } ->
+    Timed_out { role; timeout_sec }
+  (* No window of this cache closed: the compute raised the timeout itself. *)
+  | Compute_timeout _, Unbounded -> Raised
+  | Eio.Cancel.Cancelled _, (Bounded _ | Unbounded) -> Gave_up
+  | _, (Bounded _ | Unbounded) -> Raised
+
+let origin_of_cached_value = function
+  | Prepared payload -> payload.origin
+  | Json_value value -> value.origin
+
+(* The entry a [Computing] slot goes back to when its compute ends without a
+   value, from the stale entry the slot held. Every such restore comes here.
+
+   A computed value, or a timeout that already took a seed's place, stays the
+   fallback for the window the caller passes.
+
+   A seed is no value: it says the key is warming, which is true only until a
+   compute ends. Restored after that, it answers "warming" for as long as every
+   compute keeps failing (#29980).
+   - [Gave_up]: nothing was learned, so the key is still warming.
+   - [Timed_out]: the timeout envelope takes the seed's place and is served
+     like any stale value until a compute succeeds.
+   - [Raised]: the seed stays only so that [seed_stale_if_missing] does not
+     plant it again. It is past its grace, so the next read computes inline
+     and the failure reaches that reader, as for a key with no stale value. *)
+let entry_after_unfinished ~key ~ts ~expires_at ~stale_until unfinished stale =
+  match origin_of_cached_value stale.payload, unfinished with
+  | (Computed | Timeout), (Gave_up | Timed_out _ | Raised)
+  | Seeded, Gave_up -> { stale with expires_at; stale_until }
+  | Seeded, Timed_out { role; timeout_sec } ->
+    let envelope =
+      timeout_envelope_json ~kind:(timeout_kind_of_role role) ~key ~timeout_sec
+    in
+    { payload = Prepared (payload_of_json ~origin:Timeout envelope);
+      expires_at;
+      stale_until }
+  | Seeded, Raised -> { stale with expires_at = ts; stale_until = ts }
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
@@ -520,7 +569,7 @@ let inc_cache_miss () =
     A pool job that would wait on a compute whose owner's job has not started
     claims that compute and runs its own instead of holding its worker idle;
     the owner's job then returns without computing (RFC-0204 3.4 L4b). *)
-let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl produce =
+let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
   let stale_grace = ttl *. stale_factor in
   let started = now () in
   (* A runner that was cancelled or whose window closed gave up on the
@@ -532,7 +581,7 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
   in
   (* A pool job of the work's kind unless the caller is already inside one. *)
   let compute () =
-    window.within (fun () -> Pool_work.submit produce)
+    within_window window (fun () -> Pool_work.submit produce)
   in
   let clear_claimed ~token =
     atomic_update table (fun map ->
@@ -581,7 +630,7 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
           | exception _ -> ()  (* settled as [Failed]; the owner raises it below *))
     in
     match
-      window.within (fun () ->
+      within_window window (fun () ->
         Eio.Fiber.first
           (fun () ->
             Pool_work.submit job;
@@ -629,9 +678,9 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
         in
         let elapsed = now () -. started_at in
         let timed_out_waiter =
-          match wait_timeout_sec with
-          | Some timeout_sec -> waited >= timeout_sec
-          | None -> false
+          match window with
+          | Bounded { timeout_sec; _ } -> waited >= timeout_sec
+          | Unbounded -> false
         in
         let watchdog_ceiling = max_wait_sec () in
         if timed_out_waiter then
@@ -725,11 +774,11 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
               let expires_at =
                 if Cancel_safe.is_internal_race_cancel exn then ts else ts +. backoff_grace
               in
-              let refreshed = {
-                stale_entry with
-                expires_at;
-                stale_until = ts +. backoff_grace;
-              } in
+              let refreshed =
+                entry_after_unfinished ~key ~ts ~expires_at
+                  ~stale_until:(ts +. backoff_grace)
+                  (unfinished_of_exn window exn) stale_entry
+              in
               ((), SMap.add key (Ready refreshed) map)
             | Some (Ready _) | None | Some (Computing _) -> ((), map)
           )
@@ -739,11 +788,10 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
           | Some (Computing { token = c; _ }) when c = token ->
               let ts = now () in
               let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              let restored = {
-                stale_entry with
-                expires_at = ts;
-                stale_until = ts +. backoff_grace;
-              } in
+              let restored =
+                entry_after_unfinished ~key ~ts ~expires_at:ts
+                  ~stale_until:(ts +. backoff_grace) Gave_up stale_entry
+              in
               ((), SMap.add key (Ready restored) map)
           | Some (Ready _) | None | Some (Computing _) -> ((), map)
         )
@@ -872,28 +920,28 @@ let get_or_compute_eio ?wait_timeout_sec ?(window = unbounded_window) key ~ttl p
            );
            new_entry
        | Some (Error exn) ->
-           let fallback_val = ref None in
+           let unfinished = unfinished_of_exn window exn in
            if not (Cancel_safe.is_internal_race_cancel exn || is_compute_timeout exn) then
              Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
-           atomic_update table (fun map ->
-             match SMap.find_opt key map with
-             | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
-                 let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-                 let refreshed = {
-                   stale_value with
-                   expires_at = ts;
-                   stale_until = ts +. backoff_grace;
-                 } in
-                 fallback_val := Some refreshed;
-                 ((), SMap.add key (Ready refreshed) map)
-             | Some (Computing { token = c; stale = None; _ }) when c = token ->
-                 ((), SMap.remove key map)
-             | Some (Ready _) | None | Some (Computing _) -> ((), map)
-           );
-           (match !fallback_val with
-            | Some entry when should_restore_stale_after_failure exn ->
-                entry
-            | _ -> raise exn)
+           let fallback =
+             atomic_update table (fun map ->
+               match SMap.find_opt key map with
+               | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
+                   let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+                   let refreshed =
+                     entry_after_unfinished ~key ~ts ~expires_at:ts
+                       ~stale_until:(ts +. backoff_grace) unfinished stale_value
+                   in
+                   (Some refreshed, SMap.add key (Ready refreshed) map)
+               | Some (Computing { token = c; stale = None; _ }) when c = token ->
+                   (None, SMap.remove key map)
+               | Some (Ready _) | None | Some (Computing _) -> (None, map))
+           in
+           (* A timeout or a cancellation answers with the fallback; a compute
+              that raised reaches its caller. *)
+           (match fallback, unfinished with
+            | Some entry, (Timed_out _ | Gave_up) -> entry
+            | Some _, Raised | None, (Timed_out _ | Gave_up | Raised) -> raise exn)
        | None ->
            let fallback_val = ref None in
            let fallback_payload = Prepared (payload_of_json ~origin:Timeout
@@ -1070,8 +1118,7 @@ let get_or_compute_value_with_timeout ~preparation
     try
       let entry =
         if Eio_guard.is_ready () then
-          get_or_compute_eio ~wait_timeout_sec:timeout_sec
-            ~window:{ within } key ~ttl produce
+          get_or_compute_eio ~window:(Bounded { timeout_sec; within }) key ~ttl produce
         else
           get_or_compute_simple key ~ttl (fun () -> with_timeout compute)
       in

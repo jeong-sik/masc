@@ -1143,7 +1143,12 @@ type keeper_secret_status =
   | Secret_error
   | Secret_status_unknown of string
 
-val keeper_secret_status_to_string : keeper_secret_status -> string
+val keeper_secret_status_text : ko:bool -> keeper_secret_status -> string
+(** The status as the Secrets tab draws it. A known status is a word of the
+    screen language. An unknown one is the producer's own word, put through
+    {!Tui_terminal_text.sanitize_terminal_text} so an ESC, a control byte or
+    a line break in it reaches the terminal as visible escape text rather than
+    as a sequence or a new row. The decoded value keeps the raw word. *)
 
 (** One Keeper's credential surface, as the composite endpoint reports it.
 
@@ -1665,8 +1670,9 @@ type server_identity = {
           that does not carry the field — unknown, so no warning and no
           all-clear. *)
   sid_state_ready : bool option;
-      (** [/health] [startup.state_ready] or a ready scoped Observer receipt.
-          [None] means neither booting nor vouched ready. *)
+      (** [/health] [startup.state_ready], the public probe's top-level
+          [ready] when the answer has no [startup] section, or a ready scoped
+          Observer receipt. [None] means neither booting nor vouched ready. *)
   sid_uptime : string option;
       (** [/health] [uptime] human-readable elapsed duration (e.g. "1h 42m"). *)
   sid_sse_clients : int option;
@@ -1684,8 +1690,11 @@ type server_identity = {
           ordered diagnostic list. Missing typed evidence grants no target;
           its original valid diagnostic vector remains readable. *)
 }
-(** Which server the TUI is talking to, from [/health] or an attested scoped
-    Observer response. Fields absent from the latter remain unknown.
+(** Which server the TUI is talking to, from the reader's [/health] or an
+    attested scoped Observer response. Fields absent from the latter remain
+    unknown. The public probe, which the server answers to a requester it
+    gives no read, fills [sid_version] and [sid_state_ready] only; the paths
+    and the commit are empty.
 
     The footer said [Port: 8935] and nothing else, so two checkouts serving
     on the same port were indistinguishable from the screen -- and a binary
@@ -1693,7 +1702,26 @@ type server_identity = {
     [sid_binary_commit_age_s] is how long ago that binary's commit landed,
     which is the number that separates the two. *)
 
+(** [Error] for an answer that carries [account_mode]: the account server of
+    a multi-account installation serves no workspace, and its answer read as
+    an identity would name an empty one. *)
 val decode_server_identity : Yojson.Safe.t -> (server_identity, string) result
+
+(** What answers [/health] at the address the TUI was given. *)
+type server_reading =
+  | Masc_server of server_identity
+      (** A masc server, read by {!decode_server_identity}. *)
+  | Account_server of { account_server_version : string }
+      (** The account server of a multi-account installation. It serves none
+          of the operator surfaces, so a TUI that asks it for them reads only
+          404s. *)
+
+(** [Masc_server] for an object with no [account_mode] member, which no masc
+    server carries. [Account_server] for the account server's answer:
+    [account_mode] [Multi_account], [server] ["masc"] and a string
+    [version], as [Server_accounts.health_version] reads it. Any other
+    [account_mode], and an answer that is no JSON object, is [Error]. *)
+val decode_server_reading : Yojson.Safe.t -> (server_reading, string) result
 
 type prompt_operator_surface =
   | Prompt_primary

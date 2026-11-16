@@ -6,11 +6,10 @@
 #include <Security/Security.h>
 
 /* A headless runner may reject a prompt even if MASC left interaction enabled.
- * Observe the setting at both real API calls to detect that regression without
+ * Observe the setting at the real API call to detect that regression without
  * relying on whether the runner can display UI. These counters are used only
  * by the sequential observed-fixture checks, before the concurrent tests. */
-static int read_checks = 0;
-static int clear_checks = 0;
+static int access_checks = 0;
 static int interaction_violations = 0;
 
 static void check_interaction_disabled(void) {
@@ -20,35 +19,26 @@ static void check_interaction_disabled(void) {
 }
 
 static OSStatus observed_copy_matching(CFDictionaryRef query, CFTypeRef *result) {
-  ++read_checks;
+  ++access_checks;
   check_interaction_disabled();
   return SecItemCopyMatching(query, result);
 }
 
-static OSStatus observed_delete(CFDictionaryRef query) {
-  ++clear_checks;
-  check_interaction_disabled();
-  return SecItemDelete(query);
-}
-
-/* Compile the production operation again in its own translation unit. The
+/* Compile the production check again in its own translation unit. The
  * ordinary Apple_keychain entry point remains uninstrumented and is exercised
  * separately by the rest of the native integration test. */
 #define SecItemCopyMatching observed_copy_matching
-#define SecItemDelete observed_delete
-#define masc_antigravity_keychain_item masc_test_observed_keychain_item
+#define masc_antigravity_keychain_security_access masc_test_observed_security_access
 #include "../../lib/apple_keychain/apple_keychain_stubs.c"
-#undef masc_antigravity_keychain_item
-#undef SecItemDelete
+#undef masc_antigravity_keychain_security_access
 #undef SecItemCopyMatching
 
 CAMLprim value masc_test_observed_keychain_counts(value unit) {
   CAMLparam1(unit);
   CAMLlocal1(counts);
-  counts = caml_alloc_tuple(3);
-  Store_field(counts, 0, Val_int(read_checks));
-  Store_field(counts, 1, Val_int(clear_checks));
-  Store_field(counts, 2, Val_int(interaction_violations));
+  counts = caml_alloc_tuple(2);
+  Store_field(counts, 0, Val_int(access_checks));
+  Store_field(counts, 1, Val_int(interaction_violations));
   CAMLreturn(counts);
 }
 
@@ -56,9 +46,8 @@ CAMLprim value masc_test_observed_keychain_counts(value unit) {
 #include <caml/mlvalues.h>
 #include <caml/fail.h>
 
-CAMLprim value masc_test_observed_keychain_item(value path, value remove_item) {
+CAMLprim value masc_test_observed_security_access(value path) {
   (void)path;
-  (void)remove_item;
   caml_failwith("macOS Keychain test fixtures require macOS");
 }
 

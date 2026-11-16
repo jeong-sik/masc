@@ -64,7 +64,7 @@ TUI Approvals view.
    request answers `{"error":"not initialized"}` (HTTP 503). This is not an auth
    failure; wait a moment and retry.
 2. This workspace is logged in (`masc login`). Otherwise you get
-   `[AuthError] Unauthorized ... Run masc login for this workspace, or pass --token.`
+   `[AuthError] Unauthorized ... Run masc login for this workspace with the same --base-path and --agent.`
 3. A model is bound, so `runtime.toml` has `[runtime].default`. Otherwise:
    `Model setup required ... [runtime].default is required`.
 4. The chosen image is promoted in a container runtime. Otherwise:

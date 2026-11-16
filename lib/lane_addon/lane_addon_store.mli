@@ -155,6 +155,28 @@ val exact_request_directory : declaration_id:string -> string
 val exact_request_path : declaration_id:string -> request_id:string -> string
 (** The path below {!root} of one Exact record, inside
     {!exact_request_directory}. *)
+type exact_entry_refusal =
+  | Not_a_json_name  (** Neither [<name>.json] nor a staged write. *)
+  | Not_a_regular_file  (** A [<name>.json] that is a symbolic link, a directory or another kind. *)
+type exact_entry =
+  | Exact_file of { size : int64 }  (** A regular file named [<name>.json]. *)
+  | Exact_staged  (** A staged write an interrupted publication left ({!Fs_compat.is_atomic_orphan_name}). *)
+  | Exact_gone  (** Removed after the directory was listed. *)
+  | Exact_refused of exact_entry_refusal
+val exact_directory_entry : directory:string -> string -> (exact_entry, Unix.error) result
+(** Blocking. One name in a directory of Exact records ({!exact_request_directory}),
+    proof links or slot observations. The startup sweep and the deploy
+    preflight list such a directory with this judgment: both skip
+    [Exact_staged] and [Exact_gone]; on [Exact_refused] the sweep stops and
+    deletes nothing, and the preflight refuses the entry. [directory] is the
+    directory's absolute path. A symbolic link is not followed. [Error] is any
+    other [lstat] failure, which stops both. *)
+type exact_directory = Exact_directory_present | Exact_directory_absent | Exact_directory_refused
+val exact_directory : string -> (exact_directory, Unix.error) result
+(** Blocking. One of those directories at an absolute path, judged the same
+    way by both readers: absent is empty, and anything but a directory
+    ([Exact_directory_refused], a symbolic link included) stops the sweep and
+    is refused by the preflight. [Error] is any other [lstat] failure. *)
 val save_tool_request_owner : t -> scope:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 (** Cooperative publication is serialized with known-ID reads and complete
     inventories of the same original scope, across Store objects and aliases

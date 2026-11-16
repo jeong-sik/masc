@@ -29,7 +29,7 @@ let project ~base_path ~audience work =
       [ "turn_ref", Ids.Turn_ref.to_yojson observed.turn_ref
       ; "recorded_at", `Float observed.recorded_at
       ; "source", (match observed.source with None -> `Null | Some s -> `String s)
-      ; "message", Keeper_official_client_context_codec.message_to_json observed.message ] in
+      ; "message", Keeper_official_client_context_codec.(message_to_json Canonical_source) observed.message ] in
   let observed_json = function
     | Ok window -> `Assoc ["messages", `List (List.map message_json window.Keeper_turn_fragments.messages);
                            "prefix_omitted", `Bool window.prefix_omitted]

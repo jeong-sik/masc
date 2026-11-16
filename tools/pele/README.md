@@ -1,7 +1,8 @@
 # Pele terminal renderer
 
-Pele 1.6.0 (MIT, [upstream](https://github.com/obsidianmd/pele)) renders Mermaid
-syntax to SVG. This helper resolves SVG theme variables and rasterizes with
+Pele 1.13.0 (MIT, [upstream](https://github.com/obsidianmd/pele)) renders Mermaid
+syntax to SVG, and `@dagrejs/dagre` (MIT) lays out structured card graphs to SVG.
+This helper resolves SVG theme variables and rasterizes with
 resvg for MASC's existing terminal image protocol. Retained SVG markup uses the
 same offline rasterizer instead of an operating-system image converter.
 It runs offline; diagram
@@ -19,7 +20,7 @@ already holds `masc-pele`, so a local masc install leaves masc-tui and the
 helper on one checkout. A prefix without `masc-pele` gets none.
 
 The helper reads one JSON request from stdin and writes PNG bytes to stdout.
-`format` is `mermaid` or `svg`; unknown and missing formats fail explicitly.
+`format` is `mermaid`, `svg`, or `graph`; unknown and missing formats fail explicitly.
 `source` is the retained markup and `maxWidth` is the current available pixel
 width. Optional `colors` contains observed `foreground` and `background` as
 six-digit RGB hex strings. Without an observed palette, the standalone preview

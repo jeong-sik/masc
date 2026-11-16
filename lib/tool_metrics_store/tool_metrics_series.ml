@@ -42,6 +42,7 @@ let max_utc_offset_min = max_utc_offset_hours * minutes_per_hour
    bound the conversion stops being exact, so no window may reach it. *)
 let max_timestamp_s = 1e12
 let top_tool_limit = 20
+let top_caller_limit = 20
 let median = 0.50
 let tail = 0.95
 let milliseconds_per_second = 1000.0
@@ -139,6 +140,8 @@ type sample =
   ; disposition : disposition
   ; duration_ms : float
   ; result_bytes : int option
+  ; failure_class : Tool_result.tool_failure_class option
+  ; caller : string option
   }
 
 (* Durations of one set of calls, kept in a flat float array that doubles when
@@ -179,9 +182,44 @@ let percentile sorted p =
     Some (Float.Array.get sorted (max 0 (min (count - 1) rank))))
 ;;
 
+type failure_class_counts =
+  { dependency_unavailable : int
+  ; policy_rejection : int
+  ; runtime_failure : int
+  ; workflow_rejection : int
+  ; operator_cancelled : int
+  }
+
+let no_failure_classes =
+  { dependency_unavailable = 0
+  ; policy_rejection = 0
+  ; runtime_failure = 0
+  ; workflow_rejection = 0
+  ; operator_cancelled = 0
+  }
+;;
+
+(* One constructor, one counter: a new [Tool_result.tool_failure_class] stops
+   this match from compiling until it has a counter. *)
+let count_failure_class counts (failure_class : Tool_result.tool_failure_class) =
+  match failure_class with
+  | Tool_result.Dependency_unavailable ->
+    { counts with dependency_unavailable = counts.dependency_unavailable + 1 }
+  | Tool_result.Policy_rejection ->
+    { counts with policy_rejection = counts.policy_rejection + 1 }
+  | Tool_result.Runtime_failure ->
+    { counts with runtime_failure = counts.runtime_failure + 1 }
+  | Tool_result.Workflow_rejection ->
+    { counts with workflow_rejection = counts.workflow_rejection + 1 }
+  | Tool_result.Operator_cancelled ->
+    { counts with operator_cancelled = counts.operator_cancelled + 1 }
+;;
+
 type stat =
   { call_count : int
   ; failure_count : int
+  ; failure_classes : failure_class_counts
+  ; failure_unclassified_count : int
   ; deferred_count : int
   ; total_ms : float
   ; p50_ms : float option
@@ -197,6 +235,8 @@ type stat =
 type accumulator =
   { mutable calls : int
   ; mutable failed : int
+  ; mutable failed_classes : failure_class_counts
+  ; mutable failed_unclassified : int
   ; mutable deferred : int
   ; mutable sum_ms : float
   ; mutable peak_ms : float
@@ -211,6 +251,8 @@ type accumulator =
 let new_accumulator () =
   { calls = 0
   ; failed = 0
+  ; failed_classes = no_failure_classes
+  ; failed_unclassified = 0
   ; deferred = 0
   ; sum_ms = 0.0
   ; peak_ms = 0.0
@@ -228,7 +270,13 @@ let record accumulator (sample : sample) =
   (match sample.disposition with
    | Completed -> ()
    | Deferred -> accumulator.deferred <- accumulator.deferred + 1
-   | Failed -> accumulator.failed <- accumulator.failed + 1);
+   | Failed ->
+     accumulator.failed <- accumulator.failed + 1;
+     (match sample.failure_class with
+      | None -> accumulator.failed_unclassified <- accumulator.failed_unclassified + 1
+      | Some failure_class ->
+        accumulator.failed_classes
+        <- count_failure_class accumulator.failed_classes failure_class));
   accumulator.sum_ms <- accumulator.sum_ms +. sample.duration_ms;
   if sample.duration_ms > accumulator.peak_ms
   then accumulator.peak_ms <- sample.duration_ms;
@@ -248,6 +296,8 @@ let record accumulator (sample : sample) =
 let empty_stat =
   { call_count = 0
   ; failure_count = 0
+  ; failure_classes = no_failure_classes
+  ; failure_unclassified_count = 0
   ; deferred_count = 0
   ; total_ms = 0.0
   ; p50_ms = None
@@ -268,6 +318,8 @@ let stat_of_accumulator accumulator =
     let sorted = Durations.sorted accumulator.durations in
     { call_count = accumulator.calls
     ; failure_count = accumulator.failed
+    ; failure_classes = accumulator.failed_classes
+    ; failure_unclassified_count = accumulator.failed_unclassified
     ; deferred_count = accumulator.deferred
     ; total_ms = accumulator.sum_ms
     ; p50_ms = percentile sorted median
@@ -286,6 +338,7 @@ type builder =
   { shape : window
   ; slots : accumulator array
   ; per_tool : (string, accumulator) Hashtbl.t
+  ; per_caller : (string, accumulator) Hashtbl.t
   ; overall : accumulator
   }
 
@@ -293,16 +346,17 @@ let builder shape =
   { shape
   ; slots = Array.init shape.bucket_count (fun _ -> new_accumulator ())
   ; per_tool = Hashtbl.create 64
+  ; per_caller = Hashtbl.create 16
   ; overall = new_accumulator ()
   }
 ;;
 
-let tool_accumulator builder name =
-  match Hashtbl.find_opt builder.per_tool name with
+let accumulator_of table name =
+  match Hashtbl.find_opt table name with
   | Some accumulator -> accumulator
   | None ->
     let accumulator = new_accumulator () in
-    Hashtbl.replace builder.per_tool name accumulator;
+    Hashtbl.replace table name accumulator;
     accumulator
 ;;
 
@@ -310,6 +364,13 @@ let negative_size (sample : sample) =
   match sample.result_bytes with
   | Some bytes -> bytes < 0
   | None -> false
+;;
+
+(* A class names why a call failed, so only a failed call has one. *)
+let classed_without_failing (sample : sample) =
+  match sample.disposition, sample.failure_class with
+  | (Completed | Deferred), Some _ -> true
+  | (Completed | Deferred), None | Failed, (Some _ | None) -> false
 ;;
 
 let add builder (sample : sample) =
@@ -328,6 +389,12 @@ let add builder (sample : sample) =
          "tool %s has a negative result size of %d bytes"
          sample.tool_name
          (Option.value sample.result_bytes ~default:0))
+  else if classed_without_failing sample
+  then
+    Error
+      (Printf.sprintf
+         "tool %s carries a failure class but did not fail"
+         sample.tool_name)
   else if (not (Float.is_finite sample.ts))
           || sample.ts < shape.since
           || sample.ts >= shape.until
@@ -347,7 +414,10 @@ let add builder (sample : sample) =
     in
     record builder.slots.(slot) sample;
     record builder.overall sample;
-    record (tool_accumulator builder sample.tool_name) sample;
+    record (accumulator_of builder.per_tool sample.tool_name) sample;
+    Option.iter
+      (fun caller -> record (accumulator_of builder.per_caller caller) sample)
+      sample.caller;
     Ok ())
 ;;
 
@@ -361,11 +431,18 @@ type tool_usage =
   ; usage : stat
   }
 
+type caller_usage =
+  { caller : string
+  ; usage : stat
+  }
+
 type t =
   { window : window
   ; buckets : bucket list
   ; total : stat
   ; top_by_time : tool_usage list
+  ; by_caller : caller_usage list
+  ; caller_unobserved_count : int
   }
 
 let finish builder =
@@ -389,7 +466,34 @@ let finish builder =
     |> List.map (fun (name, accumulator) ->
       { name; usage = stat_of_accumulator accumulator })
   in
-  { window = shape; buckets; total = stat_of_accumulator builder.overall; top_by_time }
+  let most_failures_first (name_a, (a : accumulator)) (name_b, (b : accumulator)) =
+    match Int.compare b.failed a.failed with
+    | 0 ->
+      (match Int.compare b.calls a.calls with
+       | 0 -> String.compare name_a name_b
+       | order -> order)
+    | order -> order
+  in
+  let callers =
+    Hashtbl.fold (fun name accumulator rows -> (name, accumulator) :: rows) builder.per_caller []
+  in
+  let caller_observed_count =
+    List.fold_left (fun sum (_, (accumulator : accumulator)) -> sum + accumulator.calls) 0 callers
+  in
+  let by_caller =
+    callers
+    |> List.sort most_failures_first
+    |> List.take top_caller_limit
+    |> List.map (fun (caller, accumulator) ->
+      { caller; usage = stat_of_accumulator accumulator })
+  in
+  { window = shape
+  ; buckets
+  ; total = stat_of_accumulator builder.overall
+  ; top_by_time
+  ; by_caller
+  ; caller_unobserved_count = builder.overall.calls - caller_observed_count
+  }
 ;;
 
 let float_or_null = function
@@ -402,9 +506,24 @@ let int_or_null = function
   | Some value -> `Int value
 ;;
 
+(* The keys are the spellings [Tool_result] gives each class, so the series
+   and the keeper tool-call log name a class the same way. *)
+let failure_classes_json (counts : failure_class_counts) : Yojson.Safe.t =
+  let key = Tool_result.tool_failure_class_to_string in
+  `Assoc
+    [ key Tool_result.Dependency_unavailable, `Int counts.dependency_unavailable
+    ; key Tool_result.Policy_rejection, `Int counts.policy_rejection
+    ; key Tool_result.Runtime_failure, `Int counts.runtime_failure
+    ; key Tool_result.Workflow_rejection, `Int counts.workflow_rejection
+    ; key Tool_result.Operator_cancelled, `Int counts.operator_cancelled
+    ]
+;;
+
 let stat_fields stat : (string * Yojson.Safe.t) list =
   [ "call_count", `Int stat.call_count
   ; "failure_count", `Int stat.failure_count
+  ; "failure_classes", failure_classes_json stat.failure_classes
+  ; "failure_unclassified_count", `Int stat.failure_unclassified_count
   ; "deferred_count", `Int stat.deferred_count
   ; "total_ms", `Float stat.total_ms
   ; "p50_ms", float_or_null stat.p50_ms
@@ -432,6 +551,9 @@ let to_json ~generated_at ?tool_name ?(public_names = fun _ -> []) series
           , `List (List.map (fun name -> `String name) (public_names tool.name)) )
        :: stat_fields tool.usage)
   in
+  let caller_json (row : caller_usage) =
+    `Assoc (("caller", `String row.caller) :: stat_fields row.usage)
+  in
   `Assoc
     [ "generated_at", `Float generated_at
     ; ( "source"
@@ -452,5 +574,7 @@ let to_json ~generated_at ?tool_name ?(public_names = fun _ -> []) series
     ; "total", `Assoc (stat_fields series.total)
     ; "buckets", `List (List.map bucket_json series.buckets)
     ; "top_by_time", `List (List.map tool_json series.top_by_time)
+    ; "by_caller", `List (List.map caller_json series.by_caller)
+    ; "caller_unobserved_count", `Int series.caller_unobserved_count
     ]
 ;;

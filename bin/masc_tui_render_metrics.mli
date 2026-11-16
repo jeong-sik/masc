@@ -27,11 +27,32 @@ val identity_gap : state -> Masc_tui_value.Unknown.t
     block. *)
 val section_pills_line : ko:bool -> cols:int -> active:metrics_section -> string
 
+type session_entry = {
+  event : event;
+  run : int;  (** How many identical neighbours folded into this one. *)
+  rows : string list;
+      (** Every row the event takes at the block's width. The sentence wraps
+          under its first word rather than being cut at the edge, so a width
+          that leaves room beside the clock and mark holds every row. *)
+}
+
+type session_block = {
+  earlier : int;  (** Folded events left out, oldest first. *)
+  kept : session_entry list;  (** Oldest first; the newest is last. *)
+}
+
+val session_block : width:int -> ?room:int -> event list -> session_block
+(** Which TUI session events fit [room] rows, from the log as [state.events]
+    holds it (newest first). Room is counted in rows, an event is kept or
+    left out whole, and when any is left out one row of the room goes to
+    counting them. The newest event is kept even when it alone does not fit
+    beside that count. Without [room] every event is kept. *)
+
 val render_section_fleet : ?session_rows:int -> cols:int -> state -> string list
-(** [session_rows] bounds the TUI session block's event rows. When the log
-    folds to more rows than that, the block keeps the newest ones under a
-    row that counts the earlier ones (["N earlier"], ["이전 N건"]), so the
-    newest line stays in view. Without it every row is drawn. *)
+(** [session_rows] bounds the TUI session block's rows, spent as
+    {!session_block} decides: the kept events are drawn whole under a row
+    that counts the earlier ones (["N earlier"], ["이전 N건"]). Without it
+    every event is drawn. *)
 val render_section_resources : cols:int -> state -> string list
 val render_section_tools : cols:int -> state -> string list
 

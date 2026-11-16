@@ -23,11 +23,13 @@ val run
 (** With every change option absent, writes nothing and prints the state. With
     some, writes them in one commit and then prints the state.
 
-    When [base_path]'s server answers on [port] and is ready, the state is the
-    text it holds and the commit goes through it (RFC-0482 §3.2), with the
-    sign-in [masc login] keeps for [agent]; a server still starting or a
-    missing sign-in writes nothing. With no server for [base_path], the file
-    is the one the server reads for it, [MASC_CONFIG_DIR] included.
+    When the process that holds the lease of [base_path] announces [port] as
+    the server of a single user and is ready, the state is the text it holds
+    and the commit goes through it (RFC-0482 §3.2), with the sign-in
+    [masc login] keeps for [agent]; a server still starting, a lease holder
+    that does not announce [port] that way or a missing sign-in writes
+    nothing. With nothing holding the lease of [base_path], the file is the
+    one the server reads for it, [MASC_CONFIG_DIR] included.
 
     The result is the process exit code: [0] when it printed the state, [1]
     when it refused and said why on stderr. *)

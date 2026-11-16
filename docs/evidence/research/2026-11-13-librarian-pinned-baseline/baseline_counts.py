@@ -77,9 +77,11 @@ def pinned_of(baseline: L.Baseline) -> JsonObject:
 
 
 def sent_as(folder: Path, kind: str, lines: L.Lines, model: L.ModelLines) -> tuple[JsonObject, str]:
-    """The run's summary and the name it sent the model under (`prompt_counts.target_of`)."""
+    """The run's summary and the name it sent the model under (`prompt_counts.target_of`, which reads
+    the summary as `prompt_counts.summary_of` parses it)."""
     summary = cast(JsonObject, json.loads((folder / "summary.json").read_text(encoding="utf-8")))
-    return summary, C.target_of(summary, kind, lines.pass_lines_sha256, model.provider, model.model, folder)
+    return summary, C.target_of(C.summary_of(folder), kind, lines.pass_lines_sha256, model.provider,
+                                model.model, folder)
 
 
 def answers_of(folder: Path, kind: str, lines: L.Lines, model: L.ModelLines) -> JsonObject:

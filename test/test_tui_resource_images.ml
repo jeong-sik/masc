@@ -12,7 +12,7 @@ let blob mime value =
 let payload = function
   | Preview.Output_image {source=Inline_data data;_} -> Masc_tui_image_payload.encoded data
   | Named_path _ | Staged _ | Stored_attachment _
-  | Output_image {source=(Inline_svg _ | Inline_mermaid _ | Server_path _ | Remote_uri _);_}
+  | Output_image {source=(Inline_svg _ | Inline_mermaid _ | Inline_graph _ | Server_path _ | Remote_uri _);_}
   | Unavailable_image _ | No_image -> fail "expected retained inline bytes"
 
 let test_wire_conservation () =
@@ -45,7 +45,7 @@ let test_multipart_types () =
   (match snd (List.nth images 2) with
    | Preview.Output_image {source=Inline_svg source;_} -> check string "SVG source" "<svg/>" source
    | Preview.Named_path _ | Staged _ | Stored_attachment _
-   | Output_image {source=(Inline_data _ | Inline_mermaid _ | Server_path _ | Remote_uri _);_}
+   | Output_image {source=(Inline_data _ | Inline_mermaid _ | Inline_graph _ | Server_path _ | Remote_uri _);_}
    | Unavailable_image _ | No_image -> fail "SVG text retains markup")
 
 let test_source_ownership () =
@@ -148,7 +148,7 @@ let test_markdown_diagrams () =
   let diagrams = List.filter_map (function
     | _, Preview.Output_image {name;source=Inline_mermaid source} -> Some (name,source)
     | _, (Named_path _ | Staged _ | Stored_attachment _
-      | Output_image {source=(Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _);_}
+      | Output_image {source=(Inline_data _ | Inline_svg _ | Inline_graph _ | Server_path _ | Remote_uri _);_}
       | Unavailable_image _ | No_image) -> None) candidates in
   check (list (pair string string)) "exact closed sources keep part and occurrence identity"
     ["Mermaid · part 2 · diagram 1", first;

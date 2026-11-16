@@ -95,16 +95,16 @@ let test_an_empty_body_is_proven_not_an_image () =
 
 let test_a_clean_exit_with_a_body_is_not_a_failure () =
   check (option fetch_failure) "exit 0 + body" None
-    (Cache.fetch_failure_of_status (Unix.WEXITED 0) ~body_present:true)
+    (Cache.fetch_failure_of_ending (Cache.Exited (Unix.WEXITED 0)) ~body_present:true)
 ;;
 
 let test_a_clean_exit_without_a_body_is_a_failure () =
   check (option fetch_failure) "exit 0, no body" (Some Cache.No_body_written)
-    (Cache.fetch_failure_of_status (Unix.WEXITED 0) ~body_present:false)
+    (Cache.fetch_failure_of_ending (Cache.Exited (Unix.WEXITED 0)) ~body_present:false)
 ;;
 
 let test_curl_exit_codes_are_named () =
-  let of_code code = Cache.fetch_failure_of_status (Unix.WEXITED code) ~body_present:false in
+  let of_code code = Cache.fetch_failure_of_ending (Cache.Exited (Unix.WEXITED code)) ~body_present:false in
   check (option fetch_failure) "22 = --fail saw an HTTP error" (Some Cache.Http_error_status)
     (of_code 22);
   check (option fetch_failure) "28 = --max-time" (Some Cache.Operation_timeout) (of_code 28);
@@ -118,30 +118,44 @@ let test_curl_exit_codes_are_named () =
 
 let test_a_signal_on_curl_is_kept () =
   check (option fetch_failure) "signaled" (Some (Cache.Curl_signaled { signal = 9 }))
-    (Cache.fetch_failure_of_status (Unix.WSIGNALED 9) ~body_present:false);
+    (Cache.fetch_failure_of_ending (Cache.Exited (Unix.WSIGNALED 9)) ~body_present:false);
   check (option fetch_failure) "stopped" (Some (Cache.Curl_stopped { signal = 19 }))
-    (Cache.fetch_failure_of_status (Unix.WSTOPPED 19) ~body_present:false)
+    (Cache.fetch_failure_of_ending (Cache.Exited (Unix.WSTOPPED 19)) ~body_present:false)
+;;
+
+let test_a_runner_kill_on_curl_is_named () =
+  check (option fetch_failure) "deadline" (Some Cache.Curl_killed_at_deadline)
+    (Cache.fetch_failure_of_ending Cache.Killed_at_deadline ~body_present:true);
+  check (option fetch_failure) "cancelled" (Some Cache.Curl_cancelled)
+    (Cache.fetch_failure_of_ending Cache.Cancelled ~body_present:true)
 ;;
 
 let test_a_clean_decode_with_a_frame_is_not_a_failure () =
   check (option decode_failure) "exit 0 + frame" None
-    (Cache.decode_failure_of_status (Unix.WEXITED 0) ~output_present:true)
+    (Cache.decode_failure_of_ending (Cache.Exited (Unix.WEXITED 0)) ~output_present:true)
 ;;
 
 let test_a_clean_decode_without_a_frame_is_a_failure () =
   check (option decode_failure) "exit 0, no frame" (Some Cache.No_frame_written)
-    (Cache.decode_failure_of_status (Unix.WEXITED 0) ~output_present:false)
+    (Cache.decode_failure_of_ending (Cache.Exited (Unix.WEXITED 0)) ~output_present:false)
 ;;
 
 let test_a_nonzero_exit_does_not_diagnose_the_body () =
-  let failure = Cache.decode_failure_of_status (Unix.WEXITED 1) ~output_present:false in
+  let failure = Cache.decode_failure_of_ending (Cache.Exited (Unix.WEXITED 1)) ~output_present:false in
   check (option decode_failure) "exit 1 stays ambiguous" (Some (Cache.Decoder_exit { code = 1 }))
     failure
 ;;
 
 let test_a_missing_decoder_keeps_the_body () =
   check (option decode_failure) "127 = sh found no ffmpeg" (Some Cache.Decoder_missing)
-    (Cache.decode_failure_of_status (Unix.WEXITED 127) ~output_present:false)
+    (Cache.decode_failure_of_ending (Cache.Exited (Unix.WEXITED 127)) ~output_present:false)
+;;
+
+let test_a_runner_kill_on_the_decoder_is_named () =
+  check (option decode_failure) "deadline" (Some Cache.Decoder_killed_at_deadline)
+    (Cache.decode_failure_of_ending Cache.Killed_at_deadline ~output_present:true);
+  check (option decode_failure) "cancelled" (Some Cache.Decoder_cancelled)
+    (Cache.decode_failure_of_ending Cache.Cancelled ~output_present:true)
 ;;
 
 let write_file path bytes =
@@ -163,7 +177,7 @@ let with_cache f =
       Array.iter (fun name -> Sys.remove (Filename.concat dir name)) (Sys.readdir dir);
       Unix.rmdir dir)
     (fun () ->
-      let run command = Unix.system ("PATH=" ^ Filename.quote dir ^ " " ^ command) in
+      let run command = Cache.Exited (Unix.system ("PATH=" ^ Filename.quote dir ^ " " ^ command)) in
       f dir run)
 
 let shell_bytes bytes =
@@ -212,15 +226,20 @@ let test_download_reports_runner_failure_and_cleans_attempt () =
     check (list string) "failed download left no attempt" []
       (Sys.readdir cache_dir |> Array.to_list))
 
-let test_decoder_reports_runner_failure_without_removing_shared_output () =
+let decode_into_owned_output ~run ~cache_dir f =
+  Cache.with_decoder_output ~run ~cache_dir ~prefix:"frame_" ~suffix:".raw"
+    (fun output -> "fixture " ^ Filename.quote output) f
+
+let test_decoder_reports_runner_failure_and_removes_its_output () =
   with_cache (fun cache_dir _ ->
-    let output = Filename.concat cache_dir "partial.raw" in
-    let run _ = write_file output "partial"; raise_exhausted () in
-    let result = Cache.run_decoder ~run ~output_path:output "fixture" in
+    let output = ref "" in
+    let run command =
+      output := capture_converter_output cache_dir command;
+      write_file !output "partial"; raise_exhausted () in
+    let result = decode_into_owned_output ~run ~cache_dir Fun.id in
     check bool "runner failure retains its OS cause" true
       (result = Error (Cache.Decoder_runner_failed exhausted_runner_failure));
-    check string "runner failure does not remove another writer's output" "partial"
-      (read_file output))
+    check bool "runner failure removes the run's own output" false (Sys.file_exists !output))
 
 let test_runner_failure_stops_converter_fallback () =
   with_cache (fun cache_dir _ ->
@@ -229,7 +248,7 @@ let test_runner_failure_stops_converter_fallback () =
     write_file source bmp_header;
     let run command =
       incr calls;
-      if !calls = 1 then Unix.WEXITED 1 else begin
+      if !calls = 1 then Cache.Exited (Unix.WEXITED 1) else begin
         write_file (capture_converter_output cache_dir command) "partial";
         raise_exhausted ()
       end in
@@ -239,36 +258,47 @@ let test_runner_failure_stops_converter_fallback () =
                        Cache.Image_magick, Cache.Decoder_runner_failed exhausted_runner_failure]);
     check int "no further converter starts after a runner failure" 2 !calls;
     check string "source remains intact" bmp_header (read_file source);
-    check string "runner failure leaves the unowned output path alone" "partial"
-      (read_file (read_file (Filename.concat cache_dir "output-path"))))
+    check bool "runner failure removes the attempt's own output" false
+      (Sys.file_exists (read_file (Filename.concat cache_dir "output-path"))))
 
 let test_signalled_converter_stops_fallback () =
   with_cache (fun cache_dir _ ->
     let source = Filename.concat cache_dir "original.bmp" in
     let calls = ref 0 in
     write_file source bmp_header;
-    let run _ = incr calls; Unix.WSIGNALED Sys.sigkill in
+    let run _ = incr calls; Cache.Exited (Unix.WSIGNALED Sys.sigkill) in
     let result = Cache.convert_to_png ~run ~cache_dir source in
     check bool "a terminated converter preserves its status" true
       (result = Error [Cache.Sips, Cache.Decoder_signaled {signal=Sys.sigkill}]);
     check int "a fallback cannot reuse the terminated converter's output" 1 !calls;
     check string "source remains intact" bmp_header (read_file source))
 
+let test_converter_killed_at_deadline_stops_fallback () =
+  with_cache (fun cache_dir _ ->
+    let source = Filename.concat cache_dir "original.bmp" in
+    let calls = ref 0 in
+    write_file source bmp_header;
+    let run _ = incr calls; Cache.Killed_at_deadline in
+    let result = Cache.convert_to_png ~run ~cache_dir source in
+    check bool "the deadline kill is kept apart from a signal" true
+      (result = Error [Cache.Sips, Cache.Decoder_killed_at_deadline]);
+    check int "a fallback cannot reuse the killed converter's output" 1 !calls)
+
 exception Runner_interrupted
 
-let test_unexpected_runner_exception_preserves_shared_output () =
+let test_unexpected_runner_exception_removes_owned_output () =
   with_cache (fun cache_dir _ ->
     let interrupt _ = raise Runner_interrupted in
     check_raises "unexpected download exception propagates" Runner_interrupted (fun () ->
       ignore (Cache.download ~run:interrupt ~cache_dir "https://fixture.invalid/image"));
     check (list string) "interrupted download leaves no attempt" []
       (Sys.readdir cache_dir |> Array.to_list);
-    let output = Filename.concat cache_dir "partial.raw" in
+    let output = ref "" in
     check_raises "unexpected decoder exception propagates" Runner_interrupted (fun () ->
-      ignore (Cache.run_decoder ~output_path:output ~run:(fun _ ->
-        write_file output "partial"; raise Runner_interrupted) "fixture"));
-    check string "interrupted shared decoder path is not removed" "partial" (read_file output);
-    Sys.remove output;
+      decode_into_owned_output ~cache_dir ~run:(fun command ->
+        output := capture_converter_output cache_dir command;
+        write_file !output "partial"; raise Runner_interrupted) ignore);
+    check bool "interrupted decoder output is removed" false (Sys.file_exists !output);
     let source = Filename.concat cache_dir "original.bmp" in
     write_file source bmp_header;
     let run command =
@@ -276,8 +306,8 @@ let test_unexpected_runner_exception_preserves_shared_output () =
       raise Runner_interrupted in
     check_raises "unexpected conversion exception propagates" Runner_interrupted (fun () ->
       ignore (Cache.convert_to_png ~run ~cache_dir source));
-    check string "interrupted conversion leaves the unowned output path alone" "partial"
-      (read_file (read_file (Filename.concat cache_dir "output-path"))))
+    check bool "interrupted conversion output is removed" false
+      (Sys.file_exists (read_file (Filename.concat cache_dir "output-path"))))
 
 let test_local_file_preserves_original () =
   with_cache (fun cache_dir run ->
@@ -363,7 +393,7 @@ let test_character_frame_keeps_output_reserved () =
       check bool "another attempt cannot reserve the output while decoder runs" true !reserved;
       check (list string) "owned attempt files are cleaned up" ["output-path"]
         (Sys.readdir cache_dir |> Array.to_list |> List.sort String.compare))
-      [Unix.WEXITED 1; Unix.WEXITED 0];
+      [Cache.Exited (Unix.WEXITED 1); Cache.Exited (Unix.WEXITED 0)];
     check_raises "unexpected runner exceptions propagate" Runner_interrupted (fun () ->
       ignore (Cache.prepare_presentation ~run:(fun _ -> raise Runner_interrupted)
         ~cache_dir display png));
@@ -434,7 +464,7 @@ let test_bounded_remote_image_source () =
       (Cache.download ~max_bytes:256 ~run ~cache_dir exact |> unwrap |> Cache.download_bytes);
     write_file cache_path bytes;
     let calls = ref 0 in
-    let forbidden _ = incr calls; Unix.WEXITED 1 in
+    let forbidden _ = incr calls; Cache.Exited (Unix.WEXITED 1) in
     check bool "large shared cache is refused" true
       (Cache.download ~max_bytes:256 ~run:forbidden ~cache_dir oversized
        = Error (Cache.Cached_body_too_large {max_bytes=256}));
@@ -494,7 +524,7 @@ let test_bounded_remote_image_source () =
     let nonsquare_gif = Bytes.of_string animated_gif in
     Bytes.set nonsquare_gif 12 '\001';
     let decoder_calls = ref 0 in
-    let decoder _ = incr decoder_calls; Unix.WEXITED 0 in
+    let decoder _ = incr decoder_calls; Cache.Exited (Unix.WEXITED 0) in
     let refused body name =
       serve cache_dir body;
       let source = fetch ("https://fixture.invalid/" ^ name) in
@@ -682,19 +712,16 @@ let test_mosaic_failure_retains_input_and_can_recover () =
     executable cache_dir "ffmpeg" (Printf.sprintf "exit %d" code);
     let body = unwrap (Cache.download ~run ~cache_dir url) in
     unwrap (Cache.with_download_snapshot ~cache_dir body (fun input ->
-      let output_path = Filename.concat cache_dir "frame.raw" in
-      let command = Printf.sprintf "ffmpeg -i %s %s"
-        (Filename.quote input) (Filename.quote output_path) in
-      (* A failed command must not accept a frame left by an earlier attempt. *)
-      write_file output_path "stale";
-      check bool "decode fails" true
-        (Result.is_error (Cache.run_decoder ~run ~output_path command));
+      let decode () = Cache.with_decoder_output ~run ~cache_dir ~prefix:"mosaic_" ~suffix:".raw"
+        (fun output -> Printf.sprintf "ffmpeg -i %s %s" (Filename.quote input) (Filename.quote output))
+        Fun.id in
+      check bool "decode fails" true (Result.is_error (decode ()));
       check string "original bytes retained" png_header (read_file input);
-      check bool "failed output discarded" false (Sys.file_exists output_path);
+      check bool "failed output discarded" false
+        (Sys.readdir cache_dir |> Array.exists (String.starts_with ~prefix:"mosaic_"));
       converter_succeeds cache_dir "ffmpeg" "rgbRGB";
       ignore (unwrap (Cache.download ~run ~cache_dir url));
-      ignore (unwrap (Cache.run_decoder ~run ~output_path command));
-      check string "recovered frame" "rgbRGB" (read_file output_path)));
+      check string "recovered frame" "rgbRGB" (unwrap (decode ()))));
     check string "retained source avoids another fetch" "x"
       (read_file (Filename.concat cache_dir "fetches"))))
     [ 1; 126; 127 ]
@@ -730,14 +757,12 @@ let test_explicit_retry_recovers_without_background_loop () =
           Preview.Refused (Preview.Fetch_failed { detail = Cache.download_error_text failure })
         | Ok body ->
           unwrap (Cache.with_download_snapshot ~cache_dir body (fun input ->
-          let output_path = Filename.concat cache_dir "retry.raw" in
-          let command = Printf.sprintf "ffmpeg -i %s %s"
-            (Filename.quote input) (Filename.quote output_path) in
-          match Cache.run_decoder ~run ~output_path command with
-          | Error failure ->
-            Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
-          | Ok path ->
-            Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 (read_file path))))
+          Cache.with_decoder_output ~run ~cache_dir ~prefix:"retry_" ~suffix:".raw"
+            (fun output -> Printf.sprintf "ffmpeg -i %s %s" (Filename.quote input) (Filename.quote output))
+            (function
+              | Error failure ->
+                Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
+              | Ok frame -> Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 frame))))
     in
     executable cache_dir "curl" "exit 28";
     Preview.load_mosaic url ~compute:(fun () -> compute ());
@@ -780,14 +805,12 @@ let test_a_direct_image_retry_drops_the_body_its_first_view_cached () =
       Cache.invalidate_download ~cache_dir url;
       let body = unwrap (Cache.download ~force_fetch:true ~run ~cache_dir url) in
       unwrap (Cache.with_download_snapshot ~cache_dir body (fun input ->
-      let output_path = Filename.concat cache_dir "direct.raw" in
-      let command = Printf.sprintf "ffmpeg -i %s %s"
-        (Filename.quote input) (Filename.quote output_path) in
-      match Cache.run_decoder ~run ~output_path command with
-      | Error failure ->
-        Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
-      | Ok path ->
-        Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 (read_file path))))
+      Cache.with_decoder_output ~run ~cache_dir ~prefix:"direct_" ~suffix:".raw"
+        (fun output -> Printf.sprintf "ffmpeg -i %s %s" (Filename.quote input) (Filename.quote output))
+        (function
+          | Error failure ->
+            Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
+          | Ok frame -> Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 frame))))
     in
     Preview.retry_mosaic ~retry url;
     check int "the explicit retry ran" 1 !attempts;
@@ -867,6 +890,46 @@ let test_clear_pending_keeps_claim_and_discards_completion () =
      | _ -> fail "completed cleared worker left a reservation");
     Preview.clear_cache ()) [ false; true ]
 
+(* #47452: a converter that has already returned a failure can still have a
+   writer on its output file. The fallback's frame must not be that file. *)
+let test_a_late_write_from_a_failed_converter_cannot_replace_the_fallback_frame () =
+  with_cache (fun cache_dir _ ->
+    let source = Filename.concat cache_dir "original.bmp" in
+    write_file source bmp_header;
+    let failed_output = ref None in
+    let run command =
+      let output = capture_converter_output cache_dir command in
+      match !failed_output with
+      | None -> failed_output := Some output; Cache.Exited (Unix.WEXITED 1)
+      | Some late ->
+        check bool "the failed converter's output stays reserved" true (Sys.file_exists late);
+        write_file output png_header;
+        write_file late "late";
+        Cache.Exited (Unix.WEXITED 0) in
+    check string "the fallback converter's frame is returned" png_header
+      (unwrap (Cache.prepare_file ~run ~cache_dir source));
+    check bool "both converter outputs are removed" false
+      (Sys.readdir cache_dir |> Array.exists (String.starts_with ~prefix:"conv_attempt_")))
+
+(* #47473: two TUIs previewing one URL at one width decoded into one file named
+   after the URL and width. One run's failure cleanup must not take the other
+   run's frame. *)
+let test_a_failed_mosaic_run_cannot_remove_another_runs_frame () =
+  with_cache (fun cache_dir _ ->
+    let input = Filename.concat cache_dir "preview.png" in
+    write_file input png_header;
+    let decode run = Cache.with_decoder_output ~run ~cache_dir ~prefix:"mosaic_" ~suffix:".raw"
+      (fun output -> Printf.sprintf "ffmpeg -y -i %s %s" (Filename.quote input) (Filename.quote output))
+      Fun.id in
+    let failing_run _ = Cache.Exited (Unix.WEXITED 1) in
+    let succeeding_run command =
+      write_file (capture_converter_output cache_dir command) "second frame";
+      check (result string decode_failure) "the other run fails"
+        (Error (Cache.Decoder_exit { code = 1 })) (decode failing_run);
+      Cache.Exited (Unix.WEXITED 0) in
+    check (result string decode_failure) "the successful run keeps its frame"
+      (Ok "second frame") (decode succeeding_run))
+
 let test_partial_converter_failure_uses_next_converter () =
   with_cache (fun cache_dir run ->
     let url = "https://fixture.invalid/fallback.jpg" in
@@ -927,7 +990,7 @@ let test_published_frame_is_a_snapshot () =
         open_output := Some fd;
         check int "fixture wrote its first frame" (String.length png_header)
           (Unix.write_substring fd png_header 0 (String.length png_header));
-        Unix.WEXITED 0 in
+        Cache.Exited (Unix.WEXITED 0) in
       let path = match Cache.convert_to_png ~run ~cache_dir source with
         | Ok path -> path
         | Error failures -> failf "conversion failed: %s" (Cache.conversion_failure_text failures) in
@@ -1128,25 +1191,40 @@ let status_testable =
     ( = )
 ;;
 
+let ending_testable =
+  testable
+    (fun fmt -> function
+       | Cache.Exited status -> Format.fprintf fmt "Exited (%a)" (pp status_testable) status
+       | Cache.Killed_at_deadline -> Format.fprintf fmt "Killed_at_deadline"
+       | Cache.Cancelled -> Format.fprintf fmt "Cancelled")
+    ( = )
+;;
+
 let test_a_bounded_run_reports_the_exit_status () =
-  check status_testable "zero" (Unix.WEXITED 0)
+  check ending_testable "zero" (Cache.Exited (Unix.WEXITED 0))
     (Cache.run_bounded ~deadline_seconds:5. "true");
-  check status_testable "nonzero" (Unix.WEXITED 3)
+  check ending_testable "nonzero" (Cache.Exited (Unix.WEXITED 3))
     (Cache.run_bounded ~deadline_seconds:5. "sh -c 'exit 3'")
 ;;
 
 let test_a_bounded_run_kills_a_command_past_its_deadline () =
   let started = Unix.gettimeofday () in
-  let status = Cache.run_bounded ~deadline_seconds:0.2 "sleep 30" in
+  let ending = Cache.run_bounded ~deadline_seconds:0.2 "sleep 30" in
   let elapsed = Unix.gettimeofday () -. started in
-  check status_testable "killed" (Unix.WSIGNALED Sys.sigkill) status;
+  check ending_testable "killed" Cache.Killed_at_deadline ending;
   check bool "well before the command would have ended" true (elapsed < 10.)
+;;
+
+(* SIGKILL from anyone else is the child's own ending, not the deadline. *)
+let test_a_bounded_run_keeps_a_kill_it_did_not_send () =
+  check ending_testable "self-sent SIGKILL" (Cache.Exited (Unix.WSIGNALED Sys.sigkill))
+    (Cache.run_bounded ~deadline_seconds:5. "kill -9 $$")
 ;;
 
 let test_a_bounded_run_gives_the_command_no_input () =
   (* [cat] with the null device for input ends at once; with the caller's
      terminal it would wait for keys, and this test would be killed. *)
-  check status_testable "input is at its end" (Unix.WEXITED 0)
+  check ending_testable "input is at its end" (Cache.Exited (Unix.WEXITED 0))
     (Cache.run_bounded ~deadline_seconds:5. "cat >/dev/null")
 ;;
 
@@ -1165,7 +1243,7 @@ let test_bounded_runner_limits_descendant_file_and_ignores_bash_env () =
         (Filename.quote output) in
       let command = "/bin/sh -c " ^ Filename.quote child in
       let status = Cache.run_bounded ~max_file_bytes:4096 ~deadline_seconds:5. command in
-      check bool "oversized descendant write fails" true (status <> Unix.WEXITED 0);
+      check bool "oversized descendant write fails" true (status <> Cache.Exited (Unix.WEXITED 0));
       let size = (Unix.stat output).Unix.st_size in
       check bool "descendant file remains within the limit" true (size > 0 && size <= 4096);
       check bool "noninteractive bash startup script did not run" false (Sys.file_exists marker)))
@@ -1184,10 +1262,19 @@ let test_bounded_runner_preserves_inherited_limits () =
       ["soft", "-S"; "hard", "-H -S"])
 ;;
 
+(* Stopping is permanent for the process, so the probe runs in a child. *)
+let test_a_stopped_runner_does_not_start_a_command () =
+  let executable = Unix.realpath Sys.executable_name in
+  check ending_testable "probe saw Cancelled" (Cache.Exited (Unix.WEXITED 0))
+    (Cache.run_unbounded (Filename.quote executable ^ " --stopped-run-probe"))
+;;
+
 let test_a_killed_decoder_is_described_as_killed () =
-  check string "text"
-    "decoder was killed (SIGKILL: out of time or memory)"
-    (Cache.decode_failure_text (Cache.Decoder_signaled { signal = Sys.sigkill }))
+  check string "signal"
+    (Printf.sprintf "decoder was killed by signal %d" Sys.sigkill)
+    (Cache.decode_failure_text (Cache.Decoder_signaled { signal = Sys.sigkill }));
+  check string "deadline" "decoder was killed at its deadline"
+    (Cache.decode_failure_text Cache.Decoder_killed_at_deadline)
 ;;
 
 let () =
@@ -1204,20 +1291,27 @@ let () =
       (Filename.quote output) in
     let status = Cache.run_bounded ~max_file_bytes:4096 ~deadline_seconds:5. command in
     let size = try (Unix.stat output).Unix.st_size with Unix.Unix_error _ -> -1 in
-    exit (if status <> Unix.WEXITED 0 && size > 0 && size <= 2048 then 0 else 1)
+    exit (if status <> Cache.Exited (Unix.WEXITED 0) && size > 0 && size <= 2048 then 0 else 1)
+  end else if Array.length Sys.argv = 2 && Sys.argv.(1) = "--stopped-run-probe" then begin
+    Cache.stop_subprocesses ();
+    exit (match Cache.run_bounded ~deadline_seconds:5. "true" with
+      | Cache.Cancelled -> 0
+      | Cache.Exited _ | Cache.Killed_at_deadline -> 1)
   end else run "tui image cache"
     [ ( "workflows"
       , [ test_case "local conversion preserves original" `Quick test_local_file_preserves_original
         ; test_case "download preserves runner failure and removes attempt" `Quick
             test_download_reports_runner_failure_and_cleans_attempt
-        ; test_case "decoder preserves runner failure and shared output" `Quick
-            test_decoder_reports_runner_failure_without_removing_shared_output
+        ; test_case "decoder preserves runner failure and removes its output" `Quick
+            test_decoder_reports_runner_failure_and_removes_its_output
         ; test_case "runner failure stops converter fallback" `Quick
             test_runner_failure_stops_converter_fallback
         ; test_case "signalled converter stops fallback" `Quick
             test_signalled_converter_stops_fallback
-        ; test_case "unexpected runner exceptions preserve shared output" `Quick
-            test_unexpected_runner_exception_preserves_shared_output
+        ; test_case "converter killed at its deadline stops fallback" `Quick
+            test_converter_killed_at_deadline_stops_fallback
+        ; test_case "unexpected runner exceptions remove owned output" `Quick
+            test_unexpected_runner_exception_removes_owned_output
         ; test_case "local refusal and explicit recovery" `Quick test_local_file_failure_and_recovery
         ; test_case "character preview refuses an unrepresentable ratio before decoding" `Quick
             test_character_frame_refuses_unrepresentable_ratio
@@ -1265,6 +1359,10 @@ let () =
             test_failed_computation_releases_claim
         ; test_case "clear retains pending ownership and discards completion" `Quick
             test_clear_pending_keeps_claim_and_discards_completion
+        ; test_case "a failed converter's late write cannot replace the fallback frame" `Quick
+            test_a_late_write_from_a_failed_converter_cannot_replace_the_fallback_frame
+        ; test_case "a failed mosaic run cannot remove another run's frame" `Quick
+            test_a_failed_mosaic_run_cannot_remove_another_runs_frame
         ; test_case "partial converter failure uses next converter" `Quick
             test_partial_converter_failure_uses_next_converter
         ; test_case "a multiframe image falls back after ImageMagick" `Quick
@@ -1297,11 +1395,16 @@ let () =
             test_a_clean_exit_without_a_body_is_a_failure
         ; test_case "curl exit codes are named" `Quick test_curl_exit_codes_are_named
         ; test_case "a signal on curl is kept" `Quick test_a_signal_on_curl_is_kept
+        ; test_case "a runner kill on curl is named" `Quick test_a_runner_kill_on_curl_is_named
         ;] )
     ; ( "bounded run"
       , [ test_case "the exit status is reported" `Quick test_a_bounded_run_reports_the_exit_status
         ; test_case "a command past its deadline is killed" `Quick
             test_a_bounded_run_kills_a_command_past_its_deadline
+        ; test_case "a kill the runner did not send stays the child's" `Quick
+            test_a_bounded_run_keeps_a_kill_it_did_not_send
+        ; test_case "a stopped runner starts nothing" `Quick
+            test_a_stopped_runner_does_not_start_a_command
         ; test_case "the command gets no input" `Quick
             test_a_bounded_run_gives_the_command_no_input
         ; test_case "bounded runner limits descendants and ignores bash startup" `Quick
@@ -1320,6 +1423,8 @@ let () =
             test_a_nonzero_exit_does_not_diagnose_the_body
         ; test_case "a missing decoder keeps the body" `Quick
             test_a_missing_decoder_keeps_the_body
+        ; test_case "a runner kill on the decoder is named" `Quick
+            test_a_runner_kill_on_the_decoder_is_named
         ;] )
     ]
 ;;

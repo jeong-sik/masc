@@ -31,17 +31,17 @@ let fresh_authority ~config ~reserved request () =
   Edge.fresh_authority ~config ~reserved ~owner:(Request.physical_owner request)
     ~expected:(Request.destination request) ()
 let call = Edge.call
-let resume ~store ~config ~reserved ~wake (original,request) =
-  Owner.resume ~store ~config ~reserved ~original ~request ~wake ~call:(call ~config ~reserved)
+let resume ~store ~config ~reserved ~wake original =
+  Owner.resume ~store ~config ~reserved ~original ~wake ~call:(call ~config ~reserved)
     ~publish:(fun ~original ~request ~proposal ->
       Keeper_librarian_durable_commit.publish ~store ~config ~original ~request ~proposal
         ~fresh_authority:(fresh_authority ~config ~reserved request)
       |> Result.map_error (fun detail -> Owner.Rejected detail))
   |> Result.map_error Owner.error_to_string
-let pending_worker wait (record : Retained.retained) =
+let pending_worker wait record =
   Keeper_librarian_pending.Worker
-    (Keeper_librarian_pending.of_worker_wait ~installation_id:record.installation_id
-       ~request_id:record.request_id wait)
+    (Keeper_librarian_pending.of_worker_wait ~installation_id:(Record.installation_id record)
+       ~request_id:(Record.request_id record) wait)
 let pending_publication request detail =
   Keeper_librarian_pending.Publication { request_id = Request.request_id request; detail }
 let pending_basis request =
@@ -137,8 +137,9 @@ let completed_outcome request =
 (* [listed] is every original of the scope as its record and index; [read]
    holds the request of each one this pass read. A fenced parent's link is
    checked on records and indexes. A known-basis link compares whole requests:
-   the pass reads every original that holds a replacement intent, is unfenced,
-   or follows a predecessor of either kind. *)
+   the pass reads every original that holds a replacement intent, is a
+   predecessor, or follows a predecessor that is not a settled fence. An
+   original the pass leaves unread is none of these. *)
 let validate_lineage ~store ~fenced ~read listed =
   let find id=List.find_opt (fun (record,_) -> Record.request_id record=id) listed in
   let body id=Option.to_result ~none:"Original history lineage needs a request this pass did not read"
@@ -333,19 +334,19 @@ let rec consume_one ~config ~keeper_name ~wake =
   let store=Lane_addon_store.of_config config in
   let reserved=reserved () in
   let error detail=Error (Consumer.Original_publication_blocked detail) in
-  let resume_original ((_,request) as original) =
+  let resume_original original =
     match resume ~store ~config ~reserved ~wake original with
     | Error detail -> error detail
-    | Ok (Owner.Finished completed) ->
+    | Ok (Owner.Waited (wait, record)) ->
+      Ok (Consumer.Pending (pending_worker wait record))
+    | Ok (Resumed (Finished completed,request)) ->
       (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
        | Ok () -> Ok (completed_outcome request)
        | Error failure -> error (Keeper_librarian_history_resolution_intent.error_to_string failure))
-    | Ok (Pending (wait, record)) ->
-      Ok (Consumer.Pending (pending_worker wait record))
-    | Ok (Publication_waiting detail) ->
+    | Ok (Resumed (Publication_waiting detail,request)) ->
       Ok (Consumer.Pending (pending_publication request detail))
-    | Ok (Basis_superseded _) -> Ok (Consumer.Pending (pending_basis request))
-    | Ok (Refused (final,_)) ->
+    | Ok (Resumed (Basis_superseded _,request)) -> Ok (Consumer.Pending (pending_basis request))
+    | Ok (Resumed (Refused (final,_),request)) ->
       (* Only a non-counterpart refusal marks a smaller next read. A capacity-
          only counterpart original has no message-floor coordinate; narrowing
          would change its chat window instead of splitting its model input. *)
@@ -366,7 +367,8 @@ let rec consume_one ~config ~keeper_name ~wake =
     (* A fenced original is read as its record and index when no known-basis
        link touches it: it holds no replacement intent, and its predecessor,
        if any, is fenced and holds none either. The pass does nothing more
-       with such an original. Every other original is read with its body. *)
+       with such an original. An original waiting for its worker is read the
+       same way (below). Every other original is read with its body. *)
     let observed_fences=List.fold_left (fun result (record,index) ->
       let* fenced=result in
       let+ fence=io (fun () -> Resolution_lineage.fenced_record ~store ~record ~index) in
@@ -382,9 +384,48 @@ let rec consume_one ~config ~keeper_name ~wake =
       && (match index.predecessor with
           | None -> true
           | Some predecessor -> settled_fence predecessor.request_id) in
+    (* One complete read-only gate observation for this inventory pass.
+       Recovery and dispatch below deliberately retain their fresh reads. *)
+    let gates=match listed with
+      | [] -> Ok None
+      | (first,(first_index:Request.index))::_ ->
+        let+ inventory=io (fun () -> Keeper_librarian_durable_gate.Inventory.read ~store
+          ~owner:first_index.owner) in
+        Some (Record.scope first,first_index.owner,inventory) in
+    match gates with
+    | Error detail -> error detail
+    | Ok gates ->
+    (* RFC librarian-waiting-pass-reads-records-not-bodies 3.4. An original
+       admitted to its worker goes on as its record and index, and its body is
+       read only where the worker's answer needs it. It holds no gate
+       preparation, no gate record names it, it holds no replacement intent,
+       its predecessor if any is a settled fence, and no original names it as
+       a predecessor. So neither the gate check nor a known-basis link below
+       compares its request. *)
+    let executions=Option.fold ~none:[] ~some:(fun (_,_,inventory) ->
+      Keeper_librarian_durable_gate.Inventory.executions inventory) gates in
+    let parents=List.filter_map (fun (_,(index:Request.index)) -> Option.map
+      (fun (predecessor:Request.predecessor) -> predecessor.request_id) index.predecessor) listed in
+    let waits (record,(index:Request.index)) =
+      let id=Record.request_id record and progress=Record.progress record in
+      (match Progress.phase progress with
+       | Progress.Dispatch_pending _ -> true
+       | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
+      && not (fenced id)
+      && Option.is_none (Progress.preparation progress)
+      && Option.is_none (Progress.replacement progress)
+      && (match index.predecessor with
+          | None -> true
+          | Some predecessor -> settled_fence predecessor.request_id)
+      && not (List.mem id parents)
+      && not (List.mem id executions) in
+    let waiting=List.filter waits listed in
+    let is_waiting (record,_)=List.exists (fun (waiting,_) ->
+      Record.request_id waiting=Record.request_id record) waiting in
     let read=List.fold_left (fun result original ->
       let* read=result in
-      if unread original then Ok read else
+      if unread original || is_waiting original then Ok read else
       let+ original=Owner.load ~store original in original::read) (Ok []) listed in
     match read with
     | Error failure -> error (Owner.error_to_string failure)
@@ -403,13 +444,9 @@ let rec consume_one ~config ~keeper_name ~wake =
       Log.Keeper.info ~keeper_name "durable Librarian finished an interrupted settle: records=%d" moved;
       consume_one ~config ~keeper_name ~wake
     | Ok _ ->
-    let validated=match listed with
-      | [] -> Ok ([],[],None)
-      | (first,(first_index:Request.index))::_ ->
-        (* One complete read-only gate observation for this inventory pass.
-           Recovery and dispatch below deliberately retain their fresh reads. *)
-        let* inventory=io (fun () -> Keeper_librarian_durable_gate.Inventory.read ~store
-          ~owner:first_index.owner) in
+    let validated=match gates with
+      | None -> Ok ([],[],None)
+      | Some (scope,owner,inventory) ->
         let* unfinished,settled,fenced_read=List.fold_left (fun result (((record:Retained.retained),request) as original) ->
           let* unfinished,settled,fenced_read=result in
           let* fence=io (fun () -> Resolution_lineage.fenced_original ~store ~request ~original:record) in
@@ -418,9 +455,17 @@ let rec consume_one ~config ~keeper_name ~wake =
           | None ->
           let* frontier=io (fun () -> Commit.validate_inventory ~inventory ~store ~request ~record) in
           match frontier with
-          | Commit.Unfinished -> Ok (original::unfinished,settled,fenced_read)
+          | Commit.Unfinished -> Ok (Owner.Read original::unfinished,settled,fenced_read)
           | Commit.Settled -> Ok (unfinished,original::settled,fenced_read)) (Ok ([],[],[])) originals in
-        Ok (unfinished,fenced_read,Some (Record.scope first,first_index.owner,inventory,settled)) in
+        (* A waiting original's fence is read again here, as the fold above
+           reads it for every original it holds with its body. *)
+        let* unfinished,fenced_read=List.fold_left (fun result ((record,index) as original) ->
+          let* unfinished,fenced_read=result in
+          let+ fence=io (fun () -> Resolution_lineage.fenced_record ~store ~record ~index) in
+          match fence with
+          | Some _ -> unfinished,Record.request_id record::fenced_read
+          | None -> Owner.Listed original::unfinished,fenced_read) (Ok (unfinished,fenced_read)) waiting in
+        Ok (unfinished,fenced_read,Some (scope,owner,inventory,settled)) in
     match validated with
     | Error detail -> error detail
     | Ok (unfinished,fenced_read,observed) ->
@@ -547,7 +592,7 @@ let rec consume_one ~config ~keeper_name ~wake =
          | Ok source ->
            match capture ~replacement_parent:(parent,request) ~store ~config ~reserved ~keeper_name source with
            | Error detail -> error detail
-           | Ok original -> resume_original original)
+           | Ok original -> resume_original (Owner.Read original))
     | [],[] ->
       match Refusal.blocked ~config ~reserved stops with
       | Some refusal -> Error refusal
@@ -568,18 +613,18 @@ let rec consume_one ~config ~keeper_name ~wake =
           match capture ~before_retain ~store ~config ~reserved ~keeper_name source with
           | Error detail -> stop detail
           | Ok original ->
-            match resume ~store ~config ~reserved ~wake original with
+            match resume ~store ~config ~reserved ~wake (Owner.Read original) with
             | Error detail -> stop detail
-            | Ok (Owner.Finished completed) ->
-              (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request:(snd original) ~completed with
+            | Ok (Owner.Waited (wait, record)) ->
+              Consumer.Memory_pending (pending_worker wait record)
+            | Ok (Resumed (Finished completed,request)) ->
+              (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
                | Ok () -> Consumer.Memory_committed
                | Error failure -> stop (Keeper_librarian_history_resolution_intent.error_to_string failure))
-            | Ok (Pending (wait, record)) ->
-              Consumer.Memory_pending (pending_worker wait record)
-            | Ok (Publication_waiting detail) ->
-              Consumer.Memory_pending (pending_publication (snd original) detail)
-            | Ok (Basis_superseded _) -> Consumer.Memory_pending (pending_basis (snd original))
-            | Ok (Refused (final,_)) -> Consumer.Memory_refused [Refusal.report ~store (snd original) final] in
+            | Ok (Resumed (Publication_waiting detail,request)) ->
+              Consumer.Memory_pending (pending_publication request detail)
+            | Ok (Resumed (Basis_superseded _,request)) -> Consumer.Memory_pending (pending_basis request)
+            | Ok (Resumed (Refused (final,_),request)) -> Consumer.Memory_refused [Refusal.report ~store request final] in
         (* A refused one-turn original covers the range this pass selected. The
            pass reads that range message by message under the original, not as
            an original of its own: the host already refused it as one request. *)

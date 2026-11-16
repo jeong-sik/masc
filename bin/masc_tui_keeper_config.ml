@@ -805,13 +805,84 @@ type system_prompt_unavailable_reason =
   | Workspace_unavailable
   | Prompt_unrenderable
 
+(* The ledger lines an available prompt left out, as the endpoint states them
+   beside the prompt (#48420). A turn renders only the lines that decode and
+   goes on without the rest, so this is where the operator learns which norm
+   is missing. [Ledger_unreadable] is the preview's own re-read failing, not
+   the prompt's. *)
+type ledger_line_end =
+  | Newline_terminated
+  | Unterminated_final_line
+
+type ledger_rejected_line =
+  { line : int
+  ; line_end : ledger_line_end
+  ; detail : string
+  }
+
+type constitution_ledger_view =
+  | Ledger_read of ledger_rejected_line list
+  | Ledger_unreadable of { path : string; detail : string }
+
 type system_prompt_view =
-  | System_prompt_available of { effective : string }
+  | System_prompt_available of
+      { effective : string
+      ; constitution_ledger : constitution_ledger_view
+      }
   | System_prompt_unavailable of
       { reason : system_prompt_unavailable_reason
       ; detail : string
       }
   | System_prompt_undecodable of string
+
+let show_member = function None -> "absent" | Some json -> Yojson.Safe.to_string json
+
+let ledger_line_end_of_json = function
+  | `String "newline_terminated" -> Ok Newline_terminated
+  | `String "unterminated_final_line" -> Ok Unterminated_final_line
+  | other -> Error ("constitution_ledger has an unknown line_end " ^ Yojson.Safe.to_string other)
+
+(* [line] is 1-based in the ledger (World_constitution_store.rejected_line). *)
+let ledger_rejected_line_of_json = function
+  | `Assoc fields ->
+    (match
+       List.assoc_opt "line" fields, List.assoc_opt "line_end" fields, List.assoc_opt "detail" fields
+     with
+     | Some (`Int line), Some line_end, Some (`String detail) when line >= 1 ->
+       let* line_end = ledger_line_end_of_json line_end in
+       Ok { line; line_end; detail }
+     | line, line_end, detail ->
+       Error
+         (Printf.sprintf "constitution_ledger row with line=%s line_end=%s detail=%s"
+            (show_member line) (show_member line_end) (show_member detail)))
+  | other -> Error ("constitution_ledger row is " ^ Yojson.Safe.to_string other)
+
+(* An absent or unknown ledger answer is a decode failure, never "nothing left
+   out": reading it as an empty list would hide exactly the lines the prompt
+   dropped. *)
+let constitution_ledger_view_of_json = function
+  | None -> Error "available prompt has no constitution_ledger"
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "state" fields with
+     | Some (`String "read") ->
+       (match List.assoc_opt "rejected_lines" fields with
+        | Some (`List rows) ->
+          let* lines = traverse ledger_rejected_line_of_json rows in
+          Ok (Ledger_read lines)
+        | Some other ->
+          Error ("constitution_ledger rejected_lines is " ^ Yojson.Safe.to_string other)
+        | None -> Error "constitution_ledger has no rejected_lines")
+     | Some (`String "unreadable") ->
+       (match List.assoc_opt "path" fields, List.assoc_opt "detail" fields with
+        | Some (`String path), Some (`String detail) -> Ok (Ledger_unreadable { path; detail })
+        | path, detail ->
+          Error
+            (Printf.sprintf "unreadable constitution_ledger with path=%s detail=%s"
+               (show_member path) (show_member detail)))
+     | Some other ->
+       Error ("unknown constitution_ledger state " ^ Yojson.Safe.to_string other)
+     | None -> Error "constitution_ledger has no state")
+  | Some other -> Error ("constitution_ledger is " ^ Yojson.Safe.to_string other)
 
 let system_prompt_view_of_json value =
   let field fields key = List.assoc_opt key fields in
@@ -821,7 +892,10 @@ let system_prompt_view_of_json value =
     (match field fields "state" with
      | Some (`String "available") ->
        (match field fields "effective" with
-        | Some (`String effective) -> System_prompt_available { effective }
+        | Some (`String effective) ->
+          (match constitution_ledger_view_of_json (field fields "constitution_ledger") with
+           | Ok constitution_ledger -> System_prompt_available { effective; constitution_ledger }
+           | Error detail -> System_prompt_undecodable detail)
         | Some other ->
           System_prompt_undecodable
             ("available prompt has no effective text: " ^ Yojson.Safe.to_string other)
@@ -860,11 +934,45 @@ let system_prompt_reason_lines ~sanitize = function
     ; "   no turn runs until the prompt is repaired"
     ]
 
+(* The heading names the omission too, so a long prompt cannot scroll it out
+   of view. Its line count stays the prompt text's own. *)
+let constitution_ledger_summary = function
+  | Ledger_read [] -> None
+  | Ledger_read [ _ ] -> Some "1 ledger line left out"
+  | Ledger_read lines -> Some (Printf.sprintf "%d ledger lines left out" (List.length lines))
+  | Ledger_unreadable _ -> Some "ledger re-read failed"
+
+let ledger_line_end_note = function
+  | Newline_terminated -> ""
+  | Unterminated_final_line -> " (last line, no newline)"
+
+let constitution_ledger_lines ~sanitize = function
+  | Ledger_read [] -> []
+  | Ledger_read rejected ->
+    "   left out: these world constitution ledger lines did not decode"
+    :: List.map
+         (fun { line; line_end; detail } ->
+           Printf.sprintf "   line %d%s: %s" line (ledger_line_end_note line_end)
+             (sanitize detail))
+         rejected
+    @ [ "" ]
+  | Ledger_unreadable { path; detail } ->
+    [ "   left out: unknown, the preview could not re-read the constitution ledger"
+    ; "   path: " ^ sanitize path
+    ; "   detail: " ^ sanitize detail
+    ; ""
+    ]
+
 (* Heading annotation and body for the effective system prompt section. *)
 let system_prompt_lines ~sanitize = function
-  | System_prompt_available { effective } ->
+  | System_prompt_available { effective; constitution_ledger } ->
     let lines = free_text ~sanitize (Some (`String effective)) in
-    counted lines, lines
+    let summary =
+      match constitution_ledger_summary constitution_ledger with
+      | None -> counted lines
+      | Some omission -> counted lines ^ " \xc2\xb7 " ^ omission
+    in
+    summary, constitution_ledger_lines ~sanitize constitution_ledger @ lines
   | System_prompt_unavailable { reason; detail } ->
     ( "unavailable"
     , system_prompt_reason_lines ~sanitize reason @ [ "   detail: " ^ sanitize detail ] )

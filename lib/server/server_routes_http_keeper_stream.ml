@@ -3262,12 +3262,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       let acceptance_frame (acceptance, interactive) =
         let operation = acceptance.Keeper_owner.operation in
         let state =
-          match operation.state with
-          | Keeper_owner.Chat_operation.Queued -> "Queued"
-          | Running _ -> "Running"
-          | Succeeded _ -> "Succeeded"
-          | Failed _ -> "Failed"
-          | Cancelled _ -> "Cancelled"
+          Keeper_owner.Chat_operation.(State_name.to_wire (state_name operation.state))
         in
         Ag_ui.event_to_sse
           (Ag_ui.of_custom
@@ -3402,7 +3397,6 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 (** Build routes for MCP server *)
 
 module For_testing = struct
-  let operation_heartbeat_decision = operation_heartbeat_decision
   let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome
   let parse_request = parse_keeper_chat_stream_request

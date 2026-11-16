@@ -5,6 +5,18 @@ type key = Enter | Up | Down | Tab | Eof
 type input = Text of string | Key of key
 type error = Already_running | Not_found | Not_running | Input_pending | Invalid_input
   | Cancelled | Transport_failed | Process_failed of int | Interpreter_missing
+type pipe = Stdout | Stderr
+(** What the login shows, as the process writes it. *)
+type output =
+  | Piped of pipe * string
+      (** A chunk the process wrote to a pipe. The chunks in order are its
+          text. *)
+  | Screen of string
+      (** The whole screen of the terminal the process runs in, after its
+          latest write: the rows down to the last that shows text, one per
+          line, with SGR styles and OSC 8 hyperlinks. A row the terminal
+          wrapped joins the next without a line break. It replaces the
+          screen before it. *)
 (** Whose login it is. The kind tells an agent and a person apart, so no agent
     name reaches the sessions or the receipts of a person. *)
 type actor =
@@ -35,6 +47,9 @@ val run : t -> env:Eio_unix.Stdenv.base -> child_env:string array ->
   cwd:string -> argv:string list -> terminal:bool ->
   is_closed:(unit -> bool) -> on_ready:(unit -> unit) ->
   on_input_ready:(unit -> unit) ->
-  on_output:(string -> string -> unit) -> (unit, error) result
+  on_output:(output -> unit) -> (unit, error) result
 (** No session deadline: provider expiry, explicit cancel, disconnect and server
-    shutdown own termination. The helper kills/reaps its complete child group. *)
+    shutdown own termination. The helper kills/reaps its complete child group.
+    With [~terminal:false] the process writes to pipes and [on_output] gets
+    {!Piped}; with [~terminal:true] it runs in an 80 x 24 terminal and gets
+    {!Screen}. *)

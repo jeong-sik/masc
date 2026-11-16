@@ -21,6 +21,12 @@ Left는 상위 폴더, Right는 선택한 패키지의 폴더, `g`는 폴더 경
 
 패키지를 선택하면 manifest와 image 상태를 다시 읽는다. 이때부터 기존 schema 입력 폼을
 사용하며, 검토 후 Enter는 로컬 TOML 초안만 만든다. `s`를 눌러야 저장·적용을 요청한다.
+binding schema의 맨 위에 `oneOf` 갈래만 있고(`properties`·`const` 같은 다른 조건이 없고), 갈래가
+모두 object이며, 갈래마다 다른 갈래와 겹치지 않는 이름(`title`, `description` 또는 상수 칸)이 있는
+패키지는 갈래별로 채운다. 갈래가 둘 이상이면 첫 칸에서 Left/Right로 갈래를 고르고 그 갈래의 칸을
+채운다. 갈래를 바꾸면 `installation_id`·`run_id`를 포함해 그때까지 쓴 값이 확인 없이 지워진다.
+갈래가 선언하지 않은 칸은 양식으로 넣지 못한다. 이 조건에 맞지 않는 binding에는 갈래를 고르는
+칸이 없다. 이름 없는 갈래가 있는 `browser-ego`는 `binding`을 JSON 칸 하나로 쓴다.
 탐색과 미리보기는 image를 pull/build하거나 worker를 시작하지 않는다. image 검사 실패는
 unverified로 표시한다. binding schema가 없는 패키지는 탐색기에서 `n`을 눌러 원문 TOML
 선언을 쓴다. manifest 경로를 직접 입력했다면 Esc로 Add-ons 목록에 돌아가 `n`을 누른다.

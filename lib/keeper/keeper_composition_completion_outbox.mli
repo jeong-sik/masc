@@ -59,29 +59,40 @@ val discover : base_path:string -> (discovery, error) result
     request identity. *)
 
 type record_outcome = Retired | Waiting | Delivered
+
+(** Why a delivery callback did not commit the completion. *)
+type delivery_refusal =
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+      (** A shutdown operation holds the recipient's intake. Nothing failed. *)
+  | Delivery_failed of string
+
 val recover :
   pending ->
   deliver:(completion:Keeper_tool_execution_journal.completion_observation ->
-    composition_tool:string -> Keeper_msg_async.entry -> (unit, string) result) ->
+    composition_tool:string -> Keeper_msg_async.entry -> (unit, delivery_refusal) result) ->
   (record_outcome, error) result
 (** Reread this original obligation and reject a changed request/recipient before
     loading current canonical terminal proof and using the same delivery/ACK
     path as [flush]. The delivery callback receives the same original completion
     observation, so result hints do not repeat disposition reads. A removed
     obligation is retired; a pending hint cannot
-    borrow another owner's obligation or authorize replay. *)
+    borrow another owner's obligation or authorize replay. A delivery refused
+    with [Intake_shutdown_reserved] is [Waiting] and keeps its obligation. *)
 
 val flush :
   base_path:string ->
   deliver:(completion:Keeper_tool_execution_journal.completion_observation ->
-    composition_tool:string -> Keeper_msg_async.entry -> (unit, string) result) ->
+    composition_tool:string -> Keeper_msg_async.entry -> (unit, delivery_refusal) result) ->
   (report, error) result
 (** Reconcile only this pending partition. Read exact canonical terminal
     proof before delivery; never execute or restart a request worker. Active
     requests keep their obligation. Malformed/unreadable records stay visible
     in [failures] as [Record_file] and remain on disk; a verified obligation
     whose delivery fails stays visible as [Request_id] with its request id. Canonically released result waiting
-    attempts retire their attempt notification without calling [deliver]. *)
+    attempts retire their attempt notification without calling [deliver].
+    A delivery a shutdown operation refuses is counted in [waiting], not in
+    [failures], and keeps its obligation for the first pass after the
+    operation releases the recipient's intake. *)
 
 module For_testing : sig
   val acknowledge_waiting :

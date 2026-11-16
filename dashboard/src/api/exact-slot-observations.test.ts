@@ -52,4 +52,12 @@ describe('passive exact-slot observations', () => {
     expect(state).toMatchObject({ state: 'available', observations: [{ binding: { kind: 'official_client' },
       outcome: { kind: 'cli_failed', cause: 'Native_failed / Codex' } }] })
   })
+  it('decodes a connect that found no route as its own network failure', () => {
+    const state = parseSlotObservations({ state: 'available', observations: [slotObservation({
+      outcome: ['Execution_failed', ['Completion_failed', { sent: false,
+        cause: ['Network_failure', ['Unreachable']] }]],
+    })] })
+    expect(state).toMatchObject({ state: 'available', observations: [{
+      outcome: { kind: 'execution_failed', cause: 'Completion_failed / Network_failure / Unreachable' } }] })
+  })
 })

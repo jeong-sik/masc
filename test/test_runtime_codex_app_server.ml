@@ -7072,7 +7072,7 @@ let test_keeper_preserves_typed_history_on_codex_wire () =
             in
             check string
               "canonical history message"
-              (Keeper_official_client_context_codec.message_to_json expected
+              (Keeper_official_client_context_codec.(message_to_json Canonical_source) expected
                |> Yojson.Safe.to_string)
               (Yojson.Safe.to_string encoded))
          [ assistant_message; tool_message ]
@@ -7134,7 +7134,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     let message : Agent_core.Types.message =
       { origin = Llm_provider.Types.System_context;  role = System; content = [Text text]; name = None; tool_call_id = None;
         metadata = [] } in
-    Keeper_official_client_context_codec.encode message in
+    Keeper_official_client_context_codec.(encode Canonical_source) message in
   let assembly changed = Assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Dynamic_context,same;
       Prompt_block_id.Memory_os_recall,(if changed then same ^ " revised" else same)] in

@@ -211,7 +211,10 @@ val docker_args_persistent :
 
 (** Rewrites the derived gitconfig inside the stable config directory from
     the hosts it currently holds. Pure function of hosts.yml; a no-op when
-    the keeper is unconfigured. *)
+    the keeper is unconfigured. A gitconfig that already holds that content
+    with mode 0400 is left in place, so the mounted file keeps its inode
+    across adoptions and token rotations. [Ok true] means the hosts give git
+    a credential helper. *)
 val refresh_git_credential_config :
   config:Workspace.config -> keeper_name:string -> (bool, string) result
 

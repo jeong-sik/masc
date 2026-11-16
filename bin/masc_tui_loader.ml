@@ -1735,6 +1735,32 @@ let load_server_identity ~(host : string) ~(port : int) :
       decode_offloaded memo_server_identity ~name:"server.identity.decode_wait"
         Tui_decode.decode_server_identity json
 
+let memo_server_reading = json_memo ()
+
+(* The same probe, read for which kind of server answers it. The full refresh
+   asks this one: the account server of a multi-account installation serves
+   none of the surfaces it would read next. *)
+let load_server_reading ~(host : string) ~(port : int) :
+    (Tui_decode.server_reading, string) result =
+  match fetch_server_identity ~host ~port with
+  | Error err -> Error ("server identity load failed: " ^ err)
+  | Ok json ->
+      decode_offloaded memo_server_reading ~name:"server.identity.decode_wait"
+        Tui_decode.decode_server_reading json
+
+(* What a refresh goes on with after the probe: the account server, which
+   ends it, or the identity of a masc server as [load_server_identity] reads
+   it. *)
+type server_probe =
+  | Probe_account_server of { version : string }
+  | Probe_identity of (Tui_decode.server_identity, string) result
+
+let server_probe = function
+  | Ok (Tui_decode.Account_server { account_server_version }) ->
+      Probe_account_server { version = account_server_version }
+  | Ok (Tui_decode.Masc_server identity) -> Probe_identity (Ok identity)
+  | Error detail -> Probe_identity (Error detail)
+
 let memo_prompts = json_memo ()
 
 (** Load the prompt registry from /api/v1/prompts. *)

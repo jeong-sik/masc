@@ -21,6 +21,11 @@ let runtime_of_string = function
   | "docker" -> Some Docker | "apple_container" -> Some Apple_container | _ -> None
 type resources = { cpus : float; memory_bytes : int64; pids : int option; max_reply_bytes : int }
 let nano_cpus_per_cpu = 1_000_000_000.
+let bytes_per_mib = 1_048_576L
+(* Apple container refuses a smaller microVM at create with "minimum memory
+   amount allowed is 200 MiB" (Resources.minimumMemoryInBytes; the same 200 MiB
+   check is in every release from 1.0.0 through 1.7.1). *)
+let apple_container_minimum_memory_mib = 200L
 let check_resources ?(runtime = Docker) r =
   if not (Float.is_finite r.cpus) || r.cpus <= 0. then Error "cpus must be finite and positive"
   else if r.memory_bytes <= 0L || r.max_reply_bytes <= 0 then
@@ -37,8 +42,11 @@ let check_resources ?(runtime = Docker) r =
   | Apple_container, None ->
       if Float.floor r.cpus <> r.cpus || r.cpus >= float_of_int max_int then
         Error "Apple microVM cpus must be a positive whole vCPU count"
-      else if Int64.rem r.memory_bytes 1_048_576L <> 0L then
+      else if Int64.rem r.memory_bytes bytes_per_mib <> 0L then
         Error "Apple microVM memory_bytes must be an exact number of MiB"
+      else if Int64.div r.memory_bytes bytes_per_mib < apple_container_minimum_memory_mib then
+        Error (Printf.sprintf "Apple microVM memory_bytes must be at least %Ld MiB"
+          apple_container_minimum_memory_mib)
       else Ok ()
 type container = { runtime : runtime; image : string; resources : resources }
 type execution = Container of container | Host_process of { max_reply_bytes : int }

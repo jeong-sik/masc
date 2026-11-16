@@ -112,10 +112,6 @@ type RosterItem =
   | { type: 'header'; bucket: RosterHeaderBucket; label: string; count: number }
   | { type: 'row'; keeper: Keeper }
 
-/** Switch to the shared VirtualList once the roster is long enough that DOM
- *  weight matters. Below this we keep the identical grouped DOM structure and
- *  rely on content-visibility:auto for cheap off-screen skipping. */
-const WINDOW_AT = 60
 // Identity + status + compact time card measures 69px row-to-row (device-scale
 // 1). The earlier 92px estimate covered the taller card that also carried the
 // per-row context/tool rows, now moved to the runtime panel.
@@ -285,14 +281,12 @@ function RosterRow({
   active,
   onSelect,
   onMenu,
-  style,
 }: {
   keeper: Keeper
   attentionCount: number
   active: boolean
   onSelect: (name: string) => void
   onMenu: (keeper: Keeper, event: MouseEvent) => void
-  style?: string
 }) {
   const tone = keeperFleetTone(keeper)
   const scope = keeperScope(keeper)
@@ -322,7 +316,6 @@ function RosterRow({
       tabindex="0"
       class="kw-kp-row kp-row v2-monitoring-row"
       data-tone=${tone}
-      style=${style}
       aria-current=${active ? 'true' : 'false'}
       onClick=${select}
       onContextMenu=${(event: MouseEvent) => onMenu(keeper, event)}
@@ -684,18 +677,13 @@ export function KeeperWorkspaceRoster({
     }
   }
 
-  const useVirtual = items.length > WINDOW_AT
-  const rowStyle = `content-visibility:auto;contain-intrinsic-size:auto ${ROSTER_ROW_ESTIMATED_HEIGHT}px`
   const miniRows = sortRows(all)
 
-  // Single source for the group header so the windowed and non-windowed render
-  // paths can't drift (they previously inlined the header markup separately).
   function renderHeader(item: Extract<RosterItem, { type: 'header' }>): VNode {
     const bucketClass = groupBucketClass(item.bucket)
     return html`
       <div
         class=${`kw-roster-group roster-group ${bucketClass} v2-monitoring-row`}
-        key=${`h:${item.bucket}`}
         title=${item.label}
       >
         <span class="rg-dot" aria-hidden="true"></span>
@@ -789,20 +777,14 @@ export function KeeperWorkspaceRoster({
           </div>
           ${visible.length === 0
             ? html`<div class="kw-roster-list roster-list"><div class="kw-roster-empty v2-monitoring-row">${rosterEmptyText(all.length)}</div></div>`
-        : useVirtual
-          ? html`<${VirtualList}
-              items=${items}
-              estimatedItemHeight=${ROSTER_ROW_ESTIMATED_HEIGHT}
-              className="kw-roster-list roster-list"
-              scrollBox="self"
-              renderItem=${renderItem}
-              getKey=${getKey}
-            />`
-          : html`<div class="kw-roster-list roster-list">
-              ${items.map(item => item.type === 'header'
-                ? renderHeader(item)
-                : html`<${RosterRow} key=${item.keeper.name} keeper=${item.keeper} attentionCount=${attentionOf(item.keeper)} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} style=${rowStyle} />`)}
-            </div>`}
+            : html`<${VirtualList}
+                items=${items}
+                estimatedItemHeight=${ROSTER_ROW_ESTIMATED_HEIGHT}
+                className="kw-roster-list roster-list"
+                scrollBox="self"
+                renderItem=${renderItem}
+                getKey=${getKey}
+              />`}
         `}
       ${menu
         ? html`<${KeeperRosterMenu}

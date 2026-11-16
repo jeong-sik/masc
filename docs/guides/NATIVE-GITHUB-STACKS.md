@@ -151,10 +151,12 @@ The sweep also deletes branches a merge left behind. The worker deletes a head
 branch when it sees the merge, which misses the layers of a native stack: each
 is still the base of the open layer above it at that moment. A branch goes only
 when a pull request of this repository that the worker merged ended at exactly
-its tip and no open pull request has it as head or base. `main`, `release/*`
-and any branch a protection rule or ruleset applies to stay. The open pull
-requests are read again just before deleting, and the push carries a lease on
-that tip, so a branch that moved is refused and kept.
+its tip. The repository's default branch, `main`, `release/*` and any branch a
+protection rule or ruleset applies to stay, the same branches the worker keeps
+(both ask `scripts/review/branch-deletion.py`). Right before each delete, the
+open pull requests that have the branch as head or base are read again: one
+such pull request, or a read that fails, keeps the branch. The push carries a
+lease on that tip, so a branch that moved is refused and kept.
 
 At its next run the sweep reruns the worker on every scope that is still
 approved and ready (`ready` and `select` in
@@ -183,9 +185,11 @@ A failed API read never establishes an absent stack or an approval.
 GitHub's delete-branch-on-merge setting does not act on a merge made with the
 Actions token, so the worker deletes the head branch of each pull request it
 sees merged and records the outcome as `head_branches`. A branch stays when it
-is the base of an open pull request, is a release branch, comes from a fork, or
+comes from a fork, is the repository's default branch or a release branch, has
+a protection rule or ruleset, is the head or base of an open pull request, or
 received a commit after the merge (the delete push is leased on the merged
-head). A failed delete is recorded and does not change the merge verdict.
+head). The sweep keeps the same branches. A failed read or delete is recorded
+and does not change the merge verdict.
 
 GitHub also leaves a linked issue open when the merge is made with the Actions
 token, so the worker closes the open issues that GitHub lists as closing
@@ -194,9 +198,12 @@ references of each pull request it sees merged, and records the outcome as
 its merge commit is on that branch, so a layer of a landed native stack counts
 although its base stays the parent branch.
 
-A merge closes its issues once. An issue that was reopened after the merge
-stays open, whoever reopened it. A recheck of a merged pull request closes
-every other open issue the pull request links: one whose close failed, one a
+Within one run, a merge closes each linked issue once. An issue stays open
+when that run's check saw it reopened at or after the merge. Runs are not
+serialized with each other: a run that checked before the reopening still
+closes the issue (#51614), and the merge of a later pull request that links
+the issue closes it again. A recheck of a merged pull request closes every
+other open issue the pull request links: one whose close failed, one a
 run left behind when it died before this step, and one that was never closed
 because the pull request merged before the worker had this step. GitHub's
 record does not tell the last kind from an issue left open on purpose. A

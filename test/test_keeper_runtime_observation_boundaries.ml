@@ -293,6 +293,11 @@ let test_runner_exception_reads_reset_as_reset () =
     "connection_refused"
     (Unix.Unix_error (Unix.ECONNREFUSED, "connect", ""));
   check_kind "an Eio clock timeout is a timeout" "timeout" Eio.Time.Timeout;
+  (* ENETDOWN was Unknown, so the runner read it as not transport (#52045). *)
+  check_kind
+    "Unix ENETDOWN names a missing route"
+    "unreachable"
+    (Unix.Unix_error (Unix.ENETDOWN, "connect", ""));
   (* The HTTP client does not read an exception's text as transport
      evidence, so the runner does not either. *)
   check_kind

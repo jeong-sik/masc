@@ -967,7 +967,18 @@ let test_serves_its_table_alone () =
                 match value with
                 | `String (_ : string) -> true
                 | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> false)
-              fields)
+              fields);
+         (* masc-tui reads this answer to tell that it reached an account
+            server, which serves none of its operator surfaces. *)
+         (match Masc.Tui_decode.decode_server_reading (json_of "GET /health" body) with
+          | Ok (Masc.Tui_decode.Account_server { account_server_version }) ->
+            Alcotest.(check (option string))
+              "masc-tui reads the version of the account server"
+              (Server_accounts.health_version body)
+              (Some account_server_version)
+          | Ok (Masc.Tui_decode.Masc_server (_ : Masc.Tui_decode.server_identity)) ->
+            Alcotest.fail "masc-tui reads the account server as a masc server"
+          | Error detail -> Alcotest.failf "masc-tui refuses the health answer: %s" detail)
        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
          Alcotest.failf "the health answer is not an object: %S" body);
       (* The probes say that the listener answers and that a decision can

@@ -136,44 +136,30 @@ describe('VirtualList', () => {
     expect(child).not.toBeNull()
   })
 
-  it('applies content-visibility to the rows of a list that draws them all, using fixed itemHeight', () => {
-    const container = document.createElement('div')
-    const few = items.slice(0, 5)
-    render(
-      h(VirtualList<Item>, {
-        items: few,
-        itemHeight: 40,
-        renderItem: (item) => h('div', { key: item.id }, item.name),
-        getKey: (item) => item.id,
-        scrollBox: 'self',
-      }),
-      container,
-    )
-    const rows = container.querySelectorAll('[data-vl-key]')
-    expect(rows.length).toBe(5)
-    for (const row of rows) {
-      const style = (row as HTMLElement).style
-      expect(style.contentVisibility).toBe('auto')
-      expect(style.containIntrinsicSize).toBe('auto 40px')
+  // In a browser, a style on the element around a row decides whether what the
+  // row draws outside its box shows: content-visibility: auto there cut off the
+  // roster's keyboard focus ring in Chromium and WebKit (#51991).
+  it.each([
+    ['fixed', { itemHeight: 40 }],
+    ['dynamic', { estimatedItemHeight: 48 }],
+  ] as const)('leaves the element around each row unstyled below and above the threshold (%s heights)', (_, heights) => {
+    for (const count of [5, 41]) {
+      const container = document.createElement('div')
+      render(
+        h(VirtualList<Item>, {
+          items: items.slice(0, count),
+          ...heights,
+          renderItem: (item) => h('div', { key: item.id }, item.name),
+          getKey: (item) => item.id,
+          scrollBox: 'self',
+        }),
+        container,
+      )
+      const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-vl-key]'))
+      expect(rows.length).toBeGreaterThan(0)
+      expect(rows.filter((row) => row.hasAttribute('style'))).toEqual([])
+      render(null, container)
     }
-  })
-
-  it('applies content-visibility to the rows of a list that draws them all, using estimatedItemHeight', () => {
-    const container = document.createElement('div')
-    const few = items.slice(0, 5)
-    render(
-      h(VirtualList<Item>, {
-        items: few,
-        estimatedItemHeight: 48,
-        renderItem: (item) => h('div', { key: item.id }, item.name),
-        getKey: (item) => item.id,
-        scrollBox: 'self',
-      }),
-      container,
-    )
-    const row = container.querySelector('[data-vl-key]') as HTMLElement
-    expect(row.style.contentVisibility).toBe('auto')
-    expect(row.style.containIntrinsicSize).toBe('auto 48px')
   })
 
   it('calls onEndReached once when scrolled near the bottom in fixed-height mode', async () => {

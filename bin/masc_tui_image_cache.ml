@@ -52,6 +52,11 @@ let curl_exit_http_error_status = 22
 let curl_exit_operation_timeout = 28
 let sh_exit_command_not_found = 127
 
+type ending =
+  | Exited of Unix.process_status
+  | Killed_at_deadline
+  | Cancelled
+
 type runner_failure = { error : Unix.error; operation : string; argument : string }
 
 let run_checked ~run command =
@@ -75,13 +80,15 @@ type fetch_failure =
   | Curl_exit of { code : int }
   | Curl_signaled of { signal : int }
   | Curl_stopped of { signal : int }
+  | Curl_killed_at_deadline
+  | Curl_cancelled
   | Curl_runner_failed of runner_failure
   | No_body_written
 
-let fetch_failure_of_status status ~body_present =
-  match status with
-  | Unix.WEXITED 0 -> if body_present then None else Some No_body_written
-  | Unix.WEXITED code ->
+let fetch_failure_of_ending ending ~body_present =
+  match ending with
+  | Exited (Unix.WEXITED 0) -> if body_present then None else Some No_body_written
+  | Exited (Unix.WEXITED code) ->
       Some
         (if code = curl_exit_http_error_status then Http_error_status
          else if code = curl_exit_operation_timeout then Operation_timeout
@@ -89,8 +96,10 @@ let fetch_failure_of_status status ~body_present =
          else if code = curl_exit_could_not_connect then Could_not_connect
          else if code = sh_exit_command_not_found then Curl_missing
          else Curl_exit { code })
-  | Unix.WSIGNALED signal -> Some (Curl_signaled { signal })
-  | Unix.WSTOPPED signal -> Some (Curl_stopped { signal })
+  | Exited (Unix.WSIGNALED signal) -> Some (Curl_signaled { signal })
+  | Exited (Unix.WSTOPPED signal) -> Some (Curl_stopped { signal })
+  | Killed_at_deadline -> Some Curl_killed_at_deadline
+  | Cancelled -> Some Curl_cancelled
 
 let fetch_failure_text = function
   | Http_error_status -> "the server answered with an HTTP error status"
@@ -101,6 +110,8 @@ let fetch_failure_text = function
   | Curl_exit { code } -> Printf.sprintf "curl exited %d" code
   | Curl_signaled { signal } -> Printf.sprintf "curl was killed by signal %d" signal
   | Curl_stopped { signal } -> Printf.sprintf "curl was stopped by signal %d" signal
+  | Curl_killed_at_deadline -> "curl was killed at its deadline"
+  | Curl_cancelled -> "the download was cancelled"
   | Curl_runner_failed failure -> "could not run curl: " ^ runner_failure_text failure
   | No_body_written -> "curl wrote no body"
 
@@ -122,28 +133,31 @@ type decode_failure =
   | Decoder_exit of { code : int }
   | Decoder_signaled of { signal : int }
   | Decoder_stopped of { signal : int }
+  | Decoder_killed_at_deadline
+  | Decoder_cancelled
   | Decoder_runner_failed of runner_failure
   | No_frame_written
   | Frame_unreadable of { detail : string }
 
-let decode_failure_of_status status ~output_present =
-  match status with
-  | Unix.WEXITED 0 -> if output_present then None else Some No_frame_written
-  | Unix.WEXITED code ->
+let decode_failure_of_ending ending ~output_present =
+  match ending with
+  | Exited (Unix.WEXITED 0) -> if output_present then None else Some No_frame_written
+  | Exited (Unix.WEXITED code) ->
       Some
         (if code = sh_exit_command_not_found then Decoder_missing
          else Decoder_exit { code })
-  | Unix.WSIGNALED signal -> Some (Decoder_signaled { signal })
-  | Unix.WSTOPPED signal -> Some (Decoder_stopped { signal })
+  | Exited (Unix.WSIGNALED signal) -> Some (Decoder_signaled { signal })
+  | Exited (Unix.WSTOPPED signal) -> Some (Decoder_stopped { signal })
+  | Killed_at_deadline -> Some Decoder_killed_at_deadline
+  | Cancelled -> Some Decoder_cancelled
 
 let decode_failure_text = function
   | Decoder_missing -> "decoder executable was not found"
   | Decoder_exit { code } -> Printf.sprintf "decoder exited %d" code
-  | Decoder_signaled { signal } ->
-    if signal = Sys.sigkill
-    then "decoder was killed (SIGKILL: out of time or memory)"
-    else Printf.sprintf "decoder was killed by signal %d" signal
+  | Decoder_signaled { signal } -> Printf.sprintf "decoder was killed by signal %d" signal
   | Decoder_stopped { signal } -> Printf.sprintf "decoder was stopped by signal %d" signal
+  | Decoder_killed_at_deadline -> "decoder was killed at its deadline"
+  | Decoder_cancelled -> "decoder was cancelled"
   | Decoder_runner_failed failure -> "could not run decoder: " ^ runner_failure_text failure
   | No_frame_written -> "decoder wrote no frame"
   | Frame_unreadable { detail } -> "the decoded frame could not be read: " ^ detail
@@ -159,21 +173,29 @@ let wait_bounded ?(cancelled = fun () -> false) ~deadline_seconds pid =
     match Unix.waitpid [] pid with
     | _, status -> status
     | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap () in
+  (* SIGKILL cannot be caught, so a child that dies of this kill reports
+     [WSIGNALED Sys.sigkill]. Any other status means the child ended between
+     the last look and the kill, and that ending is its own. *)
+  let kill reason =
+    (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+    match reap () with
+    | Unix.WSIGNALED signal when signal = Sys.sigkill -> reason
+    | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status -> Exited status in
   let rec wait () =
     match Unix.waitpid [ Unix.WNOHANG ] pid with
     | 0, _ ->
-      if cancelled () || Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1e9 >= deadline_seconds
-      then begin
-        (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-        reap ()
-      end
+      if cancelled () then kill Cancelled
+      else if Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started_ns) /. 1e9 >= deadline_seconds
+      then kill Killed_at_deadline
       else begin
         Unix.sleepf run_poll_interval_seconds;
         wait ()
       end
-    | _, status -> status
+    | _, status -> Exited status
     | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
   wait ()
+
+let run_unbounded command = Exited (Unix.system command)
 
 (* A renderer's system thread can outlive its Eio observer. Serialize spawning
    with normal process shutdown so a late worker cannot leave a child behind. *)
@@ -243,7 +265,7 @@ let run_bounded ?max_file_bytes ~deadline_seconds command =
            subprocesses := (pid,cancelled) :: !subprocesses;
            Some (pid,cancelled)) in
        match child with
-       | None -> Unix.WSIGNALED Sys.sigkill
+       | None -> Cancelled
        | Some (pid,cancelled) ->
            Fun.protect ~finally:(fun () ->
              Mutex.lock subprocess_mutex;
@@ -394,8 +416,8 @@ let download ?(force_fetch = false) ?max_bytes ~run ~cache_dir url =
             (Filename.quote attempt) (Filename.quote url) in
         match run_checked ~run command with
         | Error failure -> Error (Fetch_failed (Curl_runner_failed failure))
-        | Ok status ->
-          match fetch_failure_of_status status ~body_present:(Sys.file_exists attempt) with
+        | Ok ending ->
+          match fetch_failure_of_ending ending ~body_present:(Sys.file_exists attempt) with
           | Some failure -> Error (Fetch_failed failure)
           | None ->
             match read_bytes ?max_bytes attempt with
@@ -423,8 +445,8 @@ let download ?(force_fetch = false) ?max_bytes ~run ~cache_dir url =
 let collect_decoder_bytes ?max_bytes ~run ~output_path command =
   match run_checked ~run command with
   | Error failure -> Error (Decoder_runner_failed failure)
-  | Ok status ->
-    match decode_failure_of_status status ~output_present:(Sys.file_exists output_path) with
+  | Ok ending ->
+    match decode_failure_of_ending ending ~output_present:(Sys.file_exists output_path) with
     | Some failure -> Error failure
     | None ->
       match read_bytes ?max_bytes output_path with
@@ -432,19 +454,17 @@ let collect_decoder_bytes ?max_bytes ~run ~output_path command =
       | Ok "" -> Error No_frame_written
       | Ok bytes -> Ok bytes
 
-let run_decoder_bytes ~run ~output_path command =
-  discard output_path;
-  match collect_decoder_bytes ~run ~output_path command with
-  (* Public callers may share [output_path]. The caller must own the path to
-     remove it after an exception or runner failure. *)
-  | Error (Decoder_runner_failed _ as failure) -> Error failure
-  | Error ((Decoder_missing | Decoder_exit _ | Decoder_signaled _
-           | Decoder_stopped _ | No_frame_written | Frame_unreadable _) as failure) ->
-    discard output_path; Error failure
-  | Ok bytes -> Ok bytes
-
-let run_decoder ~run ~output_path command =
-  Result.map (fun _ -> output_path) (run_decoder_bytes ~run ~output_path command)
+(* [Filename.temp_file] creates the output with O_EXCL, and the empty file
+   stays in place until [f] returns. No other run -- a fallback started from
+   [f], or another TUI previewing the same URL -- can be handed this name in
+   that time, so a failed run's cleanup removes only its own output. The
+   decoder overwrites the empty file; one left empty is [No_frame_written]. *)
+let with_decoder_output ~run ~cache_dir ~prefix ~suffix command_of_path f =
+  match attempt_path ~cache_dir ~prefix ~suffix with
+  | Error detail -> f (Error (Frame_unreadable { detail }))
+  | Ok output_path ->
+    Fun.protect ~finally:(fun () -> discard output_path) (fun () ->
+      f (collect_decoder_bytes ~run ~output_path (command_of_path output_path)))
 
 type converter = Sips | Image_magick | Ffmpeg
 type conversion_failure = (converter * decode_failure) list
@@ -471,25 +491,25 @@ let convert_frame ~run ~cache_dir input =
           Printf.sprintf "ffmpeg -y -i %s -frames:v 1 %s >/dev/null 2>&1" source (Filename.quote out))
       ]
     in
-    match attempt_path ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" with
-    | Error detail -> Error [ Sips, Frame_unreadable { detail } ]
-    | Ok attempt_file ->
-      let rec attempt failures = function
-        | [] -> discard attempt_file; Error (List.rev failures)
-        | (converter, command) :: rest ->
-          (* Publish only a nonempty frame captured from this attempt. *)
-          match run_decoder_bytes ~run ~output_path:attempt_file (command attempt_file) with
-          | Ok bytes ->
-            Fun.protect ~finally:(fun () -> discard attempt_file) (fun () ->
-              Ok (converter, failures, bytes))
-          (* A signalled converter can leave a descendant writing to this
-             pathname. Do not give that pathname to a fallback converter. *)
-          | Error ((Decoder_runner_failed _ | Decoder_signaled _ | Decoder_stopped _) as failure) ->
+    let rec attempt failures = function
+      | [] -> Error (List.rev failures)
+      | (converter, command) :: rest ->
+        (* The fallback starts while this converter's output is still
+           reserved, so it is handed another name and a late write to this
+           one cannot land in its frame. *)
+        with_decoder_output ~run ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" command (function
+          | Ok bytes -> Ok (converter, failures, bytes)
+          (* A signal, a stop, a deadline kill, a cancellation or a runner
+             failure means the converter did not finish on its own, and its
+             descendants may still be running. The sequence ends here rather
+             than starting another converter beside them. *)
+          | Error ((Decoder_runner_failed _ | Decoder_signaled _ | Decoder_stopped _
+                   | Decoder_killed_at_deadline | Decoder_cancelled) as failure) ->
             Error (List.rev ((converter, failure) :: failures))
           | Error ((Decoder_missing | Decoder_exit _ | No_frame_written | Frame_unreadable _) as failure) ->
-            attempt ((converter, failure) :: failures) rest
-      in
-      attempt [] commands
+            attempt ((converter, failure) :: failures) rest)
+    in
+    attempt [] commands
 
 let convert_and_publish ~run ~cache_dir ~target ~encode input =
   match convert_frame ~run ~cache_dir input with

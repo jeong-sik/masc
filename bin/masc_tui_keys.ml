@@ -574,6 +574,17 @@ let memory_browser_pages =
   [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
       ~help:"one Memory browser; changes require an individual Keeper, while storage opens the fleet health view" ]
 
+(* The Lanes list and one exact-output Lane's inventory detail open the same
+   editor with the same key, so both footers read this one binding. *)
+let exact_models_binding =
+  b ~ko:"exact 모델" Act "s" "exact: models"
+    ~help:"edit the model order of the selected exact-output lane, from the \
+           list or from its reading (d): r replaces the selected model/effort, \
+           a adds a fallback, 1 makes it first within its HTTP/CLI group, \
+           x removes, J/K reorders, Enter/d opens the selected \
+           slot's config table, e opens the lane table, Esc closes back to \
+           the screen it opened from; HTTP runs before CLI"
+
 let for_surface = function
   | Overview ->
       [ b ~ko:"조치 원인" Navigate "v" "action reasons"
@@ -610,6 +621,10 @@ let for_surface = function
          leaves the surface, so two rows read as two bindings. *)
       ; b ~ko:"뒤로" Act "Esc" "back"
           ~help:"close event evidence; from the list, back to Dashboard"
+      ; b ~ko:"찾기" Search "/" "find" ~detail:List_only ~rows:Needs_row
+          ~help:"Actions/Everything: jump the cursor to a matching event, tool or keeper, \
+                 over the rows the filter leaves; Turns has no cursor to land on"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~detail:List_only ~rows:Needs_row
       (* One row per action. g and G reach the ends Home and End reach, and
          l the tab 2 opens; a row for each spent two of the footer's places
          on actions it already showed, and at 120 columns the fitter dropped
@@ -811,12 +826,7 @@ let for_surface = function
           ~help:"add a candidate to the selected exact-output lane's walk order"
       ; b ~ko:"켜고 끄기" Act "Space" "activity"
           ~help:"open Exact or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
-      ; b ~ko:"exact 모델" Act "s" "exact: models"
-          ~help:"edit the model order: r replaces the selected model/effort, \
-                 a adds a fallback, 1 makes it first within its HTTP/CLI group, \
-                 x removes, J/K reorders, Enter/d opens the selected \
-                 slot's config table, e opens the lane table, Esc closes; \
-                 HTTP runs before CLI"
+      ; exact_models_binding
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
@@ -2415,10 +2425,10 @@ let bindings_memory_changes =
   [ b ~ko:"이동" Navigate "j/k" "move"
   ; b ~ko:"전문" Act "Enter" "full reading"
       ~help:"read all original and successor claims of the selected committed change"
-  ; b ~ko:"… 변화 카드" Act "." "… change cards"
-      ~help:"open only the selected change as before/change/after cards with wrapped claim excerpts; full text remains on Enter"
+  ; b ~ko:"변화 카드" Act "." "change cards"
+      ~help:"open the selected change as before/change/after cards with full wrapped claims, reason, and notes"
   ; b ~ko:"연결 트리" Act "Ctrl-O" "connected tree"
-      ~help:"open the selected change's complete connected observed memory lineage with the offline Pele Mermaid preview"
+      ~help:"open the selected change's complete connected observed memory lineage as a rich Pele graph"
   ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
   ; b ~ko:"뒤로" Act "Esc" "back to facts" ]
   @ row_list_edges @ listing_meta
@@ -3322,14 +3332,17 @@ let footer_hints_exact_model_order ~lang =
     ; b ~ko:"뒤로" Navigate "Esc" "back"
     ]
 
-let footer_hints_lane_inventory_detail ~lang =
+(* [exact_models] is whether the reading names an exact-output lane, the only
+   kind whose model order [s] edits. *)
+let footer_hints_lane_inventory_detail ~lang ~exact_models =
   hints_in_order ~lang
-    [ scroll_binding
-    ; page_binding
-    ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
-    ; b ~ko:"새로 조회" Meta "r" "refresh"
-    ; b ~ko:"목록" Navigate "Esc/Left" "inventory"
-    ]
+    ([ scroll_binding
+     ; page_binding
+     ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+     ; b ~ko:"새로 조회" Meta "r" "refresh"
+     ]
+     @ (if exact_models then [ exact_models_binding ] else [])
+     @ [ b ~ko:"목록" Navigate "Esc/Left" "inventory" ])
 
 let footer_hints_link_preview_empty ~lang = hints_in_order ~lang [ close_binding ]
 

@@ -8,7 +8,11 @@ type recovery = No_rejected_recovery | Rejected_recovery
 
 type input_kind = Action | Paste | Protocol
 type input_decision = Accept_input | Reject_action | Reject_paste
-type panel_owner = Help | About | Context | Context_search | Agenda | Answering
+type panel_owner =
+  | Help | About | Context | Context_search | Agenda | Answering
+  | Account_server
+      (** The screen that covers the others while the address answers as the
+          account server of a multi-account installation. *)
 
 type context_search_owner = {
   workspace : int;

@@ -64,6 +64,40 @@ type state =
       }
   | Cancelled of { completed_at : float }
 
+module State_name = struct
+  type t =
+    | Queued
+    | Running
+    | Succeeded
+    | Failed
+    | Cancelled
+
+  let to_wire = function
+    | Queued -> "Queued"
+    | Running -> "Running"
+    | Succeeded -> "Succeeded"
+    | Failed -> "Failed"
+    | Cancelled -> "Cancelled"
+  ;;
+
+  let of_wire = function
+    | "Queued" -> Ok Queued
+    | "Running" -> Ok Running
+    | "Succeeded" -> Ok Succeeded
+    | "Failed" -> Ok Failed
+    | "Cancelled" -> Ok Cancelled
+    | value -> Error (Printf.sprintf "unknown Keeper chat operation state %S" value)
+  ;;
+end
+
+let state_name = function
+  | Queued -> State_name.Queued
+  | Running _ -> State_name.Running
+  | Succeeded _ -> State_name.Succeeded
+  | Failed _ -> State_name.Failed
+  | Cancelled _ -> State_name.Cancelled
+;;
+
 type batch_membership = { execution_id : Operation_id.t; input_digest : string }
 
 type t =
@@ -92,20 +126,16 @@ let is_terminal = function
 ;;
 
 let state_fields ~failure_fields operation =
-  match operation.state with
-  | Queued -> [ "state", `String "Queued" ]
-  | Running { started_at } ->
-    [ "state", `String "Running"; "started_at", `Float started_at ]
-  | Succeeded { completed_at; outcome_ref } ->
-    [ "state", `String "Succeeded"
-    ; "completed_at", `Float completed_at
-    ; "outcome_ref", `String outcome_ref
-    ]
-  | Failed { completed_at; failure } ->
-    [ "state", `String "Failed"; "completed_at", `Float completed_at ]
-    @ failure_fields operation.operation_id failure
-  | Cancelled { completed_at } ->
-    [ "state", `String "Cancelled"; "completed_at", `Float completed_at ]
+  ("state", `String (State_name.to_wire (state_name operation.state)))
+  ::
+  (match operation.state with
+   | Queued -> []
+   | Running { started_at } -> [ "started_at", `Float started_at ]
+   | Succeeded { completed_at; outcome_ref } ->
+     [ "completed_at", `Float completed_at; "outcome_ref", `String outcome_ref ]
+   | Failed { completed_at; failure } ->
+     ("completed_at", `Float completed_at) :: failure_fields operation.operation_id failure
+   | Cancelled { completed_at } -> [ "completed_at", `Float completed_at ])
 ;;
 
 let to_json_with_failure ~failure_fields operation =

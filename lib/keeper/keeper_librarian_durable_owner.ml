@@ -14,12 +14,14 @@ type publication = Publication_pending of string | Publication_complete of Owner
   | Publication_superseded of Owner.retained
 type publish = original:Owner.retained -> request:Request.t ->
   proposal:Memory_runtime.durable_proposal -> (publication,error) result
-type call = expected:Request.destination -> original:Owner.retained -> arguments:Yojson.Safe.t ->
+type call = expected:Request.destination -> original:Owner.Record.t -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result,Submit.call_error) result
-type outcome = Pending of wait * Owner.retained | Publication_waiting of string
+type outcome = Publication_waiting of string
   | Refused of Exact.final * Owner.retained | Finished of Owner.retained
   | Basis_superseded of Owner.retained
+type resumed = Waited of wait * Owner.Record.t | Resumed of outcome * Request.t
 type listed = Owner.Record.t * Request.index
+type held = Listed of listed | Read of (Owner.retained * Request.t)
 let io work = Systhread_host.run work
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
 let owned value = Result.map_error (fun error -> Unavailable (Owner.error_to_string error)) value
@@ -86,8 +88,6 @@ let restore_answer ~store request record =
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
   | Outcome_unknown | Not_allowed _ | Request_id_reused ->
     Error (Rejected "Original history publication requires an actual answered host result")
-type terminal = Answer of Memory_runtime.durable_proposal * Owner.retained
-  | Refusal of Exact.final * Owner.retained
 (* RFC-0500. Whether the retained refusal says the process that started the
    attempt stopped before it ended. *)
 let interrupted ~schema (record:Owner.retained) =
@@ -128,42 +128,84 @@ let check_completed ~store ~superseded request ~original completed =
     let* ()=check_request request actual in
     let* equal_progress=same (Progress.to_json actual.progress) (Progress.to_json completed.progress) in
     require equal_progress "History publication callback differs from its durable original progress"
-let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:call) ~(publish:publish) ~wake =
+(* The body of one original as the pass uses it: the retained original read
+   with it, its request, and the Exact request and schema made from it. *)
+type body = {retained:Owner.retained;request:Request.t;exact:Exact.request;schema:Yojson.Safe.t}
+let body_of (retained,request) =
+  let* exact=rejected (Request.request request) in
+  let+ schema=match exact.schema with Some schema -> Ok schema
+    | None -> Error (Rejected "Original history request has no output schema") in
+  {retained;request;exact;schema}
+type terminal = Answer of Memory_runtime.durable_proposal * Owner.retained
+  | Refusal of Exact.final * Owner.retained
+let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publish) ~wake =
+  let record,owner,destination=match original with
+    | Listed (record,index) -> record,index.owner,index.destination
+    | Read (retained,request) ->
+      Owner.listed retained,Request.physical_owner request,Request.destination request in
   let confirm_live_owner () =
-    let owner=Request.physical_owner request in
     let base_path=config.Workspace.base_path in
     let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let* actual=io (fun () -> Request.observe_owner ~base_path ~keepers_dir ~keeper_id:(Request.keeper_id owner)) |> rejected in
     rejected (Request.owner_matches_json actual (Request.owner_to_json owner)) in
-  let* ()=check_request request original in
-  let* ()=io (fun () -> Keeper_librarian_history_resolution_state.check_unfenced
-    ~store ~request ~original) |> rejected in
+  (* A listed original is checked on its record and index here. Its body is
+     read in the branches that need it, and [load] binds that index to it. *)
+  let* ()=match original with
+    | Read (retained,request) ->
+      let* ()=check_request request retained in
+      io (fun () -> Keeper_librarian_history_resolution_state.check_unfenced
+        ~store ~request ~original:retained) |> rejected
+    | Listed (record,index) ->
+      let* fence=io (fun () -> Keeper_librarian_history_resolution_lineage.fenced_record
+        ~store ~record ~index) |> rejected in
+      require (Option.is_none fence) "This original history result is durably fenced by an operator" in
   let* ()=confirm_live_owner () in
-  let* ()=check_predecessor ~store ~dispatch:true request in
-  let* exact=rejected (Request.request request) in
-  let* schema=match exact.schema with Some schema -> Ok schema
-    | None -> Error (Rejected "Original history request has no output schema") in
-  let destination=Request.destination request in
+  let* ()=match original with
+    | Read (_,request) -> check_predecessor ~store ~dispatch:true request
+    | Listed (record,index) ->
+      io (fun () -> Keeper_librarian_history_resolution_lineage.confirm_predecessor_record
+        ~store ~require_confirmed:true record index) |> rejected in
+  let* identity,read_body=match original with
+    | Read read ->
+      let+ body=body_of read in Exact.identity body.exact,(fun () -> Ok body)
+    | Listed ((record,index) as listed) ->
+      let loaded=ref None in
+      let load_body () = match !loaded with
+        | Some body -> Ok body
+        | None ->
+          let* body=Result.bind (load ~store listed) body_of in
+          loaded:=Some body;
+          Ok body in
+      Ok (Exact.identity_of_digest ~request_id:(Owner.Record.request_id record) ~digest:index.exact_digest,
+        load_body) in
+  let rebind (body:body) record = match Owner.rebind body.retained record with
+    | Some retained -> Ok retained
+    | None -> Error (Rejected "Original history record names another request") in
   let prepare () =
     let* ()=confirm_live_owner () in
     Keeper_librarian_durable_edge.confirm_destination ~config ~reserved destination in
+  (* Admission reads the body inside [prepare], where an [Unavailable] check
+     is a wait. A body the store cannot give is not one: it ends the pass. *)
   let admit () =
-    let* ()=Memory_runtime.require_counterpart_template (Request.preparation request) |> rejected in
+    let* body=read_body () |> Result.map_error (fun error -> Rejected (error_to_string error)) in
+    let* ()=Memory_runtime.require_counterpart_template (Request.preparation body.request) |> rejected in
     prepare () in
   let call ~arguments =
     match prepare () with
     | Error error -> Error (Submit.Not_sent error)
-    | Ok () -> call ~expected:destination ~original ~arguments in
-  let terminal record final =
+    | Ok () -> call ~expected:destination ~original:record ~arguments in
+  let terminal (body:body) record final =
+    let* retained=rebind body record in
     let* ()=confirm_live_owner () in
-    let* ()=io (fun () -> Request.confirm_final ~store request final) |> rejected in
+    let* ()=io (fun () -> Request.confirm_final ~store body.request final) |> rejected in
     match final with
     | Exact.Call_final (Exact.Answered {output;_}) ->
-      let* proposal=rejected (Request.validate_proposal request (Exact.checked_json output)) in
-      Ok (Answer (proposal,record))
+      let* proposal=rejected (Request.validate_proposal body.request (Exact.checked_json output)) in
+      Ok (body,Answer (proposal,retained))
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
-    | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (Refusal (final,record)) in
-  let publish_answer (record : Owner.retained) proposal =
+    | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (body,Refusal (final,retained)) in
+  let publish_answer (body:body) (record : Owner.retained) proposal =
+    let request=body.request in
     let already_acked_commit =
       match Progress.phase record.progress with
       | Progress.Committing _ | Commit_unknown _ ->
@@ -187,47 +229,53 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
       else Memory_runtime.require_counterpart_template (Request.preparation request) |> rejected
     in
     let* published=publish ~original:record ~request ~proposal in
-    match published with
-    | Publication_pending detail -> Ok (Publication_waiting detail)
-    | Publication_complete completed ->
-      let* ()=check_completed ~store ~superseded:false request ~original:record completed in
-      let* ()=confirm_live_owner () in
-      wake ();
-      Ok (Finished completed)
-    | Publication_superseded completed ->
-      let* ()=check_completed ~store ~superseded:true request ~original:record completed in
-      let* ()=confirm_live_owner () in
-      (match Progress.phase record.progress with
-       | Progress.Conflicted _ -> ()
-       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-       | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> wake ());
-      Ok (Basis_superseded completed) in
-  let decode_final json=io (fun () -> Request.decode_final ~store request json) in
-  let* result=Submit.resume ~store ~label:"History Memory" ~original ~request:exact ~schema ~decode_final ~prepare:admit ~call ~terminal in
+    let+ outcome=match published with
+      | Publication_pending detail -> Ok (Publication_waiting detail)
+      | Publication_complete completed ->
+        let* ()=check_completed ~store ~superseded:false request ~original:record completed in
+        let* ()=confirm_live_owner () in
+        wake ();
+        Ok (Finished completed)
+      | Publication_superseded completed ->
+        let* ()=check_completed ~store ~superseded:true request ~original:record completed in
+        let* ()=confirm_live_owner () in
+        (match Progress.phase record.progress with
+         | Progress.Conflicted _ -> ()
+         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+         | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> wake ());
+        Ok (Basis_superseded completed) in
+    Resumed (outcome,request) in
+  let source:body Submit.source={identity;load=read_body;request=(fun body -> body.exact);schema=(fun body -> body.schema)} in
+  let decode_final (body:body) json=io (fun () -> Request.decode_final ~store body.request json) in
+  let* result=Submit.resume ~store ~label:"History Memory" ~original:record ~source ~decode_final ~prepare:admit ~call ~terminal in
   match result with
-  | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
-  | Final (Answer (proposal,record)) -> publish_answer record proposal
-  | Final (Refusal (Exact.Outcome_unknown,record)) ->
+  | Submit.Awaiting (wait,record) -> Ok (Waited (wait,record))
+  | Final (body,Answer (proposal,record)) -> publish_answer body record proposal
+  | Final (body,Refusal (Exact.Outcome_unknown,record)) ->
     (* Inventory validation reads an interrupted refusal as settled, so the
        next pass moves the original and selects its range again. Wake it:
        no host event follows this refusal. A cut or raised original stays
        unfinished and every pass resumes it, so waking it would never end. *)
-    let* interrupted=interrupted ~schema record in
+    let* interrupted=interrupted ~schema:body.schema record in
     if interrupted then wake ();
-    Ok (Pending (Worker_unknown,record))
-  | Final (Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
-    Ok (Refused (final,record))
+    Ok (Waited (Worker_unknown,Owner.listed record))
+  | Final (body,Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
+    Ok (Resumed (Refused (final,record),body.request))
   | Commit_pending record ->
-    let* _,proposal=restore_answer ~store request record in
-    publish_answer record proposal
+    let* body=read_body () in
+    let* record=rebind body record in
+    let* _,proposal=restore_answer ~store body.request record in
+    publish_answer body record proposal
   | Settled record ->
+    let* body=read_body () in
+    let* record=rebind body record in
     (match Progress.phase record.progress with
      | Progress.Finished _ ->
-       let* _=restore_answer ~store request record in
-       Ok (Finished record)
+       let* _=restore_answer ~store body.request record in
+       Ok (Resumed (Finished record,body.request))
      | Conflicted _ ->
-       let* _,proposal=restore_answer ~store request record in
-       publish_answer record proposal
+       let* _,proposal=restore_answer ~store body.request record in
+       publish_answer body record proposal
      | Rejected _ | Subdividing _ | Subdivided _ ->
        Error (Rejected "Original history request has a terminal host refusal")
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ ->

@@ -20,16 +20,16 @@ execution and visual evidence remain required for that combined behavior.
 | Required behavior | Current source or test | Evidence still required |
 |---|---|---|
 | Concise Home with decisions, continuation and recipient selection | `render_overview`, `home_decision_rows`, `home_continue_rows` | Current-head rendered frames and visual inspection |
-| Unknown or failed reads never imply zero decisions | `approvals_reading_current`; `unknown_and_resume` | Current-head PTY pass; partial-source failure and connection-failure cases |
+| Unknown or failed reads never imply zero decisions | `approvals_reading_current`; PTY capture case `unknown_and_resume` (receipt not committed; no persistent test) | Current-head PTY pass; partial-source failure and connection-failure cases |
 | Automatic Gate work is distinct from human decisions | `approval_item_needs_person`; mixed Gate scenario | Current-head PTY pass and Home/strip comparison |
-| Keeper zero preserves existing Goal confirmations | `empty_roster_preserves_confirmation` | Current-head PTY pass |
+| Keeper zero preserves existing Goal confirmations | PTY capture case `empty_roster_preserves_confirmation` (receipt not committed; no persistent test) | Current-head PTY pass |
 | Empty workspace leads to creation | `Home_create_keeper` dispatch | Creation success/failure journey with inputs preserved |
 | Enter opens requests without deciding them | `open_approvals` (`bin/masc_tui_home.mli`) | Current-head pass; individual request identity and duplicate cases |
-| A newly inserted destination does not steal selection | `refresh_preserves_destination` | Current-head PTY pass |
+| A newly inserted destination does not steal selection | PTY capture case `refresh_preserves_destination` (receipt not committed; no persistent test) | Current-head PTY pass |
 | Removed selection requires reselection | `home_selected_action`; refresh scenario | Current-head pass; deleted Keeper resume case |
-| Fixed startup Keeper is not a last-chat receipt | `remember_home_chat`; `opening_boot_frames` | Current-head Overview PTY pass |
-| Home chat returns with draft intact | `Keeper_chat_return_home`; `unknown_and_resume` | Combined-head `background_ask_keeps_beta_draft` text/media/no-autosend evidence |
-| Text, attachments and references stay bound to their recipient | `keeper_composer_draft`, complete save/restore in `open_message_for_keeper` | Combined-head `test_tui_keeper_draft_payload_pty` A→B→A wire results |
+| Fixed startup Keeper is not a last-chat receipt | `remember_home_chat`; PTY capture case `opening_boot_frames` (receipt not committed; no persistent test) | Current-head Overview PTY pass |
+| Home chat returns with draft intact | `Keeper_chat_return_home`; PTY capture case `unknown_and_resume` (receipt not committed; no persistent test) | Combined-head ask-during-chat text/media/no-autosend evidence (case receipt not committed) |
+| Text, attachments and references stay bound to their recipient | `keeper_composer_draft`, complete save/restore in `open_message_for_keeper` | Combined-head A→B→A wire results for text, media and reference payloads (PTY case receipt not committed) |
 | Creation failures retain input and malformed JSON is recoverable | `keeper_creation_draft`, guarded JSON/name parsing and receipt validation | Combined-head malformed/refused/success retries from Home and Keeper list |
 | Created Keeper is selected for the first assignment | Named chat handoff with no-op queue drainer and typed Home return | Combined-head explicit first-assignment wire target, response and Home return |
 | Remembered target remains visible during roster failure | `Home_read_last`, existing unavailable-recipient send authority | Combined-head roster failure history, no POST, complete deletion re-selection |

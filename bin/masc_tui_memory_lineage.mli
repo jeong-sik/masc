@@ -18,15 +18,24 @@ val kind_label : ko:bool -> Masc.Keeper_memory_activity.kind -> string
 
 val transition_svg : ko:bool -> palette:Masc_tui_terminal_palette.t -> t -> string
 (** Focus on the selected recorded transition: every prior fact, the change,
-    and every successor. Wrapped excerpts retain their original text; the
-    complete claims remain on Enter. Unknown relations stay explicit. The
-    observed terminal palette owns the canvas and text colours. *)
+    and every successor, rendered with full wrapped claims, fact identifiers,
+    optional transition reason, and deduplicated observation notes. Unknown
+    relations stay explicit. The observed terminal palette owns the canvas and
+    text colours. *)
+
+val lineage_graph :
+  ko:bool ->
+  ?palette:Masc_tui_terminal_palette.t ->
+  keeper_name:string ->
+  t ->
+  string
+(** Structured JSON scene for Pele [Graph] mode covering the connected lineage
+    component with full wrapped claims, fact retention statuses, transition
+    reasons, and deduplicated observation notes. *)
 
 val mermaid : ko:bool -> t -> string
-(** Summarized labels, rounded fact nodes and explicit transition nodes for
-    the existing offline Pele preview. Unknown relations use dotted edges.
-    The retained window and partial/stale notes remain part of the chart.
-    Full claims stay in the existing captured text reading. *)
+(** Styled Mermaid fallback covering the connected lineage neighbourhood with
+    full wrapped claims, deduplicated notes, and unknown-relation dashes. *)
 
 val transition_mermaid : ko:bool -> t -> string
 (** Palette-independent fallback with the same selected-transition scope as

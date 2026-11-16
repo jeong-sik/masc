@@ -127,6 +127,18 @@ type refusal =
 
 val refusal_to_string : refusal -> string
 
+(** Registers what a person reaches from a browser or an MCP client: the
+    login routes of [login] ({!Server_login_http.add_routes}), the routes of
+    a person ({!Server_login_http.add_person_routes}), the page at [/] among
+    them, and the console ({!Server_account_console.add_routes}). The
+    account server registers them, and so does [masc auth preview]. *)
+val add_routes_of_people
+  :  Login_routes.t
+  -> env:Eio_unix.Stdenv.base
+  -> base_path:string
+  -> Http_server_eio.Router.t
+  -> Http_server_eio.Router.t
+
 val health_version : string -> string option
 (** The release version in a body that [GET /health] of this server answered,
     for a command line that names the server it is about to replace. [None]

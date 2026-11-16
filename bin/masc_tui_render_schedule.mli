@@ -224,37 +224,6 @@ val memory_row :
     line's own dress. Escapes cost no display cells, so a dressed row is still
     exactly as wide as its header. *)
 
-(** {1 Workspace repository columns} *)
-
-val workspace_minimum_path_width : int
-val workspace_minimum_width : int
-(** Width of all repository columns at their floors, including table gaps. *)
-
-type workspace_row_values = {
-  wrow_name : string;
-  wrow_branch : string;
-  wrow_status : string;
-  wrow_sync : string;
-  wrow_path : string;
-}
-(** One repository row's readings, already rendered as text. *)
-
-type workspace_column =
-  | Workspace_name
-  | Workspace_branch
-  | Workspace_status
-  | Workspace_sync
-  | Workspace_path
-
-val workspace_layout : inner_width:int -> workspace_column Masc_tui_table.layout
-(** Keep repository, status and path. Fold sync and then branch as the
-    viewport narrows; path receives the remaining cells. *)
-
-val workspace_header_row : layout:workspace_column Masc_tui_table.layout -> string
-val workspace_row :
-  layout:workspace_column Masc_tui_table.layout -> workspace_row_values -> string
-(** Header and rows share the measured column allocation. *)
-
 (** {1 System log columns} *)
 
 val system_log_minimum_message_width : int
@@ -300,67 +269,6 @@ val system_log_row :
   styles:system_log_styles -> level_style:string ->
   layout:system_log_column Masc_tui_table.layout -> system_log_row_values -> string
 (** Header and styled rows share the measured column allocation. *)
-
-(** {1 Work / Tasks list columns} *)
-
-type work_task_row_values = {
-  wrow_mark : string;
-  wrow_task : string;
-  wrow_title : string;
-  wrow_status_named : string;
-  wrow_status_short : string;
-  wrow_owner : string;
-  wrow_goal : string;
-  wrow_urgent : string;
-}
-(** One task's readings. The status has two spellings, the state's own name and
-    a short one; the layout picks which one the list draws, so every row uses
-    the same. *)
-
-type work_task_styles = {
-  wstyle_state : string;
-  wstyle_task : string;
-  wstyle_goal : string;
-  wstyle_urgent : string;
-}
-(** The dress each kind of cell wears. [wstyle_state] dresses the mark, the
-    status and the owner, so the three read as one state. *)
-
-type work_task_widths
-
-val work_task_widths :
-  widest_id:int ->
-  widest_status_named:int ->
-  widest_status_short:int ->
-  widest_owner:int ->
-  widest_goal:int ->
-  work_task_widths
-(** The widest reading in each measured column, taken over every row of the
-    list so the columns stay put while the list scrolls. A column is never
-    narrower than its own name and never wider than its cap. *)
-
-val work_task_id_width : work_task_widths -> int
-(** What the id cell may take. A row whose id is wider shows its number or its
-    row coordinate instead, which the caller decides. *)
-
-type work_task_layout
-
-val work_task_layout :
-  inner_width:int -> widths:work_task_widths -> work_task_layout
-(** Keep the mark, the id, the title and the urgent mark. When the title would
-    fall below its floor, fold the goal, then the owner, then the status word.
-    The status word is spelled with the state's own name while that costs the
-    row no column and leaves the title its comfortable width; otherwise it is
-    spelled short. *)
-
-val work_task_header_row : layout:work_task_layout -> string
-
-val work_task_row :
-  styles:work_task_styles ->
-  layout:work_task_layout ->
-  work_task_row_values ->
-  string
-(** One task, on the same columns as {!work_task_header_row}. *)
 
 (** {1 Schedules list columns} *)
 
@@ -707,66 +615,6 @@ val fusion_pipeline_diagram :
   panel_expected:int ->
   unit ->
   string
-
-(** Planning goal columns.
-
-    The list named no columns at all, and its title took the terminal minus a
-    hand-summed constant minus however wide the age and the due date happened
-    to be. Both are optional, so the pair at the end of the row began at a
-    different column on every row -- a goal with no due date started them ten
-    cells left of the goal above it. Each has a widest form and each has a
-    column now. *)
-
-type planning_row_values = {
-  prow_phase : string;
-      (** The phase carries the brackets it is drawn in, so [phase_width] below
-          is the bracketed width rather than the label's own. *)
-  prow_proof : string;
-  prow_priority : string;
-  prow_open : string;
-  prow_title : string;
-  prow_age : string;
-  prow_due : string;
-}
-
-(** The goal list's columns, named so a narrow list can say which it spares. *)
-type planning_column =
-  | Planning_phase
-  | Planning_proof
-  | Planning_priority
-  | Planning_open
-  | Planning_title
-  | Planning_age
-  | Planning_due
-
-val planning_layout :
-  inner_width:int -> phase_width:int -> planning_column Masc_tui_table.layout
-(** The columns the goal list draws in [inner_width] and the title's share of
-    it. When the row is narrow the due date goes first, then the age, the
-    open-work tally and the judge's mark; the phase, the priority and the
-    title stay, and the title takes what the others leave, never below its
-    floor: a title folded past that point identifies no goal. *)
-
-val planning_header_row :
-  phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
-
-val planning_header_row_korean :
-  phase_width:int -> layout:planning_column Masc_tui_table.layout -> string
-
-val planning_open_width : int
-(** Cell width available for the open Task count and its activity. *)
-
-val planning_row :
-  ?priority_style:string ->
-  ?open_style:string ->
-  phase_style:string ->
-  phase_width:int ->
-  layout:planning_column Masc_tui_table.layout ->
-  planning_row_values ->
-  string
-(** One goal, on the same columns as {!planning_header_row}. The judge's mark
-    gets a named column of its own: the glyph is the only part of a row that
-    cannot be read straight off, and it was the one column with no header. *)
 
 (** Board post columns.
 

@@ -3,7 +3,9 @@
     Issue #8403 — see [.ml] header for context. *)
 
 val health : string
-(** [/health], the probe that reports which workspace this server serves. *)
+(** [/health], the probe that reports which workspace this server serves, to
+    a requester it gives a read of its state. Any other requester gets the
+    public probe of {!Server_health_public}. *)
 
 val liveness : string
 (** [/health/live] *)

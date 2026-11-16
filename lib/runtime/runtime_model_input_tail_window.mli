@@ -329,6 +329,12 @@ val project_from_atom
     never for an atom the cut leaves out.
     Never raises. *)
 
+val preamble_message : Agent_core.Types.message
+(** The constant User message the cut prepends when the first kept atom
+    cannot open a conversation. Exported so the replayed-result-age eval
+    seeds the same opening a carried range gets (RFC
+    replayed-tool-results-carry-their-time §6.1). *)
+
 val is_synthetic_preamble : Agent_core.Types.message -> bool
 (** Whether a message is the constant preamble the cut prepends when the
     first kept atom cannot open a conversation. Exported so a stage that

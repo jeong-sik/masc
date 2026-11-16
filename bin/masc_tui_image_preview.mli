@@ -7,6 +7,7 @@ type output_source = private
   | Inline_data of Masc_tui_image_payload.t
   | Inline_svg of string
   | Inline_mermaid of string
+  | Inline_graph of string
   | Server_path of string
   | Remote_uri of string
 
@@ -36,6 +37,9 @@ val inline_payload : name:string -> Masc_tui_image_payload.t -> preview
 
 val mermaid : name:string -> string -> preview
 (** Exact source for the offline Pele renderer. No parsing or process work. *)
+
+val graph : name:string -> string -> preview
+(** Structured rich graph JSON for the offline Pele renderer. *)
 
 val mermaid_source : string -> output_source
 (** The bare source for callers that build an image request source directly.

@@ -155,7 +155,7 @@ let without_drawn_diagrams ~sources media previews =
   let preview_source = function
     | Masc_tui_image_preview.Output_image {source=Inline_mermaid source;_} -> Some source
     | Named_path _ | Staged _ | Stored_attachment _
-    | Output_image {source=(Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _);_}
+    | Output_image {source=(Inline_data _ | Inline_svg _ | Inline_graph _ | Server_path _ | Remote_uri _);_}
     | Unavailable_image _ | No_image -> None in
   uncovered media_source media, uncovered preview_source previews
 ;;

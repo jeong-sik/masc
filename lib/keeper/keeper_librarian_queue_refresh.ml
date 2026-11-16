@@ -86,6 +86,27 @@ let capacity_released ~config ~installation_id =
   List.iter (fun keeper_name ->
     Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
 
+(* RFC librarian-gate-waits-on-the-destination-not-on-passes §3.3. A gate
+   that waited on refusing destinations ends its pass pending, in admission
+   or durable history, without naming which wait it is. A destination that
+   answers again wakes every pending pass of this root once; each pass reads
+   its own wait again. *)
+let destination_recovered ~config =
+  let root = Workspace.keepers_runtime_dir config in
+  let keepers = Stdlib.Mutex.protect measurements_mu (fun () ->
+    let durable = Hashtbl.fold (fun (directory, keeper) (measurement : measurement) names ->
+      match measurement.last_pass with
+      | Pending _ when String.equal directory root -> keeper :: names
+      | Pending _ | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+      | Not_committed | Stopped _ | Raised _ -> names) measurements [] in
+    Hashtbl.fold (fun (directory, keeper) (admission : Keeper_librarian_pending.admission) names ->
+      match admission with
+      | Admission_waiting _ when String.equal directory root -> keeper :: names
+      | Admission_waiting _ | Admission_failed _ -> names) admission_waits durable
+    |> List.sort_uniq String.compare) in
+  List.iter (fun keeper_name ->
+    Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
+
 let recheck_capacity_release ~config ~keeper_name ~before
     (waiting : Keeper_librarian_pending.worker) =
   match waiting.wait with

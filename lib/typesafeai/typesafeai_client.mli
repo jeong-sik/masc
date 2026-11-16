@@ -137,6 +137,13 @@ val destination_outcome : destination_id -> destination_outcome option
 (** The latest outcome of one destination; [None] when this process has not
     asked it. *)
 
+val on_destination_recovered : (destination_id -> unit) -> unit -> unit
+(** [on_destination_recovered listener] calls [listener] once each time a
+    destination's latest outcome changes from [Refusing] to [Answered], on the
+    domain that received the answer, and returns the function that removes
+    it. An answer from a destination already [Answered] or never asked calls
+    nothing. RFC librarian-gate-waits-on-the-destination-not-on-passes §3.3. *)
+
 type failure_kind = Capacity_refused | Other_refusal
 val failure_kind : failure -> failure_kind
 (** Capacity requires every attempted destination to return HTTP 400 with the

@@ -252,7 +252,32 @@ let note_outcome key update =
     Outcomes.update key (fun previous -> Some (update previous)) current)
 ;;
 
-let note_answer key ~at = note_outcome key (fun _ -> Answered { at })
+(* Who hears a destination answer again after refusing. A listener runs on
+   the asking fiber's domain and must only signal. *)
+let recovery_listeners : (unit ref * (destination_id -> unit)) list Atomic.t = Atomic.make []
+
+let on_destination_recovered listener =
+  let token = ref () in
+  Atomic_util.update recovery_listeners (fun listeners -> (token, listener) :: listeners);
+  fun () ->
+    Atomic_util.update recovery_listeners
+      (List.filter (fun (other, _) -> not (other == token)))
+;;
+
+(* The update may run more than once under contention; the run that is
+   stored is the last one, so [recovered] tells whether the stored change
+   ended a refusal. *)
+let note_answer key ~at =
+  let recovered = ref false in
+  note_outcome key (fun previous ->
+    (recovered :=
+       match previous with
+       | Some (Refusing _) -> true
+       | Some (Answered _) | None -> false);
+    Answered { at });
+  if !recovered
+  then List.iter (fun (_, listener) -> listener key) (Atomic.get recovery_listeners)
+;;
 
 let note_refusal key ~at refusal =
   let last = refusal_class refusal in

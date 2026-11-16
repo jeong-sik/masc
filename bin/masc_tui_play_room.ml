@@ -34,6 +34,10 @@ let suspend t =
 let is_read request = match request.operation with
   | Read _ -> true
   | Say _ | Leave -> false
+let request_kind request = match request.operation with
+  | Read _ -> `Read
+  | Say _ -> `Say
+  | Leave -> `Leave
 (* Preserve the inactive Leave obligation even though Read itself does not
    create or renew membership. *)
 let retire_read t = match t.pending with
@@ -105,7 +109,11 @@ let request_json request =
     | Read before -> "read", (match before with None -> [] | Some id -> ["before", `Int id])
     | Say sending -> "say", ["message_id", `String sending.id; "text", `String sending.text] in
   `Assoc (["action", `String action; "client_id", `String request.client; "machine", `String machine] @ fields)
-let receive ?viewer t request ~now result = match t.pending with
+(* A read that failed, or one the caller's workspace guard stopped before it
+   left, whose notice the caller has already worded. *)
+type failure = Unanswered of string | Kept_back of string
+
+let settle ?viewer t request ~now result = match t.pending with
   | None -> t
   | Some current when current.ticket != request.ticket -> t
   | Some _ ->
@@ -127,10 +135,12 @@ let receive ?viewer t request ~now result = match t.pending with
     let t = {t with pending = None; viewer; next_read; changed_since = false} in
     match request.operation, result with
     | Leave, Ok _ -> {t with joined = false}
-    | Leave, Error detail ->
+    | Leave, Error (Unanswered detail) ->
         {t with notice = Some ("공용 대화 나가기 확인 실패: " ^ detail)}
-    | (Read _ | Say _), Error detail ->
+    | Leave, Error (Kept_back notice) -> {t with notice = Some notice}
+    | (Read _ | Say _), Error (Unanswered detail) ->
         {t with joined = true; notice = Some ("공용 대화 확인 실패: " ^ detail ^ " · 초안을 유지합니다.")}
+    | (Read _ | Say _), Error (Kept_back notice) -> {t with joined = true; notice = Some notice}
     | Read before, Ok snapshot ->
         {t with joined = true; snapshot = (if before = t.before then Some snapshot else t.snapshot);
           notice = (if Option.is_none t.retry then None else t.notice)}
@@ -140,6 +150,9 @@ let receive ?viewer t request ~now result = match t.pending with
         {t with joined = true; snapshot = Some snapshot; retry = None; notice;
           before = None;
           position = Latest; viewport = None}
+let receive ?viewer t request ~now result =
+  settle ?viewer t request ~now (Result.map_error (fun detail -> Unanswered detail) result)
+let kept_back t request ~now notice = settle t request ~now (Error (Kept_back notice))
 let clean = Masc.Tui_terminal_text.sanitize_terminal_text
 let origin t (m : Room.message) =
   if t.viewer = Some m.who then Viewer

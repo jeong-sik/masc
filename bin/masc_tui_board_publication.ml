@@ -253,12 +253,14 @@ let response_effect = function
 
 type 'authority outcome =
   | Not_attempted of { request : 'authority request; detail : string }
+  | Kept_back of { request : 'authority request; notice : string }
   | Returned of { prepared : 'authority prepared; response : response }
 
 let not_attempted request ~detail = Not_attempted { request; detail }
+let kept_back request ~notice = Kept_back { request; notice }
 let returned prepared response = Returned { prepared; response }
 let outcome_request = function
-  | Not_attempted { request; _ } -> request
+  | Not_attempted { request; _ } | Kept_back { request; _ } -> request
   | Returned { prepared; _ } -> prepared.request
 
 type 'authority entry = Pending of 'authority request | Finished of 'authority outcome

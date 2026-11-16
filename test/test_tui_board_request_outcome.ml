@@ -127,7 +127,7 @@ let start state results =
     ~admit:(fun request ->
       if Types.workspace_reply_admitted state ~authority:request.Publication.authority
           ~reading:None ~kind:Types.Workspace_operation_outcome
-      then Ok () else Error "fixture workspace authority withdrawn")
+      then Ok () else Error Types.Workspace_authority_withdrawn)
     ~report:(fun _ _ -> ()) ~title:"published fixture" ~body:"original body" ()
 
 let rec take_outcome results =
@@ -142,7 +142,7 @@ let with_results run =
 
 let returned = function
   | Publication.Returned { prepared; response } -> prepared, response
-  | Publication.Not_attempted _ -> fail "expected an actual Board POST attempt"
+  | Publication.Not_attempted _ | Publication.Kept_back _ -> fail "expected an actual Board POST attempt"
 
 let check_committed response =
   match Publication.committed_post_id response with
@@ -325,7 +325,7 @@ let test_attachment_failure_never_posts_to_board () = with_fixture
     let outcome = take_outcome results in
     (match outcome with
      | Publication.Not_attempted _ -> ()
-     | Publication.Returned _ -> fail "an unreadable attachment must stop before Board POST");
+     | Publication.Returned _ | Publication.Kept_back _ -> fail "an unreadable attachment must stop before Board POST");
     apply state outcome;
     check int "no Board POST reached the real router" 0 !posts;
     check int "no actual post was created" 0 (List.length (Masc.Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
@@ -474,7 +474,7 @@ let test_comment_launch_failure_does_not_announce_sending () =
   Requests.start_board_comment state ~host:"127.0.0.1" ~request_id
     ~launch:(fun ~deliver _perform ->
       Updates.comment_launch_failed state ~request_id;
-      ignore (deliver (Error "launch unavailable")))
+      ignore (deliver (Error (Types.Request_failed "launch unavailable"))))
     ~report:(fun kind text -> reports := (kind, text) :: !reports)
     ~post_id:"post" ~content:"draft retained";
   check (list (pair string string)) "no sending notice when launch fails" [] !reports;
@@ -492,7 +492,7 @@ let test_old_comment_result_cannot_settle_same_draft_retry () =
       ~launch:(fun ~deliver _perform -> completions := deliver result :: !completions)
       ~report:(fun _ _ -> ()) ~post_id:"same-post" ~content:"same draft"
   in
-  start original (Error "first request did not start");
+  start original (Error (Types.Request_failed "first request did not start"));
   (* The first launch failure releases its slot before its queued result is
      consumed; a retry with exactly the same input can then own the slot. *)
   Updates.comment_launch_failed state ~request_id:original;
@@ -553,7 +553,8 @@ let test_detail_read_binds_the_original_workspace () = with_fixture
       reader.board_mode <- Types.Board_read post_id;
       reader.board_history_post_id <- if full_history then Some post_id else None;
       let launch ~deliver read =
-        Results.launch ~observation:true reader ~results ~boundary_error:Fun.id
+        Results.launch ~observation:true reader ~results
+          ~boundary_error:(fun detail -> Types.Request_failed detail)
           ~deliver read in
       Requests.start_board_post_refresh reader ~host:"127.0.0.1" ~port ~post_id ~launch;
       let rec take_detail () = match Results.take_ready results with
@@ -565,7 +566,9 @@ let test_detail_read_binds_the_original_workspace () = with_fixture
       (match read ~expected_base:base_path ~full_history with
        | Ok (post, _, _) ->
          check string "the admitted post retains its real body" "original body" post.bp_body
-       | Error error -> fail ("same-workspace detail failed: " ^ error));
+       | Error error ->
+         fail ("same-workspace detail failed: "
+           ^ Types.request_failure_text ~ko:false ~request:Types.Kept_request.Board_post_read error));
       check bool "another workspace cannot supply the same post" true
         (Result.is_error (read ~expected_base:(base_path ^ "/foreign") ~full_history)))
       [false; true])
@@ -580,7 +583,8 @@ let test_detail_read_survives_reply_handoff () = with_fixture
     reader.view <- Types.Board;
     reader.board_mode <- Types.Board_read post_id;
     let launch ~deliver read =
-      Results.launch ~observation:true reader ~results ~boundary_error:Fun.id
+      Results.launch ~observation:true reader ~results
+        ~boundary_error:(fun detail -> Types.Request_failed detail)
         ~deliver read in
     let start_read () =
       Requests.start_board_post_refresh reader ~host:"127.0.0.1" ~port ~post_id ~launch in

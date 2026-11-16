@@ -5,6 +5,10 @@ module Task = Runtime_native_tasks
 
 type error =
   | Transport of string
+  | Kept_back of string
+      (** The caller's kept-back notice for a read the workspace guard
+          withdrew before it was sent; drawn alone, never as a transport
+          failure (RFC-tui-one-screen-grammar §2). *)
   | Http_refused of int
   | Invalid_json of string
   | Invalid_response of Read.decode_error
@@ -42,7 +46,7 @@ val diagnostics : t -> string list
 val error_text : error -> string
 
 val read : mode:read_mode -> keeper_name:string ->
-  fetch:(string -> (int * string, string) result) -> previous:t ->
+  fetch:(string -> (int * string, error) result) -> previous:t ->
   (t, error) result
 (** Sequential discovery and per-incarnation suffix reads. Successful pages
     must match their exact request. A failed receiver retains its previous

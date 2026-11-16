@@ -918,7 +918,13 @@ let keeper_call_association state ~keeper_name
     (activity : Keeper_chat_transcript.tool_activity) =
   Call_evidence.resolve ~keeper_name ~execution_id:activity.execution_id
     ~loaded_keeper:state.keeper_calls_keeper ~loading:state.keeper_calls_loading
-    ~error:state.keeper_calls_error ~snapshot:state.keeper_calls
+    ~error:(Option.map (function
+      | Request_failed detail -> Call_evidence.Log_failed detail
+      | Request_withdrawn refusal ->
+          Call_evidence.Log_kept_back
+            (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Call_log_read refusal)) state.keeper_calls_error)
+    ~snapshot:state.keeper_calls
 
 
 (* The tool tree's colours, out of the reader's own theme. Built per draw
@@ -969,7 +975,7 @@ let tool_outcome_label_with_call outcome association =
   | Keeper_chat_transcript.Never_returned, Call_execution_exact call
     when Option.is_some call.kc_output ->
       "RESULT IN CALL LOG · NOT SEEN IN TURN"
-  | (Keeper_chat_transcript.Never_returned, (Call_log_not_loaded | (Call_log_loading | (Call_execution_unrecorded | (Call_execution_missing | (Call_log_unavailable _ | (Call_execution_coverage_gap _ | Call_execution_ambiguous _)))))))
+  | (Keeper_chat_transcript.Never_returned, (Call_log_not_loaded | (Call_log_loading | (Call_execution_unrecorded | (Call_execution_missing | (Call_log_unavailable _ | Call_log_kept_back _ | (Call_execution_coverage_gap _ | Call_execution_ambiguous _)))))))
   | ((Keeper_chat_transcript.Started | (Keeper_chat_transcript.Awaiting_result | (Keeper_chat_transcript.Returned | (Keeper_chat_transcript.Native_running | (Keeper_chat_transcript.Native_ended | (Keeper_chat_transcript.Native_failed | (Keeper_chat_transcript.Failed | Keeper_chat_transcript.Outcome_unrecorded))))))), _)
   | (Never_returned, Call_execution_exact _) -> tool_outcome_label outcome
 
@@ -1047,6 +1053,9 @@ let keeper_message_tool_activity_details state ~keeper_name
         "loading durable schedule…", None, activity.args, None, None
     | Call_log_unavailable detail ->
         "unavailable · " ^ detail, None, activity.args, None, None
+    | Call_log_kept_back notice ->
+        (* Not sent: the kept-back notice alone (RFC §2). *)
+        notice, None, activity.args, None, None
     | Call_execution_unrecorded ->
         "execution id not recorded", None, activity.args, None, None
     | Call_execution_missing ->
@@ -1064,7 +1073,7 @@ let keeper_message_tool_activity_details state ~keeper_name
         (match call.kc_tool_use_id with
          | Some _ as recorded -> recorded
          | None -> activity.call_id)
-    | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _
+    | Call_log_not_loaded | Call_log_loading | Call_log_unavailable _ | Call_log_kept_back _
     | Call_execution_unrecorded | Call_execution_missing
     | Call_execution_coverage_gap _ | Call_execution_ambiguous _ ->
         activity.call_id
@@ -1221,7 +1230,7 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
               "result text not recorded"
           | Call_log_not_loaded -> None, "result preview not loaded"
           | Call_log_loading -> None, "loading result preview"
-          | Call_log_unavailable _ -> None, "result preview unavailable"
+          | Call_log_unavailable _ | Call_log_kept_back _ -> None, "result preview unavailable"
           | Call_execution_unrecorded -> None, "no execution id"
           | Call_execution_missing -> None, "no call-log row"
           | Call_execution_coverage_gap _ -> None, "call log incomplete"
@@ -2120,7 +2129,7 @@ type layout_entries_memo = {
   lem_file_change_index : Keeper_chat_diff.index;
   lem_calls_keeper : string option;
   lem_calls_loading : bool;
-  lem_calls_error : string option;
+  lem_calls_error : request_failure option;
   lem_calls : keeper_calls_snapshot option;
   lem_palette_generation : int;
   lem_visible_timeline : (msg_entry * float option) list;
@@ -2277,7 +2286,7 @@ let keeper_message_layout_entries ?messages (state : state) ~keeper_name
     && Option.equal String.equal memo.lem_calls_keeper
          state.keeper_calls_keeper
     && Bool.equal memo.lem_calls_loading state.keeper_calls_loading
-    && Option.equal String.equal memo.lem_calls_error
+    && Option.equal ( = ) memo.lem_calls_error
          state.keeper_calls_error
     && memo.lem_calls == state.keeper_calls
     && memo.lem_palette_generation = palette_generation
@@ -2434,7 +2443,7 @@ type settled_block_memo = {
   sbm_tools : tool_visibility;
   sbm_calls_keeper : string option;
   sbm_calls_loading : bool;
-  sbm_calls_error : string option;
+  sbm_calls_error : request_failure option;
   sbm_calls : keeper_calls_snapshot option;
   sbm_file_changes_keeper : string option;
   sbm_file_change_index : Keeper_chat_diff.index;
@@ -4731,8 +4740,13 @@ let render_keeper_message (state : state) =
       status_frame.kmsf_activity_rows;
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       status_frame.kmsf_interrupt_rows;
+    (* A read the workspace guard kept back is said as kept back, alone,
+       never as a failed load (RFC §2). *)
+    let kept_back_line ~request refusal =
+      box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
+        ("  " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal) in
     (match state.msg_loaded_error with
-     | Some _ ->
+     | Some (Request_failed _) ->
          (* A failed read leaves the owed read Waiting on its backoff, so the
             next attempt is already scheduled; say so next to the pointer to
             [/errors]. *)
@@ -4756,6 +4770,8 @@ let render_keeper_message (state : state) =
              (ui_text state
                 ~ko:"  대화 기록 조회 실패 · /errors"
                 ~en:"  History load failed · /errors")
+     | Some (Request_withdrawn refusal) ->
+         kept_back_line ~request:Masc_tui_types.Kept_request.Keeper_history_read refusal
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
@@ -4766,10 +4782,12 @@ let render_keeper_message (state : state) =
             state.msg_loaded_dropped));
     (match state.msg_memory_error with
      | None -> ()
-     | Some _ ->
+     | Some (Request_failed _) ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
            (ui_text state ~ko:"  기억 조회 실패 · /errors"
-              ~en:"  Memory load failed · /errors"));
+              ~en:"  Memory load failed · /errors")
+     | Some (Request_withdrawn refusal) ->
+         kept_back_line ~request:Masc_tui_types.Kept_request.Keeper_memory_read refusal);
     (if state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
@@ -4817,10 +4835,12 @@ let render_keeper_message (state : state) =
             ~en:"  (loading older messages\xe2\x80\xa6)")
      else
        match state.msg_older_error with
-       | Some _ ->
+       | Some (Request_failed _) ->
            box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
              (ui_text state ~ko:"  이전 메시지 조회 실패 · /errors"
                 ~en:"  Older load failed · /errors")
+       | Some (Request_withdrawn refusal) ->
+           kept_back_line ~request:Masc_tui_types.Kept_request.Keeper_older_read refusal
        | None -> ());
     (match status_frame.kmsf_source with
      | Message_status (live, status) ->

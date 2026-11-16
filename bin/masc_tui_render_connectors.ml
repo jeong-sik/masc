@@ -329,6 +329,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
       let status = match history.content with
         | Listing -> "Reading the Keeper's recent tool receipts…"
         | List_failed detail -> "Could not read observations: " ^ Terminal_text.single_line detail
+        | List_kept_back notice -> Terminal_text.single_line notice
         | Entries {entries;cursor;selection} ->
           let position = Printf.sprintf "Observation %d/%d · from 100 recent tool calls"
             (if entries=[] then 0 else cursor+1) (List.length entries) in

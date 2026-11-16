@@ -18,11 +18,21 @@ type draft_response =
 
 type draft
 
+(** Why no answer receipt was read. *)
+type answer_failure =
+  | Answer_unconfirmed of string
+      (** A lost or invalid response: the write may have landed. Carries the
+          cause as it came. *)
+  | Answer_kept_back of string
+      (** The caller's kept-back notice: the workspace guard withdrew the
+          answer before it was sent, so nothing was written
+          (RFC-tui-one-screen-grammar §2). *)
+
 type answer_feedback = private {
   af_asker : Masc.Tui_decode_asks.ask_asker;
   af_ask_id : string;
   af_source_turn_ref : Ids.Turn_ref.t option;
-  af_receipt : (Masc.Tui_decode_asks.answer_receipt, string) result;
+  af_receipt : (Masc.Tui_decode_asks.answer_receipt, answer_failure) result;
   af_submitted_label : string option;
 }
 (** Last observed answer receipt, not current Keeper execution status. Only
@@ -32,7 +42,7 @@ type answer_feedback = private {
 val answer_feedback :
   ?source_turn_ref:Ids.Turn_ref.t ->
   asker:Masc.Tui_decode_asks.ask_asker -> ask_id:string -> submitted_label:string ->
-  (Masc.Tui_decode_asks.answer_receipt, string) result -> answer_feedback
+  (Masc.Tui_decode_asks.answer_receipt, answer_failure) result -> answer_feedback
 
 val asker_to_json : Masc.Tui_decode_asks.ask_asker -> Yojson.Safe.t
 (** The Keeper's name or the installation's declaration id, for logs. *)

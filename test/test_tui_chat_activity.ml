@@ -76,7 +76,7 @@ let test_esc_hint_follows_the_observed_turn () =
        (texts (Tui.keeper_message_activity_rows state)));
   check (list string) "and no row of its own says it again" []
     (Tui.keeper_observed_interrupt_rows state);
-  state.keeper_turns_error <- Some "poll failed";
+  state.keeper_turns_error <- Some (Tui.Request_failed "poll failed");
   check (option (pair (float 0.001) string)) "a failing poll leaves Esc without a target"
     None (Tui.keeper_observed_turn state "alpha");
   check bool "no row offers a stop Esc would not send" false
@@ -167,7 +167,7 @@ let test_compact_status_keeps_delivery_and_priority_truth () =
   state.keeper_run_next_receipts <- [first.sent_request, Ok "first"; second.sent_request, Ok "second"];
   check (list string) "both exact receipts confirm priority"
     ["내 메시지 2건 대기 · 다음 순서로 전달 대기"] (rows ());
-  state.keeper_run_next_receipts <- [second.sent_request, Error "offline"];
+  state.keeper_run_next_receipts <- [second.sent_request, Error (Tui.Request_failed "offline")];
   check bool "actual refusal retains attention" true (Tui.keeper_message_activity_needs_attention state);
   check (list string) "failure does not claim priority"
     ["다음 순서 확인 불가 · 내 메시지 2건 대기"] (rows ());

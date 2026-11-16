@@ -66,6 +66,9 @@ type view =
   | Not_loaded  (** the server said no machine of this kind is loaded *)
   | Showing of picture
   | Failed of string  (** the last read failed; the reason is drawn *)
+  | Kept_back of string
+      (** the workspace guard stopped the last read before it left; the
+          string is the caller's kept-back notice, drawn as it is *)
 
 val since : view -> mark option
 (** The mark to send with the next read: the drawn picture's, or [None]

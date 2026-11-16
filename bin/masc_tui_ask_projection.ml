@@ -10,11 +10,15 @@ type draft = {
   d_responses : (string * draft_response) list;
 }
 
+type answer_failure =
+  | Answer_unconfirmed of string
+  | Answer_kept_back of string
+
 type answer_feedback = {
   af_asker : Decode.ask_asker;
   af_ask_id : string;
   af_source_turn_ref : Ids.Turn_ref.t option;
-  af_receipt : (Decode.answer_receipt, string) result;
+  af_receipt : (Decode.answer_receipt, answer_failure) result;
   af_submitted_label : string option;
 }
 
@@ -50,7 +54,8 @@ let answer_feedback_to_json feedback =
         "already_recorded", `Null
     | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_withdrawn _)) -> "withdrawn", `Null
     | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_refused _)) -> "refused", `Null
-    | Error _ -> "unconfirmed", `Null in
+    | Error (Answer_unconfirmed _) -> "unconfirmed", `Null
+    | Error (Answer_kept_back _) -> "kept_back", `Null in
   `Assoc ["asker", asker_to_json feedback.af_asker; "ask_id", `String feedback.af_ask_id;
     "source_turn_ref", (match feedback.af_source_turn_ref with
       | None -> `Null | Some reference -> Ids.Turn_ref.to_yojson reference);

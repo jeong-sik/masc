@@ -163,7 +163,7 @@ let test_independent_pair_delivers_while_other_is_waiting () =
           if is_slow then Eio.Promise.resolve resolve_slow ()
           else Eio.Promise.resolve resolve_fast () in
         Eio_context.with_turn_switch sw (fun () ->
-          Masc_tui_async_read.launch_independent_pair
+          Masc_tui_async_read.launch_independent_pair ~boundary_error:Fun.id
             ~deliver_first:(deliver ~is_slow:slow_first)
             ~deliver_second:(deliver ~is_slow:(not slow_first))
             (if slow_first then slow else fast)

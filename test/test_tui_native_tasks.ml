@@ -186,7 +186,7 @@ let test_change_hint_poll () =
   let records=ref 0 and through=ref 1 in
   let fetch path = match Uri.path (Uri.of_string path) with
     | "/api/v1/keepers/alpha/native-tasks/hints" -> Ok (200,Yojson.Safe.to_string (hints !through))
-    | "/api/v1/keepers/alpha/native-tasks/records" -> incr records; Error "audit unavailable"
+    | "/api/v1/keepers/alpha/native-tasks/records" -> incr records; Error (Native.Transport "audit unavailable")
     | _ -> fail "poll requested full audited discovery" in
   let poll previous = match Native.read ~mode:Native.Poll ~keeper_name:keeper ~fetch ~previous with
     | Ok value -> value | Error error -> fail (Native.error_text error) in

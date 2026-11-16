@@ -132,6 +132,10 @@ type error =
       body : string;
     }
   | Protocol_error of protocol_error
+  | Follow_kept_back of string
+      (** The caller's kept-back notice: after the message left, the workspace
+          guard stopped the request that follows its reply, so the message's
+          outcome is not known and the follow-up was not sent. *)
 
 type error_certainty =
   | Verified_rejected

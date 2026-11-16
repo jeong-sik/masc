@@ -12,13 +12,24 @@ let session ~host ~port = function
   | None -> Masc_tui_http.open_mcp_session ~host ~port
       ~client_version:Runtime_build_version.current
 
+(* A request the workspace guard stopped was not sent: [check]'s refusal is
+   said as a kept-back notice, never as the source's failure (RFC §2). The
+   catalog carries text, so the notice is drawn here, in the screen's
+   language. *)
+let admit state ~request check () =
+  Result.map_error
+    (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request)
+    (check ())
+
 let launch_list state ~host ~launch ~check =
   if server_authority_ready state then begin
     let owner = Masc_tui_resources_updates.begin_listing state in
     let port = state.port in
     let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
     let captured_session = state.mcp_session in
+    let check = admit state ~request:Kept_request.Resource_list_read check in
     launch ~deliver:(fun result -> Resource_msg (Resources_listed (owner, result))) (fun () ->
+      Result.map_error (fun detail -> Request_failed detail) @@
       let mcp =
         let* session_id = session ~host ~port captured_session in
         let* () = check () in
@@ -41,20 +52,32 @@ let launch_read state ~host ~share_origin ~launch ~check ~key =
     let port = state.port in
     let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
     let captured_session = state.mcp_session in
+    (* The read's own failure is attributed to the read; a read the guard
+       kept back is said alone, since it never left. *)
+    let failed result = Result.map_error (fun detail -> Request_failed detail) result in
+    let check () = Result.map_error (fun refusal -> Request_withdrawn refusal) (check ()) in
     launch
       ~deliver:(fun result ->
         let content, journal = match result with
           | Ok pair -> pair
-          | Error detail -> Error detail, Share_journal_unavailable (detail, []) in
-        Resource_msg (Resource_read (request,
-          Masc_tui_async_read.attribute Masc_tui_async_read.Resource_read content, journal)))
+          | Error failure ->
+            Error failure, Share_journal_unavailable (request_failure_text
+              ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Resource_read failure, []) in
+        let content = match content with
+          | Ok reading -> Ok reading
+          | Error (Request_failed detail) ->
+            Masc_tui_async_read.attribute Masc_tui_async_read.Resource_read (Error detail)
+          | Error (Request_withdrawn refusal) ->
+            Error (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Resource_read refusal) in
+        Resource_msg (Resource_read (request, content, journal)))
       (fun () -> match key with
         | Catalog.Mcp_uri uri ->
           let content =
-            let* session_id = session ~host ~port captured_session in
+            let* session_id = failed (session ~host ~port captured_session) in
             let* () = check () in
             Masc_tui_http.call_mcp_resources_read ~host ~port ~session_id ~request_id ~uri
-            |> Result.map Catalog.mcp_reading in
+            |> Result.map Catalog.mcp_reading |> failed in
           Ok (content, Share_journal_not_needed)
         | Catalog.Report_revision report ->
           let observe () = match share_origin with
@@ -67,8 +90,8 @@ let launch_read state ~host ~share_origin ~launch ~check ~key =
           let before = observe () in
           let content =
             let* () = check () in
-            let* json = report_json ~host ~port ~path:(Catalog.report_path report) in
-            Catalog.report_contents report json in
+            let* json = failed (report_json ~host ~port ~path:(Catalog.report_path report)) in
+            failed (Catalog.report_contents report json) in
           let after = observe () in
           let observed_entries result = match share_origin, result with
             | Some origin, Ok (_, entries) -> List.filter (fun (entry : Masc_tui_artifact_share_pending.entry) ->

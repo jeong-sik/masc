@@ -147,12 +147,12 @@ let test_original_request_survives_new_submission_and_late_reply () = with_root 
   let changed = read config expected original (frame newer_wire) in
   (match changed with Error (Failure.Invalid_payload _) -> ()
    | Ok _ | Error (Transport _ | Http_error _ | Invalid_json _ | Launch_failure _
-       | Workspace_unconfirmed _ | Interrupted _) -> fail "new submission borrowed old detail");
+       | Workspace_unconfirmed _ | Interrupted _ | Kept_back _) -> fail "new submission borrowed old detail");
   ignore (complete_verification_evidence_read state refresh changed);
   (match view state original with
    | F.Stale (evidence,error) -> (match error with
       | Failure.Invalid_payload _ -> expect_original original.vek_request_id evidence
-      | Transport _ | Http_error _ | Invalid_json _ | Launch_failure _ | Workspace_unconfirmed _ | Interrupted _ ->
+      | Transport _ | Http_error _ | Invalid_json _ | Launch_failure _ | Workspace_unconfirmed _ | Interrupted _ | Kept_back _ ->
         fail "refresh changed its actual refusal")
    | Absent | Loading | Ready _ | Failed _ -> fail "failed refresh discarded original evidence");
   let retired = start state newer in
@@ -172,7 +172,7 @@ let test_original_request_survives_new_submission_and_late_reply () = with_root 
   (match view state newer with
    | Stale (evidence,error) -> (match error with
       | Failure.Workspace_unconfirmed _ -> expect_original newer.vek_request_id evidence
-      | Transport _ | Http_error _ | Invalid_json _ | Invalid_payload _ | Launch_failure _ | Interrupted _ ->
+      | Transport _ | Http_error _ | Invalid_json _ | Invalid_payload _ | Launch_failure _ | Interrupted _ | Kept_back _ ->
         fail "suspension changed its actual refusal")
    | Absent | Loading | Ready _ | Failed _ -> fail "suspension lost original evidence or hid its refusal")
 
@@ -188,18 +188,18 @@ let test_workspace_and_receipt_cannot_borrow_filed_evidence () = with_root @@ fu
   let foreign = read config_b expected_a key (frame wire_b) in
   (match foreign with Error (Failure.Http_error _) -> ()
    | Ok _ | Error (Transport _ | Invalid_json _ | Invalid_payload _ | Launch_failure _
-       | Workspace_unconfirmed _ | Interrupted _) -> fail "foreign root supplied original evidence");
+       | Workspace_unconfirmed _ | Interrupted _ | Kept_back _) -> fail "foreign root supplied original evidence");
   List.iter (fun receipts ->
     let refresh = start state key in
     let refused = read config_a expected_a key (frame ~receipts wire_a) in
     (match refused with Error (Failure.Workspace_unconfirmed _) -> ()
      | Ok _ | Error (Transport _ | Http_error _ | Invalid_json _ | Invalid_payload _
-         | Launch_failure _ | Interrupted _) -> fail "unattested evidence became current");
+         | Launch_failure _ | Interrupted _ | Kept_back _) -> fail "unattested evidence became current");
     ignore (complete_verification_evidence_read state refresh refused);
     match view state key with
     | Stale (value,error) -> (match error with
       | Failure.Workspace_unconfirmed _ -> check bool "unattested read retains exact original evidence" true (value==original)
-      | Transport _ | Http_error _ | Invalid_json _ | Invalid_payload _ | Launch_failure _ | Interrupted _ ->
+      | Transport _ | Http_error _ | Invalid_json _ | Invalid_payload _ | Launch_failure _ | Interrupted _ | Kept_back _ ->
         fail "receipt failure changed its actual refusal")
     | Absent | Loading | Ready _ | Failed _ -> fail "receipt failure erased or replaced original evidence")
     [[];[Masc.Workspace.read_precondition_admission_header;Masc.Workspace.read_precondition_admission_header]];

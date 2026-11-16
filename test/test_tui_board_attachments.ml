@@ -435,7 +435,7 @@ let finish state ~reply_to ~sent_attachments result =
     state.board_write <- Board_commenting request_id;
     Masc_tui_board_updates.comment_done state ~request_id ~post_id ~sent_draft:"title"
       ~report:(fun _ _ -> ()) ~refresh:(fun () -> ())
-      ~refresh_detail:(fun _ -> ()) result
+      ~refresh_detail:(fun _ -> ()) (Result.map_error (fun detail -> Request_failed detail) result)
   | None ->
     let module Publication = Masc_tui_board_publication in
     let request = Publication.capture ~authority:state.workspace_authority

@@ -4,6 +4,7 @@ open Result.Syntax
 
 type error =
   | Transport of string
+  | Kept_back of string
   | Http_refused of int
   | Invalid_json of string
   | Invalid_response of Read.decode_error
@@ -59,6 +60,7 @@ let receiver_text (receiver:Read.receiver) =
   receiver.receiver_generation ^ " / " ^ receiver.session_id
 let rec error_text = function
   | Transport detail -> "transport: " ^ detail
+  | Kept_back notice -> notice
   | Http_refused status -> Printf.sprintf "HTTP %d refused native-task read" status
   | Invalid_json detail -> "invalid JSON: " ^ detail
   | Invalid_response error -> Read.decode_error_to_string error
@@ -75,7 +77,7 @@ let health_diagnostics = function
 let rec error_diagnostics = function
   | Service failure -> (match failure.health with None -> [] | Some health -> health_diagnostics health)
   | Receiver_read (_,error) -> error_diagnostics error
-  | Transport _ | Http_refused _ | Invalid_json _ | Invalid_response _ | Persistence _ -> []
+  | Transport _ | Kept_back _ | Http_refused _ | Invalid_json _ | Invalid_response _ | Persistence _ -> []
 let diagnostics state =
   let inventory = match state.inventory with
     | None -> []
@@ -129,7 +131,7 @@ let apply_observation ~store_id tasks (observation:Task.t) =
   | Some _ -> List.map (fun old -> if old.origin=task.origin then task else old) tasks
 
 let decode ~fetch path =
-  let* status, body = fetch path |> Result.map_error (fun detail -> Transport detail) in
+  let* status, body = fetch path in
   let parsed = match Yojson.Safe.from_string body with
     | json -> Read.of_json json |> Result.map_error (fun error -> Invalid_response error)
     | exception Yojson.Json_error detail -> Error (Invalid_json detail) in

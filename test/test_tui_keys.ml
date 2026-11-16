@@ -905,6 +905,7 @@ let test_the_questions_reading_tells_unread_from_none_open () =
     | Masc_tui_approvals_model.List_not_read (Masc_tui_approvals_model.Approval_failed _) -> "failed"
     | Masc_tui_approvals_model.List_not_read (Masc_tui_approvals_model.Approval_stale _) -> "stale"
     | Masc_tui_approvals_model.List_not_read (Masc_tui_approvals_model.Approval_unavailable _) -> "unavailable"
+    | Masc_tui_approvals_model.List_not_read (Masc_tui_approvals_model.Approval_kept_back _) -> "kept back"
   in
   Alcotest.(check string) "before the first poll answers" "unread" (reading ());
   state.asks_error <- Some "connection refused";
@@ -1290,7 +1291,7 @@ let test_keeper_peer_reading_keeps_its_target_and_epoch () =
   Alcotest.(check bool) "repeated next shares its pending page" true
     (Option.is_none (request_keeper_peer_page state Peer_next));
   Alcotest.(check bool) "a failed page retires its request" true
-    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "offline"));
+    (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error (Request_failed "offline")));
   let retry = match request_keeper_peer_page state Peer_refresh with
     | Some ("beta", token, Some "10") -> token
     | Some _ | None -> Alcotest.fail "failed page did not retain the previous cursor" in
@@ -1388,7 +1389,7 @@ let test_keeper_peer_page_preserves_scroll_intent () =
   Alcotest.(check bool) "the matching response is staged" true
     (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Ok (page None)));
   Alcotest.(check bool) "a duplicate response cannot replace it" false
-    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "late"));
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error (Request_failed "late")));
   Alcotest.(check bool) "a settled input permits the next frame to consume it" true
     (settle_keeper_peer_reading state ~input_pending:false = Peer_result_applied);
   Alcotest.(check int) "new page starts at the beginning without later input" 0 (offset ());
@@ -1406,7 +1407,7 @@ let test_keeper_peer_page_preserves_scroll_intent () =
   Alcotest.(check int) "scroll during the read remains the operator's intent" 87 (offset ());
   let next = start Peer_next in
   Alcotest.(check bool) "failure is staged for its request" true
-    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "offline"));
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error (Request_failed "offline")));
   Alcotest.(check bool) "a received result is not described as loading" true
     (keeper_peer_status state = Some (Keeper_peer_arrived {page=2; retained=Some 1; retry=None}));
   Alcotest.(check bool) "the next frame presents the failure" true
@@ -1471,7 +1472,7 @@ let test_keeper_peer_staged_failure_preserves_visible_page () =
     {snapshot = {queued_count = 1; relations = [];
                  source_redacted_count = 0; source_unverified_count = 0}; next_sequence = Some "10"} in
   let first = begin_keeper_peer_reading state ~keeper_name:"beta" in
-  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:first (Error "offline"));
+  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:first (Error (Request_failed "offline")));
   Alcotest.(check bool) "an unpresented initial response keeps its request" true
     (Option.is_none (request_keeper_peer_page state Peer_refresh));
   ignore (settle_keeper_peer_reading state ~input_pending:false);
@@ -1484,12 +1485,12 @@ let test_keeper_peer_staged_failure_preserves_visible_page () =
   let next = match request_keeper_peer_page state Peer_next with
     | Some ("beta", token, _) -> token
     | Some _ | None -> Alcotest.fail "next page did not start" in
-  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "offline"));
+  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error (Request_failed "offline")));
   let refresh = match request_keeper_peer_page state Peer_refresh with
     | Some ("beta", token, None) -> token
     | Some _ | None -> Alcotest.fail "visible page did not own refresh" in
   Alcotest.(check bool) "the unpresented failed result was superseded" false
-    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error "late"));
+    (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:next (Error (Request_failed "late")));
   Alcotest.(check bool) "the refresh owns its result" true
     (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:refresh (Ok page))
 
@@ -1498,10 +1499,10 @@ let test_keeper_peer_failure_reason_survives_retry () =
   state.view <- Keepers Keeper_list;
   let reason = String.make 256 'x' ^ "\nsecond line" in
   let initial = begin_keeper_peer_reading state ~keeper_name:"beta" in
-  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:initial (Error reason));
+  ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:initial (Error (Request_failed reason)));
   ignore (settle_keeper_peer_reading state ~input_pending:false);
   let retained_reason () = match state.keeper_peer_reading with
-    | Some {kpr_failure = Some failure; _} -> Some failure.kpf_reason
+    | Some {kpr_failure = Some {kpf_reason = Request_failed reason; _}; _} -> Some reason
     | Some _ | None -> None in
   Alcotest.(check (option string)) "full failure remains in the reader state" (Some reason) (retained_reason ());
   ignore (request_keeper_peer_page state Peer_refresh);
@@ -1519,7 +1520,7 @@ let test_keeper_peer_retry_is_readable_on_narrow_failures () =
     let status = match keeper_peer_status state with
       | Some (Keeper_peer_failed {page;retained;reason}) ->
           keeper_peer_failure_status ~page ~retained ~reason
-      | Some (Keeper_peer_loading _ | Keeper_peer_arrived _
+      | Some (Keeper_peer_loading _ | Keeper_peer_arrived _ | Keeper_peer_kept_back _
              | Keeper_peer_current _ | Keeper_peer_unread)
       | None -> Alcotest.fail "failure status disappeared" in
     let rendered = Masc_tui_message_layout.fit_width status (Masc_tui_frame.inner_width ~cols) in
@@ -1552,11 +1553,11 @@ let test_keeper_peer_retry_is_readable_on_narrow_failures () =
       (has "connection lost" && has "original detail");
     Alcotest.(check (option string)) "the original failure remains exact" (Some reason)
       (match state.keeper_peer_reading with
-       | Some {kpr_failure=Some failure;_} -> Some failure.kpf_reason
+       | Some {kpr_failure=Some {kpf_reason=Request_failed reason;_};_} -> Some reason
        | Some _ | None -> None) in
   let initial = new_state () in
   let first = begin_keeper_peer_reading initial ~keeper_name:"beta" in
-  ignore (stage_keeper_peer_reading initial ~keeper_name:"beta" ~token:first (Error reason));
+  ignore (stage_keeper_peer_reading initial ~keeper_name:"beta" ~token:first (Error (Request_failed reason)));
   ignore (settle_keeper_peer_reading initial ~input_pending:false);
   check_status ~cols:20 initial;
   check_document ~cols:20 initial;
@@ -1573,7 +1574,7 @@ let test_keeper_peer_retry_is_readable_on_narrow_failures () =
   let next = match request_keeper_peer_page retained Peer_next with
     | Some ("beta", token, Some "10") -> token
     | Some _ | None -> Alcotest.fail "next page did not retain its cursor" in
-  ignore (stage_keeper_peer_reading retained ~keeper_name:"beta" ~token:next (Error reason));
+  ignore (stage_keeper_peer_reading retained ~keeper_name:"beta" ~token:next (Error (Request_failed reason)));
   ignore (settle_keeper_peer_reading retained ~input_pending:false);
   Alcotest.(check bool) "a failed later page retains its previous observation" true
     (match retained.keeper_peer_reading with
@@ -2245,27 +2246,27 @@ let test_goal_action_receipts_follow_the_goal_and_latest_ticket () =
     (note_goal_action_started state ~goal_id:"a" ~ticket:"a2");
   state.planning_mode <- Planning_detail "b";
   check Alcotest.bool "the original Goal owns a late failure" true
-    (note_goal_action_result state ~goal_id:"a" ~ticket:"a1" (Error "unknown"));
-  check Alcotest.(option string) "failure remains with A" (Some "unknown")
-    (List.assoc_opt "a" state.goal_action_errors);
-  check Alcotest.(option string) "B does not inherit A's failure" None
-    (List.assoc_opt "b" state.goal_action_errors);
+    (note_goal_action_result state ~goal_id:"a" ~ticket:"a1" (Error (Request_failed "unknown")));
+  check Alcotest.bool "failure remains with A" true
+    (List.assoc_opt "a" state.goal_action_errors = Some (Request_failed "unknown"));
+  check Alcotest.bool "B does not inherit A's failure" true
+    (List.assoc_opt "b" state.goal_action_errors = None);
   check Alcotest.bool "a later request may start after the result" true
     (note_goal_action_started state ~goal_id:"a" ~ticket:"a2");
   check Alcotest.bool "an earlier reply cannot replace the current result" false
-    (note_goal_action_result state ~goal_id:"a" ~ticket:"a1" (Error "old"));
+    (note_goal_action_result state ~goal_id:"a" ~ticket:"a1" (Error (Request_failed "old")));
   check Alcotest.bool "current failure is retained" true
-    (note_goal_action_result state ~goal_id:"a" ~ticket:"a2" (Error "new"));
-  check Alcotest.(option string) "A retains its current failure" (Some "new")
-    (List.assoc_opt "a" state.goal_action_errors);
+    (note_goal_action_result state ~goal_id:"a" ~ticket:"a2" (Error (Request_failed "new")));
+  check Alcotest.bool "A retains its current failure" true
+    (List.assoc_opt "a" state.goal_action_errors = Some (Request_failed "new"));
   record_goal_action_receipt state ~goal_id:"a" ~ticket:"a2" ~workspace:"/old"
-    (Error "outcome unknown");
+    (Error (Request_failed "outcome unknown"));
   state.goal_action_errors <- [];
   state.goal_action_inflight <- [];
   check Alcotest.bool "an earlier workspace retains its request outcome" true
     (match state.goal_action_receipts with
      | [{gar_goal_id="a"; gar_ticket="a2"; gar_workspace="/old";
-         gar_authority=None; gar_result=Error "outcome unknown"}] -> true
+         gar_authority=None; gar_result=Error (Request_failed "outcome unknown")}] -> true
      | _ -> false)
 
 let test_goal_completion_requires_an_observed_binding () =

@@ -68,6 +68,10 @@ val invalidate : reason:'error -> ('k, 'a, 'error) source -> ('k, 'a, 'error) so
 val suspend_with : reason:'error -> ('k, 'a, 'error) source -> ('k, 'a, 'error) source
 (** Typed suspension with the same retirement and retention policy. *)
 
+val suspend_reason : string
+(** The reason {!suspend} records, for a typed source that suspends with
+    {!suspend_with} and says the same. *)
+
 val suspend : ('k, 'a) t -> ('k, 'a) t
 (** Retire a pending read while retaining its key and last completed value.
     Initial reads become [Failed]; previous values become explicitly [Stale].

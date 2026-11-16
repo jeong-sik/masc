@@ -132,7 +132,7 @@ let test_file_action_uses_the_presented_source () =
     | Masc_tui_fetched.Already_loading -> fail "revalidation did not start"
   in
   let failed = Masc_tui_fetched.complete ~equal:Masc_tui_types.same_acting_pane_key
-      revalidating request (Error "read failed") in
+      revalidating request (Error (Masc_tui_types.Request_failed "read failed")) in
   check bool "a failed revalidation is not retried on every input" false
     (Masc_tui_types.acting_pane_read_needed ~key:new_key failed);
   (match Masc_tui_fetched.view_for ~equal:Masc_tui_types.same_acting_pane_keeper

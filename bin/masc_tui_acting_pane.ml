@@ -157,10 +157,13 @@ type changes_authority =
   | Changes_revalidating
   | Changes_needs_revalidation
 
+type refresh_note = Refresh_failed of string | Refresh_kept_back of string
+
 type changes =
   | Changes_absent
   | Changes_loading
   | Changes_failed of string
+  | Changes_kept_back of string
   | Changes_ready of {
       keeper : string;
       files : file_row list;
@@ -170,7 +173,7 @@ type changes =
       over_budget : int;
       malformed : int;
       authority : changes_authority;
-      refresh_failed : string option;
+      refresh_failed : refresh_note option;
     }
 
 type scope =
@@ -1661,6 +1664,8 @@ let changes_status_lines ~cols input =
   | Some name, Changes_failed why ->
       named name
         [ { text = middle_dot ^ say input.ko "조회 실패" "failed" ^ middle_dot ^ why; tone = Bad } ]
+  | Some name, Changes_kept_back notice ->
+      named name [ { text = middle_dot ^ notice; tone = Bad } ]
   | Some _, Changes_ready r ->
       let files = List.length r.files in
       let head =
@@ -1709,12 +1714,13 @@ let changes_status_lines ~cols input =
       in
       let refresh_failed =
         match r.refresh_failed with
-        | Some why ->
+        | Some (Refresh_failed why) ->
             one
               [ { text = say input.ko "갱신 실패" "refresh failed" ^ middle_dot ^ why
                 ; tone = Bad
                 }
               ]
+        | Some (Refresh_kept_back notice) -> one [ { text = notice; tone = Bad } ]
         | None -> []
       in
       let authority =
@@ -1756,7 +1762,7 @@ let changes_lines ~cols ~below ~scroll input =
   let files =
     match input.changes with
     | Changes_ready r -> List.mapi (fun index file -> File_row (index, file)) r.files
-    | Changes_absent | Changes_loading | Changes_failed _ -> []
+    | Changes_absent | Changes_loading | Changes_failed _ | Changes_kept_back _ -> []
   in
   let status =
     List.map (fun (line, target) -> Formatted_status (line, target))
@@ -1801,7 +1807,7 @@ let materialize_row ~cols input = function
        | Changes_ready { authority = Changes_current; _ } -> line, target
        | Changes_ready { authority = (Changes_workspace_unconfirmed | Changes_revalidating
                                      | Changes_needs_revalidation); _ }
-       | Changes_absent | Changes_loading | Changes_failed _ -> line, Target_none)
+       | Changes_absent | Changes_loading | Changes_failed _ | Changes_kept_back _ -> line, Target_none)
   | Formatted_status (line, target) -> line, target
 
 (* Column headings, in the row the legend used to hold. With the parts in

@@ -23,6 +23,8 @@ val suspend : t -> t
 val is_read : request -> bool
 (** A [Read] observes the room; [Say] and [Leave] change it and own their
     receipts. *)
+val request_kind : request -> [ `Read | `Say | `Leave ]
+(** Which operation [request] carries, so a caller can name it. *)
 val retire_read : t -> t
 (** Release a pending [Read] whose reply will be discarded because the
     workspace reading that issued it was retired; the next poll reads again.
@@ -48,6 +50,10 @@ val request_json : request -> Yojson.Safe.t
 val receive : ?viewer:string -> t -> request -> now:float -> (Masc.Play_room.snapshot, string) result -> t
 (** [viewer] is the authenticated response principal, committed only with a
     successful response owned by this request. It identifies local messages. *)
+val kept_back : t -> request -> now:float -> string -> t
+(** The workspace guard stopped [request] before it left. It settles like a
+    failed answer, and [notice], the caller's kept-back notice, is drawn as it
+    is. *)
 val origin : t -> Masc.Play_room.message -> origin
 (** [Viewer] when the message's author is the committed viewer, otherwise the
     room speaker. Layout marks each message from this value. *)

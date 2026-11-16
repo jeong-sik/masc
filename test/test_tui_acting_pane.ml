@@ -248,7 +248,8 @@ let test_file_targets_require_current_authority () =
   let has_file_target authority =
     let changes = match ready with
       | Pane.Changes_ready value -> Pane.Changes_ready { value with authority }
-      | Pane.Changes_absent | Pane.Changes_loading | Pane.Changes_failed _ ->
+      | Pane.Changes_absent | Pane.Changes_loading | Pane.Changes_failed _
+      | Pane.Changes_kept_back _ ->
           fail "fixture has no file changes"
     in
     let view = Pane.lines ~rows:20 ~cols ~scroll:0 { changes_fixture with changes } in

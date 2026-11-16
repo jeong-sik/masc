@@ -14,6 +14,7 @@ type request =
 type notice =
   | Input_refused of string
   | Server_refused of string
+  | Launch_kept_back of string
 
 type t =
   { form : Form.t
@@ -180,6 +181,8 @@ let paste ~text launch =
 
 let refused ~detail launch = { launch with notice = Some (Server_refused detail); waiting = None }
 
+let kept_back ~notice launch = { launch with notice = Some (Launch_kept_back notice); waiting = None }
+
 let request_body request =
   `Assoc
     [ prompt_key, `String request.prompt
@@ -192,7 +195,8 @@ let lines launch =
   (match launch.notice with
    | None -> []
    | Some (Input_refused detail) -> [ "Input error: " ^ detail ]
-   | Some (Server_refused detail) -> [ "Refused: " ^ detail ])
+   | Some (Server_refused detail) -> [ "Refused: " ^ detail ]
+   | Some (Launch_kept_back notice) -> [ notice ])
   @ (match launch.waiting with
      | Some request -> [ "Starting the run for " ^ request.keeper ^ "..." ]
      | None -> [])

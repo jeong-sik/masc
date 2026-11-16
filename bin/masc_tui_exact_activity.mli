@@ -9,6 +9,9 @@ type write_result =
   | Conflict of document
   | Refused of string
   | Unconfirmed of string
+  | Kept_back of string
+      (** The workspace guard stopped the save before it left; the string is
+          the caller's kept-back notice. *)
 
 val create : owner -> t
 val owner : t -> owner
@@ -21,6 +24,9 @@ val suspend : t -> t
 (** Withdraw read authority and pending callbacks; retain the activity draft.
     A fresh read is required even when returning to the same workspace. *)
 val start_read : generation:int -> t -> (t * request) option
+val withdraw_read : request -> string -> t -> t
+(** The workspace guard stopped the read before it left: it settles as a
+    failed read does, and [notice], the caller's kept-back notice, is said. *)
 val finish_read : request -> (document, string) result -> t -> t
 (** Follow the current file when the retained activity has no unsaved change
     and the resolved path is unchanged. Preserve a changed draft and its base,

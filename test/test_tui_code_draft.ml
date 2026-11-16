@@ -129,9 +129,10 @@ let test_conflict_uncertainty_require_explicit_adoption () =
      | Draft.Needs_review (Draft.Conflict detail, None), Draft.Save_conflict expected
      | Draft.Needs_review (Draft.Uncertain detail, None), Draft.Save_uncertain expected ->
          check string "precise review reason survives" expected detail
-     | (Draft.Editable | Draft.Saving _ | Draft.Rejected _
+     | (Draft.Editable | Draft.Saving _ | Draft.Rejected _ | Draft.Kept_back _
        | Draft.Needs_review ((Draft.Conflict _ | Draft.Uncertain _), (None | Some _))),
-       (Draft.Save_succeeded _ | Draft.Save_refused _ | Draft.Save_conflict _ | Draft.Save_uncertain _) ->
+       (Draft.Save_succeeded _ | Draft.Save_refused _ | Draft.Save_conflict _ | Draft.Save_uncertain _
+       | Draft.Save_kept_back _) ->
          fail "save failure did not retain its review reason");
     refused "review cannot retry against the stale base" (Draft.begin_save review);
     refused "adoption needs a fresh observation" (Draft.adopt_current review);

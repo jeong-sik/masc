@@ -62,7 +62,7 @@ let test_goal_candle_read_rejects_stale_authority_and_refusals () =
   (match view () with Masc_tui_fetched.Failed _ -> () | _ -> Alcotest.fail "retry lost its previous failure");
   complete retry (Ok (owner, Error (Goal_candle_read_failed "private-alpha")));
   let first_failure = match view () with
-    | Masc_tui_fetched.Failed detail -> detail
+    | Masc_tui_fetched.Failed (Goal_candle_unread detail) -> detail
     | _ -> Alcotest.fail "interrupted response retained admin data" in
   Alcotest.(check bool) "first failed read settled" false (Masc_tui_fetched.in_flight state.goal_candle);
   Alcotest.(check bool) "first unowned detail is absent from state" false
@@ -70,7 +70,7 @@ let test_goal_candle_read_rejects_stale_authority_and_refusals () =
   let another = start () in
   complete another (Ok (owner, Error (Goal_candle_read_failed "secret-beta")));
   (match view () with
-   | Masc_tui_fetched.Failed detail ->
+   | Masc_tui_fetched.Failed (Goal_candle_unread detail) ->
      Alcotest.(check bool) "second failed read settled" false (Masc_tui_fetched.in_flight state.goal_candle);
      Alcotest.(check bool) "second unowned detail is absent from state" false
        (Astring.String.is_infix ~affix:"secret-beta" detail);
@@ -754,16 +754,21 @@ let test_writes_wait_for_a_confirmed_identity () =
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
   let authority = state.workspace_authority in
   let refusal () = Masc_tui_types.write_authority_refusal state authority in
-  Alcotest.(check (option string)) "a confirmed match sends" None (refusal ());
+  let refusal_t = Alcotest.testable (fun fmt refusal ->
+      Format.pp_print_string fmt (match refusal with
+        | Masc_tui_types.Workspace_authority_withdrawn -> "Workspace_authority_withdrawn"
+        | Workspace_identity_not_confirmed -> "Workspace_identity_not_confirmed"
+        | Workspace_identity_changed -> "Workspace_identity_changed")) ( = ) in
+  Alcotest.(check (option refusal_t)) "a confirmed match sends" None (refusal ());
   state.workspace_identity <-
     Masc_tui_types.Workspace_identity_match_unconfirmed "one failed tick";
-  Alcotest.(check (option string)) "an unconfirmed match waits"
-    (Some "Workspace identity is unconfirmed") (refusal ());
+  Alcotest.(check (option refusal_t)) "an unconfirmed match waits"
+    (Some Masc_tui_types.Workspace_identity_not_confirmed) (refusal ());
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
   let (Masc_tui_types.Workspace_authority generation) = state.workspace_authority in
   state.workspace_authority <- Masc_tui_types.Workspace_authority (generation + 1);
-  Alcotest.(check (option string)) "a moved authority refuses"
-    (Some "Workspace authority withdrawn") (refusal ())
+  Alcotest.(check (option refusal_t)) "a moved authority refuses"
+    (Some Masc_tui_types.Workspace_authority_withdrawn) (refusal ())
 
 let test_partial_identity_keeps_definite_mismatches () =
   let local = "/workspace/a" in
@@ -839,7 +844,7 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
   (* Completion checks identity itself as well as generation. *)
   apply_keeper_deletions_read state ~generation:state.keeper_deletions_generation (Ok b);
   check_preserved "matching generation cannot replace unconfirmed rows";
-  apply_keeper_deletions_read state ~generation:state.keeper_deletions_generation (Error "HTTP 503");
+  apply_keeper_deletions_read state ~generation:state.keeper_deletions_generation (Error (Request_failed "HTTP 503"));
   check_preserved "failed unconfirmed read";
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
       ~local_paths:state.local_workspace_paths (Ok (identity "/workspace/a"));
@@ -3129,7 +3134,7 @@ let test_answer_receipt_has_one_original_submission_owner () =
   Alcotest.(check bool) "ordinary refresh and failed reread preserve the receipt" true
     (current_ask_answer_feedback state = Some feedback);
   Alcotest.(check bool) "terminal duplicate cannot replace the earlier POST receipt" true
-    (Option.is_none (retain_ask_answer_feedback state first (Error "later observation failed")));
+    (Option.is_none (retain_ask_answer_feedback state first (Error (Request_failed "later observation failed"))));
   let failed_reread = match observe_ask_reread_completion state first ~at_ns:20L (Error "reread failed") with
     | Some observation -> observation
     | None -> Alcotest.fail "early POST receipt suppressed canonical reread completion" in
@@ -3144,7 +3149,7 @@ let test_answer_receipt_has_one_original_submission_owner () =
     (Option.is_none (observe_ask_reread_completion state first ~at_ns:21L (Error "duplicate")));
   let second = submission "second" in
   begin_ask_submission_state ~submission:second state;
-  let next = match retain_ask_answer_feedback state second (Error "recording unknown") with
+  let next = match retain_ask_answer_feedback state second (Error (Request_failed "recording unknown")) with
     | Some next -> next | None -> Alcotest.fail "new original submission must own its receipt" in
   Alcotest.(check bool) "an older request cannot overwrite the newer receipt" true
     (Option.is_none (retain_ask_answer_feedback state first receipt));
@@ -3220,7 +3225,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
    | Error error -> Alcotest.fail (Printexc.to_string error)
    | Ok () -> Alcotest.fail "final notification unexpectedly entered the full mailbox");
   Alcotest.(check bool) "worker cleanup cannot overwrite the actual result" false
-    (R.publish original.as_receipt ~observed_ns:21L (Error "late cancellation"));
+    (R.publish original.as_receipt ~observed_ns:21L (Error (Request_failed "late cancellation")));
   Alcotest.(check bool) "publication grants no feedback or final action settlement" true
     (state.ask_submit_inflight && Option.is_none state.ask_answer_feedback);
   let final_owner, final_fact = match List.nth_opt (take_pending_ask_answer_completions state) 0 with
@@ -3228,7 +3233,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   Alcotest.(check bool) "raw final result is coherent and cannot be overwritten by worker closure" true
     (final_owner==original && final_fact.receipt=receipt && final_fact.asks=reread
      && final_fact.observed_ns=30L
-     && not (C.publish original.as_completion ~observed_ns:31L ~receipt:(Error "late failure")
+     && not (C.publish original.as_completion ~observed_ns:31L ~receipt:(Error (Request_failed "late failure"))
        ~asks:(Error "late failure")));
   let final_message = P.ask_answer_completion_message final_owner final_fact in
   state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
@@ -3272,7 +3277,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
     (pending.as_request==original.as_request && observed.result=receipt && observed.observed_ns=20L
      && pending.as_source_turn_ref=Some source);
   let impostor = {original with as_receipt=R.create ()} in
-  ignore (R.publish impostor.as_receipt ~observed_ns:99L (Error "unrelated result"));
+  ignore (R.publish impostor.as_receipt ~observed_ns:99L (Error (Request_failed "unrelated result")));
   let owner, observed = match take_ask_answer_receipt state impostor with
     | Some observed -> observed | None -> Alcotest.fail "registered original receipt was not recoverable" in
   Alcotest.(check bool) "drain reads the registered owner's cell, never a replacement payload" true
@@ -3302,7 +3307,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
         | Some (_, fact) -> fact.result=receipt | None -> false);
   let replacement = submission "replacement" in
   begin_ask_submission_state ~submission:replacement state;
-  let unknown = Error "response unavailable" in
+  let unknown = Error (Request_failed "response unavailable") in
   ignore (R.publish replacement.as_receipt ~observed_ns:30L unknown);
   let owner, observed = match take_ask_answer_receipt state replacement with
     | Some observed -> observed | None -> Alcotest.fail "replacement lost its own receipt" in
@@ -4253,7 +4258,7 @@ let test_settings_preparation_hands_off_original_snapshot_once () =
       && member "instructions" patch=`String "edited" && member "activation_mode" patch=`Null);
   let failed = keeper_settings_request state in
   Alcotest.(check bool) "read failure cannot reopen the earlier successful document" true
-    (take_keeper_settings_editor_read state failed (Error "endpoint unavailable")
+    (take_keeper_settings_editor_read state failed (Error (Request_failed "endpoint unavailable"))
       && Option.is_none (take ~input_pending:false));
   let retry = keeper_settings_request state in
   Alcotest.(check bool) "explicit retry owns a fresh read and late prior success cannot complete it" true
@@ -4302,7 +4307,7 @@ let test_settings_preparation_retires_focus_and_workspace_owners () =
   state.detail_tab <- Detail_info;
   Alcotest.(check bool) "tab navigation retires the opening intent" true
     (reconcile_keeper_settings_editor state ~available:true
-      && not (take_keeper_settings_editor_read state active (Error "old tab")));
+      && not (take_keeper_settings_editor_read state active (Error (Request_failed "old tab"))));
   let active = keeper_settings_request state in
   state.view <- Keepers Keeper_list;
   Alcotest.(check bool) "switching list/detail cannot restore a previous editor request" true
@@ -4419,7 +4424,8 @@ let test_settings_save_not_sent_preserves_origin_input () =
     (retained.ksa_recoverable && match retained.ksa_status with
      | Settings_finished (_,Settings_not_sent _) -> true
      | Settings_checking | Settings_reading | Settings_posting _ | Settings_finished (_, (Settings_applied _
-         | Settings_unchanged | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _)) -> false);
+         | Settings_unchanged | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _
+         | Settings_kept_back _)) -> false);
   Alcotest.(check string) "exact refused input survives" draft.ksd_text (settings_editor_text retained.ksa_request)
 
 let sandbox_save_snapshot profile =
@@ -4785,7 +4791,7 @@ let test_runtime_form_prepares_original_revision () =
     metadata={reading.metadata with source_revision="another writer"}} in
   Alcotest.(check bool) "changed source refuses before applying original fields" true
     (match prepare_runtime_form_save draft changed with Error (Form_not_sent _) -> true
-     | Ok _ | Error (Form_saved _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ | Form_unconfirmed _) -> false)
+     | Ok _ | Error (Form_saved _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ | Form_unconfirmed _) -> false)
 
 let test_runtime_form_retains_unknown_and_rejects_duplicate () =
   let open Masc_tui_types in
@@ -5446,7 +5452,7 @@ let test_tools_task_unpresented_frame_and_picker () =
   let loading = tools_task_frame state ~count:30 ~height:14 ~offset:16 in
   tools_task_presented_frame state loading;
   Alcotest.(check int) "a temporary short frame retains the previous position" 86 state.tools_scroll;
-  complete_tools_async_task_history state request (Error "history unavailable");
+  complete_tools_async_task_history state request (Error (Request_failed "history unavailable"));
   let settled = tools_task_frame state ~count:30 ~height:14 ~offset:16 in
   Alcotest.(check bool) "the ready transition needs a presented frame" true
     (not settled.ttf_waiting && tools_task_viewport_changed state settled);
@@ -5495,7 +5501,7 @@ let test_task_history_progressive_read_keeps_owner_and_cursor () =
     (task_history_followup state first (Ok prefix));
   Alcotest.(check bool) "an exhausted prefix or failed first read does not continue" true
     (task_history_followup state first (Ok (task_scroll_history task_id))=None
-     && task_history_followup state first (Error "unavailable")=None);
+     && task_history_followup state first (Error (Request_failed "unavailable"))=None);
   complete_task_history_read state first (Ok prefix);
   let older = begin_task_history_read ~older:true state ~task_id ~limit:39 |> require in
   Alcotest.(check bool) "continuation preserves the observed prefix and its cursor" true
@@ -5510,7 +5516,7 @@ let test_task_history_progressive_read_keeps_owner_and_cursor () =
   let refresh = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
   Alcotest.(check bool) "refresh retains a prior full observation instead of replacing it with a preview" true
     (refresh.thr_page.hr_limit=40 && Option.is_none refresh.thr_followup_limit);
-  complete_task_history_read state refresh (Error "refresh unavailable");
+  complete_task_history_read state refresh (Error (Request_failed "refresh unavailable"));
   state.task_history <- Fetched.clear state.task_history;
   let retired = begin_task_history_read ~progressive:true state ~task_id ~limit:40 |> require in
   let retired_result = decode retired.thr_page ~offset:20 ~next:(Some "older-cursor") in
@@ -5673,20 +5679,20 @@ let test_reopened_task_history_retains_only_owned_observation () =
     (Fetched.in_flight state.task_history
      && Fetched.view_for ~equal:String.equal state.task_history ~key:task_id = Fetched.Ready previous);
   cancel_task_history_for_view_exit state;
-  complete_task_history_read state refresh (Error "late cancelled response");
+  complete_task_history_read state refresh (Error (Request_failed "late cancelled response"));
   Alcotest.(check bool) "leaving the view retires the read without inventing an identity failure" true
     (state.task_history_request = None
      && Fetched.view_for ~equal:String.equal state.task_history ~key:task_id = Fetched.Ready previous);
   prepare_task_history_for_open state ~task_id;
   let refresh = begin_task_history_read state ~task_id ~limit:40 |> require in
-  complete_task_history_read state refresh (Error "fixture unavailable");
+  complete_task_history_read state refresh (Error (Request_failed "fixture unavailable"));
   Alcotest.(check bool) "a failed refresh reports the retained observation as stale" true
     (Fetched.view_for ~equal:String.equal state.task_history ~key:task_id
-     = Fetched.Stale (previous, "fixture unavailable"));
+     = Fetched.Stale (previous, Request_failed "fixture unavailable"));
   (* The legacy Home route clears the source directly before opening a Task. *)
   state.task_history <- Fetched.clear state.task_history;
   let first_other = begin_task_history_read state ~task_id:"task-other" ~limit:40 |> require in
-  complete_task_history_read state first_other (Error "other unavailable");
+  complete_task_history_read state first_other (Error (Request_failed "other unavailable"));
   prepare_task_history_for_open state ~task_id:"task-other";
   Alcotest.(check bool) "an older owner's marker cannot turn another Task's failure into an observation" true
     (Fetched.current_key state.task_history = None && state.task_history_last_reading = None);
@@ -5855,7 +5861,7 @@ let test_task_detail_end_respects_presented_input () =
       ~fallback:(fun () -> Alcotest.fail "lost displayed viewport") in
   task_detail_user_scroll state (Masc_tui_scroll.page_up ~count ~height state.task_detail_scroll);
   Alcotest.(check int) "PageUp uses the displayed height" 0 state.task_detail_scroll;
-  complete_task_history_read state refresh (Error "fixture refresh failed")
+  complete_task_history_read state refresh (Error (Request_failed "fixture refresh failed"))
 
 let test_task_detail_end_waits_for_current_read_and_frame () =
   let open Masc_tui_types in
@@ -5892,7 +5898,7 @@ let test_task_detail_end_waits_for_current_read_and_frame () =
   let next = match begin_task_history_read state ~task_id ~limit:40 with
     | Some request -> request | None -> Alcotest.fail "next read did not start" in
   task_detail_select_end state ~cols;
-  complete_task_history_read state next (Error "fixture refresh failed");
+  complete_task_history_read state next (Error (Request_failed "fixture refresh failed"));
   task_detail_presented_frame state ~task_id ~count:116 ~height:16 ~offset:100 ~cols;
   Alcotest.(check bool) "a presented failure settles End without retrying forever" false
     (task_detail_following_end state);
@@ -5907,7 +5913,7 @@ let test_task_detail_end_waits_for_current_read_and_frame () =
   task_detail_select_end state ~cols;
   state.workspace_read_authority <- ref ();
   reconcile_task_detail_scroll state;
-  complete_task_history_read state next (Error "retired workspace");
+  complete_task_history_read state next (Error (Request_failed "retired workspace"));
   Alcotest.(check bool) "workspace replacement discards the old End and viewport" true
     (Option.is_none state.task_detail_follow_end && Option.is_none state.task_detail_presented);
   state.task_detail_id <- Some "another-task";
@@ -5948,34 +5954,34 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   let goal_view () = Fetched.view_for ~equal:String.equal state.goal_timeline ~key:goal_id in
   let previous = task_rows "todo" and current = task_rows "in_progress" and repaired = task_rows "done" in
   let initial = begin_task_history_read state ~task_id ~limit:1 |> required in
-  complete_task_history_read state initial (Error "initial history source unavailable");
+  complete_task_history_read state initial (Error (Request_failed "initial history source unavailable"));
   let old = begin_task_history_read state ~task_id ~limit:1 |> required in
   let owner = begin_task_history_read state ~task_id ~limit:1 |> required in
   complete_task_history_read state old (Ok previous);
   Alcotest.(check bool) "no-value retry retains original failure and rejects the old success" true
     (Fetched.is_current ~equal:String.equal state.task_history owner.thr_ticket
      && Fetched.in_flight state.task_history && Fetched.value (task_view ()) = None
-     && task_view () = Fetched.Failed "initial history source unavailable");
-  complete_task_history_read state owner (Error "current retry failed");
+     && task_view () = Fetched.Failed (Request_failed "initial history source unavailable"));
+  complete_task_history_read state owner (Error (Request_failed "current retry failed"));
   Alcotest.(check bool) "latest no-value failure replaces cause without inventing history" true
-    (not (Fetched.in_flight state.task_history) && task_view () = Fetched.Failed "current retry failed");
+    (not (Fetched.in_flight state.task_history) && task_view () = Fetched.Failed (Request_failed "current retry failed"));
   let recovery = begin_task_history_read state ~task_id ~limit:1 |> required in
   complete_task_history_read state owner (Ok previous);
   Alcotest.(check bool) "duplicate retired completion cannot settle retry recovery" true
     (Fetched.is_current ~equal:String.equal state.task_history recovery.thr_ticket
-     && task_view () = Fetched.Failed "current retry failed");
+     && task_view () = Fetched.Failed (Request_failed "current retry failed"));
   complete_task_history_read state recovery (Ok current);
   let old_refresh = begin_task_history_read state ~task_id ~limit:1 |> required in
   let refresh = begin_task_history_read state ~task_id ~limit:1 |> required in
   Alcotest.(check bool) "refresh retains original observed history while pending" true
     (Fetched.in_flight state.task_history && Fetched.value (task_view ()) = Some current);
-  complete_task_history_read state refresh (Error "history source unavailable");
+  complete_task_history_read state refresh (Error (Request_failed "history source unavailable"));
   complete_task_history_read state old_refresh (Ok previous);
   Alcotest.(check bool) "old success cannot erase latest failure or original history" true
-    (task_view () = Fetched.Stale (current,"history source unavailable"));
+    (task_view () = Fetched.Stale (current,(Request_failed "history source unavailable")));
   let retry = begin_task_history_read state ~task_id ~limit:1 |> required in
   Alcotest.(check bool) "retry retains the unrepaired source failure" true
-    (Fetched.in_flight state.task_history && task_view () = Fetched.Stale (current,"history source unavailable"));
+    (Fetched.in_flight state.task_history && task_view () = Fetched.Stale (current,(Request_failed "history source unavailable")));
   complete_task_history_read state retry (Ok repaired);
   Alcotest.(check bool) "current original history resumes after source repair" true
     (task_view () = Fetched.Ready repaired && not (Fetched.in_flight state.task_history));
@@ -5986,14 +5992,14 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
     | Fetched.Failed cause -> cause | _ -> Alcotest.fail "typed unavailable Goal source acquired a successful value" in
   let old_goal = begin_goal_timeline_read state ~goal_id |> required in
   let goal = begin_goal_timeline_read state ~goal_id |> required in
-  complete_goal_timeline_read state old_goal (Error "retired retry failure");
+  complete_goal_timeline_read state old_goal (Error (Request_failed "retired retry failure"));
   Alcotest.(check bool) "Goal no-value retry retains original typed source cause and current owner" true
     (goal_view () = Fetched.Failed initial_goal_failure && Fetched.value (goal_view ()) = None
      && Fetched.is_current ~equal:String.equal state.goal_timeline goal
      && Fetched.in_flight state.goal_timeline);
   let original_goal = goal_rows "original Task is in progress" in
   complete_goal_timeline_read state goal (Ok (Tui_decode.Goal_timeline_ready original_goal));
-  complete_goal_timeline_read state old_goal (Error "late retired failure");
+  complete_goal_timeline_read state old_goal (Error (Request_failed "late retired failure"));
   Alcotest.(check bool) "goal history retains its own current observation" true
     (goal_view () = Fetched.Ready original_goal);
   let goal_refresh = begin_goal_timeline_read state ~goal_id |> required in
@@ -6032,13 +6038,13 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
     ~authority:state.workspace_authority ~reading:state.workspace_read_authority ~first_page:false in
   let owner = make 1 in
   state.msg_history_inflight <- Some owner;
-  Read.publish owner Read.History ~ready_at_ns:11L (Error "history refused");
-  Read.publish owner Read.History ~ready_at_ns:12L (Error "duplicate must not replace it");
+  Read.publish owner Read.History ~ready_at_ns:11L (Error (Request_failed "history refused"));
+  Read.publish owner Read.History ~ready_at_ns:12L (Error (Request_failed "duplicate must not replace it"));
   let offered = Protocol.collect_owned_results state in
   Alcotest.(check int) "completed source offered without its sibling" 1 (List.length offered);
   (match offered with
    | [{Protocol.ready_at_ns; message=Protocol.Workspace_scoped (authority, Some reading,
-        Protocol.Keeper_msg (Protocol.Keeper_chat_history_loaded (request, Read.History, Error detail)))}] ->
+        Protocol.Keeper_msg (Protocol.Keeper_chat_history_loaded (request, Read.History, Error (Request_failed detail))))}] ->
        Alcotest.(check int64) "original result observation retained" 11L ready_at_ns;
        Alcotest.(check string) "duplicate did not overwrite failure" "history refused" detail;
        Alcotest.(check bool) "original request identity retained" true (request == owner);
@@ -6051,7 +6057,7 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
   Alcotest.(check bool) "UI settles only the offered source" true (Read.settle owner Read.History);
   Alcotest.(check bool) "waiting memory remains pending" true (Read.pending owner);
   Alcotest.(check bool) "settlement cannot be repeated" false (Read.settle owner Read.History);
-  Read.publish owner Read.Memory ~ready_at_ns:13L (Error "memory refused");
+  Read.publish owner Read.Memory ~ready_at_ns:13L (Error (Request_failed "memory refused"));
   Alcotest.(check int) "sibling still publishes independently" 1
     (List.length (Protocol.collect_owned_results state));
   Alcotest.(check bool) "second UI admission settles sibling" true (Read.settle owner Read.Memory);
@@ -6059,12 +6065,12 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
   let retired = make 2 in
   state.msg_history_inflight <- Some retired;
   suspend_workspace_readings state;
-  Read.publish retired Read.Memory ~ready_at_ns:14L (Error "late retired response");
+  Read.publish retired Read.Memory ~ready_at_ns:14L (Error (Request_failed "late retired response"));
   let successor = make 3 in
   state.msg_history_inflight <- Some successor;
   Alcotest.(check int) "retired inbox cannot supply successor" 0
     (List.length (Protocol.collect_owned_results state));
-  Read.publish successor Read.History ~ready_at_ns:15L (Error "new history result");
+  Read.publish successor Read.History ~ready_at_ns:15L (Error (Request_failed "new history result"));
   Alcotest.(check int) "successor keeps its own receipt" 1
     (List.length (Protocol.collect_owned_results state))
 ;;
@@ -6098,7 +6104,7 @@ let test_keeper_initial_reply_is_partial_and_can_be_withdrawn () =
   Read.retire_initial_reply request;
   Alcotest.(check bool) "full result withdraws an already offered partial reply" false
     (Read.settle request Read.Initial_reply);
-  Read.publish request Read.Initial_reply ~ready_at_ns:21L (Error "late optional response");
+  Read.publish request Read.Initial_reply ~ready_at_ns:21L (Error (Request_failed "late optional response"));
   Alcotest.(check bool) "full history ends its loading state" false
     (keeper_message_history_loading state);
   Read.retire_page request;
@@ -6129,7 +6135,7 @@ let test_keeper_initial_reply_is_partial_and_can_be_withdrawn () =
       ~authority:state.workspace_authority ~reading:state.workspace_read_authority
       ~first_page:true in
   Read.retire_page failed;
-  Read.publish failed Read.History ~ready_at_ns:30L (Error "full history failed");
+  Read.publish failed Read.History ~ready_at_ns:30L (Error (Request_failed "full history failed"));
   Read.publish failed Read.Memory ~ready_at_ns:31L (Ok {rows=[];dropped=0});
   ignore (Read.take_ready failed);
   ignore (Read.settle failed Read.History);
@@ -6256,16 +6262,16 @@ let test_async_observation_has_an_independent_generation () =
   let second = Option.get (begin_tools_async_observation_read state) in
   Alcotest.(check int) "the next read owns a new generation" 2 second;
   Alcotest.(check bool) "an authorization failure settles only that generation" true
-    (apply_tools_async_observation_result state ~generation:second (Error "HTTP 403"));
+    (apply_tools_async_observation_result state ~generation:second (Error (Request_failed "HTTP 403")));
   Alcotest.(check bool) "a refusal releases the read" false state.tools_async_observation_inflight;
   Alcotest.(check bool) "a refusal retains the last good observation" true
     (state.tools_async_observation = Some empty_async_observation);
-  Alcotest.(check (option string)) "a refusal stays visible" (Some "HTTP 403")
-    state.tools_async_observation_error;
+  Alcotest.(check bool) "a refusal stays visible" true
+    (state.tools_async_observation_error = Some (Request_failed "HTTP 403"));
   Alcotest.(check bool) "a stale completion cannot clear the current reading" false
     (apply_tools_async_observation_result state ~generation:(second + 1) (Ok empty_async_observation));
-  Alcotest.(check (option string)) "the stale completion does not erase the error" (Some "HTTP 403")
-    state.tools_async_observation_error
+  Alcotest.(check bool) "the stale completion does not erase the error" true
+    (state.tools_async_observation_error = Some (Request_failed "HTTP 403"))
 
 let test_turn_observation_replaces_and_refuses_atomically () =
   let open Masc_tui_types in
@@ -6291,7 +6297,7 @@ let test_turn_observation_replaces_and_refuses_atomically () =
     (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
   Alcotest.(check (option (float 0.001))) "accepted observation carries its clock" (Some 20.)
     state.keeper_turns_observed_at;
-  Alcotest.(check (option string)) "accepted observation clears the old error" None state.keeper_turns_error;
+  Alcotest.(check bool) "accepted observation clears the old error" true (Option.is_none state.keeper_turns_error);
   accept_keeper_turn_observation state ~rows:[ turn "new" ]
     ~waiting:(Tui_decode.Keeper_waiting_observed []) ~observed_at:30.;
   Alcotest.(check string) "missing waiting preserves the last good row" "new"
@@ -6322,7 +6328,7 @@ let test_turn_observation_replaces_and_refuses_atomically () =
     (state.keeper_waiting_failure = Some unavailable);
   Alcotest.(check bool) "last waiting observation remains retained" true
     ((List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_busy);
-  refuse_keeper_turn_observation state "HTTP 503";
+  refuse_keeper_turn_observation state (Request_failed "HTTP 503");
   Alcotest.(check bool) "a transport refusal does not clear waiting failure" true
     (state.keeper_waiting_failure = Some unavailable);
   accept_keeper_turn_observation state ~rows:[ advanced_turn ]
@@ -6353,14 +6359,15 @@ let test_turn_observation_replaces_and_refuses_atomically () =
   Alcotest.(check bool) "a fresh waiting observation clears the failure" true
     (state.keeper_waiting_failure = None
      && (List.hd state.keeper_waiting).Tui_decode.kwr_state = Tui_decode.Keeper_waiting_idle);
-  refuse_keeper_turn_observation state "HTTP 503";
+  refuse_keeper_turn_observation state (Request_failed "HTTP 503");
   Alcotest.(check string) "a failed read keeps the accepted turn" "new"
     (List.hd state.keeper_turns).Tui_decode.ktr_keeper_name;
   Alcotest.(check string) "a failed read keeps the accepted waiting" "new"
     (List.hd state.keeper_waiting).Tui_decode.kwr_keeper_name;
   Alcotest.(check (option (float 0.001))) "a failed read keeps the accepted clock" (Some 60.)
     state.keeper_turns_observed_at;
-  Alcotest.(check (option string)) "a failed read is visible" (Some "HTTP 503") state.keeper_turns_error
+  Alcotest.(check bool) "a failed read is visible" true
+    (state.keeper_turns_error = Some (Request_failed "HTTP 503"))
 
 let test_empty_fleet_failure_requires_explicit_recovery () =
   let open Masc_tui_types in

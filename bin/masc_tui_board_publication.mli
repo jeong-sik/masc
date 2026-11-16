@@ -89,10 +89,15 @@ val response_effect : response -> Failure_effect.t
 
 type 'authority outcome = private
   | Not_attempted of { request : 'authority request; detail : string }
+  | Kept_back of { request : 'authority request; notice : string }
   | Returned of { prepared : 'authority prepared; response : response }
 val not_attempted : 'authority request -> detail:string -> 'authority outcome
 (** No Board publication call began. Earlier content-addressed artifact uploads
     may already exist; this is not a claim that no external effect happened. *)
+val kept_back : 'authority request -> notice:string -> 'authority outcome
+(** The workspace guard withdrew the publication before any upload or call
+    began. [notice] is the caller's kept-back notice, drawn alone
+    (RFC-tui-one-screen-grammar §2). *)
 val returned : 'authority prepared -> response -> 'authority outcome
 val outcome_request : 'authority outcome -> 'authority request
 

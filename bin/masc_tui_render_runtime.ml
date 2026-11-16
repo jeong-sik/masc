@@ -1156,9 +1156,11 @@ let render_tools (state : state) =
   box_divider buf cols;
   (match (selected_tools_error state) with
    | None -> ()
-   | Some detail ->
+   | Some failure ->
        box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
+         ("  " ^ Keeper_chat.terminal_safe_text
+            (request_failure_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Tool_inventory_read failure));
        box_divider buf cols);
   let display_lines = Render_tools.tools_display_lines ~cols ~terminal_rows state in
   let layout = tools_scrolled_for_lines state display_lines in

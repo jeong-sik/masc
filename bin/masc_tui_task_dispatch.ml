@@ -4,7 +4,8 @@ type intent = {
 }
 type outcome =
   | Created of { task_id : string; workspace : Masc.Tui_decode.server_identity }
-  | Not_sent of string | Server_error of string | Unconfirmed of string
+  | Not_sent of string | Kept_back of string | Server_error of string | Unconfirmed of string
+type preparation_failure = Preparation_failed of string | Preparation_kept_back of string
 type completion = { ready_at_ns : int64; outcome : outcome }
 type progress = Not_started | Reserved | Preparing | Sending | Completed of completion
 type t = { intent : intent; progress : progress Atomic.t }
@@ -20,9 +21,11 @@ let complete t outcome =
     | Not_started | Reserved | Preparing | Sending ->
         if not (Atomic.compare_and_set t.progress before (Completed completion)) then commit () in
   commit ()
-let reject t detail =
-  let completion = { ready_at_ns = Mtime_clock.elapsed_ns (); outcome = Not_sent detail } in
+let settle_unstarted t outcome =
+  let completion = { ready_at_ns = Mtime_clock.elapsed_ns (); outcome } in
   ignore (Atomic.compare_and_set t.progress Not_started (Completed completion))
+let reject t detail = settle_unstarted t (Not_sent detail)
+let keep_back t notice = settle_unstarted t (Kept_back notice)
 let boundary_failure t detail = match progress t with
   | Not_started | Reserved | Preparing -> complete t (Not_sent detail)
   | Sending -> complete t (Unconfirmed detail)
@@ -36,7 +39,8 @@ let launch t ~prepare ~send =
         | None -> complete t (Not_sent "workspace identity is not verified")
         | Some workspace ->
           (match prepare () with
-           | Error detail -> complete t (Not_sent detail)
+           | Error (Preparation_failed detail) -> complete t (Not_sent detail)
+           | Error (Preparation_kept_back notice) -> complete t (Kept_back notice)
            | Ok session_id ->
              let arguments =
                ("expected_workspace", `Assoc

@@ -1792,7 +1792,7 @@ let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
     match page, row with
     | Masc_tui_keeper_story.World, (Some _ | None) ->
         ("  " ^ Theme.info () ^ "world · shared workspace memory" ^ Ansi.reset,
-         Masc_tui_keeper_world.dock_lines ~health_error:state.memory_health_error
+         Masc_tui_keeper_world.dock_lines ~health_error:(memory_health_error_text state)
            ~cells:inner ~max_lines:(Masc_tui_render_keeper_story.body_rows ~rows)
            state.memory_health (Masc_tui_memory_world.reading state.memory_world))
     | Masc_tui_keeper_story.(Story | Schedule | Memory), None ->
@@ -2009,11 +2009,18 @@ let keeper_plain_turn_record (state : state) ~now ~keeper_name =
   | Masc_tui_fetched.Absent -> text "턴 종료 기록 미조회 · Enter:Story" "turn records not read · Enter:Story"
   | Masc_tui_fetched.Loading -> text "턴 종료 기록 조회 중" "reading turn records"
   | Masc_tui_fetched.Ready turns -> retained ^ observed turns
-  | Masc_tui_fetched.Stale (turns, reason) ->
+  | Masc_tui_fetched.Stale (turns, Request_failed reason) ->
       retained ^ text "갱신 실패: " "refresh failed: " ^ Terminal_text.single_line reason
       ^ " · " ^ observed turns
-  | Masc_tui_fetched.Failed reason ->
+  | Masc_tui_fetched.Stale (turns, Request_withdrawn refusal) ->
+      retained ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+        ~request:Kept_request.Keeper_turns_read refusal
+      ^ " · " ^ observed turns
+  | Masc_tui_fetched.Failed (Request_failed reason) ->
       text "턴 종료 기록 미확인: " "turn records unknown: " ^ Terminal_text.single_line reason
+  | Masc_tui_fetched.Failed (Request_withdrawn refusal) ->
+      workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+        ~request:Kept_request.Keeper_turns_read refusal
 
 let keeper_plain_result (state : state) (row : Keeper_list_model.row) =
   let ko = state.ui_language = Lang_ko in
@@ -2172,9 +2179,15 @@ let keeper_observation_errors (state : state) =
   List.filter_map Fun.id
     [ Option.map (fun e -> (text "목록" "roster metadata", e)) state.keepers_error
     ; Option.map (fun e -> (text "실행 관측" "live roster", e)) state.keeper_roster_error
-    ; Option.map (fun e -> (text "턴 관측" "turn observation", e)) state.keeper_turns_error
-    ; Option.map (fun e -> (text "대기 목록" "waiting inventory", e)) state.keeper_waiting_error
-    ; Option.map (fun e -> (text "별도 실행" "async observation", e)) state.tools_async_observation_error
+    ; Option.map (fun e -> (text "턴 관측" "turn observation",
+        request_failure_text ~ko:(state.ui_language = Lang_ko)
+          ~request:Kept_request.Turn_observation_read e)) state.keeper_turns_error
+    ; Option.map (fun e -> (text "대기 목록" "waiting inventory",
+        request_failure_text ~ko:(state.ui_language = Lang_ko)
+          ~request:Kept_request.Waiting_list_read e)) state.keeper_waiting_error
+    ; Option.map (fun e -> (text "별도 실행" "async observation",
+        request_failure_text ~ko:(state.ui_language = Lang_ko)
+          ~request:Kept_request.Async_requests_read e)) state.tools_async_observation_error
     ; Option.map (fun e -> (text "승인 요청" "approval reading", e)) state.keeper_tool_approvals_error
     ; Option.map (fun e -> (text "질문" "questions", e)) state.asks_error
     ]
@@ -2772,16 +2785,26 @@ let render_keeper_axes (state : state) =
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
    | None -> ());
+  (* A read the workspace guard stopped is drawn as its kept-back notice
+     alone, never under a failure label (RFC §2). *)
+  let kept_back request refusal =
+    box_line buf cols
+      (Theme.warn () ^ "  " ^ Terminal_text.single_line
+         (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal) ^ Ansi.reset) in
   (match state.keeper_turns_error with
-   | Some err ->
+   | Some (Request_failed err) ->
        box_line buf cols
          (Theme.warn () ^ "  turn/waiting observation: "
           ^ Terminal_text.single_line err ^ Ansi.reset)
+   | Some (Request_withdrawn refusal) ->
+       kept_back Kept_request.Turn_observation_read refusal
    | None -> ());
   (match state.keeper_waiting_error with
-   | Some err ->
+   | Some (Request_failed err) ->
        box_line buf cols
          (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
+   | Some (Request_withdrawn refusal) ->
+       kept_back Kept_request.Waiting_list_read refusal
    | None ->
        (match keeper_waiting_refresh_slow state with
         | Some age ->
@@ -2804,10 +2827,11 @@ let render_keeper_axes (state : state) =
        box_line buf cols
          (Theme.warn () ^ "  fleet waiting observation unavailable: " ^ detail ^ Ansi.reset));
   (match state.tools_async_observation_error with
-   | Some err ->
+   | Some (Request_failed err) ->
        box_line buf cols
          (Theme.warn () ^ "  async observation: "
           ^ Terminal_text.single_line err ^ Ansi.reset)
+   | Some (Request_withdrawn refusal) -> kept_back Kept_request.Async_requests_read refusal
    | None -> ());
 
   Option.iter (fun note -> box_line buf cols note)
@@ -2927,7 +2951,7 @@ let render_keeper_axes (state : state) =
     (function
       | Keeper_world as entry ->
           let world = Masc_tui_keeper_world.row_cells ~view:state.keeper_list_view
-              ~health_error:state.memory_health_error state.memory_health
+              ~health_error:(memory_health_error_text state) state.memory_health
               (Masc_tui_memory_world.reading state.memory_world) in
           let text = (grid_line grid
             { gutter = Theme.info () ^ "▌ ■ " ^ Ansi.reset
@@ -4471,10 +4495,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Some (name, detail) when String.equal name k.k_name -> Some detail
         | Some _ | None -> None in
       let error_lines = match error with
-        | Some detail ->
+        | Some (Request_failed detail) ->
             [ (Theme.bad ()) ^ "  "
               ^ (if observed then ui_text state ~ko:"이전 관측 · " ~en:"STALE · " else "")
               ^ Terminal_text.single_line detail ^ Ansi.reset ]
+        | Some (Request_withdrawn refusal) ->
+            [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line
+                (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                   ~request:Kept_request.Schedule_read refusal) ^ Ansi.reset ]
         | None -> [] in
       let progress = match pending with
         | None -> []

@@ -139,10 +139,16 @@ type changes_authority =
   | Changes_revalidating
   | Changes_needs_revalidation
 
+(** Why the refresh after a shown answer did not replace it: the read's own
+    failure, or the notice for a refresh the workspace guard did not send,
+    which is drawn alone. *)
+type refresh_note = Refresh_failed of string | Refresh_kept_back of string
+
 type changes =
   | Changes_absent  (** no keeper selected, or never asked *)
   | Changes_loading
   | Changes_failed of string
+  | Changes_kept_back of string
   | Changes_ready of {
       keeper : string;
       files : file_row list;  (** newest first *)
@@ -153,7 +159,7 @@ type changes =
       malformed : int;
       authority : changes_authority;
         (** Whether these retained rows can open a file in the current workspace. *)
-      refresh_failed : string option;
+      refresh_failed : refresh_note option;
         (** Why the refresh after this answer failed: the files are the last
             good read, and the status row says so above them. *)
     }

@@ -25,6 +25,10 @@ val history_heading_rows : ko:bool -> width:int -> string list
 (** The History section's heading, wrapped to [width] and drawn in the style
     of the Body's section headings. The rows carry their own style: a caller
     must not hand them to a wrapper that sanitises text. *)
-val history_status_lines : ko:bool -> width:int -> view:Masc.Tui_decode_task_inspection.history Masc_tui_fetched.view -> in_flight:bool -> continuing:bool -> string list
+(** Why a history reading holds no current answer: the read failed, or the
+    workspace guard stopped it before it left, which the caller has worded as
+    a kept-back notice and which is drawn as it is. *)
+type history_failure = History_read_failed of string | History_kept_back of string
+val history_status_lines : ko:bool -> width:int -> view:(Masc.Tui_decode_task_inspection.history, history_failure) Masc_tui_fetched.observation -> in_flight:bool -> continuing:bool -> string list
 (** Current read/pending/failure metadata only; contains no event-body work.
     The section heading is {!history_heading_rows}. *)

@@ -134,6 +134,10 @@ type error =
       body : string;
     }
   | Protocol_error of protocol_error
+  | Follow_kept_back of string
+      (* The caller's kept-back notice: after the message left, the workspace
+         guard stopped the request that follows its reply, so the message's
+         outcome is not known and the follow-up was not sent. *)
 
 type error_certainty =
   | Verified_rejected
@@ -394,6 +398,7 @@ let error_to_string = function
          own sentence. Saying it here too put "unverified" in the same line
          twice and pushed the one useful part, the cause, to the far end. *)
       "Keeper chat transport: " ^ detail
+  | Follow_kept_back notice -> notice
   | Http_error { status; body } ->
       Printf.sprintf "Keeper chat HTTP %d: %s" status (bounded_http_error_body (String.trim body))
   | Protocol_error { stream_error; _ } -> stream_error_to_string stream_error
@@ -416,7 +421,7 @@ let unverified_retry_notice ~request_id error =
    separate predicates rather than one shared classifier. *)
 let reader_unauthenticated = function
   | Http_error { status = 401 | 403; _ } -> true
-  | Http_error _ | Transport_error _ | Protocol_error _ -> false
+  | Http_error _ | Transport_error _ | Protocol_error _ | Follow_kept_back _ -> false
 
 (* The sentence itself belongs to Masc_tui_credential, which every refusal
    surface shares. What is specific here is the consequence: a refused read
@@ -435,7 +440,7 @@ let reconciliation_failure_detail ~credential_sent error =
       match Masc_tui_credential.server_reason_of_body body with
       | Some reason -> refused_reader_remedy ~credential_sent reason
       | None -> error_to_string error |> terminal_safe_text)
-  | Http_error _ | Transport_error _ | Protocol_error _ ->
+  | Http_error _ | Transport_error _ | Protocol_error _ | Follow_kept_back _ ->
       error_to_string error |> terminal_safe_text
 
 let stream_error_acceptance_observed = function
@@ -460,7 +465,7 @@ let protocol_error ?(acceptance_observed = false) stream_error =
 
 let error_acceptance_observed = function
   | Protocol_error { acceptance_observed; _ } -> acceptance_observed
-  | Transport_error _ | Http_error _ -> false
+  | Transport_error _ | Http_error _ | Follow_kept_back _ -> false
 
 let verified_pre_handler_http_rejection = function
   | 400 | 401 | 403 | 404 -> true
@@ -470,6 +475,8 @@ let error_certainty ?(was_unverified = false) error =
   let certainty =
     match error with
     | Transport_error _ -> Outcome_unverified
+    (* The message left before the guard stopped what follows it. *)
+    | Follow_kept_back _ -> Outcome_unverified
     | Http_error { status; _ } ->
         if verified_pre_handler_http_rejection status
         then Verified_rejected
@@ -527,6 +534,7 @@ let operation_record_of_result = function
       Some Operation_cancelled
   | Error
       ( Transport_error _
+      | Follow_kept_back _
       | Http_error _
       | Protocol_error
           { stream_error =

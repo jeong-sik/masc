@@ -182,6 +182,7 @@ let notice_text = function
   | Some (Lane_write_refused reason) -> "refuse: " ^ runtime_lane_refusal_text ~ko:false reason
   | Some Lane_write_pending -> "pending"
   | Some (Lane_write_committed _) -> "commit receipt retained"
+  | Some (Lane_write_kept_back _) -> "kept back"
 
 let stale_text state =
   match runtime_lane_stale_lines state with
@@ -283,7 +284,7 @@ let test_a_standalone_write_waits_for_the_standalone_list () =
 let test_a_refused_write_opens_edits_at_once () =
   let state = lane_state () in
   state.runtime_lane_write <- Lane_write_posting;
-  settle_runtime_lane_write state ~written:Runtime_surface_list (Error "HTTP 400: no");
+  settle_runtime_lane_write state ~written:Runtime_surface_list (Error (Request_failed "HTTP 400: no"));
   expect_plan "after the refusal" state down "write primary [b; a], cursor 1";
   Alcotest.(check string) "the refusal is drawn" "refuse: HTTP 400: no"
     (notice_text state.runtime_lane_notice)
@@ -294,7 +295,7 @@ let test_a_failed_reread_refuses_candidate_edits_with_a_line () =
   state.runtime_lane_write <- Lane_write_posting;
   settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
-    (Error "HTTP 503: down");
+    (Error (Request_failed "HTTP 503: down"));
   expect_plan "move is refused" state down
     "refuse: the lane list may be stale; reload it before changing candidates";
   expect_plan "drop is refused" state drop
@@ -334,7 +335,7 @@ let test_commit_application_survives_reread () =
       state.runtime_mode <- Runtime_lanes;
       Alcotest.(check bool) "narrow chrome accounts for wrapped receipt" true
         (runtime_surface_listing_chrome ~rows:100 ~cols:40 state > runtime_surface_listing_chrome ~rows:100 ~cols:140 state))
-      [Ok (); Error "HTTP 503: read unavailable"])
+      [Ok (); Error (Request_failed "HTTP 503: read unavailable")])
     [Receipt.Exact_output_registry_kept {reason = "catalog read failed; prior model order remains"},
        Receipt.Durable, "configuration lock observation changed";
      Receipt.Exact_output_registry_unpublished, Receipt.Durability_unconfirmed "fixture fsync uncertainty",
@@ -353,7 +354,7 @@ let test_dismissed_commit_stays_dismissed_after_reread () =
       (state.runtime_lane_write = Lane_write_idle);
     Alcotest.(check bool) "failed reread still marks the independent list stale"
       (Result.is_error reread) (runtime_lane_stale_lines state <> []))
-    [Ok (); Error "HTTP 503: read unavailable"]
+    [Ok (); Error (Request_failed "HTTP 503: read unavailable")]
 
 let stale_after_503 =
   "the lane list could not be re-read after the change and may be stale: HTTP 503: down"
@@ -364,7 +365,7 @@ let test_a_refusal_and_a_dismissal_leave_the_stale_line () =
   state.runtime_lane_write <- Lane_write_posting;
   settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
   runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
-    (Error "HTTP 503: down");
+    (Error (Request_failed "HTTP 503: down"));
   (match plan_runtime_lane_edit state up with
    | Refuse_lane_edit notice -> state.runtime_lane_notice <- Some notice
    | plan -> Alcotest.failf "K on the head: %s" (plan_text plan));
@@ -943,7 +944,7 @@ let test_the_route_editor_will_not_write_from_a_stale_list () =
     state.runtime_lane_write <- Lane_write_posting;
     settle_runtime_lane_write state ~written:Runtime_surface_list (Ok committed_receipt);
     runtime_lane_list_reread state ~list:Runtime_surface_list ~generation:2
-      (Error "HTTP 503: down")
+      (Error (Request_failed "HTTP 503: down"))
   in
   let refusal =
     "refuse: the lane list may be stale; reload it before changing candidates"

@@ -101,6 +101,11 @@ type chat_activity_row =
 
 let chat_activity_row_text row = row.lead ^ row.rest ^ row.keys
 
+(* Why the turn rows are not current: the poll failed, or the workspace guard
+   stopped the poll before it left, which the caller has worded as a
+   kept-back notice and which is drawn as it is (RFC §2). *)
+type poll_error = Poll_failed of string | Poll_kept_back of string
+
 (* The same running turn must remain visible while a submitted chat waits
    behind it. No ETA can be inferred from the turn's elapsed age.
 
@@ -114,7 +119,8 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
   let plain text = { lead = text; motion = Still; rest = ""; keys = "" } in
   let stale = match error with
     | None -> []
-    | Some detail -> [plain (say "활동 조회 실패: " "Activity unavailable: " ^ detail)] in
+    | Some (Poll_failed detail) -> [plain (say "활동 조회 실패: " "Activity unavailable: " ^ detail)]
+    | Some (Poll_kept_back notice) -> [plain notice] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
     String.equal row.ktr_keeper_name keeper_name) rows with
   | None -> stale
@@ -235,10 +241,13 @@ let advance_finishes ~now ~previous_rows ~current_rows finishes =
 ;;
 
 let overlay ?(frame = -1) ?width ~ko ~(now : float) ~(chat_target : string option)
-    ~(error : string option) ~(observed_at : float option)
+    ~(error : poll_error option) ~(observed_at : float option)
     ~(finishes : (string * float) list)
     (rows : Tui_decode.keeper_turn_row list) : line list =
   let say korean english = if ko then korean else english in
+  let poll_error_text = function
+    | Poll_failed detail -> Printf.sprintf (if ko then "조회 실패: %s" else "poll failed: %s") detail
+    | Poll_kept_back notice -> notice in
   let answered elapsed =
     if ko then elapsed ^ " 전에 끝남" else "answered " ^ elapsed ^ " ago" in
   let running, unavailable, idle_count =
@@ -312,14 +321,14 @@ let overlay ?(frame = -1) ?width ~ko ~(now : float) ~(chat_target : string optio
   let error_lines =
     match error, observed_at with
     | None, _ -> []
-    | Some detail, None ->
-        [ { text = Printf.sprintf (if ko then "조회 실패: %s" else "poll failed: %s") detail
+    | Some error, None ->
+        [ { text = poll_error_text error
           ; tone = Unknown
           ; target = None
           }
         ]
-    | Some detail, Some read_at ->
-        [ { text = Printf.sprintf (if ko then "조회 실패: %s" else "poll failed: %s") detail
+    | Some error, Some read_at ->
+        [ { text = poll_error_text error
           ; tone = Unknown
           ; target = None
           }

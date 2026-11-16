@@ -496,10 +496,15 @@ let save_draft state ~host ~deliver =
     ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_draft_saved (request,
       match result with Ok outcome -> outcome | Error detail -> Masc_tui_code_draft.Save_uncertain detail)))
     (fun () ->
-      if authority <> state.workspace_authority || reading != state.workspace_read_authority then
-        Ok (Masc_tui_code_draft.Save_refused "Workspace authority changed before sending the save")
+      (* The guard's refusal leaves nothing sent, so the draft says it is
+         kept back, never refused by the server (RFC §2). *)
+      let kept_back refusal = Ok (Masc_tui_code_draft.Save_kept_back
+        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Kept_request.File_save refusal)) in
+      if authority <> state.workspace_authority then kept_back Workspace_authority_withdrawn
+      else if reading != state.workspace_read_authority then kept_back Workspace_identity_not_confirmed
       else match write_authority_refusal state authority with
-        | Some detail -> Ok (Masc_tui_code_draft.Save_refused detail)
+        | Some refusal -> kept_back refusal
         | None -> Ok (Masc_tui_http.save_workspace_file_draft ~host ~port draft));
   Ok ()
 
@@ -510,7 +515,8 @@ let reread_draft state ~host ~deliver =
     Error "Confirm the workspace before rereading the draft's file"
   | Some draft -> match Masc_tui_code_draft.phase draft with
     | Masc_tui_code_draft.Saving _ -> Error "Wait for the submitted save before rereading"
-    | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _ | Masc_tui_code_draft.Needs_review _ ->
+    | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _ | Masc_tui_code_draft.Kept_back _
+    | Masc_tui_code_draft.Needs_review _ ->
       state.code_file <- Masc_tui_fetched.cancel_pending
         ~reason:"Superseded by draft comparison" state.code_file;
       let address = Masc_tui_code_draft.address draft in

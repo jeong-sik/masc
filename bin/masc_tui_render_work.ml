@@ -55,6 +55,21 @@ let goal_receipt_authority_current (state : state) (receipt : goal_action_receip
       Planning_detail.receipt_authority_current ~credential_current ~current_instance
         ~current_confirmation ~receipt:authority
 
+(* What a receipt says about its request. A request the workspace guard kept
+   back never left, so its kept-back notice is drawn alone; any other outcome
+   is the server's answer, qualified by whether the receipt's authority is
+   still current. *)
+let goal_receipt_answer (state : state) (receipt : goal_action_receipt) =
+  let ko = state.ui_language = Lang_ko in
+  let answer result =
+    `Answer (Planning_detail.receipt_outcome_text ~ko
+      ~current:(goal_receipt_authority_current state receipt) result) in
+  match receipt.gar_result with
+  | Error (Request_withdrawn refusal) ->
+    `Kept_back (workspace_refusal_text ~ko ~request:Kept_request.Goal_transition refusal)
+  | Error (Request_failed detail) -> answer (Error detail)
+  | Ok message -> answer (Ok message)
+
 let task_status_word state (status : Masc_domain.task_status) =
   Masc_tui_task_document.status_label ~ko:(state.ui_language = Lang_ko) status
 
@@ -281,7 +296,9 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
   (failures |> List.concat_map (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))))
   @ task_document_lines state ~cols Masc_tui_task_document.Body
   @ ("" :: Masc_tui_task_document.history_heading_rows ~ko:(state.ui_language = Lang_ko) ~width)
-  @ (Masc_tui_task_document.history_status_lines ~ko:(state.ui_language = Lang_ko) ~width ~view:history
+  @ (Masc_tui_task_document.history_status_lines ~ko:(state.ui_language = Lang_ko) ~width
+      ~view:(observation_failure_said (history_failure_said ~ko:(state.ui_language = Lang_ko)
+        ~request:Kept_request.Task_history_read) history)
       ~in_flight:(Masc_tui_fetched.in_flight state.task_history)
       ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
         state.task_history_request)
@@ -645,9 +662,11 @@ let planning_summary_reading ~cols (state : state) =
          section (text "목록 밖 목표 이력" "Unlisted Goal history") history]
   in
   let retired = List.rev state.goal_action_receipts |> List.map (fun receipt ->
-    let answer = Planning_detail.receipt_outcome_text ~ko ~current:(goal_receipt_authority_current state receipt) receipt.gar_result in
-    Printf.sprintf "%s · %s · %s · %s" (Terminal_text.single_line receipt.gar_goal_id)
-      (Terminal_text.single_line receipt.gar_workspace) (Terminal_text.single_line receipt.gar_ticket) answer) in
+    let names = Printf.sprintf "%s · %s · %s" (Terminal_text.single_line receipt.gar_goal_id)
+      (Terminal_text.single_line receipt.gar_workspace) (Terminal_text.single_line receipt.gar_ticket) in
+    match goal_receipt_answer state receipt with
+    | `Kept_back notice -> notice ^ " · " ^ names
+    | `Answer answer -> names ^ " · " ^ answer) in
   let sections = sections @ (match retired with
     | [] -> []
     | _ -> [section (text "목표 요청 결과" "Goal request results") retired]) in
@@ -1068,15 +1087,21 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
       field ~tone:Planning_detail.Quiet (text "목록 관측 시각" "List observed") (wire_moment snapshot.pl_generated_at))
   in
   let request_results = (match List.assoc_opt goal.pg_id state.goal_action_errors with
-       | Some error ->
+       | Some (Request_failed error) ->
          field ~tone:Planning_detail.Refused (text "실패" "Error") error
+       | Some (Request_withdrawn refusal) ->
+         (* Kept back before it left: the notice alone, without the error label. *)
+         field ~tone:Planning_detail.Refused ~separator:"" ""
+           (workspace_refusal_text ~ko ~request:Kept_request.Goal_transition refusal)
        | None -> [])
     @ (state.goal_action_receipts |> List.filter_map (fun receipt ->
          if not (String.equal receipt.gar_goal_id goal.pg_id) then None
          else Some (field ~tone:Planning_detail.Unreadable (text "요청 결과" "Request result")
-           (Printf.sprintf "%s · %s · %s" receipt.gar_workspace receipt.gar_ticket
-             (Planning_detail.receipt_outcome_text ~ko:(state.ui_language = Lang_ko)
-               ~current:(goal_receipt_authority_current state receipt) receipt.gar_result))))
+           (match goal_receipt_answer state receipt with
+            | `Kept_back notice ->
+              Printf.sprintf "%s · %s · %s" notice receipt.gar_workspace receipt.gar_ticket
+            | `Answer answer ->
+              Printf.sprintf "%s · %s · %s" receipt.gar_workspace receipt.gar_ticket answer)))
        |> List.concat)
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in
@@ -1209,10 +1234,14 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
       else match reading with
       | Masc_tui_fetched.Absent -> field ~tone:Planning_detail.Quiet (text "Candle" "Candle") (text "미조회" "not read")
       | Loading -> field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
-      | Failed error ->
+      | Failed (Goal_candle_unread error) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
           field ~tone:Planning_detail.Waiting (text "Candle" "Candle") ((text "조회 중 · 이전 조회 실패: " "reading; previous read failed: ") ^ error)
         else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") error
+      | Failed (Goal_candle_kept_back notice) ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
+        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") notice
       | Ready (owner, _, _) | Stale ((owner, _, _), _) when not (Masc_tui_http.credential_owner_is_current owner) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
           field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "조회 중 · 이전 인증 정보의 관측은 표시하지 않음" "reading; previous credential observation hidden")
@@ -1224,10 +1253,14 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
         if Masc_tui_fetched.in_flight state.goal_candle then
           field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
         else describe observation
-      | Stale (_, error) ->
+      | Stale (_, Goal_candle_unread error) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
           field ~tone:Planning_detail.Waiting (text "Candle" "Candle") ((text "조회 중 · 이전 조회 실패: " "reading; previous read failed: ") ^ error)
-        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") error in
+        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") error
+      | Stale (_, Goal_candle_kept_back notice) ->
+        if Masc_tui_fetched.in_flight state.goal_candle then
+          field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
+        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") notice in
     gap @ section (Printf.sprintf "%s [%s:%s]"
       (ui_text state ~ko:"Candle 지급 기록" ~en:"Candle payout record")
       Masc_tui_keys.goal_candle_refresh_key (ui_text state ~ko:"조회" ~en:"read")) @ rows in
@@ -2249,9 +2282,14 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
     (match state.schedule_cancel_error with
      | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
          [ Theme.bad ()
-         , ui_text state ~ko:"취소 오류: " ~en:"Cancel error: "
-           ^ wire (request_failure_text ~ko:(state.ui_language = Lang_ko)
-                     ~request:Kept_request.Schedule_cancel error) ]
+         , (match error with
+            | Request_failed detail ->
+                ui_text state ~ko:"취소 오류: " ~en:"Cancel error: " ^ wire detail
+            (* A cancel the workspace guard stopped was not sent, so it is said
+               as kept back, alone, and not as an error of the cancel (RFC §2). *)
+            | Request_withdrawn refusal ->
+                wire (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                        ~request:Kept_request.Schedule_cancel refusal)) ]
      | Some _ | None -> [])
     @ (match schedule_source_warning state with
        | None -> []

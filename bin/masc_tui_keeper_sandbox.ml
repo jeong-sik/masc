@@ -118,13 +118,17 @@ type name_report =
   ; host_alignment : kata_host_alignment option
   }
 
+type lookup_failure =
+  | Lookup_failed of string
+  | Lookup_kept_back of string
+
 type load_result =
-  | Inventory_result of (t, string) result
-  | Name_result of (name_report, string) result
+  | Inventory_result of (t, lookup_failure) result
+  | Name_result of (name_report, lookup_failure) result
 
 type partial =
-  { inventory : (t, string) result option
-  ; name : (name_report, string) result option
+  { inventory : (t, lookup_failure) result option
+  ; name : (name_report, lookup_failure) result option
   }
 
 let empty_partial = { inventory = None; name = None }
@@ -913,10 +917,13 @@ let partial_view_lines ~sanitize ~ko ~width partial =
       [ " " ^ styled Masc_tui_theme.Sgr.bold (tr "1. Kata 이름 관측" "1. Kata name observation") ]
       @ wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Info
           (tr "조회 중" "Loading")
-    | Some (Error detail) ->
+    | Some (Error (Lookup_failed detail)) ->
       [ " " ^ styled Masc_tui_theme.Sgr.bold (tr "1. Kata 이름 관측" "1. Kata name observation") ]
       @ request_failure_rows ~label:(tr "조회 실패" "Lookup failed")
           ~summary:"이름 조회를 완료하지 못했습니다." detail
+    | Some (Error (Lookup_kept_back notice)) ->
+      [ " " ^ styled Masc_tui_theme.Sgr.bold (tr "1. Kata 이름 관측" "1. Kata name observation") ]
+      @ wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Warn notice
     | Some (Ok report) when report.name_state = Kata_not_applicable
                             && Option.is_none report.expected_name
                             && Option.is_none report.host_alignment ->
@@ -945,9 +952,11 @@ let partial_view_lines ~sanitize ~ko ~width partial =
   let inventory_lines = match partial.inventory with
     | None -> inventory_header @ wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Info
         (tr "조회 중" "Loading")
-    | Some (Error detail) -> inventory_header
+    | Some (Error (Lookup_failed detail)) -> inventory_header
       @ request_failure_rows ~label:(tr "조회 실패" "Lookup failed")
           ~summary:"인스턴스 목록 조회를 완료하지 못했습니다." detail
+    | Some (Error (Lookup_kept_back notice)) -> inventory_header
+      @ wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Warn notice
     | Some (Ok reading) ->
       let summary = match inventory_decision reading with
         | Inventory_context_unavailable detail | Inventory_backend_unresolved detail

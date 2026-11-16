@@ -41,11 +41,20 @@ let switch_set
     (* Re-read rather than patch what is on screen: the switch the
               server just wrote is the answer. *)
     if keeper_detail_target_matches state keeper_name then refresh keeper_name
-  | Error detail ->
+  | Error (Request_failed detail) ->
     notice
       ~keeper_name:(Some keeper_name)
       ( Masc_tui_identity_model.Notice_bad
       , Printf.sprintf "switch %s: %s" provider_id detail )
+  | Error (Request_withdrawn refusal) ->
+    (* Not sent: the kept-back notice alone, with the provider after it
+       (RFC §2). *)
+    notice
+      ~keeper_name:(Some keeper_name)
+      ( Masc_tui_identity_model.Notice_bad
+      , workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+          ~request:Kept_request.Service_switch refusal
+        ^ " · " ^ provider_id )
 ;;
 
 let apply_login_status (state : state) ~report ~catalog expectation result =
@@ -187,10 +196,17 @@ let login_started (state : state) request ~now ~report ~notice result =
   if current
   then (
     match result with
-    | Masc_tui_identity_model.Login_started { expires_at; _ } when expires_at <= now ->
+    | Error refusal ->
+      (* Not sent, so no login is remembered; the kept-back notice alone
+         (RFC §2). *)
+      notice ~keeper_name:(Some keeper_name)
+        ( Masc_tui_identity_model.Notice_bad
+        , workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+            ~request:Kept_request.Service_login refusal )
+    | Ok (Masc_tui_identity_model.Login_started { expires_at; _ }) when expires_at <= now ->
       notice ~keeper_name:(Some keeper_name)
         (Masc_tui_identity_model.Notice_bad, "login expired; start a new login")
-    | Masc_tui_identity_model.Login_started { provider_id; label; url; expires_at; attempt_id } ->
+    | Ok (Masc_tui_identity_model.Login_started { provider_id; label; url; expires_at; attempt_id }) ->
       remember_identity_login
         state
         { ils_keeper = keeper_name
@@ -211,10 +227,10 @@ let login_started (state : state) request ~now ~report ~notice result =
       if keeper_detail_target_matches state keeper_name
       then state.identity_attempt_error <- None;
       report "system" (Printf.sprintf "%s: %s login started" keeper_name provider_id)
-    | Masc_tui_identity_model.Login_attached msg ->
+    | Ok (Masc_tui_identity_model.Login_attached msg) ->
       forget_identity_login state ~keeper_name ~provider_id:request.ilr_provider;
       notice ~keeper_name:(Some keeper_name) (Masc_tui_identity_model.Notice_ok, msg)
-    | Masc_tui_identity_model.Login_failed detail ->
+    | Ok (Masc_tui_identity_model.Login_failed detail) ->
       notice ~keeper_name:(Some keeper_name) (Masc_tui_identity_model.Notice_bad, detail))
   else
     report
@@ -225,7 +241,7 @@ let login_started (state : state) request ~now ~report ~notice result =
          request.ilr_provider)
 ;;
 
-let app_saved ~keeper_name ~provider_id ~notice result =
+let app_saved ~ko ~keeper_name ~provider_id ~notice result =
   notice
     ~keeper_name
     (match result with
@@ -242,8 +258,14 @@ let app_saved ~keeper_name ~provider_id ~notice result =
            provider_id
            count
            (if count = 1 then "" else "s") )
-     | Error detail ->
-       Masc_tui_identity_model.Notice_bad, Printf.sprintf "%s: %s" provider_id detail)
+     | Error (Request_failed detail) ->
+       Masc_tui_identity_model.Notice_bad, Printf.sprintf "%s: %s" provider_id detail
+     | Error (Request_withdrawn refusal) ->
+       (* Not sent: the kept-back notice alone, with the provider after it
+          (RFC §2). *)
+       ( Masc_tui_identity_model.Notice_bad
+       , workspace_refusal_text ~ko ~request:Kept_request.Service_app_save refusal
+         ^ " · " ^ provider_id ))
 ;;
 
 let refreshed (state : state) ~keeper_name ~refresh ~report result =
@@ -256,14 +278,23 @@ let refreshed (state : state) ~keeper_name ~refresh ~report result =
       state.identity_view <- None;
       state.identity_view_error <- None;
       refresh keeper_name
-    | Error detail -> state.identity_view_error <- Some detail)
+    | Error (Request_failed detail) -> state.identity_view_error <- Some detail
+    | Error (Request_withdrawn refusal) ->
+      state.identity_view_error <- Some (workspace_refusal_text
+        ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Service_refresh refusal))
   else
     report
       "system"
       (match result with
        | Ok () -> Printf.sprintf "%s: identity refreshed" keeper_name
-       | Error detail ->
-         Printf.sprintf "%s: identity refresh failed: %s" keeper_name detail)
+       | Error (Request_failed detail) ->
+         Printf.sprintf "%s: identity refresh failed: %s" keeper_name detail
+       | Error (Request_withdrawn refusal) ->
+         (* Not sent: the kept-back notice alone, with the Keeper after it
+            (RFC §2). *)
+         workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Kept_request.Service_refresh refusal
+         ^ " · " ^ keeper_name)
 ;;
 
 (* What a detach answered. The receipt is the server's own words, and the
@@ -273,10 +304,19 @@ let disconnected (state : state) ~keeper_name ~provider_id ~notice ~refresh resu
   state.identity_disconnect_armed <- None;
   (match result with
    | Ok text -> notice ~keeper_name:(Some keeper_name) (Masc_tui_identity_model.Notice_ok, text)
-   | Error detail ->
+   | Error (Request_failed detail) ->
      notice
        ~keeper_name:(Some keeper_name)
        ( Masc_tui_identity_model.Notice_bad
-       , Printf.sprintf "disconnect %s: %s" provider_id detail ));
+       , Printf.sprintf "disconnect %s: %s" provider_id detail )
+   | Error (Request_withdrawn refusal) ->
+     (* Not sent: the kept-back notice alone, with the provider after it
+        (RFC §2). *)
+     notice
+       ~keeper_name:(Some keeper_name)
+       ( Masc_tui_identity_model.Notice_bad
+       , workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Kept_request.Service_disconnect refusal
+         ^ " · " ^ provider_id ));
   if keeper_detail_target_matches state keeper_name then refresh keeper_name
 ;;

@@ -1426,6 +1426,10 @@ let file_change_evidence_label ~ko = function
    read to the address, the kind, whether it landed, and its range. *)
 let acting_pane_changes_and_source (state : state) =
   let module Pane = Masc_tui_acting_pane in
+  (* A changes read the workspace guard did not send, said alone (RFC §2). *)
+  let acting_pane_changes_kept_back refusal =
+    workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+      ~request:Kept_request.File_changes_read refusal in
   match selected_keeper state with
   | None -> Pane.Changes_absent, None
   | Some (keeper : keeper) -> (
@@ -1482,12 +1486,17 @@ let acting_pane_changes_and_source (state : state) =
       with
       | Masc_tui_fetched.Absent -> Pane.Changes_absent, None
       | Masc_tui_fetched.Loading -> Pane.Changes_loading, None
-      | Masc_tui_fetched.Failed detail -> Pane.Changes_failed detail, None
+      | Masc_tui_fetched.Failed (Request_failed detail) -> Pane.Changes_failed detail, None
+      | Masc_tui_fetched.Failed (Request_withdrawn refusal) ->
+          Pane.Changes_kept_back (acting_pane_changes_kept_back refusal), None
       | Masc_tui_fetched.Ready snapshot -> ready_changes snapshot ~refresh_failed:None
       (* The files already read stay listed; the status row says the refresh
          after them failed. *)
       | Masc_tui_fetched.Stale (snapshot, detail) ->
-          ready_changes snapshot ~refresh_failed:(Some detail))
+          ready_changes snapshot ~refresh_failed:(Some (match detail with
+            | Request_failed detail -> Pane.Refresh_failed detail
+            | Request_withdrawn refusal ->
+                Pane.Refresh_kept_back (acting_pane_changes_kept_back refusal))))
 
 let recent_chunk_projection (state : state) =
   let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
@@ -6442,8 +6451,11 @@ let keeper_deletions_lines (state : state) ~cols =
       state.keeper_deletions_retry_receipt in
   let lines = match state.keeper_deletions with
     | None -> [ say "삭제 기록 조회 중…" "Loading deletion records…" ]
-    | Some (Error detail) ->
+    | Some (Error (Request_failed detail)) ->
       [ say "삭제 기록 조회 실패: " "Deletion records load failed: " ^ detail ]
+    (* Kept back by the workspace guard: the notice, alone (RFC §2). *)
+    | Some (Error (Request_withdrawn refusal)) ->
+      [ workspace_refusal_text ~ko ~request:Kept_request.Keeper_deletions_read refusal ]
     | Some (Ok inventory) ->
       let errors =
         List.map
@@ -6503,7 +6515,7 @@ let answering_lines (state : state) =
     ~width:(max 0 (framed_inner_width cols - 2))
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name
-    ~error:state.keeper_turns_error
+    ~error:(keeper_turns_poll_error state)
     ~observed_at:state.keeper_turns_observed_at
     ~finishes:state.keeper_turn_finishes
     state.keeper_turns
@@ -6636,7 +6648,7 @@ let runtime_config_status_lines state ~cols =
   let module Line = Masc_tui_page_line in
   let module View = Masc_tui_runtime_config_view in
   let error =
-    match state.runtime_config_view_error with
+    match runtime_config_view_error_text state with
     | None -> []
     | Some detail -> [ Line.note ~tone:Line.Failure detail ]
   in

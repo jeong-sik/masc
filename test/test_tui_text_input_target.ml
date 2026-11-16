@@ -91,7 +91,7 @@ let test_model_form_requires_current_workspace_reading () =
   state.runtime_config_view <- Some {rcv_path="runtime.toml";rcv_source_text="";rcv_rows=[];rcv_metadata=metadata;rcv_account_emails=Ok (Masc_tui_account_login.Email_rows {rows=[]; unattributed=0})};
   check bool "current successful reading permits the selected model" true
     (Tui_types.selected_config_model state=Ok row);
-  state.runtime_config_view_error <- Some "read failed";
+  state.runtime_config_view_error <- Some (Tui_types.Request_failed "read failed");
   check bool "failed raw reading cannot reuse retained rows" true
     (Result.is_error (Tui_types.selected_config_model state));
   state.runtime_config_view_error <- None;
@@ -405,7 +405,7 @@ let test_skill_source_picker_owns_text_on_its_visible_surface () =
 let test_skill_source_paging_chooses_the_windowed_item () =
   let state = fresh_state () in
   state.Tui_types.view <- Tui_types.Tools;
-  state.Tui_types.tools_error <- Some "previous inventory read failed";
+  state.Tui_types.tools_error <- Some (Tui_types.Request_failed "previous inventory read failed");
   let sources = List.init 50 (fun index -> "source-" ^ string_of_int index) in
   state.Tui_types.tools_skill_source_picker <- Some
     { Tui_types.ssp_sources = sources; ssp_composition = true

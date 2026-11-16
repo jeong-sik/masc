@@ -234,7 +234,7 @@ let test_an_answer_after_the_inspector_left_suspends_the_inspection () =
   Alcotest.(check bool) "the Task is suspended instead of showing the answer" true
     (match failure (Read.task_observation (shown owner)) with
      | Some (Read.Workspace_unconfirmed _) -> true
-     | Some (Read.Read_failed _ | Read.Invalid_reply _ | Read.Interrupted) | None -> false)
+     | Some (Read.Read_failed _ | Read.Kept_back _ | Read.Invalid_reply _ | Read.Interrupted) | None -> false)
 
 let test_an_answer_no_longer_awaited_changes_nothing () =
   let state = fresh () in

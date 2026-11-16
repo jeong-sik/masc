@@ -15,6 +15,7 @@ type request = unit Masc_tui_fetched.request
 type failure =
   | Suspended
   | Request_failed of string
+  | Kept_back of string
 
 type t =
   { fetched : (unit, inventory, failure) Masc_tui_fetched.source
@@ -38,17 +39,22 @@ let start ~now t =
     | Masc_tui_fetched.Started (fetched, request) ->
         Some ({ fetched; owed = Owed.started t.owed }, request))
 
-let complete ~retry_s ~max_retry_s ~now t request result =
+let settle ~retry_s ~max_retry_s ~now t request result =
   if Masc_tui_fetched.is_current ~equal:Unit.equal t.fetched request
   then
-    { fetched =
-        Masc_tui_fetched.complete ~equal:Unit.equal t.fetched request
-          (Result.map_error (fun text -> Request_failed text) result)
+    { fetched = Masc_tui_fetched.complete ~equal:Unit.equal t.fetched request result
     ; owed = (match result with
         | Ok _ -> Owed.succeeded t.owed
         | Error _ -> Owed.failed ~retry_s ~max_retry_s ~now t.owed)
     }
   else t
+
+let complete ~retry_s ~max_retry_s ~now t request result =
+  settle ~retry_s ~max_retry_s ~now t request
+    (Result.map_error (fun text -> Request_failed text) result)
+
+let withdraw ~retry_s ~max_retry_s ~now t request notice =
+  settle ~retry_s ~max_retry_s ~now t request (Error (Kept_back notice))
 
 (* A retry over a failure keeps that failure's cause when it is retired: the
    retry never answered, so it has nothing to add. A refresh over an inventory
@@ -153,7 +159,7 @@ let cause_clause ~ko ~cells = function
     if Masc_tui_message_layout.fits_within_cells ~max_cells:cells word
     then Some word
     else None
-  | Request_failed text ->
+  | Request_failed text | Kept_back text ->
     let text = String.trim (Masc.Tui_terminal_text.sanitize_terminal_text text) in
     if text = "" || cells < min_cause_cells then None else Some (cut_to ~cells text)
 
@@ -178,9 +184,13 @@ let with_cause ~ko ~room failure fixed =
 
 let clauses ~ko ~room = function
   | Not_read | Reading -> [ unknown ]
-  | Read_failed failure -> with_cause ~ko ~room failure [ unknown; read_failed_word ~ko ]
+  | Read_failed (Kept_back _ as failure) -> with_cause ~ko ~room failure [ unknown ]
+  | Read_failed ((Suspended | Request_failed _) as failure) ->
+    with_cause ~ko ~room failure [ unknown; read_failed_word ~ko ]
   | Loaded { world; refresh_failure = None } -> value_clauses ~ko world
-  | Loaded { world; refresh_failure = Some failure } ->
+  | Loaded { world; refresh_failure = Some (Kept_back _ as failure) } ->
+    with_cause ~ko ~room failure (value_clauses ~ko world)
+  | Loaded { world; refresh_failure = Some ((Suspended | Request_failed _) as failure) } ->
     with_cause ~ko ~room failure (value_clauses ~ko world @ [ read_failed_word ~ko ])
 
 (* What each word does not say, because the server does not say it either

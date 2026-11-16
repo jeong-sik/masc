@@ -26,6 +26,12 @@ type tone =
   | Dim
   | Bad
 
+(** [Read_failed] carries the read's own cause. [Read_kept_back] carries the
+    notice the TUI wrote for a read the workspace guard did not send; it is
+    drawn alone. *)
+type failure = Read_failed of string | Read_kept_back of string
+
 (** The Info tab's lines for one Keeper, from the month last asked for. *)
 val lines :
-  ko:bool -> (string, month_view) Masc_tui_fetched.t -> keeper_name:string -> (tone * string) list
+  ko:bool -> (string, month_view, failure) Masc_tui_fetched.source -> keeper_name:string ->
+  (tone * string) list

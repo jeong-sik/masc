@@ -271,8 +271,10 @@ let saved_contents_rows ~ko (d : D.preset_detail) =
 
 let contents_lines ~ko d = texts (comparison_rows ~ko d @ saved_contents_rows ~ko d)
 
+type detail_failure = Detail_read_failed of string | Detail_kept_back of string
+
 let detail_rows ~ko ~(selected : D.preset_manifest option)
-      ~detail:(fetched : D.preset_detail Masc_tui_fetched.view)
+      ~detail:(fetched : (D.preset_detail, detail_failure) Masc_tui_fetched.observation)
       ~(report : D.preset_restore_report option) =
   let preset =
     match selected with
@@ -302,10 +304,13 @@ let detail_rows ~ko ~(selected : D.preset_manifest option)
     | Masc_tui_fetched.Loading -> [ plain ""; detail (text ~ko "내용을 읽는 중…" "Loading contents…") ], []
     (* A failed refresh keeps the contents it read last, under a line that
        says they are the last read. *)
-    | Masc_tui_fetched.Stale (d, reason) ->
+    | Masc_tui_fetched.Stale (d, Detail_read_failed reason) ->
       ([ plain ""; caution (text ~ko "새로고침 실패 · 마지막으로 읽은 내용 — " "Refresh failed · last read contents — " ^ reason) ]
        @ comparison_rows ~ko d, saved_contents_rows ~ko d)
-    | Masc_tui_fetched.Failed reason -> [ plain ""; failure (text ~ko "내용을 읽지 못했습니다 — " "Could not read contents — " ^ reason) ], []
+    | Masc_tui_fetched.Stale (d, Detail_kept_back notice) ->
+      ([ plain ""; caution notice ] @ comparison_rows ~ko d, saved_contents_rows ~ko d)
+    | Masc_tui_fetched.Failed (Detail_read_failed reason) -> [ plain ""; failure (text ~ko "내용을 읽지 못했습니다 — " "Could not read contents — " ^ reason) ], []
+    | Masc_tui_fetched.Failed (Detail_kept_back notice) -> [ plain ""; failure notice ], []
     | Masc_tui_fetched.Absent -> [], []
   in
   let report = match report with

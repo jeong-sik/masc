@@ -69,6 +69,8 @@ let view_lines ~ko ~month view ~keeper_name =
     ]
 ;;
 
+type failure = Read_failed of string | Read_kept_back of string
+
 let lines ~ko fetched ~keeper_name =
   match Masc_tui_fetched.current fetched with
   | None -> []
@@ -82,14 +84,17 @@ let lines ~ko fetched ~keeper_name =
               else "Efficiency %s: reading; the first read of a month can take a minute")
              month )
        ]
-     | Masc_tui_fetched.Failed detail ->
+     | Masc_tui_fetched.Failed (Read_failed detail) ->
        [ ( Bad
          , Printf.sprintf
              (if ko then "%s 효율: 읽지 못함: %s" else "Efficiency %s: not read: %s")
              month (single_line detail) )
        ]
+     | Masc_tui_fetched.Failed (Read_kept_back notice) -> [ Bad, single_line notice ]
      | Masc_tui_fetched.Ready view -> view_lines ~ko ~month view ~keeper_name
-     | Masc_tui_fetched.Stale (view, detail) ->
+     | Masc_tui_fetched.Stale (view, Read_failed detail) ->
        view_lines ~ko ~month view ~keeper_name
-       @ [ Dim, (if ko then "마지막 갱신 실패: " else "the last refresh failed: ") ^ single_line detail ])
+       @ [ Dim, (if ko then "마지막 갱신 실패: " else "the last refresh failed: ") ^ single_line detail ]
+     | Masc_tui_fetched.Stale (view, Read_kept_back notice) ->
+       view_lines ~ko ~month view ~keeper_name @ [ Dim, single_line notice ])
 ;;

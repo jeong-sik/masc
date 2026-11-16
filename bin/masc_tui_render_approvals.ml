@@ -42,7 +42,10 @@ let approval_source_notices state ~(reading : Masc_tui_approvals_model.approvals
           ^ Terminal_text.single_line cause)
     | List_not_read (Approval_unavailable detail) ->
         Some (Theme.warn (), label ^ ui_text state ~ko:" · 조회 불가: " ~en:" · unavailable: "
-          ^ Terminal_text.single_line detail))
+          ^ Terminal_text.single_line detail)
+    | List_not_read (Approval_kept_back notice) ->
+        (* The notice names the list it kept back; it is drawn alone. *)
+        Some (Theme.bad (), Terminal_text.single_line notice))
 
 (** Render the Approvals surface (pending confirmations). *)
 (* The ask, whole. The list row is one line through [single_line], which
@@ -357,8 +360,11 @@ let ask_answer_feedback_document (state : state) =
           "An earlier answer stands", Theme.info (), None
       | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_withdrawn _)) ->
           "Installation withdrew the question", Theme.warn (), None
-      | Error detail ->
-          "Answer recording unconfirmed", Theme.warn (), Some detail in
+      | Error (Ask_projection.Answer_unconfirmed detail) ->
+          "Answer recording unconfirmed", Theme.warn (), Some detail
+      (* Not sent: the kept-back notice alone, never an unconfirmed
+         recording (RFC §2). *)
+      | Error (Ask_projection.Answer_kept_back notice) -> notice, Theme.bad (), None in
     emit "Recording" style status;
     emit "Question" Ansi.dim
       (Decode.ask_asker_label feedback.af_asker ^ "\nAsk ID: " ^ feedback.af_ask_id);
@@ -1106,7 +1112,10 @@ let render_approvals (state : state) =
                   data_unreliable_row ~cols
                     (Printf.sprintf "%s %s: %s" name
                        (ui_text state ~ko:"사용 불가" ~en:"unavailable")
-                       (Terminal_text.single_line detail)))
+                       (Terminal_text.single_line detail))
+              (* Never sent, so not unreliable data: the notice alone. *)
+              | Masc_tui_approvals_model.Approval_kept_back notice ->
+                  Theme.bad () ^ "  " ^ Terminal_text.single_line notice ^ Ansi.reset)
             not_read
     in
     let lines = List.take approval_body_rows lines in
@@ -1243,7 +1252,7 @@ let render_question_reader (state : state) =
           | Masc_tui_approvals_model.List_read when asks <> [] ->
               "  Nothing selected -- [ or ] chooses a question"
           | Masc_tui_approvals_model.List_read -> "  No questions waiting"
-          | List_not_read Approval_unread -> "  Questions not loaded"
+          | List_not_read (Approval_unread | Approval_kept_back _) -> "  Questions not loaded"
           | List_not_read (Approval_failed _ | Approval_stale _ | Approval_unavailable _) ->
               "  Question source unavailable")
      | Some row ->

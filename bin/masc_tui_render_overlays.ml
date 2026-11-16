@@ -284,6 +284,9 @@ let detail_peer_status state reading =
         page (retained previous) (retry failed))
   | Some (Keeper_peer_failed {page; retained = previous; reason}) ->
       Some (Theme.warn (), keeper_peer_failure_status ~page ~retained:previous ~reason)
+  | Some (Keeper_peer_kept_back {page; retained = previous; notice}) ->
+      Some (Theme.warn (), Printf.sprintf "  %s · r retry · page %d%s"
+        (Masc.Tui_terminal_text.sanitize_terminal_text notice) page (retained previous))
   | Some (Keeper_peer_current page) ->
       Some (Theme.recede (), Printf.sprintf "  Page %d · queued relationships" page)
   | Some Keeper_peer_unread -> Some (Theme.warn (), "  Relationship page unavailable · r retry")

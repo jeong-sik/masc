@@ -4016,6 +4016,9 @@ type keeper_memory_catch_up_outcome =
   | Catch_up_submitted
   | Catch_up_coalesced
   | Catch_up_not_sent of string
+  | Catch_up_kept_back of string
+      (* The caller's kept-back notice: the workspace guard withdrew the
+         catch-up before it was sent (RFC-tui-one-screen-grammar §2). *)
   | Catch_up_refused of string
   | Catch_up_unconfirmed of string
 

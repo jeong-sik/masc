@@ -7,12 +7,14 @@ val leave_board_detail : Masc_tui_types.state -> unit
 val apply_board_post_load :
   Masc_tui_types.state -> report_error:(string -> unit) ->
   Masc_tui_board_detail.request ->
-  (Masc_tui_types.board_post * Masc_tui_types.board_comment list * string option, string) result -> unit
+  (Masc_tui_types.board_post * Masc_tui_types.board_comment list * string option,
+    Masc_tui_types.request_failure) result -> unit
 (** Only the current request for the post being read or replied to may populate
     detail. Entering reply composition retains that read; a new post or a
     different reply target cannot consume it. Success enriches the matching list
     row without reranking. Failure is reported to [report_error] only when the
-    operator is away from the Board surface. *)
+    operator is away from the Board surface; a read the workspace guard kept
+    back is drawn and reported as its kept-back notice alone. *)
 
 val apply_publication :
   Masc_tui_types.state -> report:(string -> string -> unit) ->
@@ -39,15 +41,16 @@ val comment_done :
   Masc_tui_types.state -> request_id:Masc_tui_types.board_comment_request_id ->
   post_id:string -> sent_draft:string ->
   report:(string -> string -> unit) -> refresh:(unit -> unit) ->
-  refresh_detail:(string -> unit) -> (string, string) result -> unit
+  refresh_detail:(string -> unit) -> (string, Masc_tui_types.request_failure) result -> unit
 (** Only the exact current comment request may release its write. Success
     clears an unchanged draft and refreshes the list and its post detail.
-    Failure retains the text. Comments carry no staged attachments. *)
+    Failure retains the text; a comment the workspace guard kept back says so
+    with its kept-back notice alone. Comments carry no staged attachments. *)
 
 val vote_done :
   Masc_tui_types.state -> report:(string -> string -> unit) ->
   refresh:(unit -> unit) -> refresh_detail:(string -> unit) ->
-  Masc_tui_types.board_vote_target -> (string, string) result -> unit
+  Masc_tui_types.board_vote_target -> (string, Masc_tui_types.request_failure) result -> unit
 (** Disarm the vote on either outcome. Success reports, refreshes the list,
     and refreshes the reading of the post the target lands on or under when
     that post is still the one open. *)

@@ -27,5 +27,10 @@ val finish : generation:int -> ticket -> ('a, string) result -> 'a reading -> 'a
 (** Only the current ticket and action generation can publish a result. *)
 val accept : ('a, string) result -> 'a reading
 (** A foreground inventory result supersedes any background read. *)
+val is_current : generation:int -> ticket -> 'a reading -> bool
+(** Whether [ticket] still owns the pending read of this action generation. *)
+val withdraw : ticket -> 'a reading -> 'a reading
+(** Retire the read [ticket] owns without a result, keeping the last value:
+    it was stopped before it left. *)
 val value : 'a reading -> ('a, string) result option
 val pending : 'a reading -> bool

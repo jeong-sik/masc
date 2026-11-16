@@ -60,10 +60,11 @@ val launch :
     its delivered message instead. *)
 
 val launch_independent_pair :
-  deliver_first:(('a, string) result -> unit) ->
-  deliver_second:(('b, string) result -> unit) ->
-  (unit -> ('a, string) result) ->
-  (unit -> ('b, string) result) ->
+  boundary_error:(string -> 'error) ->
+  deliver_first:(('a, 'error) result -> unit) ->
+  deliver_second:(('b, 'error) result -> unit) ->
+  (unit -> ('a, 'error) result) ->
+  (unit -> ('b, 'error) result) ->
   unit
 (** Launch two independent reads and deliver each result as soon as it is
     available. Neither result waits for the other read to finish. *)

@@ -275,7 +275,7 @@ let test_keeper_revisit_restores_read_pages_and_paging_authority () =
   state.msg_older_exist <- true;
   state.msg_loaded_dropped <- 2;
   state.msg_memory_dropped <- 1;
-  state.msg_older_error <- Some "older page temporarily unavailable";
+  state.msg_older_error <- Some (Tui_types.Request_failed "older page temporarily unavailable");
   state.msg_older_loading <- true;
   let alpha_rows = state.msg_loaded in
   let old_generation = state.msg_history_load_generation in
@@ -298,13 +298,13 @@ let test_keeper_revisit_restores_read_pages_and_paging_authority () =
     state.msg_loaded_dropped;
   Alcotest.(check int) "unreadable memory count stays attached to alpha" 1
     state.msg_memory_dropped;
-  Alcotest.(check (option string)) "older page failure remains visible"
-    (Some "older page temporarily unavailable") state.msg_older_error;
+  Alcotest.(check bool) "older page failure remains visible" true
+    (state.msg_older_error = Some (Tui_types.Request_failed "older page temporarily unavailable"));
   Alcotest.(check bool) "late requests from the first alpha visit are invalid" true
     (state.msg_history_load_generation > old_generation);
   (* A failed refresh updates its failure notice and keeps the restored read.
      Switching away again must preserve that same reading and its notice. *)
-  state.msg_loaded_error <- Some "server unavailable on revisit";
+  state.msg_loaded_error <- Some (Tui_types.Request_failed "server unavailable on revisit");
   Tui_types.restore_keeper_chat_page state "beta";
   Alcotest.(check (list string)) "beta keeps its own read" ["row at 10"]
     (texts (Tui_types.chat_rows_for state "beta"));
@@ -313,8 +313,8 @@ let test_keeper_revisit_restores_read_pages_and_paging_authority () =
   Tui_types.restore_keeper_chat_page state "alpha";
   Alcotest.(check (list string)) "outage does not erase previously read older rows"
     ["row at 1"; "row at 2"] (texts (Tui_types.chat_rows_for state "alpha"));
-  Alcotest.(check (option string)) "outage remains visible on that Keeper"
-    (Some "server unavailable on revisit") state.msg_loaded_error;
+  Alcotest.(check bool) "outage remains visible on that Keeper" true
+    (state.msg_loaded_error = Some (Tui_types.Request_failed "server unavailable on revisit"));
   let fresh = [entry_at ~request_id:"alpha-tail" 2.; entry_at ~request_id:"alpha-new" 3.] in
   Tui_types.set_keeper_chat_sources state
     {state.msg_loaded_sources with kcs_history=Tui_types.Chat_history_received (Tui_types.merge_paged_history ~paged:state.msg_loaded ~fresh)};
@@ -331,7 +331,7 @@ let test_partial_reply_preserves_initial_page_rights_across_revisits () =
   state.msg_loaded_keeper <- Some "alpha";
   state.msg_older_cursor <- None;
   state.msg_older_exist <- false;
-  state.msg_older_error <- Some "initial physical page failed";
+  state.msg_older_error <- Some (Tui_types.Request_failed "initial physical page failed");
   Alcotest.(check bool) "partial reply is available as data" true (state.msg_loaded == partial);
   Alcotest.(check bool) "partial reply does not consume initial page demand" false
     (Tui_types.keeper_chat_history_received state.msg_loaded_sources.kcs_history);
@@ -341,8 +341,8 @@ let test_partial_reply_preserves_initial_page_rights_across_revisits () =
   Alcotest.(check bool) "restored partial still permits a first-page retry" false
     (Tui_types.keeper_chat_history_received state.msg_loaded_sources.kcs_history);
   Alcotest.(check (option string)) "no cursor was invented" None state.msg_older_cursor;
-  Alcotest.(check (option string)) "physical failure remains independent"
-    (Some "initial physical page failed") state.msg_older_error;
+  Alcotest.(check bool) "physical failure remains independent" true
+    (state.msg_older_error = Some (Tui_types.Request_failed "initial physical page failed"));
   Tui_types.set_keeper_chat_sources state
     {state.msg_loaded_sources with kcs_history=Tui_types.Chat_history_received partial};
   Alcotest.(check bool) "a real history/page receipt advances readiness" true

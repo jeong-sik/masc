@@ -4,19 +4,24 @@
 val login_lines : Masc_tui_types.state -> keeper_name:string -> string list -> unit
 
 val login_finished
-  :  keeper_name:string
+  :  Masc_tui_types.state
+  -> keeper_name:string
   -> report:(string -> string -> unit)
   -> refresh:(string -> unit)
-  -> (unit, string) result
+  -> (unit, Masc_tui_types.request_failure) result
   -> unit
+(** A login the workspace guard kept back is reported as its kept-back notice
+    alone, with the Keeper after it (RFC-tui-one-screen-grammar §2). *)
 
 val token_saved
   :  Masc_tui_types.state
   -> keeper_name:string
   -> report:(string -> string -> unit)
   -> refresh:(string -> unit)
-  -> (Yojson.Safe.t, string) result
+  -> (Yojson.Safe.t, Masc_tui_types.request_failure) result
   -> unit
+(** A save the workspace guard kept back is reported and shown as its
+    kept-back notice alone, never as a failed save. *)
 
 val token_key : Masc_tui_types.state -> save:(string -> string -> unit) -> string -> unit
 val paste_token : Masc_tui_types.state -> string -> unit

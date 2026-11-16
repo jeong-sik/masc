@@ -679,7 +679,8 @@ let render_section_resources ~cols (state : state) =
   in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
-      [ "    " ^ Terminal_text.single_line error
+      [ "    " ^ Terminal_text.single_line
+          (request_failure_text ~ko ~request:Kept_request.Turn_observation_read error)
       ; say "    이전 행은 지금 실행 중인 턴으로 세지 않습니다."
           "    Previous rows are not counted as current running turns." ]
     | None, None -> [ "    " ^ field_unread ~ko ]
@@ -774,7 +775,7 @@ let render_section_tools ~cols (state : state) : string list =
      failed read as one never made. *)
   let memory =
     observe_source ~observed:(Option.is_some state.memory_health)
-      ~error:state.memory_health_error state.memory_health
+      ~error:(memory_health_error_text state) state.memory_health
   in
   let memory_status =
     say "    기억 상태: " "    Memory health: "

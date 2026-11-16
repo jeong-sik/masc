@@ -28,7 +28,7 @@ let check_style status =
       (Some {state = Masc.Published_artifact_check.Checked; _}) -> Theme.ok ()
   | Known None
   | Known (Some {state = Masc.Published_artifact_check.Unchecked; _}) -> Theme.warn ()
-  | Unknown _ -> Theme.muted ()
+  | Unknown _ | Kept_back _ -> Theme.muted ()
 
 (* A report's display name already spells its format, title and revision, and
    the type column says the format and revision, so the row names it by title. *)

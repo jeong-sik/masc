@@ -115,6 +115,8 @@ let prepare_code_draft_rows ~ko ~cols draft =
     | Draft.Rejected detail ->
       say "저장 거절: " "Save refused: " ^ detail, (Draft.base draft).text,
       say "원본 → 초안" "original source → draft"
+    | Draft.Kept_back notice ->
+      notice, (Draft.base draft).text, say "원본 → 초안" "original source → draft"
     | Draft.Needs_review (reason, current) ->
       let detail = match reason with Draft.Conflict text | Draft.Uncertain text -> text in
       (say "초안을 남겨 둠: " "Draft retained: " ^ detail),

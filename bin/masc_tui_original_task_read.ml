@@ -5,7 +5,7 @@ type receipt = Unobserved of int
   | Recorded of { task_id : string; backlog_version : int }
   | Ambiguous of { task_ids : string list; backlog_version : int }
 type error = Workspace_unconfirmed of string | Read_failed of string
-  | Invalid_reply of string | Interrupted
+  | Invalid_reply of string | Interrupted | Kept_back of string
 type request = string Fetched.request
 type ask_origin = {
   ao_keeper : string; ao_ask_id : string; ao_task_id : string;
@@ -134,6 +134,7 @@ let error_text = function
   | Read_failed detail -> "Read failed: " ^ detail
   | Invalid_reply detail -> "Reply refused: " ^ detail
   | Interrupted -> "Inspection interrupted; the original operation was not repeated."
+  | Kept_back notice -> notice
 let receipt_sections = function
   | Unobserved version -> [section "Not observed"
       (Printf.sprintf "No creation fact was observed at backlog revision %d. This does not prove that no Task was created; do not repeat creation to find out." version)]
@@ -150,6 +151,7 @@ let transport_text = function
   | Sending -> "Creation send callback entered; no result yet"
   | Completed {outcome=Created {task_id;_};_} -> "Original response confirmed " ^ task_id
   | Completed {outcome=Not_sent detail;_} -> "Original creation was not sent: " ^ detail
+  | Completed {outcome=Kept_back notice;_} -> notice
   | Completed {outcome=Server_error detail;_} -> "Original response was an error, not proof of no creation: " ^ detail
   | Completed {outcome=Unconfirmed detail;_} -> "Original transport outcome remains unconfirmed: " ^ detail
 let prepare_task ~task_id task_observation =

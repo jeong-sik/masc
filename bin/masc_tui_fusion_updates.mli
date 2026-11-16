@@ -80,8 +80,9 @@ val launch_options_loaded :
 
 val launched :
   Masc_tui_types.state -> generation:int -> report:(string -> unit) ->
-  refresh:(unit -> unit) -> (string, string) result -> unit
+  refresh:(unit -> unit) -> (string, Masc_tui_types.request_failure) result -> unit
 (** Only the current submitting form consumes the response. Success records
     the started run, calls [report], then calls [refresh]. Refusal returns the
-    existing form to editing and reports the reason. Obsolete responses invoke
+    existing form to editing and reports the reason; a launch the workspace
+    guard kept back returns it to editing with the kept-back notice. Obsolete responses invoke
     neither callback. *)

@@ -126,6 +126,7 @@ type outcome_kind =
   | Accepted
   | Refused
   | Uncertain
+  | Kept_back
 
 type batch_counts =
   { attempted : int
@@ -133,6 +134,7 @@ type batch_counts =
   ; accepted : int
   ; refused : int
   ; uncertain : int
+  ; kept_back : int
   }
 
 let requeue_all ~send ~classify ~progress items =
@@ -142,6 +144,7 @@ let requeue_all ~send ~classify ~progress items =
     ; accepted = 0
     ; refused = 0
     ; uncertain = 0
+    ; kept_back = 0
     }
   in
   let rec loop counts outcomes = function
@@ -157,6 +160,8 @@ let requeue_all ~send ~classify ~progress items =
           { counts with attempted = counts.attempted + 1; refused = counts.refused + 1 }
         | Uncertain ->
           { counts with attempted = counts.attempted + 1; uncertain = counts.uncertain + 1 }
+        | Kept_back ->
+          { counts with attempted = counts.attempted + 1; kept_back = counts.kept_back + 1 }
       in
       progress counts;
       loop counts ((partition_id, outcome) :: outcomes) remaining

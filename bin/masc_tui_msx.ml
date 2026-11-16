@@ -184,6 +184,7 @@ let empty_title ~(connection : Masc_tui_types.connection_status) source
   match live with
   | Live.Failed detail ->
       Printf.sprintf " %s — could not read the machine: %s" label detail
+  | Live.Kept_back notice -> Printf.sprintf " %s — %s" label notice
   | Live.Unread -> (
     match connection with
     | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
@@ -231,7 +232,8 @@ let live_title ~connection source (live : Live.view) =
   | Live.Showing { time = Live.Frame frame; _ } ->
       Printf.sprintf " %s — frame %d   (spectating the server)"
         (Live.source_label source) frame
-  | Live.Unread | Live.Not_loaded | Live.Failed _ -> empty_title ~connection source live
+  | Live.Unread | Live.Not_loaded | Live.Failed _ | Live.Kept_back _ ->
+      empty_title ~connection source live
 
 (* How much of the terminal the picture takes: 1.0 fills the screen, and
    the size keys step it in eighths between a quarter and full. A local
@@ -469,7 +471,7 @@ let render_live ~(write : string -> unit)
     match live with
     | Live.Showing p ->
         Some (Masc_tui_interactive.Pixels { width = p.width; height = p.height; rgb = p.rgb })
-    | Live.Unread | Live.Not_loaded | Live.Failed _ -> None
+    | Live.Unread | Live.Not_loaded | Live.Failed _ | Live.Kept_back _ -> None
   in
   draw ~write ~title:(live_title ~connection source live) ~footer:(live_footer ())
     ~retain:(Option.is_some surface) ~activity ?room ?room_footer surface
@@ -579,8 +581,9 @@ let menu_entries (state : Masc_tui_types.state) : Masc_tui_types.msx_menu_entry 
      screen; a disk change is MSX's alone. *)
   let dos = match state.msx_menu_mode, state.dos_live with
     | Masc_tui_types.Boot_game, Live.Showing _ -> [ Masc_tui_types.Menu_watch Machine_lane.Dos ]
-    | Masc_tui_types.Boot_game, (Live.Unread | Live.Not_loaded | Live.Failed _)
-    | Change_disk, (Live.Unread | Live.Not_loaded | Live.Showing _ | Live.Failed _) -> [] in
+    | Masc_tui_types.Boot_game, (Live.Unread | Live.Not_loaded | Live.Failed _ | Live.Kept_back _)
+    | Change_disk,
+      (Live.Unread | Live.Not_loaded | Live.Showing _ | Live.Failed _ | Live.Kept_back _) -> [] in
   watch @ dos @ media
 
 let same_entry (a : Masc_tui_types.msx_menu_entry) (b : Masc_tui_types.msx_menu_entry) =

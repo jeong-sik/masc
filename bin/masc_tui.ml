@@ -118,6 +118,32 @@ let report_kept_back state ~request reason kept =
   let ko = state.ui_language = Lang_ko in
   report_action state "error" (kept_back ~ko ~request (reason ~ko) kept)
 
+(* A request the workspace guard stopped before it left: never sent, so it is
+   said as kept back and never as the server's answer (RFC §2). *)
+let report_withdrawn state ~request refusal =
+  report_kept_back state ~request (fun ~ko -> workspace_refusal_reason ~ko refusal) Nothing_kept
+
+(* A read's result with its failure as the text its surface keeps: the read's
+   own failure as it was, or the kept-back notice alone for a read the
+   workspace guard stopped (RFC §2). *)
+let said_read_result state ~request result =
+  Result.map_error (request_failure_text ~ko:(state.ui_language = Lang_ko) ~request) result
+
+(* The read ran before its authority was withdrawn. Its wire outcome may
+   still be unknown, so preserve the attempt without claiming it was unsent. *)
+let workspace_response_refusal_text state ~request refusal =
+  let ko = state.ui_language = Lang_ko in
+  String.concat " · "
+    [ Kept_request.name ~ko request
+      ^ (if ko then " 시도 후 결과 미적용" else " attempted; result not applied")
+    ; workspace_refusal_reason ~ko refusal
+    ]
+
+let request_failure_after_read state ~request = function
+  | Request_failed _ as failure -> failure
+  | Request_withdrawn refusal ->
+      Request_failed (workspace_response_refusal_text state ~request refusal)
+
 (* Kept back until the server says again which workspace it serves, which a
    reconnect brings. *)
 let kept_back_until_reconnect ~ko ~request =
@@ -1994,7 +2020,7 @@ let report_workspace_reading state ~mailbox ~authority ~reading_authority
     enqueue_async mailbox
       (Workspace_scoped (authority, Some reading_authority,
         Workspace_msg (Workspace_identity_unconfirmed
-          { detail = workspace_guard_refusal_english refusal; latest = reading
+          { refusal; latest = reading
           ; prior_contact; refresh_ticket })))
 
 (* Whether a request captured under [authority] for [identity] may still go
@@ -2036,14 +2062,6 @@ let admit_workspace_request ?schedule_form_change ?refresh_ticket
       Error refusal
     end
 
-(* The guard's refusal in English, for the surfaces whose other sentences are
-   still English. A surface that moves to the screen language takes
-   [admit_workspace_request] and says the refusal with [workspace_refusal_text],
-   naming the request (#52022). *)
-let check_workspace_request ?refresh_ticket ?prior_contact state ~mailbox ~authority ~identity ~host ~port () =
-  admit_workspace_request ?refresh_ticket ?prior_contact state ~mailbox ~authority ~identity ~host ~port ()
-  |> Result.map_error workspace_guard_refusal_english
-
 (* The server this screen reads. It runs on this machine, so the address is
    loopback and there is nothing to configure.
 
@@ -2074,29 +2092,22 @@ let workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port
      | Error _ -> ());
     result
 
-(* The same chain with the refusal in English; see [check_workspace_request]. *)
-let workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port =
-  let admit = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
-  fun () -> Result.map_error workspace_guard_refusal_english (admit ())
-
 (* Capture the endpoint authority before an extracted request can suspend. *)
 let capture_workspace_admission state ~mailbox =
   workspace_admission_sequence state ~mailbox ~authority:state.workspace_authority
     ~identity:state.server_identity ~host:server_peer_host ~port:state.port
 
-let capture_workspace_check state ~mailbox =
-  workspace_check_sequence state ~mailbox ~authority:state.workspace_authority
-    ~identity:state.server_identity ~host:server_peer_host ~port:state.port
-
 (* The cached identity only describes the last read. A machine mutation
    revalidates its captured endpoint immediately before dispatch, and its
-   completion owns only the view and authority that requested it. *)
-let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unknown ~deliver write =
+   completion owns only the view and authority that requested it. A change
+   the workspace guard stops never left, so it goes to [withdrawn] with its
+   refusal, apart from [deliver]'s refusals and unknown outcomes (RFC §2). *)
+let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unknown ~withdrawn ~deliver write =
   let authority = state.workspace_authority in
   let view = ref !msx_poll_view in
   let port = state.port in
   let identity = state.server_identity in
-  let check = capture_workspace_check state ~mailbox in
+  let check = capture_workspace_admission state ~mailbox in
   let current () =
     authority = state.workspace_authority && !view == !msx_poll_view && port = state.port
   in
@@ -2104,21 +2115,24 @@ let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unk
      server compares it again at the moment it applies the change. *)
   let admission =
     try
-      if not (machine_changes_allowed state) then Error machine_change_refusal
+      if not (machine_changes_allowed state) then Error (Request_failed machine_change_refusal)
       else match identity, check () with
-      | _, Error detail -> Error detail
-      | None, Ok () -> Error "Workspace identity unavailable; MSX change withdrawn"
+      | _, Error refusal -> Error (Request_withdrawn refusal)
+      | None, Ok () -> Error (Request_withdrawn Workspace_identity_not_confirmed)
       | Some expected, Ok () when current () && machine_changes_allowed state -> Ok expected
-      | Some _, Ok () -> Error "MSX control view or workspace authority withdrawn"
+      | Some _, Ok () -> Error (Request_failed "MSX control view or workspace authority withdrawn")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
+    | exn -> Error (Request_failed (Printexc.to_string exn))
   in
   match admission with
-  | Error detail when current () ->
+  | Error (Request_failed detail) when current () ->
       state.machine_interaction <- Observe_machine;
       deliver None (Error (refused detail))
-  | Error _ -> ()
+  | Error (Request_withdrawn refusal) when current () ->
+      state.machine_interaction <- Observe_machine;
+      withdrawn refusal
+  | Error (Request_failed _ | Request_withdrawn _) -> ()
   | Ok expected_workspace ->
       let result =
         try
@@ -2184,7 +2198,7 @@ let in_workspace_request_scope ~kind state ~mailbox ~authority ~identity ~host ~
           report_workspace_reading state ~mailbox ~authority ~reading_authority
             ~prior_contact:Masc_tui_server_lifecycle.Server_reached ~refresh_ticket
             ~refusal reading)
-      ~withdrawn:(fun () -> withdrawn (workspace_guard_refusal_english refusal))
+      ~withdrawn:(fun () -> withdrawn refusal)
       request
 
 (* The scope of a job launched now: it expects the workspace this TUI holds
@@ -2195,6 +2209,11 @@ let in_current_workspace_scope ~kind state ~mailbox ~withdrawn =
   fun request ->
     in_workspace_request_scope ~kind state ~mailbox ~authority ~identity ~host ~port
       ~withdrawn request
+
+(* The launchers below whose callers do not take the scope's refusal as a type
+   answer it through their [boundary_error], as a failure in this sentence. *)
+let workspace_scope_refused_english =
+  "Workspace identity changed or is unavailable; request withdrawn"
 
 (* A job that changes something is an [Operation] scope: its guard keeps the
    [/health] admission so its receipt tells "not sent" from "unknown". *)
@@ -2213,20 +2232,25 @@ let fork_workspace_job ?(observation = false) ?kind ?key ?on_withdrawn ?observe 
     | Some kind -> kind
     | None -> workspace_scope_kind ~operation:(not observation) in
   let in_scope = in_current_workspace_scope ~kind
-      state ~mailbox ~withdrawn:(fun (_ : string) -> ()) in
+      state ~mailbox ~withdrawn:(fun (_ : workspace_refusal) -> ()) in
   Masc_tui_workspace_job.fork ~observation ?key ?on_withdrawn ?observe state ~sw
     (fun () -> in_scope run)
 
 (* Dispatch owns cancellation, error conversion and the original completion
-   envelope. Each caller supplies its own admission before doing its work. *)
+   envelope. Each caller supplies its own admission before doing its work.
+   A caller that says the guard's refusal apart from its failures passes
+   [withdrawn], which also receives the scope's refusal. *)
 let launch_workspace_result ?key ?(operation = false) ?(observation = false)
-    ?cancelled ?cancelled_by ?observe_job ?(on_not_run = fun () -> ()) state ~mailbox ~boundary_error ~deliver perform =
+    ?cancelled ?cancelled_by ?observe_job ?(on_not_run = fun () -> ()) ?withdrawn state ~mailbox ~boundary_error ~deliver perform =
+  let withdrawn = match withdrawn with
+    | Some withdrawn -> withdrawn
+    | None -> fun (_ : workspace_refusal) -> boundary_error workspace_scope_refused_english in
   let envelope = capture_workspace_message state in
   let scoped message = envelope (if operation then Workspace_operation message else message) in
   let cancelled = Option.map scoped cancelled in
   let cancelled_by = Option.map (fun message () -> scoped (message ())) cancelled_by in
   let in_scope = in_current_workspace_scope ~kind:(workspace_scope_kind ~operation) state ~mailbox
-      ~withdrawn:(fun detail -> Error (boundary_error detail)) in
+      ~withdrawn:(fun refusal -> Error (withdrawn refusal)) in
   Masc_tui_workspace_result.launch ?key ~observation ?cancelled ?cancelled_by ?observe_job ~on_not_run
     state ~results:mailbox.workspace_results ~boundary_error
     ~deliver:(fun result ->
@@ -2236,44 +2260,57 @@ let launch_workspace_result ?key ?(operation = false) ?(observation = false)
 (* An operation whose receipt outlives the workspace that admitted it. *)
 let launch_workspace_session state ~mailbox ~boundary_error ~deliver perform =
   let in_scope = in_current_workspace_scope ~kind:Masc_tui_workspace_precondition.Operation
-      state ~mailbox ~withdrawn:(fun detail -> Error (boundary_error detail)) in
+      state ~mailbox ~withdrawn:(fun (_ : workspace_refusal) ->
+        Error (boundary_error workspace_scope_refused_english)) in
   Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
     ~boundary_error ~deliver (fun () -> in_scope perform)
 
 let launch_workspace_observation ?key ?observe_job ?on_not_run state ~mailbox
     ~boundary_error ~not_started ~cancelled ~progress ~deliver perform =
   let in_scope = in_current_workspace_scope ~kind:Masc_tui_workspace_precondition.Observation
-      state ~mailbox ~withdrawn:(fun detail -> Error (boundary_error detail)) in
+      state ~mailbox ~withdrawn:(fun (_ : workspace_refusal) ->
+        Error (boundary_error workspace_scope_refused_english)) in
   Masc_tui_workspace_result.launch_observation ?key ?observe_job ?on_not_run state
     ~results:mailbox.workspace_results ~boundary_error ~not_started ~cancelled ~progress
     ~deliver (fun publish -> in_scope (fun () -> perform publish))
 
 let launch_workspace_async_read ?source ?on_not_run state ~mailbox ~deliver read =
   let in_scope = in_current_workspace_scope ~kind:Masc_tui_workspace_precondition.Observation
-      state ~mailbox ~withdrawn:Result.error in
+      state ~mailbox ~withdrawn:(fun (_ : workspace_refusal) ->
+        Error workspace_scope_refused_english) in
   Masc_tui_async_read.launch ?source ?on_not_run ~deliver (fun () -> in_scope read)
 
-let launch_workspace_async_read_with ?on_not_run state ~mailbox ~boundary_error ~deliver read =
+let launch_workspace_async_read_with ?on_not_run ?withdrawn state ~mailbox ~boundary_error ~deliver read =
+  let withdrawn = match withdrawn with
+    | Some withdrawn -> withdrawn
+    | None -> fun (_ : workspace_refusal) -> boundary_error workspace_scope_refused_english in
   let in_scope = in_current_workspace_scope ~kind:Masc_tui_workspace_precondition.Observation
-      state ~mailbox ~withdrawn:(fun detail -> Error (boundary_error detail)) in
+      state ~mailbox ~withdrawn:(fun refusal -> Error (withdrawn refusal)) in
   Masc_tui_async_read.launch_with ?on_not_run ~boundary_error ~deliver (fun () -> in_scope read)
 
-let launch_workspace_async_read_pair state ~mailbox ~deliver_first ~deliver_second first second =
-  launch_workspace_async_read state ~mailbox ~deliver:deliver_first first;
-  launch_workspace_async_read state ~mailbox ~deliver:deliver_second second
+let launch_workspace_async_read_pair state ~mailbox ~boundary_error ~withdrawn ~deliver_first ~deliver_second first second =
+  launch_workspace_async_read_with state ~mailbox ~boundary_error ~withdrawn ~deliver:deliver_first first;
+  launch_workspace_async_read_with state ~mailbox ~boundary_error ~withdrawn ~deliver:deliver_second second
 
-let launch_workspace_request ?(operation = false) ?cancelled ?cancelled_by state ~mailbox ~boundary_error ~deliver read =
+(* Recheck the endpoint before dispatch, with its refusal kept apart: the
+   request was not sent, so it reaches the caller as [withdrawn] and never as
+   one of the read's own failures, which the caller says as the server's
+   (RFC §2). *)
+let launch_guarded_request ?(operation = false) ?cancelled ?cancelled_by state ~mailbox ~boundary_error ~withdrawn ~deliver read =
   let authority = state.workspace_authority in
   let identity = state.server_identity in
   let host = server_peer_host and port = state.port in
-  launch_workspace_result ~operation ?cancelled ?cancelled_by state ~mailbox ~boundary_error ~deliver (fun () ->
-    match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-    | Error detail -> Error (boundary_error detail)
+  launch_workspace_result ~operation ?cancelled ?cancelled_by ~withdrawn state ~mailbox ~boundary_error ~deliver (fun () ->
+    match admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+    | Error refusal -> Error (withdrawn refusal)
     | Ok () -> read ())
 
 (* These read-only consumers carry their expected roots through the actual GET
    and require the server's admission receipt, including for cache reuse. Local
-   ownership is checked before dispatch; a separate health GET adds no binding. *)
+   ownership is checked before dispatch; a separate health GET adds no binding.
+   A read the check stops is never sent, so its refusal comes back as
+   [Error refusal], apart from whatever the read itself returns in [Ok]
+   (RFC §2). *)
 let capture_workspace_json_read state read =
   let expected = state.server_identity in
   let authority = state.workspace_authority in
@@ -2281,22 +2318,52 @@ let capture_workspace_json_read state read =
   let host = server_peer_host and port = state.port in
   fun () ->
     match expected with
-    | None -> Error "Workspace identity is unavailable for this read"
+    | None -> Error Workspace_identity_not_confirmed
     | Some expected ->
-        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+        if authority <> state.workspace_authority then Error Workspace_authority_withdrawn
         else if reading != state.workspace_read_authority || not (server_authority_ready state)
-        then Error "Workspace identity is unconfirmed"
+        then Error Workspace_identity_not_confirmed
         else if port <> state.port
           || not (same_workspace_identity (Some expected) state.server_identity)
-        then Error "Workspace identity changed before this read"
+        then Error Workspace_identity_changed
         else
-          Masc_tui_workspace_read.with_binding ~host ~port ~expected
-            ~proof:Masc_tui_workspace_read.Request_precondition read
+          Ok (Masc_tui_workspace_read.with_binding ~host ~port ~expected
+            ~proof:Masc_tui_workspace_read.Request_precondition read)
 
-let launch_workspace_json_read ?key ?on_not_run state ~mailbox ~deliver read =
+(* The guard's refusal reaches the caller as [withdrawn], never as one of the
+   read's own failures, which [boundary_error] and the read return. *)
+let launch_workspace_json_read ?key ?on_not_run state ~mailbox ~boundary_error ~withdrawn ~deliver read =
   let read = capture_workspace_json_read state read in
-  launch_workspace_result ?key ~observation:true ?on_not_run state
-    ~mailbox ~boundary_error:Fun.id ~deliver read
+  launch_workspace_result ?key ~observation:true ?on_not_run ~withdrawn state
+    ~mailbox ~boundary_error ~deliver (fun () ->
+      match read () with
+      | Error refusal -> Error (withdrawn refusal)
+      | Ok result -> result)
+
+(* Label a read's own failure with its source, as
+   [Masc_tui_async_read.attribute] does. A read the workspace guard stopped is
+   not that source's failure, so it keeps no label (RFC §2).
+
+   [launch_guarded_async_read] runs a captured workspace read off the render
+   loop: its own and its launch's failures come back as [Request_failed],
+   labelled with [source] as [Masc_tui_async_read.launch ~source] labels
+   them, and the guard's refusal comes back as [Request_withdrawn]. *)
+let attribute_request_failure source = function
+  | Request_failed detail ->
+      (match Masc_tui_async_read.attribute source (Error detail) with
+       | Error labelled -> Request_failed labelled
+       | Ok () -> Request_failed detail)
+  | Request_withdrawn _ as failure -> failure
+
+let launch_guarded_async_read ?source ?on_not_run state ~mailbox ~deliver read =
+  let failed detail = match source with
+    | None -> Request_failed detail
+    | Some source -> attribute_request_failure source (Request_failed detail) in
+  launch_workspace_async_read_with ?on_not_run state ~mailbox ~boundary_error:failed
+    ~withdrawn:(fun refusal -> Request_withdrawn refusal) ~deliver (fun () ->
+    match read () with
+    | Error refusal -> Error (Request_withdrawn refusal)
+    | Ok result -> Result.map_error failed result)
 
 let launch_artifact_checks_load state ~mailbox =
   if server_authority_ready state then
@@ -2306,16 +2373,21 @@ let launch_artifact_checks_load state ~mailbox =
       state.artifact_checks <- reading;
       let host = server_peer_host and port = state.port in
       launch_workspace_json_read state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Artifact_msg (Artifact_checks_loaded (request, result)))
         (fun () ->
           let open Result.Syntax in
+          Result.map_error (fun detail -> Request_failed detail) @@
           let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/published-artifact-checks" in
           Masc_tui_artifact_checks.of_json ~received_at:(Unix.gettimeofday ()) json)
 
 let launch_resources_load state ~mailbox =
   Masc_tui_resources_requests.launch_list state ~host:server_peer_host
-    ~launch:(launch_workspace_json_read state ~mailbox)
-    ~check:(capture_workspace_check state ~mailbox);
+    ~launch:(launch_workspace_json_read state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal))
+    ~check:(capture_workspace_admission state ~mailbox);
   launch_artifact_checks_load state ~mailbox
 
 let resource_export_is_current state prompt =
@@ -2373,7 +2445,8 @@ let save_resource_source state ~mailbox prompt =
         | Save_entered -> Resource_save_unconfirmed {detail;cause=None}
         | Save_observed outcome -> outcome in
       let deliver outcome = Resource_msg (Resource_saved (request, outcome)) in
-      launch_workspace_request ~operation:true state ~mailbox ~boundary_error:boundary
+      launch_guarded_request ~operation:true state ~mailbox ~boundary_error:boundary
+        ~withdrawn:(fun refusal -> Resource_save_kept_back refusal)
         ~cancelled_by:(fun () -> deliver (match !observed with
           | Save_not_entered -> Resource_save_not_started "Save cancelled before file creation"
           | Save_entered -> Resource_save_interrupted None
@@ -2414,29 +2487,34 @@ let open_resource_in_dashboard state ~mailbox =
     let reading = state.workspace_read_authority in
     let port = state.port in
     let url = Masc_tui_resource_export.dashboard_url ~host:server_peer_host ~port document in
-    launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
+    let failed detail = Request_failed detail in
+    launch_guarded_request ~operation:true state ~mailbox ~boundary_error:failed
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~cancelled:(Resource_msg (Resource_exported (Masc_tui_resource_export.label document,
-        Error ("Browser opening interrupted; whether the browser opened is unknown: " ^ url))))
+        Error (failed ("Browser opening interrupted; whether the browser opened is unknown: " ^ url)))))
       ~deliver:(fun result -> Resource_msg (Resource_exported (Masc_tui_resource_export.label document, result)))
       (fun () ->
         if authority <> state.workspace_authority || reading != state.workspace_read_authority then
-          Error "The workspace changed before opening this report"
+          Error (failed "The workspace changed before opening this report")
         else match Masc_tui_resource_document.export_source state with
-        | Error detail -> Error detail
+        | Error detail -> Error (failed detail)
         | Ok current when not (Masc_tui_resource_export.same current document) ->
-            Error "The selected report changed before opening"
+            Error (failed "The selected report changed before opening")
         | Ok _ ->
           Eio_guard.run_in_systhread ~label:"tui-report-browser" (fun () ->
             Masc_tui_browser.open_url url)
-          |> Result.map (fun opener -> "Opened " ^ url ^ " via " ^ opener ^ "; browser authentication may be required"))
+          |> Result.map (fun opener -> "Opened " ^ url ^ " via " ^ opener ^ "; browser authentication may be required")
+          |> Result.map_error failed)
 
 let launch_resources_read state ~mailbox ~key =
   withdraw_resource_diagram_pending state;
   let share_origin = Result.to_option (workspace_change_origin state) in
   Masc_tui_resources_requests.launch_read state ~host:server_peer_host
     ~share_origin
-    ~launch:(launch_workspace_json_read state ~mailbox)
-    ~check:(capture_workspace_check state ~mailbox) ~key
+    ~launch:(launch_workspace_json_read state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal))
+    ~check:(capture_workspace_admission state ~mailbox) ~key
 
 let launch_artifact_check_change state ~mailbox =
   let entry = match state.resource_focus with
@@ -2451,15 +2529,20 @@ let launch_artifact_check_change state ~mailbox =
     report_kept_back state ~request:Kept_request.Report_check workspace_identity_unread Nothing_kept
   | Some (Report report), Some expected_workspace ->
     match Masc_tui_resources_updates.begin_check state ~report with
-    | Error detail -> report_action state "error" detail
+    | Error (Request_failed detail) -> report_action state "error" detail
+    | Error (Request_withdrawn refusal) ->
+      report_withdrawn state ~request:Kept_request.Report_check refusal
     | Ok request ->
       let credential = Masc_tui_http.bind_credential () in
       let host = server_peer_host and port = state.port in
       report_action state "system" "Saving confirmation; refresh follows the result";
-      launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
+      launch_guarded_request ~operation:true state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Artifact_msg (Artifact_check_changed (request, result)))
         (fun () -> Masc_tui_http.post_artifact_check ~credential ~expected_workspace
-          ~host ~port ~request)
+          ~host ~port ~request
+          |> Result.map_error (fun detail -> Request_failed detail))
 
 module Artifact_share_pending = Masc_tui_artifact_share_pending
 
@@ -2470,6 +2553,17 @@ let open_resource_report state =
   match Masc_tui_resource_document.current state with
   | Some {entry = Masc_tui_resource_catalog.Report report; _} -> Ok report
   | Some {entry = Mcp _; _} | None -> Error "Open a published report in the detail pane"
+
+(* The share POST the workspace guard stopped: the notice, the report, and
+   the way to settle the intent already recorded for it, which a later
+   attempt may still apply. *)
+let report_resource_share_kept_back state (request : resource_share_request) refusal =
+  let ko = state.ui_language = Lang_ko in
+  report_action state "error"
+    (String.concat " · "
+       [ workspace_refusal_text ~ko ~request:Kept_request.Resource_share refusal
+       ; request.share_report.id
+       ; (if ko then "U 로 기록된 작업을 맞추세요" else "use U to reconcile the recorded operation") ])
 
 let launch_resource_share state ~mailbox ~report ~entry ~recovery ~dispatch_allowed =
   let captured_authority = state.workspace_authority in
@@ -2483,7 +2577,9 @@ let launch_resource_share state ~mailbox ~report ~entry ~recovery ~dispatch_allo
       List.iter (fun (observed : Artifact_share_pending.entry) ->
         if observed.masc_root = origin.wi_masc_root then record_resource_share_observation state observed) entries in
     (match Masc_tui_resources_updates.begin_share_change ~recovery state ~report ~entry with
-     | Error detail -> report_action state "error" detail
+     | Error (Request_failed detail) -> report_action state "error" detail
+     | Error (Request_withdrawn refusal) ->
+       report_withdrawn state ~request:Kept_request.Resource_share refusal
      | Ok request ->
        report_action state "system" (if recovery then
          "Reconciling the original share operation; it may be applied now..."
@@ -2522,19 +2618,20 @@ let launch_resource_share state ~mailbox ~report ~entry ~recovery ~dispatch_allo
            | Ok Artifact_share_pending.Prepared ->
              match Masc_tui_artifact_share_attempt.perform attempt
                ~preflight:(fun () ->
-                 match check_workspace_request state ~mailbox ~authority:captured_authority ~identity ~host ~port () with
-                 | Error detail -> Error detail
+                 match admit_workspace_request state ~mailbox ~authority:captured_authority ~identity ~host ~port () with
+                 | Error refusal -> Error (Request_withdrawn refusal)
                  | Ok () ->
                    (match resource_share_dispatch_refusal state ~origin ~entry ~recovery with
-                    | Some detail -> Error detail
+                    | Some detail -> Error (Request_failed detail)
                     | None when dispatch_allowed () -> Ok ()
-                    | None -> Error "An interrupt or termination is awaiting handling"))
+                    | None -> Error (Request_failed "An interrupt or termination is awaiting handling")))
                ~send:(fun () -> Masc_tui_http.post_artifact_share ~credential ~expected_workspace
                  ~host ~port ~id:entry.artifact_id ~shared:operation.requested
                  ~operation_id:operation.operation_id ~expected_version:operation.expected_version
                  ~expected_artifact_revision:operation.expected_artifact_revision
                  ~expected_artifact_sha256:operation.expected_artifact_sha256) with
-             | Not_sent detail -> Ok (Resource_share_not_sent detail)
+             | Not_sent (Request_failed detail) -> Ok (Resource_share_not_sent detail)
+             | Not_sent (Request_withdrawn refusal) -> Ok (Resource_share_kept_back refusal)
              | Sent (Error detail) -> Error (Resource_share_unknown (context detail))
              | Sent (Ok result) ->
                (match Artifact_share_pending.settle ~on_observed ~path entry with
@@ -2628,7 +2725,7 @@ let finish_resource_share state request result =
   | Ok (Resource_share_applied _ | Resource_share_conflict _) -> read_key
   | Ok (Resource_share_not_prepared _) -> read_key
   | Error (Resource_share_not_started _) when not request.share_recovery -> read_key
-  | Ok (Resource_share_not_sent _)
+  | Ok (Resource_share_not_sent _ | Resource_share_kept_back _)
   | Error (Resource_share_unknown _ | Resource_share_not_started _) ->
     if not (List.mem key state.resource_share_uncertain_ids) then
       state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
@@ -2639,7 +2736,7 @@ let finish_resource_share state request result =
 let launch_keeper_creation state ~mailbox ~request ~declaration =
   let host = server_peer_host in
   let port = state.port in
-  let check = workspace_check_sequence state ~mailbox
+  let check = workspace_admission_sequence state ~mailbox
       ~authority:request.kcr_authority ~identity:(Some request.kcr_workspace)
       ~host ~port in
   let deliver status =
@@ -2651,7 +2748,7 @@ let launch_keeper_creation state ~mailbox ~request ~declaration =
   let run () =
     let outcome =
       try match check () with
-      | Error detail -> Creation_not_sent detail
+      | Error refusal -> Creation_kept_back refusal
       | Ok () ->
         deliver Creation_posting;
         sent := true;
@@ -2983,22 +3080,27 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    asks the server to resume from the log's last seq instead. *)
 exception Rejected_keeper_live_stream
 
-let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_post ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
+let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_post ~follow_kept_back ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
   let enqueue_async = enqueue in
   let host = server_peer_host in
+  (* Before the first POST a refusal is kept back: nothing left, so nothing
+     can have been admitted. A refusal of a later re-POST stops a reconcile of
+     a request that did leave, whose outcome stays unverified; [follow_kept_back]
+     says that re-POST was not sent, apart from any transport failure. *)
   match Eio_context.get_clock_opt () with
   | None ->
       (match check_request () with
-       | Error detail -> Error (Keeper_chat.Transport_error detail)
+       | Error refusal -> Keeper_chat_kept_back refusal
        | Ok () ->
            if start_first_post () then begin
              enqueue_async mailbox
                (Keeper_msg (Keeper_chat_stream_unavailable
                   ( request
                   , "sending without a live view: no Eio clock to bound the stream" )));
-             Masc_tui_http.post_keeper_chat ~expected_workspace ~admission_intent ~host ~port request
+             Keeper_chat_answered
+               (Masc_tui_http.post_keeper_chat ~expected_workspace ~admission_intent ~host ~port request)
            end
-           else Error (Keeper_chat.Transport_error "Workspace authority withdrawn"))
+           else Keeper_chat_kept_back Workspace_authority_withdrawn)
   | Some clock ->
       (* After the highest seq this watcher has handed to the mailbox. The
          log is folded by the main loop, so at the moment of a re-POST it may
@@ -3013,9 +3115,10 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
       in
       let rec watch ~first_post ~since_seq was_unverified =
         match check_request () with
-        | Error detail -> Error (Keeper_chat.Transport_error detail)
+        | Error refusal when first_post -> Keeper_chat_kept_back refusal
+        | Error refusal -> Keeper_chat_answered (Error (follow_kept_back refusal))
         | Ok () when first_post && not (start_first_post ()) ->
-            Error (Keeper_chat.Transport_error "Workspace authority withdrawn")
+            Keeper_chat_kept_back Workspace_authority_withdrawn
         | Ok () ->
         let decoder = Keeper_chat_live.create ~request () in
         (* Each idempotent re-subscribe has its own SSE grammar state. The
@@ -3114,7 +3217,7 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                      | Keeper_chat.Awaiting_gate_approval | Keeper_chat.No_visible_reply );
                    _ }
               | Keeper_chat.Replayed_succeeded _)
-          | Error _) as terminal -> terminal
+          | Error _) as terminal -> Keeper_chat_answered terminal
       in
       watch ~first_post:true ~since_seq:Masc.Keeper_chat_event_log.Whole_turn false
 
@@ -3167,13 +3270,15 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
         let result =
           try
             let open Result.Syntax in
-            let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
-            let* () = probe_expected_workspace ~host ~port expected_workspace in
-            Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
-              ~tool_call_id ~approval_id ~allow
+            let failed result = Result.map_error (fun detail -> Request_failed detail) result in
+            let* () = if authority <> state.workspace_authority
+              then Error (Request_withdrawn Workspace_authority_withdrawn) else Ok () in
+            let* () = failed (probe_expected_workspace ~host ~port expected_workspace) in
+            failed (Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
+              ~tool_call_id ~approval_id ~allow)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
+          | exn -> Error (Request_failed (Printexc.to_string exn))
         in
         enqueue_async mailbox
           (Keeper_msg (Keeper_tool_approval_answered
@@ -3189,7 +3294,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
                  tool_call_id,
                  approval_id,
                  allow,
-                 Error "Eio switch is unavailable",
+                 Error (Request_failed "Eio switch is unavailable"),
                  generation ))))
 
 (* Fetch the held tool calls for the Approvals surface. Its own fiber for the
@@ -3245,24 +3350,35 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
    including the ones that refused, which is the part a chain hides by stopping
    at the first endpoint that answers. *)
 
+(* The probe after a save the workspace guard stopped: the notice, then that
+   the configuration it would test is already saved. *)
+let voice_probe_kept_back ~ko refusal =
+  workspace_refusal_text ~ko ~request:Kept_request.Voice_probe refusal
+  ^ " · " ^ (if ko then "설정은 저장됨" else "configuration saved")
+
 let launch_voice_wizard_probe state ~mailbox ~request message =
   if not (server_authority_ready state) then
     state.voice_wizard <- Option.map (fun session ->
       Option.value ~default:session
         (Masc_tui_voice_wizard_session.voice_wizard_after_probe session ~request
-           (Error "Configuration saved; endpoint probe awaits confirmed workspace identity.")))
+           (Error (voice_probe_kept_back ~ko:(state.ui_language = Lang_ko)
+              Workspace_identity_not_confirmed))))
       state.voice_wizard
   else begin
   let enqueue_async = workspace_enqueue state in
-  let check = capture_workspace_check state ~mailbox in
+  let check = capture_workspace_admission state ~mailbox in
   let host = server_peer_host in
   let port = state.port in
   let payload = Yojson.Safe.to_string (`Assoc [ "message", `String message ]) in
   let run () =
     let result =
-      Result.bind (check ()) (fun () -> Masc_tui_http.post_json_with_timeout
-        ~timeout_sec:Masc_tui_http.voice_probe_timeout_sec
-        ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload)
+      match check () with
+      | Error refusal -> Error (Request_withdrawn refusal)
+      | Ok () ->
+        Masc_tui_http.post_json_with_timeout
+          ~timeout_sec:Masc_tui_http.voice_probe_timeout_sec
+          ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload
+        |> Result.map_error (fun detail -> Request_failed detail)
     in
     enqueue_async mailbox (Voice_msg (Voice_wizard_probed (request, result)))
   in
@@ -3270,7 +3386,7 @@ let launch_voice_wizard_probe state ~mailbox ~request message =
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
     enqueue_async mailbox
-      (Voice_msg (Voice_wizard_probed (request, Error "Eio switch is unavailable")))
+      (Voice_msg (Voice_wizard_probed (request, Error (Request_failed "Eio switch is unavailable"))))
   end
 ;;
 
@@ -3427,12 +3543,18 @@ let voice_setup_section_kinds state (section : Voice_setup.section) =
 
 let launch_voice_wizard_save state ~mailbox
     (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
-  match write_authority_refusal state state.workspace_authority with
-  | Some detail ->
-    state.voice_wizard <- Some { session with vws_status = Some detail }
-  | None ->
+  (* A save the guard stopped did not leave, and the wizard keeps its draft:
+     said as kept back, never as the server's refusal (RFC §2). *)
+  let kept_back refusal =
+    let ko = state.ui_language = Lang_ko in
+    kept_back ~ko ~request:Kept_request.Voice_setup_save
+      (workspace_refusal_reason ~ko refusal) Draft_kept in
+  if not (server_authority_ready state) then
+    state.voice_wizard <- Some { session with
+      vws_status = Some (kept_back Workspace_identity_not_confirmed) }
+  else
   let enqueue_async = workspace_enqueue state in
-  let check = capture_workspace_check state ~mailbox in
+  let check = capture_workspace_admission state ~mailbox in
   let alongside =
     voice_setup_section_kinds state session.vws_draft.Voice_wizard.section
   in
@@ -3463,11 +3585,12 @@ let launch_voice_wizard_save state ~mailbox
       let reply =
         match
           (match check () with
-           | Error detail -> Masc_tui_http.Post_refused detail
-           | Ok () -> Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
-               ~body:payload)
+           | Error refusal -> Error refusal
+           | Ok () -> Ok (Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
+               ~body:payload))
         with
-        | Masc_tui_http.Post_answered json ->
+        | Error refusal -> Masc_tui_voice_wizard_session.Save_kept_back (kept_back refusal)
+        | Ok (Masc_tui_http.Post_answered json) ->
           (match voice_setup_revision json with
            | Some revision -> Masc_tui_voice_wizard_session.Save_written revision
            (* Written, by the status, but with no revision to keep editing
@@ -3475,8 +3598,8 @@ let launch_voice_wizard_save state ~mailbox
               this write's is exactly what the reread decides. *)
            | None ->
              Masc_tui_voice_wizard_session.Save_unanswered_reply "the answer named no revision")
-        | Masc_tui_http.Post_refused message -> Masc_tui_voice_wizard_session.Save_refused message
-        | Masc_tui_http.Post_unanswered detail ->
+        | Ok (Masc_tui_http.Post_refused message) -> Masc_tui_voice_wizard_session.Save_refused message
+        | Ok (Masc_tui_http.Post_unanswered detail) ->
           Masc_tui_voice_wizard_session.Save_unanswered_reply detail
       in
       enqueue_async mailbox (Voice_msg (Voice_wizard_saved (request, reply)))
@@ -3586,12 +3709,13 @@ let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
 
 let launch_voice_agent_voice_save state ~mailbox
       (session : Masc_tui_types.voice_agent_session) =
-  match write_authority_refusal state state.workspace_authority with
-  | Some detail ->
-    state.voice_agent_voices <- Some { session with vas_status = Some detail }
-  | None ->
+  if not (server_authority_ready state) then
+    state.voice_agent_voices <- Some { session with
+      vas_status = Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+        ~request:Kept_request.Agent_voice_save Workspace_identity_not_confirmed) }
+  else
   let enqueue_async = workspace_enqueue state in
-  let check = capture_workspace_check state ~mailbox in
+  let check = capture_workspace_admission state ~mailbox in
   match Masc_tui_types.voice_agent_selected session with
   | None ->
     state.voice_agent_voices
@@ -3619,20 +3743,21 @@ let launch_voice_agent_voice_save state ~mailbox
       let result =
         match
           (match check () with
-           | Error detail -> Masc_tui_http.Post_refused detail
-           | Ok () -> Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
-               ~body:payload)
+           | Error refusal -> Error refusal
+           | Ok () -> Ok (Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
+               ~body:payload))
         with
-        | Masc_tui_http.Post_answered json -> Ok json
-        | Masc_tui_http.Post_refused message -> Error message
-        | Masc_tui_http.Post_unanswered detail -> Error detail
+        | Error refusal -> Error (Request_withdrawn refusal)
+        | Ok (Masc_tui_http.Post_answered json) -> Ok json
+        | Ok (Masc_tui_http.Post_refused message) -> Error (Request_failed message)
+        | Ok (Masc_tui_http.Post_unanswered detail) -> Error (Request_failed detail)
       in
       enqueue_async mailbox (Voice_msg (Voice_agent_voice_saved result))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
      | None ->
-       enqueue_async mailbox (Voice_msg (Voice_agent_voice_saved (Error "Eio switch is unavailable"))))
+       enqueue_async mailbox (Voice_msg (Voice_agent_voice_saved (Error (Request_failed "Eio switch is unavailable")))))
 ;;
 
 (* The input device captures open, read at boot from [tui].audio_input_device
@@ -3712,10 +3837,12 @@ let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
     let expected_workspace = state.server_identity in
     state.msx_live_owed <- Masc_tui_owed_read.started state.msx_live_owed;
     state.msx_live_in_flight <- Some request;
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Msx_msg (Msx_live_loaded (request, result)))
       (fun () -> Masc_tui_http.fetch_machine_live ?expected_workspace ~host:server_peer_host
-        ~port:request.live_port Masc.Machine_lane.Msx ~since)
+        ~port:request.live_port Masc.Machine_lane.Msx ~since
+        |> Result.map_error (fun detail -> Request_failed detail))
 ;;
 
 
@@ -3729,10 +3856,12 @@ let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
     state.dos_live_owed <- Masc_tui_owed_read.started state.dos_live_owed;
     state.dos_live_in_flight <- Some request;
     let since = Masc_tui_machine_live.since state.dos_live in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Dos_live_loaded (request, result))
       (fun () -> Masc_tui_http.fetch_machine_live ~host:server_peer_host
-        ~port:request.live_port Masc.Machine_lane.Dos ~since)
+        ~port:request.live_port Masc.Machine_lane.Dos ~since
+        |> Result.map_error (fun detail -> Request_failed detail))
   end
 ;;
 
@@ -3749,8 +3878,11 @@ let launch_keeper_preparation_load state ~mailbox =
     let target = Details.requested_target request in
     let host = server_peer_host and port = state.port in
     launch_workspace_json_read state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Keeper_msg (Keeper_preparation_loaded (request,result)))
-      (fun () -> Masc_tui_http.fetch_keeper_preparation_details ~host ~port target)) request;
+      (fun () -> Masc_tui_http.fetch_keeper_preparation_details ~host ~port target
+        |> Result.map_error (fun detail -> Request_failed detail))) request;
   current != previous
 ;;
 
@@ -3766,7 +3898,7 @@ let launch_keeper_waiting_load ?change ?(exclusive = false) state ~mailbox =
       state.keeper_waiting_owed <- Masc_tui_owed_read.started state.keeper_waiting_owed;
       let host = server_peer_host and port = state.port in
       let snapshot = capture_keeper_waiting_snapshot state in
-      launch_workspace_async_read state ~mailbox ~source:Masc_tui_async_read.Keeper_turns
+      launch_guarded_async_read state ~mailbox ~source:Masc_tui_async_read.Keeper_turns
         ~deliver:(fun result -> enqueue_async mailbox (Keeper_msg (Keeper_waiting_loaded (request, snapshot, result))))
         (capture_workspace_json_read state (fun () ->
           Masc_tui_loader.load_keeper_turns ~host ~port ~preparation_details_for:None))
@@ -3789,7 +3921,7 @@ let launch_keeper_turns_load state ~mailbox =
     let preparation_details_for =
       if state.view = Keepers Keeper_message && not state.msg_turn_folded
       then state.msg_target_keeper_name else None in
-    launch_workspace_async_read state ~mailbox
+    launch_guarded_async_read state ~mailbox
       ~source:Masc_tui_async_read.Keeper_turns
       ~on_not_run:(fun () ->
         state.keeper_turns_inflight <- false;
@@ -3870,13 +4002,15 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
         let result =
           try
             let open Result.Syntax in
-            let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
-            let* () = probe_expected_workspace ~host ~port expected_workspace in
-            Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
-              ~approve ~reason ~expected_workspace
+            let failed result = Result.map_error (fun detail -> Request_failed detail) result in
+            let* () = if authority <> state.workspace_authority
+              then Error (Request_withdrawn Workspace_authority_withdrawn) else Ok () in
+            let* () = failed (probe_expected_workspace ~host ~port expected_workspace) in
+            failed (Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
+              ~approve ~reason ~expected_workspace)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
+          | exn -> Error (Request_failed (Printexc.to_string exn))
         in
         enqueue_async mailbox
           (Gate_msg (Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation)))
@@ -3890,7 +4024,7 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
                ( approval_id,
                  approve,
                  expected_workspace,
-                 Error "Eio switch is unavailable",
+                 Error (Request_failed "Eio switch is unavailable"),
                  generation ))))
 
 let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pending) =
@@ -3918,13 +4052,15 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
             let result =
               try
                 let open Result.Syntax in
-                let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
-                let* () = probe_expected_workspace ~host ~port expected_workspace in
-                Masc_tui_http.post_dashboard_gate_retry ~host ~port ~request
-                  ~expected_workspace
+                let failed result = Result.map_error (fun detail -> Request_failed detail) result in
+                let* () = if authority <> state.workspace_authority
+                  then Error (Request_withdrawn Workspace_authority_withdrawn) else Ok () in
+                let* () = failed (probe_expected_workspace ~host ~port expected_workspace) in
+                failed (Masc_tui_http.post_dashboard_gate_retry ~host ~port ~request
+                  ~expected_workspace)
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> Error (Printexc.to_string exn)
+              | exn -> Error (Request_failed (Printexc.to_string exn))
             in
             enqueue_async mailbox
               (Gate_msg (Gate_auto_judge_retried (pending.gp_id, expected_workspace, result, generation)))
@@ -3937,14 +4073,14 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
                 (Gate_msg (Gate_auto_judge_retried
                    ( pending.gp_id,
                      expected_workspace,
-                     Error "Eio switch is unavailable",
+                     Error (Request_failed "Eio switch is unavailable"),
                      generation ))))
 
 let launch_gate_mode_set state ~mailbox ~lane ~mode =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   match write_authority_refusal state authority with
-  | Some detail -> report_action state "error" detail
+  | Some refusal -> report_withdrawn state ~request:Kept_request.Gate_mode_change refusal
   | None ->
   let host = server_peer_host in
   let port = state.port in
@@ -3952,13 +4088,13 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
     let result =
       try
         match write_authority_refusal state authority with
-        | Some detail -> Error detail
-        | None -> (match lane with
+        | Some refusal -> Error (Request_withdrawn refusal)
+        | None -> Result.map_error (fun detail -> Request_failed detail) (match lane with
          | Masc_tui_palette.Workspace_gate -> Masc_tui_http.post_dashboard_gate_workspace_mode ~host ~port ~mode
          | Masc_tui_palette.External_gate -> Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     enqueue_async mailbox (Gate_msg (Gate_mode_set (lane, mode, result)))
   in
@@ -3967,7 +4103,7 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
       fork_workspace_job state ~mailbox ~sw run
   | None ->
       enqueue_async mailbox
-        (Gate_msg (Gate_mode_set (lane, mode, Error "Eio switch is unavailable")))
+        (Gate_msg (Gate_mode_set (lane, mode, Error (Request_failed "Eio switch is unavailable"))))
 
 let launch_keeper_tool_modes_load state ~mailbox =
   if server_authority_ready state then
@@ -3994,10 +4130,12 @@ let launch_keeper_tool_modes_load state ~mailbox =
       let result =
         try
           match write_authority_refusal state authority with
-          | Some detail -> Error detail
-          | None -> Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+          | Some refusal -> Error (Request_withdrawn refusal)
+          | None ->
+            Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port
+            |> Result.map_error (fun detail -> Request_failed detail) with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error (Request_failed (Printexc.to_string exn))
       in
       enqueue_async mailbox (Keeper_msg (Keeper_tool_modes_loaded (result, ticket)));
       (* Same trip, because both answer "what did somebody set about this
@@ -4007,10 +4145,12 @@ let launch_keeper_tool_modes_load state ~mailbox =
       let settings =
         try
           match write_authority_refusal state authority with
-          | Some detail -> Error detail
-          | None -> Masc_tui_loader.load_keeper_gate_settings ~host ~port with
+          | Some refusal -> Error (Request_withdrawn refusal)
+          | None ->
+            Masc_tui_loader.load_keeper_gate_settings ~host ~port
+            |> Result.map_error (fun detail -> Request_failed detail) with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error (Request_failed (Printexc.to_string exn))
       in
       enqueue_async mailbox (Keeper_msg (Keeper_gate_settings_loaded settings))
     in
@@ -4019,13 +4159,13 @@ let launch_keeper_tool_modes_load state ~mailbox =
          fork_workspace_job state ~mailbox ~sw run
      | None ->
          enqueue_async mailbox
-           (Keeper_msg (Keeper_tool_modes_loaded (Error "Eio switch is unavailable", ticket))))
+           (Keeper_msg (Keeper_tool_modes_loaded (Error (Request_failed "Eio switch is unavailable"), ticket))))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   match write_authority_refusal state authority with
-  | Some detail -> report_action state "error" detail
+  | Some refusal -> report_withdrawn state ~request:Kept_request.Tool_mode_change refusal
   | None ->
   (* [begin_action] takes the newest generation, so a stance listing already
      on the wire stops being current and cannot put the old answer back on
@@ -4043,12 +4183,13 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
         let result =
           try
             match write_authority_refusal state authority with
-            | Some detail -> Error detail
+            | Some refusal -> Error (Request_withdrawn refusal)
             | None -> Masc_tui_http.post_keeper_tool_approval_mode ~host ~port
               ~keeper_name ~mode
+              |> Result.map_error (fun detail -> Request_failed detail)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
+          | exn -> Error (Request_failed (Printexc.to_string exn))
         in
         enqueue_async mailbox
           (Keeper_msg (Keeper_tool_mode_set (keeper_name, mode, result, generation)))
@@ -4061,7 +4202,7 @@ let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
             (Keeper_msg (Keeper_tool_mode_set
                ( keeper_name,
                  mode,
-                 Error "Eio switch is unavailable",
+                 Error (Request_failed "Eio switch is unavailable"),
                  generation ))))
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
@@ -4081,13 +4222,15 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     let result =
       try
         let open Result.Syntax in
-        let* () = if authority <> state.workspace_authority then Error "Workspace authority withdrawn" else Ok () in
-            let* () = probe_expected_workspace ~host ~port expected_workspace in
-        Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
-          ~tool_call_id ~approval_id ~allow
+        let failed result = Result.map_error (fun detail -> Request_failed detail) result in
+        let* () = if authority <> state.workspace_authority
+          then Error (Request_withdrawn Workspace_authority_withdrawn) else Ok () in
+        let* () = failed (probe_expected_workspace ~host ~port expected_workspace) in
+        failed (Masc_tui_http.post_keeper_tool_approval ~expected_workspace ~host ~port ~keeper_name
+          ~tool_call_id ~approval_id ~allow)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     enqueue_async mailbox
       (Keeper_msg (Keeper_chat_approval_answered (request, tool_call_id, allow, result)))
@@ -4098,7 +4241,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   | None ->
       enqueue_async mailbox
         (Keeper_msg (Keeper_chat_approval_answered
-           (request, tool_call_id, allow, Error "Eio switch is unavailable")))
+           (request, tool_call_id, allow, Error (Request_failed "Eio switch is unavailable"))))
 
 (* Automatic polling shares a pending reading for the same Keeper. Explicit
    refresh and selection changes supersede it, retaining the generation guard. *)
@@ -4170,8 +4313,11 @@ let launch_tools_async_detail ?(force=false) state ~mailbox =
       let host = server_peer_host and port = state.port in
       let target = Masc_tui_fetched.request_key request.tad_ticket in
       launch_workspace_json_read ~key:request.tad_job state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Tools_msg (Tools_async_detail_loaded (request,result)))
-        (fun () -> Masc_tui_http.fetch_async_request_detail ~host ~port ~target)
+        (fun () -> Masc_tui_http.fetch_async_request_detail ~host ~port ~target
+          |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 let launch_tools_async_task_history ?(force=false) ?(older=false) state ~mailbox =
@@ -4185,8 +4331,11 @@ let launch_tools_async_task_history ?(force=false) ?(older=false) state ~mailbox
       Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.thr_job) previous;
       let host=server_peer_host and port=state.port in
       launch_workspace_json_read ~key:request.thr_job state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Tools_msg (Tools_async_task_history_loaded (request,result)))
-        (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page)
+        (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page
+          |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 let launch_tools_async_task ?(force=false) state ~mailbox =
@@ -4201,8 +4350,11 @@ let launch_tools_async_task ?(force=false) state ~mailbox =
        Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.atr_job) previous;
        let source=Masc_tui_fetched.request_key request.atr_ticket in
        launch_workspace_json_read ~key:request.atr_job state ~mailbox
+         ~boundary_error:(fun detail -> Request_failed detail)
+         ~withdrawn:(fun refusal -> Request_withdrawn refusal)
          ~deliver:(fun result -> Tools_msg (Tools_async_task_body_loaded (request,result)))
-         (fun () -> Masc_tui_http.fetch_original_task_detail ~host ~port ~task_id:source.ats_task_id ~previous:request.atr_previous));
+         (fun () -> Masc_tui_http.fetch_original_task_detail ~host ~port ~task_id:source.ats_task_id ~previous:request.atr_previous
+           |> Result.map_error (fun detail -> Request_failed detail)));
     launch_tools_async_task_history ~force state ~mailbox
   end
 
@@ -4233,8 +4385,11 @@ let launch_tools_async_observation_load state ~mailbox =
             if generation = state.tools_async_request_generation then
               state.tools_async_observation_inflight <- false)
           state ~mailbox
+          ~boundary_error:(fun detail -> Request_failed detail)
+          ~withdrawn:(fun refusal -> Request_withdrawn refusal)
           ~deliver:(fun result -> Tools_msg (Tools_async_observation_loaded (generation, result)))
-          (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
+          (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port
+            |> Result.map_error (fun detail -> Request_failed detail))
 
 (* Starts the named Tools parts, beside the parts already in flight, and marks
    each part's owed read started. The inventory and the activations read for
@@ -4311,14 +4466,20 @@ let launch_tools_parts state ~mailbox parts =
           end;
           state.tools_inventory_owed <- start_owed_read ~for_another state.tools_inventory_owed;
           launch_workspace_json_read state ~mailbox
+            ~boundary_error:(fun detail -> Request_failed detail)
+            ~withdrawn:(fun refusal -> Request_withdrawn refusal)
             ~deliver:(fun result -> Tools_msg (Tools_read_loaded (Tools_inventory_loaded { generation; keeper; result })))
-            (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
+            (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ()
+              |> Result.map_error (fun detail -> Request_failed detail))
       | Tools_catalog_read ->
           state.tools_catalog_owed <- Masc_tui_owed_read.started state.tools_catalog_owed;
           launch_workspace_json_read state ~mailbox
+            ~boundary_error:(fun detail -> Request_failed detail)
+            ~withdrawn:(fun refusal -> Request_withdrawn refusal)
             ~deliver:(fun result -> Tools_msg (Tools_read_loaded (Tools_catalog_loaded { generation = skill_generation;
-              result = Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result })))
-            (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port)
+              result = Result.map_error (attribute_request_failure Masc_tui_async_read.Skills_catalog) result })))
+            (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port
+              |> Result.map_error (fun detail -> Request_failed detail))
       | Tools_activations_read ->
           (* The Activations pane draws the selected Keeper's ledger, which its
              own route answers (RFC-0483). *)
@@ -4343,9 +4504,12 @@ let launch_tools_parts state ~mailbox parts =
                state.tools_activations_owed <-
                  start_owed_read ~for_another state.tools_activations_owed;
                launch_workspace_json_read state ~mailbox
+                 ~boundary_error:(fun detail -> Request_failed detail)
+                 ~withdrawn:(fun refusal -> Request_withdrawn refusal)
                  ~deliver:(fun result ->
                    Tools_msg (Tools_read_loaded (Tools_activations_loaded { generation; keeper; result })))
-                 (fun () -> Masc_tui_loader.load_keeper_skill_activations ~host ~port ~keeper))
+                 (fun () -> Masc_tui_loader.load_keeper_skill_activations ~host ~port ~keeper
+                   |> Result.map_error (fun detail -> Request_failed detail)))
             keeper
       | Tools_usage_read keeper ->
           (* The Usage pane counts every Keeper's use of the catalog, one
@@ -4353,9 +4517,12 @@ let launch_tools_parts state ~mailbox parts =
           set_keeper_skill_usage_owed state keeper
             (Masc_tui_owed_read.started (keeper_skill_usage_owed state keeper));
           launch_workspace_json_read state ~mailbox
+            ~boundary_error:(fun detail -> Request_failed detail)
+            ~withdrawn:(fun refusal -> Request_withdrawn refusal)
             ~deliver:(fun result ->
               Tools_msg (Tools_read_loaded (Tools_usage_loaded { generation = skill_generation; keeper; result })))
-            (fun () -> Masc_tui_loader.load_keeper_skill_usage ~host ~port ~keeper)
+            (fun () -> Masc_tui_loader.load_keeper_skill_usage ~host ~port ~keeper
+              |> Result.map_error (fun detail -> Request_failed detail))
       | Tools_async_read -> launch_tools_async_observation_load state ~mailbox)
     parts
   end
@@ -4436,9 +4603,11 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
         Masc_tui_loader.load_schedule_wake_history ~host ~port ~schedule_id) in
       let run () =
         let result =
-          try read () with
+          try (match read () with
+            | Error refusal -> Error (Request_withdrawn refusal)
+            | Ok result -> Result.map_error (fun detail -> Request_failed detail) result) with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
+          | exn -> Error (Request_failed (Printexc.to_string exn))
         in
         enqueue_async mailbox (Schedule_msg (Schedule_wake_history_loaded (schedule_id, result)))
       in
@@ -4450,7 +4619,7 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
        | None ->
            enqueue_async mailbox
              (Schedule_msg (Schedule_wake_history_loaded
-                (schedule_id, Error "Eio switch is unavailable"))))
+                (schedule_id, Error (Request_failed "Eio switch is unavailable")))))
   end
 
 let launch_keeper_schedules_load ?page state ~mailbox ~keeper_name =
@@ -4476,7 +4645,7 @@ let launch_keeper_schedules_load ?page state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
   let payload_target = "keeper:" ^ keeper_name in
-  launch_workspace_async_read state ~mailbox
+  launch_guarded_async_read state ~mailbox
     ~source:Masc_tui_async_read.Keeper_schedule
     ~deliver:(fun result ->
       enqueue_async mailbox (Keeper_msg (Keeper_schedules_loaded (request, result))))
@@ -4526,7 +4695,7 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
         spr_navigation = navigating; spr_selected_id = selected_id } in
   let host = server_peer_host in
   let port = state.port in
-  launch_workspace_async_read state ~mailbox
+  launch_guarded_async_read state ~mailbox
     ~deliver:(fun result ->
       enqueue_async mailbox (Schedule_msg (Schedules_loaded (request, result))))
     (capture_workspace_json_read state (fun () ->
@@ -4545,7 +4714,7 @@ let launch_schedule_agenda_load ?(intent = Snapshot_read.Poll) state ~mailbox =
         note_schedule_agenda_read_started state;
         let host = server_peer_host in
         let port = state.port in
-        launch_workspace_async_read state ~mailbox
+        launch_guarded_async_read state ~mailbox
           ~deliver:(fun result ->
             enqueue_async mailbox (Schedule_msg (Schedules_loaded (Schedule_agenda_read ticket, result))))
           (capture_workspace_json_read state (fun () ->
@@ -4576,8 +4745,11 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_json_read state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Keeper_msg (Keeper_calls_loaded (generation, keeper_name, result)))
-      (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100)
+      (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name ~limit:100
+        |> Result.map_error (fun detail -> Request_failed detail))
   end
 
   end
@@ -4598,9 +4770,12 @@ let launch_chat_call_read state ~mailbox =
     let host=server_peer_host and port=state.port in
     let execution_id=Masc_tui_fetched.request_key request.ccr_ticket in
     launch_workspace_json_read ~key:request.ccr_job state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Chat_msg (Chat_call_loaded (request,result)))
       (fun () -> Masc_tui_http.fetch_keeper_call ~host ~port
-        ~keeper_name:request.ccr_origin.cco_keeper ~execution_id))
+        ~keeper_name:request.ccr_origin.cco_keeper ~execution_id
+        |> Result.map_error (fun detail -> Request_failed detail)))
     (begin_chat_call_read state)
 
 let cancel_board_preparation state =
@@ -4628,9 +4803,12 @@ let launch_board_read state ~mailbox ~kind key =
     let host=server_peer_host and port=state.port in
     Option.iter (fun request ->
       launch_workspace_json_read ~key:(Masc_tui_board_reader.request_job request) state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Board_msg (Board_attachment_loaded (request,result)))
         (fun () ->
           let open Result.Syntax in
+          Result.map_error (fun detail -> Request_failed detail) @@
           let* bytes=Masc_tui_http.get_workspace_bytes ~host ~port
             ~max_body_bytes:Masc_tui_board_upload.max_attachment_bytes
             ~path:("/api/v1/artifact-bytes/" ^ key.Masc_tui_board_reader.sha256) in
@@ -4743,6 +4921,8 @@ let launch_goal_candle_load state ~mailbox goal_id =
       let host = server_peer_host and port = state.port in
       let expected_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
       launch_workspace_json_read state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Goal_msg (Goal_candle_loaded (request, result)))
         (fun () ->
           let credential = Masc_tui_http.bind_credential () in
@@ -4767,8 +4947,11 @@ let launch_goal_timeline_load state ~mailbox goal_id =
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_json_read state ~mailbox
+    ~boundary_error:(fun detail -> Request_failed detail)
+    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
     ~deliver:(fun result -> Goal_msg (Goal_timeline_loaded (request, result)))
-    (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
+    (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id
+      |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 let launch_task_history_load ?(older=false) ?limit state ~mailbox task_id =
@@ -4781,8 +4964,11 @@ let launch_task_history_load ?(older=false) ?limit state ~mailbox task_id =
       Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.thr_job) previous;
       let host=server_peer_host and port=state.port in
       launch_workspace_json_read ~key:request.thr_job state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Task_msg (Task_history_loaded (request,result)))
-        (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page)
+        (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page
+          |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 (* Cancel through the authenticated operator route with the captured workspace
@@ -4808,8 +4994,8 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
       let outcome = match result with Ok outcome | Error outcome -> outcome in
       Task_msg (Task_cancel_done (task_id, expected_workspace, outcome)))
     (fun () ->
-      match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-      | Error detail -> Ok (Task_cancel_refused detail)
+      match admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+      | Error refusal -> Ok (Task_cancel_kept_back refusal)
       | Ok () ->
         Ok (match Masc_tui_http.cancel_task ~host ~port ~task_id ~reason ~expected_workspace with
           | Masc_tui_http.Post_answered json ->
@@ -4853,6 +5039,7 @@ let verification_evidence_outcome = function
   | Error (Launch_failure _) -> "boundary_failed"
   | Error (Workspace_unconfirmed _) -> "workspace_unconfirmed"
   | Error (Interrupted _) -> "interrupted"
+  | Error (Kept_back _) -> "kept_back"
 
 let log_verification_evidence_read request ~phase ~outcome =
   Log.Transport.routine_lazy (fun () ->
@@ -4886,20 +5073,21 @@ let launch_verification_evidence_load state ~mailbox key =
       log_verification_evidence_read request ~phase:"requested" ~outcome:"pending";
       let host = server_peer_host and port = state.port in
       let read = capture_workspace_json_read state (fun () ->
-        Ok (Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id:key.vek_task_id
+        Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id:key.vek_task_id
           ~verification_id:key.vek_request_id
           |> Result.map (fun evidence ->
             Eio_guard.run_in_systhread ~label:"tui-evidence-pictures" (fun () ->
               Masc_tui_evidence_picture.prepare
                 ~layout:Masc_tui_evidence_picture.One_at_a_time
                 ~display:(Masc_tui_portrait_view.current_display ())
-                ~convert:convert_evidence_image evidence)))) in
+                ~convert:convert_evidence_image evidence))) in
       launch_workspace_result ~key:request.ver_job ~observation:true state ~mailbox
         ~on_not_run:(fun () -> log_verification_evidence_read request ~phase:"not_run" ~outcome:"not_started")
         ~observe_job:(fun event -> log_verification_evidence_read request
           ~phase:(match event with Masc_tui_workspace_job.Cancellation_requested -> "cancellation_requested"
             | Registration_released -> "registration_released") ~outcome:"observed")
         ~boundary_error:(fun detail -> Verification_evidence_read.Launch_failure detail)
+        ~withdrawn:(fun refusal -> Verification_evidence_read.Kept_back refusal)
         ~deliver:(fun result ->
           log_verification_evidence_read request ~phase:"delivery_formed" ~outcome:(verification_evidence_outcome result);
           Verification_msg (Verification_evidence_loaded (request,result)))
@@ -4908,7 +5096,7 @@ let launch_verification_evidence_load state ~mailbox key =
           try
             let result = match read () with
               | Ok result -> result
-              | Error detail -> Error (Verification_evidence_read.Workspace_unconfirmed detail) in
+              | Error refusal -> Error (Verification_evidence_read.Kept_back refusal) in
             log_verification_evidence_read request ~phase:"caller_observed" ~outcome:(verification_evidence_outcome result);
             result
           with Eio.Cancel.Cancelled _ as exn ->
@@ -4934,13 +5122,19 @@ let launch_keeper_deletions state ~mailbox ?retry () =
       let result =
         try
           let open Result.Syntax in
+          (* The guard's refusal, and the moved workspace or unconfirmed
+             identity it would refuse the same way, travel as
+             [Request_withdrawn], apart from the read's own failure (RFC §2). *)
+          let failed result = Result.map_error (fun detail -> Request_failed detail) result in
           let check_authority () =
-            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-            else if generation <> state.keeper_deletions_generation then Error "Deletion inventory request superseded"
-            else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+            if authority <> state.workspace_authority then Error (Request_withdrawn Workspace_authority_withdrawn)
+            else if generation <> state.keeper_deletions_generation then Error (Request_failed "Deletion inventory request superseded")
+            else if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
             else Ok () in
+          let admit () = admit_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
+            |> Result.map_error (fun refusal -> Request_withdrawn refusal) in
           let* () = check_authority () in
-          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = admit () in
           let* () = match retry with
             | None -> Ok ()
             | Some (row : Keeper_control.deletion_row) ->
@@ -4953,14 +5147,13 @@ let launch_keeper_deletions state ~mailbox ?retry () =
               let receipt =
                 try
                   match identity with
-                  | None ->
-                    Error (kept_back ~ko ~request:Kept_request.Keeper_deletion (workspace_identity_unread ~ko) Nothing_kept)
+                  | None -> Error (Request_withdrawn Workspace_identity_not_confirmed)
                   | Some expected_workspace ->
                     let* status, body =
-                      Masc_tui_http.post_keeper_deletion_retry ~host ~port ~path
-                        ~keeper_name ~operation_id ~expected_workspace
+                      failed (Masc_tui_http.post_keeper_deletion_retry ~host ~port ~path
+                        ~keeper_name ~operation_id ~expected_workspace)
                     in
-                    (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
+                    failed (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
                      | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
                      | Rejected { detail; _ } | Paused_owner_conflict detail
                      | Committed_followup_failed detail -> Error detail
@@ -4971,7 +5164,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                          (if ko then "삭제 재시도 응답이 요청 ID 를 밝히지 않음"
                           else "deletion retry response did not identify the requested operation"))
                 with Eio.Cancel.Cancelled _ as exn -> raise exn
-                   | exn -> Error (Printexc.to_string exn)
+                   | exn -> Error (Request_failed (Printexc.to_string exn))
               in
               (* The admitted POST result has operation authority. The GET
                  below retains its separate, revocable observation stamp. *)
@@ -4979,21 +5172,23 @@ let launch_keeper_deletions state ~mailbox ?retry () =
               receipt
           in
           let* () = check_authority () in
-          let* json = Masc_tui_http.get_json ~host ~port
-            ~path:"/api/v1/dashboard/keepers/deletions" in
-          let* inventory = Keeper_control.decode_deletion_inventory json in
-          let* () = check_authority () in
-          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* json = failed (Masc_tui_http.get_json ~host ~port
+            ~path:"/api/v1/dashboard/keepers/deletions") in
+          let* inventory = failed (Keeper_control.decode_deletion_inventory json) in
+          let* () = check_authority ()
+            |> Result.map_error (request_failure_after_read state ~request:Kept_request.Keeper_deletions_read) in
+          let* () = admit ()
+            |> Result.map_error (request_failure_after_read state ~request:Kept_request.Keeper_deletions_read) in
           Ok inventory
         with Eio.Cancel.Cancelled _ as exn -> raise exn
-           | exn -> Error (Printexc.to_string exn)
+           | exn -> Error (Request_failed (Printexc.to_string exn))
       in
       enqueue_async mailbox (Keeper_msg (Keeper_deletions_loaded (generation, result)))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> fork_workspace_job state ~mailbox ~sw run
     | None -> enqueue_async mailbox (Keeper_msg (Keeper_deletions_loaded
-        (generation, Error "Eio switch is unavailable")))
+        (generation, Error (Request_failed "Eio switch is unavailable"))))
 
 let tree_diff_base_ref = "HEAD"
 
@@ -5089,7 +5284,11 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   end
   else begin
   let host = server_peer_host and port = state.port in
-  let check_workspace = capture_workspace_check state ~mailbox in
+  (* The guard's refusal travels as [Request_withdrawn], apart from the
+     request's own failure, so the panel says it as kept back (RFC §2). *)
+  let check_workspace = capture_workspace_admission state ~mailbox in
+  let check_workspace () = Result.map_error (fun refusal -> Request_withdrawn refusal) (check_workspace ()) in
+  let failed result = Result.map_error (fun detail -> Request_failed detail) result in
   let enqueue_async = workspace_enqueue state in
   (match action with
    | Login.Input _ | Nothing -> ()
@@ -5108,13 +5307,13 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   if account_login_action_is_read action then
     state.account_login_readings <- (view, generation, action) :: state.account_login_readings;
   let post path body = Result.bind (check_workspace ()) (fun () ->
-    Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body)) in
+    failed (Masc_tui_http.post_json ~host ~port ~path ~body:(Yojson.Safe.to_string body))) in
   let post_setup path body = Result.bind (check_workspace ()) (fun () ->
-    Masc_tui_http.post_setup_json ~host ~port ~path ~body:(Yojson.Safe.to_string body)) in
+    failed (Masc_tui_http.post_setup_json ~host ~port ~path ~body:(Yojson.Safe.to_string body))) in
   let login_path id = "/api/v1/setup/accounts/login/" ^ id in
   let enqueue result = enqueue_async mailbox (Account_msg (Account_login_json (view, generation, action, result))) in
   let start_job f = match Eio_context.get_switch_opt () with
-    | None -> enqueue (Error "Login requires the TUI runtime.")
+    | None -> enqueue (Error (Request_failed "Login requires the TUI runtime."))
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
       if generation = view.generation then (
         try Eio.Cancel.sub (fun cancellation ->
@@ -5133,11 +5332,11 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
                 | Select_existing _ | Start _ | Cancel | Recover | Discover | Refresh_models | Prepare _ | Save _
                 | Close | Nothing | Preview_removal _ | Remove _ | Refresh_removed _
                 | Refresh_list _ -> view.cancel_stream <- None)
-            (fun () -> match check_workspace () with Error detail -> enqueue (Error detail) | Ok () -> f ()))
+            (fun () -> match check_workspace () with Error failure -> enqueue (Error failure) | Ok () -> f ()))
         with
         | Eio.Cancel.Cancelled _ as exn -> if generation = view.generation then raise exn
         | Unix.Unix_error _ | Sys_error _ | Eio.Io _ | Yojson.Json_error _ ->
-          enqueue (Error "The account request did not complete. Recheck its state."));
+          enqueue (Error (Request_failed "The account request did not complete. Recheck its state.")));
       `Stop_daemon) in
   match action with
   | Login.Nothing -> ()
@@ -5160,20 +5359,22 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
            let path = if provider.client=Login.Antigravity then "/api/v1/setup/accounts/antigravity" else "/api/v1/setup/accounts/select" in
            match post path (`Assoc ["integration_id",`String provider.id]) with
            | Error _ as error -> error
-           | Ok (`Assoc fields) -> (match List.assoc_opt "account_ref" fields with Some (`String reference) -> Ok (Some reference) | _ -> Error "No account selected.")
-           | Ok _ -> Error "No account selected." in
+           | Ok (`Assoc fields) -> (match List.assoc_opt "account_ref" fields with Some (`String reference) -> Ok (Some reference) | _ -> Error (Request_failed "No account selected."))
+           | Ok _ -> Error (Request_failed "No account selected.") in
          match selected, Eio_context.get_clock_opt () with
-         | Error message, _ -> enqueue (Error message)
-         | Ok _, None -> enqueue (Error "Login requires the TUI clock.")
+         | Error failure, _ -> enqueue (Error failure)
+         | Ok _, None -> enqueue (Error (Request_failed "Login requires the TUI clock."))
          | Ok reference, Some clock ->
            let on_chunk, complete = Login.decoder ~integration_id:provider.id (fun event ->
                enqueue_async mailbox (Account_msg (Account_login_event (view,generation,event)))) in
              let body=`Assoc (["integration_id",`String provider.id] @ (match reference with Some r->["account_ref",`String r] | None->[])) |> Yojson.Safe.to_string in
              let result = Result.bind (check_workspace ()) (fun () ->
-               Masc_tui_http.post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk) in
+               failed (Masc_tui_http.post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk)) in
              match result with
              | Ok () when complete () -> ()
-             | Ok () | Error _ -> enqueue (Error "로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요.")))
+             (* The login was not sent; it is kept back, not unanswered. *)
+             | Error (Request_withdrawn _ as failure) -> enqueue (Error failure)
+             | Ok () | Error (Request_failed _) -> enqueue (Error (Request_failed "로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요."))))
   | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false
      | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
@@ -5182,10 +5383,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
       | Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading
       | Activate_saved _ | Refresh_saved _ | Select_existing _ | Start _ | Input _ | Cancel
       | Recover | Discover | Refresh_models | Prepare _ | Save _ | Close | Nothing | Preview_removal _ | Remove _
-      | Refresh_removed _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+      | Refresh_removed _ -> ()); start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory")))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
-      | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
+      | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:(login_path id)))))
   | Discover | Refresh_models ->
     (match action with
      | Refresh_models -> Login.refreshing_models view
@@ -5221,7 +5422,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
       let outcome=Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/setup/accounts/remove" ~body in
       enqueue_async mailbox (Account_msg (Account_login_removal (view, generation, provider, login_store, outcome))))
   | Refresh_removed _ ->
-    view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
+    view.phase<-Login.Loading; start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory")))
 
   end
 
@@ -5248,13 +5449,15 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
       let port = state.port in
       let started_ns = Mtime_clock.elapsed_ns () in
       Log.Transport.info "tui_runtime_config_read generation=%d started_ns=%Ld phase=started" generation started_ns;
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result ->
           let ready_ns = Mtime_clock.elapsed_ns () in
           Log.Transport.info "tui_runtime_config_read generation=%d started_ns=%Ld ready_ns=%Ld phase=prepared outcome=%s"
             generation started_ns ready_ns (match result with Ok _ -> "source_loaded" | Error _ -> "read_failed");
           Runtime_msg (Runtime_config_view_loaded (generation, requested_model, started_ns, ready_ns, result)))
-        (fun () -> Masc_tui_loader.load_runtime_config_snapshot ~host ~port)
+        (fun () -> Masc_tui_loader.load_runtime_config_snapshot ~host ~port
+          |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 let commit_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity
@@ -5262,18 +5465,25 @@ let commit_runtime_config_text ?prior_contact state ~mailbox ~authority ~identit
   let host = server_peer_host in
   let port = state.port in
   let open Result.Syntax in
-  let refused result = Result.map_error (fun detail -> Masc_tui_http.Runtime_config_save_refused detail) result in
-  let* () = refused (check_workspace_request ?prior_contact state ~mailbox ~authority ~identity ~host ~port ()) in
+  (* The guard's refusal is [`Kept_back]: the save was not sent, so it is
+     never the server's refusal (RFC §2). *)
+  let admit ?prior_contact () =
+    admit_workspace_request ?prior_contact state ~mailbox ~authority ~identity ~host ~port ()
+    |> Result.map_error (fun refusal -> `Kept_back refusal) in
+  let refused result =
+    Result.map_error (fun detail -> `Save (Masc_tui_http.Runtime_config_save_refused detail)) result in
+  let* () = admit ?prior_contact () in
   let* preview = refused (Masc_tui_http.post_runtime_config_preview ~host ~port ~source_text:edited) in
   let* preview = refused (Masc_tui_runtime_config_receipt.decode_preview preview) in
   match preview with
   | Masc_tui_runtime_config_receipt.Cannot_save reason ->
-    Error (Masc_tui_http.Runtime_config_save_refused ("Preview rejected the edit: " ^ reason))
+    Error (`Save (Masc_tui_http.Runtime_config_save_refused ("Preview rejected the edit: " ^ reason)))
   | Masc_tui_runtime_config_receipt.Can_save ->
-    let* () = refused (check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity ~host ~port ()) in
+    let* () = admit ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
     before_commit ();
     Masc_tui_http.post_runtime_config_raw ~host ~port
       ~source_text:edited ~expected_source_path ~expected_source_revision
+    |> Result.map_error (fun error -> `Save error)
 
 let save_runtime_config_text ?prior_contact state ~mailbox ~authority ~identity
     ~expected_source_path ~expected_source_revision edited =
@@ -5294,15 +5504,18 @@ let launch_keeper_settings_save state ~mailbox request =
         request.ksv_started_ns observed_ns (keeper_settings_save_phase status) in
   let finish outcome = publish (Settings_finished (!prepared,outcome)) in
   let interrupted detail = if !sent then Settings_unconfirmed detail else Settings_not_sent detail in
-  let check_workspace = workspace_check_sequence state ~mailbox ~authority:key.ksk_authority
+  let check_workspace = workspace_admission_sequence state ~mailbox ~authority:key.ksk_authority
     ~identity:(Some request.ksv_expected) ~host ~port in
+  (* The guard's refusal is [Settings_kept_back]: the save was not sent, and
+     it is never said as the read's or the server's failure (RFC §2). *)
   let check () =
     if request.ksv_reading != state.workspace_read_authority then
-      Error "Settings read authority withdrew before dispatch"
-    else check_workspace () in
+      Error (Settings_not_sent "Settings read authority withdrew before dispatch")
+    else Result.map_error (fun refusal -> Settings_kept_back refusal) (check_workspace ()) in
   let run () =
     let outcome = try
       let open Result.Syntax in
+      let not_sent result = Result.map_error (fun detail -> Settings_not_sent detail) result in
       let prepare () =
         let* () = check () in
         let* snapshot = match request.ksv_input with
@@ -5310,19 +5523,19 @@ let launch_keeper_settings_save state ~mailbox request =
               Ok {ksp_snapshot=draft.ksd_snapshot.kss_observed;ksp_patch=Some draft.ksd_patch}
           | Sandbox_shortcut_input profile ->
               publish Settings_reading;
-              let* json = Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name:key.ksk_keeper in
-              let* patch = Masc_tui_response_decode.run ~name:"keeper.sandbox_save.decode_wait"
-                (fun () -> Masc_tui_keeper_config.sandbox_patch ~profile json) in
+              let* json = not_sent (Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name:key.ksk_keeper) in
+              let* patch = not_sent (Masc_tui_response_decode.run ~name:"keeper.sandbox_save.decode_wait"
+                (fun () -> Masc_tui_keeper_config.sandbox_patch ~profile json)) in
               Ok {ksp_snapshot=json;ksp_patch=patch} in
         prepared := Some snapshot;
         let* () = match request.ksv_input with
           | Settings_editor_input _ -> Ok ()
           | Sandbox_shortcut_input _ -> check () in
         if request.ksv_reading != state.workspace_read_authority then
-          Error "Settings read authority withdrew before dispatch"
+          Error (Settings_not_sent "Settings read authority withdrew before dispatch")
         else Ok snapshot in
       match prepare () with
-      | Error detail -> Settings_not_sent detail
+      | Error outcome -> outcome
       | Ok snapshot ->
           match snapshot.ksp_patch with
           | None -> Settings_unchanged
@@ -5377,8 +5590,9 @@ let launch_runtime_form_save state ~mailbox request =
       let* draft = match request.rfs_draft with
         | Config_document_draft session -> Ok (prepare_runtime_document session)
         | Model_form_draft _ | Account_form_draft _ ->
-            let* () = not_sent (check_workspace_request state ~mailbox
-              ~authority:request.rfs_authority ~identity:(Some request.rfs_workspace) ~host ~port ()) in
+            let* () = admit_workspace_request state ~mailbox
+              ~authority:request.rfs_authority ~identity:(Some request.rfs_workspace) ~host ~port ()
+              |> Result.map_error (fun refusal -> Form_kept_back refusal) in
             let* json = not_sent (Masc_tui_http.fetch_runtime_config_raw ~host ~port) in
             let* reading = not_sent (Masc_tui_response_decode.run ~name:"runtime-form-source"
               (fun () -> Masc_tui_runtime_config_view.decode json)) in
@@ -5397,9 +5611,10 @@ let launch_runtime_form_save state ~mailbox request =
         ~expected_source_path:draft.rfp_base.path
         ~expected_source_revision:draft.rfp_base.source_revision draft.rfp_text
       |> Result.map_error (function
-        | Masc_tui_http.Runtime_config_conflict current -> Form_conflict current
-        | Runtime_config_save_refused detail -> Form_refused detail
-        | Runtime_config_save_unconfirmed detail -> Form_unconfirmed detail)
+        | `Save (Masc_tui_http.Runtime_config_conflict current) -> Form_conflict current
+        | `Save (Runtime_config_save_refused detail) -> Form_refused detail
+        | `Save (Runtime_config_save_unconfirmed detail) -> Form_unconfirmed detail
+        | `Kept_back refusal -> Form_kept_back refusal)
     with
     | Eio.Cancel.Cancelled _ as exn ->
         finish (interrupted "Save worker interrupted"); raise exn
@@ -5422,9 +5637,11 @@ let launch_runtime_params_load state ~mailbox =
   state.runtime_params_loading <- true;
   let host = server_peer_host in
   let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+  launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
     ~deliver:(fun result -> Runtime_msg (Runtime_params_loaded result))
-    (fun () -> Masc_tui_loader.load_runtime_params ~host ~port)
+    (fun () -> Masc_tui_loader.load_runtime_params ~host ~port
+      |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 let launch_prompts_load state ~mailbox =
@@ -5450,8 +5667,10 @@ let launch_prompts_load state ~mailbox =
 let launch_preset_call state ~mailbox ~call ~wrap =
   let host = server_peer_host in
   let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:wrap (fun () -> call ~host ~port)
+  let failed detail = Request_failed detail in
+  launch_guarded_request state ~mailbox ~boundary_error:failed
+    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+    ~deliver:wrap (fun () -> Result.map_error failed (call ~host ~port))
 
 let launch_preset_save state ~mailbox ~sink ~name ~description ~chat_input ~also_pane =
   let identity = state.server_identity and authority = state.workspace_authority in
@@ -5509,23 +5728,26 @@ let launch_preset_save state ~mailbox ~sink ~name ~description ~chat_input ~also
         ~boundary_error
         ~deliver:(fun result -> Preset_msg (Preset_saved (pending, result)))
         (fun () ->
-          match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-          | Error detail -> Error (Preset_save_not_sent detail)
+          (* The guard's refusal, and a retired reading or an unread identity
+             it would refuse the same way, is kept back: the save was not
+             sent (RFC §2). *)
+          match admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+          | Error refusal -> Error (Preset_save_kept_back refusal)
           | Ok () ->
             (match workspace with
-            | None -> Error (Preset_save_not_sent "Workspace identity is unavailable")
+            | None -> Error (Preset_save_kept_back Workspace_identity_not_confirmed)
             | Some expected_workspace ->
             Masc_tui_loader.save_preset ~host ~port ~name ~description
               ~expected_workspace
               ~after_auth_refused:(fun () -> Atomic.set phase Preset_save_auth_refused)
               ~before_dispatch:(fun () ->
                 if reading != state.workspace_read_authority then
-                  Error (boundary_error "Workspace reading authority withdrawn")
+                  Error (Preset_save_kept_back Workspace_identity_not_confirmed)
                 else
-                  match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-                  | Error detail -> Error (boundary_error detail)
+                  match admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+                  | Error refusal -> Error (Preset_save_kept_back refusal)
                   | Ok () when reading != state.workspace_read_authority ->
-                    Error (boundary_error "Workspace reading authority withdrawn")
+                    Error (Preset_save_kept_back Workspace_identity_not_confirmed)
                   | Ok () -> Atomic.set phase Preset_save_dispatching; Ok ())))
 
 let launch_chat_command_read state ~mailbox ~label ~call ~wrap =
@@ -5705,7 +5927,10 @@ let launch_keeper_settings_editor_read state ~mailbox request =
   let key = Masc_tui_fetched.request_key request.ksr_request in
   let host = server_peer_host and port = state.port in
   let authority = key.ksk_authority and identity = Some request.ksr_expected in
-  let check = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
+  (* The guard's refusal stays typed apart from the read's own failure, so it
+     is said as kept back (RFC §2). *)
+  let check = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
+  let check () = Result.map_error (fun refusal -> Request_withdrawn refusal) (check ()) in
   let enqueue_async = workspace_enqueue state in
   let deliver result = enqueue_async mailbox (Keeper_msg (Keeper_settings_editor_loaded (request, result))) in
   let superseded, resolve = Eio.Promise.create () in
@@ -5720,18 +5945,20 @@ let launch_keeper_settings_editor_read state ~mailbox request =
           let open Result.Syntax in
           let* () = check () in
           let* observed, stem = Masc_tui_loader.load_keeper_config_editor ~host ~port
-              ~keeper_name:key.ksk_keeper ~format:request.ksr_format in
-          let* () = check () in
+              ~keeper_name:key.ksk_keeper ~format:request.ksr_format
+            |> Result.map_error (fun detail -> Request_failed detail) in
+          let* () = check ()
+            |> Result.map_error (request_failure_after_read state ~request:Kept_request.Keeper_settings_read) in
           Ok {kss_observed=observed;kss_stem=stem})
         (fun () ->
           Eio.Promise.await superseded;
           log_keeper_settings_read ~phase:"superseded" request ~outcome:"cancel_requested";
-          Error "Settings editor preparation cancelled")
+          Error (Request_failed "Settings editor preparation cancelled"))
         with
         | Eio.Cancel.Cancelled _ as exn ->
             log_keeper_settings_read ~phase:"cancelled" request ~outcome:"cancelled";
             raise exn
-        | exn -> Error (Printexc.to_string exn) in
+        | exn -> Error (Request_failed (Printexc.to_string exn)) in
       log_keeper_settings_read ~phase:"read_completed" request
         ~outcome:(match result with Ok _ -> "received" | Error _ -> "unconfirmed");
       Masc_tui_types.finish_keeper_settings_worker state request;
@@ -5739,14 +5966,14 @@ let launch_keeper_settings_editor_read state ~mailbox request =
   match Eio_context.get_switch_opt () with
   | None ->
       Masc_tui_types.finish_keeper_settings_worker state request;
-      deliver (Error "Eio switch is unavailable for settings editor preparation")
+      deliver (Error (Request_failed "Eio switch is unavailable for settings editor preparation"))
   | Some sw ->
       (match fork_workspace_job ~observation:true state ~mailbox ~sw run with
        | () -> ()
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn ->
            Masc_tui_types.finish_keeper_settings_worker state request;
-           deliver (Error (Printexc.to_string exn)))
+           deliver (Error (Request_failed (Printexc.to_string exn))))
 
 let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_name =
   if server_authority_ready state then begin
@@ -5850,11 +6077,23 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let host = server_peer_host in
   let port = state.port in
   state.keeper_sandbox_view <- Some (keeper_name, Masc_tui_keeper_sandbox.empty_partial);
-  let inventory = capture_workspace_json_read state (fun () ->
+  let kept_back refusal =
+    Masc_tui_keeper_sandbox.Lookup_kept_back
+      (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Sandbox_read refusal) in
+  let guarded read =
+    let read = capture_workspace_json_read state read in
+    fun () ->
+    match read () with
+    | Ok result -> Result.map_error (fun detail -> Masc_tui_keeper_sandbox.Lookup_failed detail) result
+    | Error refusal -> Error (kept_back refusal) in
+  let inventory = guarded (fun () ->
     Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name) in
-  let name = capture_workspace_json_read state (fun () ->
+  let name = guarded (fun () ->
     Masc_tui_loader.load_keeper_sandbox_name ~host ~port ~keeper_name) in
   launch_workspace_async_read_pair state ~mailbox
+    ~boundary_error:(fun cause -> Masc_tui_keeper_sandbox.Lookup_failed cause)
+    ~withdrawn:kept_back
     ~deliver_first:(fun result ->
       enqueue_async mailbox (Keeper_msg (Keeper_sandbox_view_loaded
         (request, Masc_tui_keeper_sandbox.Inventory_result result))))
@@ -5947,9 +6186,12 @@ let launch_keeper_efficiency state ~mailbox =
       state.keeper_efficiency <- next;
       let host = server_peer_host and port = state.port in
       launch_workspace_json_read state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Keeper_msg (Keeper_efficiency_loaded (request, result)))
         (fun () ->
           let open Result.Syntax in
+          Result.map_error (fun detail -> Request_failed detail) @@
           let* json =
             Masc_tui_http.get_json_decoded
               ~timeout_sec:(Some Masc_tui_keeper_efficiency.timeout_sec)
@@ -5957,6 +6199,12 @@ let launch_keeper_efficiency state ~mailbox =
               ~path:(Masc_tui_keeper_efficiency.path ~month)
           in
           Masc_tui_keeper_efficiency.decode json)
+
+(* How many rows of a requeue batch the workspace guard did not send, after
+   the batch's other counts; nothing when it sent them all. *)
+let board_requeue_kept_back_count ~ko kept_back =
+  if kept_back = 0 then ""
+  else Printf.sprintf ", %d %s" kept_back (not_sent ~ko)
 
 (* Q acknowledges the oldest partition through its exact quarantine CAS. *)
 let launch_board_quarantine_requeue state ~mailbox ~keeper_name
@@ -5972,12 +6220,12 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
     let outcome =
       try
         match write_authority_refusal state authority with
-        | Some reason -> Masc_tui_http.Post_unanswered reason
-        | None -> Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
-          ~partition_id ~request
+        | Some refusal -> Error refusal
+        | None -> Ok (Masc_tui_http.post_board_quarantine_requeue ~host ~port ~keeper_name
+          ~partition_id ~request)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Masc_tui_http.Post_unanswered (Printexc.to_string exn)
+      | exn -> Ok (Masc_tui_http.Post_unanswered (Printexc.to_string exn))
     in
     enqueue_async mailbox
       (Board_msg (Board_quarantine_requeued (keeper_name, partition_id, outcome)))
@@ -5990,7 +6238,7 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
       (Board_msg (Board_quarantine_requeued
          ( keeper_name
          , partition_id
-         , Masc_tui_http.Post_unanswered "Eio switch is unavailable" )))
+         , Ok (Masc_tui_http.Post_unanswered "Eio switch is unavailable") )))
 
 (* B is one operator action over the inventory snapshot, with a separate
    authenticated CAS command and audit row per candidate. Partial outcomes
@@ -6012,25 +6260,20 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
         ~send:(fun ~partition_id ~request ->
           try
             match write_authority_refusal state authority with
-            | Some reason -> Masc_tui_http.Post_unanswered reason
-            | None -> Masc_tui_http.post_board_quarantine_requeue
-              ~host ~port ~keeper_name ~partition_id ~request
+            | Some refusal -> Error refusal
+            | None -> Ok (Masc_tui_http.post_board_quarantine_requeue
+              ~host ~port ~keeper_name ~partition_id ~request)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Masc_tui_http.Post_unanswered (Printexc.to_string exn))
+          | exn -> Ok (Masc_tui_http.Post_unanswered (Printexc.to_string exn)))
         ~classify:(function
-          | Masc_tui_http.Post_answered _ -> Masc_tui_board_quarantine.Accepted
-          | Masc_tui_http.Post_refused _ -> Masc_tui_board_quarantine.Refused
-          | Masc_tui_http.Post_unanswered _ -> Masc_tui_board_quarantine.Uncertain)
+          | Ok (Masc_tui_http.Post_answered _) -> Masc_tui_board_quarantine.Accepted
+          | Ok (Masc_tui_http.Post_refused _) -> Masc_tui_board_quarantine.Refused
+          | Ok (Masc_tui_http.Post_unanswered _) -> Masc_tui_board_quarantine.Uncertain
+          | Error _ -> Masc_tui_board_quarantine.Kept_back)
         ~progress:(fun (counts : Masc_tui_board_quarantine.batch_counts) ->
           enqueue_async mailbox
-            (Board_msg (Board_quarantines_bulk_progress
-               ( keeper_name
-               , counts.attempted
-               , counts.total
-               , counts.accepted
-               , counts.refused
-               , counts.uncertain ))))
+            (Board_msg (Board_quarantines_bulk_progress (keeper_name, counts))))
         items
     in
     enqueue_async mailbox (Board_msg (Board_quarantines_bulk_requeued (keeper_name, outcomes)))
@@ -6045,7 +6288,7 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
          , List.map
              (fun (item : Masc.Keeper_board_attention_quarantine_command.inventory_item) ->
                 item.partition_id,
-                Masc_tui_http.Post_unanswered "Eio switch is unavailable")
+                Ok (Masc_tui_http.Post_unanswered "Eio switch is unavailable"))
              items )))
 
 let settle_connector_unbind_offers state
@@ -6122,15 +6365,18 @@ let launch_connectors_load state ~mailbox =
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_json_read ~key:(Connector_read.job_key request) state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~on_not_run:(fun () ->
         state.connectors_owed <- Masc_tui_owed_read.abandoned state.connectors_owed;
         connector_read_not_started state request)
       ~deliver:(fun result ->
         Connectors_msg (Connectors_loaded (request,
-          Masc_tui_async_read.attribute Masc_tui_async_read.Connectors result)))
+          Result.map_error (attribute_request_failure Masc_tui_async_read.Connectors) result)))
       (fun () -> Masc_tui_loader.load_connectors ~host ~port
         ~on_status:(fun snapshot ->
-          enqueue_status mailbox (Connectors_msg (Connectors_status_loaded (request, snapshot)))))
+          enqueue_status mailbox (Connectors_msg (Connectors_status_loaded (request, snapshot))))
+        |> Result.map_error (fun detail -> Request_failed detail))
 
 (* A binding write changed what the server holds. A load already in flight
    may have read before the write landed. Coalesce while status is pending;
@@ -6153,7 +6399,7 @@ let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
     state.connector_unbind_all_inflight <- true;
     let host = server_peer_host in
     let port = state.port in
-    let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
+    let check_request = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
     let run () =
       let results =
         List.map
@@ -6161,7 +6407,12 @@ let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
              let outcome =
                try
                  match check_request () with
-                 | Error detail -> Masc_tui_connector_unbind.Failed detail
+                 | Error refusal ->
+                     (* Not sent: the kept-back notice, never a failed
+                        unbind (RFC §2). *)
+                     Masc_tui_connector_unbind.Kept_back
+                       (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                          ~request:Kept_request.Connector_unbind refusal)
                  | Ok () -> Masc_tui_http.post_connector_unbind_owned ~host ~port target
                with
                | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -6208,8 +6459,10 @@ let launch_volume_gc state ~mailbox request =
       Tools_msg (Tools_volume_gc_reclaimed (names, result))
   in
   state.volume_gc <- Masc_tui_volume_gc.sending state.volume_gc request;
-  launch_workspace_request ~operation:execute state ~mailbox ~boundary_error:Fun.id
-    ~cancelled:(deliver (Error "interrupted before the server answered"))
+  let failed detail = Request_failed detail in
+  launch_guarded_request ~operation:execute state ~mailbox ~boundary_error:failed
+    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+    ~cancelled:(deliver (Error (failed "interrupted before the server answered")))
     ~deliver
     (fun () ->
       let open Result.Syntax in
@@ -6217,17 +6470,20 @@ let launch_volume_gc state ~mailbox request =
         match session with
         | Some session_id -> Ok session_id
         | None ->
-          Masc_tui_http.open_mcp_session ~host ~port
-            ~client_version:Runtime_build_version.current
+          Result.map_error failed
+            (Masc_tui_http.open_mcp_session ~host ~port
+               ~client_version:Runtime_build_version.current)
       in
       let* () =
-        check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
+        admit_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
           state ~mailbox ~authority ~identity ~host ~port ()
+        |> Result.map_error (fun refusal -> Request_withdrawn refusal)
       in
       let+ outcome =
-        Masc_tui_http.call_mcp_tool_within ~timeout_sec:Masc_tui_volume_gc.timeout_sec
-          ~host ~port ~session_id ~request_id:("tui-volume-gc-" ^ Random_id.uuid_v7 ())
-          ~tool:Masc_tui_volume_gc.tool ~arguments:(Masc_tui_volume_gc.arguments request)
+        Result.map_error failed
+          (Masc_tui_http.call_mcp_tool_within ~timeout_sec:Masc_tui_volume_gc.timeout_sec
+             ~host ~port ~session_id ~request_id:("tui-volume-gc-" ^ Random_id.uuid_v7 ())
+             ~tool:Masc_tui_volume_gc.tool ~arguments:(Masc_tui_volume_gc.arguments request))
       in
       Masc_tui_volume_gc.answer_of_text ~is_error:outcome.Masc_tui_mcp.is_error
         outcome.Masc_tui_mcp.text)
@@ -6244,7 +6500,13 @@ let settle_volume_gc state request result =
   state.volume_gc <-
     (match result with
      | Ok answer -> Masc_tui_volume_gc.answered answer
-     | Error detail -> Masc_tui_volume_gc.unanswered request detail);
+     | Error (Request_failed detail) -> Masc_tui_volume_gc.unanswered request detail
+     | Error (Request_withdrawn refusal) ->
+       let named = match request with
+         | Masc_tui_volume_gc.Report_request -> Kept_request.Volume_report
+         | Masc_tui_volume_gc.Reclaim_request _ -> Kept_request.Volume_reclaim in
+       Masc_tui_volume_gc.kept_back request
+         (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request:named refusal));
   (* A newly answered report can arm a reclaim. Show its first line before
      the retained report position; periodic inventory reads do not move it. *)
   if state.view = Tools
@@ -6268,6 +6530,26 @@ let lane_addons_input_failure detail =
 let lane_addons_detail_failure detail =
   Some (Masc_tui_lane_addons.Detail_read_failure detail)
 
+(* A lane add-on request the workspace guard stopped, said as kept back and
+   never as a failed read or request (RFC §2). *)
+let lane_addons_kept_back state ~request refusal =
+  Some (Masc_tui_lane_addons.Kept_back
+    (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal))
+
+(* An installer read the guard stopped: like a failed read, the installer
+   goes back to what it showed before the read, but only when that read is
+   the one pending. *)
+let lane_installer_kept_back state (view : Masc_tui_lane_addons.t) read refusal =
+  match view.installer with
+  | Some installer when Masc_tui_lane_installer.pending_read installer = Some read ->
+      let installer = Masc_tui_lane_installer.suspend_read installer in
+      let package_directory = match read with
+        | Masc_tui_lane_installer.Read_catalog _ -> Masc_tui_lane_installer.directory installer
+        | Masc_tui_lane_installer.Read_preview _ -> view.package_directory in
+      {view with loading=false;installer=Some installer;package_directory;
+        error=lane_addons_kept_back state ~request:Kept_request.Addon_read refusal;scroll=0}
+  | Some _ | None -> view
+
 let launch_lane_application state ~mailbox =
   if server_authority_ready state then begin
   let module Addons = Masc_tui_lane_addons in
@@ -6279,11 +6561,14 @@ let launch_lane_application state ~mailbox =
        | Some (view, ticket) ->
            state.lane_addons <- Some view;
            let host=server_peer_host and port=state.port in
-           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+           launch_guarded_request state ~mailbox
+             ~boundary_error:(fun detail -> Request_failed detail)
+             ~withdrawn:(fun refusal -> Request_withdrawn refusal)
              ~deliver:(fun result -> Lane_msg (Lane_application_loaded (ticket,result)))
              (fun () -> Result.bind
                (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons")
-               Addons.decode_configuration))
+               Addons.decode_configuration
+               |> Result.map_error (fun detail -> Request_failed detail)))
   end
 
 let lane_addons_request_failure detail =
@@ -6319,9 +6604,12 @@ let launch_lane_package_catalog state ~mailbox directory =
       let host=server_peer_host and port=state.port in
       let query = match directory with None -> ""
         | Some path -> "?directory=" ^ Masc_tui_http.percent_encode_query_value path in
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      launch_guarded_request state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Lane_msg (Lane_package_catalog_loaded (generation,directory,result)))
-        (fun () -> Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/package-catalog" ^ query)))
+        (fun () -> Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/package-catalog" ^ query)
+          |> Result.map_error (fun detail -> Request_failed detail)))
   end
 
 let launch_lane_package_preview state ~mailbox path =
@@ -6338,10 +6626,13 @@ let launch_lane_package_preview state ~mailbox path =
     | Ok installer ->
     state.lane_addons <- Some {view with generation;installer=Some installer;loading=true;error=None};
     let host=server_peer_host and port=state.port in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    launch_guarded_request state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Lane_msg (Lane_package_preview_loaded (generation,path,result)))
       (fun () -> Masc_tui_http.get_json ~host ~port
-        ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)))
+        ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)
+        |> Result.map_error (fun detail -> Request_failed detail)))
   end
 
 let lane_draft_directory (view : Masc_tui_lane_addons.t) =
@@ -6381,9 +6672,11 @@ let launch_lane_declaration state ~mailbox ~edit request =
             ~headers:(Masc_tui_http.auth_headers ()) ~path:"/api/v1/lane-addons/declaration"
             ~body:(Yojson.Safe.to_string (Document.write_json session)) in
       Document.decode_response request ~status ~body in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    launch_guarded_request state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Lane_msg (Lane_declaration_loaded (generation, request, edit, create_directory, result)))
-      perform)
+      (fun () -> Result.map_error (fun detail -> Request_failed detail) (perform ())))
   end
 
 let launch_lane_subscriptions state ~mailbox request =
@@ -6401,13 +6694,15 @@ let launch_lane_subscriptions state ~mailbox request =
         | Subs.Save _ -> None);
       state.lane_addons <- Some {view with generation;loading=true;error=None};
       let host=server_peer_host and port=state.port in
-      launch_workspace_request
+      launch_guarded_request
         ~operation:(match request with Subs.Inspect -> false | Subs.Save _ -> true)
-        state ~mailbox ~boundary_error:Fun.id
+        state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Lane_msg (Lane_subscriptions_loaded (generation,result)))
         (fun () -> Result.bind (Masc_tui_http.post_json ~host ~port
           ~path:"/api/v1/lane-addons/subscriptions"
-          ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
+          ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode
+          |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 let launch_lane_addons ?target state ~mailbox request =
@@ -6467,30 +6762,34 @@ let launch_lane_addons ?target state ~mailbox request =
   let broadcast_workspace_verified=state.workspace_identity=Masc_tui_types.Workspace_identity_match in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
-  let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
-  let get_json ~path =
-    Result.bind (check_request ())
-      (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
-  let post_json ~path ~body =
-    Result.bind (check_request ())
-      (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
+  let check_request = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
+  (* Each request in the chain is admitted again. The guard's refusal stays
+     apart from the request's own failure, which [kind] names. *)
+  let guarded kind send = match check_request () with
+    | Error refusal -> Error (`Kept_back refusal)
+    | Ok () -> Result.map_error kind (send ()) in
+  let get_json kind ~path = guarded kind (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
+  let post_json kind ~path ~body =
+    guarded kind (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
   let perform () =
     let open Result.Syntax in
-    let inventory_result result = Result.map_error (fun detail -> `Inventory detail) result in
-    let detail_result result = Result.map_error (fun detail -> `Detail detail) result in
-    let request_result result = Result.map_error (fun detail -> `Request detail) result in
-    let reply ?snapshot ?receipt ?action ?diagnostic ?(inventory_read=`Unchanged) () =
+    let inventory_failure detail = `Inventory detail in
+    let detail_failure detail = `Detail detail in
+    let request_failure detail = `Request detail in
+    let detail_result result = Result.map_error detail_failure result in
+    let request_result result = Result.map_error request_failure result in
+    let reply ?snapshot ?receipt ?action ?diagnostic ?(inventory_read=`Unchanged) ?kept_back () =
       {lar_snapshot=snapshot;lar_receipt=receipt;lar_action=action;
-       lar_diagnostic=diagnostic;lar_inventory_read=inventory_read} in
+       lar_diagnostic=diagnostic;lar_inventory_read=inventory_read;lar_kept_back=kept_back} in
     let inspect () =
       try
-        let* json = get_json ~path:"/api/v1/lane-addons" in
-        Addons.decode json
+        let* json = get_json inventory_failure ~path:"/api/v1/lane-addons" in
+        Result.map_error inventory_failure (Addons.decode json)
       with Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> Error (Printexc.to_string exn) in
+         | exn -> Error (inventory_failure (Printexc.to_string exn)) in
     match request with
     | Addons.Inspect ->
-        let* snapshot = inventory_result (inspect ()) in
+        let* snapshot = inspect () in
         let retained = Option.bind initial_detail (fun (id, incarnation) ->
           List.find_opt (fun (item : Addons.instance) ->
             item.id = id && item.incarnation = incarnation
@@ -6499,17 +6798,19 @@ let launch_lane_addons ?target state ~mailbox request =
          | None -> Ok (reply ~snapshot ~inventory_read:`Read ())
          | Some item ->
              let history = Result.bind
-               (get_json ~path:("/api/v1/lane-addons/slice?run_id="
+               (get_json detail_failure ~path:("/api/v1/lane-addons/slice?run_id="
                  ^ Masc_tui_http.percent_encode_query_value item.run_id))
-               (Addons.decode_slice ~snapshot) in
+               (fun json -> detail_result (Addons.decode_slice ~snapshot json)) in
              (match history with
               | Ok snapshot -> Ok (reply ~snapshot ~inventory_read:`Read ())
-              | Error detail -> Ok (reply ~snapshot ~inventory_read:`Read
-                  ~diagnostic:(Addons.Detail_read_failure detail) ())))
+              | Error (`Detail detail) -> Ok (reply ~snapshot ~inventory_read:`Read
+                  ~diagnostic:(Addons.Detail_read_failure detail) ())
+              | Error (`Kept_back refusal) ->
+                  Ok (reply ~snapshot ~inventory_read:`Read ~kept_back:refusal ())))
     | Addons.Subscriptions args ->
-        let* json=request_result (post_json
+        let* json = post_json request_failure
           ~path:"/api/v1/lane-addons/subscriptions"
-          ~body:(Yojson.Safe.to_string args)) in
+          ~body:(Yojson.Safe.to_string args) in
         Ok (reply ~receipt:json ())
     | Addons.Slice query ->
         let path = match query with
@@ -6517,10 +6818,10 @@ let launch_lane_addons ?target state ~mailbox request =
           | _ :: _ ->
               let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
               "/api/v1/lane-addons/slice?" ^ query in
-        let* json = detail_result (get_json ~path) in
+        let* json = get_json detail_failure ~path in
         let* previous, source = match view.snapshot with
           | Some snapshot -> Ok (snapshot, Cached_snapshot)
-          | None -> let* snapshot = inventory_result (inspect ()) in
+          | None -> let* snapshot = inspect () in
               Ok (snapshot, Fresh_inventory) in
         let inventory_read = match source with
           | Cached_snapshot -> `Unchanged
@@ -6534,14 +6835,14 @@ let launch_lane_addons ?target state ~mailbox request =
               | Cached_snapshot -> Error (`Detail detail)))
     | Addons.Act action | Addons.Action_status action ->
         let* json = match request with
-          | Addons.Act _ -> request_result (post_json
+          | Addons.Act _ -> post_json request_failure
               ~path:"/api/v1/lane-addons/actions"
-              ~body:(Yojson.Safe.to_string (Addons.action_json action)))
+              ~body:(Yojson.Safe.to_string (Addons.action_json action))
           | Addons.Inspect | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
-          | Addons.Evidence _ | Addons.Action_status _ | Addons.Subscriptions _ -> detail_result (get_json
+          | Addons.Evidence _ | Addons.Action_status _ | Addons.Subscriptions _ -> get_json detail_failure
               ~path:("/api/v1/lane-addons/actions?instance_id="
               ^ Masc_tui_http.percent_encode_query_value action.instance_id ^ "&request_id="
-              ^ Masc_tui_http.percent_encode_query_value action.request_id)) in
+              ^ Masc_tui_http.percent_encode_query_value action.request_id) in
         let* receipt = (match request with
           | Addons.Act _ -> request_result (Addons.action_receipt action json)
           | Addons.Inspect | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
@@ -6567,22 +6868,21 @@ let launch_lane_addons ?target state ~mailbox request =
             | None -> Error (`Request "Verify the server workspace before sharing evidence via Broadcast")) in
         let* principal = match scope with
           | None -> Ok None
-          | Some _ -> (request_result (Result.bind
-              (check_request ())
-              (fun () -> Masc_tui_http.lane_broadcast_principal_bound ~credential ~host ~port))
-              |> Result.map Option.some) in
+          | Some _ -> guarded request_failure
+              (fun () -> Masc_tui_http.lane_broadcast_principal_bound ~credential ~host ~port)
+              |> Result.map Option.some in
         let* body = match principal,scope with
           | None,_ -> Ok body
           | Some principal,Some scope -> request_result (Masc_tui_lane_broadcast_pending.prepare
               ~path:broadcast_path ~scope ~credential:principal body)
           | Some _,None -> Error (`Request "Broadcast workspace scope is unavailable") in
         let post ~path ~body = if broadcast then
-            Result.bind (check_request ())
+            guarded request_failure
               (fun () -> Masc_tui_http.post_json_bound ~credential ~host ~port ~path ~body)
-          else post_json ~path ~body in
-        let* receipt = request_result (post
+          else post_json request_failure ~path ~body in
+        let* receipt = post
           ~path:("/api/v1/lane-addons/" ^ suffix)
-          ~body:(Yojson.Safe.to_string body)) in
+          ~body:(Yojson.Safe.to_string body) in
         let diagnostic = match principal,scope with
           | None,_ -> None
           | Some principal,Some scope ->
@@ -6601,16 +6901,20 @@ let launch_lane_addons ?target state ~mailbox request =
          | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ ->
              (match inspect () with
               | Ok snapshot -> Ok (reply ~snapshot ~receipt ?diagnostic ~inventory_read:`Read ())
-              | Error detail -> Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ()))
+              | Error (`Inventory detail) ->
+                  Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ())
+              (* The change was applied; only the read after it was kept back. *)
+              | Error (`Kept_back refusal) -> Ok (reply ~receipt ?diagnostic ~kept_back:refusal ()))
          | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _
          | Addons.Subscriptions _ -> assert false)
   in
-  launch_workspace_request
+  launch_guarded_request
     ~operation:(match request with
       | Addons.Inspect | Slice _ | Action_status _ -> false
       | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> true)
     state ~mailbox
     ~boundary_error:(lane_addons_failure_for_request request)
+    ~withdrawn:(fun refusal -> `Kept_back refusal)
     ~deliver:(fun result -> Lane_msg (Lane_addons_loaded (generation, target, result)))
     perform)
   end
@@ -6629,9 +6933,12 @@ let launch_browser_history state ~mailbox ~reload =
       let host = server_peer_host and port = state.port in
       if reload then
         launch_workspace_json_read state ~mailbox
+          ~boundary_error:(fun detail -> Request_failed detail)
+          ~withdrawn:(fun refusal -> Request_withdrawn refusal)
           ~deliver:(fun result -> Browser_msg (Browser_history_list_loaded (generation, result)))
           (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port
-            ~keeper_name:history.keeper_name ~limit:100)
+            ~keeper_name:history.keeper_name ~limit:100
+            |> Result.map_error (fun detail -> Request_failed detail))
       else begin
         let enqueue_async = workspace_enqueue state in
         let fetch () = Browser_msg (Browser_history_page_loaded (generation,
@@ -6836,9 +7143,11 @@ let launch_runtime_surface_load state ~mailbox ~force =
       state.runtime_surface_inflight <- Some generation;
       let host = server_peer_host in
       let port = state.port in
-      launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+      launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Runtime_msg (Runtime_surface_loaded (generation, result)))
-        (fun () -> Masc_tui_loader.load_runtime_surface ~host ~port ~force)
+        (fun () -> Masc_tui_loader.load_runtime_surface ~host ~port ~force
+          |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 let launch_repositories_load state ~mailbox =
@@ -6876,9 +7185,11 @@ let launch_memory_input_load state ~mailbox ~refresh =
           state.memory_input <- next;
           state.memory_input_owed <- Masc_tui_owed_read.started state.memory_input_owed;
           let host = server_peer_host and port = state.port in
-          launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+          launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+            ~withdrawn:(fun refusal -> Request_withdrawn refusal)
             ~deliver:(fun result -> Memory_msg (Memory_input_loaded (request, result)))
-            (fun () -> Masc_tui_http.fetch_keeper_memory_input ~host ~port ~keeper_name:key)
+            (fun () -> Masc_tui_http.fetch_keeper_memory_input ~host ~port ~keeper_name:key
+              |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 (* The newest turns of the Keeper the Story window draws. The window follows
@@ -6898,10 +7209,12 @@ let launch_keeper_story_turns_load state ~mailbox ~keeper_name ~refresh =
           state.keeper_story_turns_owed <-
             Masc_tui_owed_read.started state.keeper_story_turns_owed;
           let host = server_peer_host and port = state.port in
-          launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+          launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+            ~withdrawn:(fun refusal -> Request_withdrawn refusal)
             ~deliver:(fun result ->
               Keeper_msg (Keeper_story_turns_loaded (request, result)))
-            (fun () -> Masc_tui_http.fetch_keeper_story_turns ~host ~port ~keeper_name)
+            (fun () -> Masc_tui_http.fetch_keeper_story_turns ~host ~port ~keeper_name
+              |> Result.map_error (fun detail -> Request_failed detail))
   end
 
 (* Independent Memory dock sources deliver without waiting for one another. *)
@@ -6915,7 +7228,10 @@ let launch_memory_activity_read state ~mailbox ~keeper_name ~refresh
       set_source next;
       set_owed (Masc_tui_owed_read.started owed);
       launch_workspace_json_read state ~mailbox
-        ~deliver:(fun result -> Keeper_msg (deliver request result)) read
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+        ~deliver:(fun result -> Keeper_msg (deliver request result))
+        (fun () -> Result.map_error (fun detail -> Request_failed detail) (read ()))
 
 let launch_memory_health_load state ~mailbox =
   if server_authority_ready state then begin
@@ -6929,9 +7245,11 @@ let launch_memory_health_load state ~mailbox =
        the one held is not applied. Reading them after it costs one row each. *)
     let host = server_peer_host in
     let port = state.port in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Memory_msg (Memory_loaded (Fleet_health_read result)))
-      (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
+      (fun () -> Masc_tui_loader.load_memory_health ~host ~port
+        |> Result.map_error (fun detail -> Request_failed detail))
   end
 
   end
@@ -6952,9 +7270,11 @@ let launch_owed_memory_health_row state ~mailbox =
         state.memory_health_inflight <- true;
         let host = server_peer_host in
         let port = state.port in
-        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+          ~withdrawn:(fun refusal -> Request_withdrawn refusal)
           ~deliver:(fun result -> Memory_msg (Memory_loaded (Row_health_read { keeper; result })))
-          (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper)
+          (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper
+            |> Result.map_error (fun detail -> Request_failed detail))
       end
 
 (* Ask for [key]'s facts and run [read] for them, unless that read is already
@@ -6973,7 +7293,10 @@ let launch_memory_facts_read state ~mailbox ~key read =
          names a Keeper, not a workspace (#41163). *)
       state.memory_facts_owed <- Masc_tui_owed_read.started state.memory_facts_owed;
       launch_workspace_json_read state ~mailbox
-        ~deliver:(fun result -> Memory_msg (Memory_facts_loaded (request, result))) read
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+        ~deliver:(fun result -> Memory_msg (Memory_facts_loaded (request, result)))
+        (fun () -> Result.map_error (fun detail -> Request_failed detail) (read ()))
   end
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
@@ -7253,7 +7576,7 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
   state.changes_inflight <- true;
-  launch_workspace_async_read state ~mailbox
+  launch_guarded_async_read state ~mailbox
     ~deliver:(fun result ->
       enqueue_async mailbox (File_changes_loaded (keeper_name, result)))
     (capture_workspace_json_read state (fun () ->
@@ -7288,7 +7611,7 @@ let launch_acting_pane_changes_load ?(force = false) state ~mailbox ~keeper_name
       state.acting_pane_changes <- next;
       let host = server_peer_host in
       let port = state.port in
-      launch_workspace_async_read state ~mailbox
+      launch_guarded_async_read state ~mailbox
         ~deliver:(fun result ->
           enqueue_async mailbox (Acting_pane_changes_loaded (request, result)))
         (capture_workspace_json_read state (fun () ->
@@ -7363,10 +7686,12 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
           ~window_hours:changes_window_hours) in
       let run () =
         let result =
-          try read ()
+          try (match read () with
+            | Error refusal -> Error (Request_withdrawn refusal)
+            | Ok result -> Result.map_error (fun detail -> Request_failed detail) result)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
+          | exn -> Error (Request_failed (Printexc.to_string exn))
         in
         enqueue_async mailbox
           (Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, result)))
@@ -7381,7 +7706,7 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
             (Keeper_msg (Keeper_chat_file_changes_loaded
                ( generation
                , keeper_name
-               , Error "Eio switch is unavailable" )))
+               , Error (Request_failed "Eio switch is unavailable") )))
     end
   end
   end
@@ -7500,9 +7825,11 @@ let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mai
         Masc_tui_loader.load_fusion_runs ~host ~port) in
       let run () =
         let result =
-          try read () with
+          try (match read () with
+            | Error refusal -> Error (Request_withdrawn refusal)
+            | Ok result -> Result.map_error (fun detail -> Request_failed detail) result) with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Printexc.to_string exn)
+          | exn -> Error (Request_failed (Printexc.to_string exn))
         in
         enqueue_async mailbox (Fusion_msg (Fusion_runs_loaded (request, result)))
       in
@@ -7514,7 +7841,7 @@ let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mai
        | None ->
            enqueue_async mailbox
              (Fusion_msg (Fusion_runs_loaded
-                (request, Error "Eio switch is unavailable"))))
+                (request, Error (Request_failed "Eio switch is unavailable")))))
 
 let launch_fusion_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~run_id =
   if server_authority_ready state then begin
@@ -7526,7 +7853,7 @@ let launch_fusion_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~m
     let port = state.port in
     let read = capture_workspace_json_read state (fun () ->
       Masc_tui_loader.load_fusion_detail ~host ~port ~run_id) in
-    launch_workspace_async_read state ~mailbox
+    launch_guarded_async_read state ~mailbox
       ~deliver:(fun result ->
         enqueue_async mailbox (Fusion_msg (Fusion_detail_loaded (generation, run_id, result))))
       read
@@ -7542,7 +7869,7 @@ let launch_fusion_historical_detail_load ?(demand = Masc_tui_fusion_updates.Shar
     let port = state.port in
     let read = capture_workspace_json_read state (fun () ->
       Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference) in
-    launch_workspace_async_read state ~mailbox
+    launch_guarded_async_read state ~mailbox
       ~deliver:(fun result ->
         enqueue_async mailbox (Fusion_msg (Fusion_historical_detail_loaded (generation, reference, result))))
       read
@@ -7611,9 +7938,11 @@ let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) 
   let generation = state.fusion_launch_generation in
   let host = server_peer_host in
   let port = state.port in
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+  launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
     ~deliver:(fun result -> Fusion_msg (Fusion_launched (generation, result)))
-    (fun () -> Masc_tui_loader.launch_fusion_run ~host ~port ~request)
+    (fun () -> Masc_tui_loader.launch_fusion_run ~host ~port ~request
+      |> Result.map_error (fun detail -> Request_failed detail))
 
 let launch_lanes_load state ~mailbox =
   if server_authority_ready state then begin
@@ -7625,10 +7954,12 @@ let launch_lanes_load state ~mailbox =
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Lane_msg (Lane_inventory_loaded (standalone_generation,
-        Masc_tui_async_read.attribute Masc_tui_async_read.Standalone_lanes result)))
-      (fun () -> Masc_tui_loader.load_lane_inventory ~host ~port)
+    launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+      ~deliver:(fun result -> Lane_msg (Lane_inventory_loaded (standalone_generation, result)))
+      (fun () -> Masc_tui_loader.load_lane_inventory ~host ~port
+        |> Masc_tui_async_read.attribute Masc_tui_async_read.Standalone_lanes
+        |> Result.map_error (fun detail -> Request_failed detail))
   end
 
   end
@@ -7653,14 +7984,17 @@ let launch_machine_activity_read state ~mailbox owner =
      | Some (session, request) ->
        Masc_tui_types.put_machine_activity state session;
        let host = server_peer_host and port = state.port in
-       let check = capture_workspace_check state ~mailbox in
-       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+       let check = capture_workspace_admission state ~mailbox in
+       launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+         ~withdrawn:(fun refusal -> Request_withdrawn refusal)
          ~deliver:(fun result -> Machine_msg (Machine_activity_read (request,result))) (fun () ->
            let document = Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
              {Masc_tui_runtime_config_edit.path=reading.path;
               source_text=reading.source_text;source_revision=reading.metadata.source_revision})
              (Masc_tui_loader.load_runtime_config_view ~host ~port) in
-           Result.bind (check ()) (fun () ->
+           let check () = Result.map_error (fun refusal -> Request_withdrawn refusal) (check ()) in
+           Result.bind (check ()
+             |> Result.map_error (request_failure_after_read state ~request:Kept_request.Runtime_config_read)) (fun () ->
            let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
              (fun snapshot ->
                match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
@@ -7674,7 +8008,8 @@ let launch_machine_activity_read state ~mailbox owner =
                | Some {state=(Exact_state _ | Browser_clients _ | Package_state _);_} ->
                    Error "The selected machine is absent from the server reading.") in
            Result.map (fun () -> Masc_tui_machine_activity.{document;activity})
-             (check ()))))
+             (check ()
+              |> Result.map_error (request_failure_after_read state ~request:Kept_request.Lanes_read)))))
   end
 
 let launch_machine_activity_save state ~mailbox session =
@@ -7687,14 +8022,17 @@ let launch_machine_activity_save state ~mailbox session =
   | Ok (session,request,write) ->
     Masc_tui_types.put_machine_activity state session;
     let authority=state.workspace_authority and identity=state.server_identity in
-    launch_workspace_request state ~mailbox
-      ~boundary_error:(fun detail -> Masc_tui_http.Runtime_config_save_refused detail)
+    launch_guarded_request state ~mailbox
+      ~boundary_error:(fun detail -> `Save (Masc_tui_http.Runtime_config_save_refused detail))
+      ~withdrawn:(fun refusal -> `Kept_back refusal)
       ~deliver:(fun result ->
         let result = match result with
-          | Ok receipt -> Activity.Saved receipt
-          | Error (Masc_tui_http.Runtime_config_conflict current) -> Activity.Conflict current
-          | Error (Masc_tui_http.Runtime_config_save_refused detail) -> Activity.Refused detail
-          | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
+          | Ok receipt -> Ok (Activity.Saved receipt)
+          | Error (`Save (Masc_tui_http.Runtime_config_conflict current)) -> Ok (Activity.Conflict current)
+          | Error (`Save (Masc_tui_http.Runtime_config_save_refused detail)) -> Ok (Activity.Refused detail)
+          | Error (`Save (Masc_tui_http.Runtime_config_save_unconfirmed detail)) ->
+              Ok (Activity.Unconfirmed detail)
+          | Error (`Kept_back refusal) -> Error refusal in
         Machine_msg (Machine_activity_saved (request,result)))
       (fun () -> save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
         ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
@@ -7722,12 +8060,14 @@ let launch_exact_activity_read state ~mailbox owner =
      | Some (session, request) ->
        Masc_tui_types.put_exact_activity state session;
        let host = server_peer_host and port = state.port in
-       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+       launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+         ~withdrawn:(fun refusal -> Request_withdrawn refusal)
          ~deliver:(fun result -> Exact_msg (Exact_activity_read (request,result))) (fun () ->
            Masc_tui_loader.load_runtime_config_view ~host ~port
            |> Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
              {Masc_tui_runtime_config_edit.path=reading.path;source_text=reading.source_text;
-              source_revision=reading.metadata.source_revision})))
+              source_revision=reading.metadata.source_revision})
+           |> Result.map_error (fun detail -> Request_failed detail)))
   end
 
 let launch_exact_activity_save state ~mailbox session =
@@ -7740,14 +8080,17 @@ let launch_exact_activity_save state ~mailbox session =
   | Ok (session,request,write) ->
     Masc_tui_types.put_exact_activity state session;
     let authority=state.workspace_authority and identity=state.server_identity in
-    launch_workspace_request state ~mailbox
-      ~boundary_error:(fun detail -> Masc_tui_http.Runtime_config_save_refused detail)
+    launch_guarded_request state ~mailbox
+      ~boundary_error:(fun detail -> `Save (Masc_tui_http.Runtime_config_save_refused detail))
+      ~withdrawn:(fun refusal -> `Kept_back refusal)
       ~deliver:(fun result ->
         let result = match result with
-          | Ok receipt -> Activity.Saved receipt
-          | Error (Masc_tui_http.Runtime_config_conflict current) -> Activity.Conflict current
-          | Error (Masc_tui_http.Runtime_config_save_refused detail) -> Activity.Refused detail
-          | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
+          | Ok receipt -> Ok (Activity.Saved receipt)
+          | Error (`Save (Masc_tui_http.Runtime_config_conflict current)) -> Ok (Activity.Conflict current)
+          | Error (`Save (Masc_tui_http.Runtime_config_save_refused detail)) -> Ok (Activity.Refused detail)
+          | Error (`Save (Masc_tui_http.Runtime_config_save_unconfirmed detail)) ->
+              Ok (Activity.Unconfirmed detail)
+          | Error (`Kept_back refusal) -> Error refusal in
         Exact_msg (Exact_activity_saved (request,result)))
       (fun () -> save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
         ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
@@ -7910,9 +8253,11 @@ let launch_verification_load state ~mailbox =
        arrives must be the one that was asked for. *)
     let view = state.verification_view in
     let offset = state.verification_offset in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Verification_msg (Verification_loaded result))
-      (fun () -> Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset)
+      (fun () -> Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset
+        |> Result.map_error (fun detail -> Request_failed detail))
   end
   end
 
@@ -9228,17 +9573,27 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
     let read_authority = state.workspace_read_authority in
     launch_workspace_async_read_with state ~mailbox
       ~boundary_error:(fun detail -> Masc_tui_native_tasks.Transport detail)
+      ~withdrawn:(fun refusal -> Masc_tui_native_tasks.Kept_back
+        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+          ~request:Kept_request.Native_tasks_read refusal))
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_msg (Keeper_native_tasks_loaded (keeper_name,result))))
       (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
           let open Result.Syntax in
-          let* () = if read_authority == state.workspace_read_authority then Ok ()
-            else Error "workspace observation read was retired" in
-          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
-          let result = Masc_tui_http.http_get ~host ~port ~path in
-          let* () = if read_authority == state.workspace_read_authority then Ok ()
-            else Error "workspace observation read was retired" in
-          let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let retired () = if read_authority == state.workspace_read_authority then Ok ()
+            else Error (Masc_tui_native_tasks.Transport "workspace observation read was retired") in
+          (* The guard's refusal is the kept-back notice, never a transport
+             failure (RFC §2). *)
+          let admit () = admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = retired () in
+          let* () = admit () |> Result.map_error (fun refusal -> Masc_tui_native_tasks.Kept_back
+            (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Native_tasks_read refusal)) in
+          let result = Masc_tui_http.http_get ~host ~port ~path
+            |> Result.map_error (fun detail -> Masc_tui_native_tasks.Transport detail) in
+          let* () = retired () in
+          let* () = admit () |> Result.map_error (fun refusal -> Masc_tui_native_tasks.Transport
+            (workspace_response_refusal_text state ~request:Kept_request.Native_tasks_read refusal)) in
           result))
   end
 
@@ -9269,17 +9624,29 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
     state.msg_child_content_inflight <- (keeper_name,mode) :: state.msg_child_content_inflight;
     launch_workspace_async_read_with state ~mailbox
       ~boundary_error:(fun detail -> Masc_tui_child_content.Transport detail)
+      ~withdrawn:(fun refusal -> Masc_tui_child_content.Kept_back
+        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+          ~request:Kept_request.Child_content_read refusal))
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_msg (Keeper_child_content_loaded (keeper_name,result))))
       (fun () -> Masc_tui_child_content.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
           let open Result.Syntax in
-          let check () =
+          (* The guard's refusal is the kept-back notice, never a transport
+             failure (RFC §2). *)
+          let retired () =
             if reading != state.workspace_read_authority then
-              Error "Child observation read was retired"
-            else check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
-          let* () = check () in
-          let result = Masc_tui_http.http_get ~host ~port ~path in
-          let* () = check () in
+              Error (Masc_tui_child_content.Transport "Child observation read was retired")
+            else Ok () in
+          let admit () = admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+          let* () = retired () in
+          let* () = admit () |> Result.map_error (fun refusal -> Masc_tui_child_content.Kept_back
+            (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Child_content_read refusal)) in
+          let result = Masc_tui_http.http_get ~host ~port ~path
+            |> Result.map_error (fun detail -> Masc_tui_child_content.Transport detail) in
+          let* () = retired () in
+          let* () = admit () |> Result.map_error (fun refusal -> Masc_tui_child_content.Transport
+            (workspace_response_refusal_text state ~request:Kept_request.Child_content_read refusal)) in
           result))
   end
 
@@ -9365,47 +9732,57 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     let read source fetch =
       (* Each source keeps its own identity-probe chain. Neither result waits
          for its sibling or for capacity in the shared mailbox. *)
-      let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
+      (* The guard's refusal stays typed apart from the read's own failure,
+         so the pane draws it as kept back (RFC §2). *)
+      let check_request = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
+      let request = match source with
+        | Keeper_history_read.History -> Kept_request.Keeper_history_read
+        | Keeper_history_read.Initial_reply -> Kept_request.Keeper_reply_read
+        | Keeper_history_read.Memory -> Kept_request.Keeper_memory_read in
       let result =
         try
           let open Result.Syntax in
-          let* () = check_request () in
-          let* reading = fetch ~host ~port ~keeper_name in
-          let* () = check_request () in
+          let check () = Result.map_error (fun refusal -> Request_withdrawn refusal) (check_request ()) in
+          let* () = check () in
+          let* reading = fetch ~host ~port ~keeper_name
+            |> Result.map_error (fun detail -> Request_failed detail) in
+          let* () = check () |> Result.map_error (request_failure_after_read state ~request) in
           Ok reading
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             let detail = Printexc.to_string exn in
-            Error (match source with
+            Error (Request_failed (match source with
               | Keeper_history_read.History -> detail
               | Keeper_history_read.Initial_reply -> "initial reply: " ^ detail
-              | Keeper_history_read.Memory -> "memory journal: " ^ detail)
+              | Keeper_history_read.Memory -> "memory journal: " ^ detail))
       in
       publish source result
     in
     let read_page () =
-      let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
+      let check_request = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
       let result =
         try
           let open Result.Syntax in
-          let check () = Result.map_error
-            (fun detail -> Keeper_chat_history.Page_read_failed detail) (check_request ()) in
+          let check () = Result.map_error (fun refusal -> Request_withdrawn refusal) (check_request ()) in
           let* () = check () in
-          let* page = Masc_tui_http.fetch_keeper_chat_history_page ~host ~port ~keeper_name ~cursor:None in
-          let* () = check () in
+          let* page = Masc_tui_http.fetch_keeper_chat_history_page ~host ~port ~keeper_name ~cursor:None
+            |> Result.map_error (fun error ->
+                 Request_failed (Keeper_chat_history.page_error_to_string error)) in
+          let* () = check ()
+            |> Result.map_error (request_failure_after_read state ~request:Kept_request.Keeper_history_read) in
           Ok page
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Keeper_chat_history.Page_read_failed (Printexc.to_string exn)) in
+        | exn -> Error (Request_failed (Printexc.to_string exn)) in
       Keeper_history_read.publish_page request ~ready_at_ns:(Mtime_clock.elapsed_ns ()) result
     in
     let not_run detail =
-      publish Keeper_history_read.History (Error detail);
-      publish Keeper_history_read.Memory (Error detail);
-      publish Keeper_history_read.Initial_reply (Error detail);
+      publish Keeper_history_read.History (Error (Request_failed detail));
+      publish Keeper_history_read.Memory (Error (Request_failed detail));
+      publish Keeper_history_read.Initial_reply (Error (Request_failed detail));
       Keeper_history_read.publish_page request ~ready_at_ns:(Mtime_clock.elapsed_ns ())
-        (Error (Keeper_chat_history.Page_read_failed detail)) in
+        (Error (Request_failed detail)) in
     (match Eio_context.get_switch_opt () with
      | Some sw ->
          (try
@@ -9635,7 +10012,9 @@ let launch_owed_board_post state ~mailbox =
           Some { owed with bpo_read = Masc_tui_owed_read.started read };
         Masc_tui_board_requests.start_board_post_refresh state ~host:server_peer_host
           ~port:state.port ~post_id
-          ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id)
+          ~launch:(launch_guarded_request state ~mailbox
+            ~boundary_error:(fun detail -> Request_failed detail)
+            ~withdrawn:(fun refusal -> Request_withdrawn refusal))
       end
 
 let owe_board_post_read state ~mailbox ~post_id =
@@ -9984,8 +10363,11 @@ let launch_owed_memory_world state ~mailbox =
         state.memory_world <- next;
         let host = server_peer_host and port = state.port in
         launch_workspace_json_read state ~mailbox
+          ~boundary_error:(fun detail -> Request_failed detail)
+          ~withdrawn:(fun refusal -> Request_withdrawn refusal)
           ~deliver:(fun result -> Memory_msg (Memory_world_loaded (request, result)))
-          (fun () -> Masc_tui_loader.load_memory_world ~host ~port)
+          (fun () -> Masc_tui_loader.load_memory_world ~host ~port
+            |> Result.map_error (fun detail -> Request_failed detail))
 
 (* Runs on every loop iteration. The input pane reads when the selection moves
    to another Keeper, when a memory health answer owes it, and again after a
@@ -10745,19 +11127,22 @@ let launch_keeper_chat_copy state ~mailbox ~keeper_name =
   end
 ;;
 
+(* The guard's refusal stays apart from the read's own failure: a read it
+   stopped was not sent (RFC §2). *)
 let read_keeper_chat_operation ~check_request ~host ~port
     ~keeper_name ~operation_id =
   try
     let open Result.Syntax in
-    let* () = check_request () in
+    let* () = check_request () |> Result.map_error (fun refusal -> Request_withdrawn refusal) in
+    let failed result = Result.map_error (fun detail -> Request_failed detail) result in
     let path = Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
       (Masc_tui_http.percent_encode_path_segment keeper_name)
       (Masc_tui_http.percent_encode_path_segment operation_id) in
-    let* json = Masc_tui_http.get_json ~host ~port ~path in
-    Keeper_chat_log.decode_operation_state ~operation_id json
+    let* json = failed (Masc_tui_http.get_json ~host ~port ~path) in
+    failed (Keeper_chat_log.decode_operation_state ~operation_id json)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printexc.to_string exn)
+  | exn -> Error (Request_failed (Printexc.to_string exn))
 ;;
 
 let apply_keeper_chat_operation_state state ~journal_id log = function
@@ -10765,12 +11150,18 @@ let apply_keeper_chat_operation_state state ~journal_id log = function
       Keeper_chat_log.observe_operation_state log.tl_log observed;
       Option.iter (Keeper_chat_transcript.reconcile_operation log.tl_transcript)
         (Keeper_chat_log.operation_state log.tl_log)
-  | Error detail ->
+  | Error (Request_failed detail) ->
       Keeper_chat_log.observe_operation_state log.tl_log None;
       add_event state "error"
         (Printf.sprintf "operation for %s not loaded: %s"
            (Keeper_chat.compact_request_id journal_id)
            (Keeper_chat.terminal_safe_text detail))
+  | Error (Request_withdrawn refusal) ->
+      Keeper_chat_log.observe_operation_state log.tl_log None;
+      add_event state "error"
+        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Kept_request.Keeper_operation_read refusal
+         ^ " · " ^ Keeper_chat.compact_request_id journal_id)
 ;;
 
 let launch_keeper_chat_operation_reads state ~mailbox ~keeper_name targets =
@@ -10779,7 +11170,7 @@ let launch_keeper_chat_operation_reads state ~mailbox ~keeper_name targets =
   | _ :: _, Some sw ->
       let enqueue_async = workspace_enqueue state in
       let host = server_peer_host and port = state.port in
-      let check_request = capture_workspace_check state ~mailbox in
+      let check_request = capture_workspace_admission state ~mailbox in
       List.iter (fun operation_id ->
         journal_read_started state (keeper_name, Keeper_chat_log.Operation operation_id)) targets;
       fork_workspace_job ~kind:Masc_tui_workspace_precondition.Observation state ~mailbox ~sw (fun () ->
@@ -10825,7 +11216,7 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
   let identity = state.server_identity in
   let host = server_peer_host in
   let port = state.port in
-  let check_request = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
+  let check_request = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
   let run (source, started_at, since_seq) =
     (* The journal can lack its final event after interruption or an append
        failure. Its cursor remains the journal's; the exact operation is a
@@ -10847,7 +11238,10 @@ let launch_keeper_chat_journal_loads state ~mailbox ~keeper_name targets =
                server's and this client's, so the ask can never exceed
                what the endpoint admits. *)
             match check_request () with
-            | Error detail -> Error (Keeper_chat_log.Events_transport detail)
+            | Error refusal ->
+              Error (Keeper_chat_log.Events_kept_back
+                (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                   ~request:Kept_request.Keeper_journal_read refusal))
             | Ok () -> Masc_tui_http.fetch_keeper_chat_events ~host ~port ~keeper_name
                 ~source ~since_seq ~since_offset
                 ~limit:Masc.Keeper_chat_event_log.page_max_limit)
@@ -11446,13 +11840,14 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   let run () =
     let result =
       try
-        if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-        else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+        if authority <> state.workspace_authority then Error (Request_withdrawn Workspace_authority_withdrawn)
+        else if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
         else Masc_tui_http.post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~host ~port ~keeper_name
           ~request_id
+          |> Result.map_error (fun detail -> Request_failed detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     enqueue_async mailbox (Keeper_msg (Keeper_chat_interrupt_done (request, generation, result)))
   in
@@ -11461,7 +11856,8 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
       fork_workspace_job state ~mailbox ~sw run
   | None ->
       enqueue_async mailbox
-        (Keeper_msg (Keeper_chat_interrupt_done (request, generation, Error "Eio switch is unavailable")))
+        (Keeper_msg (Keeper_chat_interrupt_done (request, generation,
+           Error (Request_failed "Eio switch is unavailable"))))
 
 let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token =
   let enqueue_async = workspace_enqueue state in
@@ -11479,20 +11875,22 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
     let run () =
       let result =
         try
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+          if authority <> state.workspace_authority then Error (Request_withdrawn Workspace_authority_withdrawn)
+          else if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
           else Masc_tui_http.post_keeper_observed_turn_interrupt ~on_control_token ~host:server_peer_host
             ~port:state.port ~keeper_name ~interrupt_token
+            |> Result.map_error (fun detail -> Request_failed detail)
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error (Request_failed (Printexc.to_string exn))
       in
       enqueue_async mailbox (Keeper_msg (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result)))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw -> fork_workspace_job state ~mailbox ~sw run
      | None -> enqueue_async mailbox
-         (Keeper_msg (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, Error "Eio switch is unavailable"))));
+         (Keeper_msg (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation,
+            Error (Request_failed "Eio switch is unavailable")))));
     true
 ;;
 
@@ -11500,7 +11898,7 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
   if explicit then
     state.keeper_observed_interrupts <- List.filter (fun item ->
       item.oi_keeper <> keeper_name || match item.oi_status with
-        | Interrupt_failed _ | Interrupt_declined _ -> false
+        | Interrupt_failed _ | Interrupt_declined _ | Interrupt_kept_back _ -> false
         | Interrupt_sending | Interrupt_signalled -> true) state.keeper_observed_interrupts;
   match working_chat_for_keeper state keeper_name with
   | Some entry ->
@@ -11604,18 +12002,20 @@ let launch_keeper_run_next ?(automatic = false) state ~mailbox request =
     let run () =
       let result =
         try
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-          else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+          if authority <> state.workspace_authority then Error (Request_withdrawn Workspace_authority_withdrawn)
+          else if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
           else Masc_tui_http.post_keeper_run_next ?priority_predecessors ~host:server_peer_host
             ~port:state.port ~keeper_name ~request_id ()
+            |> Result.map_error (fun detail -> Request_failed detail)
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error (Request_failed (Printexc.to_string exn))
       in
       enqueue_async mailbox (Keeper_msg (Keeper_run_next_done (request, result))) in
     match Eio_context.get_switch_opt () with
     | Some sw -> fork_workspace_job state ~mailbox ~sw run
-    | None -> enqueue_async mailbox (Keeper_msg (Keeper_run_next_done (request, Error "Eio switch is unavailable")))
+    | None -> enqueue_async mailbox (Keeper_msg (Keeper_run_next_done (request,
+        Error (Request_failed "Eio switch is unavailable"))))
   end
 ;;
 
@@ -11658,9 +12058,10 @@ let launch_runtime_lane_write ?replacement_selection state ~mailbox ~written wri
   let port = state.port in
   state.runtime_lane_write <- Masc_tui_types.Lane_write_posting;
   state.runtime_lane_replacement_selection <- None;
-  launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+  launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
     ~deliver:(fun result -> Runtime_msg (Runtime_lane_slots_written (written, replacement_selection, result)))
-    (fun () -> write ~host ~port)
+    (fun () -> write ~host ~port |> Result.map_error (fun detail -> Request_failed detail))
 
 ;;
 
@@ -11956,7 +12357,7 @@ let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Kee
   let host = server_peer_host in
   let port = state.port in
   let check_request =
-    workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port
+    workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port
   in
   match state.workspace_identity, state.server_identity with
   | Workspace_identity_match, Some expected_workspace ->
@@ -11994,14 +12395,19 @@ let launch_keeper_request ~(promoted : Chat_queue.item) ?(admission_intent = Kee
     let start_first_post () =
       enqueue_dispatch_start ~enqueue:enqueue_async mailbox request false
     in
+    let follow_kept_back refusal =
+      Keeper_chat.Follow_kept_back
+        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+           ~request:Kept_request.Keeper_reply_follow refusal)
+    in
     let result =
       try
         post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_post
-          ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port
+          ~follow_kept_back ~enqueue:enqueue_async ~control_generation ~admission_intent ~mailbox ~port
           ~log:log.tl_log request
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
+      | exn -> Keeper_chat_answered (Error (Keeper_chat.Transport_error (Printexc.to_string exn)))
     in
     enqueue_dispatch_ack ~enqueue:enqueue_async mailbox (fun acknowledge ->
       Keeper_msg (Keeper_chat_done (request, false, result, acknowledge)))
@@ -12551,25 +12957,38 @@ let launch_task_creation_read state ~mailbox =
         | Original_task_query ticket -> Masc_tui_original_task_read.task_request_id ticket
         | Original_history_query ticket -> Masc_tui_original_task_read.history_request_id ticket
         | Original_evidence_query ticket -> Masc_tui_original_task_read.evidence_request_id ticket) in
+    let kept_back refusal=Masc_tui_original_task_read.Kept_back
+      (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Task_creation_read refusal) in
     launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
       ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
+      ~withdrawn:kept_back
       ~deliver:(fun result -> Task_msg (Task_creation_read_done (request,result))) (fun () ->
         let open Result.Syntax in
-        let workspace_error detail=Masc_tui_original_task_read.Workspace_unconfirmed detail in
+        (* The guard's refusal is the kept-back notice, never a failed read
+           (RFC §2). *)
         let* arguments=Masc_tui_original_task_read.arguments source in
-        let* ()=check_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
-          |> Result.map_error workspace_error in
+        let* ()=admit_workspace_request state ~mailbox ~authority ~identity ~host ~port ()
+          |> Result.map_error kept_back in
         let* session_id=(match session with Some id -> Ok id
           | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Runtime_build_version.current)
           |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail) in
-        let* ()=check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
-          state ~mailbox ~authority ~identity ~host ~port () |> Result.map_error workspace_error in
+        let* ()=admit_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
+          state ~mailbox ~authority ~identity ~host ~port () |> Result.map_error kept_back in
         let* answer=Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id:rpc_id
           ~tool:"masc_tasks" ~arguments
           |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail) in
         Masc_tui_response_decode.run ~name:"tui.task_creation.decode"
           (fun () -> Masc_tui_original_task_read.decode source answer)))
     (begin_task_creation_inspection state)
+
+(* An original inspection read the workspace guard stopped: the reader holds
+   text, so the kept-back notice is worded here, in the screen's language,
+   and drawn alone (RFC §2). *)
+let original_read_kept_back state refusal =
+  Masc_tui_original_task_read.Kept_back
+    (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+       ~request:Kept_request.Original_task_read refusal)
 
 let launch_original_task_read state ~mailbox =
   cancel_task_inspection_read state;
@@ -12582,10 +13001,12 @@ let launch_original_task_read state ~mailbox =
         Masc_tui_http.fetch_original_task_inspection ~host ~port ~task_id) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
+        ~withdrawn:(original_read_kept_back state)
         ~deliver:(fun result -> wrap_original (Original_results.Original_task_read_done (request,result))) (fun () ->
           match read () with
-          | Error detail -> Error (Masc_tui_original_task_read.Read_failed detail)
-          | Ok result -> result)) (begin_original_task_inspection state)
+          | Error refusal -> Error (original_read_kept_back state refusal)
+          | Ok (Error detail) -> Error (Masc_tui_original_task_read.Read_failed detail)
+          | Ok (Ok result) -> result)) (begin_original_task_inspection state)
 
 let launch_original_history_read state ~mailbox ~earlier ~limit =
   cancel_task_inspection_read state;
@@ -12598,14 +13019,21 @@ let launch_original_history_read state ~mailbox ~earlier ~limit =
         Masc_tui_http.fetch_original_task_history ~host ~port ~request:page) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
+        ~withdrawn:(original_read_kept_back state)
         ~deliver:(fun result -> wrap_original (Original_results.Original_task_history_done (request,result))) (fun () ->
-          read () |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail)))
+          match read () with
+          | Error refusal -> Error (original_read_kept_back state refusal)
+          | Ok result -> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail) result))
     (begin_original_history_inspection state ~earlier ~limit)
-let original_evidence_failure = function
+let original_evidence_failure ~ko = function
   | Verification_evidence_read.Transport detail | Http_error detail | Launch_failure detail -> Masc_tui_original_task_read.Read_failed detail
   | Invalid_json detail | Invalid_payload detail -> Masc_tui_original_task_read.Invalid_reply detail
   | Workspace_unconfirmed detail -> Masc_tui_original_task_read.Workspace_unconfirmed detail
   | Interrupted _ -> Masc_tui_original_task_read.Interrupted
+  | Kept_back refusal ->
+      Masc_tui_original_task_read.Kept_back
+        (workspace_refusal_text ~ko ~request:Kept_request.Verification_evidence_read refusal)
+
 let launch_original_evidence_read state ~mailbox ~next =
   cancel_task_inspection_read state;
   Option.iter (fun request -> match request.tcr_query with
@@ -12614,14 +13042,16 @@ let launch_original_evidence_read state ~mailbox ~next =
       let host=server_peer_host and port=state.port in
       let task_id=Masc_tui_original_task_read.evidence_task_id ticket in
       let verification_id=Masc_tui_original_task_read.evidence_verification_id ticket in
-      let read=capture_workspace_json_read state (fun () -> Ok (
+      let read=capture_workspace_json_read state (fun () ->
         Masc_tui_http.fetch_original_verification_evidence ~host ~port ~task_id ~verification_id
-        |> Result.map_error original_evidence_failure |> fun result -> Result.bind result Fun.id)) in
+        |> Result.map_error (original_evidence_failure ~ko:(state.ui_language = Lang_ko))
+        |> fun result -> Result.bind result Fun.id) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
+        ~withdrawn:(original_read_kept_back state)
         ~deliver:(fun result -> wrap_original (Original_results.Original_task_evidence_done (request,result))) (fun () ->
           match read () with
-          | Error detail -> Error (Masc_tui_original_task_read.Workspace_unconfirmed detail)
+          | Error refusal -> Error (original_read_kept_back state refusal)
           | Ok result -> result)) (begin_original_evidence_inspection state ~next)
 
 (* /task in the composer or the chat pane: create the task first, then hand
@@ -12640,28 +13070,38 @@ let launch_task_dispatch state ~mailbox ~keeper_name ~title ~body ~original =
     request_id="tui-task-" ^ Random_id.uuid_v7 ();
     keeper=keeper_name;title;body;original;workspace} in
   let request = begin_task_dispatch state intent in
+  (* The guard's refusal is the kept-back notice, drawn alone when the
+     completion is handled (RFC §2). *)
+  let kept_back refusal =
+    workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Task_creation refusal in
   if not (keeper_available_for_new_message state keeper_name) then
     Masc_tui_task_dispatch.reject request.tdr_dispatch "waiting for the current Keeper roster"
   else match workspace with
-  | None -> Masc_tui_task_dispatch.reject request.tdr_dispatch "workspace identity is not verified"
+  | None -> Masc_tui_task_dispatch.keep_back request.tdr_dispatch (kept_back Workspace_identity_not_confirmed)
   | Some _ ->
     let host = server_peer_host and port = state.port and session = state.mcp_session in
     (* Preparing and sending run on the dispatch's own fiber, each in the
        scope of the workspace captured here. *)
-    let in_scope request =
+    let in_scope ~withdrawn request =
       in_workspace_request_scope ~kind:Masc_tui_workspace_precondition.Operation
-        state ~mailbox ~authority ~identity ~host ~port ~withdrawn:Result.error request in
+        state ~mailbox ~authority ~identity ~host ~port ~withdrawn request in
     Masc_tui_task_dispatch.launch request.tdr_dispatch
-      ~prepare:(fun () -> in_scope @@ fun () ->
+      ~prepare:(fun () ->
+        in_scope ~withdrawn:(fun refusal ->
+          Error (Masc_tui_task_dispatch.Preparation_kept_back (kept_back refusal))) @@ fun () ->
         let open Result.Syntax in
-        let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
+        let admit ?prior_contact () =
+          admit_workspace_request ?prior_contact state ~mailbox ~authority ~identity ~host ~port ()
+          |> Result.map_error (fun refusal -> Masc_tui_task_dispatch.Preparation_kept_back (kept_back refusal)) in
+        let* () = admit () in
         let* session_id = match session with
           | Some session_id -> Ok session_id
-          | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Runtime_build_version.current in
-        let* () = check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
-          state ~mailbox ~authority ~identity ~host ~port () in
+          | None -> Masc_tui_http.open_mcp_session ~host ~port ~client_version:Runtime_build_version.current
+              |> Result.map_error (fun detail -> Masc_tui_task_dispatch.Preparation_failed detail) in
+        let* () = admit ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
         Ok session_id)
-      ~send:(fun ~session_id ~request_id ~arguments -> in_scope @@ fun () ->
+      ~send:(fun ~session_id ~request_id ~arguments ->
+        in_scope ~withdrawn:(fun (_ : workspace_refusal) -> Error workspace_scope_refused_english) @@ fun () ->
         Masc_tui_http.call_mcp_tool ~host ~port ~session_id ~request_id ~tool:"masc_add_task" ~arguments)
 
 (* One reading of what the operator typed, wherever they typed it: the
@@ -12760,7 +13200,9 @@ let refresh_collab state ~mailbox owner =
       launch_preset_call state ~mailbox
         ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
         ~wrap:(fun result -> Play_msg (Play_invites_listed (Play_collab_list read,
-          Result.bind result Tui_decode.decode_play_invites)))
+          Result.bind result (fun json ->
+            Result.map_error (fun detail -> Request_failed detail)
+              (Tui_decode.decode_play_invites json)))))
   | Some _ | None -> ()
 
 let refresh_current_collab state ~mailbox =
@@ -12796,7 +13238,8 @@ let launch_play_issue state ~mailbox ~sink ~name ~hours =
         ~wrap:(fun result -> Play_msg (Play_invite_issued (request, sink,
           match result with
           | Ok outcome -> decode_play_mutation Tui_decode.decode_play_invite_issued outcome
-          | Error detail -> play_request_failure state request detail)));
+          | Error (Request_withdrawn refusal) -> Play_kept_back refusal
+          | Error (Request_failed detail) -> play_request_failure state request detail)));
       true
 
 let launch_play_revoke state ~mailbox ~sink ~name =
@@ -12823,7 +13266,9 @@ let launch_play_revoke state ~mailbox ~sink ~name =
           | Ok (Masc_tui_http.Revoke_release_failed detail) -> Play_revoke_release_failed detail
           | Ok (Masc_tui_http.Revoke_other outcome) ->
               Play_revoke_result (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
-          | Error detail -> Play_revoke_result (play_request_failure state request detail))));
+          | Error (Request_withdrawn refusal) -> Play_revoke_result (Play_kept_back refusal)
+          | Error (Request_failed detail) ->
+              Play_revoke_result (play_request_failure state request detail))));
       true
 
 let settle_retired_queue_inspections state =
@@ -12845,7 +13290,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let panel_notice ~failure text =
     match action with
     | Inbox.Inspect_peers (token, _) ->
-      ignore (stage_keeper_peer_reading state ~keeper_name ~token (Error text))
+      ignore (stage_keeper_peer_reading state ~keeper_name ~token (Error (Request_failed text)))
     | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
     | Cancel_event _ | Prioritize_event _ ->
       (match state.queue_panel with
@@ -13111,14 +13556,19 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
     Ok (receipt, observation) in
+  let failed result = Result.map_error (fun detail -> Request_failed detail) result in
   let read = match action with
-    | Inbox.Inspect_peers _ -> capture_workspace_json_read state perform
+    | Inbox.Inspect_peers _ ->
+      let read = capture_workspace_json_read state perform in
+      (fun () -> match read () with
+        | Error refusal -> Error (Request_withdrawn refusal)
+        | Ok result -> failed result)
     | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-    | Cancel_event _ | Prioritize_event _ -> perform in
+    | Cancel_event _ | Prioritize_event _ -> (fun () -> failed (perform ())) in
   let run () =
     let result = try read () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn) in
+      | exn -> Error (Request_failed (Printexc.to_string exn)) in
     enqueue_async mailbox (Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation, action, result))) in
   (* Said here, past both refusals above. The job can still send none: it
      checks the workspace and the control generation first and reports a
@@ -13141,7 +13591,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
               (String.concat " · " (cancelling @ ["Sending queue change…"]))));
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~mailbox ~sw run
-  | None -> enqueue_async mailbox (Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation, action, Error "Eio switch is unavailable")))
+  | None -> enqueue_async mailbox (Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation, action, Error (Request_failed "Eio switch is unavailable"))))
   end
   end
 ;;
@@ -13472,7 +13922,8 @@ let msx_frame_of_live ~previous_live ~previous_frame
         | Masc_tui_machine_live.Showing old, Some frame
           when String.equal old.mark.incarnation p.mark.incarnation -> frame.msx_meta
         | ( ( Masc_tui_machine_live.Showing _ | Masc_tui_machine_live.Unread
-            | Masc_tui_machine_live.Not_loaded | Masc_tui_machine_live.Failed _ ),
+            | Masc_tui_machine_live.Not_loaded | Masc_tui_machine_live.Failed _
+            | Masc_tui_machine_live.Kept_back _ ),
             _ ) -> None
       in
       (view, Some { Masc_tui_types.msx_number = number; msx_width = p.width;
@@ -13480,24 +13931,38 @@ let msx_frame_of_live ~previous_live ~previous_frame
   | Masc_tui_machine_live.Showing { time = Masc_tui_machine_live.Untimed; _ } ->
       (Masc_tui_machine_live.Failed "an MSX answer carried no frame number", None)
   | Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
-  | Masc_tui_machine_live.Failed _ -> (view, None)
+  | Masc_tui_machine_live.Failed _ | Masc_tui_machine_live.Kept_back _ -> (view, None)
 ;;
+
+(* A live read the workspace guard stopped was never sent, so the screen
+   says it was kept back and not that the machine could not be read (RFC §2). *)
+let advance_machine_live state ~request view = function
+  | Ok answer -> Masc_tui_machine_live.advance view (Ok answer)
+  | Error (Request_failed detail) -> Masc_tui_machine_live.advance view (Error detail)
+  | Error (Request_withdrawn refusal) ->
+      Some (Masc_tui_machine_live.Kept_back
+        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal))
 
 (* A read of the MSX screen through the live route, asked with the counter
    of the picture drawn from the last one. An unchanged answer leaves the
-   frame alone. *)
-let with_msx_observation state ~mailbox read apply =
-  let check = capture_workspace_check state ~mailbox in
+   frame alone. Admission before the read and rejection after its attempt
+   preserve different facts. *)
+let with_msx_observation state ~mailbox ~request read apply =
+  let check = capture_workspace_admission state ~mailbox in
+  let kept_back refusal =
+    state.msx_notice <-
+      Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal) in
   match check () with
-  | Error detail -> state.msx_notice <- Some detail
+  | Error refusal -> kept_back refusal
   | Ok () ->
       let result = read () in
       (match check () with
-       | Error detail -> state.msx_notice <- Some detail
+       | Error refusal ->
+           state.msx_notice <- Some (workspace_response_refusal_text state ~request refusal)
        | Ok () -> apply result)
 
 let observe_msx_carts state ~mailbox =
-  with_msx_observation state ~mailbox
+  with_msx_observation state ~mailbox ~request:Kept_request.Msx_carts_read
     (fun () -> Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port)
     (fun carts -> state.msx_carts <- carts)
 
@@ -13509,7 +13974,7 @@ let observe_msx_frame ?(clear_notice = false) ?expected_workspace
      carries that workspace, and the server that answers it compares it with
      its own. A server swapped in at any point, including A -> B -> A, answers
      409 and its picture never reaches this view. *)
-  with_msx_observation state ~mailbox (fun () ->
+  with_msx_observation state ~mailbox ~request:Kept_request.Msx_screen_read (fun () ->
     (* The decoder has checked that MSX has no activity feed. Only its
        picture answer is needed by the MSX view. *)
     Result.map fst
@@ -14825,7 +15290,14 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
      | Board_image_read (_,_,job), Masc_tui_image_requests.Board_artifact _ ->
          (* The actual binary GET, not a separate health probe, carries the
             captured workspace roots and must return its admission receipt. *)
-         launch_workspace_json_read ~key:job state ~mailbox ~deliver:completion load
+         launch_workspace_json_read ~key:job state ~mailbox
+           ~boundary_error:(fun cause -> Request_failed cause)
+           ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+           ~deliver:(fun result -> Sent_image_ready { request; result = match result with
+             | Ok prepared -> Image_prepared (Ok prepared)
+             | Error (Request_failed cause) -> Image_prepared (Error cause)
+             | Error (Request_withdrawn refusal) -> Image_kept_back refusal })
+           (fun () -> Result.map_error (fun cause -> Request_failed cause) (load ()))
      | Board_image_read (_,_,job), Generated _ ->
          launch_workspace_result ~key:job ~observation:true state ~mailbox
            ~boundary_error:Fun.id ~deliver:completion load
@@ -15248,8 +15720,11 @@ let listen_newest_media ?(destination=Listen_player) state ~mailbox =
         let host = server_peer_host and port = state.port in
         notice ~kind:Notice_reply (command ^ ": preparing " ^ media.name);
         launch_workspace_json_read state ~mailbox
+          ~boundary_error:(fun cause -> Request_failed cause)
+          ~withdrawn:(fun refusal -> Request_withdrawn refusal)
           ~deliver:(fun result -> Listen_prepared (request, result))
-          (fun () -> prepare_listen_media ~host ~port request.lr_media)
+          (fun () -> Result.map_error (fun cause -> Request_failed cause)
+            (prepare_listen_media ~host ~port request.lr_media))
       end
 
 let withdraw_pending_music_editor state =
@@ -15790,10 +16265,16 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         notice ~kind:Notice_failure "Open a Keeper chat to inspect its loading errors"
       else begin
         let errors =
-          [ Option.map (fun detail -> "Saved history\n" ^ detail)
+          let ko = state.ui_language = Lang_ko in
+          [ Option.map (fun failure -> "Saved history\n"
+                ^ request_failure_text ~ko ~request:Kept_request.Keeper_history_read failure)
               state.msg_loaded_error
-          ; Option.map (fun detail -> "Older messages\n" ^ detail) state.msg_older_error
-          ; Option.map (fun detail -> "Memory journal\n" ^ detail) state.msg_memory_error
+          ; Option.map (fun failure -> "Older messages\n"
+                ^ request_failure_text ~ko ~request:Kept_request.Keeper_older_read failure)
+              state.msg_older_error
+          ; Option.map (fun failure -> "Memory journal\n"
+                ^ request_failure_text ~ko ~request:Kept_request.Keeper_memory_read failure)
+              state.msg_memory_error
           ] |> List.filter_map Fun.id
         in
         set_msg_scroll state 0;
@@ -15996,7 +16477,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       (match restored, view.phase with
        | Some _, (Login.Saving | Login.Failed) -> ()
        | Some _, Login.Finished {activation = Login.Activating; _} -> ()
-       | Some _, Login.Finished {saved; activation = (Login.Activation_failed _ | Login.Active _); _} ->
+       | Some _, Login.Finished {saved; activation = (Login.Activation_failed _ | Login.Activation_kept_back _ | Login.Active _); _} ->
          launch_account_login_action state ~mailbox view (Login.Refresh_saved saved)
        | Some _, (Login.Loading | Login.Logging | Login.Models | Login.Refreshing_models | Login.Preparing_context _
            | Login.Removing | Login.Providers _ | Login.Documented_context _ | Login.Removal _)
@@ -16348,14 +16829,17 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            (ticket, state.workspace_read_authority, "/memory status") :: state.chat_command_reads;
          let host = server_peer_host and port = state.port in
          launch_workspace_json_read state ~mailbox
+           ~boundary_error:(fun detail -> Request_failed detail)
+           ~withdrawn:(fun refusal -> Request_withdrawn refusal)
            ~deliver:(fun result -> Chat_command_read_completed
              (ticket, Memory_msg (Memory_loaded (Command_health_read {keeper; result}))))
-           (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper))
+           (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper
+             |> Result.map_error (fun detail -> Request_failed detail)))
   | Masc_tui_command.Memory_sync ->
       (match target, state.server_identity with
        | Some keeper, Some workspace
          when server_authority_ready state ->
-           let check = capture_workspace_check state ~mailbox in
+           let check = capture_workspace_admission state ~mailbox in
            let authority = state.workspace_authority in
            let host = server_peer_host and port = state.port in
            let posting = Atomic.make false in
@@ -16378,7 +16862,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
              ~deliver:(fun result -> message (match result with Ok outcome | Error outcome -> outcome))
              (fun () ->
                match check () with
-               | Error detail -> Ok (Masc_tui_http.Catch_up_not_sent detail)
+               | Error refusal ->
+                 (* Not sent: the kept-back notice, never a POST that went
+                    unsent for a reason of its own (RFC §2). *)
+                 Ok (Masc_tui_http.Catch_up_kept_back
+                   (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                      ~request:(Kept_request.Command "/memory sync") refusal))
                | Ok () ->
                  Atomic.set posting true;
                  Ok (Masc_tui_http.post_keeper_memory_catch_up ~expected_workspace:workspace
@@ -16512,7 +17001,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       launch_chat_command_read state ~mailbox ~label:"/play invites"
         ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
         ~wrap:(fun result ->
-          Play_msg (Play_invites_listed (Play_chat_list target, Result.bind result Tui_decode.decode_play_invites)))
+          Play_msg (Play_invites_listed (Play_chat_list target,
+            Result.bind result (fun json ->
+              Result.map_error (fun detail -> Request_failed detail)
+                (Tui_decode.decode_play_invites json)))))
   | Masc_tui_command.Play_link requested_name ->
       Masc_tui_message_input.clear state.msg_input;
       (* The cards carry names made safe to draw, so the name typed is
@@ -16563,7 +17055,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          | None -> report_action state "error" "No retained Task command for this Keeper/workspace"
          | Some request ->
            let detail = match Masc_tui_task_dispatch.progress request.tdr_dispatch with
-             | Completed {outcome=Not_sent _;_} -> "Original command restored; it has not been sent"
+             | Completed {outcome=(Not_sent _ | Kept_back _);_} -> "Original command restored; it has not been sent"
              | Completed {outcome=(Server_error _ | Unconfirmed _);_} ->
                  "Original command restored; inspect Tasks before repeating an unconfirmed creation"
              | Not_started | Reserved | Preparing | Sending | Completed {outcome=Created _;_} ->
@@ -16757,14 +17249,23 @@ let apply_approvals_load state result =
                    snapshot.aps_items) ->
            state.pending_approval_action <- None
        | Some _ | None -> ())
-  | Error err ->
+  | Error failure ->
       state.approval_snapshot <- None;
       state.approval_cursor <- 0;
       state.pending_approval_action <- None;
-      remember_surface_error state ~surface:"approvals"
-        ~current_error:state.approvals_error
-        ~set_error:(fun value -> state.approvals_error <- value)
-        err
+      (* A read the workspace guard kept back settles as a failed read, and
+         its event is the kept-back notice alone, not unreliable data
+         (RFC §2). The event is added once per changed error, as
+         [remember_surface_error] does. *)
+      let changed = not (Option.equal ( = ) state.approvals_error (Some failure)) in
+      state.approvals_error <- Some failure;
+      if changed then
+        add_event state "error"
+          (match failure with
+           | Request_failed err -> Printf.sprintf "approvals data unreliable: %s" err
+           | Request_withdrawn refusal ->
+               workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:Kept_request.Confirmations_read refusal)
 
 (* A read that fails leaves the last snapshot in place rather than blanking
    the pane: an operator mid-decision should not lose the question they were
@@ -16848,13 +17349,16 @@ let apply_asks_observation state observation =
   Option.iter (apply_asks_read state)
     (Masc_tui_types.take_asks_observation state observation)
 
-let take_approval_observation state observation =
+(* Whether the listing ticket still owns the confirmations it read. *)
+let admit_approval_listing state ticket =
   let order, admitted =
-    Approval.Listing_order.admit state.approvals_order state.approval_flow
-      observation.ao_ticket
+    Approval.Listing_order.admit state.approvals_order state.approval_flow ticket
   in
   state.approvals_order <- order;
-  if admitted then Some observation.ao_result else None
+  admitted
+
+let take_approval_observation state observation =
+  if admit_approval_listing state observation.ao_ticket then Some observation.ao_result else None
 
 (* A read of the confirmations: what it found, and whether the owed read is
    settled or waits to retry. *)
@@ -16863,7 +17367,8 @@ let apply_approvals_read state result =
   apply_approvals_load state result
 
 let apply_approval_observation state observation =
-  Option.iter (apply_approvals_read state)
+  Option.iter (fun result ->
+    apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result))
     (take_approval_observation state observation)
 
 (* The held-call listing goes out from both the full and the scoped refresh,
@@ -16892,7 +17397,10 @@ let apply_approvals_summary_load state ~listing_ticket ~expected_workspace reque
     state.approvals_summary_read <- read;
     if state.workspace_identity = Workspace_identity_match
        && Option.exists (same_server_workspace expected_workspace) state.server_identity
-    then apply_approval_observation state { ao_ticket = listing_ticket; ao_result = result }
+    then
+      (* Carried as [request_failure], so a read the guard kept back is drawn
+         as kept back and not as a failed read (RFC §2). *)
+      if admit_approval_listing state listing_ticket then apply_approvals_read state result
 
 (* One request per refresh returns this many lines. The server caps the
    parameter at 3000; a screenful of scrollback is what the surface can show
@@ -17382,7 +17890,9 @@ let launch_approvals_summary_load state ~mailbox =
             | Some request ->
                 let host = server_peer_host in
                 let port = state.port in
-                launch_workspace_async_read state ~mailbox
+                launch_workspace_async_read_with state ~mailbox
+                  ~boundary_error:(fun detail -> Request_failed detail)
+                  ~withdrawn:(fun refusal -> Request_withdrawn refusal)
                   ~deliver:(fun result ->
                     enqueue_async mailbox
                       (Approvals_msg (Approvals_summary_loaded
@@ -17390,16 +17900,18 @@ let launch_approvals_summary_load state ~mailbox =
                   (fun () ->
                     let open Result.Syntax in
                     let check_identity ?prior_contact () =
-                      check_workspace_request ?prior_contact ~refresh_ticket state ~mailbox ~authority
+                      admit_workspace_request ?prior_contact ~refresh_ticket state ~mailbox ~authority
                         ~identity:(Some expected_workspace) ~host ~port ()
+                      |> Result.map_error (fun refusal -> Request_withdrawn refusal)
                     in
                     let* () = check_identity () in
                     let snapshot = Masc_tui_loader.load_approvals ~host ~port in
                     (* The first successful identity check already reached the
                        server. A failed GET still needs the trailing check. *)
                     let* () = check_identity
-                      ~prior_contact:Masc_tui_server_lifecycle.Server_reached () in
-                    snapshot)
+                      ~prior_contact:Masc_tui_server_lifecycle.Server_reached ()
+                      |> Result.map_error (request_failure_after_read state ~request:Kept_request.Confirmations_read) in
+                    Result.map_error (fun detail -> Request_failed detail) snapshot)
 
 (* The owed read of the confirmations, also when their count is drawn: that
    count is what changed. Its answer names the workspace it was read from, so
@@ -17425,11 +17937,14 @@ let launch_pending_confirms_read state ~mailbox =
         | Some request ->
           let enqueue_async = workspace_enqueue state in
           let host = server_peer_host and port = state.port in
-          launch_workspace_async_read state ~mailbox
+          launch_workspace_async_read_with state ~mailbox
+            ~boundary_error:(fun detail -> Request_failed detail)
+            ~withdrawn:(fun refusal -> Request_withdrawn refusal)
             ~deliver:(fun result ->
               enqueue_async mailbox
                 (Approvals_msg (Approvals_summary_loaded (request, listing_ticket, expected_workspace, result))))
-            (fun () -> Masc_tui_loader.load_workspace_approvals ~expected_workspace ~host ~port);
+            (fun () -> Masc_tui_loader.load_workspace_approvals ~expected_workspace ~host ~port
+              |> Result.map_error (fun detail -> Request_failed detail));
           true
 
 (* Runs on every loop iteration. A read already on the wire is let finish
@@ -18690,7 +19205,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     (* Withdraw decision authority even when this refresh did not ask for
        Home. A later matching Metrics read cannot revive foreign/stale tokens. *)
     let reason = "workspace identity is unverified; decisions require a fresh matching read" in
-    apply_approvals_load state (Error reason);
+    apply_approvals_load state (Error (Request_failed reason));
     state.board_listing <- Masc_tui_fetched.Failed reason;
     state.board_list_reported_error <- None;
     state.board_census <- Masc_tui_fetched.Absent;
@@ -19024,12 +19539,18 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
     drain_queued_message state ~base_path ~mailbox
   end
 
-let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_ticket ~latest err =
+(* A scoped refresh the guard stopped settles as a failed one does; only its
+   words differ: the kept-back notice alone, never the read's failure
+   (RFC §2). *)
+let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_ticket ~latest failure =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+    let err = request_failure_text ~ko:(state.ui_language = Lang_ko)
+        ~request:Kept_request.Surface_read failure in
     apply_refused_workspace_identity state ~mailbox ~detail:err latest;
     Option.iter
       (fun ao_ticket ->
-         apply_approval_observation state { ao_ticket; ao_result = Error err })
+         if admit_approval_listing state ao_ticket then
+           apply_approvals_read state (Error failure))
       approval_ticket;
     add_event state "error" err
   end
@@ -20759,7 +21280,10 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
              state.goal_confirmation_presented <- None;
              let host = server_peer_host and port = state.port in
              let workspace = Goal_confirmation.confirmation_workspace_of_identity expected_workspace in
-             launch_workspace_request state ~mailbox ~boundary_error:(fun detail -> Goal_confirmation.Read_failed (None, detail))
+             let ko = state.ui_language = Lang_ko in
+             launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Goal_confirmation.Read_failed (None, detail))
+               ~withdrawn:(fun refusal -> Goal_confirmation.Read_kept_back
+                 (workspace_refusal_text ~ko ~request:Kept_request.Goal_confirmation_read refusal))
                ~deliver:(fun result -> Goal_msg (Goal_confirmation_loaded (request, result)))
                (fun () ->
                  let open Result.Syntax in
@@ -20802,15 +21326,19 @@ let launch_skill_evidence_read ?composition_run_id state ~mailbox reference =
     state.tools_evidence_request <- Some request;
     state.tools_evidence_reference <- Some reference;
     state.tools_evidence_run_id <- composition_run_id;
-    let check = capture_workspace_check state ~mailbox in
+    let admit = capture_workspace_admission state ~mailbox in
+    let check () = admit () |> Result.map_error (fun refusal -> Request_withdrawn refusal) in
     let host = server_peer_host and port = state.port in
-    launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+    launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
       ~deliver:(fun result -> Skill_evidence_loaded (request, key, result))
       (fun () ->
         let open Result.Syntax in
         let* () = check () in
-        let* json = Masc_tui_http.post_skill_evidence ?composition_run_id ~host ~port reference in
-        let* () = check () in
+        let* json = Masc_tui_http.post_skill_evidence ?composition_run_id ~host ~port reference
+          |> Result.map_error (fun detail -> Request_failed detail) in
+        let* () = check ()
+          |> Result.map_error (request_failure_after_read state ~request:Kept_request.Skill_evidence) in
         Ok json)
   end
 
@@ -21170,16 +21698,20 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
         let open Result.Syntax in
         let identity = currency_authority.car_identity in
         (* A superseded scoped probe must not enqueue an unticketed identity
-           withdrawal. Only its ticketed completion may change authority. *)
+           withdrawal. Only its ticketed completion may change authority. The
+           guard's stop travels as [Request_withdrawn]; an identity read that
+           failed stays that read's own failure (RFC §2). *)
         let probe () =
-          if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+          if authority <> state.workspace_authority then Error (Request_withdrawn Workspace_authority_withdrawn)
           else
             let reading = load_server_identity ~host ~port in
             latest_identity := Some reading;
-            if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-            else if Masc_tui_types.server_workspace_matches ~expected:identity reading
-            then reading
-            else Error "Workspace identity changed or is unavailable; scoped refresh withdrawn"
+            if authority <> state.workspace_authority then Error (Request_withdrawn Workspace_authority_withdrawn)
+            else match reading with
+              | Error detail -> Error (Request_failed detail)
+              | Ok identified when Masc_tui_types.server_workspace_matches ~expected:identity reading ->
+                  Ok identified
+              | Ok _ -> Error (Request_withdrawn Workspace_identity_changed)
         in
         let* server_identity = probe () in
         let on_dataset ed_identity ed_dataset =
@@ -21195,8 +21727,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
         Ok { readings with http_scoped_server_identity = Ok confirmed_identity }
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printf.sprintf "HTTP surface refresh failed: %s"
-                       (Printexc.to_string exn))
+      | exn -> Error (Request_failed (Printf.sprintf "HTTP surface refresh failed: %s"
+                       (Printexc.to_string exn)))
     in
     let run_refresh () =
       let completed = match read_refresh () with
@@ -21551,7 +22083,11 @@ let apply_approval_decision_result state approval decision approvals result =
          | Ok (Approval.Completed _) -> approval_decision_done decision ^ ": " ^ approval.ap_summary
          | Ok (Approval.Deferred _) -> "Confirmation accepted; action deferred: " ^ approval.ap_summary
          | Ok (Approval.Execution_failed (_, detail)) -> "Confirmation accepted; action failed: " ^ approval.ap_summary ^ " · " ^ detail
-         | Error error -> approval_decision_unverified decision ^ ": " ^ approval.ap_summary ^ " · " ^ error
+         | Error (Request_failed error) -> approval_decision_unverified decision ^ ": " ^ approval.ap_summary ^ " · " ^ error
+         | Error (Request_withdrawn refusal) ->
+             workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Approval_decision refusal
+             ^ " · " ^ approval.ap_summary
        in
        state.home_decision_receipt <- Some (request, receipt)
    | Some (Home_held_call _ | Home_gate_request _ | Home_operator_request _
@@ -21570,10 +22106,12 @@ let apply_approval_decision_result state approval decision approvals result =
    | Ok (Approval.Execution_failed (_, detail)) ->
        report_action state "error"
          (Printf.sprintf "Confirmation accepted; action failed: %s" detail)
-   | Error err ->
+   | Error (Request_failed err) ->
        report_action state "error"
-         (Printf.sprintf "%s: %s" (approval_decision_unverified decision) err));
-  apply_approvals_load state approvals
+         (Printf.sprintf "%s: %s" (approval_decision_unverified decision) err)
+   | Error (Request_withdrawn refusal) ->
+       report_withdrawn state ~request:Kept_request.Approval_decision refusal);
+  apply_approvals_load state (Result.map_error (fun detail -> Request_failed detail) approvals)
 
 let apply_approval_decision_completion state generation approval decision result
     approvals =
@@ -21605,9 +22143,12 @@ let start_approval_decision state approval decision ~mailbox =
     let host = server_peer_host in
     let port = state.port in
     let confirm () =
-      Result.bind (check_workspace_request state ~mailbox ~authority ~identity ~host ~port ())
-        (fun () -> Masc_tui_http.post_operator_confirm ~host ~port
-          ~token:approval.ap_token ~decision)
+      match admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+      | Error refusal -> Error (Request_withdrawn refusal)
+      | Ok () ->
+        Result.map_error (fun detail -> Request_failed detail)
+          (Masc_tui_http.post_operator_confirm ~host ~port
+             ~token:approval.ap_token ~decision)
     in
     let reload () =
       if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
@@ -21620,7 +22161,7 @@ let start_approval_decision state approval decision ~mailbox =
           confirm ()
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error (Request_failed (Printexc.to_string exn))
       in
       let approvals =
         try
@@ -21637,7 +22178,7 @@ let start_approval_decision state approval decision ~mailbox =
         let result =
           try
             confirm ()
-          with exn -> Error (Printexc.to_string exn)
+          with exn -> Error (Request_failed (Printexc.to_string exn))
         in
         let approvals =
           try
@@ -21943,10 +22484,15 @@ let apply_ask_answer_completion state submission result asks =
    | Ok (Masc.Tui_decode_asks.Installation_answer_receipt (Installation_answer_withdrawn _)) ->
        close_draft ();
        report_action state "system" "The installation withdrew this question"
-   | Error err ->
+   | Error (Request_failed err) ->
        (* A lost or invalid response cannot establish that the write did not
           land. Keep the draft and read the canonical questions again. *)
-       report_action state "error" (Printf.sprintf "Answer recording unconfirmed: %s" err));
+       report_action state "error" (Printf.sprintf "Answer recording unconfirmed: %s" err)
+   | Error (Request_withdrawn refusal) ->
+       (* The guard stopped the answer before it left: kept back, with the
+          draft it kept, never an unconfirmed recording (RFC §2). *)
+       report_kept_back state ~request:Kept_request.Ask_answer
+         (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept);
   apply_asks_read state asks
 
 (* TEL-OK: the TUI-local submit gate emits user-visible events here; the
@@ -21972,13 +22518,16 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
   log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:submission.as_started_ns Ask_answer_observation.Submitted);
   let host = server_peer_host in
   let port = state.port in
-  let check = workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port in
+  let check = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
   let run_action () =
     Fun.protect ~finally:(fun () -> close_ask_submission submission) (fun () ->
     let result =
       try
         let open Result.Syntax in
-        let* () = observe_ask_answer_call submission Ask_answer_observation.Workspace_check check in
+        (* A refusal of the workspace guard stays typed: the answer was not
+           sent (RFC §2). *)
+        let* () = observe_ask_answer_call submission Ask_answer_observation.Workspace_check (fun () ->
+          check () |> Result.map_error (fun refusal -> Request_withdrawn refusal)) in
         observe_ask_answer_call submission Ask_answer_observation.Answer_post (fun () ->
           (* The asker decides the route; each route's receipt keeps its kind. *)
           let result = match asker with
@@ -21989,6 +22538,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
                 Masc_tui_http.post_installation_ask_answer ~host ~port ~declaration_id:ai_declaration_id
                   ~ask_id ~answers ~session_id:None
                 |> Result.map (fun receipt -> Masc.Tui_decode_asks.Installation_answer_receipt receipt) in
+          let result = Result.map_error (fun detail -> Request_failed detail) result in
           (* Keep the actual POST result before even the observation logger can
              yield. The outer publication also covers pre-POST failures. *)
           ignore (Ask_answer_receipt.publish submission.as_receipt
@@ -21996,7 +22546,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
           result)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Request_failed (Printexc.to_string exn))
     in
     (* Publish before any queue wait. UI drain owns admission; the original
        operation proceeds straight to canonical reread, even with a full mailbox. *)
@@ -22087,11 +22637,22 @@ let handle_ask_submit state ~mailbox =
    conflict on an action that names a recovery continues into it instead of
    surfacing as a failure. Recovery runs once — a conflict raised by the
    recovery itself is the operator's to read. *)
-let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_operation_id
-    ~expected_workspace action =
-  (* The workspace check and the transport answer in text, not HTTP; what
-     they say is carried as it came. *)
+let run_keeper_action_steps ~check_request ~kept_back ~later_step_kept_back ~host ~port ~keeper_name
+    ~operator_operation_id ~expected_workspace action =
+  (* The transport answers in text, not HTTP; what it says is carried as it
+     came. *)
   let unanswered result = Result.map_error (fun text -> Keeper_control.No_answer text) result in
+  (* Before the first step leaves, a guard refusal is kept back: nothing was
+     sent. A refusal of a later step stops an action whose earlier step did
+     leave, so it is kept back as that later step, never as a step with no
+     answer. *)
+  let sent = ref false in
+  let admit () =
+    match check_request () with
+    | Ok () -> Ok ()
+    | Error refusal when not !sent -> Error (kept_back refusal)
+    | Error refusal -> Error (later_step_kept_back refusal)
+  in
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
         unanswered
@@ -22115,7 +22676,7 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
                empty walk must not read as success. *)
             Error Keeper_control.Empty_plan)
     | step :: rest -> (
-        match Result.bind (unanswered (check_request ())) (fun () -> perform step) with
+        match Result.bind (admit ()) (fun () -> sent := true; perform step) with
         | Error failure -> Error failure
         | Ok (status, body) -> (
             let outcome = match step with
@@ -22178,7 +22739,19 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
          (Printf.sprintf (if ko then "%s %s 거절: %s" else "%s %s refused: %s")
             keeper_name label
             (Keeper_control.failure_text ~ko (Keeper_control.Unbound_receipt status)))
-   | Error failure ->
+   | Error (Keeper_control.Kept_back notice) ->
+       (* Not sent: the kept-back notice alone, with the Keeper after it
+          (RFC §2). *)
+       report_action state "error" (notice ^ " · " ^ keeper_name)
+   | Error (Keeper_control.Later_step_kept_back notice) ->
+       (* The later step's kept-back notice, the Keeper, and that an earlier
+          step was sent (RFC §2). *)
+       report_action state "error"
+         (notice ^ " · " ^ keeper_name ^ " · " ^ Keeper_control.earlier_step_sent ~ko)
+   | Error
+       (( Keeper_control.Empty_plan | Keeper_control.Followup_failed _
+        | Keeper_control.Refused _ | Keeper_control.Unbound_receipt _
+        | Keeper_control.No_answer _ ) as failure) ->
        report_action state "error"
          (Printf.sprintf (if ko then "%s %s 실패: %s" else "%s %s failed: %s")
             keeper_name label (Keeper_control.failure_text ~ko failure)));
@@ -22213,12 +22786,22 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
     Keeper_control.mint_operation_id ()
   in
   let check_request =
-    workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port
+    workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port
+  in
+  let kept_back refusal =
+    Keeper_control.Kept_back
+      (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Keeper_action refusal)
+  in
+  let later_step_kept_back refusal =
+    Keeper_control.Later_step_kept_back
+      (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+         ~request:Kept_request.Keeper_action_step refusal)
   in
   let run_action () =
     let result =
       try
-        run_keeper_action_steps ~check_request ~host ~port ~keeper_name
+        run_keeper_action_steps ~check_request ~kept_back ~later_step_kept_back ~host ~port ~keeper_name
           ~operator_operation_id ~expected_workspace action
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -22231,7 +22814,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   | None ->
       let result =
         try
-          run_keeper_action_steps ~check_request ~host ~port ~keeper_name
+          run_keeper_action_steps ~check_request ~kept_back ~later_step_kept_back ~host ~port ~keeper_name
             ~operator_operation_id ~expected_workspace action
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -22245,6 +22828,13 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
 let split_board_draft (text : string) : string * string =
   Board_composer.split_draft text
 
+
+(* A Goal request the workspace guard kept back, with the Goal it was for
+   after the notice. *)
+let goal_kept_back_notice state ~goal_id ~current refusal =
+  workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+    ~request:Kept_request.Goal_transition refusal
+  ^ " · Goal " ^ goal_id ^ (if current then "" else " (earlier request)")
 
 (* Request a goal lifecycle change through the tools route. Runs in a fiber
    like the other writes; the outcome lands in the shared mailbox and the
@@ -22276,16 +22866,19 @@ let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string
            (Goal_phase.Public_action.to_string action));
       let host = server_peer_host in
       let port = state.port in
-      launch_workspace_request ~operation:true state ~mailbox ~boundary_error:annotate_error
-        ~cancelled:(Goal_msg (Goal_transition_done (goal_id, ticket, origin, Error (annotate_error "Request interrupted; its outcome is unknown. Inspect the Goal before retrying."))))
+      launch_guarded_request ~operation:true state ~mailbox
+        ~boundary_error:(fun detail -> Request_failed (annotate_error detail))
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+        ~cancelled:(Goal_msg (Goal_transition_done (goal_id, ticket, origin, Error (Request_failed (annotate_error "Request interrupted; its outcome is unknown. Inspect the Goal before retrying.")))))
         ~deliver:(fun result -> Goal_msg (Goal_transition_done (goal_id, ticket, origin, Result.map (fun message -> message ^ proof_context) result)))
         (fun () ->
-          match
+          (match
             Masc_tui_http.post_goal_transition ~expected_workspace
               ~host ~port ~goal_id ~action ~note ~retry_binding
           with
           | Error err -> Error (annotate_error err)
           | Ok json -> Masc.Tui_decode.tool_envelope_outcome json |> Result.map_error annotate_error)
+          |> Result.map_error (fun detail -> Request_failed detail))
       end
   | ( Workspace_identity_match | Workspace_identity_mismatch _
     | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ ), _ ->
@@ -22355,11 +22948,17 @@ let handle_goal_confirmation_key state ~mailbox =
            let workspace_authority = state.workspace_authority in
            let workspace_read_authority = state.workspace_read_authority in
            let expected_workspace = state.server_identity in
-           launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-             ~cancelled:(Goal_msg (Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority, Error (annotate_error "request interrupted"))))
+           launch_guarded_request ~operation:true state ~mailbox
+             ~boundary_error:(fun detail -> Request_failed detail)
+             ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+             ~cancelled:(Goal_msg (Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority, Error (Request_failed (annotate_error "request interrupted")))))
              ~deliver:(fun result -> Goal_msg (Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority,
-               result |> Result.map (fun message -> message ^ proof_context) |> Result.map_error annotate_error)))
+               result |> Result.map (fun message -> message ^ proof_context)
+               |> Result.map_error (function
+                 | Request_failed detail -> Request_failed (annotate_error detail)
+                 | Request_withdrawn refusal -> Request_withdrawn refusal))))
              (fun () ->
+               Result.map_error (fun detail -> Request_failed detail) @@
                let open Result.Syntax in
                let credential = Masc_tui_http.bind_credential () in
                let* () = if credential.bound_owner == confirmation.credential_owner then Ok ()
@@ -22388,7 +22987,8 @@ let handle_goal_confirmation_key state ~mailbox =
                  |> Result.map_error (function
                    | Goal_confirmation.Read_failed _ -> "Goal confirmation readback failed; inspect the current proof"
                    | Goal_confirmation.Read_http_error (_, status) -> Printf.sprintf "Goal confirmation readback failed (HTTP %d)" status
-                   | Goal_confirmation.Server_changed _ -> "Goal confirmation server changed before readback") in
+                   | Goal_confirmation.Server_changed _ -> "Goal confirmation server changed before readback"
+                   | Goal_confirmation.Read_kept_back notice -> notice) in
                let* readback = Goal_confirmation.decode_confirmation ~goal_id ~workspace:confirmation.workspace
                  ~runtime_instance_id:confirmation.runtime_instance_id ~credential_headers:confirmation.credential_headers ~credential_owner:confirmation.credential_owner readback_json in
                if authority_current () && readback.phase = Goal_phase.Completed
@@ -22451,7 +23051,10 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
 (* The kind decides the route: a post vote and a comment vote are two
    requests, and nothing here can send one as the other. *)
 let send_board_vote state ~mailbox ~(up : bool) target =
-  let launch = launch_workspace_request state ~mailbox ~boundary_error:Fun.id in
+  let launch ~deliver read =
+    launch_guarded_request state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal) ~deliver read in
   let report = report_action state in
   match target with
   | Vote_post post_id ->
@@ -22578,20 +23181,22 @@ let start_verification_verdict state ~mailbox ~(task_id : string)
   let port = state.port in
   let run_verdict () =
     let result =
-      let open Result.Syntax in
-      let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
-      match
-        Masc_tui_http.post_verification_verdict ~host ~port ~task_id
-          ~verification_id ~verdict
-      with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.verification_verdict_outcome json
+      match admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+      | Error refusal -> Error (Request_withdrawn refusal)
+      | Ok () ->
+        (match
+           Masc_tui_http.post_verification_verdict ~host ~port ~task_id
+             ~verification_id ~verdict
+         with
+         | Error err -> Error err
+         | Ok json -> Masc.Tui_decode.verification_verdict_outcome json)
+        |> Result.map_error (fun detail -> Request_failed detail)
     in
     enqueue_async mailbox (Verification_msg (Verification_verdict_done result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~mailbox ~sw run_verdict
-  | None -> enqueue_async mailbox (Verification_msg (Verification_verdict_done (Error "Eio switch is unavailable")))
+  | None -> enqueue_async mailbox (Verification_msg (Verification_verdict_done (Error (Request_failed "Eio switch is unavailable"))))
 
 (* The row under the Verification cursor, if the list has one. *)
 let verification_cursor_row state =
@@ -22714,12 +23319,18 @@ let export_verification_evidence state ~mailbox ~open_file =
          && request.vex_reading == state.workspace_read_authority
       then Ok () else Error "Workspace changed before the evidence file operation" in
     report_action state "system" "선택한 증거 사본을 내려받는 중…";
-    launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-      ~cancelled:(Verification_msg (Verification_evidence_exported (request, Error "File operation interrupted; a local copy or opened viewer may exist. Inspect before retrying.")))
+    launch_guarded_request ~operation:true state ~mailbox
+      ~boundary_error:(fun detail -> Request_failed detail)
+      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+      ~cancelled:(Verification_msg (Verification_evidence_exported (request, Error (Request_failed "File operation interrupted; a local copy or opened viewer may exist. Inspect before retrying."))))
       ~deliver:(fun result -> Verification_msg (Verification_evidence_exported (request,result)))
       (fun () ->
+        match read () with
+        | Error refusal -> Error (Request_withdrawn refusal)
+        | Ok file ->
+        Result.map_error (fun detail -> Request_failed detail) @@
         let open Result.Syntax in
-        let* file = read () in
+        let* file = file in
         let open_file = if not open_file then None else Some (fun path ->
           Eio_guard.run_in_systhread ~label:"tui-evidence-open" (fun () ->
             Masc_tui_browser.open_url (Uri.to_string (Uri.make ~scheme:"file" ~path ())))
@@ -23029,8 +23640,9 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
                 ; sent_draft
                 ; result =
                     Error
-                      (Masc_tui_board_updates.comment_outcome_unknown
-                         ~ko:(state.ui_language = Lang_ko))
+                      (Request_failed
+                         (Masc_tui_board_updates.comment_outcome_unknown
+                            ~ko:(state.ui_language = Lang_ko)))
                 })
             in
             let on_not_run () =
@@ -23043,10 +23655,11 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
                 let authority = state.workspace_authority in
                 let identity = state.server_identity in
                 let host = server_peer_host and port = state.port in
-                launch_workspace_result ~cancelled ~on_not_run state ~mailbox
-                  ~boundary_error:Fun.id ~deliver (fun () ->
-                    match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-                    | Error detail -> Error detail
+                launch_workspace_result ~operation:true ~cancelled ~on_not_run state ~mailbox
+                  ~boundary_error:(fun detail -> Request_failed detail)
+                  ~withdrawn:(fun refusal -> Request_withdrawn refusal) ~deliver (fun () ->
+                    match admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+                    | Error refusal -> Error (Request_withdrawn refusal)
                     | Ok () -> read ()))
               ~post_id ~content;
             true
@@ -23072,7 +23685,7 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
               Masc_tui_board_requests.start_board_post state ~host:server_peer_host
                 ~results:mailbox.workspace_results
                 ~admit:(fun request ->
-                  check_workspace_request state ~mailbox
+                  admit_workspace_request state ~mailbox
                     ~authority:request.Masc_tui_board_publication.authority
                     ~identity:request.expected_workspace
                     ~host:request.host ~port:request.port ())
@@ -23857,6 +24470,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Ok (Resource_share_not_sent detail) -> report_action state "system"
                  ("The share request for " ^ request.share_report.id ^ " did not send. The recorded operation may still apply; use U to reconcile: " ^ detail);
                  Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             | Ok (Resource_share_kept_back refusal) ->
+                 report_resource_share_kept_back state request refusal;
+                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
              | Error (Resource_share_unknown detail) -> report_action state "error"
                  ("Previous workspace external sharing result unconfirmed for " ^ request.share_report.id
                   ^ "; use U to reconcile the recorded operation: " ^ detail)
@@ -23888,7 +24504,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (match Original_results.answer_kind answer with
            | Original_results.Read -> ())
         | Play_msg (Play_invite_issued (_, _, Play_answered (Error _))
-        | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _)))
+        | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _
+                                     | Play_kept_back _)))
         | (Approvals_msg Approvals_listing_superseded) | (Keeper_msg Keeper_composer_released)
         | Chat_msg (Chat_search_finished (_, _, _, _)) | Workspace_scoped (_, _, _) | Workspace_operation _
         | Chat_command_read_completed (_, _) | Workspace_msg (Workspace_identity_unconfirmed _)
@@ -23954,7 +24571,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Runtime_msg (Runtime_config_view_loaded (_, _, _, _, _) | Runtime_params_loaded _
         | Runtime_param_written (_, _)) | Prompts_loaded (_, _)
         | Keeper_msg (Keeper_board_quarantines_loaded (_, _) | Keeper_efficiency_loaded (_, _)) | Board_msg (Board_quarantine_requeued (_, _, _)
-        | Board_quarantines_bulk_progress (_, _, _, _, _, _)
+        | Board_quarantines_bulk_progress (_, _)
         | Board_quarantines_bulk_requeued (_, _)) | Preset_msg (Presets_listed (_, _)
         | Preset_detail_loaded (_, _) | Preset_contents_shown (_, _) | Preset_saved (_, _)
         | Preset_restored (_, _) | Preset_deleted (_, _)) | Play_msg (Play_room_received (_, _)
@@ -23978,8 +24595,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Workspace_operation message ->
       apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
         ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
-  | Workspace_msg (Workspace_identity_unconfirmed { detail; latest; prior_contact; refresh_ticket }) ->
+  | Workspace_msg (Workspace_identity_unconfirmed { refusal; latest; prior_contact; refresh_ticket }) ->
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+      (* What the guard saw of the identity, in the screen language. The
+         request it stopped says its own kept-back notice (RFC §2). *)
+      let detail = String.capitalize_ascii
+          (workspace_refusal_reason ~ko:(state.ui_language = Lang_ko) refusal) in
       let authority = read_authority state in
       apply_refused_workspace_identity state ~mailbox ~detail (Some latest);
       state.connection_status <-
@@ -24003,24 +24624,38 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Lane_msg (Lane_package_catalog_loaded (generation,directory,result)) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
-        let response = Option.bind view.installer
-          (Masc_tui_lane_installer.receive_catalog ~request_id:generation ~directory result) in
-        match response with
-        | None -> view
-        | Some (installer,error) ->
-            {view with loading=false;installer=Some installer;
-              package_directory=Masc_tui_lane_installer.directory installer;
-              error=Option.bind error lane_addons_detail_failure;scroll=0})
+        let receive result =
+          let response = Option.bind view.installer
+            (Masc_tui_lane_installer.receive_catalog ~request_id:generation ~directory result) in
+          match response with
+          | None -> view
+          | Some (installer,error) ->
+              {view with loading=false;installer=Some installer;
+                package_directory=Masc_tui_lane_installer.directory installer;
+                error=Option.bind error lane_addons_detail_failure;scroll=0} in
+        match result with
+        | Ok json -> receive (Ok json)
+        | Error (Request_failed detail) -> receive (Error detail)
+        | Error (Request_withdrawn refusal) ->
+            lane_installer_kept_back state view
+              (Masc_tui_lane_installer.Read_catalog directory) refusal)
   | Lane_msg (Lane_package_preview_loaded (generation,path,result)) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
-        let response = Option.bind view.installer
-          (Masc_tui_lane_installer.receive_preview ~request_id:generation ~path result) in
-        match response with
-        | None -> view
-        | Some (installer,error) ->
-            {view with loading=false;installer=Some installer;
-              error=Option.bind error lane_addons_detail_failure;scroll=0})
+        let receive result =
+          let response = Option.bind view.installer
+            (Masc_tui_lane_installer.receive_preview ~request_id:generation ~path result) in
+          match response with
+          | None -> view
+          | Some (installer,error) ->
+              {view with loading=false;installer=Some installer;
+                error=Option.bind error lane_addons_detail_failure;scroll=0} in
+        match result with
+        | Ok json -> receive (Ok json)
+        | Error (Request_failed detail) -> receive (Error detail)
+        | Error (Request_withdrawn refusal) ->
+            lane_installer_kept_back state view
+              (Masc_tui_lane_installer.Read_preview path) refusal)
   | Keeper_msg (Keeper_queue_resume_confirmed (keeper_name, generation, confirmation, request_ids)) ->
       settle_keeper_priority_control state keeper_name ~generation
         ~outcome:(match confirmation with
@@ -24057,13 +24692,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       dispatch_ready_run_next state ~mailbox keeper_name
   | Keeper_msg (Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers (token, _), result)) ->
       let observation = match result with
-        | Error reason -> Error reason
-        | Ok (_, Error reason) -> Error reason
+        | Error failure -> Error failure
+        | Ok (_, Error reason) -> Error (Request_failed reason)
         | Ok (_, Ok observation) ->
             (match observation.operations, observation.peer_page with
-             | Error reason, _ -> Error reason
+             | Error reason, _ -> Error (Request_failed reason)
              | Ok _, Some page -> Ok page
-             | Ok _, None -> Error "Keeper relationship page is unavailable") in
+             | Ok _, None -> Error (Request_failed "Keeper relationship page is unavailable")) in
       ignore (stage_keeper_peer_reading state ~keeper_name ~token observation)
   | Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation,
       ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _
@@ -24086,7 +24721,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match state.queue_panel with
        | Some panel when String.equal panel.qp_keeper keeper_name ->
          let panel = (match result with
-          | Error detail ->
+          | Error failure ->
+            let detail = request_failure_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Keeper_action failure in
             let panel = withdraw_queue_panel_server_selection panel in
             if action = Masc_tui_queue_inspection.Inspect then
               {panel with qp_reading=Queue_unavailable; qp_notice=Some (Queue_error detail)}
@@ -24112,7 +24749,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Some _ | None ->
          if action <> Masc_tui_queue_inspection.Inspect then begin
            let lines = match result with
-             | Error detail -> [detail]
+             | Error failure ->
+               [request_failure_text ~ko:(state.ui_language = Lang_ko)
+                  ~request:Kept_request.Keeper_action failure]
              | Ok (_, Error detail) -> ["Read unavailable: " ^ detail]
              | Ok (_, Ok observation) ->
                let source = function
@@ -24133,15 +24772,33 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       drain_queued_message state ~base_path ~mailbox
   | Lane_msg (Lane_application_loaded (ticket,result)) ->
       map_lane_addons state (fun view ->
-        Masc_tui_lane_addons.finish_application_read view ticket result)
+        match result with
+        | Ok configuration ->
+            Masc_tui_lane_addons.finish_application_read view ticket (Ok configuration)
+        | Error (Request_failed detail) ->
+            Masc_tui_lane_addons.finish_application_read view ticket (Error detail)
+        | Error (Request_withdrawn refusal) ->
+            Masc_tui_lane_addons.withdraw_application_read view ticket
+              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:Kept_request.Addon_read refusal))
   | Lane_msg (Lane_subscriptions_loaded (generation,result)) ->
       (match state.lane_nested_read_resume with
        | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
        | Some _ | None -> ());
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
-        {view with loading=false;subscription_panel=Option.map
-          (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
+        match result with
+        | Ok snapshot ->
+            {view with loading=false;subscription_panel=Option.map
+              (fun panel -> Masc_tui_lane_subscriptions.loaded panel (Ok snapshot)) view.subscription_panel}
+        | Error (Request_failed detail) ->
+            {view with loading=false;subscription_panel=Option.map
+              (fun panel -> Masc_tui_lane_subscriptions.loaded panel (Error detail)) view.subscription_panel}
+        | Error (Request_withdrawn refusal) ->
+            (* The panel keeps what it showed; the notice says the request
+               was not sent. *)
+            {view with loading=false;
+              error=lane_addons_kept_back state ~request:Kept_request.Addon_request refusal})
   | Lane_msg (Lane_addons_loaded (generation, target, result)) ->
       let showing = Option.is_some state.lane_addons in
       (match target with
@@ -24157,6 +24814,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  else match result with
                    | Ok reply when Option.is_some reply.lar_snapshot
                        && Option.is_none reply.lar_diagnostic
+                       && Option.is_none reply.lar_kept_back
                        && (match reply.lar_inventory_read with
                            | `Read | `Unchanged -> true
                            | `Failed _ -> false) ->
@@ -24180,15 +24838,22 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             {view with loading=false;error=lane_addons_detail_failure detail;detail_read_error}
         | Error (`Request detail) ->
             {view with loading=false;error=lane_addons_request_failure detail}
+        | Error (`Kept_back refusal) ->
+            {view with loading=false;
+              error=lane_addons_kept_back state ~request:Kept_request.Addon_request refusal}
         | Ok reply ->
+            (* A follow-up read the guard stopped is said as kept back. *)
+            let diagnostic = match reply.lar_kept_back with
+              | Some refusal -> lane_addons_kept_back state ~request:Kept_request.Addon_read refusal
+              | None -> reply.lar_diagnostic in
             let view = match reply.lar_snapshot with
               | None -> view
               | Some snapshot -> Masc_tui_lane_addons.reconcile_read_snapshot view
-                  ~target ~diagnostic:reply.lar_diagnostic snapshot in
+                  ~target ~diagnostic snapshot in
             let view = match reply.lar_receipt with
               | None -> view
               | Some receipt -> Masc_tui_lane_addons.acknowledge_broadcast view receipt in
-            let view = match target, reply.lar_snapshot, reply.lar_diagnostic with
+            let view = match target, reply.lar_snapshot, diagnostic with
               | Masc_tui_lane_addons.Read_detail _, Some _, None when view.row_cursor < 0 ->
                   Masc_tui_lane_addons.select_initial_result view
               | (Masc_tui_lane_addons.Read_screen | Read_detail _ | Read_installation_results _),
@@ -24205,11 +24870,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   Masc_tui_lane_addons.receive_application_inventory view
                     (match configuration with Some configuration -> Ok configuration
                      | None -> Error "Configuration observation is unavailable") in
-            let view = {view with loading=false;error=reply.lar_diagnostic;
+            let view = {view with loading=false;error=diagnostic;
               snapshot_read_error;
               action_receipt=(match reply.lar_action with None -> view.action_receipt | Some _ -> reply.lar_action);
               receipt=(match reply.lar_receipt with None -> view.receipt | Some _ -> reply.lar_receipt)} in
-            (match target, reply.lar_snapshot, reply.lar_diagnostic with
+            (match target, reply.lar_snapshot, diagnostic with
              | Masc_tui_lane_addons.Read_installation_results installation_id, Some _, None ->
                  Masc_tui_lane_addons.installation_results view ~installation_id
              | (Masc_tui_lane_addons.Read_screen | Read_detail _ | Read_installation_results _),
@@ -24239,10 +24904,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         if view.generation <> generation then view else
         let view = {view with loading=false} in
         match result with
-        | Error detail ->
+        | Error (Request_failed detail) ->
             {view with error=(match request with
               | Document.Read _ -> lane_addons_detail_failure detail
               | Document.Save _ -> lane_addons_request_failure detail)}
+        | Error (Request_withdrawn refusal) ->
+            {view with error=lane_addons_kept_back state refusal ~request:(match request with
+              | Document.Read _ -> Kept_request.Addon_read
+              | Document.Save _ -> Kept_request.Addon_request)}
         | Ok response ->
             let key = match request with Document.Read path -> Filename.basename path
               | Document.Save session -> session.file_name in
@@ -24287,7 +24956,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   one that got no answer. *)
                | Masc_tui_voice_wizard_session.Save_written _ | Masc_tui_voice_wizard_session.Save_unanswered_reply _ ->
                    launch_voice_config_load state ~mailbox
-               | Masc_tui_voice_wizard_session.Save_refused _ -> ());
+               | Masc_tui_voice_wizard_session.Save_refused _
+               | Masc_tui_voice_wizard_session.Save_kept_back _ -> ());
               match updated.vws_save with
               | Masc_tui_voice_wizard_session.Save_probing request ->
                   launch_voice_wizard_probe state ~mailbox ~request
@@ -24321,9 +24991,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Voice_msg (Voice_agent_voice_saved result) ->
       (match state.voice_agent_voices, result with
        | None, (Ok _ | Error _) -> ()
-       | Some session, Error message ->
+       | Some session, Error (Request_failed message) ->
            state.voice_agent_voices
              <- Some { session with vas_saving = false; vas_status = Some message }
+       | Some session, Error (Request_withdrawn refusal) ->
+           state.voice_agent_voices
+             <- Some { session with vas_saving = false
+                     ; vas_status = Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                         ~request:Kept_request.Agent_voice_save refusal) }
        | Some session, Ok json ->
            (* The write moved the configuration on, so the next assignment
               carries the revision this answer named rather than the one the
@@ -24353,7 +25028,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
             (Masc_tui_voice_wizard_session.voice_wizard_after_probe session ~request
-               (Result.map voice_wizard_probe_lines result)))
+               (Result.map voice_wizard_probe_lines result
+                |> Result.map_error (function
+                  | Request_failed message -> message
+                  | Request_withdrawn refusal ->
+                    voice_probe_kept_back ~ko:(state.ui_language = Lang_ko) refusal))))
         state.voice_wizard
   | Voice_msg (Voice_wizard_reread (request, result)) ->
       Option.iter
@@ -24567,7 +25246,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
           ~authority:early.eap_authority early.eap_identity
       then Option.iter (fun result ->
-        apply_approvals_read state result;
+        apply_approvals_read state (Result.map_error (fun detail -> Request_failed detail) result);
         Option.iter (fun started_ns ->
           Log.Transport.info "tui_approvals_early request=%d refresh_started_ns=%Ld admitted_ms=%.3f outcome=%s"
             (Approval.Listing_order.request_id early.eap_observation.ao_ticket) started_ns
@@ -25155,7 +25834,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         (match acting_pane_changes_keeper state with
          | Some keeper_name when server_authority_ready state ->
              state.acting_pane_changes <-
-               Masc_tui_fetched.invalidate ~reason:"Observer events were lost"
+               Masc_tui_fetched.invalidate ~reason:(Request_failed "Observer events were lost")
                  state.acting_pane_changes;
              let key = { apk_keeper = keeper_name
                        ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
@@ -25394,6 +26073,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               ignore (restore_task_dispatch_input state request);
               report_action state "error" (Printf.sprintf "task for %s was not sent: %s; /task-recover retains the command"
                 intent.keeper detail)
+          | Kept_back notice ->
+              (* The guard withdrew the creation before it was sent; the
+                 command is restored and retained as for [Not_sent]. *)
+              ignore (restore_task_dispatch_input state request);
+              report_action state "error" (notice ^ " · /task-recover retains the command")
           | Server_error detail ->
               report_action state "error" (Printf.sprintf "task creation for %s returned an error: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)
@@ -25630,11 +26314,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (if ko then "삭제 재시도 %s 접수됨 · 목록 다시 조회 중"
              else "Deletion retry %s accepted; refreshing inventory.")
             operation_id
-        | Error detail ->
+        | Error (Request_failed detail) ->
           Printf.sprintf
             (if ko then "삭제 재시도 %s 확인 안 됨: %s · 목록을 다시 조회한 뒤 재시도"
              else "Deletion retry %s not confirmed: %s. Refresh inventory before retrying.")
-            operation_id detail in
+            operation_id detail
+        (* The retry was not sent: the kept-back notice, then the operation. *)
+        | Error (Request_withdrawn refusal) ->
+          workspace_refusal_text ~ko ~request:Kept_request.Keeper_deletion refusal
+          ^ " · " ^ operation_id in
       state.keeper_deletions_retry_receipt <- Some (state.keeper_deletions_generation, message);
       report_action state (if Result.is_ok result then "system" else "error") message
   | Keeper_msg (Keeper_deletions_loaded (generation, result)) ->
@@ -25656,14 +26344,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Settings_finished (_,outcome) ->
             let severity = match outcome with
               | Settings_applied receipt -> receipt.severity | Settings_unchanged -> "system"
-              | Settings_not_sent _ | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _ -> "error" in
+              | Settings_not_sent _ | Settings_kept_back _ | Settings_refused _ | Settings_observation_required _ | Settings_unconfirmed _ -> "error" in
             let origin = if current then "" else " (" ^ key.ksk_base_path ^ ")" in
+            let ko = state.ui_language = Lang_ko in
             let message = match request.ksv_input,outcome with
               | Settings_editor_input _,Settings_applied receipt -> receipt.message ^ origin
+              (* The kept-back notice leads, alone; the setting follows it. *)
+              | (Sandbox_shortcut_input _ | Settings_editor_input _), Settings_kept_back _ ->
+                  keeper_settings_save_outcome_detail ~ko outcome ^ " · " ^ keeper_settings_save_label request ^ origin
               | (Sandbox_shortcut_input _ | Settings_editor_input _),
                   (Settings_applied _ | Settings_unchanged | Settings_not_sent _ | Settings_refused _
                    | Settings_observation_required _ | Settings_unconfirmed _) ->
-                  keeper_settings_save_label request ^ origin ^ " · " ^ keeper_settings_save_outcome_detail outcome in
+                  keeper_settings_save_label request ^ origin ^ " · " ^ keeper_settings_save_outcome_detail ~ko outcome in
             report_action state severity message;
             if current && state.view = Keepers Keeper_detail
                && Option.exists (fun (keeper : keeper) -> String.equal keeper.k_name key.ksk_keeper) (selected_keeper state)
@@ -25688,6 +26380,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Form_posting _ -> "posting"
           | Form_finished (_, Form_saved _) -> "saved"
           | Form_finished (_, Form_not_sent _) -> "not_sent"
+          | Form_finished (_, Form_kept_back _) -> "kept_back"
           | Form_finished (_, Form_invalid_account _) -> "invalid_account"
           | Form_finished (_, Form_refused _) -> "refused"
           | Form_finished (_, Form_conflict _) -> "conflict"
@@ -25711,11 +26404,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox;
                    launch_runtime_surface_load state ~mailbox ~force:true;
                    launch_lanes_reread state ~mailbox
-               | Form_not_sent _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> ())
+               | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> ())
             end;
             if attached && current then begin
               match request.rfs_draft, outcome with
-              | Config_document_draft _, (Form_saved _ | Form_not_sent _ | Form_invalid_account _
+              | Config_document_draft _, (Form_saved _ | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _
                   | Form_refused _ | Form_conflict _ | Form_unconfirmed _) -> ()
               | Model_form_draft _, Form_saved _ ->
                   state.runtime_model_form <- None; state.runtime_form_save_focus <- None
@@ -25727,21 +26420,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   state.runtime_form_save_focus <- None
               | Account_form_draft _, Form_invalid_account form ->
                   state.runtime_account_form <- Some form
-              | Model_form_draft form, (Form_not_sent _ | Form_invalid_account _
+              | Model_form_draft form, (Form_not_sent _ | Form_kept_back _ | Form_invalid_account _
                   | Form_refused _ | Form_conflict _ | Form_unconfirmed _) ->
                   state.runtime_model_form <- Some (Masc_tui_model_form.refused form
-                    (runtime_form_outcome_detail outcome))
-              | Account_form_draft form, (Form_not_sent _ | Form_refused _
+                    (runtime_form_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome))
+              | Account_form_draft form, (Form_not_sent _ | Form_kept_back _ | Form_refused _
                   | Form_conflict _ | Form_unconfirmed _) ->
                   state.runtime_account_form <- Some (Masc_tui_runtime_account_form.refused form
-                    (runtime_form_outcome_detail outcome))
+                    (runtime_form_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome))
             end;
             let origin = if current then "" else
                 " (" ^ Tui_decode.Canonical_path.to_string request.rfs_workspace.sid_base_path ^ ")" in
             report_action state (match outcome with Form_saved _ -> "system"
-              | Form_not_sent _ | Form_invalid_account _ | Form_refused _
+              | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _
               | Form_conflict _ | Form_unconfirmed _ -> "error")
-              ("Runtime configuration" ^ origin ^ " · " ^ runtime_form_outcome_detail outcome);
+              (match outcome with
+               (* The kept-back notice leads, alone; the workspace follows. *)
+               | Form_kept_back _ ->
+                   runtime_form_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome ^ origin
+               | Form_saved _ | Form_not_sent _ | Form_invalid_account _ | Form_refused _
+               | Form_conflict _ | Form_unconfirmed _ ->
+                   "Runtime configuration" ^ origin ^ " · "
+                   ^ runtime_form_outcome_detail ~ko:(state.ui_language = Lang_ko) outcome);
             (match outcome, prepared with
              | Form_saved _, Some {rfp_account=Some declaration;_} ->
                  Option.iter (fun sign_in ->
@@ -25750,7 +26450,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    Option.iter (fun typed -> add_event state "info"
                      (declaration.id ^ origin ^ " 그다음 client 안에서: " ^ typed))
                      (Masc_tui_runtime_account_form.then_type sign_in)) declaration.sign_in
-             | (Form_saved _ | Form_not_sent _ | Form_invalid_account _ | Form_refused _
+             | (Form_saved _ | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _
                  | Form_conflict _ | Form_unconfirmed _), (None | Some _) -> ())
       end
   | Keeper_msg (Keeper_creation_changed (request, status)) ->
@@ -25760,6 +26460,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Creation_posting -> "posting"
           | Creation_finished Creation_created -> "created"
           | Creation_finished (Creation_not_sent _) -> "not_sent"
+          | Creation_finished (Creation_kept_back _) -> "kept_back"
           | Creation_finished (Creation_refused _) -> "refused"
           | Creation_finished (Creation_unconfirmed _) -> "unconfirmed" in
         Log.Transport.info
@@ -25803,6 +26504,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  else "creation confirmed in its original workspace"))
            | Creation_not_sent detail ->
                report_action state "error" (prefix ^ "creation not sent; declaration retained: " ^ detail)
+           (* The notice leads, then the Keeper and, outside its workspace,
+              where the declaration was written for. *)
+           | Creation_kept_back refusal ->
+               let ko = state.ui_language = Lang_ko in
+               report_action state "error"
+                 (kept_back ~ko ~request:Kept_request.Keeper_creation
+                    (workspace_refusal_reason ~ko refusal) Draft_kept
+                  ^ " · " ^ request.kcr_keeper
+                  ^ (if current then ""
+                     else " (" ^ Tui_decode.Canonical_path.to_string request.kcr_workspace.sid_base_path ^ ")"))
            | Creation_refused detail ->
                report_action state "error" (prefix ^ "creation refused; declaration retained: " ^ detail)
            | Creation_unconfirmed detail ->
@@ -25821,19 +26532,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Catch_up_coalesced ->
           Notice_reply, say "대기 중인 따라잡기에 합침" "joined the pending catch-up" ^ " · " ^ status_hint
         | Catch_up_not_sent detail -> Notice_failure, not_sent ~ko ^ ": " ^ detail
+        | Catch_up_kept_back notice -> Notice_failure, notice
         | Catch_up_refused detail -> Notice_failure, say "서버가 거절함: " "server refused: " ^ detail
         | Catch_up_unconfirmed detail ->
           Notice_failure,
           say "접수 미확인: " "acceptance unconfirmed: " ^ detail ^ " · "
           ^ say "원래 워크스페이스에서 /memory status 로 확인하세요"
               "check /memory status in the original workspace" in
+      (* A kept-back notice leads its line, with the Keeper after it (RFC §2). *)
+      let line = match outcome with
+        | Masc_tui_http.Catch_up_kept_back _ -> detail ^ " · " ^ keeper
+        | Catch_up_submitted | Catch_up_coalesced | Catch_up_not_sent _
+        | Catch_up_refused _ | Catch_up_unconfirmed _ -> keeper ^ ": " ^ detail in
       if original_is_current then
-        chat_notice state ~keeper_name:(Some keeper) ~kind (keeper ^ ": " ^ detail)
+        chat_notice state ~keeper_name:(Some keeper) ~kind line
       else
         report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system")
           (let path = Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path in
-           say (path ^ "의 원래 요청") ("original request in " ^ path)
-           ^ " · " ^ keeper ^ ": " ^ detail)
+           let original = say (path ^ "의 원래 요청") ("original request in " ^ path) in
+           match outcome with
+           | Masc_tui_http.Catch_up_kept_back _ -> line ^ " · " ^ original
+           | Catch_up_submitted | Catch_up_coalesced | Catch_up_not_sent _
+           | Catch_up_refused _ | Catch_up_unconfirmed _ -> original ^ " · " ^ line)
   | Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)) ->
       let origin_matches =
         Option.for_all
@@ -25948,8 +26668,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox
-       | Error err ->
-           report_action state "error" (label ^ err))
+       | Error (Request_failed err) ->
+           report_action state "error" (label ^ err)
+       | Error (Request_withdrawn refusal) ->
+           report_action state "error"
+             (goal_kept_back_notice state ~goal_id ~current refusal))
   | Goal_msg (Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result)) ->
       record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
       (match state.goal_confirmation with
@@ -25958,11 +26681,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Goal_confirmation.Submitting _ | Goal_confirmation.Inspecting _ -> ());
       let owned = Masc_tui_http.credential_owner_is_current authority.ra_credential_owner
         && Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some authority.ra_runtime_instance_id) state.server_identity in
-      let status = if owned then Result.map_error (fun _ -> "Confirmation result is in the request history") result
-        else Error "Confirmation outcome belongs to an earlier server or credential; inspect request history" in
+      let status = match result with
+        | Error (Request_withdrawn _) ->
+          (* Kept back before it left: nothing is in the request history to
+             point at, and the receipt's authority does not bear on it. *)
+          result
+        | Ok _ | Error (Request_failed _) ->
+          if owned then Result.map_error (fun _ -> Request_failed "Confirmation result is in the request history") result
+          else Error (Request_failed "Confirmation outcome belongs to an earlier server or credential; inspect request history") in
       let current = note_goal_action_result state ~goal_id ~ticket status in
       let label = "Goal " ^ goal_id ^ (if current then "" else " (earlier request)") ^ ": " in
       (match owned, result with
+       | _, Error (Request_withdrawn refusal) ->
+           report_action state "error" (goal_kept_back_notice state ~goal_id ~current refusal)
        | false, _ ->
            report_action state "system" (label ^ "confirmation result belongs to an earlier server or credential; inspect the original workspace")
        | true, Ok _ ->
@@ -25972,7 +26703,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              ~refresh_inflight:http_refresh_inflight
              ~scoped_refresh_inflight:http_scoped_refresh_inflight
              ~scoped_refresh_followup ~mailbox
-       | true, Error _ ->
+       | true, Error (Request_failed _) ->
            report_action state "error" (label ^ "confirmation outcome unconfirmed; inspect the current proof and request history"));
       (match selected_planning_goal_id state with
        | Some selected when String.equal selected goal_id ->
@@ -25996,12 +26727,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            let changed_owner = match result with
              | Error (Goal_confirmation.Server_changed owner)
                when current && Masc_tui_http.credential_owner_is_current owner -> Some owner
-             | Ok _ | Error (Goal_confirmation.Read_failed _ | Goal_confirmation.Read_http_error _ | Goal_confirmation.Server_changed _) -> None in
+             | Ok _ | Error (Goal_confirmation.Read_failed _ | Goal_confirmation.Read_http_error _ | Goal_confirmation.Server_changed _
+                            | Goal_confirmation.Read_kept_back _) -> None in
            let credential_changed = match result with
              | Ok confirmation -> not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner)
              | Error (Goal_confirmation.Read_failed (Some owner, _) | Goal_confirmation.Read_http_error (owner, _) | Goal_confirmation.Server_changed owner) ->
                  not (Masc_tui_http.credential_owner_is_current owner)
-             | Error (Goal_confirmation.Read_failed (None, _)) -> false in
+             | Error (Goal_confirmation.Read_failed (None, _) | Goal_confirmation.Read_kept_back _) -> false in
            let result = match result with
              | Ok confirmation when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
                  Error (Goal_confirmation.Read_failed (Some confirmation.credential_owner, "Goal confirmation credential changed; read the proof again"))
@@ -26039,7 +26771,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Writing _ | Saved _ | Aborted _ -> state.verification_evidence_saved <-
              (request.vex_key, request.vex_index, progress) :: state.verification_evidence_saved);
       (match result with
-       | Error detail -> report_action state "error" ("Evidence: " ^ detail ^ location)
+       | Error (Request_failed detail) -> report_action state "error" ("Evidence: " ^ detail ^ location)
+       | Error (Request_withdrawn refusal) ->
+           report_action state "error"
+             (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Evidence_export refusal)
        | Ok path -> report_action state "system" ("증거 사본 저장: " ^ path))
   | Verification_msg (Verification_evidence_loaded (request, result)) ->
       let key = Masc_tui_fetched.request_key request.ver_ticket in
@@ -26058,6 +26794,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "system" (Printf.sprintf "task %s cancelled" task_id);
            refresh Cancellation_confirmed
        | Task_cancel_refused err -> report_action state "error" ("task cancel refused: " ^ err)
+       | Task_cancel_kept_back refusal ->
+           report_withdrawn state ~request:Kept_request.Task_cancel refusal
        | Task_cancel_unconfirmed detail ->
            report_action state "error"
              (Printf.sprintf "task %s cancellation unconfirmed; checking its workspace: %s"
@@ -26094,7 +26832,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Option.iter (fun limit -> launch_task_history_load ~older:true ~limit state ~mailbox task_id) followup
   | Board_msg (Board_attachment_loaded (request,result)) ->
       if Option.is_some (current_board_reader state) then
-        state.board_reader <- Masc_tui_board_reader.complete state.board_reader request result
+        state.board_reader <- Masc_tui_board_reader.complete state.board_reader request
+          (said_read_result state ~request:Kept_request.Attachment_read result)
   | Board_msg (Board_attachment_prepared (request,result)) ->
       if Option.is_some (current_board_reader state) then
         state.board_reader <- Masc_tui_board_reader.complete_preparation state.board_reader request result
@@ -26214,12 +26953,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Ok snapshot ->
              state.keeper_calls_error <-
                Some
-                 (Printf.sprintf
+                 (Request_failed (Printf.sprintf
                     "tool-call response named keeper %s, expected %s"
-                    snapshot.kcs_keeper keeper_name);
+                    snapshot.kcs_keeper keeper_name));
              settle_calls_owed state ~keeper_name failed
-         | Error detail ->
-             state.keeper_calls_error <- Some detail;
+         | Error failure ->
+             state.keeper_calls_error <- Some failure;
              settle_calls_owed state ~keeper_name failed);
         let still_visible =
           match state.view with
@@ -26246,7 +26985,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~outcome:(match result with Ok _ -> "ready" | Error _ -> "failed");
         match result with
         | Ok _ -> ()
-        | Error detail -> report_action state "error" detail
+        | Error (Request_failed detail) -> report_action state "error" detail
+        | Error (Request_withdrawn refusal) ->
+            report_withdrawn state ~request:Kept_request.Keeper_settings_read refusal
       end
   | Keeper_msg (Keeper_config_view_loaded (request, result)) -> (
       let keeper_name = request.drr_keeper in
@@ -26323,8 +27064,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Preset_to_chat target, Ok snapshot ->
            chat_notice state ~keeper_name:target ~kind:Notice_reply
              (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
-       | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
+       | Preset_to_chat target, Error failure ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure
+             (request_failure_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Preset_list_read failure)
        | Preset_to_pane, Ok snapshot ->
            let selected_name = selected_preset_for_state state
                |> Option.map (fun row -> row.Tui_decode.pm_name) in
@@ -26353,20 +27096,22 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               shortens the document to its loading rows and clamps a reader
               at its end to a different place before the answer arrives. *)
            ensure_preset_detail state ~mailbox
-       | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
+       | Preset_to_pane, Error failure -> state.presets_error <- Some failure)
   | Preset_msg (Preset_contents_shown (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_reply
              (String.concat "\n" (Masc_tui_preset_text.contents_lines
                 ~ko:(state.ui_language = Lang_ko) detail))
-       | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
+       | Preset_to_chat target, Error failure ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure
+             (request_failure_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Preset_read failure)
        (* The pane reads its own detail through [Preset_detail_loaded], keyed
           by the cursor, so a pane sink here would be a second answer to a
           question nobody asked. *)
        | Preset_to_pane, Ok _ -> ()
-       | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
+       | Preset_to_pane, Error failure -> state.presets_error <- Some failure)
   | Preset_msg (Preset_detail_loaded (request, result)) ->
       (* Dropping an answer the cursor has moved past is [complete]'s job
          now, so this arm no longer has to remember to do it. *)
@@ -26378,23 +27123,36 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.keeper_board_quarantines request result
   | Keeper_msg (Keeper_efficiency_loaded (request, result)) ->
       state.keeper_efficiency <-
-        Masc_tui_fetched.complete ~equal:String.equal state.keeper_efficiency request result
+        Masc_tui_fetched.complete ~equal:String.equal state.keeper_efficiency request
+          (Result.map_error (function
+             | Request_failed detail -> Masc_tui_keeper_efficiency.Read_failed detail
+             | Request_withdrawn refusal ->
+                 Masc_tui_keeper_efficiency.Read_kept_back
+                   (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                      ~request:Kept_request.Efficiency_read refusal)) result)
   | Board_msg (Board_quarantine_requeued (keeper_name, partition_id, outcome)) ->
       state.board_quarantine_requeue_inflight <- None;
       let partition = Terminal_text.single_line partition_id in
       (match outcome with
-       | Masc_tui_http.Post_answered _ ->
+       | Ok (Masc_tui_http.Post_answered _) ->
            report_action state "system"
              ("Board partition requeued: " ^ partition)
-       | Masc_tui_http.Post_refused detail ->
+       | Ok (Masc_tui_http.Post_refused detail) ->
            report_action state "error"
              ("Board requeue refused for " ^ partition ^ ": "
               ^ Terminal_text.single_line detail)
-       | Masc_tui_http.Post_unanswered detail ->
+       | Ok (Masc_tui_http.Post_unanswered detail) ->
            report_action state "error"
              ("Board requeue for " ^ partition
               ^ " may or may not have landed: "
-              ^ Terminal_text.single_line detail));
+              ^ Terminal_text.single_line detail)
+       | Error refusal ->
+           (* Not sent: the kept-back notice alone, with the partition after
+              it (RFC §2). *)
+           report_action state "error"
+             (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Board_requeue refusal
+              ^ " · " ^ partition));
       (* Read the rows again whatever the answer: a refusal usually means the
          row moved, and an unanswered press may have committed. The slot holds
          one keeper, so only while that keeper is still the one on screen --
@@ -26405,24 +27163,27 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            launch_keeper_board_quarantines state ~mailbox keeper_name
        | Some _ | None -> ())
   | Board_msg (Board_quarantines_bulk_progress
-      (keeper_name, attempted, total, accepted, refused, unanswered)) ->
+      (keeper_name, { attempted; total; accepted; refused; uncertain = unanswered; kept_back })) ->
       if state.board_quarantine_requeue_inflight <> None then
         report_action state
-          (if refused > 0 || unanswered > 0 then "error" else "system")
+          (if refused > 0 || unanswered > 0 || kept_back > 0 then "error" else "system")
           (Printf.sprintf
              "Board requeue %s: %d/%d attempted · %d accepted, %d refused, %d uncertain"
              (Terminal_text.single_line keeper_name) attempted total accepted
-             refused unanswered)
+             refused unanswered
+           ^ board_requeue_kept_back_count ~ko:(state.ui_language = Lang_ko) kept_back)
   | Board_msg (Board_quarantines_bulk_requeued (keeper_name, outcomes)) ->
       state.board_quarantine_requeue_inflight <- None;
-      let accepted, refused, unanswered =
+      let ko = state.ui_language = Lang_ko in
+      let accepted, refused, unanswered, kept_back =
         List.fold_left
-          (fun (accepted, refused, unanswered) (_, outcome) ->
+          (fun (accepted, refused, unanswered, kept_back) (_, outcome) ->
              match outcome with
-             | Masc_tui_http.Post_answered _ -> accepted + 1, refused, unanswered
-             | Masc_tui_http.Post_refused _ -> accepted, refused + 1, unanswered
-             | Masc_tui_http.Post_unanswered _ -> accepted, refused, unanswered + 1)
-          (0, 0, 0)
+             | Ok (Masc_tui_http.Post_answered _) -> accepted + 1, refused, unanswered, kept_back
+             | Ok (Masc_tui_http.Post_refused _) -> accepted, refused + 1, unanswered, kept_back
+             | Ok (Masc_tui_http.Post_unanswered _) -> accepted, refused, unanswered + 1, kept_back
+             | Error _ -> accepted, refused, unanswered, kept_back + 1)
+          (0, 0, 0, 0)
           outcomes
       in
       let summary =
@@ -26432,28 +27193,34 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           refused
           unanswered
           (List.length outcomes)
+        ^ board_requeue_kept_back_count ~ko kept_back
       in
+      (* A row the guard stopped was not sent, so it is said as kept back, in
+         its own words, and never as the first refused or uncertain row
+         (RFC §2). *)
       let first_issue =
         List.find_map
           (fun (partition_id, outcome) ->
              match outcome with
-             | Masc_tui_http.Post_answered _ -> None
-             | Masc_tui_http.Post_refused detail ->
-               Some ("refused", partition_id, detail)
-             | Masc_tui_http.Post_unanswered detail ->
-               Some ("uncertain", partition_id, detail))
+             | Ok (Masc_tui_http.Post_answered _) -> None
+             | Ok (Masc_tui_http.Post_refused detail) ->
+               Some ("first refused: " ^ Terminal_text.single_line partition_id ^ ": "
+                     ^ Terminal_text.single_line detail)
+             | Ok (Masc_tui_http.Post_unanswered detail) ->
+               Some ("first uncertain: " ^ Terminal_text.single_line partition_id ^ ": "
+                     ^ Terminal_text.single_line detail)
+             | Error refusal ->
+               Some (workspace_refusal_text ~ko ~request:Kept_request.Board_requeue refusal
+                     ^ " · " ^ Terminal_text.single_line partition_id))
           outcomes
       in
       let summary =
         match first_issue with
         | None -> summary
-        | Some (kind, partition_id, detail) ->
-          summary ^ " · first " ^ kind ^ ": "
-          ^ Terminal_text.single_line partition_id ^ ": "
-          ^ Terminal_text.single_line detail
+        | Some issue -> summary ^ " · " ^ issue
       in
       report_action state
-        (if refused > 0 || unanswered > 0 then "error" else "system")
+        (if refused > 0 || unanswered > 0 || kept_back > 0 then "error" else "system")
         summary;
       (match selected_keeper state with
        | Some keeper when String.equal keeper.k_name keeper_name ->
@@ -26493,6 +27260,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 | Preset_save_not_sent _ ->
                   ui_text state ~ko:"프리셋 저장 미전송 · 프리셋 알림 확인"
                     ~en:"Preset save not sent · check Presets"
+                | Preset_save_kept_back refusal ->
+                  workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                    ~request:Kept_request.Preset_save refusal
                 | Preset_save_refused _ ->
                   ui_text state ~ko:"프리셋 저장 거절 · 프리셋 알림 확인"
                     ~en:"Preset save refused · check Presets"
@@ -26548,8 +27318,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              report_action state "error"
                (ui_text state ~ko:"프리셋 복원 결과에 확인할 항목이 있습니다 · 상세 보고서를 확인하세요"
                   ~en:"The restore needs attention · check the detailed report")
-       | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
+       | Preset_to_chat target, Error failure ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure
+             (request_failure_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Preset_restore failure)
        | Preset_to_pane, Ok report ->
            state.preset_busy <- false;
            state.preset_report <- Some report;
@@ -26558,9 +27330,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (Printf.sprintf (if state.ui_language = Lang_ko then "%s 복원 결과 · 이전 상태는 %s" else "%s restore result · previous settings: %s")
                 report.Tui_decode.prr_restored report.Tui_decode.prr_autosave);
            launch_presets_load state ~mailbox
-       | Preset_to_pane, Error detail ->
+       | Preset_to_pane, Error (Request_failed detail) ->
            state.preset_busy <- false;
-           report_action state "error" (ui_text state ~ko:"프리셋 복원: " ~en:"Preset restore: " ^ detail))
+           report_action state "error" (ui_text state ~ko:"프리셋 복원: " ~en:"Preset restore: " ^ detail)
+       | Preset_to_pane, Error (Request_withdrawn refusal) ->
+           state.preset_busy <- false;
+           report_withdrawn state ~request:Kept_request.Preset_restore refusal)
   | Preset_msg (Preset_deleted (sink, result)) ->
       (* The list is read again after a failure too: a refusal says the
          list was stale, and an unanswered delete may have landed. *)
@@ -26568,33 +27343,59 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Preset_to_chat target, Ok name ->
            chat_notice state ~keeper_name:target ~kind:Notice_reply
              ("deleted preset " ^ name)
-       | Preset_to_chat target, Error detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure detail
+       | Preset_to_chat target, Error failure ->
+           chat_notice state ~keeper_name:target ~kind:Notice_failure
+             (request_failure_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Preset_delete failure)
        | Preset_to_pane, Ok name ->
            state.preset_busy <- false;
            report_action state "system" (name ^ ui_text state ~ko:" 삭제됨" ~en:" deleted");
            launch_presets_load state ~mailbox
-       | Preset_to_pane, Error detail ->
+       | Preset_to_pane, Error (Request_failed detail) ->
            state.preset_busy <- false;
            report_action state "error" (ui_text state ~ko:"프리셋 삭제: " ~en:"Preset delete: " ^ detail);
+           launch_presets_load state ~mailbox
+       | Preset_to_pane, Error (Request_withdrawn refusal) ->
+           state.preset_busy <- false;
+           report_withdrawn state ~request:Kept_request.Preset_delete refusal;
            launch_presets_load state ~mailbox)
   | Play_msg (Play_room_received (request, result)) ->
       state.play_room <- Option.map (fun room ->
-        let viewer, result = match result with
-          | Ok (viewer, snapshot) -> Some viewer, Ok snapshot
-          | Error detail -> None, Error detail in
-        Masc_tui_play_room.receive ?viewer room request ~now:(Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9) result) state.play_room;
+        let now = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9 in
+        match result with
+        | Ok (viewer, snapshot) -> Masc_tui_play_room.receive ~viewer room request ~now (Ok snapshot)
+        | Error (Request_failed detail) -> Masc_tui_play_room.receive room request ~now (Error detail)
+        | Error (Request_withdrawn refusal) ->
+            (* A read or a message keeps the draft, as the room's own
+               failure notice says; leaving has nothing to keep. *)
+            let named, kept = match Masc_tui_play_room.request_kind request with
+              | `Read -> Kept_request.Play_room_read, Draft_kept
+              | `Say -> Kept_request.Play_room_message, Draft_kept
+              | `Leave -> Kept_request.Play_room_leave, Nothing_kept in
+            let ko = state.ui_language = Lang_ko in
+            Masc_tui_play_room.kept_back room request ~now
+              (kept_back ~ko ~request:named (workspace_refusal_reason ~ko refusal) kept)) state.play_room;
       if state.msx_open && not state.msx_menu_open then render_spectator state
   | Play_msg (Play_invites_listed (target, result)) ->
       (match target with
        | Play_collab_list read ->
-           state.collab <- Option.map (fun view -> Masc_tui_collab.listed view read result) state.collab
+           state.collab <- Option.map (fun view -> match result with
+             | Ok listed -> Masc_tui_collab.listed view read (Ok listed)
+             | Error (Request_failed detail) -> Masc_tui_collab.listed view read (Error detail)
+             | Error (Request_withdrawn refusal) ->
+                 Masc_tui_collab.kept_back view read
+                   (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                      ~request:Kept_request.Play_invite_list_read refusal)) state.collab
        | Play_chat_list keeper ->
          let target = Play_chat keeper in
          (match result with
-       | Error detail ->
+       | Error (Request_failed detail) ->
            play_notice state ~sink:target ~kind:Notice_failure
              ("play invites: " ^ detail)
+       | Error (Request_withdrawn refusal) ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Play_invite_list_read refusal)
        | Ok { Tui_decode.pis_rows = []; pis_controller } ->
            play_notice state ~sink:target ~kind:Notice_reply
              (String.concat "\n"
@@ -26616,7 +27417,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  @ List.map row invites))))
   | Play_msg (Play_invite_issued (request, target, result)) ->
       let outcome = match result with
-        | Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _ -> Change_confirmed
+        | Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _ | Play_kept_back _ ->
+            Change_confirmed
         | Play_answered (Error _) | Play_unanswered _ -> Change_unknown in
       if Masc_tui_types.finish_play_change state request outcome then begin
       settle_play_mutation state target;
@@ -26655,6 +27457,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Play_not_dispatched detail ->
            play_notice state ~sink:target ~kind:Notice_failure
              ("play invite was not sent: " ^ detail)
+       | Play_kept_back refusal ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Play_invite_issue refusal)
        | Play_unanswered detail ->
            play_notice state ~sink:target ~kind:Notice_failure
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
@@ -26664,7 +27470,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Play_msg (Play_invite_revoked (request, target, requested_name, result)) ->
       let outcome = match result with
         | Play_revoke_absent | Play_revoke_release_failed _
-        | Play_revoke_result (Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _) -> Change_confirmed
+        | Play_revoke_result (Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _
+                              | Play_kept_back _) -> Change_confirmed
         | Play_revoke_result (Play_answered (Error _) | Play_unanswered _) -> Change_unknown in
       if Masc_tui_types.finish_play_change state request outcome then begin
       settle_play_mutation state target;
@@ -26706,6 +27513,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Play_revoke_result (Play_not_dispatched detail) ->
            play_notice state ~sink:target ~kind:Notice_failure
              ("play revoke was not sent: " ^ detail)
+       | Play_revoke_result (Play_kept_back refusal) ->
+           play_notice state ~sink:target ~kind:Notice_failure
+             (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Play_invite_revoke refusal)
        | Play_revoke_result (Play_unanswered detail) ->
            play_notice state ~sink:target ~kind:Notice_failure
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
@@ -26762,24 +27573,37 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.runtime_params <- Some rows;
           state.runtime_params_cursor <- cursor;
           state.runtime_params_error <- None
-      | Error detail ->
+      | Error failure ->
           (* Reported, not swallowed into an empty list: empty means nothing is
              registered, which is a working state. *)
-          state.runtime_params_error <- Some detail)
+          state.runtime_params_error <- Some failure)
   | Runtime_msg (Runtime_param_written (edit, result)) ->
       state.runtime_params_loading <- false;
       (match result with
-       | Error detail -> state.runtime_params_notice <- Some (false, detail)
+       | Error (Request_failed detail) -> state.runtime_params_notice <- Some (Params_said (false, detail))
+       | Error (Request_withdrawn refusal) -> state.runtime_params_notice <- Some (Params_kept_back refusal)
        | Ok notice ->
            if state.runtime_param_edit = edit then state.runtime_param_edit <- None;
-           state.runtime_params_notice <- Some (true, notice);
+           state.runtime_params_notice <- Some (Params_said (true, notice));
            launch_runtime_params_load state ~mailbox)
   | Machine_msg (Machine_activity_read (request,result)) ->
       Option.iter (fun session ->
-        Masc_tui_types.put_machine_activity state (Masc_tui_machine_activity.finish_read request result session))
+        Masc_tui_types.put_machine_activity state (match result with
+          | Ok reading -> Masc_tui_machine_activity.finish_read request (Ok reading) session
+          | Error (Request_failed detail) ->
+              Masc_tui_machine_activity.finish_read request (Error detail) session
+          | Error (Request_withdrawn refusal) ->
+              Masc_tui_machine_activity.withdraw_read request
+                (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                   ~request:Kept_request.Machine_activity_read refusal) session))
         (Masc_tui_types.machine_activity_session state (Masc_tui_machine_activity.request_owner request))
   | Machine_msg (Machine_activity_saved (request,result)) ->
       let module Activity = Masc_tui_machine_activity in
+      let result = match result with
+        | Ok result -> result
+        | Error refusal ->
+            Activity.Kept_back (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Machine_activity_save refusal) in
       let owner = Activity.request_owner request in
       (match Masc_tui_types.machine_activity_session state owner with
        | Some session when Activity.matches request session ->
@@ -26788,14 +27612,26 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Activity.Saved _ | Activity.Unconfirmed _ ->
             launch_machine_activity_read state ~mailbox owner;
             launch_lanes_reread state ~mailbox
-          | Activity.Conflict _ | Activity.Refused _ -> ())
+          | Activity.Conflict _ | Activity.Refused _ | Activity.Kept_back _ -> ())
        | None | Some _ -> ())
   | Exact_msg (Exact_activity_read (request,result)) ->
       Option.iter (fun session ->
-        Masc_tui_types.put_exact_activity state (Masc_tui_exact_activity.finish_read request result session))
+        Masc_tui_types.put_exact_activity state (match result with
+          | Ok document -> Masc_tui_exact_activity.finish_read request (Ok document) session
+          | Error (Request_failed detail) ->
+              Masc_tui_exact_activity.finish_read request (Error detail) session
+          | Error (Request_withdrawn refusal) ->
+              Masc_tui_exact_activity.withdraw_read request
+                (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                   ~request:Kept_request.Exact_activity_read refusal) session))
         (Masc_tui_types.exact_activity_session state (Masc_tui_exact_activity.request_owner request))
   | Exact_msg (Exact_activity_saved (request,result)) ->
       let module Activity = Masc_tui_exact_activity in
+      let result = match result with
+        | Ok result -> result
+        | Error refusal ->
+            Activity.Kept_back (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Exact_activity_save refusal) in
       let owner = Activity.request_owner request in
       (match Masc_tui_types.exact_activity_session state owner with
        | Some session when Activity.matches request session ->
@@ -26804,7 +27640,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Activity.Saved _ ->
             launch_exact_activity_read state ~mailbox owner;
             launch_lanes_reread state ~mailbox
-          | Activity.Conflict _ | Activity.Refused _ | Activity.Unconfirmed _ -> ())
+          | Activity.Conflict _ | Activity.Refused _ | Activity.Unconfirmed _
+          | Activity.Kept_back _ -> ())
        | None | Some _ -> ())
   | Runtime_msg (Runtime_config_view_loaded (generation, requested_model, started_ns, ready_ns, result)) -> (
       let disposition = if generation <> state.runtime_config_generation then "superseded"
@@ -26885,11 +27722,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Some (section, false) ->
              report_action state "error"
                (Printf.sprintf "runtime.toml has no [%s] section" section))
-      | Error detail ->
+      | Error failure ->
           state.runtime_config_owed <- failed_read state.runtime_config_owed;
           state.runtime_model_jump <- None;
           state.runtime_config_jump_section <- None;
-          state.runtime_config_view_error <- Some detail)
+          state.runtime_config_view_error <- Some failure)
   | Code_msg answer -> (
       (* The save settles inside [apply]. With input queued, the reread waits
          for [Code_results.saved_refresh_path]. *)
@@ -26901,23 +27738,39 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               ~host:server_peer_host ~deliver:(deliver_code state mailbox) ~path)
   | Resource_msg (Resources_listed (owner, result)) ->
       withdraw_resource_diagram_pending state;
-      Masc_tui_resources_updates.listed state ~owner result
+      Masc_tui_resources_updates.listed state ~owner
+        (said_read_result state ~request:Kept_request.Resource_list_read result)
   | Artifact_msg (Artifact_checks_loaded (request, result)) ->
-      Masc_tui_resources_updates.checks_loaded state request result
+      (* A read the guard stopped keeps its notice apart, so the confirmation
+         it leaves unknown is said as kept back, alone (RFC §2). *)
+      Masc_tui_resources_updates.checks_loaded state request
+        (Result.map_error (function
+           | Request_failed detail -> Masc_tui_artifact_checks.Read_failed detail
+           | Request_withdrawn refusal ->
+               Masc_tui_artifact_checks.Read_kept_back
+                 (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                    ~request:Kept_request.Report_checks_read refusal)) result)
   | Artifact_msg (Artifact_check_changed (request, result)) ->
       if Masc_tui_resources_updates.check_changed state request then begin
         (match result with
          | Ok _ -> report_action state "system" "Confirmation saved; reading shared state"
-         | Error detail -> report_action state "error"
-             ("Confirmation result requires refresh: " ^ detail));
+         | Error (Request_failed detail) -> report_action state "error"
+             ("Confirmation result requires refresh: " ^ detail)
+         | Error (Request_withdrawn refusal) ->
+             report_withdrawn state ~request:Kept_request.Report_check refusal);
         launch_artifact_checks_load state ~mailbox
       end
   | Resource_msg (Resource_saved (request, outcome)) ->
       if settle_resource_save state request outcome then begin
+        match outcome with
+        | Resource_save_kept_back refusal ->
+            report_withdrawn state ~request:Kept_request.Original_save refusal
+        | Resource_save_result _ | Resource_save_not_started _
+        | Resource_save_unconfirmed _ | Resource_save_interrupted _ ->
         let category = match outcome with
           | Resource_save_result (Ok ()) | Resource_save_not_started _ -> "system"
           | Resource_save_result (Error _) | Resource_save_unconfirmed _
-          | Resource_save_interrupted _ -> "error" in
+          | Resource_save_interrupted _ | Resource_save_kept_back _ -> "error" in
         report_action state category
           (resource_save_document_title request.save_document ^ " · "
            ^ resource_save_summary state (Resource_save_settled outcome)
@@ -26933,7 +27786,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 launch_resources_read state ~mailbox ~key
             | Some ((Masc_tui_resource_catalog.Report_revision _
                     | Masc_tui_resource_catalog.Mcp_uri _), _) | None -> ())
-       | Error detail -> report_action state "error" (label ^ ": " ^ detail))
+       | Error (Request_failed detail) -> report_action state "error" (label ^ ": " ^ detail)
+       | Error (Request_withdrawn refusal) ->
+           report_withdrawn state ~request:Kept_request.Report_open refusal)
   | Resource_msg (Resource_share_changed (request, result)) ->
       if resource_share_is_owned state request then begin
         let read_key = finish_resource_share state request result in
@@ -26956,6 +27811,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
          | Ok (Resource_share_not_sent detail) ->
              report_action state "error" ("The share request for " ^ request.share_report.id ^ " did not send. The recorded operation may still apply; use U to reconcile: " ^ detail);
+             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+         | Ok (Resource_share_kept_back refusal) ->
+             report_resource_share_kept_back state request refusal;
              Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
          | Error (Resource_share_unknown detail) ->
              report_action state "error"
@@ -27090,7 +27948,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
         ~report:(report_action state) ~notice:(present_identity_notice state) result
   | Identity_msg (Identity_app_saved (keeper_name, provider_id, result)) ->
-      Masc_tui_identity_updates.app_saved ~keeper_name ~provider_id
+      Masc_tui_identity_updates.app_saved ~ko:(state.ui_language = Lang_ko) ~keeper_name ~provider_id
         ~notice:(present_identity_notice state) result
   | Identity_msg (Identity_disconnected (keeper_name, provider_id, result)) ->
       Masc_tui_identity_updates.disconnected state ~keeper_name ~provider_id
@@ -27121,6 +27979,32 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Option.to_list state.account_login @ state.account_login_detached) with
        | Some current when current == view && view.generation = generation ->
          let module Login = Masc_tui_account_login in
+         (match (match result with
+                 | Ok json -> Either.Right (Ok json)
+                 | Error (Request_failed detail) -> Either.Right (Error detail)
+                 | Error (Request_withdrawn refusal) -> Either.Left refusal) with
+          | Either.Left refusal ->
+            (* Not sent: the panel says the kept-back notice and settles as it
+               does for a failed request of the same action (RFC §2). *)
+            let notice = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Account_login refusal in
+            (match action with
+             | Login.Input (sequence, _) ->
+               if sequence = view.input_sequence && view.input_pending then begin
+                 view.input_pending <- false; view.notice <- notice end
+             | Login.Activate_saved saved ->
+               Login.activation_kept_back view saved notice;
+               launch_account_login_action state ~mailbox view (Login.Refresh_saved saved)
+             | Login.Refresh_saved saved -> Login.refresh_saved_kept_back view saved notice
+             | Login.Refresh_retry -> Login.refresh_retry view (Error notice); view.notice <- notice
+             | Login.Refresh_models -> Login.models_refresh_failed view notice
+             | Login.Save _ -> view.input_pending<-false; view.draft<-""; Login.save_failed view notice
+             | Login.Inventory | Login.Cancel | Login.Recover | Login.Discover | Login.Close | Login.Nothing
+             | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Preview_removal _
+             | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ ->
+               view.input_pending<-false; view.draft<-"";
+               view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-notice)
+          | Either.Right result ->
          let applied = match action, result with
            | Login.Input (sequence, _), result -> Login.input_response ~sequence view result; Ok ()
            | Login.Activate_saved saved, result ->
@@ -27192,7 +28076,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
              | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _
              | Login.Select_existing _ | Login.Start _ | Login.Preview_removal _
-             | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
+             | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message)))
        | Some _ | None -> ())
   | Account_msg (Account_login_removal (view, generation, provider, login_store, outcome)) ->
       (match state.account_login with
@@ -27214,7 +28098,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Github_msg (Github_login_lines (keeper_name, lines)) ->
       Masc_tui_github_ui.login_lines state ~keeper_name lines
   | Github_msg (Github_login_finished (keeper_name, result)) ->
-      Masc_tui_github_ui.login_finished ~keeper_name
+      Masc_tui_github_ui.login_finished state ~keeper_name
         ~report:(fun level detail -> report_action state level detail)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
   | Github_msg (Github_token_saved (keeper_name, result)) ->
@@ -27223,11 +28107,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
   | System_log_streamed (stream, event) -> take_system_log_stream state stream event
   | Schedule_msg (Schedules_loaded (Schedule_agenda_read ticket, result)) ->
+      let result = said_read_result state ~request:Kept_request.Schedule_read result in
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
       if current then
         state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
   | Schedule_msg (Schedules_loaded (Schedule_page_read request, result)) ->
+      let result = said_read_result state ~request:Kept_request.Schedule_read result in
       let current_agenda =
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
           request.spr_agenda_ticket in
@@ -27252,9 +28138,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Ok history ->
             state.schedule_wake_history <- Some history;
             state.schedule_wake_history_error <- None
-        | Error err ->
+        | Error failure ->
             state.schedule_wake_history <- None;
-            state.schedule_wake_history_error <- Some (schedule_id, err)
+            state.schedule_wake_history_error <- Some (schedule_id,
+              request_failure_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Wake_history_read failure)
       end
       else if
         Option.equal String.equal state.schedule_wake_history_inflight
@@ -27284,7 +28172,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (match result with Ok _ -> Masc_tui_owed_read.succeeded state.memory_activity_owed
            | Error _ -> failed_read state.memory_activity_owed);
       state.memory_activity <-
-        Masc_tui_fetched.complete ~equal:String.equal state.memory_activity request result
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_activity request
+          (said_read_result state ~request:Kept_request.Memory_activity_read result)
   | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
       | Ok message ->
@@ -27332,7 +28221,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              read usually follows the announced one; it is the read when the
              feed is down. *)
           owe_harness_read state
-      | Error err -> report_action state "error" ("Harness label: " ^ err))
+      | Error (Request_failed err) -> report_action state "error" ("Harness label: " ^ err)
+      | Error (Request_withdrawn refusal) ->
+          report_withdrawn state ~request:Kept_request.Harness_label refusal)
   | Approvals_msg (Approval_decision_done (approval, decision, result, generation, approvals)) ->
       apply_approval_decision_completion state generation approval decision
         result approvals
@@ -27392,7 +28283,32 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               then state.msg_live <- Some entry.log;
               proceed := true
           | Some _ | None -> ())
-  | Keeper_msg (Keeper_chat_done (request, _was_replay, result, acknowledge)) ->
+  | Keeper_msg (Keeper_chat_done (request, _was_replay, Keeper_chat_kept_back refusal, acknowledge)) ->
+      (* Settles as the unsent request it is: the input is retained where the
+         preflight put it back, or, beside another preflight for the same
+         Keeper, held as an error of the request would hold it. *)
+      Fun.protect
+        ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
+        (fun () ->
+          let ko = state.ui_language = Lang_ko in
+          let notice kept =
+            kept_back ~ko ~request:Kept_request.Message (workspace_refusal_reason ~ko refusal) kept
+            ^ " · " ^ request.Keeper_chat.request_id in
+          if recover_failed_keeper_preflight state request then begin
+            let queued = List.exists (fun (_, id, intervention) ->
+                String.equal id request.Keeper_chat.request_id && match intervention with
+                | Retained_before_dispatch -> true
+                | Retained_after_stop | Awaiting_control _ -> false)
+                state.keeper_interactive_waiting in
+            report_action state "system"
+              (notice (if queued then Queued_input_kept else Draft_kept))
+          end else
+            match inflight_by_request_id state request.Keeper_chat.request_id with
+            | Some current when Keeper_chat.same_request_identity current request ->
+                append_chat_history state request Message_status (notice Nothing_kept);
+                report_action state "error" (notice Nothing_kept)
+            | Some _ | None -> ())
+  | Keeper_msg (Keeper_chat_done (request, _was_replay, Keeper_chat_answered result, acknowledge)) ->
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -27650,7 +28566,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                when nothing was listening. *)
             Printf.sprintf "too late for %s; the call was no longer waiting"
               call_label
-        | Error detail -> "could not answer the held call: " ^ detail
+        | Error (Request_failed detail) -> "could not answer the held call: " ^ detail
+        | Error (Request_withdrawn refusal) ->
+            (* Not sent: the kept-back notice alone (RFC §2). *)
+            workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+              ~request:Kept_request.Tool_approval refusal
       in
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       append_chat_history state request
@@ -27684,11 +28604,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         withdraw_pending_music_editor state;
       if take_chat_listen state request then begin
         let notice = chat_notice state ~keeper_name:(Some request.lr_keeper) in
+        let command = match request.lr_destination with
+          | Listen_player -> "/listen" | Listen_music_editor -> "/music midi" in
         match result with
-        | Error detail ->
-            let command = match request.lr_destination with
-              | Listen_player -> "/listen" | Listen_music_editor -> "/music midi" in
+        | Error (Request_failed detail) ->
             notice ~kind:Notice_failure (command ^ ": " ^ detail)
+        | Error (Request_withdrawn refusal) ->
+            notice ~kind:Notice_failure
+              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:(Kept_request.Command command) refusal)
         | Ok prepared ->
             match request.lr_destination with
             | Listen_player ->
@@ -27714,6 +28638,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let pending = Masc_tui_types.take_image_read state request in
       (match result with
        | Image_worker_busy -> ()
+       | Image_kept_back refusal -> (match pending with
+         | Some ({sir_purpose=Open_image;_} as origin)
+             when not state.msx_open && generation = state.image_request_generation
+               && view = state.view && image_request_keeper_is_current state request ->
+             (* The guard did not send this read: the notice is drawn alone,
+                never as the image's failure (RFC §2). *)
+             let said = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Image_read refusal in
+             let opened_original = match origin.sir_owner with
+               | Board_image_read (_, subject, _) -> board_image_source_reader state ~message:said subject
+               | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> false in
+             if not opened_original then
+               image_notice state ~view ~keeper_name ~kind:Notice_failure said
+         | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ())
        | Image_prepared result -> match pending with
        | Some {sir_purpose=Inspect_image {identity;window};_}
            when state.image_open && not state.msx_open && view=state.view
@@ -28047,7 +28985,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                         | Some (Masc_tui_machine_live.Failed detail) ->
                             Error detail
                         | Some ((Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
-                                | Masc_tui_machine_live.Showing _) as live) ->
+                                | Masc_tui_machine_live.Showing _
+                                | Masc_tui_machine_live.Kept_back _) as live) ->
                             let live,frame = msx_frame_of_live ~previous_live:state.msx_live ~previous_frame:state.msx_frame live in
                             state.msx_live <- live; state.msx_frame <- frame; msx_surface_frame := frame;
                             Ok () in
@@ -28079,7 +29018,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 already reads it that way. Poll bookkeeping still runs:
                 liveness is not paint. *)
              let picture_changed =
-               match Masc_tui_machine_live.advance state.msx_live (Result.map fst result) with
+               match advance_machine_live state ~request:Kept_request.Msx_screen_read
+                       state.msx_live (Result.map fst result) with
                | None -> false
                | Some live ->
                    let live, frame = msx_frame_of_live ~previous_live:state.msx_live
@@ -28111,7 +29051,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                match result with
                | Ok (answer, Masc_tui_machine_live.Activity activity) -> Ok (answer, activity)
                | Ok (_, Masc_tui_machine_live.No_activity_feed) ->
-                   Error "live: a DOS read answered without an activity feed"
+                   Error (Request_failed "live: a DOS read answered without an activity feed")
                | Error _ as error -> error
              in
              state.dos_live_owed <- (match result with
@@ -28132,7 +29072,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 feed still repaints the spectator sidebar; an identical feed
                 remains silent. The read also discovers the DOS watch row
                 while the menu is open. *)
-             (match Masc_tui_machine_live.advance state.dos_live (Result.map fst result) with
+             (match advance_machine_live state ~request:Kept_request.Dos_screen_read
+                      state.dos_live (Result.map fst result) with
               | None ->
                   if activity_changed && not state.msx_menu_open then
                     render_spectator state
@@ -28159,7 +29100,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           launch_keeper_waiting_load ~change:(Waiting_keepers [keeper_name]) state ~mailbox
       end else launch_keeper_turns_load state ~mailbox
   | Keeper_msg (Keeper_preparation_loaded (request, result)) ->
-      state.msg_preparation_details <- Masc_tui_preparation_details.receive request result state.msg_preparation_details
+      let details = state.msg_preparation_details in
+      state.msg_preparation_details <- (match result with
+        | Ok snapshot -> Masc_tui_preparation_details.receive request (Ok snapshot) details
+        | Error (Request_failed detail) ->
+            Masc_tui_preparation_details.receive request (Error detail) details
+        | Error (Request_withdrawn refusal) ->
+            Masc_tui_preparation_details.withdraw request
+              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:Kept_request.Preparation_read refusal) details)
   | Keeper_msg (Keeper_waiting_loaded (request, snapshot, result)) ->
       let usable = Keeper_waiting_read.accepts_event state.keeper_waiting_read request in
       let reconcile = Keeper_waiting_read.event_needs_reconciliation state.keeper_waiting_read request in
@@ -28316,10 +29265,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.approval_cursor <- max 0 (count - 1);
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Ok () -> ()
-       | Error detail ->
+       | Error (Request_failed detail) ->
            report_action state "error"
              (Printf.sprintf "Gate decision for %s failed: %s" approval_id
-                detail))
+                detail)
+       | Error (Request_withdrawn refusal) ->
+           report_withdrawn state ~request:Kept_request.Gate_decision refusal)
   | Gate_msg (Gate_auto_judge_retried (approval_id, expected_workspace, result, generation)) ->
       let flow, owns_action =
         Approval.Flow.finish_action state.approval_flow generation
@@ -28331,32 +29282,37 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (Printf.sprintf "Auto Judge retry started for %s" approval_id);
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Ok () -> ()
-       | Error detail ->
+       | Error (Request_failed detail) ->
            report_action state "error"
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
-                detail))
+                detail)
+       | Error (Request_withdrawn refusal) ->
+           report_withdrawn state ~request:Kept_request.Auto_judge_retry refusal)
   | Gate_msg (Gate_mode_set (lane, mode, result)) ->
       (match result with
        | Ok () ->
            report_action state "system"
              (Printf.sprintf "%s Gate set to %s" (Masc_tui_palette.gate_lane_label lane) mode);
            launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
-       | Error detail ->
+       | Error (Request_failed detail) ->
            report_action state "error"
-             (Printf.sprintf "%s Gate change failed: %s" (Masc_tui_palette.gate_lane_label lane) detail))
+             (Printf.sprintf "%s Gate change failed: %s" (Masc_tui_palette.gate_lane_label lane) detail)
+       | Error (Request_withdrawn refusal) ->
+           report_withdrawn state ~request:Kept_request.Gate_mode_change refusal)
   | Keeper_msg (Keeper_gate_settings_loaded result) ->
       (match result with
        | Ok (modes, exact_lanes) ->
            state.keeper_gate_modes <- modes;
            state.keeper_exact_lane_firsts <- exact_lanes;
            state.keeper_gate_settings_unread <- None
-       | Error detail ->
+       | Error failure ->
            (* Keep the last known settings rather than showing every Keeper as
               following the workspace, which is the looser reading and the one
               an operator would act on. The pane says the read failed: before
               the first successful read, the "last known" values are the
-              defaults. *)
-           state.keeper_gate_settings_unread <- Some detail)
+              defaults. A read the guard stopped says so alone (RFC §2). *)
+           state.keeper_gate_settings_unread <- Some (request_failure_text
+             ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Gate_settings_read failure))
   | Keeper_msg (Keeper_tool_modes_loaded (result, ticket)) ->
       (* Dropped when a press has opened since the fetch went out -- it
          describes the stance from before that press, including a press that
@@ -28383,9 +29339,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    | Masc.Keeper_tool_approval_mode.Yolo -> Some keeper
                    | Masc.Keeper_tool_approval_mode.Auto -> None)
                  overrides
-         | Error detail ->
+         | Error failure ->
              state.tool_modes_owed <- failed_read state.tool_modes_owed;
-             state.keeper_tool_modes_error <- Some detail)
+             state.keeper_tool_modes_error <- Some (request_failure_text
+               ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Tool_modes_read failure))
   | Keeper_msg (Keeper_tool_mode_set (keeper_name, mode, result, generation)) ->
       let flow, owned = Approval.Flow.finish_action state.approval_flow generation in
       state.approval_flow <- flow;
@@ -28414,9 +29371,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   Printf.sprintf "%s is back on the approval policy (%s)"
                     keeper_name
                     (Masc_tui_types.tool_mode_word Masc.Keeper_tool_approval_mode.Auto))
-       | Error detail ->
+       | Error (Request_failed detail) ->
            report_action state "error"
-             (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
+             (Printf.sprintf "could not set %s's gate: %s" keeper_name detail)
+       | Error (Request_withdrawn refusal) ->
+           report_withdrawn state ~request:Kept_request.Tool_mode_change refusal)
   | Keeper_msg (Keeper_tool_approval_answered
       (keeper_name, tool_call_id, approval_id, allow, result, generation)) ->
       (* Release the single-action slot [launch_surface_tool_approval] took, so
@@ -28438,6 +29397,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              "system"
          | Ok { remembered = false; settled = false } | Error _ -> "error")
         (match result with
+         | Error (Request_withdrawn refusal) ->
+             (* Not sent: the kept-back notice alone (RFC §2). *)
+             workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Tool_approval refusal
          | Ok { Masc_tui_http.settled = true; _ } ->
              Printf.sprintf "%s %s's held call %s"
                (if allow then "allowed" else "denied")
@@ -28455,16 +29418,21 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                "too late for %s's call %s; it was no longer waiting"
                keeper_name
                (Keeper_chat.compact_request_id tool_call_id)
-         | Error detail -> "could not answer the held call: " ^ detail);
+         | Error (Request_failed detail) -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
   | Keeper_msg (Keeper_run_next_done (request, result)) ->
       (match settle_keeper_run_next state request result with
        | Run_next_untracked -> ()
        | (Run_next_received | Run_next_retired) as completion ->
            (match completion, result with
-            | Run_next_received, Error detail ->
+            | Run_next_received, Error (Request_failed detail) ->
                 append_chat_history state request Message_error
                   ("다음 순서 확인 불가: " ^ detail)
+            | Run_next_received, Error (Request_withdrawn refusal) ->
+                (* Not sent: the kept-back notice alone (RFC §2). *)
+                append_chat_history state request Message_error
+                  (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                     ~request:Kept_request.Run_next refusal)
             | (Run_next_untracked | Run_next_retired), _
             | Run_next_received, Ok _ -> ());
            dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name;
@@ -28486,7 +29454,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Ok Pending_admission_paused -> Interrupt_declined "Pending input paused; no active turn signalled"
           | Ok (Not_signalled { reason; detail }) ->
             Interrupt_declined (Option.value ~default:reason detail)
-          | Error detail -> Interrupt_failed detail }) state.keeper_observed_interrupts
+          | Error (Request_failed detail) -> Interrupt_failed detail
+          | Error (Request_withdrawn refusal) -> Interrupt_kept_back refusal }) state.keeper_observed_interrupts
   | Keeper_msg (Keeper_chat_interrupt_done (request, generation, result)) ->
       let keeper_name = request.Keeper_chat.keeper_name in
       settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
@@ -28515,7 +29484,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    (match detail with
                     | None -> reason
                     | Some detail -> reason ^ ": " ^ detail)
-             | Error detail -> Keeper_chat_transcript.Signal_error detail
+             | Error (Request_failed detail) -> Keeper_chat_transcript.Signal_error detail
+             | Error (Request_withdrawn refusal) ->
+                 (* Not sent: the kept-back notice alone (RFC §2). *)
+                 Keeper_chat_transcript.Signal_kept_back
+                   (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                      ~request:Kept_request.Keeper_interrupt refusal)
            in
            Keeper_chat_transcript.note_interrupt live noted
        | Some _ | None ->
@@ -28659,10 +29633,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                     Only a successful page read can clear that source error. *)
                  forget_session_rows_the_transcript_holds state keeper_name rows ~fresh;
                  kept
-              | Error detail ->
+              | Error failure ->
                  (* The transcript is left as it was and the session rows stay: a
                     failed load must not be the reason the pane goes blank. *)
-                 state.msg_loaded_error <- Some detail;
+                 state.msg_loaded_error <- Some failure;
                  prior_history
              in
              let history = match result with
@@ -28684,16 +29658,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                     | Chat_history_received _ -> Chat_history_received history
                     | Chat_history_unread | Chat_history_partial _ -> Chat_history_partial history in
                   set_keeper_chat_sources state {prior_sources with kcs_history}
-              | Error detail ->
-                Log.Transport.debug "keeper initial reply unavailable for %s: %s" keeper_name detail)
+              | Error failure ->
+                Log.Transport.debug "keeper initial reply unavailable for %s: %s" keeper_name
+                  (request_failure_text ~ko:false ~request:Kept_request.Keeper_reply_read failure))
            | Keeper_history_read.Memory ->
              let memory_entries = match result with
                | Ok { Keeper_chat_history.rows; dropped } ->
                    state.msg_memory_error <- None;
                    state.msg_memory_dropped <- dropped;
                    msg_entries_of_history_rows state keeper_name rows
-               | Error detail ->
-                   state.msg_memory_error <- Some detail;
+               | Error failure ->
+                   state.msg_memory_error <- Some failure;
                    prior_sources.kcs_memory in
              set_keeper_chat_sources state {prior_sources with kcs_memory=memory_entries});
           (* Once both answers of this read are applied, the owed record
@@ -28727,8 +29702,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            && Option.exists (String.equal keeper_name) state.msg_target_keeper_name then begin
           state.msg_older_loading <- false;
           match result with
-          | Error error ->
-              state.msg_older_error <- Some (Keeper_chat_history.page_error_to_string error)
+          | Error failure ->
+              state.msg_older_error <- Some failure
           | Ok page ->
               let sources = if state.msg_loaded_keeper = Some keeper_name
                 then state.msg_loaded_sources else empty_keeper_chat_sources in
@@ -28916,7 +29891,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           add_event state "error"
             (Printf.sprintf "journal for %s not loaded: %s"
                (Keeper_chat.compact_request_id journal_id)
-               (Keeper_chat.terminal_safe_text detail)));
+               (Keeper_chat.terminal_safe_text detail))
+      | Error (Keeper_chat_log.Events_kept_back notice) ->
+          (* Not sent, so not remembered either: the next load asks again. *)
+          add_event state "error"
+            (notice ^ " · " ^ Keeper_chat.compact_request_id journal_id));
       read_again ())
   | Tools_msg (Tools_read_loaded (Tools_inventory_loaded { generation; keeper = keeper_name; result })) ->
       let current = settle_tools_read state ~generation Tools_inventory_read in
@@ -28963,7 +29942,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.tools_evidence_reference <- None;
         state.tools_evidence_run_id <- None;
         match result with
-        | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
+        | Error (Request_failed detail) -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
+        | Error (Request_withdrawn refusal) ->
+            report_withdrawn state ~request:Kept_request.Skill_evidence refusal
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
   | Tools_msg (Tools_read_loaded (Tools_activations_loaded { generation; keeper; result })) ->
       let (_ : bool) = settle_tools_read state ~generation Tools_activations_read in
@@ -29094,7 +30075,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match state.browser_history with
        | Some history when generation=state.browser_history_generation ->
          (match result with
-          | Error detail -> state.browser_history <- Some {history with content=List_failed detail}
+          | Error (Request_failed detail) -> state.browser_history <- Some {history with content=List_failed detail}
+          | Error (Request_withdrawn refusal) ->
+              state.browser_history <- Some {history with content=List_kept_back
+                (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                   ~request:Kept_request.Browser_history_read refusal)}
           | Ok snapshot when snapshot.kcs_keeper <> history.keeper_name || snapshot.kcs_mismatched <> 0 ->
               state.browser_history <- Some {history with content=List_failed "Keeper history identity mismatch"}
           | Ok snapshot ->
@@ -29187,13 +30172,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         (fun ((_, outcome) as result) ->
            let kind =
              match outcome with
-             | Masc_tui_connector_unbind.Failed _ -> "error"
+             | Masc_tui_connector_unbind.Failed _ | Kept_back _ -> "error"
              | Removed | Rebound | Not_found _ -> "system"
            in
            add_event state kind (Masc_tui_connector_unbind.outcome_line result))
         (Masc_tui_connector_unbind.report_order results);
       report_action state
-        (if Masc_tui_connector_unbind.any_failed results then "error"
+        (if Masc_tui_connector_unbind.any_failed results
+            || Masc_tui_connector_unbind.any_kept_back results then "error"
          else "system")
         (Masc_tui_connector_unbind.summary ~keeper_name results);
       reload_connectors_after_write state ~mailbox
@@ -29206,7 +30192,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (match retirement with
             | Connector_read.No_retirement -> ()
             | Retire _ -> launch_connectors_load state ~mailbox))
-  | Connectors_msg (Connectors_loaded (request, result)) ->
+  | Connectors_msg (Connectors_loaded (request, read)) ->
+      let result = said_read_result state ~request:Kept_request.Connector_list_read read in
       (match complete_connectors_read state request result with
        | None -> ()
        | Some completion -> begin
@@ -29224,11 +30211,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             let pending = List.rev state.connector_unbind_offer_pending in
             state.connector_unbind_offer_pending <- [];
             state.connector_unbind_offer_origin <- None;
+            (* A read the guard stopped is said by its kept-back notice
+               alone, never as the offer's failure (RFC §2). *)
+            let line keeper_name = match read with
+              | Error (Request_withdrawn _) ->
+                  Masc_tui_connector_unbind.offer_read_kept_back ~keeper_name ~notice:detail
+              | Ok _ | Error (Request_failed _) ->
+                  Masc_tui_connector_unbind.offer_read_failed ~keeper_name ~detail in
             List.iter
-              (fun keeper_name ->
-                 report_action state "error"
-                   (Masc_tui_connector_unbind.offer_read_failed ~keeper_name
-                      ~detail))
+              (fun keeper_name -> report_action state "error" (line keeper_name))
               pending)
       end)
   | Runtime_msg (Runtime_surface_loaded (generation, result)) ->
@@ -29263,14 +30254,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               | Error detail ->
                   state.runtime_surface_error <- Some detail;
                   Masc_tui_types.runtime_lane_list_reread state
-                    ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail))
-         | Error detail ->
+                    ~list:Masc_tui_types.Runtime_surface_list ~generation
+                    (Error (Request_failed detail)))
+         | Error (Request_failed detail) ->
              (* The last joined reading remains visible. An authority read or
                 decode failure is not an empty lane inventory. *)
              state.runtime_evidence <- Some (Error "runtime history not refreshed; runtime identity read failed");
              state.runtime_surface_error <- Some detail;
              Masc_tui_types.runtime_lane_list_reread state
-               ~list:Masc_tui_types.Runtime_surface_list ~generation (Error detail));
+               ~list:Masc_tui_types.Runtime_surface_list ~generation (Error (Request_failed detail))
+         | Error (Request_withdrawn refusal) ->
+             (* The read was not sent, so no history was refreshed either;
+                both say it was kept back. *)
+             let notice = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:Kept_request.Runtime_surface_read refusal in
+             state.runtime_evidence <- Some (Error notice);
+             state.runtime_surface_error <- Some notice;
+             Masc_tui_types.runtime_lane_list_reread state
+               ~list:Masc_tui_types.Runtime_surface_list ~generation
+               (Error (Request_withdrawn refusal)));
       if is_current && state.runtime_surface_force_pending then begin
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
@@ -29300,7 +30302,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          when snapshot.Masc.Tui_decode_memory_health.mhs_generated_at
               < held.Masc.Tui_decode_memory_health.mhs_generated_at -> ()
        | Ok snapshot, (Some _ | None) -> apply_memory_health_snapshot state snapshot
-       | Error detail, (Some _ | None) -> state.memory_health_error <- Some detail);
+       | Error failure, (Some _ | None) -> state.memory_health_error <- Some failure);
       owe_memory_input_read state
   | Memory_msg (Memory_loaded ((Row_health_read { keeper; result }
       | Command_health_read { keeper; result }) as reading)) ->
@@ -29314,9 +30316,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          let ko = state.ui_language = Lang_ko in
          let say korean english = if ko then korean else english in
          match result with
-         | Error detail ->
+         | Error (Request_failed detail) ->
            notice ~kind:Notice_failure
              (keeper ^ ": " ^ say "상태 " "status " ^ field_failed ~ko ^ " · " ^ detail)
+         | Error (Request_withdrawn refusal) ->
+           notice ~kind:Notice_failure
+             (workspace_refusal_text ~ko ~request:(Kept_request.Command "/memory status") refusal
+              ^ " · " ^ keeper)
          | Ok {mhr_keeper = Row_absent; _} ->
            notice ~kind:Notice_failure
              (keeper ^ ": " ^ say "메모리 관측 없음" "no memory observation")
@@ -29382,8 +30388,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               when String.equal selected.Masc.Tui_decode_memory_health.mkh_keeper_id keeper ->
                 owe_memory_input_read state
             | Some _ | None -> ())
-       | None, Error detail ->
-           state.memory_health_error <- Some detail;
+       | None, Error failure ->
+           state.memory_health_error <- Some failure;
            state.memory_health_owed <- failed_read state.memory_health_owed
        | None, Ok _ -> owe_memory_health_read state)
   | Memory_msg (Memory_input_loaded (request, result)) ->
@@ -29399,10 +30405,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Memory_msg (Memory_world_loaded (request, result)) ->
       (* An answer for a read the workspace has moved past is dropped whole by
          [complete]; a failed refresh keeps the inventory held. *)
-      state.memory_world <-
-        Masc_tui_memory_world.complete
-          ~retry_s:stream_reconnect_s ~max_retry_s:keeper_execute_stream_max_reconnect_s
-          ~now:(monotonic_now_s ()) state.memory_world request result
+      let retry_s = stream_reconnect_s
+      and max_retry_s = keeper_execute_stream_max_reconnect_s
+      and now = monotonic_now_s () in
+      state.memory_world <- (match result with
+        | Ok inventory ->
+            Masc_tui_memory_world.complete ~retry_s ~max_retry_s ~now state.memory_world request
+              (Ok inventory)
+        | Error (Request_failed detail) ->
+            Masc_tui_memory_world.complete ~retry_s ~max_retry_s ~now state.memory_world request
+              (Error detail)
+        | Error (Request_withdrawn refusal) ->
+            Masc_tui_memory_world.withdraw ~retry_s ~max_retry_s ~now state.memory_world request
+              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                 ~request:Kept_request.Memory_world_read refusal))
   | Memory_msg (Memory_facts_loaded (request, result)) ->
       (* A late answer for a browser that closed, or for the keeper the reader
          already left, is dropped whole by [complete]. A failed refresh keeps
@@ -29462,7 +30478,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  (max 0 (state.repository_changes_diff_max_width - 1));
              state.repository_changes_diff_error <- None
          | Error detail -> state.repository_changes_diff_error <- Some detail)
-  | Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, result)) ->
+  | Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, read)) ->
+      let result = said_read_result state ~request:Kept_request.File_changes_read read in
       let still_current =
         generation = state.msg_file_changes_generation
         && Option.equal String.equal state.msg_file_changes_keeper
@@ -29474,9 +30491,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         let refresh_pending = state.msg_file_changes_refresh_pending in
         state.msg_file_changes_loading <- false;
         state.msg_file_changes_refresh_pending <- false;
+        (* A read the guard stopped is said by its kept-back notice alone,
+           never as the changes being unavailable (RFC §2). *)
         let store_error detail =
           state.msg_file_changes_error <- Some detail;
-          add_event state "error" ("chat recorded changes unavailable: " ^ detail)
+          add_event state "error" (match read with
+            | Error (Request_withdrawn _) -> detail
+            | Ok _ | Error (Request_failed _) -> "chat recorded changes unavailable: " ^ detail)
         in
         (match result with
          | Ok snapshot
@@ -29503,8 +30524,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (state.workspace_authority, state.workspace_read_authority) then begin
         let result = match result with
           | Ok snapshot when not (String.equal snapshot.Masc.Tui_decode.fcs_keeper key.apk_keeper) ->
-              Error (Printf.sprintf "file-change response named keeper %s, expected %s"
-                snapshot.fcs_keeper key.apk_keeper)
+              Error (Request_failed (Printf.sprintf "file-change response named keeper %s, expected %s"
+                snapshot.fcs_keeper key.apk_keeper))
           | Ok _ | Error _ -> result
         in
         let current =
@@ -29535,7 +30556,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Some keeper_name when String.equal keeper_name key.apk_keeper
                                   && server_authority_ready state ->
               state.acting_pane_changes <-
-                Masc_tui_fetched.invalidate ~reason:"Observer events were lost"
+                Masc_tui_fetched.invalidate ~reason:(Request_failed "Observer events were lost")
                   state.acting_pane_changes;
               launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name
           | Some _ | None ->
@@ -29544,6 +30565,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         end
       end
   | File_changes_loaded (keeper_name, result) ->
+      let result = said_read_result state ~request:Kept_request.File_changes_read result in
       (* An answer for a keeper the surface has since left is not this
          surface's answer. Dropping it keeps one keeper's files from being
          drawn under another's name. *)
@@ -29654,10 +30676,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | None,_ | Some _,(Some _ | None) -> ());
             Masc_tui_types.runtime_lane_list_reread state
               ~list:Masc_tui_types.Standalone_lanes_list ~generation (Ok ())
-        | Error detail ->
-            state.standalone_lanes_error <- Some detail;
+        | Error failure ->
+            state.standalone_lanes_error <- Some (request_failure_text
+              ~ko:(state.ui_language = Lang_ko) ~request:Kept_request.Lanes_read failure);
             Masc_tui_types.runtime_lane_list_reread state
-              ~list:Masc_tui_types.Standalone_lanes_list ~generation (Error detail));
+              ~list:Masc_tui_types.Standalone_lanes_list ~generation (Error failure));
       if state.standalone_lanes_reread_pending then begin
         state.standalone_lanes_reread_pending <- false;
         launch_lanes_load state ~mailbox
@@ -29759,6 +30782,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.harness_owed <- failed_read state.harness_owed;
           state.harness_error <- Some detail)
   | Fusion_msg (Fusion_runs_loaded (request, result)) ->
+      let result = said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.runs_loaded state request result with
        | Reread when state.view = Fusion
                      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs) ->
@@ -29766,12 +30790,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Runs result
        | Reread | Await_observer | Obsolete -> ())
   | Fusion_msg (Fusion_detail_loaded (generation, run_id, result)) ->
+      let result = said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result with
        | Reread when state.view = Fusion ->
            launch_fusion_detail_load state ~mailbox ~run_id
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Detail result
        | Reread | Await_observer | Obsolete -> ())
   | Fusion_msg (Fusion_historical_detail_loaded (generation, reference, result)) ->
+      let result = said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result with
        | Reread when state.view = Fusion ->
            launch_fusion_historical_detail_load state ~mailbox ~reference
@@ -29814,9 +30840,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                        requests) ->
                state.verification_verdict_armed <- None;
                state.verification_verdict_error <-
-                 Some (Printf.sprintf
+                 Some (Request_failed (Printf.sprintf
                    "%s: request %s changed or closed; review the refreshed queue"
-                   task_id request_id)
+                   task_id request_id))
            | Some _ | None -> ());
           (match state.verification_detail_request_id with
            | Some request_id
@@ -29831,11 +30857,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                state.verification_detail_request_id <- None;
                state.verification_detail_scroll <- 0
            | Some _ | None -> ())
-      | Error detail ->
+      | Error failure ->
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
           state.verification_owed <- failed_read state.verification_owed;
-          state.verification_error <- Some detail)
+          state.verification_error <- Some failure)
   | Local_msg (Local_workspace_read (request, result)) ->
       (match observe_local_source state ~source:Local_work
           ~is_observed:Masc_tui_loader.local_workspace_observed request result with
@@ -29972,10 +30998,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             retire_keeper_chat_history state keeper_name;
             launch_keeper_history_load ~load_file_changes:false ~force:true state
               ~mailbox ~keeper_name;
-            state.msg_older_error <- Some (Keeper_chat_history.page_error_to_string Keeper_chat_history.Page_stale)
+            state.msg_older_error <- Some (Request_failed
+              (Keeper_chat_history.page_error_to_string Keeper_chat_history.Page_stale))
         | Error (Keeper_chat_history.Page_read_failed detail) ->
             (* A failed read retains its exact cursor for retry. *)
-            state.msg_older_error <- Some detail))
+            state.msg_older_error <- Some (Request_failed detail)))
 (* How long one pass of the loop applies queued results before it goes back
    to read a key. Results arrive in bursts (a history page, then a journal
    read for each turn on it), and applying all of them in one pass held a
@@ -30228,7 +31255,7 @@ let session_quit_notice (state : state) ~key =
       match Masc_tui_code_draft.phase draft with
       | Masc_tui_code_draft.Saving _
       | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Uncertain _, _) -> true
-      | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
+      | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _ | Masc_tui_code_draft.Kept_back _
       | Masc_tui_code_draft.Needs_review (Masc_tui_code_draft.Conflict _, _) -> false)
       state.code_drafts in
   let chat_draft = not (keeper_message_draft_empty state) || state.msg_drafts <> [] in
@@ -30869,10 +31896,12 @@ let main
     fun () -> admitted && not (Masc_tui_exit_signals.pending_signal exit_signals)
       && signal_generation = Masc_tui_exit_signals.generation exit_signals
       && terminal_generation = Atomic.get resize_generation in
-  let workspace_write_ready action =
+  (* A write the guard refuses here is not sent, and is said as kept back
+     under its own name (RFC §2). *)
+  let workspace_write_ready request =
     match write_authority_refusal state state.workspace_authority with
     | None -> true
-    | Some detail -> report_action state "error" (action ^ ": " ^ detail); false
+    | Some refusal -> report_withdrawn state ~request refusal; false
   in
   let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
   let presented_surface_reference () =
@@ -31433,12 +32462,18 @@ let main
                   report_action state "error"
                     (action ^ ": channel_id must remain the selected binding")
               | Some _ | None -> (
-                  let result =
-                    let open Result.Syntax in
-                    let* () = check_workspace_request state ~mailbox:async_messages
-                      ~authority ~identity ~host ~port () in
-                    post ~connector ~json in
-                  match result with
+                  match admit_workspace_request state ~mailbox:async_messages
+                      ~authority ~identity ~host ~port () with
+                  | Error refusal ->
+                      (* Not sent: the kept-back notice, never the route's
+                         own answer (RFC §2). *)
+                      let request = match change with
+                        | Channel_bind -> Kept_request.Connector_bind
+                        | Channel_unbind -> Kept_request.Connector_unbind
+                        | Channel_binding_edit -> Kept_request.Connector_binding_edit in
+                      report_withdrawn state ~request refusal
+                  | Ok () ->
+                  match post ~connector ~json with
                   | Ok _ ->
                       state.connector_unbind_armed <- None;
                       report_action state "system"
@@ -31526,10 +32561,12 @@ let main
                   in
                   if state.connector_unbind_armed = Some exact then begin
                     state.connector_unbind_armed <- None;
-                    let result =
-                      let open Result.Syntax in
-                      let* () = check_workspace_request state ~mailbox:async_messages
-                        ~authority ~identity ~host ~port () in
+                    match admit_workspace_request state ~mailbox:async_messages
+                        ~authority ~identity ~host ~port () with
+                    | Error refusal ->
+                      report_withdrawn state ~request:Kept_request.Connector_unbind refusal
+                    | Ok () ->
+                    match
                       Masc_tui_http.post_connector_unbind ~host ~port
                         ~connector:selected.cn_id
                         ~body_json:
@@ -31537,8 +32574,8 @@ let main
                              (`Assoc
                                [ "channel_id", `String binding.cb_channel_id
                                ; "keeper_name", `String binding.cb_keeper_name
-                               ])) in
-                    match result with
+                               ]))
+                    with
                     | Ok _ ->
                       report_action state "system"
                         ("unbind: removed " ^ label);
@@ -31705,20 +32742,22 @@ let main
   in
   let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
       ~reason ~described =
-    if workspace_write_ready "Harness label" then
-    let check = capture_workspace_check state ~mailbox:async_messages in
+    if workspace_write_ready Kept_request.Harness_label then
+    let check = capture_workspace_admission state ~mailbox:async_messages in
     let enqueue_async = workspace_enqueue state in
     let host = server_peer_host in
     let port = state.port in
     let run () =
       let result =
-        match
-          Result.bind (check ()) (fun () ->
-            Masc_tui_http.post_harness_label ~host ~port ~notes_hash ~verdict
-              ~reason)
-        with
-        | Error err -> Error err
-        | Ok _json -> Ok described
+        match check () with
+        | Error refusal -> Error (Request_withdrawn refusal)
+        | Ok () ->
+          (match
+             Masc_tui_http.post_harness_label ~host ~port ~notes_hash ~verdict
+               ~reason
+           with
+           | Error err -> Error (Request_failed err)
+           | Ok _json -> Ok described)
       in
       enqueue_async async_messages (Harness_msg (Harness_label_done result))
     in
@@ -31743,7 +32782,7 @@ let main
                    (if approved then "approve" else "reject")))
   in
   let handle_harness_overrule () =
-    if workspace_write_ready "Harness label" then
+    if workspace_write_ready Kept_request.Harness_label then
     match harness_cursor_verdict () with
     | None -> ()
     | Some row -> (
@@ -32192,17 +33231,19 @@ let main
   let write_runtime_param ~edit ~failure ~notice write =
     if not state.runtime_params_loading then begin
       state.runtime_params_loading <- true;
-      launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id
+      launch_guarded_request state ~mailbox:async_messages
+        ~boundary_error:(fun detail -> Request_failed detail)
+        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
         ~deliver:(fun result -> Runtime_msg (Runtime_param_written (edit, result)))
         (fun () -> write ()
           |> Result.map (fun _ -> notice)
-          |> Result.map_error (fun detail -> failure ^ detail))
+          |> Result.map_error (fun detail -> Request_failed (failure ^ detail)))
     end
   in
   let handle_runtime_param_edit_open ~advanced () =
     match selected_runtime_param () with
     | None ->
-      state.runtime_params_notice <- Some (false, "No runtime parameter is selected")
+      state.runtime_params_notice <- Some (Params_said (false, "No runtime parameter is selected"))
     | Some row ->
       state.runtime_param_edit <-
         Some (Masc_tui_types.runtime_param_edit_of_row ~advanced row);
@@ -32213,7 +33254,7 @@ let main
     | None -> ()
     | Some edit -> (
       match Masc_tui_types.runtime_param_edit_value edit with
-      | Error detail -> state.runtime_params_notice <- Some (false, detail)
+      | Error detail -> state.runtime_params_notice <- Some (Params_said (false, detail))
       | Ok value ->
         write_runtime_param ~edit:(Some edit) ~failure:"Set failed: "
           ~notice:(Printf.sprintf "Set %s = %s" edit.rpe_key (Yojson.Safe.to_string value))
@@ -32223,11 +33264,11 @@ let main
   let handle_runtime_param_clear () =
     match selected_runtime_param () with
     | None ->
-      state.runtime_params_notice <- Some (false, "No runtime parameter is selected")
+      state.runtime_params_notice <- Some (Params_said (false, "No runtime parameter is selected"))
     | Some row ->
       let key = row.Tui_decode.rpr_key in
       if not row.rpr_has_override then
-        state.runtime_params_notice <- Some (true, key ^ " already uses its default")
+        state.runtime_params_notice <- Some (Params_said (true, key ^ " already uses its default"))
       else
         write_runtime_param ~edit:None ~failure:"Reset failed: "
           ~notice:("Reset " ^ key ^ " to its default")
@@ -32287,7 +33328,11 @@ Use relative paths for resources already held in the package. -->
             let package_id = document.name in
             let report kind text = report_action state kind (Terminal_text.single_line text) in
             (match check () with
-             | Error detail -> report "error" ("Create not sent; draft retained: " ^ detail)
+             | Error refusal ->
+               (* Not sent: the kept-back notice with the draft it kept
+                  (RFC §2). *)
+               report_kept_back state ~request:Kept_request.Skill_creation
+                 (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept
              | Ok () ->
                match Masc_tui_http.post_skill_editor_create ~host:server_peer_host ~port
                    ~composition ~source_id ~package_id ~source_text with
@@ -32310,16 +33355,20 @@ Use relative paths for resources already held in the package. -->
                  launch_tools_load state ~mailbox:async_messages)))
   in
   let handle_skill_create ~composition () =
-    let check = capture_workspace_check state ~mailbox:async_messages in
+    let check = capture_workspace_admission state ~mailbox:async_messages in
     let port = state.port in
     let origin = workspace_input_identity_of_server state.server_identity in
-    match Result.bind (check ()) (fun () ->
-      Masc_tui_http.fetch_skill_editor_sources ~host:server_peer_host ~port) with
+    match check () with
+    | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_sources_read refusal
+    | Ok () ->
+    match Masc_tui_http.fetch_skill_editor_sources ~host:server_peer_host ~port with
     | Error detail -> report_action state "error" ("Skill sources failed: " ^ detail)
     | Ok [] -> report_action state "error" "No ready read-write Skill source"
     | Ok [source_id] ->
       (match origin with
-       | None -> report_action state "error" "Confirm the current workspace before authoring a Skill"
+       | None ->
+         report_kept_back state ~request:Kept_request.Skill_creation
+           workspace_identity_unconfirmed Nothing_kept
        | Some origin -> edit_new_skill ~origin ~composition ~source_id ~check ~port ())
     | Ok sources ->
       state.search <- None;
@@ -32344,14 +33393,16 @@ Use relative paths for resources already held in the package. -->
          | Dismissed -> state.tools_skill_source_picker <- None
          | Chosen source_id ->
            state.tools_skill_source_picker <- None;
-           let check = workspace_check_sequence state ~mailbox:async_messages
+           let check = workspace_admission_sequence state ~mailbox:async_messages
              ~authority:picker.ssp_authority ~identity:picker.ssp_identity
              ~host:server_peer_host ~port:picker.ssp_port in
            match check () with
-           | Error detail -> report_action state "error" ("Skill creation withdrawn: " ^ detail)
+           | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_creation refusal
            | Ok () ->
              match workspace_input_identity_of_server picker.ssp_identity with
-             | None -> report_action state "error" "Original Skill workspace is unconfirmed"
+             | None ->
+               report_kept_back state ~request:Kept_request.Skill_creation
+                 workspace_identity_unconfirmed Nothing_kept
              | Some origin -> edit_new_skill ~origin ~composition:picker.ssp_composition
                  ~source_id ~check ~port:picker.ssp_port ())
   in
@@ -32455,18 +33506,20 @@ Use relative paths for resources already held in the package. -->
               state ~mailbox:async_messages profile.esp_reference))
     | _ -> report_action state "system" "Load this Skill revision's retained evidence first"
   in
+  (* Each of the read, the preview and the save asks the workspace guard
+     first; one it stops was not sent and is said as kept back (RFC §2). *)
   let handle_skill_edit () =
-    let check = capture_workspace_check state ~mailbox:async_messages in
+    let check = capture_workspace_admission state ~mailbox:async_messages in
     match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
       let name = profile.Masc.Tui_decode_tools.esp_name in
       let host = server_peer_host in
       let port = state.port in
-      (match
-         Result.bind (check ()) (fun () ->
-           Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference)
-       with
+      (match check () with
+       | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_read refusal
+       | Ok () ->
+       match Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference with
        | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
        | Ok { Masc_tui_http.sel_access = Skill_source_config.Read_only; _ } ->
          report_action state "error" (name ^ " belongs to a read-only Skill source")
@@ -32487,20 +33540,22 @@ Use relative paths for resources already held in the package. -->
              | Ok edited when String.equal edited loaded.sel_source_text ->
                report_action state "system" (name ^ " unchanged")
              | Ok edited ->
-               (match
-                  Result.bind (check ()) (fun () ->
-                    Masc_tui_http.post_skill_editor_preview ~host ~port
-                      ~reference:loaded.sel_reference ~source_text:edited)
+               (match check () with
+                | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_preview refusal
+                | Ok () ->
+                match
+                  Masc_tui_http.post_skill_editor_preview ~host ~port
+                    ~reference:loaded.sel_reference ~source_text:edited
                 with
                 | Error detail ->
                   report_action state "error" ("Skill preview rejected: " ^ detail)
                 | Ok _ ->
-                  (match
-                     Result.bind (Result.map_error
-                       (fun detail -> Masc_tui_http.Skill_write_refused ("Save not sent: " ^ detail))
-                       (check ())) (fun () ->
-                       Masc_tui_http.post_skill_editor_save ~host ~port
-                         ~reference:loaded.sel_reference ~source_text:edited)
+                  (match check () with
+                   | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_save refusal
+                   | Ok () ->
+                   match
+                     Masc_tui_http.post_skill_editor_save ~host ~port
+                       ~reference:loaded.sel_reference ~source_text:edited
                    with
                    | Error (Masc_tui_http.Skill_write_refused detail) ->
                      report_action state "error" (Terminal_text.single_line ("Skill save refused: " ^ detail))
@@ -32540,7 +33595,7 @@ Use relative paths for resources already held in the package. -->
      what the edit flow does too -- it yields the fresh exact reference the
      server's revision CAS demands and refuses read-only sources up front. *)
   let handle_skill_delete () =
-    let check = capture_workspace_check state ~mailbox:async_messages in
+    let check = capture_workspace_admission state ~mailbox:async_messages in
     match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
@@ -32555,20 +33610,20 @@ Use relative paths for resources already held in the package. -->
       end
       else begin
         state.tools_skill_delete_armed <- None;
-        match
-          Result.bind (check ()) (fun () ->
-            Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference)
-        with
+        (* The read and the delete each ask the workspace guard first; one it
+           stops was not sent and is said as kept back (RFC §2). *)
+        match check () with
+        | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_read refusal
+        | Ok () ->
+        match Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference with
         | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
         | Ok { Masc_tui_http.sel_access = Skill_source_config.Read_only; _ } ->
           report_action state "error" (name ^ " belongs to a read-only Skill source")
         | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
-          (match
-             Result.bind (Result.map_error
-               (fun detail -> Masc_tui_http.Skill_write_refused ("Delete not sent: " ^ detail))
-               (check ())) (fun () ->
-               Masc_tui_http.delete_skill_editor ~host ~port ~reference:loaded.sel_reference)
-           with
+          (match check () with
+           | Error refusal -> report_withdrawn state ~request:Kept_request.Skill_delete refusal
+           | Ok () ->
+           match Masc_tui_http.delete_skill_editor ~host ~port ~reference:loaded.sel_reference with
            | Error (Masc_tui_http.Skill_write_refused detail) ->
              report_action state "error" (Terminal_text.single_line ("Skill delete refused: " ^ detail))
            | Error (Skill_write_unconfirmed detail) ->
@@ -32604,8 +33659,8 @@ Use relative paths for resources already held in the package. -->
           ~prompt_key:row.Tui_decode.pr_key
   in
   let handle_prompt_edit () =
-    if workspace_write_ready "Prompt edit" then
-    let check = capture_workspace_check state ~mailbox:async_messages in
+    if workspace_write_ready Kept_request.Prompt_save then
+    let check = capture_workspace_admission state ~mailbox:async_messages in
     match selected_prompt () with
     | None -> report_action state "error" "prompts not loaded yet; r to reload"
     | Some row -> (
@@ -32620,10 +33675,18 @@ Use relative paths for resources already held in the package. -->
         | Error abort ->
           report_editor_abort state ~form:(Prompt_text row.Tui_decode.pr_key) abort
         | Ok edited ->
-          (match
-             Result.bind (check ()) (fun () ->
-               Masc_tui_http.post_prompt_override ~host:server_peer_host
-                 ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited)
+          (match check () with
+           | Error refusal ->
+             (* Not sent: the kept-back notice, with the prompt after it,
+                never a failed save (RFC §2). *)
+             report_action state "error"
+               (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                  ~request:Kept_request.Prompt_save refusal
+                ^ " · " ^ row.Tui_decode.pr_key)
+           | Ok () ->
+           match
+             Masc_tui_http.post_prompt_override ~host:server_peer_host
+               ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited
            with
            | Ok _ ->
              report_action state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
@@ -32635,8 +33698,8 @@ Use relative paths for resources already held in the package. -->
   (* Clearing is not editing to empty: it returns the prompt to the file's
      words, which is a different outcome from an override holding "". *)
   let handle_prompt_clear () =
-    if workspace_write_ready "Prompt clear" then
-    let check = capture_workspace_check state ~mailbox:async_messages in
+    if workspace_write_ready Kept_request.Prompt_clear then
+    let check = capture_workspace_admission state ~mailbox:async_messages in
     match selected_prompt () with
     | None -> report_action state "error" "prompts not loaded yet; r to reload"
     | Some row -> (
@@ -32645,10 +33708,18 @@ Use relative paths for resources already held in the package. -->
         report_action state "system"
           (row.Tui_decode.pr_key ^ ": no override to clear")
       | Tui_decode.Prompt_override -> (
+        match check () with
+        | Error refusal ->
+          (* Not sent: the kept-back notice, with the prompt after it, never
+             a failed clear (RFC §2). *)
+          report_action state "error"
+            (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+               ~request:Kept_request.Prompt_clear refusal
+             ^ " · " ^ row.Tui_decode.pr_key)
+        | Ok () ->
         match
-          Result.bind (check ()) (fun () ->
-            Masc_tui_http.post_prompt_clear ~host:server_peer_host
-              ~port:state.port ~key:row.Tui_decode.pr_key)
+          Masc_tui_http.post_prompt_clear ~host:server_peer_host
+            ~port:state.port ~key:row.Tui_decode.pr_key
         with
         | Ok _ ->
           report_action state "system"
@@ -32818,8 +33889,8 @@ Use relative paths for resources already held in the package. -->
      names every field the route reads, with the two that have no sensible
      default left empty. *)
   let handle_repository_add () =
-    if workspace_write_ready "Repository add" then
-    let check = capture_workspace_check state ~mailbox:async_messages in
+    if workspace_write_ready Kept_request.Repository_add then
+    let check = capture_workspace_admission state ~mailbox:async_messages in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_editor_unset state ~form:Repository_addition
@@ -32855,10 +33926,13 @@ Use relative paths for resources already held in the package. -->
           report_action state "error"
             "declaration needs non-empty \"name\" and \"url\" strings; nothing was added"
         else
+          match check () with
+          | Error refusal ->
+            report_withdrawn state ~request:Kept_request.Repository_add refusal
+          | Ok () ->
           match
-            Result.bind (check ()) (fun () ->
-              Masc_tui_http.post_repository_add ~host ~port
-                ~declaration_json:declaration)
+            Masc_tui_http.post_repository_add ~host ~port
+              ~declaration_json:declaration
           with
           | Ok _ ->
             report_action state "system" (name ^ ": repository added");
@@ -34144,7 +35218,7 @@ Use relative paths for resources already held in the package. -->
                 | Masc.Machine_lane.Dos, Masc_tui_machine_live.Showing _ -> true
                 | Masc.Machine_lane.Dos,
                   (Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
-                  | Masc_tui_machine_live.Failed _) -> false
+                  | Masc_tui_machine_live.Failed _ | Masc_tui_machine_live.Kept_back _) -> false
               in
               if loaded then begin
                 (* A game is loaded underneath: fall back to watching it, and
@@ -34169,7 +35243,11 @@ Use relative paths for resources already held in the package. -->
                 | Swap_disk _ -> true
                 | Load _ | Stay | Closed | Watch _ -> false
               in
+              let request = if swapping then Kept_request.Msx_disk_change else Kept_request.Msx_load in
               run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                ~withdrawn:(fun refusal ->
+                  Masc_tui_msx.render_menu ~write:write_to_terminal
+                    ~status:(workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal) state)
                 ~deliver:(fun expected_workspace -> function
                   | Ok () ->
                       state.msx_notice <- (if swapping
@@ -34225,6 +35303,11 @@ Use relative paths for resources already held in the package. -->
                render_spectator state
            | Observe_machine ->
                run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                 ~withdrawn:(fun refusal ->
+                   state.msx_notice <- Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                     ~request:Kept_request.Msx_control refusal);
+                   state.msx_last_poll_ns <- 0L;
+                   render_spectator state)
                  ~deliver:(fun _expected_workspace result ->
                    (match result with
                     | Ok () -> state.machine_interaction <- Control_machine
@@ -34252,6 +35335,14 @@ Use relative paths for resources already held in the package. -->
                run_machine_change ~checkpoint_boundary:true state ~mailbox:async_messages
                  ~refused:(fun detail -> Masc_tui_http.Checkpoint_refused detail)
                  ~unknown:(fun detail -> Masc_tui_http.Checkpoint_outcome_unknown detail)
+                 (* Nothing was asked of the server: no intent is retained, so
+                    there is no pending checkpoint to forget or inspect. *)
+                 ~withdrawn:(fun refusal ->
+                   state.msx_notice <- Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                     ~request:(if restore then Kept_request.Msx_restore else Kept_request.Msx_checkpoint)
+                     refusal);
+                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                   render_spectator state)
                  ~deliver:(fun _expected_workspace result ->
                    state.msx_notice <- Some (match result with
                      | Ok () -> if restore then "Restore completed; inspecting current workspace screen." else "Saved quick checkpoint."
@@ -34306,6 +35397,11 @@ Use relative paths for resources already held in the package. -->
           match Masc_tui_msx.server_key name with
           | Some server_key ->
               run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
+                ~withdrawn:(fun refusal ->
+                  state.msx_notice <- Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                    ~request:Kept_request.Msx_key refusal);
+                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
+                  render_spectator state)
                 ~deliver:(fun expected_workspace result ->
                   (match result with
                    | Ok _ -> observe_msx_frame ~clear_notice:true ?expected_workspace state ~mailbox:async_messages
@@ -36690,7 +37786,7 @@ Use relative paths for resources already held in the package. -->
                | "esc" ->
                  state.runtime_param_edit <- None;
                  state.runtime_params_notice <-
-                   Some (true, edit.rpe_key ^ ": edit cancelled")
+                   Some (Params_said (true, edit.rpe_key ^ ": edit cancelled"))
                | "home" | "end" ->
                  state.config_scroll <-
                    (if String.equal k "home" then 0 else Masc_tui_types.clamped_scroll_end)
@@ -38333,7 +39429,7 @@ Use relative paths for resources already held in the package. -->
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_github_token ->
-           Masc_tui_github_ui.token_key state ~save:(fun keeper token -> Masc_tui_github_requests.launch_token_save state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state ~mailbox:async_messages) ~check:(capture_workspace_check state ~mailbox:async_messages) keeper token) k
+           Masc_tui_github_ui.token_key state ~save:(fun keeper token -> Masc_tui_github_requests.launch_token_save state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state ~mailbox:async_messages) ~check:(capture_workspace_admission state ~mailbox:async_messages) keeper token) k
        | Some "/"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity ->
@@ -39032,7 +40128,9 @@ Use relative paths for resources already held in the package. -->
             | None -> report_action state "error" "Open a resource to reread it")
        | Some "u" when state.view = Resources ->
            (match Masc_tui_resources_updates.select_next_unchecked state with
-            | Error detail -> report_action state "error" detail
+            | Error (Request_failed detail) -> report_action state "error" detail
+            | Error (Request_withdrawn refusal) ->
+                report_withdrawn state ~request:Kept_request.Unchecked_report_move refusal
             | Ok None -> report_action state "system" "No unchecked reports in the current format and date selection"
             | Ok (Some key) ->
               if state.resource_focus = Right_pane then
@@ -39215,7 +40313,7 @@ Use relative paths for resources already held in the package. -->
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github ->
-           Masc_tui_github_ui.start_login state ~login:(fun keeper -> Masc_tui_github_requests.launch_login state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state ~mailbox:async_messages) ~check:(capture_workspace_check state ~mailbox:async_messages) keeper)
+           Masc_tui_github_ui.start_login state ~login:(fun keeper -> Masc_tui_github_requests.launch_login state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~fork:(fork_workspace_job state ~mailbox:async_messages) ~check:(capture_workspace_admission state ~mailbox:async_messages) keeper)
        | Some digit
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github
@@ -40045,7 +41143,11 @@ Use relative paths for resources already held in the package. -->
        | Some "S" when state.view = Code && code_edit_focus state ->
            (match Masc_tui_code_requests.save_draft state ~host:server_peer_host
              ~deliver:(deliver_code state async_messages) with
-            | Ok () -> () | Error detail -> report_action state "error" detail)
+            | Ok () -> ()
+            | Error (Request_failed detail) -> report_action state "error" detail
+            | Error (Request_withdrawn refusal) ->
+                report_kept_back state ~request:Kept_request.File_save
+                  (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept)
        | Some "V" when state.view = Code && code_edit_focus state ->
            (match current_code_draft state with
             | None -> report_action state "system" "No draft for this file"
@@ -43921,7 +45023,7 @@ Use relative paths for resources already held in the package. -->
                    if Masc_tui_frame_timing.enabled then begin
                      let reading = match Masc_tui_approvals_model.approvals_questions_reading state with
                        | Masc_tui_approvals_model.List_read -> Masc_tui_frame_timing.Questions_current
-                       | List_not_read Approval_unread -> Masc_tui_frame_timing.Questions_unread
+                       | List_not_read (Approval_unread | Approval_kept_back _) -> Masc_tui_frame_timing.Questions_unread
                        | List_not_read (Approval_stale _) -> Masc_tui_frame_timing.Questions_stale
                        | List_not_read (Approval_failed _) -> Masc_tui_frame_timing.Questions_failed
                        | List_not_read (Approval_unavailable _) -> Masc_tui_frame_timing.Questions_unavailable in

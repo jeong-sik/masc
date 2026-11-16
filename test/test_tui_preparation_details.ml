@@ -168,11 +168,11 @@ let workspace_admission_preserves_selected_preparation () =
                     | Preview.Preparation_finished {outcome=Preview.Rejected;_} -> true
                     | Preparation_finished _ | Preparation_active -> false)
                   (Preview.preparation_spans report.timeline)) snapshot.reports)
-      | Not_loaded | Loading | Failed _ | Retained _ -> fail "admitted original preparation did not settle its selection" in
+      | Not_loaded | Loading | Failed _ | Retained _ | Kept_back _ -> fail "admitted original preparation did not settle its selection" in
     let expect_failed state =
       match Details.view selected state with
       | Details.Failed _ -> ()
-      | Not_loaded | Loading | Loaded _ | Retained _ -> fail "unadmitted evidence became loaded or left its owner pending" in
+      | Not_loaded | Loading | Loaded _ | Retained _ | Kept_back _ -> fail "unadmitted evidence became loaded or left its owner pending" in
     let initial, initial_request = begin_read () in
     let first = read () in
     expect_original (Details.receive initial_request first initial);
@@ -263,12 +263,12 @@ let selected_read_ownership () = with_source (fun _ keeper_name turn_ref log sel
   let unrelated = Details.refresh ~keeper_name:(keeper_name ^ "-other") cached in
   check bool "another Keeper's history refresh does not invalidate original evidence" true
     (match Details.view selected unrelated with Details.Loaded value -> value==snapshot
-     | Not_loaded | Loading | Failed _ | Retained _ -> false);
+     | Not_loaded | Loading | Failed _ | Retained _ | Kept_back _ -> false);
   let waiting = Details.refresh ~keeper_name cached in
   check bool "explicit refresh retains original evidence without claiming a running request" true
     (match Details.view selected waiting with
      | Details.Retained {snapshot=value;recheck=Details.Recheck_pending} -> value==snapshot
-     | Not_loaded | Loading | Failed _ | Loaded _ | Retained _ -> false);
+     | Not_loaded | Loading | Failed _ | Loaded _ | Retained _ | Kept_back _ -> false);
   let refreshing, first_refresh = Details.select (Some selected) waiting in
   let first_refresh = Option.get first_refresh in
   let restarting = Details.refresh ~keeper_name refreshing in
@@ -278,12 +278,12 @@ let selected_read_ownership () = with_source (fun _ keeper_name turn_ref log sel
   check bool "refresh retires the older read capability while retaining only unconfirmed original evidence" true
     (match Details.view selected late with
      | Details.Retained {snapshot=value;recheck=Details.Recheck_loading} -> value==snapshot
-     | Not_loaded | Loading | Failed _ | Loaded _ | Retained _ -> false);
+     | Not_loaded | Loading | Failed _ | Loaded _ | Retained _ | Kept_back _ -> false);
   let failed_refresh = Details.receive next_refresh (Error "fresh read failed") late in
   check bool "failed reread preserves original reports with explicit failed freshness" true
     (match Details.view selected failed_refresh with
      | Details.Retained {snapshot=value;recheck=Details.Recheck_failed _} -> value==snapshot
-     | Not_loaded | Loading | Failed _ | Loaded _ | Retained _ -> false);
+     | Not_loaded | Loading | Failed _ | Loaded _ | Retained _ | Kept_back _ -> false);
   let retrying = Details.refresh ~keeper_name failed_refresh in
   let retrying, retry = Details.select (Some selected) retrying in
   let unaffected = Details.refresh ~keeper_name:(keeper_name ^ "-other") retrying in
@@ -293,7 +293,7 @@ let selected_read_ownership () = with_source (fun _ keeper_name turn_ref log sel
   let visible, _ = Details.select (Some selected) hidden in
   check bool "an unrelated refresh preserves the owned read and hidden success confirms its original source" true
     (match Details.view selected visible with Details.Loaded value -> value==refreshed_snapshot
-     | Not_loaded | Loading | Failed _ | Retained _ -> false);
+     | Not_loaded | Loading | Failed _ | Retained _ | Kept_back _ -> false);
   let other_log = journal ~keeper_name ~source:(Log.Operation "other") ~execution_id:"other" ~turn_ref in
   let other = target other_log in
   let moved, next = Details.select (Some other) state in
@@ -302,17 +302,17 @@ let selected_read_ownership () = with_source (fun _ keeper_name turn_ref log sel
   let wrong = Details.receive (Option.get next) (Ok snapshot) moved in
   check bool "a response bound to another target is rejected" true
     (match Details.view other wrong with Details.Failed _ -> true
-     | Not_loaded | Loading | Loaded _ | Retained _ -> false);
+     | Not_loaded | Loading | Loaded _ | Retained _ | Kept_back _ -> false);
   let moved_retained, _ = Details.select (Some other) failed_refresh in
   check bool "another execution cannot display the retained report" true
     (match Details.view other moved_retained with Details.Loading -> true
-     | Not_loaded | Failed _ | Loaded _ | Retained _ -> false);
+     | Not_loaded | Failed _ | Loaded _ | Retained _ | Kept_back _ -> false);
   let closed, _ = Details.select None state in
   let _, duplicate = Details.select (Some selected) closed in
   check bool "folding and reopening do not duplicate the owned read" true (duplicate=None);
   let hidden = Details.receive request (Ok snapshot) closed in
   check bool "hidden completion is cached without being presented" true
-    (match Details.view selected hidden with Details.Not_loaded -> true | Loading | Failed _ | Loaded _ | Retained _ -> false);
+    (match Details.view selected hidden with Details.Not_loaded -> true | Loading | Failed _ | Loaded _ | Retained _ | Kept_back _ -> false);
   let _, duplicate = Details.select (Some selected) hidden in
   check bool "reopening reuses the hidden completion" true (duplicate=None);
   let reopened, fresh = Details.select (Some selected) moved in
@@ -328,7 +328,7 @@ let selected_read_ownership () = with_source (fun _ keeper_name turn_ref log sel
   let revised_read, _ = Details.select (Some revised) failed_refresh in
   check bool "a newer journal revision cannot display retained evidence for the older revision" true
     (match Details.view revised revised_read with Details.Loading -> true
-     | Not_loaded | Failed _ | Loaded _ | Retained _ -> false))
+     | Not_loaded | Failed _ | Loaded _ | Retained _ | Kept_back _ -> false))
 
 let original_identity_observations_are_owned () =
   Eio_main.run (fun _ ->

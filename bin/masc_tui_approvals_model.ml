@@ -190,6 +190,9 @@ let approvals_open_question_count (state : state) =
    - [List_not_read (Approval_unavailable detail)]: the server answered and
      said the store behind the list could not be read. The Gate snapshot sends
      [approval_queue: null] with [approval_queue_state] in this case.
+   - [List_not_read (Approval_kept_back notice)]: the workspace guard stopped
+     the last confirm-queue read before it left, so nothing was read; the
+     notice says so (RFC-tui-one-screen-grammar §2).
 
    Every place that has to know whether a list was read -- Home, the
    Approvals title and the empty queue -- reads it from here, so none of them
@@ -199,6 +202,7 @@ type approval_not_read =
   | Approval_failed of string
   | Approval_stale of string
   | Approval_unavailable of string
+  | Approval_kept_back of string
 
 type approval_list_reading =
   | List_read
@@ -225,7 +229,12 @@ let confirm_queue_reading (state : state) =
   else
     match (state.approval_snapshot, state.approvals_error) with
     | Some _, _ -> List_read
-    | None, Some cause -> List_not_read (Approval_failed cause)
+    | None, Some (Request_failed cause) -> List_not_read (Approval_failed cause)
+    | None, Some (Request_withdrawn refusal) ->
+        List_not_read
+          (Approval_kept_back
+             (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Confirmations_read refusal))
     | None, None -> List_not_read Approval_unread
 
 let kept_rows_reading ~observed ~error =
@@ -294,7 +303,7 @@ let approvals_reading_current (state : state) =
    a poll failed; the rows of a list read before and not since are "stale". *)
 let approval_list_note ~name = function
   | List_read -> ""
-  | List_not_read (Approval_unread | Approval_failed _) ->
+  | List_not_read (Approval_unread | Approval_failed _ | Approval_kept_back _) ->
       Printf.sprintf ", %s unread" name
   | List_not_read (Approval_stale _) -> Printf.sprintf ", %s stale" name
   | List_not_read (Approval_unavailable _) ->

@@ -40,6 +40,9 @@ type interrupt =
       (** The server accepted the request and did not signal — no turn in
           flight, or the cancel itself failed. Carries its reason. *)
   | Signal_error of string  (** The request never got an answer. *)
+  | Signal_kept_back of string
+      (** The caller's kept-back notice: the workspace guard stopped the
+          request before it was sent. *)
 
 (** What the source says happened to a tool call. Live calls distinguish a
     call still accepting arguments from one whose invocation ended but whose

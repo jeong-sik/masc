@@ -307,12 +307,25 @@ type failure =
   | Unbound_receipt of int
       (** The purge answered {!Unbound_purge_receipt} with this status. *)
   | No_answer of string
-      (** No HTTP answer was read: the workspace check withdrew the request,
-          the transport failed, or an exception escaped. Carries that text. *)
+      (** No HTTP answer was read: the transport failed, or an exception
+          escaped. Carries that text. *)
+  | Kept_back of string
+      (** The caller's kept-back notice: the workspace guard withdrew the
+          action before its first step was sent, so nothing left
+          (RFC-tui-one-screen-grammar §2). *)
+  | Later_step_kept_back of string
+      (** The caller's kept-back notice for a later step the workspace guard
+          withdrew after an earlier step was sent; {!earlier_step_sent} says
+          that the earlier step left. *)
+
+val earlier_step_sent : ko:bool -> string
+(** What a [Later_step_kept_back] notice is said with: a step before it was
+    sent, Korean when [ko]. *)
 
 val failure_text : ko:bool -> failure -> string
 (** The words a notice puts after "<keeper> <action> failed:", Korean when
-    [ko]. Carried text is written as it came. *)
+    [ko]. Carried text is written as it came. A [Kept_back] or
+    [Later_step_kept_back] notice is drawn alone, not after that prefix. *)
 
 (** {1 Confirmation gate} *)
 

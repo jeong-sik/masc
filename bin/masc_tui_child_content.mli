@@ -2,7 +2,10 @@
     Public transport views never grant runtime/binding/publication ownership. *)
 module Read = Masc.Keeper_child_content_read
 
-type error = Transport of string | Http_refused of int | Invalid_json of string
+(** [Kept_back] holds the caller's kept-back notice for a read the workspace
+    guard withdrew before it was sent; it is drawn alone, never as a transport
+    failure (RFC-tui-one-screen-grammar §2). *)
+type error = Transport of string | Kept_back of string | Http_refused of int | Invalid_json of string
   | Invalid_response of Read.decode_error | Service of Read.failure
   | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * string * error
   | History_rewritten of Read.receiver * string
@@ -32,7 +35,7 @@ val diagnostics : t -> string list
     supply diagnostics. A successfully admitted page refreshes that evidence. *)
 val error_text : error -> string
 val read : mode:read_mode -> keeper_name:string ->
-  fetch:(string -> (int * string,string) result) -> previous:t -> (t,error) result
+  fetch:(string -> (int * string,error) result) -> previous:t -> (t,error) result
 (** Caller supplies actual guarded authenticated fetch and owns workspace/cache
     lifetime and read epoch mailbox admission; Keeper equality/DTO is not auth.
     Poll reads unchecked hints, exact changed suffixes only; same attempted hint

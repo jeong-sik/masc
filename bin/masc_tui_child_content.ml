@@ -1,7 +1,7 @@
 module Read = Masc.Keeper_child_content_read
 open Result.Syntax
 
-type error = Transport of string | Http_refused of int | Invalid_json of string
+type error = Transport of string | Kept_back of string | Http_refused of int | Invalid_json of string
   | Invalid_response of Read.decode_error | Service of Read.failure
   | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * string * error
   | History_rewritten of Read.receiver * string
@@ -71,6 +71,7 @@ let receiver_text (receiver:Read.receiver) =
   receiver.receiver_generation ^ " / " ^ receiver.session_id ^ " / " ^ receiver.client_uuid
 let rec error_text = function
   | Transport detail -> "transport: " ^ detail
+  | Kept_back notice -> notice
   | Http_refused status -> Printf.sprintf "HTTP %d refused Child read" status
   | Invalid_json detail -> "invalid JSON: " ^ detail
   | Invalid_response error -> Read.decode_error_to_string error
@@ -96,7 +97,7 @@ let diagnostics state =
             "failure history is kept only for the collector lifetime; provider completeness and liveness unknown" in
       let real_error = List.exists (function
         | Persistence _ | Receiver_read _ | Service _ -> true
-        | Transport _ | Http_refused _ | Invalid_json _ | Invalid_response _
+        | Transport _ | Kept_back _ | Http_refused _ | Invalid_json _ | Invalid_response _
         | History_rewritten _ -> false) (errors state) in
       let retained = List.filter_map (fun (store:store) ->
         if List.exists (fun (receiver,status) -> receiver=store.receiver &&
@@ -110,7 +111,7 @@ let diagnostics state =
       List.sort_uniq String.compare
         (if failures <> [] || real_error then caveat :: failures else failures)
 let decode ~fetch path =
-  let* status,body=fetch path |> Result.map_error (fun detail -> Transport detail) in
+  let* status,body=fetch path in
   let parsed=match Yojson.Safe.from_string body with
     | json -> Read.of_json json |> Result.map_error (fun error -> Invalid_response error)
     | exception Yojson.Json_error detail -> Error (Invalid_json detail) in
@@ -196,7 +197,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
         let full = mode=Audit || Option.exists (fun (store:store) ->
           match store.error with
           | Some (History_rewritten _) -> true
-          | Some (Transport _ | Http_refused _ | Invalid_json _ | Invalid_response _ | Service _
+          | Some (Transport _ | Kept_back _ | Http_refused _ | Invalid_json _ | Invalid_response _ | Service _
                  | Persistence _ | Receiver_read _) | None -> false) old in
         let after=if full then None else Option.bind old (fun (store:store) -> store.cursor) in
         let request:Read.records_request={scope={keeper_name;receiver};after} in
@@ -234,7 +235,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
               | Some store ->
                   let primary = match store.error with
                     | Some (History_rewritten _ as retained) -> retained
-                    | Some (Transport _) | None | Some (Http_refused _) | Some (Invalid_json _)
+                    | Some (Transport _) | Some (Kept_back _) | None | Some (Http_refused _) | Some (Invalid_json _)
                     | Some (Invalid_response _) | Some (Service _) | Some (Persistence (_, _))
                     | Some (Receiver_read (_, _, _)) -> error in
                   {store with error=Some primary;attempted=Some advertised;cleanup_failures}

@@ -72,13 +72,16 @@ let checks_loaded state request result =
   state.artifact_checks <- Masc_tui_fetched.complete ~equal:Unit.equal
     state.artifact_checks request result
 
+(* The guard's refusal comes back as [Request_withdrawn] so the caller says the
+   change is kept back (RFC §2). *)
 let begin_check state ~report =
-  if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+  if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
   else match state.artifact_check_pending with
-  | Some _ -> Error "A confirmation change is still pending"
+  | Some _ -> Error (Request_failed "A confirmation change is still pending")
   | None ->
     let open Result.Syntax in
-    let* request = Masc_tui_artifact_check_action.prepare state.artifact_checks report in
+    let* request = Masc_tui_artifact_check_action.prepare state.artifact_checks report
+      |> Result.map_error (fun detail -> Request_failed detail) in
     state.artifact_check_pending <- Some request;
     state.artifact_checks <- Masc_tui_fetched.clear state.artifact_checks;
     Ok request
@@ -132,23 +135,25 @@ let begin_share_recovery_lookup state ~origin ~report =
   if not (List.mem uncertain_key state.resource_share_uncertain_ids) then
     state.resource_share_uncertain_ids <- uncertain_key :: state.resource_share_uncertain_ids
 
+(* The guard's refusal comes back as [Request_withdrawn] so the caller says the
+   change is kept back (RFC §2). *)
 let begin_share_change ?(recovery = false) state ~report ~(entry : Masc_tui_artifact_share_pending.entry) =
-  if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+  if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
   else if resource_share_uncertain state report && not recovery then
-    Error "External sharing outcome is unconfirmed; an operation receipt is required"
+    Error (Request_failed "External sharing outcome is unconfirmed; an operation receipt is required")
   else match workspace_input_identity_of_server state.server_identity with
-  | None -> Error "Workspace identity is unconfirmed"
+  | None -> Error (Request_withdrawn Workspace_identity_not_confirmed)
   | Some share_workspace_identity when
       entry.base_path <> share_workspace_identity.wi_base_path
       || entry.masc_root <> share_workspace_identity.wi_masc_root
       || entry.artifact_id <> report.Catalog.id ->
-    Error "The share request belongs to another workspace or artifact"
+    Error (Request_failed "The share request belongs to another workspace or artifact")
   | Some _ when resource_share_identity_conflict state entry ->
-    Error "The recovered operation ID does not match the originally observed request"
+    Error (Request_failed "The recovered operation ID does not match the originally observed request")
   | Some share_workspace_identity when List.exists (fun request ->
       request.share_workspace_identity = share_workspace_identity
       && String.equal request.share_report.id report.id) state.resource_share_pending ->
-    Error "An external sharing change for this artifact is still pending"
+    Error (Request_failed "An external sharing change for this artifact is still pending")
   | Some share_workspace_identity ->
     let request = { share_owner = ref (); share_workspace = state.workspace_authority;
       share_workspace_identity; share_report = report; share_target = entry.request.requested;
@@ -191,7 +196,7 @@ let share_changed state request ~result =
      | Ok (Resource_share_applied _ | Resource_share_conflict _) ->
        settle_resource_share state request.share_entry;
        state.resource_share_uncertain_ids <- List.filter ((<>) uncertain_key) state.resource_share_uncertain_ids
-     | Ok (Resource_share_not_sent _) | Error (Resource_share_unknown _) ->
+     | Ok (Resource_share_not_sent _ | Resource_share_kept_back _) | Error (Resource_share_unknown _) ->
        observe_resource_share state request.share_entry;
        if not (List.mem uncertain_key state.resource_share_uncertain_ids) then
          state.resource_share_uncertain_ids <- uncertain_key :: state.resource_share_uncertain_ids
@@ -269,19 +274,22 @@ let step_revision state ~direction ~read =
       (Catalog.adjacent_revision direction ~current:report state.resource_revision_history)
   | Some (Catalog.Mcp_uri _) | None -> ()
 
+(* The guard's refusal comes back as [Request_withdrawn] so the caller says the
+   move is kept back (RFC §2). *)
 let select_next_unchecked state =
   let open Result.Syntax in
   let* () =
-    if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+    if not (server_authority_ready state) then Error (Request_withdrawn Workspace_identity_not_confirmed)
     else if Option.is_some state.artifact_check_pending then
-      Error "A confirmation change is still pending"
+      Error (Request_failed "A confirmation change is still pending")
     else Ok () in
   let* entries = match visible_resources state with
-    | None -> Error "Report inventory has not been read"
+    | None -> Error (Request_failed "Report inventory has not been read")
     | Some entries -> Ok entries in
   let* selected = Masc_tui_artifact_checks.next_unchecked
     ~reports_complete:state.resources_reports_complete ~entries
-    ~cursor:state.resources_cursor state.artifact_checks in
+    ~cursor:state.resources_cursor state.artifact_checks
+    |> Result.map_error (fun detail -> Request_failed detail) in
   match Option.bind selected (List.nth_opt entries) with
   | None -> Ok None
   | Some entry ->

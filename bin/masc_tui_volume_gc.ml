@@ -51,6 +51,7 @@ type shown =
   | Nothing_asked
   | Answered of answer
   | Unanswered of request * string
+  | Kept_back of request * string
 
 type t = { phase : phase; shown : shown }
 
@@ -83,6 +84,7 @@ let phase_after = function
 
 let answered answer = { phase = phase_after answer; shown = Answered answer }
 let unanswered request detail = { phase = Idle; shown = Unanswered (request, detail) }
+let kept_back request notice = { phase = Idle; shown = Kept_back (request, notice) }
 
 let disarm t =
   match t.phase with
@@ -165,6 +167,7 @@ let shown_lines = function
     [ Bad, "회수 답을 받지 못했습니다: " ^ single_line detail
     ; Bad, "지워졌는지 알 수 없습니다. " ^ key ^ " 로 지금 상태를 다시 보세요."
     ]
+  | Kept_back (_, notice) -> [ Bad, notice ]
 ;;
 
 let phase_line = function
@@ -213,4 +216,5 @@ let status_line t =
   | Answered (Refused detail) -> "volume GC refused: " ^ single_line detail
   | Answered (Unreadable detail) -> "volume GC answer unreadable: " ^ single_line detail
   | Unanswered (_, detail) -> "volume GC: no answer: " ^ single_line detail
+  | Kept_back (_, notice) -> notice
 ;;

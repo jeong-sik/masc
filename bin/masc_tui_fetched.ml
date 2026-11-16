@@ -154,8 +154,9 @@ let suspend_with ~reason state =
   in
   { state with status }
 
-let suspend state =
-  suspend_with ~reason:"Reading suspended; waiting for workspace identity." state
+let suspend_reason = "Reading suspended; waiting for workspace identity."
+
+let suspend state = suspend_with ~reason:suspend_reason state
 
 let complete ~equal state request result =
   if not (is_current ~equal state request)

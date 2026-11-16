@@ -4,6 +4,7 @@
 module B = Tool_blob_store
 module O = Tool_output
 module S = Tool_blob_sweep
+module Lane_addon_store = Masc.Lane_addon_store
 
 let scope = Server_tool_blob_scope.scope
 

@@ -50,12 +50,15 @@ function makeWords(making: Make): string {
 /** The words of a refusal the page can say more of than that it was refused.
     A 403 on a request from this page comes of a session another tab
     replaced: its CSRF token is not the one of the session the browser holds
-    now, or that session is of an account that is not an Admin. */
+    now, or that session is of an account that is not an Admin. The console
+    reads the session before the panel gets the answer (`ConsoleModel.send`):
+    the same person's token of now goes with the next press, and another
+    account takes the page from this panel. */
 function refusedWords(status: number, step: 'make' | 'revoke'): readonly string[] | null {
   if (status === forbidden) {
     return [
       '서버가 이 요청을 받지 않았어요.',
-      '다른 탭에서 다시 로그인했거나 다른 계정으로 로그인했다면, 이 화면을 새로 고친 뒤 다시 해 주세요.',
+      '다른 탭에서 다시 로그인했다면 한 번 더 해 주세요.',
     ]
   }
   if (status === notFound && step === 'revoke') return ['서버에서 이 초대를 찾지 못했어요. 목록을 다시 불러와요.']

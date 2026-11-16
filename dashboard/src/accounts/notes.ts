@@ -27,6 +27,8 @@ export const slowAfterMs = 300
 
 /** The answer of a server that cannot serve for now (its files are being read again). */
 const serviceUnavailable = 503
+/** The answer of a request whose session may have been replaced by another tab (`ConsoleModel.send`). */
+const forbidden = 403
 /** How much of an id the console shows: enough to tell two apart. */
 const idTailLength = 6
 
@@ -38,9 +40,11 @@ function problemWords(problem: Shown): string {
     case 'unreachable': return '서버에 닿지 못했어요. 연결을 확인한 뒤 다시 해 주세요.'
     case 'unreadable': return '서버의 답을 읽지 못했어요. 이 서버를 운영하는 사람에게 알려 주세요.'
     case 'refused':
-      return problem.status === serviceUnavailable
-        ? '서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요.'
-        : '서버가 요청을 받아들이지 않았어요.'
+      if (problem.status === serviceUnavailable) return '서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요.'
+      // The console has read the session of now before this is shown, so
+      // the next try carries its token.
+      if (problem.status === forbidden) return '서버가 요청을 받아들이지 않았어요. 다른 탭에서 다시 로그인했다면 한 번 더 해 주세요.'
+      return '서버가 요청을 받아들이지 않았어요.'
   }
 }
 

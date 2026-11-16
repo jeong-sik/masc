@@ -502,6 +502,13 @@ Anthropic producer/serializer로 읽기와 signature의 prefix 결속을 검사�
 Root의 OCaml 5.5.2 전체 파일 구문 검사 9개는 통과했다. 이 검사를 타입·동작 성공으로
 부르지 않는다. 원본과 결과는 `artifacts/farm-document-request-reading-20261116/`에 있다.
 
+후속으로 소스 후보 `8811012d471b9ca6d88ed5e6e2aea7dd75099c17`의 두 제품 구현
+전체와 두 공개 인터페이스 타입 검사도 성공했다. 실제 원본 인터페이스와 namespace를
+사용했고, 기존에 컴파일한 의존성은 소스·출력 해시를 대조해 재사용했다. 독립 소스
+검토도 같은 11개 파일의 Git 바이트와 결속됐다. 검사 실행기에 빠진 패키지·모듈 별칭을
+보완한 이전 실패는 보존했으며 제품 오류로 판정하지 않았다. 이 결과는 유지 중인
+시험의 타입·링크·실행이나 전체 MASC 빌드, 런타임 초기화 검증이 아니다.
+
 이 소스 변경은 원본 효과의 재실행이나 canonical checkpoint의 첨부 교체가 아니다.
 늦은 caller projection, Text JSON outbox, Completion-review, official-client 내부 round,
 Responses ToolResult PDF처럼 위치에 따른 native 표현의 제약은 남는다.
@@ -513,6 +520,8 @@ Document 스택은 이제 일곱 층이며, 새 층의 검토와 전체 원격 p
 게시하지 않도록 로컬 인계 note를 갱신했다. 이전 여섯 층만 게시하는 요청으로 해석하지
 않는다. 지정된 협업 thread의 새 조회도 로컬 MCP 전송 연결에서 실패했으며 전달 완료를
 주장하지 않는다. 런타임·설치·데이터 변경은 수행하지 않았다.
+후속 읽기 전용 진단에서는 이 실행 환경의 GitHub DNS 해석 실패와 기존 MCP 포트의
+TCP 연결 거절을 확인했다. 인증 유효성과 호스트 전체 상태는 확인되지 않았다.
 
 ## 원래 25개 요구의 현재 위치
 

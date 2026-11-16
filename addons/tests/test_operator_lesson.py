@@ -17,7 +17,6 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "operator-lesson"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # records.py
 
-<<<<<<< HEAD
 from test_operator_quiz_flow import REPO, WIKI, FakeHost, commit, exact_payload, post, wiki_page  # noqa: E402
 import lesson_flow as f  # noqa: E402
 import lesson_log as l  # noqa: E402

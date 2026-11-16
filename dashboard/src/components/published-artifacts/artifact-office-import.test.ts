@@ -7,12 +7,15 @@ import { artifactWordFile } from '../../lib/artifact-word-export'
 import { artifactHwpxFile } from '../../lib/artifact-hwpx-export'
 import { importArtifactDocx } from '../../lib/artifact-docx-import'
 import { importArtifactHwpx } from '../../lib/artifact-hwpx-import'
+import { importArtifactHwp } from '../../lib/artifact-hwp-import'
 import { officeImportLimits } from '../../lib/artifact-office-xml'
 import { officeChartFigure } from '../../lib/artifact-office-chart'
 import { ArtifactImport } from './artifact-import'
 import type { ArtifactDraftSnapshot } from './artifact-composer'
 
 vi.mock('../../api/core', async original => ({ ...await original<typeof import('../../api/core')>(), get: vi.fn(), getWithResponse: vi.fn(), post: vi.fn() }))
+// These tests cover the component and publication. The real WASM conversion is verified separately.
+vi.mock('../../lib/artifact-hwp-import', () => ({ importArtifactHwp: vi.fn() }))
 const chart = officeChartFigure({ type: 'column', title: '지역 실적', categories: ['서울', '제주'], series: [{ name: '실적', values: [12.5, null] }] })
 const content = '<table><tr><td colspan="2">합계</td></tr><tr><td>건수</td><td>3</td></tr></table>' + chart
 const meta = { id: `artifact-${'a'.repeat(32)}`, revision: 1, title: '실적', summary: '보고서', format: 'html' as const, author: 'fixture',
@@ -33,14 +36,17 @@ function open(isCurrent = () => true) {
 beforeEach(() => {
   setStoredToken('office-fixture')
   vi.mocked(get).mockReset(); vi.mocked(getWithResponse).mockReset(); vi.mocked(post).mockReset()
+  vi.mocked(importArtifactHwp).mockReset()
+  vi.mocked(importArtifactHwp).mockResolvedValue({ content, notices: [] })
   vi.mocked(get).mockResolvedValue({ paths: { effective_base_path: '/office-fixture', effective_masc_root: '/office-fixture/.masc' } })
 })
 afterEach(() => { cleanup(); clearStoredToken(); vi.restoreAllMocks() })
 
-for (const format of ['docx', 'hwpx'] as const) it(`imports ${format}, edits chart data and publishes once before re-exporting the edited native chart`, async () => {
+for (const format of ['docx', 'hwpx', 'hwp'] as const) it(`imports ${format}, edits chart data and publishes once before re-exporting the edited native chart`, async () => {
   const write = format === 'docx' ? artifactWordFile : artifactHwpxFile
   const read = format === 'docx' ? importArtifactDocx : importArtifactHwpx
-  const generated = await write(input), view = open(), selected = file(generated.data, `실적.${format}`)
+  const generated = format === 'hwp' ? { data: new ArrayBuffer(0) } : await write(input)
+  const view = open(), selected = file(generated.data, `실적.${format}`)
   fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [selected] } })
   const body = await screen.findByLabelText('문서 본문') as HTMLTextAreaElement
   expect(body.value).toContain('data-masc-chart="column"')
@@ -72,7 +78,7 @@ for (const format of ['docx', 'hwpx'] as const) it(`imports ${format}, edits cha
   expect(result.content).toContain('colspan="2"')
 })
 
-for (const format of ['docx', 'hwpx']) it(`refuses an oversized ${format} before allocating its file buffer`, async () => {
+for (const format of ['docx', 'hwpx', 'hwp']) it(`refuses an oversized ${format} before allocating its file buffer`, async () => {
   open()
   const selected = file(new ArrayBuffer(0), `large.${format}`)
   Object.defineProperty(selected, 'size', { value: officeImportLimits.inputBytes + 1 })
@@ -80,6 +86,30 @@ for (const format of ['docx', 'hwpx']) it(`refuses an oversized ${format} before
   await screen.findByText('가져올 문서는 32 MiB 이하여야 합니다.')
   expect(selected.arrayBuffer).not.toHaveBeenCalled()
   expect(screen.queryByLabelText('문서 본문')).toBeNull()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('does not publish or open a draft when HWP conversion fails', async () => {
+  const view = open()
+  vi.mocked(importArtifactHwp).mockRejectedValue(new Error('지원하지 않는 HWP 개체입니다.'))
+  fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file(new ArrayBuffer(0), '문서.hwp')] } })
+  await screen.findByText('지원하지 않는 HWP 개체입니다.')
+  expect(view.drafts).toHaveLength(0)
+  expect(screen.queryByLabelText('문서 본문')).toBeNull()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('aborts an outstanding HWP worker when the import surface closes', async () => {
+  const view = open()
+  vi.mocked(importArtifactHwp).mockImplementation((_data, signal) => new Promise((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(new DOMException('closed', 'AbortError')), { once: true })
+  }))
+  fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file(new ArrayBuffer(0), '문서.hwp')] } })
+  await waitFor(() => expect(importArtifactHwp).toHaveBeenCalledTimes(1))
+  const signal = vi.mocked(importArtifactHwp).mock.calls[0]![1]!
+  view.unmount()
+  expect(signal.aborted).toBe(true)
+  expect(view.drafts).toHaveLength(0)
   expect(post).not.toHaveBeenCalled()
 })
 

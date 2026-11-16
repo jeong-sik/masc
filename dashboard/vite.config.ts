@@ -4,6 +4,7 @@ import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
 import preact from '@preact/preset-vite'
 import tailwindcss from '@tailwindcss/vite'
 import { sourceContextPlugin } from './dev/source-context-plugin'
+import { rhwpNoticesPlugin } from './dev/rhwp-notices-plugin'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 const dashboardBasePath = '/dashboard/'
@@ -160,6 +161,7 @@ export default defineConfig(({ command }) => {
   return {
     plugins: [
       sourceContextPlugin(),
+      rhwpNoticesPlugin(),
       tailwindcss(),
       preact(),
       ...reportPlugins,

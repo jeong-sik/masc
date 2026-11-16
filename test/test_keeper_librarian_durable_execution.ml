@@ -4288,7 +4288,7 @@ let advance_legacy fixture original event =
     | Ok (Owner.Stored record | Already_stored record) -> record
     | Ok (Unconfirmed detail) -> fail detail
     | Error error -> fail (Owner.update_error_to_string error))
-let test_legacy_omitted_original_refuses_admission_but_observes_pending () =
+let test_legacy_omitted_original_refuses_admission_but_prepares_safe_continuation () =
   with_fixture (fun ~sw:_ fixture -> with_legacy_omitted_original fixture (fun original request ->
     let source_json=Capture.to_json request and events=Progress.to_json original.Owner.progress in
     let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
@@ -4312,26 +4312,44 @@ let test_legacy_omitted_original_refuses_admission_but_observes_pending () =
     assert_omitted_original_blocked (run_worker fixture);
     let dispatched=advance_legacy fixture held Progress.Dispatch_intended in
     assert_pending (run_worker fixture);
+    (* Observe the immutable original and one confirmed safe continuation
+       before driving it; the existing completion checks below then run it. *)
     let retained ()=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
       ~request_id:original.request_id |> owned |> Option.get) in
-    let pending=retained () in
-    let restored=io (fun () -> Capture.restore ~owner:(Capture.physical_owner request) pending |> get) in
+    let recovery ()=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+      ~request_id:dispatched.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+    let prepared=recovery () in
+    let child_id=match prepared.intents with
+      | [{Resolution_intent.actor="librarian";phase=Child_confirmed child;_}] -> child.request_id
+      | _ -> fail "the absent original did not retain one automatic continuation" in
+    check bool "the continuation has a durable fence and no Memory completion" true
+      (Option.is_some prepared.fence && prepared.completion=Resolution_work.Not_observed);
+    check bool "the continuation has its own ID" true (child_id<>dispatched.request_id);
+    let captures=observed_originals fixture in
+    check (list string) "only the exact original and its confirmed child are retained"
+      (List.sort String.compare [dispatched.request_id;child_id])
+      (List.map (fun ((record:Owner.retained),_) -> record.request_id) captures |> List.sort String.compare);
+    let by_id request_id=match List.filter (fun ((record:Owner.retained),_) ->
+      record.request_id=request_id) captures with
+      | [capture] -> capture
+      | [] | _::_ -> fail "expected one strictly restored original for the exact request ID" in
+    let pending,restored=by_id dispatched.request_id in
+    let _,child=by_id child_id in
     check string "unknown delivery keeps the old ID" dispatched.request_id pending.Owner.request_id;
     check json "pending observation never rerenders the question" source_json (Capture.to_json restored);
-    let recovery ()=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
-      ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
-    let child_id=match (recovery ()).intents with
-      | [{Resolution_intent.actor="librarian";phase=Child_confirmed child;_}] -> child.request_id
-      | _ -> fail "the absent legacy original has no single automatic continuation" in
-    let child=io (fun () ->
-      let child=Owner.load ~store:fixture.store ~scope:original.scope ~request_id:child_id
-        |> owned |> Option.get in
-      Capture.restore ~owner:(Capture.physical_owner request) child |> get) in
+    check bool "the child binds its exact original predecessor" true
+      (Capture.predecessor child=Some {Capture.request_id=dispatched.request_id;
+        request_digest=dispatched.request_digest});
+    io (fun () -> Keeper_librarian_history_resolution_lineage.confirm_predecessor
+      ~store:fixture.store ~require_confirmed:true child |> get);
     check string "the new question retains the exact original source basis"
       (Capture.source_basis_digest request |> get) (Capture.source_basis_digest child |> get);
     check bool "the frozen original still fails its input guard" true
       (Result.is_error (Keeper_librarian_runtime.require_counterpart_template (Capture.preparation restored)));
     Keeper_librarian_runtime.require_counterpart_template (Capture.preparation child) |> get;
+    check bool "the fresh question keeps every original counterpart observation" true
+      ((Source.input (Capture.source child)).counterpart_observations=
+       (Source.input (Capture.source request)).counterpart_observations);
     check json "no external preparation is ACKed" cursor_before (cursor ());
     check bool "no read position advances" true (progress fixture=position_before);
     check int "admission, provider guard and pending wakes dispatch no model" 0 (F.post_count fixture.server);
@@ -4456,8 +4474,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_refusal_does_not_accept_a_different_equal_chat_row;
   test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
     test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
-  test_case "legacy omitted original blocks admission but observes pending" `Quick
-    test_legacy_omitted_original_refuses_admission_but_observes_pending;
+  test_case "legacy omitted original blocks admission but prepares a safe continuation" `Quick
+    test_legacy_omitted_original_refuses_admission_but_prepares_safe_continuation;
   test_case "legacy omitted answer blocks Judged and commit publication" `Quick
     test_legacy_omitted_answer_blocks_judged_and_commit_publication;
   test_case "missing counterpart substitution preserves fresh source until corrected" `Quick

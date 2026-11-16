@@ -1663,9 +1663,65 @@ let test_run_argv_with_stdin_held_open_preserves_open_pipe () =
   check bool "stdout captured" true (contains stdout "got:hello_stream")
 ;;
 
+(* A status carries OCaml's signal numbers. A real child ended by a signal
+   must read with the signal's name, not [Sys.sigkill]'s -7. *)
+let test_exit_text_names_a_reaped_signal () =
+  let pid =
+    Unix.create_process "/bin/sh" [| "sh"; "-c"; "kill -KILL $$" |]
+      Unix.stdin Unix.stdout Unix.stderr
+  in
+  let _, status = wait_fixture_child [] pid in
+  check string "reaped SIGKILL" "was killed by SIGKILL"
+    (Process_exit_text.of_status status)
+;;
+
+(* Every signal [Sys] defines in the pinned OCaml (5.5.2). Dropping or
+   swapping a row of the module's table fails here; the old restart table
+   knew nine of these and printed the rest as "signal -N". *)
+let test_exit_text_names_every_ocaml_signal () =
+  List.iter
+    (fun (signal, name) ->
+      check string name name (Process_exit_text.signal_name signal))
+    [ Sys.sigabrt, "SIGABRT"; Sys.sigalrm, "SIGALRM"; Sys.sigfpe, "SIGFPE"
+    ; Sys.sighup, "SIGHUP"; Sys.sigill, "SIGILL"; Sys.sigint, "SIGINT"
+    ; Sys.sigkill, "SIGKILL"; Sys.sigpipe, "SIGPIPE"; Sys.sigquit, "SIGQUIT"
+    ; Sys.sigsegv, "SIGSEGV"; Sys.sigterm, "SIGTERM"; Sys.sigusr1, "SIGUSR1"
+    ; Sys.sigusr2, "SIGUSR2"; Sys.sigchld, "SIGCHLD"; Sys.sigcont, "SIGCONT"
+    ; Sys.sigstop, "SIGSTOP"; Sys.sigtstp, "SIGTSTP"; Sys.sigttin, "SIGTTIN"
+    ; Sys.sigttou, "SIGTTOU"; Sys.sigvtalrm, "SIGVTALRM"; Sys.sigprof, "SIGPROF"
+    ; Sys.sigbus, "SIGBUS"; Sys.sigpoll, "SIGPOLL"; Sys.sigsys, "SIGSYS"
+    ; Sys.sigtrap, "SIGTRAP"; Sys.sigurg, "SIGURG"; Sys.sigxcpu, "SIGXCPU"
+    ; Sys.sigxfsz, "SIGXFSZ"; Sys.sigio, "SIGIO"; Sys.sigwinch, "SIGWINCH" ]
+;;
+
+let test_exit_text_reads_each_status () =
+  check string "exit" "exited with status 3"
+    (Process_exit_text.of_status (Unix.WEXITED 3));
+  check string "signal" "was killed by SIGPIPE"
+    (Process_exit_text.of_status (Unix.WSIGNALED Sys.sigpipe));
+  check string "stop" "was stopped by SIGTSTP"
+    (Process_exit_text.of_status (Unix.WSTOPPED Sys.sigtstp))
+;;
+
+(* OCaml names its signals with negative numbers. One it does not name
+   arrives as the host's positive number and keeps that number. 34 has no
+   name on Darwin (signals end at 31) or Linux (a real-time signal). *)
+let test_exit_text_keeps_an_unnamed_host_number () =
+  check string "host number" "signal 34" (Process_exit_text.signal_name 34)
+;;
+
 let () =
   run "Process_eio coverage"
     [
+      ( "exit text",
+        [ test_case "a reaped signal reads with its name" `Quick
+            test_exit_text_names_a_reaped_signal;
+          test_case "every OCaml signal reads with its name" `Quick
+            test_exit_text_names_every_ocaml_signal;
+          test_case "each status kind reads as a predicate" `Quick
+            test_exit_text_reads_each_status;
+          test_case "an unnamed host signal keeps its number" `Quick
+            test_exit_text_keeps_an_unnamed_host_number ] );
       ( "capture owner",
         [ test_case "pipeline preserves streams and callbacks" `Quick
             test_eio_pipeline_preserves_streams_and_callbacks ] );

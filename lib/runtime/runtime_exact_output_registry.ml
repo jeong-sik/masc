@@ -373,7 +373,8 @@ let serves_required_lane ~addon_served_lane_ids lane_id (lane : admitted_lane) =
     | { slots = _ :: _; _ } | { cli_slots = _ :: _; _ } -> true
     | { slots = []; cli_slots = []; _ } -> false
   in
-  has_slot
+  lane.enabled
+  && has_slot
   &&
   match lane.owner with
   | Runtime_schema.Builtin _ -> String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id

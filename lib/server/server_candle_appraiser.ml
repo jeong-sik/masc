@@ -30,7 +30,7 @@ let declaration_change_probe ~config () =
     | None -> false
     | Some export ->
       let changed = match !previous with
-        | None -> false
+        | None -> true
         | Some prior -> not (Lane_addon_tool_export.equal_owner prior.owner export.owner) in
       previous := Some export;
       changed

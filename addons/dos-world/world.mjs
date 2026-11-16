@@ -184,11 +184,25 @@ export class DosWorld {
     }
   }
 
-  async untilSnapshot(predicate) {
+  async untilSnapshot(predicate, timeoutMs = 15_000) {
+    const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (this.failure !== null || this.closed) throw new Error(this.failure ?? 'machine owner has closed');
       if (this.snapshot !== null && predicate(this.snapshot)) return this.snapshot;
-      await new Promise(resolve => this.waiters.add(resolve));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('Timed out waiting for verified DOS guest snapshot');
+      await new Promise((resolve, reject) => {
+        const wake = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          this.waiters.delete(wake);
+          reject(new Error('Timed out waiting for verified DOS guest snapshot'));
+        }, remaining);
+        timer.unref?.();
+        this.waiters.add(wake);
+      });
     }
   }
 

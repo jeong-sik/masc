@@ -396,11 +396,14 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     fail_start (engine_error runtime ~operation:"create" "invalid container ID")
   else begin
     identity := Some id;
+    let close_quietly flow =
+      try Eio.Flow.close flow with
+      | Eio.Io _ | Unix.Unix_error _ | Invalid_argument _ -> ()
+    in
     let stderr_source = ref None in
     let worker_cleanup () =
       let* () = cleanup () in
-      Option.iter (fun source ->
-        try Eio.Flow.close source with Eio.Io _ | Unix.Unix_error _ -> ()) !stderr_source;
+      Option.iter close_quietly !stderr_source;
       stderr_source := None;
       Ok () in
     let protocol = Protocol.create ~instance_id ~contract
@@ -416,19 +419,36 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
       if not (String.equal inspected_id id) then
         Error (engine_error runtime ~operation:"inspect" "container ID changed")
       else
-        (* Package diagnostics have an OS-bounded pipe. They cannot flood the
-           host log or allocate an unbounded buffer. A noisy package may block
-           itself; the owner and other Add-ons do not share this pipe. *)
+        (* Drain package stderr asynchronously with a fixed-size buffer so a
+           chatty container never deadlocks on a full OS pipe while still
+           allocating bounded host memory. *)
         let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
         stderr_source := Some stderr_r;
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+          let buf = Cstruct.create 4096 in
+          let rec drain () =
+            match Eio.Flow.single_read stderr_r buf with
+            | 0 -> ()
+            | (_ : int) -> drain ()
+            | exception (End_of_file | Eio.Io _ | Unix.Unix_error _ | Invalid_argument _) ->
+              ()
+          in
+          Fun.protect
+            ~finally:(fun () -> close_quietly stderr_r)
+            drain;
+          `Stop_daemon);
         let protocol_error error = Protocol_failed (Agent_core.Error.to_string error) in
-        let* client = Agent_core.Mcp.connect ~sw ~mgr ~command
-            ~args:(Engine.start_arguments runtime id)
-            ~stderr:(stderr_w :> Eio.Flow.sink_ty Eio.Resource.t)
-            ~max_response_bytes:(Lane_addon_types.max_reply_bytes package) ?sampling_handler ()
+        let* client =
+          Fun.protect
+            ~finally:(fun () -> close_quietly stderr_w)
+            (fun () ->
+               Agent_core.Mcp.connect ~sw ~mgr ~command
+                 ~args:(Engine.start_arguments runtime id)
+                 ~stderr:(stderr_w :> Eio.Flow.sink_ty Eio.Resource.t)
+                 ~max_response_bytes:(Lane_addon_types.max_reply_bytes package)
+                 ?sampling_handler ())
           |> Result.map_error protocol_error in
         Eio.Promise.resolve set_connected client;
-        Eio.Flow.close stderr_w;
         let* () = Protocol.initialize protocol client |> protocol_result in
         Ok worker
       with
@@ -439,6 +459,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     | Ok _ -> result
     | Error error ->
         Protocol.close protocol;
+        Option.iter close_quietly !stderr_source;
+        stderr_source := None;
         fail_start error
   end
 

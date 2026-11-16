@@ -289,23 +289,28 @@ let create ~base_path () =
       | Ok (arguments, _) ->
           events := [];
           let start_time = Tool_timing.start () in
+          let flush_events = ref false in
           (* An exception still leaves the lines the call queued: a load or a
              restore announces under the lane lock before anything else can
              raise, and those lines belong to a machine that did change. They
-             go out with this call's events, with the failure as its answer. *)
+             go out with this call's events, with the failure as its answer.
+             Read-only and unauthorized calls never drain pending Board
+             announcements because the host only records events on
+             [Machine_changed] operations. *)
           let answer =
             match
               match authorize ~tool call with
               | Error message -> response (Machine.reject ~tool_name:call.tool
                   ~start_time message)
               | Ok (actor, released_controller) ->
+                  flush_events := (Controller.call_effect tool = Controller.Changes_state);
                   if tool = Controller.Dos_screen then screen ~arguments ()
                   else invoke ~released_controller ~actor ~tool ~arguments
             with
             | answer -> answer
             | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
             | exception exn -> failed_by_exception ~tool_name:call.tool ~start_time exn in
-          Machine.flush_announcements ();
+          if !flush_events then Machine.flush_announcements ();
           let metadata = match answer.S._meta with Some (`Assoc fields) -> fields | _ -> [] in
           Ok { answer with S._meta = Some (`Assoc
             (("io.github.jeong-sik/masc.machine.events", `List (List.rev !events)) :: metadata)) })) server in

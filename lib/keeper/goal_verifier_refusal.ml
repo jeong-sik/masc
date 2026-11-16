@@ -82,13 +82,56 @@ let stage_of = function
   | Progress.Before_dispatch -> Before_dispatch
   | Progress.Execution -> Execution
 
-(* Refusals are re-labeled, never decoded: the exact evidence bytes move into
+(* RFC-0489 §2.2 and §2.6 — the two evidence shapes layer 3 writes into an
+   [Execution] refusal. [Run_ended] is what [evidence_json] puts down for a run
+   that dispatched and ended without a verdict, [Owner_exited] is the same for
+   an original that was left [Dispatch_pending] with no live owner. Neither
+   carries a reviewer receipt, so they cannot be read as [Reviewer_refused].
+   Decoding stays total: an evidence object this module cannot read keeps
+   today's meaning and the worker authenticates it as before. *)
+let tools_of = function
+  | `List encoded ->
+    List.fold_left (fun acc json ->
+      match acc, Verification_run_registry.tool_observation_of_yojson json with
+      | Ok tools, Ok tool -> Ok (tool :: tools)
+      | Ok _, Error message | Error message, _ -> Error message)
+      (Ok []) encoded
+    |> Result.map List.rev
+  | _ -> Error "Goal run tools must be a list"
+
+let ended_run evidence =
+  match evidence with
+  | `Assoc fields when not (List.mem_assoc "schema" fields) ->
+    (match List.assoc_opt "cause" fields, List.assoc_opt "run" fields with
+     | Some (`String label), Some encoded_run ->
+       (match run_end_of_label label, run_of_json encoded_run with
+        | Ok cause, Ok run ->
+          (match List.assoc_opt "tools" fields, List.assoc_opt "observations" fields with
+           | Some tools, Some (`List observations) ->
+             Result.to_option (Result.map (fun tools ->
+               Run_ended {cause; run; tools; observations}) (tools_of tools))
+           | _ -> None)
+        | Error _, _ | _, Error _ -> None)
+     | Some _, _ | _, None ->
+       (match List.assoc_opt "run" fields with
+        | Some encoded_run when List.length fields = 1 ->
+          (match run_of_json encoded_run with
+           | Ok run -> Some (Owner_exited {run})
+           | Error _ -> None)
+        | Some _ | None -> None))
+  | _ -> None
+
+(* Refusals are re-labeled, not rewritten: the exact evidence bytes move into
    the typed wrapper (or into [detail] for the before-dispatch change) so the
-   worker's existing validation reads the same structure as before. *)
+   worker's existing validation reads the same structure as before. The one
+   decode is the run-ended shape above, which names no receipt to authenticate. *)
 let refusal_of stage evidence =
   match stage with
   | Progress.Before_dispatch -> Authority_moved {detail = Yojson.Safe.to_string evidence}
-  | Progress.Execution -> Reviewer_refused {evidence}
+  | Progress.Execution ->
+    (match ended_run evidence with
+     | Some refusal -> refusal
+     | None -> Reviewer_refused {evidence})
 
 let view (phase : Progress.phase) =
   match phase with

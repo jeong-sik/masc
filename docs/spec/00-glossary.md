@@ -2650,7 +2650,9 @@ status: reference
   spawn으로 시작한 별도 에이전트의 동시 실행과 다르다.
 
 **Identity Row State (Identity 행 상태)**
-: Identity 탭이 서비스 하나에 대해 말하는 닫힌 다섯 값(`Masc_tui_identity_model.identity_row_state`).
+: 키퍼가 로그인한 업무 서비스 탭이 서비스 하나에 대해 말하는 닫힌 다섯 값
+  (`Masc_tui_identity_model.identity_row_state`). 탭 화면 라벨은 "서비스"(영문판 "Services")이고
+  내부 변형 이름은 `Detail_identity`다(#51829).
   `Identity_not_attached`(선언이 없거나 도구 목록이 `None` — 한 번도 붙지 않음)·
   `Identity_attached_without_tools`(붙었으나 제공하는 도구가 빈 목록)·
   `Identity_switch_unreadable`(스위치 저장소를 읽지 못함)·`Identity_switched_off`(운영자가
@@ -2660,7 +2662,8 @@ status: reference
   이름 대도 이 Keeper에게 아무것도 주지 않는다. 행과 그 위 요약 줄이 이 한 함수를 읽으므로
   둘이 어긋날 수 없다. 요약 줄은 `attached`·`switched off`·`attached with no tools`·
   `with an unreadable switch`를 센다.
-  → [masc_tui_types.ml](../../bin/masc_tui_types.ml)
+  → [masc_tui_identity_model](../../bin/masc_tui_identity_model.mli),
+  [masc_tui_types](../../bin/masc_tui_types.ml)
 
 **Detail State (상세 상태)**
 : 상세를 가진 판의 바인딩이 어느 상태에서 응답하는지의 닫힌 세 값

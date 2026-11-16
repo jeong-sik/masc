@@ -1191,7 +1191,34 @@ let validate_answer pass selected_input output =
 ;;
 
 type admission_proposal = Deferred | Accepted of accepted
-let validate_admission_proposal ~now ~batch ~input:selected_input output =
+let check_admission_facts_budget ~(policy : admission_policy) (input : Keeper_librarian.input)
+    (accepted : accepted) =
+  let current_facts =
+    Option.fold ~none:[] ~some:(fun (c : Keeper_librarian.current_selection) -> c.facts) input.current
+  in
+  let previous_bytes =
+    Keeper_memory_os_render.facts_payload_bytes
+      ~ordinary_facts:current_facts
+      ~source_lines:policy.facts_source_lines
+  in
+  let budget =
+    Keeper_memory_os_render.measure_facts_budget
+      ~maximum_bytes:policy.facts_max_bytes
+      ~ordinary_facts:accepted.selection.facts
+      ~source_lines:policy.facts_source_lines
+  in
+  if Keeper_memory_os_render.facts_budget_fits budget || budget.total_bytes < previous_bytes
+  then Ok ()
+  else
+    Error
+      (Keeper_librarian.Admission_invalid
+         (Printf.sprintf
+            "proposed Memory OS facts exceed commit budget: %d bytes > %d bytes"
+            budget.total_bytes
+            budget.maximum_bytes))
+;;
+
+let validate_admission_proposal ?policy ~now ~batch ~input:selected_input output =
   let open Result.Syntax in
   let* ()=if Float.is_finite now && now>=0. then Ok ()
     else Error (Keeper_librarian.Admission_invalid "Original admission parsing time is invalid") in
@@ -1245,13 +1272,25 @@ let validate_admission_proposal ~now ~batch ~input:selected_input output =
                 target_memory_id=Keeper_memory_os_types.memory_id target} :: bindings)
          | _ -> Error (invalid "admitted lookup binding lacks its candidate or selected target")))
       (Ok []) judgments in
-    Ok (Accepted {accepted with required_memory_ids; explicit_candidate_ids;
-      admission_support = change_support; admission_recall_bindings = List.rev admission_recall_bindings})
+    let accepted =
+      {accepted with required_memory_ids; explicit_candidate_ids;
+       admission_support = change_support;
+       admission_recall_bindings = List.rev admission_recall_bindings}
+    in
+    let+ () =
+      match policy with
+      | None -> Ok ()
+      | Some policy -> check_admission_facts_budget ~policy selected_input accepted
+    in
+    Accepted accepted
 ;;
-let validate_admission_answer ~commit ~now batch input output =
-  validate_admission_proposal ~now ~batch ~input output |> Result.map (function
-    | Deferred -> Admission_deferred_answer
-    | Accepted accepted -> Memory_answer (accepted,Commit_memory commit))
+
+let validate_admission_answer ?policy ~commit ~now batch input output =
+  let open Result.Syntax in
+  let+ proposal = validate_admission_proposal ?policy ~now ~batch ~input output in
+  match proposal with
+  | Deferred -> Admission_deferred_answer
+  | Accepted accepted -> Memory_answer (accepted, Commit_memory commit)
 ;;
 
 let try_cli_slots
@@ -1894,7 +1933,7 @@ let run_pass
                 prepare_durable ~now:(Time_compat.now ()) ~source_lines prompt_input))
             | Memory_pass (Some _, _) | Continuity_state_pass _ | Volatile_state_pass _
             | Volatile_memory_pass _ | Working_context_pass -> None in
-        let prompt_variables, prompt_material = match admission with
+        let prompt_variables, prompt_material, admission_policy = match admission with
           | None ->
             (match durable_preparation with
              | None ->
@@ -1907,11 +1946,11 @@ let run_pass
                           ~prompt:material.resolution ~turn_inputs:material.turn_inputs))
                  | Memory_pass (None, _) | Continuity_state_pass _ | Volatile_state_pass _
                  | Working_context_pass -> material in
-               variables, material
+               variables, material, None
              | Some (_, Ok prepared) -> prepared.variables,
                Ok {resolution=prepared.prompt;turn_inputs=Some prepared.turn_prompts.turn_inputs;
-                   rendered=prepared.rendered_prompt}
-             | Some (_, Error detail) -> [],Error detail)
+                   rendered=prepared.rendered_prompt}, None
+             | Some (_, Error detail) -> [],Error detail, None)
           | Some (batch, _) ->
             let prepared =
               let open Result.Syntax in
@@ -1927,8 +1966,9 @@ let run_pass
               prepare_admission ~batch ~retirement ~source_lines prompt_input in
             (match prepared with
              | Ok prepared -> prepared.variables,
-               Ok {resolution=prepared.prompt;turn_inputs=None;rendered=prepared.rendered_prompt}
-             | Error detail -> [],Error detail) in
+               Ok {resolution=prepared.prompt;turn_inputs=None;rendered=prepared.rendered_prompt},
+               Some prepared.policy
+             | Error detail -> [],Error detail, None) in
         let parsing_now=match durable_preparation with
           | Some (_, Ok prepared) -> prepared.parsing_now
           | None | Some (_, Error _) -> Time_compat.now () in
@@ -1940,7 +1980,7 @@ let run_pass
                |> Result.map (fun proposal -> Memory_answer (proposal.accepted,Commit_memory commit)))
              | None | Some (_, Error _) -> validate_answer pass prompt_input)
           | Some (batch, commit) ->
-            validate_admission_answer ~commit ~now:parsing_now batch prompt_input in
+            validate_admission_answer ?policy:admission_policy ~commit ~now:parsing_now batch prompt_input in
         let requirement = match admission with
           | None ->
             (match durable_preparation with

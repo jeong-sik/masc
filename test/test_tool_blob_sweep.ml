@@ -281,6 +281,53 @@ let test_finder_file_below_a_store_does_not_end_the_scan () =
       let first = observe_ok ~base_path in
       Alcotest.(check int) "the named blob is live" 0 first.candidates)
 
+let test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified () =
+  with_temp_dir (fun base_path ->
+      Unix.chmod base_path 0o700;
+      let masc = Common.masc_dir_from_base_path ~base_path in
+      Fs_compat.mkdir_p masc;
+      Unix.chmod masc 0o700;
+      let store = B.create ~base_path in
+      let stale = put store "stale output alongside empty sqlite and lane-addons" in
+      set_mtime store stale (long_ago ());
+      forget_marks ();
+      let empty_db =
+        Filename.concat masc "keepers/keeper-empty/chat-operations.sqlite3"
+      in
+      Fs_compat.mkdir_p (Filename.dirname empty_db);
+      Unix.chmod (Filename.concat masc "keepers") 0o700;
+      Unix.chmod (Filename.dirname empty_db) 0o700;
+      Fs_compat.save_file empty_db "";
+      Unix.chmod empty_db 0o600;
+      List.iter
+        (fun sub ->
+           let dir = Filename.concat (Filename.concat masc "lane-addons") sub in
+           Fs_compat.mkdir_p dir;
+           Unix.chmod dir 0o700)
+        [ "evidence"
+        ; "sampling-evidence"
+        ; "host-results"
+        ; "sampling"
+        ; "sampling-outcomes"
+        ; "exact-requests"
+        ; "tool-request-owners"
+        ; "tool-request-bodies"
+        ; "keeper-librarian-history-fences"
+        ; "keeper-librarian-history-resolutions"
+        ];
+      let first = observe_ok ~base_path in
+      Alcotest.(check (list string)) "all lane-addon subdirectories classified" []
+        first.unclassified;
+      let second = observe_ok ~base_path in
+      Alcotest.(check int) "stale blob becomes deletable on second scan" 1
+        second.deletable;
+      let wal = empty_db ^ "-wal" in
+      Fs_compat.save_file wal "uncheckpointed-or-corrupt-wal";
+      Unix.chmod wal 0o600;
+      (match S.observe ~base_path ~scope with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "0-byte sqlite with companion WAL must not bypass sqlite inspection"))
+
 let () =
   Alcotest.run "tool_blob_sweep"
     [ ( "sweep"
@@ -300,5 +347,7 @@ let () =
             test_private_jsonl_lock_does_not_end_the_scan
         ; Alcotest.test_case "finder file below a store does not end the scan" `Quick
             test_finder_file_below_a_store_does_not_end_the_scan
+        ; Alcotest.test_case "empty sqlite and lane-addon stores leave sweep classified" `Quick
+            test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified
         ] )
     ]

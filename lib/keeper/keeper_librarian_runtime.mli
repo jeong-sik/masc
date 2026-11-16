@@ -544,7 +544,7 @@ val validate_admission_preparation : batch:Keeper_memory_admission_queue.batch -
 (** Pure captured-template/input/schema consistency check; never resolves a
     current prompt. It refuses an input that carries turn material, as
     {!prepare_admission} does. *)
-val validate_admission_proposal : now:float ->
+val validate_admission_proposal : ?policy:admission_policy -> now:float ->
   batch:Keeper_memory_admission_queue.batch -> input:Keeper_librarian.input ->
   Yojson.Safe.t -> (admission_proposal, Keeper_librarian.parse_error) result
 

@@ -520,6 +520,23 @@ let references_in_file ~ownership_root path =
        |> snd
 ;;
 
+let sqlite_companions_absent path =
+  let rec check = function
+    | [] -> Ok true
+    | suffix :: rest ->
+      (match Unix.lstat (path ^ suffix) with
+       | _ -> Ok false
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> check rest
+       | exception Unix.Unix_error (error, _, _) ->
+         Error (Unix.error_message error))
+  in
+  check
+    [ Common.sqlite_journal_suffix
+    ; Common.sqlite_wal_suffix
+    ; Common.sqlite_shm_suffix
+    ]
+;;
+
 let references_in_chat_operation_store ~ownership_root path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error ->
@@ -532,8 +549,19 @@ let references_in_chat_operation_store ~ownership_root path =
     Error
       (Durable_source_read_failed
          { path; reason = "durable source disappeared during scan" })
-  | Ok (Some _) ->
-    (match Keeper_chat_operation_store.inspect_durable_records ~path with
+  | Ok (Some payload) ->
+    let empty_without_companions =
+      if String.equal payload ""
+      then sqlite_companions_absent path
+      else Ok false
+    in
+    (match empty_without_companions with
+     | Ok true ->
+       (* An uninitialized 0-byte SQLite file with no WAL/journal/SHM companion holds no schema or durable rows yet. *)
+       Ok Live_reference_set.empty
+     | Error reason -> Error (Durable_source_read_failed { path; reason })
+     | Ok false ->
+       (match Keeper_chat_operation_store.inspect_durable_records ~path with
      | Error error ->
        Error
          (Durable_source_parse_failed
@@ -602,7 +630,7 @@ let references_in_chat_operation_store ~ownership_root path =
             | Keeper_semantic_execution.Settled _ ->
               after_record)
          with_batch_inputs
-         semantic_executions)
+         semantic_executions))
 ;;
 
 let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =

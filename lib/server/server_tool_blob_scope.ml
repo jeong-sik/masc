@@ -46,8 +46,18 @@ let lane_addons =
         [ (* Prepared evidence stays owned before its message commits. *)
           tree Lane_addon_store.broadcasts_directory
         ; excluded M.Settled_archive Lane_addon_store.tool_request_archive_directory
+        ; excluded M.Other_media_store "evidence"
+        ; excluded M.Other_media_store "sampling-evidence"
+        ; no_reference "host-results"
+        ; no_reference "sampling"
+        ; no_reference "sampling-outcomes"
         ; no_reference Lane_addon_store.actions_directory
         ; no_reference Lane_addon_store.bindings_directory
+        ; no_reference Lane_addon_store.exact_requests_directory
+        ; no_reference Lane_addon_store.tool_request_owners_directory
+        ; no_reference Lane_addon_store.tool_request_bodies_directory
+        ; no_reference Lane_addon_store.history_fences_directory
+        ; no_reference Lane_addon_store.history_resolutions_directory
         ; no_reference Lane_addon_store.observations_directory
         ; no_reference Lane_addon_store.sequences_directory
         ; no_reference Lane_addon_asks.dirname
@@ -258,6 +268,10 @@ let config_keepers =
       }
   ; M.Keeper_files
       { suffix = Keeper_librarian_unread_ledger.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = ".turn-boundaries.jsonl"
       ; reason = M.Writes_no_reference
       }
   ; finder_metadata

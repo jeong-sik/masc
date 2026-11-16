@@ -753,6 +753,9 @@ let list_recent_posts_matching_author_unchecked ~author_matches ~limit () =
       ~limit:(max 0 limit)
 ;;
 
+let list_posts_after_cursor_unchecked cursor =
+  Board.posts_after_cursor (backend ()) cursor
+
 let current_post_cursor () =
   let store = backend () in Board.current_post_cursor store
 

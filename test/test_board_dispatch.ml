@@ -2089,10 +2089,13 @@ let test_set_pinned_persistence_failure_rolls_back () =
   let post_id = Board.Post_id.to_string post.id in
   let active = Board.global () in
   let observed_source = posts_observation active in
+  let cursor_before = Board_dispatch.current_post_cursor () in
   with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   check_source_io_error (Board_dispatch.set_pinned ~post_id ~pinned:true);
   check_retained_posts_source observed_source active;
+  Alcotest.(check (pair (float 0.0) (option string))) "refused pin restores cursor index"
+    cursor_before (Board_dispatch.current_post_cursor ());
   Alcotest.(check bool)
     "persist error counter incremented"
     true
@@ -2106,6 +2109,26 @@ let test_set_pinned_persistence_failure_rolls_back () =
    what a page of the board answers, so each raises one [Post_changed] naming
    the post and what was done to it. *)
   )
+
+let check_updated_cursor_against_posts () =
+  let posts = Board_dispatch.list_posts_unchecked ~limit:max_int () in
+  let token (post : Board.post) = post.updated_at, Board.Post_id.to_string post.id in
+  let compare_token (at, ai) (bt, bi) =
+    let order = Float.compare at bt in if order <> 0 then order else String.compare ai bi in
+  let sorted = List.sort (fun a b -> compare_token (token a) (token b)) posts in
+  let ids = List.map (fun (p : Board.post) -> Board.Post_id.to_string p.id) in
+  let cursors = (neg_infinity, None) :: List.map (fun p -> let ts, id = token p in ts, Some id) sorted in
+  List.iter (fun ((ts, id) as cursor) ->
+    let expected = List.filter (fun p -> compare_token (token p) (ts, Option.value ~default:"" id) > 0) sorted in
+    Alcotest.(check (list string)) "indexed range matches current source order"
+      (ids expected) (ids (Board_dispatch.list_posts_after_cursor_unchecked cursor))) cursors;
+  match List.rev sorted with
+  | [] -> Alcotest.(check (option string)) "empty board has no head ID" None (snd (Board_dispatch.current_post_cursor ()))
+  | latest :: _ ->
+    let ts, id = token latest in
+    Alcotest.(check (pair (float 0.0) (option string))) "indexed head matches current post" (ts, Some id)
+      (Board_dispatch.current_post_cursor ())
+;;
 
 let test_each_post_write_announces_its_change () =
   let changes = ref [] in
@@ -2124,7 +2147,7 @@ let test_each_post_write_announces_its_change () =
   in
   let post_id = Board.Post_id.to_string post.id in
   let ok label = function
-    | Ok _ -> ()
+    | Ok _ -> check_updated_cursor_against_posts ()
     | Error e -> Alcotest.fail (label ^ ": " ^ Board.show_board_error e)
   in
   Alcotest.(check int) "creating raises its own event" 1 !others;
@@ -2149,6 +2172,20 @@ let test_each_post_write_announces_its_change () =
          "deleted" ])
     (List.rev !changes);
   Alcotest.(check int) "no other event was raised" 1 !others
+
+let test_comment_and_vote_advance_cursor_index () =
+  let post = get_created (Board_dispatch.create_post ~author:"cursor-writer" ~content:"cursor parent"
+    ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let store = Board.global () in
+  let require = function Ok _ -> () | Error error -> Alcotest.fail (Board.show_board_error error) in
+  require (Board.add_comment store ~reader:Masc_board_handlers.Board_access.Operator
+    ~lookup:every_name_declared ~post_id ~author:"cursor-reader" ~content:"comment changes parent" ());
+  check_updated_cursor_against_posts ();
+  require (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator
+    ~voter:"cursor-reader" ~post_id ~direction:Board.Up);
+  check_updated_cursor_against_posts ()
+;;
 
 (* A write the store refuses changed nothing, so nothing is announced. *)
 let test_direct_comments_cannot_expand_readership () =
@@ -3582,6 +3619,8 @@ let () =
       Alcotest.test_case "whitespace-only hearth becomes None" `Quick
         (with_eio test_whitespace_hearth_becomes_none);
       Alcotest.test_case "set_thread_id" `Quick (with_eio test_set_thread_id);
+      Alcotest.test_case "comment and vote advance cursor index" `Quick
+        (with_eio test_comment_and_vote_advance_cursor_index);
       Alcotest.test_case "set_pinned toggle + restart" `Quick (with_eio test_set_pinned);
       Alcotest.test_case "set_pinned missing post" `Quick (with_eio test_set_pinned_missing_post);
       Alcotest.test_case "set_pinned append failure rolls back" `Quick

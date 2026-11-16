@@ -449,15 +449,16 @@ val list_posts
   -> unit
   -> post list
 
-(** Returns the post with the greatest [(updated_at, post_id)] cursor token,
-    or [None] when the board is empty. The fold runs under the board lock and
-    does not allocate or sort the complete post history. *)
 val current_post_cursor : store -> float * string option
-(** Atomic high-water mark for Board observation.
+(** Greatest [(updated_at, post_id)] key, read under the board lock without
+    scanning or sorting history. On an empty board, the time is captured
+    under the same lock used by post creation and the ID is absent. *)
 
-    When the Board is empty, the timestamp is captured while holding the same
-    lock used by post creation, so a concurrently admitted first post is
-    strictly newer than the returned cursor. *)
+val posts_after_cursor : store -> float * string option -> post list
+(** Strictly after the cursor in [updated_at ASC, post_id ASC] order.
+    A missing ID uses the empty string, preserving timestamp-only cursors.
+    The indexed range and post lookup share one lock. No visibility filter;
+    use the access-controlled dispatch surface for user-facing queries. *)
 
 (** Traverse the Recent index in [created_at DESC, post_id ASC] order until
     [limit] matches are collected or the index is exhausted. A nonpositive

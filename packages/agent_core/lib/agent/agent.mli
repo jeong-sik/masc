@@ -318,6 +318,44 @@ val observe_execution :
     [Execution_awaiting] includes a competing observation or writer
     admission whose absence has not been established. *)
 
+type uncollected_turn_retirement =
+  | Not_uncollected
+      (** The run is not a turn cut before its provider response was
+          collected. Nothing was written. *)
+  | Retired of execution_terminal_evidence
+      (** This call closed the open provider attempt, its turn and the root
+          [Cancelled]. The evidence is read back from the closed journal. *)
+
+type uncollected_turn_error
+
+val uncollected_turn_error_to_string : uncollected_turn_error -> string
+
+val retire_uncollected_turn
+  :  runtime:execution_runtime
+  -> dir:Eio.Fs.dir_ty Eio.Path.t
+  -> execution_locator
+  -> agent_name:string
+  -> checkpoint_turn_count:int
+  -> (uncollected_turn_retirement, uncollected_turn_error) result
+(** Close, at restart settlement, a run whose writer is gone while one provider
+    attempt is open and before the host collected its response. A run allows
+    one provider attempt per turn, so the same run cannot continue that turn.
+    The host continues the work from the checkpoint it saved before the call.
+
+    [checkpoint_turn_count] is the turn count of the newest checkpoint the host
+    saved for this run. The run is [Retired] when its single open turn has
+    that ordinal, the turn's provider attempt is open, and the attempt has no
+    Tool invocation. A recorded response does not change this: without the
+    host's collected checkpoint, the run cannot continue the turn either.
+    Every other shape is [Not_uncollected], including a finished root and a
+    topology that {!run} would refuse on resume.
+
+    The writer lock is taken without waiting. A live writer is an error, and
+    the tree is read again under the lock before the abort. A failed writer
+    close can follow a committed abort; the host then reads the terminal with
+    {!read_execution_terminal} before it decides. Cancellation and reserved
+    exceptions are re-raised. *)
+
 (** Configure one durable execution scope. Without [resume], the directory must
     be new and the call starts a fresh scope. With [resume], the same Agent API
     reopens that scope in the same directory, validates Agent identity and the

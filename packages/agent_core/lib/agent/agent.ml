@@ -101,6 +101,27 @@ let observe_execution projection =
       Execution_terminal (execution_terminal_evidence (terminal, evidence)))
 ;;
 
+type uncollected_turn_retirement =
+  | Not_uncollected
+  | Retired of execution_terminal_evidence
+
+type uncollected_turn_error = Agent_uncollected_turn.error
+
+let uncollected_turn_error_to_string = Agent_uncollected_turn.error_to_string
+
+let retire_uncollected_turn ~runtime ~dir locator ~agent_name ~checkpoint_turn_count =
+  Agent_uncollected_turn.retire
+    ~codec:(Agent_execution_runner.runtime_codec runtime)
+    ~dir
+    (Agent_execution_runner.locator_scope locator)
+    ~agent_name
+    ~checkpoint_turn_count
+  |> Result.map (function
+    | Agent_uncollected_turn.Not_uncollected -> Not_uncollected
+    | Agent_uncollected_turn.Retired (terminal, evidence) ->
+      Retired (execution_terminal_evidence (terminal, evidence)))
+;;
+
 (* The operator-facing record of an admitted source change. Restore and
    dispatch both write it from the typed value their admission returned, so
    the record names each excluded message instead of counting them. *)

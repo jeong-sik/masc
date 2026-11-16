@@ -2830,7 +2830,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                            | Some reply -> Keeper_event_queue.Delegate_replied reply
                            | None -> Keeper_event_queue.Delegate_no_reply))
                    | Keeper_chat_run_signal.Failed message ->
-                     commit (Keeper_event_queue.Delegate_failed message)
+                     settle_delivery (Error message)
                    | Keeper_chat_run_signal.Progress -> loop reply
                  in
                  loop None)

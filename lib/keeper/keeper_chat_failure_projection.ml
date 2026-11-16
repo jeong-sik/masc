@@ -28,6 +28,7 @@ type failed =
   { operation : Operation.Operation_id.t
   ; operation_id : string
   ; delivery_key : Keeper_chat_delivery_identity.delivery_key
+  ; created_at : float
   ; completed_at : float
   ; failure_kind : Operation.failure_kind
   ; source : (Keeper_chat_operation_payload.decoded_source, string) result Lazy.t
@@ -51,25 +52,58 @@ let prepare (operation : Operation.t) =
        Ok (Some { operation = operation.operation_id
                 ; operation_id
                 ; delivery_key = Keeper_chat_delivery_identity.Operation request_id
+                ; created_at = operation.created_at
                 ; completed_at
                 ; failure_kind = failure.kind
                 ; source
                 ; route
                 ; content = "Keeper request failed: " ^ summary failure.kind }))
 
-(* The transcript answer is already in; the journal is attempted either way. *)
+(* The transcript answer is already in; the journal and any Keeper delegation
+   failure wake are attempted either way so cancellations, exceptions, and
+   restart-recovered failures always notify a waiting delegating Keeper. *)
 let finish ~base_path ~keeper_name (failed : failed) appended =
+  let source_decoded = Lazy.force failed.source in
   let transcript = appended
     |> Result.map_error (fun detail -> Transcript_unavailable detail)
     |> Result.map (fun appended -> match appended with
      | Keeper_chat_store.Already_present _ -> ()
      | Keeper_chat_store.Appended _ ->
-       (match Lazy.force failed.source with
+       (match source_decoded with
         | Ok (_ : Keeper_chat_operation_payload.decoded_source) -> ()
         | Error detail ->
           Log.Keeper.warn ~keeper_name
             "failed operation %s has an unreadable source; failure row has no route: %s"
             failed.operation_id detail)) in
+  (match source_decoded with
+   | Ok { Keeper_chat_operation_payload.continuation_channel =
+            Keeper_continuation_channel.Keeper { keeper_name = asked_by }
+        ; _ } ->
+     (match
+        Keeper_delegate_completion_wake.deliver
+          ~not_before:failed.created_at
+          ~base_path
+          ~asked_by
+          ~operation_id:failed.operation_id
+          ~delegate:keeper_name
+          ~terminal:(Keeper_event_queue.Delegate_failed (summary failed.failure_kind))
+      with
+      | Ok () -> ()
+      | Error detail ->
+        Log.Keeper.warn ~keeper_name
+          "failed operation %s delegate completion wake pending for %s: %s"
+          failed.operation_id asked_by detail)
+   | Ok
+       { Keeper_chat_operation_payload.continuation_channel =
+           ( Keeper_continuation_channel.Dashboard _
+           | Keeper_continuation_channel.Discord _
+           | Keeper_continuation_channel.Slack _
+           | Keeper_continuation_channel.Telegram _
+           | Keeper_continuation_channel.Imessage _
+           | Keeper_continuation_channel.Gate _
+           | Keeper_continuation_channel.Unrouted _ )
+       ; _ }
+   | Error _ -> ());
   let journal = Journal.open_journal ~base_dir:base_path ~keeper_name
       ~operation_id:failed.operation_id () in
   let settlement = { Journal.operation_id = failed.operation; completed_at = failed.completed_at } in

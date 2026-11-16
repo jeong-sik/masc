@@ -14,7 +14,8 @@
     queue the Keeper drains on its next admitted turn. *)
 
 val deliver
-  :  base_path:string
+  :  ?not_before:float
+  -> base_path:string
   -> asked_by:string
   -> operation_id:string
   -> delegate:string

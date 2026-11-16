@@ -1187,8 +1187,9 @@ let test_predispatch_failure_advances_only_to_agent_core_successor () =
                (match cause with
                 | EO.Completion_failed _ -> true
                 | _ -> false)
-           | EO.Flow_advance_candidate_rejected _ ->
-             fail "transport failure was recorded as a candidate rejection")
+           | EO.Flow_advance_candidate_rejected _
+           | EO.Flow_advance_before_dispatch_admission_timed_out _ ->
+             fail "transport failure was recorded as a pre-dispatch failure")
         | _ -> fail "exactly one typed AGENT_CORE advance should be retained");
        match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some

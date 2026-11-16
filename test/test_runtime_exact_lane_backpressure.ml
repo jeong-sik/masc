@@ -410,7 +410,8 @@ let test_typed_quota_uses_actual_generation_dispatch_receipt env () =
               {cause=(Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _
                 | Exact.Flow_measurement_start_failed _ | Exact.Flow_before_measurement_dispatch_callback_failed _
                 | Exact.Flow_measurement_terminal_callback_failed _ | Exact.Flow_before_dispatch_callback_failed _
-                | Exact.Flow_before_advance_callback_failed _ | Exact.Flow_candidates_exhausted _);_})
+                | Exact.Flow_before_advance_callback_failed _ | Exact.Flow_candidates_exhausted _
+                | Exact.Flow_before_dispatch_admission_timed_out _);_})
           | Error (Exact.Flow_semantic_candidates_exhausted _) ->
             fail "fixture did not produce an actual generation failure receipt" in
         Lane.observe ~resolved substituted;

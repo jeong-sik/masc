@@ -101,6 +101,10 @@ let execute_http ~before_dispatch ~admission_class ~note ~capture_http ~resolved
             note (Exact.candidate_rejection_identity rejection).candidate_id (Failure.candidate rejection)
               (Exact.candidate_rejection_to_string rejection)
           in
+          let admission_timed_out (receipt : Exact.flow_attempt_receipt) timeout =
+            note (slot_of receipt) Failure.Transient
+              ("before_dispatch_admission_timed_out: " ^ Exact.admission_wait_timeout_to_string timeout)
+          in
           let check success =
             let raw = (Exact.flow_success_output success).output in
             match validate raw with
@@ -120,6 +124,8 @@ let execute_http ~before_dispatch ~admission_class ~note ~capture_http ~resolved
                 Eio.Fiber.check ();
                 (match failed with
                  | Exact.Flow_candidate_execution_failed { candidate; cause } -> execution_failed candidate cause
+                 | Exact.Flow_candidate_before_dispatch_admission_timed_out { candidate; timeout } ->
+                   admission_timed_out candidate timeout
                  | Exact.Flow_candidate_rejected rejection -> rejected rejection);
                 Ok ())
               ~validate:check attempt)
@@ -141,6 +147,8 @@ let execute_http ~before_dispatch ~admission_class ~note ~capture_http ~resolved
           | Error (Exact.Flow_execution_terminal { cause; _ }) ->
             (match cause with
              | Exact.Flow_exact_execution_failed { candidate; cause = error; _ } -> execution_failed candidate error
+             | Exact.Flow_before_dispatch_admission_timed_out { candidate; timeout; _ } ->
+               admission_timed_out candidate timeout
              | Exact.Flow_candidates_exhausted { rejection; _ } -> rejected rejection
              | Exact.Flow_attempt_already_started _ | Exact.Flow_attempt_start_failed _
              | Exact.Flow_measurement_start_failed _ | Exact.Flow_before_measurement_dispatch_callback_failed _

@@ -53,14 +53,28 @@ let visit_of_admission = function
   | Candidate_rejected rejection -> Exact.candidate_rejection_visit rejection
 let rejection_outcome rejection = Admission_rejected
   (Failure.local_rejection (Exact.candidate_rejection_disposition rejection))
+let predispatch_queue_timeout timeout =
+  Execution_failed
+    (Failure.api_observation
+       (Exact.Completion_failed
+          { dispatch = Exact.No_generation_dispatch
+          ; error = Llm_provider.Http_client.TimeoutError
+              { phase = Llm_provider.Http_client.Queue
+              ; message = Exact.admission_wait_timeout_to_string timeout
+              }
+          }))
 let failed_snapshot = function
   | Exact.Flow_advance_candidate_rejected rejection ->
     (Exact.candidate_rejection_visit rejection).ordinal,rejection_outcome rejection
+  | Flow_advance_before_dispatch_admission_timed_out {candidate;timeout} ->
+    candidate.visit.ordinal,predispatch_queue_timeout timeout
   | Flow_advance_execution_failed {candidate;cause;_} ->
     candidate.visit.ordinal,Execution_failed (Failure.api_observation cause)
 let failed_candidate = function
   | Exact.Flow_candidate_rejected rejection ->
     (Exact.candidate_rejection_visit rejection).ordinal,rejection_outcome rejection
+  | Flow_candidate_before_dispatch_admission_timed_out {candidate;timeout} ->
+    candidate.visit.ordinal,predispatch_queue_timeout timeout
   | Flow_candidate_execution_failed {candidate;cause} ->
     candidate.visit.ordinal,Execution_failed (Failure.api_observation cause.cause)
 let semantic (rejection:'a Exact.semantic_rejection_receipt) =
@@ -111,6 +125,8 @@ let terminal_evidence = function
   | Flow_before_advance_callback_failed {evidence;failed;_} -> evidence,[failed_candidate failed]
   | Flow_candidates_exhausted {evidence;rejection} ->
     evidence,[(Exact.candidate_rejection_visit rejection).ordinal,rejection_outcome rejection]
+  | Flow_before_dispatch_admission_timed_out {evidence;candidate;timeout} ->
+    evidence,[candidate.visit.ordinal,predispatch_queue_timeout timeout]
   | Flow_exact_execution_failed {evidence;candidate;cause} ->
     evidence,[candidate.visit.ordinal,Execution_failed (Failure.api_observation cause.cause)]
 let of_result = function

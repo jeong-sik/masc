@@ -235,8 +235,16 @@ type flow_attempt_snapshot =
   ; receipt : generation_receipt_snapshot
   }
 
+type admission_wait_timeout =
+  | Permit_wait_expired
+  | Permit_granted_as_deadline_passed
+
 type flow_advance_failure_snapshot =
   | Flow_advance_candidate_rejected of candidate_rejection_receipt
+  | Flow_advance_before_dispatch_admission_timed_out of
+      { candidate : flow_attempt_snapshot
+      ; timeout : admission_wait_timeout
+      }
   | Flow_advance_execution_failed of
       { candidate : flow_attempt_snapshot
       ; cause : execution_error_cause
@@ -322,6 +330,10 @@ type ('accepted, 'rejection) validated_flow_success =
 
 type flow_candidate_failure =
   | Flow_candidate_rejected of candidate_rejection_receipt
+  | Flow_candidate_before_dispatch_admission_timed_out of
+      { candidate : flow_attempt_receipt
+      ; timeout : admission_wait_timeout
+      }
   | Flow_candidate_execution_failed of
       { candidate : flow_attempt_receipt
       ; cause : execution_error
@@ -362,6 +374,11 @@ type 'callback_error flow_execution_error =
       }
   | Flow_candidates_exhausted of
       { rejection : candidate_rejection_receipt
+      ; evidence : flow_evidence
+      }
+  | Flow_before_dispatch_admission_timed_out of
+      { candidate : flow_attempt_receipt
+      ; timeout : admission_wait_timeout
       ; evidence : flow_evidence
       }
   | Flow_exact_execution_failed of
@@ -436,6 +453,10 @@ type ('callback_error, 'uncertainty) flow_step_failure =
   | Flow_step_measurement_terminal_callback_failed of
       flow_measurement_receipt * 'callback_error
   | Flow_step_before_dispatch_callback_failed of flow_attempt_receipt * 'callback_error
+  | Flow_step_before_dispatch_admission_timed_out of
+      { candidate : flow_attempt_receipt
+      ; timeout : admission_wait_timeout
+      }
   | Flow_step_execution_failed of
       { candidate : flow_attempt_receipt
       ; cause : execution_error
@@ -820,6 +841,14 @@ let flow_attempt_evidence (flow : flow_attempt) =
 
 let flow_advance_failure_snapshot = function
   | Flow_candidate_rejected receipt -> Flow_advance_candidate_rejected receipt
+  | Flow_candidate_before_dispatch_admission_timed_out { candidate; timeout } ->
+    Flow_advance_before_dispatch_admission_timed_out
+      { candidate =
+          { visit = candidate.visit
+          ; receipt = Generation_receipt.snapshot candidate.receipt
+          }
+      ; timeout
+      }
   | Flow_candidate_execution_failed { candidate; cause } ->
     Flow_advance_execution_failed
       { candidate =
@@ -1049,7 +1078,9 @@ let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
    headers when it is frozen, a clock is always passed, an attempt is started
    once by the step that allocated it, and every normalized answer is JSON. *)
 let flow_execution_terminal_kind = function
-  | Flow_candidates_exhausted _ | Flow_exact_execution_failed _ ->
+  | Flow_candidates_exhausted _
+  | Flow_before_dispatch_admission_timed_out _
+  | Flow_exact_execution_failed _ ->
     Advanceable_candidates_exhausted
   | Flow_attempt_already_started _
   | Flow_attempt_start_failed _
@@ -1141,12 +1172,16 @@ let flow_execution_binding_standing error =
     match advance.failed with
     | Flow_advance_execution_failed { cause; candidate = _; raw_response_sha256 = _ } ->
       execution_cause_is_binding_rest cause
+    | Flow_advance_before_dispatch_admission_timed_out { candidate = _; timeout = _ } ->
+      true
     | Flow_advance_candidate_rejected _ -> false
   in
   match error with
   | Flow_exact_execution_failed { cause; evidence; candidate = _ }
     when execution_cause_is_binding_rest cause.cause
          && List.for_all advance_rests evidence.advances -> Every_binding_resting
+  | Flow_before_dispatch_admission_timed_out { evidence; candidate = _; timeout = _ }
+    when List.for_all advance_rests evidence.advances -> Every_binding_resting
   | Flow_attempt_already_started _
   | Flow_attempt_start_failed _
   | Flow_measurement_start_failed _
@@ -1155,6 +1190,7 @@ let flow_execution_binding_standing error =
   | Flow_before_dispatch_callback_failed _
   | Flow_before_advance_callback_failed _
   | Flow_candidates_exhausted _
+  | Flow_before_dispatch_admission_timed_out _
   | Flow_exact_execution_failed _ -> Not_every_binding_resting
 ;;
 
@@ -1288,21 +1324,53 @@ let execute_flow_candidate
             | None, _ -> run ()
             | Some _, None -> Provider_admission.with_admission ~config:target.config run
             | Some _, Some timeout_s ->
+              let deadline_at = Eio.Time.now clock +. timeout_s in
               (match
-                 Provider_admission.with_admission_and_work_for
+                 Provider_admission.with_admission_until
                    ~clock
-                   ~timeout_s
+                   ~deadline_at
                    ~config:target.config
-                   run
+                   (fun () ->
+                     if Float.compare (deadline_at -. Eio.Time.now clock) 0.0 <= 0
+                     then Error `Permit_granted_as_deadline_passed
+                     else (
+                       match before_dispatch candidate_receipt with
+                       | Error cause ->
+                         Ok
+                           (Error
+                              (Flow_step_before_dispatch_callback_failed
+                                 (candidate_receipt, cause)))
+                       | Ok () ->
+                         Generation_receipt.start attempt.receipt;
+                         publish ();
+                         let remaining = deadline_at -. Eio.Time.now clock in
+                         if Float.compare remaining 0.0 <= 0
+                         then Error `Work_expired
+                         else (
+                           match
+                             Under_deadline.run clock remaining (fun () ->
+                               execute_once_with_publication ~publish ~net ~clock attempt)
+                           with
+                           | Error `Timeout -> Error `Work_expired
+                           | Ok (Ok success) -> Ok (Ok (candidate_receipt, success))
+                           | Ok (Error cause) ->
+                             Ok
+                               (Error
+                                  (Flow_step_execution_failed
+                                     { candidate = candidate_receipt; cause })))))
                with
-               | Ok result -> result
-               | Error Provider_admission.Permit_wait_expired ->
-                 timeout_failure ~phase:Http_client.Queue
-                   "before a provider admission permit was granted"
-               | Error Provider_admission.Permit_granted_as_deadline_passed ->
-                 timeout_failure ~phase:Http_client.Queue
-                   "as the provider admission permit was granted"
-               | Error Provider_admission.Work_expired ->
+               | Ok (Ok step_result) -> step_result
+               | Error `Permit_wait_expired ->
+                 Error
+                   (Flow_step_before_dispatch_admission_timed_out
+                      { candidate = candidate_receipt; timeout = Permit_wait_expired })
+               | Ok (Error `Permit_granted_as_deadline_passed) ->
+                 Error
+                   (Flow_step_before_dispatch_admission_timed_out
+                      { candidate = candidate_receipt
+                      ; timeout = Permit_granted_as_deadline_passed
+                      })
+               | Ok (Error `Work_expired) ->
                  timeout_failure ~phase:Http_client.Wall_clock
                    "during the provider round trip")
           in
@@ -1315,7 +1383,9 @@ let execute_flow_candidate
                     | Flow_step_measurement_start_failed _
                     | Flow_step_before_measurement_dispatch_callback_failed _
                     | Flow_step_measurement_terminal_callback_failed _
-                    | Flow_step_before_dispatch_callback_failed _ | Flow_step_unresolved _) -> None
+                    | Flow_step_before_dispatch_callback_failed _
+                    | Flow_step_before_dispatch_admission_timed_out _
+                    | Flow_step_unresolved _) -> None
           in
           (match classify_uncertainty observation execution_error with
            | None -> result
@@ -1358,6 +1428,8 @@ let responses_uncertainty snapshot (execution_error : execution_error option) =
 
 let advanceable_flow_failure = function
   | Flow_step_candidate_rejected receipt -> Some (Flow_candidate_rejected receipt)
+  | Flow_step_before_dispatch_admission_timed_out { candidate; timeout } ->
+    Some (Flow_candidate_before_dispatch_admission_timed_out { candidate; timeout })
   | Flow_step_execution_failed { candidate; cause } ->
     Some (Flow_candidate_execution_failed { candidate; cause })
   | Flow_step_attempt_start_failed _
@@ -1446,6 +1518,10 @@ let execute_flow_once_internal
         terminal prior_rejections (Flow_measurement_terminal_callback_failed { measurement; cause; evidence })
       | Flow_step_before_dispatch_callback_failed (candidate, cause) ->
         terminal prior_rejections (Flow_before_dispatch_callback_failed { candidate; cause; evidence })
+      | Flow_step_before_dispatch_admission_timed_out { candidate; timeout } ->
+        terminal
+          prior_rejections
+          (Flow_before_dispatch_admission_timed_out { candidate; timeout; evidence })
       | Flow_step_execution_failed { candidate; cause; _ } ->
         terminal prior_rejections (Flow_exact_execution_failed { candidate; cause; evidence }))
 ;;
@@ -1645,12 +1721,21 @@ let candidate_rejection_to_string (rejection : candidate_rejection_receipt) =
     (candidate_rejection_reason rejection)
 ;;
 
+let admission_wait_timeout_to_string : admission_wait_timeout -> string = function
+  | Permit_wait_expired -> "permit_wait_expired"
+  | Permit_granted_as_deadline_passed -> "permit_granted_as_deadline_passed"
+;;
+
 let flow_advance_failure_to_string
   : flow_advance_failure_snapshot -> string * string
   = function
   | Flow_advance_candidate_rejected rejection ->
     ( rejection.visit.identity.candidate_id
     , "candidate_rejected cause=" ^ candidate_rejection_reason rejection )
+  | Flow_advance_before_dispatch_admission_timed_out { candidate; timeout } ->
+    ( candidate.visit.identity.candidate_id
+    , "before_dispatch_admission_timed_out cause="
+      ^ admission_wait_timeout_to_string timeout )
   | Flow_advance_execution_failed { candidate; cause; raw_response_sha256 } ->
     let sha =
       match raw_response_sha256 with
@@ -1711,6 +1796,12 @@ let flow_candidate_failure_to_string ~raw_response_to_string
   = function
   | Flow_candidate_rejected rejection ->
     "candidate_rejected " ^ candidate_rejection_to_string rejection
+  | Flow_candidate_before_dispatch_admission_timed_out { candidate; timeout } ->
+    Printf.sprintf
+      "before_dispatch_admission_timed_out slot=%s call_id=%s cause=%s"
+      candidate.visit.identity.candidate_id
+      (call_id_to_string (receipt_call_id candidate.receipt))
+      (admission_wait_timeout_to_string timeout)
   | Flow_candidate_execution_failed { candidate; cause } ->
     Printf.sprintf
       "execution_failed slot=%s %s"
@@ -1773,6 +1864,14 @@ let flow_execution_error_to_string
          (callback_error_to_string cause))
   | Flow_candidates_exhausted { rejection; evidence } ->
     with_flow evidence ("candidates_exhausted: " ^ candidate_rejection_to_string rejection)
+  | Flow_before_dispatch_admission_timed_out { candidate; timeout; evidence } ->
+    with_flow
+      evidence
+      (Printf.sprintf
+         "before_dispatch_admission_timed_out: slot=%s call_id=%s cause=%s"
+         candidate.visit.identity.candidate_id
+         (call_id_to_string (receipt_call_id candidate.receipt))
+         (admission_wait_timeout_to_string timeout))
   | Flow_exact_execution_failed { candidate; cause; evidence } ->
     with_flow
       evidence

@@ -3035,6 +3035,138 @@ let test_wrong_shape_run_record_keeps_the_shape () =
         Alcotest.fail "the wrong-shape run did not close with durable detail"))
 ;;
 
+let test_permit_wait_expiry_advances_and_defers_without_partition_invariant () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      with_temp_base "board-attention-permit-wait-expiry" @@ fun base_path ->
+      let cand_failover = candidate "board-attention-permit-wait-failover" in
+      let cand_defer = candidate "board-attention-permit-wait-defer" in
+      let meta =
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+            [ "name", `String cand_failover.keeper_name
+            ; "trace_id", `String "trace-board-permit-wait"
+            ])
+        |> Result.get_ok
+      in
+      ignore (Keeper_registry.register_offline ~base_path cand_failover.keeper_name meta);
+      let server =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply
+             (Fixture.openai_response
+                (judgment_output ~candidate_id:cand_failover.candidate_id)))
+      in
+      let make_binding key =
+        Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~provider_id:"fixture-provider"
+          ~model_id:"fixture-model"
+          ~base_url:server.base_url
+          ~api_key:key
+          ~request_path:"/v1/chat/completions"
+          ~max_concurrent_requests:1
+          ~model_capabilities_override:
+            { Llm_provider.Capabilities.default_capabilities with
+              supports_response_format_json = true
+            }
+          ()
+      in
+      let primary_key = "permit-wait-primary-" ^ cand_failover.candidate_id in
+      let successor_key = "permit-wait-successor-" ^ cand_failover.candidate_id in
+      let primary_cfg = make_binding primary_key in
+      let declared id cfg key : Exact_output.declared_target =
+        { target_ref = id
+        ; binding = cfg
+        ; credential =
+            Exact_output.Credential_resolved (Llm_provider.Secret.of_string key)
+        ; body_timeout_s = Some 0.05
+        ; model_declaration = Exact_output.No_model_declaration
+        }
+      in
+      let snapshot =
+        Exact_output.load_resolver_snapshot
+          ~catalog:
+            (Exact_output.Embedded_with_targets
+               [ declared "permit-primary" primary_cfg primary_key
+               ; declared "permit-successor" (make_binding successor_key) successor_key
+               ])
+          ()
+        |> Result.get_ok
+      in
+      (* Part 1: primary times out in permit queue -> advances cleanly via
+         Predispatch_rejection (no Durable_partition_invariant) to successor. *)
+      ignore
+        (Fixture.publish_registry
+           ~lane_id:Exact_flow.lane_id
+           ~slot_ids:[ "permit-primary"; "permit-successor" ]
+           snapshot
+          : Runtime_exact_output_registry.t);
+      (match Candidate.record ~base_path cand_failover with
+       | Candidate.Recorded _ -> ()
+       | Candidate.Duplicate _ | Candidate.Record_error _ ->
+         Alcotest.fail "record failover candidate");
+      let occupied, occupied_resolver = Eio.Promise.create () in
+      let release, release_resolver = Eio.Promise.create () in
+      Eio.Fiber.both
+        (fun () ->
+           Llm_provider.Provider_admission.with_admission ~config:primary_cfg (fun () ->
+             Eio.Promise.resolve occupied_resolver ();
+             Eio.Promise.await release))
+        (fun () ->
+           Eio.Promise.await occupied;
+           (match
+              Worker.For_testing.process_next_exact
+                ~clock
+                ~net:(Some net)
+                ~now:(fun () -> 3.0)
+                ~worker_epoch:(Partition.Worker_epoch.generate ())
+                ~base_path
+                ~keeper_name:cand_failover.keeper_name
+            with
+            | Ok (Worker.Judgment_completed { candidate_id; _ })
+              when String.equal candidate_id cand_failover.candidate_id -> ()
+            | Ok (Worker.Partition_blocked { reason = _; _ }) ->
+              Alcotest.fail "permit wait expiry unexpectedly blocked partition"
+            | Ok _ -> Alcotest.fail "unexpected worker step on permit-wait failover"
+            | Error detail -> Alcotest.fail detail);
+           (* Part 2: all slots time out in permit queue -> defers Ready
+              instead of quarantining Exact_lane_exhausted. *)
+           ignore
+             (Fixture.publish_registry
+                ~lane_id:Exact_flow.lane_id
+                ~slot_ids:[ "permit-primary" ]
+                snapshot
+               : Runtime_exact_output_registry.t);
+           (match Candidate.record ~base_path cand_defer with
+            | Candidate.Recorded _ -> ()
+            | Candidate.Duplicate _ | Candidate.Record_error _ ->
+              Alcotest.fail "record defer candidate");
+           (match
+              Worker.For_testing.process_next_exact
+                ~clock
+                ~net:(Some net)
+                ~now:(fun () -> 4.0)
+                ~worker_epoch:(Partition.Worker_epoch.generate ())
+                ~base_path
+                ~keeper_name:cand_defer.keeper_name
+            with
+            | Ok (Worker.Judgment_deferred { candidate_id; _ })
+              when String.equal candidate_id cand_defer.candidate_id -> ()
+            | Ok (Worker.Partition_blocked { reason = _; _ }) ->
+              Alcotest.fail
+                "all-slots permit queue expiry quarantined instead of deferring"
+            | Ok _ -> Alcotest.fail "expected Judgment_deferred when permit queue expires"
+            | Error detail -> Alcotest.fail detail);
+           Eio.Promise.resolve release_resolver ());
+      Alcotest.(check int)
+        "only successor sent an HTTP POST"
+        1
+        (Fixture.post_count server)))
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
@@ -3074,6 +3206,10 @@ let () =
             "explicit lane failover preserves projection order and success provenance"
             `Quick
             test_explicit_lane_failover_and_success_provenance
+        ; Alcotest.test_case
+            "permit wait expiry advances and defers without partition invariant"
+            `Quick
+            test_permit_wait_expiry_advances_and_defers_without_partition_invariant
         ; Alcotest.test_case
             "strict singleton mismatch advances to declared successor"
             `Quick

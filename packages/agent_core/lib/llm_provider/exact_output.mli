@@ -768,8 +768,20 @@ type flow_attempt_snapshot = private
   ; receipt : generation_receipt_snapshot
   }
 
+(** Why a bounded endpoint-permit wait ended before [before_dispatch] or
+    generation started. *)
+type admission_wait_timeout =
+  | Permit_wait_expired
+  | Permit_granted_as_deadline_passed
+
+val admission_wait_timeout_to_string : admission_wait_timeout -> string
+
 type flow_advance_failure_snapshot =
   | Flow_advance_candidate_rejected of candidate_rejection_receipt
+  | Flow_advance_before_dispatch_admission_timed_out of
+      { candidate : flow_attempt_snapshot
+      ; timeout : admission_wait_timeout
+      }
   | Flow_advance_execution_failed of
       { candidate : flow_attempt_snapshot
       ; cause : execution_error_cause
@@ -882,6 +894,10 @@ type ('accepted, 'rejection) validated_flow_success = private
 
 type flow_candidate_failure =
   | Flow_candidate_rejected of candidate_rejection_receipt
+  | Flow_candidate_before_dispatch_admission_timed_out of
+      { candidate : flow_attempt_receipt
+      ; timeout : admission_wait_timeout
+      }
   | Flow_candidate_execution_failed of
       { candidate : flow_attempt_receipt
       ; cause : execution_error
@@ -922,6 +938,11 @@ type 'callback_error flow_execution_error =
       }
   | Flow_candidates_exhausted of
       { rejection : candidate_rejection_receipt
+      ; evidence : flow_evidence
+      }
+  | Flow_before_dispatch_admission_timed_out of
+      { candidate : flow_attempt_receipt
+      ; timeout : admission_wait_timeout
       ; evidence : flow_evidence
       }
   | Flow_exact_execution_failed of

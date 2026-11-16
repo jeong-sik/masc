@@ -50,7 +50,8 @@ let execute_prepared_flow_with_queue_ops_current
   let guarded_before_advance ~failed ~next =
     let* () = before_advance ~queue_ops prepared.entry ~failed ~next in
     (match failed with
-     | Exact_output.Flow_candidate_rejected _ -> ()
+     | Exact_output.Flow_candidate_rejected _
+     | Exact_output.Flow_candidate_before_dispatch_admission_timed_out _ -> ()
      | Exact_output.Flow_candidate_execution_failed _ ->
        bound_candidate := None);
     Ok ()
@@ -99,8 +100,6 @@ let execute_prepared_flow_with_queue_ops_current
        | Exact_output.Non_advanceable_terminal ->
          handle_flow_error ~queue_ops prepared cause
        | Exact_output.Advanceable_candidates_exhausted ->
-         (* [flow_execution_terminal_kind] admits only [Flow_candidates_exhausted]
-            and [Flow_exact_execution_failed]; both matches below rely on that pair. *)
          let bound =
            match cause with
            | Exact_output.Flow_exact_execution_failed { candidate; _ } ->
@@ -111,18 +110,31 @@ let execute_prepared_flow_with_queue_ops_current
            | Exact_output.Flow_measurement_terminal_callback_failed _
            | Exact_output.Flow_before_dispatch_callback_failed _
            | Exact_output.Flow_before_advance_callback_failed _
-           | Exact_output.Flow_candidates_exhausted _ -> Option.map exact_identity_of_candidate !bound_candidate
+           | Exact_output.Flow_candidates_exhausted _
+           | Exact_output.Flow_before_dispatch_admission_timed_out _ ->
+             Option.map exact_identity_of_candidate !bound_candidate
          in
          (match try_cli_slots ~queue_ops ~cli_runner ~bound prepared ~on_summary with
           | Cli_summary | Cli_settled -> ()
           | Cli_no_slots | Cli_fell_back ->
             (match cause, !bound_candidate with
-             | Exact_output.Flow_candidates_exhausted _, Some candidate ->
+             | ( Exact_output.Flow_candidates_exhausted _
+               | Exact_output.Flow_before_dispatch_admission_timed_out _ ), Some candidate ->
                record_outcome Domain_invalid_output;
                quarantine_candidate ~queue_ops prepared.entry candidate
                  Exact_domain_invalid_output
-             | (Exact_output.Flow_candidates_exhausted _, None)
-             | ((Exact_output.Flow_attempt_already_started _ | (Exact_output.Flow_attempt_start_failed _ | (Exact_output.Flow_measurement_start_failed _ | (Exact_output.Flow_before_measurement_dispatch_callback_failed _ | (Exact_output.Flow_measurement_terminal_callback_failed _ | (Exact_output.Flow_before_dispatch_callback_failed _ | (Exact_output.Flow_before_advance_callback_failed _ | Exact_output.Flow_exact_execution_failed _))))))), _) -> handle_flow_error ~queue_ops prepared cause)));
+             | ( ( Exact_output.Flow_candidates_exhausted _
+                 | Exact_output.Flow_before_dispatch_admission_timed_out _ )
+               , None )
+             | ( ( Exact_output.Flow_attempt_already_started _
+                 | Exact_output.Flow_attempt_start_failed _
+                 | Exact_output.Flow_measurement_start_failed _
+                 | Exact_output.Flow_before_measurement_dispatch_callback_failed _
+                 | Exact_output.Flow_measurement_terminal_callback_failed _
+                 | Exact_output.Flow_before_dispatch_callback_failed _
+                 | Exact_output.Flow_before_advance_callback_failed _
+                 | Exact_output.Flow_exact_execution_failed _ )
+               , _ ) -> handle_flow_error ~queue_ops prepared cause)));
       Executed
     | Error
         (Exact_output.Flow_semantic_candidates_exhausted

@@ -23,8 +23,8 @@ open Result.Syntax
 let exit_text status = match Process_eio.exit_reason_of_status status with
   | Process_eio.Completed code -> Printf.sprintf "exit %d" code
   | Process_eio.Timed_out -> "timed out"
-  | Process_eio.Signaled signal -> "killed by " ^ Process_eio.signal_name signal
-  | Process_eio.Stopped signal -> "stopped by " ^ Process_eio.signal_name signal
+  | Process_eio.Signaled signal -> "killed by " ^ Process_exit_text.signal_name signal
+  | Process_eio.Stopped signal -> "stopped by " ^ Process_exit_text.signal_name signal
 let with_detail = function
   | None -> "" | Some detail -> (match String.trim detail with "" -> "" | detail -> ": " ^ detail)
 let child_detail stderr = match String.trim stderr with "" -> None | text -> Some text

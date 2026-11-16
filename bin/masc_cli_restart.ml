@@ -248,20 +248,6 @@ let log_tail path =
     let drop = max 0 (List.length lines - failure_log_lines) in
     List.filteri (fun index _ -> index >= drop) lines
 
-(* Unix.process_status carries OCaml's own signal numbers, not the host's. *)
-let signal_name signal =
-  List.assoc_opt signal
-    [ Sys.sigterm, "SIGTERM"; Sys.sigkill, "SIGKILL"; Sys.sigint, "SIGINT"
-    ; Sys.sighup, "SIGHUP"; Sys.sigsegv, "SIGSEGV"; Sys.sigabrt, "SIGABRT"
-    ; Sys.sigbus, "SIGBUS"; Sys.sigstop, "SIGSTOP"; Sys.sigtstp, "SIGTSTP" ]
-  |> Option.value ~default:(Printf.sprintf "signal %d" signal)
-
-let exit_description = function
-  | Some (Unix.WEXITED code) -> Printf.sprintf "exited with status %d" code
-  | Some (Unix.WSIGNALED signal) -> Printf.sprintf "was killed by %s" (signal_name signal)
-  | Some (Unix.WSTOPPED signal) -> Printf.sprintf "was stopped by %s" (signal_name signal)
-  | None -> "exited"
-
 (* What a readiness answer that is not the replacement's 200 says, so the wait
    shows why it goes on. [None] while nothing listens yet. *)
 let string_field name body =
@@ -413,8 +399,11 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
       (Eio.Time.now clock -. started_at) (build_summary ~clock ~port kind) pid base_path port;
     Ok 0
   | Replacement_exited status ->
+    (* [None]: another waiter in this process reaped it, so how it ended is
+       not known here. *)
+    let ending = Option.fold ~none:"exited" ~some:Process_exit_text.of_status status in
     Printf.eprintf "pid %d %s before it was ready. Last lines of %s:\n%!"
-      pid (exit_description status) log_path;
+      pid ending log_path;
     List.iter (Printf.eprintf "  %s\n") (log_tail log_path);
     Ok 1
 

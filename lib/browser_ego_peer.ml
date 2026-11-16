@@ -58,7 +58,7 @@ let head message =
 
 let run_failure_message = function
   | Exited {code; output} -> Printf.sprintf "ego-browser nodejs exited with code %d: %s" code (tail output)
-  | Signaled signal -> "ego-browser nodejs was ended by " ^ Process_eio.signal_name signal
+  | Signaled signal -> "ego-browser nodejs was ended by " ^ Process_exit_text.signal_name signal
   | Timed_out -> "ego-browser nodejs did not finish in time and was stopped"
   | Output_exceeded -> Printf.sprintf "ego-browser nodejs wrote more than %d bytes and was stopped" output_limit_bytes
   | Unobserved detail -> "ego-browser nodejs ran and its output or its end could not be read: " ^ detail

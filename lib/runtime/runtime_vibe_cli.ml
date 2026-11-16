@@ -193,12 +193,12 @@ let error_to_string = function
   | Signaled { signal; stderr_tail } ->
     Printf.sprintf
       "Vibe was killed by %s: %s"
-      (Process_eio.signal_name signal)
+      (Process_exit_text.signal_name signal)
       stderr_tail
   | Stopped { signal; stderr_tail } ->
     Printf.sprintf
       "Vibe was stopped by %s: %s"
-      (Process_eio.signal_name signal)
+      (Process_exit_text.signal_name signal)
       stderr_tail
   | No_export { exit_code; stderr_tail } ->
     Printf.sprintf "Vibe exited %d without export.json: %s" exit_code stderr_tail

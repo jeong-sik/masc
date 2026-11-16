@@ -2287,6 +2287,28 @@ let test_cut_replacement_releases_unread_source_and_survives_rollback () = with_
       (Progress.phase cut.progress=Progress.phase ended.progress);
     check bool "the separate source-unconsumed disposition is durable" true
       (Option.is_some (Progress.settlement ended.progress));
+    check int "preflight accepts the same strict Cut disposition as inventory" 0
+      (List.length (librarian_refusals fixture));
+    let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+      ~request_id:exact.request_id |> get |> Option.get) in
+    let raised_host=match host with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          key,if key="attempts" then `List [`Assoc ["status",`String "outcome_unknown";
+            "cause",`String "raised";"exception",`String "fixture retained another host cause"]] else value) fields)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "expected host record" in
+    let schema=Option.to_result ~none:"Cut original schema" exact.schema |> get in
+    check bool "the other typed cause has the same delivered outcome but decodes as Raised" true
+      ((Exact.observe_record ~declaration_id:"librarian" ~schema exact (Some raised_host) |> get)
+        =Exact.Retained_terminal (Exact.Retained_unknown Exact.Raised));
+    io (fun () -> Store.save_exact_request fixture.store ~declaration_id:"librarian"
+      ~request_id:exact.request_id raised_host |> get);
+    check bool "preflight cannot confirm Cut replacement through a Raised host ending" true
+      (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
+        refusal.decoder=Lane_addon_store_preflight.Tool_request_exact_reads) (librarian_refusals fixture));
+    check bool "inventory also refuses a different typed host ending" true
+      (Result.is_error (io (fun () -> Commit.validate ~store:fixture.store ~request:capture ~record:ended)));
+    io (fun () -> Store.save_exact_request fixture.store ~declaration_id:"librarian"
+      ~request_id:exact.request_id host |> get);
     check int "the completed disposition wakes the next pass" 1 !wakes;
     check bool "Cut release advances no read position" true (progress fixture=positions);
     check json "Cut release advances no external ACK" cursor_before (cursor ());
@@ -2304,6 +2326,9 @@ let test_cut_replacement_releases_unread_source_and_survives_rollback () = with_
           else event) events)
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> fail "expected progress events") retained in
     io (fun () -> Store.save_tool_request_owner fixture.store ~scope:ended.scope ~request_id:ended.request_id corrupt |> get);
+    check bool "preflight refuses a Cut disposition without a replacement declaration" true
+      (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
+        refusal.decoder=Lane_addon_store_preflight.Tool_request_payload) (librarian_refusals fixture));
     (match pass () with
      | Error (Consumer.Original_publication_blocked _) -> ()
      | Error error -> fail (Consumer.error_to_string error)
@@ -2491,6 +2516,59 @@ let test_unadmitted_replacement_preserves_existing_host_execution () = with_fixt
   check int "uncertain execution grants no provider replay" 0 (F.post_count fixture.server);
   check bool "uncertain execution advances no source position" true (progress fixture=positions);
   no_memory fixture)
+let test_preflight_preserves_before_dispatch_ending_evidence () = with_fixture (fun ~sw fixture ->
+  let original,request=retain_absent_history_original ~failed_selection:false ~admitted:false fixture in
+  let exact=Capture.request request |> get in
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-preflight-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_actual_worker_configuration fixture ~sw replacement;
+  (match run_worker fixture with
+   | Ok (Consumer.Memory_not_committed _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "fixture did not retain its before-dispatch ending");
+  let ended=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> owned |> Option.get) in
+  check int "no host record or proof is valid before dispatch" 0 (List.length (librarian_refusals fixture));
+  let positions=progress fixture and wakes=ref 0 in
+  let scope=Capture.scope (Capture.physical_owner request) in
+  let gate_scope=Gate.scope (Capture.physical_owner request) in
+  let refuses ()=check bool "preflight preserves the consumer's lack of replacement authority" true
+    (refuses_original fixture ~original:ended (scope,gate_scope) (librarian_refusals fixture)) in
+  let runtime_refuses ()=
+    match memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+      ~wake:(fun () -> incr wakes)) with
+    | Error (Consumer.Original_publication_blocked _) -> ()
+    | Error error -> fail (Consumer.error_to_string error)
+    | Ok _ -> fail "host evidence was converted into permission to replace a before-dispatch original" in
+  let record_path=Filename.concat (Store.root fixture.store)
+    (Store.exact_request_path ~declaration_id:"librarian" ~request_id:exact.request_id) in
+  io (fun () -> Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id
+    (`Assoc ["declaration_id",`String "librarian";"request_id",`String exact.request_id;
+      "digest",`String (Exact.digest exact);"request",Exact.request_to_json exact;
+      "attempts",`List [`Assoc ["started",`String "0123456789abcdef0123456789abcdef"]];"final",`Null]) |> get);
+  check bool "the Exact scan keeps this valid original host record" false
+    (List.mem record_path (exact_deletes fixture));
+  refuses ();runtime_refuses ();
+  io (fun () -> write record_path "{unreadable original host record");
+  check bool "the Exact scan would remove this malformed record" true
+    (List.mem record_path (exact_deletes fixture));
+  (* Pruning cannot turn the host record into proof that dispatch never ran. *)
+  refuses ();runtime_refuses ();
+  io (fun () -> Sys.remove record_path);
+  let proof=proof_path fixture exact in
+  io (fun () -> write proof "{unreadable original execution proof");
+  refuses ();runtime_refuses ();
+  check int "contradictory host evidence grants no wake" 0 !wakes;
+  check int "no preflight or failed resume calls a provider" 0 (F.post_count fixture.server);
+  check bool "contradictory evidence consumes no input" true (progress fixture=positions);
+  no_memory fixture;
+  io (fun () -> Sys.remove proof);
+  check int "restoring actual absence also restores the read-only verdict" 0
+    (List.length (librarian_refusals fixture));
+  replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+  drive_advanced fixture;
+  check int "only the new request runs after the evidence is restored" 1 (F.post_count fixture.server))
 let test_replacement_terminal_survives_worker_gap ~rollback () = with_fixture (fun ~sw fixture ->
   let _,request=retain_absent_history_original ~failed_selection:false fixture in
   let original_input=Source.input (Capture.source request) in
@@ -5323,6 +5401,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_unadmitted_replacement_needs_no_body_and_survives_rollback ~capacity_wait:true);
   test_case "pre-admission replacement refuses an original with host execution evidence" `Quick
     test_unadmitted_replacement_preserves_existing_host_execution;
+  test_case "preflight cannot turn removed host evidence into before-dispatch replacement authority" `Quick
+    test_preflight_preserves_before_dispatch_ending_evidence;
   test_case "a ready replacement releases an actual Cut once and survives rollback" `Quick
     test_cut_replacement_releases_unread_source_and_survives_rollback;
   test_case "a replacement does not release an original Raised outcome" `Quick

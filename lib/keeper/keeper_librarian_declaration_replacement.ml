@@ -171,34 +171,58 @@ let ended_payload ~original ~(exact:Exact.request) ~captured =
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false
 
-let ended ~store ~original ~exact ~captured =
+type ending_reads = {
+  before_dispatch : unit -> (unit, string) result;
+  observe : unit -> (Exact.retained_observation, string) result;
+  latest : unit -> (Exact.latest_original_execution, string) result;
+}
+type host_ending = Cut_ending | Declaration_ending
+let host_ending = function
+  | Exact.Retained_unknown Cut -> Some Cut_ending
+  | Retained_not_allowed {reason=Replaced_declaration} -> Some Declaration_ending
+  | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed {reason=Permission_refused _}
+  | Retained_request_id_reused -> None
+
+let ended_with ~reads ~original ~exact ~captured =
   let* permitted=ended_payload ~original ~exact ~captured in
   if not permitted then Ok false else
   match Progress.phase (Record.progress original) with
   | Progress.Rejected {stage=Before_dispatch;_} ->
-    let+ ()=confirm_no_execution ~store ~original ~exact_digest:(Exact.digest exact) in true
+    let+ ()=reads.before_dispatch () in true
   | Rejected {stage=Execution;evidence} ->
     let* schema=Option.to_result ~none:"Declaration ending lacks its original schema" exact.Exact.schema in
     let* final=Exact.retained_final_of_json ~schema evidence in
-    (match final with
-     | Exact.Retained_unknown Cut -> let+ ()=confirm_host_cut ~store ~original ~exact in true
-     | Retained_not_allowed {reason=Replaced_declaration} ->
-       let* installation=Owner.installation_of_id (Record.installation_id original) in
-       let* declaration_id=match installation with
-         | Owner.Configuration id -> Ok id
-         | Manual _ -> Error "Declaration ending requires a configured original" in
-       let* observed=Exact.recover_retained ~store ~declaration_id ~schema exact
-         |> Result.map_error Exact.describe_recovery_error in
-       (match observed with
-        | Exact.Retained_terminal (Retained_not_allowed {reason=Replaced_declaration}) ->
-          let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in
-          (match latest with
-           | Exact.No_completed_latest -> Ok true
-           | Completed_latest _ -> Error "Declaration ending has a completed original execution")
-        | Retained_absent | Retained_open
-        | Retained_terminal (Retained_unknown (Interrupted | Raised | Cut) | Retained_call _ | Retained_not_allowed {reason=Permission_refused _}
-          | Retained_request_id_reused) -> Error "Declaration ending differs from its original host record")
-     | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed {reason=Permission_refused _}
-     | Retained_request_id_reused -> Ok false)
+    let* observed=reads.observe () in
+    let expected=host_ending final in
+    let actual=match observed with
+      | Exact.Retained_terminal retained -> host_ending retained
+      | Retained_absent | Retained_open -> None in
+    let* ()=if Option.is_some expected && expected=actual then Ok ()
+      else Error "Declaration ending differs from its original host record" in
+    (* This read is independent of record recovery, including a busy claim. *)
+    let* latest=reads.latest () in
+    (match latest with
+     | Exact.No_completed_latest -> Ok true
+     | Completed_latest _ -> Error "Declaration ending has a completed original execution")
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false
+
+let ended ~store ~original ~exact ~captured =
+  let target () =
+    let* installation=Owner.installation_of_id (Record.installation_id original) in
+    let* declaration_id=match installation with
+      | Owner.Configuration id -> Ok id
+      | Manual _ -> Error "Declaration ending requires a configured original" in
+    let+ schema=Option.to_result ~none:"Declaration ending lacks its original schema" exact.Exact.schema in
+    declaration_id,schema in
+  let reads={
+    before_dispatch=(fun () -> confirm_no_execution ~store ~original ~exact_digest:(Exact.digest exact));
+    observe=(fun () ->
+      let* declaration_id,schema=target () in
+      Exact.recover_retained ~store ~declaration_id ~schema exact
+      |> Result.map_error Exact.describe_recovery_error);
+    latest=(fun () ->
+      let* declaration_id,schema=target () in
+      Exact.read_latest_original_execution ~store ~declaration_id ~schema exact);
+  } in
+  ended_with ~reads ~original ~exact ~captured

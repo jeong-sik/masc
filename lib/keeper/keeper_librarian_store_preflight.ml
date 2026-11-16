@@ -219,8 +219,16 @@ type consumer_read =
   | Confirm_delivered of Exact.final
       (* An execution refusal: confirm_final of the final its evidence names,
          then what the consumer reads after a body refusal. *)
+  | Confirm_ending of Owner.Record.t * Lane_addon_captured_destination.t
+      (* A declaration ending: its strict cause, host record and independent
+         proof read, or positive absence of both before admission. *)
 
-let consumer_read ~schema (record:Owner.retained) =
+let consumer_read ~(target:Final.target) ~destination (record:Owner.retained) =
+  let ending () =
+    let* permitted=Keeper_librarian_declaration_replacement.ended_payload
+      ~original:(Owner.listed record) ~exact:target.exact ~captured:destination in
+    if permitted then Ok (Some (Confirm_ending (Owner.listed record,destination)))
+    else Error "Original Librarian has no strict declaration ending" in
   match Progress.phase record.progress with
   | Progress.Captured | Admission_wait _ -> Ok None
   | Dispatch_pending _ -> Ok (Some Recover_record)
@@ -228,13 +236,14 @@ let consumer_read ~schema (record:Owner.retained) =
   | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
     Ok (Some (Decode_judgment commit.Progress.judgment))
   | Rejected {Progress.stage=Progress.Execution;evidence} ->
-    let+ retained=Exact.retained_final_of_json ~schema evidence in
-    Some (Confirm_delivered (Exact.delivered retained))
-  (* Nothing here needs an Exact read. A request refused before dispatch was
-     never sent: completed history reads it as settled from its own evidence,
-     and the other consumers' validators refuse it, as every validator
-     refuses the subdivision phases. *)
-  | Rejected {Progress.stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ -> Ok None
+    let* retained=Exact.retained_final_of_json ~schema:target.schema evidence in
+    (match retained with
+     | Exact.Retained_not_allowed {reason=Replaced_declaration} -> ending ()
+     | Retained_unknown Cut when Option.is_some (Progress.settlement record.progress) -> ending ()
+     | Retained_unknown (Interrupted | Raised | Cut) | Retained_call _ | Retained_not_allowed {reason=Permission_refused _}
+     | Retained_request_id_reused -> Ok (Some (Confirm_delivered (Exact.delivered retained))))
+  | Rejected {Progress.stage=Progress.Before_dispatch;_} -> ending ()
+  | Subdividing _ | Subdivided _ -> Ok None
 
 (* What a consumer reads once it confirms the body refusal the worker gives
    before the host (Request_body_refused). The host also ends a request with
@@ -315,6 +324,25 @@ let judge_files ~wording ~body_refusal (target:Final.target) (files:Preflight.ex
   | Confirm_delivered final ->
     let* ()=confirm_files ~wording target files final in
     if Exact.refused_before_host final then size_proof_kept body_refusal files.deleted else Ok ()
+  | Confirm_ending (original,captured) ->
+    let reads:Keeper_librarian_declaration_replacement.ending_reads={
+      before_dispatch=(fun () ->
+        match files.deleted,files.record,files.proof with
+        | None,None,Preflight.No_proof -> Ok ()
+        | Some (Deleted_open | Deleted_terminal _ | Deleted_unknown),_,_ ->
+          Error "The Exact check removes original host evidence; absence cannot confirm a before-dispatch ending"
+        | None,(Some _),_ | None,None,(Proof _ | Unreadable_proof _) ->
+          Error "A before-dispatch declaration ending has original host execution evidence");
+      observe=(fun () ->
+        let* proof=proof_json files in
+        let* record=Exact.recovery_of_files ~store:files.store ~declaration_id:target.declaration_id
+          ~schema:target.schema target.exact ~record:files.record ~proof in
+        Exact.observe_record ~declaration_id:target.declaration_id ~schema:target.schema target.exact record);
+      latest=(fun () -> latest_files ~declaration_id:target.declaration_id ~schema:target.schema target.exact files);
+    } in
+    let* ended=Keeper_librarian_declaration_replacement.ended_with ~reads ~original
+      ~exact:target.exact ~captured in
+    if ended then Ok () else Error "Original Librarian has no confirmed declaration ending"
 (* A proof link the original's request names while no record of it is left.
    Fresh state deletes it with the owner's scopes. *)
 let recordless_proof (target:Final.target) (files:Preflight.exact_files) =
@@ -333,13 +361,14 @@ let installation_id (destination:Lane_addon_captured_destination.t) =
   destination.Lane_addon_captured_destination.installation_id
 (* [None] when the consumer reads no Exact file of this original: a manual
    installation names no declaration, and some phases read none. *)
-let exact_original ~wording ~body_refusal ~installation_id exact (record:Owner.retained) =
+let exact_original ~wording ~body_refusal ~destination exact (record:Owner.retained) =
+  let installation_id=installation_id destination in
   let* installation=Owner.installation_of_id installation_id in
   match installation with
   | Owner.Manual _ -> Ok None
   | Owner.Configuration _ ->
     let* target=Final.target ~installation_id exact in
-    let+ read=consumer_read ~schema:target.Final.schema record in
+    let+ read=consumer_read ~target ~destination record in
     Option.map (fun read -> {target;read;wording;body_refusal}) read
 (* Phase one decodes what the consumer reads, as the consumer decodes it; a
    failure there is a payload the consumer refuses. Phase two reads the Exact
@@ -365,7 +394,7 @@ let admission_original ~read ~owner record =
   let* capture=Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
   let* exact=Admission.request capture in
   exact_original ~wording:Admission.unconfirmed_detail ~body_refusal:Size_proof
-    ~installation_id:(installation_id (Admission.destination capture)) exact record
+    ~destination:(Admission.destination capture) exact record
 (* A history original an operator fenced is left out of resume and
    validation, so its consumer reads no Exact file. *)
 let history_original ~read_fence ~owner (record:Owner.retained) =
@@ -376,12 +405,12 @@ let history_original ~read_fence ~owner (record:Owner.retained) =
     let* capture=History.restore_payload ~owner record in
     let* exact=History.request capture in
     exact_original ~wording:Final.unconfirmed_detail ~body_refusal:Final_alone
-      ~installation_id:(installation_id (History.destination capture)) exact record
+      ~destination:(History.destination capture) exact record
 let floor_original ~owner record =
   let* step=Floor.restore ~owner record in
   let* exact=Floor.request step in
   exact_original ~wording:Final.unconfirmed_detail ~body_refusal:Final_alone
-    ~installation_id:(installation_id (Floor.destination step)) exact record
+    ~destination:(Floor.destination step) exact record
 
 (* The forest of each owner, read once for the scan by the first record that
    needs it. A check that fails reads it again before it refuses: a part or

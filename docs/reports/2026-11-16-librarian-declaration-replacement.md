@@ -119,6 +119,30 @@ child 저장 후 부모 ACK 전 중단을 다루는 여섯 시나리오를 작�
 source 보존, 실제 새 요청의 Memory receipt와 원래 해소 완료 연결을 확인하도록 했다.
 linked Raised에 대한 순수 검증 거부와 서로 다른 후속 게시의 상호 배제도 추가했다. **실행은 미실행이다.**
 
+## 여섯 번째 단위: 설치 전 검사도 종료 증거를 확인
+
+실제 consumer는 접수 전 종료를 정리하기 전에 원래 Exact 기록과 실행 proof가 모두 없는지 확인한다.
+기존 preflight는 `Before_dispatch`면 Exact를 읽지 않아, 유효한 실행 중 기록이 있어도 그 consumer 검사를
+통과한 것으로 볼 수 있었다. Cut의 별도 종료 증거도 일반 `Outcome_unknown` 확인만으로는 typed 원인을 구분하지 못했다.
+
+공통 `ended_with`가 순수 종료 증거와 명시적인 읽기 port를 함께 검증한다. 실제 저장소 reader와 preflight가
+같은 규칙을 쓴다. 접수 전에는 기록·proof가 없어야 하고, host 종결은 원래 typed 사유와 독립적으로 읽은
+최신 proof를 모두 확인한다. Exact 검사가 제거할 기록을 ‘보낸 적 없음’의 근거로 쓰지 않는다.
+검사는 읽기뿐이며 Runtime·모델·Memory·큐 ACK를 호출하지 않는다.
+
+Runtime fixture에 strict 접수 전 종결, 남아 있는 유효한 host 기록, Exact가 제거할 손상 기록, record 없는
+손상 proof, 증거 복원 후 정상 재개를 추가했다. 실제 Cut fixture에는 같은 delivered outcome을 가진 Raised
+host 기록과 잘못된 별도 종료 증거를 preflight·inventory가 함께 거부하는 대조를 더했다. 실행은 미실행이다.
+
+## admission의 추가 정책 결정
+
+사용자는 미소비 후보 묶음에 이미 보류 판정된 후보와 선언 교체로 끝난 후보가 함께 있으면,
+**미소비 묶음 전체를 새 요청으로 다시 판단**하도록 선택했다. 추가 모델 호출이 생길 수 있음을 포함한다.
+기존 committed candidate receipt와 ACK로 완료된 후보는 제외한다. 저장된 종료 후 rollback한 혼합 묶음도
+그 종료 사실을 새 frontier의 한 번의 재생성 근거로 쓰며, 새 root의 소유권이 옛 근거의 반복 사용을 막아야 한다.
+실행 결과가 불명확하거나 Memory 반영이 끝나지 않은 후보의 권한으로 넓히지 않는다.
+이 결정에 따른 admission forest 구현은 아직 남아 있다.
+
 ## 확인한 범위
 
 변경 OCaml 파일의 `ocamlc -stop-after parsing -c`와 `git diff --check`를 확인한다.

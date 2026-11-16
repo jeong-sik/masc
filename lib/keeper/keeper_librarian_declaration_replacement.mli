@@ -56,6 +56,20 @@ val ended_payload : original:Lane_addon_tool_request_owner.Record.t ->
     terminal causes return false. This validates owned payloads and grants
     no host execution, live configuration or publication authority. *)
 
+type ending_reads = {
+  before_dispatch : unit -> (unit, string) result;
+  observe : unit -> (Lane_addon_exact.retained_observation, string) result;
+  latest : unit -> (Lane_addon_exact.latest_original_execution, string) result;
+}
+val ended_with : reads:ending_reads -> original:Lane_addon_tool_request_owner.Record.t ->
+  exact:Lane_addon_exact.request -> captured:Lane_addon_captured_destination.t -> (bool, string) result
+(** The consumer's strict ending check through explicit read ports. Before
+    dispatch, require absence of both host record and execution proof. For
+    a host ending, confirm its exact typed cause and independently read the
+    bound latest proof even when a claim prevents record recovery. The live
+    consumer and deploy preflight use this same check; the supplied ports
+    grant no publication, consumption or dispatch authority. *)
+
 val ended : store:Lane_addon_store.t -> original:Lane_addon_tool_request_owner.Record.t ->
   exact:Lane_addon_exact.request -> captured:Lane_addon_captured_destination.t -> (bool, string) result
 (** Confirm {!ended_payload} against the original host record and execution

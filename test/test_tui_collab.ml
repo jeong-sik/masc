@@ -50,6 +50,54 @@ let test_removed_selection () =
   let view = listed view ["delta"] in
   check (option string) "a new row restores selection" (Some "delta") (selected view)
 
+let check_read_actions_blocked view =
+  check (option string) "a pending or failed read cannot open its retained link" None (selected view);
+  let attempted, _ = C.key view "x" in
+  check bool "a retained row cannot open a revoke confirmation" true
+    (snd (C.key attempted "enter") = C.Stay);
+  check bool "machine observation remains available" true
+    (snd (C.key view "m") = C.Watch Masc.Machine_lane.Msx);
+  let issue, _ = C.key view "n" in
+  check bool "issuing a new invite remains independent of the inventory read" true (C.text_input_active issue)
+
+let test_refresh_navigation () =
+  let view = listed (C.create ()) ["alpha"; "beta"; "gamma"] in
+  let view, _ = C.key view "j" in
+  let view, read = C.loading view in
+  check_read_actions_blocked view;
+  let view, _ = C.key view "j" in
+  let view = C.listed view read (Ok (inventory ["alpha"; "gamma"; "beta"])) in
+  check (option string) "navigation through retained rows follows the invite name after refresh"
+    (Some "gamma") (selected view);
+  let view, read = C.loading view in
+  let view = C.listed view read (Ok (inventory [])) in
+  check (option string) "a successful empty read clears the retained inventory" None (selected view);
+  let attempted, _ = C.key view "x" in
+  check bool "a cleared invite cannot be revoked" true (snd (C.key attempted "enter") = C.Stay)
+
+let test_failed_refresh_navigation () =
+  let view = listed (C.create ()) ["alpha"; "beta"; "gamma"] in
+  let view, _ = C.key view "j" in
+  let view, _ = C.key view "j" in
+  let view, read = C.loading view in
+  let view = C.listed view read (Error "offline") in
+  check_read_actions_blocked view;
+  let view, _ = C.key view "k" in
+  let view, read = C.loading view in
+  check_read_actions_blocked view;
+  let view = C.listed view read (Ok (inventory ["gamma"; "beta"; "alpha"])) in
+  check (option string) "retry retains navigation after the failure" (Some "beta") (selected view);
+  let _, action = C.key (fst (C.key view "x")) "enter" in
+  check bool "a successful reread restores revocation for the selected invite" true
+    (match action with C.Revoke (_, "beta") -> true | _ -> false)
+
+let test_refresh_preserves_captured_confirmation () =
+  let view = listed (C.create ()) ["alpha"] in
+  let view, _ = C.key view "x" in
+  let view, _ = C.loading view in
+  check bool "refresh does not withdraw an already captured revoke confirmation" true
+    (match snd (C.key view "enter") with C.Revoke (_, "alpha") -> true | _ -> false)
+
 let test_notice_does_not_settle_mutation () =
   let view, first = revoke (listed (C.create ()) ["alpha"]) in
   let view = C.notice view "The one-time link is not retained" in
@@ -95,6 +143,9 @@ let test_explicit_unknown_resolution () =
 let () = run "Collab request ownership" ["operator flows", [
   test_case "superseded and foreign inventories are ignored" `Quick test_superseded_inventory;
   test_case "removed selections move to surviving invites" `Quick test_removed_selection;
+  test_case "refresh retains navigation without admitting row actions" `Quick test_refresh_navigation;
+  test_case "failed refresh retains navigation until a successful retry" `Quick test_failed_refresh_navigation;
+  test_case "refresh preserves an existing explicit confirmation" `Quick test_refresh_preserves_captured_confirmation;
   test_case "only the matching receipt settles a mutation" `Quick test_notice_does_not_settle_mutation;
   test_case "unknown resolution requires its explicit current confirmation" `Quick test_explicit_unknown_resolution;
 ]]

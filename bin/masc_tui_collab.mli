@@ -24,8 +24,13 @@ val write_access : t -> write_access -> t
     The confirmation retains that request ID; a different unknown request
     withdraws the old confirmation. *)
 val loading : t -> t * read
+(** Retain the last inventory and selection while its replacement is pending.
+    Browsing can move through retained rows; opening a link or starting a revoke
+    from a row requires a successfully completed current read. *)
 val listed : t -> read -> (Masc.Tui_decode.play_invites, string) result -> t
-(** Only the latest read of this view may replace its inventory. *)
+(** Only the latest read of this view may replace its inventory. Failed reads
+    retain the previous inventory for observation, with its failure attached.
+    A successful empty inventory clears the retained rows. *)
 val notice : t -> string -> t
 val settled : t -> mutation -> t
 (** Release only the pending mutation whose receipt arrived. Notices and
@@ -53,6 +58,9 @@ val lines : height:int -> width:int -> t -> string list
     one row for the frame's note. Below that the sentences go together and the
     keys stay, and below that the keys go too. The closing sentence is always
     returned and is not counted, so the frame's cut at the end takes it first.
+    When retained invites compete with refresh errors for space, the selected
+    invite takes priority over error details. Retained rows carry their last-read
+    label even when there is no room for the separate status summary.
     The form, the messages and the selected invite stay while [height] has rows
     for them. The frame says how many rows it cut, but not that the sentences
     or the keys gave way: when what is left fits without a cut, nothing says

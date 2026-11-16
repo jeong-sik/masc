@@ -73,6 +73,17 @@ OCaml 13개 구문 검사와 미실행 회귀 9개가 있다는 보고다. 이�
 이는 조회 시점의 worktree 상태이며, 앞선 고정 head의 소스 리뷰를 새 통합 결과로 옮기지 않는다.
 현재 통합·게시 완료 여부와 원래 요청의 실제 회복은 별도 확인 대상이다.
 
+이후 `.worktrees/farm-librarian-admission-replacement-20261116`에서
+head `4aae41288a5dbba0fb27bfeafea5999dd7fec77c`와 clean 상태를
+직접 확인하고 `rebase-and-review-4aae412.md`를 읽었다. 작성 세션은 보유한 Git 객체를
+읽는 임시 local remote로 일곱 층 전체를 native rebase했고, base는
+`4fb63016f6cbb80139dbda3b99940733a5804a8e`라고 기록했다. 두 독립 리뷰가 통합 범위와
+마지막 두 테스트 match 수정을 확인했다는 보고다. 59개 OCaml parser 영수증 중 12개는
+새 검사, 47개는 같은 바이트의 이전 검사다. 타입·회귀 실행·원래 요청 회복은 미검증이다.
+이 관측은 앞선 충돌 snapshot 이후의 상태이며, root가 전체 소스를 다시 승인한 것은 아니다.
+작성 세션의 submit은 token 조회에서 실패했고, root의 후속 `gh api user`도 연결 실패였다.
+원격 게시와 재기반은 구분한다. 이전 다섯 층만 게시하라는 위임은 계속 철회 상태다.
+
 ## UID 생성과 실제 첫 쓰기의 연결
 
 같은 UID/SSH 스택에 아래 네 층을 추가했다. 앞서 적은 SSH 경로 분리의 동작 증거나
@@ -85,7 +96,7 @@ OCaml 13개 구문 검사와 미실행 회귀 9개가 있다는 보고다. 이�
 | `62af6cb40b830fec898923a1713234415d1c440b` | Workspace factory/init, config bootstrap, `workspace-create`, 저장 CLI, prerequisites와 installer의 첫 쓰기를 연결했다. UID 오류를 Memory fallback으로 숨기지 않는다. | 37개 파일 독립 소스 리뷰와 구문 검사 35개. installer Python 경계 시험 6개는 모의 CLI 응답으로 순서·거절을 확인했다. 실제 설치·CLI 실행 증거가 아니다. manifest `bfb73c54017067d8602823a39c916f54b280699beaa9c7a7813a742e4942e946` |
 | `6e328cde52221f8443973d6f31198431ca59a682` | Item, Gate, direct resume, Goal confirmation의 HTTP 검증 스크립트가 선택한 후보로 workspace-create한 뒤 fixture를 쓴다. | 네 파일 독립 소스 리뷰와 Python 구문 검사. 두 스크립트의 통제된 후보 거절 시 runtime·서버 로그가 생기지 않음을 확인했다. native UID·서버·provider는 실행하지 않았다. manifest `4b709aaba3061b336b67ed9c8f20654a443bfc3569b885c2017b88a6c1d2163e` |
 
-이 네 층의 해당 소스 범위에는 독립 리뷰의 추가 P0/P1/P2가 없다. 이후 아래 여섯 층도
+이 네 층의 해당 소스 범위에는 독립 리뷰의 추가 P0/P1/P2가 없다. 이후 아래 층도
 커밋했다. 각 행의 검증 범위를 전체 스택이나 실제 설치 결과로 넓히지 않는다.
 
 | 커밋 | 변경 | 확인한 증거와 한계 |
@@ -96,6 +107,12 @@ OCaml 13개 구문 검사와 미실행 회귀 9개가 있다는 보고다. 이�
 | `d23bf59c5679f674aeef81e75f1ee743f46818f1` | TUI가 유효한 기존 UID의 로그 경로 또는 비공개 host session을 선택한다. 로그 때문에 `.masc`를 만들지 않는다. 시작 출력의 실제 경로를 표시하고 재시작 스크립트가 관측한 stderr의 새 행만 읽는다. | 21개 파일 독립 소스 리뷰. 실제 root/lifecycle 소스의 시험 24개, 제어된 lsof 응답과 실제 임시 파일을 쓴 helper 시험 15개, 실제 lsof와 시험 소유 sleep의 shell self-test를 확인했다. 전체 TUI·observation·Ask·metrics·Linux E2E는 미실행이다. |
 | `19943ea90dd092759cda3c906a5db7f58b3c9516` | 없는 credential store의 revoke/retire는 디렉터리나 UID를 만들지 않는다. credential 저장소 잠금을 먼저 잡은 login과 revoke는 기존 transaction 순서를 유지한다. | 7개 파일 독립 소스 리뷰, 구문 검사와 제한된 실제 인터페이스 타입 검사 41개 명령 통과. 실제 auth 실행·전체 graph는 미검증이다. |
 | `383101ff149d580d6654cfec8e9d7001a1f986bc` | presentation 도구는 workspace 밖에서 준비하고, native fixture가 UID를 만든 뒤 환경 링크를 놓는다. parser가 없는 경우의 시험은 공유 venv 대신 자기 링크만 옮긴다. | 3개 파일 독립 소스 리뷰, OCaml/Python 구문과 모의 subprocess 준비 경계를 확인했다. venv 설치·native parser·render 실행은 하지 않았다. 역사적 pinned probe는 바꾸지 않았다. |
+| `4cc28146db818607173fa1960ab4f1bf6b842223` | raw CLI 입력을 공용 typed admission에서 해소한다. 마지막 canonical 경로의 기존 UID를 다시 확인하고 처음 UID와 대조한다. source start·quickstart·seed-team이 같은 후보의 반환 경로로 설정을 쓴다. | 20개 파일 독립 소스 리뷰. 실제 admission 시험 23개 통과. 바뀌지 않은 shell/test 범위의 모의 source 16개·container 17개와 기존 PTY fixture 결과를 상속했다. 전체 HTTP/stdio CLI 타입·실행은 미검증이다. |
+| `57bb507c8a33fd2c40b73996d1f99131b60b4732` | carts와 workspace 기본 경로를 쓰는 monitor가 native 반환 경로를 사용한다. 조회·dry-run·명시적 host 경로의 의미를 보존한다. | Dune 등록을 포함한 5개 파일 독립 소스 리뷰, 통제된 경계 시험 10개. 실제 native CLI·download·monitor 실행은 아니다. |
+| `501ea3e79536087ca479b74733a3c0bd91bfd1e7` | run-local의 config·환경·argv를 반환 BasePath로 맞춘다. 서버의 linked root 거절은 bootstrap보다 먼저이며 START는 최종 실행에서만 복원한다. | 2개 파일 독립 소스 리뷰, 실제 shell·env 실행을 거친 선택 시험 6개 통과·26개 skip. build·native candidate·lsof는 fixture이며 실제 서버·Dune 실행은 아니다. |
+| `4243495f03683c644dc264875dd179d1b910cb8b` | 공통 root resolver가 관측한 HOME을 cwd보다 먼저 확장한다. 추론으로 고른 위치를 보존하고, 재사용할 때 다른 root가 되는 경로는 typed 오류로 거절한다. doctor·port·deployment도 이를 없음으로 숨기지 않는다. | 5개 파일 독립 소스 리뷰. 실제 resolver/guard suite 20개·11개 명령 통과. 두 bin은 소스·구문만 확인했다. compiler PATH는 runner에서 고정했고 후속 도구 환경 조회는 원래 실행 환경 스냅샷과 구분했다. |
+| `556cf0052a7e57d55cd36e3e80a7a9c6f8f5ab50` | installer의 ready·needs_attention·수동 journey가 native preflight의 경로를 이어 쓴다. guest shim도 기존 admission 반환 뒤에 쓸 위치를 정한다. | 4개 파일 독립 소스 리뷰. Python adapter/env/journey 16개·Wizard 22개 통과. native/config/download는 명시적 fixture다. 실제 설치·CLI·서버 실행은 미검증이며 START 소유 경계는 별도로 남는다. |
+| `01d798ef7ec35c1e83bb9e31b53a72cad59f7fbb` | SSH 경로·로그 helper의 기존 정본을 직접 호출해 상위 의존성을 줄인다. 실제 UID와 Keeper 생성 ID를 실제 runner의 요청 frame까지 연결해 시험한다. | Dune 등록을 포함한 5개 파일 독립 소스 리뷰. 실제 local-wire 4개·경로 변환 8개·protocol 41개, 총 53개 통과. SSH 역할은 local self-exec peer다. 실제 OpenSSH 인증·원격 jail·VM 격리·기존 전체 SSH dispatch/factory suite는 미검증이다. |
 
 TUI의 실제 실행 영수증은 `artifacts/farm-tui-logging-20261116/run-3/`다. 컴파일러의
 `-version`과 `-where`가 모두 5.5.2임을 확인하고 새 소스 10개를 컴파일·연결해 두 suite를 실행했다.
@@ -103,9 +120,22 @@ TUI의 실제 실행 영수증은 `artifacts/farm-tui-logging-20261116/run-3/`�
 두 실패 영수증을 보존했으며 구문 검사나 `ocamlfind` 파일명만으로 실행 성공을 판단하지 않았다.
 재사용한 admission 기반 소스 179개의 해시도 대조했다. 전체 Dune 의존 그래프 검사는 아니다.
 
-전체 스택에는 source start/quickstart/seed-team, carts/monitor와 사용자 입력을 받는
-run-local/installer의 실제 쓰기 대상 연결이 남는다. native가 확정한 BasePath와 shell의
-쓰기 경로가 달라지지 않아야 한다. 이 후속 작업은 별도 후보이며 아직 완료로 집계하지 않는다.
+source 입력의 마지막 경로 재확인은 원래 UID에 다른 디렉터리의 경로를 짝지어 반환하던
+경우를 막는다. UID가 없는 대체 경로나 다른 UID는 거절하며 같은 UID alias와 기존 linked
+runtime 정책은 보존한다. 반환값은 계속 잡고 있는 파일시스템 capability가 아니므로
+반환 뒤의 모든 경로 교체까지 막는다는 뜻은 아니다.
+
+SSH 로컬 시험 영수증은 `artifacts/farm-ssh-local-wire-20261116/wire-4/`다. 실제 소스
+265개 중 이전 기반 179개와 재사용 객체 287개를 해시로 대조했다. 추가 41개 모듈과 C,
+실제 세 suite를 컴파일·연결·실행한 103개 명령이 성공했다. 컴파일 전에 환경과
+5.5.2 version/stdlib를 기록했다. standalone build metadata는 version=None과 실제 설치
+package 조회 결과를 사용했으며 product Build_version 구현을 대체하지 않았다.
+의존 package·metadata 연결 순서 때문에 실패한 wire-1~3도 보존했다.
+
+전체 시작 흐름의 완료 판정은 아직 아니다. installer의 preparation과 실제 lifecycle
+자식이 공유하는 START 환경은 별도 수리가 필요하다. 사용자 지정 BasePath를 받아 지우는
+harness도 반환 경로만 바꿔 삭제 범위를 넓히지 않도록 별도로 검토해야 한다.
+전체 CLI·설치·runtime과 원래 Farm 행렬은 실행하지 않았다.
 읽기나 실패한 revoke를 계기로 UID를 자동 발급하거나, 기존 UID 없는 루트를 뒤늦게
 등록하는 방식으로 해결하지 않는다. raw credential 저장소와 명시적 host 도구 경로도
 자동으로 Workspace로 바꾸지 않는다.

@@ -45,13 +45,13 @@ type deps = {
   get_base_path : unit -> string;
   get_server_state : unit -> Mcp_server.server_state option;
   verify_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+    base_path:string -> Httpun.Request.t -> (Auth.request_principal, auth_failure) result;
   verify_mcp_observer_stream_auth :
-    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+    base_path:string -> Httpun.Request.t -> (Auth.request_principal, auth_failure) result;
   verify_operator_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+    base_path:string -> Httpun.Request.t -> (Auth.request_principal, auth_failure) result;
   verify_seat_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+    base_path:string -> Httpun.Request.t -> (Auth.request_principal, auth_failure) result;
 }
 
 val mcp_protocol_versions : string list
@@ -87,6 +87,7 @@ val method_from_body : string -> string option
 val body_with_canonical_http_actor :
   base_path:string ->
   auth_token:string option ->
+  principal:Auth.request_principal ->
   Httpun.Request.t ->
   string ->
   string

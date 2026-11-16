@@ -889,7 +889,6 @@ let with_standalone_observer_server env body =
       in
       let verify check ~base_path request =
         check ~base_path request
-        |> Result.map (fun _ -> ())
         |> Result.map_error Server_mcp_transport_http_types.auth_failure_of_masc_error
       in
       let runtime : Transport.runtime =
@@ -1228,7 +1227,7 @@ let test_mcp_rejects_duplicate_cursors_before_registration env =
   let module Transport = Server_mcp_transport_http in
   let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
     | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
-  let admit ~base_path:_ _request = Ok () in
+  let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal in
   let deps : Transport.deps =
     { get_origin = (fun _ -> "")
     ; cors_headers = (fun _ -> [])
@@ -1274,7 +1273,7 @@ let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
     ignore (Masc.Session.McpSessionStore.get_or_create ~id:"observer-machine-test" ());
     let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
       | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
-    let admit ~base_path:_ _request = Ok () in
+    let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal in
     let deps : Transport.deps =
       { get_origin = (fun _ -> "")
       ; cors_headers = (fun _ -> [])
@@ -1325,11 +1324,11 @@ let test_mcp_observer_refuses_foreign_and_retired_workspaces env =
     let token = Option.get auth.Masc.Sse.token in
     let verify ~base_path:_ _request =
       match !mode with
-      | `Admit -> Ok ()
+      | `Admit -> Ok Masc_test_deps.auth_off_principal
       | `Deny -> Error { Transport.message = "fixture denied"; auth_error_code = None }
       | `Replace ->
         Result.get_ok (Masc.Mcp_server.set_workspace_config state scope.config);
-        Ok ()
+        Ok Masc_test_deps.auth_off_principal
     in
     let deps : Transport.deps =
       { get_origin = (fun _ -> "")
@@ -1493,7 +1492,7 @@ let test_play_observer_reconnect_keeps_replacement_presence env =
     (fun () -> Eio.Switch.run (fun sw ->
       let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
         | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
-      let admit ~base_path:_ _request = Ok () in
+      let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal in
       let runtime : Transport.runtime =
         { base_path = workspace
         ; sw
@@ -1794,7 +1793,7 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
     (fun () -> Eio.Switch.run (fun sw ->
       let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
         | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
-      let admit ~base_path:_ _request = Ok () in
+      let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal in
       let runtime : Transport.runtime =
         { base_path = workspace
         ; sw

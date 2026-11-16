@@ -90,7 +90,7 @@ let with_fixture env ?(ready = fun () -> true) fn =
     (fun () -> Eio.Switch.run (fun sw ->
       let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
         | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
-      let admit ~base_path:_ _request = Ok () in
+      let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal in
       let runtime : Transport.runtime =
         { base_path = workspace
         ; sw

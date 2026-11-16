@@ -172,7 +172,7 @@ let test_log_stream_names_its_observer_instance env =
           Eio.Switch.fail route_sw Stop_dashboard_route)
       with Stop_dashboard_route -> ())
 
-let admit ~base_path:_ _request = Ok ()
+let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal
 
 (* The real presence route, served with a runtime on [runtime_sw], so its
    supervisor owns the response (RFC-0493 §3.2). *)

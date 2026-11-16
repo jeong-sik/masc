@@ -75,7 +75,7 @@ let post_handler ~workspace (runtime : Server_mcp_transport_http.runtime) =
     | Ok authority -> authority
     | Error `Malformed -> Alcotest.fail "fixture authority"
   in
-  let admit ~base_path:_ _request = Ok () in
+  let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal in
   let deps : Server_mcp_transport_http.deps =
     { get_origin = (fun _ -> "")
     ; cors_headers = (fun _ -> [])

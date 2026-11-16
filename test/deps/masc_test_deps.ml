@@ -536,6 +536,19 @@ let make_sse_auth workspace agent_name =
            agent_name
            (Masc_domain.masc_error_to_string e))
 
+(** The /mcp door's principal on a workspace with auth off, made by the door
+    itself since [Auth.request_principal] is private. Transport deps that
+    admit every request answer it, as such a workspace does. *)
+let auth_off_principal =
+  match
+    Auth.admit_request ""
+      ~auth_cfg:{ Masc_domain.default_auth_config with enabled = false }
+      ~token:None ~internal_keeper_agent:None
+  with
+  | Ok principal -> principal
+  | Error (Auth.Token_required | Auth.Bearer_refused _) ->
+      failwith "auth_off_principal: a workspace with auth off admits every request"
+
 (* Which sandbox a fixture's keeper runs in.
 
    Nothing used to answer this, so the profile came from the placeholder

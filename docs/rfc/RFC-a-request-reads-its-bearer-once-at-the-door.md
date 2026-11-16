@@ -126,8 +126,9 @@ stdio 는 `Mcp_server_eio.run_stdio`(`mcp_server_eio.ml:161`)가 요청마다 au
 type request_principal = private
   | Auth_off
       (* auth 가 꺼져 있다. 지금처럼 Admin 이다. *)
-  | Anonymous of { agent_hint : string option }
-      (* token 이 없다. require_token 이 꺼져 있을 때만 입구를 지난다. *)
+  | Anonymous
+      (* token 이 없다. require_token 이 꺼져 있을 때만 입구를 지난다.
+         actor 힌트는 요청 헤더에서 읽는다. 조회가 없다. *)
   | Bearer of
       { agent_name : string
       ; role : agent_role
@@ -141,7 +142,7 @@ type request_principal = private
 
 **D2. 입구가 만들어 넘긴다.**
 
-- `Server_auth.admit_bearer` 가 `request_principal` 을 돌려준다.
+- 입구 함수는 `Auth.admit_request` 다(1a). `/mcp`·seat·observer·operator 판정이 이것을 거쳐 주체를 돌려준다(1b).
 - `runtime.handle_request` 는 `?auth_token` 대신 `~principal` 을 받는다. 내부 서명이라 hard cut 이다. 호환용 인자를 남기지 않는다.
 - stdio(`run_stdio`)와 내부 Keeper runtime 경로도 같은 입구 함수를 거친다.
 
@@ -149,8 +150,9 @@ type request_principal = private
 
 **D4. 신원 단계.**
 
-- `body_with_canonical_http_actor` 는 `dashboard_actor_for_request` 대신 주체의 `agent_name` 을 쓴다.
-- `is_verified_internal_keeper_request` 는 `resolved = Internal_keeper_bearer` 로 답한다. `x-masc-keeper-name` 헤더 확인은 이미 입구(`identify_bearer`)에서 했다.
+- `body_with_canonical_http_actor` 는 `Server_auth.dashboard_actor_of_principal` 로 actor 를 얻는다. `Bearer` 면 주체의 `agent_name`, `Anonymous` 면 요청의 actor 힌트다.
+- internal Keeper 여부는 `Server_auth.is_internal_keeper_principal` 이 `resolved = Internal_keeper_bearer` 로 답한다. `x-masc-keeper-name` 헤더 확인은 이미 입구(`identify_bearer`)에서 했다.
+- `Auth_off` 면 입구가 아무것도 읽지 않았다. 두 함수는 지금처럼 `dashboard_actor_for_request`·`is_verified_internal_keeper_request` 를 부른다.
 
 **D5. `tools/call` 실행.**
 
@@ -229,10 +231,15 @@ type request_principal = private
 |---|---|---|
 | 0 | 계기와 기준선. §4.2 의 측정을 남긴다 | 측정 기록이 PR 에 붙는다 |
 | 1a | `Auth.request_principal` 타입과 입구 함수 `Auth.admit_request`. `/mcp`·observer 판정이 이것을 쓴다. 판정 함수의 반환은 아직 `unit` 이라 transport 와 시험 stub 은 그대로다 | L1 의 입구 부분 |
-| 1b | transport `deps` 의 판정이 요청 주체를 돌려주고, `runtime.handle_request` 에 `~principal` 을 더한다. 아래 층은 아직 raw token 도 받는다 | L1, 시험 stub 갱신 |
-| 2 | dispatch `require_auth` 와 신원 단계를 주체로 바꾼다(D3, D4) | L1, `initialize`·`tools/list` 의 L2 |
+| 1b | transport `deps` 의 판정이 요청 주체를 돌려주고, POST 신원 단계가 그 주체로 답한다(D4). 아래 층은 아직 raw token 을 받는다 | L1, 시험 stub 갱신 |
+| 2 | `runtime.handle_request` 에 `~principal` 을 더하고 dispatch `require_auth` 를 주체로 바꾼다(D3) | L1, `initialize`·`tools/list` 의 L2 |
 | 3 | `tools/call` 실행과 도구별 조회를 주체로 바꾼다(D5). `?auth_token` 을 지운다 | L1 전체, `tools/call` 의 L2 |
 | 4 | raw token 함수 허용 목록 검사(D6)와 TLA+ 갱신 | CI 검사, TLC 정상·buggy |
+
+D4 는 처음에 단계 2 에 있었다. 1b 로 옮긴 이유는 두 가지다.
+
+- 1b 에서 `~principal` 인자만 더하면, 받는 쪽이 아무도 쓰지 않는 인자가 단계 2 까지 남는다.
+- 신원 단계는 transport 안에 있다. 판정의 반환과 같은 PR 에서 바꿀 수 있다. POST 마다 internal Keeper hash 읽기 한 번, `tools/call` 의 bearer 조회 한 번이 1b 에서 빠진다.
 
 ## 7. 열린 질문
 

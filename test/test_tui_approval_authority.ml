@@ -52,14 +52,19 @@ let gate approval_id =
     }
 
 let effect_row = function
-  | Some resolved -> resolved.Authority.row
-  | None -> fail "expected a resolved approval effect"
+  | Authority.Listed resolved -> resolved.Authority.row
+  | Authority.No_row_presented | Authority.Presented_row_gone ->
+      fail "expected a resolved approval effect"
+
+let is_presented_row_gone = function
+  | Authority.Presented_row_gone -> true
+  | Authority.No_row_presented | Authority.Listed _ -> false
 
 let test_removed_presented_row_has_no_effect () =
   let shown = operator "operator-a" in
   let unseen = keeper "keeper-b" "call-b" in
   check bool "A cannot turn into B" true
-    (Option.is_none
+    (is_presented_row_gone
        (Authority.resolve ~presented:(Some shown) ~current:[ unseen ] Confirm))
 
 let test_reordered_presented_row_keeps_exact_identity () =
@@ -93,7 +98,7 @@ let test_replacement_waiter_has_no_presented_authority () =
   let shown = keeper ~approval_id:"waiter-a" "keeper-a" "call-a" in
   let replacement = keeper ~approval_id:"waiter-b" "keeper-a" "call-a" in
   check bool "same keeper and call cannot transfer a decision" true
-    (Option.is_none
+    (is_presented_row_gone
        (Authority.resolve ~presented:(Some shown) ~current:[ replacement ] Confirm));
   check bool "a new waiter requires a new accepted frame" true
     (Authority.authority_changed ~presented:(Some shown)
@@ -261,16 +266,21 @@ let test_retry_reaches_only_a_listed_gate_row () =
   List.iter
     (fun shown ->
       match Authority.retry_target ~presented:(Some shown) ~current:listed with
-      | Authority.Not_retryable -> ()
-      | Authority.Row_gone -> fail "a row still listed was reported as gone"
-      | Authority.Retry_gate _ -> fail "a non-Gate row reached the Auto Judge retry")
+      | Authority.Listed Authority.Not_retryable -> ()
+      | Authority.Presented_row_gone -> fail "a row still listed was reported as gone"
+      | Authority.No_row_presented -> fail "a presented row was reported as never shown"
+      | Authority.Listed (Authority.Retry_gate _) ->
+          fail "a non-Gate row reached the Auto Judge retry")
     [ operator "token-a"; keeper "keeper-a" "call-a" ];
   List.iter
     (fun shown ->
       match Authority.retry_target ~presented:(Some shown) ~current:[ gate "appr-b" ] with
-      | Authority.Row_gone -> ()
-      | Authority.Not_retryable -> fail "a row that left the list was reported as listed"
-      | Authority.Retry_gate _ -> fail "a row that left the list reached the Auto Judge retry")
+      | Authority.Presented_row_gone -> ()
+      | Authority.No_row_presented -> fail "a row that left the list was reported as never shown"
+      | Authority.Listed Authority.Not_retryable ->
+          fail "a row that left the list was reported as listed"
+      | Authority.Listed (Authority.Retry_gate _) ->
+          fail "a row that left the list reached the Auto Judge retry")
     [ operator "token-a"; keeper "keeper-a" "call-a"; gate "appr-a" ];
   let replayable =
     match gate "appr-a" with
@@ -282,11 +292,52 @@ let test_retry_reaches_only_a_listed_gate_row () =
     Authority.retry_target ~presented:(Some (gate "appr-a"))
       ~current:[ operator "token-a"; Approvals.Gate_row replayable ]
   with
-  | Authority.Retry_gate pending ->
+  | Authority.Listed (Authority.Retry_gate pending) ->
     check string "approval" "appr-a" pending.Tui_decode.gp_id;
     check bool "the retry reads the row as the current list holds it" true
       (Option.is_some pending.Tui_decode.gp_retry_request)
-  | Authority.Row_gone | Authority.Not_retryable -> fail "the listed Gate row was not retried"
+  | Authority.No_row_presented | Authority.Presented_row_gone
+  | Authority.Listed Authority.Not_retryable -> fail "the listed Gate row was not retried"
+
+(* The three places a presented row can stand, named the same way for y/n
+   and R. A frame that showed no row is not a list that changed. *)
+type standing = Nothing_shown | Shown_row_gone | Shown_row_listed
+
+let standing = function
+  | Authority.No_row_presented -> Nothing_shown
+  | Authority.Presented_row_gone -> Shown_row_gone
+  | Authority.Listed _ -> Shown_row_listed
+
+let standing_testable =
+  testable
+    (fun formatter value ->
+      Format.pp_print_string formatter
+        (match value with
+         | Nothing_shown -> "Nothing_shown"
+         | Shown_row_gone -> "Shown_row_gone"
+         | Shown_row_listed -> "Shown_row_listed"))
+    ( = )
+
+let test_no_presented_row_is_not_a_changed_list () =
+  let cases =
+    [ "empty list, nothing shown", None, [], Nothing_shown
+    ; "rows listed, nothing shown", None, [ gate "appr-a"; operator "token-a" ], Nothing_shown
+    ; "shown row left the list", Some (gate "appr-a"), [ gate "appr-b" ], Shown_row_gone
+    ; "shown row left an empty list", Some (operator "token-a"), [], Shown_row_gone
+    ; "shown row still listed", Some (gate "appr-a"), [ operator "token-a"; gate "appr-a" ],
+      Shown_row_listed
+    ]
+  in
+  List.iter
+    (fun (name, presented, current, expected) ->
+      List.iter
+        (fun decision ->
+          check standing_testable (name ^ ": y/n")
+            expected (standing (Authority.resolve ~presented ~current decision)))
+        [ Confirm; Deny ];
+      check standing_testable (name ^ ": R")
+        expected (standing (Authority.retry_target ~presented ~current)))
+    cases
 
 let test_authority_change_is_typed () =
   let operator_a = operator "token-a" in
@@ -490,6 +541,8 @@ let () =
             test_gate_detail_waits_for_presented_mode;
           test_case "retry reaches only a listed Gate row" `Quick
             test_retry_reaches_only_a_listed_gate_row;
+          test_case "no presented row is not a changed list" `Quick
+            test_no_presented_row_is_not_a_changed_list;
           test_case "authority change is typed" `Quick
             test_authority_change_is_typed;
         ] );

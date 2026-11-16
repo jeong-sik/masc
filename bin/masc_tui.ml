@@ -30911,21 +30911,25 @@ let main
       Approval_authority.resolve ~presented:(!presented).approval
         ~current:(Masc_tui_approvals_model.approval_items state) decision
     with
-    | Some { Approval_authority.row = Masc_tui_approvals_model.Operator_row approval; decision } ->
+    | Approval_authority.Listed { Approval_authority.row = Masc_tui_approvals_model.Operator_row approval; decision } ->
         handle_approval_decision state approval decision
           ~mailbox:async_messages
-    | Some { Approval_authority.row = Masc_tui_approvals_model.Keeper_tool_row held; decision } ->
+    | Approval_authority.Listed { Approval_authority.row = Masc_tui_approvals_model.Keeper_tool_row held; decision } ->
         launch_surface_tool_approval state ~mailbox:async_messages
           ~keeper_name:held.kta_keeper
           ~tool_call_id:held.kta_tool_call_id
           ~approval_id:held.kta_approval_id
           ~allow:(match decision with Confirm -> true | Deny -> false)
-    | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Confirm } ->
+    | Approval_authority.Listed { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Confirm } ->
         launch_gate_resolve state ~mailbox:async_messages
           ~approval_id:pending.Tui_decode.gp_id ~approve:true ~reason:None
-    | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Deny } ->
+    | Approval_authority.Listed { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; decision = Deny } ->
         reject_gate_approval pending
-    | None ->
+    | Approval_authority.No_row_presented ->
+        report_action state "system"
+          (ui_text state ~ko:"화면에 결정할 행 없음"
+             ~en:"No approval row on screen to decide")
+    | Approval_authority.Presented_row_gone ->
         report_action state "system"
           "Approval list changed; review the updated row before deciding"
   in
@@ -39234,14 +39238,18 @@ Use relative paths for resources already held in the package. -->
               Approval_authority.retry_target ~presented:(!presented).approval
                 ~current:(Masc_tui_approvals_model.approval_items state)
             with
-            | Approval_authority.Retry_gate pending ->
+            | Approval_authority.Listed (Approval_authority.Retry_gate pending) ->
                 launch_gate_auto_judge_retry state ~mailbox:async_messages pending
-            | Approval_authority.Not_retryable ->
+            | Approval_authority.Listed Approval_authority.Not_retryable ->
                 report_action state "system"
                   (ui_text state
                      ~ko:"Auto Judge 다시 시도는 Gate 행에서만 됨 · 이 행은 y/n 으로 결정"
                      ~en:"R retries Auto Judge on Gate rows only; decide this row with y/n")
-            | Approval_authority.Row_gone ->
+            | Approval_authority.No_row_presented ->
+                report_action state "system"
+                  (ui_text state ~ko:"화면에 다시 시도할 행 없음"
+                     ~en:"No approval row on screen to retry")
+            | Approval_authority.Presented_row_gone ->
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->

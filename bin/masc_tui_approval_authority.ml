@@ -25,25 +25,41 @@ let same_identity left right =
   | Masc_tui_approvals_model.Operator_row _, (Masc_tui_approvals_model.Keeper_tool_row _ | Masc_tui_approvals_model.Gate_row _) ->
       false
 
-let still_listed ~presented ~current =
-  Option.bind presented (fun row -> List.find_opt (same_identity row) current)
+type 'listed target =
+  | No_row_presented
+  | Presented_row_gone
+  | Listed of 'listed
+
+(* The one place that tells "the frame showed nothing" from "what it showed
+   has left the list"; y/n and R both read it through [map]. *)
+let presented_target ~presented ~current =
+  match presented with
+  | None -> No_row_presented
+  | Some shown -> (
+      match List.find_opt (same_identity shown) current with
+      | Some current_row -> Listed current_row
+      | None -> Presented_row_gone)
+
+let map f = function
+  | No_row_presented -> No_row_presented
+  | Presented_row_gone -> Presented_row_gone
+  | Listed row -> Listed (f row)
 
 let resolve ~presented ~current decision =
-  Option.map
-    (fun current_row -> { row = current_row; decision })
-    (still_listed ~presented ~current)
+  map (fun current_row -> { row = current_row; decision })
+    (presented_target ~presented ~current)
 
-type retry_target =
+type retry =
   | Retry_gate of Tui_decode.gate_pending
-  | Row_gone
   | Not_retryable
 
 let retry_target ~presented ~current =
-  match still_listed ~presented ~current with
-  | Some (Masc_tui_approvals_model.Gate_row pending) -> Retry_gate pending
-  | Some (Masc_tui_approvals_model.Operator_row _ | Masc_tui_approvals_model.Keeper_tool_row _) ->
-      Not_retryable
-  | None -> Row_gone
+  map
+    (function
+      | Masc_tui_approvals_model.Gate_row pending -> Retry_gate pending
+      | Masc_tui_approvals_model.Operator_row _ | Masc_tui_approvals_model.Keeper_tool_row _ ->
+          Not_retryable)
+    (presented_target ~presented ~current)
 
 let authority_changed ~presented ~candidate =
   not (Option.equal same_identity presented candidate)

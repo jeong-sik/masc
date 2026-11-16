@@ -106,8 +106,9 @@ let parent_final_with ~decode ~capture ~proposal (parent:Owner.retained) =
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Gate requires the original answered proposal" in
   Ok final
+(* The deploy check's reading of the parent's answer. The check confirms the
+   capture against the parent before, once for each pair ([confirm_capture]). *)
 let parent_final ~capture ~proposal (parent:Owner.retained) =
-  let* () = equal parent.request (Capture.to_json capture) "Gate parent capture differs" in
   let* judgment = parent_judgment parent in
   let* exact = Capture.request capture in
   let* schema = Option.to_result ~none:"Original Librarian request has no schema" exact.schema in
@@ -270,40 +271,48 @@ let pending_child ~(prior:Owner.retained) (child:Owner.retained) =
 (* Binding chains one deploy check proved. The check reads every gate record
    of a scope and follows each record's retry links back to its root, so
    proving every record's whole chain again proved a journal of n attempts
-   n(n+1)/2 times. A chain proved for an attempt stays proved for the rest of
-   the check while the attempt, its execution parent and its owner read the
-   same, as the check's forest proof does. The check restores the capture
-   from that parent, so the parent fixes the capture too. A failed proof is
-   not kept: the next record that reaches it proves it again and is refused
-   as before.
+   n(n+1)/2 times. A chain proved for an attempt stays proved while the
+   attempt reads the same and the check gives the same owner, execution
+   parent and capture. The check's reader gives back the record it read
+   before for bytes that did not change, and the check restores one capture
+   from that record, so the parent and the capture are the same values. They
+   are compared by identity: a parent read from other bytes, or a capture
+   restored again, is proved again. A failed proof is not kept: the next
+   record that reaches it proves it again and is refused as before.
    The check is not a snapshot of the store. A record it checked is not read
    again when a running server changes the store later in the check, and a
    chain it proved is not read again either. On a store that does not change
    during the check, the same records are refused with the same text.
-   Records are compared by their listed form, which names the request by
-   digest. A proof keeps the attempt's proposal for the rest of the check,
-   and no request body. *)
-type chain_proof = {owner_key:string; parent_key:string; record_key:string; proved:Yojson.Safe.t}
-type proofs = (string, chain_proof) Hashtbl.t
-let proofs () : proofs = Hashtbl.create 64
-let listed_key (record:Owner.retained) =
-  Agent_core_sha256.(digest_string (Yojson.Safe.to_string (Owner.record_to_json (Owner.listed record))) |> to_hex)
+   A proof keeps the attempt's record and proposal, and the parent and capture
+   it was proved under, for as long as the caller keeps the proofs. *)
+type chain_proof = {owner_key:string; parent:Owner.retained; capture:Capture.t; record:Owner.retained;
+  proved:Yojson.Safe.t}
+type proofs = {chains:(string, chain_proof) Hashtbl.t; mutable confirmed:(Owner.retained * Capture.t) list}
+let proofs () = {chains=Hashtbl.create 64; confirmed=[]}
+(* Every attempt of a journal names the same parent, and confirming the
+   capture against it encodes and compares the parent's whole request. *)
+let confirm_capture proofs ~capture (parent:Owner.retained) =
+  if List.exists (fun (confirmed,restored) -> confirmed == parent && restored == capture) proofs.confirmed
+  then Ok ()
+  else
+    let+ ()=equal parent.request (Capture.to_json capture) "Gate parent capture differs" in
+    proofs.confirmed <- (parent,capture)::proofs.confirmed
 (* Captured links only. Live owner and host-proof restoration stay in the
    runtime path below. *)
 let validate_binding_chain ~proofs ~read ~owner ~capture ~parent record =
-  let owner_key=Yojson.Safe.to_string (Capture.owner_to_json owner) and parent_key=listed_key parent in
-  let recall (record:Owner.retained) record_key =
+  let owner_key=Yojson.Safe.to_string (Capture.owner_to_json owner) in
+  let recall (record:Owner.retained) =
     List.find_map (fun proof ->
-      if String.equal proof.owner_key owner_key && String.equal proof.parent_key parent_key
-         && String.equal proof.record_key record_key then Some proof.proved else None)
-      (Hashtbl.find_all proofs record.request_id) in
+      if String.equal proof.owner_key owner_key && proof.parent == parent && proof.capture == capture
+         && Owner.same_record proof.record record then Some proof.proved else None)
+      (Hashtbl.find_all proofs.chains record.request_id) in
   let rec visit visited (record:Owner.retained) =
     let* ()=require (not (List.mem record.request_id visited)) "Cyclic gate retry ancestry" in
-    let record_key=listed_key record in
-    match recall record record_key with
+    match recall record with
     | Some proposal -> Ok proposal
     | None ->
       let* proposal,_,_,_,predecessor=retained_payload ~owner ~capture ~parent record in
+      let* ()=confirm_capture proofs ~capture parent in
       let* _=parent_final ~capture ~proposal parent in
       let* ()=match predecessor with
         | None -> root_binding ~parent record
@@ -313,7 +322,7 @@ let validate_binding_chain ~proofs ~read ~owner ~capture ~parent record =
           let* prior_proposal=visit (record.request_id::visited) prior in
           let* ()=equal prior_proposal proposal "Gate retry changed the original proposal" in
           let* ()=predecessor_binding ~prior record in pending_child ~prior record in
-      Hashtbl.add proofs record.request_id {owner_key;parent_key;record_key;proved=proposal};
+      Hashtbl.add proofs.chains record.request_id {owner_key;parent;capture;record;proved=proposal};
       Ok proposal in
   visit [] record
 let validate_payload ~proofs ~read ~read_body ~owner ~capture ~parent ~record =
@@ -349,6 +358,7 @@ let validate_preparation_payload ~proofs ~read ~read_body ~owner ~capture ~(pare
     let* proposal,_,_,_,predecessor=request_payload ~owner ~capture ~parent
       ~request_id:intent.request_id intent.request in
     let* ()=require (predecessor=None) "Original gate preparation names a retry" in
+    let* ()=confirm_capture proofs ~capture parent in
     let* _=parent_final ~capture ~proposal parent in
     let* child=read ~scope:(scope owner) ~request_id:intent.request_id in
     match child with

@@ -581,13 +581,16 @@ let test_a_journal_read_restores_each_attempt_once () = with_fixture (fun fixtur
     check bool "a journal read grows with its attempts and not with their square" true
       (eight -. four < 2. *. (four -. one))))
 
-(* A deploy check reads every gate record of a journal and follows each
-   record's retry links back to the journal's first attempt. A check that
-   proves each attempt once reads the gate scope two more times for each
-   attempt a journal grows by: the new attempt's predecessor, and the
-   successor that predecessor names. A check that proved each record's whole
-   chain again would also read every earlier attempt once more: three more
-   reads for the third attempt and five for the fifth. *)
+(* The payload check of a deploy check, without its Exact reads, reads every
+   gate record of a journal and follows each record's retry links back to the
+   journal's first attempt. A check that proves each attempt once reads the
+   gate scope two more times for each attempt a journal grows by: the new
+   attempt's predecessor, and the successor that predecessor names. A check
+   that proved each record's whole chain again would also read every earlier
+   attempt once more: three more reads for the third attempt and five for the
+   fifth. The proofs hold only while the check gives back the same step and
+   the same capture restored from it, so a check that read the step anew or
+   restored it again for each record proves each whole chain again too. *)
 let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture ->
   fixture.respond := (fun body ->
     if contains body second_text then `OK, F.openai_response (answer ~claim:"claim 2" ~state:"state 2")
@@ -643,6 +646,63 @@ let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture 
     check int "the fifth attempt adds as many gate reads to the check as the third"
       (three - two) (five - four)))
 
+(* A gate record's consumer reads the Exact files of the step its journal
+   names, so a deploy check judges that step's files for each gate record. A
+   check that keeps a passed judgment while it stays in the gate scope reads
+   them once for the journal and once for the step's own record, however many
+   attempts the journal holds. A check that judged them for each gate record
+   would read them once more for every attempt. *)
+let test_a_deploy_check_judges_a_steps_exact_files_once_for_its_journal () = with_fixture (fun fixture ->
+  fixture.respond := (fun body ->
+    if contains body second_text then `OK, F.openai_response (answer ~claim:"claim 2" ~state:"state 2")
+    else `OK, F.openai_response absorbing_answer);
+  let owner = owner fixture and range = range_link (owner fixture) in
+  let starting : Chain.fresh = { fresh with current = Some { Keeper_librarian.facts = [ stale_fact ] } } in
+  let original = Runtime_typesafeai_policy.current () in
+  Fun.protect ~finally:(fun () -> Runtime_typesafeai_policy.publish original) (fun () ->
+    Runtime_typesafeai_policy.publish { original with absorb_gate = true; lane_enabled = false };
+    let fail_once () =
+      match run_through_workers fixture ~owner ~range ~fresh:starting () with
+      | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
+      | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Error detail -> failf "the chain refused: %s" detail in
+    let first_step () = match in_position_order (steps_of fixture ~owner) with
+      | ((step : Owner.retained), (_ : Step.header)) :: _ -> Some step
+      | [] -> None in
+    let attempts () = match first_step () with
+      | None -> 0
+      | Some step ->
+        let inventory = Gate.Inventory.read ~store:fixture.store ~owner |> get in
+        List.length (Gate.Inventory.execution_records inventory ~execution_id:step.request_id) in
+    let rec grow_to count runs =
+      if attempts () < count then
+        if runs = 0 then failf "the first step's journal did not reach %d attempts" count
+        else (fail_once (); grow_to count (runs - 1)) in
+    (* One deploy check, counting the reads of the first step's Exact files. *)
+    let step_reads () =
+      let step = match first_step () with Some step -> step | None -> fail "the chain retained no step" in
+      let reads = ref 0 in
+      let counting () =
+        let check = Keeper_librarian_store_preflight.preflight () in
+        fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact record ->
+          let read_exact ~declaration_id (request : Exact.request) =
+            if String.equal request.request_id step.request_id then incr reads;
+            read_exact ~declaration_id request in
+          check ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact record in
+      let report = io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
+        Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
+      check (list string) "the deploy check refuses no record" []
+        (List.map (fun (refusal : Lane_addon_store_preflight.refusal) -> refusal.detail) report.refusals);
+      !reads in
+    grow_to 2 3;
+    let two = step_reads () in
+    grow_to 5 6;
+    let five = step_reads () in
+    check int "the first step's journal holds five attempts" 5 (attempts ());
+    check bool "the check reads the step's Exact files" true (two > 0);
+    check int "three more attempts add no read of the step's Exact files" two five))
+
 let () =
   run "keeper_librarian_floor_chain"
     [ ( "chain"
@@ -679,5 +739,7 @@ let () =
             test_a_journal_read_restores_each_attempt_once
         ; test_case "a deploy check proves each attempt once" `Slow
             test_a_deploy_check_proves_each_attempt_once
+        ; test_case "a deploy check judges a step's Exact files once for its journal" `Slow
+            test_a_deploy_check_judges_a_steps_exact_files_once_for_its_journal
         ] )
     ]

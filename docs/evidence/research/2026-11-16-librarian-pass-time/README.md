@@ -34,9 +34,9 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 고정 템플릿 | `config/prompts/librarian.md` sha256 `575a6849…`, 47,654바이트. main `fae3b542ef5b` 의 파일과 같다 |
-| 채점 하네스 | main `fae3b542ef5b` 의 `scripts/tinker/librarian`. `pass_lines.json` sha256 `9b62a255…`. #52242(head `1b6809f26ef1`)의 채점 파일과 바이트가 같다 |
-| 기준선 | 고정 템플릿으로 잰 Inkling 두 실행. 수는 #52242 가 `prompt_lines.json` 에 고정한 값이다. main 의 `prompt_lines.json` 은 기준선이 비어 있다(`null`) |
+| 고정 템플릿 | `config/prompts/librarian.md` sha256 `575a6849…`, 47,654바이트. main `71a19f1c9030` 의 파일과 같다 |
+| 채점 하네스 | main `71a19f1c9030` 의 `scripts/tinker/librarian`. `pass_lines.json` sha256 `9b62a255…` |
+| 기준선 | 고정 템플릿으로 잰 Inkling 두 실행. 수는 main 의 `prompt_lines.json` 에 고정된 값이다(#52242 로 들어갔다) |
 | 실행 하네스 | #52242 의 checkout `3f11de239676` 에 [`harness-pass-time.patch`](harness-pass-time.patch) 를 얹고 `pass_lines.json` 을 다시 고정한 사본. 사본의 `pass_lines.json` sha256 `b9963e77…`. main 과 다른 파일은 아래 「하네스 사본」에 있다 |
 | E-synth | requests sha256 `8aa43fde…`, 판정 사례 seed 20261113 |
 | E-real | manifest sha256 `8d87e880…`. 기록은 git 이 무시하는 snapshot 에만 있다 |
@@ -45,7 +45,7 @@
 
 [2026-11-13 기준선 기록](../2026-11-13-librarian-pinned-baseline/README.md)의 수(168/180, 219/250, 40/162, 72/96, 22/44, 15/74)는 옛 검사기(`pass_lines.json` `94c12b79…`)로 센 값이다.
 이 기록의 기준선은 같은 답을 지금 검사기로 다시 센 값이다(175/180, 226/250, 52/204, 82/111, 56/89, 19/88).
-다시 센 기록은 #52242 의 `docs/evidence/research/2026-11-13-librarian-rescored-baseline/` 에 있다. #52242 는 병합 전이다.
+다시 센 기록은 [2026-11-13 다시 센 기준선 기록](../2026-11-13-librarian-rescored-baseline/README.md)에 있다.
 
 ### E-synth 는 기억 묶음 31개를 나눠 쓴다
 
@@ -118,20 +118,19 @@ P 초안의 실행과 판정은 이 실험보다 먼저 한 것이다. 공개된
 MASC 는 Librarian 프롬프트에 시각을 그리지 않는다. 고정 하네스도 그렇다. 그래서 사본에서 쟀다.
 
 - 사본은 #52242 의 checkout `3f11de239676` 에서 만들었다. 두 파일에 [`harness-pass-time.patch`](harness-pass-time.patch) 를 얹고 `pass_lines.json` 을 다시 고정했다.
-- 사본이 main `fae3b542ef5b` 과 다른 파일은 다섯이다.
+- 사본이 main `71a19f1c9030` 과 다른 파일은 넷이다.
 
 | 파일 | 다른 까닭 | 채점에 쓰이나 |
 | --- | --- | --- |
 | `admission_template.py` | patch 가 문자열 변수 `pass_time` 을 더했다. 템플릿에 없어도 된다 | 쓰인다 |
 | `admission_request.py` | patch 가 `pass_time` 을 요청의 마지막 후보 시각으로 그린다 | 쓰인다 |
 | `pass_lines.json` | 위 두 파일의 sha256 만 다르다 | 쓰인다 |
-| `prompt_lines.json` | #52242 가 기준선을 고정한 파일이다 | E-synth 실행과 채점은 읽지 않는다 |
 | `synth_generate.py` | 그 checkout 의 E-synth 생성기다 | 이 실험은 요청을 새로 만들지 않았다 |
 
 - main 의 두 파일에 patch 를 얹으면 사본의 두 파일과 바이트가 같다(`git apply --unidiff-zero harness-pass-time.patch`).
   patch 의 주석에 나오는 `time_harness_patch.py` 는 사본을 만든 스크립트다. git 이 무시하는 `artifacts/tinker/librarian/code/` 에만 있다.
 - `pass_lines.json` 이 고정하는 채점 파일은 24개다. 그중 22개가 사본과 main 에서 바이트가 같다. 나머지 둘이 patch 의 두 파일이다.
-  `prompt_lines.json` 과 `synth_generate.py` 는 그 24개에 들지 않는다.
+  `synth_generate.py` 는 그 24개에 들지 않는다.
 - `pass_time` 은 요청의 마지막 후보 시각을 RFC 3339 문자열로 적은 값이다.
   블라인드 판정자가 case 의 `now` 로 받는 값과 같다(`e_synth_audit.request_time`). E-synth 90건 모두 같았다.
 - T 의 문장은 호스트가 패스를 시작한 시각이라고 말한다. 잰 값은 마지막 후보 시각이다. 라이브에서 패스는 그보다 늦게 시작한다.
@@ -236,7 +235,7 @@ Tinker 실행은 요청마다 호출을 두 번 보낸다. 첫 호출은 프롬�
 
 ## 명령
 
-저장소 루트에서 돌린다. 채점 하네스는 main 의 것을 쓴다. `<52242>` 는 #52242 checkout 이다.
+저장소 루트에서 돌린다. 채점 하네스와 기준선 고정값은 main 의 것을 쓴다.
 
 ```sh
 E=docs/evidence/research/2026-11-16-librarian-pass-time
@@ -245,19 +244,23 @@ H=scripts/tinker/librarian
 python3 $E/time_screen.py --runs $E/screen-runs.json --root $R --out "$TMPDIR/screen.json"
 uv run --python 3.12 --with openai==3.46.0 $E/time_judged.py --scripts $H \
   --runs $E/judged-runs.json --root $R \
-  --expect <52242>/scripts/tinker/librarian/prompt_lines.json --out "$TMPDIR/judged.json"
+  --expect $H/prompt_lines.json --out "$TMPDIR/judged.json"
 python3 $E/time_cluster.py --runs $E/judged-runs.json --requests $R/e-synth-pooled/requests.jsonl \
-  --root $R --draft F --baseline base --judged "$TMPDIR/judged.json" --screen "$TMPDIR/screen.json"
+  --root $R --draft F --baseline base --judged "$TMPDIR/judged.json" --screen "$TMPDIR/screen.json" \
+  --out "$TMPDIR/cluster-F-base.json"
 uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
-  --runs $E/screen-runs.json --requests $R/e-synth-pooled/requests.jsonl --root $R
+  --runs $E/screen-runs.json --requests $R/e-synth-pooled/requests.jsonl --root $R --out "$TMPDIR/absent.json"
 ```
 
 - `time_cluster.py` 는 `--draft` 와 `--baseline` 을 바꿔 가며 돌렸다: F·base, F·A, A·base, P·base, E·base, E·B, B·P.
 - `time_judged.py` 는 `prompt_counts.measure` 의 E-synth 절반을 같은 함수로 센다.
   기준선 폴더에서 센 수가 `prompt_lines.json` 의 고정값과 다르면 멈춘다. 이번에는 같았다.
-  main 의 `prompt_lines.json` 을 주면 기준선이 비어 있다고 알리고 멈춘다.
+  기준선이 비어 있는(`null`) `prompt_lines.json` 을 주면 그렇다고 알리고 멈춘다.
 - `time_cluster.py` 는 자기가 센 수가 `time_judged.py` 나 `time_screen.py` 가 쓴 수와 다르면 멈춘다. 이번에는 같았다.
 - `time_absent.py` 는 `calls.jsonl` 의 답을 읽는다. 수만 낸다.
+- [`outputs.jsonl`](outputs.jsonl) 은 위 명령이 쓴 JSON 열 개다. 한 줄이 출력 하나다.
+  `output` 은 출력 이름(`screen`, `judged`, `cluster-<초안>-<견준 쪽>` 일곱, `absent`)이고 `content` 는 그 출력이다.
+  아래 표의 수는 이 파일과 견줄 수 있다. 같은 명령을 다시 돌려 나온 열 개도 이 파일과 같았다.
 
 ## 결과
 
@@ -523,4 +526,4 @@ E 의 흡수는 판정하지 않았다. `rows.jsonl` 의 `absorbs` 에서 셌다
 - S 는 E-synth 가 심은 기억과 같은 종류를 말한다. 쓸 날을 다르게 적은 기억에 듣는지는 재지 않았다.
 - 판정 시각 없이 S 의 첫 문장만 넣은 초안은 재지 않았다.
 - `pass_time` 은 하네스 사본이 그린 값이다. MASC 는 아직 그 변수를 그리지 않는다.
-- 실행 폴더와 판정 폴더는 한 대의 디스크에만 있다.
+- 실행 폴더와 판정 폴더는 한 대의 디스크에만 있다. 저장소에는 스크립트 출력(`outputs.jsonl`)만 있다.

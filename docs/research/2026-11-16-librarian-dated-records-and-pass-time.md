@@ -5,7 +5,7 @@
 - 관련 결정: [RFC-0517](../rfc/RFC-0517-the-librarian-keeps-one-correct-fact-per-piece-of-knowledge.md) §2.3(프롬프트 원칙), §6(하지 않는 것), §7.1(후보와 무관한 정리), §7.2(지우기를 확인할지).
 - 측정 대상: Inkling 2 Small 기본 모델. 초안은 Inkling 에서만 쟀다. GLM 은 기준선 한 실행의 수만 있다.
 - 세트: E-synth(라벨이 있는 합성 요청 90건)와 E-real(라이브 admission 기록 50건, 라벨 없음).
-- 코드 사실: main `fae3b542ef5b` 에서 읽었다.
+- 코드 사실: main `71a19f1c9030` 에서 읽었다.
 - 이 문서는 연구 기록이다. 초안을 들일지는 RFC-0517 §2.3 의 들이는 기준으로 정한다.
   `prompt_compare.py compare` 가 그 기준을 고정한 기준선과 견줘 내는 결과를 「고정 비교」로 부른다.
 

@@ -421,9 +421,10 @@ val restore_durable_preparation : source_input:Keeper_librarian.input -> parsing
   turn_prompts:turn_input_prompts ->
   prompt:Prompt_registry.prompt_resolution -> output_schema:Yojson.Safe.t ->
   (durable_preparation, string) result
-(** Render the substitutions and prompt again from the captured input and the
-    retained resolutions, then {!validate_durable_preparation}. No
-    environment/prompt lookup. *)
+(** Render the substitutions and prompt once from the captured input and
+    retained resolutions, checking the same policy, resolution and schema
+    invariants as {!validate_durable_preparation}. No environment/prompt lookup.
+    The public validator still recomputes the rendering of a supplied record. *)
 type durable_absorption = {
   cited_observations : Keeper_librarian_absorb_gate.cited_observations;
   facts : Keeper_memory_os_types.fact list;

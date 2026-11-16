@@ -531,7 +531,7 @@ let durable_substitutions ?continuity ~(policy:durable_policy) ~rule_prompt ~tur
   let* variables=with_turn_input_prompts turn_prompts ((working_contexts_rule_variable,String.trim rule)::base) in
   let+ rendered=Prompt_registry.render_resolved_prompt_template Prompt_names.librarian prompt variables in
   rule,variables,rendered
-let check_durable_preparation ?continuity ~expected_schema (preparation : durable_preparation) =
+let check_durable_fields (preparation : durable_preparation) =
   let open Result.Syntax in
   let policy=preparation.policy in
   let* ()=if Float.is_finite preparation.parsing_now && preparation.parsing_now>=0.
@@ -541,10 +541,10 @@ let check_durable_preparation ?continuity ~expected_schema (preparation : durabl
   let* ()=validate_resolution preparation.rule_prompt in
   let* ()=validate_resolution preparation.turn_prompts.working_context_input in
   let* ()=validate_resolution preparation.turn_prompts.turn_inputs in
-  let* ()=validate_resolution preparation.prompt in
-  let* rule,variables,rendered=durable_substitutions ?continuity ~policy ~rule_prompt:preparation.rule_prompt
-    ~turn_prompts:preparation.turn_prompts
-    ~prompt:preparation.prompt preparation.source_input in
+  validate_resolution preparation.prompt
+let check_durable_rendering ~expected_schema ~rule ~variables ~rendered
+    (preparation : durable_preparation) =
+  let open Result.Syntax in
   let* ()=if preparation.variables=variables then Ok ()
     else Error "Original history Memory substitutions differ from captured input" in
   let* actual_schema=Lane_addon_action.canonical preparation.output_schema in
@@ -552,17 +552,27 @@ let check_durable_preparation ?continuity ~expected_schema (preparation : durabl
   if String.trim rule<>"" && String.trim rendered<>""
     && preparation.rendered_prompt=rendered && Yojson.Safe.equal actual_schema expected_schema
   then Ok () else Error "Original history Memory prompt/schema differs from captured templates and input"
+let check_durable_preparation ?continuity ~expected_schema (preparation : durable_preparation) =
+  let open Result.Syntax in
+  let* ()=check_durable_fields preparation in
+  let* rule,variables,rendered=durable_substitutions ?continuity ~policy:preparation.policy
+    ~rule_prompt:preparation.rule_prompt ~turn_prompts:preparation.turn_prompts
+    ~prompt:preparation.prompt preparation.source_input in
+  check_durable_rendering ~expected_schema ~rule ~variables ~rendered preparation
 let validate_durable_preparation preparation =
   check_durable_preparation
     ~expected_schema:Keeper_structured_output_schema.librarian_current_output_schema preparation
 let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts ~prompt
     ~output_schema =
   let open Result.Syntax in
-  let* _rule,variables,rendered_prompt=durable_substitutions ~policy ~rule_prompt ~turn_prompts ~prompt
+  let* rule,variables,rendered_prompt=durable_substitutions ~policy ~rule_prompt ~turn_prompts ~prompt
     source_input in
   let preparation : durable_preparation = {source_input;parsing_now;policy;rule_prompt;turn_prompts;prompt;
     variables;rendered_prompt;output_schema} in
-  let+ ()=validate_durable_preparation preparation in preparation
+  let* ()=check_durable_fields preparation in
+  let+ ()=check_durable_rendering
+    ~expected_schema:Keeper_structured_output_schema.librarian_current_output_schema
+    ~rule ~variables ~rendered:rendered_prompt preparation in preparation
 (* This is an admission check, not a restoration rule: old captures must keep
    their original prompt and remain decodable even if it omitted the input.
    The counterpart observations are turn material: they reach the model only
@@ -599,7 +609,9 @@ let prepare_durable_with ?continuity ~output_schema ~now ~source_lines source_in
   let* prompt,rendered_prompt=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
   let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;turn_prompts;prompt;
     variables;rendered_prompt;output_schema} in
-  let* ()=check_durable_preparation ?continuity ~expected_schema:output_schema preparation in
+  let* ()=check_durable_fields preparation in
+  let* ()=check_durable_rendering ~expected_schema:output_schema ~rule ~variables
+    ~rendered:rendered_prompt preparation in
   let* ()=require_counterpart_template preparation in
   Ok preparation
 let prepare_durable ~now ~source_lines source_input =
@@ -621,21 +633,27 @@ let durable_step_continuity (context : durable_step_context) =
   `Assoc ["previous_working_state",
     (match context.previous_state with None -> `Null | Some state -> `String state);
     "unread_messages", Keeper_librarian_unread.list_to_json context.unread_messages]
+let check_durable_step_input (preparation : durable_preparation) =
+  if preparation.source_input.working_context=Keeper_librarian_context.empty then Ok ()
+  else Error "Original history floor step must not carry a working context"
 let validate_durable_step_preparation (step : durable_step_preparation) =
   let open Result.Syntax in
-  let* ()=if step.preparation.source_input.working_context=Keeper_librarian_context.empty then Ok ()
-    else Error "Original history floor step must not carry a working context" in
+  let* ()=check_durable_step_input step.preparation in
   check_durable_preparation ~continuity:(durable_step_continuity step.context)
     ~expected_schema:Keeper_structured_output_schema.librarian_continuity_output_schema step.preparation
 let restore_durable_step_preparation ~context ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts
     ~prompt ~output_schema =
   let open Result.Syntax in
   let continuity=durable_step_continuity context in
-  let* _rule,variables,rendered_prompt=durable_substitutions ~continuity ~policy ~rule_prompt ~turn_prompts
+  let* rule,variables,rendered_prompt=durable_substitutions ~continuity ~policy ~rule_prompt ~turn_prompts
     ~prompt source_input in
   let step={context;preparation={source_input;parsing_now;policy;rule_prompt;turn_prompts;prompt;variables;
     rendered_prompt;output_schema}} in
-  let+ ()=validate_durable_step_preparation step in step
+  let* ()=check_durable_step_input step.preparation in
+  let* ()=check_durable_fields step.preparation in
+  let+ ()=check_durable_rendering
+    ~expected_schema:Keeper_structured_output_schema.librarian_continuity_output_schema
+    ~rule ~variables ~rendered:rendered_prompt step.preparation in step
 (* A floor step reads the input the Runtime floor's volatile Memory pass reads.
    The pass's state and unread arguments do not change that input. *)
 let durable_step_source_input input = input_for_pass (Volatile_memory_pass (None,[])) input
@@ -646,7 +664,7 @@ let prepare_durable_step ~now ~context ~source_lines input =
     ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema ~now ~source_lines
     source_input in
   let step={context;preparation} in
-  let+ ()=validate_durable_step_preparation step in step
+  let+ ()=check_durable_step_input step.preparation in step
 let render_librarian_prompt ~source_lines input =
   prepare_durable ~now:(Time_compat.now ()) ~source_lines input
   |> Result.map (fun (preparation : durable_preparation) -> preparation.rendered_prompt)

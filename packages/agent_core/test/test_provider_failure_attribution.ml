@@ -813,7 +813,11 @@ let test_attribution_json_omits_diagnostics () =
   check_bool
     "unknown wire stop reason omitted"
     false
-    (Util.string_contains ~needle:unknown_stop rendered)
+    (Util.string_contains ~needle:unknown_stop rendered);
+  check_bool
+    "empty completion detail omitted"
+    false
+    (Util.string_contains ~needle:"sensitive empty detail" rendered)
 ;;
 
 let () =
@@ -854,6 +858,10 @@ let () =
             "coarse provider fail-closed"
             `Quick
             test_coarse_sdk_provider_errors_fail_closed
+        ; Alcotest.test_case
+            "redacted attribution JSON"
+            `Quick
+            test_attribution_json_omits_diagnostics
         ; Alcotest.test_case
             "ContextWindowExceeded types as Api ContextOverflow"
             `Quick

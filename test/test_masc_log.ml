@@ -150,7 +150,7 @@ let test_entry_to_json_omits_diagnostic_kind () =
   } in
   let json = Log.Ring.entry_to_json entry in
   Alcotest.(check bool) "no diagnostic_kind key on the wire" false
-    (Yojson.Safe.Util.member "diagnostic_kind" json <> `Null)
+    (List.mem "diagnostic_kind" (Yojson.Safe.Util.keys json))
 
 (* Local helper: this binary intentionally depends only on masc_log +
    alcotest-adjacent modules, so no String_util import. *)
@@ -316,6 +316,9 @@ let () =
         Alcotest.test_case
           "entry_to_json: keeper_name=Some preserves value"
           `Quick test_entry_to_json_keeper_name_some_preserves;
+        Alcotest.test_case
+          "entry_to_json: diagnostic_kind stays off the wire (#49742)"
+          `Quick test_entry_to_json_omits_diagnostic_kind;
         Alcotest.test_case "push masks github token in message" `Quick
           test_push_masks_github_token_in_message;
         Alcotest.test_case "push masks secrets in details" `Quick

@@ -27923,7 +27923,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Ok (Masc_tui_image_cache.Remote_copy_ready {copy;_}) ->
              Masc_tui_image_cache.discard_captured_copy copy;
              schedule_discarded_copy_cleanup ()
-         | Ok (Remote_unfetched | Remote_png _ | Remote_native _ | Remote_bounded_source _ | Remote_cells _
+         | Ok (Remote_unfetched | Remote_native _ | Remote_bounded_source _ | Remote_cells _
               | Remote_busy _ | Remote_bounded_failure _ | Remote_native_failed _ | Remote_copy_failed _) | Error _ -> ())
   | Msx_msg (Msx_tick_withdrawn (request, detail)) ->
       (match !msx_pending_poll with

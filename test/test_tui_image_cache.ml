@@ -412,9 +412,9 @@ let test_remote_capability_changes () =
   let rgba = Cache.Rgba {columns=2;pixel_rows=2;bytes=String.make 16 '\000'} in
   let frame = Cache.Remote_cells {source=png;cells=Ok rgba} in
   check bool "unknown capability tries native PNG" true
-    (Cache.decide_remote ~graphics:None ~colour:true (Cache.Remote_png png) = Cache.Draw_remote_png png);
+    (Cache.decide_remote ~graphics:None ~colour:true (Cache.Remote_bounded_source png) = Cache.Draw_remote_png png);
   check bool "confirmed non-pixel terminal prepares cells" true
-    (Cache.decide_remote ~graphics:(Some false) ~colour:true (Cache.Remote_png png) = Cache.Prepare_remote_cells png);
+    (Cache.decide_remote ~graphics:(Some false) ~colour:true (Cache.Remote_bounded_source png) = Cache.Prepare_remote_cells png);
   check bool "prepared cells are used on a colour terminal" true
     (Cache.decide_remote ~graphics:(Some false) ~colour:true frame = Cache.Draw_remote_cells {source=png;cells=rgba});
   check bool "late native support uses the original PNG even after cell failure" true

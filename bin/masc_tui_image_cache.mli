@@ -259,7 +259,6 @@ val prepare_presentation :
 
 type remote_image =
   | Remote_unfetched
-  | Remote_png of string
   | Remote_native of { source : string; png : string }
   | Remote_bounded_source of string
   | Remote_cells of { source : string; cells : (presentation, string) result }

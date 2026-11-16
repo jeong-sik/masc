@@ -7,7 +7,6 @@ type keeper =
 type t =
   { observed_at : float
   ; keepers : keeper list
-  ; identity : string
   }
 
 open Result.Syntax
@@ -99,11 +98,10 @@ let collect ~base_path =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let* ids = discover ~keepers_dir in
   let keepers = List.map (read_keeper ~keepers_dir) ids in
-  Ok { observed_at = Time_compat.now (); keepers;
-       identity = hash (`List (List.map keeper_json keepers)) }
+  Ok { observed_at = Time_compat.now (); keepers }
 
 let keepers t = t.keepers
-let fingerprint t = t.identity
+let fingerprint t = hash (`List (List.map keeper_json t.keepers))
 let http_json ~base_path =
   let captured = collect ~base_path in
   let observed_at = match captured with Ok t -> t.observed_at | Error _ -> Time_compat.now () in

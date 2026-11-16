@@ -855,12 +855,15 @@ let test_curator_inventory_binds_actual_commits () =
     ignore (write_snapshot ~keepers_dir ~keeper_id:"reviewer" [fact "Criteria are not files"]);
     let before = Inventory.collect ~base_path:base |> require_ok in
     let unchanged = Inventory.collect ~base_path:base |> require_ok in
-    Alcotest.(check string) "observation time does not trigger another model pass"
-      (Inventory.fingerprint before) (Inventory.fingerprint unchanged);
+    let before_identity = Inventory.fingerprint before in
+    Alcotest.(check string) "observation time does not change captured inventory identity"
+      before_identity (Inventory.fingerprint unchanged);
     let captured = Ledger.reconcile Ledger.empty (Inventory.keepers before) in
     Alcotest.(check int) "both current facts are pending" 2 (List.length captured.new_facts);
     ignore (write_snapshot ~keepers_dir ~keeper_id:"writer" []);
     let changed = Inventory.collect ~base_path:base |> require_ok in
+    Alcotest.(check string) "the captured identity does not reread changed stores"
+      before_identity (Inventory.fingerprint before);
     Alcotest.(check bool) "actual retraction changes the inventory" true
       (Inventory.fingerprint before <> Inventory.fingerprint changed);
     Alcotest.(check int) "in-flight facts stay captured" 2 (List.length captured.current_facts);

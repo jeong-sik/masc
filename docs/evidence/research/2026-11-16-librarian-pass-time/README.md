@@ -19,6 +19,9 @@
 | 큰 답 | 기억 10개 이상을 흡수한 유효 답 |
 | 이항 σ | 두 쪽을 합친 비율로 센 이항 표준오차. `prompt_compare.py` 의 식이다 |
 | 묶음 단위 구간 | 기억 묶음을 복원 추출로 10,000번 다시 뽑아 본 차이의 2.5~97.5 백분위 |
+| 고정 비교 | RFC-0517 §2.3 의 들이는 기준을 `prompt_compare.py compare` 가 고정한 기준선과 견줘 내는 결과. 나빠짐은 −2.5σ 아래, 좋아짐은 +2σ 위다 |
+| 후보 판정 | 답이 후보마다 적는 `incorporated`, `already_represented` 같은 결과. 블라인드 판정자의 판정과 다른 것이다 |
+| 빈 입력 칸을 뺀 초안 | admission 프롬프트에서 빈 대화·도구 입력 칸을 뺀 템플릿. 잰 실행은 #52347(RFC-0517 에 결과를 적는 Draft)의 것이다. 코드는 그 위에 쌓인 #52348(Draft)에 있다 |
 
 ## 무엇을 확인했나
 
@@ -34,7 +37,7 @@
 | 고정 템플릿 | `config/prompts/librarian.md` sha256 `575a6849…`, 47,654바이트. main `fae3b542ef5b` 의 파일과 같다 |
 | 채점 하네스 | main `fae3b542ef5b` 의 `scripts/tinker/librarian`. `pass_lines.json` sha256 `9b62a255…`. #52242(head `1b6809f26ef1`)의 채점 파일과 바이트가 같다 |
 | 기준선 | 고정 템플릿으로 잰 Inkling 두 실행. 수는 #52242 가 `prompt_lines.json` 에 고정한 값이다. main 의 `prompt_lines.json` 은 기준선이 비어 있다(`null`) |
-| 실행 하네스 | 채점 하네스에 [`harness-pass-time.patch`](harness-pass-time.patch) 를 얹은 사본. 두 파일만 다르다. 사본의 `pass_lines.json` sha256 `b9963e77…` |
+| 실행 하네스 | #52242 의 checkout `3f11de239676` 에 [`harness-pass-time.patch`](harness-pass-time.patch) 를 얹고 `pass_lines.json` 을 다시 고정한 사본. 사본의 `pass_lines.json` sha256 `b9963e77…`. main 과 다른 파일은 아래 「하네스 사본」에 있다 |
 | E-synth | requests sha256 `8aa43fde…`, 판정 사례 seed 20261113 |
 | E-real | manifest sha256 `8d87e880…`. 기록은 git 이 무시하는 snapshot 에만 있다 |
 | 모델 | Tinker `thinkingmachines/Inkling-2-Small:peft:262144` |
@@ -58,7 +61,10 @@
 - 아래 표의 분모는 요청마다 센 수다. 두 실행을 더한 76, 34, 204 는 그 두 배다.
 - 요청의 마지막 후보 시각은 90건 모두 2026-11-07(UTC)이다.
   쓸 날이 남은 기억의 쓸 시각은 그 시각보다 1.1~5.5일 뒤다. 쓸 날이 지난 기억은 0.7~9.4일 앞이다.
-- 쓸 날이 요청과 같은 날인 기억은 없다. 생성기가 그런 기억을 만들지 않는다(`synth_rows.scheduled_holds`).
+- 쓸 날이 요청과 같은 날인 기억은 없다. 생성기가 같은 날의 기억을 만들지 않는다(`synth_rows.scheduled_holds`).
+- 쓸 날이 다음 날인 기억도 없다. 쓸 날이 남은 기억의 쓸 날은 달력으로 2일, 3일, 5일 뒤뿐이다.
+  요청마다 세면 18번, 15번, 5번이고 서로 다른 기억으로는 5개, 5개, 2개다.
+  생성기는 후보를 11-07 에 두고 쓸 날을 11-09 부터 잡는다(`synth_generate.py` 의 `USE_AHEAD_START`).
 
 ## 초안
 
@@ -105,33 +111,44 @@ candidate is deferred. Do not add other fields or put the wrapper inside memory.
 | F | T + S | `b4d5efb11ff8…` | 48,054 |
 | E | P + T + S + R | `9a950110fc4c…` | 47,915 |
 
-P 초안의 실행과 판정은 이 실험보다 먼저 한 것이다. 공개된 기록이 없어서 실행과 판정 폴더의 sha256 을 여기에 같이 적는다.
+P 초안의 실행과 판정은 이 실험보다 먼저 한 것이다. 공개된 기록이 없어서 실행과 판정 폴더의 sha256 을 이 측정 기록에 같이 적는다.
 
 ## 하네스 사본
 
 MASC 는 Librarian 프롬프트에 시각을 그리지 않는다. 고정 하네스도 그렇다. 그래서 사본에서 쟀다.
 
-- 사본은 main 의 두 파일에 [`harness-pass-time.patch`](harness-pass-time.patch) 를 얹으면 나온다. 얹은 결과가 사본과 바이트가 같다.
+- 사본은 #52242 의 checkout `3f11de239676` 에서 만들었다. 두 파일에 [`harness-pass-time.patch`](harness-pass-time.patch) 를 얹고 `pass_lines.json` 을 다시 고정했다.
+- 사본이 main `fae3b542ef5b` 과 다른 파일은 다섯이다.
+
+| 파일 | 다른 까닭 | 채점에 쓰이나 |
+| --- | --- | --- |
+| `admission_template.py` | patch 가 문자열 변수 `pass_time` 을 더했다. 템플릿에 없어도 된다 | 쓰인다 |
+| `admission_request.py` | patch 가 `pass_time` 을 요청의 마지막 후보 시각으로 그린다 | 쓰인다 |
+| `pass_lines.json` | 위 두 파일의 sha256 만 다르다 | 쓰인다 |
+| `prompt_lines.json` | #52242 가 기준선을 고정한 파일이다 | E-synth 실행과 채점은 읽지 않는다 |
+| `synth_generate.py` | 그 checkout 의 E-synth 생성기다 | 이 실험은 요청을 새로 만들지 않았다 |
+
+- main 의 두 파일에 patch 를 얹으면 사본의 두 파일과 바이트가 같다(`git apply --unidiff-zero harness-pass-time.patch`).
   patch 의 주석에 나오는 `time_harness_patch.py` 는 사본을 만든 스크립트다. git 이 무시하는 `artifacts/tinker/librarian/code/` 에만 있다.
-- `admission_template.py`: 글자 변수 `pass_time` 을 받는다. 템플릿에 없어도 된다.
-- `admission_request.py`: `pass_time` 을 요청의 마지막 후보 시각의 RFC 3339 글자로 그린다.
+- `pass_lines.json` 이 고정하는 채점 파일은 24개다. 그중 22개가 사본과 main 에서 바이트가 같다. 나머지 둘이 patch 의 두 파일이다.
+  `prompt_lines.json` 과 `synth_generate.py` 는 그 24개에 들지 않는다.
+- `pass_time` 은 요청의 마지막 후보 시각을 RFC 3339 문자열로 적은 값이다.
   블라인드 판정자가 case 의 `now` 로 받는 값과 같다(`e_synth_audit.request_time`). E-synth 90건 모두 같았다.
 - T 의 문장은 호스트가 패스를 시작한 시각이라고 말한다. 잰 값은 마지막 후보 시각이다. 라이브에서 패스는 그보다 늦게 시작한다.
-- 채점 파일 22개는 원본과 바이트가 같다. 원본 `pass_lines.json` 의 고정값으로 대조했다.
-- 고정 템플릿으로 그린 프롬프트 140건(E-synth 90, E-real 50)이 사본과 원본에서 바이트가 같다.
+- 고정 템플릿으로 그린 프롬프트 140건(E-synth 90, E-real 50)은 patch 를 얹기 전과 뒤의 하네스에서 바이트가 같다.
 
 ## 실행 전에 적은 기준
 
 기준은 git 이 무시하는 `artifacts/tinker/librarian/exp-time/PLAN.md` 에 적었다.
-커밋이 없어서 적은 때를 저장소로 확인할 수 없다. 아래 시각은 그 디스크의 파일 시각과 호출 기록이다(KST).
+커밋이 없어서 적은 때를 저장소로 확인할 수 없다. 아래 시각은 그 디스크의 파일 시각과 호출을 보낸 시각이다(KST).
 
 | 시각 | 일 |
 | --- | --- |
-| 01:58:01 | A 와 B 의 첫 호출 |
-| 02:04:04 | A 의 마지막 호출 |
-| 02:07:17 | B 의 마지막 호출 |
+| 01:58:01 | A 와 B 의 첫 호출을 보냄 |
+| 02:04:04 | A 의 마지막 호출을 보냄. 마지막 답은 02:04:16 에 왔다 |
+| 02:07:17 | B 의 마지막 호출을 보냄. 마지막 답은 02:08:06 에 왔다 |
 | 02:07:22 | 기준 파일의 마지막 저장 |
-| 02:07:25 | F 와 E 의 첫 호출 |
+| 02:07:25 | F 와 E 의 첫 호출을 보냄 |
 
 처음 적은 기준은 이렇다.
 
@@ -141,10 +158,11 @@ MASC 는 Librarian 프롬프트에 시각을 그리지 않는다. 고정 하네�
 4. 고른 초안은 E-synth 를 한 번 더 돌리고 지우기와 흡수를 블라인드 판정자에게 맡긴다.
 5. 선별은 한 번 실행이다. 2σ 를 넘는 차이만 달라졌다고 적는다.
 
-A 의 결과를 본 뒤에 두 번 고쳤다. 둘 다 F 와 E 를 돌리기 전이다.
+A 의 결과를 본 뒤에 기준을 두 번 바꿨다. 둘 다 F 와 E 를 돌리기 전이다.
+F 와 E 는 B 의 마지막 답이 오기 전에 띄웠다. E 를 넘기는 조건은 B 의 값을 쓰지만 B 가 끝나기 전에 적었다.
 
-- 고침 1: S 의 글을 바꿨다. 옛 글은 「한 시점의 상태가 아닙니다」까지만 말했다. 새 글은 「그날 한 번 쓰고 끝나는 내용이어도 쓸 날까지 기억에 남습니다」를 말한다.
-- 고침 2: P + T + R 초안 대신 F(T + S)를 돌렸다. S 의 효과는 F 대 A 로 읽는다. R 의 효과는 E 대 B 로 읽고, 그 비교에는 S 가 섞여 있다.
+- 바꾼 것 1: S 의 글을 바꿨다. 옛 글은 「한 시점의 상태가 아닙니다」까지만 말했다. 새 글은 「그날 한 번 쓰고 끝나는 내용이어도 쓸 날까지 기억에 남습니다」를 말한다.
+- 바꾼 것 2: P + T + R 초안 대신 F(T + S)를 돌렸다. S 의 효과는 F 대 A 로 읽는다. R 의 효과는 E 대 B 로 읽고, 그 비교에는 S 가 섞여 있다.
   - F 를 다음 단계로 넘기는 조건: 쓸 날이 남은 기억을 남긴 비율이 A 보다 2σ 넘게 높다. 다른 값은 기준선 두 실행 합보다 2.5σ 넘게 낮지 않다.
   - E 를 넘기는 조건: 그 비율이 B 보다 2σ 넘게 높다. 낡은 상태 지움과 합침은 P 두 실행 합보다 2.5σ 넘게 낮지 않다.
 
@@ -154,13 +172,14 @@ A 의 결과를 본 뒤에 두 번 고쳤다. 둘 다 F 와 E 를 돌리기 전�
 - E 도 조건을 채웠다. 판정자에게는 F 만 맡겼다.
 - E-real 은 F 만 한 번 돌렸다. 실행에 준 지출 한도에 닿아 50건 중 47건에서 멈췄다.
 
-## run 파일
+## 실행 파일
 
-run 은 git 이 무시하는 `artifacts/tinker/librarian/` 아래에 있다. 모델 답은 `calls.jsonl` 에만 있다.
-Tinker 실행은 요청마다 같은 프롬프트를 두 번 보낸다. 그래서 E-synth 의 `calls.jsonl` 줄 수는 `rows.jsonl` 의 두 배다.
+실행 폴더는 git 이 무시하는 `artifacts/tinker/librarian/` 아래에 있다. 모델 답은 `calls.jsonl` 에만 있다.
+Tinker 실행은 요청마다 호출을 두 번 보낸다. 첫 호출은 프롬프트 캐시를 데우고 둘째 호출을 잰다(`eval_admission.py`).
+그래서 E-synth 의 `calls.jsonl` 줄 수는 `rows.jsonl` 의 두 배다.
 지출은 공개 단가로 스크립트가 센 값이다.
 
-| run | 초안 | 템플릿 | `rows.jsonl` 줄 | sha256 | `calls.jsonl` 줄 | sha256 | 지출 USD |
+| 실행 폴더 | 초안 | 템플릿 | `rows.jsonl` 줄 | sha256 | `calls.jsonl` 줄 | sha256 | 지출 USD |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `rescore-a1/base-inkling-synth-1` | 기준선 | `575a6849…` | 90 | `263bbff6a5e2…` | 180 | `273463901a46…` | 0.6892 |
 | `rescore-a1/base-inkling-synth-2` | 기준선 | `575a6849…` | 90 | `a801321a9862…` | 180 | `3f99f95d4a36…` | 0.5048 |
@@ -177,6 +196,7 @@ Tinker 실행은 요청마다 같은 프롬프트를 두 번 보낸다. 그래�
 
 - 이 실험이 새로 돌린 실행은 `xt` 로 시작하는 일곱 개다. 지출 합은 $6.199 다.
 - GLM 기준선 실행은 #52242 가 고정한 실행이다. GLM 초안 실행은 없다.
+- P 의 두 실행은 실행에 준 지출 한도에 닿아 한 번씩 멈췄다. 같은 폴더에서 이어 돌려 90건을 다 물었다.
 
 판정은 블라인드다. 이 실험에서는 F 의 두 실행만 판정했다. 기준선과 P 의 판정은 먼저 한 것이다.
 
@@ -192,6 +212,8 @@ Tinker 실행은 요청마다 같은 프롬프트를 두 번 보낸다. 그래�
 | `a1p-inkling-drops-2` | 17 | 17 | `3e8994c962f0…` | 라벨 밖 지우기 28개 모두 `keep` |
 | `a1p-inkling-merges-1` | 279 | 279 | `ca401523e8ec…` | `mergeable` 128, `loses_knowledge` 151 |
 | `a1p-inkling-merges-2` | 247 | 247 | `2fd2a2a0deb0…` | `mergeable` 113, `loses_knowledge` 133, `different_context` 1 |
+| `a1p-inkling-additions-1` | 118 | 118 | `c651a923e631…` | `no_addition` 83, `adds_unsupported` 35 |
+| `a1p-inkling-additions-2` | 86 | 86 | `a03fbfa3445a…` | `no_addition` 50, `adds_unsupported` 35, `uncertain` 1 |
 | `xtF-inkling-drops-1` | 3 | 3 | `3a1c17b9c2da…` | 라벨 밖 지우기 3개 모두 `keep` |
 | `xtF-inkling-drops-2` | 2 | 2 | `5a028b8d2b56…` | 라벨 밖 지우기 2개 모두 `keep` |
 | `xtF-inkling-merges-1` | 32 | 32 | `daf8fbbf272b…` | `mergeable` 18, `loses_knowledge` 14 |
@@ -202,13 +224,15 @@ Tinker 실행은 요청마다 같은 프롬프트를 두 번 보낸다. 그래�
 - 지우기 case 는 요청 하나다. 판정자는 그 요청의 기억마다 `keep`, `drop`, `restates`, `superseded` 중 하나를 고른다. `keep` 은 그 기억을 남겨야 한다는 뜻이다.
 - 라벨 밖 지우기는 라벨이 지우라고도 합치라고도 하지 않은 기억을 답이 지운 것이다(`dropped_off_label`).
   판정자의 판정으로 채점에서 빠진 기억은 여섯 실행 모두 없다.
-- 판정자는 case 의 `now` 와 쓸 날 규칙을 같이 받는다. 규칙은 「쓸 날이 `now` 의 날짜보다 뒤면 `keep`, 앞이면 `drop`」이다(`e_synth_audit.py` 의 판정 글).
-  라벨과 같은 규칙이다. 그래서 쓸 날이 남은 기억에 대한 `keep` 은 라벨과 따로 선 확인이 아니다.
+- 판정자는 case 의 `now` 와 쓸 날 규칙을 같이 받는다. 규칙은 「쓸 날이 `now` 의 날짜보다 뒤면 `keep`, 앞이면 `drop`」이다(`e_synth_audit.py` 의 `JUDGE`).
+  라벨과 같은 규칙이다. 그래서 쓸 날이 남은 기억에 대한 `keep` 은 라벨과 독립된 확인이 아니다.
 - 흡수 case 는 흡수된 기억과 합친 claim 의 짝이다. 같은 짝을 낸 흡수는 case 하나가 대신한다.
   F 1 은 case 32개가 흡수 36개를, F 2 는 case 97개가 흡수 98개를 대신한다.
   F 2 의 나머지 흡수 2개는 심은 낡은 상태를 흡수한 것이다. case 가 없고 `mergeable` 이 아닌 것으로 센다.
 - 덧붙임 case 는 합친 claim 하나다. 판정자는 claim 이 재료에 없는 말을 더했는지 본다.
-  `adds_unsupported` 는 기준선이 49건 중 13건, F 가 56건 중 12건이다. 폴더마다 `merge_additions.py count` 로 셌다.
+  `adds_unsupported` 는 기준선이 49건 중 13건, F 가 56건 중 12건, P 가 204건 중 70건이다. 폴더마다 `merge_additions.py count` 로 셌다.
+  지지 후보가 그 claim 을 `incorporated` 로 가리킨 합침만 세면 기준선 8/30, F 7/27, P 8/37 이다.
+  지지 후보가 없는 합침은 기준선 5/19, F 5/29, P 62/167 이다. 지지 후보가 없는 합침은 RFC-0517 §7.1 로만 받는 합침이다.
 
 ## 명령
 
@@ -257,12 +281,16 @@ uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
 
 | 열 | 뜻 |
 | --- | --- |
-| 쓸 날이 남은 기억을 남김 | 쓸 날이 남은 기억 중 답이 지우지 않은 수. 무효 답은 기억을 바꾸지 않으므로 남긴 것으로 센다 |
+| 쓸 날이 남은 기억을 남김 | 쓸 날이 남은 기억 중 답이 `dropped` 로 지우지 않은 수. 무효 답은 기억을 바꾸지 않으므로 남긴 것으로 센다. 답이 새 claim 에 흡수한 기억도 남긴 것으로 센다(`memory_scores.score_synth`) |
 | 쓸 날이 지난 기억을 지움 | 쓸 날이 지난 기억 중 답이 지운 수. 이 기억은 낡은 상태 102개에 든다 |
 | 낡은 상태 지움 | 심은 낡은 상태 중 답이 지운 수(`stale_drop_recall`) |
 | 합침 | 라벨이 바란 합침 중 답이 한 수. 판정자의 판정은 넣지 않았다 |
 | 남는 기억 정확도 | 후보마다, 답을 적용한 뒤 남는 기억이 라벨과 같은 상태인 수(`memory_state_accuracy`) |
 | 지우기 정밀도 | 답이 지운 기억 중 라벨이 지우라고 한 수(`drop_precision`) |
+
+쓸 날이 남은 기억을 흡수한 답은 E 2 에 하나 있다. `eval-qa-coordinator-06` 의 요청 하나에서 기억 2개를 흡수했다.
+E 2 의 38/38 과 E 의 75/76 은 흡수된 2개를 남긴 것으로 센 값이다. 2개를 빼면 36/38 과 73/76 이다. 다른 열 실행에는 흡수된 기억이 없다.
+E 의 흡수는 판정하지 않았다. `rows.jsonl` 의 `absorbs` 에서 셌다.
 
 차이를 이항 σ 로 나눈 값이다. 같은 초안의 실행은 더해서 견줬다. 고정 비교의 폭은 나빠짐 2.5σ, 좋아짐 2σ 다.
 
@@ -330,6 +358,7 @@ uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
 | F − A | `drop_precision` | 102/108 | 40/57 | +0.243 | +0.098 ~ +0.393 | 0.1% | 23 |
 | A − 기준선 | 쓸 날이 남은 기억을 남김 | 23/38 | 52/76 | −0.079 | −0.250 ~ +0.048 | 85.1% | 9 |
 | A − 기준선 | `drop_precision` | 40/57 | 82/111 | −0.037 | −0.141 ~ +0.056 | 79.5% | 23 |
+| A − 기준선 | 쓸 날이 지난 기억을 지움 | 2/17 | 5/34 | −0.029 | −0.357 ~ +0.273 | 51.4% | 7 |
 | P − 기준선 | 쓸 날이 남은 기억을 남김 | 26/76 | 52/76 | −0.342 | −0.488 ~ −0.200 | 99.9% | 9 |
 | P − 기준선 | `absorb_precision` | 242/529 | 56/89 | −0.172 | −0.320 ~ +0.028 | 95.4% | 28 |
 | P − 기준선 | `stale_drop_recall` | 119/204 | 52/204 | +0.328 | +0.237 ~ +0.406 | 0.0% | 22 |
@@ -340,7 +369,10 @@ uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
 | B − P | 쓸 날이 남은 기억을 남김 | 16/38 | 26/76 | +0.079 | −0.071 ~ +0.200 | 10.5% | 9 |
 
 - 쓸 날이 남은 기억이 든 묶음은 9개뿐이다. 묶음이 이만큼 적으면 백분위 구간은 실제보다 좁게 나오는 쪽으로 틀린다.
-- 쓸 날이 지난 기억을 지움은 10,000번 중 5번이 그 기억을 하나도 뽑지 못해 빠졌다.
+- 0 을 겨우 벗어난 구간이 둘 있다. `drop_precision` 의 F − 기준선(+0.006 ~ +0.388)과 쓸 날이 남은 기억의 E − 기준선(+0.038 ~ +0.490)이다.
+  구간이 좁게 나오는 쪽으로 틀리므로 두 구간만으로 차이가 있다고 말하기는 어렵다.
+- 「기회가 있는 묶음」은 그 값의 분모가 0 이 아닌 묶음의 수다. 차이가 난 묶음의 수가 아니다.
+- 쓸 날이 지난 기억을 지움은 10,000번 중 5번이 쓸 날이 지난 기억을 하나도 뽑지 못해 빠졌다.
 
 ### 쓸 날이 남은 기억, 기억 묶음별 (`time_cluster.py`)
 
@@ -378,9 +410,14 @@ uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
 | B | 2 | 1 | 1 | 15/37 |
 | E | 11 | 6 | 6 | 69/70 |
 
-- 기준선이 지운 24개 중 21개가 묶음 셋에서 나왔다: `eval-qa-coordinator-06` 10개, `eval-support-triage-02` 9개, `eval-support-triage-08` 2개. 서로 다른 기억으로는 5개다.
-- F 가 지운 3개는 `eval-docs-gardener-00` 과 `eval-docs-gardener-06` 의 기억 둘이다. 기준선은 그 둘을 14번 중 한 번도 지우지 않았다.
-- A 는 같은 두 묶음에서 7번 중 3번 지웠다.
+- 기준선이 지운 24번 중 19번이 묶음 둘에서 나왔다. `eval-qa-coordinator-06` 이 10번, `eval-support-triage-02` 가 9번이다. 서로 다른 기억으로는 4개다.
+  나머지 5번은 `eval-support-triage-08` 2번, `eval-infra-cost-watch-14` 2번, `eval-support-triage-17` 1번이다.
+- F 가 지운 3번은 `eval-docs-gardener-00` 과 `eval-docs-gardener-06` 의 기억 둘에서 나왔다. Inkling 기준선은 두 기억을 14번 중 한 번도 지우지 않았다.
+- 다른 실행은 같은 두 기억을 지웠다. A 는 7번 중 3번, B 는 7번 중 3번, P 는 14번 중 5번, E 는 14번 중 1번, GLM 기준선은 7번 중 2번이다.
+- 묶음 31개는 Keeper 넷에서 나왔다. `docs-gardener` 6개, `infra-cost-watch` 10개, `qa-coordinator` 7개, `support-triage` 8개다.
+  쓸 날이 남은 기억이 든 묶음은 Keeper 마다 2, 2, 1, 4개다.
+  F 가 지운 3번은 `docs-gardener` 의 묶음에서만 나왔다. Inkling 기준선이 지운 24번은 나머지 세 Keeper 의 묶음에서만 나왔다.
+  다시 뽑기는 묶음끼리 독립이라고 본다. 같은 Keeper 의 묶음이 같이 움직이면 구간은 더 넓어야 한다.
 
 ### 흡수와 큰 답 (`time_screen.py`, `time_cluster.py`)
 
@@ -400,6 +437,16 @@ uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
 
 - 「3개 이상 묶은 claim 의 흡수」는 판정 case 가 있는 흡수만 센다. 심은 낡은 상태를 흡수한 것은 case 가 없어 빠진다.
 - P 가 든 초안은 큰 답이 실행마다 8~11개다. 유효 답의 9~13% 다. 큰 답의 흡수는 그 실행의 흡수의 59~71% 다.
+- 둘째와 셋째 열은 흡수 case 폴더의 `key.jsonl` 과 `judge/cases.jsonl` 을 읽는다. 판정은 읽지 않는다.
+  위 판정 표에 없는 폴더는 아래와 같다. A, B, E 의 폴더는 case 만 만들고 판정하지 않았다.
+
+| 흡수 case 폴더 | case | `key.jsonl` sha256 | `judge/cases.jsonl` sha256 |
+| --- | --- | --- | --- |
+| `rescore-a1/opus/base-glm-1-merges` | 48 | `36908324cfd5…` | `c6d86496a329…` |
+| `xtA-inkling-merges-1` | 38 | `3cd5e3a63c57…` | `a3db2a51530f…` |
+| `xtB-inkling-merges-1` | 319 | `6a9072edcb4b…` | `ab9e7f215c06…` |
+| `xtE-inkling-merges-1` | 302 | `534d6bc669ea…` | `9165bf6541f5…` |
+| `xtE-inkling-merges-2` | 290 | `2f18eaf1bc87…` | `f9c1d5b5878a…` |
 
 판정을 받은 초안의 흡수를 큰 답과 나머지로 나눈 `absorb_precision` 이다.
 
@@ -412,7 +459,8 @@ uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
 - F 의 흡수 136개 중 65개가 기억 묶음 하나(`eval-infra-cost-watch-11`, 요청 3건)에서 나왔다. 그중 63개가 F 2 의 답 하나다.
   그 답의 요청은 기억 90개와 후보 1개를 실었다. 답은 기억 63개를 새 claim 23개로 묶었다. 판정자는 63개 중 19개를 `mergeable` 로 봤다.
 - 그 묶음의 흡수는 F 가 19/65 다. 그 묶음을 빼면 F 는 45/71 이다. 기준선은 그 묶음에서 하나도 흡수하지 않았다.
-- 같은 요청에서 다른 실행이 흡수한 수: 기준선 0·0, A 0, F 1 은 0, P 5·15, B 2, E 45·8.
+- 같은 요청에서 다른 실행이 흡수한 수: 기준선 0·0, GLM 기준선 1, A 0, F 1 은 0, P 5·15, B 2, E 45·8.
+  큰 수(63, 45)는 S 가 든 실행에서만 나왔다. 요청 하나의 수다.
 - B 와 E 의 흡수는 판정하지 않았다.
 
 ### E-real (F 한 번)
@@ -451,10 +499,10 @@ uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
 
 무효 답은 900건 중 37건이다. 답마다 종류는 하나였다. GLM 기준선 실행은 8건이다(`no_answer` 7, `memory_claim_absent` 1).
 
-`memory_claim_absent` 는 판정이 가리킨 `memory_claim` 이 최종 기억의 claim 과 글자까지 같지 않을 때 난다.
-26건에서 그런 판정은 27개다(`time_absent.py`).
+`memory_claim_absent` 는 후보 판정이 가리킨 `memory_claim` 이 최종 기억의 claim 과 글자까지 같지 않을 때 난다.
+26건에서 최종 기억에 없는 글을 가리킨 후보 판정은 27개다(`time_absent.py`).
 
-| 판정 | 가리킨 글 | 수 |
+| 후보 판정 | 가리킨 글 | 수 |
 | --- | --- | --- |
 | `already_represented` | 답이 남긴 입력 기억과 가깝다 | 18 |
 | `already_represented` | 가까운 최종 claim 이 없다 | 3 |
@@ -475,4 +523,4 @@ uv run --python 3.12 --with openai==3.46.0 $E/time_absent.py --scripts $H \
 - S 는 E-synth 가 심은 기억과 같은 종류를 말한다. 쓸 날을 다르게 적은 기억에 듣는지는 재지 않았다.
 - 판정 시각 없이 S 의 첫 문장만 넣은 초안은 재지 않았다.
 - `pass_time` 은 하네스 사본이 그린 값이다. MASC 는 아직 그 변수를 그리지 않는다.
-- run 폴더와 판정 폴더는 한 대의 디스크에만 있다.
+- 실행 폴더와 판정 폴더는 한 대의 디스크에만 있다.

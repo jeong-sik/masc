@@ -75,8 +75,10 @@ export interface KeepersModel {
   /** The latest assignment of each Keeper the person gave a Runtime, by its name. */
   readonly assigning: ReadonlySignal<ReadonlyMap<string, Assign>>
   /** Reads the Keepers of the person of `session`. A call for the person the
-      panel already shows only keeps their newest session; a call for another
-      person starts over, and an answer for the first changes nothing. */
+      panel already shows only keeps their newest session. A call after
+      `stop` for the person the panel was for reads the Keepers again and
+      keeps what they did. A call for another person starts over, and an
+      answer for the first changes nothing. */
   readonly load: (session: Session) => Promise<void>
   /** Reads again after a failure. Any other time it does nothing. */
   readonly retry: () => Promise<void>
@@ -91,6 +93,12 @@ export interface KeepersModel {
   readonly assign: (name: string, runtimeId: string) => Promise<void>
   /** The conversation of one of the Keepers, which another person shown closes. */
   readonly talking: TalkModel
+  /** Forgets the list once the console shows no one signed in: the account
+      changed, or the browser leaves. A reading still under way then changes
+      nothing, and the next `load` reads the Keepers again, for the same
+      person too. The make, the assignments and the conversation stay the
+      person's until another person is shown. */
+  readonly stop: () => void
 }
 
 /** How many tries of the same thing came to nothing in a row before this one. */
@@ -115,13 +123,17 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
   const making = signal<Make>({ kind: 'idle' })
   const assigning = signal<ReadonlyMap<string, Assign>>(new Map())
   let session: Session | null = null
+  /** The person whose make, assignments and conversation the panel holds. `stop` keeps them. */
+  let person: string | null = null
   /** The reading whose answer the panel takes. */
   let latest = 0
   /** Each person shown makes a new round; an answer writes only while its round is the latest. */
   let round = 0
   let left = false
-  /** How many answers of a make or an assignment the list took. A reading
-      that began before one of them may not hold it, and is read again. */
+  /** How many answers of a make or an assignment came, whether or not the
+      list was on the page to take them, and how many asked for the list to
+      be read again. A reading that began before one of them may not hold
+      it, and is read again. */
   let puts = 0
 
   /** The browser leaves, with whatever runs left behind. */
@@ -160,19 +172,21 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     view.value = { kind: 'failed', forUser, failure: { problem: found.problem, attempts: attemptsBefore + 1 }, next: 'idle' }
   }
 
-  /** Reads the list again while it shows one, which stays on the page meanwhile. */
+  /** Reads the list again while it shows one, which stays on the page
+      meanwhile. A reading under way reads again once it ends. */
   const refresh = (): Promise<void> => {
+    puts += 1
     const now = view.peek()
     return now.kind === 'read' ? read(now.forUser, 0) : Promise.resolve()
   }
 
   /** Puts the Keeper an answer named into the list the panel shows. */
   const put = (keeper: Keeper): void => {
+    puts += 1
     const now = view.peek()
     if (now.kind !== 'read') return
     const listed = now.keepers.some((one) => one.id === keeper.id)
     const keepers = listed ? now.keepers.map((one) => (one.id === keeper.id ? keeper : one)) : [...now.keepers, keeper]
-    puts += 1
     view.value = { ...now, keepers }
   }
 
@@ -265,11 +279,14 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     const now = view.peek()
     session = next
     if (now.kind !== 'waiting' && now.forUser === next.userId) return Promise.resolve()
-    round += 1
-    left = false
-    making.value = { kind: 'idle' }
-    assigning.value = new Map()
-    talking.reset()
+    if (next.userId !== person) {
+      person = next.userId
+      round += 1
+      left = false
+      making.value = { kind: 'idle' }
+      assigning.value = new Map()
+      talking.reset()
+    }
     view.value = { kind: 'reading', forUser: next.userId, slow: false }
     return read(next.userId, 0)
   }
@@ -281,14 +298,23 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     return read(now.forUser, now.failure.attempts)
   }
 
-  return { view, making, assigning, load, retry, make: makeKeeper, assign: assignKeeper, talking }
+  const stop = (): void => {
+    if (view.peek().kind === 'waiting') return
+    latest += 1
+    view.value = { kind: 'waiting' }
+  }
+
+  return { view, making, assigning, load, retry, make: makeKeeper, assign: assignKeeper, talking, stop }
 }
 
-/** Reads the Keepers of each person the console comes to show signed in.
-    The returned function stops following. */
+/** Reads the Keepers of each person the console comes to show signed in,
+    and stops whenever it shows anything else, so the person shown again
+    after another account was in the browser is read again. The returned
+    function stops following. */
 export function followKeepers(frame: ReadonlySignal<View>, keepers: KeepersModel): () => void {
   return effect(() => {
     const now = frame.value
     if (now.kind === 'signed_in') void keepers.load(now.session)
+    else keepers.stop()
   })
 }

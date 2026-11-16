@@ -63,3 +63,8 @@ val metric_total : string -> float
     the lock. *)
 val snapshot : unit -> metric list
 
+(** Copy only the series whose name equals the argument, under the same store
+    lock as {!snapshot}. Returned records are detached, including their values;
+    an unknown name returns an empty list. Row order is unspecified. *)
+val snapshot_named : string -> metric list
+

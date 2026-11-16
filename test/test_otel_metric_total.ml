@@ -122,6 +122,44 @@ let test_a_name_never_written_totals_zero () =
   check near "no series" 0.0 (Store.metric_total "masc_test_metric_total_never_written")
 ;;
 
+let test_named_snapshot_preserves_series_and_detaches_values () =
+  let name = "masc_test_named_snapshot" in
+  let labels = [ "action", "a"; "stage", "prepare" ] in
+  Store.register_counter ~name ~help:"original help" ~labels ();
+  Store.inc_counter name ~labels ~delta:2.0 ();
+  Store.set_gauge name ~labels:[ "lane", "gauge" ] 3.5;
+  ignore (Store.declare_counter name : string);
+  for i = 1 to 1000 do
+    Store.inc_counter (name ^ "_other") ~labels:[ "row", string_of_int i ] ()
+  done;
+  let ordered = List.sort (fun (a : Store.metric) b -> compare a.labels b.labels) in
+  let expected =
+    Store.snapshot ()
+    |> List.filter (fun (metric : Store.metric) -> String.equal metric.name name)
+    |> ordered
+  in
+  let captured = Store.snapshot_named name |> ordered in
+  check int "all three series, including zero" 3 (List.length captured);
+  check bool "name, help, type, value and original label order agree" true
+    (expected = captured);
+  let counter = List.find (fun (metric : Store.metric) -> metric.labels = labels) captured in
+  Store.inc_counter name ~labels ~delta:4.0 ();
+  check near "an update does not change a captured value" 2.0 counter.value;
+  counter.value <- 999.0;
+  check (option near) "a renderer cannot change the store" (Some 6.0)
+    (Store.get_metric_value name ~labels ());
+  let current =
+    Store.snapshot_named name
+    |> List.find (fun (metric : Store.metric) -> metric.labels = labels)
+  in
+  check near "the next snapshot observes the update" 6.0 current.value
+;;
+
+let test_named_snapshot_missing_name_is_empty () =
+  check int "an unknown name has no series" 0
+    (List.length (Store.snapshot_named "masc_test_named_snapshot_missing"))
+;;
+
 let () =
   run
     "otel_metric_total"
@@ -146,6 +184,14 @@ let () =
             "a name never written totals zero"
             `Quick
             test_a_name_never_written_totals_zero
+        ; test_case
+            "named snapshots preserve series and detach values"
+            `Quick
+            test_named_snapshot_preserves_series_and_detaches_values
+        ; test_case
+            "a missing name has an empty snapshot"
+            `Quick
+            test_named_snapshot_missing_name_is_empty
         ] )
     ]
 ;;

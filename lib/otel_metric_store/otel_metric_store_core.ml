@@ -38,6 +38,7 @@ module Series : sig
   val write : string -> make:(unit -> metric) -> change:(metric -> unit) -> unit
 
   val fold : (metric -> 'acc -> 'acc) -> 'acc -> 'acc
+  val fold_named : string -> (metric -> 'acc -> 'acc) -> 'acc -> 'acc
   val total : string -> float
 end = struct
   let by_key : (string, metric) Hashtbl.t = Hashtbl.create 64
@@ -63,6 +64,12 @@ end = struct
   ;;
 
   let fold f init = Hashtbl.fold (fun _ series acc -> f series acc) by_key init
+
+  let fold_named name f init =
+    match Hashtbl.find_opt by_name name with
+    | Some named -> List.fold_left (fun acc series -> f series acc) init named
+    | None -> init
+  ;;
 
   let total name =
     match Hashtbl.find_opt by_name name with
@@ -227,18 +234,22 @@ let metric_value_or_zero name ?(labels = []) () =
 
 let metric_total name = with_lock (fun () -> Series.total name)
 
+let snapshot_row (m : metric) acc =
+  { name = m.name
+  ; help = m.help
+  ; metric_type = m.metric_type
+  ; value = m.value
+  ; labels = m.labels
+  }
+  :: acc
+;;
+
 let snapshot () =
-  with_lock (fun () ->
-    Series.fold
-      (fun (m : metric) acc ->
-         { name = m.name
-         ; help = m.help
-         ; metric_type = m.metric_type
-         ; value = m.value
-         ; labels = m.labels
-         }
-         :: acc)
-      [])
+  with_lock (fun () -> Series.fold snapshot_row [])
+;;
+
+let snapshot_named name =
+  with_lock (fun () -> Series.fold_named name snapshot_row [])
 ;;
 
 let observe_histogram name ?(labels = []) value =

@@ -734,6 +734,63 @@ let test_body_changed_between_records_is_refused () =
       check int "changed body cannot borrow the first record's verdict" 1 (List.length report.P.refusals)))
     [false;true]
 
+(* A record a check reads again from the bytes it was decoded from is the
+   record decoded then, so the check can tell a parent that reads the same by
+   identity. The record and its body are still read each time: the same bytes
+   written again give the same record, a changed record is read anew, and a
+   record whose body is gone is refused. *)
+let test_a_record_read_again_from_the_same_bytes_is_the_same_record () = with_lane_store (fun base root ->
+  let scope="scope" in
+  let path id = grouped root Lane_addon_store.tool_request_owners_directory ~group:scope ~id in
+  let request_digest=Lane_addon_store.digest owner_request_bytes in
+  let body=Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest) in
+  Fs_compat.mkdir_p (Filename.dirname body);
+  write body owner_request_bytes;
+  let owner ~request_id = tool_request_owner ~scope ~request_id ~schema:"lane.addon.tool-request-owner.v4" ~request_digest in
+  let parent = owner ~request_id:"parent" in
+  let summarized = match parent with
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+        key, if String.equal key "summary" then `String "another summary" else value) fields)
+    | json -> json in
+  put (path "parent") parent;
+  put (path "checked") (owner ~request_id:"checked");
+  let reads = ref None in
+  let validate () ~read ~read_scope:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_ ~read_exact:_
+      (record : Lane_addon_tool_request_owner.retained) =
+    if String.equal record.request_id "checked" then begin
+      let read_parent () = match read ~scope ~request_id:"parent" with
+        | Ok (Some parent) -> Ok parent
+        | Ok None -> Error "the parent is absent"
+        | Error detail -> Error detail in
+      let first = read_parent () in
+      let again = read_parent () in
+      put (path "parent") parent;
+      let rewritten = read_parent () in
+      put (path "parent") summarized;
+      let changed = read_parent () in
+      Sys.remove body;
+      let without_body = read_parent () in
+      write body owner_request_bytes;
+      reads := Some (first, again, rewritten, changed, without_body)
+    end;
+    P.Payload_valid in
+  match P.scan ~validate_tool_request:validate P.Store.Tool_request_owners ~base_path:base with
+  | Error detail -> fail detail
+  | Ok report ->
+    check int "both records are checked" 2 report.P.rows;
+    check int "and none is refused" 0 (List.length report.P.refusals);
+    let read = function Ok value -> value | Error detail -> fail detail in
+    match !reads with
+    | None -> fail "the check never read the parent"
+    | Some (first, again, rewritten, changed, without_body) ->
+      let first = read first in
+      check bool "a second read of unchanged bytes is the same record" true (read again == first);
+      check bool "the same bytes written again are the same record" true (read rewritten == first);
+      let changed = read changed in
+      check bool "a changed record is read anew" true
+        (changed != first && Yojson.Safe.equal changed.summary (`String "another summary"));
+      check bool "a record whose body is gone is refused" true (Result.is_error without_body))
+
 (* The deploy gate itself: a refused Lane Add-on record stops validate-stores. *)
 let test_lane_addon_record_refuses_deploy exe () = with_lane_store (fun base root ->
   let path = grouped root Lane_addon_store.actions_directory ~group:"instance" ~id:"string-executor" in
@@ -1266,6 +1323,8 @@ let () =
       test_case "tool request owners" `Quick test_lane_addon_tool_request_owners;
       test_case "body reuse observes current bytes" `Quick test_body_reuse_observes_current_bytes;
       test_case "a body changed between records is refused" `Quick test_body_changed_between_records_is_refused;
+      test_case "a record read again from the same bytes is the same record" `Quick
+        test_a_record_read_again_from_the_same_bytes_is_the_same_record;
       test_case "a record settled while it is checked is absent" `Quick
         test_a_record_settled_while_it_is_checked_is_absent;
       test_case "a refused record stops validate-stores" `Quick

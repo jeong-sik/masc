@@ -764,17 +764,33 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
             Reader.request reader ~scope ~request_digest
             |> Result.map_error (fun detail ->
               Filename.concat root (Lane_addon_store.tool_request_body_path ~scope ~request_digest) ^ ": " ^ detail) in
+          (* A record read again from the bytes it was decoded from is the
+             record decoded then, while its body also reads the bytes it was
+             verified from. A check can then tell a parent that reads the same
+             by identity, and does not decode it again for each record that
+             names it. Both files are still read each time. *)
+          let decoded=Hashtbl.create 16 in
           let read_name ~scope ~name =
             let group=Lane_addon_store.digest scope in
             let path=Filename.concat root (Filename.concat Lane_addon_store.tool_request_owners_directory
               (Filename.concat group name)) in
             let* bytes=read_text path in
             match bytes with
-            | None -> Ok None
+            | None -> Hashtbl.remove decoded path; Ok None
             | Some bytes ->
+              let same_body (record:Lane_addon_tool_request_owner.retained) =
+                match Reader.request reader ~scope:record.scope ~request_digest:record.request_digest with
+                | Ok request -> request == record.request
+                | Error _ -> false in
               let result =
-                let* json=try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
-                let* record=Reader.read reader ~directory_name:group ~file_name:name json in
+                let* record=match Hashtbl.find_opt decoded path with
+                  | Some (seen,record) when String.equal seen bytes && same_body record -> Ok record
+                  | Some _ | None ->
+                    Hashtbl.remove decoded path;
+                    let* json=try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
+                    let+ record=Reader.read reader ~directory_name:group ~file_name:name json in
+                    Hashtbl.replace decoded path (bytes,record);
+                    record in
                 if record.scope=scope then Ok (Some record)
                 else Error "original parent belongs to another scope" in
               Result.map_error (fun detail -> path ^ ": " ^ detail) result

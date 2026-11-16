@@ -632,6 +632,19 @@ let check_compaction_receipt_survives_later_request_usage ~compact_item () =
     let sent = if index = 0 then Yojson.Safe.to_string (`List rows) else turn_text rows in
     check bool "compacted session receives recall again despite later request usage"
       recall_expected (String_util.contains_substring sent "RECALL_AFTER_COMPACTION");
+    (* The same compaction that forgets recall preserves the standing
+       developer instructions. Exercise the actual adapter wire, not just
+       the held-receipt filter: #48737 must not resend the whole System on
+       the following turn, or on the turn after its recall is settled. *)
+    if index >= 2 then (
+      let developer_messages =
+        rows
+        |> List.filter (fun row -> member "method" row = `String "thread/inject_items")
+        |> List.concat_map (fun row -> row |> member "params" |> member "items" |> items)
+        |> List.filter (fun item -> member "role" item = `String "developer")
+      in
+      check int "compaction preserves standing System without a new injection"
+        0 (List.length developer_messages));
     if index > 0 then
       check int "compaction does not require a new thread" 1
         (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows)))

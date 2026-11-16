@@ -5191,7 +5191,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     let source=Login.source view in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/models" source))
   | Prepare model ->
-    view.phase<-Login.Loading;
+    Login.preparing view model;
     let body=`Assoc ["source",Login.source view;"model",`String model.id;"load",`Bool false] in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/context" body))
   | Save models ->
@@ -15993,7 +15993,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
        | Some _, Login.Finished {activation = Login.Activating; _} -> ()
        | Some _, Login.Finished {saved; activation = (Login.Activation_failed _ | Login.Active _); _} ->
          launch_account_login_action state ~mailbox view (Login.Refresh_saved saved)
-       | (Some _, (Login.Loading | (Login.Logging | (Login.Models | (Login.Removing | (Login.Providers _ | (Login.Documented_context _ | Login.Removal _)))))))
+       | Some _, (Login.Loading | Login.Logging | Login.Models | Login.Preparing_context _
+           | Login.Removing | Login.Providers _ | Login.Documented_context _ | Login.Removal _)
        | (None, _) -> launch_account_login_action state ~mailbox view Login.Inventory)
   | Masc_tui_command.Open_settings ->
       Masc_tui_message_input.clear state.msg_input;
@@ -27130,12 +27131,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (* The request's own error is the reason: the server's sentence for a
               refusal ("HTTP 502: Runtime ... did not pass ... verification"),
               the transport's for a dropped connection. A fixed sentence here
-              hid which runtime a save's verification refused. *)
-           | Login.Save _, Error detail -> Error detail
+              hid which runtime a save's verification refused. A context
+              failure returns to the same model instead of refreshing the list. *)
+           | (Login.Save _ | Login.Prepare _), Error detail -> Error detail
            | (Login.Inventory, Error detail) | (Login.Select_existing _, Error detail)
            | (Login.Start _, Error detail) | (Login.Cancel, Error detail)
            | (Login.Recover, Error detail) | (Login.Discover, Error detail)
-           | (Login.Prepare _, Error detail) | (Login.Close, Error detail)
+           | (Login.Close, Error detail)
            | (Login.Nothing, Error detail) | (Login.Preview_removal _, Error detail)
            | (Login.Remove _, Error detail) | (Login.Refresh_removed _, Error detail)
            | (Login.Refresh_list _, Error detail) -> Error (detail ^ " · r로 다시 확인하세요.")
@@ -27178,10 +27180,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Error message -> view.input_pending<-false; view.draft<-"";
             (match action with
              | Login.Save _ -> Login.save_failed view message
+             | Login.Prepare _ -> Login.prepare_failed view message
              | Login.Input _ -> view.notice<-message
              | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
              | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _
-             | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Preview_removal _
+             | Login.Select_existing _ | Login.Start _ | Login.Preview_removal _
              | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
        | Some _ | None -> ())
   | Account_msg (Account_login_removal (view, generation, provider, login_store, outcome)) ->

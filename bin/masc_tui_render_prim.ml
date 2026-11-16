@@ -2792,6 +2792,41 @@ let box_wrapped_field buf cols ~head ~style body =
         (fun segment -> box_line buf cols (hang ^ style ^ segment ^ Ansi.reset))
         rest
 
+(* The wide pane beside a list, with nothing open in it. The narrow pane fits
+   the list's reason to one row of its own width, which keeps the label and
+   cuts the cause; here it wraps at this pane's width, kept to [height] with
+   its head and its tail, and the page note under it says what the list
+   holds. The rows the reading leaves are blank, so the pane keeps its height
+   whatever it says. *)
+let draw_list_idle buf cols ~ko ~empty ~height idle =
+  let drawn = ref 0 in
+  let reason ~keep detail =
+    let budget = max (min height 1) (height - keep) in
+    if budget > 0 then begin
+      let detail = Keeper_chat.terminal_safe_text ~preserve_newlines:true detail in
+      box_lines_styled_bounded buf cols ~style:(Theme.bad ()) ~budget detail;
+      drawn := !drawn + min budget (box_lines_row_count ~cols detail)
+    end
+  in
+  let note text =
+    if !drawn < height then begin
+      box_line_styled buf cols ~style:Ansi.dim text;
+      incr drawn
+    end
+  in
+  (match idle with
+   | Masc_tui_list_idle.List_failed detail ->
+       reason ~keep:1 detail;
+       note (page_failed_note ~ko)
+   | List_unread -> note (page_unread_note ~ko)
+   | List_loading -> note (page_reading_note ~ko)
+   | List_empty detail ->
+       Option.iter (reason ~keep:1) detail;
+       note ("  " ^ empty)
+   | Rows_ready detail -> Option.iter (reason ~keep:0) detail);
+  for _ = !drawn + 1 to height do
+    box_empty buf cols
+  done
 
 let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
   box_wrapped_field buf cols

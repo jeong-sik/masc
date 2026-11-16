@@ -16,6 +16,10 @@ val set_read : Eio.Executor_pool.t -> unit
     {!Pool_lane.Read} fiber there and everything else to the pool of {!set}.
     Without a read pool, reads use the pool of {!set}. *)
 
+val set_librarian : Eio.Executor_pool.t -> unit
+(** Install the Librarian pool (#52389). Work from a {!Pool_lane.Librarian}
+    fiber goes there; without it, to the pool of {!set}. *)
+
 val in_worker_context : unit -> bool
 (** Whether the current domain is executing a closure submitted through this
     shared pool reference or through {!Domain_pool}. Nested shared-pool
@@ -38,6 +42,9 @@ module For_testing : sig
 
   val with_read_pool : Eio.Executor_pool.t -> (unit -> 'a) -> 'a
   (** {!with_pool} for the read pool. *)
+
+  val with_librarian_pool : Eio.Executor_pool.t -> (unit -> 'a) -> 'a
+  (** {!with_pool} for the Librarian pool. *)
 end
 
 type strict_submit_error =

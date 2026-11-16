@@ -11,18 +11,28 @@ let read_pool : Domain_pool.t option Atomic.t = Atomic.make None
 
 let set_read p = Atomic.set read_pool (Some p)
 
+(* #52389: see [Executor_pool_ref.selected]. *)
+let librarian_pool : Domain_pool.t option Atomic.t = Atomic.make None
+
+let set_librarian p = Atomic.set librarian_pool (Some p)
+
+let lane_or_shared lane_pool =
+  match Atomic.get lane_pool with
+  | Some _ as own -> own
+  | None -> Atomic.get pool
+;;
+
 let selected () =
   match Pool_lane.current () with
   | Pool_lane.Background -> Atomic.get pool
-  | Pool_lane.Read ->
-    (match Atomic.get read_pool with
-     | Some _ as read -> read
-     | None -> Atomic.get pool)
+  | Pool_lane.Read -> lane_or_shared read_pool
+  | Pool_lane.Librarian -> lane_or_shared librarian_pool
 ;;
 
 let clear_for_tests () =
   Atomic.set pool None;
-  Atomic.set read_pool None
+  Atomic.set read_pool None;
+  Atomic.set librarian_pool None
 ;;
 
 let domain_count_opt () =
@@ -33,6 +43,12 @@ let domain_count_opt () =
 
 let read_domain_count_opt () =
   match Atomic.get read_pool with
+  | None -> None
+  | Some p -> Some (Domain_pool.domain_count p)
+;;
+
+let librarian_domain_count_opt () =
+  match Atomic.get librarian_pool with
   | None -> None
   | Some p -> Some (Domain_pool.domain_count p)
 ;;

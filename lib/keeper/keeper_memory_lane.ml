@@ -373,7 +373,8 @@ let submit_librarian ~keeper_name entry sw f =
              ~sw
              drain.owner_lane
              ~run:(fun lane_sw ->
-               run_librarian_drain ~keeper_name entry drain lane_sw f)
+               Pool_lane.with_librarian (fun () ->
+                 run_librarian_drain ~keeper_name entry drain lane_sw f))
              ~cleanup:(fun _outcome ->
                cleanup_librarian_drain
                  ~keeper_name

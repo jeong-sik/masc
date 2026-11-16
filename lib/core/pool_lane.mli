@@ -1,5 +1,5 @@
-(** Who the current fiber is working for: an HTTP read being answered, or
-    anything else. RFC-0204 §3.1.
+(** Who the current fiber is working for: an HTTP read being answered, a
+    Librarian unit, or anything else. RFC-0204 §3.1.
 
     The mark lives in an Eio fiber key, so fibers forked while a read is being
     answered inherit it. A read ends when {!with_read} returns or raises;
@@ -19,18 +19,28 @@
 
 type lane =
   | Read
+  | Librarian
+      (** Memory upkeep for one Keeper. Its pool work goes to a pool of its
+          own, so a Librarian slowed by an outside service it depends on
+          spends only that pool, not the workers Keeper turns and requests
+          use. *)
   | Background
 
 val current : unit -> lane
-(** [Read] inside {!with_read} until it returns; [Background] otherwise and
-    outside Eio. *)
+(** [Read] inside {!with_read} until it returns; [Librarian] inside
+    {!with_librarian}; [Background] otherwise and outside Eio. A read wins
+    over a Librarian mark. *)
 
 val with_read : (unit -> 'a) -> 'a
 (** Run [f] as one HTTP read. Outside Eio this runs [f] unmarked. *)
 
 val with_background : (unit -> 'a) -> 'a
-(** Run [f] as background work even inside a read, for work no request waits
-    on: a refresh started after the request was already answered. Fibers
-    forked inside inherit it. *)
+(** Run [f] as background work even inside a read or a Librarian unit, for
+    work no request waits on: a refresh started after the request was already
+    answered. Fibers forked inside inherit it. *)
+
+val with_librarian : (unit -> 'a) -> 'a
+(** Run [f] as one Librarian unit. Fibers forked inside inherit it. Outside
+    Eio this runs [f] unmarked. *)
 
 val to_string : lane -> string

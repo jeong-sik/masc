@@ -141,9 +141,15 @@ let scheduler_json () =
     | Some count -> `Int count
     | None -> `Null
   in
+  let librarian_pool_domains =
+    match Domain_pool_ref.librarian_domain_count_opt () with
+    | Some count -> `Int count
+    | None -> `Null
+  in
   `Assoc
     (("pool_domains", pool_domains)
      :: ("read_pool_domains", read_pool_domains)
+     :: ("librarian_pool_domains", librarian_pool_domains)
      :: ("pool_wait", Pool_wait.to_json ())
      :: ("serving_lag", `Assoc (Scheduler_lag.to_fields Scheduler_lag.serving))
      :: Scheduler_lag.to_fields Scheduler_lag.global)

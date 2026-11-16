@@ -339,6 +339,7 @@ let serve_owned ~stays_with_connection ~admitted classification reqd =
       let handle () = serve_admitted ~admitted classification relayed in
       match lane with
       | Pool_lane.Read -> Pool_lane.with_read handle
+      | Pool_lane.Librarian -> Pool_lane.with_librarian handle
       | Pool_lane.Background -> handle ())
 ;;
 

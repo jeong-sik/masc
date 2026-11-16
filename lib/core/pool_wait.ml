@@ -86,10 +86,12 @@ let lane_histograms () =
   }
 ;;
 let read = lane_histograms ()
+let librarian = lane_histograms ()
 let background = lane_histograms ()
 
 let of_lane = function
   | Pool_lane.Read -> read
+  | Pool_lane.Librarian -> librarian
   | Pool_lane.Background -> background
 ;;
 
@@ -214,6 +216,7 @@ let to_json () =
   `Assoc
     [ "bucket_upper_ms", `List (List.map (fun ms -> `Float ms) bucket_upper_ms)
     ; Pool_lane.to_string Pool_lane.Read, lane_json read
+    ; Pool_lane.to_string Pool_lane.Librarian, lane_json librarian
     ; Pool_lane.to_string Pool_lane.Background, lane_json background
     ]
 ;;

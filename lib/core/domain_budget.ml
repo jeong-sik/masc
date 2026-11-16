@@ -3,6 +3,7 @@ type plan =
   ; fixed : int
   ; shared_pool : int
   ; read_pool : int
+  ; librarian_pool : int
   ; execution_codec : int
   }
 
@@ -12,6 +13,7 @@ type error =
       ; limit : int
       ; fixed : int
       ; read_pool : int
+      ; librarian_pool : int
       ; execution_codec : int
       }
 
@@ -33,9 +35,17 @@ let read_pool_domains = 2
    workers before the codec runtime or the read pool takes a second one. *)
 let shared_pool_kept_first = 2
 
+(* Librarian units keep one core whatever the host (#52389). A Librarian
+   slowed by an outside service it depends on, as TypeSafe refusing with 402
+   on 2026-11-16, then waits in its own pool instead of holding shared
+   workers. Its work is memory upkeep a turn does not wait on, so it gets
+   the one core every pool keeps and no more. *)
+let librarian_pool_domains = 1
+
 let plan ~recommended ~fixed ~override =
   let limit = Int.max 1 (recommended - 1) in
-  let room = limit - fixed in
+  let librarian_pool = librarian_pool_domains in
+  let room = limit - fixed - librarian_pool in
   (* Short of room, the codec runtime gives up its second domain first, then
      the read pool, then the shared pool its second; each pool keeps one
      worker even on a host too small for the limit, so the largest shared
@@ -53,21 +63,31 @@ let plan ~recommended ~fixed ~override =
   let largest_shared_pool = Int.max 1 (room - execution_codec - read_pool) in
   match override with
   | Some override when override > largest_shared_pool ->
-    Error (Override_exceeds_limit { override; limit; fixed; read_pool; execution_codec })
-  | Some shared_pool -> Ok { limit; fixed; shared_pool; read_pool; execution_codec }
+    Error
+      (Override_exceeds_limit
+         { override; limit; fixed; read_pool; librarian_pool; execution_codec })
+  | Some shared_pool ->
+    Ok { limit; fixed; shared_pool; read_pool; librarian_pool; execution_codec }
   | None ->
-    Ok { limit; fixed; shared_pool = largest_shared_pool; read_pool; execution_codec }
+    Ok
+      { limit
+      ; fixed
+      ; shared_pool = largest_shared_pool
+      ; read_pool
+      ; librarian_pool
+      ; execution_codec
+      }
 
-let total t = t.fixed + t.shared_pool + t.read_pool + t.execution_codec
+let total t = t.fixed + t.shared_pool + t.read_pool + t.librarian_pool + t.execution_codec
 let within_limit t = total t <= t.limit
 
 let error_to_string = function
-  | Override_exceeds_limit { override; limit; fixed; read_pool; execution_codec } ->
+  | Override_exceeds_limit { override; limit; fixed; read_pool; librarian_pool; execution_codec } ->
     Printf.sprintf
-      "MASC_EXECUTOR_DOMAIN_COUNT=%d with %d fixed, %d read pool and %d execution codec \
-       domains makes %d, above the limit of %d (Domain.recommended_domain_count () - 1); \
-       set it to %d or less"
-      override fixed read_pool execution_codec
-      (override + fixed + read_pool + execution_codec)
+      "MASC_EXECUTOR_DOMAIN_COUNT=%d with %d fixed, %d read pool, %d Librarian pool and \
+       %d execution codec domains makes %d, above the limit of %d \
+       (Domain.recommended_domain_count () - 1); set it to %d or less"
+      override fixed read_pool librarian_pool execution_codec
+      (override + fixed + read_pool + librarian_pool + execution_codec)
       limit
-      (Int.max 1 (limit - fixed - read_pool - execution_codec))
+      (Int.max 1 (limit - fixed - read_pool - librarian_pool - execution_codec))

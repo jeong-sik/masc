@@ -254,14 +254,19 @@ let check_exact_output_registry ?config_root () =
   | Ok () -> ()
 ;;
 
-let install_domain_pool_references ?read domain_pool =
+let install_domain_pool_references ?read ?librarian domain_pool =
   Domain_pool_ref.set domain_pool;
   Executor_pool_ref.set (Domain_pool.executor_pool domain_pool);
   Option.iter
     (fun read ->
       Domain_pool_ref.set_read read;
       Executor_pool_ref.set_read (Domain_pool.executor_pool read))
-    read
+    read;
+  Option.iter
+    (fun librarian ->
+      Domain_pool_ref.set_librarian librarian;
+      Executor_pool_ref.set_librarian (Domain_pool.executor_pool librarian))
+    librarian
 ;;
 
 let publish_exact_output_registry_from_file ~config_path =
@@ -1144,7 +1149,10 @@ let initialize_owner_state_blocking
   let read_pool =
     Domain_pool.create ~sw ~domain_count:budget.Domain_budget.read_pool domain_mgr
   in
-  install_domain_pool_references ~read:read_pool domain_pool;
+  let librarian_pool =
+    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.librarian_pool domain_mgr
+  in
+  install_domain_pool_references ~read:read_pool ~librarian:librarian_pool domain_pool;
   Server_pending_confirm_expiry.start ~sw ~clock ~mono_clock ~state;
   Systhread_host.start ();
   (match Runtime_agent_execution_runtime.initialize ~sw:runtime_sw ~domain_mgr
@@ -1164,9 +1172,9 @@ let initialize_owner_state_blocking
    | Error error -> raise (Keeper_owner_registry.Install_failed error));
   let log = if Domain_budget.within_limit budget then Log.Server.info else Log.Server.warn in
   log
-    "Executor domains: %d shared pool + %d read pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"
+    "Executor domains: %d shared pool + %d read pool + %d Librarian pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"
     budget.Domain_budget.shared_pool budget.Domain_budget.read_pool
-    budget.Domain_budget.execution_codec
+    budget.Domain_budget.librarian_pool budget.Domain_budget.execution_codec
     budget.Domain_budget.fixed (Domain_budget.total budget) budget.Domain_budget.limit
     (Domain.recommended_domain_count ());
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }

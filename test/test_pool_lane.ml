@@ -68,6 +68,29 @@ let test_with_background_unmarks_inside_a_read () =
       check lane "the read after with_background returns" Pool_lane.Read after))
 ;;
 
+(* #52389. A Librarian unit and the fibers it forks are [Librarian]; a read
+   inside it is [Read]; [with_background] inside it is [Background]. *)
+let test_librarian_marks_its_unit () =
+  check int "outside Eio" 1 (Pool_lane.with_librarian (fun () -> 1));
+  check lane "outside Eio stays unmarked" Pool_lane.Background
+    (Pool_lane.with_librarian Pool_lane.current);
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      let forked = ref Pool_lane.Background in
+      let inside, read, background =
+        Pool_lane.with_librarian (fun () ->
+          Eio.Fiber.fork ~sw (fun () -> forked := Pool_lane.current ());
+          ( Pool_lane.current ()
+          , Pool_lane.with_read Pool_lane.current
+          , Pool_lane.with_background Pool_lane.current ))
+      in
+      check lane "inside with_librarian" Pool_lane.Librarian inside;
+      check lane "a read inside a Librarian unit" Pool_lane.Read read;
+      check lane "with_background inside a Librarian unit" Pool_lane.Background background;
+      check lane "a fiber forked by the unit" Pool_lane.Librarian !forked;
+      check lane "after with_librarian returns" Pool_lane.Background (Pool_lane.current ())))
+;;
+
 let with_pool f =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -335,6 +358,7 @@ let () =
             test_read_ends_for_every_fiber
         ; test_case "a pool job does not inherit the lane" `Quick
             test_pool_job_does_not_inherit_the_lane
+        ; test_case "a Librarian unit marks its fibers" `Quick test_librarian_marks_its_unit
         ; test_case "with_background unmarks inside a read" `Quick
             test_with_background_unmarks_inside_a_read
         ] )

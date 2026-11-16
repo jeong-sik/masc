@@ -13,8 +13,12 @@ val set_read : Domain_pool.t -> unit
     {!Pool_lane.Read} fiber there and everything else to the pool of {!set};
     without a read pool, reads use the pool of {!set}. *)
 
+val set_librarian : Domain_pool.t -> unit
+(** Install the Librarian pool (#52389). The submits below send work from a
+    {!Pool_lane.Librarian} fiber there; without it, to the pool of {!set}. *)
+
 val clear_for_tests : unit -> unit
-(** Remove both pools. *)
+(** Remove every pool. *)
 
 val domain_count_opt : unit -> int option
 (** Current worker-domain count, when the pool has been installed. *)
@@ -22,9 +26,12 @@ val domain_count_opt : unit -> int option
 val read_domain_count_opt : unit -> int option
 (** Worker-domain count of the read pool, when installed. *)
 
+val librarian_domain_count_opt : unit -> int option
+(** Worker-domain count of the Librarian pool, when installed. *)
+
 val submit_io_or_inline : name:string -> (unit -> 'a) -> 'a
-(** Submit IO-bound work to the pool {!set_read} or {!set} selects for the
-    caller's {!Pool_lane}. [name] names the work in {!Pool_wait} and the
+(** Submit IO-bound work to the pool {!set_read}, {!set_librarian} or {!set}
+    selects for the caller's {!Pool_lane}. [name] names the work in {!Pool_wait} and the
     trace; callers pass [__FUNCTION__] (RFC-0474 L4c). Runs inline when the
     process has not installed the pool yet, when the caller is already on the
     shared executor worker, or when the caller is not on an Eio fiber (raw

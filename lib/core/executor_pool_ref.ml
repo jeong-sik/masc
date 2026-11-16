@@ -45,15 +45,25 @@ let read_pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
 
 let set_read p = Atomic.set read_pool (Some p)
 
-(* The pool a submission from this fiber goes to. Without a read pool a read
+(* Librarian units get their own pool, so a Librarian slowed by an outside
+   service spends its own worker, not the shared ones (#52389). *)
+let librarian_pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
+
+let set_librarian p = Atomic.set librarian_pool (Some p)
+
+let lane_or_shared lane_pool =
+  match Atomic.get lane_pool with
+  | Some _ as own -> own
+  | None -> Atomic.get pool
+;;
+
+(* The pool a submission from this fiber goes to. Without its own pool a lane
    uses the shared pool, so tests and one-pool tools keep a single pool. *)
 let selected () =
   match Pool_lane.current () with
   | Pool_lane.Background -> Atomic.get pool
-  | Pool_lane.Read ->
-    (match Atomic.get read_pool with
-     | Some _ as read -> read
-     | None -> Atomic.get pool)
+  | Pool_lane.Read -> lane_or_shared read_pool
+  | Pool_lane.Librarian -> lane_or_shared librarian_pool
 ;;
 
 module For_testing = struct
@@ -67,6 +77,10 @@ module For_testing = struct
   let with_read_pool p f =
     let previous = Atomic.exchange read_pool (Some p) in
     Fun.protect ~finally:(fun () -> Atomic.set read_pool previous) f
+
+  let with_librarian_pool p f =
+    let previous = Atomic.exchange librarian_pool (Some p) in
+    Fun.protect ~finally:(fun () -> Atomic.set librarian_pool previous) f
   ;;
 end
 

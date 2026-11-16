@@ -104,6 +104,67 @@ let test_without_a_read_pool_reads_use_the_shared_pool () =
         check bool "the read still ran on a pool domain" true (where <> caller))))
 ;;
 
+(* #52389. The Librarian pool's only worker is held, as a Librarian slowed by
+   an outside service holds it, and work of every other lane still starts on
+   the shared pool. Librarian work goes to its own pool. *)
+let test_other_work_starts_while_the_librarian_pool_is_full () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let dm = Eio.Stdenv.domain_mgr env in
+      let shared = Domain_pool.create ~sw ~domain_count:1 dm in
+      let librarian = Domain_pool.create ~sw ~domain_count:1 dm in
+      let shared_domain = worker_domain shared in
+      let librarian_domain = worker_domain librarian in
+      Domain_pool_ref.set shared;
+      Domain_pool_ref.set_librarian librarian;
+      Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+        Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool shared) (fun () ->
+          Executor_pool_ref.For_testing.with_librarian_pool (Domain_pool.executor_pool librarian)
+            (fun () ->
+              check int "Librarian work runs on the Librarian pool" librarian_domain
+                (Pool_lane.with_librarian (fun () ->
+                   Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ domain));
+              check int "a fiber forked by a Librarian unit keeps its pool" librarian_domain
+                (Pool_lane.with_librarian (fun () ->
+                   Eio.Fiber.fork_promise ~sw (fun () ->
+                     Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ domain)
+                   |> Eio.Promise.await_exn));
+              let release, release_worker = Eio.Promise.create () in
+              let held, hold = Eio.Promise.create () in
+              let blocker =
+                Eio.Fiber.fork_promise ~sw (fun () ->
+                  Pool_lane.with_librarian (fun () ->
+                    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+                      Eio.Promise.resolve hold ();
+                      Eio.Promise.await release)))
+              in
+              Eio.Promise.await held;
+              Fun.protect
+                ~finally:(fun () ->
+                  Eio.Promise.resolve release_worker ();
+                  Eio.Promise.await_exn blocker)
+                (fun () ->
+                  let starts name submit =
+                    match
+                      Eio.Time.with_timeout (Eio.Stdenv.clock env) 10.0 (fun () ->
+                        Ok (submit domain))
+                    with
+                    | Ok where -> check int (name ^ ": ran on the shared pool") shared_domain where
+                    | Error `Timeout -> fail (name ^ ": waited behind the held Librarian worker")
+                  in
+                  starts "Executor_pool_ref.submit_or_inline" (fun f ->
+                    Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ f);
+                  starts "Domain_pool_ref.submit_io_or_inline"
+                    (Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__);
+                  starts "Domain_pool_ref.submit_cpu_or_inline"
+                    (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__);
+                  starts "background work under with_background inside a Librarian unit"
+                    (fun f ->
+                      Pool_lane.with_librarian (fun () ->
+                        Pool_lane.with_background (fun () ->
+                          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ f)))))))))
+;;
+
 let () =
   run "Read pool"
     [ ( "isolation"
@@ -113,6 +174,8 @@ let () =
             test_background_work_and_nested_reads_stay_put
         ; test_case "without a read pool reads use the shared pool" `Quick
             test_without_a_read_pool_reads_use_the_shared_pool
+        ; test_case "other work starts while the Librarian pool is full" `Quick
+            test_other_work_starts_while_the_librarian_pool_is_full
         ] )
     ]
 ;;

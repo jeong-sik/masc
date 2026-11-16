@@ -52,6 +52,7 @@ val capture_attachment : t -> keeper:string -> provider_id:string -> attachment
 val attachment_scope : attachment -> scope
 val catalog_scope : catalog_publication -> scope
 val attachment_current : attachment -> bool
+val same_attachment : attachment -> attachment -> bool
 val begin_catalog : attachment -> catalog_publication option
 (** [None] means the captured attachment is no longer current. A newer catalog
     request supersedes earlier catalog publishers in the same scope. *)

@@ -152,6 +152,53 @@ let hosts_yml ~login ~token =
     ]
 ;;
 
+let save_private_file_atomic path content =
+  Eio_guard.run_in_systhread ~label:"github-app-hosts-yml" (fun () ->
+    let dir = Filename.dirname path in
+    let base = Filename.basename path in
+    let tmp =
+      Filename.concat dir
+        (Printf.sprintf ".%s.%s.tmp" base (Random_id.hex ~bytes:8))
+    in
+    let rec write_all fd ofs remaining =
+      if remaining > 0 then
+        match Unix.write_substring fd content ofs remaining with
+        | 0 -> raise (Unix.Unix_error (Unix.EIO, "write_substring", tmp))
+        | written -> write_all fd (ofs + written) (remaining - written)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_all fd ofs remaining
+    in
+    try
+      let fd =
+        Unix.openfile tmp
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ] 0o600
+      in
+      let fd_open = ref true in
+      let close_fd () =
+        if !fd_open then (
+          fd_open := false;
+          Unix.close fd)
+      in
+      (try
+         Unix.fchmod fd 0o600;
+         write_all fd 0 (String.length content);
+         (try Unix.fsync fd with Unix.Unix_error _ -> ());
+         close_fd ();
+         Unix.rename tmp path;
+         Ok ()
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+         (try close_fd () with Unix.Unix_error _ -> ());
+         (try Unix.unlink tmp with Unix.Unix_error _ -> ());
+         raise exn
+       | exn ->
+         (try close_fd () with Unix.Unix_error _ -> ());
+         (try Unix.unlink tmp with Unix.Unix_error _ -> ());
+         Error (Printexc.to_string exn))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn))
+;;
+
 let write_projection ~config ~keeper_name ~token ~expires_at =
   let cli_dir =
     Keeper_github_identity.config_dir ~config ~keeper_name
@@ -160,7 +207,7 @@ let write_projection ~config ~keeper_name ~token ~expires_at =
   (try Unix.chmod cli_dir 0o700 with Unix.Unix_error _ -> ());
   let login = keeper_name ^ "[bot]" in
   let* () =
-    Fs_compat.save_file_atomic
+    save_private_file_atomic
       (Filename.concat cli_dir "hosts.yml")
       (hosts_yml ~login ~token)
   in
@@ -169,8 +216,6 @@ let write_projection ~config ~keeper_name ~token ~expires_at =
       (Filename.concat (credentials_dir ~config ~keeper_name) token_stamp_name)
       (Printf.sprintf "%.0f\n" expires_at)
   in
-  (try Unix.chmod (Filename.concat cli_dir "hosts.yml") 0o600
-   with Unix.Unix_error _ -> ());
   Ok ()
 ;;
 

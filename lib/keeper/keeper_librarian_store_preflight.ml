@@ -58,9 +58,9 @@ let forest_proof () =
     else
       let+ ()=Parts.validate_payload_forest ~read_scope ~owner in
       Hashtbl.replace proved key ()
-let history_capture ~read ~read_fence ~read_resolution ~owner (record:Owner.retained) =
+let history_capture ~indexes ~read ~read_fence ~read_resolution ~owner (record:Owner.retained) =
   let* capture=History.restore_payload ~owner record in
-  let+ ()=Keeper_librarian_history_resolution_lineage.validate_predecessor_payload ~read ~read_fence ~read_resolution
+  let+ ()=Keeper_librarian_history_resolution_lineage.validate_predecessor_payload ~indexes ~read ~read_fence ~read_resolution
     ~require_confirmed:(Lane_addon_request_progress.events record.progress<>[]) capture in capture
 let floor_capture ~read ~owner record =
   let* capture=Floor.restore ~owner record in
@@ -100,10 +100,11 @@ let validator () =
      execution's own record proves only its journal's first attempt, with
      proofs of its own. *)
   let scope_gates=per_scope fresh_gates and closure_gates=per_scope fresh_gates in
+  let history_indexes=per_scope Keeper_librarian_history_resolution_lineage.payload_indexes in
   let admission_capture ~read ~read_scope ~owner record =
     let* ()=forest ~read_scope ~owner in
     Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
-  let validate ~gates ~read ~read_scope ~read_body ~read_fence ~read_resolution (record:Owner.retained) =
+  let validate ~gates ~indexes ~read ~read_scope ~read_body ~read_fence ~read_resolution (record:Owner.retained) =
   match purpose record.scope with
   | None -> Ok ()
   | Some Admission_execution ->
@@ -124,7 +125,7 @@ let validator () =
     let+ _=Closure.restore ~owner record in ()
   | Some History_execution ->
     let* owner=history_owner record in
-    let* capture=history_capture ~read ~read_fence ~read_resolution ~owner record in
+    let* capture=history_capture ~indexes ~read ~read_fence ~read_resolution ~owner record in
     Keeper_librarian_durable_gate.validate_preparation_payload ~proofs:(Keeper_librarian_durable_gate.proofs ())
       ~read ~read_body ~owner ~capture ~parent:record
   | Some Floor_execution ->
@@ -146,7 +147,7 @@ let validator () =
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(History.scope owner) ~request_id in
     let* capture=parent_capture gates.history_gates ~owner_key:(history_key owner) ~parent
-        (fun () -> history_capture ~read ~read_fence ~read_resolution ~owner parent) in
+        (fun () -> history_capture ~indexes ~read ~read_fence ~read_resolution ~owner parent) in
     Gate.validate_payload ~proofs:gates.history_gates.proofs ~read ~read_body ~owner ~capture ~parent ~record
   | Some Floor_gate ->
     let module Gate=Keeper_librarian_floor_step_gate in
@@ -161,15 +162,16 @@ let validator () =
      owner can publish its closing journal before the next scanned record. *)
   fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution (record:Owner.retained) ->
   let gates=scope_gates record.scope in
+  let indexes=history_indexes record.scope in
   match purpose record.scope with
   | None | Some (History_execution | Floor_execution | History_gate | Floor_gate) ->
-    validate ~gates ~read ~read_scope ~read_body ~read_fence ~read_resolution record
+    validate ~gates ~indexes ~read ~read_scope ~read_body ~read_fence ~read_resolution record
   | Some (Admission_execution | Admission_part | Admission_partition | Admission_gate | Admission_closure) ->
     let* owner=admission_owner record in
     let* view=Closure.project ~owner ~read ~read_scope ~read_body ~read_archive in
     match view.closure with
     | None ->
-      validate ~gates ~read ~read_scope ~read_body ~read_fence ~read_resolution record
+      validate ~gates ~indexes ~read ~read_scope ~read_body ~read_fence ~read_resolution record
     | Some closure ->
       let* ()=if Closure.is_scope record.scope then
         let current=Closure.record closure in
@@ -187,7 +189,7 @@ let validator () =
          the scope as those are. Every record of an owner that has a closure
          is checked here, a gate journal's attempts too. The owner's forest
          proof is kept for both reads ([forest_proof]). *)
-      let check=validate ~gates:(closure_gates record.scope) ~read:view.read ~read_scope:view.read_scope
+      let check=validate ~gates:(closure_gates record.scope) ~indexes ~read:view.read ~read_scope:view.read_scope
           ~read_body:view.read_body ~read_fence ~read_resolution in
       let* ()=check record in
       if Closure.is_scope record.scope then

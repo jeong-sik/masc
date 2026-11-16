@@ -780,7 +780,10 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
              (Printf.sprintf "the next signal reads %s; cause=%s"
                 (match mode with Oldest_turn -> "the oldest completed turn"
                  | Oldest_turn_messages -> "messages of the refused original range")
-                (cause_detail ()))))
+                (cause_detail ()));
+           (* This named refusal selected a smaller source. Queue its next
+              serial unit even when a held Keeper ends no further turn. *)
+           Keeper_librarian_queue_signal.changed ~base_path ~keeper_name))
       | Some observed ->
         remember_input_capacity ~config ~keeper_name observed;
         capacity := Some observed;

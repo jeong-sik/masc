@@ -173,6 +173,11 @@ Each existing Memory lane checks its own unread input before doing any work.
 
 ## Verify recovery on the original input
 
+When the complete continuity walk proves an input-size refusal and selects a
+smaller source, it queues the next unit on the same serial Memory lane. A held
+Keeper does not need another conversation turn to make that descent. A quota
+refusal alone grants no retry; the whole walk's invalid-output veto still holds.
+
 1. Inspect desired/applied declaration revision and the actual worker's lifecycle
    in Lane Add-ons. Verify both exported tools and the two exact-output routes.
 2. Read full health and Keeper memory health. Require the matching installation

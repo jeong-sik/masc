@@ -2197,6 +2197,64 @@ let test_cached_fit_refusal_reaches_its_original_message_floor () =
   check bool "subsequent turns return to whole-turn selection" true
     (Queue.For_testing.read_limit ~config ~keeper_name ~trace_id = Some Queue.Oldest_turn)
 
+let with_signalled_continuity_lane ~config ~pass ~expected_signals check_outcome =
+  let module Lane = Masc.Keeper_memory_lane in
+  let module Signal = Masc.Keeper_librarian_queue_signal in
+  let base_path = config.Masc.Workspace.base_path in
+  Lane.For_testing.reset ();
+  Fun.protect
+    ~finally:(fun () ->
+      Signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+      Lane.For_testing.reset ())
+    (fun () ->
+      let signals = ref [] in
+      Eio.Switch.run (fun sw ->
+        Lane.init ~sw;
+        Signal.install (fun ~base_path:actual_base ~keeper_name:actual_keeper ->
+          signals := (actual_base,actual_keeper) :: !signals;
+          (* Keep unexpected signals for assertions after the drain, without
+             making a failing fixture resubmit itself forever. *)
+          if String.equal actual_base base_path && String.equal actual_keeper keeper_name
+             && List.length !signals <= expected_signals then
+            ignore (Lane.submit ~base_path ~keeper_name pass));
+        ignore (Lane.submit ~base_path ~keeper_name pass);
+        Lane.For_testing.await_idle ~base_path ~keeper_name);
+      List.iter (fun actual ->
+        check (pair string string) "the successor belongs to the same workspace and Keeper"
+          (base_path,keeper_name) actual) (List.rev !signals);
+      check_outcome (List.length !signals))
+
+let test_named_refusal_resumes_without_another_keeper_turn () =
+  let widths = ref [] in
+  narrowing_fixture ~completed_turn_ends:[2;5;8] ~slot_count:1
+    ~answer:(fun _index body ->
+      let width = selected_message_count body in
+      widths := !widths @ [width];
+      if width > fixture_atom_capacity
+      then `Request_entity_too_large, refused "invalid_request_error"
+      else `OK, accepted_answer)
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  with_signalled_continuity_lane ~config ~pass ~expected_signals:3 @@ fun signals ->
+  check (option int) "one initial wake covers every completed atom" (Some 8) (coverage ());
+  check (list int) "each smaller unit follows an actual refusal of its source"
+    [8;2;3;1;1;1;3;1;1;1] !widths;
+  check int "only the three named descents signal another unit" 3 signals;
+  check bool "draining releases the temporary source mode" true
+    (Masc.Keeper_librarian_queue_refresh.For_testing.read_limit
+       ~config ~keeper_name ~trace_id = None)
+
+let test_quota_refusal_does_not_schedule_its_own_retry () =
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index _body -> `Too_many_requests, refused "rate_limit_error")
+  @@ fun ~bodies ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  with_signalled_continuity_lane ~config ~pass ~expected_signals:0 @@ fun signals ->
+  check int "quota retains one attempted original" 1 (List.length !bodies);
+  check int "quota adds no self-triggered retry" 0 signals;
+  check (option int) "a quota refusal publishes no coverage" None (coverage ());
+  check bool "quota cannot install a smaller source mode" true
+    (Masc.Keeper_librarian_queue_refresh.For_testing.read_limit
+       ~config ~keeper_name ~trace_id = None)
+
 let test_refused_width_carries_to_the_next_pass () =
   let requested_widths = ref [] in
   narrowing_fixture ~completed_turn_ends:[2;5;8] ~slot_count:1
@@ -2654,6 +2712,10 @@ let () = run "production continuity pair"
     test_case "pending receipt overrides next turn" `Quick test_recovery_overrides_next_turn;
     test_case "queue keeps capacity and alternative opportunity" `Quick test_queue_reuses_capacity_without_gating_alternatives;
     test_case "a refused batch selects actual turns then the exact message floor" `Quick test_refused_width_carries_to_the_next_pass;
+    test_case "a named input refusal resumes without another Keeper turn" `Quick
+      test_named_refusal_resumes_without_another_keeper_turn;
+    test_case "a quota refusal does not schedule its own retry" `Quick
+      test_quota_refusal_does_not_schedule_its_own_retry;
     test_case "Memory-covered and unread intervals are separate batches" `Quick test_batch_partitions_at_memory_coverage;
     test_case "original recovery keeps the initial completed frontier" `Quick test_recovery_keeps_the_initial_completed_frontier;
     test_case "cached fitting refusal reaches the original message floor" `Quick test_cached_fit_refusal_reaches_its_original_message_floor;

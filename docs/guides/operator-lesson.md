@@ -48,7 +48,7 @@ paths = ["changelog.d/"]
 
 - `language`: 장면을 쓰는 언어다.
 - `since`: Unix 시각(초)이다. 첫 수업은 이 시각부터 만든 기록을 읽는다. 꼭 적는다. 기본값이 없다. `date -u -j -f "%Y-%m-%d %H:%M:%S" "2026-11-12 00:00:00" +%s`(macOS)나 `date -u -d 2026-11-12 +%s`(Linux)로 얻는다. 두 명령 모두 그날 0시(UTC)를 준다. 한국 시각으로는 09:00 이다. macOS 에서 시각을 빼고 날짜만 주면 `date` 가 지금 시각을 채운다.
-- 다음 수업부터는 `records` 의 항목마다, outline 까지 간 지난 수업이 멈춘 자리(cursor)부터 읽는다. 남은 자리가 없는 항목은 다시 `since` 부터 읽는다. 새 `source_id` 로 더한 항목, `since` 부터 읽었는데 기록이 하나도 없던 항목, host 가 남은 자리를 모두 거절한 항목이 그렇다. `github_pulls` 항목은 그 사이에 PR 의 병합 커밋이 아닌 커밋이 있으면, 기록이 없어도 그 커밋을 지나친 자리가 남는다. 자리는 `source_id` 로 찾는다. 뺐다가 다시 더한 항목과 거절된 자리는 [운영자 퀴즈](operator-quiz.md)의 「수업 뒤에 묻기」와 같은 규칙을 따른다.
+- 다음 수업부터는 `records` 의 항목마다, outline 까지 간 지난 수업이 멈춘 자리(cursor)부터 읽는다. 남은 자리가 없는 항목은 다시 `since` 부터 읽는다. 새 `source_id` 로 더한 항목, `since` 부터 읽었는데 기록이 하나도 없던 항목, host 가 남은 자리를 모두 거절한 항목이 그렇다. `github_pulls` 항목은 그 사이에 PR 의 병합 커밋이 아닌 커밋이 있으면 기록이 없어도 그 커밋을 지나친 자리가 남는다. 그 수업이 outline 까지 갔으면 다음 수업은 그 자리부터 읽는다. 자리는 `source_id` 로 찾는다. 뺐다가 다시 더한 항목과 거절된 자리는 [운영자 퀴즈](operator-quiz.md)의 「수업 뒤에 묻기」와 같은 규칙을 따른다.
 - `records`: 읽을 기록이다. 운영자가 쓴 TOML 선언만 기록 권한을 가질 수 있다. 권한의 종류와 규칙은 [운영자 퀴즈](operator-quiz.md)의 "설치 선언"과 같다. wiki 와 `github_pulls` 권한도 같은 모양으로 더한다.
 - `visibilities` 에 적은 공개 범위의 글은 `outline` 과 `scene` 출력에 묶인 slot 의 provider 에게 간다. `internal` 을 넣거나 `direct` 를 적기 전에, 그 provider 가 그런 글을 받아도 되는지 확인한다.
 - `sources` 는 늘 빈 배열이다. 이 패키지는 관측 source 를 읽지 않는다.

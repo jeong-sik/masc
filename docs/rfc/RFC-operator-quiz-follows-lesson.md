@@ -183,8 +183,8 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py` `_start
 
 질문을 낸 세션이 남긴 cursor 를 쓸 수 있는 source 에는 `since` 를 다시 쓰지 않는다. 그때부터 빠지는 기록은 §3.6 이다. 쓸 수 있는 cursor 가 없는 source 는 `since` 부터 읽는다. 세 경우가 그렇다.
 
-- 질문을 낸 세션이 아직 읽지 않은 source. 새로 설치한 퀴즈에서는 모든 source 가 그렇고, 처음 쓰는 `source_id` 로 더한 source 도 그렇다. cursor 는 `source_id` 로 찾는다. 뺐다가 같은 `source_id` 로 다시 더한 source 는 전에 남은 cursor 부터 읽는다. 뺄 때 그 source 를 읽던 세션이 있었으면 host 가 그 읽기를 `not_allowed` 로 거절하고, `last_cursor` 는 그 읽기의 cursor 를 거절된 cursor 로 센다(#52372).
-- 질문을 낸 세션이 읽었는데 host 가 cursor 를 주지 않은 source. host 는 `since` 부터 읽었는데 기록도 없고 지나친 항목도 없으면 cursor 를 주지 않는다(`lib/lane_addon/lane_addon_records.ml` `start_cursor`·`answer_page`). 그 source 는 다음 세션이 다시 `since` 부터 읽는다. `github_pulls` 는 기록이 없어도 cursor 가 남을 수 있다. host 는 병합한 PR 이 없는 commit 을 지나치면 지나친 자리를 cursor 로 준다(`take_page`). 그때는 다음 세션이 그 cursor 부터 읽는다.
+- 질문을 낸 세션이 아직 읽지 않은 source. 새로 설치한 퀴즈에서는 모든 source 가 그렇고, 처음 쓰는 `source_id` 로 더한 source 도 그렇다. cursor 는 `source_id` 로 찾는다. 뺐다가 같은 `source_id` 로 다시 더한 source 는 전에 남은 cursor 부터 읽는다. 뺄 때 읽기를 마치지 않은 세션이 그 source 를 앞 세션의 cursor 부터 읽으려 하면 host 가 `not_allowed` 로 거절하고, `last_cursor` 는 그 cursor 를 거절된 cursor 로 센다(#52372).
+- 질문을 낸 세션이 읽었는데 host 가 cursor 를 주지 않은 source. host 는 `since` 부터 읽었는데 기록도 없고 지나친 항목도 없으면 cursor 를 주지 않는다(`lib/lane_addon/lane_addon_records.ml` `start_cursor`·`answer_page`). 그 source 는 다음 세션이 다시 `since` 부터 읽는다. `github_pulls` 는 기록이 없어도 cursor 가 남을 수 있다. host 는 PR 의 병합 commit 이 아닌 commit(브랜치에 바로 올린 commit, rebase 병합의 앞쪽 commit)을 지나치면 지나친 자리를 cursor 로 준다(`take_page`). 그때는 다음 세션이 그 cursor 부터 읽는다.
 - host 가 남은 cursor 를 모두 거절한 source(`addons/records.py` `last_cursor`).
 
 이미 질문을 낸 퀴즈에 수업을 묶어도 같다. 묶기 전 세션이 cursor 를 남긴 source 는 그 cursor 부터 읽고, `since` 는 위 세 경우의 source 에만 쓰인다. 수업이 그 cursor 보다 앞선 기록을 인용하면 퀴즈는 그 기록을 읽지 않는다.

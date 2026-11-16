@@ -7,10 +7,17 @@ import { useEffect, useState } from 'preact/hooks'
 import { html } from 'htm/preact'
 import { KeeperConversationPanel } from '../components/keeper-shared'
 import { setStoredToken } from '../api/core'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import { shellAuthSummary } from '../store'
 
 const KEEPER = 'sangsu'
 const FIXTURE_STATE_KEY = 'masc.keeper-operation-e2e.v1'
+// The threads the server writes on an operation stream: the acceptance frame
+// is built outside any run and carries the bridge's default thread
+// (Ag_ui.of_custom); a run's frames carry the Keeper's thread
+// (server_keeper_chat_agui_projection.ml).
+const ACCEPTANCE_THREAD_ID = 'default'
+const RUN_THREAD_ID = `keeper:${KEEPER}`
 
 type FixtureOperationState =
   | { kind: 'Queued' }
@@ -171,20 +178,30 @@ function waitingInventory(): Record<string, unknown> {
   }
 }
 
+// Stamps the time in seconds; the caller names the thread. The dashboard
+// rejects a frame without either (validateKeeperChatAgUiEvent in schemas/sse.ts).
+function send(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  frame: Record<string, unknown>,
+): void {
+  const stamped = { ...frame, timestamp: Date.now() / 1000 }
+  controller.enqueue(encoder.encode(`data: ${JSON.stringify(stamped)}\n\n`))
+}
+
 function emit(operationId: string, event: Record<string, unknown>): void {
   const controller = streamControllers.get(operationId)
   if (!controller) throw new Error(`No live stream for ${operationId}`)
-  controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+  send(controller, { ...event, threadId: RUN_THREAD_ID, runId: `run-${operationId}` })
 }
 
-function startHead(): void {
+export function startHead(): void {
   const head = fixtureState.operations
     .filter(operation => operation.state.kind === 'Queued')
     .sort((left, right) => left.sequence - right.sequence)[0]
   if (!head) return
   head.state = { kind: 'Running', startedAt: Date.now() / 1000 }
   persistState()
-  emit(head.operationId, { type: 'RUN_STARTED', runId: `run-${head.operationId}` })
+  emit(head.operationId, { type: 'RUN_STARTED' })
   emit(head.operationId, { type: 'CUSTOM', name: 'KEEPER_STREAM_PING', value: null })
   emit(head.operationId, {
     type: 'CUSTOM',
@@ -207,7 +224,7 @@ function startHead(): void {
   })
 }
 
-function finishRunning(): void {
+export function finishRunning(): void {
   const running = fixtureState.operations.find(operation => operation.state.kind === 'Running')
   if (!running) return
   emit(running.operationId, {
@@ -219,6 +236,7 @@ function finishRunning(): void {
   emit(running.operationId, {
     type: 'TEXT_MESSAGE_START',
     messageId: `message-${running.operationId}`,
+    role: 'assistant',
   })
   emit(running.operationId, {
     type: 'TEXT_MESSAGE_CONTENT',
@@ -236,7 +254,7 @@ function finishRunning(): void {
     outcomeRef: `turn-${running.operationId}`,
   }
   persistState()
-  emit(running.operationId, { type: 'RUN_FINISHED', runId: `run-${running.operationId}` })
+  emit(running.operationId, { type: 'RUN_FINISHED' })
   streamControllers.get(running.operationId)?.close()
   streamControllers.delete(running.operationId)
 }
@@ -257,7 +275,7 @@ function interruptRunningAndReload(): void {
   window.location.reload()
 }
 
-async function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const path = requestPath(input)
   const method = requestMethod(input, init)
   if (path === '/api/v1/dashboard/dev-token' && method === 'GET') {
@@ -268,8 +286,17 @@ async function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     return json(waitingInventory())
   }
   if (path.startsWith(`/api/v1/keepers/${KEEPER}/chat/operations?`) && method === 'GET') {
+    // The dashboard reads pages until one is empty, sending the last sequence
+    // it saw; the server answers rows after it (list_queued in
+    // keeper_chat_operation_store.ml).
+    const cursor = new URLSearchParams(path.slice(path.indexOf('?') + 1)).get('after_sequence')
+    const after = cursor === null ? null : Number(cursor)
+    if (after !== null && !(Number.isSafeInteger(after) && after >= 0)) {
+      return json({ error: 'after_sequence must be a non-negative integer' }, 400)
+    }
     const operations = fixtureState.operations
       .filter(operation => operation.state.kind === 'Queued')
+      .filter(operation => after === null || operation.sequence > after)
       .sort((left, right) => left.sequence - right.sequence)
       .map(operationWire)
     return json({
@@ -303,15 +330,16 @@ async function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         streamControllers.set(operationId, controller)
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+        send(controller, {
           type: 'CUSTOM',
+          threadId: ACCEPTANCE_THREAD_ID,
           name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
           value: {
             operation_id: operationId,
             state: 'Queued',
             queued_count: queueCount(),
           },
-        })}\n\n`))
+        })
       },
       cancel() {
         streamControllers.delete(operationId)
@@ -348,7 +376,10 @@ async function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promi
     persistState()
     return json(operationWire(operation))
   }
-  if (path.includes('/tool-call') || path.includes('/tool-calls')) return json([])
+  if (path.startsWith(`/api/v1/keepers/${KEEPER}/tool-calls?limit=`) && method === 'GET') {
+    // No tool run in this fixture recorded an output.
+    return json({ keeper: KEEPER, count: 0, entries: [] })
+  }
   return json({ error: `Unhandled fixture request: ${method} ${path}` }, 404)
 }
 
@@ -368,6 +399,15 @@ shellAuthSummary.value = {
   can_keeper_msg: true,
   keeper_msg_error: null,
 }
+// Durable operation reads wait for an admitted workspace with an observer
+// instance (dashboardObservationOwnerHasWorkspace). This page runs no
+// execution hydrator, so it admits one the way the component tests do.
+acceptedExecutionWorkspace.value = Object.freeze({
+  epoch: 'queued-stream-fixture',
+  workspaceRoot: '/fixture/queued-stream',
+  connectionGeneration: 0,
+  observerInstanceId: 'queued-stream-fixture-observer',
+})
 
 function OperationFixtureStatus() {
   const [, setVersion] = useState(0)

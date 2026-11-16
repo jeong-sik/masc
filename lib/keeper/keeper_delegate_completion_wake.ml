@@ -8,7 +8,7 @@
    as the Board and Fusion wakes do. Its failure is logged rather than raised
    because the stimulus is already committed and the Keeper reads it on its
    next admitted turn. Eio structural cancellation is re-raised. *)
-let deliver ~base_path ~asked_by ~operation_id ~delegate ~terminal =
+let deliver ?not_before ~base_path ~asked_by ~operation_id ~delegate ~terminal () =
   let completion =
     { Keeper_event_queue.dc_operation_id = operation_id
     ; dc_keeper = delegate
@@ -33,7 +33,20 @@ let deliver ~base_path ~asked_by ~operation_id ~delegate ~terminal =
     }
   in
   match
-    try Keeper_registry_event_queue.enqueue_durable_result ~base_path asked_by stimulus with
+    try
+      match
+        Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
+          ?not_before
+          ~base_path
+          asked_by
+          stimulus
+      with
+      | Keeper_registry_event_queue.Stimulus_enqueued -> Ok `Enqueued
+      | Keeper_registry_event_queue.Stimulus_already_present -> Ok `Already_present
+      | Keeper_registry_event_queue.Stimulus_shutdown_reserved op_id ->
+        Error (Keeper_registry_event_queue.shutdown_reserved_detail op_id)
+      | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
+    with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
   with
@@ -45,7 +58,8 @@ let deliver ~base_path ~asked_by ~operation_id ~delegate ~terminal =
       delegate
       reason;
     Error reason
-  | Ok () ->
+  | Ok `Already_present -> Ok ()
+  | Ok `Enqueued ->
     (* The level comes from the outcome, as it does at the intake side: the
        commit succeeded either way, but a delegation that could not finish is
        not routine for the Keeper still waiting on it. *)

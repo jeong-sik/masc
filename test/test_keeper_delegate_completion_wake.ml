@@ -118,6 +118,7 @@ let deliver_or_fail config ~terminal =
       ~operation_id
       ~delegate
       ~terminal
+      ()
   with
   | Ok () -> ()
   | Error detail -> fail ("deliver failed: " ^ detail)
@@ -247,6 +248,7 @@ let a_cut_reply_names_the_read_path () =
           ~operation_id:op
           ~delegate
           ~terminal:(Event_queue.Delegate_replied reply)
+          ()
       with
       | Ok () -> ()
       | Error detail -> fail ("deliver failed: " ^ detail)
@@ -335,6 +337,7 @@ let the_full_reply_rides_lossless_through_the_projection () =
           ~operation_id:op
           ~delegate
           ~terminal
+          ()
       with
       | Ok () -> ()
       | Error detail -> fail ("deliver failed: " ^ detail)
@@ -428,6 +431,7 @@ let a_padded_short_reply_is_not_cut () =
         ~operation_id
         ~delegate
         ~terminal:(Event_queue.Delegate_replied padded)
+        ()
     with
     | Error detail -> fail ("deliver failed: " ^ detail)
     | Ok () ->
@@ -547,6 +551,69 @@ let only_a_registered_keeper_is_the_sender () =
         (Option.map Masc.Keeper_identity.Keeper_id.to_string decoded.sender_keeper))
 ;;
 
+let cancelled_or_restarted_delegation_wakes_the_asker () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    ensure_keeper config ~keeper_name:delegate;
+    let base_path = config.Workspace.base_path in
+    let store =
+      match Keeper_chat_operation_store.open_or_create
+              ~path:(Filename.concat base_path "delegate-cancel.sqlite3")
+      with
+      | Ok s -> s
+      | Error e -> fail (Keeper_chat_operation_store.error_to_string e)
+    in
+    Fun.protect ~finally:(fun () -> ignore (Keeper_chat_operation_store.close store)) @@ fun () ->
+    let op_id = Keeper_chat_operation.Operation_id.of_string operation_id |> Result.get_ok in
+    let continuation_channel =
+      Keeper_continuation_channel.keeper ~keeper_name:asker |> Result.get_ok
+    in
+    let source =
+      Masc.Keeper_chat_operation_payload.source_to_json
+        ~submitted_by:asker
+        ~thread_id:("keeper:" ^ delegate)
+        ~continuation_channel
+        ~surface:Masc.Surface_ref.Agent
+        ~channel:"agent"
+        ~channel_user_id:""
+        ~channel_user_name:""
+        ~channel_workspace_id:""
+        ~conversation_id:None
+        ~external_message_id:None
+        ~workspace_id:None
+        ~extra_mentions:[]
+        ~sender_keeper:(Ops.sender_keeper_of_submitter ~config ~submitted_by:asker)
+        ~user_row_origin:Masc.Keeper_chat_store.Needs_append
+      |> Result.get_ok
+    in
+    ignore
+      (Keeper_chat_operation_store.submit store ~now:1. ~operation_id:op_id
+         ~source ~input:(`Assoc [ "message", `String "delegated task" ])
+       |> Result.get_ok);
+    ignore (Keeper_chat_operation_store.claim_next store ~now:2. |> Result.get_ok);
+    let failed_op =
+      Keeper_chat_operation_store.fail_running store ~now:3. ~operation_id:op_id
+        ~kind:Keeper_chat_operation.Turn_cancelled
+        ~detail:"operator interrupt"
+        ~outcome_ref:None
+      |> Result.get_ok
+    in
+    ignore
+      (Masc.Keeper_chat_failure_projection.persist ~base_path ~keeper_name:delegate failed_op
+       |> Result.get_ok);
+    ignore
+      (Masc.Keeper_chat_failure_projection.persist ~base_path ~keeper_name:delegate failed_op
+       |> Result.get_ok);
+    match queued_answers ~base_path ~keeper_name:asker with
+    | [ (_, completion) ] ->
+      check string "asker woken for cancelled delegation" operation_id completion.dc_operation_id;
+      (match completion.dc_terminal with
+       | Event_queue.Delegate_failed _ -> ()
+       | Event_queue.Delegate_replied _ | Event_queue.Delegate_no_reply ->
+         fail "expected Delegate_failed on cancelled delegation")
+    | rows -> failf "expected 1 completion wake row, got %d" (List.length rows))
+;;
+
 (* Exercise the actual durable producer and the queue's selection API. These
    are backlog sizes, not live Keeper/model cohorts. A pre-existing Immediate
    source must retain its place while the answer passes earlier ambient work. *)
@@ -637,6 +704,10 @@ let () =
             "only a registered Keeper is the sender"
             `Quick
             only_a_registered_keeper_is_the_sender
+        ; test_case
+            "cancelled or restarted delegation wakes the asker"
+            `Quick
+            cancelled_or_restarted_delegation_wakes_the_asker
         ] )
     ]
 ;;

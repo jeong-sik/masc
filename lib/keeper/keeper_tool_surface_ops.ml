@@ -700,6 +700,26 @@ let sender_keeper_of_submitter ~(config : Workspace.config) ~submitted_by =
   | Some _ | None -> None
 ;;
 
+(* Where the answer goes. A Keeper that delegates or messages another Keeper is
+   the reader of the reply and reads it from its own queue, so it names itself
+   as the destination. Everyone else — an operator or an agent driving the tool
+   over HTTP — keeps the dashboard thread, which is where they are watching. *)
+let delegate_continuation_channel ~(config : Workspace.config) ~submitted_by =
+  if String.equal (String.trim submitted_by) ""
+  then None
+  else if not (Keeper_registry.is_registered ~base_path:config.base_path submitted_by)
+  then None
+  else (
+    match Keeper_continuation_channel.keeper ~keeper_name:submitted_by with
+    | Ok channel -> Some channel
+    | Error message ->
+      invalid_arg
+        (Printf.sprintf
+           "keeper delegate: registered Keeper %S has no continuation channel: %s"
+           submitted_by
+           message))
+;;
+
 let submit_agent_operation
       ?continuation_channel
       ?operation_id_raw
@@ -727,8 +747,17 @@ let submit_agent_operation
     match continuation_channel with
     | Some continuation_channel -> Ok continuation_channel
     | None ->
-      Keeper_continuation_channel.dashboard ~thread_id
-      |> Result.map_error (operation_payload_error ~class_:Tool_result.Policy_rejection "invalid_input")
+      let keeper_channel =
+        if String.equal (String.trim submitted_by) (String.trim keeper_name)
+        then None
+        else delegate_continuation_channel ~config:ctx.config ~submitted_by
+      in
+      (match keeper_channel with
+       | Some keeper_channel -> Ok keeper_channel
+       | None ->
+         Keeper_continuation_channel.dashboard ~thread_id
+         |> Result.map_error
+              (operation_payload_error ~class_:Tool_result.Policy_rejection "invalid_input"))
   in
   let* source =
     Keeper_chat_operation_payload.source_to_json
@@ -842,36 +871,6 @@ let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_res
   with
   | Ok (_keeper_name, acceptance) -> tool_result_of_operation_acceptance acceptance
   | Error error -> tool_result_of_handler_error error
-;;
-
-(* Where the answer goes. A Keeper that delegates is the reader of the reply
-   and reads it from its own queue, so it names itself as the destination.
-   Everyone else — an operator or an agent driving the tool over HTTP — keeps
-   the dashboard thread, which is where they are watching. Registry
-   membership decides it, not the shape of the name: writing a queue for a
-   name no Keeper owns would leave the answer somewhere nobody drains. *)
-let delegate_continuation_channel ~(config : Workspace.config) ~submitted_by =
-  (* The blank name leaves here, before the lookup. It is the one input the
-     constructor below refuses, so ruling it out up front is what makes the
-     [Error] arm unreachable -- and a reader can see that in these four lines
-     instead of having to go read what [is_registered] accepts. *)
-  if String.equal (String.trim submitted_by) ""
-  then None
-  else if not (Keeper_registry.is_registered ~base_path:config.base_path submitted_by)
-  then None
-  else (
-    match Keeper_continuation_channel.keeper ~keeper_name:submitted_by with
-    | Ok channel -> Some channel
-    | Error message ->
-      (* Unreachable: the only refusal is a blank name and that left above.
-         It says so rather than returning [None], which would spell "this
-         Keeper owns no queue" -- and by the comment on this function, that
-         is how a reply lands somewhere nobody drains. *)
-      invalid_arg
-        (Printf.sprintf
-           "keeper delegate: registered Keeper %S has no continuation channel: %s"
-           submitted_by
-           message))
 ;;
 
 let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =

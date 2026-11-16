@@ -1,0 +1,82 @@
+{
+  "window": [
+    "2026-11-13T00:48:28+00:00",
+    "2026-11-16T00:48:28+00:00"
+  ],
+  "hold_seconds": 60.0,
+  "files": 17,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "holds": {
+    "calls": 83,
+    "keepers": 17,
+    "hours": 4.714,
+    "hours_with_a_waiting_operation": 0.524,
+    "share_with_a_waiting_operation": 0.1111
+  },
+  "queue_wait": {
+    "operations": 875,
+    "hours_all_keepers": 934.753,
+    "hours_holding_keepers": 919.848
+  },
+  "overlap": {
+    "hours": 0.798,
+    "share_of_all_keepers": 0.0009,
+    "share_of_holding_keepers": 0.0009
+  },
+  "top_keepers": [
+    {
+      "keeper": "code-reviewer-father",
+      "overlap_hours": 0.266,
+      "hold_calls": 9,
+      "held_hours": 1.721,
+      "held_hours_with_a_waiting_operation": 0.18,
+      "queue_wait_hours": 128.913
+    },
+    {
+      "keeper": "code-reviewer-mother",
+      "overlap_hours": 0.156,
+      "hold_calls": 11,
+      "held_hours": 0.285,
+      "held_hours_with_a_waiting_operation": 0.091,
+      "queue_wait_hours": 24.928
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "overlap_hours": 0.151,
+      "hold_calls": 8,
+      "held_hours": 0.438,
+      "held_hours_with_a_waiting_operation": 0.151,
+      "queue_wait_hours": 5.664
+    },
+    {
+      "keeper": "context-reviewer",
+      "overlap_hours": 0.113,
+      "hold_calls": 5,
+      "held_hours": 0.109,
+      "held_hours_with_a_waiting_operation": 0.061,
+      "queue_wait_hours": 355.007
+    },
+    {
+      "keeper": "code-reviewer",
+      "overlap_hours": 0.095,
+      "hold_calls": 7,
+      "held_hours": 0.14,
+      "held_hours_with_a_waiting_operation": 0.024,
+      "queue_wait_hours": 121.917
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "overlap_hours": 0.017,
+      "hold_calls": 7,
+      "held_hours": 0.236,
+      "held_hours_with_a_waiting_operation": 0.017,
+      "queue_wait_hours": 38.792
+    }
+  ],
+  "keepers_with_holds_and_no_store": [],
+  "unreadable_stores": [
+    "tool_usage"
+  ]
+}

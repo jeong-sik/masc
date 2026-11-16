@@ -1,0 +1,99 @@
+{
+ "window": [
+  1794271708.0,
+  1794530908.0
+ ],
+ "keepers": {
+  "context-reviewer": {
+   "operations": 17,
+   "executions": 15,
+   "wait_h": 4.0,
+   "first_call_wait_h": 3.1,
+   "queued_h": 2.3,
+   "idle_h": 2.0,
+   "idle_overlap_h": {
+    "any_turn": 0.0
+   },
+   "turns": {},
+   "turns_without_start": 0
+  },
+  "code-reviewer-father": {
+   "operations": 52,
+   "executions": 49,
+   "wait_h": 1.0,
+   "first_call_wait_h": 1.0,
+   "queued_h": 0.6,
+   "idle_h": 0.1,
+   "idle_overlap_h": {
+    "any_turn": 0.0
+   },
+   "turns": {},
+   "turns_without_start": 0
+  },
+  "code-reviewer": {
+   "operations": 155,
+   "executions": 152,
+   "wait_h": 3.2,
+   "first_call_wait_h": 3.2,
+   "queued_h": 2.6,
+   "idle_h": 1.7,
+   "idle_overlap_h": {
+    "any_turn": 0.0
+   },
+   "turns": {},
+   "turns_without_start": 0
+  },
+  "code-reviewer-uncle": {
+   "operations": 320,
+   "executions": 319,
+   "wait_h": 3.9,
+   "first_call_wait_h": 3.9,
+   "queued_h": 2.3,
+   "idle_h": 0.3,
+   "idle_overlap_h": {
+    "any_turn": 0.0
+   },
+   "turns": {},
+   "turns_without_start": 0
+  },
+  "code-reviewer-brother": {
+   "operations": 42,
+   "executions": 41,
+   "wait_h": 0.1,
+   "first_call_wait_h": 0.1,
+   "queued_h": 0.1,
+   "idle_h": 0.0,
+   "idle_overlap_h": {
+    "any_turn": 0.0
+   },
+   "turns": {},
+   "turns_without_start": 0
+  },
+  "code-reviewer-sister": {
+   "operations": 60,
+   "executions": 59,
+   "wait_h": 0.7,
+   "first_call_wait_h": 0.7,
+   "queued_h": 0.6,
+   "idle_h": 0.1,
+   "idle_overlap_h": {
+    "any_turn": 0.0
+   },
+   "turns": {},
+   "turns_without_start": 0
+  },
+  "code-reviewer-mother": {
+   "operations": 42,
+   "executions": 42,
+   "wait_h": 0.1,
+   "first_call_wait_h": 0.1,
+   "queued_h": 0.1,
+   "idle_h": 0.0,
+   "idle_overlap_h": {
+    "any_turn": 0.0
+   },
+   "turns": {},
+   "turns_without_start": 0
+  }
+ }
+}

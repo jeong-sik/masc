@@ -861,7 +861,7 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
     Error E.Network_unavailable
   in
   (match
-     W.For_testing.drain_available
+     W.For_testing.drain_available_typed
        ~yield:(fun () -> incr yields)
        ~now:(fun () -> 3.0)
        ~worker_epoch:(P.Worker_epoch.generate ())
@@ -871,11 +871,13 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
          Alcotest.fail "setup error reached execution")
    with
-   | Error detail ->
+   | Error (W.For_testing.Pre_claim_setup_unavailable E.Network_unavailable as err) ->
      Alcotest.(check string)
-       "typed setup failure stops the lifecycle"
+       "typed setup failure renders with pre-claim detail"
        "Board attention exact setup unavailable before claim: network context unavailable"
-       detail
+       (W.For_testing.drain_error_to_string err)
+   | Error (W.For_testing.Pre_claim_setup_unavailable _ | W.For_testing.Durable_drain_failed _) ->
+     Alcotest.fail "unexpected drain_error variant on pre-claim Network_unavailable"
    | Ok
        ( W.Drained _ | W.Retry_later _ | W.Lane_deferred _
        | W.Awaiting_registry_fence _ ) ->

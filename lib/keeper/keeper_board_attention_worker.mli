@@ -148,7 +148,8 @@ val run :
   (unit, fatal_error) result
 (** Register and run the wake-driven worker until [sw] is cancelled. The clock
     is forwarded to AGENT_CORE execution. MASC owns no execution-target policy.
-    Setup or durability errors end this lifecycle instead of awaiting another
+    Pre-claim exact setup refusals defer and rearm at the maintenance pulse
+    interval; durability errors end this lifecycle instead of awaiting another
     wake. Exact claim contention schedules one generation-keyed delayed wake on
     the worker switch; it never recursively claims a sibling in the same turn.
     Cancellation performs no partition I/O: process-start recovery returns every
@@ -426,4 +427,35 @@ module For_testing : sig
   val wake_admission_of_meta_read :
     (Keeper_meta_contract.keeper_meta option, string) result -> wake_admission
   (** The per-wake pause decision over one meta read result. *)
+
+  type drain_error =
+    | Pre_claim_setup_unavailable of Keeper_board_attention_exact_flow.setup_error
+    | Durable_drain_failed of string
+
+  val drain_error_to_string : drain_error -> string
+
+  val drain_available_typed :
+    yield:(unit -> unit) ->
+    now:(unit -> float) ->
+    worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->
+    base_path:string ->
+    keeper_name:string ->
+    prepare:
+      (Keeper_board_attention_candidate.candidate ->
+       ( 'prepared
+       , Keeper_board_attention_exact_flow.setup_error )
+       result) ->
+    execute:
+      (before_dispatch:
+         (Keeper_board_attention_exact_flow.attempt_provenance ->
+          (unit, string) result) ->
+       before_advance:
+         (failed:Keeper_board_attention_exact_flow.advance_source ->
+          next:Keeper_board_attention_exact_flow.candidate_visit ->
+          (unit, string) result) ->
+       'prepared ->
+       ( Keeper_board_attention_candidate.judgment
+       , string Keeper_board_attention_exact_flow.execution_error )
+       result) ->
+    (drain_outcome, drain_error) result
 end

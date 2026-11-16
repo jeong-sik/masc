@@ -1294,6 +1294,17 @@ type 'prepared ready_selection =
       ; prepared : (string * 'prepared) option
       }
 
+type drain_error =
+  | Pre_claim_setup_unavailable of Exact_flow.setup_error
+  | Durable_drain_failed of string
+
+let drain_error_to_string = function
+  | Pre_claim_setup_unavailable error ->
+    "Board attention exact setup unavailable before claim: "
+    ^ setup_error_detail error
+  | Durable_drain_failed detail -> detail
+;;
+
 (* Lane-free roots go first. A root whose lane is resting is Ready again and
    the oldest, so claiming strictly oldest first would put every lane-free
    root behind it until a slot frees; a restart that returns cut runs to
@@ -1304,7 +1315,10 @@ let prepare_next_ready
       ~prepare
       candidates
   =
-  let* partitions = Partition.load ~base_path ~keeper_name in
+  let* partitions =
+    Partition.load ~base_path ~keeper_name
+    |> Result.map_error (fun detail -> Durable_drain_failed detail)
+  in
   let ready_lane_free, ready_needs_lane =
     List.fold_right
       (fun (partition : Partition.t) (lane_free, needs_lane) ->
@@ -1354,9 +1368,7 @@ let prepare_next_ready
           | Exact_flow.Candidate_invalid _
           | Exact_flow.Flow_snapshot_failed
           | Exact_flow.Flow_start_failed ) as error) ->
-       Error
-         ("Board attention exact setup unavailable before claim: "
-          ^ setup_error_detail error))
+       Error (Pre_claim_setup_unavailable error))
   | [], [] -> Ok No_ready_root
 ;;
 
@@ -1781,7 +1793,7 @@ let prunes_and_read ~base_path ~keeper_name ?hook ?before_receipt_prune () =
   Candidate.load_candidates ~base_path ~keeper_name
 ;;
 
-let process_next_with_claim_ready_exact_current
+let process_next_with_claim_ready_exact_current_typed
       ~map_write_outcome
       ~claim_ready_exact
       ~now
@@ -1791,11 +1803,12 @@ let process_next_with_claim_ready_exact_current
       ~prepare
       ~execute
   =
+  let durable r = Result.map_error (fun detail -> Durable_drain_failed detail) r in
   (* The prunes and the candidate read run as one seam; a test can install
      a hook that fires immediately before the first prune, landing an owner
      settlement in exactly the gap the read position defines. *)
-  let* candidates = prunes_and_read ~base_path ~keeper_name () in
-  let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
+  let* candidates = durable (prunes_and_read ~base_path ~keeper_name ()) in
+  let* (_ : int) = durable (Partition.ensure_roots ~base_path ~keeper_name candidates) in
   let selected_generation_is_ready ~partition_id ~generation =
     let* partitions = Partition.load ~base_path ~keeper_name in
     Ok
@@ -1878,11 +1891,34 @@ let process_next_with_claim_ready_exact_current
         then claim_selected (attempts_remaining - 1)
         else Ok (Contended { keeper_name; partition_id; generation })
     in
-    (match Keeper_board_attention_admission.acquire_singleton ~base_path ~candidate_id with
-     | None -> Ok (Rescan_later { keeper_name; partition_id; generation })
-     | Some token ->
+    durable
+      (match Keeper_board_attention_admission.acquire_singleton ~base_path ~candidate_id with
+       | None -> Ok (Rescan_later { keeper_name; partition_id; generation })
+       | Some token ->
          Fun.protect ~finally:(fun () -> Keeper_board_attention_admission.release token)
            (fun () -> claim_selected 3))
+;;
+
+let process_next_with_claim_ready_exact_current
+      ~map_write_outcome
+      ~claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  process_next_with_claim_ready_exact_current_typed
+    ~map_write_outcome
+    ~claim_ready_exact
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+  |> Result.map_error drain_error_to_string
 ;;
 
 let process_next_with_claim_ready_exact
@@ -2196,7 +2232,7 @@ let drain_available_with_process ~yield ~process =
   loop { judgments = 0; steps = 0 }
 ;;
 
-let drain_available_current
+let drain_available_current_typed
       ~yield
       ~now
       ~worker_epoch
@@ -2208,7 +2244,9 @@ let drain_available_current
   drain_available_with_process
     ~yield
     ~process:(fun () ->
-      process_next_current
+      process_next_with_claim_ready_exact_current_typed
+        ~map_write_outcome:unchanged_write_outcome
+        ~claim_ready_exact:Partition.claim_ready_exact
         ~now
         ~worker_epoch
         ~base_path
@@ -2226,7 +2264,7 @@ let drain_available
       ~prepare
       ~execute
   =
-  drain_available_current
+  drain_available_current_typed
     ~yield
     ~now
     ~worker_epoch
@@ -2234,6 +2272,7 @@ let drain_available
     ~keeper_name
     ~prepare
     ~execute
+  |> Result.map_error drain_error_to_string
 ;;
 
 (* Pause is read once per wake, before any partition I/O, from the same
@@ -2413,7 +2452,7 @@ let run
              | Wake_admitted -> drain_admitted ()
            and drain_admitted () =
              match
-               drain_available_current
+               drain_available_current_typed
                  ~yield:Eio.Fiber.yield
                  ~now:Time_compat.now
                  ~worker_epoch
@@ -2441,7 +2480,15 @@ let run
                  (apply_drain_rearm contention_rearms outcome
                   : rearm_schedule option);
                await ()
-             | Error detail -> fail Durable_drain detail
+             | Error (Pre_claim_setup_unavailable error) ->
+               Log.Keeper.warn
+                 ~keeper_name
+                 "board_attention_worker_setup_deferred keeper=%s detail=%s"
+                 keeper_name
+                 (drain_error_to_string (Pre_claim_setup_unavailable error));
+               schedule_deferred_rearm deferred_rearm;
+               await ()
+             | Error (Durable_drain_failed detail) -> fail Durable_drain detail
            in
            (try drain () with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2466,6 +2513,7 @@ module For_testing = struct
   let process_next_exact = process_next_exact
   let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
   let drain_available = drain_available
+  let drain_available_typed = drain_available_current_typed
   let drain_available_with_process = drain_available_with_process
   let make_contention_rearm_scheduler = make_contention_rearm_scheduler
   let schedule_contention_rearm = schedule_contention_rearm
@@ -2481,5 +2529,9 @@ module For_testing = struct
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim
   let wake_admission_of_meta_read = wake_admission_of_meta_read
+  type nonrec drain_error = drain_error =
+    | Pre_claim_setup_unavailable of Exact_flow.setup_error
+    | Durable_drain_failed of string
+  let drain_error_to_string = drain_error_to_string
 end
 ;;

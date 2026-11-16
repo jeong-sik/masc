@@ -1095,15 +1095,14 @@ type flow_binding_standing =
   | Every_binding_resting
   | Not_every_binding_resting
 
-(* Only refusals that name the binding's own standing -- its quota or rate
-   limit spent, its capacity full, its account unable to pay. Every other
-   refusal can be about this input (a size, a request shape, a credential, a
-   route), so it is not read as rest. *)
+(* Refusals that name the binding's own standing or upstream availability --
+   its quota or rate limit spent, its capacity full, an upstream 5xx outage, or
+   its account unable to pay. Every other refusal can be about this input (a
+   size, a request shape, a credential, a route), so it is not read as rest. *)
 let provider_refusal_is_binding_rest = function
-  | Rate_limited | Overloaded | Payment_required -> true
+  | Rate_limited | Overloaded | Payment_required | Server_error -> true
   | Request_body_refused
   | Refusal_body_not_received
-  | Server_error
   | Auth_failed
   | Authorization_refused
   | Invalid_request

@@ -155,11 +155,16 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 
 대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`와
 배포 사전점검 도구를 한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요.
-아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`과 저장 상태를 검사합니다.
+아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`을 검사합니다.
 경로가 해석되고 아직 존재하지 않는다고 확인되면 새 작업 공간으로 취급하고 검사는
 미실행으로 표시합니다. 경로를 해석하거나 관측할 수 없으면 교체 전에
 멈춥니다. 작업 공간을 찾지 못하면 `--base-path DIR`을 주거나 `MASC_BASE_PATH`를
-설정하세요. 설정이나 저장 상태가 거부된 경우에도 설치를 중단합니다.
+설정하세요. 설정이 거부된 경우에도 설치를 중단합니다.
+로컬 설치는 저장 기록 전체를 검사하거나 서버를 재시작하지 않습니다.
+따라서 설치 성공이 저장 상태의 호환성을 보증하지는 않습니다. 저장 형식을 바꾸는
+빌드라면 기존 상태로 시작하기 전에 후보 빌드의 검사를 별도로 실행하세요.
+[저장 상태 배포 검사](docs/guides/DURABLE-STORE-HARD-CUT.md)에 절차가 있습니다.
+`masc restart`는 기동 검사를 하며, 전체 기록을 감사하지는 않습니다.
 
 `./quickstart.sh`는 `~/masc-quickstart` 아래에 작업 공간을 만들고, 서버를
 띄우고, MCP bearer를 `.masc/config/mcp-client.env`에 씁니다. Keeper는 띄우지

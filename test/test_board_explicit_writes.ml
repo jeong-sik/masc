@@ -79,8 +79,8 @@ let test_identical_comments_are_distinct_writes () =
     "distinct ids" true
     (not
        (String.equal
-          (Board.Comment_id.to_string first.Board.comment_id)
-          (Board.Comment_id.to_string second.Board.comment_id)));
+          (Board.Comment_id.to_string first.Board.id)
+          (Board.Comment_id.to_string second.Board.id)));
   let substring needle haystack =
     let n = String.length needle and h = String.length haystack in
     let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in

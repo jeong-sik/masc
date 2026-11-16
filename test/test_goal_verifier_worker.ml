@@ -402,7 +402,8 @@ let test_unknown_and_cancellation_never_redispatch () =
                   | _ -> false)
              | _ -> Alcotest.fail "run-end evidence is not an object")
           | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-          | Commit_unknown _ | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ ->
+          | Commit_unknown _ | Finished _ | Conflicted _ | Subdividing _ | Subdivided _
+          | Rejected {stage=Before_dispatch; _} ->
             Alcotest.fail "a cancelled run was not recorded as an execution refusal");
          let authority_calls, current_authority = counted_authority authority in
          let subject = V.subject (W.original retained) in

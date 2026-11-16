@@ -47,7 +47,12 @@ exception Non_eio_mutex_context of mutex_access
     runs without any locking (safe because OCaml is single-threaded
     at module init time). *)
 
-(** Read-write guard: acquires mutex if Eio is ready, runs directly otherwise. *)
+(** Read-write guard: takes the mutex if Eio is ready, runs directly otherwise.
+
+    [Eio.Mutex] always admits one fiber at a time, so "read-write" here names
+    the [use_rw] variant, not a shared lock. Cancellation is prevented inside
+    the critical section, and an exception from the body disables the mutex
+    ([Eio.Mutex.Poisoned] on the next use). *)
 let with_mutex mutex f =
   match Atomic.get ready, execution_context () with
   | false, _ -> f ()
@@ -56,7 +61,14 @@ let with_mutex mutex f =
 ;;
 
 (** Exclusive guard that unlocks rather than poisoning on callback exceptions.
-    Runs directly before Eio is ready. *)
+    Runs directly before Eio is ready.
+
+    This is [Eio.Mutex.use_ro]: the same exclusive mutex as {!with_mutex},
+    differing in two ways. The critical section is cancellable (no
+    [Cancel.protect]), and an exception from the body releases the mutex
+    instead of disabling it, so the body must still leave the resource in a
+    consistent state. It is not a shared or read lock — no [Eio.Mutex]
+    operation admits two fibers. *)
 let with_mutex_ro mutex f =
   match Atomic.get ready, execution_context () with
   | false, _ -> f ()

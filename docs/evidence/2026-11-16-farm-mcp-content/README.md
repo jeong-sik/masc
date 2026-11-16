@@ -118,8 +118,11 @@ this work unit; full regression for this candidate is unrun.
 ## Publication and remaining evidence
 
 Earlier submission of this native stack failed with local GitHub CLI token
-absence. A later refresh still reported an invalid CLI token and Git fetch
-failed to resolve `github.com`. Connector reads do not supply credentials to
+absence. In this agent command environment, a later `gh api user` failed to
+connect, DNS lookup failed for both GitHub hosts, and the standard credential
+lookup returned no token. `gh auth status` displayed an invalid-token message,
+but these observations do not establish that the user's account or interactive
+terminal login is invalid. Connector reads do not supply credentials to
 `gh stack`. No PR,
 GitHub approval, merge or deployment is established by this record. Refresh
 remote main, native stack membership and overlapping work before publication.

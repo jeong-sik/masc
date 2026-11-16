@@ -160,7 +160,10 @@ let atom_target source = Option.map (fun (range : Current.durable_range_id) : At
 let official_target source = Option.map (fun (range : Current.official_range_id) : Official.t ->
   {boundary_line=List.fold_left (fun line (next,_) -> max line next)
     range.after_boundary_line range.turns}) (Source.official_range_id source)
-let settle_positions request =
+let settle_positions ~store ~record request =
+  Keeper_librarian_durable_source_lock.with_original_settlement ~request (fun () ->
+  let* ()=Keeper_librarian_history_resolution_state.check_unfenced
+    ~store ~request ~original:record in
   let source=Request.source request and owner=Request.physical_owner request in
   let keeper_id=Request.keeper_id owner and runtime_keepers_dir=Source.runtime_keepers_dir source in
   let* ()=Request.confirm_owner request in
@@ -201,7 +204,7 @@ let settle_positions request =
     "Original history external ACK remains unconfirmed" in
   require (atom=Option.fold ~none:positions.current ~some:(fun value -> Some value) atom_next
     && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
-    "Original history read-position settlement remains unconfirmed"
+    "Original history read-position settlement remains unconfirmed")
 type frontier = Unfinished | Settled
 let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_result
     ~store ~request ~(record : Owner.retained) =
@@ -399,7 +402,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
           let* ()=Request.confirm_owner request in advance ~store record event) in
         let confirm record =
           before_settlement ();
-          match io (fun () -> settle_positions request) with
+          match io (fun () -> settle_positions ~store ~record request) with
           | Error detail -> pending detail
           | Ok () ->
             let confirmed=match Progress.phase record.Owner.progress with
@@ -524,6 +527,8 @@ let settle_refused ~store ~request ~(record : Owner.retained) ~diagnosis =
   let* ()=io (fun () ->
     Keeper_librarian_durable_source_lock.with_original ~request (fun () ->
       let* actual=reload ~store ~previous:record request in
+      let* ()=Keeper_librarian_history_resolution_state.check_unfenced
+        ~store ~request ~original:actual in
       let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
       let* proved=receipt_state request in
       if proved then Ok () else
@@ -536,6 +541,6 @@ let settle_refused ~store ~request ~(record : Owner.retained) ~diagnosis =
       Ok ())) in
   let* proved=io (fun () -> let* ()=Request.confirm_owner request in receipt_state request) in
   let* ()=require proved "Refused original range has no Memory receipts to settle against" in
-  let* ()=io (fun () -> settle_positions request) in
+  let* ()=io (fun () -> settle_positions ~store ~record request) in
   let* _,record=advance ~store record (Progress.Refusal_settled diagnosis) in
   Ok record

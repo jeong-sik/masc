@@ -88,6 +88,8 @@ val settle_refused : store:Lane_addon_store.t -> request:Keeper_librarian_durabl
     runs the same unread archive, external ACK and atom/official position
     settlement a finished original uses, and only then appends the fact. Refuses
     any record that is not an unsettled execution refusal, and refuses if the
-    read positions moved outside this original's settlement. A cut re-enters
-    safely. This relaxes fail-closed on purpose: the refused input is never
+    original is effect-fenced or the read positions moved outside this
+    original's settlement. Fence checks and ACK/write hold the original source
+    locks, including when recovering a partial previous settlement. A cut
+    re-enters safely. This relaxes fail-closed on purpose: the refused input is never
     read. Blocking; offload it in an Eio caller. *)

@@ -1729,6 +1729,34 @@ let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixtur
     check int "Off recovery actually acknowledges the original external admission" 1
       (Keeper_external_read_cursor.observation_offset settled_cursor);
     check int "ACK recovery never repeats inference" posts (F.post_count fixture.server)))
+let test_receipt_proved_partial_ack_keeps_source_locks_without_rereading_prefix () =
+  with_fixture (fun ~sw:_ fixture ->
+    fixture.delivery_loss:=true;
+    let delivered= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);await_delivery fixture ~after:delivered;
+    let original,request=only_original fixture in
+    let positions=progress fixture and posts=F.post_count fixture.server in
+    let proved_revision=ref None in
+    let result=resume_with_settlement_fault fixture (fun () ->
+      check bool "the partial settlement starts only after actual range receipts" true
+        (io (fun () -> Keeper_librarian_durable_commit.receipt_state request |> get));
+      proved_revision:=io (fun () -> Option.map (fun (snapshot:Current.t) -> snapshot.revision) (current fixture.keepers_dir));
+      io (fun () -> Keeper_external_read_cursor.acknowledge
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get);
+      check bool "external ACK can precede atom settlement" true (progress fixture=positions);
+      (* Memory now owns the read prefix; acknowledgement must not need a
+         second copy of it after retention has pruned the checkpoint. *)
+      save_checkpoint fixture.config ~trace_id [] 1) in
+    (match result with
+     | Ok (Durable_owner.Resumed (Finished completed,_)) ->
+       check string "the same original finishes the partial settlement" original.request_id completed.Owner.request_id
+     | Ok (Waited _ | Original_replaced _ | Resumed ((Refused _ | Publication_waiting _ | Basis_superseded _),_)) ->
+       fail "receipt-proved partial ACK did not finish under the source locks"
+     | Error error -> fail (Durable_owner.error_to_string error));
+    check bool "partial settlement advances the original atom frontier" true (progress fixture<>positions);
+    check bool "receipt-proved ACK writes no second Memory revision" true
+      (!proved_revision=io (fun () -> Option.map (fun (snapshot:Current.t) -> snapshot.revision) (current fixture.keepers_dir)));
+    check int "settlement dispatches no additional model request" posts (F.post_count fixture.server))
 type source_change = Replaced_checkpoint | Restarted_history
 let test_source_replacement_cannot_publish_retained_answer change () = with_fixture (fun ~sw:_ fixture ->
   fixture.delivery_loss:=true;
@@ -2791,6 +2819,10 @@ let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () 
     let current_parent=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
       ~request_id:original.request_id |> owned |> Option.get) in
     check json "parent progress was not settled or rewritten" parent (Owner.to_json current_parent);
+    check bool "direct refusal settlement cannot abandon an effect-fenced original" true
+      (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+        Keeper_librarian_durable_commit.settle_refused ~store:fixture.store ~request
+          ~record:current_parent ~diagnosis:(`Assoc ["kind",`String "must_not_abandon_fenced_source"])))));
     check bool "the serial consumer refuses Cut as a successor grant" true
       (Result.is_error (memory_action fixture (fun () ->
         Resolution_work.run_serialized ~config:fixture.config ~keeper_name)));
@@ -6217,6 +6249,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "a different installation cannot prepare an answered floor Gate" `Quick
     (test_answered_floor_gate_follows_replacement ~foreign_installation:true);
   test_case "actual Memory receipt with failed ACK settles while Off" `Quick test_real_memory_receipt_then_failed_ack_recovers_while_off;
+  test_case "receipt-proved partial ACK holds source locks without requiring the pruned prefix" `Quick
+    test_receipt_proved_partial_ack_keeps_source_locks_without_rereading_prefix;
   test_case "a worker call reads the record and writes nothing" `Quick test_a_worker_call_reads_the_record_and_writes_nothing;
   test_case "a waiting pass reads no body" `Quick test_a_waiting_pass_reads_no_body;
   test_case "a finished worker answer reads the body first" `Quick test_a_finished_worker_answer_reads_the_body_first;

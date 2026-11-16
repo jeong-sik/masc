@@ -506,6 +506,22 @@ class Sessions(Base):
         self.assertTrue(self.flow.deliver(request["request_id"], {"status": "not_allowed", "reason": "no grant"}, 1.0))
         self.assertEqual(self.session(session_id).failure, l.NotAllowed(request["request_id"], "no grant"))
 
+    def test_a_refused_piece_of_a_result_ends_the_lesson(self):
+        """The host refuses a piece of a result too large for the frame
+        when it no longer keeps that result. Like a refused page, the
+        refusal ends the lesson; only a refused file is skipped."""
+        self.host.page_size, self.host.frame = 3, 180
+        self.host.board = [post(1, "the ledger records facts " * 4), post(2, "keepers choose"), post(3, "asks wait")]
+        reason = "no retained result for this installation and original request"
+        produce = self.host.produce
+        self.host.produce = lambda request: ({"status": "not_allowed", "reason": reason}
+                                             if request["kind"] == "read_result" else produce(request))
+        session_id = self.compose()
+        self.host.run(self.flow)
+        (piece,) = {r["request_id"] for r in self.host.listed if r["kind"] == "read_result"}
+        session = self.session(session_id)
+        self.assertEqual((session.state, session.failure), (l.FAILED, l.NotAllowed(piece, reason)))
+
     def test_an_unreadable_log_refuses_every_write(self):
         self.compose()
         with open(self.flow.log.path, "ab") as handle:

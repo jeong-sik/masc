@@ -85,6 +85,10 @@ class FakeHost:
         self.files: dict[tuple[str, str], str] = {}
         self.page_size = page_size
         self.frame = frame
+        # The cursor of the record at an index. Host cursors are opaque: a
+        # Board cursor carries the hex of a time and does not sort in the
+        # order the posts came.
+        self.cursor: Callable[[int], str] = lambda index: str(index).zfill(6)
         # None leaves the request waiting, as a lane that has not answered does.
         self.author: Callable[[dict], dict | None] = lambda payload: None
         self.grade: Callable[[dict], dict | None] = lambda payload: None
@@ -95,7 +99,7 @@ class FakeHost:
     def page(self, request: dict, records: list[dict], head: str | None) -> dict:
         after = request["after"]
         since = request.get("since")
-        cursors = [str(index).zfill(6) for index in range(len(records))]
+        cursors = [self.cursor(index) for index in range(len(records))]
         if after is not None and since is not None:
             raise AssertionError("a read names after or since, not both")
         if since is not None:
@@ -883,10 +887,12 @@ class ReviewFindings(Base):
 
     def test_a_source_taken_out_while_a_session_read_it_loses_that_cursor(self):
         """The host answers a read of a source the binding no longer grants
-        with not_allowed. The session fails and keeps that read, and
-        records.last_cursor counts the cursor it asked after as refused. Put
-        back, the source is read from the cursor before that one, here none,
-        so from the first opening, and not from the cursor it had (#52372)."""
+        with not_allowed (lane_addon_records.ml); here the answer is
+        delivered by hand. The session's first read of wiki asked after the
+        cursor the first session left. The session fails and keeps that read,
+        and records.last_cursor counts that cursor as refused. Put back, the
+        source is read from the cursor before it, here none, so from the
+        first opening, and not from the cursor it had (#52372)."""
         self.host.wiki = [wiki_page("guide", 1, "a page of the wiki")]
         both = BINDING | {"records": [BOARD, WIKI]}
         first = self.compose("act-1", binding=both)
@@ -914,6 +920,105 @@ class ReviewFindings(Base):
         self.host.author = lambda payload: None
         self.host.run(self.flow)
         self.assertEqual(self.starts(fourth), {"board": {"after": "000003"}, "wiki": {"after": None, "since": 0.0}})
+
+    def test_a_source_taken_out_while_a_session_read_a_later_page_keeps_its_cursor(self):
+        """Only the cursor the refused read asked for counts as refused. The
+        session had read a page of wiki after the cursor the first session
+        left, and waited on the next page when wiki was taken out. The
+        refused cursor is one of that session's own, so wiki put back is read
+        from the cursor the first session left (#52372)."""
+        self.host.wiki = [wiki_page("guide", 1, "a page of the wiki")]
+        both = BINDING | {"records": [BOARD, WIKI]}
+        first = self.compose("act-1", binding=both)
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(first).state, "asked")
+        self.host.board.append(post(4, "the next decision"))
+        self.host.wiki += [wiki_page(f"later-{n}", 1, f"page {n} written later") for n in (2, 3, 4)]
+        produce = self.host.produce
+        self.host.produce = lambda request: (None if request["kind"] == "read_records" and request["source_id"] == "wiki"
+                                             and request["after"] == "000002" else produce(request))
+        second = self.compose("act-2", binding=both)
+        self.host.run(self.flow)
+        (waiting,) = [r for r in self.flow.listing() if r["request_id"].startswith(second)]
+        self.assertEqual((waiting["source_id"], waiting["after"]), ("wiki", "000002"))
+        self.assertTrue(self.flow.deliver(waiting["request_id"], {
+            "status": "not_allowed", "reason": "source wiki is not granted to this installation"}))
+        self.assertEqual(self.session(second).state, "failed")
+        self.host.produce = produce
+        third = self.compose("act-3")
+        self.host.run(self.flow)
+        self.assertEqual(self.session(third).state, "asked")
+        self.host.listed.clear()
+        fourth = self.compose("act-4", binding=both)
+        self.host.author = lambda payload: None
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(fourth), {"board": {"after": "000003"}, "wiki": {"after": "000000"}})
+
+    def test_every_refused_cursor_stays_refused_until_the_first_opening(self):
+        """Three sessions asked, and the host refuses every cursor they
+        left. Each next session asks for the cursor before the last refused
+        one and fails, and once none is left the next reads from the first
+        opening. A refusal is remembered by every later session, not only by
+        the session after it."""
+        asked = [self.compose("act-1")]
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        for n, action in ((4, "act-2"), (6, "act-3")):
+            self.host.board += [post(n, f"decision number {n}"), post(n + 1, f"decision number {n + 1}")]
+            asked.append(self.compose(action))
+            self.host.run(self.flow)
+        self.assertEqual([self.session(s).state for s in asked], ["asked"] * 3)
+        produce = self.host.produce
+        self.host.produce = lambda request: ({"status": "not_allowed", "reason": "after is not a cursor this host gave"}
+                                             if request["kind"] == "read_records" and request["after"] is not None
+                                             else produce(request))
+        refused = []
+        for action in ("act-4", "act-5", "act-6"):
+            refused.append(self.compose(action))
+            self.host.run(self.flow)
+        self.assertEqual([self.session(s).state for s in refused], ["failed"] * 3)
+        self.assertEqual([self.starts(s) for s in refused],
+                         [{"board": {"after": "000006"}}, {"board": {"after": "000004"}},
+                          {"board": {"after": "000002"}}])
+        last = self.compose("act-7")
+        (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(last)]
+        self.assertEqual((request["after"], request["since"]), (None, 0.0))
+
+    def test_a_superseded_session_that_read_posts_does_not_move_the_cursor(self):
+        """A session read the next posts and was superseded before it
+        asked. Only a session that asked moves the cursor, so the session
+        after it reads those posts again."""
+        first = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.host.board += [post(4, "the next decision"), post(5, "a decision after that one")]
+        seen: list[dict] = []
+        # The author is left waiting, so the session is still writing.
+        self.host.author = lambda payload: seen.append(payload)
+        second = self.compose("act-2")
+        self.host.run(self.flow)
+        self.assertEqual([m["pin"] for m in seen[0]["material"]], ["p-4", "p-5"])
+        third = self.compose("act-3")
+        self.assertEqual([self.session(s).state for s in (first, second)], ["asked", "superseded"])
+        (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(third)]
+        self.assertEqual(request["after"], "000002")
+
+    def test_the_later_session_gives_the_cursor_even_when_its_cursor_sorts_first(self):
+        """The cursor is the one the later session that asked left, not
+        the greatest. Here each later post has a cursor that sorts first."""
+        self.host.cursor = lambda index: f"{9 - index:06d}"
+        first = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.host.board += [post(4, "the next decision"), post(5, "a decision after that one")]
+        second = self.compose("act-2")
+        self.host.run(self.flow)
+        self.assertEqual([self.session(s).state for s in (first, second)], ["asked", "asked"])
+        self.assertEqual(self.starts(second), {"board": {"after": "000007"}})
+        third = self.compose("act-3")
+        (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(third)]
+        self.assertEqual(request["after"], "000005")
 
     def test_a_quote_taken_from_a_file_path_is_not_in_the_file(self):
         self.host.commits = [commit(1, ["changelog.d/a.md"])]
@@ -1031,6 +1136,22 @@ class Pieces(Base):
         self.flow.deliver(request["request_id"], marker | {"retained_sha256": "0" * 64})
         with self.assertRaises(f.InvalidResult):
             self.host.run(self.flow)
+
+    def test_a_refused_piece_of_a_result_ends_the_session(self):
+        """The host refuses a piece of a result too large for the frame
+        when it no longer keeps that result. Like a refused page, the
+        refusal ends the session; only a refused file is skipped."""
+        self.host = FakeHost(page_size=3, frame=180)
+        self.host.board = [post(1, "the ledger records facts " * 4), post(2, "keepers choose"), post(3, "asks wait")]
+        reason = "no retained result for this installation and original request"
+        produce = self.host.produce
+        self.host.produce = lambda request: ({"status": "not_allowed", "reason": reason}
+                                             if request["kind"] == "read_result" else produce(request))
+        session_id = self.compose()
+        self.host.run(self.flow)
+        (piece,) = {r["request_id"] for r in self.host.listed if r["kind"] == "read_result"}
+        session = self.session(session_id)
+        self.assertEqual((session.state, session.failure), ("failed", q.NotAllowed(piece, reason)))
 
 
 class Repository(Base):

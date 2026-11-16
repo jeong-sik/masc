@@ -1803,6 +1803,8 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
        | Error error -> raise (Owner_initialization_failed error));
       boot_stage "owner_publication.end";
       let tool_dispatcher tool_name args_json =
+      let auth_token = Server_grpc_listener.current_auth_token () in
+      let internal_keeper_runtime = Server_grpc_listener.current_internal_keeper () in
       Server_grpc_tool_dispatch.dispatch args_json ~dispatch:(fun arguments ->
           let workspace_scope = Mcp_server.workspace_scope state in
           let result =
@@ -1810,10 +1812,9 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
               ~sw
               ~clock
               ~workspace_scope
-              (* gRPC carries no bearer, and no door reads one. *)
               ~bearer:
-                (Mcp_server_eio_caller_identity.unread None
-                   ~internal_keeper_runtime:false)
+                (Mcp_server_eio_caller_identity.unread auth_token
+                   ~internal_keeper_runtime)
               state
               ~name:tool_name ~arguments
           in
@@ -1896,10 +1897,16 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
                     Server_mcp_transport_ws.finish_inbound_dispatch session)
                   (fun () ->
                     try
+                      match Server_mcp_transport_ws.session_mcp_auth ws_session_id with
+                      | None -> ()
+                      | Some (auth_token, internal_keeper_runtime) ->
                       let response_json =
                         Mcp_eio.handle_request ~clock ~sw
                           ~mcp_session_id:ws_session_id
-                          ~sender:Mcp_eio.Unadmitted state body_str
+                          ~sender:Mcp_eio.Unadmitted
+                          ?auth_token
+                          ~internal_keeper_runtime
+                          state body_str
                       in
                       let response_str = Yojson.Safe.to_string response_json in
                       if response_str <> "null" then begin

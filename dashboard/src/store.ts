@@ -1152,10 +1152,41 @@ export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean;
       // A failed read does not attest a different actor. Its own managed401
       // may retire strict hydration authority while the request headers stay
       // the same; keep that original refusal and its retry policy intact.
-      shellAuthSummary.value = null
-      shellReadRecovery.failed(() => requestShellRecoveryRead(wantsLight),
-        !(err instanceof ApiRequestError && (err.status === 401 || err.status === 403)))
-      showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
+      const isAuthRefusal =
+        err instanceof ApiRequestError && (err.status === 401 || err.status === 403)
+      if (isAuthRefusal) {
+        const knownCodes = new Set([
+          'missing_token',
+          'invalid_token',
+          'token_expired',
+          'actor_mismatch',
+          'insufficient_role',
+          'same_origin_blocked',
+          'unknown',
+        ])
+        const rawCode = err.authErrorCode
+        const fallbackCode = err.status === 401 ? 'missing_token' : 'insufficient_role'
+        const authErrorCode = (
+          rawCode && knownCodes.has(rawCode) ? rawCode : fallbackCode
+        ) as NonNullable<DashboardShellAuthSummary['auth_error_code']>
+        shellAuthSummary.value = {
+          enabled: true,
+          require_token: true,
+          token_present: Boolean(authOwner.token),
+          token_valid: err.status === 403,
+          effective_role: null,
+          auth_error_code: authErrorCode,
+          auth_error_detail: err.detail ?? err.message,
+          can_keeper_msg: false,
+          keeper_msg_error: err.detail ?? err.message,
+        }
+      } else {
+        shellAuthSummary.value = null
+      }
+      shellReadRecovery.failed(() => requestShellRecoveryRead(wantsLight), !isAuthRefusal)
+      if (!isAuthRefusal) {
+        showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
+      }
       console.warn('[Dashboard] shell fetch error:', err)
       return { kind: 'failed', cause: err }
     } finally {

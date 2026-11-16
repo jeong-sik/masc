@@ -1040,11 +1040,10 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             | Error (Sse.Credential_refused reg_err) ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
-               (match reg_err with
-                | Sse.Registration_stale _ -> ()
-                | Sse.Missing_token | Sse.Invalid_token _ | Sse.Token_expired _
-                | Sse.Auth_lookup_error _ | Sse.Unknown_session _ | Sse.Session_expired _
-                | Sse.Session_owner_mismatch _ -> stop_sse_session session_id);
+               (* Never stop an existing SSE stream when a new GET fails
+                  credential or session-owner validation: doing so let any
+                  unauthenticated or mismatched caller disconnect a live
+                  victim session. *)
                respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Ok (client, previous, _) when not (scope_is_current ()) ->
               Atomic.set previous_cleanup previous;
@@ -1274,6 +1273,39 @@ let handle_get_operator_mcp ~deps request reqd =
   | Ok _ ->
       handle_get_mcp ~deps ~profile:Operator_remote request reqd
 
+let verify_delete_session_owner ~(principal : Auth.request_principal) ~session_id =
+  match Session.McpSessionStore.peek session_id with
+  | None -> Ok ()
+  | Some { agent_name = None; _ } -> Ok ()
+  | Some { agent_name = Some owner_agent; _ } ->
+    (match principal with
+     | Auth.Auth_off -> Ok ()
+     | Auth.Anonymous ->
+       Error
+         (Masc_domain.Auth
+            (Masc_domain.Auth_error.Forbidden
+               { agent = "anonymous"
+               ; action =
+                   "delete authenticated MCP session owned by " ^ owner_agent
+               }))
+     | Auth.Bearer { agent_name = caller_agent; role; resolved; _ } ->
+       let is_internal =
+         match resolved with
+         | Auth.Internal_keeper_bearer -> true
+         | Auth.Token_credential _ -> false
+       in
+       if String.equal caller_agent owner_agent
+          || ((not is_internal)
+              && Masc_domain.has_permission role Masc_domain.CanAdmin)
+       then Ok ()
+       else
+         Error
+           (Masc_domain.Auth
+              (Masc_domain.Auth_error.Forbidden
+                 { agent = caller_agent
+                 ; action = "delete MCP session owned by " ^ owner_agent
+                 })))
+
 let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   let request_authority = Server_request_authority.current_exn () in
   if not (deps.is_ready ()) then
@@ -1302,7 +1334,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
         ~session_id
         ~protocol_version
         failure
-  | Ok _ -> (
+  | Ok principal -> (
       match get_session_id_any request with
       | Some session_id -> (
           match validate_mcp_session_delete_profile ~profile session_id with
@@ -1330,7 +1362,22 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                     Httpun.Response.create ~headers `Bad_request
                   in
                   Http_reqd.respond_with_string reqd response body
-              | Ok () ->
+              | Ok () -> (
+               match verify_delete_session_owner ~principal ~session_id with
+               | Error failure ->
+                 let protocol_version =
+                   get_protocol_version_for_session ~session_id request
+                 in
+                 respond_mcp_auth_error
+                   ~deps
+                   ~request_authority
+                   ~endpoint:(delete_endpoint_label profile)
+                   request
+                   reqd
+                   ~session_id
+                   ~protocol_version
+                   (Server_mcp_transport_http_types.auth_failure_of_masc_error failure)
+               | Ok () ->
                let protocol_version = get_protocol_version request in
                let sse_active_before_stop = is_active_sse_session session_id in
                stop_sse_session session_id;
@@ -1357,7 +1404,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   (("content-length", "0") :: mcp_headers session_id protocol_version)
               in
               let response = Httpun.Response.create ~headers `No_content in
-              Http_reqd.respond_with_string reqd response ""))
+              Http_reqd.respond_with_string reqd response "")))
       | None ->
           let body = "Mcp-Session-Id required" in
           let headers =

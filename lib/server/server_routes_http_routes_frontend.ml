@@ -115,8 +115,21 @@ let websocket_handler ?clock ~upgrade request reqd =
            (Server_mcp_transport_http_types.auth_failure_of_masc_error err);
          respond_auth_error request reqd err
        | Ok () ->
+         let mcp_auth_token =
+           match auth_token_from_request request with
+           | Some _ as tok -> tok
+           | None ->
+             Httpun.Headers.get
+               request.Httpun.Request.headers
+               internal_token_header_name
+         in
+         let mcp_internal_keeper =
+           is_verified_internal_keeper_request ~base_path request
+         in
          (match
             Server_mcp_transport_ws.upgrade_connection
+              ?mcp_auth_token
+              ~mcp_internal_keeper
               ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
               ?clock
               ~on_message:Server_mcp_transport_ws.dispatch_inbound_message

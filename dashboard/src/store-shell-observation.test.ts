@@ -103,7 +103,12 @@ describe('App-owned Shell observation', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(originalCause).toBeInstanceOf((await import('./api/core')).ApiRequestError)
     expect(retain).toHaveBeenCalledWith(originalCause)
-    expect(store.shellAuthSummary.value).toBeNull()
+    expect(store.shellAuthSummary.value).toMatchObject({
+      enabled: true,
+      require_token: true,
+      token_valid: status === 403,
+      auth_error_code: status === 401 ? 'missing_token' : 'insufficient_role',
+    })
     for (let i = 0; i < 3; i++) {
       observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
       window.dispatchEvent(new Event('focus'))
@@ -151,8 +156,14 @@ describe('App-owned Shell observation', () => {
     await flush()
     await vi.advanceTimersByTimeAsync(300_000)
     expect(fetch).toHaveBeenCalledTimes(1)
-    expect(store.shellAuthSummary.value).toBeNull()
-    expect(effects.toast).toHaveBeenCalledTimes(1)
+    expect(store.shellAuthSummary.value).toMatchObject({
+      enabled: true,
+      require_token: true,
+      token_present: true,
+      token_valid: status === 403,
+      auth_error_code: 'invalid_token',
+    })
+    expect(effects.toast).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
     core.setRejectedCredentialListener(null)
   })

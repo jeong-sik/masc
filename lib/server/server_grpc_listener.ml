@@ -39,7 +39,38 @@ let with_listener ~listen ~serve =
 
 let listener_tag = "grpc"
 
-let serve_socket ~sw ~clock ~socket server =
+type rpc_auth_identity = {
+  auth_token : string option;
+  internal_keeper : bool;
+}
+
+let rpc_auth_key : rpc_auth_identity Eio.Fiber.key = Eio.Fiber.create_key ()
+
+let current_auth_token () =
+  match Eio.Fiber.get rpc_auth_key with
+  | Some { auth_token; _ } -> auth_token
+  | None -> None
+
+let current_internal_keeper () =
+  match Eio.Fiber.get rpc_auth_key with
+  | Some { internal_keeper; _ } -> internal_keeper
+  | None -> false
+
+let with_rpc_auth_identity identity f =
+  Eio.Fiber.with_binding rpc_auth_key identity f
+
+let respond_grpc_unauthenticated reqd message =
+  let safe_msg = Uri.pct_encode ~component:`Query_value message in
+  let headers =
+    H2.Headers.of_list
+      [ "content-type", "application/grpc"
+      ; "grpc-status", "16"
+      ; "grpc-message", safe_msg
+      ]
+  in
+  H2.Reqd.respond_with_string reqd (H2.Response.create ~headers `OK) ""
+
+let serve_socket ?authorize_request ~sw ~clock ~socket server =
   let rec accept () =
     Eio.Net.accept_fork socket ~sw
       ~on_error:(function
@@ -67,11 +98,20 @@ let serve_socket ~sw ~clock ~socket server =
                 ~clock
                 ~sw:conn_sw
                 ~h2_request_handler:(fun ~stream_end _peer reqd ->
-                  Grpc_eio.Server.request_handler
-                    ~sw:(Http_h2_stream.Stream_end.switch stream_end)
-                    ~clock
-                    server
-                    reqd)
+                  let auth_decision =
+                    match authorize_request with
+                    | None -> Ok { auth_token = None; internal_keeper = false }
+                    | Some check -> check (H2.Reqd.request reqd)
+                  in
+                  match auth_decision with
+                  | Error message -> respond_grpc_unauthenticated reqd message
+                  | Ok identity ->
+                    Eio.Fiber.with_binding rpc_auth_key identity (fun () ->
+                      Grpc_eio.Server.request_handler
+                        ~sw:(Http_h2_stream.Stream_end.switch stream_end)
+                        ~clock
+                        server
+                        reqd))
                 ~h2_error_handler:Grpc_eio.Server.error_handler
                 peer
                 (Server_connection_socket.socket connection)));
@@ -79,11 +119,12 @@ let serve_socket ~sw ~clock ~socket server =
   in
   accept ()
 
-let serve ~env ~port server =
+let serve ?authorize_request ~env ~port server =
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
   with_listener
     ~listen:(fun ~sw ->
       Eio.Net.listen net ~sw ~backlog:128 ~reuse_addr:true
         (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)))
-    ~serve:(fun ~sw socket -> serve_socket ~sw ~clock ~socket server)
+    ~serve:(fun ~sw socket ->
+      serve_socket ?authorize_request ~sw ~clock ~socket server)

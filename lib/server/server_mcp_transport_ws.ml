@@ -117,6 +117,9 @@ type ws_session = {
   dashboard_last_delta_seq: int Atomic.t;
   dashboard_last_delta_at: float Atomic.t;
   inbound_dispatches: int Atomic.t;
+  outbound_queued: int Atomic.t;
+  mcp_auth_token: string option;
+  mcp_internal_keeper: bool;
 }
 
 (** [true] when the dashboard handshake has completed for this state. *)
@@ -237,7 +240,9 @@ let next_id =
 let log_ws_delivery_dropped ~context session_id =
   Log.Transport.warn "WS %s not delivered for session=%s" context session_id
 
-let new_session ~runtime_authority ~id =
+let max_outbound_frames_per_session = 4096
+
+let new_session ?mcp_auth_token ?(mcp_internal_keeper = false) ~runtime_authority ~id () =
   (* NDT-OK: session creation stamps wall-clock liveness/ACK metadata only;
      message ordering and protocol output still come from explicit sequence IDs. *)
   let now = Unix.gettimeofday () in
@@ -257,7 +262,16 @@ let new_session ~runtime_authority ~id =
     dashboard_last_delta_seq = Atomic.make 0;
     dashboard_last_delta_at = Atomic.make now;
     inbound_dispatches = Atomic.make 0;
+    outbound_queued = Atomic.make 0;
+    mcp_auth_token;
+    mcp_internal_keeper;
   }
+
+let session_mcp_auth session_id =
+  with_sessions_rw (fun () ->
+    match Hashtbl.find_opt sessions session_id with
+    | None -> None
+    | Some s -> Some (s.mcp_auth_token, s.mcp_internal_keeper))
 
 (** [true] once the session was cleaned up or a send to it was refused.
     Safe from any domain. *)
@@ -279,16 +293,27 @@ let record_pong session =
 let send_text_bigstring session payload =
   if is_session_closed session
   then false
-  else if Domain_mailbox.send session.outbound (Text_frame payload)
-  then begin
-    let len = Bigstringaf.length payload in
-    Transport_metrics.inc_ws_bytes_sent ~bytes:len;
-    Transport_metrics.observe_ws_message_bytes_sent len;
-    true
-  end
   else begin
-    Atomic.set session.closed true;
-    false
+    let queued_before = Atomic.fetch_and_add session.outbound_queued 1 in
+    if queued_before >= max_outbound_frames_per_session
+    then begin
+      Atomic.decr session.outbound_queued;
+      if Atomic.compare_and_set session.closed false true
+      then ignore (Domain_mailbox.send session.outbound Close_frame : bool);
+      false
+    end
+    else if Domain_mailbox.send session.outbound (Text_frame payload)
+    then begin
+      let len = Bigstringaf.length payload in
+      Transport_metrics.inc_ws_bytes_sent ~bytes:len;
+      Transport_metrics.observe_ws_message_bytes_sent len;
+      true
+    end
+    else begin
+      Atomic.decr session.outbound_queued;
+      Atomic.set session.closed true;
+      false
+    end
   end
 
 (** WebSocket text frames must contain valid UTF-8.  Raw SSE broadcasts can
@@ -1009,12 +1034,19 @@ let __test_dashboard_delta_payload_text_for_event (ev : Sse.external_event) =
    a cancelled scope starts none, the connection is ending, and nobody would
    take this session's frames. *)
 let serve_outbound ~scope session_id session wsd =
+  let release_queued = function
+    | Text_frame _ -> Atomic.decr session.outbound_queued
+    | Ping_frame | Close_frame -> ()
+  in
   let write frame =
     if Ws_wsd.is_closed wsd
-    then `Finished
+    then (
+      release_queued frame;
+      `Finished)
     else (
       match frame with
       | Text_frame payload ->
+        Atomic.decr session.outbound_queued;
         Ws_wsd.send_text_bigstring wsd payload;
         `Continue
       | Ping_frame ->
@@ -1030,7 +1062,7 @@ let serve_outbound ~scope session_id session wsd =
     Fun.protect
       ~finally:(fun () -> Eio.Cancel.protect (fun () -> cleanup_session session_id))
       (fun () ->
-        Domain_mailbox.serve session.outbound ~handle:write ~unhandled:(fun _frame -> ()));
+        Domain_mailbox.serve session.outbound ~handle:write ~unhandled:release_queued);
     `Stop_daemon);
   !serving
 ;;
@@ -1044,7 +1076,10 @@ let start_upgrade_heartbeat ~scope ?clock session_id session =
       let rec loop () =
         Eio.Time.sleep clock heartbeat_interval_s;
         if is_session_closed session
-        then `Stop_daemon
+        then begin
+          cleanup_session session_id;
+          `Stop_daemon
+        end
         else if
           (* NDT-OK: wall-clock compared for liveness only, not output *)
           heartbeat_should_close
@@ -1093,6 +1128,8 @@ let start_upgrade_heartbeat ~scope ?clock session_id session =
     payload and ignore the eof error.  Cleanup runs regardless of the
     hook. *)
 let mcp_websocket_handler
+    ?mcp_auth_token
+    ?(mcp_internal_keeper = false)
     ~runtime_authority
     ~scope
     ?clock
@@ -1103,7 +1140,9 @@ let mcp_websocket_handler
     (wsd : Ws_wsd.t)
   : Ws_endpoint.handlers =
   let session_id = next_id () in
-  let session = new_session ~runtime_authority ~id:session_id in
+  let session =
+    new_session ?mcp_auth_token ~mcp_internal_keeper ~runtime_authority ~id:session_id ()
+  in
   (* The writer fiber starts first, so a session that is registered always
      has one taking its frames. Were it started after, a start that raised or
      did not happen would leave a registered session whose queue only
@@ -1225,6 +1264,8 @@ let respond_and_drive_upgrade
     @param on_message Callback for incoming text messages.
       Default: ignore. *)
 let upgrade_connection
+    ?mcp_auth_token
+    ?(mcp_internal_keeper = false)
     ~runtime_authority
     ?clock
     ?(on_message = fun _session_id _text -> ())
@@ -1238,7 +1279,14 @@ let upgrade_connection
       ~max_message:(max_inbound_message_bytes ())
       ~max_frame:(max_inbound_frame_bytes ())
       ~handler:
-        (mcp_websocket_handler ~runtime_authority ~scope ?clock ~on_message ~origin_label:"same-origin /ws")
+        (mcp_websocket_handler
+           ?mcp_auth_token
+           ~mcp_internal_keeper
+           ~runtime_authority
+           ~scope
+           ?clock
+           ~on_message
+           ~origin_label:"same-origin /ws")
 
 (** Outcome of {!send_to_session_result}.  [Sent] is the happy path;
     [Session_gone] is the expected case where the session has already

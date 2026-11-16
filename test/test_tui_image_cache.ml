@@ -1111,6 +1111,72 @@ let test_explicit_fetch_bypasses_a_republished_body () =
     check string "retry performed another fetch" "xx"
       (read_file (Filename.concat cache_dir "fetches")))
 
+(* Every download of a URL publishes to the same cache file. Each case below
+   stops a download after its body has arrived and before it publishes, runs
+   an explicit retry in that gap, and then lets the first download finish. *)
+let run_then ~shell_run between =
+  let ran = ref false in
+  fun command ->
+    let ending = shell_run command in
+    if not !ran then begin ran := true; between () end;
+    ending
+
+let test_a_download_that_began_before_a_retry_does_not_replace_it () =
+  with_cache (fun cache_dir shell_run ->
+    let url = "https://fixture.invalid/late.png" in
+    let earlier = png_header ^ "earlier" and retried = png_header ^ "retried" in
+    serve cache_dir earlier;
+    let retry = ref None in
+    let run = run_then ~shell_run (fun () ->
+      Cache.invalidate_download ~cache_dir url;
+      serve cache_dir retried;
+      retry := Some (unwrap (Cache.download ~force_fetch:true ~run:shell_run ~cache_dir url))) in
+    let late = unwrap (Cache.download ~run ~cache_dir url) in
+    check string "the earlier download keeps its own body" earlier (Cache.download_bytes late);
+    check (option string) "the retry receives its own response" (Some retried)
+      (Option.map Cache.download_bytes !retry);
+    check string "a later read gets the retry's response" retried
+      (Cache.download_bytes (unwrap (Cache.download ~run:shell_run ~cache_dir url)));
+    check string "from the cache" "xx" (read_file (Filename.concat cache_dir "fetches")))
+
+let test_a_retry_that_began_before_another_retry_does_not_replace_it () =
+  with_cache (fun cache_dir shell_run ->
+    let url = "https://fixture.invalid/retried-twice.png" in
+    let first = png_header ^ "first" and second = png_header ^ "second" in
+    let retry run =
+      Cache.invalidate_download ~cache_dir url;
+      unwrap (Cache.download ~force_fetch:true ~run ~cache_dir url) in
+    serve cache_dir first;
+    let later_retry = ref None in
+    let run = run_then ~shell_run (fun () ->
+      serve cache_dir second;
+      later_retry := Some (retry shell_run)) in
+    check string "the first retry receives its own response" first
+      (Cache.download_bytes (retry run));
+    check (option string) "the second retry receives its own response" (Some second)
+      (Option.map Cache.download_bytes !later_retry);
+    check string "a later read gets the second retry's response" second
+      (Cache.download_bytes (unwrap (Cache.download ~run:shell_run ~cache_dir url)));
+    check string "from the cache" "xx" (read_file (Filename.concat cache_dir "fetches")))
+
+let test_a_failed_retry_keeps_its_error_and_the_earlier_body_out () =
+  with_cache (fun cache_dir shell_run ->
+    let url = "https://fixture.invalid/failed-retry.png" in
+    let earlier = png_header ^ "earlier" and later = png_header ^ "later" in
+    serve cache_dir earlier;
+    let retry = ref None in
+    let run = run_then ~shell_run (fun () ->
+      Cache.invalidate_download ~cache_dir url;
+      executable cache_dir "curl" "exit 22";
+      retry := Some (Cache.download ~force_fetch:true ~run:shell_run ~cache_dir url)) in
+    let late = unwrap (Cache.download ~run ~cache_dir url) in
+    check string "the earlier download keeps its own body" earlier (Cache.download_bytes late);
+    check bool "the retry reports the server's refusal" true
+      (!retry = Some (Error (Cache.Fetch_failed Cache.Http_error_status)));
+    serve cache_dir later;
+    check string "a later read fetches instead of reusing the earlier body" later
+      (Cache.download_bytes (unwrap (Cache.download ~run:shell_run ~cache_dir url))))
+
 let test_late_conversion_cannot_poison_a_refreshed_body () =
   with_cache (fun cache_dir shell_run ->
     let url = "https://fixture.invalid/concurrent.bmp" in
@@ -1341,6 +1407,12 @@ let () =
             test_download_owns_its_bytes_across_replacement
         ; test_case "explicit fetch bypasses a republished body" `Quick
             test_explicit_fetch_bypasses_a_republished_body
+        ; test_case "a download begun before a retry does not replace it" `Quick
+            test_a_download_that_began_before_a_retry_does_not_replace_it
+        ; test_case "a retry begun before another retry does not replace it" `Quick
+            test_a_retry_that_began_before_another_retry_does_not_replace_it
+        ; test_case "a failed retry keeps its error and the earlier body out" `Quick
+            test_a_failed_retry_keeps_its_error_and_the_earlier_body_out
         ; test_case "late conversion cannot poison refreshed input" `Quick
             test_late_conversion_cannot_poison_a_refreshed_body
         ; test_case "invalid converted cache is not reused" `Quick

@@ -104,18 +104,16 @@ let rec atomic_update atomic f =
 
 let rec atomic_update_with_result atomic f =
   let old_val = Atomic.get atomic in
-  let new_val, result, rollback = f old_val in
+  let new_val, result = f old_val in
   if Atomic.compare_and_set atomic old_val new_val then result
   else begin
-    rollback ();
     observe_cas_retry ();
     atomic_update_with_result atomic f
   end
 
 type lock_entry = {
   lock : Cross_context_mutex.t;
-  last_used : float Atomic.t;
-  active : int Atomic.t;   (** Number of fibers currently holding or waiting on this mutex *)
+  active : int;   (** Number of fibers/threads currently holding or waiting on this mutex *)
 }
 
 type table_state = {
@@ -123,60 +121,78 @@ type table_state = {
   entries : lock_entry SMap.t;
 }
 
-let max_lock_entries = 512
-let stale_lock_seconds = 600.0
-
 let table : table_state Atomic.t = Atomic.make { version = 0; entries = SMap.empty }
 
-(* Bump the published version whenever the map shape changes so a structural
-   A -> B -> A cycle cannot satisfy a stale CAS with the old snapshot. *)
+(* Bump the published version whenever the map shape or active count changes so
+   a structural A -> B -> A cycle cannot satisfy a stale CAS with the old snapshot. *)
 let publish_entries state entries =
   if entries == state.entries then state
   else { version = state.version + 1; entries }
 
-(** Remove entries unused for [stale_lock_seconds] when table exceeds
-    [max_lock_entries]. *)
-let prune_stale_entries () =
-  atomic_update table (fun state ->
-    if SMap.cardinal state.entries > max_lock_entries then
-      let now = Time_compat.now () in
-      let entries = SMap.filter (fun _path entry ->
-        Atomic.get entry.active > 0
-        || now -. Atomic.get entry.last_used <= stale_lock_seconds
-      ) state.entries in
-      publish_entries state entries
-    else state
-  )
+(* Canonicalize the nearest existing ancestor directory and reattach any
+   not-yet-created segments plus the leaf basename. Never call [realpath]
+   on the target file itself so nonexistent paths and leaf symlinks do not
+   fail or diverge, while symlinked parent directories share one entry. *)
+let canonical_table_key path =
+  let rec strip_trailing_slashes s =
+    let len = String.length s in
+    if len > 1 && Char.equal s.[len - 1] '/'
+    then strip_trailing_slashes (String.sub s 0 (len - 1))
+    else s
+  in
+  let trimmed = strip_trailing_slashes path in
+  if String.equal trimmed "" || String.equal trimmed "/"
+  then trimmed
+  else (
+    let rec resolve_dir dir suffix =
+      match Unix.realpath dir with
+      | real_dir -> List.fold_left Filename.concat real_dir suffix
+      | exception Unix.Unix_error _ ->
+        let parent = Filename.dirname dir in
+        if String.equal parent dir
+        then List.fold_left Filename.concat dir suffix
+        else resolve_dir parent (Filename.basename dir :: suffix)
+    in
+    if String.equal trimmed "." || String.equal trimmed ".."
+    then resolve_dir trimmed []
+    else
+      Filename.concat
+        (resolve_dir (Filename.dirname trimmed) [])
+        (Filename.basename trimmed))
 
-(** Get or create a lock entry for the given file path.
-    Increments [active] to prevent prune_stale_entries from removing
-    in-use entries (see TLA+ FileLockStarvation spec). *)
-let get_entry path =
-  prune_stale_entries ();
-  let entry =
+(** Reserve the lock entry for [raw_path] via a pure CAS increment of [active]. *)
+let get_entry raw_path =
+  let path = canonical_table_key raw_path in
+  let lock =
     atomic_update_with_result table (fun state ->
       match SMap.find_opt path state.entries with
       | Some entry ->
-        (* Publish a new version so a stale prune CAS cannot erase this reservation. *)
-        Atomic.set entry.last_used (Time_compat.now ());
-        Atomic.incr entry.active;
-        ( { state with version = state.version + 1 }
-        , entry
-        , fun () -> ignore (Atomic.fetch_and_add entry.active (-1)) )
+        let updated = { entry with active = entry.active + 1 } in
+        let entries = SMap.add path updated state.entries in
+        (publish_entries state entries, updated.lock)
       | None ->
         let entry =
           { lock = Cross_context_mutex.create ()
-          ; last_used = Atomic.make (Time_compat.now ())
-          ; active = Atomic.make 1
+          ; active = 1
           }
         in
         let entries = SMap.add path entry state.entries in
-        (publish_entries state entries, entry, Fun.id))
+        (publish_entries state entries, entry.lock))
   in
-  entry
+  (path, lock)
 
-let release_entry entry =
-  ignore (Atomic.fetch_and_add entry.active (-1))
+(** Release a reservation on [path], evicting the entry when [active] reaches 0. *)
+let release_entry path =
+  atomic_update table (fun state ->
+    match SMap.find_opt path state.entries with
+    | None -> state
+    | Some entry ->
+      let entries =
+        if entry.active <= 1
+        then SMap.remove path state.entries
+        else SMap.add path { entry with active = entry.active - 1 } state.entries
+      in
+      publish_entries state entries)
 
 let run_blocking_lock_op f = Eio_guard.run_in_systhread ~label:"file-lock-op" f
 
@@ -223,15 +239,25 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     (try Unix.close fd with Unix.Unix_error _ -> ());  (* re-raises below *)
     raise exn
 
+let rec openfile_no_eintr path mode perm =
+  try Unix.openfile path mode perm with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> openfile_no_eintr path mode perm
+
+let rec try_tlock_no_eintr fd =
+  try
+    Unix.lockf fd Unix.F_TLOCK 0;
+    true
+  with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> try_tlock_no_eintr fd
+  | Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> false
+
 (** Fiber-friendly wrapper around [acquire_flock_retry].
-    Opening/closing the descriptor uses a systhread, and the F_TLOCK attempt
-    also runs in a systhread to avoid blocking the Eio domain on filesystems
-    that do not honor the non-blocking contract reliably. Retry sleep yields
-    to the Eio scheduler when a clock is available and otherwise sleeps in a
-    systhread so the calling fiber does not block the domain. *)
+    Runs non-blocking [F_TLOCK] directly without dispatching to [run_in_systhread]
+    while holding an in-process mutex (avoiding systhread-pool starvation).
+    Retry sleep yields to the Eio scheduler when a clock is available. *)
 let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = retry_sleep_sec) ~caller () =
-  let fd = run_blocking_lock_op (fun () -> Unix.openfile lock_path mode perm) in
+  let fd = openfile_no_eintr lock_path mode perm in
   let started_at = Time_compat.now () in
   let rec acquire attempts =
     if attempts <= 0 then begin
@@ -240,15 +266,7 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
       raise (Flock_timeout { caller; path = lock_path; attempts = max_attempts })
     end
     else
-      let success =
-        run_blocking_lock_op (fun () ->
-            try
-              Unix.lockf fd Unix.F_TLOCK 0;
-              true
-            with
-            | Unix.Unix_error (Unix.EAGAIN, _, _)
-            | Unix.Unix_error (Unix.EACCES, _, _) -> false)
-      in
+      let success = try_tlock_no_eintr fd in
       if success then begin
         observe_lock_attempt ~caller
           ~retries:(max_attempts - attempts) ~started_at ~outcome:"acquired";
@@ -257,41 +275,45 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
       else begin
         (match clock with
          | Some c -> Eio.Time.sleep c sleep_sec
-         | None -> run_blocking_lock_op (fun () -> Unix.sleepf sleep_sec));
+         | None ->
+           (match Eio_guard.execution_context () with
+            | Eio_guard.Eio_fiber ->
+              (try Eio_unix.sleep sleep_sec with
+               | Effect.Unhandled _ -> Eio.Fiber.yield ())
+            | Eio_guard.Non_eio -> Unix.sleepf sleep_sec));
         acquire (attempts - 1)
       end
   in
   try acquire max_attempts
   with exn ->  (* re-raises below *)
-    run_blocking_lock_op (fun () -> try Unix.close fd with Unix.Unix_error _ -> ());
-    raise exn
+    let bt = Printexc.get_raw_backtrace () in
+    (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+    (try Unix.close fd with Unix.Unix_error _ -> ());
+    Printexc.raise_with_backtrace exn bt
 
 let acquire_flock_fd ?clock lock_path =
   acquire_flock_retry_cooperative ?clock ~lock_path
-    ~mode:[ Unix.O_CREAT; Unix.O_WRONLY ] ~perm:0o644
+    ~mode:[ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_CLOEXEC ] ~perm:0o644
     ~caller:"File_lock_eio" ()
 
 let release_flock_fd fd =
-  run_blocking_lock_op (fun () ->
-      (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
-      Unix.close fd)
-
-let with_entry_lock entry f = Cross_context_mutex.with_lock entry.lock f
+  (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+  Unix.close fd
 
 (** Run [f] while holding only the cross-context per-path mutex.
     Use this for in-memory backends that need single-process fiber
     serialization but do not have a real filesystem artifact to flock. *)
 let with_mutex path f =
-  let entry = get_entry path in
+  let key, lock = get_entry path in
   Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
-    ~finally:(fun () -> release_entry entry)
-    (fun () -> with_entry_lock entry f)
+    ~finally:(fun () -> release_entry key)
+    (fun () -> Cross_context_mutex.with_lock lock f)
 
 let try_with_mutex path f =
-  let entry = get_entry path in
+  let key, lock = get_entry path in
   Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
-    ~finally:(fun () -> release_entry entry)
-    (fun () -> Cross_context_mutex.try_with_lock entry.lock (fun () ->
+    ~finally:(fun () -> release_entry key)
+    (fun () -> Cross_context_mutex.try_with_lock lock (fun () ->
       match Eio_guard.execution_context () with
       | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
       | Eio_guard.Non_eio -> f ()))
@@ -304,24 +326,25 @@ let lock_file_path path = path ^ lock_suffix
     retries; sleep/yield stays scheduler-friendly whether or not a clock
     is provided. Max 200 attempts (~2s with sleeps). *)
 let with_lock ?clock path f =
+  let canonical = canonical_table_key path in
   let run_with_flock () =
-    let lock_path = lock_file_path path in
+    let lock_path = lock_file_path canonical in
     let dir = Filename.dirname lock_path in
     if not (Sys.file_exists dir) then
       (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     let fd = acquire_flock_fd ?clock lock_path in
-    Common.protect ~module_name:"file_lock_eio" ~finally_label:"finalizer"
+    Fun.protect
       ~finally:(fun () -> release_flock_fd fd)
       f
   in
-  with_mutex path (fun () -> run_with_flock ())
+  with_mutex canonical (fun () -> run_with_flock ())
 
 let unix_failure (error, operation, argument) =
   { error; operation; argument }
 
 let close_fd_result fd =
   try
-    run_blocking_lock_op (fun () -> Unix.close fd);
+    Unix.close fd;
     Ok ()
   with
   | Unix.Unix_error (error, operation, argument) ->
@@ -330,7 +353,7 @@ let close_fd_result fd =
 let release_durable_fd_result fd =
   let unlock =
     try
-      run_blocking_lock_op (fun () -> Unix.lockf fd Unix.F_ULOCK 0);
+      Unix.lockf fd Unix.F_ULOCK 0;
       Ok ()
     with
     | Unix.Unix_error (error, operation, argument) ->
@@ -382,13 +405,12 @@ let open_durable_lock_file ~execution_context lock_path =
   let result =
     try
       Ok
-        (run_blocking_lock_op (fun () ->
-           let fd =
-             Unix.openfile lock_path
-               [ Unix.O_CLOEXEC; Unix.O_CREAT; Unix.O_WRONLY ] 0o644
-           in
-           Atomic.set opened_fd (Some fd);
-           fd))
+        (let fd =
+           openfile_no_eintr lock_path
+             [ Unix.O_CLOEXEC; Unix.O_CREAT; Unix.O_WRONLY ] 0o644
+         in
+         Atomic.set opened_fd (Some fd);
+         fd)
     with
     | Unix.Unix_error (error, operation, argument) ->
       Error (unix_failure (error, operation, argument))
@@ -404,12 +426,13 @@ let open_durable_lock_file ~execution_context lock_path =
 
 (* One non-blocking attempt at the process lock: [Ok false] when another
    process holds it. *)
-let try_process_lock fd ~process_lock_held =
+let rec try_process_lock fd ~process_lock_held =
   try
-    run_blocking_lock_op (fun () -> Unix.lockf fd Unix.F_TLOCK 0);
+    Unix.lockf fd Unix.F_TLOCK 0;
     Atomic.set process_lock_held true;
     Ok true
   with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> try_process_lock fd ~process_lock_held
   | Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> Ok false
   | Unix.Unix_error (error, operation, argument) ->
     Error (unix_failure (error, operation, argument))
@@ -544,11 +567,11 @@ type 'a durable_lock_attempt =
   | Lock_attempted of 'a durable_lock_observation
 
 let try_with_durable_lock_observed ~lock_path f =
-  let entry = get_entry lock_path in
+  let key, lock = get_entry lock_path in
   Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
-    ~finally:(fun () -> release_entry entry)
+    ~finally:(fun () -> release_entry key)
     (fun () ->
-      match Cross_context_mutex.try_with_lock entry.lock (fun () ->
+      match Cross_context_mutex.try_with_lock lock (fun () ->
         let execution_context = Eio_guard.execution_context () in
         match open_durable_lock_file ~execution_context lock_path with
         | Error cause ->
@@ -601,9 +624,10 @@ let with_durable_lock ~lock_path f =
 
 module For_testing = struct
   let holders_and_waiters ~lock_path =
-    match SMap.find_opt lock_path (Atomic.get table).entries with
+    let key = canonical_table_key lock_path in
+    match SMap.find_opt key (Atomic.get table).entries with
     | None -> 0
-    | Some entry -> Atomic.get entry.active
+    | Some entry -> entry.active
 
   let with_durable_lock_observed_with_release_failure
       ~release_failure

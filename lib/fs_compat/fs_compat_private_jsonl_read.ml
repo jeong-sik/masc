@@ -46,12 +46,12 @@ let read_private_jsonl_slice_locked_with_io ~io path ~from =
   else
     try
       test_exec_home_guard ~op:"read_private_jsonl_slice_locked" path;
-      let path_mu = get_append_path_mutex path in
       run_blocking_private_file_transaction
         ~label:"fs-compat-private-jsonl-read"
         ~path
         (fun () ->
-           Stdlib.Mutex.protect path_mu (fun () ->
+           with_append_path_mutex path (fun () ->
+             evict_inactive_cached_writer_for_path path;
              match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 with
              | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
                if from = 0
@@ -170,12 +170,12 @@ let read_private_jsonl_locked_with_errors
   in
   try
     test_exec_home_guard ~op:"read_private_jsonl_rows_locked" path;
-    let path_mu = get_append_path_mutex path in
     run_blocking_private_file_transaction
       ~label:"fs-compat-private-jsonl-rows-read"
       ~path
       (fun () ->
-         Stdlib.Mutex.protect path_mu (fun () ->
+         with_append_path_mutex path (fun () ->
+           evict_inactive_cached_writer_for_path path;
            match capture Open_transaction_data (fun () ->
              match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 with
              | fd -> Some fd

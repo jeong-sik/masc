@@ -131,7 +131,7 @@ let record ~config ~keeper ~turn_ref (proposal : proposal) = protect (fun () ->
   let evidence_sha256 = evidence_sha256 post in
   let payload = Event.prepare ~decision_id ~evidence_sha256
       ~post_id:(Board.Post_id.to_string post.id) ~goal_ids ~agent:keeper ~turn_ref proposal in
-  Workspace_utils.with_file_lock config (Filename.concat (events_root config) "fusion-decision.lock") (fun () ->
+  Workspace_utils.with_file_lock config (Filename.concat (events_root config) "fusion-decision") (fun () ->
     let* existing = read_events ~config ~run_id:proposal.run_id in
     match List.find_opt (fun event -> String.equal (Event.decision_id event) decision_id) existing with
     | Some event ->

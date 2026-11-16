@@ -9,33 +9,43 @@ let create () =
   }
 ;;
 
-let rec lock_cooperatively mutex =
+let cooperative_yield spins =
+  if spins < 4
+  then Eio.Fiber.yield ()
+  else (
+    try Eio_unix.sleep 0.001 with
+    | Effect.Unhandled _ -> Eio.Fiber.yield ())
+;;
+
+let rec lock_cooperatively mutex spins =
   if Stdlib.Mutex.try_lock mutex
   then ()
   else (
-    Eio.Fiber.yield ();
-    (lock_cooperatively [@tailcall]) mutex)
+    cooperative_yield spins;
+    (lock_cooperatively [@tailcall]) mutex (spins + 1))
 ;;
 
 type cancellation_mode =
   | Cancellable
   | Durable
 
-(* [use_ro] is still exclusive; unlike [use_rw] it releases rather than poisons
-   the gate when the callback raises. The gate carries no mutable resource state
-   of its own, and the Stdlib mutex is released by the [Fun.protect] finalizer
-   before any callback exception is propagated. *)
+(* Explicit [Eio.Mutex.lock] + [Fun.protect ~finally:Eio.Mutex.unlock] provides
+   exclusive fiber mutual exclusion without [use_rw]'s exception poisoning, and
+   releases both gates in strict reverse order when the callback raises. *)
 let with_eio_lock cancellation_mode t f =
-  Eio.Mutex.use_ro t.eio_gate (fun () ->
-    lock_cooperatively t.cross_context_mutex;
-    let run_locked () =
-      Fun.protect
-        ~finally:(fun () -> Stdlib.Mutex.unlock t.cross_context_mutex)
-        f
-    in
-    match cancellation_mode with
-    | Cancellable -> run_locked ()
-    | Durable -> Eio.Cancel.protect run_locked)
+  Eio.Mutex.lock t.eio_gate;
+  Fun.protect
+    ~finally:(fun () -> Eio.Mutex.unlock t.eio_gate)
+    (fun () ->
+       lock_cooperatively t.cross_context_mutex 0;
+       let run_locked () =
+         Fun.protect
+           ~finally:(fun () -> Stdlib.Mutex.unlock t.cross_context_mutex)
+           f
+       in
+       match cancellation_mode with
+       | Cancellable -> run_locked ()
+       | Durable -> Eio.Cancel.protect run_locked)
 ;;
 
 let with_lock t f =

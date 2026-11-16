@@ -1076,9 +1076,13 @@ val sync_directory_capability
   :  _ Eio.Path.t
   -> (unit, capability_directory_sync_error) result
 
-(** [true] iff [name] matches the canonical [.atomic_*.tmp] pattern produced by
-    this module. Exposed for tests and recovery sweeps. *)
+(** [true] iff [name] matches canonical unpublished staging patterns
+    ([.atomic_*.tmp] and [.private_jsonl_*.stage]) produced by this module.
+    Exposed for tests and recovery sweeps. *)
 val is_atomic_orphan_name : string -> bool
+
+(** Acquire a non-blocking exclusive stage [flock] on [fd]. Test-only. *)
+val try_lock_stage_fd_for_testing : Unix.file_descr -> bool
 
 type atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
@@ -2304,3 +2308,11 @@ val reset_fd_cache_for_testing : unit -> unit
     creation, HOME guards, and per-path write serialization stay composed
     at the public append boundary. *)
 val with_cached_writer_for_testing : string -> (out_channel -> 'a) -> 'a
+
+(** Current number of live entries in the per-path append mutex table.
+    Test-only — verifies refcounted cleanup leaves zero leaked entries. *)
+val append_path_mutex_count_for_testing : unit -> int
+
+(** Canonical per-path mutex key resolved via the nearest existing parent
+    directory [realpath] + leaf basename. Test-only. *)
+val canonical_append_mutex_path_for_testing : string -> string

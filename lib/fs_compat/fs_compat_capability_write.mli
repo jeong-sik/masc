@@ -537,6 +537,8 @@ val sync_directory_capability :
 
 val is_atomic_orphan_name : string -> bool
 
+val try_lock_stage_fd_for_testing : Unix.file_descr -> bool
+
 type atomic_orphan_cleanup_operation = Atomic_orphan_cleanup.atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root
   | Read_cleanup_directory

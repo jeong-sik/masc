@@ -1979,6 +1979,73 @@ let test_private_jsonl_append_rejects_nonregular_and_hardlinked_targets () =
          (Fs_compat.load_file path))
 ;;
 
+let test_symlink_alias_mutex_convergence_and_zero_entry_leak () =
+  let root = Filename.temp_dir "masc_private_jsonl_alias_" "" in
+  let real_dir = Filename.concat root "real" in
+  let alias_dir = Filename.concat root "alias" in
+  Unix.mkdir real_dir 0o700;
+  Unix.symlink real_dir alias_dir;
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree root)
+    (fun () ->
+       let real_target = Filename.concat real_dir "goal_events.jsonl" in
+       let alias_target = Filename.concat alias_dir "goal_events.jsonl" in
+       let uncreated_sub_real =
+         Filename.concat (Filename.concat real_dir "pending_dir") "events.jsonl"
+       in
+       let uncreated_sub_alias =
+         Filename.concat (Filename.concat alias_dir "pending_dir") "events.jsonl"
+       in
+       check string "existing parent symlink converges before target exists"
+         (Fs_compat.canonical_append_mutex_path_for_testing real_target)
+         (Fs_compat.canonical_append_mutex_path_for_testing alias_target);
+       check string "uncreated child under symlinked parent converges"
+         (Fs_compat.canonical_append_mutex_path_for_testing uncreated_sub_real)
+         (Fs_compat.canonical_append_mutex_path_for_testing uncreated_sub_alias);
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Fun.protect
+         ~finally:Fs_compat.clear_fs
+         (fun () ->
+            Eio.Fiber.all
+              [ (fun () ->
+                   for i = 1 to 10 do
+                     match
+                       Fs_compat.append_private_jsonl_durable_locked_result
+                         real_target
+                         (Printf.sprintf "{\"writer\":\"real\",\"i\":%d}\n" i)
+                     with
+                     | Fs_compat.Private_file_succeeded () -> ()
+                     | _ -> fail "real_target append failed"
+                   done)
+              ; (fun () ->
+                   for i = 1 to 10 do
+                     match
+                       Fs_compat.append_private_jsonl_durable_locked_result
+                         alias_target
+                         (Printf.sprintf "{\"writer\":\"alias\",\"i\":%d}\n" i)
+                     with
+                     | Fs_compat.Private_file_succeeded () -> ()
+                     | _ -> fail "alias_target append failed"
+                   done)
+              ; (fun () ->
+                   for _ = 1 to 10 do
+                     ignore (List.length (Fs_compat.load_jsonl alias_target) : int);
+                     let count =
+                       Fs_compat.fold_jsonl_lines
+                         ~init:0
+                         ~f:(fun acc ~line_no:_ _json -> acc + 1)
+                         real_target
+                     in
+                     check bool "reader count non-negative" true (count >= 0)
+                   done)
+              ];
+            let rows = Fs_compat.load_jsonl real_target in
+            check int "all 20 durable rows committed" 20 (List.length rows);
+            check int "zero leaked mutex entries after release" 0
+              (Fs_compat.append_path_mutex_count_for_testing ())))
+;;
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; "--fifo-probe"; operation; path ] ->
@@ -2224,6 +2291,10 @@ let () =
             "private JSONL append cancellation settles once with receipt"
             `Quick
             test_private_jsonl_append_cancellation_settles_once_with_receipt
+        ; test_case
+            "symlink alias mutex convergence and zero entry leak"
+            `Quick
+            test_symlink_alias_mutex_convergence_and_zero_entry_leak
         ] )
     ]
 ;;

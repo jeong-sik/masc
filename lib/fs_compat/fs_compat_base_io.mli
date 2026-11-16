@@ -40,7 +40,17 @@ val read_channel_and_close :
 
 val write_all_and_close : Unix.file_descr -> string -> unit
 
-val get_append_path_mutex : string -> Mutex.t
+val canonical_append_mutex_path : string -> string
+
+val with_append_path_mutex : string -> (unit -> 'a) -> 'a
+
+val try_with_append_path_mutex : string -> (unit -> 'a) -> 'a option
+
+val evict_inactive_cached_writer_for_path : string -> unit
+
+val append_path_mutex_count_for_testing : unit -> int
+
+val canonical_append_mutex_path_for_testing : string -> string
 
 val append_file_unix : string -> string -> unit
 

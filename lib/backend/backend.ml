@@ -156,6 +156,9 @@ module FileSystem = struct
 
   let is_atomic_tmp_key key = String.ends_with ~suffix:atomic_tmp_suffix key
 
+  let is_sidecar_lock_key key =
+    String.ends_with ~suffix:File_lock_eio.lock_suffix key
+
   let validate_key key =
     if String.length key = 0 then
       Error (InvalidKey "Empty key not allowed")
@@ -209,17 +212,125 @@ module FileSystem = struct
   let run_blocking_file_op f =
     Eio_unix.run_in_systhread ~label:"backend-blocking-io" f
 
-  let with_locked_rw_fd path_str f =
-    run_blocking_file_op (fun () ->
-        let fd = File_lock_eio.acquire_flock_retry ~lock_path:path_str
-            ~mode:[ Unix.O_RDWR; Unix.O_CREAT ] ~perm:0o644
-            ~max_attempts:100 ~caller:"backend_eio" ()
-        in
-        Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer"
-          ~finally:(fun () ->
-            (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
-            Unix.close fd)
-        @@ fun () -> f fd)
+  (* Canonicalize the nearest existing ancestor directory and reattach any
+     not-yet-created segments plus the leaf basename. Never call [realpath]
+     on the target file itself: at lock acquisition time the file may not
+     exist yet, and a symlinked parent directory must converge to one key. *)
+  let canonicalize_parent_and_leaf path_str =
+    let rec strip_trailing_slashes s =
+      let len = String.length s in
+      if len > 1 && Char.equal s.[len - 1] '/'
+      then strip_trailing_slashes (String.sub s 0 (len - 1))
+      else s
+    in
+    let trimmed = strip_trailing_slashes path_str in
+    if String.equal trimmed "" || String.equal trimmed "/"
+    then trimmed
+    else (
+      let rec resolve_dir dir suffix =
+        match Unix.realpath dir with
+        | real_dir -> List.fold_left Filename.concat real_dir suffix
+        | exception Unix.Unix_error _ ->
+          let parent = Filename.dirname dir in
+          if String.equal parent dir
+          then List.fold_left Filename.concat dir suffix
+          else resolve_dir parent (Filename.basename dir :: suffix)
+      in
+      if String.equal trimmed "." || String.equal trimmed ".."
+      then resolve_dir trimmed []
+      else
+        Filename.concat
+          (resolve_dir (Filename.dirname trimmed) [])
+          (Filename.basename trimmed))
+
+  let release_sidecar_lock_fd lock_fd =
+    (try Unix.lockf lock_fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+    (try Unix.close lock_fd with Unix.Unix_error _ -> ())
+
+  (* Acquire a non-blocking [F_TLOCK] on the [.lock] sidecar without dispatching
+     to [run_in_systhread] while holding the in-process mutex (avoiding
+     systhread-pool starvation). Contention waits cooperatively via Eio clock. *)
+  let acquire_sidecar_lock_fd ?clock ~lock_path ~open_flags () =
+    let max_attempts = 100 in
+    let rec try_tlock fd =
+      try
+        Unix.lockf fd Unix.F_TLOCK 0;
+        true
+      with
+      | Unix.Unix_error (Unix.EINTR, _, _) -> try_tlock fd
+      | Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> false
+    in
+    let rec acquire_loop fd started_at attempts_left =
+      if attempts_left <= 0 then (
+        let elapsed_s = max 0.0 (Time_compat.now () -. started_at) in
+        (try
+           (Atomic.get File_lock_eio.on_lock_attempt_fn)
+             ~caller:"backend_eio"
+             ~retries:max_attempts
+             ~elapsed_s
+             ~outcome:"timeout"
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | _ -> ());
+        raise
+          (File_lock_eio.Flock_timeout
+             { caller = "backend_eio"; path = lock_path; attempts = max_attempts }))
+      else if try_tlock fd then (
+        Eio.Fiber.check ();
+        let elapsed_s = max 0.0 (Time_compat.now () -. started_at) in
+        (try
+           (Atomic.get File_lock_eio.on_lock_attempt_fn)
+             ~caller:"backend_eio"
+             ~retries:(max_attempts - attempts_left)
+             ~elapsed_s
+             ~outcome:"acquired"
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | _ -> ());
+        fd)
+      else (
+        (match clock with
+         | Some c -> Eio.Time.sleep c 0.01
+         | None -> File_lock_eio.wait_after_contention ());
+        acquire_loop fd started_at (attempts_left - 1))
+    in
+    let rec open_no_eintr () =
+      try Unix.openfile lock_path open_flags 0o644 with
+      | Unix.Unix_error (Unix.EINTR, _, _) -> open_no_eintr ()
+    in
+    let fd = open_no_eintr () in
+    let started_at = Time_compat.now () in
+    try acquire_loop fd started_at max_attempts with
+    | exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      release_sidecar_lock_fd fd;
+      Printexc.raise_with_backtrace exn bt
+
+  let with_locked_rw_fd ?clock path_str f =
+    let canonical_path =
+      run_blocking_file_op (fun () -> canonicalize_parent_and_leaf path_str)
+    in
+    let lock_path = File_lock_eio.lock_file_path canonical_path in
+    let rec open_data_no_eintr () =
+      try
+        Unix.openfile canonical_path
+          [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o644
+      with
+      | Unix.Unix_error (Unix.EINTR, _, _) -> open_data_no_eintr ()
+    in
+    File_lock_eio.with_mutex canonical_path (fun () ->
+      let lock_fd =
+        acquire_sidecar_lock_fd ?clock ~lock_path
+          ~open_flags:[ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_CLOEXEC ] ()
+      in
+      Fun.protect
+        ~finally:(fun () -> release_sidecar_lock_fd lock_fd)
+        (fun () ->
+          let data_fd = open_data_no_eintr () in
+          Fun.protect
+            ~finally:(fun () ->
+              try Unix.close data_fd with Unix.Unix_error _ -> ())
+            (fun () -> f data_fd)))
 
   (** Write all bytes to fd, retrying on partial writes and EINTR.
       Raises [Unix.Unix_error] if a zero-length write occurs (disk full). *)
@@ -355,6 +466,7 @@ module FileSystem = struct
              acc
     | `Regular_file ->
         if (not (is_atomic_tmp_key logical_prefix))
+           && (not (is_sidecar_lock_key logical_prefix))
            && (requested_prefix = ""
                || String.starts_with ~prefix:requested_prefix logical_prefix)
         then
@@ -820,7 +932,7 @@ module FileSystem = struct
        | None -> ());
 
       let path_str = Eio.Path.native_exn path in
-      with_locked_rw_fd path_str @@ fun fd ->
+      with_locked_rw_fd ?clock:t.clock path_str @@ fun fd ->
       let _ = Unix.lseek fd 0 Unix.SEEK_SET in
       let buf = Bytes.create 32 in
       let n = Unix.read fd buf 0 32 in
@@ -840,28 +952,56 @@ module FileSystem = struct
       Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
 
   (** Atomically get the current counter value without incrementing.
-      Reads the file without locking — the counter is a small integer
-      written atomically by [atomic_increment] (which holds an exclusive
-      lock).  A lockless read avoids EBADF on Linux where [F_TLOCK] on
-      an [O_RDONLY] fd is rejected per POSIX. *)
+      Serializes through the per-path in-process mutex and, when present,
+      the sidecar [.lock] file so concurrent [ftruncate] + [write] cycles
+      in [atomic_increment] never expose a transient 0-byte read, and closing
+      the read descriptor never drops a writer's POSIX record lock. *)
   let atomic_get t key =
     let* path = key_to_path t key in
     try
       let path_str = Eio.Path.native_exn path in
-      run_blocking_file_op (fun () ->
+      let canonical_path =
+        run_blocking_file_op (fun () -> canonicalize_parent_and_leaf path_str)
+      in
+      let lock_path = File_lock_eio.lock_file_path canonical_path in
+      let read_counter_file () =
+        let rec open_ro_no_eintr () =
+          try
+            Unix.openfile canonical_path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0o644
+          with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> open_ro_no_eintr ()
+        in
+        let rec read_no_eintr fd buf ofs len =
+          try Unix.read fd buf ofs len with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> read_no_eintr fd buf ofs len
+        in
         try
-          let fd = Unix.openfile path_str [ Unix.O_RDONLY ] 0o644 in
-          Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer"
-            ~finally:(fun () -> Unix.close fd)
-          @@ fun () ->
-          let buf = Bytes.create 32 in
-          let n = Unix.read fd buf 0 32 in
-          if n = 0 then Ok 0
-          else
-            Ok
-              (Safe_ops.int_of_string_with_default ~default:0
-                 (String.trim (Bytes.sub_string buf 0 n)))
-        with Unix.Unix_error (Unix.ENOENT, _, _) -> Ok 0)
+          let fd = open_ro_no_eintr () in
+          Fun.protect
+            ~finally:(fun () ->
+              try Unix.close fd with Unix.Unix_error _ -> ())
+            (fun () ->
+              let buf = Bytes.create 32 in
+              let n = read_no_eintr fd buf 0 32 in
+              if n = 0 then Ok 0
+              else
+                Ok
+                  (Safe_ops.int_of_string_with_default ~default:0
+                     (String.trim (Bytes.sub_string buf 0 n))))
+        with
+        | Unix.Unix_error (err, _, _) when err = Unix.ENOENT -> Ok 0
+      in
+      File_lock_eio.with_mutex canonical_path (fun () ->
+        match
+          acquire_sidecar_lock_fd ?clock:t.clock ~lock_path
+            ~open_flags:[ Unix.O_WRONLY; Unix.O_CLOEXEC ] ()
+        with
+        | lock_fd ->
+          Fun.protect
+            ~finally:(fun () -> release_sidecar_lock_fd lock_fd)
+            read_counter_file
+        | exception Unix.Unix_error (err, _, _) when err = Unix.ENOENT ->
+          read_counter_file ())
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error (IOError (Printf.sprintf "atomic_get failed: %s" (Printexc.to_string exn)))
 
@@ -887,7 +1027,7 @@ module FileSystem = struct
        | None -> ());
 
       let path_str = Eio.Path.native_exn path in
-      with_locked_rw_fd path_str @@ fun fd ->
+      with_locked_rw_fd ?clock:t.clock path_str @@ fun fd ->
       let _ = Unix.lseek fd 0 Unix.SEEK_SET in
       let stat = Unix.fstat fd in
       let size = stat.Unix.st_size in

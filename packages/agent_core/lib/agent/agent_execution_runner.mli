@@ -44,6 +44,7 @@ val store
 val locator_to_yojson : locator -> Yojson.Safe.t
 val locator_of_yojson : Yojson.Safe.t -> (locator, string) result
 val locator_run_id : locator -> Execution_event.Run_id.t
+val locator_scope : locator -> Execution_agent_scope.scope_locator
 
 val with_fresh
   :  store

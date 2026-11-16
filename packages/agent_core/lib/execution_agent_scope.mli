@@ -279,6 +279,10 @@ val abort : t -> abort_reason -> (unit, error) result
     automatically because its external effect may already have happened. *)
 val terminal_recovery_action : t -> (recovery_action, error) result
 
+(** The same classification with the evidence it was read from, as
+    {!recovery_evidence_from_tree} derives it for this scope's root. *)
+val terminal_recovery_evidence : t -> (recovery_evidence, error) result
+
 (** Read-only committed Tool attempt/result observations, across the complete
     recursive journal. Each observation includes its exact source cursor. *)
 type bus_observation =

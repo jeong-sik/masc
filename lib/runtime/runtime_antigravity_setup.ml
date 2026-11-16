@@ -1,7 +1,7 @@
 type t = Runtime_antigravity_home.t
 type error = Private_home_unavailable | Sign_in_required | Unsafe_credential
   | Unrecognized_credential | Unrecognized_managed_credential | Command_failed | Invalid_catalog
-  | Keychain_unavailable
+  | Keychain_unavailable | Login_write_in_progress
 let error_message = function
   | Private_home_unavailable -> "Antigravity's private account directory is unavailable."
   | Sign_in_required -> "Sign in with the official Antigravity CLI, then continue setup."
@@ -13,6 +13,7 @@ let error_message = function
   | Command_failed -> "The official Antigravity account command did not complete."
   | Invalid_catalog -> "The official Antigravity model catalog has an unsupported response format."
   | Keychain_unavailable -> "The selected Antigravity keychain could not be read or its private account could not be switched. Unlock that account and retry; no fallback account was selected."
+  | Login_write_in_progress -> "The Antigravity client is updating its saved login."
 open Result.Syntax
 let prepare ~host ~runtime_root ~account_id =
   Runtime_antigravity_home.prepare_for_login ~host ~runtime_root ~owner_leaf:account_id
@@ -30,9 +31,16 @@ let prepare_from_credential_file ~host ~runtime_root ~account_id ~oauth_source =
   |> Result.map_error credential_file_error
 let home_dir = Runtime_antigravity_home.home_dir
 let environment home = Runtime_antigravity.official_client_environment ~home_dir:(home_dir home) ()
-let private_file path =
+let private_file ?(while_running=false) path =
   match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:(Filename.dirname path) path with
-  | Error _ -> Error Unsafe_credential
+  | Error {failure; close_failure} ->
+    (match failure, close_failure with
+     | Fs_compat.Filesystem_identity_changed _, None when while_running ->
+       Error Login_write_in_progress
+     | Fs_compat.(Ownership_boundary_rejected _ | Path_is_not_regular_file _
+       | Filesystem_identity_changed _ | Owned_path_owner_mismatch _
+       | Owned_path_writable_by_others _ | Owned_file_operation_failed _), (None | Some _) ->
+       Error Unsafe_credential)
   | Ok None -> Ok None
   | Ok (Some file) when file.snapshot.owner_uid <> Unix.geteuid () || file.snapshot.permissions <> 0o600 ->
     Error Unsafe_credential
@@ -47,12 +55,12 @@ let keychain_present path =
     else Error Unsafe_credential
   with Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
      | Unix.Unix_error _ -> Error Unsafe_credential
-let import_with ~read_keychain ~clear_keychain ~source_home home =
+let read_signed_in ~while_running ~read_keychain ~source_home =
   if Filename.is_relative source_home then Error Unsafe_credential else
   let source_keychain = keychain_path source_home in
   let* exists = keychain_present source_keychain in
   let selected = if exists then read_keychain ~path:source_keychain else Apple_keychain.Missing in
-  let* contents = match selected with
+  match selected with
     | Apple_keychain.Found value ->
       (* The fallback file holds the login JSON; the keychain holds it as
          go-keyring stores it. A blank login is no sign-in, as a blank
@@ -64,8 +72,23 @@ let import_with ~read_keychain ~clear_keychain ~source_home home =
          Error Unrecognized_credential)
     | Unavailable -> Error Keychain_unavailable
     | Missing | Unsupported ->
-      let* file = private_file (canonical_file source_home) in
-      (match file with Some contents -> Ok contents | None -> Error Sign_in_required) in
+      let* file = private_file ~while_running (canonical_file source_home) in
+      (match file with Some contents -> Ok contents | None -> Error Sign_in_required)
+let login_saved_with ~read_keychain home =
+  match read_signed_in ~while_running:true ~read_keychain ~source_home:(home_dir home) with
+  | Error Sign_in_required -> Ok false
+  | Error (Private_home_unavailable | Unsafe_credential | Unrecognized_credential
+      | Unrecognized_managed_credential | Command_failed | Invalid_catalog
+      | Keychain_unavailable | Login_write_in_progress as error) -> Error error
+  | Ok contents ->
+    Runtime_antigravity_oauth_credential.account_email contents
+    |> Result.map (fun _ -> true)
+    |> Result.map_error (fun _ -> Unrecognized_credential)
+let login_saved home =
+  Eio_guard.run_in_systhread ~label:"antigravity-login-observation" (fun () ->
+    login_saved_with ~read_keychain:Apple_keychain.read home)
+let import_with ~read_keychain ~clear_keychain ~source_home home =
+  let* contents = read_signed_in ~while_running:false ~read_keychain ~source_home in
   (* Capture the selected account first, including capture_login where source and
      destination are identical. Clear only the managed destination's exact item;
      otherwise keyring-first CLI reads would ignore the newly copied fallback. *)
@@ -78,6 +101,7 @@ let import_with ~read_keychain ~clear_keychain ~source_home home =
 let import_signed_in ~source_home home =
   import_with ~read_keychain:Apple_keychain.read ~clear_keychain:Apple_keychain.clear ~source_home home
 module For_testing = struct
+  let login_saved_with = login_saved_with
   let import_with = import_with
   let credential_file_error = credential_file_error
 end

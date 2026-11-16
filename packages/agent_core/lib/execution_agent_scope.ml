@@ -879,13 +879,17 @@ let recovery_action_from_tree ~read_node ~root =
   |> Result.map (fun evidence -> evidence.recovery)
 ;;
 
-let terminal_recovery_action scope =
-  recovery_action_from_tree ~root:(Journal.run_root scope.run)
+let terminal_recovery_evidence scope =
+  recovery_evidence_from_tree ~root:(Journal.run_root scope.run)
     ~read_node:(fun node ->
       match Writer.find_node scope.writer node with
       | Error error -> Error (Scope_unavailable error)
       | Ok None -> Error (Resume_topology_mismatch "execution descendant disappeared")
       | Ok (Some view) -> Ok view)
+;;
+
+let terminal_recovery_action scope =
+  terminal_recovery_evidence scope |> Result.map (fun evidence -> evidence.recovery)
 ;;
 
 let record_provider_request_provenance provider provenance =

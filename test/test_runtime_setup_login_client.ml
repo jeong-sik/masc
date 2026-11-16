@@ -33,6 +33,7 @@ let isolated_native_login () = fixture (fun root _ ->
     check int "new login owns private directory" 0o700 ((Unix.stat home).st_perm land 0o777);
     check (list string) "official login command" argv (Login.argv ~cli_path:"fixture-cli" login);
     check bool "native device or code flow uses pipes" false (Login.is_pty login);
+    check bool "native login command exits itself" true (Option.is_none (Login.saved_login_check login));
     let env = Login.environment login |> ok in
     check (option string) "child selects new account" (Some home) (value env variable);
     check (option string) "ambient provider key omitted" None (value env "ANTHROPIC_API_KEY");
@@ -199,7 +200,56 @@ let a_new_logins_home_is_found_again () = fixture (fun root _ ->
   check bool "none for Antigravity" true
     (Result.is_error (Login.account_home ~runtime_root:root ~account_id:"acct-1" ~client:Login.Antigravity)))
 
+let antigravity_reauthentication_starts_without_a_login () = fixture (fun root env ->
+  let (_ : Runtime_account_access.host_account) =
+    Masc_test_deps.host_account Runtime_account_access.Antigravity in
+  let credential_file = Filename.concat root "selected-oauth" in
+  let contents = Masc_test_deps.antigravity_oauth_fixture "selected-account" in
+  Auth.save_private_text_file credential_file contents;
+  let reference, _ = Accounts.create ~workspace:root ~integration_id:"antigravity" ~cli_path:"agy"
+    ~import:(fun ~base_path:_ -> Ok {Accounts.credential_file; timeout_s=123.; catalog=`Null})
+    |> account_ok in
+  let existing = Accounts.resolve ~workspace:root ~integration_id:"antigravity" ~cli_path:"agy" reference
+    |> account_ok in
+  let login = Login.prepare ~runtime_root:root ~account_id:"reauthentication"
+    ~client:Login.Antigravity ~existing:(Some existing) |> ok in
+  check string "selected credential is unchanged" contents (Fs_compat.load_file credential_file);
+  let check_saved = match Login.saved_login_check login with
+    | Some check -> check | None -> fail "interactive login needs a completion observation" in
+  check (result bool string) "old credentials cannot skip authentication" (Ok false) (check_saved ());
+  let destination = Filename.concat (Login.home_dir login) ".gemini/antigravity-cli/antigravity-oauth-token" in
+  Auth.save_private_text_file destination "{";
+  check (result bool string) "an unfinished login does not kill its writer" (Ok false) (check_saved ());
+  let continued = ref false in
+  let module Session = Runtime_setup_login_session in
+  let session_result = Eio.Time.with_timeout (Eio.Stdenv.clock env) 10. (fun () ->
+    Ok (Session.with_session ~workspace:root ~actor:(Session.Agent "operator")
+    ~account_key:(Login.home_dir login) (fun session ->
+      Session.run ~saved_login:check_saved session ~env:(env :> Eio_unix.Stdenv.base)
+        ~child_env:(Login.environment login |> ok) ~cwd:(Login.home_dir login)
+        ~argv:["python3"; "-c";
+          "import os,sys,time\npath,login=sys.argv[1:]\n"
+          ^ "with open(path,'w') as f: f.write('{')\nprint('writing',flush=True)\n"
+          ^ "sys.stdin.readline()\nwith open(path,'w') as f: f.write(login)\n"
+          ^ "while True: time.sleep(1)\n";
+          destination; contents]
+        ~terminal:true ~is_closed:(fun () -> false) ~on_ready:(fun () -> ())
+        ~on_input_ready:(fun () -> ()) ~on_output:(fun _ ->
+          if not !continued then (
+            continued := true;
+            match Session.submit ~workspace:root ~actor:(Session.Agent "operator")
+              ~login_id:(Session.id session) (Session.Text "finish-sign-in") with
+            | Ok () -> () | Error error -> fail (Session.error_message error)))))) in
+  (match session_result with
+   | Ok (Ok ()) -> ()
+   | Ok (Error error) -> fail (Session.error_message error)
+   | Error `Timeout -> fail "saved login did not stop the interactive client");
+  check bool "the partial credential's producer continued" true !continued;
+  check (result bool string) "newly saved login ends authentication" (Ok true) (check_saved ());
+  check string "observation preserves the client's login" contents (Fs_compat.load_file destination))
+
 let () = run "official login adapters" ["selected accounts", [
+  test_case "Antigravity reauthentication has no prior login" `Quick antigravity_reauthentication_starts_without_a_login;
   test_case "native login isolation" `Quick isolated_native_login;
   test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;

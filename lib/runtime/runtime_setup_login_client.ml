@@ -87,9 +87,11 @@ let prepare ~runtime_root ~account_id ~client ~existing =
         Runtime_antigravity_setup.prepare ~host ~runtime_root ~account_id
         |> Result.map (fun home -> home, Runtime_antigravity.default_timeout_s)
         |> Result.map_error Runtime_antigravity_setup.error_message
-      | Some (Runtime_setup_accounts.Antigravity_account {credential_file; timeout_s}) ->
-        Runtime_antigravity_setup.prepare_from_credential_file ~host ~runtime_root
-          ~account_id ~oauth_source:credential_file
+      | Some (Runtime_setup_accounts.Antigravity_account {credential_file = _; timeout_s}) ->
+        (* This is a new sign-in, not an invocation on the selected credential.
+           Seeding it would start agy's conversation instead of authentication.
+           The previously selected credential remains available for recovery. *)
+        Runtime_antigravity_setup.prepare ~host ~runtime_root ~account_id
         |> Result.map (fun home -> home, timeout_s)
         |> Result.map_error Runtime_antigravity_setup.error_message
       | Some (Runtime_setup_accounts.Native_home _) ->
@@ -118,6 +120,20 @@ let environment = function
   | Antigravity_home {home; _} -> Ok (Runtime_antigravity_setup.environment home)
 
 let is_pty = function Native _ -> false | Antigravity_home _ -> true
+
+let saved_login_check = function
+  | Native _ -> None
+  | Antigravity_home {home; _} -> Some (fun () ->
+      match Runtime_antigravity_setup.login_saved home with
+      | Ok saved -> Ok saved
+      (* The running client may create/truncate/write its fallback file.
+         Only a complete, parsed login ends it. After client exit, observe
+         and publication still reject unreadable or unknown credentials. *)
+      | Error (Runtime_antigravity_setup.Login_write_in_progress | Unrecognized_credential) -> Ok false
+      | Error (Runtime_antigravity_setup.(Private_home_unavailable | Sign_in_required
+          | Unsafe_credential | Unrecognized_managed_credential | Command_failed
+          | Invalid_catalog | Keychain_unavailable) as error) ->
+        Error (Runtime_antigravity_setup.error_message error))
 
 let authorize ~account_request ~client ~account_home =
   let* captured = Runtime_official_account.capture ~client ~declaration:(Some account_home) in

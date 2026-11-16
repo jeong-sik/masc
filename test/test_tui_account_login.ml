@@ -355,6 +355,7 @@ let refreshed_model_selection () =
   t.provider <- Some provider; t.account_ref <- Some account;
   let initial = document [model 0,false; model 1,false; model 2,false] in
   ok (Login.models t initial);
+  ignore (Login.key t "a");
   t.cursor <- 1; ignore (Login.key t " "); t.cursor <- 2;
   check bool "refresh is distinct from first discovery" true (Login.key t "r"=Login.Refresh_models);
   Login.refreshing_models t;
@@ -382,7 +383,7 @@ let refreshed_model_selection () =
   check (list string) "bound, unsupported and removed models cannot be saved" [] t.selected_models;
   ok (Login.selected_account t provider (`Assoc ["account_ref",`String other]));
   ok (Login.models t initial);
-  check (list string) "another account starts with its own initial selection" ["0";"1";"2"] t.selected_models
+  check (list string) "another account does not inherit the previous selection" [] t.selected_models
 let model_refresh_failure () =
   let t = Login.create "codex" in
   t.provider <- Some provider; t.account_ref <- Some account;

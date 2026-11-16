@@ -383,14 +383,14 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
          row read here can be cancelled, transferred, or reprioritized
          without a second queue projection. Both are wire strings: the ref
          is a SHA-256 hex and the incarnation a decimal int64. *)
-      let base_detail =
+      let base_detail source_ref =
         match stimulus.payload with
         (* This inventory is public-read and has no authenticated Board
            reader. Even actors and post IDs disclose a private event. Exact
            source controls carry only opaque addresses; their effects remain
            on the authorized operator boundary. *)
         | Keeper_event_queue.Board_routing_pending _ | Board_signal _ | Board_attention _ ->
-          [ "source_ref", `String (Keeper_event_queue_state.source_snapshot_ref stimulus)
+          [ "source_ref", `String source_ref
           ; "source_incarnation", `String (Int64.to_string selection.admitted_revision) ]
         | Bootstrap | Fusion_completed _ | Schedule_due _ | Connector_attention _
         | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
@@ -399,7 +399,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
         [ "queue_index", `Int queue_index
         ; "post_id", `String stimulus.post_id
         ; ( "source_ref"
-          , `String (Keeper_event_queue_state.source_snapshot_ref stimulus) )
+          , `String source_ref )
         ; ( "source_incarnation"
           , `String (Int64.to_string selection.admitted_revision) )
         ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
@@ -440,6 +440,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
          go (queue_index + 1) acc rest
        | Some (wake, members) ->
          schedules_emitted := String_set.add wake.schedule_id !schedules_emitted;
+         let source_ref = Keeper_event_queue_state.source_snapshot_ref stimulus in
          let count = List.length members in
          let oldest_arrived_at, first_due, last_due =
            List.fold_left
@@ -452,7 +453,9 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
              members
          in
          (* Every member's exact address, in due order, so the operator
-            boundary can cancel or reprioritize any one of them from this row. *)
+             boundary can cancel or reprioritize any one of them from this row.
+             Grouping retains the original selections, including the queue-order
+             anchor, even when sorting moves it behind another member. *)
          let member_addresses =
            members
            |> List.sort (fun ((a : Keeper_event_queue.scheduled_wake), _) ((b : Keeper_event_queue.scheduled_wake), _) ->
@@ -460,7 +463,10 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
            |> List.map (fun ((member_wake : Keeper_event_queue.scheduled_wake), (member : Keeper_event_queue_state.pending_selection)) ->
                 `Assoc
                   [ ( "source_ref"
-                    , `String (Keeper_event_queue_state.source_snapshot_ref member.source) )
+                    , `String
+                        (if member == selection
+                         then source_ref
+                         else Keeper_event_queue_state.source_snapshot_ref member.source) )
                   ; ( "source_incarnation"
                     , `String (Int64.to_string member.admitted_revision) )
                   ; "due_at_unix", `Float member_wake.due_at
@@ -478,7 +484,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
               ~since:(Some oldest_arrived_at)
               ~detail:
                 (`Assoc
-                   (base_detail
+                   (base_detail source_ref
                     @ [ ("group_count", `Int count)
                       ; ("group_first_due_unix", `Float first_due)
                       ; ("group_last_due_unix", `Float last_due)
@@ -509,7 +515,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
               ~since:(Some oldest_arrived_at)
               ~detail:
                 (`Assoc
-                   (base_detail
+                   (base_detail (Keeper_event_queue_state.source_snapshot_ref stimulus)
                     @ [ ("group_count", `Int connector_count)
                       ; ( "group_event_ids"
                         , `List (List.map (fun id -> `String id) bounded) )
@@ -531,7 +537,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
            (row
               ~what:(stimulus_what stimulus)
               ~since:(Some stimulus.arrived_at)
-              ~detail:(`Assoc base_detail)
+              ~detail:(`Assoc (base_detail (Keeper_event_queue_state.source_snapshot_ref stimulus)))
               :: acc)
            rest))
   in

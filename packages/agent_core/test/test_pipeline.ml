@@ -2298,7 +2298,9 @@ let test_fmt_failure_keeps_durable_run fault () =
       | response :: rest -> responses := rest; Ok response
       (* Keep reporting outside the failed formatter. A replay still fails
          the result and the exact provider-call assertion below. *)
-      | [] -> Error (Error.Internal "tracer failure repeated a provider request")
+      | [] ->
+        Error (Llm_provider.Http_client.AcceptRejected
+          { reason = "tracer failure repeated a provider request" })
     in
     let transport = Llm_provider.Llm_transport.custom
       { complete_sync = (fun _request ->

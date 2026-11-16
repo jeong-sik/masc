@@ -921,6 +921,40 @@ class ReviewFindings(Base):
         self.host.run(self.flow)
         self.assertEqual(self.starts(fourth), {"board": {"after": "000003"}, "wiki": {"after": None, "since": 0.0}})
 
+    def test_a_source_put_back_falls_back_once_even_when_read_again_to_the_refused_cursor(self):
+        """No page was written after the cursor the first session left, so
+        the session that reads wiki again from the first opening stops at
+        that same cursor. The refusal came before that session, so the
+        session after it reads on from that cursor, not from the first
+        opening again (#52417)."""
+        self.host.wiki = [wiki_page("guide", 1, "a page of the wiki")]
+        both = BINDING | {"records": [BOARD, WIKI]}
+        first = self.compose("act-1", binding=both)
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(first).state, "asked")
+        self.host.board.append(post(4, "the next decision"))
+        produce = self.host.produce
+        self.host.produce = lambda request: (None if request["kind"] == "read_records" and request["source_id"] == "wiki"
+                                             else produce(request))
+        second = self.compose("act-2", binding=both)
+        self.host.run(self.flow)
+        (waiting,) = [r for r in self.flow.listing() if r["request_id"].startswith(second)]
+        self.assertEqual((waiting["source_id"], waiting["after"]), ("wiki", "000000"))
+        self.assertTrue(self.flow.deliver(waiting["request_id"], {
+            "status": "not_allowed", "reason": "source wiki is not granted to this installation"}))
+        self.assertEqual(self.session(second).state, "failed")
+        self.host.produce = produce
+        third = self.compose("act-3", binding=both)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(third).state, "asked")
+        self.assertEqual(self.starts(third)["wiki"], {"after": None, "since": 0.0})
+        self.host.listed.clear()
+        fourth = self.compose("act-4", binding=both)
+        self.host.author = lambda payload: None
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(fourth)["wiki"], {"after": "000000"})
+
     def test_a_source_taken_out_while_a_session_read_a_later_page_keeps_its_cursor(self):
         """Only the cursor the refused read asked for counts as refused. The
         session had read a page of wiki after the cursor the first session

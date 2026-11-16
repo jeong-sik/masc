@@ -734,7 +734,6 @@ let split_keeper_reply_chunks (text : string) : string list =
 let execute_keeper_stream_tool_streaming
       ~sw
       ~clock
-      ?auth_token:_
       ?on_event
       ?on_tool_stream_observation
       ?on_tool_result_ready
@@ -1264,7 +1263,7 @@ let publish_stream_events ~redact_text ~base_dir ~publish bridge_state scoped_ev
    selected at its persistence boundary; this function never infers either
    from a connector label or message content. *)
 let process_single_turn ~batch_binding ~user_row_origin ~submission
-    ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
+    ~state ~clock ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.t) =
@@ -1781,7 +1780,6 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
               execute_keeper_stream_tool_streaming
                 ~sw:request_sw
                 ~clock
-                ?auth_token
                 state ~agent_name ~message:direct_message
                 ~input_speaker:(input_speaker_of_request payload) ~on_event
                 ~on_tool_stream_observation
@@ -2866,7 +2864,6 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                      })
                 ~state
                 ~clock
-                ~auth_token:None
                 ~thread_id:operation_payload.source.thread_id
                 ~continuation_channel:operation_payload.source.continuation_channel
                 ~closed

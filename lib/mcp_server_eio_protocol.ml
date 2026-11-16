@@ -1353,7 +1353,7 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  (fun auth_token ->
+                  (fun _auth_token ->
                      match
                        Mcp_sdk_adapter_masc.dispatch_request
                          ~handle_call_tool_eio
@@ -1362,7 +1362,6 @@ let handle_request
                          ~sw
                          ~clock
                          ?mcp_session_id
-                         ?auth_token
                          json
                      with
                      | Some response -> response

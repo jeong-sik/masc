@@ -337,7 +337,9 @@ let test_lane_addon_records_keep_embedded_tool_blobs_live () =
           ~masc_dir:(Common.masc_dir_from_base_path ~base_path)
       in
       let directories =
-        [ "host-results"
+        [ "evidence"
+        ; "sampling-evidence"
+        ; "host-results"
         ; "sampling"
         ; "sampling-outcomes"
         ; Lane_addon_store.exact_requests_directory
@@ -379,6 +381,59 @@ let test_lane_addon_records_keep_embedded_tool_blobs_live () =
       Alcotest.(check int) "new owners remove every previous candidate" 0 second.candidates;
       Alcotest.(check int) "no retained blob is deletable" 0 second.deletable)
 
+let test_lane_addon_raw_evidence_keeps_tool_blobs_live () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let addon_root =
+        Lane_addon_store.directory
+          ~masc_dir:(Common.masc_dir_from_base_path ~base_path)
+      in
+      let addons = Lane_addon_store.create ~root:addon_root in
+      let direct = put store "retained raw evidence output" in
+      let recovery = put store "retained sampling recovery output" in
+      let structured = put store "retained JSONL evidence output" in
+      List.iter (fun reference -> set_mtime store reference (long_ago ()))
+        [ direct; recovery; structured ];
+      forget_marks ();
+      let first = observe_ok ~base_path in
+      Alcotest.(check int) "all raw payload blobs start as candidates" 3 first.candidates;
+      let retain label = function
+        | Ok _ -> ()
+        | Error detail -> Alcotest.failf "%s: %s" label detail
+      in
+      let direct_bytes =
+        "raw packet\000\n" ^ O.encode_for_agent_core (O.Stored direct) ^ "\nbody"
+      in
+      retain "write raw packet" (Lane_addon_store.write_blob addons direct_bytes);
+      let recovery_bytes =
+        "sampling output\n" ^ O.encode_for_agent_core (O.Stored recovery)
+      in
+      (* A directory at the canonical immutable address makes the production
+         sampling writer retain the same bytes in its recovery namespace. *)
+      let blocked_path =
+        Filename.concat addon_root
+          ("evidence/" ^ Lane_addon_store.digest recovery_bytes ^ ".json")
+      in
+      Fs_compat.mkdir_p blocked_path;
+      retain "write recovery payload"
+        (Lane_addon_store.write_sampling_blob addons recovery_bytes);
+      retain "write JSONL payload"
+        (Lane_addon_store.write_blob addons
+           (Yojson.Safe.to_string (O.normalized_artifact_ref_to_json structured)
+            ^ "\n{\"other\":true}\n"));
+      let second = observe_ok ~base_path in
+      Alcotest.(check (list string)) "raw payload stores are classified" []
+        second.unclassified;
+      Alcotest.(check int) "raw and JSONL payloads retain all blobs" 3 second.live_digests;
+      Alcotest.(check int) "raw owners remove old candidates" 0 second.candidates;
+      Alcotest.(check int) "no raw payload blob is deletable" 0 second.deletable;
+      retain "write malformed reserved reference"
+        (Lane_addon_store.write_blob addons
+           ("raw packet\n" ^ O.marker_prefix ^ "sha256=garbage]"));
+      (match S.observe ~base_path ~scope with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "malformed reserved marker in raw evidence must stop the scan"))
+
 let () =
   Alcotest.run "tool_blob_sweep"
     [ ( "sweep"
@@ -402,5 +457,7 @@ let () =
             test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified
         ; Alcotest.test_case "lane-addon records keep embedded tool blobs live" `Quick
             test_lane_addon_records_keep_embedded_tool_blobs_live
+        ; Alcotest.test_case "lane-addon raw evidence keeps tool blobs live" `Quick
+            test_lane_addon_raw_evidence_keeps_tool_blobs_live
         ] )
     ]

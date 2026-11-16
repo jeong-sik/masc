@@ -2,6 +2,7 @@ module M = Tool_blob_maintenance
 module Board = Masc_board_handlers.Board_paths
 
 let tree name = M.Store { name; classification = M.In_scope M.Tree }
+let payload_tree name = M.Store { name; classification = M.In_scope M.Payload_tree }
 let file name = M.Store { name; classification = M.In_scope M.File }
 let excluded reason name = M.Store { name; classification = M.Excluded reason }
 let no_reference = excluded M.Writes_no_reference
@@ -46,11 +47,11 @@ let lane_addons =
         [ (* Prepared evidence stays owned before its message commits. *)
           tree Lane_addon_store.broadcasts_directory
         ; excluded M.Settled_archive Lane_addon_store.tool_request_archive_directory
-        ; excluded M.Other_media_store "evidence"
-        ; excluded M.Other_media_store "sampling-evidence"
-          (* These records can retain original input, summaries or model
-             output. Their own evidence hashes name another media store,
-             but embedded tool blob references still belong to this scan. *)
+          (* Evidence retains original packet bytes as well as JSON input
+             and model output. Scan embedded tool blob references without
+             requiring arbitrary packet payloads to be JSON records. *)
+        ; payload_tree "evidence"
+        ; payload_tree "sampling-evidence"
         ; tree "host-results"
         ; tree "sampling"
         ; tree "sampling-outcomes"

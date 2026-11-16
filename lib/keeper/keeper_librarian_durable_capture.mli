@@ -65,7 +65,9 @@ type projection = {
 val tool_observations : Agent_core.Types.message list -> Keeper_librarian.tool_observation list
 val project_source : boundaries:boundary_lines -> source -> (projection, error) result
 (** The same pure projection used by the real selector and strict restoration;
-    preserves interleaving and original historical attribution offsets. *)
+    preserves interleaving and original historical attribution offsets. Official
+    history rows are indexed once per selected trace in this projection; the
+    index is local to the captured source and grants no storage authority. *)
 
 type positions = {
   current : Keeper_librarian_progress.t option;

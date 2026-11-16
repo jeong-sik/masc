@@ -11,9 +11,15 @@ HTML 아티팩트와 HWPX/DOCX 사이에서 병합 표와 native 차트를 옮�
 기존 HTML 원문이며 SVG·차트 캐시·내장 워크북은 출력할 때 만든다.
 새 게시 상태나 서버 변환 API를 추가하지 않았다.
 
-코드는 별도 worktree에 있다. main 병합·설치·배포는 하지 않았다.
-GitHub CLI는 HTTP 401 또는 연결 실패로 원격 상태를 읽지 못했다.
-PR·Native Stack 생성과 GitHub 정식 승인은 남아 있다.
+코드는 별도 worktree에 있다. [Draft PR #52514](https://github.com/jeong-sik/masc/pull/52514)로
+게시했다. main 병합·설치·배포는 하지 않았다. CLI 인증이 없어 연결된
+GitHub로 게시했으며 원격 Native Stack 연결과 GitHub 정식 승인은 남아 있다.
+
+PR은 main `b584e03211e6` 위로 정리했다. 변경한 39파일은 최초 base 이후
+main 변경과 겹치지 않았다. 관련 테스트 165개를 다시 실행해 통과했다.
+이 main의 타입 검사는 `src/api/keeper-asks.test.ts:39,60,72`의
+`AnswerRequestBody.name` 누락 3건에서 실패한다. main 단독에서도 같다.
+이 PR에서 최신 main의 타입 검사가 통과했다고 보고하지 않는다.
 
 ## 로컬 검사
 

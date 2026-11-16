@@ -1,18 +1,22 @@
 // GET /api/v1/keeper-efficiency — one month of per-Keeper turn and tool totals
 // with the run-weighted fleet row (lib/keeper_efficiency/keeper_efficiency.mli).
 //
-// One answer holds every Keeper of the month, so a reader keeps it by month
-// and picks its Keeper's row out of it. Asked without `month`, the server
-// answers the current UTC month of its own clock; this module asks that way,
-// so the month a page shows is the one the server counted, not one the
-// browser's clock guessed.
+// One answer holds every Keeper of the month, so a reader of one Keeper picks
+// that Keeper's row out of it (keeperEfficiencyRow). Asked without `month`,
+// the server answers the current UTC month of its own clock; this module asks
+// that way, so the month a page shows is the one the server counted, not one
+// the browser's clock guessed.
 //
 // The decoder refuses what it cannot read. A schema it does not know, a
 // missing field, a count that is negative or has a fraction, or a time no
 // Date holds is an error that names the field; none of them becomes a zero.
-// The TUI decoder refuses the same shapes
-// (lib/tui_decode_keeper_efficiency.ml). JSON.parse hands over one number
-// type, so `30.0` in a count position reads as the count 30 here.
+//
+// The TUI decoder (lib/tui_decode_keeper_efficiency.ml) reads the same answer
+// of the server. The two differ on numbers the server does not write.
+// JSON.parse hands over one number type, so `30.0` in a count position reads
+// as the count 30 here and `0` in the position of a fraction reads as 0; the
+// TUI refuses a float where it wants an int and an int where it wants a
+// float. Only this decoder refuses a time past what a Date holds.
 
 import { isRecord } from '../lib/type-guards'
 import { get, type AbortableRequestOptions } from './core'

@@ -1,12 +1,22 @@
 (** The existing known-basis link or one explicit fenced-original link, with
     a shared cycle check. Read ports grant no dispatch/publication authority. *)
 type reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
+type payload_indexes
+val payload_indexes : unit -> payload_indexes
+(** Small indexes proved from ancestor bodies during one preflight scope.
+    Holds neither full requests nor progress. A weak body identity can reuse
+    an index only after the supplied reader freshly returns that same verified
+    body, digest, complete summary and owner/binding. Every walk still reads
+    its fences and resolution intents. Discard on leaving the scope. *)
 val validate_predecessor_payload :
+  ?indexes:payload_indexes ->
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   read_fence:reader -> read_resolution:reader -> require_confirmed:bool ->
   Keeper_librarian_durable_request.t -> (unit, string) result
 (** Reads every predecessor's body, makes its index from the request it
-    restored and requires the record's summary to be that index. Captured
+    restored and requires the record's summary to be that index. With
+    [indexes], reuse only that completed body/index check; the reader still
+    observes the current body on every visit. Captured
     payloads only: the deployment preflight's check. *)
 val confirm_predecessor_by_body : store:Lane_addon_store.t -> require_confirmed:bool ->
   Keeper_librarian_durable_request.t -> (unit, string) result

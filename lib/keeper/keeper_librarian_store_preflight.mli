@@ -19,7 +19,12 @@ val purpose : string -> purpose option
     that names it. While the scan stays in one scope, it also keeps the capture
     of each execution the scope's gate records name, as long as the reader
     returns the same execution record, and the retry chains it proved from
-    that execution, as long as the execution reads the same. A capture that
+    that execution, as long as the execution reads the same. History ancestry
+    also reuses fully checked small indexes while the freshly read ancestor
+    has the same verified body, summary and owner/binding. These weak body
+    witnesses keep no reconstructed source/prompt or progress and are dropped
+    on leaving the scope; fences and resolution intents are still read on
+    every walk. A capture that
     failed is restored again. Records checked through an admission closure's
     reads keep their own captures and chains for the scope. *)
 val validator : unit ->

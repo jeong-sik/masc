@@ -2739,6 +2739,39 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   let parent_body=Filename.concat root (Store.tool_request_body_path ~scope:original.scope
     ~request_digest:original.request_digest) in
   let parent_bytes=io (fun () -> In_channel.with_open_bin parent_body In_channel.input_all) in
+  let module Published=Owner.Published_reader in
+  let read_text path=if Sys.file_exists path then
+      Ok (Some (In_channel.with_open_bin path In_channel.input_all)) else Ok None in
+  let published=Published.create ~read_body:(fun ~scope ~request_digest ->
+    read_text (Filename.concat root (Store.tool_request_body_path ~scope ~request_digest))) in
+  let read ~scope ~request_id =
+    let open Result.Syntax in
+    let* bytes=read_text (record_path request_id) in
+    match bytes with
+    | None -> Ok None
+    | Some bytes ->
+      let* json=try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
+      Result.map Option.some (Published.read published ~directory_name:(Store.digest scope)
+        ~file_name:(Store.digest request_id ^ ".json") json) in
+  let indexes=Lineage.payload_indexes () in
+  let payload_lineage ?indexes ()=io (fun () -> Lineage.validate_predecessor_payload ?indexes
+    ~read ~read_fence:(Store.load_history_fence fixture.store)
+    ~read_resolution:(Store.load_history_resolution fixture.store)
+    ~require_confirmed:true child_request) in
+  check (result unit string) "preflight proves the ancestor index" (Ok ()) (payload_lineage ~indexes ());
+  check (result unit string) "preflight reuses the same verified ancestor" (Ok ()) (payload_lineage ~indexes ());
+  let compare_payload label=check (result unit string) label
+    (payload_lineage ()) (payload_lineage ~indexes ()) in
+  io (fun () -> Sys.remove parent_body);
+  compare_payload "a missing ancestor body cannot borrow a preflight index";
+  io (fun () -> write parent_body parent_bytes);
+  check (result unit string) "restored bytes can be verified again" (Ok ()) (payload_lineage ~indexes ());
+  let corrupt=Bytes.of_string parent_bytes in
+  Bytes.set corrupt 0 (if Bytes.get corrupt 0='{' then '[' else '{');
+  io (fun () -> write parent_body (Bytes.to_string corrupt));
+  compare_payload "same-length corruption cannot borrow a preflight index";
+  io (fun () -> write parent_body parent_bytes);
+  check (result unit string) "preflight accepts restored bytes again" (Ok ()) (payload_lineage ~indexes ());
   let lineage ()=io (fun () -> Lineage.confirm_predecessor ~store:fixture.store ~require_confirmed:true child_request) in
   io (fun () -> Sys.remove parent_body);
   check (result unit string) "lineage of a resolution child passes without the parent's body" (Ok ()) (lineage ());
@@ -2794,6 +2827,9 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     io (fun () -> write path honest);
     result in
   let with_summary_value id name value f=with_summary_json id name (`String value) f in
+  ignore (with_summary_value original.request_id "source_digest" (String.make 64 '0') (fun () ->
+    compare_payload "a changed root summary cannot borrow a fully checked ancestor index"));
+  check (result unit string) "preflight proves the restored summary again" (Ok ()) (payload_lineage ~indexes ());
   check bool "a changed ancestor summary refuses actual dispatch" true
     (with_summary_value original.request_id "source_digest" (String.make 64 '0')
       (fun () -> Result.is_error (guard ())));

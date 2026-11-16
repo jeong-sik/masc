@@ -101,8 +101,50 @@ let body_node ~restore ~read ~verified ~owner ~request_id =
     let+ index=Request.index_of_summary record in
     verified parent index;
     Some {record;index;body=(fun () -> Ok request)}
-let validate_predecessor_payload ~read ~read_fence ~read_resolution ~require_confirmed request =
-  validate ~read_node:(body_node ~restore:Request.restore_payload ~read ~verified:(fun _ _ -> ())) ~read ~read_fence ~read_resolution
+(* A preflight reader verifies the actual bytes on every read and returns the
+   same immutable JSON only while those bytes match. Keep just a weak witness
+   and the fully checked small index: a scan must not retain every reconstructed
+   source/prompt or an old progress tail. The current record still supplies all
+   progress, and the lineage walk still reads every fence and child intent. *)
+type payload_index = {request:Yojson.Safe.t Weak.t;id:string;digest:string;index:Request.index}
+type payload_indexes = (string * string, payload_index) Hashtbl.t
+let payload_indexes () = Hashtbl.create 16
+let payload_node ~indexes ~read ~owner ~request_id =
+  let scope=Request.scope owner in
+  let key=scope,request_id in
+  let* parent=match read ~scope ~request_id with
+    | Error detail -> Hashtbl.remove indexes key; Error detail
+    | Ok parent -> Ok parent in
+  match parent with
+  | None -> Hashtbl.remove indexes key; Ok None
+  | Some (parent:Owner.retained) ->
+    let record=Owner.listed parent in
+    let cached=match Hashtbl.find_opt indexes key with
+      | Some previous when String.equal previous.id parent.request_id
+          && String.equal previous.digest parent.request_digest
+          && previous.index.owner=owner
+          && (match Weak.get previous.request 0 with Some request -> request==parent.request | None -> false) ->
+        (match Request.index_of_summary record with
+         | Ok index when index=previous.index -> Some index
+         | Error _ | Ok _ -> None)
+      | Some _ | None -> None in
+    (match cached with
+     | Some index ->
+       Ok (Some {record;index;body=(fun () -> Request.restore_payload ~owner parent)})
+     | None ->
+       Hashtbl.remove indexes key;
+       let* request=Request.restore_payload ~owner parent in
+       let* ()=Request.confirm_index request record in
+       let+ index=Request.index_of_summary record in
+       let witness=Weak.create 1 in
+       Weak.set witness 0 (Some parent.request);
+       Hashtbl.replace indexes key {request=witness;id=parent.request_id;digest=parent.request_digest;index};
+       Some {record;index;body=(fun () -> Ok request)})
+let validate_predecessor_payload ?indexes ~read ~read_fence ~read_resolution ~require_confirmed request =
+  let read_node=match indexes with
+    | None -> body_node ~restore:Request.restore_payload ~read ~verified:(fun _ _ -> ())
+    | Some indexes -> payload_node ~indexes ~read in
+  validate ~read_node ~read ~read_fence ~read_resolution
     ~require_confirmed request
 let store_readers ~store =
   (fun ~scope ~request_id -> Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string),

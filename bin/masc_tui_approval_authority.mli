@@ -3,21 +3,29 @@ type resolved = private {
   decision : Masc_tui_types.approval_decision;
 }
 
+(** Where the row the last accepted frame presented stands in the current
+    list. {!resolve} and {!retry_target} both answer with it, so y/n and [R]
+    tell the same three cases apart in the same way. *)
+type 'listed target =
+  | No_row_presented
+      (** The last frame showed no approval row, so a key has nothing to act
+          on, whatever the current list holds now. *)
+  | Presented_row_gone
+      (** The last frame showed a row that the current list no longer holds. *)
+  | Listed of 'listed
+      (** The presented row, as the current list now holds it. *)
+
 val resolve :
   presented:Masc_tui_approvals_model.approval_row option ->
   current:Masc_tui_approvals_model.approval_row list ->
   Masc_tui_types.approval_decision ->
-  resolved option
+  resolved target
 (** Resolve an approval effect by the identity last presented, never by the
-    mutable cursor's current index. A presented identity absent from [current]
-    produces no effect. *)
+    mutable cursor's current index. Only [Listed] carries an effect. *)
 
-type retry_target =
+type retry =
   | Retry_gate of Masc_tui_types.Tui_decode.gate_pending
       (** The presented Gate row, as the current list now holds it. *)
-  | Row_gone
-      (** The current list holds no row the last frame presented: that frame
-          showed none, or the one it showed has left the list. *)
   | Not_retryable
       (** The presented row is still listed, but it is an operator
           confirmation or a held Keeper tool call: Auto Judge never ruled on
@@ -26,7 +34,7 @@ type retry_target =
 val retry_target :
   presented:Masc_tui_approvals_model.approval_row option ->
   current:Masc_tui_approvals_model.approval_row list ->
-  retry_target
+  retry target
 (** What [R] acts on, found by the identity last presented like {!resolve}. *)
 
 val authority_changed :

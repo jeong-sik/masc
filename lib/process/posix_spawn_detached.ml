@@ -9,34 +9,46 @@ external posix_spawn
 
 type t = { pid : int; started : string option; exited : Unix.process_status option Eio.Promise.t }
 
-external darwin_start : int -> string option = "masc_process_start_time"
-external darwin_parent : int -> int option = "masc_process_parent_pid"
+type parent =
+  | Parent of int
+  | No_process
+  | Unreadable
 
-(* starttime is field 22 of proc(5), the 20th after the command. It counts
-   from boot, so the boot names it too. *)
+external darwin_start : int -> string option = "masc_process_start_time"
+
+(* [None]: the Darwin process table did not answer, on another platform or
+   because the sysctl failed. [Some None]: it answered with no such process. *)
+external darwin_parent : int -> int option option = "masc_process_parent_pid"
+
+(* starttime counts from boot, so the boot names it too. *)
 let linux_start pid =
-  match Linux_proc_stat.read pid with
-  | None -> None
-  | Some fields ->
-    (match List.nth_opt fields 19, In_channel.with_open_bin "/proc/sys/kernel/random/boot_id" In_channel.input_all with
-     | exception Sys_error _ -> None
-     | Some starttime, boot -> Some (Printf.sprintf "proc:%s:%s" (String.trim boot) starttime)
-     | None, _ -> None)
+  match
+    ( Linux_proc_stat.parse (Linux_proc_stat.read pid)
+    , In_channel.with_open_bin "/proc/sys/kernel/random/boot_id" In_channel.input_all )
+  with
+  | exception (Unix.Unix_error (_, _, _) | Sys_error _) -> None
+  | Some line, boot -> Some (Printf.sprintf "proc:%s:%s" (String.trim boot) line.Linux_proc_stat.start)
+  | None, _ -> None
 
 let process_start pid =
   match darwin_start pid with
   | Some _ as started -> started
   | None -> linux_start pid
 
-(* ppid is field 4 of proc(5), the second after the command. *)
+(* ENOENT names both a pid /proc does not hold and, on a host without /proc,
+   every pid; whether /proc/self is there tells the two apart. *)
 let linux_parent pid =
-  match Linux_proc_stat.read pid with
-  | Some (_state :: ppid :: _) -> int_of_string_opt ppid
-  | Some ([] | [ _ ]) | None -> None
+  match Linux_proc_stat.parse (Linux_proc_stat.read pid) with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ESRCH), _, _) when Sys.file_exists "/proc/self/stat" ->
+    No_process
+  | exception Unix.Unix_error (_, _, _) -> Unreadable
+  | Some line -> Parent line.Linux_proc_stat.parent
+  | None -> Unreadable
 
 let parent_pid pid =
   match darwin_parent pid with
-  | Some _ as parent -> parent
+  | Some (Some parent) -> Parent parent
+  | Some None -> No_process
   | None -> linux_parent pid
 
 let rec reaped pid =

@@ -45,12 +45,10 @@ let proc_member_row name =
   match int_of_string_opt name with
   | None -> None
   | Some pid ->
-    (match Linux_proc_stat.read pid with
-     | Some (state :: ppid :: pgrp :: _) ->
-       (match int_of_string_opt ppid, int_of_string_opt pgrp with
-        | Some parent, Some group -> Some (pid, parent, group, state)
-        | _ -> None)
-     | Some _ | None -> None)
+    (match Linux_proc_stat.parse (Linux_proc_stat.read pid) with
+     | exception Unix.Unix_error (_, _, _) -> None
+     | Some { Linux_proc_stat.state; parent; group; start = _ } -> Some (pid, parent, group, state)
+     | None -> None)
 
 let proc_live_member_left pgid =
   if not (Sys.file_exists "/proc/self/stat") then None

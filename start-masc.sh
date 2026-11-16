@@ -935,8 +935,8 @@ if [ "$EIO_MODE" = "true" ]; then
     fi
 fi
 
-# Port guard: abort if another process already holds the port.
-if [ "$HTTP_MODE" = "true" ]; then
+# Port guard: abort if another process already holds the port (unless MASC_ALLOW_PORT_REUSE=1).
+if [ "$HTTP_MODE" = "true" ] && [ "${MASC_ALLOW_PORT_REUSE:-0}" != "1" ]; then
     existing_pid=$(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
     if [ -n "$existing_pid" ]; then
         existing_cmd=$(ps -p "$existing_pid" -o comm= 2>/dev/null || echo "unknown")

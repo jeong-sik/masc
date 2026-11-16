@@ -46,6 +46,15 @@ val read_recent :
   unit ->
   (row list, string) result
 
+val read_recent_with_caller :
+  masc_root:string ->
+  ?caller:string ->
+  ?since_ts:float ->
+  ?until_ts:float ->
+  n:int ->
+  unit ->
+  ((row * string option) list, string) result
+
 val read_series :
   masc_root:string ->
   window:Tool_metrics_series.window ->
@@ -78,7 +87,7 @@ val observe_series :
     Like {!read_series}, run this off the Eio event loop. *)
 
 val summary : masc_root:string -> (summary, string) result
-val row_to_json : row -> Yojson.Safe.t
+val row_to_json : ?caller:string -> row -> Yojson.Safe.t
 val reset_for_testing : unit -> unit
 
 val database_filename : string

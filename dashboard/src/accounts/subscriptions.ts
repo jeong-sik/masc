@@ -45,8 +45,10 @@ export interface SubscriptionsModel {
   /** Reads what the person of `session` connected and what the server
       offers. A call for the person the panel already shows only keeps their
       newest session and settles at once, even after a failure: `retry` reads
-      again. A call for another person starts over: what was read for the
-      first is dropped, and a login they started is left behind. */
+      again. A call after `stop` for the person the panel was for reads
+      again and keeps their login and checks. A call for another person
+      starts over: what was read for the first is dropped, and a login they
+      started is left behind. */
   readonly load: (session: Session) => Promise<void>
   /** Reads again after a failure. Any other time it does nothing. */
   readonly retry: () => Promise<void>
@@ -54,10 +56,11 @@ export interface SubscriptionsModel {
   readonly connecting: ConnectModel
   /** The checks of a model of an account by the person the panel shows. */
   readonly checking: ChecksModel
-  /** Forgets what was read, the login and the checks once the console
-      shows no one signed in: the account changed, or the browser leaves. A
-      reading still under way then changes nothing on the page, and the next
-      `load` reads from the start, for the same person too. */
+  /** Forgets what was read once the console shows no one signed in: the
+      account changed, or the browser leaves. A reading still under way then
+      changes nothing, and the next `load` reads again, for the same person
+      too. A login and the checks stay the person's until another person is
+      shown. */
   readonly stop: () => void
 }
 
@@ -84,6 +87,8 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   let latest = 0
   /** The session of the person the panel shows. A login sends its token. */
   let session: Session | null = null
+  /** The person whose login and checks the panel holds. `stop` keeps them. */
+  let person: string | null = null
 
   const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
     latest += 1
@@ -128,8 +133,11 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     const now = view.peek()
     session = next
     if (now.kind !== 'waiting' && now.forUser === next.userId) return Promise.resolve()
-    connecting.reset()
-    checking.reset()
+    if (next.userId !== person) {
+      person = next.userId
+      connecting.reset()
+      checking.reset()
+    }
     view.value = { kind: 'reading', forUser: next.userId, slow: false }
     return read(next.userId, 0)
   }
@@ -144,9 +152,6 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   const stop = (): void => {
     if (view.peek().kind === 'waiting') return
     latest += 1
-    session = null
-    connecting.reset()
-    checking.reset()
     view.value = { kind: 'waiting' }
   }
 
@@ -155,8 +160,8 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
 
 /** Reads the subscriptions of each person the console comes to show
     signed in, and stops whenever it shows anything else, so the person
-    shown again after another account was in the browser is read from the
-    start. The returned function stops following. */
+    shown again after another account was in the browser is read again. The
+    returned function stops following. */
 export function follow(frame: ReadonlySignal<View>, panel: SubscriptionsModel): () => void {
   return effect(() => {
     const now = frame.value

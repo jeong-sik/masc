@@ -86,7 +86,9 @@ export interface TokensModel {
   /** The latest revoke of each token the person revoked, by its id. */
   readonly revoking: ReadonlySignal<ReadonlyMap<string, Revoke>>
   /** Reads the tokens of the person of `session`. A call for the person the
-      panel already shows only keeps their newest session; a call for another
+      panel already shows only keeps their newest session. A call after
+      `stop` for the person the panel was for reads the tokens again and
+      keeps the token they made and their revokes. A call for another
       person starts over, and an answer for the first changes nothing. */
   readonly load: (session: Session) => Promise<void>
   /** Reads again after a failure. Any other time it does nothing. */
@@ -98,10 +100,11 @@ export interface TokensModel {
   readonly forget: () => void
   /** Revokes the token `id`. A token whose revoke runs is left as it is. */
   readonly revoke: (id: string) => Promise<void>
-  /** Forgets the tokens and the token made once the console shows no one
-      signed in: the account changed, or the browser leaves. An answer still
-      under way then changes nothing on the page and reads nothing, and the
-      next `load` reads from the start, for the same person too. */
+  /** Forgets the list once the console shows no one signed in: the account
+      changed, or the browser leaves. A reading still under way then changes
+      nothing, and the next `load` reads the tokens again, for the same
+      person too. What the person did is theirs until another person is
+      shown: a token made stays on the page for them. */
   readonly stop: () => void
 }
 
@@ -126,6 +129,8 @@ export function createTokens({ send, leave, now }: TokensDeps): TokensModel {
   const making = signal<Make>({ kind: 'idle' })
   const revoking = signal<ReadonlyMap<string, Revoke>>(new Map())
   let session: Session | null = null
+  /** The person whose makes and revokes the panel holds. `stop` keeps them. */
+  let person: string | null = null
   /** The reading whose answer the panel takes. */
   let latest = 0
   /** Each person shown makes a new round; an answer writes only while its round is the latest. */
@@ -263,10 +268,13 @@ export function createTokens({ send, leave, now }: TokensDeps): TokensModel {
     const shown = view.peek()
     session = next
     if (shown.kind !== 'waiting' && shown.forUser === next.userId) return Promise.resolve()
-    round += 1
-    left = false
-    making.value = { kind: 'idle' }
-    revoking.value = new Map()
+    if (next.userId !== person) {
+      person = next.userId
+      round += 1
+      left = false
+      making.value = { kind: 'idle' }
+      revoking.value = new Map()
+    }
     view.value = { kind: 'reading', forUser: next.userId, slow: false }
     return read(next.userId, 0)
   }
@@ -280,11 +288,7 @@ export function createTokens({ send, leave, now }: TokensDeps): TokensModel {
 
   const stop = (): void => {
     if (view.peek().kind === 'waiting') return
-    round += 1
     latest += 1
-    session = null
-    making.value = { kind: 'idle' }
-    revoking.value = new Map()
     view.value = { kind: 'waiting' }
   }
 
@@ -293,8 +297,8 @@ export function createTokens({ send, leave, now }: TokensDeps): TokensModel {
 
 /** Reads the tokens of each person the console comes to show signed in,
     and stops whenever it shows anything else, so the person shown again
-    after another account was in the browser is read from the start. The
-    returned function stops following. */
+    after another account was in the browser is read again. The returned
+    function stops following. */
 export function followTokens(frame: ReadonlySignal<View>, tokens: TokensModel): () => void {
   return effect(() => {
     const shown = frame.value

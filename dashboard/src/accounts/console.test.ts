@@ -568,6 +568,8 @@ describe('a request of a panel that the server refused', () => {
   describe('a panel shown again to the same person after the account changed', () => {
     const readsOf = (sent: readonly Sent[], path: string): number =>
       sent.filter((one) => one.path === path && one.init.method !== 'POST').length
+    const aPat = (id: string) =>
+      ({ pat_id: id, scope: { runtimes: 'all', channels: ['direct'], allowed_effects: ['read_state'] }, expires_at_ms: null, issued_at_ms: 1, status: 'open' })
     /** The console over `answers`, before its first reading. */
     function shown(answers: readonly Scripted[]): { readonly model: ConsoleModel; readonly sent: Sent[] } {
       const { send, sent } = scripted(answers)
@@ -613,7 +615,7 @@ describe('a request of a panel that the server refused', () => {
       panel.unfollow()
     })
 
-    it('reads the tokens from the start, not the failure of the reading that ran while no one was shown', async () => {
+    it('reads the tokens again, not the failure of the reading that ran while no one was shown', async () => {
       const patsPath = '/api/v1/auth/pats'
       const { model, sent } = shown([
         aSession(), aWho(), json(200, { pats: [] }),
@@ -626,16 +628,72 @@ describe('a request of a panel that the server refused', () => {
       await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
       await panel.make('read_only', 'days_7')
       expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
-      // The refusal came after the panel stopped: it holds nothing for anyone.
-      expect([panel.view.value, panel.making.value]).toEqual([{ kind: 'waiting' }, { kind: 'idle' }])
+      // The list read after the refusal could not be sent; the panel forgot it.
+      expect(panel.view.value).toEqual({ kind: 'waiting' })
       await model.load()
       await waitFor(() => { expect(readsOf(sent, patsPath)).toBe(2) })
       await waitFor(() => { expect(panel.view.value).toEqual({ kind: 'read', forUser: person, pats: [] }) })
-      expect(panel.making.value).toEqual({ kind: 'idle' })
+      // The refusal is the person's, and stays with them.
+      expect(panel.making.value).toMatchObject({ kind: 'refused', problem: { status: 403 } })
       stop()
     })
 
-    it('reads the Keepers from the start', async () => {
+    it('keeps a token made for the person shown again, and drops it for another person', async () => {
+      const issued = json(200, { pat_id: 'pat_1', token: 'masc_pat_pat_1_secret' })
+      const backAgain = shown([
+        aSession(), aWho(), json(200, { pats: [] }), issued.clone(), json(200, { pats: [aPat('pat_1')] }),
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), json(200, { pats: [aPat('pat_1')] }),
+      ])
+      const someoneElse = shown([
+        aSession(), aWho(), json(200, { pats: [] }), issued.clone(), json(200, { pats: [aPat('pat_1')] }),
+        staleToken(), ...them(),
+        ...them(), json(200, { pats: [] }),
+      ])
+      const madeThen = async ({ model }: { readonly model: ConsoleModel }): Promise<TokensModel['making']['value']> => {
+        const panel = createTokens({ send: model.send, leave: vi.fn(), now: () => 0 })
+        const stop = followTokens(model.view, panel)
+        await model.load()
+        await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+        await panel.make('read_only', 'never')
+        await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', pats: [{ id: 'pat_1' }] }) })
+        await model.send(panelPath, write('token'))
+        expect(panel.view.value).toEqual({ kind: 'waiting' })
+        await model.load()
+        await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+        stop()
+        return panel.making.value
+      }
+      expect(await madeThen(backAgain)).toMatchObject({ kind: 'issued', issued: { id: 'pat_1', token: 'masc_pat_pat_1_secret' } })
+      expect(await madeThen(someoneElse)).toEqual({ kind: 'idle' })
+    })
+
+    it('reads the tokens again when a token made before the change is answered after the person is back', async () => {
+      const made = later()
+      const { model, sent } = shown([
+        aSession(), aWho(), json(200, { pats: [] }),
+        made.answer,
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), json(200, { pats: [] }),
+        json(200, { pats: [aPat('pat_1')] }),
+      ])
+      const panel = createTokens({ send: model.send, leave: vi.fn(), now: () => 0 })
+      const stop = followTokens(model.view, panel)
+      await model.load()
+      await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+      const making = panel.make('read_only', 'never')
+      await model.send(panelPath, write('token'))
+      await model.load()
+      await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', pats: [] }) })
+      made.give(json(200, { pat_id: 'pat_1', token: 'masc_pat_pat_1_secret' }))
+      await making
+      await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', pats: [{ id: 'pat_1' }] }) })
+      expect(panel.making.value).toMatchObject({ kind: 'issued', issued: { id: 'pat_1' } })
+      expect(readsOf(sent, '/api/v1/auth/pats')).toBe(3)
+      stop()
+    })
+
+    it('reads the Keepers again', async () => {
       const keepersPath = '/api/v1/auth/keepers'
       const { model, sent } = shown([
         aSession(), aWho(), json(200, { keepers: [] }),
@@ -646,16 +704,44 @@ describe('a request of a panel that the server refused', () => {
       const stop = followKeepers(model.view, panel)
       await model.load()
       await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
-      expect(await panel.make('alpha', null)).toBeNull()
+      expect(await panel.make('alpha', null)).toMatchObject({ kind: 'refused', problem: { status: 403 } })
       expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
       await model.load()
       await waitFor(() => { expect(readsOf(sent, keepersPath)).toBe(2) })
       await waitFor(() => { expect(panel.view.value).toEqual({ kind: 'read', forUser: person, keepers: [] }) })
-      expect(panel.making.value).toEqual({ kind: 'idle' })
+      expect(panel.making.value).toMatchObject({ kind: 'refused', problem: { status: 403 } })
       stop()
     })
 
-    it('reads the subscriptions from the start', async () => {
+    it('reads the Keepers again when a Keeper made before the change is answered while the list is read', async () => {
+      const keepersPath = '/api/v1/auth/keepers'
+      const made = later()
+      const list = later()
+      const { model, sent } = shown([
+        aSession(), aWho(), json(200, { keepers: [] }),
+        made.answer,
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), list.answer,
+        json(200, { keepers: [{ keeper_id: 'alpha', runtime_id: null }] }),
+      ])
+      const panel = createKeepers({ send: model.send, leave: vi.fn() })
+      const stop = followKeepers(model.view, panel)
+      await model.load()
+      await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+      const making = panel.make('alpha', null)
+      await model.send(panelPath, write('token'))
+      await model.load()
+      await waitFor(() => { expect(readsOf(sent, keepersPath)).toBe(2) })
+      // The make is answered while the list is read: that reading may not hold it.
+      made.give(json(200, { keeper_id: 'alpha', record: 'made' }))
+      expect(await making).toMatchObject({ kind: 'made', name: 'alpha' })
+      list.give(json(200, { keepers: [] }))
+      await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', keepers: [{ id: 'alpha' }] }) })
+      expect(readsOf(sent, keepersPath)).toBe(3)
+      stop()
+    })
+
+    it('reads the subscriptions again', async () => {
       const offered = (): Response => json(200, { integrations: [] })
       const ownedNothing = (): Response => json(200, { provider_accounts: [], runtimes: [] })
       const { model, sent } = shown([
@@ -673,6 +759,44 @@ describe('a request of a panel that the server refused', () => {
       await model.load()
       await waitFor(() => { expect(readsOf(sent, paths.integrations)).toBe(2) })
       await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', forUser: person }) })
+      stop()
+    })
+
+    it('keeps a check of the person shown again, and reads again once it passes', async () => {
+      const claude = { integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], calls: 'allowed' }
+      const offered = (): Response => json(200, { integrations: [claude] })
+      const account = { provider_account_id: 'acct_1', integration_id: 'claude_code' }
+      const runtime = { runtime_id: 'acct_1.claude-sonnet-5', provider_account_id: 'acct_1', model: 'claude-sonnet-5' }
+      const owned = (...runtimes: readonly unknown[]): Response => json(200, { provider_accounts: [account], runtimes })
+      const passed = json(200, {
+        verification: {
+          schema: 'masc.runtime_verification.v1', runtime_id: runtime.runtime_id, model: runtime.model, observed_model: null,
+          status: 'verified', checks: { response: true, tool_called: true, tool_roundtrip: true }, failure: null,
+        },
+        runtime: { runtime_id: runtime.runtime_id, record: 'made' },
+      })
+      const checked = later()
+      const { model, sent } = shown([
+        aSession(), aWho(), offered(), owned(),
+        checked.answer,
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), offered(), owned(),
+        offered(), owned(runtime),
+      ])
+      const panel = createSubscriptions({ send: model.send, leave: vi.fn() })
+      const stop = follow(model.view, panel)
+      await model.load()
+      await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+      const checking = panel.checking.check('acct_1', 'claude-sonnet-5')
+      await model.send(panelPath, write('token'))
+      await model.load()
+      await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', owned: { runtimes: [] } }) })
+      expect(panel.checking.checks.value.get('acct_1')).toMatchObject({ kind: 'checking' })
+      checked.give(passed)
+      await checking
+      expect(panel.checking.checks.value.get('acct_1')).toMatchObject({ kind: 'passed' })
+      await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', owned: { runtimes: [{ id: runtime.runtime_id }] } }) })
+      expect(readsOf(sent, paths.owned)).toBe(3)
       stop()
     })
   })

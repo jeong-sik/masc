@@ -42,7 +42,7 @@ parser messages and source paths remain in the authenticated Lane inventory.
 to establish completed work. Full health aggregates actionable missing
 dependencies as degraded while intentional Off remains explicit in each row.
 
-## Prepare package version 0.2.3
+## Prepare package version 0.2.4
 
 Use the repository version containing
 [`addons/keeper-librarian/lane.toml`](../../addons/keeper-librarian/lane.toml),
@@ -50,19 +50,21 @@ its `server.py` and both bundled schemas. Prepare this image through the package
 image workflow, then load it into the container engine used by MASC:
 
 ```sh
-docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.3 addons
+docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.4 addons
 ```
 
 The build context is `addons`, because the image contains the shared
 `protocol.py` and `exact_worker.py`. The runtime mounts the package directory.
-Saving a declaration does not build or download an image. Existing installations with worker record v1 require the
-[Exact worker state hard cut](EXACT-WORKER-STATE-HARD-CUT.md) before this version;
-do not erase unresolved originals or reuse old worker state. A first installation
-uses the host-created empty state under its declared owner identity. For an alternate
-configured engine, import that same image into that engine before attaching.
+Saving a declaration does not build or download an image. Installations that
+still contain worker record v1 require the
+[Exact worker state hard cut](EXACT-WORKER-STATE-HARD-CUT.md); do not erase
+unresolved originals or attach a v1 state directory to this worker. Existing v2
+state remains usable as described below. A first installation uses the
+host-created empty state under its declared owner identity. For another
+configured engine, import the same image into that engine before attaching.
 
 Place the complete package in an operator-managed, versioned location readable
-by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.3/` works
+by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.4/` works
 with this declaration when the resolved config root is
 `<base-path>/.masc/config`:
 
@@ -70,7 +72,7 @@ with this declaration when the resolved config root is
 id = "keeper-librarian"
 run_id = "keeper-librarian"
 enabled = true
-manifest_path = "../../packages/keeper-librarian-0.2.3/lane.toml"
+manifest_path = "../../packages/keeper-librarian-0.2.4/lane.toml"
 
 [binding]
 sources = []
@@ -79,11 +81,52 @@ sources = []
 Create it through `masc_lane_declaration_save` with `mode="create"`,
 `file_name="keeper-librarian.toml"` and the complete `source_text`. An existing
 installation is edited with `mode="save"` and its freshly read
-`expected_source_revision`. Preserve the existing installation ID, run ID,
-manifest location and persistent state when restoring an existing installation.
+`expected_source_revision`. Preserve the existing installation ID, run ID and
+persistent state when restoring an existing installation. Select a new versioned
+package through that declaration rather than editing a running package in place.
 Resolve a relative manifest from the actual declaration directory if
 `MASC_CONFIG_DIR` selects another root. Do not replace a conflicting declaration
 or manual attachment by inventing a second installation.
+
+### Upgrade an existing installation
+
+Version 0.2.4 gives the compact `refuse_body` command introduced in
+[#52504](https://github.com/jeong-sik/masc/pull/52504) its own package revision and
+image tag. An installed 0.2.3 image or mounted `server.py` from before that change
+does not accept the command. Updating the MASC executables does not build the
+Add-on image, copy its operator-managed package or change its declaration.
+
+Build or load the image and copy the complete package from the same source
+revision. The image supplies `protocol.py` and `exact_worker.py`; the mounted
+package supplies `server.py` and both schemas. Keep the old package and image
+unchanged. Worker record version 2 is unchanged, so this update alone does not
+require an empty volume. The separate v1 record hard cut linked above applies
+only to installations that still have those records.
+
+A package path, revision or image change also changes the semantic configuration
+revision. Preserving the volume does not reauthorize a captured original under
+the new configuration. Before switching, inspect retained host originals,
+worker records, Exact outcomes and proofs. Finish outstanding work through its
+existing owner, or use a separately reviewed, explicitly authorized plan to set
+aside the affected original chains and make their preserved inputs eligible
+again. Missing or unknown results do not authorize replay. See
+[the original-inventory requirements](EXACT-WORKER-STATE-HARD-CUT.md#deploy-with-a-stopped-writer).
+
+An approved fresh-state operation stops writers and holds the workspace lease
+before backing up and isolating the selected Librarian owner/body, history fence
+and resolution scopes and their matching worker requests. Preserve Memory,
+admission queues, raw conversations, receipts, all read cursors, Exact records
+and proofs, settled archives and unrelated worker records. Do not clear the
+whole volume. Run the candidate's
+[stored-state audit](DURABLE-STORE-HARD-CUT.md) before starting that candidate.
+
+For an ordinary update with no unresolved original chains, save the new manifest
+path with a fresh declaration revision through the
+[declaration API](lane-declaration-editor.md#keeper와-공통-api). Normal
+reconciliation removes the old worker before attaching the replacement. Verify
+the applied revision, actual image ID, the same owned `/state` volume, and live
+`tools/list` advertising `refuse_body` on both `admit_memory` and `derive_memory`.
+Then check actual Memory receipts and source acknowledgements separately.
 
 The optional top-level `max_exact_in_flight` is how many exact requests of this
 installation the host runs side by side. It is an integer of 1 or more and

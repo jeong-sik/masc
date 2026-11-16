@@ -28,3 +28,8 @@ HWP를 가져온 뒤 편집·게시·HWPX/DOCX 다운로드를 확인한다.
 이 Node 대조는 실제 브라우저 다운로드와 한컴·Word 화면을 증명하지 않는다.
 별도 Vite 설정은 격리 화면과 실제 HWP worker·WASM·고지 파일만 빌드한다.
 전체 Dashboard 빌드나 실행 중인 Dashboard 설치는 바꾸지 않는다.
+
+2026-11-16에는 Linux Chromium에서 실제 HWP worker와 다운로드도 확인했다.
+DOCX 6개는 Linux LibreOffice에서 열어 출력했다.
+실제 한컴·Word 실행과 원본 표 너비 보존은 확인한 범위에 포함하지 않는다.
+자세한 범위는 [검증 기록](../../../docs/evidence/artifact-office-browser-2026-11-16.md)에 있다.

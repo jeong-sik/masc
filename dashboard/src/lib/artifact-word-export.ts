@@ -170,7 +170,7 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
       if(chart){
         flush()
         charts.push(chart)
-        const common={title:wordText(chart.title),categories:chart.categories.map(wordText),
+        const common={...(chart.title===''?{}:{title:wordText(chart.title)}),categories:chart.categories.map(wordText),
           series:chart.series.map(series=>({name:wordText(series.name),values:series.values})),transformation:{width:bodyWidth/15,height:320}}
         const options=chart.type==='pie'?{...common,type:chart.type}:{...common,type:chart.type,emptyValues:chart.emptyValues,
           ...(chart.valueFormat===undefined?{}:{valueAxis:{numberFormat:chart.valueFormat}})}

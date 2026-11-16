@@ -1306,6 +1306,72 @@ let test_resolved_bearer_role_matches_resolve_role () =
     Auth.disable_auth dir;
     compare_all "auth off")
 
+(* The door's admission stands in for the reads it replaces: a bearer is the
+   agent its credential, or the Keeper header for the internal token, names,
+   with the role [resolve_role_with_auth_config] gives that agent; a bearer
+   that does not resolve is refused with the lookup's own error. *)
+let test_admit_request_matches_the_reads_it_replaces () =
+  let dir = setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_test_workspace dir) (fun () ->
+    let admit ?internal_keeper_agent token =
+      Auth.admit_request dir ~auth_cfg:(Auth.load_auth_config dir) ~token
+        ~internal_keeper_agent
+    in
+    (match admit None with
+     | Ok Auth.Auth_off -> ()
+     | Ok (Auth.Anonymous | Auth.Bearer _) | Error _ ->
+         fail "auth off admits a request as Auth_off");
+    let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+    (match admit None with
+     | Error Auth.Token_required -> ()
+     | Ok _ | Error (Auth.Bearer_refused _) ->
+         fail "a required bearer that is absent is Token_required");
+    let bearer label ?internal_keeper_agent ~agent_name token =
+      let auth_cfg = Auth.load_auth_config dir in
+      match
+        admit ?internal_keeper_agent (Some token),
+        Auth.resolve_role_with_auth_config dir ~auth_cfg ~agent_name ~token:(Some token)
+      with
+      | Ok (Auth.Bearer { agent_name = admitted; role; _ }), Ok expected ->
+          check string (label ^ ": agent") agent_name admitted;
+          check string (label ^ ": role")
+            (Masc_domain.show_agent_role expected) (Masc_domain.show_agent_role role)
+      | Ok (Auth.Auth_off | Auth.Anonymous), _ -> fail (label ^ ": a bearer admitted without its agent")
+      | Error Auth.Token_required, _ -> fail (label ^ ": a present bearer read as absent")
+      | Error (Auth.Bearer_refused error), _ | _, Error error ->
+          fail (label ^ ": " ^ Masc_domain.masc_error_to_string error)
+    in
+    List.iter
+      (fun (agent_name, role) ->
+        match Auth.create_token dir ~agent_name ~role with
+        | Ok (raw_token, _) -> bearer agent_name ~agent_name raw_token
+        | Error error -> fail (Masc_domain.masc_error_to_string error))
+      [ "worker_agent", Masc_domain.Worker
+      ; "admin_agent", Masc_domain.Admin
+      ; "player_agent", Masc_domain.Player
+      ];
+    let internal = Auth.ensure_internal_keeper_token dir in
+    bearer "internal keeper" ~internal_keeper_agent:"keeper-a" ~agent_name:"keeper-a" internal;
+    (match admit (Some internal) with
+     | Error
+         (Auth.Bearer_refused
+            (Masc_domain.Auth
+               (Masc_domain.Auth_error.Unauthorized
+                  { reason = Masc_domain.Auth_error.Missing_token; _ }))) -> ()
+     | Ok _ | Error _ -> fail "the internal Keeper token without its header is refused");
+    let unknown = "not-a-credential-token" in
+    (match admit (Some unknown), Auth.find_token_credential dir ~token:unknown with
+     | Error (Auth.Bearer_refused refused), Error lookup ->
+         check string "an unknown bearer is refused with the lookup's error"
+           (Masc_domain.masc_error_to_string lookup)
+           (Masc_domain.masc_error_to_string refused)
+     | _ -> fail "an unknown bearer is refused as its lookup is");
+    let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"test-admin" in
+    match admit None with
+    | Ok Auth.Anonymous -> ()
+    | Ok (Auth.Auth_off | Auth.Bearer _) | Error _ ->
+        fail "no bearer where none is required is Anonymous")
+
 let test_authorize_unknown_masc_tool_strict_denied () =
   let dir = setup_test_workspace () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
@@ -1595,6 +1661,8 @@ let () =
         `Quick test_resolve_role_workspace_secret_grants_admin;
       test_case "a resolved bearer's role matches resolve_role"
         `Quick test_resolved_bearer_role_matches_resolve_role;
+      test_case "admit_request matches the reads it replaces"
+        `Quick test_admit_request_matches_the_reads_it_replaces;
       test_case "strict unknown masc tool denied"
         `Quick test_authorize_unknown_masc_tool_strict_denied;
       test_case "strict unknown non-masc tool denied"

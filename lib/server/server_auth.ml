@@ -191,21 +191,28 @@ let internal_keeper_agent_from_request request =
    token with its header, or the credential that holds the token. *)
 let identify_bearer ~base_path request ~token :
     (string * Auth.resolved_bearer, Masc_domain.masc_error) result =
-  match Auth.internal_keeper_bearer base_path ~token with
-  | Some internal -> (
-      match internal_keeper_agent_from_request request with
-      | Some agent_name -> Ok (agent_name, internal)
-      | None ->
-          Error
-            (Masc_domain.Auth
-               (Masc_domain.Auth_error.Unauthorized
-                  { reason = Missing_token
-                  ; message = "Internal keeper auth requires x-masc-keeper-name header."
-                  })))
-  | None ->
-      let+ credential = Auth.find_token_credential base_path ~token in
-      ( (Auth.token_credential_agent_credential credential).Masc_domain.agent_name
-      , Auth.token_credential_bearer credential )
+  Auth.identify_bearer base_path ~token
+    ~internal_keeper_agent:(internal_keeper_agent_from_request request)
+
+(* The door's admission of [request]. [token_required] words the answer to
+   a request without a bearer on a workspace that requires one, which
+   differs by endpoint. *)
+let admit_request ~base_path ~auth_cfg request ~token ~token_required :
+    (Auth.request_principal, Masc_domain.masc_error) result =
+  match
+    Auth.admit_request base_path ~auth_cfg ~token
+      ~internal_keeper_agent:(internal_keeper_agent_from_request request)
+  with
+  | Ok principal -> Ok principal
+  | Error Auth.Token_required -> Error (token_required ())
+  | Error (Auth.Bearer_refused error) -> Error error
+
+(* The /mcp door's rule: with auth off, or with no bearer where none is
+   required, the request passes; a bearer's role must hold [permission]. *)
+let authorize_principal ~permission : Auth.request_principal -> _ = function
+  | Auth.Auth_off | Auth.Anonymous -> Ok ()
+  | Auth.Bearer { agent_name; role; _ } ->
+      Auth.authorize_permission_for_role ~agent_name ~role ~permission
 
 let resolve_agent_name_for_auth_raw ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =
@@ -263,23 +270,19 @@ let verify_mcp_auth_unscoped ~permission ~base_path request =
     |> Result.map_error mcp_unauthorized
   in
   let* () = reject_malformed_request_credential credential in
-  if not auth_config.Masc_domain.enabled then
-    Ok ()  (* Auth disabled - allow all *)
-  else
-    match token_of_request_auth_credential credential with
-    | None when not auth_config.require_token ->
-        Ok ()  (* Token not required *)
-    | None ->
-        Error
-          (mcp_unauthorized
-             ~reason:Masc_domain.Auth_error.Missing_token
-             "Authentication required. Use 'Authorization: Bearer <token>' header.")
-    | Some token ->
-        (* A bearer always names an agent or fails: [admitted_bearer] has
-           no anonymous case to rewrite to "dashboard". Spec:
-           [specs/auth/AuthIdentityFSM.tla] invariant [NoSilentRewrite] (I2). *)
-        let* admitted = admit_bearer ~base_path ~auth_cfg:auth_config request ~token in
-        authorize_admitted_bearer ~permission admitted
+  (* A bearer always names an agent or fails: [Auth.Bearer] carries the
+     agent the bearer resolved to, and a bearer that does not resolve is
+     refused, never turned into [Anonymous] or "dashboard". Spec:
+     [specs/auth/AuthIdentityFSM.tla] invariant [NoSilentRewrite] (I2). *)
+  let* principal =
+    admit_request ~base_path ~auth_cfg:auth_config request
+      ~token:(token_of_request_auth_credential credential)
+      ~token_required:(fun () ->
+        mcp_unauthorized
+          ~reason:Masc_domain.Auth_error.Missing_token
+          "Authentication required. Use 'Authorization: Bearer <token>' header.")
+  in
+  authorize_principal ~permission principal
 
 let verify_mcp_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -306,21 +309,16 @@ let verify_mcp_observer_stream_auth_unscoped ~base_path request =
     |> Result.map_error mcp_unauthorized
   in
   let* () = reject_malformed_request_credential credential in
-  if not auth_config.Masc_domain.enabled then
-    Ok ()
-  else
-    match token_of_request_auth_credential credential with
-    | None when not auth_config.require_token ->
-        Ok ()
-    | None ->
-        Error
-          (mcp_unauthorized
-             ~reason:Masc_domain.Auth_error.Missing_token
-             "Authentication required. Use 'Authorization: Bearer <token>' header \
-              or 'token' query param for the observer/presence/cursor SSE stream.")
-    | Some token ->
-        let* admitted = admit_bearer ~base_path ~auth_cfg:auth_config request ~token in
-        authorize_admitted_bearer ~permission:Masc_domain.CanReadState admitted
+  let* principal =
+    admit_request ~base_path ~auth_cfg:auth_config request
+      ~token:(token_of_request_auth_credential credential)
+      ~token_required:(fun () ->
+        mcp_unauthorized
+          ~reason:Masc_domain.Auth_error.Missing_token
+          "Authentication required. Use 'Authorization: Bearer <token>' header \
+           or 'token' query param for the observer/presence/cursor SSE stream.")
+  in
+  authorize_principal ~permission:Masc_domain.CanReadState principal
 
 let verify_mcp_observer_stream_auth ~base_path request =
   with_mcp_expected_resource (fun () ->

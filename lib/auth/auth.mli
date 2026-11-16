@@ -509,6 +509,52 @@ val resolve_role_of_resolved_bearer :
     secret are checked first, as there; an OAuth access record is verified
     against its owner's static file, as there. *)
 
+(** {1 Request admission} *)
+
+(** Who a request is, decided once at the door
+    (RFC-a-request-reads-its-bearer-once-at-the-door). Private: only
+    {!admit_request} makes one.
+    - [Auth_off]: workspace auth is disabled.
+    - [Anonymous]: no bearer, and the workspace does not require one.
+    - [Bearer]: the bearer names [agent_name], which holds [role]. [token] is
+      the bearer itself, for a later check that must pair it with a name the
+      caller chose. *)
+type request_principal = private
+  | Auth_off
+  | Anonymous
+  | Bearer of
+      { agent_name : string
+      ; role : agent_role
+      ; resolved : resolved_bearer
+      ; token : string
+      }
+
+(** Why the door did not admit a request. *)
+type admission_refusal =
+  | Token_required
+      (** No bearer, and the workspace requires one. The endpoint words
+          the answer. *)
+  | Bearer_refused of masc_error
+      (** The bearer did not resolve to an agent, or its role could not be
+          read. *)
+
+val identify_bearer :
+  string -> token:string -> internal_keeper_agent:string option ->
+  (string * resolved_bearer, masc_error) result
+(** The agent [token] names, and what answered for it: the internal Keeper
+    token with [internal_keeper_agent], the Keeper name the request's header
+    gives, or else the credential that holds [token]. The internal Keeper
+    token without that name is refused. *)
+
+val admit_request :
+  string -> auth_cfg:auth_config -> token:string option ->
+  internal_keeper_agent:string option ->
+  (request_principal, admission_refusal) result
+(** Admits a request carrying [token]: [Auth_off] when [auth_cfg] has auth
+    disabled, [Anonymous] or [Token_required] without a token as
+    [auth_cfg.require_token] says, and otherwise the [Bearer] that
+    {!identify_bearer} and {!resolve_role_of_resolved_bearer} give. *)
+
 val resolve_role :
   string -> agent_name:string -> token:string option ->
   (agent_role, masc_error) result

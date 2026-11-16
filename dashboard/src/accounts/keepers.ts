@@ -131,8 +131,9 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
   let round = 0
   let left = false
   /** How many answers of a make or an assignment came, whether or not the
-      list was on the page to take them. A reading that began before one of
-      them may not hold it, and is read again. */
+      list was on the page to take them, and how many asked for the list to
+      be read again. A reading that began before one of them may not hold
+      it, and is read again. */
   let puts = 0
 
   /** The browser leaves, with whatever runs left behind. */
@@ -171,8 +172,10 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     view.value = { kind: 'failed', forUser, failure: { problem: found.problem, attempts: attemptsBefore + 1 }, next: 'idle' }
   }
 
-  /** Reads the list again while it shows one, which stays on the page meanwhile. */
+  /** Reads the list again while it shows one, which stays on the page
+      meanwhile. A reading under way reads again once it ends. */
   const refresh = (): Promise<void> => {
+    puts += 1
     const now = view.peek()
     return now.kind === 'read' ? read(now.forUser, 0) : Promise.resolve()
   }

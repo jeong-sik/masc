@@ -741,6 +741,34 @@ describe('a request of a panel that the server refused', () => {
       stop()
     })
 
+    it('reads the Keepers again when a make before the change ends unknown while the list is read', async () => {
+      const keepersPath = '/api/v1/auth/keepers'
+      const made = later()
+      const list = later()
+      const { model, sent } = shown([
+        aSession(), aWho(), json(200, { keepers: [] }),
+        made.answer,
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), list.answer,
+        json(200, { keepers: [{ keeper_id: 'alpha', runtime_id: null }] }),
+      ])
+      const panel = createKeepers({ send: model.send, leave: vi.fn() })
+      const stop = followKeepers(model.view, panel)
+      await model.load()
+      await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+      const making = panel.make('alpha', null)
+      await model.send(panelPath, write('token'))
+      await model.load()
+      await waitFor(() => { expect(readsOf(sent, keepersPath)).toBe(2) })
+      // The server failed on its side: the Keeper may have been made.
+      made.give(notReady())
+      expect(await making).toMatchObject({ kind: 'unknown', name: 'alpha' })
+      list.give(json(200, { keepers: [] }))
+      await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', keepers: [{ id: 'alpha' }] }) })
+      expect(readsOf(sent, keepersPath)).toBe(3)
+      stop()
+    })
+
     it('reads the subscriptions again', async () => {
       const offered = (): Response => json(200, { integrations: [] })
       const ownedNothing = (): Response => json(200, { provider_accounts: [], runtimes: [] })
@@ -795,6 +823,45 @@ describe('a request of a panel that the server refused', () => {
       checked.give(passed)
       await checking
       expect(panel.checking.checks.value.get('acct_1')).toMatchObject({ kind: 'passed' })
+      await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', owned: { runtimes: [{ id: runtime.runtime_id }] } }) })
+      expect(readsOf(sent, paths.owned)).toBe(3)
+      stop()
+    })
+
+    it('reads the subscriptions again when a check passes while they are read', async () => {
+      const claude = { integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], calls: 'allowed' }
+      const offered = (): Response => json(200, { integrations: [claude] })
+      const account = { provider_account_id: 'acct_1', integration_id: 'claude_code' }
+      const runtime = { runtime_id: 'acct_1.claude-sonnet-5', provider_account_id: 'acct_1', model: 'claude-sonnet-5' }
+      const owned = (...runtimes: readonly unknown[]): Response => json(200, { provider_accounts: [account], runtimes })
+      const passed = json(200, {
+        verification: {
+          schema: 'masc.runtime_verification.v1', runtime_id: runtime.runtime_id, model: runtime.model, observed_model: null,
+          status: 'verified', checks: { response: true, tool_called: true, tool_roundtrip: true }, failure: null,
+        },
+        runtime: { runtime_id: runtime.runtime_id, record: 'made' },
+      })
+      const checked = later()
+      const offeredLate = later()
+      const { model, sent } = shown([
+        aSession(), aWho(), offered(), owned(),
+        checked.answer,
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), offeredLate.answer, owned(),
+        offered(), owned(runtime),
+      ])
+      const panel = createSubscriptions({ send: model.send, leave: vi.fn() })
+      const stop = follow(model.view, panel)
+      await model.load()
+      await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+      const checking = panel.checking.check('acct_1', 'claude-sonnet-5')
+      await model.send(panelPath, write('token'))
+      await model.load()
+      await waitFor(() => { expect(readsOf(sent, paths.owned)).toBe(2) })
+      // The owned accounts were read before the check recorded its Runtime.
+      checked.give(passed)
+      await checking
+      offeredLate.give(offered())
       await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', owned: { runtimes: [{ id: runtime.runtime_id }] } }) })
       expect(readsOf(sent, paths.owned)).toBe(3)
       stop()

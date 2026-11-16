@@ -89,10 +89,15 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   let session: Session | null = null
   /** The person whose login and checks the panel holds. `stop` keeps them. */
   let person: string | null = null
+  /** How many logins and checks asked for the panel to be read again. A
+      reading that began before the latest of them may not hold what it
+      changed, and is read again. */
+  let landed = 0
 
   const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
     latest += 1
     const mine = latest
+    const asOf = landed
     const slow = setTimeout(() => {
       const now = view.peek()
       if (mine === latest && now.kind === 'reading') view.value = { ...now, slow: true }
@@ -101,6 +106,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     clearTimeout(slow)
     if (mine !== latest) return
     if (found.ok) {
+      if (landed !== asOf) return read(forUser, attemptsBefore)
       view.value = { kind: 'read', forUser, integrations: found.integrations, owned: found.owned }
       return
     }
@@ -116,9 +122,9 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   }
 
   /** Reads again what the panel shows, which stays on the page meanwhile. A
-      panel that shows no reading has nothing to read again: its own reading
-      or retry is under way, or the browser is leaving. */
+      reading or retry under way reads again once it ends. */
   const refresh = (): Promise<void> => {
+    landed += 1
     const now = view.peek()
     return now.kind === 'read' ? read(now.forUser, 0) : Promise.resolve()
   }

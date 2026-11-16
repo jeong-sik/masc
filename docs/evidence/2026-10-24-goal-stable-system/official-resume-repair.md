@@ -13,8 +13,9 @@ The shared projection now also selects exactly that typed issued Goal. Start
 records it under the existing `Context_block Active_goals` digest because the
 initial System prompt sends it. A new or changed Goal on Resume is one separate
 encoded User observation before the owner request. An unchanged observation is
-omitted under the existing held policy. It does not join extra-context block
-batches, replay the base prompt or alter session identity. Regular HTTP source
+omitted under the existing held policy. This shared projection does not join
+extra-context block batches or emit the base prompt. It does not decide native
+instruction refresh or session identity. Regular HTTP source
 and its leading System Goal carrier are unchanged by this repair.
 
 The submission link has an explicit System-Goal source path. Its proof selects
@@ -40,5 +41,32 @@ codec and receipt consumer. The parent integration executed it atd3a242837194e94
 Neither the pure probe nor this authored fixture proves full SDK sessions,
 completed vendor transport or model retention. No local Dune, real official
 client session, CI watch or live Keeper mutation was performed for this repair.
+
+## Native adapter boundary clarification — 2026-11-16
+
+The earlier wording about leaving session identity unchanged overstated this
+projection's scope. At source `dd34bc2515c2782d644b5be53e2c602ee0729b9f`,
+the native adapters separately consume the complete prepared System:
+
+- Codex compares the exact complete instruction receipt and injects changed
+  instructions through its acknowledged Developer path. Updating resume
+  configuration alone did not immediately update model input; #47580 added
+  this delivery path. A changed issued Goal can therefore also refresh the
+  full instructions. The shared User projection does not suppress that path.
+- Muse includes the complete prepared System in its canonical-source guard.
+  A change can select a fresh session, or refuse a Gate continuation whose
+  exact source changed. Muse's MASC adapter frames instructions in Start
+  turn text; its `session/start` MCP configuration is not a native System
+  instruction field. Codex and Muse do not establish the same wire authority.
+
+These are separate adapter decisions. The retained pure-projection results do
+not establish that they preserve a session or avoid base-instruction delivery.
+Changing them requires preserving current instruction authority, ordering,
+exact source identity and uncertain-effect handling; hashing only `base_text`
+or dropping the Developer injection would not prove that contract.
+
+The [runtime authority map](../../guides/runtime-continuity-authority.md) links
+the current owning interfaces. This clarification changes narrative scope;
+the retained probe, captures and their original hashes are unchanged.
 
 The parent integration session binds the author baseline661becba to published root baseline3badb881 in probe-baseline-binding.json. Their projection file bytes are identical. The replay script uses published ancestry so a separate clone can reproduce the baseline without an unpublished author commit.

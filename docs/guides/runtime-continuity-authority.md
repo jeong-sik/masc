@@ -60,5 +60,19 @@ Agent Core의 checkpoint/durable turn count는 다른 계약이다. 후자는 �
 source-extracted replay, 문법 검사, 실제 통합 시험, vendor 세션 실측, 설치 후 관측은
 각각 실행한 범위로 기록한다. 하나의 성공을 다른 범위의 증거로 이월하지 않는다.
 
+## Native System 갱신의 검증 범위
+
+issued 관측을 공통 Resume projection이 별도로 고른다는 사실만으로 native adapter가
+전체 지시문을 다시 보내지 않거나 같은 세션을 유지한다고 결론 내리지 않는다.
+Codex는 변경된 지시문을 model-visible Developer 주입으로 반영하고, Muse는 전체
+System을 포함한 canonical source가 바뀌면 새 세션을 선택할 수 있다.
+Muse가 Start turn text에 합치는 instruction frame과 Codex의 Developer role은 서로
+다른 전송 계약이다. 둘을 같은 native System 설정이라고 부르지 않는다.
+
+이력 조사의 [기존 projection 증거 설명 정정](../evidence/2026-10-24-goal-stable-system/official-resume-repair.md#native-adapter-boundary-clarification--2026-11-16)은
+이 범위를 분명히 한다. Goal·승인 관측의 권위와 순서, 관측 제거와 미확정 ACK를 보존하는
+전달 계약 없이 `base_text`만 해시하거나 지시문 주입을 없애는 수리를 하지 않는다.
+그 최적화가 필요하면 기존 receipt와 provider별 실제 갱신·압축 계약에서 출발한다.
+
 이번 trace 시작·귀속 수리의 직접 기록은
 [trace-start-authority 증거](../evidence/trace-start-authority-20261116/README.md)에 있다.

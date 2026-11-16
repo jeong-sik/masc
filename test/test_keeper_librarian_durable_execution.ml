@@ -972,7 +972,7 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
       ~wake:(fun () -> ())) in
   (match hold with
    | Ok (Durable_owner.Resumed (Publication_waiting _,_)) -> ()
-   | Ok (Waited _ | Resumed ((Refused _ | Finished _ | Basis_superseded _ | Ended_unadmitted _),_)) -> fail "original did not retain its judgment"
+   | Ok (Waited _ | Original_replaced _ | Resumed ((Refused _ | Finished _ | Basis_superseded _ | Ended_unadmitted _),_)) -> fail "original did not retain its judgment"
    | Error error -> fail (Durable_owner.error_to_string error));
   let judged,_=only_original fixture in
   (match Progress.phase judged.Owner.progress with
@@ -1699,7 +1699,7 @@ let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixtur
       injected:=true;write cursor_path "{invalid cursor after actual Memory receipt}\n") in
     (match result with
      | Ok (Durable_owner.Resumed (Publication_waiting _,_)) -> ()
-     | Ok (Waited _ | Resumed ((Refused _ | Finished _ | Basis_superseded _ | Ended_unadmitted _),_)) ->
+     | Ok (Waited _ | Original_replaced _ | Resumed ((Refused _ | Finished _ | Basis_superseded _ | Ended_unadmitted _),_)) ->
        fail "actual post-Memory cursor failure was not retained Pending"
      | Error error -> fail (Durable_owner.error_to_string error));
     check int "the original has nonempty admitted external evidence to acknowledge" 1
@@ -2230,10 +2230,11 @@ let test_epoch_reset_refuses_old_original () = with_fixture (fun ~sw:_ fixture -
   let retained=Option.get retained in
   check json "old epoch evidence remains observable without restoring authority" original retained.Owner.request;
   check int "epoch invalidation starts no replacement provider" posts (F.post_count fixture.server))
-let retain_absent_history_original fixture =
+let retain_absent_history_original ?(failed_selection=true) fixture =
   let captured = ref None in
   (match memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
-    ~commit:(fun source -> captured := Some source; Consumer.Memory_refused [])) with
+    ~commit:(fun source -> captured := Some source;
+      if failed_selection then Consumer.Memory_refused [] else Consumer.Memory_replaced [])) with
    | Ok (Consumer.Memory_not_committed _) -> ()
    | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending _)
    | Error _ -> fail "fixture did not retain an unread history source");
@@ -2256,6 +2257,56 @@ let retain_absent_history_original fixture =
   let original = advance original Progress.Dispatch_intended in
   let original = advance original (Progress.Execution_observed (Progress.Absent (`Assoc []))) in
   original, request
+let test_replacement_terminal_survives_worker_gap ~rollback () = with_fixture (fun ~sw fixture ->
+  let _,request=retain_absent_history_original ~failed_selection:false fixture in
+  let original_input=Source.input (Capture.source request) in
+  let positions=progress fixture in
+  let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+    ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get)
+    |> Keeper_external_read_cursor.observation_to_json in
+  let cursor_before=cursor () in
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_actual_worker_configuration fixture ~sw replacement;
+  let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+    |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+  let exact=Capture.request request |> get in
+  let result=memory_action fixture (fun () -> Exact.run ~store:fixture.store
+    ~declaration_id:"librarian" ~package ~runner:(Server_lane_addon_exact.runner ~base_path:fixture.base_path)
+    ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path) exact) |> get in
+  (match result with Exact.Final (Not_allowed _) -> ()
+   | Final _ | Not_final _ -> fail "fresh replacement did not end the unstarted original");
+  check int "the actual host replacement sends no model request" 0 (F.post_count fixture.server);
+  if rollback then replace_actual_worker_configuration fixture ~sw (fixture.declaration true)
+  else set_enabled fixture false;
+  let wakes=ref 0 in
+  (match memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+     ~wake:(fun () -> incr wakes)) with
+   | Ok (Consumer.Memory_not_committed _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the original host cause was lost after its worker changed");
+  check int "the completed replacement requests one next pass" 1 !wakes;
+  let record,_=only_original fixture in
+  let target=Keeper_librarian_original_final.target
+    ~installation_id:(Capture.destination request).installation_id exact |> get in
+  check bool "the immutable host cause survives current worker state" true
+    (io (fun () -> Keeper_librarian_original_final.declaration_replaced ~store:fixture.store target record) |> get);
+  let selected=ref None in
+  (match memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
+     ~commit:(fun source -> selected:=Some (Source.input source);Consumer.Memory_replaced [])) with
+   | Ok (Consumer.Memory_not_committed _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "the untouched unread source was not selected again");
+  let selected=Option.to_result ~none:"missing fresh source selection" !selected |> get in
+  check bool "replacement never narrows the original unread history" true
+    (selected.messages=original_input.messages);
+  check bool "replacement retains all original counterpart input" true
+    (selected.counterpart_observations=original_input.counterpart_observations);
+  check bool "replacement advances no read position" true (progress fixture=positions);
+  check json "replacement advances no external ACK" cursor_before (cursor ());
+  check int "neither the missing worker nor rollback replays the original" 0 (F.post_count fixture.server);
+  no_memory fixture)
 let fence_preview fixture request = io (fun () ->
   Resolution.preview ~config:fixture.config ~keeper_name ~request_id:(Capture.request_id request)
   |> Result.map_error Resolution.error_to_string |> get)
@@ -2966,12 +3017,12 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   (match resume_descendant () with
    | Ok (Durable_owner.Waited _) -> ()
    | Error error -> fail (Durable_owner.error_to_string error)
-   | Ok (Resumed _) -> fail "descendant did not dispatch its actual worker request");
+   | Ok (Resumed _ | Original_replaced _) -> fail "descendant did not dispatch its actual worker request");
   await_delivery fixture ~after:delivered;
   (match resume_descendant () with
    | Ok (Durable_owner.Resumed (Finished _,_)) -> ()
    | Error error -> fail (Durable_owner.error_to_string error)
-   | Ok (Waited _ | Resumed ((Publication_waiting _ | Refused _ | Basis_superseded _ | Ended_unadmitted _),_)) ->
+   | Ok (Waited _ | Original_replaced _ | Resumed ((Publication_waiting _ | Refused _ | Basis_superseded _ | Ended_unadmitted _),_)) ->
      fail "descendant did not finish its actual Memory publication");
   check bool "the crash cut precedes durable completion observation" true
     ((observe ()).completion=Resolution_work.Not_observed);
@@ -3296,6 +3347,8 @@ let finished = function
   | Ok (Chain.Pending pending) ->
     failf "the chain was still pending: %s" (Keeper_librarian_pending.description pending)
   | Ok (Chain.Stopped {position;report}) -> failf "the chain stopped at %d: %s" position report.detail
+  | Ok (Chain.Declaration_replaced {position;request_id}) ->
+    failf "the declaration of step %d was replaced: %s" position request_id
   | Ok Chain.Superseded -> fail "the chain's initial facts were superseded"
   | Error detail -> failf "the chain refused: %s" detail
 let program_claims (program:Program.t) =
@@ -3589,7 +3642,7 @@ let test_a_checkpoint_whose_read_prefix_changed_stops_the_descent_before_any_ste
   fixture.set_step_response (fun _ -> fail "a changed source reached the provider");
   (match descend fixture candidate with
    | Error _ -> ()
-   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _ | Chain.Superseded) ->
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) ->
      fail "the floor read a checkpoint the original did not read");
   check int "no step was retained" 0 (List.length (steps_of fixture request));
   check int "and the provider was not asked" 0 (F.post_count fixture.server-posts))
@@ -4881,6 +4934,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_counterpart_only_provider_capacity_refusal_is_source_preserving;
   test_case "a different equal chat row cannot release the original refusal" `Quick
     test_refusal_does_not_accept_a_different_equal_chat_row;
+  test_case "a host replacement survives its ready worker disappearing" `Quick
+    (test_replacement_terminal_survives_worker_gap ~rollback:false);
+  test_case "a host replacement survives declaration rollback without replay" `Quick
+    (test_replacement_terminal_survives_worker_gap ~rollback:true);
   test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
     test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
   test_case "legacy omitted original blocks admission but prepares a safe continuation" `Quick

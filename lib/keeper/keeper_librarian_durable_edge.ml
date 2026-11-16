@@ -53,3 +53,7 @@ let call ~config ~reserved ~(expected : Request.destination) ~(original : Retain
     |> Result.map_error Submit.call_error_of_runtime
 let confirm_destination ~config ~reserved (destination:Request.destination) =
   Submit.confirm_destination ~config ~reserved ~label:"history" destination
+
+let observe_relation ~config ~reserved destination =
+  let+ relation,_=Submit.destination_relation ~config ~reserved ~label:"history" destination in
+  relation

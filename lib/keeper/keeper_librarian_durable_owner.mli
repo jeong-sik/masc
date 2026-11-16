@@ -39,6 +39,9 @@ type resumed =
       (** The original waits for its worker. Its body may not have been read. *)
   | Resumed of outcome * Keeper_librarian_durable_request.t
       (** The body was read, and the outcome is of this request. *)
+  | Original_replaced of Lane_addon_tool_request_owner.Record.t
+      (** This original ended without consuming its source. The Owner has
+          requested the next pass once; it must not narrow the unread range. *)
 val retain : store:Lane_addon_store.t -> Keeper_librarian_durable_request.t ->
   (Lane_addon_tool_request_owner.retained, error) result
 (** Persist the full original before any dispatch, retaining its existing journal.

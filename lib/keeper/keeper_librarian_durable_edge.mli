@@ -31,3 +31,10 @@ val confirm_destination : config:Workspace.config -> reserved:string list ->
 (** The configuration still publishes [destination]'s installation, package,
     tool and semantic revision. A missing export is [Unavailable]: the Add-on is
     off or not ready. A conflicting export or a changed configuration is [Rejected]. *)
+
+val observe_relation : config:Workspace.config -> reserved:string list ->
+  Keeper_librarian_durable_request.destination ->
+  (Lane_addon_captured_destination.relation, Lane_addon_submit_once.error) result
+(** Compare the original with a fresh complete configured destination and its
+    ready worker. A changed file without that worker remains unavailable,
+    never [Replaced]. This observation alone neither dispatches nor settles. *)

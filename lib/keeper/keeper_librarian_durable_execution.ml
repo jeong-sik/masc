@@ -46,6 +46,10 @@ let pending_publication request detail =
   Keeper_librarian_pending.Publication { request_id = Request.request_id request; detail }
 let pending_basis request =
   Keeper_librarian_pending.Basis_changed { request_id = Request.request_id request }
+let replacement_report_id request_id = Keeper_librarian_runtime.not_committed_of_failure
+  ~detail:("Original Librarian declaration replaced; source remains unread: " ^ request_id)
+  Keeper_exact_walk_failure.empty
+let replacement_report record = replacement_report_id (Record.request_id record)
 let advance_original ~store record event =
   io (fun () -> match Retained.advance ~store ~expected:record ~event with
     | Ok (Retained.Stored record | Already_stored record) -> Ok record
@@ -391,6 +395,8 @@ let rec consume_one ~config ~keeper_name ~wake =
       (match wait_for_original wait record with
        | Ok pending -> Ok (Consumer.Pending pending)
        | Error detail -> error detail)
+    | Ok (Owner.Original_replaced record) ->
+      Ok (Consumer.Memory_not_committed [replacement_report record])
     | Ok (Resumed (Finished completed,request)) ->
       (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
        | Ok () -> Ok (completed_outcome request)
@@ -684,6 +690,8 @@ let rec consume_one ~config ~keeper_name ~wake =
               (match wait_for_original wait record with
                | Ok pending -> Consumer.Memory_pending pending
                | Error detail -> stop detail)
+            | Ok (Owner.Original_replaced record) ->
+              Consumer.Memory_replaced [replacement_report record]
             | Ok (Resumed (Finished completed,request)) ->
               (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
                | Ok () -> Consumer.Memory_committed
@@ -717,6 +725,10 @@ let rec consume_one ~config ~keeper_name ~wake =
               (Keeper_librarian_pending.description pending);
             Consumer.Memory_pending pending
           | Ok Floor_chain.Superseded -> superseded ()
+          | Ok (Floor_chain.Declaration_replaced {position;request_id}) ->
+            (match Floor_cleanup.settle_step ~store ~owner candidate ~position with
+             | Error detail -> stop detail
+             | Ok _ -> wake ();Consumer.Memory_replaced [replacement_report_id request_id])
           | Ok (Floor_chain.Stopped {position;report}) ->
             (* The host ended this step's ID. The steps before it stay, and the
                next pass asks the same position under a new ID. *)

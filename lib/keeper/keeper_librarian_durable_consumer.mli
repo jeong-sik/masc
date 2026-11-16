@@ -30,6 +30,10 @@ type commit_result =
       (** All failure reports in callback order. An empty list means the pass
           returned without committing or supplying classified evidence. Neither
           form authorizes progress or proves that the source is too large. *)
+  | Memory_replaced of Keeper_librarian_runtime.not_committed list
+      (** The original ended because its declaration was replaced. Its source
+          remains unread; preserve the pre-existing selection mode rather
+          than classifying this as a failed wide model input. *)
 
 type outcome =
   | Nothing_to_read

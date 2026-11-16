@@ -41,6 +41,10 @@ type outcome =
       (** The step at [position] ended in a refusal that does not show reading
           less could help, or the question is a host observation that cannot become
           a hole. The chain does not advance. [report] is the host's own evidence. *)
+  | Declaration_replaced of {position : int; request_id : string}
+      (** The host did not execute this step under its replaced declaration.
+          The caller settles this step and schedules a new pass without
+          treating it as evidence that a smaller source input is needed. *)
   | Superseded
       (** The retained first step began from different Memory facts. No step is
           resumed; the caller settles the chain before beginning from current

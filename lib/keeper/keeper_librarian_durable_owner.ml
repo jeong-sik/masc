@@ -21,6 +21,7 @@ type outcome = Publication_waiting of string
   | Basis_superseded of Owner.retained
   | Ended_unadmitted of Owner.retained
 type resumed = Waited of wait * Owner.Record.t | Resumed of outcome * Request.t
+  | Original_replaced of Owner.Record.t
 type listed = Owner.Record.t * Request.index
 type held = Listed of listed | Read of (Owner.retained * Request.t)
 let io work = Systhread_host.run work
@@ -292,7 +293,18 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     if settles then wake ();
     Ok (Waited (Worker_unknown,Owner.listed record))
   | Final (body,Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
-    Ok (Resumed (Refused (final,record),body.request))
+    let* replacement = match final with
+      | Exact.Not_allowed _ ->
+        io (fun () ->
+          let* target=Keeper_librarian_original_final.target
+            ~installation_id:destination.installation_id body.exact in
+          Keeper_librarian_original_final.declaration_replaced ~store target record) |> rejected
+      | Call_final _ | Outcome_unknown | Request_id_reused -> Ok false in
+    if replacement then (
+      let* ()=confirm_live_owner () in
+      wake ();
+      Ok (Original_replaced (Owner.listed record)))
+    else Ok (Resumed (Refused (final,record),body.request))
   | Commit_pending record ->
     let* body=read_body () in
     let* record=rebind body record in

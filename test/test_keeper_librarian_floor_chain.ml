@@ -72,6 +72,8 @@ let finished = function
   | Ok (Chain.Finished finished) -> finished
   | Ok (Chain.Pending pending) -> failf "the chain was still pending: %s" (Pending.description pending)
   | Ok (Chain.Stopped { position; report }) -> failf "the chain stopped at %d: %s" position report.detail
+  | Ok (Chain.Declaration_replaced {position;request_id}) ->
+    failf "the declaration of step %d was replaced: %s" position request_id
   | Ok Chain.Superseded -> fail "the chain's initial facts were superseded"
   | Error detail -> failf "the chain refused: %s" detail
 
@@ -217,13 +219,13 @@ let test_a_refusal_that_shows_nothing_about_reading_less_stops_the_chain () = wi
      check int "at the first message" 0 position;
      check bool "its report does not let the floor read less" true
        (report.message_descent <> Memory_runtime.Smaller_input_may_help && report.provider_input_refusals = [])
-   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Superseded) -> fail "the chain went past a message no slot could answer"
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "the chain went past a message no slot could answer"
    | Error detail -> fail detail);
   check int "no second message was asked" 1 (List.length (steps_of fixture ~owner));
   let calls = F.post_count fixture.server in
   (match drive fixture ~owner ~range () with
    | Ok (Chain.Stopped { position; _ }) -> check int "a restart stops at the same message" 0 position
-   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Superseded) | Error _ -> fail "a restart did not stop at the same message");
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Declaration_replaced _ | Chain.Superseded) | Error _ -> fail "a restart did not stop at the same message");
   check int "without asking the provider again" calls (F.post_count fixture.server))
 
 let stale_fact = Types.observed ~claim:"a fact from the Memory of another moment" ~category:Types.Fact
@@ -262,7 +264,7 @@ let retain_copy ~store ~owner (record : Owner.retained) ~edit =
 
 let expect_refused label ~mentioning = function
   | Error detail -> check bool (Printf.sprintf "%s (%s)" label detail) true (contains detail mentioning)
-  | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _ | Chain.Superseded) -> failf "%s was accepted" label
+  | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> failf "%s was accepted" label
 
 let test_a_chain_that_disagrees_with_itself_is_refused () = with_fixture (fun fixture ->
   fixture.respond := answering ();
@@ -369,7 +371,7 @@ let test_a_retained_chain_revalidates_current_facts_before_resuming () = with_fi
    | Ok _ -> fail "a failed authority read was accepted");
   (match resume (fun () -> Ok (Some { Keeper_librarian.facts = [ stale_fact ] })) with
    | Ok Chain.Superseded -> ()
-   | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _) | Error _ ->
+   | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _) | Error _ ->
      fail "changed Memory did not supersede the chain");
   check (list string) "neither outcome settles records on the caller's behalf" before (records ());
   check int "neither resumes a model step" calls (F.post_count fixture.server);
@@ -476,12 +478,12 @@ let test_a_pass_with_no_answered_step_does_not_read_the_gate_scope () = with_fix
      check string "the leaf worker request survives the floor" record.request_id waiting.request_id;
      check bool "the actual worker is processing" true (waiting.wait = Pending.Processing)
    | Ok (Chain.Pending _) -> fail "the pending worker was replaced by a floor diagnostic"
-   | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "the chain went past a step nothing had answered"
+   | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "the chain went past a step nothing had answered"
    | Error detail -> failf "a pass with no answered step read the gate scope: %s" detail);
   await_delivery fixture ~after:before;
   match run_once fixture ~owner ~range () with
   | Error _ -> ()
-  | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "an answered step was judged without the gate scope")
+  | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "an answered step was judged without the gate scope")
 
 let absorbing_answer = `Assoc
   [ "new_claims", `List [ `Assoc [ "claim", `String "a claim that absorbs the stale fact"; "category", `String "fact";
@@ -505,7 +507,7 @@ let test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_in
     (match run_through_workers fixture ~owner ~range ~fresh:starting () with
      | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
      | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
-     | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+     | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
      | Error detail -> failf "the chain refused: %s" detail);
     let failed = Gate.Inventory.read ~store:fixture.store ~owner |> get in
     check bool "the failed journal is in the inventory" true (Gate.Inventory.record_count failed > 0);
@@ -552,7 +554,7 @@ let test_a_journal_read_restores_each_attempt_once () = with_fixture (fun fixtur
       match run_through_workers fixture ~owner ~range ~fresh:starting () with
       | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
       | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
-      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
       | Error detail -> failf "the chain refused: %s" detail in
     let first_step () = match in_position_order (steps_of fixture ~owner) with
       | (record, (_ : Step.header)) :: _ -> Some record
@@ -605,7 +607,8 @@ let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture 
       match run_through_workers fixture ~owner ~range ~fresh:starting () with
       | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
       | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
-      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded | Chain.Declaration_replaced _) ->
+        fail "a gate that failed was taken for a decision"
       | Error detail -> failf "the chain refused: %s" detail in
     let attempts () = match in_position_order (steps_of fixture ~owner) with
       | [] -> 0
@@ -674,7 +677,8 @@ let test_a_deploy_check_judges_a_steps_exact_files_once_for_its_journal () = wit
       match run_through_workers fixture ~owner ~range ~fresh:starting () with
       | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
       | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
-      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded | Chain.Declaration_replaced _) ->
+        fail "a gate that failed was taken for a decision"
       | Error detail -> failf "the chain refused: %s" detail in
     let first_step () = match in_position_order (steps_of fixture ~owner) with
       | ((step : Owner.retained), (_ : Step.header)) :: _ -> Some step

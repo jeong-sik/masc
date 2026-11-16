@@ -27,6 +27,13 @@ type unconfirmed = Terminal_absent | Terminal_unresolved | Terminal_differs
     own error for it. *)
 type verdict = Confirmed | Unconfirmed of unconfirmed
 
+val declaration_replaced : store:Lane_addon_store.t -> target -> Lane_addon_tool_request_owner.retained ->
+  (bool, string) result
+(** Bind an execution refusal's typed cause to the original host Exact record.
+    Current worker availability cannot revoke this past no-send verdict.
+    The caller must first bind the original and confirm its final. Blocking
+    Store reads must be offloaded from Eio. *)
+
 val confirm : observe:(unit -> (Lane_addon_exact.retained_observation, string) result) ->
   latest:(unit -> (Lane_addon_exact.latest_original_execution, string) result) ->
   Lane_addon_exact.final -> (verdict, string) result

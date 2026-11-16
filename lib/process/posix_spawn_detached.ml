@@ -12,27 +12,26 @@ type t = { pid : int; started : string option; exited : Unix.process_status opti
 external darwin_start : int -> string option = "masc_process_start_time"
 external darwin_parent : int -> int option = "masc_process_parent_pid"
 
-(* starttime is field 22 of proc(5), the 20th after the command. It counts
-   from boot, so the boot names it too. *)
+(* starttime counts from boot, so the boot names it too. *)
 let linux_start pid =
-  match Linux_proc_stat.read pid with
-  | None -> None
-  | Some fields ->
-    (match List.nth_opt fields 19, In_channel.with_open_bin "/proc/sys/kernel/random/boot_id" In_channel.input_all with
-     | exception Sys_error _ -> None
-     | Some starttime, boot -> Some (Printf.sprintf "proc:%s:%s" (String.trim boot) starttime)
-     | None, _ -> None)
+  match
+    ( Linux_proc_stat.parse (Linux_proc_stat.read pid)
+    , In_channel.with_open_bin "/proc/sys/kernel/random/boot_id" In_channel.input_all )
+  with
+  | exception (Unix.Unix_error (_, _, _) | Sys_error _) -> None
+  | Some line, boot -> Some (Printf.sprintf "proc:%s:%s" (String.trim boot) line.Linux_proc_stat.start)
+  | None, _ -> None
 
 let process_start pid =
   match darwin_start pid with
   | Some _ as started -> started
   | None -> linux_start pid
 
-(* ppid is field 4 of proc(5), the second after the command. *)
 let linux_parent pid =
-  match Linux_proc_stat.read pid with
-  | Some (_state :: ppid :: _) -> int_of_string_opt ppid
-  | Some ([] | [ _ ]) | None -> None
+  match Linux_proc_stat.parse (Linux_proc_stat.read pid) with
+  | exception Unix.Unix_error (_, _, _) -> None
+  | Some line -> Some line.Linux_proc_stat.parent
+  | None -> None
 
 let parent_pid pid =
   match darwin_parent pid with

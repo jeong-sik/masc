@@ -718,12 +718,27 @@ let test_parent_of_a_held_and_a_reaped_child () =
     (Posix_spawn_detached.parent_pid pid)
 ;;
 
+let stat_line =
+  testable
+    (fun ppf { Linux_proc_stat.state; parent; group; start } ->
+      Format.fprintf ppf "{ state = %S; parent = %d; group = %d; start = %S }" state parent group start)
+    ( = )
+
+(* pid 4242, ppid 17, pgrp 23 and starttime 98765 all differ, so a field
+   read from the wrong place shows. *)
+let stat_fields_after_command =
+  "S 17 23 23 34816 23 4194304 100 0 0 0 1 2 0 0 20 0 1 0 98765 1024 10\n"
+
 let test_proc_stat_fields_start_after_the_last_parenthesis () =
-  check (option (list string)) "a command holding spaces and ')'"
-    (Some [ "S"; "1"; "4242"; "4242" ])
-    (Linux_proc_stat.parse "4242 (a) b (c)) S 1 4242 4242\n");
-  check (option (list string)) "a line with no command" None
-    (Linux_proc_stat.parse "4242 S 1 4242")
+  check (option stat_line) "a command holding spaces and ')'"
+    (Some { Linux_proc_stat.state = "S"; parent = 17; group = 23; start = "98765" })
+    (Linux_proc_stat.parse ("4242 (a) b (c)) " ^ stat_fields_after_command));
+  check (option stat_line) "a line with no command" None
+    (Linux_proc_stat.parse ("4242 " ^ stat_fields_after_command));
+  check (option stat_line) "a line that stops before starttime" None
+    (Linux_proc_stat.parse "4242 (sh) S 17 23 23");
+  check (option stat_line) "a ppid that is not a number" None
+    (Linux_proc_stat.parse "4242 (sh) S x 23 23 34816 23 4194304 100 0 0 0 1 2 0 0 20 0 1 0 98765")
 ;;
 
 (* Darwin's group kill answers EPERM when it signalled nobody; the member

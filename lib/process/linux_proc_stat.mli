@@ -1,15 +1,23 @@
 (** One process's line in Linux's [/proc/<pid>/stat] (proc(5)).
 
     The line starts "pid (comm) state ppid pgrp ...". The command name sits
-    in parentheses and may hold spaces and [')'] itself, so every caller that
-    wants a field after it has to find the last [')'] first. Field 3 of
-    proc(5), the state, is the head of the list both functions return. *)
+    in parentheses and may hold spaces and [')'] itself, so the fields are
+    counted from the last [')']. *)
 
-val parse : string -> string list option
-(** The fields after the command name in one stat line: state, ppid, pgrp
-    and on. [None] when the line holds no [')']. *)
+type t =
+  { state : string  (** Field 3: ["S"], ["R"], ["Z"] for a zombie, and so on. *)
+  ; parent : int  (** Field 4, ppid. *)
+  ; group : int  (** Field 5, pgrp. *)
+  ; start : string  (** Field 22, starttime: clock ticks after boot, as written. *)
+  }
 
-val read : int -> string list option
-(** {!parse} of [/proc/<pid>/stat]. [None] when that file cannot be read --
-    no process numbered [pid], or no [/proc], which is every platform but
-    Linux -- or when it does not parse. *)
+val parse : string -> t option
+(** [None] when the line holds no [')'], stops before field 22, or holds no
+    number where ppid or pgrp stands. *)
+
+val read : int -> string
+(** The stat line of process [pid].
+    @raise Unix.Unix_error [ENOENT] when [/proc] holds no such process, and
+    for every pid when there is no [/proc], which is every platform but
+    Linux; [ESRCH] when the process was reaped after its file opened; the
+    errno of the refusal when the file would not open or read. *)

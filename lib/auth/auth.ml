@@ -221,17 +221,62 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
   resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
 ;;
 
+type resolved_bearer =
+  | Internal_keeper_bearer
+  | Token_credential of token_credential
+
+(* HIGH-RISK-UNREVIEWED: the role [resolve_role_with_auth_config] gives a
+   bearer that was already resolved, without resolving it again.
+
+   The caller has read the auth store once to learn whether [token] is the
+   internal Keeper token, and if not, which credential holds it.
+   [resolve_role_with_auth_config] read the same files again for the same
+   answers. Each read is a round trip through a system thread and the owner
+   domain; on 2026-11-16, with the host's load average near 500, one MCP
+   [initialize] spent 31.5 s authenticating its bearer and Claude Code gave
+   up after 10 s.
+
+   The checks run in the same order. Auth off and the workspace secret are
+   asked here, as before. The internal-token answer stands in for the second
+   hash read. A static bearer's credential was matched against its owner's
+   current file field by field, role and expiry included, which is the file
+   [verify_token] would read again. An OAuth access record goes through
+   [verify_token] as before: its owner's static file can refuse it. As with
+   the reads before, nothing locks the files between this answer and its
+   use; a credential replaced after the read is judged by the next request. *)
+let resolve_role_of_resolved_bearer config ~auth_cfg ~token resolved
+  : (agent_role, masc_error) result
+  =
+  if not auth_cfg.enabled
+  then Ok Admin
+  else if verify_workspace_secret config ~cached_hash:auth_cfg.workspace_secret_hash token
+  then Ok Admin
+  else (
+    match resolved with
+    | Internal_keeper_bearer -> Ok Worker
+    | Token_credential (Static_bearer credential) -> Ok credential.role
+    | Token_credential (Oauth_access credential) ->
+      Result.map
+        (fun (verified : agent_credential) -> verified.role)
+        (verify_token config ~agent_name:credential.agent_name ~token))
+;;
+
+let authorize_permission_for_role ~agent_name ~role ~permission
+  : (unit, masc_error) result
+  =
+  if has_permission role permission
+  then Ok ()
+  else
+    Error
+      (Auth
+         (Auth_error.Forbidden
+            { agent = agent_name; action = permission_to_string permission }))
+;;
+
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
-  | Ok role ->
-    if has_permission role permission
-    then Ok ()
-    else
-      Error
-        (Auth
-           (Auth_error.Forbidden
-              { agent = agent_name; action = permission_to_string permission }))
+  | Ok role -> authorize_permission_for_role ~agent_name ~role ~permission
 ;;
 
 let unknown_tool_class tool_name =

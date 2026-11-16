@@ -275,6 +275,15 @@ val rotate_shared_tokens_for_agents :
     and identity are preserved while publishers, revoke and prune are excluded
     by the same transaction. *)
 
+type token_credential = Auth_credential_token.token_credential =
+  | Oauth_access of agent_credential
+  | Static_bearer of agent_credential
+
+val token_credential_agent_credential : token_credential -> agent_credential
+
+val find_token_credential :
+  string -> token:string -> (token_credential, masc_error) result
+
 val find_credential_by_token :
   string -> token:string -> (agent_credential, masc_error) result
 
@@ -466,7 +475,27 @@ val check_permission :
 (** Resolves the caller's role with {!resolve_role} and checks it against
     [permission]. *)
 
+val authorize_permission_for_role :
+  agent_name:string -> role:agent_role -> permission:permission ->
+  (unit, masc_error) result
+(** The role check of {!check_permission}, for a role already resolved. *)
+
 (** {1 Role Resolution} *)
+
+(** A bearer the caller already resolved: the internal Keeper token, or the
+    credential {!find_token_credential} returned for it. *)
+type resolved_bearer =
+  | Internal_keeper_bearer
+  | Token_credential of token_credential
+
+val resolve_role_of_resolved_bearer :
+  string -> auth_cfg:auth_config -> token:string -> resolved_bearer ->
+  (agent_role, masc_error) result
+(** The role {!resolve_role_with_auth_config} gives [token] for the agent it
+    resolved to, using the resolution in hand instead of reading the
+    internal-token hash and a static bearer's credential again. Auth off and
+    the workspace secret are checked first, as there; an OAuth access record
+    is verified against its owner's static file, as there. *)
 
 val resolve_role :
   string -> agent_name:string -> token:string option ->

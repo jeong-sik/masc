@@ -187,26 +187,54 @@ let internal_keeper_agent_from_request request =
       in
       if normalized = "" then None else Some normalized
 
+(* The agent a bearer names, and what answered for it: the internal Keeper
+   token with its header, or the credential that holds the token. *)
+let identify_bearer ~base_path request ~token :
+    (string * Auth.resolved_bearer, Masc_domain.masc_error) result =
+  if Auth.verify_internal_keeper_token base_path ~token then
+    match internal_keeper_agent_from_request request with
+    | Some agent_name -> Ok (agent_name, Auth.Internal_keeper_bearer)
+    | None ->
+        Error
+          (Masc_domain.Auth
+             (Masc_domain.Auth_error.Unauthorized
+                { reason = Missing_token
+                ; message = "Internal keeper auth requires x-masc-keeper-name header."
+                }))
+  else
+    let+ credential = Auth.find_token_credential base_path ~token in
+    ( (Auth.token_credential_agent_credential credential).Masc_domain.agent_name
+    , Auth.Token_credential credential )
+
 let resolve_agent_name_for_auth_raw ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =
   match token with
-  | Some t when Auth.verify_internal_keeper_token base_path ~token:t -> (
-      match internal_keeper_agent_from_request request with
-      | Some agent_name -> Ok (Some agent_name)
-      | None ->
-          Error
-            (Masc_domain.Auth
-               (Masc_domain.Auth_error.Unauthorized
-                  { reason = Missing_token
-                  ; message = "Internal keeper auth requires x-masc-keeper-name header."
-                  })))
   | Some t ->
-      let+ agent_name = Auth.resolve_agent_from_token base_path ~token:t in
+      let+ agent_name, _ = identify_bearer ~base_path request ~token:t in
       Some agent_name
   | None -> (
       match agent_from_request request with
       | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
       | _ -> Ok None)
+
+(* HIGH-RISK-UNREVIEWED: a bearer read once for both questions an endpoint
+   asks: which agent it names, and whether that agent may do what the
+   endpoint asks. Asking [Auth.check_permission] after
+   [resolve_agent_name_for_auth_raw] read the auth store a second time for
+   answers the first read already had. *)
+type admitted_bearer = {
+  agent_name : string;
+  role : Masc_domain.agent_role;
+}
+
+let admit_bearer ~base_path ~auth_cfg request ~token :
+    (admitted_bearer, Masc_domain.masc_error) result =
+  let* agent_name, resolved = identify_bearer ~base_path request ~token in
+  let+ role = Auth.resolve_role_of_resolved_bearer base_path ~auth_cfg ~token resolved in
+  { agent_name; role }
+
+let authorize_admitted_bearer ~permission { agent_name; role } =
+  Auth.authorize_permission_for_role ~agent_name ~role ~permission
 
 (** Bind OAuth credential lookup to the resource derived from the admitted
     request authority. Static bearer lookup is unaffected by this scope. *)
@@ -245,25 +273,12 @@ let verify_mcp_auth_unscoped ~permission ~base_path request =
           (mcp_unauthorized
              ~reason:Masc_domain.Auth_error.Missing_token
              "Authentication required. Use 'Authorization: Bearer <token>' header.")
-    | Some token -> (
-        let* agent_name =
-          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-        in
-        match agent_name with
-        | None ->
-            (* Fail-closed: dead branch today (resolver:154-157 returns
-               [Ok (Some _)] or [Error] for [Some token]) but kept
-               explicit so a future [Anonymous] case cannot silently
-               rewrite to "dashboard". Spec:
-               [specs/auth/AuthIdentityFSM.tla] invariant
-               [NoSilentRewrite] (I2). *)
-            Error
-              (Masc_domain.Auth
-                 (Masc_domain.Auth_error.InvalidToken
-                    "Bearer token did not resolve to a credential identity."))
-        | Some agent_name ->
-            Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission)
+    | Some token ->
+        (* A bearer always names an agent or fails: [admitted_bearer] has
+           no anonymous case to rewrite to "dashboard". Spec:
+           [specs/auth/AuthIdentityFSM.tla] invariant [NoSilentRewrite] (I2). *)
+        let* admitted = admit_bearer ~base_path ~auth_cfg:auth_config request ~token in
+        authorize_admitted_bearer ~permission admitted
 
 let verify_mcp_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -302,21 +317,9 @@ let verify_mcp_observer_stream_auth_unscoped ~base_path request =
              ~reason:Masc_domain.Auth_error.Missing_token
              "Authentication required. Use 'Authorization: Bearer <token>' header \
               or 'token' query param for the observer/presence/cursor SSE stream.")
-    | Some token -> (
-        let* agent_name =
-          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-        in
-        match agent_name with
-        | None ->
-            (* Fail-closed: see verify_mcp_auth above. *)
-            Error
-              (Masc_domain.Auth
-                 (Masc_domain.Auth_error.InvalidToken
-                    "Authentication required. Bearer token did not resolve to \
-                     any agent."))
-        | Some agent_name ->
-            Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanReadState)
+    | Some token ->
+        let* admitted = admit_bearer ~base_path ~auth_cfg:auth_config request ~token in
+        authorize_admitted_bearer ~permission:Masc_domain.CanReadState admitted
 
 let verify_mcp_observer_stream_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -343,21 +346,9 @@ let verify_operator_mcp_auth_unscoped ~base_path request =
           (mcp_unauthorized
              ~reason:Masc_domain.Auth_error.Missing_token
              "Authentication required. Use 'Authorization: Bearer <token>' header.")
-    | Parsed_credential token -> (
-        let* agent_name =
-          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
-        in
-        match agent_name with
-        | None ->
-            (* Fail-closed: see verify_mcp_auth above. *)
-            Error
-              (Masc_domain.Auth
-                 (Masc_domain.Auth_error.InvalidToken
-                    "Authentication required. Bearer token did not resolve to \
-                     any agent."))
-        | Some agent_name ->
-            Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanAdmin)
+    | Parsed_credential token ->
+        let* admitted = admit_bearer ~base_path ~auth_cfg:auth_config request ~token in
+        authorize_admitted_bearer ~permission:Masc_domain.CanAdmin admitted
 
 let verify_operator_mcp_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -1056,13 +1047,18 @@ let authorize_permission_request ~base_path ~permission request :
                { reason = Generic; message = msg }))
   in
   let* () = reject_malformed_request_credential credential in
-  let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
-  let* actor = resolve_request_authorization_actor ~token agent_name_opt in
-  Auth.check_permission
-    base_path
-    ~agent_name:(request_authorization_actor_name actor)
-    ~token
-    ~permission
+  match token with
+  | Some token ->
+      let* admitted = admit_bearer ~base_path ~auth_cfg request ~token in
+      authorize_admitted_bearer ~permission admitted
+  | None ->
+      let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token:None in
+      let* actor = resolve_request_authorization_actor ~token:None agent_name_opt in
+      Auth.check_permission
+        base_path
+        ~agent_name:(request_authorization_actor_name actor)
+        ~token:None
+        ~permission
 
 let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
@@ -1085,11 +1081,20 @@ let authorize_tool_request_with_actor ~base_path ~tool_name ~request_authority r
             (Masc_domain.Auth_error.Unauthorized
                { reason = Generic; message = msg }))
   in
-  let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
-  let* actor = resolve_request_authorization_actor ~token agent_name_opt in
-  let agent_name = request_authorization_actor_name actor in
-  let* () = Auth.authorize_tool base_path ~agent_name ~token ~tool_name in
-  Ok agent_name
+  match token with
+  | Some token ->
+      let* admitted = admit_bearer ~base_path ~auth_cfg request ~token in
+      let* () =
+        Auth.authorize_tool_for_role ~agent_name:admitted.agent_name
+          ~role:admitted.role ~tool_name
+      in
+      Ok admitted.agent_name
+  | None ->
+      let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token:None in
+      let* actor = resolve_request_authorization_actor ~token:None agent_name_opt in
+      let agent_name = request_authorization_actor_name actor in
+      let* () = Auth.authorize_tool base_path ~agent_name ~token:None ~tool_name in
+      Ok agent_name
 
 type request_error =
   | Bad_request_detail of string

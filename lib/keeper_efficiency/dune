@@ -8,6 +8,7 @@
  (libraries
   dated_jsonl
   fs_compat
+  masc_core
   masc_cost_ledger
   masc_tool_types
   unix

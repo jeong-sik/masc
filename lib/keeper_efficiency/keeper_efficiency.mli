@@ -77,7 +77,11 @@ val month_of_unix_time : float -> string
 val read_month : masc_root:string -> month:string -> (month_view, string) result
 (** Aggregate the requested month, reusing and updating the boundary cache.
     An invalid month string is an [Error]. A missing ledger is an empty
-    month, not an error: the view then carries zero totals. *)
+    month, not an error: the view then carries zero totals.
+
+    Calls take turns. A call from an Eio fiber waits for its turn as a fiber,
+    so the other fibers of its domain keep running; a call from outside Eio
+    blocks its thread. *)
 
 val month_view_to_json : month_view -> Yojson.Safe.t
 (** The wire/cache projection of a month view. The response schema is

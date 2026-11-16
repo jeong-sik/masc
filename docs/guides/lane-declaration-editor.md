@@ -7,7 +7,7 @@ MASC 원천·다른 Lane 출력 사이의 연결을 지정한다.
 
 ## TUI
 
-`:go lane add-ons` 또는 `/addons`로 연다. TOML 설치 목록은 선언 경로와
+`:go Features & plugins / Plugins` 또는 `/addons`로 연다. TOML 설치 목록은 선언 경로와
 원하는 설정·실제 적용 revision, 설정 오류를 보여준다. 목록에서 `j/k`로 항목을 고르고
 Enter로 연다. 선언 항목은 설치 선언 화면, 인스턴스 항목은 Add-on 상세를 연다.
 인스턴스 상세에서만 Tab으로 Results → Links → Installation → Records를 순환한다.

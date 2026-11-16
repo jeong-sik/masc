@@ -3198,6 +3198,40 @@ let first_step_facts fixture request =
   match (Keeper_librarian_floor_step_request.step step).preparation.source_input.current with
   | Some current -> List.sort String.compare (List.map (fun (fact:Types.fact) -> fact.claim) current.facts)
   | None -> []
+let test_dispatch_rechecks_owner_without_restoring_the_body () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let original,capture=only_original fixture in
+  let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+    |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+  let authorization=Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+    ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request capture |> get)
+    |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
+    |> get |> Option.get in
+  authorization.before_dispatch () |> get;
+  let posts=F.post_count fixture.server and positions=progress fixture in
+  let body=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
+  let held=body ^ ".fixture-held" in
+  io (fun () -> Unix.rename body held);
+  Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> io (fun () ->
+    Unix.rename held body;
+    Store.save_tool_request_owner fixture.store ~scope:original.scope ~request_id:original.request_id
+      (Owner.to_json original) |> get))) (fun () ->
+    (* The authorization already holds this body's verified canonical value.
+       The recheck must still read the current owner and its immutable identity. *)
+    authorization.before_dispatch () |> get;
+    let changed=match Owner.to_json original with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          key, if key="summary" then `Null else value) fields)
+      | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ | `List _ ->
+        fail "the retained owner is not an object" in
+    io (fun () -> Store.save_tool_request_owner fixture.store ~scope:original.scope
+      ~request_id:original.request_id changed |> get);
+    check bool "a changed owner summary refuses the previously validated body" true
+      (Result.is_error (authorization.before_dispatch ()));
+    check int "dispatch authorization calls no model" posts (F.post_count fixture.server);
+    check bool "dispatch authorization acknowledges no source position" true (progress fixture=positions)))
+
 let candidate_and_request fixture =
   let _,request=only_original fixture in
   match candidate_of fixture with
@@ -4275,6 +4309,8 @@ let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
     no_memory fixture))
 
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
+  test_case "dispatch rechecks the owner without restoring the verified body" `Quick
+    test_dispatch_rechecks_owner_without_restoring_the_body;
   test_case "proved original survives invalid working context on resume" `Quick
     test_retained_answer_with_invalid_working_context_recovers;
   test_case "retained source aliases preserve runtime physical-root checks" `Quick test_retained_source_root_alias;

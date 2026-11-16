@@ -25,4 +25,8 @@ val authorize : base_path:string -> store:Lane_addon_store.t -> declaration_id:s
     external-effect purge scope. The latter is called at each actual dispatch,
     never for retained delivery or after provider completion. Both new execution and
     retained delivery use this boundary. No provider, worker, Memory or ACK
-    effect is performed. Existing Store reads run on a system thread. *)
+    effect is performed. Existing Store reads run on a system thread.
+    Dispatch reloads the current owner metadata/progress and requires the
+    original digest, binding and summary. It reuses the immutable body and
+    history preparation already validated by this authorization; physical
+    owner, source-root, predecessor and live Runtime guards are still fresh. *)

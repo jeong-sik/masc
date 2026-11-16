@@ -48,7 +48,7 @@ let handle_ag_ui_events ~deps request reqd =
         ~session_id
         ~protocol_version
         failure
-  | Ok () ->
+  | Ok _ ->
       (match last_event_id with
       | Error error ->
           respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
@@ -189,7 +189,7 @@ let handle_presence_events ~deps request reqd =
         ~session_id:raw_session_id
         ~protocol_version
         failure
-  | Ok () ->
+  | Ok _ ->
       let token = Server_auth.observer_sse_auth_token_from_request request in
       let auth = { Sse.config = base_path; token } in
       (match check_sse_connect_guard session_id with

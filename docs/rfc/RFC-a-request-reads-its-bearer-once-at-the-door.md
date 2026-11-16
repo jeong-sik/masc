@@ -126,8 +126,9 @@ stdio 는 `Mcp_server_eio.run_stdio`(`mcp_server_eio.ml:161`)가 요청마다 au
 type request_principal = private
   | Auth_off
       (* auth 가 꺼져 있다. 지금처럼 Admin 이다. *)
-  | Anonymous of { agent_hint : string option }
-      (* token 이 없다. require_token 이 꺼져 있을 때만 입구를 지난다. *)
+  | Anonymous
+      (* token 이 없다. require_token 이 꺼져 있을 때만 입구를 지난다.
+         actor 힌트는 요청 헤더에서 읽는다. 조회가 없다. *)
   | Bearer of
       { agent_name : string
       ; role : agent_role
@@ -141,35 +142,79 @@ type request_principal = private
 
 **D2. 입구가 만들어 넘긴다.**
 
-- `Server_auth.admit_bearer` 가 `request_principal` 을 돌려준다.
+- 입구 함수는 `Auth.admit_request` 다(1a). `/mcp`·seat·observer·operator 판정이 이것을 거쳐 주체를 돌려준다(1b).
 - `runtime.handle_request` 는 `?auth_token` 대신 `~principal` 을 받는다. 내부 서명이라 hard cut 이다. 호환용 인자를 남기지 않는다.
 - stdio(`run_stdio`)와 내부 Keeper runtime 경로도 같은 입구 함수를 거친다.
+- stdio 가 `Auth.admit_request` 를 쓰면 두 자리가 좁아진다(단계 2).
+  - internal Keeper token 을 static credential 도 들고 있으면, 예전에는 그 credential 로 통과했다. 이제는 거절된다. stdio 는 `x-masc-keeper-name` 을 보내지 않기 때문이다.
+  - OAuth access token 의 role 을 예전에는 저장된 role 로 보았다. 이제는 scope 가 좁힌 role 로 본다. HTTP 입구와 같다.
 
-**D3. dispatch.** `require_auth` 는 주체로 판정한다. `Requires_auth` 메서드는 `Bearer _` 와 `Auth_off` 를 통과시킨다. `Anonymous` 는 auth 가 켜져 있으면 `Missing_token` 이다. 조회는 없다.
+**D3. dispatch.** dispatch 는 `Mcp_server_eio_types.sender` 를 받는다. 입구가 통과시킨 요청은 `Admitted 주체`, 입구를 거치지 않은 요청은 `Unadmitted` 다.
+
+| sender | 공개 메서드 | `Requires_auth` 메서드 | 읽기 |
+|---|---|---|---|
+| `Admitted Auth_off` | 통과 | 통과 | 0 |
+| `Admitted Anonymous` | 통과 | `Missing_token` | 0 |
+| `Admitted Bearer`, credential 이 든 token | 통과 | 그 credential 로 통과 | 0 |
+| `Admitted Bearer`, internal Keeper token | 통과 | 지금처럼 저장소에 묻는다 | 지금과 같음 |
+| `Unadmitted` | 통과 | auth 가 꺼져 있으면 통과, 켜져 있으면 `Missing_token` | auth 설정 한 번 |
+
+- internal Keeper token 은 저장소에 credential 이 없다. 그래서 지금 dispatch 는 `Requires_auth` 메서드에서 `Invalid_token` 으로 답한다. 처음 초안은 `Bearer _` 를 모두 통과시켰다. 그대로 하면 이 거절이 사라지므로 조회를 남겼다. 저장소 안에는 `x-masc-keeper-name` 을 보내는 클라이언트가 없다. 이 경로를 어떻게 할지는 §7 의 열린 질문이다.
+- `Unadmitted` 는 WebSocket 메시지다. 소켓은 `dashboard/hello` 가 판정하고, 메시지는 bearer 를 싣지 않는다. dispatch 를 직접 부르는 시험도 이것을 쓴다.
+- `Anonymous` 를 입구 밖에서 만들 수 있게 열지 않는다. `Server_auth.authorize_principal` 이 `Anonymous` 를 통과시키기 때문이다.
 
 **D4. 신원 단계.**
 
-- `body_with_canonical_http_actor` 는 `dashboard_actor_for_request` 대신 주체의 `agent_name` 을 쓴다.
-- `is_verified_internal_keeper_request` 는 `resolved = Internal_keeper_bearer` 로 답한다. `x-masc-keeper-name` 헤더 확인은 이미 입구(`identify_bearer`)에서 했다.
+- `body_with_canonical_http_actor` 는 `Server_auth.dashboard_actor_of_principal` 로 actor 를 얻는다. `Bearer` 면 주체의 `agent_name`, `Anonymous` 면 요청의 actor 힌트다.
+- internal Keeper 여부는 `Server_auth.is_internal_keeper_principal` 이 `resolved = Internal_keeper_bearer` 로 답한다. `x-masc-keeper-name` 헤더 확인은 이미 입구(`identify_bearer`)에서 했다.
+- `Auth_off` 면 입구가 아무것도 읽지 않았다. 두 함수는 지금처럼 `dashboard_actor_for_request`·`is_verified_internal_keeper_request` 를 부른다.
 
 **D5. `tools/call` 실행.**
 
-- 호출자 신원 단계는 credential 주인을 주체에서 읽는다(지금 `resolve_agent_from_token`, 264행).
-- 실행 권한은 호출 이름에 따라 나뉜다.
+protocol 의 `tools/call` 은 sender 와 gate 를 지난 token 으로 `Mcp_server_eio_caller_identity.bearer` 를 한 번 만든다. `handle_call_tool_eio`, `execute_tool_eio`, `Mcp_server_eio_caller_identity.resolve` 는 `?auth_token`·`?internal_keeper_runtime` 대신 이 값을 받는다.
 
-| 호출 이름 | 판정 | 읽기 |
-|---|---|---|
-| 주체의 `agent_name` 과 같다 | `Auth.authorize_tool_for_role ~role:주체.role` | 0 |
-| 다르다 | 지금처럼 `Auth.authorize_tool ~agent_name ~token:(Some 주체.token)` | 지금과 같음 |
-| 주체가 `Auth_off` | `Admin` 으로 `authorize_tool_for_role` | 0 |
-| 주체가 `Anonymous` | 지금처럼 `Auth.authorize_tool ~token:None` | 지금과 같음 |
+```ocaml
+type bearer = private
+  | Admitted of
+      { token : string
+      ; credential : agent_credential  (* 입구의 조회가 찾은 credential *)
+      ; role : agent_role               (* 입구가 준 role *)
+      }
+  | Unread of
+      { token : string option
+      ; internal_keeper_runtime : bool
+      }
+```
 
+| sender | bearer |
+|---|---|
+| `Admitted Bearer`, credential 이 든 token | `Admitted` |
+| `Admitted Bearer`, internal Keeper token | `Unread`. D3 처럼 지금과 같이 읽는다 |
+| `Admitted Anonymous` | `Unread`, token 없음 |
+| `Admitted Auth_off` | `Unread`. 입구가 읽지 않았다 |
+| `Unadmitted`(WebSocket, gRPC, dispatch 를 직접 부르는 시험) | `Unread` |
+
+- `private` 라서 `Admitted` 는 입구의 주체로만 만든다. 입구 없이 부르는 쪽은 `unread` 로 만든다.
+- 호출자 신원 단계는 credential 주인을 `Admitted` 에서 읽는다. `Unread` 면 token 을 한 번 조회한다. 지금은 주인 확인(264행)과 임시 이름 대체(157행)가 같은 token 을 두 번 조회한다. 한 번 읽은 답을 셋이 같이 쓰니, 두 답이 어긋날 수 없다.
+- 실행 권한은 bearer 와 호출 이름에 따라 나뉜다.
+
+| bearer | 호출 이름 | 판정 | 읽기 |
+|---|---|---|---|
+| `Admitted` | credential 주인과 같다 | `Auth.authorize_tool_for_role ~role`. `Operator_remote` 는 `Auth.authorize_permission_for_role ~permission:CanAdmin` | 0 |
+| `Admitted` | 다르다 | 지금처럼 auth 설정을 읽고 `Auth.authorize_tool ~agent_name ~token:(Some token)` | 지금과 같음 |
+| `Unread` | 상관없음 | 지금처럼 auth 설정을 읽고, 켜져 있으면 `Auth.authorize_tool ~token` | 지금과 같음 |
+
+- 첫 줄은 auth 설정도 읽지 않는다. 입구가 auth 가 켜진 상태에서 이 bearer 를 판정했다.
+- 처음 초안은 `Auth_off` 를 `Admin` 으로 `authorize_tool_for_role` 에 넣었다. 그러면 등록되지 않은 도구가 `Forbidden` 이 된다. 지금은 auth 가 꺼져 있으면 판정 없이 통과하고, 없는 도구는 dispatch 가 답한다. 그래서 `Unread` 로 두었다.
 - 이름이 다른 경우는 alias 규칙을 지금 코드 그대로 쓴다. 규칙을 주체 위의 순수 함수로 옮기는 일은 §7 의 열린 질문이다.
-- `lane_access_for_caller`, `browser_principal_for_caller`, `board_reader_for_caller` 는 주체의 role 과 `agent_name` 을 쓴다.
+- `lane_access_for_caller`, `browser_principal_for_caller`, `board_reader_for_caller` 는 `Admitted` 의 credential 을 쓴다. 이 함수들은 지금도 `find_credential_by_token` 이 찾은 credential 의 role 을 본다. 입구의 role 이 아니다.
+- `Unread` 의 token 은 남는다. auth 가 꺼진 workspace 에서도 bearer 가 호출자 이름과 Keeper 주인을 정하기 때문이다. 이 동작을 바꾸려면 운영자 결정이 필요하다.
+- Add-on 노출(`addon_exports_for_request`)도 `bearer` 를 받는다(3b). `tools/list` 와 `tools/call` 이 쓰는 값이다. `Admitted` 면 credential 과 입구의 role 을 쓰고, `Unread` 면 지금처럼 token 을 조회하고 role 을 구한다.
+- OAuth step-up(`Server_oauth_step_up.required_scope`)은 주체를 받는다(3c). OAuth access 기록은 주체의 `Oauth_access` credential 이다. 입구는 같은 expected resource 아래에서 OAuth 를 static credential 보다 먼저 조회했다. 그래서 static bearer 에는 OAuth 기록이 없다. internal Keeper token 은 OAuth access token 처럼 무작위 값이라, 그 hash 를 가진 기록도 없다.
 
 **D6. raw token 함수 가두기.** 아래 층이 `Auth.find_credential_by_token`, `Auth.resolve_agent_from_token`, `Auth.check_permission ~token`, `Auth.authorize_tool ~token` 을 새로 부르면 CI 가 실패한다.
 
-- 허용 목록은 입구 파일(`lib/server/server_auth.ml`, `lib/mcp_server_eio.ml` 의 stdio 입구)과 D5 의 「이름이 다르다」 자리다.
+- 허용 목록은 입구 파일(`lib/server/server_auth.ml`, `lib/mcp_server_eio.ml` 의 stdio 입구), D5 의 「이름이 다르다」 자리, `Unread` 를 읽는 두 자리(`Mcp_server_eio_caller_identity.resolve`, `Mcp_server_eio_execute.bearer_credential`)다.
 - 검사는 `rg` 로 하고, 허용 목록 밖에서 부르는 자리를 출력하며 실패한다.
 
 ### 3.3 남는 비용
@@ -178,6 +223,9 @@ type request_principal = private
 - 이름이 token 주인과 다른 `tools/call` 은 지금처럼 다시 읽는다.
 - 서명 변경이 넓다. §6 처럼 단계로 나눈다.
 - 입구에서 판정한 뒤 요청이 끝날 때까지 credential 이 바뀌어도, 그 요청은 입구의 답으로 끝난다. 지금은 아래 층이 다시 읽어서 이 변화를 잡을 때가 있다. 같은 변화는 다음 요청이 잡는다. #52390 이 입구에서 받아들인 것과 같은 창이다.
+  - 이 창에 드는 일은 credential 교체만이 아니다. credential·OAuth family 폐기, auth 끄기, auth 설정이나 저장소를 읽을 수 없게 되는 일도 든다.
+  - 이름이 주인과 같은 `tools/call` 은 그 사이에 아무것도 읽지 않는다. 그래서 그 요청에서는 예전에 날 수 있던 `Auth_config_error`·I/O 오류·`Invalid_grant` 가 나지 않는다.
+  - auth 를 끈 뒤에도 그 요청은 입구의 role 로 판정된다. 낮은 role 은 거절된다. 더 엄격한 쪽이다.
 
 ## 4. 기록과 관측
 
@@ -229,14 +277,23 @@ type request_principal = private
 |---|---|---|
 | 0 | 계기와 기준선. §4.2 의 측정을 남긴다 | 측정 기록이 PR 에 붙는다 |
 | 1a | `Auth.request_principal` 타입과 입구 함수 `Auth.admit_request`. `/mcp`·observer 판정이 이것을 쓴다. 판정 함수의 반환은 아직 `unit` 이라 transport 와 시험 stub 은 그대로다 | L1 의 입구 부분 |
-| 1b | transport `deps` 의 판정이 요청 주체를 돌려주고, `runtime.handle_request` 에 `~principal` 을 더한다. 아래 층은 아직 raw token 도 받는다 | L1, 시험 stub 갱신 |
-| 2 | dispatch `require_auth` 와 신원 단계를 주체로 바꾼다(D3, D4) | L1, `initialize`·`tools/list` 의 L2 |
-| 3 | `tools/call` 실행과 도구별 조회를 주체로 바꾼다(D5). `?auth_token` 을 지운다 | L1 전체, `tools/call` 의 L2 |
+| 1b | transport `deps` 의 판정이 요청 주체를 돌려주고, POST 신원 단계가 그 주체로 답한다(D4). 아래 층은 아직 raw token 을 받는다 | L1, 시험 stub 갱신 |
+| 2 | `runtime.handle_request` 에 `~principal` 을 더하고 dispatch `require_auth` 를 주체로 바꾼다(D3) | L1, `initialize`·`tools/list` 의 L2 |
+| 3a | 실행부(호출자 신원, 실행 권한, lane·browser·board 조회)가 `bearer` 를 받는다(D5). `handle_call_tool_eio`·`execute_tool_eio` 의 `?auth_token`·`?internal_keeper_runtime` 을 지운다 | L1(같은 호출을 입구의 답과 token 으로 풀어 비교), `tools/call` 의 L2 |
+| 3b | Add-on 노출(`addon_exports_for_request`)이 `bearer` 를 받는다. `tools/list` 와 `tools/call` 이 같은 값을 쓴다 | L1, `tools/list` 의 L2 |
+| 3c | transport 의 OAuth step-up(`Server_oauth_step_up.required_scope`)이 주체의 OAuth credential 을 쓴다. Keeper stream 과 SDK adapter 가 받고 버리는 `?auth_token` 을 지운다 | L1 |
 | 4 | raw token 함수 허용 목록 검사(D6)와 TLA+ 갱신 | CI 검사, TLC 정상·buggy |
+
+D4 는 처음에 단계 2 에 있었다. 1b 로 옮긴 이유는 두 가지다.
+
+- 1b 에서 `~principal` 인자만 더하면, 받는 쪽이 아무도 쓰지 않는 인자가 단계 2 까지 남는다.
+- 신원 단계는 transport 안에 있다. 판정의 반환과 같은 PR 에서 바꿀 수 있다. POST 마다 internal Keeper hash 읽기 한 번, `tools/call` 의 bearer 조회 한 번이 1b 에서 빠진다.
 
 ## 7. 열린 질문
 
 1. 아래 층에서 raw token 이 신원 판정 말고 다른 데 쓰이는가. 예를 들어 Add-on worker 나 Keeper stream 으로 전달되는가. 단계 1 전에 `auth_token` 을 넘기는 자리를 모두 분류한다. 판정에만 쓰이면 D1 의 `token` 필드는 D5 의 「이름이 다르다」와 OAuth `verify_token` 에만 남는다.
+   - 답(3a 조사). 아래 층에서는 신원·권한 판정에만 쓰인다. 호출자 신원, 실행 권한, lane·browser·board 조회, Add-on 노출이다. Keeper stream 은 `process_single_turn` 이 `~auth_token:None` 을 넘기고, `execute_keeper_stream_tool_streaming` 이 `?auth_token:_` 로 버린다. SDK adapter(`Mcp_sdk_adapter_masc.dispatch_request`)도 `?auth_token:_` 로 버린다. transport 에서는 actor 주입(`Server_mcp_actor_injection.reduce`)이 token 이 있는지만 보고, OAuth step-up 이 OAuth access 기록을 한 번 읽는다.
 2. 후보 B(메모리 스냅샷)를 따로 할 것인가. 「요청마다 owner 현재 파일과 대조」 결정을 바꾸므로 운영자 결정이 먼저 필요하다. 이 RFC 가 끝난 뒤 남는 조회 한 번이 여전히 문제일 때 다시 묻는다.
 3. 이름이 token 주인과 다른 `tools/call` 의 alias 규칙을 주체 위의 순수 함수로 옮길 것인가. canonical alias credential 이 있는지는 여전히 파일을 봐야 하므로, 읽기가 0 이 되지는 않는다.
 4. stdio 는 프로세스가 사는 동안 token 이 고정이다. 요청마다 한 번 대조하는 결정을 stdio 에도 그대로 둘 것인가. 이 RFC 는 그대로 둔다.
+5. internal Keeper token 을 HTTP 로 쓰는 경로. 입구는 `x-masc-keeper-name` 과 함께 이 token 을 통과시킨다. dispatch 는 `Requires_auth` 메서드에서 거절한다. 저장소 안에 이 헤더를 보내는 클라이언트는 없다. 경로를 지울지, dispatch 도 통과시킬지 운영자 결정이 필요하다.

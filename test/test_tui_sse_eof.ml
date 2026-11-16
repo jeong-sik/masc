@@ -172,7 +172,7 @@ let test_log_stream_names_its_observer_instance env =
           Eio.Switch.fail route_sw Stop_dashboard_route)
       with Stop_dashboard_route -> ())
 
-let admit ~base_path:_ _request = Ok ()
+let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal
 
 (* The real presence route, served with a runtime on [runtime_sw], so its
    supervisor owns the response (RFC-0493 §3.2). *)
@@ -189,7 +189,7 @@ let presence_handler env ~workspace ~runtime_sw =
     ; tool_allowed_in_profile = (fun _ _ -> true)
     ; handle_request =
         (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
-             ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+             ?otel_transport_context:_ ~principal:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
     ; clear_resource_subscriptions_for_session = (fun _ -> ())
     }
   in

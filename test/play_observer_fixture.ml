@@ -90,7 +90,7 @@ let with_fixture env ?(ready = fun () -> true) fn =
     (fun () -> Eio.Switch.run (fun sw ->
       let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
         | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
-      let admit ~base_path:_ _request = Ok () in
+      let admit ~base_path:_ _request = Ok Masc_test_deps.auth_off_principal in
       let runtime : Transport.runtime =
         { base_path = workspace
         ; sw
@@ -98,7 +98,7 @@ let with_fixture env ?(ready = fun () -> true) fn =
         ; tool_allowed_in_profile = (fun _ _ -> true)
         ; handle_request =
             (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
-                 ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+                 ?otel_transport_context:_ ~principal:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
         ; clear_resource_subscriptions_for_session = (fun _ -> ())
         } in
       let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in

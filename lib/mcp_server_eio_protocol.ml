@@ -58,44 +58,70 @@ let make_auth_error ~id reason =
   make_error_typed ~id Mcp_error_code.Auth_error (auth_rejection_message reason)
 ;;
 
-let require_auth ~base_path ~requirement ~id ?auth_token () =
-  if not (Auth.is_auth_enabled base_path)
-  then Ok (auth_token, None)
-  else (
-    match requirement with
-    | Auth_requirement.Public -> Ok (auth_token, None)
-    | Requires_auth ->
-      (match auth_token with
-       | None -> Error (make_auth_error ~id Missing_token)
-       | Some token -> (
-         match Auth_credential_token.find_credential_by_token base_path ~token with
-         | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired agent)) ->
-           Error (make_auth_error ~id (Token_expired agent))
-         | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
-           Error (make_auth_error ~id Invalid_token)
-         | Error
-             (( Masc_domain.Task _
-              | Masc_domain.Agent _
-              | Masc_domain.System _
-              | Masc_domain.Auth
-                  ( Masc_domain.Auth_error.Unauthorized _
-                  | Masc_domain.Auth_error.Forbidden _
-                  | Masc_domain.Auth_error.SameOriginBlocked ) ) as err) ->
-           let cause = Masc_domain.masc_error_to_string err in
-           Log.Auth.error
-             "MCP credential-store lookup failed for request %s: %s"
-             (Yojson.Safe.to_string id)
-             cause;
-           Error
-             (make_error_typed
-                ~id
-                Mcp_error_code.Internal_error
-                "Internal credential-store error")
-         | Ok cred -> Ok (Some token, Some cred))))
+(* The credential store's answer for [token] at a method that requires auth. *)
+let find_required_credential ~base_path ~id token =
+  match Auth_credential_token.find_credential_by_token base_path ~token with
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired agent)) ->
+    Error (make_auth_error ~id (Token_expired agent))
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
+    Error (make_auth_error ~id Invalid_token)
+  | Error
+      (( Masc_domain.Task _
+       | Masc_domain.Agent _
+       | Masc_domain.System _
+       | Masc_domain.Auth
+           ( Masc_domain.Auth_error.Unauthorized _
+           | Masc_domain.Auth_error.Forbidden _
+           | Masc_domain.Auth_error.SameOriginBlocked ) ) as err) ->
+    let cause = Masc_domain.masc_error_to_string err in
+    Log.Auth.error
+      "MCP credential-store lookup failed for request %s: %s"
+      (Yojson.Safe.to_string id)
+      cause;
+    Error
+      (make_error_typed
+         ~id
+         Mcp_error_code.Internal_error
+         "Internal credential-store error")
+  | Ok cred -> Ok (Some token, Some cred)
 ;;
 
-let with_required_auth ~base_path ~id ~requirement ?auth_token f =
-  match require_auth ~base_path ~requirement ~id ?auth_token () with
+(* HIGH-RISK-UNREVIEWED: the dispatcher's gate (RFC
+   a-request-reads-its-bearer-once-at-the-door, D3). A door already read the
+   bearer of an [Admitted] request, so the gate answers from the principal:
+
+   - [Auth_off]: every method passes, as the workspace runs without auth.
+   - [Anonymous]: public methods pass; the others answer [Missing_token].
+   - a bearer a credential holds: every method passes, with that credential.
+   - the internal Keeper bearer: the store holds no credential for the
+     internal Keeper token unless one also holds it, so a method that
+     requires auth asks the store, as it did before the door named it.
+
+   An [Unadmitted] request carries no bearer and is answered as a request
+   without one, reading whether auth is on as before. *)
+let require_auth ~base_path ~requirement ~id ~sender ?auth_token () =
+  let module T = Mcp_server_eio_types in
+  match sender, requirement with
+  | T.Admitted Auth.Auth_off, (Auth_requirement.Public | Auth_requirement.Requires_auth) ->
+    Ok (auth_token, None)
+  | T.Admitted (Auth.Anonymous | Auth.Bearer _), Auth_requirement.Public ->
+    Ok (auth_token, None)
+  | T.Admitted Auth.Anonymous, Auth_requirement.Requires_auth -> Error (make_auth_error ~id Missing_token)
+  | T.Admitted (Auth.Bearer { resolved = Auth.Token_credential credential; token; _ }),
+    Auth_requirement.Requires_auth ->
+    Ok (Some token, Some (Auth.token_credential_agent_credential credential))
+  | T.Admitted (Auth.Bearer { resolved = Auth.Internal_keeper_bearer; token; _ }),
+    Auth_requirement.Requires_auth ->
+    find_required_credential ~base_path ~id token
+  | T.Unadmitted, Auth_requirement.Public -> Ok (auth_token, None)
+  | T.Unadmitted, Auth_requirement.Requires_auth ->
+    if Auth.is_auth_enabled base_path
+    then Error (make_auth_error ~id Missing_token)
+    else Ok (auth_token, None)
+;;
+
+let with_required_auth ~base_path ~id ~requirement ~sender ?auth_token f =
+  match require_auth ~base_path ~requirement ~id ~sender ?auth_token () with
   | Error e -> e
   | Ok (auth_token, _cred) -> f auth_token
 ;;
@@ -103,8 +129,8 @@ let with_required_auth ~base_path ~id ~requirement ?auth_token f =
 (* The credential the gate verified, [None] when the workspace runs without
    auth. A handler that needs the caller's name reads it here; the bearer is a
    secret and never names anyone. *)
-let with_required_credential ~base_path ~id ~requirement ?auth_token f =
-  match require_auth ~base_path ~requirement ~id ?auth_token () with
+let with_required_credential ~base_path ~id ~requirement ~sender ?auth_token f =
+  match require_auth ~base_path ~requirement ~id ~sender ?auth_token () with
   | Error e -> e
   | Ok (_auth_token, credential) -> f credential
 ;;
@@ -319,18 +345,22 @@ let handle_server_discover_eio ?(profile = Full) id =
 
 let public_tool_help_schemas () = Config.visible_tool_schemas ()
 
-let addon_exports_for_request ~profile ~auth_token state =
+(* HIGH-RISK-UNREVIEWED: which Add-on tools this caller may see and call
+   (RFC a-request-reads-its-bearer-once-at-the-door, step 3b). A bearer the
+   door resolved brings its credential and role, so the listing reads
+   neither again. A token no door read is looked up as before. *)
+let addon_exports_for_request ~profile ~(bearer : Mcp_server_eio_caller_identity.bearer)
+    state =
   let config = Mcp_server.workspace_config state in
   let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
       Config.raw_all_tool_schemas in
-  let permitted ~agent_name ~principal access =
+  let permitted ~agent_name ~principal ~role access =
       let reading = Lane_addon_runtime.tool_export_snapshot ~config ~access ~reserved in
       (* One role answers every name below. [Auth.authorize_tool] resolved it
          again for each name, reading the auth store once per exported tool;
-         under a congested owner domain each read costs seconds. Lazy so a
-         listing with no Add-on tools reads nothing, as before. Only this call
-         forces it, from one fiber, so Stdlib.Lazy needs no lock. *)
-      let role = lazy (Auth.resolve_role config.base_path ~agent_name ~token:auth_token) in
+         under a congested owner domain each read costs seconds. [role] is
+         lazy so a listing with no Add-on tools reads nothing, as before. Only
+         this call forces it, from one fiber, so Stdlib.Lazy needs no lock. *)
       (* Retained tool metadata owns known permissions even when execution is
          supplied by an Add-on. Unknown package tools use the generic Lane
          action permission; package-provided annotations grant no role. *)
@@ -360,33 +390,44 @@ let addon_exports_for_request ~profile ~auth_token state =
         permits conflict.name) reading.conflicts in
       access, principal, reserved,
       ({ exports; conflicts; unready } : Lane_addon_runtime.export_snapshot) in
+  (* The role a token resolves to, read only when an Add-on tool asks. *)
+  let token_role ~agent_name token =
+    lazy (Auth.resolve_role config.base_path ~agent_name ~token) in
+  let anonymous token =
+    permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
+      ~role:(token_role ~agent_name:"anonymous" token) Lane_addon_sources.Unauthenticated in
+  let credentialed (credential : Masc_domain.agent_credential) ~role =
+    let access = match credential.role with
+      | Masc_domain.Admin -> Lane_addon_sources.Operator_configuration
+      | Masc_domain.Worker ->
+          (match Keeper_meta_store.read_meta_resolved config credential.agent_name with
+           | Ok (Some (keeper, _)) -> Lane_addon_sources.Keeper keeper
+           | Ok None | Error _ -> Lane_addon_sources.Unauthenticated)
+      | Masc_domain.Player -> Lane_addon_sources.Unauthenticated in
+    let principal = match access with
+      | Lane_addon_sources.Keeper keeper -> Lane_addon_call_context.Keeper keeper
+      | Operator_configuration | Unauthenticated ->
+          Lane_addon_call_context.Authenticated_agent credential.agent_name in
+    permitted ~agent_name:credential.agent_name ~principal ~role access in
   match profile with
   | Managed_agent | Operator_remote ->
       Ok (Lane_addon_sources.Unauthenticated, Lane_addon_call_context.Anonymous, reserved,
         ({ exports = []; conflicts = []; unready = [] } : Lane_addon_runtime.export_snapshot))
   | Full | Seat ->
-      match auth_token with
-      | None -> Ok (permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
-          Lane_addon_sources.Unauthenticated)
-      | Some token ->
+      match bearer with
+      (* The door resolved the role the same way [Auth.resolve_role] would
+         for this credential's owner and this token. *)
+      | Mcp_server_eio_caller_identity.Admitted { credential; role; token = _ } ->
+          Ok (credentialed credential ~role:(Lazy.from_val (Ok role)))
+      | Mcp_server_eio_caller_identity.Unread { token = None; _ } -> Ok (anonymous None)
+      | Mcp_server_eio_caller_identity.Unread { token = Some token as auth_token; _ } ->
           match Auth.find_credential_by_token config.base_path ~token with
           | Error _ when not (Auth.is_auth_enabled config.base_path) ->
-              Ok (permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
-                Lane_addon_sources.Unauthenticated)
+              Ok (anonymous auth_token)
           | Error error -> Error (Masc_domain.masc_error_to_string error)
           | Ok credential ->
-              let access = match credential.role with
-                | Masc_domain.Admin -> Lane_addon_sources.Operator_configuration
-                | Masc_domain.Worker ->
-                    (match Keeper_meta_store.read_meta_resolved config credential.agent_name with
-                     | Ok (Some (keeper, _)) -> Lane_addon_sources.Keeper keeper
-                     | Ok None | Error _ -> Lane_addon_sources.Unauthenticated)
-                | Masc_domain.Player -> Lane_addon_sources.Unauthenticated in
-              let principal = match access with
-                | Lane_addon_sources.Keeper keeper -> Lane_addon_call_context.Keeper keeper
-                | Operator_configuration | Unauthenticated ->
-                    Lane_addon_call_context.Authenticated_agent credential.agent_name in
-              Ok (permitted ~agent_name:credential.agent_name ~principal access)
+              Ok (credentialed credential
+                    ~role:(token_role ~agent_name:credential.agent_name auth_token))
 ;;
 
 (* The worker SDK still models 2025 tool execution hints and a legacy [icon].
@@ -409,7 +450,7 @@ let handle_list_tools_eio
       ?(include_usage = false)
       ?cursor
       ?agent_id
-      ?auth_token
+      ~bearer
       state
       id
   =
@@ -422,7 +463,7 @@ let handle_list_tools_eio
            (Mcp_server.workspace_config state))
     else None
   in
-  match addon_exports_for_request ~profile ~auth_token state with
+  match addon_exports_for_request ~profile ~bearer state with
   | Error detail -> make_error_typed ~id Mcp_error_code.Invalid_request detail
   | Ok (_, _, _, (reading : Lane_addon_runtime.export_snapshot)) ->
   let tools =
@@ -859,11 +900,15 @@ let handle_request
       ?mcp_session_id
       ?otel_mcp_protocol_version
       ?otel_transport_context
+      ~sender
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
       request_str
   =
+  (* Every method below asks the gate with this request's [sender]. *)
+  let with_required_auth = with_required_auth ~sender in
+  let with_required_credential = with_required_credential ~sender in
   try
     match
       Mcp_request_admission.admit
@@ -1087,7 +1132,9 @@ let handle_request
                        in
                        handle_list_tools_eio
                          ~profile:list_profile
-                         ?auth_token
+                         ~bearer:
+                           (Mcp_server_eio_caller_identity.of_sender sender
+                              ~auth_token ~internal_keeper_runtime)
                          ?names
                          ~include_hidden
                          ~include_usage
@@ -1104,6 +1151,12 @@ let handle_request
               | "tools/call" ->
                 let handle_tools_call auth_token =
                   let operation_start_time = Eio.Time.now clock in
+                  (* What the executor knows about the bearer: the door's
+                     answer when it resolved one, the token otherwise. *)
+                  let bearer =
+                    Mcp_server_eio_caller_identity.of_sender sender ~auth_token
+                      ~internal_keeper_runtime
+                  in
                 let otel_context =
                   otel_tool_request_context
                     ~id
@@ -1149,7 +1202,7 @@ let handle_request
                       in
                       let addon =
                         if Config.is_raw_tool_name name then Ok (None, None)
-                        else addon_exports_for_request ~profile:call_profile ~auth_token state
+                        else addon_exports_for_request ~profile:call_profile ~bearer state
                           |> Result.map (fun (access, principal, reserved, (reading : Lane_addon_runtime.export_snapshot)) ->
                               Option.map (fun export -> access, principal, reserved, export)
                                 (List.find_opt (fun (export : Lane_addon_runtime.tool_export) ->
@@ -1169,13 +1222,12 @@ let handle_request
                       | Ok (Some (access, principal, reserved, export), _) ->
                           let wire_result = ref None in
                           let execute ~sw:_ ~clock:_ ~workspace_scope ?profile:_ ?mcp_session_id
-                              ?invocation_ref:_ ?auth_token ?(internal_keeper_runtime=false)
-                              ?on_caller_resolved state ~name ~arguments =
+                              ?invocation_ref:_ ~bearer ?on_caller_resolved state ~name ~arguments =
                             let config = workspace_scope.Mcp_server.config in
                             let identity = Client_registry_eio.get_or_create_identity ?mcp_session_id arguments in
                             let caller = Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
                               ~identity ~cached_resolved_agent:(Option.bind mcp_session_id Client_registry_eio.get_resolved_name)
-                              ~auth_token ~internal_keeper_runtime
+                              ~bearer
                               ~direct_call_authority:Mcp_server_eio_caller_identity.Restricted_profile
                               ~workspace_initialized:(fun () -> Workspace.is_initialized config)
                               ~log_mcp_exn:Mcp_server_eio_helpers.log_mcp_exn in
@@ -1212,8 +1264,8 @@ let handle_request
                           Mcp_server_eio_call_tool.handle_call_tool_eio
                             ~execute_tool_eio:execute ~maybe_emit_resource_notifications
                             ~broadcast_tools_list_changed ~wire_result:(fun () -> !wire_result)
-                            ~sw ~clock ~profile:call_profile ?mcp_session_id ?auth_token
-                            ~internal_keeper_runtime state id call
+                            ~sw ~clock ~profile:call_profile ?mcp_session_id ~bearer
+                            state id call
                       | Ok (None, None) ->
                       if
                         not
@@ -1252,8 +1304,7 @@ let handle_request
                                  ~clock
                                  ~profile
                                  ?mcp_session_id
-                                 ?auth_token
-                                 ~internal_keeper_runtime
+                                 ~bearer
                                  state
                                  id
                                  call)
@@ -1302,7 +1353,7 @@ let handle_request
                   ~id
                   ~requirement:Auth_requirement.Requires_auth
                   ?auth_token
-                  (fun auth_token ->
+                  (fun _auth_token ->
                      match
                        Mcp_sdk_adapter_masc.dispatch_request
                          ~handle_call_tool_eio
@@ -1311,7 +1362,6 @@ let handle_request
                          ~sw
                          ~clock
                          ?mcp_session_id
-                         ?auth_token
                          json
                      with
                      | Some response -> response

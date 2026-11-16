@@ -299,7 +299,9 @@ let execute_tool fixture ~name ~arguments =
     ~sw:fixture.sw
     ~clock:fixture.clock
     ~workspace_scope:(Mcp_server.workspace_scope fixture.state)
-    ~auth_token:fixture.auth_token
+    ~bearer:
+      (Masc_test_deps.door_bearer ~base_path:fixture.base_path
+         (Some fixture.auth_token))
     ~mcp_session_id:fixture.sid fixture.state ~name ~arguments
 
 let execute_tool_ok fixture ~name ~arguments =
@@ -995,7 +997,9 @@ let call_tool_json fixture (schema : Masc_domain.tool_schema) arguments =
         ])
   in
   Mcp_eio.handle_request ~clock:fixture.clock ~sw:fixture.sw
-    ~mcp_session_id:fixture.sid ~auth_token:fixture.auth_token fixture.state
+    ~mcp_session_id:fixture.sid
+    ~sender:(Masc_test_deps.door_sender ~base_path:fixture.base_path (Some fixture.auth_token))
+    ~auth_token:fixture.auth_token fixture.state
     request
 
 let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock

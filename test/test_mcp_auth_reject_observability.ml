@@ -115,7 +115,8 @@ let test_non_tool_bodies_skip_actor_resolution () =
     (fun body ->
       let result =
         Server_mcp_transport_http.body_with_canonical_http_actor
-          ~base_path:(Filename.get_temp_dir_name ()) ~auth_token:None request body
+          ~base_path:(Filename.get_temp_dir_name ()) ~auth_token:None
+          ~principal:Masc_test_deps.auth_off_principal request body
       in
       check bool "unmodified body is reused" true (result == body))
     [ {|{ "jsonrpc": "2.0", "method": "ping", "id": 1 }|};
@@ -127,10 +128,13 @@ let test_non_tool_bodies_skip_actor_resolution () =
   check (float 0.0) "no actor-resolution fallback for non-tool bodies"
     before (fallback_count ());
   (* Positive control: the same credential reaches the real resolver for a
-     tools/call notification too; lack of an id must not skip injection. *)
+     tools/call notification too; lack of an id must not skip injection.
+     With auth off the door read nothing, so the resolver reads the request's
+     credential. *)
   ignore
     (Server_mcp_transport_http.body_with_canonical_http_actor
-       ~base_path:(Filename.get_temp_dir_name ()) ~auth_token:None request
+       ~base_path:(Filename.get_temp_dir_name ()) ~auth_token:None
+       ~principal:Masc_test_deps.auth_off_principal request
        {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_status","arguments":{}}}|});
   check (float 0.0) "tool call still resolves actor"
     (before +. 1.0) (fallback_count ())

@@ -127,8 +127,8 @@ let tools_list_response ~clock ~sw ?profile ?cursor state =
         ])
   in
   match profile with
-  | Some profile -> Mcp_eio.handle_request ~clock ~sw ~profile state request
-  | None -> Mcp_eio.handle_request ~clock ~sw state request
+  | Some profile -> Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile state request
+  | None -> Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request
 
 let tools_from_response response =
   match response with
@@ -233,7 +233,7 @@ let resources_list_response ~clock ~sw ?cursor state =
           ("params", params);
         ])
   in
-  Mcp_eio.handle_request ~clock ~sw state request
+  Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request
 
 let resources_from_response response =
   match response with
@@ -535,7 +535,7 @@ let test_handle_request_initialize () =
     ]);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
 
   (match response with
    | `Assoc fields ->
@@ -586,7 +586,7 @@ let test_handle_request_initialize_counteroffers_legacy_version () =
        | Some (`String version) -> Some version
        | Some _ | None -> None)
   in
-  expect_legacy (Mcp_eio.handle_request ~clock ~sw state request);
+  expect_legacy (Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request);
   let modern_request =
     Yojson.Safe.from_string request
     |> (function
@@ -600,7 +600,7 @@ let test_handle_request_initialize_counteroffers_legacy_version () =
         | json -> json)
     |> Yojson.Safe.to_string
   in
-  expect_legacy (Mcp_eio.handle_request ~clock ~sw state modern_request);
+  expect_legacy (Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state modern_request);
 
   cleanup_dir base_path
 
@@ -635,7 +635,7 @@ let test_handle_request_server_discover_2026 () =
               ] );
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let result = result_fields_exn response in
   Alcotest.(check (option string)) "complete result"
     (Some "complete")
@@ -689,7 +689,7 @@ let run_stdio_messages ?(on_handled = fun _ _ _ -> ()) ~clock ~sw state messages
     method stdout = output_writer
   end in
   let handle_request ~clock ~sw ~mcp_session_id state request =
-    let response = Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+    let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request in
     on_handled mcp_session_id request response;
     response
   in
@@ -797,7 +797,7 @@ let parked_tool_call ~release ~on_enter ~on_cancel ~clock ~sw ~mcp_session_id st
       [ "jsonrpc", `String "2.0"
       ; "id", Yojson.Safe.Util.member "id" json
       ; "result", `Assoc [] ]
-  | _ -> Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request
+  | _ -> Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request
 
 (* A legacy session, so a legacy [ping] (no [_meta]) is admitted and answers
    with a result. *)
@@ -1193,7 +1193,7 @@ let test_stdio_parent_cancel_drains_external_subscription_send () =
         method stdout = stdout
       end in
       let handle_request ~clock ~sw ~mcp_session_id state request =
-        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request in
       Eio.Fiber.fork ~sw (fun () ->
         let cancelled =
           try Eio.Cancel.sub (fun context ->
@@ -1296,7 +1296,7 @@ let test_stdio_prior_failure_precedes_drain_cancellation () =
         method stdout = stdout
       end in
       let handle_request ~clock ~sw ~mcp_session_id state request =
-        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request in
       Eio.Fiber.fork ~sw (fun () ->
         let error =
           try Eio.Cancel.sub (fun context ->
@@ -1352,7 +1352,7 @@ let test_stdio_eof_reports_external_send_failure () =
         method stdout = stdout
       end in
       let handle_request ~clock ~sw ~mcp_session_id state request =
-        Mcp_eio.handle_request ~clock ~sw ?mcp_session_id state request in
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ?mcp_session_id state request in
       Eio.Fiber.fork ~sw (fun () ->
         let error =
           try Masc.Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env:stdio_env state; None
@@ -1630,6 +1630,11 @@ let test_stdio_forwards_external_credential () =
       (error_code_exn (execute ~auth_token:"invalid" ()));
     Alcotest.(check int) "player cannot read full workspace resources" (-32001)
       (error_code_exn (execute ~auth_token:player ()));
+    (* Stdio sends no x-masc-keeper-name, so its door refuses the internal
+       Keeper token, as the credential lookup refused it before the door. *)
+    let internal = Auth.ensure_internal_keeper_token base_path in
+    Alcotest.(check int) "the internal Keeper token is refused on stdio" (-32001)
+      (error_code_exn (execute ~auth_token:internal ()));
     Alcotest.(check bool) "explicit caller credential admitted" true
       (Yojson.Safe.Util.member "result" (execute ~auth_token:token ()) <> `Null))
 
@@ -1755,7 +1760,7 @@ let test_handle_request_initialize_operator_profile () =
     ]);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
   in
   (match response with
    | `Assoc fields ->
@@ -1790,7 +1795,7 @@ let test_handle_request_tools_list_operator_profile () =
     ("params", `Assoc []);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
   in
   (match response with
    | `Assoc fields ->
@@ -1894,7 +1899,7 @@ let test_handle_request_initialize_managed_profile () =
     ]);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
   in
   (match response with
    | `Assoc fields ->
@@ -1927,7 +1932,7 @@ let test_handle_request_tools_list_managed_profile () =
     ("params", `Assoc []);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Managed_agent state request
   in
   (match response with
    | `Assoc fields ->
@@ -1982,6 +1987,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~bearer:Masc_test_deps.no_bearer
       ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
@@ -2023,7 +2029,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
     Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
   in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Managed_agent
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Managed_agent
       ~mcp_session_id:sid
       ~otel_mcp_protocol_version:"2025-06-18"
       ~otel_transport_context:(Otel_dispatch_hook.http_transport_context ~protocol_version:"2")
@@ -2072,7 +2078,7 @@ let test_handle_request_tools_call_missing_params_records_duration () =
     Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
   in
   let response =
-    Mcp_eio.handle_request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted
       ~clock
       ~sw
       ~profile:Mcp_eio.Managed_agent
@@ -2130,7 +2136,7 @@ let test_handle_request_tools_call_managed_invalid_arguments_records_duration ()
     Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
   in
   let response =
-    Mcp_eio.handle_request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted
       ~clock
       ~sw
       ~profile:Mcp_eio.Managed_agent
@@ -2163,6 +2169,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~bearer:Masc_test_deps.no_bearer
       ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
@@ -2197,7 +2204,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
         ])
   in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:sid state request
   in
   let steps = workflow_next_step_names response in
   Alcotest.(check (option string)) "claim binds current_task" (Some "task-001")
@@ -2220,6 +2227,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~bearer:Masc_test_deps.no_bearer
       ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
@@ -2253,7 +2261,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
         ])
   in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:sid state request
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "missing action rejected" true
@@ -2278,7 +2286,7 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
     ]);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~profile:Mcp_eio.Operator_remote state request
   in
   (match response with
    | `Assoc fields ->
@@ -2309,7 +2317,7 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
     ]);
   ]) in
   let response =
-    Mcp_eio.handle_request ~clock ~sw state request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request
   in
   let tools = tools_from_response response in
   let names =
@@ -2396,7 +2404,7 @@ let test_handle_request_tools_list_include_usage_metadata () =
     ("method", `String "tools/list");
     ("params", `Assoc [ ("include_usage", `Bool true) ]);
   ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let result_fields = result_fields_exn response in
   let result_usage =
     `Assoc result_fields
@@ -2441,7 +2449,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
     Masc.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_bind" ~arguments ~identity
       ~cached_resolved_agent:(Some ("cached-stale-nickname", false))
-      ~auth_token:None ~internal_keeper_runtime:false
+      ~bearer:Masc_test_deps.no_bearer
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> false)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
@@ -2482,7 +2490,7 @@ let test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname () =
       ~tool_name:"masc_transition"
       ~arguments:(`Assoc [ ("agent_name", `String "alpha-agent") ])
       ~identity ~cached_resolved_agent:None
-      ~auth_token:None ~internal_keeper_runtime:false
+      ~bearer:Masc_test_deps.no_bearer
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
@@ -2515,7 +2523,7 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
   let status_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~auth_token:raw_token state
+      ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token)) state
       ~name:"masc_auth_status"
       ~arguments:(`Assoc [("agent_name", `String "dashboard-eager-manta")])
   in
@@ -2553,7 +2561,7 @@ let test_execute_tool_actor_mismatch_reports_typed_code () =
       ~sw
       ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~auth_token:raw_token
+      ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token))
       state
       ~name:"masc_status"
       ~arguments:(`Assoc [ "_agent_name", `String "dashboard" ])
@@ -2662,7 +2670,7 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~auth_token:raw_token state
+      ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token)) state
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "dashboard-eager-manta") ])
   in
@@ -2695,7 +2703,7 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~auth_token:raw_token state
+      ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token)) state
       ~name:"masc_transition"
       ~arguments:
         (`Assoc
@@ -2735,7 +2743,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
       ~mcp_session_id:"sid-hyphenated-generated-alias"
-      ~auth_token:raw_token state
+      ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token)) state
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "mu-king-warm-heron") ])
   in
@@ -2769,6 +2777,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~bearer:Masc_test_deps.no_bearer
       state
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "uncredentialed-agent") ])
@@ -2798,6 +2807,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~bearer:Masc_test_deps.no_bearer
       state
       ~name:"masc_transition"
       ~arguments:
@@ -2834,7 +2844,7 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   let result =
     Mcp_eio.execute_tool_eio ~sw ~clock
       ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~auth_token:raw_token state
+      ~bearer:(Masc_test_deps.door_bearer ~base_path (Some raw_token)) state
       ~name:"masc_add_task"
       ~arguments:
         (`Assoc
@@ -2859,6 +2869,12 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
     (Masc_domain.task_status_to_string task.task_status);
   cleanup_dir base_path
 
+(* The token a resolved caller carries, whichever way its bearer arrived. *)
+let bearer_token (caller : Masc.Mcp_server_eio_caller_identity.t) =
+  match caller.bearer with
+  | Masc.Mcp_server_eio_caller_identity.Admitted { token; _ } -> Some token
+  | Masc.Mcp_server_eio_caller_identity.Unread { token; _ } -> token
+
 let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
   let base_path = temp_dir () in
   let config = Masc.Workspace.default_config base_path in
@@ -2872,8 +2888,9 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
       ~tool_name:"masc_status"
       ~arguments:(`Assoc [ ("token", `String "stale-argument-token") ])
       ~identity ~cached_resolved_agent:None
-      ~auth_token:(Some "http-auth-token")
-      ~internal_keeper_runtime:false
+      ~bearer:
+        (Masc.Mcp_server_eio_caller_identity.unread (Some "http-auth-token")
+           ~internal_keeper_runtime:false)
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
@@ -2881,7 +2898,7 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
   Alcotest.(check (option string))
     "http auth token wins over stale argument token"
     (Some "http-auth-token")
-    result.token;
+    (bearer_token result);
   cleanup_dir base_path
 
 let test_execute_tool_argument_token_ignored_without_http_auth () =
@@ -2897,7 +2914,7 @@ let test_execute_tool_argument_token_ignored_without_http_auth () =
       ~tool_name:"masc_status"
       ~arguments:(`Assoc [ ("token", `String "argument-token") ])
       ~identity ~cached_resolved_agent:None
-      ~auth_token:None ~internal_keeper_runtime:false
+      ~bearer:Masc_test_deps.no_bearer
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
@@ -2905,7 +2922,7 @@ let test_execute_tool_argument_token_ignored_without_http_auth () =
   Alcotest.(check (option string))
     "argument token ignored without HTTP auth"
     None
-    result.token;
+    (bearer_token result);
   cleanup_dir base_path
 
 let test_execute_tool_without_mcp_session_uses_generated_identity () =
@@ -2921,7 +2938,7 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
       ~tool_name:"masc_broadcast"
       ~arguments:(`Assoc [ ("content", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
-      ~auth_token:None ~internal_keeper_runtime:false
+      ~bearer:Masc_test_deps.no_bearer
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
@@ -2942,7 +2959,7 @@ let test_handle_request_invalid_json () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state "not valid json {{{" in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state "not valid json {{{" in
 
   (match response with
    | `Assoc fields ->
@@ -2979,7 +2996,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
       ]);
     ]);
   ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let structured = structured_content_exn response in
   Alcotest.(check string) "canonical board body" "hello board"
     Yojson.Safe.Util.(structured |> member "body" |> to_string);
@@ -3029,7 +3046,7 @@ let test_handle_request_tools_call_logs_structured_mcp_details () =
             ])
       in
       let response =
-        Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-log" state
+        Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:"session-log" state
           request
       in
       ignore (result_fields_exn response);
@@ -3102,7 +3119,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
                   ] );
             ])
       in
-      let response = Mcp_eio.handle_request ~clock ~sw state request in
+      let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
       ignore (result_fields_exn response);
       match List.assoc_opt "masc_status" (Keeper_registry.tool_usage_of ~base_path keeper_name) with
       | Some entry ->
@@ -3203,7 +3220,7 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
       ("arguments", `Assoc []);
     ]);
   ]) in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let result = result_fields_exn response in
   Alcotest.(check bool) "unknown keeper internal tool isError" true
     (match List.assoc_opt "isError" result with
@@ -3260,7 +3277,8 @@ let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
         let caller = Masc.Mcp_server_eio_caller_identity.resolve ~config
           ~tool_name:"masc_lane_inspect" ~arguments:(`Assoc ["_agent_name", `String name])
           ~identity:(test_agent_identity ~uuid:"lane-runtime" ~session_key:"lane-runtime")
-          ~cached_resolved_agent:None ~auth_token:(Some token) ~internal_keeper_runtime
+          ~cached_resolved_agent:None
+          ~bearer:(Masc.Mcp_server_eio_caller_identity.unread (Some token) ~internal_keeper_runtime)
           ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
           ~workspace_initialized:(fun () -> false) ~log_mcp_exn:(fun ~label:_ _ -> ()) in
         caller in
@@ -3271,7 +3289,7 @@ let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
       Alcotest.(check bool) "browser actor is the verified canonical Keeper" true
         (Masc.Mcp_server_eio_execute.browser_principal_for_caller ~config caller=
           Lane_addon_call_context.Keeper "alpha");
-      let spoofed={caller with token=None;verified_internal_keeper_runtime=false} in
+      let spoofed={caller with bearer=Masc_test_deps.no_bearer;verified_internal_keeper_runtime=false} in
       Alcotest.(check bool) "a resolved caller name without credential is not browser authority" true
         (Masc.Mcp_server_eio_execute.browser_principal_for_caller ~config spoofed=
           Lane_addon_call_context.Anonymous);
@@ -3281,6 +3299,136 @@ let test_internal_keeper_lane_access_requires_verified_runtime_and_keeper () =
         Alcotest.(check bool) "unverified or missing Keeper stays unauthenticated" true
           (access ~internal_keeper_runtime ~token ~name = Masc.Lane_addon_sources.Unauthenticated))
         [false, token, "alpha"; true, "invalid-token", "alpha"; true, token, "missing"])
+
+(* RFC a-request-reads-its-bearer-once-at-the-door, D5: a bearer the door
+   resolved answers the executor's identity and lookups the way its token
+   did. Each case resolves the same call twice, once with the door's answer
+   and once reading the token, and compares what the executor would use. *)
+let test_door_bearer_answers_caller_identity_as_the_token_did () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let config = Masc.Workspace.default_config base_path in
+    ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+    let resolve ~bearer arguments =
+      Masc.Mcp_server_eio_caller_identity.resolve ~config ~tool_name:"masc_status"
+        ~arguments
+        ~identity:(test_agent_identity ~uuid:"door-bearer" ~session_key:"door-bearer")
+        ~cached_resolved_agent:None ~bearer
+        ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
+        ~workspace_initialized:(fun () -> false)
+        ~log_mcp_exn:(fun ~label:_ _ -> ())
+    in
+    List.iter
+      (fun (role, owner) ->
+        let raw =
+          match Auth.create_token base_path ~agent_name:owner ~role with
+          | Ok (token, _) -> token
+          | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
+        in
+        let admitted = Masc_test_deps.door_bearer ~base_path (Some raw) in
+        (* Both authorization branches of D5 rest on this: the door's role is
+           the one [Auth.resolve_role] gives the owner and the token. *)
+        Alcotest.(check bool) (owner ^ ": the door's role is the token's role") true
+          (match admitted with
+           | Masc.Mcp_server_eio_caller_identity.Admitted { role; _ } ->
+             Auth.resolve_role base_path ~agent_name:owner ~token:(Some raw) = Ok role
+           | Masc.Mcp_server_eio_caller_identity.Unread _ -> false);
+        let unread =
+          Masc.Mcp_server_eio_caller_identity.unread (Some raw)
+            ~internal_keeper_runtime:false
+        in
+        List.iter
+          (fun (case, arguments) ->
+            let label what = Printf.sprintf "%s, %s: %s" owner case what in
+            let door = resolve ~bearer:admitted arguments in
+            let token = resolve ~bearer:unread arguments in
+            Alcotest.(check string) (label "caller name") token.agent_name door.agent_name;
+            Alcotest.(check bool) (label "ephemerality")
+              token.agent_name_is_ephemeral door.agent_name_is_ephemeral;
+            Alcotest.(check bool) (label "internal Keeper runtime")
+              token.verified_internal_keeper_runtime door.verified_internal_keeper_runtime;
+            Alcotest.(check (option (pair string (option string))))
+              (label "Keeper owner") token.owner_keeper_identity door.owner_keeper_identity;
+            Alcotest.(check bool) (label "Lane access") true
+              (Masc.Mcp_server_eio_execute.lane_access_for_caller ~config door
+               = Masc.Mcp_server_eio_execute.lane_access_for_caller ~config token);
+            Alcotest.(check bool) (label "browser principal") true
+              (Masc.Mcp_server_eio_execute.browser_principal_for_caller ~config door
+               = Masc.Mcp_server_eio_execute.browser_principal_for_caller ~config token))
+          [ "generated name", `Assoc []
+          ; "the owner's name", `Assoc [ "_agent_name", `String owner ]
+          ; "another name", `Assoc [ "_agent_name", `String "someone-else" ]
+          ])
+      [ Masc_domain.Admin, "door-admin"
+      ; Masc_domain.Worker, "door-worker"
+      ; Masc_domain.Player, "door-player"
+      ];
+    (* The internal Keeper token passes the door with its Keeper header, and
+       dispatch still looks it up (D3), so the executor reads it as before. *)
+    let internal = Auth.ensure_internal_keeper_token base_path in
+    match
+      Auth.admit_request base_path ~auth_cfg:(Auth.load_auth_config base_path)
+        ~token:(Some internal) ~internal_keeper_agent:(Some "door-keeper")
+    with
+    | Error _ -> Alcotest.fail "the door refused the internal Keeper token"
+    | Ok principal ->
+      Alcotest.(check bool) "the internal Keeper token stays unread" true
+        (match
+           Masc.Mcp_server_eio_caller_identity.of_sender
+             (Masc.Mcp_server_eio.Admitted principal)
+             ~auth_token:(Some internal) ~internal_keeper_runtime:true
+         with
+         | Masc.Mcp_server_eio_caller_identity.Unread
+             { token = Some token; internal_keeper_runtime = true } ->
+           String.equal token internal
+         | Masc.Mcp_server_eio_caller_identity.Unread _
+         | Masc.Mcp_server_eio_caller_identity.Admitted _ -> false))
+
+(* D5: a call that names the credential's owner is authorized by the role the
+   door gave, without reading the token again. The credential is deleted
+   after the door admitted the bearer, so a read would refuse. A call under
+   another name still pairs that name with the token, and a token no door
+   read is read as before; both meet the deleted credential. *)
+let test_executor_authorizes_the_owner_from_the_door_answer () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
+    ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+    let raw =
+      match Auth.create_token base_path ~agent_name:"door-worker" ~role:Masc_domain.Worker with
+      | Ok (token, _) -> token
+      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
+    in
+    let admitted = Masc_test_deps.door_bearer ~base_path (Some raw) in
+    Auth.delete_credential base_path "door-worker";
+    let call ~bearer caller =
+      Mcp_eio.execute_tool_eio ~sw ~clock
+        ~workspace_scope:(Mcp_server.workspace_scope state)
+        ~bearer state ~name:"masc_tool_help"
+        ~arguments:
+          (`Assoc [ "_agent_name", `String caller; "tool_name", `String "masc_status" ])
+    in
+    let owner = call ~bearer:admitted "door-worker" in
+    Alcotest.(check bool)
+      ("the owner's call takes the door's role: " ^ Tool_result.message owner)
+      true (Tool_result.is_success owner);
+    Alcotest.(check bool) "another name pairs with the deleted credential's token" false
+      (Tool_result.is_success (call ~bearer:admitted "someone-else"));
+    Alcotest.(check bool) "a token no door read meets the deleted credential" false
+      (Tool_result.is_success
+         (call
+            ~bearer:
+              (Masc.Mcp_server_eio_caller_identity.unread (Some raw)
+                 ~internal_keeper_runtime:false)
+            "door-worker")))
 
 let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools
     () =
@@ -3301,8 +3449,9 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
         ("params", `Assoc []);
       ]) in
       let response =
-        Mcp_eio.handle_request ~clock ~sw ~auth_token:token
-          ~internal_keeper_runtime:true state request
+        Mcp_eio.handle_request ~clock ~sw
+          ~sender:(Masc_test_deps.door_sender ~base_path (Some token))
+          ~auth_token:token ~internal_keeper_runtime:true state request
       in
       let names = tool_names_from_list_response response in
       Alcotest.(check bool) "tool_execute is not externally discovered" false
@@ -3342,8 +3491,9 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execu
         ]);
       ]) in
       let response =
-        Mcp_eio.handle_request ~clock ~sw ~auth_token:token
-          ~internal_keeper_runtime:true state request
+        Mcp_eio.handle_request ~clock ~sw
+          ~sender:(Masc_test_deps.door_sender ~base_path (Some token))
+          ~auth_token:token ~internal_keeper_runtime:true state request
       in
       let result = result_fields_exn response in
       Alcotest.(check bool) "tool_execute is an MCP tool-result error" true
@@ -3388,7 +3538,7 @@ let test_handle_request_batch_rejected () =
             ];
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "batch rejected" (-32600) (error_code_exn response);
   Alcotest.(check bool) "mentions batch unsupported" true
     (String_util.contains_substring (error_message_exn response) "batch requests are not supported");
@@ -3410,7 +3560,7 @@ let test_handle_request_jsonrpc_response_returns_null () =
           ("result", `String "already a response");
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check bool) "response ignored" true (response = `Null);
   cleanup_dir base_path
 
@@ -3430,7 +3580,7 @@ let test_handle_request_method_not_found () =
     ("params", `Assoc []);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
 
   (match response with
    | `Assoc fields ->
@@ -3461,7 +3611,7 @@ let test_handle_request_tools_list_rejects_empty_cursor () =
           ("params", `Assoc [ ("cursor", `String "   ") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check string) "empty cursor error"
     "Invalid params: cursor must not be empty"
@@ -3485,7 +3635,7 @@ let test_handle_request_tools_list_rejects_tier_field () =
           ("params", `Assoc [ ("tier", `String "impossible") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unsupported tier error" true
     (String_util.contains_substring (error_message_exn response) "unsupported field(s): tier");
@@ -3508,7 +3658,7 @@ let test_handle_request_resources_list_rejects_unknown_field () =
           ("params", `Assoc [ ("page", `Int 2) ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unknown field rejected" true
     (String_util.contains_substring (error_message_exn response) "unsupported field");
@@ -3531,7 +3681,7 @@ let test_handle_request_resources_templates_rejects_invalid_cursor () =
           ("params", `Assoc [ ("cursor", `String "not-base64") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   let msg = error_message_exn response in
   Alcotest.(check bool)
@@ -3559,7 +3709,7 @@ let test_handle_request_prompts_list_rejects_invalid_cursor () =
           ("params", `Assoc [ ("cursor", `String "bad-cursor") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   let msg = error_message_exn response in
   Alcotest.(check bool)
@@ -3587,7 +3737,7 @@ let test_handle_request_prompts_list_non_empty () =
           ("params", `Assoc []);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let prompts =
     match response with
     | `Assoc fields -> (
@@ -3621,7 +3771,7 @@ let test_handle_request_prompts_list_cursor () =
           ("params", `Assoc [ ("cursor", `String cursor) ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let prompts =
     match response with
     | `Assoc fields -> (
@@ -3658,7 +3808,7 @@ let test_handle_request_prompts_get_tool_help () =
               ] );
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let description, messages =
     match response with
     | `Assoc fields -> (
@@ -3757,7 +3907,7 @@ let test_handle_request_resources_list_paginates () =
           ("params", `Assoc []);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let resources =
     match response with
     | `Assoc fields -> (
@@ -3852,7 +4002,7 @@ let test_handle_request_tools_list_paginates () =
           ("params", `Assoc [ ("cursor", `String cursor) ]);
         ])
   in
-  let second_page = Mcp_eio.handle_request ~clock ~sw state request in
+  let second_page = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let second_tools = tools_from_response second_page in
   let first_name =
     match List.hd first_tools with
@@ -3894,7 +4044,7 @@ let test_handle_request_tool_help_resource_read () =
           ("params", `Assoc [ ("uri", `String "masc://tool-help/masc_status") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let text =
     match response with
     | `Assoc fields -> (
@@ -3966,7 +4116,7 @@ Alpha body
               ("params", `Assoc [ ("uri", `String uri) ]);
             ])
       in
-      let response = Mcp_eio.handle_request ~clock ~sw state request in
+      let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
       Alcotest.(check string) (uri ^ " mime type") expected_mime
         (resource_mime_type_exn response);
       Alcotest.(check bool) (uri ^ " text contains expected") true
@@ -3991,7 +4141,7 @@ let test_handle_request_resources_subscribe_requires_session () =
           ("params", `Assoc [ ("uri", `String "masc://status") ]);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   (match response with
    | `Assoc fields ->
        Alcotest.(check bool) "subscribe requires session" true
@@ -4016,7 +4166,7 @@ let test_handle_request_dashboard_ping_requires_session () =
           ("params", `Assoc []);
         ])
   in
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   Alcotest.(check bool) "ping requires ws session" true
     (String_util.contains_substring
        (Yojson.Safe.to_string response)
@@ -4041,7 +4191,7 @@ let test_handle_request_dashboard_ping_reports_unknown_ws_session () =
         ])
   in
   let response =
-    Mcp_eio.handle_request
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted
       ~clock
       ~sw
       ~mcp_session_id:"missing-dashboard-ws-session"
@@ -4072,7 +4222,7 @@ let test_handle_request_resources_subscribe_roundtrip () =
         ])
   in
   let subscribe_response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-spec" state
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:"session-spec" state
       subscribe_request
   in
   (match subscribe_response with
@@ -4091,7 +4241,7 @@ let test_handle_request_resources_subscribe_roundtrip () =
         ])
   in
   let unsubscribe_response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:"session-spec" state
+    Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw ~mcp_session_id:"session-spec" state
       unsubscribe_request
   in
   (match unsubscribe_response with
@@ -4229,6 +4379,10 @@ let eio_tests = [
     test_handle_request_tools_call_blocks_keeper_internal_tool;
   "verified internal Keeper Lane access", `Quick,
     test_internal_keeper_lane_access_requires_verified_runtime_and_keeper;
+  "door bearer answers caller identity as the token did", `Quick,
+    test_door_bearer_answers_caller_identity_as_the_token_did;
+  "executor authorizes the owner from the door answer", `Quick,
+    test_executor_authorizes_the_owner_from_the_door_answer;
   "handle tools/list internal keeper runtime hides keeper internal tools", `Quick,
     test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools;
   "handle tools/call internal keeper runtime rejects unknown execute", `Quick,

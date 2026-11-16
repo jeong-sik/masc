@@ -26,6 +26,11 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Operator_remote
   | Seat
 
+(** How a request reached the dispatcher: {!Mcp_server_eio_types.sender}. *)
+type sender = Mcp_server_eio_types.sender =
+  | Admitted of Auth.request_principal
+  | Unadmitted
+
 (** {1 Network Context} *)
 
 (** Type alias for the Eio network capability used by agent core. *)
@@ -87,6 +92,8 @@ val create_state_eio :
     @param clock Eio time clock for [Mcp_server_eio_helpers.wait_for_message_eio] timeouts
     @param sw Eio.Switch for structured concurrency
     @param mcp_session_id Optional HTTP MCP session ID for identity continuity
+    @param sender How the request reached the dispatcher: the principal a
+      door admitted, or [Unadmitted] for a request no door admitted
     @param state Server state
     @param request_str Raw JSON-RPC request string
     @return JSON response *)
@@ -97,6 +104,7 @@ val handle_request :
   ?mcp_session_id:string ->
   ?otel_mcp_protocol_version:string ->
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  sender:sender ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
   server_state ->
@@ -113,8 +121,7 @@ val execute_tool_eio :
   ?profile:tool_profile ->
   ?mcp_session_id:string ->
   ?invocation_ref:Tool_invocation_ref.t ->
-  ?auth_token:string ->
-  ?internal_keeper_runtime:bool ->
+  bearer:Mcp_server_eio_caller_identity.bearer ->
   ?on_caller_resolved:(Mcp_server_eio_caller_identity.t -> unit) ->
   server_state ->
   name:string ->

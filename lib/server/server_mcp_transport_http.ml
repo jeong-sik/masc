@@ -16,6 +16,7 @@ type runtime = Server_mcp_transport_http_types.runtime = {
     ?mcp_session_id:string ->
     ?otel_mcp_protocol_version:string ->
     ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+    principal:Auth.request_principal ->
     ?auth_token:string ->
     ?internal_keeper_runtime:bool ->
     string ->
@@ -261,10 +262,10 @@ let should_stream_post_tools_call request body_str accept_mode =
       | None -> false)
   | _ -> false
 
-let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
+let body_with_canonical_http_actor ~base_path ~auth_token ~principal request body_str =
   match body_jsonrpc_method body_str with
   | Some ("tools/call", _) ->
-      let actor = Server_auth.dashboard_actor_for_request ~base_path request in
+      let actor = Server_auth.dashboard_actor_of_principal ~base_path request principal in
       Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
   | _ ->
       (* Only tool arguments carry a caller identity. HTTP admission and
@@ -350,9 +351,9 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
           Http_reqd.respond_with_string reqd response body;
           Error ()
     in
-    let* () =
+    let* principal =
       match auth_result with
-      | Ok () -> Ok ()
+      | Ok principal -> Ok principal
       | Error failure ->
           respond_mcp_auth_error
             ~deps
@@ -471,10 +472,9 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       let* () =
         match
           if Server_oauth_metadata.loopback_authority request_authority then
-            Auth_oauth.with_expected_resource expected_resource (fun () ->
-              Server_oauth_step_up.required_scope ~base_path ~auth_token
-                ~allowed_tool:(runtime.tool_allowed_in_profile profile)
-                ~body:body_str)
+            Server_oauth_step_up.required_scope ~principal
+              ~allowed_tool:(runtime.tool_allowed_in_profile profile)
+              ~body:body_str
           else None
         with
         | None -> Ok ()
@@ -498,8 +498,9 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       let sw = runtime.sw in
       let clock = runtime.clock in
       Ok (Eio.Fiber.fork ~sw (fun () ->
-                            (* Only immutable auth duration crosses the fiber boundary.
-                               Buffered responses report phases, not total request time. *)
+                            (* Only immutable admission values (its duration and its
+                               principal) cross the fiber boundary. Buffered responses
+                               report phases, not total request time. *)
                             let timing = Server_timing.create () in
                             Server_timing.record_ms timing Mcp_http_auth auth_ms;
                             let timed_headers headers =
@@ -536,16 +537,16 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       Server_timing.measure timing Mcp_identity (fun () ->
                                         let body_with_agent =
                                           body_with_canonical_http_actor ~base_path
-                                            ~auth_token request body_str
+                                            ~auth_token ~principal request body_str
                                         in
                                         let internal_keeper_runtime =
-                                          Server_auth.is_verified_internal_keeper_request
-                                            ~base_path request
+                                          Server_auth.is_internal_keeper_principal
+                                            ~base_path request principal
                                         in
                                         body_with_agent, internal_keeper_runtime)
                                     in
                                     Server_timing.measure timing Mcp_dispatch (fun () ->
-                                      runtime.handle_request ?auth_token ~profile
+                                      runtime.handle_request ~principal ?auth_token ~profile
                                         ?mcp_session_id:
                                           (if stateless_request then None
                                            else Some session_id)
@@ -834,7 +835,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
             ~session_id
             ~protocol_version
             failure
-      | Ok () ->
+      | Ok _ ->
           (match last_event_id with
           | Error error ->
               respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
@@ -1270,7 +1271,7 @@ let handle_get_operator_mcp ~deps request reqd =
         ~session_id
         ~protocol_version
         failure
-  | Ok () ->
+  | Ok _ ->
       handle_get_mcp ~deps ~profile:Operator_remote request reqd
 
 let handle_delete_mcp ~deps ?(profile = Full) request reqd =
@@ -1301,7 +1302,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
         ~session_id
         ~protocol_version
         failure
-  | Ok () -> (
+  | Ok _ -> (
       match get_session_id_any request with
       | Some session_id -> (
           match validate_mcp_session_delete_profile ~profile session_id with

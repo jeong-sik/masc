@@ -9,6 +9,10 @@ type tool_profile =
   | Operator_remote
   | Seat
 
+type sender =
+  | Admitted of Auth.request_principal
+  | Unadmitted
+
 let tool_profile_to_string = function
   | Full -> "full"
   | Managed_agent -> "managed_agent"

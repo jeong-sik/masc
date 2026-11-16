@@ -718,7 +718,74 @@ let test_addon_lane_serves_required_service () =
     (admission [ lane (addon required) [ "not-in-frozen-catalog" ] ]);
   refused "an attested id served by an Addon lane of another output"
     (admission [ lane (addon "unrelated_exact") [ replacement_target ] ]);
-  refused "no lane at all" (admission [])
+  refused "a disabled attested Addon lane"
+    (admission [ { (lane (addon required) [ replacement_target ]) with enabled = false } ]);
+  refused "no lane at all" (admission []);
+  let shape_schema =
+    `Assoc
+      [ "type", `String "object"
+      ; "required", `List [ `String "scores"; `String "verdict" ]
+      ; "additionalProperties", `Bool false
+      ; ( "properties"
+        , `Assoc
+            [ ( "scores"
+              , `Assoc
+                  [ "type", `String "array"
+                  ; "minItems", `Int 1
+                  ; "maxItems", `Int 2
+                  ; ( "items"
+                    , `Assoc
+                        [ "type", `String "number"
+                        ; "minimum", `Float 0.0
+                        ; "maximum", `Float 1.0
+                        ] )
+                  ] )
+            ; ( "verdict"
+              , `Assoc
+                  [ "type", `String "string"
+                  ; "enum", `List [ `String "approve"; `String "reject" ]
+                  ] )
+            ] )
+      ]
+  in
+  Alcotest.(check bool)
+    "valid consumer shape passes"
+    true
+    (Option.is_none
+       (Masc.Lane_addon_exact_shape.issue
+          ~at:"$"
+          shape_schema
+          (`Assoc
+            [ "scores", `List [ `Float 0.5 ]
+            ; "verdict", `String "approve"
+            ])));
+  Alcotest.(check bool)
+    "empty array violates minItems"
+    true
+    (Option.is_some
+       (Masc.Lane_addon_exact_shape.issue
+          ~at:"$"
+          shape_schema
+          (`Assoc [ "scores", `List []; "verdict", `String "approve" ])));
+  Alcotest.(check bool)
+    "out-of-range array item violates maximum"
+    true
+    (Option.is_some
+       (Masc.Lane_addon_exact_shape.issue
+          ~at:"$"
+          shape_schema
+          (`Assoc
+            [ "scores", `List [ `Float 1.5 ]
+            ; "verdict", `String "approve"
+            ])));
+  Alcotest.(check bool)
+    "unknown enum value violates enum"
+    true
+    (Option.is_some
+       (Masc.Lane_addon_exact_shape.issue
+          ~at:"$"
+          shape_schema
+          (`Assoc [ "scores", `List [ `Float 0.5 ]; "verdict", `String "maybe" ])))
 ;;
 
 let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =

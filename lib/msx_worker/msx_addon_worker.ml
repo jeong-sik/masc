@@ -159,17 +159,28 @@ let schemas () =
       | Ok definition -> tool, definition.Tool_definition_toml.schema
       | Error message -> invalid_arg message)
 
-let definition (schema : Masc_domain.tool_schema) =
+let definition tool (schema : Masc_domain.tool_schema) =
   match S.tool_of_yojson (`Assoc ["name", `String schema.name;
       "description", `String schema.description; "inputSchema", schema.input_schema]) with
-  | Ok tool -> tool | Error message -> invalid_arg message
+  | Ok listed ->
+    { listed with
+      S.annotations =
+        Some
+          { S.title = None
+          ; read_only_hint = Some (Msx_tool.reads_only tool)
+          ; destructive_hint = None
+          ; idempotent_hint = None
+          ; open_world_hint = None
+          }
+    }
+  | Error message -> invalid_arg message
 
 let create ~base_path () =
   let history = Machine_input_history.create ~encode:Msx_lane.entry_json () in
   let server = Server.create ~name:"masc-msx-addon" ~version:Build_version.current () in
   let schemas = schemas () in
-  let server = List.fold_left (fun server (_tool, (schema : Masc_domain.tool_schema)) ->
-    Server.add_tool (definition schema)
+  let server = List.fold_left (fun server (tool, (schema : Masc_domain.tool_schema)) ->
+    Server.add_tool (definition tool schema)
       (fun _context _name _arguments ->
         Ok (response (Tool_result.make_err ~tool_name:schema.name ~start_time:(Tool_timing.start ())
           ~class_:Tool_result.Policy_rejection ~effect_disposition:Tool_result.Proven_pre_effect

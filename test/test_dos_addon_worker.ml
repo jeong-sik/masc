@@ -519,6 +519,11 @@ let test_a_worker_start_resumes_the_autosave () =
     let call, snapshot = worker_call client in
     let screen = call "masc_dos_screen" (`Assoc ["include_frame", `Bool false]) in
     check bool "the first call finds a machine" false (screen.is_error = Some true);
+    check bool "read-only screen call does not drain startup announcements" true
+      (match screen._meta with
+       | Some (`Assoc fields) ->
+         List.assoc_opt "io.github.jeong-sik/masc.machine.events" fields = Some (`List [])
+       | _ -> false);
     check bool "the autosave's program" true (member "saves_name" screen = `String "hello.com");
     check bool "at the autosave's steps" true (member "steps" screen = `Int booted.Dos_lane.steps);
     check bool "with the controller free" true (member "controller" screen = `Null);

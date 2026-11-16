@@ -75,6 +75,15 @@ let test_stdio_machine_lifecycle () =
               check int "machine tools and private control ports" 17 (List.length tools);
               check bool "disk export is discovered through the worker protocol" true
                 (List.exists (fun (tool : S.tool) -> tool.name = "masc_msx_export_disk") tools);
+              List.iter (fun msx_tool ->
+                let name = Msx_tool.name msx_tool in
+                match List.find_opt (fun (listed : S.tool) -> String.equal listed.name name) tools with
+                | None -> fail (name ^ " is not listed")
+                | Some listed ->
+                  check (option bool) (name ^ " exposes readOnlyHint")
+                    (Some (Msx_tool.reads_only msx_tool))
+                    (Option.bind listed.annotations (fun a -> a.S.read_only_hint)))
+                Msx_tool.all;
               let call name arguments =
                 let name, arguments = if String.equal name "lane_observe" then name, arguments
                   else Lane_addon_call_context.tool_name,

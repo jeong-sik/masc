@@ -4778,6 +4778,27 @@ let start_fleet_service ~config ~sw ~clock =
       m.fleet_nudge<-(fun () -> ()));
     Pulse.run ~sw pulse)
 
+let wake_expired_exact_waits m ~now =
+  Eio_context.run_on_owner_domain (fun () ->
+    entries m
+    |> List.iter (fun e ->
+      if (not e.stopping)
+         && List.exists
+              (fun (wait : exact_wait) ->
+                 match wait.reason with
+                 | Lane_addon_exact.Lane_unavailable (Every_slot_held { until }) ->
+                   Float.compare until now <= 0
+                 | Lane_addon_exact.Lane_unavailable
+                     ( Lane_unconfigured
+                     | Lane_off
+                     | No_admitted_slots
+                     | Lane_registry_unavailable _ )
+                 | Lane_addon_exact.Provider_refused _
+                 | Lane_addon_exact.Attempt_in_progress ->
+                   false)
+              e.host_status.exact_waiting
+      then wake_host e))
+
 let configuration_services : (string, unit -> unit) Hashtbl.t = Hashtbl.create 4
 let start_configuration_service ~config ~sw ~clock =
   let key = Workspace.masc_dir config in
@@ -4788,6 +4809,7 @@ let start_configuration_service ~config ~sw ~clock =
       let name = "lane-addon-configuration"
       let should_act _ = !active
       let on_beat _ =
+        wake_expired_exact_waits (manager config) ~now:(Eio.Time.now clock);
         let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
         match resolution.status with
         | Config_dir_resolver.Invalid_env_status ->

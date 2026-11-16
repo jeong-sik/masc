@@ -69,3 +69,24 @@ raw backtrace 비교, SDK 인터페이스 적용·전체 타입 검사·시험 s
 [test_pipeline.ml](../../../packages/agent_core/test/test_pipeline.ml), tracer·wrapped reserved
 회귀 소스는 [test_tracing.ml](../../../packages/agent_core/test/test_tracing.ml)에 있으며,
 그 실행 결과는 별도로 확인해야 한다.
+
+## Alcotest 출력과 고장 주입의 분리
+
+첫 실제 SDK 실행에서 Fmt 고장 시험들이 실패해, 별도로 실제 설치 Alcotest의 verbose
+출력을 조사했다. [재현 입력](alcotest-reporter/input.ml)은 항상 `42`를 반환하는 연산에
+같은 닫힌 전용 formatter를 적용한다. 단언을 formatter 복원 안쪽에서 출력하면
+`Alcotest_engine__Test.check`가 `Sys_error("Bad file descriptor")`를 내고, 복원한 뒤
+같은 값을 단언하면 통과한다. 실제 interpreter는 앞 시험 하나의 실패로 exit 1이다.
+[선택한 관측과 원문 digest](alcotest-reporter/observations.json)는 파생 기록이다.
+
+이 결과에 따라 SDK 시험은 고장 중 실행 결과·예외·backtrace를 수집하고, formatter를
+복원한 뒤 단언한다. 실제 Fmt 고장과 실행 횟수·정본 저장·원래 예외 검사는 유지한다.
+아래 재현은 reporter 경계만 검사하며 수정한 SDK 시험의 통과를 대신하지 않는다.
+새 결과는 보존 기록을 덮지 않도록 별도 `artifacts/` 폴더에 쓴다.
+
+```sh
+repo_src="$PWD"
+probe_out=$(mktemp -d "$PWD/artifacts/alcotest-reporter.XXXXXX")
+cd "$probe_out"
+ocaml -noinit -noprompt -I +unix < "$repo_src/docs/evidence/tracer-observer-authority-20261116/alcotest-reporter/input.ml" > stdout.txt 2> stderr.txt
+```

@@ -2247,9 +2247,11 @@ let test_trace_write_failure_keeps_execution fault () =
 ;;
 
 (* Exercise the built-in tracer's real channel errors without closing the
-   process stderr descriptor. Restore the shared formatter even when a run
-   raises, so a failed assertion cannot damage later tests or their output. *)
+   process stderr descriptor. Only execute and collect observations here:
+   Alcotest reports assertions through the shared formatter too, so all
+   assertions belong after this helper restores it, including on exceptions. *)
 let with_private_fmt_channel f =
+  Format.pp_print_flush Format.err_formatter ();
   let output = Format.pp_get_formatter_out_functions Format.err_formatter () in
   let channel = Unix.out_channel_of_descr (Unix.dup Unix.stderr) in
   let closed = ref false in
@@ -2274,61 +2276,65 @@ type fmt_channel_fault =
   | Fmt_tool_finished_closed
 
 let test_fmt_failure_keeps_durable_run fault () =
-  with_private_fmt_channel
-  @@ fun close_trace ->
   with_execution_test_dir "agent_core-fmt-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let provider_calls = ref 0 and tool_calls = ref 0 in
   let injected = ref false in
-  let break_trace () = injected := true; close_trace () in
-  let responses = ref
-    [ Provider_mock.tool_use_response
-        ~tool_name:"fmt_effect" ~tool_input:(`Assoc []) () []
-    ; Provider_mock.text_response ~input_tokens:7 ~output_tokens:3 "durable answer" []
-    ]
-  in
-  let next_response () =
-    incr provider_calls;
-    (match fault with
-     | Fmt_provider_finished_closed -> break_trace ()
-     | Fmt_start_closed | Fmt_tool_finished_closed -> ());
-    match !responses with
-    | response :: rest -> responses := rest; Ok response
-    | [] -> Alcotest.fail "tracer failure repeated a provider request"
-  in
-  let transport = Llm_provider.Llm_transport.custom
-    { complete_sync = (fun _request ->
-        { Llm_provider.Llm_transport.response = next_response (); latency_ms = Some 0 })
-    ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ())
-    }
-  in
-  let tool = Tool.create ~name:"fmt_effect" ~description:"effect under a failed tracer"
-      ~parameters:[] (fun _ ->
-        incr tool_calls;
-        (match fault with
-         | Fmt_tool_finished_closed -> break_trace ()
-         | Fmt_start_closed | Fmt_provider_finished_closed -> ());
-        Ok { Types.content = "settled once"; content_blocks = None; _meta = None })
-  in
   let completions = ref [] and locator = ref None in
-  let agent = Agent.create ~media_store:(History.Memory_store.create ())
-      ~net:(Eio.Stdenv.net env)
-      ~config:{ (Types.default_config ~model:"test-model") with name = "fmt-observation" }
-      ~tools:[tool]
-      ~options:{ Agent.default_options with
-        transport = Some transport
-      ; provider_config = Some (Provider_mock.to_provider_config ())
-      ; tracer = Tracing.fmt
-      ; on_run_complete = Some (fun ok -> completions := ok :: !completions)
-      } ()
+  let result, state, lifecycle = with_private_fmt_channel (fun close_trace ->
+    let break_trace () = injected := true; close_trace () in
+    let responses = ref
+      [ Provider_mock.tool_use_response
+          ~tool_name:"fmt_effect" ~tool_input:(`Assoc []) () []
+      ; Provider_mock.text_response ~input_tokens:7 ~output_tokens:3 "durable answer" []
+      ]
+    in
+    let next_response () =
+      incr provider_calls;
+      (match fault with
+       | Fmt_provider_finished_closed -> break_trace ()
+       | Fmt_start_closed | Fmt_tool_finished_closed -> ());
+      match !responses with
+      | response :: rest -> responses := rest; Ok response
+      (* Keep reporting outside the failed formatter. A replay still fails
+         the result and the exact provider-call assertion below. *)
+      | [] -> Error (Error.Internal "tracer failure repeated a provider request")
+    in
+    let transport = Llm_provider.Llm_transport.custom
+      { complete_sync = (fun _request ->
+          { Llm_provider.Llm_transport.response = next_response (); latency_ms = Some 0 })
+      ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ())
+      }
+    in
+    let tool = Tool.create ~name:"fmt_effect" ~description:"effect under a failed tracer"
+        ~parameters:[] (fun _ ->
+          incr tool_calls;
+          (match fault with
+           | Fmt_tool_finished_closed -> break_trace ()
+           | Fmt_start_closed | Fmt_provider_finished_closed -> ());
+          Ok { Types.content = "settled once"; content_blocks = None; _meta = None })
+    in
+    let agent = Agent.create ~media_store:(History.Memory_store.create ())
+        ~net:(Eio.Stdenv.net env)
+        ~config:{ (Types.default_config ~model:"test-model") with name = "fmt-observation" }
+        ~tools:[tool]
+        ~options:{ Agent.default_options with
+          transport = Some transport
+        ; provider_config = Some (Provider_mock.to_provider_config ())
+        ; tracer = Tracing.fmt
+        ; on_run_complete = Some (fun ok -> completions := ok :: !completions)
+        } ()
+    in
+    let store = Agent.execution_store ~runtime ~dir
+        ~on_scope_ready:(fun value -> locator := Some value; Ok ()) ()
+    in
+    (match fault with
+     | Fmt_start_closed -> break_trace ()
+     | Fmt_provider_finished_closed | Fmt_tool_finished_closed -> ());
+    let result = Agent.run ~sw ~execution_store:store agent "settle the effect" in
+    result, Agent.state agent, Agent.lifecycle agent)
   in
-  let store = Agent.execution_store ~runtime ~dir
-      ~on_scope_ready:(fun value -> locator := Some value; Ok ()) ()
-  in
-  (match fault with
-   | Fmt_start_closed -> break_trace ()
-   | Fmt_provider_finished_closed | Fmt_tool_finished_closed -> ());
-  (match Agent.run ~sw ~execution_store:store agent "settle the effect" with
+  (match result with
    | Ok response ->
      Alcotest.(check string) "provider answer survives Fmt failure"
        "durable answer" (Types.text_of_response response)
@@ -2337,11 +2343,10 @@ let test_fmt_failure_keeps_durable_run fault () =
   Alcotest.(check int) "each provider turn executes once" 2 !provider_calls;
   Alcotest.(check int) "external effect executes once" 1 !tool_calls;
   Alcotest.(check (list bool)) "completion callback observes success once" [true] !completions;
-  let state = Agent.state agent in
   Alcotest.(check int) "both accepted provider turns retain usage" 2 state.usage.api_calls;
   Alcotest.(check int) "accepted input tokens survive" 7 state.usage.total_input_tokens;
   Alcotest.(check int) "accepted output tokens survive" 3 state.usage.total_output_tokens;
-  (match Agent.lifecycle agent with
+  (match lifecycle with
    | Some snapshot ->
      Alcotest.(check bool) "lifecycle completes" true (snapshot.status = Agent.Completed)
    | None -> Alcotest.fail "lifecycle missing after Fmt fault");

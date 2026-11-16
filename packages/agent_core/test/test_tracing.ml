@@ -259,40 +259,42 @@ let observer_failure_attrs : Tracing.span_attrs =
 (* Close only this test's descriptor. The real Fmt tracer still writes through
    Format.err_formatter, whose previous output functions are always restored. *)
 let with_private_fmt_channel f =
+  Format.pp_print_flush Format.err_formatter ();
   let saved = Format.pp_get_formatter_out_functions Format.err_formatter () in
   let channel = Unix.out_channel_of_descr (Unix.dup Unix.stderr) in
   Format.pp_set_formatter_out_channel Format.err_formatter channel;
   Fun.protect
     ~finally:(fun () ->
       Format.pp_set_formatter_out_functions Format.err_formatter saved;
-      close_out_noerr channel)
+      close_out_noerr channel;
+      Format.pp_print_flush Format.err_formatter ())
     (fun () -> f (fun () -> close_out_noerr channel))
 ;;
 
 let test_fmt_start_failure_runs_body_once () =
-  with_private_fmt_channel (fun close_output ->
-    close_output ();
-    let effects = ref 0 in
-    let result =
+  let effects = ref 0 in
+  let result =
+    with_private_fmt_channel (fun close_output ->
+      close_output ();
       Tracing.with_span Tracing.fmt observer_failure_attrs (fun _ ->
         incr effects;
-        42)
-    in
-    check int "operation survives failed span start" 42 result;
-    check int "operation executed once" 1 !effects)
+        42))
+  in
+  check int "operation survives failed span start" 42 result;
+  check int "operation executed once" 1 !effects
 ;;
 
 let test_fmt_finish_failure_preserves_result () =
-  with_private_fmt_channel (fun close_output ->
-    let effects = ref 0 in
-    let result =
+  let effects = ref 0 in
+  let result =
+    with_private_fmt_channel (fun close_output ->
       Tracing.with_span Tracing.fmt observer_failure_attrs (fun _ ->
         incr effects;
         close_output ();
-        42)
-    in
-    check int "operation result survives failed span finish" 42 result;
-    check int "completed effect is not replayed" 1 !effects)
+        42))
+  in
+  check int "operation result survives failed span finish" 42 result;
+  check int "completed effect is not replayed" 1 !effects
 ;;
 
 let first_backtrace_location backtrace =
@@ -310,28 +312,37 @@ let test_fmt_finish_failure_preserves_body_exception () =
   Fun.protect
     ~finally:(fun () -> Printexc.record_backtrace was_recording)
     (fun () ->
-      with_private_fmt_channel (fun close_output ->
-        let effects = ref 0 in
-        let original = Failure "body-failure" in
-        let origin = ref None in
-        match
-          Tracing.with_span Tracing.fmt observer_failure_attrs (fun _ ->
-            incr effects;
-            close_output ();
-            try raise original with
-            | exn ->
-              let backtrace = Printexc.get_raw_backtrace () in
-              origin := Some (first_backtrace_location backtrace);
-              Printexc.raise_with_backtrace exn backtrace)
-        with
-        | _ -> fail "body exception was swallowed"
-        | exception observed ->
-          let backtrace = Printexc.get_raw_backtrace () in
+      let effects = ref 0 in
+      let original = Failure "body-failure" in
+      let origin = ref None in
+      let outcome =
+        with_private_fmt_channel (fun close_output ->
+          match
+            Tracing.with_span Tracing.fmt observer_failure_attrs (fun _ ->
+              incr effects;
+              close_output ();
+              try raise original with
+              | exn ->
+                let backtrace = Printexc.get_raw_backtrace () in
+                origin := Some backtrace;
+                Printexc.raise_with_backtrace exn backtrace)
+          with
+          | _ -> None
+          | exception observed ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            Some (observed, backtrace))
+      in
+      (* Alcotest's verbose assertions also use the formatter. Observe the
+         fault first and report only after restoring its healthy output. *)
+      match outcome, !origin with
+      | Some (observed, backtrace), Some original_backtrace ->
           check bool "original exception object survives failed finish" true
             (observed == original);
           check int "failed effect is not replayed" 1 !effects;
           check bool "original raise location survives failed finish" true
-            (Some (first_backtrace_location backtrace) = !origin)))
+            (first_backtrace_location backtrace = first_backtrace_location original_backtrace)
+      | None, _ -> fail "body exception was swallowed"
+      | Some _, None -> fail "body raise was not observed")
 ;;
 
 let test_trace_context_failure_is_optional () =

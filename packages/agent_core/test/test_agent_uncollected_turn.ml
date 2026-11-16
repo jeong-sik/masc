@@ -31,13 +31,16 @@ let projection_value = function
 ;;
 
 let binding () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
-    ~model_id:"uncollected-turn-test"
-    ~base_url:"http://uncollected-turn.invalid"
-    ~api_key:""
-    ~request_path:"/v1/chat/completions"
-    ()
+  value
+    (Binding_identity.of_provider_config
+       ~transport:Binding_identity.Injected
+       (Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~model_id:"uncollected-turn-test"
+          ~base_url:"http://uncollected-turn.invalid"
+          ~api_key:""
+          ~request_path:"/v1/chat/completions"
+          ()))
 ;;
 
 let make_dir fs prefix =

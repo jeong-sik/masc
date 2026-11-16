@@ -118,8 +118,7 @@ val handle_request :
      clock:([> float Eio.Time.clock_ty ] as 'clk) Eio.Resource.t ->
      profile:tool_profile ->
      ?mcp_session_id:string ->
-     ?auth_token:string ->
-     internal_keeper_runtime:bool ->
+     bearer:Mcp_server_eio_caller_identity.bearer ->
      Mcp_server.server_state ->
      Yojson.Safe.t ->
      Mcp_server_eio_call_request.t ->

@@ -552,7 +552,7 @@ let resolve_managed_agent_call ?mcp_session_id request =
 (** Handle tools/call JSON-RPC method *)
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~broadcast_tools_list_changed ?(wire_result = fun () -> None) ~sw ~clock ?(profile = Full) ?mcp_session_id
-    ?auth_token ?(internal_keeper_runtime = false) state id request =
+    ~bearer state id request =
   (* The active workspace is an admission fact for this call.  In particular,
      [masc_start] may publish a new current scope while executing, but the
      initiating call and every post-execution observation remain attributed to
@@ -615,8 +615,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ?profile:(Some profile)
         ?mcp_session_id
         ?invocation_ref
-        ?auth_token
-        ?internal_keeper_runtime:(Some internal_keeper_runtime)
+        ~bearer
         ?on_caller_resolved:(Some on_caller_resolved)
         state
         ~name

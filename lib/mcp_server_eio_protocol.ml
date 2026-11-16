@@ -1134,6 +1134,12 @@ let handle_request
               | "tools/call" ->
                 let handle_tools_call auth_token =
                   let operation_start_time = Eio.Time.now clock in
+                  (* What the executor knows about the bearer: the door's
+                     answer when it resolved one, the token otherwise. *)
+                  let bearer =
+                    Mcp_server_eio_caller_identity.of_sender sender ~auth_token
+                      ~internal_keeper_runtime
+                  in
                 let otel_context =
                   otel_tool_request_context
                     ~id
@@ -1199,13 +1205,12 @@ let handle_request
                       | Ok (Some (access, principal, reserved, export), _) ->
                           let wire_result = ref None in
                           let execute ~sw:_ ~clock:_ ~workspace_scope ?profile:_ ?mcp_session_id
-                              ?invocation_ref:_ ?auth_token ?(internal_keeper_runtime=false)
-                              ?on_caller_resolved state ~name ~arguments =
+                              ?invocation_ref:_ ~bearer ?on_caller_resolved state ~name ~arguments =
                             let config = workspace_scope.Mcp_server.config in
                             let identity = Client_registry_eio.get_or_create_identity ?mcp_session_id arguments in
                             let caller = Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
                               ~identity ~cached_resolved_agent:(Option.bind mcp_session_id Client_registry_eio.get_resolved_name)
-                              ~auth_token ~internal_keeper_runtime
+                              ~bearer
                               ~direct_call_authority:Mcp_server_eio_caller_identity.Restricted_profile
                               ~workspace_initialized:(fun () -> Workspace.is_initialized config)
                               ~log_mcp_exn:Mcp_server_eio_helpers.log_mcp_exn in
@@ -1242,8 +1247,8 @@ let handle_request
                           Mcp_server_eio_call_tool.handle_call_tool_eio
                             ~execute_tool_eio:execute ~maybe_emit_resource_notifications
                             ~broadcast_tools_list_changed ~wire_result:(fun () -> !wire_result)
-                            ~sw ~clock ~profile:call_profile ?mcp_session_id ?auth_token
-                            ~internal_keeper_runtime state id call
+                            ~sw ~clock ~profile:call_profile ?mcp_session_id ~bearer
+                            state id call
                       | Ok (None, None) ->
                       if
                         not
@@ -1282,8 +1287,7 @@ let handle_request
                                  ~clock
                                  ~profile
                                  ?mcp_session_id
-                                 ?auth_token
-                                 ~internal_keeper_runtime
+                                 ~bearer
                                  state
                                  id
                                  call)

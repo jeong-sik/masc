@@ -4,6 +4,8 @@ module Journal = Keeper_tool_execution_journal
 open Keeper_tool_composition_projection
 open Keeper_tool_composition_surface_schema
 
+let evidence_committed_event_type = "keeper_tool_call_evidence_committed"
+
 let observe_node_result
       ?on_receipt_committed
       ~composition_tool
@@ -77,7 +79,7 @@ let observe_node_result
     if not !committed
     then failwith "composition telemetry commit callback was not delivered";
     let fields =
-      [ "type", `String "keeper_tool_call_evidence_committed"
+      [ "type", `String evidence_committed_event_type
       ; "name", `String meta.name
       ; "tool_name", `String result.tool_name
       ; ( "composition_run_id"

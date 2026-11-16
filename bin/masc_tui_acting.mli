@@ -71,7 +71,8 @@ val glyph_text : glyph -> string
 
 (** Who a row is about. The event kind decides which: an event that carries
     a Keeper or an agent name is [Actor_named] with that name, an agent_core
-    event that names neither is [Actor_unnamed], and a change of the whole
+    event that names neither is [Actor_unnamed], and so is a type the TUI was
+    not taught, which keeps only its name; a change of the whole
     workspace (a queue, a dataset, a store, a snapshot) is [Actor_server]. A
     Keeper named [server] is [Actor_named "server"], never the server. *)
 type actor =

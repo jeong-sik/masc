@@ -107,6 +107,11 @@ let summary = function
          | Some (Ok Masc.Tui_decode.Keeper_call_failed) -> "failed"
          | Some (Error error) -> "error:" ^ error
          | None -> "-")
+  | Observer.Event (Observer.Keeper_tool_call_evidence_committed e) ->
+      Printf.sprintf "skill_node(%s,%s,%s,%s,%s)" e.Observer.ce_keeper
+        e.Observer.ce_tool e.Observer.ce_composition_tool
+        (Masc.Keeper_tool_plan.Composition_run_id.to_string e.Observer.ce_run_id)
+        (Masc.Keeper_tool_plan.Node_id.to_string e.Observer.ce_node_id)
   | Observer.Event (Observer.Keeper_turn_complete t) ->
       Printf.sprintf "turn_complete(%s,turn=%s,cost=%s)" t.Observer.tc_keeper
         (match t.Observer.tc_turn with Some n -> string_of_int n | None -> "-")
@@ -402,6 +407,106 @@ let test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock () =
   check (list string) "a seq of the wrong shape fails the frame, not reads as absent"
     [ "undecodable:keeper_chat_operation_event carries a non-integer seq" ]
     (List.map summary (decode_all [ chat_stream_malformed_seq_frame ]))
+
+(* Two composition runs, each a UUIDv7 as [Composition_run_id.fresh] mints. *)
+let triage_run = "019a8c3e-5b2d-7f41-8a6c-3d9e0b1f2a47"
+let release_run = "019a8c3e-5b2e-7c02-9b13-6e0f4a2d8c55"
+
+(* Every field [Keeper_tool_composition_surface_observation.observe_node_result]
+   writes, in its order, for one node of one run. *)
+let skill_node_fields ~keeper ~run_id ~tool ~node ~ts =
+  [ ("type", `String "keeper_tool_call_evidence_committed")
+  ; ("name", `String keeper)
+  ; ("tool_name", `String tool)
+  ; ("composition_run_id", `String run_id)
+  ; ("composition_node_id", `String node)
+  ; ("composition_tool", `String "keeper_compose_triage")
+  ; ("composition_execution", `String "inline")
+  ; ("composition_tool_kind", `String "composition")
+  ; ("parent_tool_use_id", `String "toolu_parent")
+  ; ("turn", `Int 41)
+  ; ("execution_id", `String ("exec-" ^ node))
+  ; ("duration_ms", `Float 12.5)
+  ; ("disposition", `String "completed")
+  ; ("wire_outcome", `String "ok")
+  ; ("result_bytes", `Int 230)
+  ; ("truncated_to", `Null)
+  ; ("planned_index", `Int 0)
+  ; ("batch_index", `Int 0)
+  ; ("batch_size", `Int 1)
+  ; ("execution_mode", `String "serial")
+  ; ("ts_unix", `Float ts)
+  ; ("tool_use_id", `String ("composition-skill:" ^ node))
+  ]
+
+let frame_of_fields fields = "data: " ^ Yojson.Safe.to_string (`Assoc fields) ^ "\n\n"
+
+(* The issue's screen: seven of these in one second drew seven identical
+   rows, "server" and an empty detail, because the frame arrived as a type
+   this build did not know and only its name was kept. *)
+let seven_skill_nodes =
+  [ ("triage-keeper", triage_run, "read_file", "fetch")
+  ; ("triage-keeper", triage_run, "grep", "scan")
+  ; ("triage-keeper", triage_run, "masc_board_post", "report")
+  ; ("triage-keeper", triage_run, "read_file", "recheck")
+  ; ("release-keeper", release_run, "gh_pr_view", "inspect")
+  ; ("release-keeper", release_run, "read_file", "fetch")
+  ; ("release-keeper", release_run, "masc_board_post", "report")
+  ]
+  |> List.mapi (fun index (keeper, run_id, tool, node) ->
+         skill_node_fields ~keeper ~run_id ~tool ~node
+           ~ts:(1789000123.05 +. (0.1 *. float_of_int index)))
+
+let test_a_skill_nodes_committed_row_keeps_its_keeper_tool_and_node () =
+  let decoded = decode_all (List.map frame_of_fields seven_skill_nodes) in
+  let node keeper tool run_id node =
+    Printf.sprintf "skill_node(%s,%s,keeper_compose_triage,%s,%s)" keeper tool run_id node
+  in
+  check (list string) "each frame decodes to its own Keeper, tool, run and node"
+    [ node "triage-keeper" "read_file" triage_run "fetch"
+    ; node "triage-keeper" "grep" triage_run "scan"
+    ; node "triage-keeper" "masc_board_post" triage_run "report"
+    ; node "triage-keeper" "read_file" triage_run "recheck"
+    ; node "release-keeper" "gh_pr_view" release_run "inspect"
+    ; node "release-keeper" "read_file" release_run "fetch"
+    ; node "release-keeper" "masc_board_post" release_run "report"
+    ]
+    (List.map summary decoded);
+  (* The server sends it once the node's row is committed, so the Keeper's
+     calls are owed a read on it. *)
+  check (list (option string)) "each frame owes its Keeper's calls a read"
+    [ Some "triage-keeper"; Some "triage-keeper"; Some "triage-keeper"
+    ; Some "triage-keeper"; Some "release-keeper"; Some "release-keeper"
+    ; Some "release-keeper" ]
+    (List.map
+       (function
+         | Observer.Event event -> Observer.tool_call_keeper event
+         | Observer.Undecodable _ -> None)
+       decoded)
+
+(* A field the server always writes is part of what the frame says. Without
+   it the frame is not another kind of event: it fails, and says why. *)
+let test_a_skill_node_row_without_a_written_field_is_undecodable () =
+  let one =
+    skill_node_fields ~keeper:"triage-keeper" ~run_id:triage_run ~tool:"read_file"
+      ~node:"fetch" ~ts:1789000123.05
+  in
+  let undecodable fields =
+    match decode_all [ frame_of_fields fields ] with
+    | [ Observer.Undecodable _ ] -> true
+    | [ Observer.Event _ ] | [] | _ :: _ :: _ -> false
+  in
+  List.iter
+    (fun field ->
+      check bool (field ^ " missing fails the frame") true
+        (undecodable (List.remove_assoc field one)))
+    [ "name"; "tool_name"; "composition_tool"; "composition_run_id"
+    ; "composition_node_id"; "ts_unix" ];
+  let replaced field value = (field, value) :: List.remove_assoc field one in
+  check bool "a run id that is not a UUIDv7 fails the frame" true
+    (undecodable (replaced "composition_run_id" (`String "run-1")));
+  check bool "an empty node id fails the frame" true
+    (undecodable (replaced "composition_node_id" (`String "")))
 
 let operator_digest_frame =
   "data: {\"type\":\"operator_digest\",\"ts_unix\":1787507573.0}\n\n"
@@ -1779,6 +1884,10 @@ let () =
             test_keeper_events_decode_by_name
         ; test_case "the chat stream and waiting queue keep their keeper and clock"
             `Quick test_the_chat_stream_and_waiting_queue_keep_their_keeper_and_clock
+        ; test_case "a skill node's committed row keeps its keeper, tool and node"
+            `Quick test_a_skill_nodes_committed_row_keeps_its_keeper_tool_and_node
+        ; test_case "a skill node row without a written field is undecodable"
+            `Quick test_a_skill_node_row_without_a_written_field_is_undecodable
         ; test_case "every whole-projection push decodes as a snapshot" `Quick
             test_every_whole_projection_push_decodes_as_a_snapshot
         ; test_case "a frame its type decides is not read past the type" `Quick

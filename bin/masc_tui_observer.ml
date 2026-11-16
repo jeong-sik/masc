@@ -120,6 +120,15 @@ type keeper_tool_call = {
   kt_tool_output_preview : string option;
 }
 
+type keeper_tool_call_evidence = {
+  ce_keeper : string;
+  ce_tool : string;
+  ce_composition_tool : string;
+  ce_run_id : Masc.Keeper_tool_plan.Composition_run_id.t;
+  ce_node_id : Masc.Keeper_tool_plan.Node_id.t;
+  ce_at : float;
+}
+
 type approval_change =
   | Approval_queue_changed
   | Approval_rules_changed
@@ -169,6 +178,8 @@ type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
   | Keeper_tool_call of keeper_tool_call
+  (* A composition node's call whose row the call log committed. *)
+  | Keeper_tool_call_evidence_committed of keeper_tool_call_evidence
   | Keeper_turn_complete of keeper_turn_complete
   | Keeper_turn_observation of keeper_turn_observation
   | Keeper_composite_changed of { keeper : string; at : float }
@@ -255,7 +266,7 @@ let chat_appended_keeper = function
      carries no transcript. Even the turn's own settle does not reload the
      chat, so a frame from mid-turn does not either. *)
   | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -267,7 +278,7 @@ let chat_appended_keeper = function
 let composite_changed_keeper = function
   | Keeper_composite_changed { keeper; _ } -> Some keeper
   | Keeper_metrics_appended _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
@@ -278,7 +289,7 @@ let composite_changed_keeper = function
 let metrics_appended_keeper = function
   | Keeper_metrics_appended { keeper; _ } -> Some keeper
   | Keeper_composite_changed _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
@@ -288,6 +299,8 @@ let metrics_appended_keeper = function
 
 let tool_call_keeper = function
   | Keeper_tool_call { kt_keeper; _ } -> Some kt_keeper
+  (* Sent after the node's row is committed, so the read it owes finds it. *)
+  | Keeper_tool_call_evidence_committed { ce_keeper; _ } -> Some ce_keeper
   | Keeper_composite_changed _ | Keeper_metrics_appended _ | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _
   | Keeper_turn_observation _ | Agent_core _ | Keeper_heartbeat _
   | Keeper_turn_complete _
@@ -301,7 +314,7 @@ let memory_journal_appended_keeper = function
   | Keeper_memory_journal_appended { keeper; _ } -> Some keeper
   | Keeper_runtime_journal_appended _
   | Keeper_chat_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -317,7 +330,7 @@ let held_calls_changed = function
       | Gate_keeper_settings_changed _ | Tool_approval_mode_changed _
       | Keeper_asks_changed _ | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -332,7 +345,7 @@ let tool_modes_changed = function
       ( Approval_queue_changed | Approval_rules_changed | Gate_mode_changed
       | Tool_approval_waits_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -345,7 +358,7 @@ let async_requests_changed = function
   | Keeper_async_requests_changed _ -> true
   | Keeper_skill_activations_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -357,7 +370,7 @@ let async_requests_keeper = function
   | Keeper_async_requests_changed { keeper } -> Some keeper
   | Keeper_skill_activations_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -369,7 +382,7 @@ let skill_activations_keeper = function
   | Keeper_skill_activations_changed { keeper } -> Some keeper
   | Keeper_async_requests_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -382,7 +395,7 @@ let skill_catalog_published = function
   | Workspace_store_changed (Schedule_store | Pending_confirms | Goal_projection | Runtime_config | Lane_addon_exports)
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -395,7 +408,7 @@ let lane_addon_exports_changed = function
   | Workspace_store_changed (Schedule_store | Pending_confirms | Goal_projection | Runtime_config | Skill_catalog)
   | Keeper_async_requests_changed _ | Keeper_skill_activations_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -411,7 +424,7 @@ let dataset_owed = function
   | Internal_agent_runs_changed
       (Masc.Internal_agent_runs_event.Goal_verification | Masc.Internal_agent_runs_event.Exact_lane)
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -426,7 +439,7 @@ let gate_connector_changed = function
   | Workspace_store_changed _
   | Dataset_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -439,7 +452,7 @@ let gate_connector_changed = function
 let goal_projection_changed = function
   | Workspace_store_changed Goal_projection -> true
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -456,7 +469,7 @@ let transport_health_measured = function
   | Internal_agent_runs_changed _
   | Workspace_store_changed _
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -469,7 +482,7 @@ let transport_health_measured = function
 let turn_change = function
   | Keeper_turn_changed { keeper; change } -> Some (keeper, change)
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _
@@ -481,7 +494,7 @@ let turn_change = function
 let runtime_journal_appended = function
   | Keeper_runtime_journal_appended { keeper; journal; _ } -> Some (keeper, journal)
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -493,7 +506,7 @@ let runtime_journal_appended = function
 let schedules_changed = function
   | Workspace_store_changed Schedule_store -> true
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -505,7 +518,7 @@ let schedules_changed = function
 let event_queue_changed = function
   | Keeper_event_queue_changed { keeper } -> Some keeper
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -521,7 +534,7 @@ let pending_confirms_changed = function
       | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
       | Tool_approval_mode_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -537,7 +550,7 @@ let runtime_config_changed = function
       | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
       | Tool_approval_mode_changed _ | Keeper_asks_changed _ | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -553,7 +566,7 @@ let asks_changed = function
       | Gate_keeper_settings_changed _ | Tool_approval_waits_changed _
       | Tool_approval_mode_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -565,7 +578,7 @@ let asks_changed = function
 let board_changed_post = function
   | Board_changed { post_id } -> Some post_id
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -583,7 +596,7 @@ let gate_snapshot_changed = function
       ( Tool_approval_waits_changed _ | Tool_approval_mode_changed _ | Keeper_asks_changed _
       | Installation_asks_changed _ )
   | Keeper_chat_appended _ | Keeper_memory_journal_appended _ | Keeper_runtime_journal_appended _ | Keeper_turn_observation _
-  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _
+  | Agent_core _ | Keeper_heartbeat _ | Keeper_tool_call _ | Keeper_tool_call_evidence_committed _
   | Keeper_turn_complete _
   | Keeper_composite_changed _ | Keeper_metrics_appended _
   | Keeper_chat_stream_frame _ | Keeper_turn_stream_frame _ | Keeper_waiting_inventory_changed _ | Keeper_roster_change _ | Keeper_turn_changed _
@@ -850,6 +863,37 @@ let decode_keeper_tool_call fields =
        ; kt_tool_output_preview
        })
 
+(* A composition node's committed row, as
+   [Keeper_tool_composition_surface_observation.observe_node_result] sends
+   it. Read as an untaught type, seven nodes of one run drew as seven
+   identical rows under "server", although the frame names the Keeper, the
+   tool and the node. The ids are read with the plan's own parsers, so an id
+   the server could not have minted fails the frame instead of drawing. *)
+let decode_keeper_tool_call_evidence fields =
+  let event =
+    Masc.Keeper_tool_composition_surface_observation.evidence_committed_event_type
+  in
+  let* ce_keeper = required string_field fields "name" ~event in
+  let* ce_tool = required string_field fields "tool_name" ~event in
+  let* ce_composition_tool = required string_field fields "composition_tool" ~event in
+  let* run_id = required string_field fields "composition_run_id" ~event in
+  let* ce_run_id =
+    Masc.Keeper_tool_plan.Composition_run_id.of_string run_id
+    |> Result.map_error
+         (fun (Masc.Keeper_tool_plan.Composition_run_id.Invalid_uuid_v7 reason) ->
+           Printf.sprintf "%s composition_run_id is not a UUIDv7: %s" event reason)
+  in
+  let* node_id = required string_field fields "composition_node_id" ~event in
+  let* ce_node_id =
+    Masc.Keeper_tool_plan.Node_id.make node_id
+    |> Result.map_error (fun Masc.Keeper_tool_plan.Node_id.Empty ->
+           event ^ " carries an empty composition_node_id")
+  in
+  let* ce_at = required float_field fields "ts_unix" ~event in
+  Ok
+    (Keeper_tool_call_evidence_committed
+       { ce_keeper; ce_tool; ce_composition_tool; ce_run_id; ce_node_id; ce_at })
+
 (* The [ag_ui_event] frame names itself in [type]; only CUSTOM adds a [name],
    so pairing the two labels the frame without matching on any literal. *)
 let stream_frame_label inner =
@@ -937,6 +981,10 @@ let reading_of_type type_name =
           | None -> decode_agent_core ~type_name fields)
   | "keeper_heartbeat" -> From_fields decode_keeper_heartbeat
   | "keeper_tool_call" -> From_fields decode_keeper_tool_call
+  | type_name
+    when String.equal type_name
+           Masc.Keeper_tool_composition_surface_observation.evidence_committed_event_type ->
+      From_fields decode_keeper_tool_call_evidence
   | "keeper_turn_complete" -> From_fields decode_keeper_turn_complete
   | "keeper_turn_observation" -> From_fields decode_keeper_turn_observation
   | "keeper_composite_changed" as event ->

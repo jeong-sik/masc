@@ -167,6 +167,24 @@ type keeper_tool_call = {
   kt_tool_output_preview : string option;
 }
 
+(** One node of a composition (a skill run as a tool) whose row the Keeper's
+    call log committed
+    ({!Masc.Keeper_tool_composition_surface_observation.evidence_committed_event_type}).
+    The handler that ran the node's tool already sent the call itself as a
+    [keeper_tool_call]; this frame follows once its row is durable. Every
+    field is one the server always writes; a frame without one, or with a
+    run id or node id that does not parse, is undecodable rather than read
+    as a different event. *)
+type keeper_tool_call_evidence = {
+  ce_keeper : string;  (** [name] *)
+  ce_tool : string;  (** [tool_name]: the tool the node ran *)
+  ce_composition_tool : string;
+      (** [composition_tool]: the skill tool whose plan holds the node *)
+  ce_run_id : Masc.Keeper_tool_plan.Composition_run_id.t;
+  ce_node_id : Masc.Keeper_tool_plan.Node_id.t;
+  ce_at : float;
+}
+
 (** What changed in the Gate, the held tool calls, the tool approval modes
     or the questions put to the operator. Each is a server push with no
     data: the reader re-fetches. *)
@@ -241,6 +259,7 @@ type event =
   | Agent_core of agent_core
   | Keeper_heartbeat of keeper_heartbeat
   | Keeper_tool_call of keeper_tool_call
+  | Keeper_tool_call_evidence_committed of keeper_tool_call_evidence
   | Keeper_turn_complete of keeper_turn_complete
   | Keeper_turn_observation of keeper_turn_observation
   | Keeper_composite_changed of { keeper : string; at : float }
@@ -386,9 +405,10 @@ val metrics_appended_keeper : event -> string option
     Keeper's metrics again on this. *)
 
 val tool_call_keeper : event -> string option
-(** The keeper a [keeper_tool_call] names — [Some] only for
-    {!Keeper_tool_call}. The Keeper_calls surface reads that Keeper's calls
-    again on this. *)
+(** The keeper whose call log gained a row — [Some] for {!Keeper_tool_call}
+    and for {!Keeper_tool_call_evidence_committed}, which the server sends
+    after the node's row is committed. The Keeper_calls surface reads that
+    Keeper's calls again on this. *)
 
 val gate_snapshot_changed : event -> bool
 (** The Gate snapshot ([/api/v1/dashboard/gate]) may answer differently:

@@ -239,8 +239,9 @@ val tool_request_body_path : scope:string -> request_digest:string -> string
 val save_tool_request_body : t -> scope:string -> request_digest:string -> string -> (unit, string) result
 (** Publish one original request body, named by the {!digest} of its bytes.
     Bytes that do not match [request_digest] are refused before writing.
-    Writing the same body again publishes the same file. Same serializer and
-    durability as record publication. *)
+    An existing identical body is strictly reobserved without replacement.
+    A different or unreadable existing body is preserved and refused. Same
+    serializer and durability as record publication. *)
 val load_tool_request_body : t -> scope:string -> request_digest:string -> (string option, string) result
 (** Read one staged or published body under its scope serializer. Only a
     SHA-256 name is accepted; the consumer verifies canonical bytes against

@@ -37,10 +37,8 @@ let original ~config ~keeper_name ~store intent =
   let* ()=require (Request.keeper_id owner=keeper_name) "Resolution original belongs to another Keeper" in
   let+ request=Request.restore ~owner parent in parent,request
 let fence_matches intent fence =
-  let* ()=match fence.Fence.authority with
-    | Fence.Worker_absent -> Ok ()
-    | Excluded_cut _ -> Error "A Cut effect fence alone does not grant a resolution successor" in
-  require (fence.scope=intent.Intent.scope && fence.request_id=intent.original_request_id
+  let* ()=Fence.require_resolution_successor_authority fence in
+  require (fence.Fence.scope=intent.Intent.scope && fence.request_id=intent.original_request_id
     && fence.expected=intent.expected && fence.actor=intent.actor && fence.reason=intent.reason)
     "Existing history fence belongs to another resolution"
 type child_source = Replayable of Source.t | Unreplayable of string
@@ -83,7 +81,7 @@ let prepare_child ~config ~keeper_name ~store intent =
     let* child=io (fun () -> Request.create ~request_id:(Request.fresh_request_id (Request.physical_owner request))
       ~predecessor:{Request.request_id=parent.request_id;request_digest=parent.request_digest}
       ~owner:(Request.physical_owner request) ~destination ~source ~preparation ()) in
-    Ok (io (fun () -> Intent.intend_child ~store ~expected:intent child)))
+    Ok (io (fun () -> Intent.prepare_child ~store ~expected:intent child)))
     |> unavailable |> Result.join
 (* An original as the pass reads it here: its record and the index in that
    record's summary. The owner the index names is observed live. *)
@@ -127,7 +125,7 @@ let recover_child ~config ~keeper_name ~store intent =
       Owner.listed child
     | Some child,(Child_intended _ | Child_confirmed _) -> Ok child
     | None,Child_confirmed _ -> Error (Intent.Unavailable "Acknowledged resolution child disappeared")
-    | (None | Some _),(Requested | Refused _ | Fenced) -> Error (Intent.Conflict "Resolution has no child publication intent") in
+    | (None | Some _),(Requested | Refused _ | Fenced | Child_prepared _) -> Error (Intent.Conflict "Resolution has no child publication intent") in
   let* index=io (fun () ->
     let* index=observed_index ~config ~keeper_name ~foreign:"Resolution child belongs to another Keeper" child in
     let* ()=require (Record.request_id child=intended.request_id && Record.request_digest child=intended.request_digest)
@@ -152,7 +150,7 @@ let recover_child ~config ~keeper_name ~store intent =
     io (fun () -> Intent.confirm_child ~store ~expected:intent child) |> Result.map (fun _ -> ())
   | Child_confirmed _ ->
     io (fun () -> Lineage.confirm_predecessor_record ~store ~require_confirmed:true child index) |> unavailable
-  | Requested | Refused _ | Fenced -> Error (Intent.Conflict "Resolution child phase changed")
+  | Requested | Refused _ | Fenced | Child_prepared _ -> Error (Intent.Conflict "Resolution child phase changed")
 (* Descends by record and index. A fenced original leads to its resolution
    child; an unfenced one is read, body and all, only once its progress says
    it settled. *)
@@ -206,7 +204,7 @@ let retain_completion ~config ~keeper_name ~store intent =
     let* completed=find_completed ~config ~keeper_name ~store ~child_id:child.request_id |> unavailable in
     (match completed with None -> Ok () | Some (completed,request) ->
       io (fun () -> Intent.observe_memory_commit ~store ~expected:intent ~request ~completed) |> Result.map (fun _ -> ()))
-  | Requested | Refused _ | Fenced | Child_intended _ -> Ok ()
+  | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> Ok ()
 let rec process ~config ~keeper_name ~store intent = match intent.Intent.phase with
   | Refused _ -> Ok ()
   | Requested ->
@@ -229,6 +227,16 @@ let rec process ~config ~keeper_name ~store intent = match intent.Intent.phase w
      | Error (Publication_uncertain detail) -> Error (Intent.Publication_uncertain detail))
   | Fenced ->
     let* next=prepare_child ~config ~keeper_name ~store intent in
+    process ~config ~keeper_name ~store next
+  | Child_prepared prepared ->
+    (* The preparation, rather than current Memory, prompts or clock, owns
+       these bytes. Reobserve this same original and fence before staging. *)
+    let* ()=io (fun () ->
+      let* parent,request=original ~config ~keeper_name ~store intent in
+      let* fence=Lineage.fenced_original ~store ~request ~original:parent in
+      let* fence=Option.to_result ~none:"Resolution fence disappeared" fence in
+      fence_matches intent fence) |> unavailable in
+    let* next=io (fun () -> Intent.intend_child ~store ~expected:intent prepared.request) in
     process ~config ~keeper_name ~store next
   | Child_intended _ -> recover_child ~config ~keeper_name ~store intent
   | Child_confirmed _ ->
@@ -257,7 +265,7 @@ let resolve_missing_serialized ~config ~keeper_name ~request_id =
       | Some _ -> Resume_history
       | None -> if current.phase=intent.phase then Original_waiting else Reobserve_original in
     match latest with
-    | Some ({Intent.phase=(Requested | Fenced | Child_intended _ | Child_confirmed _);_} as intent) ->
+    | Some ({Intent.phase=(Requested | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _);_} as intent) ->
       continue intent
     | None | Some {phase=Refused _;_} ->
       match io (fun () -> Resolution.preview ~config ~keeper_name ~request_id) with
@@ -279,7 +287,7 @@ let resolve_missing_serialized ~config ~keeper_name ~request_id =
                Reobserve that identity instead of replacing its actor/guard. *)
             let* observed=io (fun () -> Intent.read ~config ~keeper_name ~request_id) in
             (match List.rev observed with
-             | ({Intent.phase=(Requested | Fenced | Child_intended _ | Child_confirmed _);_} as intent)::_ ->
+             | ({Intent.phase=(Requested | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _);_} as intent)::_ ->
                continue intent
              | [] | {phase=Refused _;_}::_ -> Error conflict)
           | Error ((Invalid _ | Unavailable _ | Publication_uncertain _) as error) -> Error error
@@ -309,7 +317,7 @@ let record_completed_serialized ~config ~keeper_name ~request ~completed =
           ~owner:(Request.physical_owner request) ~predecessor:(Request.predecessor request)) |> unavailable in
       if not applies then Ok () else
         io (fun () -> Intent.observe_memory_commit ~store ~expected:intent ~request ~completed) |> Result.map (fun _ -> ())
-    | Requested | Refused _ | Fenced | Child_intended _ -> Ok ()) (Ok ()) intents
+    | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> Ok ()) (Ok ()) intents
 let range_summary ~store ~request_id =
   let* scope=Request.scope_of_request_id request_id in
   let* parent=Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string in

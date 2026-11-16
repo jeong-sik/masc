@@ -186,6 +186,10 @@ let read ~store ~scope ~request_id =
     let+ () = require (fence.scope = scope && fence.request_id = request_id)
       "History fence is stored under another original" in
     Some fence
+let require_resolution_successor_authority fence =
+  match fence.authority with
+  | Worker_absent -> Ok ()
+  | Excluded_cut _ -> Error "A Cut effect fence alone does not grant a resolution successor"
 let confirm_binding ~request ~(original:Owner.retained) fence =
   let* source_sha256 = digest (Source.to_json (Request.source request)) in
   require (fence.scope=original.scope && fence.request_id=original.request_id

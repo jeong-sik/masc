@@ -13,8 +13,9 @@ open Result.Syntax
 
 type refusal = Observation_changed | No_longer_eligible of string
 type child = {request_id:string;request_digest:string}
+type prepared_child = {child:child;request:Request.t}
 type phase = Requested | Refused of refusal | Fenced
-  | Child_intended of child | Child_confirmed of child
+  | Child_prepared of prepared_child | Child_intended of child | Child_confirmed of child
 type memory_commit = {request_id:string;receipts:Memory.durable_range_receipt list}
 type t = {
   intent_id:string;scope:string;original_request_id:string;expected:Fence.guard;
@@ -37,18 +38,24 @@ let phase_json = function
   | Refused Observation_changed -> `Assoc ["kind",`String "refused";"reason",`String "observation_changed";"detail",`Null]
   | Refused (No_longer_eligible detail) -> `Assoc ["kind",`String "refused";"reason",`String "no_longer_eligible";"detail",`String detail]
   | Fenced -> `Assoc ["kind",`String "fenced"]
+  | Child_prepared prepared -> `Assoc ["kind",`String "child_prepared";
+      "child",child_json prepared.child;"request",Request.to_json prepared.request]
   | Child_intended child -> `Assoc ["kind",`String "child_intended";"child",child_json child]
   | Child_confirmed child -> `Assoc ["kind",`String "child_confirmed";"child",child_json child]
-let public_fields intent = [
+let public_phase_json = function
+  | Child_prepared prepared -> `Assoc ["kind",`String "child_prepared";"child",child_json prepared.child]
+  | (Requested | Refused _ | Fenced | Child_intended _ | Child_confirmed _) as phase -> phase_json phase
+let public_fields ~phase intent = [
   "intent_id",`String intent.intent_id;"original_request_id",`String intent.original_request_id;
   "expected",Fence.guard_to_json intent.expected;"actor",`String intent.actor;
-  "reason",`String intent.reason;"submitted_at",`Float intent.submitted_at;"phase",phase_json intent.phase]
+  "reason",`String intent.reason;"submitted_at",`Float intent.submitted_at;"phase",phase]
 let to_public_json intent = `Assoc (("memory_commit",(match intent.memory_commit with
-  | None -> `Null | Some proof -> `Assoc ["request_id",`String proof.request_id]))::public_fields intent)
+  | None -> `Null | Some proof -> `Assoc ["request_id",`String proof.request_id]))::
+  public_fields ~phase:(public_phase_json intent.phase) intent)
 let to_json intent = `Assoc (("scope",`String intent.scope)::
   ("memory_commit",(match intent.memory_commit with None -> `Null | Some proof ->
     `Assoc ["request_id",`String proof.request_id;"receipts",`List (List.map Codec.durable_range_receipt_to_json proof.receipts)]))::
-  public_fields intent)
+  public_fields ~phase:(phase_json intent.phase) intent)
 let hash = function
   | `String value when String_util.is_lowercase_sha256_hex value -> Ok value
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> Error "Invalid resolution digest"
@@ -62,6 +69,15 @@ let child_of_json json =
   let* request_id,fields=Json.field ~context "request_id" Json.as_non_blank fields in
   let* request_digest,fields=Json.field ~context "request_digest" hash fields in
   let+ ()=Json.finish ~context fields in {request_id;request_digest}
+let prepared_request_of_json json =
+  let* owner=match json with
+    | `Assoc fields ->
+      let* owner=Option.to_result ~none:"Prepared resolution child has no physical owner"
+        (List.assoc_opt "owner" fields) in
+      Request.owner_of_json owner
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error "Prepared resolution child must be a complete request" in
+  Request.of_json ~owner json
 let phase_of_json json =
   let context="history resolution phase" in
   let* fields=Json.object_fields ~context json in
@@ -69,6 +85,13 @@ let phase_of_json json =
   match kind with
   | "requested" -> let+ ()=Json.finish ~context fields in Requested
   | "fenced" -> let+ ()=Json.finish ~context fields in Fenced
+  | "child_prepared" ->
+    let* child,fields=Json.field ~context "child" child_of_json fields in
+    let* request,fields=Json.field ~context "request" prepared_request_of_json fields in
+    let* ()=Json.finish ~context fields in
+    let+ ()=require (child.request_id=Request.request_id request && child.request_digest=Request.body_digest request)
+      "Prepared resolution child differs from its complete request" in
+    Child_prepared {child;request}
   | "refused" ->
     let* reason,fields=Json.field ~context "reason" Json.as_string fields in
     let* detail,fields=Json.field ~context "detail" (Json.as_nullable Json.as_non_blank) fields in
@@ -93,7 +116,7 @@ let memory_commit_of_json json =
     "Resolution completion has no committed Memory receipts" in {request_id;receipts}
 let child intent = match intent.phase with
   | Child_intended child | Child_confirmed child -> Some child
-  | Requested | Refused _ | Fenced -> None
+  | Requested | Refused _ | Fenced | Child_prepared _ -> None
 let same_atom (left:Current.durable_range_id) (right:Current.durable_range_id) =
   {left with unread_messages=[]}={right with unread_messages=[]}
 let same_official (left:Current.official_range_id) (right:Current.official_range_id) =
@@ -133,6 +156,14 @@ let of_json json =
      carries its scope. *)
   let* ()=match phase with
     | Requested | Refused _ | Fenced -> Ok ()
+    | Child_prepared prepared ->
+      let* child_scope=Request.scope_of_request_id prepared.child.request_id in
+      let* ()=require (child_scope=scope && prepared.child.request_id<>original_request_id)
+        "Prepared resolution child belongs to another scope or its parent" in
+      (match Request.predecessor prepared.request with
+       | Some predecessor -> require (predecessor.request_id=original_request_id)
+           "Prepared resolution child names another original predecessor"
+       | None -> Error "Prepared resolution child has no original predecessor")
     | Child_intended expected_child | Child_confirmed expected_child ->
       let* child_scope=Request.scope_of_request_id expected_child.request_id in
       require (child_scope=scope && expected_child.request_id<>original_request_id)
@@ -140,11 +171,11 @@ let of_json json =
   (* [observe_memory_commit] proves the receipts against the completed
      original's source when it writes them. A reader does not repeat that. *)
   let* ()=match memory_commit,phase with
-    | None,(Requested | Refused _ | Fenced | Child_intended _ | Child_confirmed _) -> Ok ()
+    | None,(Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _) -> Ok ()
     | Some proof,Child_confirmed _ ->
       let* proof_scope=Request.scope_of_request_id proof.request_id in
       require (proof_scope=scope) "Resolution completion belongs to another scope"
-    | Some _,(Requested | Refused _ | Fenced | Child_intended _) ->
+    | Some _,(Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _) ->
       Error "Resolution completion precedes its child acknowledgement" in
   Ok {intent_id;scope;original_request_id;expected;actor;reason;submitted_at;phase;memory_commit}
 let envelope ~scope ~request_id intents = `Assoc ["schema",`String "keeper.librarian.history-resolution.v2";
@@ -169,7 +200,7 @@ let decode ~scope ~request_id json =
        | Refused _ ->
          let* ()=require (first.expected<>next.expected) "A refused resolution needs a new observation" in
          history rest
-       | Requested | Fenced | Child_intended _ | Child_confirmed _ ->
+       | Requested | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _ ->
          Error "History resolution has multiple active intents") in
   let+ ()=history values in values
 let decode_published = decode
@@ -212,7 +243,7 @@ let submit ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
       | latest::_ ->
         (match latest.phase with
          | Refused _ when latest.expected<>expected -> Ok ()
-         | Refused _ | Requested | Fenced | Child_intended _ | Child_confirmed _ ->
+         | Refused _ | Requested | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _ ->
            Error (Conflict "Original already owns an active resolution or needs a new observation")) in
     let* fence=Fence.read ~store ~scope ~request_id |> unavailable in
     let* ()=match fence with None -> Ok () | Some _ -> Error (Conflict "Original is already fenced") in
@@ -249,7 +280,7 @@ let active_for_keeper ~config ~keeper_name =
        | None ->
          (match intent.phase with
           | Refused _ -> Ok values
-          | Requested | Fenced | Child_intended _ | Child_confirmed _ -> Ok (intent::values)))) (Ok []) rows
+          | Requested | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _ -> Ok (intent::values)))) (Ok []) rows
 let reload ~store expected =
   let* _,values=load ~store ~scope:expected.scope ~request_id:expected.original_request_id in
   Option.to_result ~none:(Unavailable "Resolution intent disappeared")
@@ -273,47 +304,77 @@ let refuse ~store ~expected refusal = update ~store ~expected (fun actual ->
       require (fence.expected=actual.expected && fence.actor=actual.actor && fence.reason=actual.reason)
         "Resolution refusal has another immutable fence"
     | Fenced,Observation_changed
-    | (Refused _ | Child_intended _ | Child_confirmed _),(Observation_changed | No_longer_eligible _) ->
+    | (Refused _ | Child_prepared _ | Child_intended _ | Child_confirmed _),(Observation_changed | No_longer_eligible _) ->
       Error "Only a resolution without a child intent can be refused" in
   {actual with phase=Refused refusal})
 let confirm_fence ~store ~expected fence = update ~store ~expected (fun actual ->
+  let* ()=Fence.require_resolution_successor_authority fence in
   let* ()=require (actual.phase=Requested && fence.Fence.scope=actual.scope
     && fence.request_id=actual.original_request_id && fence.expected=actual.expected
     && fence.actor=actual.actor && fence.reason=actual.reason) "Resolution fence binding differs" in
   let* stored=Fence.read ~store ~scope:actual.scope ~request_id:actual.original_request_id in
   let+ ()=require (Option.map Fence.to_json stored=Some (Fence.to_json fence)) "Resolution fence is not durably observed" in
   {actual with phase=Fenced})
-let intend_child ~store ~expected request = update ~store ~expected (fun actual ->
-  let* ()=require (actual.phase=Fenced) "Resolution already has a child intent" in
+let validate_child ~store actual request =
   let* fence=Fence.read ~store ~scope:actual.scope ~request_id:actual.original_request_id in
   let* fence=Option.to_result ~none:"Resolution fence is absent" fence in
+  let* ()=Fence.require_resolution_successor_authority fence in
+  let* ()=require (fence.scope=actual.scope && fence.request_id=actual.original_request_id
+    && fence.expected=actual.expected && fence.actor=actual.actor && fence.reason=actual.reason)
+    "Resolution child preparation has another immutable fence" in
   let* parent=Owner.load ~store ~scope:actual.scope ~request_id:actual.original_request_id |> Result.map_error Owner.error_to_string in
   let* parent=Option.to_result ~none:"Resolution original is absent" parent in
   let* owner=Request.owner_of_json fence.physical_owner in
   let* parent_request=Request.restore_payload ~owner parent in
-  let* source_hash=digest (Source.to_json (Request.source parent_request)) in
-  let* ()=require (parent.request_digest=fence.request_digest && source_hash=fence.source_sha256)
-    "Resolution original immutable binding changed" in
+  let* ()=Fence.confirm_binding ~request:parent_request ~original:parent fence in
+  let* ()=require (Request.physical_owner request=owner && Request.scope owner=actual.scope
+    && Request.request_id request<>parent.request_id)
+    "Resolution child changed its original owner or identity" in
+  let* ()=Request.confirm_owner request in
   let* rebased=Source.with_current ~expected_revision:(Source.expected_revision (Request.source request))
     ~current:(Source.input (Request.source request)).current (Request.source parent_request)
     |> Result.map_error Source.error_to_string in
   let* ()=require (Source.to_json rebased=Source.to_json (Request.source request)) "Resolution child changed its original source" in
-  let* ()=match Request.predecessor request with
+  match Request.predecessor request with
     | Some predecessor -> require (predecessor.request_id=parent.request_id && predecessor.request_digest=parent.request_digest)
       "Resolution child has another original predecessor"
-    | None -> Error "Resolution child has no original predecessor" in
-  (* The child's request is durable under its digest before the intent names
-     it. The body is the one file retaining the child writes. *)
-  let* staged=Owner.prepare_successor ~store ~scope:actual.scope
+    | None -> Error "Resolution child has no original predecessor"
+let prepare_child ~store ~expected request = update ~store ~expected (fun actual ->
+  let* ()=require (actual.phase=Fenced) "Resolution already has a child preparation" in
+  let+ ()=validate_child ~store actual request in
+  let child={request_id=Request.request_id request;request_digest=Request.body_digest request} in
+  {actual with phase=Child_prepared {child;request}})
+let intend_child ~store ~expected request =
+  let* prepared=match expected.phase with
+    | Child_prepared prepared -> Ok prepared
+    | Requested | Refused _ | Fenced | Child_intended _ | Child_confirmed _ ->
+      Error (Conflict "Resolution child has no retained preparation") in
+  let* ()=require (Request.to_json request=Request.to_json prepared.request)
+    "Resolution child differs from its retained preparation" |> unavailable in
+  let* ()=validate_child ~store expected request |> unavailable in
+  (* A restart takes the complete request from Child_prepared. Neither a
+     body write nor an uncertain compacting CAS can make it mint a new ID. *)
+  let* staged=Owner.prepare_successor ~store ~scope:expected.scope
     ~request_id:(Request.request_id request) ~request:(Request.to_json request)
-    |> Result.map_error Owner.error_to_string in
-  let+ ()=require (staged.request_digest=Request.body_digest request)
-    "Resolution child body differs from its request digest" in
-  {actual with phase=Child_intended {request_id=staged.request_id;request_digest=staged.request_digest}})
+    |> Result.map_error (fun error -> Publication_uncertain (Owner.error_to_string error)) in
+  let* observed=Owner.load_successor_request ~store ~scope:expected.scope staged
+    |> Result.map_error (fun error -> Publication_uncertain (Owner.error_to_string error)) in
+  let* canonical=Lane_addon_action.canonical (Request.to_json prepared.request) |> unavailable in
+  let* ()=require (staged.request_id=prepared.child.request_id
+    && staged.request_digest=prepared.child.request_digest && observed=canonical)
+    "Resolution child body readback differs from its retained preparation"
+    |> Result.map_error (fun detail -> Publication_uncertain detail) in
+  update ~store ~expected (fun actual ->
+    let+ ()=match actual.phase with
+      | Child_prepared current -> require (current.child=prepared.child
+          && Request.body_digest current.request=staged.request_digest) "Resolution child preparation changed"
+      | Requested | Refused _ | Fenced | Child_intended _ | Child_confirmed _ ->
+        Error "Resolution child preparation is no longer awaiting its body" in
+    {actual with phase=Child_intended prepared.child})
 let confirm_child ~store ~expected child = update ~store ~expected (fun actual ->
   let module Record=Owner.Record in
   let* expected_child=match actual.phase with Child_intended child -> Ok child
-    | Requested | Refused _ | Fenced | Child_confirmed _ -> Error "Resolution child is not awaiting acknowledgement" in
+    | Requested | Refused _ | Fenced | Child_prepared _ | Child_confirmed _ -> Error "Resolution child is not awaiting acknowledgement" in
   let+ ()=require (Record.scope child=actual.scope && Record.request_id child=expected_child.request_id
     && Record.request_digest child=expected_child.request_digest
     && Progress.phase (Record.progress child)=Progress.Captured) "Unacknowledged resolution child differs or has execution progress" in
@@ -321,7 +382,7 @@ let confirm_child ~store ~expected child = update ~store ~expected (fun actual -
 let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) =
   update ~store ~expected (fun actual ->
     let* child=match actual.phase with Child_confirmed child -> Ok child
-      | Requested | Refused _ | Fenced | Child_intended _ -> Error "Resolution child is not acknowledged" in
+      | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> Error "Resolution child is not acknowledged" in
     (* The completed original is the resolution child or a replacement that
        descends from it. A descendant kept the child's source and changed
        only its current Memory, which is an equal basis digest. *)

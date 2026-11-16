@@ -58,6 +58,7 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
           confirm_ending parent
         | Some json ->
           let* fence=Fence.of_json json in
+          let* ()=Fence.require_resolution_successor_authority fence in
           let* ()=Fence.confirm_binding_index ~index:parent.index ~original:parent.record fence in
           let* stored=read_resolution ~scope ~request_id:parent_id in
           let* stored=Option.to_result ~none:"Fenced history parent has no resolution intent" stored in
@@ -66,7 +67,7 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
             (List.find_opt (fun intent -> match intent.Intent.phase with
               | Child_confirmed child -> child.request_id=id
               | Child_intended child -> not require_confirmed && child.request_id=id
-              | Requested | Refused _ | Fenced -> false) intents) in
+              | Requested | Refused _ | Fenced | Child_prepared _ -> false) intents) in
           let* ()=require (intent.expected=fence.expected && intent.actor=fence.actor && intent.reason=fence.reason)
             "History child intent does not own the original fence" in
           (* The intent names its child by digest, and equal digests are
@@ -224,6 +225,7 @@ let confirmed_resolution_child ~store ~record ~index =
   match fence with
   | None -> Ok None
   | Some fence ->
+    let* ()=Fence.require_resolution_successor_authority fence in
     let scope=Owner.Record.scope record and request_id=Owner.Record.request_id record in
     let* json=Store.load_history_resolution store ~scope ~request_id in
     let* json=Option.to_result ~none:"Fenced history original has no resolution intent" json in
@@ -232,4 +234,4 @@ let confirmed_resolution_child ~store ~record ~index =
       intent.Intent.expected=fence.expected && intent.actor=fence.actor && intent.reason=fence.reason) intents) in
     match intent.phase with
     | Intent.Child_confirmed child -> Ok (Some child.request_id)
-    | Requested | Refused _ | Fenced | Child_intended _ -> Ok None
+    | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> Ok None

@@ -39,7 +39,9 @@ val run_serialized : config:Workspace.config -> keeper_name:string ->
     A definite unreplayable source before child intent is durably refused,
     retaining its fence so ordinary discovery can continue. Unknown
     publication or unreadable state stops this unit. Restart and a
-    coalesced ordinary wake discover the same durable intent/child ID. *)
+    coalesced ordinary wake discover the same durable intent/child ID. A child
+    preparation retains the complete request before its body is written;
+    recovery never rerenders that preparation from changed Memory or clock. *)
 type automatic_resolution = Original_waiting | Reobserve_original | Resume_history
 val resolve_missing_serialized : config:Workspace.config -> keeper_name:string ->
   request_id:string -> (automatic_resolution, error) result

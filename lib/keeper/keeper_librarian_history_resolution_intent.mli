@@ -3,8 +3,12 @@
     At most one non-refused request and one child intent own an original. *)
 type refusal = Observation_changed | No_longer_eligible of string
 type child = private { request_id:string; request_digest:string }
+type prepared_child = private {
+  child:child;
+  request:Keeper_librarian_durable_request.t;
+}
 type phase = Requested | Refused of refusal | Fenced
-  | Child_intended of child | Child_confirmed of child
+  | Child_prepared of prepared_child | Child_intended of child | Child_confirmed of child
 type memory_commit = private {
   request_id:string;
   receipts:Keeper_memory_os_current_types.durable_range_receipt list;
@@ -53,8 +57,17 @@ val refuse : store:Lane_addon_store.t -> expected:t -> refusal -> (t, error) res
     source cursor or Memory receipt is removed or acknowledged. *)
 val confirm_fence : store:Lane_addon_store.t -> expected:t ->
   Keeper_librarian_history_resolution_state.t -> (t, error) result
+val prepare_child : store:Lane_addon_store.t -> expected:t ->
+  Keeper_librarian_durable_request.t -> (t, error) result
+(** Persist the complete canonical child and its identity in the resolution
+    before writing its content-addressed body. A retry restores this exact
+    preparation instead of rendering or minting another request. No child
+    owner record, provider call, Memory publication or source ACK is allowed. *)
 val intend_child : store:Lane_addon_store.t -> expected:t ->
   Keeper_librarian_durable_request.t -> (t, error) result
+(** Stage and strictly confirm the already prepared child's body, then compact
+    the resolution to its ID and digest. A crash at either side of that write
+    leaves the same complete preparation recoverable. *)
 val confirm_child : store:Lane_addon_store.t -> expected:t ->
   Lane_addon_tool_request_owner.Record.t -> (t, error) result
 val observe_memory_commit : store:Lane_addon_store.t -> expected:t ->
@@ -68,5 +81,6 @@ val observe_memory_commit : store:Lane_addon_store.t -> expected:t ->
     confirmed [request]'s lineage, which restores that child. *)
 val child : t -> child option
 (** The child a [Child_intended] or [Child_confirmed] intent names by ID and
-    digest. The intent holds no request: the child's request is the body file
-    its digest names, staged before the intent and read where it is used. *)
+    digest. [Child_prepared] does not grant a child: its complete request stays
+    in the preparation until the body it names is staged and strictly read
+    back. The compact intent then keeps only the ID and digest. *)

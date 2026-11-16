@@ -50,6 +50,10 @@ val create_cut : store:Lane_addon_store.t ->
     under the source/Memory locks and actual serialized Memory owner. *)
 val read : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   (t option, string) result
+val require_resolution_successor_authority : t -> (unit, string) result
+(** The current continuation protocol accepts worker-absence fences only.
+    A Cut effect fence alone grants no child, including at direct host or
+    lineage consumers that do not pass through the recovery worker. *)
 val confirm_binding : request:Keeper_librarian_durable_request.t ->
   original:Lane_addon_tool_request_owner.retained -> t -> (unit, string) result
 (** Immutable identity/source binding only; never grants the old effect. *)

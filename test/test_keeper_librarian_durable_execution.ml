@@ -2855,6 +2855,54 @@ let test_cut_effect_fence_refuses_moved_source_positions () =
       (Result.is_error (cut_fence fixture original preview.expected));
     check bool "the refusal does not change positions again" true (cut_source_positions fixture=positions);
     no_memory fixture)
+let test_cut_fence_is_not_direct_child_or_host_authority () =
+  with_same_binding_cut (fun fixture original request _exact _schema ->
+    let expected=(cut_preview fixture original).expected in
+    let accepted=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id ~expected ~actor:"operator"
+      ~reason:"Exclude this original's future local effects" ~now:(Time_compat.now ())
+      |> Result.map_error Resolution_intent.error_to_string |> get) in
+    let fence=cut_fence fixture original expected |> Result.map_error Resolution.error_to_string |> get in
+    let before=cut_memory_bytes fixture,cut_source_positions fixture,F.post_count fixture.server in
+    check bool "direct intent confirmation cannot promote a Cut fence to successor authority" true
+      (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+        Resolution_intent.confirm_fence ~store:fixture.store ~expected:accepted.intent fence))));
+    let owner=Capture.physical_owner request in
+    let child=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+      ~predecessor:{request_id=original.request_id;request_digest=original.request_digest}
+      ~owner ~destination:(Capture.destination request) ~source:(Capture.source request)
+      ~preparation:(Capture.preparation request) ()) |> get in
+    (* Existing or externally supplied metadata must not bypass the effect
+       check merely by already claiming an acknowledged child. *)
+    io (fun () ->
+      let stored=Store.load_history_resolution fixture.store ~scope:original.scope
+        ~request_id:original.request_id |> get |> Option.get in
+      let phase=`Assoc ["kind",`String "child_confirmed";"child",`Assoc [
+        "request_id",`String (Capture.request_id child);"request_digest",`String (Capture.body_digest child)]] in
+      let next=`Assoc (List.map (fun (name,value) -> if name="intents" then
+          name,`List (List.map (fun json -> `Assoc (List.map (fun (name,value) ->
+            if name="phase" then name,phase else name,value) (Yojson.Safe.Util.to_assoc json)))
+            (Yojson.Safe.Util.to_list value))
+          else name,value) (Yojson.Safe.Util.to_assoc stored)) in
+      (match Store.publish_history_resolution fixture.store ~scope:original.scope
+        ~request_id:original.request_id ~expected:(Some stored) ~next |> get with
+       | Store.History_resolution_stored -> ()
+       | History_resolution_changed | History_resolution_unconfirmed _ -> fail "fixture child metadata was not retained");
+      let destination=Capture.destination child in
+      let index=Capture.index child |> get in
+      Owner.retain ~store:fixture.store ~scope:original.scope ~request_id:(Capture.request_id child)
+        ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
+        ~summary:(Capture.index_to_json index) ~request:(Capture.to_json child) |> owned);
+    check bool "direct lineage consumption refuses an already acknowledged Cut child" true
+      (Result.is_error (io (fun () -> Keeper_librarian_history_resolution_lineage.confirm_predecessor_by_body
+        ~store:fixture.store ~require_confirmed:true child)));
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    check bool "actual host authorization refuses Cut metadata before any provider dispatch" true
+      (Result.is_error (Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+        ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request child |> get)));
+    check bool "denied authority changes no Memory, source position or provider count" true
+      (before=(cut_memory_bytes fixture,cut_source_positions fixture,F.post_count fixture.server)))
 let test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner () =
   with_same_binding_cut (fun fixture original request _exact _schema ->
     let expected=(cut_preview fixture original).expected in
@@ -3243,7 +3291,7 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
     |> Result.map_error Resolution_intent.error_to_string |> get) in
   let child_id=match (List.hd (List.rev (view ()).intents)).phase with
     | Resolution_intent.Child_confirmed child -> child.request_id
-    | Requested | Refused _ | Fenced | Child_intended _ -> fail "the operator resolution has no confirmed child" in
+    | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> fail "the operator resolution has no confirmed child" in
   let child,request=io (fun () ->
     let child=Owner.load ~store:fixture.store ~scope:parent.scope ~request_id:child_id |> owned |> Option.get in
     let request=Capture.restore ~owner:(Capture.physical_owner parent_request) child |> get in
@@ -3409,7 +3457,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
     run_ok ();
     let child_id=match (last request).phase with
       | Child_confirmed child -> child.request_id
-      | Requested | Refused _ | Fenced | Child_intended _ -> fail "nested fixture has no confirmed child" in
+      | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> fail "nested fixture has no confirmed child" in
     let child,request=io (fun () ->
       let child=Owner.load ~store:fixture.store ~scope:original.scope ~request_id:child_id |> owned |> Option.get in
       let request=Capture.restore ~owner:(Capture.physical_owner request) child |> get in child,request) in
@@ -3446,7 +3494,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
   run_ok ();
   check bool "a definite post-fence cursor change is durably refused" true
     (match (last request).phase with Refused (No_longer_eligible _) -> true
-     | Requested | Refused Observation_changed | Fenced | Child_intended _ | Child_confirmed _ -> false);
+     | Requested | Refused Observation_changed | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _ -> false);
   check bool "terminal refusal has no child or claimed Memory receipt" true
     (Resolution_intent.child (last request)=None && (read request).completion=Resolution_work.Not_observed);
   check bool "refusal does not move the externally observed cursor" true
@@ -3470,6 +3518,130 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
     (Option.map Owner.to_json (io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
       ~request_id:original.request_id |> owned))=Some (Owner.to_json original));
   refuse_fenced_resume fixture original request)
+let prepare_resolution_fixture fixture =
+  let original,request=retain_absent_history_original fixture in
+  let expected=(fence_preview fixture request).expected in
+  let accepted=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id ~expected ~actor:"operator"
+    ~reason:"Retain one complete successor before staging" ~now:(Time_compat.now ())
+    |> Result.map_error Resolution_intent.error_to_string |> get) in
+  let fenced=memory_action fixture (fun () -> io (fun () ->
+    let fence=Resolution.fence_serialized ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id ~expected ~actor:accepted.intent.actor
+      ~reason:accepted.intent.reason ~now:(Time_compat.now ())
+      |> Result.map_error Resolution.error_to_string |> get in
+    Resolution_intent.confirm_fence ~store:fixture.store ~expected:accepted.intent fence
+      |> Result.map_error Resolution_intent.error_to_string |> get)) in
+  let owner=Capture.physical_owner request in
+  let child ()=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+    ~predecessor:{request_id=original.request_id;request_digest=original.request_digest}
+    ~owner ~destination:(Capture.destination request) ~source:(Capture.source request)
+    ~preparation:(Capture.preparation request) ()) |> get in
+  original,request,fenced,child
+type resolution_preparation_cut = Before_body | Body_before_compaction | Compaction_before_owner
+let test_resolution_preparation_recovers_exact_bytes cut () = with_fixture (fun ~sw:_ fixture ->
+  let original,_request,fenced,make_child=prepare_resolution_fixture fixture in
+  let child=make_child () and losing_child=make_child () in
+  let before=progress fixture,F.post_count fixture.server in
+  let prepared=memory_action fixture (fun () -> io (fun () ->
+    Resolution_intent.prepare_child ~store:fixture.store ~expected:fenced child
+      |> Result.map_error Resolution_intent.error_to_string |> get)) in
+  let load_resolution ()=io (fun () -> Store.load_history_resolution fixture.store
+    ~scope:original.scope ~request_id:original.request_id |> get |> Option.get) in
+  let original_preparation=load_resolution () in
+  let body_path=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:(Capture.body_digest child)) in
+  check bool "the complete preparation exists before its body or child owner" true
+    (not (Sys.file_exists body_path) && Resolution_intent.child prepared=None
+      && io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+        ~request_id:(Capture.request_id child) |> owned)=None);
+  check bool "the prepared phase is not execution authority" true
+    (Result.is_error (memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store child)));
+  let public_phase=member "phase" (Resolution_intent.to_public_json prepared) in
+  check json "the public phase contains identifiers without the private request"
+    (`Assoc ["kind",`String "child_prepared";"child",`Assoc [
+      "request_id",`String (Capture.request_id child);"request_digest",`String (Capture.body_digest child)]]) public_phase;
+  check bool "a competing preparation cannot remint or overwrite the winner" true
+    (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+      Resolution_intent.prepare_child ~store:fixture.store ~expected:fenced losing_child)))
+      && load_resolution ()=original_preparation);
+  let preflight ()=io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
+    ~validate_history_resolution:Resolution_intent.check_published_file
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
+  check int "deployment preflight accepts the complete prepared intermediate state" 0
+    (List.length (preflight ()).refusals);
+  (match cut with
+   | Before_body -> ()
+   | Body_before_compaction ->
+     ignore (io (fun () -> Owner.prepare_successor ~store:fixture.store ~scope:original.scope
+       ~request_id:(Capture.request_id child) ~request:(Capture.to_json child) |> owned));
+     check json "a crash after the body leaves the same complete preparation"
+       original_preparation (load_resolution ())
+   | Compaction_before_owner ->
+     ignore (memory_action fixture (fun () -> io (fun () ->
+       Resolution_intent.intend_child ~store:fixture.store ~expected:prepared child
+         |> Result.map_error Resolution_intent.error_to_string |> get))));
+  let written_inode=if Sys.file_exists body_path then Some (Unix.lstat body_path).st_ino else None in
+  let fact=Types.observed ~claim:"Memory changed while the complete child waited" ~category:Types.Fact
+    ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="prepared-child-writer"} in
+  io (fun () -> Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write
+    ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+    ~source:{kind=Current.Explicit_write;trace_id="prepared-child-writer"} fact
+    |> Result.map_error Current.upsert_error_to_string |> get) |> ignore;
+  let previous=(Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+  Fun.protect ~finally:(fun () -> match previous with
+    | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+    | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
+    Prompt_registry.set_override Prompt_names.librarian "A changed template must not rerender a retained preparation." |> get;
+    memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name)
+      |> Result.map_error Resolution_intent.error_to_string |> get);
+  let intent=io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)
+    |> List.hd in
+  (match intent.phase with
+   | Resolution_intent.Child_confirmed confirmed ->
+     check string "restart acknowledges the retained child ID" (Capture.request_id child) confirmed.request_id;
+     check string "restart acknowledges the retained body digest" (Capture.body_digest child) confirmed.request_digest
+   | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> fail "retained preparation was not recovered");
+  let retained=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:(Capture.request_id child) |> owned |> Option.get) in
+  check json "changed Memory, template and clock do not change prepared request bytes"
+    (Lane_addon_action.canonical (Capture.to_json child) |> get) retained.request;
+  check bool "an existing exact body is reobserved without replacing its inode" true
+    (Option.fold ~none:true ~some:(fun inode -> inode=(Unix.lstat body_path).st_ino) written_inode);
+  check bool "publication of the child advances no source and calls no provider" true
+    (before=(progress fixture,F.post_count fixture.server));
+  check bool "compaction removes the private request from the resolution envelope" true
+    (member "request" (member "phase" (Yojson.Safe.Util.to_list (member "intents" (load_resolution ())) |> List.hd))=`Null);
+  check bool "the losing candidate has no body or owner record" true
+    (not (Sys.file_exists (Filename.concat (Store.root fixture.store)
+       (Store.tool_request_body_path ~scope:original.scope ~request_digest:(Capture.body_digest losing_child))))
+      && io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+        ~request_id:(Capture.request_id losing_child) |> owned)=None))
+let test_resolution_preparation_preserves_conflicting_body () = with_fixture (fun ~sw:_ fixture ->
+  let original,_request,fenced,make_child=prepare_resolution_fixture fixture in
+  let child=make_child () in
+  let prepared=memory_action fixture (fun () -> io (fun () ->
+    Resolution_intent.prepare_child ~store:fixture.store ~expected:fenced child
+      |> Result.map_error Resolution_intent.error_to_string |> get)) in
+  let before=io (fun () -> Store.load_history_resolution fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> get) in
+  let path=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:(Capture.body_digest child)) in
+  let conflicting="conflicting retained body evidence" in
+  io (fun () -> write path conflicting);
+  check bool "a conflicting content address cannot be repaired by overwriting evidence" true
+    (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+      Resolution_intent.intend_child ~store:fixture.store ~expected:prepared child))));
+  check string "the conflicting bytes are preserved" conflicting
+    (io (fun () -> In_channel.with_open_bin path In_channel.input_all));
+  check bool "failure keeps the complete preparation and publishes no child" true
+    (io (fun () -> Store.load_history_resolution fixture.store ~scope:original.scope
+      ~request_id:original.request_id |> get)=before
+      && io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+        ~request_id:(Capture.request_id child) |> owned)=None);
+  no_memory fixture)
 let test_history_resolution_rejects_stale_then_continues_the_same_original () = with_fixture (fun ~sw:_ fixture ->
   let original,request=retain_absent_history_original fixture in
   let preview=fence_preview fixture request in
@@ -6106,6 +6278,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_cut_effect_fence_refuses_an_actual_range_receipt;
   test_case "a Cut effect fence refuses source positions moved after preview" `Quick
     test_cut_effect_fence_refuses_moved_source_positions;
+  test_case "a Cut fence grants no direct intent, lineage or host execution authority" `Quick
+    test_cut_fence_is_not_direct_child_or_host_authority;
   test_case "a Cut fence without an intent blocks ordinary, direct and queued fresh history" `Quick
     (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:false);
   test_case "a Cut fence still blocks fresh history after its live owner record disappears" `Quick
@@ -6124,6 +6298,14 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_history_fence_uncertain_publication_still_blocks;
   test_case "history resolution survives stale preview and continues one exact range" `Quick
     test_history_resolution_rejects_stale_then_continues_the_same_original;
+  test_case "resolution recovers complete preparation after a crash before body publication" `Quick
+    (test_resolution_preparation_recovers_exact_bytes Before_body);
+  test_case "resolution recovers the same prepared child after body publication before compaction" `Quick
+    (test_resolution_preparation_recovers_exact_bytes Body_before_compaction);
+  test_case "resolution recovers compacted intent before child ownership publication" `Quick
+    (test_resolution_preparation_recovers_exact_bytes Compaction_before_owner);
+  test_case "resolution preserves conflicting body evidence and its complete preparation" `Quick
+    test_resolution_preparation_preserves_conflicting_body;
   test_case "concurrent explicit Memory write closes known basis and resumes original source once" `Quick
     (test_changed_memory_rebases_original_source_without_unknown_retry ~lose_child_after_dispatch:false);
   test_case "confirmed successor loss refuses fresh inference and late answer" `Quick

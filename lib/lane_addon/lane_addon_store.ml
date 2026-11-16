@@ -903,13 +903,18 @@ let load_tool_request t ~scope ~request_id ~name_body =
       let* record,request_digest = name_body json in
       let* body = tool_request_body t ~scope ~request_digest in
       Ok (Some (record,body)))
-(* A body is named by the digest of its bytes, so writing it again publishes
-   the same file; each write is atomic and synced with its directory. *)
+(* A body is named by its bytes. Observe an existing file under this same
+   serializer before writing: a retry must not erase conflicting evidence. *)
 let save_tool_request_body t ~scope ~request_digest bytes =
   let* () = if String.equal (digest bytes) request_digest then Ok ()
     else Error "a request body must be named by the digest of its bytes" in
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
-    write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
+    let* existing = tool_request_body t ~scope ~request_digest in
+    match existing with
+    | Some observed ->
+      if observed=bytes then Ok () else Error "existing request body differs from its content digest"
+    | None ->
+      write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
 (* Settled originals: each record, under the date its chain began. The body
    its record names does not move here; the settle removes it. *)
 let tool_request_archive_directory = "tool-request-owners-settled"

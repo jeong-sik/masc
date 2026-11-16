@@ -104,7 +104,7 @@ let runtime_on ~sw ~workspace env ~handle : Server_mcp_transport_http.runtime =
   ; tool_allowed_in_profile = (fun _ _ -> true)
   ; handle_request =
       (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
-           ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> handle ())
+           ?otel_transport_context:_ ~principal:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> handle ())
   ; clear_resource_subscriptions_for_session = (fun _ -> ())
   }
 ;;

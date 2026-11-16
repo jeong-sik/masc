@@ -189,7 +189,7 @@ let presence_handler env ~workspace ~runtime_sw =
     ; tool_allowed_in_profile = (fun _ _ -> true)
     ; handle_request =
         (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
-             ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+             ?otel_transport_context:_ ~principal:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
     ; clear_resource_subscriptions_for_session = (fun _ -> ())
     }
   in

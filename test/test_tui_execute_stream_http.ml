@@ -896,7 +896,7 @@ let with_standalone_observer_server env body =
         ; tool_allowed_in_profile = (fun _ _ -> true)
         ; handle_request =
             (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
-                 ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+                 ?otel_transport_context:_ ~principal:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
         ; clear_resource_subscriptions_for_session = (fun _ -> ())
         }
       in
@@ -1500,7 +1500,7 @@ let test_play_observer_reconnect_keeps_replacement_presence env =
         ; tool_allowed_in_profile = (fun _ _ -> true)
         ; handle_request =
             (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
-                 ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+                 ?otel_transport_context:_ ~principal:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
         ; clear_resource_subscriptions_for_session = (fun _ -> ())
         } in
       let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
@@ -1801,7 +1801,7 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         ; tool_allowed_in_profile = (fun _ _ -> true)
         ; handle_request =
             (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
-                 ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+                 ?otel_transport_context:_ ~principal:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
         ; clear_resource_subscriptions_for_session = (fun _ -> ())
         } in
       let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in

@@ -145,8 +145,23 @@ type request_principal = private
 - 입구 함수는 `Auth.admit_request` 다(1a). `/mcp`·seat·observer·operator 판정이 이것을 거쳐 주체를 돌려준다(1b).
 - `runtime.handle_request` 는 `?auth_token` 대신 `~principal` 을 받는다. 내부 서명이라 hard cut 이다. 호환용 인자를 남기지 않는다.
 - stdio(`run_stdio`)와 내부 Keeper runtime 경로도 같은 입구 함수를 거친다.
+- stdio 가 `Auth.admit_request` 를 쓰면 두 자리가 좁아진다(단계 2).
+  - internal Keeper token 을 static credential 도 들고 있으면, 예전에는 그 credential 로 통과했다. 이제는 거절된다. stdio 는 `x-masc-keeper-name` 을 보내지 않기 때문이다.
+  - OAuth access token 의 role 을 예전에는 저장된 role 로 보았다. 이제는 scope 가 좁힌 role 로 본다. HTTP 입구와 같다.
 
-**D3. dispatch.** `require_auth` 는 주체로 판정한다. `Requires_auth` 메서드는 `Bearer _` 와 `Auth_off` 를 통과시킨다. `Anonymous` 는 auth 가 켜져 있으면 `Missing_token` 이다. 조회는 없다.
+**D3. dispatch.** dispatch 는 `Mcp_server_eio_types.sender` 를 받는다. 입구가 통과시킨 요청은 `Admitted 주체`, 입구를 거치지 않은 요청은 `Unadmitted` 다.
+
+| sender | 공개 메서드 | `Requires_auth` 메서드 | 읽기 |
+|---|---|---|---|
+| `Admitted Auth_off` | 통과 | 통과 | 0 |
+| `Admitted Anonymous` | 통과 | `Missing_token` | 0 |
+| `Admitted Bearer`, credential 이 든 token | 통과 | 그 credential 로 통과 | 0 |
+| `Admitted Bearer`, internal Keeper token | 통과 | 지금처럼 저장소에 묻는다 | 지금과 같음 |
+| `Unadmitted` | 통과 | auth 가 꺼져 있으면 통과, 켜져 있으면 `Missing_token` | auth 설정 한 번 |
+
+- internal Keeper token 은 저장소에 credential 이 없다. 그래서 지금 dispatch 는 `Requires_auth` 메서드에서 `Invalid_token` 으로 답한다. 처음 초안은 `Bearer _` 를 모두 통과시켰다. 그대로 하면 이 거절이 사라지므로 조회를 남겼다. 저장소 안에는 `x-masc-keeper-name` 을 보내는 클라이언트가 없다. 이 경로를 어떻게 할지는 §7 의 열린 질문이다.
+- `Unadmitted` 는 WebSocket 메시지다. 소켓은 `dashboard/hello` 가 판정하고, 메시지는 bearer 를 싣지 않는다. dispatch 를 직접 부르는 시험도 이것을 쓴다.
+- `Anonymous` 를 입구 밖에서 만들 수 있게 열지 않는다. `Server_auth.authorize_principal` 이 `Anonymous` 를 통과시키기 때문이다.
 
 **D4. 신원 단계.**
 
@@ -247,3 +262,4 @@ D4 는 처음에 단계 2 에 있었다. 1b 로 옮긴 이유는 두 가지다.
 2. 후보 B(메모리 스냅샷)를 따로 할 것인가. 「요청마다 owner 현재 파일과 대조」 결정을 바꾸므로 운영자 결정이 먼저 필요하다. 이 RFC 가 끝난 뒤 남는 조회 한 번이 여전히 문제일 때 다시 묻는다.
 3. 이름이 token 주인과 다른 `tools/call` 의 alias 규칙을 주체 위의 순수 함수로 옮길 것인가. canonical alias credential 이 있는지는 여전히 파일을 봐야 하므로, 읽기가 0 이 되지는 않는다.
 4. stdio 는 프로세스가 사는 동안 token 이 고정이다. 요청마다 한 번 대조하는 결정을 stdio 에도 그대로 둘 것인가. 이 RFC 는 그대로 둔다.
+5. internal Keeper token 을 HTTP 로 쓰는 경로. 입구는 `x-masc-keeper-name` 과 함께 이 token 을 통과시킨다. dispatch 는 `Requires_auth` 메서드에서 거절한다. 저장소 안에 이 헤더를 보내는 클라이언트는 없다. 경로를 지울지, dispatch 도 통과시킬지 운영자 결정이 필요하다.

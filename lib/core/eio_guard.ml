@@ -47,7 +47,9 @@ exception Non_eio_mutex_context of mutex_access
     runs without any locking (safe because OCaml is single-threaded
     at module init time). *)
 
-(** Read-write guard: acquires mutex if Eio is ready, runs directly otherwise. *)
+(** Exclusive guard with cancellation protection: takes the mutex if Eio is
+    ready, runs directly otherwise. If the body raises, the mutex is disabled
+    ([Eio.Mutex.Poisoned] on the next use). *)
 let with_mutex mutex f =
   match Atomic.get ready, execution_context () with
   | false, _ -> f ()

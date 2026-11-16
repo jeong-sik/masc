@@ -966,19 +966,6 @@ let test_agent_scope_executes_pending_after_restart () =
               { reason = Some "pending command test complete"; data = None }))))
 ;;
 
-let rec await_reconciliation_phase writer =
-  let observed = Writer.stats writer in
-  match observed.admission, observed.worker_phase with
-  | Writer.Failed failure, _ -> fail (Writer.scope_failure_to_string failure)
-  | Writer.Closed, _ -> fail "writer closed before reconciliation was observed"
-  | ( (Writer.Accepting | Writer.Draining)
-    , (Writer.Reconciling_group | Writer.Awaiting_reconciliation_wake) ) -> ()
-  | ( (Writer.Accepting | Writer.Draining)
-    , (Writer.Starting | Writer.Idle | Writer.Committing_group) ) ->
-    Eio.Fiber.yield ();
-    await_reconciliation_phase writer
-;;
-
 let rec await_reconciliation_wait writer ~outcome_count =
   let observed = Writer.stats writer in
   match observed.admission, observed.worker_phase, observed.current_reconciliation with

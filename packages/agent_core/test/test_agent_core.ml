@@ -2,18 +2,6 @@ open Alcotest
 open Agent_core
 open Types
 
-let with_env key value f =
-  let previous = Sys.getenv_opt key in
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some v -> Unix.putenv key v
-      | None -> Unix.putenv key "")
-    (fun () ->
-       Unix.putenv key value;
-       f ())
-;;
-
 let test_model_string () =
   Alcotest.(check string)
     "exact model"

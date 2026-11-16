@@ -5,7 +5,6 @@ open Types
 open Yojson.Safe.Util
 module Stream=Streaming
 module Acc=Complete_stream_acc
-let get = function Ok value->value | Error detail->Alcotest.fail detail
 let config=Provider_config.make ~kind:Provider_config.OpenAI_compat
   ~provider_id:"responses-stream-fixture" ~model_id:"responses-stream-fixture"
   ~base_url:"https://fixture.invalid" ~request_path:"/v1/responses"
@@ -19,8 +18,6 @@ let reasoning ?summary ?full ?encrypted id = `Assoc
    @ (match encrypted with None->[]|Some value->["encrypted_content",`String value]))
 let call=`Assoc["type",`String "function_call";"id",`String "call-item";"call_id",`String "call"
   ;"name",`String "lookup";"arguments",`String "{}"]
-let answer=`Assoc["type",`String "message";"role",`String "assistant"
-  ;"content",`List[part "output_text" "answer"]]
 let wire output=`Assoc["id",`String "response";"model",`String "fixture";"status",`String "completed"
   ;"output",`List output]
 let feed (state,acc) event json =

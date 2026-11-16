@@ -22,8 +22,6 @@ end
 
 let check_string = Alcotest.(check string)
 let check_int = Alcotest.(check int)
-let check_bool = Alcotest.(check bool)
-
 let stream_error_to_string = function
   | Stream_provider_error { message; _ } -> message
   | Stream_parse_failed { reason; _ } -> reason

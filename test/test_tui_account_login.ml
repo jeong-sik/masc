@@ -346,6 +346,55 @@ let failed_activation_blocks_login_shortcuts () =
   check bool "new login is available after confirmed activation" true
     (Login.key t "n"=Login.Start {provider;existing=false})
 
+let pending_model_context () =
+  let t = Login.create "antigravity" in
+  t.provider <- Some {provider with client=Login.Antigravity};
+  t.account_ref <- Some account;
+  let unknown = { (model 17) with context=None } in
+  let rows = List.init 22 (fun i -> if i=17 then unknown else model i) in
+  ok (Login.models t (`Assoc ["models", `List (List.map (fun (m:Login.model) ->
+    `Assoc ["id", `String m.id; "label", `String m.label; "bound", `Bool false;
+      "context", (match m.context with Some n -> `Int n | None -> `Null);
+      "tools", `Bool true]) rows)]));
+  t.cursor <- 17;
+  let selection = t.selected_models in
+  check bool "unknown model requests only its native context" true
+    (Login.key t " " = Login.Prepare unknown);
+  Login.preparing t unknown;
+  check bool "pending context has its own phase" true
+    (t.phase=Login.Preparing_context unknown);
+  check bool "pending context retains the complete inventory" true (t.models=rows);
+  check int "pending context retains the selected model" 17 t.cursor;
+  check (list string) "other selections remain pending" selection t.selected_models;
+  List.iter (fun key ->
+    check bool "context observation owns input until it settles" true
+      (Login.key t key=Login.Nothing)) [" "; "a"; "enter"; "r"; "n"; "e"; "up"; "down"];
+  check bool "pending context can still be closed" true (Login.key t "esc"=Login.Close);
+  Login.prepare_failed t "context request unavailable";
+  check bool "context failure returns to selection" true (t.phase=Login.Models);
+  check bool "failure preserves inventory and cursor" true (t.models=rows && t.cursor=17);
+  check (list string) "failure preserves other selections" selection t.selected_models;
+  check (option string) "failure preserves authenticated account" (Some account) t.account_ref;
+  check bool "same model can be retried without login or rediscovery" true
+    (Login.key t " "=Login.Prepare unknown);
+  Login.preparing t unknown;
+  let malformed = `Assoc ["model", `String "another-model"; "context", `Int 65536] in
+  (match Login.prepared t unknown malformed with
+   | Ok () -> fail "foreign context was accepted"
+   | Error detail -> Login.prepare_failed t detail);
+  check bool "invalid receipt preserves the original unknown context" true
+    (t.phase=Login.Models && t.models=rows && t.selected_models=selection);
+  Login.preparing t unknown;
+  ok (Login.prepared t unknown (`Assoc ["model", `String unknown.id; "context", `Int 65536]));
+  check bool "observed context returns to selection" true (t.phase=Login.Models);
+  check int "observed context keeps cursor" 17 t.cursor;
+  match Login.key t "enter" with
+  | Login.Save models ->
+    check int "all selected models still go through save verification" 22 (List.length models);
+    check bool "only the requested model receives the observed context" true
+      (models=List.map (fun (m:Login.model) ->
+        if m.id=unknown.id then {m with context=Some 65536} else m) rows)
+  | _ -> fail "prepared models could not reach save verification"
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -1134,6 +1183,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "lock warning survives refresh without exposing diagnostics" `Quick uncertain_lock_release_save;
   test_case "a partly checked save summarizes retained connections and names failures" `Quick partly_checked_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
+  test_case "pending native context retains selection and recovery" `Quick pending_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;
   test_case "malformed and unfinished streams" `Quick decoder_failures;
   test_case "explicit provider and preserved default" `Quick account_and_default;

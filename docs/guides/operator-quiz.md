@@ -7,7 +7,7 @@
 ## 한 번의 퀴즈가 지나가는 길
 
 1. Schedule 이 정한 시각에 `compose` 를 보낸다. 패키지는 세션을 하나 열고 `confirmed` 로 답한다.
-2. 패키지가 host 에게 기록을 한 번에 하나씩 요청한다. 지난번에 질문까지 간 세션이 멈춘 자리부터 읽는다. 실패했거나 다음 세션으로 대체된 세션이 읽은 기록은 다시 읽는다.
+2. 패키지가 host 에게 기록을 한 번에 하나씩 요청한다. 지난번에 질문까지 간 세션이 멈춘 자리부터 읽는다. 질문까지 가지 못하고 실패했거나 다음 세션으로 대체된 세션이 읽은 기록은 다시 읽는다.
 3. 다 읽으면 `author` 출력을 한 번 요청한다. 읽은 기록, 지난 문제들의 풀이 기록, 문제 수, 언어를 함께 보낸다. 새 기록이 없어도 지난 문제가 있으면 요청한다. 이때 `author` 는 지난 문제를 그 출처 그대로 다시 낼 수 있다.
    - 요청 하나에 다 들어가지 않으면 가장 최근에 읽은 기록만 담는다. 그래서 worker 는 읽는 동안 결과의 요약(상태, cursor, 커밋과 경로)만 메모리에 두고, 본문은 이때 보관한 페이지에서 최근 것부터 요청에 들어가는 만큼만 다시 읽는다. 퀴즈를 오래 꺼 두었다가 다시 켜도 worker 메모리는 요청 하나 크기 근처에 머문다.
 4. 돌아온 문제마다 확인한다. 선택형 문제는 선택지가 둘 이상인지, 정답 선택지가 선택지 안에 있는지, `single` 이 정답을 하나만 갖는지 본다. 서술형 문제(`text`)는 선택지와 정답 key 없이, 맞는 답이 말해야 할 점(rubric)을 갖는지 본다. 어느 쪽이든 인용문이 그 기록의 보관된 바이트에 글자 그대로 있는지 본다. 통과하지 못한 문제는 이유와 함께 버린다. 하나도 통과하지 못하면 세션은 `no_question_passed` 로 끝난다.
@@ -169,24 +169,29 @@ selection = "latest_completed"
 
 `since`, `language`, `timezone` 은 `[[binding.sources]]` 보다 위에 둔다. 아래에 두면 TOML 이 그 줄을 source 항목의 키로 읽어 선언이 저장되지 않는다.
 
-`[binding]` 을 잘못 적으면 선언이 저장되지 않는다. host 는 아래 순서로 보고, 처음 걸린 문구 하나만 낸다.
+host 는 선언을 저장하기 전에 `[binding]` 을 아래 순서로 본다. 걸리면 저장하지 않고, 처음 걸린 문구 하나만 낸다.
 
 | 순서 | host 가 보는 것 | 걸리는 예 | 문구 |
 | --- | --- | --- | --- |
-| 1 | 파일이 TOML 로 읽히는가 | `sources = []` 를 지우지 않고 `[[binding.sources]]` 를 더했다 | `table [binding.sources] is duplicated by an array of tables [[binding.sources]]` |
-| 2 | 값이 날짜나 시각이 아닌가 | `since = 2026-11-12` | `binding.since: TOML date/time values are unsupported; use an explicit string` |
+| 1 | 파일이 TOML 로 읽히는가 | `sources = []` 를 지우지 않고 바로 아래에 `[[binding.sources]]` 를 더했다 | `table [binding.sources] is duplicated by an array of tables [[binding.sources]]` |
+| 2 | 값을 JSON 으로 옮길 수 있는가 | `since = 2026-11-12` | `binding.since: TOML date/time values are unsupported; use an explicit string` |
+| 2 | | `since = nan`, `since = inf` | `binding.since: non-finite numbers are not supported` |
 | 3 | `sources` 항목의 모양 | `since`·`language`·`timezone` 이 `[[binding.sources]]` 아래에 있다 | `lane_output contains duplicate or unknown fields` |
 | 3 | | `selection` 이 없다 | `lane_output selection must be latest_completed` |
-| 3 | | `sources` 가 배열이 아니다 | `binding.sources requires an array of observation sources` |
+| 3 | | `sources` 가 없거나 배열이 아니다 | `binding.sources requires an array of observation sources` |
 | 4 | `[binding]` 이 패키지의 스키마에 맞는가 | 아래 목록 | `lane binding must match exactly one schema alternative` |
+
+1 번 문구는 TOML 을 읽는 라이브러리(Otoml)가 낸다. 같은 실수라도 줄의 자리에 따라 문구가 다르다. `[[binding.sources]]` 를 `[[binding.records]]` 둘 뒤에 더하면 `otoml internal error` 로 시작하는 문구가 나온다.
 
 4 번 문구는 어느 칸이 틀렸는지 말하지 않는다(#52319). 이럴 때 나온다.
 
-- `since` 가 없다. 숫자가 아니다. 0 보다 작다.
+- `since` 가 없다. 문자열이다. 0 보다 작다.
 - 수업을 묶지 않은 선언에 `since` 가 있다.
 - `timezone` 이 없다. 패키지가 읽지 않는 키가 있다. `output_id` 가 `scenes` 가 아니다.
 
 `since` 는 Unix 시각(초)을 숫자로 적는다. 2 번 문구는 문자열로 적으라고 하지만, 문자열로 적은 `since` 는 4 번에서 걸린다.
+
+스키마는 `records` 항목마다 칸의 모양만 본다. 종류에 맞는 칸이 있는지는 보지 않는다. Board 항목에 `visibilities` 가 없거나 저장소 항목에 `paths` 가 없는 선언은 저장된 뒤, worker 를 붙일 때 거절된다(#52373).
 
 맞춰야 하는 것이 넷이다.
 
@@ -200,10 +205,12 @@ selection = "latest_completed"
   남은 자리가 없는 항목은 셋이다.
 
   - 질문을 낸 세션이 읽은 적 없는 항목. 질문을 낸 적 없는 퀴즈는 모든 항목이 그렇다. 나중에 새 `source_id` 로 더한 항목도 그렇다.
-  - `since` 부터 읽었는데 기록이 하나도 없던 항목. 다음 세션이 다시 `since` 부터 읽는다. `github_pulls` 항목은 다를 수 있다. 그 사이에 PR 없이 들어간 커밋이 있으면 host 가 그 커밋을 지나친 자리를 남기고, 다음 세션은 그 자리부터 읽는다.
-  - 남은 자리를 host 가 모두 거절한 항목. host 는 저장소 항목에서 그 자리의 커밋이 기본 브랜치에 더는 없으면 거절한다. 거절당한 세션은 실패로 끝나고, 다음 세션은 그보다 앞서 남은 자리부터 읽는다. 그런 자리도 없으면 `since` 부터 읽는다.
+  - `since` 부터 읽었는데 기록이 하나도 없던 항목. 다음 세션이 다시 `since` 부터 읽는다. `github_pulls` 항목은 다를 수 있다. 그 사이에 PR 의 병합 커밋이 아닌 커밋(브랜치에 바로 올린 커밋, rebase 병합의 앞쪽 커밋)이 있으면 host 가 그 커밋을 지나친 자리를 준다. 그 세션이 질문을 냈으면 다음 세션은 그 자리부터 읽는다.
+  - 남은 자리를 host 가 모두 거절한 항목. host 는 그 자리를 지금 기록에서 찾지 못하면 거절한다. 저장소·`github_pulls` 항목은 그 커밋이 기본 브랜치에 더는 없을 때, wiki 항목은 `log.md` 가 다시 쓰여 그 자리의 줄이 달라졌을 때다. 거절당한 세션은 실패로 끝나고, 다음 세션은 그보다 앞서 남은 자리부터 읽는다. 그런 자리도 없으면 `since` 부터 읽는다.
 
-  자리는 `source_id` 로 찾는다. 뺐다가 같은 `source_id` 로 다시 더한 항목은 전에 멈춘 자리부터 읽는다.
+  자리는 `source_id` 로 찾는다. 뺐다가 같은 `source_id` 로 다시 더한 항목은 전에 멈춘 자리부터 읽는다. 다만 뺄 때 그 항목을 읽던 세션이 있었으면, host 가 그 읽기를 거절하고 퀴즈는 그 읽기의 자리를 거절된 자리로 센다. 그 항목은 거절된 자리보다 앞서 남은 자리나 `since` 부터 읽는다(#52372).
+
+  쓰던 `source_id` 를 다른 기록에 다시 쓰지 않는다. 새 기록이 옛 자리를 이어받아, host 가 그 자리를 거절할 때마다 세션이 하나씩 실패한다.
 
   질문을 낸 적 없는 퀴즈는 첫 수업과 같은 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. 이미 질문을 낸 퀴즈에 수업을 묶으면 퀴즈는 전에 멈춘 자리부터 읽는다. 수업이 그 자리보다 앞선 기록을 인용해도 퀴즈는 그 기록을 읽지 않는다.
 - 두 설치 선언의 `run_id` 가 같아야 한다. 다르면 퀴즈는 수업 출력을 받지 못하고, `quiz/measures` 의 `lesson.source.detail` 에 `upstream installation belongs to another run` 이 나온다. `run_id` 를 바꿔 저장하면 worker 는 다시 뜨지만 volume 과 log 는 그대로다.

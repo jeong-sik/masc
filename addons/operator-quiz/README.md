@@ -31,7 +31,8 @@ lesson cites from before them is not read. A read from `since` that finds
 no record leaves no cursor, unless the host passed over items that have no
 record (`github_pulls`: commits no pull request merged). The cursor goes by
 `source_id`: a source taken out and put back is read from the cursor it
-had. Design:
+had, unless a session was reading it when it was taken out (#52372).
+Design:
 [RFC](../../docs/rfc/RFC-operator-quiz-follows-lesson.md).
 
 - `quiz_log.py`: the log's events, the session fold, and the body store.

@@ -15,6 +15,7 @@ related: ["0340", "main-domain-scheduler-latency"]
 - 상태: 초안.
 - 계기: 2026-11-16 Claude Code 의 masc MCP 연결이 `CONNECT_TIMEOUT`(10초)으로 거듭 끊겼다. 앞선 고침은 #52390(HTTP 입구), #52404(`tools/list` 의 Add-on 노출)이다.
 - 먼저 있는 결정:
+  - #51752: 입구 판정(`verify_mcp_auth` 등)이 늘 `None` 인 `'a option` 을 돌려주던 것을 `unit` 으로 줄였다. 오지 않는 `Some` 을 약속했기 때문이다. 「자격을 확인해서 통과」와 「자격이 필요 없어서 통과」를 갈라야 하는 호출처가 생기면 그때 닫힌 variant 를 돌려주라고 적었다. D1 의 요청 주체가 그 variant 다.
   - RFC-0340 「Request identity」: bearer 가 붙은 요청은 credential 신원으로 풀려야 한다. 풀리지 않으면 `invalid_token` 이다. 문자열 `dashboard` 로 바꾸지 않는다.
   - `specs/auth/AuthIdentityFSM.tla`: I1 `IdentityBindsToken`(풀린 주체가 요청 token 의 주인이다), I2 `NoSilentRewrite`(풀린 주체는 token 으로 정해진다), I3 `FailClosedDefault`(token 이 없으면 Pending 이나 Deny).
   - static bearer 는 요청마다 owner 의 현재 파일 전체와 맞아야 한다. 캐시를 다시 만든 뒤에도 같다(`Auth.find_static_credential_by_token` 의 `.mli` 설명). 이 RFC 는 이 결정을 바꾸지 않는다. 요청마다 한 번은 지금처럼 owner 파일을 읽는다.
@@ -227,7 +228,8 @@ type request_principal = private
 | 단계 | 내용 | 확인 |
 |---|---|---|
 | 0 | 계기와 기준선. §4.2 의 측정을 남긴다 | 측정 기록이 PR 에 붙는다 |
-| 1 | `request_principal` 타입과 입구 함수. `runtime.handle_request` 에 `~principal` 을 더한다. 아래 층은 아직 raw token 도 받는다 | L1 의 입구 부분 |
+| 1a | `Auth.request_principal` 타입과 입구 함수 `Auth.admit_request`. `/mcp`·observer 판정이 이것을 쓴다. 판정 함수의 반환은 아직 `unit` 이라 transport 와 시험 stub 은 그대로다 | L1 의 입구 부분 |
+| 1b | transport `deps` 의 판정이 요청 주체를 돌려주고, `runtime.handle_request` 에 `~principal` 을 더한다. 아래 층은 아직 raw token 도 받는다 | L1, 시험 stub 갱신 |
 | 2 | dispatch `require_auth` 와 신원 단계를 주체로 바꾼다(D3, D4) | L1, `initialize`·`tools/list` 의 L2 |
 | 3 | `tools/call` 실행과 도구별 조회를 주체로 바꾼다(D5). `?auth_token` 을 지운다 | L1 전체, `tools/call` 의 L2 |
 | 4 | raw token 함수 허용 목록 검사(D6)와 TLA+ 갱신 | CI 검사, TLC 정상·buggy |

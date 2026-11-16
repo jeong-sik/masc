@@ -427,16 +427,20 @@ let restored_receipt retained =
        let* receipt, _ = decode (refusal_receipt retained r) in Ok (Some receipt)
      | View.Before_dispatch, View.Authority_moved _ ->
        let* _ = moved_authority retained (View.evidence_json refusal) in Ok None
-     | (View.Execution,
-        (View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _))
+     | (View.Execution, View.Authority_moved _)
      | (View.Before_dispatch,
         (View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _)) ->
-       invalid "Goal refusal evidence does not match its refusal stage")
+       invalid "Goal refusal evidence does not match its refusal stage"
+     (* RFC-0489 §2.2/§2.6: a run that ended without a verdict, or an original
+        whose owner exited, left no receipt to restore. The next attempt starts
+        from that fact rather than from a judgment. *)
+     | (View.Execution, (View.Run_ended _ | View.Owner_exited _)) -> Ok None)
   | View.Subdividing (refusal,_) | View.Subdivided (refusal,_) ->
     (match refusal with
      | View.Reviewer_refused r ->
        let* receipt, _ = decode (refusal_receipt retained r) in Ok (Some receipt)
-     | View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _ ->
+     | View.Run_ended _ | View.Owner_exited _ -> Ok None
+     | View.Authority_moved _ ->
        invalid "Goal refusal evidence does not match its refusal stage")
   | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ -> Ok None
 
@@ -472,8 +476,13 @@ let observed_receipt retained =
     | View.Rejected {stage=View.Before_dispatch; _}
     | View.Subdividing (View.Authority_moved _, _)
     | View.Subdivided (View.Authority_moved _, _) -> Ok None
+    (* RFC-0489 §2.2/§2.6: a run that ended without a verdict has no receipt at
+       all, so asking for one is not an error — there is nothing to restore. *)
+    | View.Rejected {stage=View.Execution; refusal=(View.Run_ended _ | View.Owner_exited _)} ->
+      Ok None
     | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _
-    | View.Conflicted _ | View.Rejected {stage=View.Execution; _}
+    | View.Conflicted _
+    | View.Rejected {stage=View.Execution; refusal=(View.Reviewer_refused _ | View.Authority_moved _)}
     | View.Subdividing ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _)
     | View.Subdivided ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _) ->
       invalid "Goal terminal observation lacks its original receipt"
@@ -506,8 +515,18 @@ let tool_observations retained =
     | View.Subdivided (View.Authority_moved _, _) -> Ok []
     | View.Dispatch_pending (Some (View.Waiting _ | View.Absent _)) ->
       invalid "Goal dispatch observation has no retained tool receipt"
+    (* RFC-0489 §2.2: a run that ended without a verdict still carries the tool
+       observations it actually made, and the host publishes those with its
+       cancelled/raised outcome. *)
+    | View.Rejected {stage=View.Execution; refusal=View.Run_ended {run; tools; _}} ->
+      if run = goal_run retained.run then Ok tools
+      else invalid "Goal run end differs from its fixed run"
+    | View.Rejected {stage=View.Execution; refusal=View.Owner_exited {run}} ->
+      if run = goal_run retained.run then Ok []
+      else invalid "Goal owner-less dispatch differs from its fixed run"
     | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _
-    | View.Conflicted _ | View.Rejected {stage=View.Execution; _}
+    | View.Conflicted _
+    | View.Rejected {stage=View.Execution; refusal=(View.Reviewer_refused _ | View.Authority_moved _)}
     | View.Subdividing ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _)
     | View.Subdivided ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _) ->
       invalid "Goal terminal observation lacks its original receipt"
@@ -599,7 +618,14 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
          | None -> Ok ()
          | Some _ -> invalid "Goal explicit retry cannot follow a before-dispatch refusal")
       | View.Run_ended _ | View.Owner_exited _ ->
-        invalid "Goal refusal evidence does not match its refusal stage" in
+        (* RFC-0489 §2.4: a run that ended without a verdict left no receipt to
+           authenticate, so the successor is authorized by the parent's own
+           digest alone — no grant on the automatic path, the exact parent
+           digest on an explicit request. *)
+        (match explicit_retry with
+         | None -> Ok ()
+         | Some grant when grant.parent_digest = parent.record.request_digest -> Ok ()
+         | Some _ -> invalid "Goal explicit retry names another parent") in
     (* The parent's [Successor_intended] digest pins the child's whole body,
        so its lookup grants are the ones it was prepared with. Here the child
        must also ask the parent's question as its next attempt. *)
@@ -771,8 +797,18 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         (* Already refused before dispatch: its next attempt asks again. *)
         let* change = moved_authority retained (View.evidence_json refusal) in
         Error (Authority_changed change)
+      (* RFC-0489 §2.2/§2.7. An original whose last run ended without a verdict
+         must not be dispatched again by an ordinary call: the next attempt is a
+         new original created from that run end, and a raised run waits for an
+         explicit request. *)
+      | View.Rejected {stage=View.Execution;
+                       refusal=(View.Run_ended _ | View.Owner_exited _)} ->
+        Error (Execution_pending
+          "The original Goal verification run ended without a verdict; the next attempt is recorded from that run end, not by replaying this one.")
       | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
-      | View.Rejected {stage=View.Execution; _} | View.Subdividing _ | View.Subdivided _ ->
+      | View.Rejected {stage=View.Execution;
+                       refusal=(View.Reviewer_refused _ | View.Authority_moved _)}
+      | View.Subdividing _ | View.Subdivided _ ->
         invalid "Goal review frontier changed" in
     let* () = if V.question_matches retained.original authority then Ok ()
       else Error Question_changed in

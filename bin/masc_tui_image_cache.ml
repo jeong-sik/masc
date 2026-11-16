@@ -138,6 +138,7 @@ type decode_failure =
   | Decoder_runner_failed of runner_failure
   | No_frame_written
   | Frame_unreadable of { detail : string }
+  | Frame_not_png
 
 let decode_failure_of_ending ending ~output_present =
   match ending with
@@ -161,6 +162,12 @@ let decode_failure_text = function
   | Decoder_runner_failed failure -> "could not run decoder: " ^ runner_failure_text failure
   | No_frame_written -> "decoder wrote no frame"
   | Frame_unreadable { detail } -> "the decoded frame could not be read: " ^ detail
+  | Frame_not_png -> "decoder wrote a frame that is not a PNG"
+
+(* A converter is asked for a PNG, but neither its exit status nor the name of
+   the file it wrote makes the bytes one. A converted frame read back from a
+   cache passes the same check. *)
+let png_frame bytes = if has_png_structure bytes then Ok bytes else Error Frame_not_png
 
 (* How often a bounded run looks at its child. A decoder that finishes is
    noticed within one interval; the interval is not a cost of its own, since
@@ -497,7 +504,8 @@ let convert_frame ~run ~cache_dir input =
         (* The fallback starts while this converter's output is still
            reserved, so it is handed another name and a late write to this
            one cannot land in its frame. *)
-        with_decoder_output ~run ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" command (function
+        with_decoder_output ~run ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" command (fun output ->
+          match Result.bind output png_frame with
           | Ok bytes -> Ok (converter, failures, bytes)
           (* A signal, a stop, a deadline kill, a cancellation or a runner
              failure means the converter did not finish on its own, and its
@@ -506,7 +514,10 @@ let convert_frame ~run ~cache_dir input =
           | Error ((Decoder_runner_failed _ | Decoder_signaled _ | Decoder_stopped _
                    | Decoder_killed_at_deadline | Decoder_cancelled) as failure) ->
             Error (List.rev ((converter, failure) :: failures))
-          | Error ((Decoder_missing | Decoder_exit _ | No_frame_written | Frame_unreadable _) as failure) ->
+          (* These converters ended on their own, including one that exited 0
+             after writing bytes that are not a PNG, so the next one starts. *)
+          | Error ((Decoder_missing | Decoder_exit _ | No_frame_written | Frame_unreadable _
+                   | Frame_not_png) as failure) ->
             attempt ((converter, failure) :: failures) rest)
     in
     attempt [] commands
@@ -524,7 +535,7 @@ let convert_and_publish ~run ~cache_dir ~target ~encode input =
 let convert_to_png ~run ~cache_dir input =
   let target = png_path ~cache_dir input in
   match read_bytes target with
-  | Ok bytes when String.length bytes > 0 -> Ok target
+  | Ok bytes when Result.is_ok (png_frame bytes) -> Ok target
   | Ok _ | Error _ ->
     Result.map (fun _ -> target)
       (convert_and_publish ~run ~cache_dir ~target ~encode:(fun bytes -> [bytes]) input)
@@ -541,7 +552,7 @@ let cached_downloaded_frame ~prefix path =
         match int_of_string_opt size with
         | Some size when size > 0 ->
           let frame = In_channel.input_all channel in
-          if String.length frame = size then Some frame else None
+          if String.length frame = size then Result.to_option (png_frame frame) else None
         | Some _ | None -> None)
   with Sys_error _ | End_of_file -> None
 

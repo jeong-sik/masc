@@ -30,6 +30,14 @@ let static_png =
   "\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\b\006\
    \000\000\000\031\021\196\137\000\000\000\nIDATx\156c\000\001\000\000\005\
    \000\001\r\n-\180\000\000\000\000IEND\174B`\130"
+let be32 n = String.init 4 (fun i -> Char.chr ((n lsr ((3 - i) * 8)) land 255))
+(* Converter fixtures must write a complete PNG. A tEXt chunk tells otherwise
+   identical frames apart; the structure check reads chunk lengths, not CRCs. *)
+let tagged_png tag =
+  let before_iend = String.length static_png - 12 in
+  let text = "Comment\000" ^ tag in
+  String.sub static_png 0 before_iend ^ be32 (String.length text) ^ "tEXt" ^ text
+  ^ "\000\000\000\000" ^ String.sub static_png before_iend 12
 let jpeg_header = "\xff\xd8\xff\xe0\000\x10JFIF"
 let sized_jpeg =
   "\xff\xd8\xff\xc0\000\x0b\x08\000\x02\000\x02\x01\x01\x11\000\
@@ -313,8 +321,8 @@ let test_local_file_preserves_original () =
   with_cache (fun cache_dir run ->
     let source = Filename.concat cache_dir "original.bmp" in
     write_file source bmp_header;
-    converter_succeeds cache_dir "sips" png_header;
-    check string "converted captured local bytes" png_header
+    converter_succeeds cache_dir "sips" static_png;
+    check string "converted captured local bytes" static_png
       (unwrap (Cache.prepare_file ~run ~cache_dir source));
     check string "original source retained" bmp_header (read_file source))
 
@@ -333,7 +341,6 @@ let test_local_file_failure_and_recovery () =
 
 let test_character_frame_refuses_unrepresentable_ratio () =
   with_cache (fun cache_dir _run ->
-    let be32 n = String.init 4 (fun i -> Char.chr ((n lsr ((3 - i) * 8)) land 255)) in
     let run _ = fail "unrepresentable image must be refused before starting a decoder" in
     List.iter (fun (width, height, columns, rows) ->
       let png = png_header ^ be32 width ^ be32 height in
@@ -612,10 +619,10 @@ let test_late_native_uses_the_captured_source () =
     executable cache_dir "curl" "exit 22";
     let stale_input = Cache.input_path ~cache_dir ("payload:" ^ source) in
     write_file (Cache.png_path ~cache_dir stale_input) "stale conversion";
-    converter_succeeds cache_dir "sips" png_header;
+    converter_succeeds cache_dir "sips" static_png;
     (match Cache.decide_remote ~graphics:(Some true) ~colour:true (Cache.Remote_bounded_source source) with
      | Cache.Prepare_native_source captured ->
-         check string "conversion uses captured source" png_header
+         check string "conversion uses captured source" static_png
            (unwrap (Cache.prepare_captured_png ~run ~cache_dir captured))
      | Cache.Fetch_remote | Cache.Prepare_remote_cells _ | Cache.Draw_remote_png _
      | Cache.Draw_remote_cells _ | Cache.Open_remote_page _ | Cache.Open_remote_copy _ | Cache.Hold_remote_source _ ->
@@ -629,7 +636,7 @@ let test_native_to_colour_keeps_the_original () =
   with_cache (fun cache_dir run ->
     let url = "https://fixture.invalid/animated.gif" in
     serve cache_dir animated_gif;
-    converter_succeeds cache_dir "sips" png_header;
+    converter_succeeds cache_dir "sips" static_png;
     let body = unwrap (Cache.download ~run ~cache_dir url) in
     let source = Cache.download_bytes body in
     let png = unwrap (Cache.prepare_downloaded_png ~run ~cache_dir ~url body) in
@@ -738,8 +745,8 @@ let test_v_missing_converters_retains_input () =
       (Sys.readdir cache_dir |> Array.exists (String.starts_with ~prefix:"download_input_"));
     let body = unwrap (Cache.download ~run ~cache_dir url) in
     check string "JPEG still cached" jpeg_header (Cache.download_bytes body);
-    converter_succeeds cache_dir "sips" png_header;
-    check string "next explicit view can convert" png_header
+    converter_succeeds cache_dir "sips" static_png;
+    check string "next explicit view can convert" static_png
       (unwrap (Cache.prepare_png ~run ~cache_dir url));
     check string "no second download" "x"
       (read_file (Filename.concat cache_dir "fetches")))
@@ -903,10 +910,10 @@ let test_a_late_write_from_a_failed_converter_cannot_replace_the_fallback_frame 
       | None -> failed_output := Some output; Cache.Exited (Unix.WEXITED 1)
       | Some late ->
         check bool "the failed converter's output stays reserved" true (Sys.file_exists late);
-        write_file output png_header;
+        write_file output static_png;
         write_file late "late";
         Cache.Exited (Unix.WEXITED 0) in
-    check string "the fallback converter's frame is returned" png_header
+    check string "the fallback converter's frame is returned" static_png
       (unwrap (Cache.prepare_file ~run ~cache_dir source));
     check bool "both converter outputs are removed" false
       (Sys.readdir cache_dir |> Array.exists (String.starts_with ~prefix:"conv_attempt_")))
@@ -936,8 +943,8 @@ let test_partial_converter_failure_uses_next_converter () =
     serve cache_dir jpeg_header;
     executable cache_dir "sips"
       "for output do :; done\nprintf partial > \"$output\"\nexit 1";
-    converter_succeeds cache_dir "convert" png_header;
-    check string "partial failed output is replaced by next converter" png_header
+    converter_succeeds cache_dir "convert" static_png;
+    check string "partial failed output is replaced by next converter" static_png
       (unwrap (Cache.prepare_png ~run ~cache_dir url));
     check string "fallback retains source without refetch" "x"
       (read_file (Filename.concat cache_dir "fetches")))
@@ -950,7 +957,9 @@ let first_frame_ffmpeg cache_dir frame =
 let test_multiframe_image_after_imagemagick () =
   with_cache (fun cache_dir run ->
     let source = Filename.concat cache_dir "animated.gif" in
-    let full_frame = png_header ^ "\000\000\000\004\000\000\000\004" in
+    let full_frame =
+      String.sub static_png 0 16 ^ be32 4 ^ be32 4
+      ^ String.sub static_png 24 (String.length static_png - 24) in
     write_file source offset_gif;
     executable cache_dir "sips" "exit 127";
     executable cache_dir "convert"
@@ -965,8 +974,8 @@ let test_multiframe_image_with_ffmpeg () =
     let source = Filename.concat cache_dir "animated.gif" in
     write_file source animated_gif;
     List.iter (fun name -> executable cache_dir name "exit 127") ["sips";"convert"];
-    first_frame_ffmpeg cache_dir png_header;
-    check string "ffmpeg prepares one frame" png_header
+    first_frame_ffmpeg cache_dir static_png;
+    check string "ffmpeg prepares one frame" static_png
       (unwrap (Cache.prepare_file ~run ~cache_dir source));
     check string "the original animation remains intact" animated_gif (read_file source))
 
@@ -988,8 +997,8 @@ let test_published_frame_is_a_snapshot () =
         let fd = Unix.openfile (read_file captured_path)
             [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
         open_output := Some fd;
-        check int "fixture wrote its first frame" (String.length png_header)
-          (Unix.write_substring fd png_header 0 (String.length png_header));
+        check int "fixture wrote its first frame" (String.length static_png)
+          (Unix.write_substring fd static_png 0 (String.length static_png));
         Cache.Exited (Unix.WEXITED 0) in
       let path = match Cache.convert_to_png ~run ~cache_dir source with
         | Ok path -> path
@@ -997,7 +1006,7 @@ let test_published_frame_is_a_snapshot () =
       let fd = match !open_output with Some fd -> fd | None -> fail "no output handle" in
       ignore (Unix.lseek fd 0 Unix.SEEK_SET);
       check int "fixture wrote after the decoder returned" 4 (Unix.write_substring fd "late" 0 4);
-      check string "a late write cannot change the published frame" png_header (read_file path)))
+      check string "a late write cannot change the published frame" static_png (read_file path)))
 
 let test_explicit_refresh_replaces_a_refused_body () =
   with_cache (fun cache_dir run ->
@@ -1047,13 +1056,13 @@ let test_a_delete_during_the_conversion_does_not_take_the_frame () =
     executable cache_dir "sips"
       (Printf.sprintf
          "for output do :; done\nprintf %%b %s > \"$output\"\n/bin/rm -f %s\nprintf %%b %s >> \"$output\""
-         (shell_bytes (String.sub png_header 0 4))
+         (shell_bytes (String.sub static_png 0 4))
          (Filename.quote shared)
-         (shell_bytes (String.sub png_header 4 (String.length png_header - 4))));
+         (shell_bytes (String.sub static_png 4 (String.length static_png - 4))));
     match Cache.convert_to_png ~run ~cache_dir input with
     | Error failures -> failf "conversion failed: %s" (Cache.conversion_failure_text failures)
     | Ok path ->
-      check string "the published frame is whole" png_header (read_file path);
+      check string "the published frame is whole" static_png (read_file path);
       check string "and it is the shared path" shared path)
 
 (* A body the sniffer refuses must not be left in the cache for the next reader
@@ -1115,7 +1124,7 @@ let test_late_conversion_cannot_poison_a_refreshed_body () =
   with_cache (fun cache_dir shell_run ->
     let url = "https://fixture.invalid/concurrent.bmp" in
     let old = bmp_header ^ "old" and fresh = bmp_header ^ "fresh" in
-    let old_frame = png_header ^ "old-frame" and fresh_frame = png_header ^ "fresh-frame" in
+    let old_frame = tagged_png "old-frame" and fresh_frame = tagged_png "fresh-frame" in
     let old_path = Filename.concat cache_dir "old-body" in
     let fresh_path = Filename.concat cache_dir "fresh-body" in
     let conversions = Filename.concat cache_dir "conversions" in
@@ -1154,8 +1163,8 @@ let test_invalid_converted_cache_is_not_reused () =
     serve cache_dir bmp_header;
     executable cache_dir "sips" (Printf.sprintf
       "printf x >> %s\nprintf %%b %s > \"$6\""
-      (Filename.quote conversions) (shell_bytes png_header));
-    let view () = check string "converter frame returned" png_header
+      (Filename.quote conversions) (shell_bytes static_png));
+    let view () = check string "converter frame returned" static_png
         (unwrap (Cache.prepare_png ~run ~cache_dir url)) in
     view ();
     view ();
@@ -1166,11 +1175,14 @@ let test_invalid_converted_cache_is_not_reused () =
     let path = Filename.concat cache_dir name in
     let valid = read_file path in
     let header_only = String.sub valid 0 (String.index valid '\n' + 1) in
+    (* #47628: an entry bound to this source whose frame is not a PNG, as an
+       earlier TUI published it after a converter wrote other bytes. *)
+    let bound_not_png = header_only ^ "9\nnot-a-png" in
     List.iter (fun damaged ->
       write_file path damaged;
       view ())
-      [""; "legacy png"; header_only; String.sub valid 0 (String.length valid - 1)];
-    check string "invalid cache entries are converted again" "xxxxx"
+      [""; "legacy png"; header_only; String.sub valid 0 (String.length valid - 1); bound_not_png];
+    check string "invalid cache entries are converted again" "xxxxxx"
       (read_file conversions);
     check string "invalid frames do not trigger a new download" "x"
       (read_file (Filename.concat cache_dir "fetches"));
@@ -1179,6 +1191,52 @@ let test_invalid_converted_cache_is_not_reused () =
     Cache.invalidate_download ~cache_dir url;
     check bool "refresh removes the bound frame" false (Sys.file_exists path);
     check bool "refresh also removes the legacy frame" false (Sys.file_exists legacy))
+
+(* #47628: a converter that exits 0 after writing bytes that are not a PNG has
+   not produced a frame. The next converter runs; when none produces one,
+   nothing is published and the native decision carries the received original
+   to recovery instead of drawing those bytes. *)
+let test_a_converter_frame_that_is_not_png_is_not_published () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/loopback.gif" in
+    serve cache_dir animated_gif;
+    List.iter (fun name -> converter_succeeds cache_dir name "not-a-png")
+      [ "sips"; "convert"; "ffmpeg" ];
+    let body = unwrap (Cache.download ~run ~cache_dir url) in
+    let source = Cache.download_bytes body in
+    let prepare () = match Cache.prepare_downloaded_png ~run ~cache_dir ~url body with
+      | Ok png -> Cache.Remote_native {source;png}
+      | Error detail -> Cache.Remote_native_failed {source;detail} in
+    let prepared = prepare () in
+    check bool "no converted frame is published" false
+      (Sys.readdir cache_dir |> Array.exists (String.starts_with ~prefix:"conv_"));
+    List.iter (fun graphics ->
+      match Cache.decide_remote ~graphics ~colour:true prepared with
+      | Cache.Open_remote_page {source=Some original;_} ->
+          check string "recovery carries the received original" animated_gif original
+      | Cache.Open_remote_page {source=None;_} | Cache.Fetch_remote | Cache.Prepare_remote_cells _
+      | Cache.Prepare_native_source _ | Cache.Draw_remote_png _ | Cache.Draw_remote_cells _
+      | Cache.Open_remote_copy _ | Cache.Hold_remote_source _ ->
+          fail "bytes that are not a PNG reached the native draw")
+      [ None; Some true ];
+    converter_succeeds cache_dir "convert" static_png;
+    check bool "the next converter's PNG follows a frame that is not a PNG" true
+      (prepare () = Cache.Remote_native {source;png=static_png});
+    check string "the original was fetched once" "x"
+      (read_file (Filename.concat cache_dir "fetches")))
+
+(* #47628: the payload conversion cache is read before converting. Bytes there
+   that are not a PNG are converted again, not returned as the frame. *)
+let test_a_cached_payload_frame_that_is_not_png_is_converted_again () =
+  with_cache (fun cache_dir run ->
+    let source = Filename.concat cache_dir "original.bmp" in
+    write_file source bmp_header;
+    let cached = Cache.png_path ~cache_dir (Cache.input_path ~cache_dir ("payload:" ^ bmp_header)) in
+    write_file cached "not-a-png";
+    converter_succeeds cache_dir "sips" static_png;
+    check string "the frame is converted again" static_png
+      (unwrap (Cache.prepare_file ~run ~cache_dir source));
+    check string "the converted PNG replaces the cached bytes" static_png (read_file cached))
 
 (* ---- bounded run ---- *)
 
@@ -1345,6 +1403,10 @@ let () =
             test_late_conversion_cannot_poison_a_refreshed_body
         ; test_case "invalid converted cache is not reused" `Quick
             test_invalid_converted_cache_is_not_reused
+        ; test_case "a converter frame that is not a PNG is not published" `Quick
+            test_a_converter_frame_that_is_not_png_is_not_published
+        ; test_case "a cached payload frame that is not a PNG is converted again" `Quick
+            test_a_cached_payload_frame_that_is_not_png_is_converted_again
         ; test_case "mosaic failure retains input and can recover" `Quick
             test_mosaic_failure_retains_input_and_can_recover
         ; test_case "view retains input when all converters are missing" `Quick

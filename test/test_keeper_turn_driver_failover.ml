@@ -1456,6 +1456,167 @@ let synthetic_image () =
     ~media_type:"image/png"
     ~source:(Agent_core.Types.Url "https://example.invalid/screenshot.png")
 
+(* Capability declarations describe documents independently from mixed input. *)
+let h5_runtime_with_document_capabilities ~document ~multimodal =
+  Printf.sprintf {|
+[runtime]
+default = "media.test_model"
+[providers.media]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "media-test"
+max-context = 200000
+tools-support = true
+streaming = true
+[models.test_model.capabilities]
+supports-image-input = true
+supports-audio-input = true
+supports-document-input = %b
+supports-multimodal-inputs = %b
+[media.test_model]
+is-default = true
+max-concurrent = 1
+|} document multimodal
+
+let h5_nested_media blocks =
+  Agent_core.Types.ToolResult
+    { tool_use_id = "media-tool"
+    ; content = "original tool answer"
+    ; outcome = Agent_core.Types.Tool_succeeded
+    ; json = Some (`Assoc [ "artifact", `String "media-artifact" ])
+    ; content_blocks = Some blocks
+    }
+
+let h5_check_attempt_admitted runtime (view : Driver.attempt_input) =
+  let checkpoint_messages = match view.attempt_agent_core_checkpoint with
+    | None -> [] | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages in
+  let goal_blocks = Option.value view.attempt_goal_blocks ~default:[] in
+  match Runtime_agent.For_testing.validate_content_blocks_for_run_against_capabilities_with_checkpoint
+    ~provider_label:runtime.Runtime_instance.id
+    (Runtime_agent.input_capabilities_of_runtime runtime)
+    ~checkpoint_messages ~initial_messages:view.attempt_initial_messages ~goal_blocks with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+
+let test_h5_document_declaration_controls_every_input_surface () =
+  List.iter (fun document -> List.iter (fun multimodal ->
+    with_runtime_config (h5_runtime_with_document_capabilities ~document ~multimodal)
+      (fun () ->
+        let runtime = Option.get (Runtime.get_runtime_by_id "media.test_model") in
+        let original = h5_document_block () in
+        let goal = [original] in
+        let history = [message ~role:Agent_core.Types.Tool [h5_nested_media [original]]] in
+        let checkpoint = { (checkpoint_with_session_id "document-capabilities") with messages = history } in
+        let calls = ref 0 in
+        let view = Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
+          ~project_media:(h5_projector
+            ~read:(h5_reader_counting calls ~answer:(Ok h5_fact_document)) ())
+          ~project_images:(fun ~mode:_ _ -> Alcotest.fail "document-only input invoked image projection")
+          ~keeper_name:"document-capabilities" ~runtime_id:runtime.id
+          ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+          ~goal_blocks:(Some goal) ~goal_metadata:[] ~initial_messages:history
+          ~agent_core_checkpoint:(Some checkpoint) runtime in
+        h5_check_attempt_admitted runtime view;
+        Alcotest.(check int) "only unsupported documents use the reader"
+          (if document then 0 else 1) !calls;
+        if document then (
+          Alcotest.(check bool) "native document goal retained" true
+            (view.attempt_goal_blocks = Some goal);
+          Alcotest.(check bool) "native document history retained" true
+            (view.attempt_initial_messages = history);
+          Alcotest.(check bool) "native document checkpoint retained" true
+            (view.attempt_agent_core_checkpoint = Some checkpoint))
+        else (
+          let required = Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
+            ~checkpoint_messages:(Option.get view.attempt_agent_core_checkpoint).messages
+            ~initial_messages:view.attempt_initial_messages
+            ~goal_blocks:(Option.get view.attempt_goal_blocks) in
+          Alcotest.(check (list string)) "all unsupported document surfaces became readings" [] required)))
+    [false; true]) [false; true]
+
+let test_h5_mixed_bundle_projects_all_media_and_restores_canonical_input () =
+  let document = h5_document_block () in
+  let audio = h5_audio_block () in
+  let image = synthetic_image () in
+  let goal = [document] in
+  let original_tool = h5_nested_media [image; audio; h5_nested_media [document]] in
+  let history = [message ~role:Agent_core.Types.Tool [original_tool]] in
+  let checkpoint = { (checkpoint_with_session_id "mixed-capabilities") with messages = history } in
+  with_runtime_config (h5_runtime_with_document_capabilities ~document:true ~multimodal:false)
+    (fun () ->
+      let runtime = Option.get (Runtime.get_runtime_by_id "media.test_model") in
+      let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+      Alcotest.(check bool) "fixture accepts each media kind but refuses their bundle" true
+        (caps.supports_image_input && caps.supports_audio_input && caps.supports_document_input
+         && not caps.supports_multimodal_inputs);
+      let calls = ref 0 in
+      let view = Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
+        ~project_media:(h5_projector ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes ->
+          incr calls; Ok bytes) ())
+        ~project_images:(Masc.Keeper_vision_ingest.fallback_projector ~media_store:test_media_store
+          ~keeper_name:"mixed-capabilities" ())
+        ~keeper_name:"mixed-capabilities" ~runtime_id:runtime.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~goal_blocks:(Some goal) ~goal_metadata:[] ~initial_messages:history
+        ~agent_core_checkpoint:(Some checkpoint) runtime in
+      h5_check_attempt_admitted runtime view;
+      let projected_checkpoint = Option.get view.attempt_agent_core_checkpoint in
+      Alcotest.(check (list string)) "mixed refusal is converted to admitted text"
+        [] (Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
+          ~checkpoint_messages:projected_checkpoint.messages
+          ~initial_messages:view.attempt_initial_messages
+          ~goal_blocks:(Option.get view.attempt_goal_blocks));
+      Alcotest.(check int) "nested media share the same memo as goal and checkpoint" 2 !calls;
+      (match (List.hd view.attempt_initial_messages).content, original_tool with
+       | [Agent_core.Types.ToolResult projected], Agent_core.Types.ToolResult original ->
+         Alcotest.(check bool) "tool identity and non-media result fields retained" true
+           (projected.tool_use_id = original.tool_use_id
+            && projected.content = original.content && projected.outcome = original.outcome
+            && projected.json = original.json);
+         (match projected.content_blocks with
+          | Some [Agent_core.Types.Text image_ref; Agent_core.Types.Text audio_reading;
+              Agent_core.Types.ToolResult { content_blocks = Some [Agent_core.Types.Text document_reading]; _ }] ->
+            Alcotest.(check bool) "image reference keeps its source" true
+              (contains ~needle:"https://example.invalid/screenshot.png" image_ref);
+            Alcotest.(check bool) "nested audio keeps its fact and source digest" true
+              (contains ~needle:h5_fact_audio audio_reading
+               && contains ~needle:(Agent_core.History.stored_of_raw h5_fact_audio).sha256 audio_reading);
+            Alcotest.(check bool) "nested document keeps its fact and source digest" true
+              (contains ~needle:h5_fact_document document_reading
+               && contains ~needle:(Agent_core.History.stored_of_raw h5_fact_document).sha256 document_reading)
+          | _ -> Alcotest.fail "projection lost nested readings or their tool-result structure")
+       | _ -> Alcotest.fail "projection lost the tool result");
+      let projected_input = message ~role:Agent_core.Types.User (Option.get view.attempt_goal_blocks) in
+      let canonical_input = message ~role:Agent_core.Types.User goal in
+      let suffix = [message [Agent_core.Types.Text "read the attachments"]] in
+      let dispatched_checkpoint =
+        { projected_checkpoint with messages = projected_checkpoint.messages @ [projected_input] @ suffix } in
+      let restored = Attempt_checkpoint.project
+        ~projection:view.attempt_replay_prefix_projection
+        (Ok { (completed_run_result ()) with checkpoint = Some dispatched_checkpoint }) in
+      (match restored.Attempt_checkpoint.turn_result with
+       | Ok { Runtime_agent.checkpoint = Some canonical; _ } ->
+         Alcotest.(check bool) "checkpoint stores original nested media and current document" true
+           (canonical.messages = history @ [canonical_input] @ suffix)
+       | Ok _ -> Alcotest.fail "restored checkpoint missing"
+       | Error error -> Alcotest.fail (Agent_core.Error.to_string error)));
+  with_runtime_config (h5_runtime_with_document_capabilities ~document:true ~multimodal:true)
+    (fun () ->
+      let runtime = Option.get (Runtime.get_runtime_by_id "media.test_model") in
+      let view = Driver.For_testing.project_input_for_attempt ~media_store:test_media_store
+        ~project_media:(fun ~needs_projection:_ _ -> Alcotest.fail "capable fallback projected original media")
+        ~project_images:(fun ~mode:_ _ -> Alcotest.fail "capable fallback projected original images")
+        ~keeper_name:"mixed-capabilities" ~runtime_id:runtime.id
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~goal_blocks:(Some goal) ~goal_metadata:[] ~initial_messages:history
+        ~agent_core_checkpoint:(Some checkpoint) runtime in
+      h5_check_attempt_admitted runtime view;
+      Alcotest.(check bool) "next capable candidate receives original goal" true
+        (view.attempt_goal_blocks = Some goal);
+      Alcotest.(check bool) "next capable candidate receives original nested history" true
+        (view.attempt_initial_messages = history && view.attempt_agent_core_checkpoint = Some checkpoint))
+
 (* Per-attempt image projection: one image turn projected for the text-only
    candidate retains image references in the goal and the history and records
    delegation against that runtime; projected for the vision candidate it is
@@ -7661,6 +7822,12 @@ let () =
             "H5-S1 audio fact reaches text-only fallback"
             `Quick
             test_h5_s1_audio_fact_reaches_text_only_fallback;
+          Alcotest.test_case
+            "H5 document declarations control all input surfaces" `Quick
+            test_h5_document_declaration_controls_every_input_surface;
+          Alcotest.test_case
+            "H5 mixed bundles become text and restore canonical media" `Quick
+            test_h5_mixed_bundle_projects_all_media_and_restores_canonical_input;
           Alcotest.test_case
             "H5-S2 document fact reaches text-only fallback"
             `Quick

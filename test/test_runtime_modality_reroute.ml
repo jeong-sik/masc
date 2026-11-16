@@ -24,10 +24,11 @@ let load_list_text ~config_path =
 ;;
 
 
-let caps ?(image = false) ?(audio = false) ?(multimodal = false) () =
+let caps ?(image = false) ?(audio = false) ?(document = false) ?(multimodal = false) () =
   { Llm_provider.Capabilities.default_capabilities with
     supports_image_input = image
   ; supports_audio_input = audio
+  ; supports_document_input = document
   ; supports_multimodal_inputs = multimodal
   }
 
@@ -268,13 +269,24 @@ let test_decision_is_deterministic () =
     (decision_to_string d1)
     (decision_to_string d2)
 
-(* The shared accept predicate: a runtime admits a multi-modality turn only when
-   it supports every required modality; missing one rejects. *)
+(* Individual media support and support for a combined request are separate. *)
 let test_caps_admit_required_modalities () =
   check bool "image+audio runtime admits image+audio" true
     (Runtime_agent.For_testing.caps_admit_required_modalities
-       (caps ~image:true ~audio:true ())
+       (caps ~image:true ~audio:true ~multimodal:true ())
        [ "image"; "audio" ]);
+  check bool "separate media support does not grant mixed input" false
+    (Runtime_agent.caps_admit_required_modalities
+       (caps ~image:true ~audio:true ()) [ "image"; "audio" ]);
+  check bool "mixed unsupported input needs readings" true
+    (Runtime_agent.requires_text_media_projection
+       (caps ~image:true ~document:true ()) ~required:[ "image"; "document" ]);
+  check bool "document alone stays native when declared" true
+    (Runtime_agent.caps_admit_required_modalities
+       (caps ~document:true ()) [ "document" ]);
+  check bool "mixed support alone does not grant documents" false
+    (Runtime_agent.caps_admit_required_modalities
+       (caps ~image:true ~multimodal:true ()) [ "document" ]);
   check bool "image-only runtime rejects image+audio" false
     (Runtime_agent.For_testing.caps_admit_required_modalities
        (caps ~image:true ())
@@ -688,6 +700,7 @@ max-context = 4096
 supports-image-input = true
 supports-audio-input = true
 supports-video-input = true
+supports-document-input = true
 supports-multimodal-inputs = true
 [fixture.vision]
 |}

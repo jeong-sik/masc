@@ -5292,6 +5292,7 @@ describe('fetchRuntimeProviders', () => {
               supports_response_format_json: true,
               supports_structured_output: true,
               supports_multimodal_inputs: true,
+              supports_document_input: false,
               supports_image_input: true,
               supports_audio_input: false,
               supports_video_input: false,
@@ -5350,6 +5351,7 @@ describe('fetchRuntimeProviders', () => {
                   supports_parallel_tool_calls: true,
                   thinking_control_format: 'chat-template-kwargs',
                   supports_image_input: true,
+                  supports_document_input: true,
                   supports_audio_input: false,
                   supports_video_input: false,
                   supports_multimodal_inputs: true,
@@ -5472,6 +5474,9 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.supports_response_format_json).toBe(true)
     expect(result.providers[0]?.supports_structured_output).toBe(true)
     expect(result.providers[0]?.effective_capabilities?.supports_native_streaming).toBe(true)
+    expect(result.providers[0]?.effective_capabilities?.supports_document_input).toBe(false)
+    expect(result.providers[0]?.declared_spec?.model?.capabilities?.supports_document_input).toBe(true)
+    expect(result.providers[1]?.supports_document_input).toBeUndefined()
     expect(result.providers[0]?.supports_assistant_prefill).toBe(false)
     expect(result.providers[0]?.effective_capabilities?.supports_assistant_prefill).toBe(false)
     expect(result.providers[1]?.supports_assistant_prefill).toBeUndefined()

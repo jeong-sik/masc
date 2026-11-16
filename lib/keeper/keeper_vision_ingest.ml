@@ -316,11 +316,11 @@ let fallback_projector_with_read ?base_path ?(exclude_runtime_ids = []) ~media_s
         | Agent_core.Types.Image { source = Agent_core.Types.Url data; _ } ->
           Agent_core.Types.Text
             (Printf.sprintf
-               "[unread image URL: %s; this runtime cannot view the image]" data)
+               "[unread image URL: %s; this request carries a text reference]" data)
         | Agent_core.Types.Image { source = Agent_core.Types.File_id data; _ } ->
           Agent_core.Types.Text
             (Printf.sprintf
-               "[unread image file ID: %s; this runtime cannot view the image]" data)
+               "[unread image file ID: %s; this request carries a text reference]" data)
         | Agent_core.Types.Image { source = Agent_core.Types.Stored _;_}
         | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
         | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _

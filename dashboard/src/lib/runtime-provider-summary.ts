@@ -65,6 +65,7 @@ export function runtimeCatalogSnapshotFacts(item: DashboardRuntimeProviderSnapsh
       ? `multimodal:${item.supports_multimodal_inputs ? 'on' : 'off'}`
       : null,
     typeof item.supports_image_input === 'boolean' ? `image:${item.supports_image_input ? 'on' : 'off'}` : null,
+    typeof item.supports_document_input === 'boolean' ? `document:${item.supports_document_input ? 'on' : 'off'}` : null,
     typeof item.supports_audio_input === 'boolean' ? `audio:${item.supports_audio_input ? 'on' : 'off'}` : null,
     typeof item.supports_video_input === 'boolean' ? `video:${item.supports_video_input ? 'on' : 'off'}` : null,
     item.thinking_control_format ? `thinking-control:${item.thinking_control_format}` : null,
@@ -175,6 +176,7 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
   ])
   const inputs = nonEmptyParts([
     caps?.supports_multimodal_inputs ? 'multimodal' : null,
+    caps?.supports_document_input ? 'document' : null,
     caps?.supports_image_input ? 'image' : null,
     caps?.supports_audio_input ? 'audio' : null,
     caps?.supports_video_input ? 'video' : null,
@@ -260,6 +262,7 @@ export function runtimeCatalogEffectiveCapabilities(item: DashboardRuntimeProvid
   ])
   const input = nonEmptyParts([
     caps.supports_multimodal_inputs ? 'multimodal' : null,
+    caps.supports_document_input ? 'document' : null,
     caps.supports_image_input ? 'image' : null,
     caps.supports_audio_input ? 'audio' : null,
     caps.supports_video_input ? 'video' : null,

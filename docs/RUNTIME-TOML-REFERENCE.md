@@ -208,11 +208,24 @@ different from an unwritten key (#37435).
   warning).
 - Feature booleans: `supports-tool-choice`, `supports-required-tool-choice`,
   `supports-named-tool-choice`, `supports-parallel-tool-calls`,
-  `supports-image-input`, `supports-audio-input`, `supports-video-input`,
+  `supports-image-input`, `supports-document-input`, `supports-audio-input`, `supports-video-input`,
   `supports-multimodal-inputs`, `supports-response-format-json`,
   `supports-structured-output`, `supports-system-prompt`,
   `supports-assistant-prefill`, `supports-prompt-caching`, `supports-top-k`,
   `supports-min-p`, `supports-seed`, `emits-usage-tokens`.
+
+Media keys are opt-in: an absent key does not grant that modality.
+`supports-document-input` declares native document input independently of
+`supports-multimodal-inputs`, which declares combined media input. A PDF alone
+needs document support; a PDF plus an image needs both individual flags and
+the combined-input flag. The materialized API configuration carries the same
+document decision used by admission and request serialization. Native Ollama
+and the official-client transports cannot acquire document support from TOML.
+
+When the candidate cannot carry a document or mixed request, Keeper uses its
+[media reading projection](KEEPER-MEDIA-FALLBACK-H5.md), retaining the canonical
+attachment. Declaring support does not prove that an endpoint accepts the file;
+verify the configured model and wire before enabling it.
 
 ## 4. `[<provider>.<model>]` — bindings
 

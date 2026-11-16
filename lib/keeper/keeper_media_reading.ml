@@ -339,19 +339,25 @@ let project projector ~needs_projection blocks =
            in
            Agent_core.Types.text_block text)
   in
-  let projected =
-    List.map
-      (fun (block : Agent_core.Types.content_block) ->
-        match block with
-        | Agent_core.Types.Audio { media_type; source } ->
-          project_one ~kind:Audio ~media_type ~source block
-        | Agent_core.Types.Document { media_type; source } ->
-          project_one ~kind:Document ~media_type ~source block
-        | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
-        | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-        | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _ -> block)
-      blocks
+  let rec project_block (block : Agent_core.Types.content_block) =
+    match block with
+    | Agent_core.Types.Audio { media_type; source } ->
+      project_one ~kind:Audio ~media_type ~source block
+    | Agent_core.Types.Document { media_type; source } ->
+      project_one ~kind:Document ~media_type ~source block
+    | Agent_core.Types.ToolResult
+        { tool_use_id; content; outcome; json; content_blocks = Some nested } ->
+      let content_blocks = match List.map project_block nested with
+        | [] -> None
+        | blocks -> Some blocks in
+      Agent_core.Types.ToolResult { tool_use_id; content; outcome; json; content_blocks }
+    | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+    | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+    | Agent_core.Types.ToolUse _
+    | Agent_core.Types.ToolResult { content_blocks = None; _ }
+    | Agent_core.Types.Image _ -> block
   in
+  let projected = List.map project_block blocks in
   projected, List.rev !replaced
 ;;
 

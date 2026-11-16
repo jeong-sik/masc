@@ -4109,7 +4109,7 @@ let test_runtime_multimodal_gate_allows_supported_image () =
   | Error err -> fail ("expected image-capable provider to pass: "
                        ^ Agent_core.Error.to_string err)
 
-let test_runtime_multimodal_gate_requires_multimodal_for_document () =
+let test_runtime_multimodal_gate_requires_document_capability () =
   let blocks =
     [
       Agent_core.Types.document_block
@@ -4119,14 +4119,14 @@ let test_runtime_multimodal_gate_requires_multimodal_for_document () =
   in
   let rejected =
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
-      ~provider_label:"test:image-only"
-      (multimodal_caps ~image:true ())
+      ~provider_label:"test:multimodal-without-documents"
+      (multimodal_caps ~image:true ~multimodal:true ())
       blocks
   in
   let accepted =
     Runtime_agent.For_testing.validate_content_blocks_against_capabilities
-      ~provider_label:"test:multimodal"
-      (multimodal_caps ~multimodal:true ())
+      ~provider_label:"test:document-only"
+      { (multimodal_caps ()) with supports_document_input = true }
       blocks
   in
   (match rejected with
@@ -4137,11 +4137,11 @@ let test_runtime_multimodal_gate_requires_multimodal_for_document () =
          (String_util.string_contains_substring
             ~needle:"unsupported document input"
             detail)
-   | Ok () -> fail "expected document to require multimodal capability"
+   | Ok () -> fail "expected document to require document capability"
    | Error err -> fail ("unexpected error shape: " ^ Agent_core.Error.to_string err));
   match accepted with
   | Ok () -> ()
-  | Error err -> fail ("expected multimodal provider to accept document: "
+  | Error err -> fail ("expected document-capable provider to accept document: "
                        ^ Agent_core.Error.to_string err)
 
 let test_surface_context_to_instructions_formats_copilot_context () =
@@ -4613,8 +4613,8 @@ let () =
             test_runtime_multimodal_gate_rejects_unsupported_image;
           test_case "runtime multimodal gate allows supported image" `Quick
             test_runtime_multimodal_gate_allows_supported_image;
-          test_case "runtime multimodal gate requires multimodal for document" `Quick
-            test_runtime_multimodal_gate_requires_multimodal_for_document;
+          test_case "runtime document gate uses document capability" `Quick
+            test_runtime_multimodal_gate_requires_document_capability;
           test_case "surface context formats into instructions" `Quick
             test_surface_context_to_instructions_formats_copilot_context;
           test_case "surface context ignores empty fields" `Quick

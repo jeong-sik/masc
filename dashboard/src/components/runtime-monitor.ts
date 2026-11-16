@@ -285,6 +285,7 @@ function runtimeDeclaredInputText(provider: DashboardRuntimeProviderSnapshot): s
   return textList([
     flagText(caps.supports_multimodal_inputs, 'multimodal'),
     flagText(caps.supports_image_input, 'image'),
+    flagText(caps.supports_document_input, 'document'),
     flagText(caps.supports_audio_input, 'audio'),
     flagText(caps.supports_video_input, 'video'),
   ])
@@ -321,6 +322,7 @@ function runtimeEffectiveInputText(provider: DashboardRuntimeProviderSnapshot): 
   return textList([
     flagText(caps.supports_multimodal_inputs, 'multimodal'),
     flagText(caps.supports_image_input, 'image'),
+    flagText(caps.supports_document_input, 'document'),
     flagText(caps.supports_audio_input, 'audio'),
     flagText(caps.supports_video_input, 'video'),
     caps.modality_priority ? `modality ${caps.modality_priority}` : null,

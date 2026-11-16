@@ -98,6 +98,7 @@ let test_unwritten_media_key_stays_closed () =
      the image one, and the rest must NOT open with it: media input is the one
      place MASC's model spec is the SSOT and absence means no. *)
   check bool "the stated media key is honored" true caps.Llm_provider.Capabilities.supports_image_input;
+  check bool "an unstated document key stays closed" false caps.supports_document_input;
   check
     bool
     "an unstated media key stays closed"

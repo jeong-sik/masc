@@ -1527,6 +1527,7 @@ let effective_capabilities_json (rt : Runtime_instance.t) =
       ; "supports_structured_output", `Bool caps.supports_structured_output
       ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
       ; "supports_image_input", `Bool caps.supports_image_input
+      ; "supports_document_input", `Bool caps.supports_document_input
       ; "supports_audio_input", `Bool caps.supports_audio_input
       ; "supports_video_input", `Bool caps.supports_video_input
       ; "modality_priority", `String (modality_priority_wire caps.modality_priority)
@@ -1692,6 +1693,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
     ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs
     ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+      ; "supports_document_input", Json_util.bool_opt_to_json caps.supports_document_input
     ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
     ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
     ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)

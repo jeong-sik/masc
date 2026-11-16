@@ -241,6 +241,9 @@ type model_capabilities =
   ; reasoning_streaming_format : reasoning_streaming_format option
       (** Exact streaming side-channel for this transport binding. *)
   ; supports_image_input : bool option
+  ; supports_document_input : bool option
+      (** Native document input. [None] withholds document input, as for other
+          media declarations. The selected transport must also represent it. *)
   ; supports_audio_input : bool option
   ; supports_video_input : bool option
   ; supports_multimodal_inputs : bool option

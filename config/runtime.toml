@@ -506,6 +506,7 @@ path = "/api/tags"
 # Turn these on together with --mmproj on the server, not before.
 # supports-image-input = false
 # supports-multimodal-inputs = false
+# supports-document-input = false # native documents; independent of mixed modalities
 # supports-system-prompt = true
 # supports-seed = true
 # supports-top-k = true
@@ -537,6 +538,7 @@ path = "/api/tags"
 # supports-structured-output = true
 # supports-image-input = false
 # supports-multimodal-inputs = false
+# supports-document-input = false # native documents; independent of mixed modalities
 # supports-system-prompt = true
 # supports-seed = true
 # supports-top-k = true
@@ -568,6 +570,7 @@ path = "/api/tags"
 # supports-structured-output = false
 # supports-image-input = false
 # supports-multimodal-inputs = false
+# supports-document-input = false # native documents; independent of mixed modalities
 # supports-system-prompt = true
 # supports-seed = true
 # supports-top-k = true
@@ -1812,8 +1815,8 @@ streaming = true
 # tool_choice (agent_core backend_ollama.ml:24). The catalog row for this model
 # names no supports_tool_choice, so the ollama preset's false is what reaches the
 # wire. A supports-tool-choice line in this block would not change that: for a
-# model the catalog names, runtime_adapter reads only thinking-control-format,
-# reasoning-streaming-format and max-output-tokens from here. Re-enabling needs a
+# model the catalog names, runtime_adapter reads reasoning/output controls and
+# document admission from here; supports-tool-choice remains a catalog decision. Re-enabling needs a
 # serializer path + model-side proof, written on the catalog row.
 thinking-control-format = "chat_template_token"
 thinking-control-token = "<|think|>"
@@ -2208,8 +2211,8 @@ supports-multimodal-inputs = false
 # wide as it is tall" on this wire on 2026-08-29.
 # supports-multimodal-inputs follows every other vision row on this provider,
 # which pairs it with image input. /api/show evidences vision only, so the flag
-# is convention rather than measurement here — it stays a generic document flag
-# with no per-provider file-input contract behind it (#27908).
+# is convention rather than measurement here. It does not grant document input;
+# that requires supports-document-input and a wire with a native document part.
 [models.ollama-cloud-glm-5-3-flash]
 reasoning-uncontrolled = true
 api-name = "glm-5.3-flash"

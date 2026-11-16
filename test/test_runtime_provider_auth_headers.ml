@@ -1230,6 +1230,105 @@ let with_model_catalog toml f =
     (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Some (catalog)) ~providers:(None)));
     Fun.protect ~finally:Llm_provider.Catalog_snapshot.reset f
 
+(* The declaration is consumed by the materialized wire configuration as well
+   as Keeper admission: multimodal=true alone must not send an unread PDF. *)
+let materialized_document_config ~protocol ~capabilities_table =
+  let toml = Printf.sprintf {|
+[providers.runpod_mtp]
+protocol = "%s"
+endpoint = "https://example.invalid/v1"
+[providers.runpod_mtp.credentials]
+type = "inline"
+value = "fixture-key"
+[models.qwen]
+api-name = "qwen"
+max-context = 8192
+tools-support = true
+%s
+[runpod_mtp.qwen]
+|} protocol capabilities_table in
+  let runtime = match Runtime_toml.parse_string toml with
+    | Ok runtime -> runtime
+    | Error errors -> failf "document fixture did not parse: %s"
+        (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) ->
+           e.path ^ ": " ^ e.message) errors)) in
+  match runtime.bindings with
+  | [ binding ] ->
+    (match provider_config_for_binding runtime binding with
+     | Ok config -> config
+     | Error detail -> failf "document fixture did not materialize: %s" detail)
+  | _ -> fail "document fixture must have one binding"
+
+let test_document_declaration_reaches_catalogued_and_uncatalogued_wire () =
+  let check_scope catalog = with_model_catalog catalog (fun () ->
+    List.iter (fun (capabilities_table, expected) ->
+      let config = materialized_document_config
+        ~protocol:"openai-compatible-http" ~capabilities_table in
+      let caps = match Llm_provider.Provider_config.capabilities_for_config_model config with
+        | Some caps -> caps
+        | None -> fail "document declaration lost materialized capabilities" in
+      check bool "wire capability matches document declaration" expected caps.supports_document_input;
+      let open Llm_provider.Types in
+      let document = document_block ~media_type:"application/pdf" ~source:(Base64 "JVBERi0=") in
+      let message = { role = User; content = [document]; name = None;
+                      tool_call_id = None; origin = Conversation; metadata = [] } in
+      let body = Llm_provider.Backend_openai.build_request_assoc ~config ~messages:[message] () in
+      let rows = Yojson.Safe.Util.(body |> member "messages" |> to_list) in
+      let content = Yojson.Safe.Util.(List.hd (List.rev rows) |> member "content") in
+      if expected then
+        let parts = Yojson.Safe.Util.to_list content in
+        check bool "native document bytes reach the file part" true
+          (List.exists (fun part ->
+             Yojson.Safe.Util.member "type" part = `String "file"
+             && Yojson.Safe.Util.(part |> member "file" |> member "file_data")
+                = `String "data:application/pdf;base64,JVBERi0=") parts)
+      else
+        check bool "an undeclared PDF has no native file part" false
+          (match content with
+           | `List parts -> List.exists (fun part ->
+               Yojson.Safe.Util.member "type" part = `String "file") parts
+           | `String _ -> false
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+           | `Assoc _ ->
+             fail "unexpected serialized user content"))
+      [ "", false
+      ; "[models.qwen.capabilities]\nsupports-multimodal-inputs = true", false
+      ; "[models.qwen.capabilities]\nsupports-document-input = false", false
+      ; "[models.qwen.capabilities]\nsupports-document-input = true", true ]) in
+  (* The catalog declares document support so absence must actively narrow it.
+     The provider preset case exercises a model with no matching catalog row. *)
+  check_scope {|
+[[models]]
+model_id = "qwen"
+provider_name = "runpod_mtp"
+max_context_tokens = 8192
+supports_document_input = true
+|};
+  check_scope {|
+[[providers]]
+id = "runpod_mtp"
+kind = "openai_compat"
+base_url = "https://example.invalid/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
+|}
+
+let test_native_ollama_cannot_enable_document_input () =
+  with_model_catalog {|
+[[models]]
+model_id = "qwen"
+provider_name = "runpod_mtp"
+max_context_tokens = 8192
+supports_document_input = true
+|} (fun () ->
+    let config = materialized_document_config ~protocol:"ollama-http"
+      ~capabilities_table:"[models.qwen.capabilities]\nsupports-document-input = true" in
+    match Llm_provider.Provider_config.capabilities_for_config_model config with
+    | None -> fail "Ollama document fixture lost capabilities"
+    | Some caps -> check bool "native wire cannot acquire a document part" false
+        caps.supports_document_input)
+
 let test_adapter_stamps_declared_provider_id () =
   check
     (option string)
@@ -3955,6 +4054,14 @@ let () =
             "max-only runtime capability overrides provider base on wire"
             `Quick
             test_runtime_max_only_capability_overrides_provider_base_on_wire
+        ; test_case
+            "document declaration reaches catalogued and uncatalogued wire"
+            `Quick
+            test_document_declaration_reaches_catalogued_and_uncatalogued_wire
+        ; test_case
+            "native Ollama cannot enable document input"
+            `Quick
+            test_native_ollama_cannot_enable_document_input
         ; test_case
             "embedded GLM vision catalog ceiling reaches wire"
             `Quick

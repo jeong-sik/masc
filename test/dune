@@ -2865,6 +2865,7 @@
 (include stanzas/test_sandbox_image_catalog.inc)
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_credential_expiry.inc)
+(include stanzas/test_csp_nonce.inc)
 (include stanzas/test_auth_token_prune_transaction.inc)
 (include stanzas/test_auth_token_rotation_transaction.inc)
 (include stanzas/test_auth_file_backed_transaction.inc)

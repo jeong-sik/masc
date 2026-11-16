@@ -63,7 +63,7 @@ type t =
   ; draw : unit -> string
         (** 32 random bytes as lowercase hex ({!Random_id.hex} in the server):
             user ids, namespaces and session ids. A page draws its nonce with
-            {!Account_page.Nonce.draw}. *)
+            {!Csp_nonce.draw}. *)
   }
 
 (** [POST /auth/oidc/start] and [POST /auth/github/start].

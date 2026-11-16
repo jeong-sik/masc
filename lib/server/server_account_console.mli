@@ -48,5 +48,5 @@ val policy : string
 val unreadable : unit -> string option
 
 (** Registers the three routes. The page that says the console cannot be
-    opened draws the nonce of its sheet ({!Account_page.Nonce.draw}). *)
+    opened draws the nonce of its sheet ({!Csp_nonce.draw}). *)
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

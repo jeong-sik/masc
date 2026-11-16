@@ -95,10 +95,13 @@ val session_path : string
     releases its controller under one Auth transaction; true explicitly
     reconnects the still-valid invitation without claiming control. *)
 
-val page : nonce:string -> string
+(* HIGH-RISK-UNREVIEWED: the page holds a bearer, and the nonce decides which
+   inline script a browser runs with it. Only {!Csp_nonce.draw} makes one. *)
+
+val page : nonce:Csp_nonce.t -> string
 (** The page, with [nonce] on its one script and one style tag. *)
 
-val csp_header : string -> string
+val csp_header : Csp_nonce.t -> string
 (** The content-security-policy value for [nonce]. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

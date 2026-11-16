@@ -11,7 +11,7 @@ let policy ~nonce =
   Printf.sprintf
     "default-src 'none'; script-src %s; %s; connect-src 'self'; form-action 'self' %s; \
      base-uri 'none'; frame-ancestors 'none'"
-    (Account_page.Nonce.source nonce)
+    (Csp_nonce.source nonce)
     (Account_page.style_source ~nonce)
     github_authorize_origin
 ;;
@@ -39,7 +39,7 @@ let page ~nonce ~title ~body ~script =
            [ "<main>"
            ; body
            ; "</main>"
-           ; Printf.sprintf "<script %s>%s</script>" (Account_page.Nonce.attribute nonce) script
+           ; Printf.sprintf "<script %s>%s</script>" (Csp_nonce.attribute nonce) script
            ])
   }
 ;;

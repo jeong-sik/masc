@@ -40,7 +40,7 @@ let http_status = function
   | `Unavailable -> `Service_unavailable
 ;;
 
-let handle_post state req reqd body =
+let handle_post ~sw ~clock state req reqd body =
   let name = keeper_name req in
   if String.equal name ""
   then Http.Response.json_value ~status:`Bad_request (error_json "keeper name is required") reqd
@@ -75,6 +75,26 @@ let handle_post state req reqd body =
            (Operator.error_to_yojson error)
            reqd
        | Ok outcome ->
+         let outcome =
+           match request, outcome with
+           | Operator.Resume_owner resume_request, Operator.Resumed success ->
+             Operator.Resumed
+               (Server_dashboard_http_keeper_api_lifecycle_post
+                .complete_resume_missing_registry_lane
+                  ~sw
+                  ~clock
+                  state
+                  ~config
+                  ~name
+                  ~request:resume_request
+                  success)
+           | ( ( Operator.Resume_owner _
+               | Operator.Cancel_pending _
+               | Operator.Transfer_owner _
+               | Operator.Ack_source_terminal _ )
+             , _ ) ->
+             outcome
+         in
          Log.Dashboard.info
            "paused-work operator action committed: keeper=%s projection_complete=%b"
            name

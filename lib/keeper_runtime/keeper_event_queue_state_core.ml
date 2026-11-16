@@ -134,6 +134,16 @@ let revision state = state.revision
 let pending_selections state = state.pending_entries
 let last_non_immediate_served state = state.last_non_immediate_served
 
+let intake_ordered_selections state =
+  List.stable_sort
+    (fun left right ->
+       Keeper_event_queue.compare_selection_urgency
+         ~last_non_immediate_served:state.last_non_immediate_served
+         left.source.urgency
+         right.source.urgency)
+    state.pending_entries
+;;
+
 let non_immediate_urgency = function
   | (Keeper_event_queue.Normal | Keeper_event_queue.Low) as urgency ->
     Some urgency
@@ -433,18 +443,27 @@ let project_accepted_transfer ?admitted_at (transfer : accepted_transfer) state 
     in
     (match matching with
      | [] ->
+       let inserted =
+         { source = transfer.source
+         ; admitted_revision = state.revision
+         ; arrival = state.next_arrival
+         ; checkpoint_retentions = 0
+         ; first_admitted_at = admitted_at
+         }
+       in
+       let pending_entries =
+         List.stable_sort
+           (fun left right ->
+              Keeper_event_queue.compare_selection_urgency
+                ~last_non_immediate_served:None
+                left.source.urgency
+                right.source.urgency)
+           (state.pending_entries @ [ inserted ])
+       in
        Ok
          ( { state with
              next_arrival = Int64.succ state.next_arrival
-           ; pending_entries =
-               state.pending_entries
-               @ [ { source = transfer.source
-                   ; admitted_revision = state.revision
-                   ; arrival = state.next_arrival
-                   ; checkpoint_retentions = 0
-                   ; first_admitted_at = admitted_at
-                   }
-                 ]
+           ; pending_entries
            ; accepted_transfer_projections =
                state.accepted_transfer_projections @ [ transfer ]
            }
@@ -1112,6 +1131,30 @@ let turn_terminal_operation_id
     "turn-attempt-terminal:%Ld:%s"
     admitted_revision
     (source_snapshot_ref source)
+;;
+
+let schedule_cancel_operation_id
+      ~keeper_name
+      ~admitted_revision
+      source
+  =
+  Printf.sprintf
+    "schedule-cancel:%s:%s:%Ld"
+    keeper_name
+    (source_snapshot_ref source)
+    admitted_revision
+;;
+
+let is_schedule_cancel_cancellation
+      ~keeper_name
+      (cancellation : accepted_cancellation)
+  =
+  String.equal
+    cancellation.operator_operation_id
+    (schedule_cancel_operation_id
+       ~keeper_name
+       ~admitted_revision:cancellation.source_incarnation
+       cancellation.source)
 ;;
 
 let ack_pending_source_terminal

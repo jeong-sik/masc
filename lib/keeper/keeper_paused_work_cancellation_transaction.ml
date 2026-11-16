@@ -72,8 +72,54 @@ let replay_committed ~base_path ~keeper_name replay =
   match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
   | Error detail -> Error (Queue_replay_failed detail)
   | Ok state ->
-    replay state
-    |> Result.map_error (fun detail -> Queue_replay_failed detail)
+    (match replay state with
+     | Error detail -> Error (Queue_replay_failed detail)
+     | Ok None -> Ok `Absent
+     | Ok (Some (receipt : Keeper_event_queue_state.transition_receipt)) ->
+       (match Keeper_event_queue_state.transition_outbox state with
+        | [ entry ]
+          when String.equal
+                 entry.receipt.transition_id
+                 receipt.transition_id ->
+          Ok (`Unprojected receipt)
+        | [] | [ _ ] | _ :: _ :: _ -> Ok (`Projected receipt)))
+;;
+
+let project_transition_outbox_if_pending ~base_path ~keeper_name result =
+  let project (receipt : Keeper_event_queue_state.transition_receipt) =
+    match
+      Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+        ~base_path
+        ~keeper_name
+        ~expected_transition_id:receipt.transition_id
+    with
+    | Ok () -> result
+    | Error detail ->
+      Keeper_registry_event_queue.Transition_committed_followup_failed
+        { receipt; stage = `Projection; detail }
+  in
+  match result with
+  | Keeper_registry_event_queue.Transition_committed_followup_failed _ -> result
+  | Keeper_registry_event_queue.Transition_applied receipt -> project receipt
+  | Keeper_registry_event_queue.Transition_already_applied receipt ->
+    (match
+       Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+     with
+     | Error detail ->
+       Keeper_registry_event_queue.Transition_committed_followup_failed
+         { receipt; stage = `Projection; detail }
+     | Ok state ->
+       (match Keeper_event_queue_state.transition_outbox state with
+        | [ entry ]
+          when String.equal entry.receipt.transition_id receipt.transition_id ->
+          project receipt
+        | [] | [ _ ] -> result
+        | _ :: _ :: _ ->
+          Keeper_registry_event_queue.Transition_committed_followup_failed
+            { receipt
+            ; stage = `Projection
+            ; detail = "event queue transition outbox cardinality invalid"
+            }))
 ;;
 
 let validate_durable_owner config ~keeper_name =
@@ -144,12 +190,24 @@ let cancel_with_lifecycle
       (try
          match replay_committed ~base_path ~keeper_name replay with
          | Error cause -> finish token (Error cause)
-         | Ok (Some receipt) ->
+         | Ok (`Projected receipt) ->
            finish token (Ok (Keeper_registry_event_queue.Transition_already_applied receipt))
-         | Ok None ->
+         | Ok (`Unprojected receipt) ->
            finish
              token
-             (run config ~keeper_name commit)
+             (Ok
+                (project_transition_outbox_if_pending
+                   ~base_path
+                   ~keeper_name
+                   (Keeper_registry_event_queue.Transition_already_applied receipt)))
+         | Ok `Absent ->
+           finish
+             token
+             (run config ~keeper_name commit
+              |> Result.map
+                   (project_transition_outbox_if_pending
+                      ~base_path
+                      ~keeper_name))
        with
        | exn ->
          let release = Keeper_lifecycle_reservation.release token in
@@ -165,12 +223,12 @@ let cancel_with_lifecycle
   in
   match replay_committed ~base_path ~keeper_name replay with
   | Error cause -> Error (Failed { cause; reservation_release = None })
-  | Ok (Some receipt) ->
+  | Ok (`Projected receipt) ->
     Ok
       { transition = Keeper_registry_event_queue.Transition_already_applied receipt
       ; reservation_release = None
       }
-  | Ok None ->
+  | Ok (`Unprojected _ | `Absent) ->
     (match
        Keeper_owner_registry.run_maintenance_if_idle
          ~base_path

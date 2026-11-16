@@ -1244,7 +1244,7 @@ let heartbeat_event_intake
       , hard_error )
     =
     match
-      Keeper_registry_event_queue.pending_selections_result
+      Keeper_registry_event_queue.intake_selections_result
         ~base_path
         keeper_name
     with

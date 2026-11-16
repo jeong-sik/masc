@@ -501,17 +501,22 @@ let transition_prior_receipt_has_standing_asker
       ~keeper_name
       (receipt : Keeper_event_queue_state.transition_receipt)
   =
-  let operator_operation_id =
-    match receipt.transition with
-    | Keeper_event_queue_state.Cancel_accepted cancellation ->
-        cancellation.operator_operation_id
-    | Transfer_accepted transfer -> transfer.operator_operation_id
-    | Ack_source_terminal terminal -> terminal.operator_operation_id
-  in
-  Keeper_paused_work_disposition_receipt.durable_receipt_exists
-    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
-    ~keeper_name
-    ~operator_operation_id
+  match receipt.transition with
+  | Keeper_event_queue_state.Cancel_accepted cancellation ->
+    not
+      (Keeper_event_queue_state.is_schedule_cancel_cancellation
+         ~keeper_name
+         cancellation)
+  | Transfer_accepted transfer ->
+    Keeper_paused_work_disposition_receipt.durable_receipt_exists
+      ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+      ~keeper_name
+      ~operator_operation_id:transfer.operator_operation_id
+  | Ack_source_terminal terminal ->
+    Keeper_paused_work_disposition_receipt.durable_receipt_exists
+      ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+      ~keeper_name
+      ~operator_operation_id:terminal.operator_operation_id
 ;;
 
 let project_event_queue_transition_outbox_result

@@ -154,6 +154,24 @@ val pending : t -> Keeper_event_queue.t
 val pending_selections : t -> pending_selection list
 (** FIFO pending entries with their exact source incarnation authority. *)
 
+val intake_ordered_selections : t -> pending_selection list
+(** Pending entries ordered under strict [Immediate] priority and deterministic
+    [Normal]/[Low] alternation from {!last_non_immediate_served}, preserving
+    within-lane FIFO order. *)
+
+val schedule_cancel_operation_id :
+  keeper_name:string ->
+  admitted_revision:int64 ->
+  Keeper_event_queue.stimulus ->
+  string
+(** Deterministic operation ID for internal schedule-wake cancellations. *)
+
+val is_schedule_cancel_cancellation :
+  keeper_name:string -> accepted_cancellation -> bool
+(** [true] iff [cancellation] carries the deterministic internal schedule-cancel
+    operation ID for its exact [keeper_name], [source_incarnation] and
+    [source]. *)
+
 val last_non_immediate_served : t -> Keeper_event_queue.urgency option
 (** Non-immediate urgency currently held in this state ([Normal] or [Low]),
     used by {!peek_when} for lane preference. On snapshot

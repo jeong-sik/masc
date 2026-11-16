@@ -58,10 +58,13 @@ let failure_kind_json : A.tool_failure_kind -> Yojson.Safe.t = function
   | Validation_error -> `String "validation_error" | Recoverable_tool_error -> `String "recoverable_tool_error"
   | Non_retryable_tool_error -> `String "non_retryable_tool_error" | Reported_tool_error -> `String "reported_tool_error"
   | Unattributed_tool_error -> `String "unattributed_tool_error"
+  | Writer_exited_tool_error -> `String "writer_exited_tool_error"
 let failure_kind_of_json json = let* s=text json in match s with
   | "validation_error" -> Ok A.Validation_error | "recoverable_tool_error" -> Ok A.Recoverable_tool_error
   | "non_retryable_tool_error" -> Ok A.Non_retryable_tool_error | "reported_tool_error" -> Ok A.Reported_tool_error
-  | "unattributed_tool_error" -> Ok A.Unattributed_tool_error | _ -> Error "Unknown captured tool failure provenance"
+  | "unattributed_tool_error" -> Ok A.Unattributed_tool_error
+  | "writer_exited_tool_error" -> Ok A.Writer_exited_tool_error
+  | _ -> Error "Unknown captured tool failure provenance"
 let outcome_json : A.tool_result_outcome -> Yojson.Safe.t = function
   | Tool_succeeded -> `Assoc ["kind",`String "succeeded"]
   | Tool_failed failure -> `Assoc ["kind",`String "failed";"failure_kind",failure_kind_json failure.failure_kind;

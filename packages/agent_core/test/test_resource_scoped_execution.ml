@@ -515,7 +515,8 @@ let test_unattempted_sibling_preserves_original_wave () =
              match row.outcome with
              | Tool_failed { failure_kind=Validation_error; _ } -> true
              | Tool_failed {failure_kind=(Recoverable_tool_error | Non_retryable_tool_error
-                 | Reported_tool_error | Unattributed_tool_error); _}
+                 | Reported_tool_error | Unattributed_tool_error
+                 | Writer_exited_tool_error); _}
              | Tool_succeeded -> false) report.completed_results)
        | Error _ -> fail "current Terminal mix lost its typed rejection");
       List.iter (fun changed_right ->

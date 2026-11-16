@@ -254,7 +254,8 @@ let captured_tool_payload_fields fields =
            exact_fields ["kind";"failure_kind";"error_class"] outcome
            && (match string_field "failure_kind" outcome with
                | Some ("validation_error" | "recoverable_tool_error" | "non_retryable_tool_error"
-                 | "reported_tool_error" | "unattributed_tool_error") -> true
+                 | "reported_tool_error" | "unattributed_tool_error"
+                 | "writer_exited_tool_error") -> true
                | Some _ | None -> false)
            && (match List.assoc "error_class" outcome with
                | `Null | `String ("transient" | "deterministic" | "unknown") -> true

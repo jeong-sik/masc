@@ -212,7 +212,14 @@ def read_staged(path, text, step, destination, suffix):
 def read_release_workflow(path):
     """.github/workflows/release-build.yml: every executable list of the release job."""
     text = path.read_text()
-    macos_targets = read_build_targets(path, text, 'Build (macOS)')
+    build = step_script(path, text, 'Build (macOS)')
+    if '"$MASC_MACOS_EXECUTABLES"' not in build or '"${binaries[@]}"' not in build:
+        raise AssertionError(f'{path}: macOS build does not consume MASC_MACOS_EXECUTABLES')
+    declaration = re.search(
+        r'^      MASC_MACOS_EXECUTABLES: >-\n((?:        [^\n]+\n)+)', text, re.M)
+    if declaration is None:
+        raise AssertionError(f'{path}: no folded MASC_MACOS_EXECUTABLES declaration')
+    macos_targets = _checked(path, 'macOS build targets', declaration.group(1).split())
     packaged = read_staged(path, text, 'Package binary', 'dist', MATRIX_SUFFIX)
     dist_name = re.compile(r'dist/([a-z0-9-]+)-' + re.escape(MATRIX_SUFFIX))
     chmod = [name

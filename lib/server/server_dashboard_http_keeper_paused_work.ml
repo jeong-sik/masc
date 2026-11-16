@@ -92,7 +92,10 @@ let handle_post ~sw ~clock state req reqd body =
                | Operator.Cancel_pending _
                | Operator.Transfer_owner _
                | Operator.Ack_source_terminal _ )
-             , _ ) ->
+             , ( Operator.Resumed _
+               | Operator.Cancelled _
+               | Operator.Transferred _
+               | Operator.Source_terminal_acked _ ) ) ->
              outcome
          in
          Log.Dashboard.info

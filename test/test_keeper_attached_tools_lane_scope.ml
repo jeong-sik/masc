@@ -250,11 +250,10 @@ let test_the_official_client_lanes_get_the_tools_themselves () =
       [ "atlassian_jira_search"; "atlassian_confluence_search" ])
 ;;
 
-(* An attached-service answer is held to the same Claude Code ceiling as a
-   built-in result (Keeper_identity_tools.tool_result_of_call), so it declares
-   that ceiling. Left undeclared, the client keeps its own threshold, which
-   is not the bound the answer was held to. *)
-let test_an_attached_tool_declares_the_ceiling_its_answer_is_held_to () =
+(* Attached text is externalized at the lane ceiling, but a result can also
+   carry native image bytes. Do not advertise the text threshold as a bound
+   on that complete result. Built-in and composition bounds stay intact. *)
+let test_attached_media_does_not_claim_a_text_only_result_bound () =
   with_bundle (fun bundle ->
     let sent = tool_names bundle.Keeper_tools_agent_core.tools in
     let bounds = bundle.Keeper_tools_agent_core.result_bounds in
@@ -262,8 +261,8 @@ let test_an_attached_tool_declares_the_ceiling_its_answer_is_held_to () =
       (fun name ->
          check
            (option int)
-           (Printf.sprintf "%s declares the Claude Code ceiling its answer is held to" name)
-           (Some Runtime_execution.claude_code_inline_result_bytes)
+           (Printf.sprintf "%s does not claim a total bound from its text threshold" name)
+           None
            (List.assoc_opt name bounds))
       [ "atlassian_jira_search"; "atlassian_confluence_search" ];
     check bool "the built-ins declare their bound" true (bounds <> []);
@@ -916,9 +915,9 @@ let () =
             `Quick
             test_the_agent_core_lane_gets_the_listing_instead
         ; test_case
-            "an attached tool declares the ceiling its answer is held to"
+            "attached media does not claim a text-only result bound"
             `Quick
-            test_an_attached_tool_declares_the_ceiling_its_answer_is_held_to
+            test_attached_media_does_not_claim_a_text_only_result_bound
         ; test_case
             "holds back a built-in that declares deferral"
             `Quick

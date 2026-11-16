@@ -419,6 +419,26 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
 
 let latest_tool_call_json ~(keeper_name : string) =
   Keeper_tool_call_log.read_latest ~keeper_name ()
+  |> Option.map (function
+    | `Assoc fields ->
+      (* Status is also a Keeper tool. The audit ledger owns received MCP
+         envelopes, but exposing their handles here would let a model read
+         content excluded by the MCP audience projection. Keep operator and
+         retention reads intact; only this model-facing view is filtered. *)
+      `Assoc (List.filter_map (fun (key, value) ->
+        if key <> "artifact_refs" then Some (key, value)
+        else match value with
+          | `List references ->
+            let visible = List.filter (fun reference ->
+              match Tool_output.normalized_artifact_ref_of_json reference with
+              | Tool_output.Decoded_normalized_artifact_ref reference ->
+                not (String.equal reference.mime Keeper_mcp_content.private_result_mime)
+              | Tool_output.Not_normalized_artifact_ref
+              | Tool_output.Invalid_normalized_artifact_ref _ -> false) references in
+            (match visible with [] -> None | _ :: _ -> Some (key, `List visible))
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> None)
+        fields)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as value -> value)
 
 let pending_approval_json_with_reader
     ~(read_pending :

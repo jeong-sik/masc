@@ -3306,7 +3306,8 @@ let test_approved_web_search_replays_without_model_resubmission () =
        | Ok
            { state = Masc.Keeper_approval_queue_result.Resolution_consumed
            ; replay_outcome =
-               Some (Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+               Some (Masc.Keeper_approval_queue_result.Replay_applied
+                   { artifact_ref = output_ref; _ })
            ; _
            } ->
          let replay_store = Tool_blob_store.create ~base_path:config.base_path in
@@ -3448,7 +3449,8 @@ let test_durable_connector_replay_settles_terminal_turn () =
           Masc.Keeper_approval_queue.record_consumed_resolution_replay
             ~base_path:config.base_path
             ~id:approval_id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                { artifact_ref = output_ref; retained_artifacts = [] })
         with
         | Ok Masc.Keeper_approval_queue_result.Replay_recorded
         | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->

@@ -1156,7 +1156,8 @@ let consume_host_replay_fixture ~base_path ~keeper_name (id, tool_name, input) =
   let artifact = Keeper_gate_replay.For_testing.persist_replay_artifact ~base_path
     ("durable fixture result for " ^ id) |> hitl_ok in
   ignore (Keeper_approval_queue.record_consumed_resolution_replay ~base_path ~id
-    ~outcome:(Keeper_approval_queue_result.Replay_applied artifact)
+    ~outcome:(Keeper_approval_queue_result.Replay_applied
+        { artifact_ref = artifact; retained_artifacts = [] })
     |> Result.map_error Keeper_approval_queue_result.grant_error_to_string |> hitl_ok)
 ;;
 

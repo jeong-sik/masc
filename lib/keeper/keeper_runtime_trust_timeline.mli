@@ -56,6 +56,9 @@ val blocker_timeline_event :
   Yojson.Safe.t option
 
 val latest_tool_call_json : keeper_name:string -> Yojson.Safe.t option
+(** Status projection of the latest call. Private received-MCP envelope
+    references remain in the audit ledger and are excluded from this view,
+    which is also returned to models by the Keeper status tool. *)
 
 val pending_approval_json_with_reader :
   read_pending:

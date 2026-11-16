@@ -105,7 +105,11 @@ let resolution_replay_outcome_equal left right =
   | Replay_applied_with_warning left, Replay_applied_with_warning right
   | Replay_failed left, Replay_failed right
   | Replay_indeterminate left, Replay_indeterminate right ->
-    left = right
+    left.artifact_ref = right.artifact_ref
+    && List.map (fun reference -> Tool_output.normalized_artifact_ref_to_json
+          (Tool_output.with_preview reference "")) left.retained_artifacts
+       = List.map (fun reference -> Tool_output.normalized_artifact_ref_to_json
+          (Tool_output.with_preview reference "")) right.retained_artifacts
   | Replay_applied _, Replay_failed _
   | Replay_applied _, Replay_applied_with_warning _
   | Replay_applied _, Replay_indeterminate _

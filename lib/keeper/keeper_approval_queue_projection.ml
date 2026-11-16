@@ -298,13 +298,13 @@ let ensure_replay_chat_projection
   let call_summary = requested_call_summary ~base_path ~keeper_name ~approval_id in
   let phase, artifact_ref =
     match outcome with
-    | Replay_applied artifact_ref ->
+    | Replay_applied { artifact_ref; retained_artifacts = _ } ->
       Keeper_approval_lifecycle.Approval_replay_applied, artifact_ref
-    | Replay_applied_with_warning artifact_ref ->
+    | Replay_applied_with_warning { artifact_ref; retained_artifacts = _ } ->
       Keeper_approval_lifecycle.Approval_replay_applied_with_warning, artifact_ref
-    | Replay_failed artifact_ref ->
+    | Replay_failed { artifact_ref; retained_artifacts = _ } ->
       Keeper_approval_lifecycle.Approval_replay_failed, artifact_ref
-    | Replay_indeterminate artifact_ref ->
+    | Replay_indeterminate { artifact_ref; retained_artifacts = _ } ->
       Keeper_approval_lifecycle.Approval_replay_indeterminate, artifact_ref
   in
   Keeper_chat_store.reconcile_approval_replay_lifecycle_once

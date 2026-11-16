@@ -125,6 +125,11 @@ val with_retained_artifacts : Tool_output.artifact_ref list -> t -> t
     including failed results whose Tool_result payload has no retention field.
     This changes no result data, disposition or effect evidence. *)
 
+val success_with_blocks :
+  content_blocks:Llm_provider.Types.content_block list option -> string -> t
+(** A completed producer result with an opaque summary and authoritative
+    model-facing content blocks. Does not infer structured JSON or metadata. *)
+
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
     handler. [failure_effect_disposition] lets a producer preserve a phase it
     can prove; generic producers default to [Effect_outcome_unknown]. A

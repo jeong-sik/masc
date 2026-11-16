@@ -106,13 +106,21 @@ type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
 
+type replay_evidence =
+  { artifact_ref : Tool_output.artifact_ref
+  ; retained_artifacts : Tool_output.artifact_ref list
+  }
+(** [artifact_ref] names the model-facing replay projection. [retained_artifacts]
+    are private owner roots, persisted beside that projection with empty previews.
+    They never enter the replay payload, chat lifecycle or provider input. *)
+
 type resolution_replay_outcome =
-  | Replay_applied of Tool_output.artifact_ref
-  | Replay_applied_with_warning of Tool_output.artifact_ref
-  | Replay_failed of Tool_output.artifact_ref
-  | Replay_indeterminate of Tool_output.artifact_ref
+  | Replay_applied of replay_evidence
+  | Replay_applied_with_warning of replay_evidence
+  | Replay_failed of replay_evidence
+  | Replay_indeterminate of replay_evidence
 (** Derived replay evidence points to exact bytes in {!Tool_blob_store}. The
-    Gate sidecar owns only this typed content address. The current provider
+    Gate sidecar owns these typed content addresses. The current provider
     input rehydrates the full payload at the caller-owned projection boundary;
     the assigned Runtime measures and admits that exact projected request.
     Canonical history and checkpoints retain the reference, not a duplicate

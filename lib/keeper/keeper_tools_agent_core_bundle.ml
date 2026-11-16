@@ -762,7 +762,10 @@ let make_tool_bundle_for_descriptors_with_policy
      They reach the model through the listing rather than directly: an
      attached service offers more tools than a request can carry, and the
      Gate wrapper is the same either way. *)
-  let gate_wrapped offered =
+  let gate_wrapped ?(accepts_image_input = false)
+        ?(inline_ceiling_bytes = fun () ->
+          Tool_output.inline_ceiling_bytes
+            (model_projection_for_call Tool_output.default_model_projection ())) offered =
     Keeper_identity_gate.agent_tool
       ?clock
       ~config
@@ -770,21 +773,19 @@ let make_tool_bundle_for_descriptors_with_policy
       ?continuation_channel
       ?gate_context:gate_context_provider
       ?gate_grant
-      ~inline_ceiling_bytes:(fun () ->
-        Tool_output.inline_ceiling_bytes
-          (model_projection_for_call Tool_output.default_model_projection ()))
+      ~accepts_image_input
+      ~inline_ceiling_bytes
       offered
   in
   (* Attached tools, as schemas. What the lanes that cannot widen a running
      turn are given: they pin their tool set at process spawn or thread start,
      and that set is part of a resumable session's identity, so a listing
      would name tools they can never make callable. *)
-  let identity_agent_tools =
-    List.map
-      gate_wrapped
-      (match identity_surface with
-       | None -> []
-       | Some surface -> surface.Keeper_tools_agent_core.offered)
+  let identity_offered = match identity_surface with
+    | None -> []
+    | Some surface -> surface.Keeper_tools_agent_core.offered
+  in
+  let identity_agent_tools = List.map (fun offered -> gate_wrapped offered) identity_offered
   in
   (* What the model is shown by name instead of by schema.
 
@@ -831,31 +832,28 @@ let make_tool_bundle_for_descriptors_with_policy
     in
     deferred_descriptors @ deferred_compositions, loaded_descriptors @ loaded_compositions
   in
-  let deferred_of source tool =
-    ( { Keeper_identity_tool_search.tool
-      ; summary =
-          Keeper_identity_tool_search.summary_of
-            tool.Agent_core.Tool.schema.description
-      }
-    , { Keeper_tool_load_receipts.source; schema = tool.Agent_core.Tool.schema } )
+  let deferred_entry tool =
+    { Keeper_identity_tool_search.tool
+    ; summary = Keeper_identity_tool_search.summary_of tool.Agent_core.Tool.schema.description
+    }
   in
   let identity_listing_data =
     match identity_surface with
     | None -> None
     | Some surface ->
-      let deferred, receipt_surface =
-        List.split
-          (List.map
-             (fun (offered : Keeper_identity_tools.offered_tool) ->
-               deferred_of
-                 (Keeper_tool_load_receipts.Attached
+      let receipt_surface =
+          List.map2
+             (fun (offered : Keeper_identity_tools.offered_tool) (tool : Agent_core.Tool.t) ->
+               { Keeper_tool_load_receipts.source = Keeper_tool_load_receipts.Attached
                     { provider_id = offered.provider.id
                     ; endpoint = offered.provider.mcp_url
                     ; remote_name = offered.remote_name
-                    })
-                 (gate_wrapped offered))
-             surface.Keeper_tools_agent_core.offered
-           @ List.map (deferred_of Keeper_tool_load_receipts.Builtin) deferred_builtin_tools)
+                    }
+               ; schema = tool.schema })
+             identity_offered identity_agent_tools
+           @ List.map (fun (tool : Agent_core.Tool.t) ->
+               { Keeper_tool_load_receipts.source = Keeper_tool_load_receipts.Builtin
+               ; schema = tool.schema }) deferred_builtin_tools
       in
       let receipts =
         Keeper_tool_load_receipts.create
@@ -876,13 +874,15 @@ let make_tool_bundle_for_descriptors_with_policy
                | Some current -> Ok current.current_task_id))
           ~surface:receipt_surface
       in
-      Some (surface, deferred, receipts)
+      Some (surface, receipts)
   in
   let listings = ref [] in
-  let make_identity_listing ?held_schemas ~admitted ~carried () =
+  let make_identity_listing ?held_schemas ?(identity_tools = identity_agent_tools)
+        ~admitted ~carried () =
     match identity_listing_data with
     | None -> None
-    | Some (surface, deferred, receipts) ->
+    | Some (surface, receipts) ->
+      let deferred = List.map deferred_entry (identity_tools @ deferred_builtin_tools) in
       let listing = Keeper_identity_tool_search.make ~carried ?held_schemas
         ~keeper_name:meta.Keeper_meta_contract.name
         { Keeper_identity_tool_search.deferred = List.filter
@@ -919,10 +919,10 @@ let make_tool_bundle_for_descriptors_with_policy
   let result_bounds =
       (* The bound each result is held to on an official-client lane, read
          off the projection applied there (see [model_projection_for_call]):
-         a descriptor's own, which every model name it answers to crosses;
-         the projection a composition surface chose; and the default for an
-         attached-service tool, whose answer
-         [Keeper_identity_tools.tool_result_of_call] holds to that ceiling. *)
+         a descriptor's own, which every model name it answers to crosses,
+         and the projection a composition surface chose. Attached-service
+         text is externalized, but native image bytes are not bounded by that
+         text threshold, so those tools truthfully leave the result unbounded. *)
       List.concat_map
         (fun (descriptor : Keeper_tool_descriptor.t) ->
            let bound =
@@ -941,11 +941,6 @@ let make_tool_bundle_for_descriptors_with_policy
              ( tool.Agent_core.Tool.schema.name
              , Tool_output.inline_ceiling_bytes projection ))
           composition_tools_with_loading
-      @ List.map
-          (fun (tool : Agent_core.Tool.t) ->
-             ( tool.Agent_core.Tool.schema.name
-             , Runtime_execution.claude_code_inline_result_bytes ))
-          identity_agent_tools
   in
   let agent_core_view ~admitted ~deferred listing =
     List.filter admitted always_loaded
@@ -965,23 +960,46 @@ let make_tool_bundle_for_descriptors_with_policy
           if List.mem tool.schema.name carried then None else Some tool.schema.name) deferred}
   in
   let project_for_runtime ~runtime ~carried : model_tool_surface =
+    let accepts_image_input = Runtime_agent.runtime_accepts_image_input ~runtime in
+    (* A runtime model declaration may enable the input admission view while
+       the selected catalog row still withholds images on the API wire. This
+       attached result must satisfy both, or its bytes would be replaced by
+       the serializer's omitted-image text after the service already ran. *)
+    let accepts_identity_image_input = accepts_image_input &&
+      match runtime.Runtime_instance.execution with
+      | Runtime_execution.Agent_core sealed ->
+        (Runtime_agent.provider_caps_of_config
+           (Runtime_account_access.api_declaration sealed)).supports_image_input
+      | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
+      | Runtime_execution.Muse_serve _ | Runtime_execution.Antigravity_cli _
+      | Runtime_execution.Vibe_cli _ -> true
+    in
     let image_admission =
-      if Runtime_agent.runtime_accepts_image_input ~runtime
+      if accepts_image_input
       then Image_input_admitted else Image_input_unavailable
     in
+    (* These closures belong to this materialized candidate. A later attempt
+       can build another view while an earlier call keeps its original image
+       admission and text ceiling. The deferred loader uses these same tools;
+       carried names resolve to its new entries, never to old callables. *)
+    let inline_ceiling = Runtime_execution.tool_result_inline_ceiling_bytes runtime.Runtime_instance.execution in
+    let identity_tools = List.map
+      (gate_wrapped ~accepts_image_input:accepts_identity_image_input
+         ~inline_ceiling_bytes:(fun () -> inline_ceiling))
+      identity_offered in
     let admitted tool = match image_admission with
       | Image_input_admitted -> true
       | Image_input_unavailable -> not (List.exists (fun image -> image == tool) image_tools) in
     let deferred = List.filter admitted deferred_builtin_tools in
-    let tools = List.filter admitted tools in
+    let tools = List.filter admitted (descriptor_tools @ composition_tools @ identity_tools) in
     let held_schemas = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools in
-    let listing = make_identity_listing ~held_schemas ~admitted ~carried () in
+    let listing = make_identity_listing ~held_schemas ~identity_tools ~admitted ~carried () in
     let names = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
     assemble_model_tool_surface
       ~image_admission ~tools
       ~agent_core_tools:(agent_core_view ~admitted ~deferred listing)
       ~on_demand_tool_names:(List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
-        (deferred @ identity_agent_tools))
+        (deferred @ identity_tools))
       ~result_bounds:(List.filter (fun (name, _) -> List.mem name names) result_bounds)
       ~listing:(placement deferred listing)
   in

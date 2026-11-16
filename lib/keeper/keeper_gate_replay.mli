@@ -249,13 +249,18 @@ val replay_approved_effect_with_receipt :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?identity_transports:Keeper_identity_tools.transports ->
   grant:Keeper_gate.cycle_grant ->
   approval_id:string ->
   unit ->
   replay_execution
 (** Replay exactly once and retain the typed connector-post receipt needed by
     turn finalization. [replay_approved_effect] is the outcome-only projection
-    for callers that do not own a turn boundary. *)
+    for callers that do not own a turn boundary. Identity replay retains its
+    received artifacts in the private replay-results owner alongside the
+    model-facing evidence reference. Persistence repair keeps those roots
+    without repeating the remote effect. [identity_transports], when supplied,
+    replaces only the identity producer's transport dependencies. *)
 
 val replay_resolution_inputs :
   config:Workspace.config ->

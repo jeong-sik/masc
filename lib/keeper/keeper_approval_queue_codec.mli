@@ -67,6 +67,9 @@ val validate_pending_snapshot : base_path:string -> Yojson.Safe.t -> (unit, stri
     The append log is not read. *)
 val replay_results_of_yojson :
   Yojson.Safe.t -> (resolution_replay_outcome Set_util.StringMap.t, string) result
+(** Private retained roots are strict normalized references with empty previews.
+    An omitted list denotes an existing replay row that owned only its model
+    projection. Malformed present lists fail the whole sidecar decode. *)
 val log_row_of_yojson : base_path:string -> Yojson.Safe.t -> (decoded_log_row, string) result
 val apply_log_row :
   pending_approval Set_util.StringMap.t * persisted_delivery Set_util.StringMap.t ->

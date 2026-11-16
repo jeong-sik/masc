@@ -64,6 +64,9 @@ val agent_tool :
   ?transports:Keeper_identity_tools.transports ->
       (** A test's recorded answers. Absent in production, where the tool
           builds {!Keeper_identity_tools.http_transports} from [clock]. *)
+  ?accepts_image_input:bool ->
+      (** Frozen input capability of the consuming runtime. Defaults to false;
+          a caller without a resolved runtime receives media byte references. *)
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
       (** The turn's clock when the bundle carries one; the process clock
           ({!Eio_context.get_clock_opt}) otherwise. With neither, a call is
@@ -87,14 +90,19 @@ val agent_tool :
     the cycle's one-shot resolution, threaded so a byte-identical re-emission
     inside the woken cycle can also spend it.
 
-    The service's answer is held to [inline_ceiling_bytes] by
-    {!Keeper_identity_tools.tool_result_of_call}. *)
+    The service's text is held to [inline_ceiling_bytes] by
+    {!Keeper_identity_tools.tool_result_of_call}; admitted images stay typed,
+    and other media become individually readable byte references.
+    An execution invocation is required before contacting the service, so
+    raw result artifacts have an owner independent of model-visible data. *)
 
 val replay_call_with_outcome :
   ?transports:Keeper_identity_tools.transports ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
       (** Resolved exactly as for {!agent_tool}: injected, else the given
           clock, else the process clock; with none the replay is refused. *)
+  ?inline_ceiling_bytes:int ->
+      (** Defaults to the standard tool-result projection ceiling. *)
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?continuation_channel:Keeper_continuation_channel.t ->
@@ -114,4 +122,5 @@ val replay_call_with_outcome :
     follows the ordinary Gate. Effect disposition is honest about the wire:
     a local precondition or a session that never came up proves no effect;
     any failure after the tool request was sent has an unknown outcome and
-    is not automatically retried. *)
+    is not automatically retried. The same content projection as [agent_tool]
+    is used, with raw result artifacts retained on the returned execution. *)

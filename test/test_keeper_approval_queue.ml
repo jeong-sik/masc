@@ -24,6 +24,10 @@ let select_queue_entry ~base_path ~keeper_name ~now ~ready =
 ;;
 
 module AQ = Masc.Keeper_approval_queue
+
+let replay_evidence ?(retained_artifacts = []) artifact_ref =
+  { Masc.Keeper_approval_queue_result.artifact_ref; retained_artifacts }
+;;
 module Rules = Masc.Keeper_approval_queue_rules
 module Rule_types = Keeper_approval_queue_rules_types
 
@@ -2016,11 +2020,15 @@ let test_resolution_is_durable_and_origin_scoped () =
        let replay_output_ref =
          store_replay_artifact ~base_path replay_output
        in
+       let private_output = "private MCP original, including user-only content" in
+       let private_ref = store_replay_artifact ~base_path private_output in
+       let retained_artifacts = [ private_ref ] in
        (match
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied replay_output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                (replay_evidence ~retained_artifacts replay_output_ref))
         with
         | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
         | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
@@ -2030,12 +2038,19 @@ let test_resolution_is_durable_and_origin_scoped () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied replay_output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                (replay_evidence ~retained_artifacts replay_output_ref))
         with
         | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> ()
         | Ok Masc.Keeper_approval_queue_result.Replay_recorded ->
           Alcotest.fail "identical replay outcome was rewritten as new"
         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+       (match AQ.record_consumed_resolution_replay ~base_path ~id
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                (replay_evidence replay_output_ref)) with
+        | Error (Masc.Keeper_approval_queue_result.Grant_replay_outcome_conflict _) -> ()
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error)
+        | Ok _ -> Alcotest.fail "same model projection cannot erase private retained roots");
        let different_ref =
          store_replay_artifact ~base_path "different outcome"
        in
@@ -2043,7 +2058,7 @@ let test_resolution_is_durable_and_origin_scoped () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed different_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed (replay_evidence different_ref))
         with
         | Error (Masc.Keeper_approval_queue_result.Grant_replay_outcome_conflict actual_id) ->
           Alcotest.(check string) "conflict identifies approval" id actual_id
@@ -2093,6 +2108,10 @@ let test_resolution_is_durable_and_origin_scoped () =
          "current sidecar carries no raw legacy output field"
          true
          (replay_outcome_wire |> member "output" = `Null);
+       Alcotest.(check yojson) "private roots are separate and have no preview"
+         (`List [ Tool_output.normalized_artifact_ref_to_json
+                    (Tool_output.with_preview private_ref "") ])
+         (replay_outcome_wire |> member "retained_artifacts");
        let fresh_replay_message =
          let input =
            Masc.Keeper_gate_replay.resolution_input
@@ -2138,14 +2157,30 @@ let test_resolution_is_durable_and_origin_scoped () =
        (match AQ.approved_resolution_delivery ~base_path ~id with
         | Ok
             { state = Masc.Keeper_approval_queue_result.Resolution_consumed
-            ; replay_outcome = Some (Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+            ; replay_outcome = Some (Masc.Keeper_approval_queue_result.Replay_applied
+                { artifact_ref = output_ref; retained_artifacts })
             ; _
             } ->
           Alcotest.(check string)
             "replay output identity survives restart"
             replay_output_ref.sha256
-            output_ref.sha256
+            output_ref.sha256;
+          Alcotest.(check (list string)) "private roots survive restart"
+            [ private_ref.sha256 ]
+            (List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256)
+               retained_artifacts);
+          Alcotest.(check (list string)) "private previews stay empty after restart"
+            [ "" ]
+            (List.map (fun (reference : Tool_output.artifact_ref) -> reference.preview)
+               retained_artifacts)
         | Ok _ -> Alcotest.fail "restart lost the consumed replay outcome"
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+       (match AQ.record_consumed_resolution_replay ~base_path ~id
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                (replay_evidence ~retained_artifacts replay_output_ref)) with
+        | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> ()
+        | Ok Masc.Keeper_approval_queue_result.Replay_recorded ->
+          Alcotest.fail "restart rewrote identical private replay roots"
         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let retry_message =
          Masc.Keeper_gate_replay.user_message_with_hitl_resolution
@@ -2189,6 +2224,10 @@ let test_resolution_is_durable_and_origin_scoped () =
          |> List.find (fun line -> not (String.equal (String.trim line) ""))
          |> Yojson.Safe.from_string
        in
+       List.iter (fun private_value ->
+         Alcotest.(check bool) "private roots and bytes never reach model replay"
+           false (String_util.contains_substring projected_text private_value))
+         [ private_ref.sha256; private_output ];
        Alcotest.(check string)
          "provider-only projection preserves the exact replay artifact identity"
          replay_output_ref.sha256
@@ -2723,7 +2762,7 @@ let test_consumed_delivery_with_acknowledged_wake_leaves_the_store () =
        AQ.record_consumed_resolution_replay
          ~base_path
          ~id:approval_id
-         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence output_ref))
      with
      | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
      | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> Alcotest.fail "outcome was already recorded"
@@ -5285,6 +5324,66 @@ let test_malformed_replay_sidecar_is_scoped_and_preserved () =
          (In_channel.with_open_bin sidecar_path In_channel.input_all))
 ;;
 
+let test_replay_sidecar_private_roots_codec () =
+  let module Codec = Masc.Keeper_approval_queue_codec in
+  let module Result = Masc.Keeper_approval_queue_result in
+  let reference digest preview =
+    match Tool_output.make_artifact_ref ~sha256:(String.make 64 digest)
+        ~bytes:3 ~preview ~mime:"application/json" with
+    | Ok reference -> reference
+    | Error _ -> Alcotest.fail "invalid test artifact reference"
+  in
+  let output_ref = reference 'a' "" in
+  let private_ref = reference 'b' "private preview" in
+  let sidecar outcome = `Assoc
+      [ "version", `Int 1
+      ; "outcomes", `List [ `Assoc
+          [ "approval_id", `String "private-roots"; "outcome", outcome ] ] ] in
+  let decode outcome = Codec.replay_results_of_yojson (sidecar outcome) in
+  let check_evidence expected outcome =
+    match decode outcome with
+    | Error detail -> Alcotest.fail detail
+    | Ok outcomes ->
+      let evidence = match Set_util.StringMap.find "private-roots" outcomes with
+        | Result.Replay_applied evidence
+        | Result.Replay_applied_with_warning evidence
+        | Result.Replay_failed evidence
+        | Result.Replay_indeterminate evidence -> evidence in
+      Alcotest.(check (list string)) "decoded private root identities" expected
+        (List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256)
+           evidence.retained_artifacts);
+      List.iter (fun (reference : Tool_output.artifact_ref) ->
+        Alcotest.(check string) "private root has no preview" "" reference.preview)
+        evidence.retained_artifacts
+  in
+  let evidence = replay_evidence ~retained_artifacts:[ private_ref ] output_ref in
+  List.iter (fun outcome ->
+    let wire = Codec.resolution_replay_outcome_to_yojson outcome in
+    check_evidence [ private_ref.sha256 ] wire;
+    Alcotest.(check bool) "private preview is not persisted" false
+      (String_util.contains_substring (Yojson.Safe.to_string wire) "private preview"))
+    [ Result.Replay_applied evidence; Result.Replay_applied_with_warning evidence
+    ; Result.Replay_failed evidence; Result.Replay_indeterminate evidence ];
+  let old_fields =
+    [ "kind", `String "applied"
+    ; "output_ref", Tool_output.normalized_artifact_ref_to_json output_ref ] in
+  check_evidence [] (`Assoc old_fields);
+  check_evidence [] (`Assoc (old_fields @ [ "retained_artifacts", `List [] ]));
+  let malformed =
+    [ `Null; `String "not a reference list"; `List [ `Null ]
+    ; `List [ `Assoc [ "_blob", `Assoc
+          [ "sha256", `String "invalid"; "bytes", `Int 3
+          ; "mime", `String "application/json"; "preview", `String "" ] ] ] ] in
+  List.iter (fun retained ->
+    match decode (`Assoc (old_fields @ [ "retained_artifacts", retained ])) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "malformed private root was silently accepted") malformed;
+  match decode (`Assoc (old_fields @
+      [ "retained_artifacts", `List []; "retained_artifacts", `List [] ])) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "duplicate private roots field was accepted"
+;;
+
 let test_replay_sidecar_rejects_raw_output_wire () =
   let base_path = temp_dir () in
   Fun.protect
@@ -5363,7 +5462,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id:approval_id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence output_ref))
         with
         | Error (Masc.Keeper_approval_queue_result.Grant_replay_projection_unavailable { path; _ }) ->
           Alcotest.(check string)
@@ -6227,7 +6326,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id:approval_id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied canonical_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence canonical_ref))
         with
         | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
         | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded | Error _ ->
@@ -6264,7 +6363,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed stale_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed (replay_evidence stale_ref))
         with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "stale replay displaced the correction");
@@ -7046,7 +7145,7 @@ let test_replay_outcome_preserves_durable_delivery_identity_for_log_deltas () =
        AQ.record_consumed_resolution_replay
          ~base_path
          ~id:approval_id
-         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence output_ref))
      with
      | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
      | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
@@ -7474,6 +7573,10 @@ let () =
             "malformed replay sidecar is preserved"
             `Quick
             test_malformed_replay_sidecar_is_scoped_and_preserved
+        ; Alcotest.test_case
+            "private replay roots are strict and separate from model evidence"
+            `Quick
+            test_replay_sidecar_private_roots_codec
         ; Alcotest.test_case
             "raw replay output wire is rejected"
             `Quick

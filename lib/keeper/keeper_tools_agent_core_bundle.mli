@@ -54,7 +54,15 @@ val make_tool_bundle_for_capability_surface
     use {!Common.max_tool_result_wire_bytes}. Agent Core uses
     {!Common.max_agent_core_inline_result_bytes}. Before an attempt is observed,
     the descriptor's own projection stands. The handler receives the same
-    answer, so a thread read sizes its page by it. *)
+    answer, so a thread read sizes its page by it.
+
+    Attached-service tools are rebuilt by [project_for_runtime] with that
+    materialized candidate's image admission and text ceiling. For Agent Core,
+    the selected provider's frozen image capability must also permit it. The direct
+    surface and deferred loader use the same closures and share the existing
+    load receipts. An in-flight call never reads a later candidate's policy.
+    Their text threshold does not bound native images, so official-client
+    [result_bounds] omits them instead of claiming a total result limit. *)
 
 module For_testing : sig
   val make_tool_bundle

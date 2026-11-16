@@ -207,6 +207,10 @@ let with_retained_artifacts retained_artifacts result =
   { result with retained_artifacts }
 ;;
 
+let success_with_blocks ~content_blocks raw_output =
+  { (success raw_output) with content_blocks }
+;;
+
 let of_tool_result
       ?failure_effect_disposition
       (result : Tool_result.result)

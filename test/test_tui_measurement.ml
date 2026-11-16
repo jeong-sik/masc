@@ -213,6 +213,16 @@ let test_temporal_observations () =
    | Ok _ -> Alcotest.fail "readiness observations were lost or untyped"
    | Error detail -> Alcotest.fail detail);
   rejects "report does not certify pass" (view ~passed:(`Bool true) row);
+  (* A step carries the operation API's state word. The five words the server
+     writes are read; another case of a word, or a word it never writes, is not. *)
+  List.iter (fun word ->
+    Alcotest.(check bool) ("operation state " ^ word ^ " is read") true
+      (Result.is_ok (T.of_yojson (view (set "operation_state" (`String word) row)))))
+    ["Queued"; "Running"; "Succeeded"; "Failed"; "Cancelled"];
+  List.iter (fun word ->
+    rejects ("operation state " ^ word ^ " is not a server state")
+      (view (set "operation_state" (`String word) row)))
+    ["queued"; "Paused"];
   rejects "earlier request cannot certify omission"
     (view (step ~w:(`Int 1) ~omitted:(omission 4) ~probability:(`Float 1.) ~model:(`String "actual")));
   rejects "measured probability requires actual model"

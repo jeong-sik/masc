@@ -46,12 +46,19 @@ type field = {
           why it is the caller's to choose and not this module's. *)
 }
 
-val document : ?palette:palette -> string -> string option
+val document : ?palette:palette -> string -> (int * string) list option
 (** [document value] is [value] re-served as {!structured} serves a JSON
     object or array, and [None] for anything else: a scalar, a bare word, a
     payload that does not parse. A caller that reads the rest its own way
     asks this instead of {!structured}. Every character of the text is
     terminal-safe, so the only escapes in it are the palette's.
+
+    Each line is the number of cells it is indented by and its text, which
+    holds no line break. The indent is a count rather than spaces because a
+    document nested [n] deep has [2n] lines indented up to [2n] cells, and a
+    caller that keeps an indent only up to a bound, as
+    {!Masc_tui_text_block.preformatted_styled_rows} does, makes only the
+    spaces it keeps. {!structured} spells every line's indent out.
 
     A number that JSON cannot write ([NaN], [Infinity], [-Infinity], or one
     too large for a float) is drawn as that word in the number's colour. A

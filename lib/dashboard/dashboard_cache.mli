@@ -130,7 +130,8 @@ val get_or_compute_with_timeout :
   Yojson.Safe.t Pool_work.t -> Yojson.Safe.t
 (** Like [get_or_compute] but runs the work under an Eio timeout.
     On timeout in the stale-while-revalidate path, the stale value is
-    preserved (not overwritten by error JSON).  On timeout with no stale
+    preserved (not overwritten by error JSON), unless that value is a seed
+    ({!seed_stale_if_missing}).  On timeout with no stale
     data, returns a timeout-error JSON without caching it.  Repeated no-stale
     timeouts for the same key open a short fail-fast circuit; fresh or stale
     cache entries are still served normally. *)
@@ -141,7 +142,8 @@ val get_or_compute_payload_with_timeout :
   Yojson.Safe.t Pool_work.t -> cached_payload
 (** Same timeout and stale-value semantics as {!get_or_compute_with_timeout},
     retaining the memoized bytes and ETag of the returned JSON. Timeout envelopes
-    are returned uncached. Preparation completes inside the timed worker compute
+    are returned uncached, except one that takes a seed's place
+    ({!seed_stale_if_missing}). Preparation completes inside the timed worker compute
     before the cache entry is published. Prepared hits and stale responses do
     not wait for executor capacity. Preparing an existing JSON-only value also
     obeys [timeout_sec]; cancellation leaves the AST usable and permits a later
@@ -168,7 +170,15 @@ val seed_stale_if_missing :
     background when a switch is available. Existing entries are left intact.
     Seeds are intended for small warming responses: their bytes and ETag are
     prepared synchronously before publication, without using the executor pool.
-    An existing slot skips preparation; a slot installed concurrently wins. *)
+    An existing slot skips preparation; a slot installed concurrently wins.
+
+    A seed answers only until a compute for [key] ends. A compute that
+    succeeds replaces it. A cancelled one leaves it in place. After a compute
+    times out, the timeout envelope (origin [Timeout]) takes its place and is
+    served like a stale value until a compute succeeds. After a compute
+    raises, the seed is no longer served: the next read computes inline and
+    the failure reaches that reader. In both cases the key stays occupied, so
+    seeding again does not bring the seed back. *)
 
 val seed_stale_from_if_missing : string -> from:string -> stale_for:float -> unit
 (** [seed_stale_from_if_missing key ~from ~stale_for] puts [from]'s current

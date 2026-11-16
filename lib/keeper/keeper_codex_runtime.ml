@@ -69,7 +69,7 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
    inside the app-server connection. The shared catalog clamp is for clients
    without that discovery contract. *)
 
-let project_messages ~assembly messages =
+let project_messages ~assembly ~started_at messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
     | (message : Agent_core.Types.message) :: rest ->
@@ -78,17 +78,17 @@ let project_messages ~assembly messages =
          let projection=Keeper_context_submission_link.encoded_carrier ~assembly ~selected_blocks:None message in
          loop (projection :: developer) history rest
        | Agent_core.Types.User ->
-         let text = Host.encode_history_message message in
+         let text = Host.encode_start_message ~started_at message in
          loop developer
            ({ Runtime_codex_app_server.role = User; text } :: history)
            rest
        | Agent_core.Types.Assistant ->
-         let text = Host.encode_history_message message in
+         let text = Host.encode_start_message ~started_at message in
          loop developer
            ({ Runtime_codex_app_server.role = Assistant; text } :: history)
            rest
        | Agent_core.Types.Tool ->
-         let text = Host.encode_history_message message in
+         let text = Host.encode_start_message ~started_at message in
          loop developer
            ({ Runtime_codex_app_server.role = User; text } :: history)
            rest)
@@ -1176,11 +1176,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        owner domain stalls HTTP, SSE and every other Keeper sharing that
        scheduler. Vendor-session frontier provenance needs only its message
        count, not an encoding or digest of the canonical conversation. *)
+    let started_at = Time_compat.now () in
     let* history, context_frontier, composed_developer_instructions,
         (system_projection, system_receipt) =
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let* developer_messages, history =
-          project_messages ~assembly:composed_context
+          project_messages ~assembly:composed_context ~started_at
             (match thread_mode with
              | Runtime_codex_app_server.Start -> prepared.messages
              | Runtime_codex_app_server.Resume _ ->
@@ -1682,17 +1683,27 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          ~developer_context
          ~on_undelivered_tool_result:
            (fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
+             (* Every later request re-reads a retained receipt until a
+                completed turn acknowledges it, so it names large bytes by blob
+                address, as a host receipt does. *)
+             let* response = Keeper_client_tool_outbox.codex_response ~base_path
+                 ~min_result_bytes:Keeper_turn_driver_try_provider.aged_result_min_bytes
+                 receipt.response in
              let receipt : Keeper_client_tool_outbox.receipt =
                {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
                 tool_name=receipt.tool_name;
                 arguments=Keeper_client_tool_outbox.Known receipt.arguments;
-                response=receipt.response} in
+                response} in
              let* () = Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt in
              (* The receipt is committed even if notification cannot commit.
                 Startup and the existing maintenance pulse rediscover it. *)
              (match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
               | Ok () -> ()
-              | Error detail -> Log.Keeper.warn ~keeper_name
+              | Error (Keeper_client_tool_outbox_wake.Intake_shutdown_reserved operation_id) ->
+                Log.Keeper.routine ~keeper_name
+                  "retained tool result notification held by shutdown operation=%s"
+                  (Keeper_shutdown_types.Operation_id.to_string operation_id)
+              | Error (Keeper_client_tool_outbox_wake.Notify_failed detail) -> Log.Keeper.warn ~keeper_name
                   "retained tool result notification deferred: %s" detail
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
               | exception exn -> Log.Keeper.warn ~keeper_name

@@ -69,15 +69,6 @@ let next_round ~run_started_at ~shown selections =
   { listed; later = List.length later }
 ;;
 
-let age_text seconds =
-  let seconds = Int.max 0 (int_of_float seconds) in
-  if seconds < 60
-  then Printf.sprintf "%ds" seconds
-  else if seconds < 3600
-  then Printf.sprintf "%dm" (seconds / 60)
-  else Printf.sprintf "%dh%02dm" (seconds / 3600) (seconds mod 3600 / 60)
-;;
-
 let urgency_text = function
   | Keeper_event_queue.Immediate -> "immediate"
   | Keeper_event_queue.Normal -> "normal"
@@ -119,7 +110,7 @@ let render ~now ?(receipt = fun _ -> None) { listed; later } =
            Printf.sprintf
              "- %s, %s ago: %s"
              (urgency_text row.urgency)
-             (age_text (now -. row.arrived_at))
+             (Keeper_age_text.of_seconds (now -. row.arrived_at))
              (line_text ~receipt row))
         listed
     in

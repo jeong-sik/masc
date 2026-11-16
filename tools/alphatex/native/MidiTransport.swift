@@ -139,8 +139,35 @@ struct WireState {
         guard !exclusive, pending.isEmpty else { throw MidiFailure("source ends inside a MIDI wire message") }
     }
 }
-// Reconstruction retains channel-message order for bank/program and RPN writes.
-// It never replays opaque device commands or invents an unknown initial value.
+// Reconstruction re-sends original messages in their original order, but only
+// those that still decide state: the last write of each field, each earlier
+// write a kept message reads (the bank a Program Change applies, the parameter
+// selection of a Data Entry, the patch a sounding Note On keeps) and every
+// message that is not a replaceable absolute write. A write replaced in every
+// field it set and read by no kept message is dropped: a long controller
+// stream restores as its final value instead of its whole history.
+struct StateReplay<Field: Hashable, Message> {
+    private var messages: [Int: Message] = [:], reads: [Int: [Int]] = [:], holds: [Int: Int] = [:]
+    private(set) var current: [Field: Int] = [:]
+    // `writes` are the fields an absolute message replaces. A message with no
+    // such field (a relative step, pedal, reset or note) is kept for good.
+    mutating func append(_ order: Int, _ message: Message, writes: Set<Field>, reading: [Field]) {
+        let read = Set(reading.compactMap { current[$0] })
+        messages[order] = message; reads[order] = Array(read)
+        holds[order] = max(writes.count, 1)
+        for value in read { holds[value]! += 1 }
+        for field in writes { if let previous = current.updateValue(order, forKey: field) { release(previous) } }
+    }
+    private mutating func release(_ order: Int) {
+        holds[order]! -= 1
+        guard holds[order] == 0 else { return }
+        holds[order] = nil; messages[order] = nil
+        for value in reads.removeValue(forKey: order)! { release(value) }
+    }
+    var entries: [(order: Int, message: Message)] { messages.keys.sorted().map { ($0, messages[$0]!) } }
+}
+// Reconstruction never replays opaque device commands or invents an unknown
+// initial value.
 struct ChaseField: Hashable {
     enum Kind: Hashable { case controller(UInt8), program, bend, pressure, poly(UInt8), parameter(UInt16, UInt8) }
     let port: Int
@@ -171,6 +198,7 @@ struct ChaseChannel {
     var rpnMSB: UInt8?, rpnLSB: UInt8?
     var nrpn = false
     var parameters: [UInt16: Set<UInt8>] = [:]
+    var replay = StateReplay<ChaseField.Kind, [UInt8]>()
     mutating func prune() {
         notes.removeAll { !$0.held && sustain < 64 && !(sostenuto >= 64 && $0.captured) }
     }
@@ -186,9 +214,13 @@ enum ChaseObstacle: String, Hashable {
 }
 struct SourceChase {
     var channels: [Int: ChaseChannel] = [:]
-    var history: [(Int, [UInt8])] = []
+    // Original order of the replayed channel messages, shared by every channel.
+    var sequence = 0
     var touched = Set<ChaseField>(), known = Set<ChaseField>()
     var obstacles = Set<ChaseObstacle>()
+    // Data Entry applies to the parameter these controllers select; Reset All
+    // Controllers sets that selection to null.
+    static let selection: [ChaseField.Kind] = [98, 99, 100, 101, 121].map { .controller($0) }
     mutating func observe(_ bytes: [UInt8], port: Int, origin: Int? = nil) {
         guard let status = bytes.first else { return }
         guard status < 0xf0 else { obstacles.insert(.system); return }
@@ -196,6 +228,9 @@ struct SourceChase {
         var state = channels[key] ?? ChaseChannel()
         func field(_ kind: ChaseField.Kind) -> ChaseField { ChaseField(port: port, channel: channel, kind: kind) }
         func mark(_ kind: ChaseField.Kind) { let value = field(kind); touched.insert(value); known.insert(value) }
+        func replay(writes: Set<ChaseField.Kind>, reading: [ChaseField.Kind] = []) {
+            state.replay.append(sequence, bytes, writes: writes, reading: reading); sequence += 1
+        }
         switch type {
         case 0x90 where bytes[2] > 0:
             state.notes.append(ChaseNote(pitch: bytes[1], velocity: bytes[2], program: state.program, origin: origin))
@@ -212,16 +247,16 @@ struct SourceChase {
             state.pressure = bytes[1]; mark(.pressure)
         case 0xc0:
             state.program = ChaseProgram(bankMSB: state.bankMSB, bankLSB: state.bankLSB, number: bytes[1])
-            history.append((port, bytes)); mark(.program)
+            replay(writes: [.program], reading: [.controller(0), .controller(32)]); mark(.program)
         case 0xe0:
-            history.append((port, bytes)); mark(.bend)
+            replay(writes: [.bend]); mark(.bend)
         case 0xb0:
             let cc = bytes[1], value = bytes[2]
             if cc < 120 && ![6, 38, 96, 97].contains(cc) { mark(.controller(cc)) }
             switch cc {
             case 0, 32:
                 if cc == 0 { state.bankMSB = value } else { state.bankLSB = value }
-                history.append((port, bytes))
+                replay(writes: [.controller(cc)])
             case 64:
                 state.sustain = value; state.prune()
             case 66:
@@ -233,11 +268,11 @@ struct SourceChase {
                 state.prune()
             case 69:
                 if value >= 64 { obstacles.insert(.hold2) }
-                history.append((port, bytes))
+                replay(writes: [.controller(69)])
             case 88:
                 obstacles.insert(.velocity)
             case 120:
-                state.notes.removeAll(); history.append((port, bytes))
+                state.notes.removeAll(); replay(writes: [.controller(120)])
             case 121:
                 state.sustain = 0; state.sostenuto = 0
                 for index in state.notes.indices { state.notes[index].captured = false }
@@ -248,7 +283,9 @@ struct SourceChase {
                 mark(.pressure); mark(.bend)
                 for pitch: UInt8 in 0...127 { mark(.poly(pitch)) }
                 for controller: UInt8 in [1, 11, 64, 65, 66, 67, 98, 99, 100, 101] { mark(.controller(controller)) }
-                history.append((port, bytes))
+                // Kept in order, the reset still clears whatever a device resets
+                // among the writes before it; later writes follow it.
+                replay(writes: [.controller(121)])
             case 123:
                 // This mode has no per-note release byte. Chase its implicit
                 // offs at neutral velocity 64, retaining earlier explicit offs.
@@ -261,28 +298,34 @@ struct SourceChase {
             case 122, 124...127:
                 obstacles.insert(.mode)
             case 98, 99:
-                state.nrpn = true; history.append((port, bytes))
+                state.nrpn = true; replay(writes: [.controller(cc)])
             case 100, 101:
                 state.nrpn = false
                 if cc == 100 { state.rpnLSB = value } else { state.rpnMSB = value }
-                history.append((port, bytes))
+                replay(writes: [.controller(cc)])
             case 6, 38, 96, 97:
-                history.append((port, bytes))
                 if state.nrpn { obstacles.insert(.nrpn) }
                 else if let high = state.rpnMSB, let low = state.rpnLSB, high == 127 && low == 127 {
-                    // Null RPN selection makes Data Entry ineffectual.
+                    // Null RPN selection makes Data Entry ineffectual. A device
+                    // that keeps one number register for RPN and NRPN applies
+                    // it, so it is resent in order after the selection it read.
+                    replay(writes: [], reading: SourceChase.selection)
                 } else if let high = state.rpnMSB, let low = state.rpnLSB, high == 0 && low <= 5 {
                     let id = UInt16(high) << 7 | UInt16(low)
                     if cc == 6 || cc == 38 {
                         state.parameters[id, default: []].insert(cc)
                         mark(.parameter(id, cc))
+                        replay(writes: [.parameter(id, cc)], reading: SourceChase.selection)
                     } else {
                         for component: UInt8 in [6, 38] { touched.insert(field(.parameter(id, component))) }
                         if state.parameters[id] != Set([6,38]) { obstacles.insert(.relative) }
+                        // Devices step either component (RP-018 the LSB, others
+                        // the MSB), so the step stays with the values it adjusts.
+                        else { replay(writes: [], reading: SourceChase.selection + [.parameter(id, 6), .parameter(id, 38)]) }
                     }
                 } else { obstacles.insert(.parameter) }
             default:
-                history.append((port, bytes))
+                replay(writes: [.controller(cc)])
             }
         default: break
         }
@@ -303,7 +346,8 @@ struct SourceChase {
         guard !notes || channels.values.allSatisfy({ state in state.notes.allSatisfy { $0.program == state.program } }) else {
             throw MidiFailure("source state reconstruction cannot restore held notes across program or bank changes")
         }
-        var result = history
+        var result = channels.flatMap { key, state in state.replay.entries.map { (order: $0.order, port: key >> 8, bytes: $0.message) } }
+            .sorted { $0.order < $1.order }.map { ($0.port, $0.bytes) }
         for key in channels.keys.sorted() {
             let state = channels[key]!, port = key >> 8, channel = UInt8(key & 15)
             if notes {
@@ -468,7 +512,6 @@ extension SourceChase {
     func scoped(to addresses: Set<Int>) -> SourceChase {
         var value = self
         value.channels = channels.filter { addresses.contains($0.key) }
-        value.history = history.filter { addresses.contains($0.0 << 8 | Int($0.1[0] & 15)) }
         value.known = known.filter { addresses.contains($0.port << 8 | Int($0.channel)) }
         value.touched = touched.filter { addresses.contains($0.port << 8 | Int($0.channel)) }
         return value
@@ -478,7 +521,8 @@ extension SourceChase {
         var value = scoped(to: outside)
         let replacement = model.scoped(to: addresses)
         value.channels.merge(replacement.channels) { _, new in new }
-        value.history.append(contentsOf: replacement.history)
+        // Later writes must follow the replacement's replayed messages.
+        value.sequence = max(sequence, model.sequence)
         value.known.formUnion(replacement.known); value.touched.formUnion(replacement.touched)
         self = value
     }

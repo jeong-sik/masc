@@ -30,8 +30,8 @@ import {
   waitAxisPosition,
   waitingAgeMinutes,
   waitingDueMinutes,
-  waitingRowsOldestFirst,
 } from './lane-queue-model'
+import { waitingRowsOldestFirst } from '../common/waiting-row-window'
 import type { DashboardKeeperWaitingKeeper, DashboardKeeperWaitingRow } from '../../api'
 
 const NOW = 1_800_000_000

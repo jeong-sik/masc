@@ -67,14 +67,21 @@ val default_preview_port : int
 
     It goes on only where {!invite} would: a boot finds [Multi_account] with
     an external store that matches the log. It holds the BasePath lease while
-    it runs, so no server runs on the base path meanwhile. It serves the login
-    routes and the routes of {!Server_login_http.add_person_routes}, and none
-    of the Keeper, Runtime, MCP or Board routes of the server. The GitHub
-    client is
-    {!Login_client.loopback} with [github_client_id] and the secret of
+    it runs, so no server runs on the base path meanwhile. It serves the
+    routes of {!Server_accounts.add_routes_of_people}, as the account server
+    does: the login routes, the routes of a person, the MCP endpoint of a
+    person among them, and the console. It serves no Board route. Once it
+    holds the lease it calls [select_dashboard], which picks the dashboard
+    bundle the console is read from as [masc start] does. The GitHub client
+    is {!Login_client.loopback} with [github_client_id] and the secret of
     {!github_client_secret_env}, whose value is printed nowhere.
 
     Returns [1] with the reason on standard error when it cannot start, and
     [0] when the listener stops. *)
-val preview : base_path:string -> port:int -> github_client_id:string -> int
+val preview
+  :  select_dashboard:(unit -> unit)
+  -> base_path:string
+  -> port:int
+  -> github_client_id:string
+  -> int
 

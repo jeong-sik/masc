@@ -1804,6 +1804,36 @@ let wrap_body ?markdown ~max_cells ~sanitize text =
          | rows -> rows)
       (String.split_on_char '\n' text)
 
+(* A body whose lines are laid out by whoever wrote them: a tool's output,
+   which is often code or a served JSON document. [wrap_words] reads a row's
+   leading spaces as nothing between words, so [wrap_body] hands an indented
+   line back flush left and the structure is gone. Here a line's leading
+   spaces are taken off before the wrap and put back on every row the rest
+   wraps to, so a wrapped line stays in its column. An indent that fills the
+   row leaves no cell for the text; the rest of that line then wraps at the
+   whole width without it. *)
+let wrap_indented_body ~max_cells ~sanitize text =
+  let max_cells = Int.max 1 max_cells in
+  List.concat_map
+    (fun line ->
+       let line = sanitize line in
+       let length = String.length line in
+       let rec indent_end index =
+         if index < length && Char.equal line.[index] ' ' then
+           indent_end (index + 1)
+         else index
+       in
+       let indent = indent_end 0 in
+       let rest = String.sub line indent (length - indent) in
+       let hang, room =
+         if indent < max_cells then (String.make indent ' ', max_cells - indent)
+         else ("", max_cells)
+       in
+       match wrap_words ~max_cells:room rest with
+       | [] -> [ "" ]
+       | rows -> List.map (fun row -> hang ^ row) rows)
+    (String.split_on_char '\n' text)
+
 (* Defensive body floor for unsupported viewports. Supported inline metadata
    moves to a heading before it consumes the readable body budget. *)
 let min_body_cells = 4

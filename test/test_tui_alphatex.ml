@@ -113,14 +113,18 @@ let test_a_tie_holds_the_note_before_it () =
     [ 192, [ 0, 96, ( false, [ "7@4"; "5@3" ] ); 96, 96, ( false, [ "-7@4"; "-5@3" ] ) ] ];
   check_music "with markup after it" ":4 7.4 -.4{h}"
     [ 192, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [ "-7@4*" ] ) ] ];
-  check_music "past a directive, which opens alphaTab's next bar" ":4 7.4 \\tempo 90 -.4"
-    [ 192, [ 0, 96, ( false, [ "7@4" ] ); 96, 96, ( false, [ "-7@4" ] ) ] ];
+  check_music "past a directive, which opens the next bar" ":4 7.4 \\tempo 90 -.4"
+    [ 96, [ 0, 96, ( false, [ "7@4" ] ) ]; 96, [ 0, 96, ( false, [ "-7@4" ] ) ] ];
+  check_music "past bars with no beat" ":4 7.4 | \\tempo 90 | | -.4"
+    [ 96, [ 0, 96, ( false, [ "7@4" ] ) ]; 0, []; 0, []; 96, [ 0, 96, ( false, [ "-7@4" ] ) ] ];
   (* alphaTab plays these as an open string, which [-] does not say. *)
   check_failure "with no note before it" ":4 -.4 3.3" (Tie_without_note 4);
   check_failure "with the note only on another string" ":4 7.3 -.4" (Tie_without_note 4);
   check_failure "four bars back" ":4 7.4 | 5.3 | 5.3 | 5.3 | -.4" (Tie_without_note 4);
   check_failure "empty bars count as bars" ":4 7.4 | | | | -.4" (Tie_without_note 4);
   check_failure "a bar a directive opened counts as a bar" ":4 7.4 | r | r \\ts 3 4 r | -.4"
+    (Tie_without_note 4);
+  check_failure "four bars back past bars with no beat" ":4 7.4 | \\tempo 90 | | | -.4"
     (Tie_without_note 4);
   check_failure "holding a dead note" ":4 x.4 -.4" (Tie_to_dead_note 4);
   check_failure "a chord member holds no member of its own chord" ":4 (7.4 -.3)"
@@ -164,8 +168,10 @@ let test_what_is_read_and_not_played () =
   check_music "the directives and the dot that ends them"
     "\\title \"a \\\"quoted\\\" title\" \\tempo 99999999999999999999 \\ts 4 4 . :4 0.6"
     [ 96, [ 0, 96, ( false, [ "0@6" ] ) ] ];
+  (* alphaTab 1.8.4 reads the bar before the first [|] and the one between
+     two as bars with no beat. *)
   check_music "a bar line with nothing before it, or two together" "| :4 0.6 | | 3.6 |"
-    [ 96, [ 0, 96, ( false, [ "0@6" ] ) ]; 96, [ 0, 96, ( false, [ "3@6" ] ) ] ]
+    [ 0, []; 96, [ 0, 96, ( false, [ "0@6" ] ) ]; 0, []; 96, [ 0, 96, ( false, [ "3@6" ] ) ] ]
 
 let test_the_tuning_names_the_lines () =
   let tuning source =
@@ -318,12 +324,79 @@ let test_metadata_arguments_and_bar_boundaries () =
   check_music "a clef names the staff and changes no fret"
     "\\clef bass :8 4.3 | \\clef treble 7.3"
     [ 48, [ 0, 48, (false, [ "4@3" ]) ]; 48, [ 0, 48, (false, [ "7@3" ]) ] ];
-  check_failure "a section cannot silently erase an implicit bar boundary"
-    ":8 4.3 \\section \"Solo\" 7.3" Section_after_note;
-  check_failure "a key change cannot silently erase an implicit bar boundary"
-    ":8 4.3 \\ks Emajor 7.3" Key_signature_after_note;
-  check_failure "a clef change cannot silently erase an implicit bar boundary"
-    ":8 4.3 \\clef bass 7.3" Clef_after_note
+  check_music "a section after a note starts the next bar"
+    ":8 4.3 \\section \"Solo\" 7.3"
+    [ 48, [ 0, 48, (false, [ "4@3" ]) ]; 48, [ 0, 48, (false, [ "7@3" ]) ] ];
+  check_music "a key change after a note starts the next bar"
+    ":8 4.3 \\ks Emajor 7.3"
+    [ 48, [ 0, 48, (false, [ "4@3" ]) ]; 48, [ 0, 48, (false, [ "7@3" ]) ] ];
+  check_music "a clef change after a note starts the next bar"
+    ":8 4.3 \\clef bass 7.3"
+    [ 48, [ 0, 48, (false, [ "4@3" ]) ]; 48, [ 0, 48, (false, [ "7@3" ]) ] ]
+
+(* {1 Bars}
+
+   alphaTab 1.8.4 reads a bar as its directives and then its beats: a bar
+   ends at [|] or at the next directive, so a directive after a beat starts
+   the next bar. A bar with no beat in it is still a bar, played as a rest
+   for its whole length. Every expectation here is what the engine's
+   [readScore] gave for the same text. *)
+
+(* Each measure as whether a beat was written in it. *)
+let written (score : Score.t) =
+  List.map (fun (measure : Score.measure) -> not (List.is_empty measure.beats)) score.measures
+
+let check_bars label source expected =
+  Alcotest.check Alcotest.(result (list bool) failure) label (Ok expected)
+    (Result.map written (Score.read source))
+
+(* The operator's report: the preview put the close on the first bar, and
+   alphaTab gave it a bar of its own between the two. *)
+let test_a_directive_after_a_beat_starts_the_next_bar () =
+  check_music "a close after the notes is a bar of its own" ":4 3.3 3.3 \\rc 2 | 5.3"
+    [ 192, [ 0, 96, ( false, [ "3@3" ] ); 96, 96, ( false, [ "3@3" ] ) ]
+    ; 0, []
+    ; 96, [ 0, 96, ( false, [ "5@3" ] ) ] ];
+  List.iter
+    (fun directive ->
+      check_music directive
+        (":4 7.4 " ^ directive ^ " -.4")
+        [ 96, [ 0, 96, ( false, [ "7@4" ] ) ]; 96, [ 0, 96, ( false, [ "-7@4" ] ) ] ])
+    [ "\\title \"t\""; "\\subtitle \"t\""; "\\artist \"t\""; "\\tempo 90"; "\\ts 3 4"; "\\ro"
+    ; "\\rc 2"; "\\ae 1"; "\\ks Emajor"; "\\clef bass"; "\\section \"S\"" ];
+  check_music "markup after the beat stays on it" ":4 0.6 {v} \\tempo 90 3.6"
+    [ 96, [ 0, 96, ( false, [ "0@6*" ] ) ]; 96, [ 0, 96, ( false, [ "3@6" ] ) ] ];
+  check_bars "directives in a row start one bar" ":4 0.6 \\tempo 90 \\ts 3 4 3.6" [ true; true ]
+
+let test_a_bar_with_no_beat_is_a_bar () =
+  check_bars "between two bar lines" ":4 0.6 | | 3.6" [ true; false; true ];
+  check_bars "before the first bar line" "| :4 0.6" [ false; true ];
+  check_bars "after the directives, before a bar line" "\\title \"x\" | :4 0.6" [ false; true ];
+  check_bars "opened by a directive, closed by a bar line" ":4 0.6 \\title \"x\" | 3.6"
+    [ true; false; true ];
+  check_failure "bar lines and no music" "| |" No_music;
+  check_failure "a sign and no music" "\\ro" No_music
+
+(* alphaTab drops the empty bars at the end of a score unless one carries a
+   change of its own (ModelUtils.trimEmptyBarsAtEnd): a repeat sign, a tempo,
+   a section, or a time signature, key or clef other than the bar before. *)
+let test_empty_bars_at_the_end () =
+  check_bars "a last bar line" ":4 0.6 |" [ true ];
+  check_bars "bar lines at the end" ":4 0.6 | | |" [ true ];
+  check_bars "a title at the end" ":4 0.6 \\title \"x\"" [ true ];
+  check_bars "the same time signature" ":4 0.6 \\ts 4 4" [ true ];
+  check_bars "a time signature said back" ":4 0.6 \\ts 3 4 \\ts 4 4" [ true ];
+  check_bars "the same key" ":4 0.6 \\ks C" [ true ];
+  check_bars "the same clef" ":4 0.6 \\clef treble" [ true ];
+  check_bars "a key carried into a bar" ":4 0.6 | \\ks Emajor | |" [ true; false ];
+  check_bars "a tempo" ":4 0.6 \\tempo 120" [ true; false ];
+  check_bars "another time signature" ":4 0.6 \\ts 3 4" [ true; false ];
+  check_bars "another key" ":4 0.6 \\ks Emajor" [ true; false ];
+  check_bars "another clef" ":4 0.6 \\clef bass" [ true; false ];
+  check_bars "a clef back to the first" ":4 0.6 \\clef bass | \\clef treble"
+    [ true; false; false ];
+  check_bars "a section" ":4 0.6 \\section \"S\"" [ true; false ];
+  check_bars "a close, then bar lines" ":4 0.6 \\rc 2 | |" [ true; false ]
 
 (* {1 Repeats}
 
@@ -340,56 +413,81 @@ let signs = Alcotest.(result (list (triple bool (option int) (list int))) failur
 let check_signs label source expected =
   Alcotest.check signs label (Ok expected) (Result.map signs_per_bar (Score.read source))
 
+(* A sign is written at the start of the bar it marks, a close too, the way
+   alphaTab's own examples write [| \rc 2 1.3 2.3 …]. *)
 let test_a_repeat_opens_and_closes () =
-  check_signs "open, then close with the count" "\\ro :4 0.6 3.6 | :4 5.6 3.6 \\rc 2"
+  check_signs "open, then close with the count" "\\ro :4 0.6 3.6 | \\rc 2 :4 5.6 3.6"
     [ true, None, []; false, Some 2, [] ];
-  check_signs "a sign stands anywhere in its bar" ":4 0.6 \\ro 3.6 | :4 \\rc 3 5.6"
-    [ true, None, []; false, Some 3, [] ];
+  check_signs "a sign after a note marks the next bar" ":4 0.6 \\ro 3.6 | \\rc 3 :4 5.6"
+    [ false, None, []; true, None, []; false, Some 3, [] ];
+  check_signs "a close after the last note closes a bar of its own"
+    "\\ro :4 0.6 3.6 | :4 5.6 3.6 \\rc 2"
+    [ true, None, []; false, None, []; false, Some 2, [] ];
   check_signs "before the dot that ends the directives" "\\title \"riff\" \\ro . :4 0.6"
     [ true, None, [] ]
 
 let test_a_second_close_says_the_count_again () =
-  check_signs "the latest count wins" ":4 0.6 \\rc 2 \\rc 3" [ false, Some 3, [] ];
+  check_signs "the latest count wins" "\\rc 2 \\rc 3 :4 0.6" [ false, Some 3, [] ];
   check_signs "an opener twice is still open" "\\ro \\ro :4 0.6" [ true, None, [] ]
 
 let test_endings_gather_across_the_bar () =
-  check_signs "two directives, one set" ":4 0.6 \\ae 1 \\ae 2 3" [ false, None, [ 1; 2; 3 ] ];
-  check_signs "ascending, no two alike" ":4 0.6 \\ae 3 1 3 2" [ false, None, [ 1; 2; 3 ] ];
-  check_signs "each bar keeps its own" ":4 0.6 \\ae 1 | :4 3.6 \\ae 2"
+  check_signs "two directives, one set" "\\ae 1 \\ae 2 3 :4 0.6" [ false, None, [ 1; 2; 3 ] ];
+  check_signs "ascending, no two alike" "\\ae 3 1 3 2 :4 0.6" [ false, None, [ 1; 2; 3 ] ];
+  check_signs "each bar keeps its own" "\\ae 1 :4 0.6 | \\ae 2 :4 3.6"
     [ false, None, [ 1 ]; false, None, [ 2 ] ]
 
 (* alphaTab's own syntax and the writer's canonical form wrap several endings
    in parentheses; a single ending may carry them or not. *)
 let test_endings_read_alphaTabs_parenthesized_form () =
-  check_signs "parenthesized members are the list" ":4 0.6 \\ae (1 2 3)"
+  check_signs "parenthesized members are the list" "\\ae (1 2 3) :4 0.6"
     [ false, None, [ 1; 2; 3 ] ];
-  check_signs "one member may keep the parentheses" ":4 0.6 \\ae (2)"
+  check_signs "one member may keep the parentheses" "\\ae (2) :4 0.6"
     [ false, None, [ 2 ] ];
-  check_signs "one member may drop the parentheses" ":4 0.6 \\ae 4"
+  check_signs "one member may drop the parentheses" "\\ae 4 :4 0.6"
     [ false, None, [ 4 ] ];
   check_signs "parentheses then music, alphaTab's example"
-    "\\ro :4 0.6 | \\ae (1 2 3) :4 3.6 \\rc 2"
+    "\\ro :4 0.6 | \\ae (1 2 3) \\rc 2 :4 3.6"
     [ true, None, []; false, Some 2, [ 1; 2; 3 ] ]
 
 (* The endings stop where the music resumes: the note after them still
-   sounds on its count. *)
+   sounds, as the first beat of the bar the endings started. *)
 let test_endings_stop_where_music_resumes () =
   check_music "the note after the endings keeps its beat" ":4 0.6 \\ae 1 3.6"
-    [ 192, [ 0, 96, ( false, [ "0@6" ] ); 96, 96, ( false, [ "3@6" ] ) ] ];
-  check_signs "and the bar keeps its ending" ":4 0.6 \\ae 1 3.6" [ false, None, [ 1 ] ]
+    [ 96, [ 0, 96, ( false, [ "0@6" ] ) ]; 96, [ 0, 96, ( false, [ "3@6" ] ) ] ];
+  check_signs "and its bar keeps the ending" ":4 0.6 \\ae 1 3.6"
+    [ false, None, []; false, None, [ 1 ] ]
 
 let test_all_marks_on_one_bar () =
-  check_signs "open, endings and close together" "\\ro \\ae 1 :4 0.6 \\rc 2"
+  check_signs "open, endings and close together" "\\ro \\ae 1 \\rc 2 :4 0.6"
     [ true, Some 2, [ 1 ] ];
-  (match Alphatex.render_tab ~max_width:40 "\\ro \\ae 1 :4 0.6 \\rc 2" with
+  (match Alphatex.render_tab ~max_width:40 "\\ro \\ae 1 \\rc 2 :4 0.6" with
    | Error failure -> Alcotest.fail (Alphatex.failure_text failure)
    | Ok lines ->
        Alcotest.(check bool) "no line is wider than the pane" true
          (List.for_all (fun line -> String.length line <= 40) lines))
 
 let test_counts_at_their_edges () =
-  check_signs "a count of one plays once" ":4 0.6 \\rc 1" [ false, Some 1, [] ];
-  check_signs "the thirty-first ending" ":4 0.6 \\ae 31" [ false, None, [ 31 ] ]
+  check_signs "a count of one plays once" "\\rc 1 :4 0.6" [ false, Some 1, [] ];
+  check_signs "the thirty-first ending" "\\ae 31 :4 0.6" [ false, None, [ 31 ] ]
+
+(* A sign on a bar with no beat marks that bar, which alphaTab plays as a
+   rest; with no beat anywhere there is no music to mark. *)
+let test_a_sign_on_a_bar_with_no_beat () =
+  check_signs "an opener after the last bar" ":4 0.6 | \\ro"
+    [ false, None, []; true, None, [] ];
+  check_signs "a closer after the last bar" ":4 0.6 | \\rc 2"
+    [ false, None, []; false, Some 2, [] ];
+  check_signs "endings after the last bar" ":4 0.6 | \\ae 1"
+    [ false, None, []; false, None, [ 1 ] ];
+  check_signs "an opener on an empty bar" "\\ro | :4 0.6"
+    [ true, None, []; false, None, [] ];
+  check_signs "a closer on an empty bar" ":4 0.6 | \\rc 2 | 3.6"
+    [ false, None, []; false, Some 2, []; false, None, [] ];
+  check_signs "endings on an empty bar" "\\ae 1 | :4 0.6"
+    [ false, None, [ 1 ]; false, None, [] ];
+  check_failure "an opener and nothing else" "\\ro" No_music;
+  check_failure "a closer and nothing else" "\\rc 2" No_music;
+  check_failure "endings and nothing else" "\\ae 1" No_music
 
 (* {1 The pane}
 
@@ -451,12 +549,17 @@ let test_parallel_chords_remain_readable () =
 
 let test_continuation_keeps_music_and_signs () =
   let score = read_score
-    "\\ro \\ae (1 2) :4 (12.6 14.5) -.6 r 10.1{gr} 5.1{d} \\rc 12 | :1 3.6 5.6" in
+    "\\ro \\ae (1 2) \\rc 12 :4 (12.6 14.5) -.6 r 10.1{gr} 5.1{d} | :1 3.6 5.6" in
   let fragments = reading ~max_width:20 score in
   check_preserved score fragments;
   Alcotest.(check bool) "reading continues instead of discarding an oversized bar" true
     (List.exists (fun (part : Alphatex.fragment) ->
       part.left = Alphatex.Continuation || part.right = Alphatex.Continuation) fragments)
+
+(* A bar with no beat still has its place in the reading, with its signs. *)
+let test_a_bar_with_no_beat_keeps_its_place () =
+  let score = read_score ":4 3.3 3.3 \\rc 2 | 5.3" in
+  check_preserved score (reading ~max_width:20 score)
 
 let test_long_score_keeps_original_bars () =
   let score = read_score (String.concat " | " (List.init 1000 (fun _ -> ":16 r"))) in
@@ -611,8 +714,8 @@ let test_the_rhythm_line_fills_between_beats () =
            (String.sub rhythm 2 (String.length rhythm - 2)))
 
 let repeated_riff =
-  "\\ro :4 0.6 3.6 5.6 3.6 | :8 5.6 3.6 :4 0.5 \\rc 2 | \\ae 1 :4 5.5 3.5 | \\ae 2 :4 5.5 \
-   \\rc 2"
+  "\\ro :4 0.6 3.6 5.6 3.6 | \\rc 2 :8 5.6 3.6 :4 0.5 | \\ae 1 :4 5.5 3.5 | \\ae 2 \\rc 2 \
+   :4 5.5"
 
 let test_a_repeated_tab_stays_inside_the_pane () =
   match Alphatex.render_tab ~max_width:40 repeated_riff with
@@ -626,7 +729,7 @@ let test_a_repeated_measure_the_pane_cannot_hold () =
   (* The opening beat with its repeat start fits in 21 cells; the closing
      beat with its original repeat count needs 25, even on its own. *)
   match Alphatex.layout ~max_width:21
-    (read_score "\\ro :1 0.6 0.6 \\rc 12") with
+    (read_score "\\ro \\rc 12 :1 0.6 0.6") with
   | Error (Too_wide _) -> ()
   | Error (Unreadable _ as other) -> Alcotest.failf "not Too_wide: %s" (Alphatex.failure_text other)
   | Ok _ -> Alcotest.fail "an indivisible beat with its original repeat close cannot fit"
@@ -823,17 +926,6 @@ let test_repeat_signs_outside_the_subset () =
   check_failure "an ending past 31" ":4 0.6 \\ae 32" (Alternate_ending_out_of_range "32");
   check_failure "the second ending past 31" ":4 0.6 \\ae 1 32" (Alternate_ending_out_of_range "32")
 
-let test_a_sign_with_no_bar () =
-  check_failure "an opener and nothing else" "\\ro" Repeat_without_bar;
-  check_failure "a closer and nothing else" "\\rc 2" Repeat_without_bar;
-  check_failure "endings and nothing else" "\\ae 1" Repeat_without_bar;
-  check_failure "an opener after the last bar" ":4 0.6 | \\ro" Repeat_without_bar;
-  check_failure "a closer after the last bar" ":4 0.6 | \\rc 2" Repeat_without_bar;
-  check_failure "endings after the last bar" ":4 0.6 | \\ae 1" Repeat_without_bar;
-  check_failure "an opener on an empty bar" "\\ro | :4 0.6" Repeat_without_bar;
-  check_failure "a closer on an empty bar" ":4 0.6 | \\rc 2 | 3.6" Repeat_without_bar;
-  check_failure "endings on an empty bar" "\\ae 1 | :4 0.6" Repeat_without_bar
-
 (* A failure's sentence quotes the author's text and is printed on the pane,
    so whatever the text held, the sentence holds nothing a terminal acts on:
    no C0 byte or DEL, no C1 control in UTF-8 (an xterm reads U+009B as CSI),
@@ -907,6 +999,13 @@ let () =
         ; Alcotest.test_case "metadata arguments and bar boundaries" `Quick
             test_metadata_arguments_and_bar_boundaries
         ] )
+    ; ( "bars"
+      , [ Alcotest.test_case "a directive after a beat starts the next bar" `Quick
+            test_a_directive_after_a_beat_starts_the_next_bar
+        ; Alcotest.test_case "a bar with no beat is a bar" `Quick
+            test_a_bar_with_no_beat_is_a_bar
+        ; Alcotest.test_case "empty bars at the end" `Quick test_empty_bars_at_the_end
+        ] )
     ; ( "repeats"
       , [ Alcotest.test_case "a repeat opens and closes" `Quick
             test_a_repeat_opens_and_closes
@@ -920,6 +1019,8 @@ let () =
             test_endings_stop_where_music_resumes
         ; Alcotest.test_case "all marks on one bar" `Quick test_all_marks_on_one_bar
         ; Alcotest.test_case "counts at their edges" `Quick test_counts_at_their_edges
+        ; Alcotest.test_case "a sign on a bar with no beat" `Quick
+            test_a_sign_on_a_bar_with_no_beat
         ] )
     ; ( "the pane"
       , [ Alcotest.test_case "a drawn tab stays inside the pane" `Quick
@@ -934,6 +1035,8 @@ let () =
             test_a_bar_that_must_continue_starts_its_own_system
         ; Alcotest.test_case "a bar that fits is never divided" `Quick
             test_a_bar_that_fits_is_never_divided
+        ; Alcotest.test_case "a bar with no beat keeps its place" `Quick
+            test_a_bar_with_no_beat_keeps_its_place
         ; Alcotest.test_case "long score keeps original bars" `Quick
             test_long_score_keeps_original_bars
         ; Alcotest.test_case "wide note text does not overwrite the next beat" `Quick
@@ -979,7 +1082,6 @@ let () =
             test_notes_that_cannot_be_placed
         ; Alcotest.test_case "repeat signs outside the subset" `Quick
             test_repeat_signs_outside_the_subset
-        ; Alcotest.test_case "a sign with no bar" `Quick test_a_sign_with_no_bar
         ; Alcotest.test_case "a failure sentence holds no control bytes" `Quick
             test_a_failure_sentence_holds_no_control_bytes
         ] )

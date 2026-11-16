@@ -436,7 +436,7 @@ def surface_runs(path: Path, frames_received: int) -> surfaces.Runs | str:
     try:
         text = path.read_text()
     except FileNotFoundError:
-        return 'the TUI wrote no frame-timing report'
+        return surfaces.NO_REPORT
     except (OSError, UnicodeError) as exc:
         return f'frame-timing report: {exc}'
     return surfaces.read_runs(text, frames_received)

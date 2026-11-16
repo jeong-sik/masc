@@ -1,5 +1,5 @@
 (* HIGH-RISK-UNREVIEWED: [whoami] tells a browser who the server takes it for,
-   and the pages start a login and sign a browser out. *)
+   the pages start a login, and the home page signs a browser out. *)
 
 (** The pages and the who-am-I answer of the localhost preview of
     multi-account login (plan, preview scope P2).
@@ -11,7 +11,8 @@
     The pages hold no request data. The invitation token stays in the
     fragment of the link ({!Authz_activation.link}), which the browser does
     not send, and the script of the invitation page copies it into the form.
-    The CSRF token of a sign-out comes from [GET /auth/session]. *)
+    A login started from either page comes back to
+    {!Account_page.console_path}. *)
 
 (** [GET /accounts/invite], the page that an invitation link opens: a form
     that starts a GitHub login with the token of the link. [nonce] is the
@@ -20,20 +21,17 @@
     the server has no GitHub login. An address with no token shows how to open
     the invitation again in place of the form. The pages start no Google
     login. *)
-val invite_page : nonce:string -> github:bool -> Login_routes.answer
+val invite_page : nonce:Account_page.Nonce.t -> github:bool -> Login_routes.answer
 
 (** [GET /]: for a browser with no session, a form that starts a GitHub
     login and no answer of a route. When the session routes do not say whether
-    a session is open, the page says so in place of that form. For a signed-in
-    browser, the session and who the server takes it for, and a sign-out
-    button. Below them, the
-    subscriptions the person owns, a form that connects one through
-    {!connect_path} and answers its login, and a form that calls one through
-    {!verify_path}. Last, the person's Runtimes and Keepers, a form that
-    makes a Keeper and gives it a Runtime through {!Auth_preview_keeper}, and
-    a form that sends the Keeper a message through
-    {!Auth_preview_keeper.turn_path} and shows its answer. *)
-val home_page : nonce:string -> github:bool -> Login_routes.answer
+    a session is open, the page says so in place of that form. A browser with
+    a session goes on to {!Account_page.console_path}, where the person uses
+    their subscriptions, Keepers and tokens, and signs out. When the server
+    does not give the console (a 503 while the dashboard bundle cannot be
+    read), the page stays, says so, and offers the sign-out
+    ([POST /auth/logout]) in its place. *)
+val home_page : nonce:Account_page.Nonce.t -> github:bool -> Login_routes.answer
 
 (** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}
     on a snapshot the zone could be trusted for ({!Authz_zone.read}), as
@@ -53,7 +51,7 @@ val connect_prefix : string
 val provider_accounts_path : string
 
 (** [/api/v1/setup/accounts/verify]: one call of the person's own account
-    (plan D1-6a). The home page posts the account and the model to it. *)
+    (plan D1-6a). The console posts the account and the model to it. *)
 val verify_path : string
 
 (** A person that a [Manage_own_provider] route lets through, with the

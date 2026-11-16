@@ -1,0 +1,24 @@
+{
+ "inkling": [
+  {
+   "synth": "artifacts/tinker/librarian/rescore-a1/base-inkling-synth-1",
+   "real": "artifacts/tinker/librarian/rescore-a1/base-inkling-real-1",
+   "drops": "artifacts/tinker/librarian/rescore-a1/opus/base-inkling-1-drops",
+   "merges": "artifacts/tinker/librarian/rescore-a1/opus/base-inkling-1-merges"
+  },
+  {
+   "synth": "artifacts/tinker/librarian/rescore-a1/base-inkling-synth-2",
+   "real": "artifacts/tinker/librarian/rescore-a1/base-inkling-real-2",
+   "drops": "artifacts/tinker/librarian/rescore-a1/opus/base-inkling-2-drops",
+   "merges": "artifacts/tinker/librarian/rescore-a1/opus/base-inkling-2-merges"
+  }
+ ],
+ "glm": [
+  {
+   "synth": "artifacts/tinker/librarian/rescore-a1/base-glm-synth-1",
+   "real": "artifacts/tinker/librarian/rescore-a1/base-glm-real-1",
+   "drops": "artifacts/tinker/librarian/rescore-a1/opus/base-glm-1-drops",
+   "merges": "artifacts/tinker/librarian/rescore-a1/opus/base-glm-1-merges"
+  }
+ ]
+}

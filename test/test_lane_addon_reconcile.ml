@@ -229,11 +229,13 @@ command = ["observer"]
 contributions = ["observe"]
 [resources]
 cpus = %s
-memory_bytes = 67108864
+memory_bytes = %s
 %s
 max_reply_bytes = 4096
 |} id (match runtime with Types.Docker -> "" | Apple_container -> "runtime = \"apple_container\"")
     (match runtime with Types.Docker -> "0.5" | Apple_container -> "1")
+    (* Apple container creates nothing below 200 MiB. *)
+    (match runtime with Types.Docker -> "67108864" | Apple_container -> "209715200")
     (match runtime with Types.Docker -> "pids = 16" | Apple_container -> ""));
   path
 
@@ -488,7 +490,7 @@ contributions = ["observe"]
 mode = "persistent"
 [resources]
 cpus = 1
-memory_bytes = 67108864
+memory_bytes = 209715200
 max_reply_bytes = 4096
 |};
     let refused = reconcile config directory in

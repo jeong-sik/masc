@@ -1249,6 +1249,7 @@ let test_tool_result_preserves_structured_content_and_failure_provenance () =
     `Assoc
       [ "role", `String "tool"
       ; "origin", `String "conversation"
+      ; "result_time", `Assoc [ "state", `String "unrecorded" ]
       ; ( "content_blocks"
         , `List
             [ `Assoc

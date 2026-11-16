@@ -1,9 +1,9 @@
-type format = Mermaid | Svg
+type format = Mermaid | Svg | Graph
 type scene = { format : format; source : string; max_width : int;
   font_size : int; now_ms : int64; colors : (string * string) option }
 type crop = { left : float; top : float; right : float; bottom : float }
 type raster = { width : int; height : int; crop : crop option }
-type runner = input:string -> output:string -> errors:string -> Unix.process_status
+type runner = input:string -> output:string -> errors:string -> Masc_tui_image_cache.ending
 type response = Confirmed of string | Unconfirmed
 let protocol_version = 1
 let protocol_receipt = Printf.sprintf "masc-pele-protocol:%d" protocol_version
@@ -37,7 +37,7 @@ let default_runner ~input ~output ~errors =
       with_file errors [Unix.O_WRONLY; Unix.O_TRUNC] (fun stderr ->
         Unix.create_process "masc-pele" [|"masc-pele"|] stdin stdout stderr))) in
   let rec wait () = match Unix.waitpid [] pid with
-    | _, status -> status
+    | _, status -> Masc_tui_image_cache.Exited status
     | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
   wait ()
 
@@ -56,7 +56,7 @@ let render ~cache_dir ?raster ?(runner=default_runner) {format;source;max_width;
       let output = temporary ".png" in
       let errors = temporary ".err" in
       let fields = ["protocol", `Int protocol_version;
-                    "format", `String (match format with Mermaid -> "mermaid" | Svg -> "svg");
+                    "format", `String (match format with Mermaid -> "mermaid" | Svg -> "svg" | Graph -> "graph");
                     "source", `String source; "maxWidth", `Int max_width;
                     "fontSize", `Int font_size; "now", `Intlit (Int64.to_string now_ms)] in
       let fields = match raster with
@@ -77,7 +77,7 @@ let render ~cache_dir ?raster ?(runner=default_runner) {format;source;max_width;
       Out_channel.with_open_bin input (fun channel ->
         Yojson.Safe.to_channel channel (`Assoc fields));
       match runner ~input ~output ~errors with
-      | Unix.WEXITED code ->
+      | Masc_tui_image_cache.Exited (Unix.WEXITED code) ->
           (match code, read_response ~pixels:(code = 0) output with
            | 0, Confirmed png ->
                if String.length png = 0 then Error "Pele produced no image" else Ok png
@@ -89,8 +89,10 @@ let render ~cache_dir ?raster ?(runner=default_runner) {format;source;max_width;
                let detail = if String.equal detail "" then Printf.sprintf "exit %d" code
                  else Printf.sprintf "exit %d: %s" code detail in
                Error (unconfirmed_error detail))
-      | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+      | Exited (Unix.WSIGNALED signal | Unix.WSTOPPED signal) ->
           Error (Printf.sprintf "Pele ended on signal %d" signal)
+      | Killed_at_deadline -> Error "Pele was killed at its deadline"
+      | Cancelled -> Error "Pele was cancelled"
     with
     | Unix.Unix_error (Unix.ENOENT, "create_process", _) ->
         Error "masc-pele is not installed; run scripts/install-pele.sh"

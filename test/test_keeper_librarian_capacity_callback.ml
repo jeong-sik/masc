@@ -630,6 +630,7 @@ let test_size_verdict_table () =
       , failed (Http.Unknown_provider_failure { reason = None })
       , false )
     ; "completion failed, dns failure", network Http.Dns_failure, false
+    ; "completion failed, no route to the network or host", network Http.Unreachable, false
     ; "completion failed, connection refused", network Http.Connection_refused, false
     ; "completion failed, tls failure", network Http.Tls_error, false
     ; "completion failed, peer reset", network Http.Connection_reset, false

@@ -275,6 +275,17 @@ let keeper_waiting_item_text (item : Tui_decode.waiting_item) =
      else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
      else item.kwi_waiting_on)
 
+(* The reasons the server gave for each source the fleet waiting read could
+   not observe. The Plain header and the axis views say the same thing. *)
+let keeper_waiting_failure_reasons ~ko errors =
+  List.map
+    (function
+      | Keeper_list_model.Failure_sentence sentence -> Terminal_text.single_line sentence
+      | Keeper_list_model.Failure_next_action action ->
+          (if ko then "다음 조치: " else "next action: ") ^ Terminal_text.single_line action
+      | Keeper_list_model.Failure_unstated -> if ko then "원인 미기록" else "reason not stated")
+    (Keeper_list_model.waiting_failure_reasons errors)
+
 let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
   match row.waiting with
   | Keeper_list_model.Waiting_observed { Tui_decode.kwr_waiting_on = (first :: rest as items); _ } ->
@@ -2199,8 +2210,8 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
      fold into a single summary line. Either way the header grows by one line
      instead of one per failure, so a burst of read errors cannot shove the
      whole list up and down. *)
+  let cells = max 0 (inner - 2) in
   let errors =
-    let cells = max 0 (inner - 2) in
     match keeper_observation_errors state with
     | [] -> []
     | [ (label, reason) ] ->
@@ -2233,9 +2244,17 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
   in
   let waiting = match state.keeper_waiting_failure with
     | Some (Tui_decode.Keeper_waiting_invalid reason) -> [warning (text "대기 관측 미확인: " "waiting unknown: ") reason]
-    | Some (Tui_decode.Keeper_waiting_sources_unavailable _) ->
-        [warning "" (text "대기 원본을 읽지 못했습니다 · 대기 목록이 업무 차단을 뜻하지는 않습니다"
-                       "waiting sources unavailable · inventory is not a work blocker")]
+    | Some (Tui_decode.Keeper_waiting_sources_unavailable errors) ->
+        (* One line like the read errors above. The reasons come right after
+           the failure, so a narrow frame cuts the closing note first. *)
+        let failure = text "대기 원본을 읽지 못했습니다" "waiting sources unavailable" in
+        let failure = match keeper_waiting_failure_reasons ~ko:(state.ui_language = Lang_ko) errors with
+          | [] -> failure
+          | reasons -> failure ^ ": " ^ String.concat ", " reasons
+        in
+        [warning "" (Message_layout.fit_width
+           (failure ^ text " · 대기 목록이 업무 차단을 뜻하지는 않습니다"
+              " · inventory is not a work blocker") cells)]
     | None ->
         (match keeper_waiting_refresh_slow state with
          | Some age ->
@@ -2778,13 +2797,8 @@ let render_keeper_axes (state : state) =
        let detail =
          match failure with
          | Tui_decode.Keeper_waiting_sources_unavailable errors ->
-             errors
-             |> List.map (fun item ->
-               let detail =
-                 if item.Tui_decode.kwi_source = Tui_decode.Waiting_source_observation_unavailable
-                 then item.kwi_what else item.kwi_waiting_on in
-               Terminal_text.single_line detail)
-             |> String.concat ", "
+             String.concat ", "
+               (keeper_waiting_failure_reasons ~ko:(state.ui_language = Lang_ko) errors)
          | Tui_decode.Keeper_waiting_invalid detail -> Terminal_text.single_line detail
        in
        box_line buf cols
@@ -3093,7 +3107,13 @@ let secret_lines (state : state) (k : keeper) =
   match keeper_composite_of state ~keeper_name:k.k_name with
   | None | Some { kcr_secret = None; _ } -> None
   | Some { kcr_secret = Some p; _ } ->
-      let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
+      (* HIGH-RISK-UNREVIEWED: [keeper_secret_status_text] already makes an
+         unknown producer word one printable row; the styles below wrap it
+         as it is. *)
+      let status =
+        Masc.Tui_decode.keeper_secret_status_text
+          ~ko:(state.ui_language = Lang_ko) p.ksp_status
+      in
       let status_label = t "  상태:    " "  Status:  " in
       let status_line =
         match p.ksp_status with
@@ -3133,7 +3153,7 @@ let secret_lines (state : state) (k : keeper) =
       @ [ ""
         ; dim
             (if p.ksp_values_validated then
-               t "  값을 읽고 검증했음. 값은 여기로 보내지지 않음."
+               t "  값을 읽고 검증했음. 값은 여기로 보내지 않음."
                  "  Values were read and validated. They are never sent here."
              else
                t "  마지막 읽기에서 값을 검증하지 못함."
@@ -4204,7 +4224,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                     state.keepers
                 in
                 let binding_reference (binding : Masc.Tui_decode_connectors.connector_binding) =
-                  Masc_tui_connector_unbind.channel_label
+                  Masc_tui_connector_unbind.channel_label ~ko
                     ~channel_id:binding.cb_channel_id
                     ~channel_name:binding.cb_channel_name
                 in
@@ -4398,7 +4418,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Some _ | None -> None in
       let error_lines = match error with
         | Some detail ->
-            [ (Theme.bad ()) ^ "  " ^ (if observed then "STALE · " else "")
+            [ (Theme.bad ()) ^ "  "
+              ^ (if observed then ui_text state ~ko:"이전 관측 · " ~en:"STALE · " else "")
               ^ Terminal_text.single_line detail ^ Ansi.reset ]
         | None -> [] in
       let progress = match pending with
@@ -4715,25 +4736,30 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           let error = keeper_composite_error_of state ~keeper_name:k.k_name in
           let reading_now = keeper_composite_reading_now state ~keeper_name:k.k_name in
           let observed = Option.is_some reading in
+          let t korean english = ui_text state ~ko:korean ~en:english in
           let failure = match error with
             | None -> []
             | Some detail ->
-                [ (Theme.bad ()) ^ "  " ^ (if observed then "STALE · " else "")
+                [ (Theme.bad ()) ^ "  " ^ (if observed then t "이전 관측 · " "STALE · " else "")
                   ^ Terminal_text.single_line detail ^ Ansi.reset ] in
           let progress = if reading_now then
               [ loading_row (if observed
-                  then "refreshing execution snapshot · last observation"
-                  else "reading execution snapshot") ]
+                  then t "실행 상태 갱신 중 · 마지막 관측"
+                      "refreshing execution snapshot · last observation"
+                  else t "실행 상태 읽는 중" "reading execution snapshot") ]
             else [] in
           let lines = match secret_lines state k with
             | Some lines -> lines
             | None ->
                 (match reading, error, reading_now with
                  | None, None, false ->
-                     [ Ansi.dim ^ "  Execution snapshot not observed" ^ Ansi.reset ]
+                     [ Ansi.dim ^ t "  실행 상태 미관측" "  Execution snapshot not observed" ^ Ansi.reset ]
                  | None, (Some _ | None), true | None, Some _, false -> []
                  | Some _, (Some _ | None), (true | false) ->
-                     [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]) in
+                     [ Ansi.dim
+                       ^ t "  (이 Keeper 시크릿 상태 보고 없음)"
+                           "  (no projection reported for this Keeper)"
+                       ^ Ansi.reset ]) in
           failure @ progress @ lines
       | Detail_github ->
           let base =

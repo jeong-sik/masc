@@ -542,6 +542,67 @@ let test_verify_token_rejects_dashed_name_that_ends_in_the_token_owner () =
       fail (Printf.sprintf "the token of bar authenticated foo-bar as %s" cred.agent_name)
   | Error _ -> ()
 
+(* #44137: a keeper- prefix does not name an owner. "keeper-evil" has no
+   credential file and no stored alias, so the token of the credential "keeper"
+   must be refused as another agent's token. *)
+let test_verify_token_rejects_unregistered_keeper_prefixed_name () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      match Auth.ensure_keeper_credential dir ~agent_name:"keeper" with
+      | Error e ->
+          failf "keeper credential bootstrap failed: %s"
+            (Masc_domain.masc_error_to_string e)
+      | Ok (keeper_token, _) -> (
+          match Auth.verify_token dir ~agent_name:"keeper-evil" ~token:keeper_token with
+          | Ok cred ->
+              failf "the token of keeper authenticated keeper-evil as %s"
+                cred.agent_name
+          | Error
+              (Masc_domain.Auth
+                 (Masc_domain.Auth_error.Unauthorized
+                    { reason = Masc_domain.Auth_error.Actor_mismatch; _ })) -> ()
+          | Error e ->
+              failf "expected an actor mismatch for keeper-evil, got %s"
+                (Masc_domain.masc_error_to_string e)))
+
+(* Next to the same "keeper" credential, a keeper-* name still signs in by its
+   own credential (keeper-<name>-agent exact match) or by an alias stored with
+   [Auth.ensure_credential_alias]. *)
+let test_verify_token_keeper_prefixed_name_signs_in_by_exact_or_stored_alias () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let ok label = function
+        | Ok value -> value
+        | Error e -> failf "%s: %s" label (Masc_domain.masc_error_to_string e)
+      in
+      let keeper_token, _ =
+        ok "keeper credential bootstrap"
+          (Auth.ensure_keeper_credential dir ~agent_name:"keeper")
+      in
+      let alpha_token, _ =
+        ok "keeper-alpha-agent credential bootstrap"
+          (Auth.ensure_keeper_credential dir ~agent_name:"keeper-alpha-agent")
+      in
+      let exact =
+        ok "keeper-alpha-agent exact match"
+          (Auth.verify_token dir ~agent_name:"keeper-alpha-agent" ~token:alpha_token)
+      in
+      check string "exact keeper-<name>-agent credential answers"
+        "keeper-alpha-agent" exact.agent_name;
+      ok "store keeper-short alias"
+        (Auth.ensure_credential_alias dir ~canonical_name:"keeper"
+           ~alias_name:"keeper-short");
+      let aliased =
+        ok "keeper-short stored alias"
+          (Auth.verify_token dir ~agent_name:"keeper-short" ~token:keeper_token)
+      in
+      check string "stored alias answers with the keeper credential"
+        "keeper" aliased.agent_name)
+
 let test_resolve_agent_from_token () =
   let dir = setup_test_workspace () in
   let create_result = Auth.create_token dir ~agent_name:"resolver" ~role:Masc_domain.Worker in
@@ -724,7 +785,7 @@ let test_extract_agent_type_prefix_keeper_aliases () =
     (Auth_nickname.extract_agent_type_prefix "mu-king-warm-heron-a3b2");
   check (option string) "plain name stays plain" (Some "alpha")
     (Auth_nickname.extract_agent_type_prefix "alpha");
-  check (option string) "two segment keeper fallback unchanged" (Some "keeper")
+  check (option string) "keeper-prefixed name outside the alias shape has no owner" None
     (Auth_nickname.extract_agent_type_prefix "keeper-alpha")
 
 let test_verify_token_keeper_exact_match () =
@@ -1417,6 +1478,10 @@ let () =
         test_verify_token_allows_generated_alias_for_token_owner_prefix;
       test_case "dashed name ending in the token owner is rejected" `Quick
         test_verify_token_rejects_dashed_name_that_ends_in_the_token_owner;
+      test_case "keeper token does not sign in an unregistered keeper-* name" `Quick
+        test_verify_token_rejects_unregistered_keeper_prefixed_name;
+      test_case "keeper-* name signs in by exact credential or stored alias" `Quick
+        test_verify_token_keeper_prefixed_name_signs_in_by_exact_or_stored_alias;
       test_case "resolve agent from token" `Quick test_resolve_agent_from_token;
       test_case "list credentials" `Quick test_list_credentials;
       test_case "delete credential" `Quick test_delete_credential;

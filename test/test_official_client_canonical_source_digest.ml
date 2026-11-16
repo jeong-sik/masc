@@ -26,7 +26,7 @@ let rest = [ "model", `Null; "workspace_root", `String "/workspace" ]
 let spelled_out ~rest =
   `Assoc
     (("system_prompt", `String system_prompt)
-     :: ("messages", `List (List.map Codec.to_json messages))
+     :: ("messages", `List (List.map (Codec.to_json Codec.Canonical_source) messages))
      :: rest)
   |> Yojson.Safe.to_string
   |> Agent_core_sha256.digest_string

@@ -59,7 +59,7 @@ Board 를 읽고 쓰는 것까지 해 봅니다. 각 단계 끝에는 *이것이
    `{"error":"not initialized"}`(HTTP 503)가 납니다. 인증 실패가 아니니 잠시 뒤
    다시 하세요.
 2. 이 작업공간에 로그인돼 있습니다(`masc login`). 아니면
-   `[AuthError] Unauthorized ... Run masc login for this workspace, or pass --token.`
+   `[AuthError] Unauthorized ... Run masc login for this workspace with the same --base-path and --agent.`
    이 납니다.
 3. 모델이 연결돼 `runtime.toml` 에 `[runtime].default` 가 있습니다. 아니면
    `Model setup required ... [runtime].default is required` 가 납니다.

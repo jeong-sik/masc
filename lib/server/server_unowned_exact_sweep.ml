@@ -52,27 +52,34 @@ let original_required (declaration : Lane_addon_config.declaration) =
 type listed = { file_name : string; path : string; size : int64 }
 
 (* A declaration directory holds only <name>.json files. A staging file a
-   write left is skipped; any other entry refuses the sweep. *)
+   write left is skipped; any other entry refuses the sweep. The deploy
+   preflight judges the directory and its entries with the same functions. A
+   refusal names the entry's path below the store root, never its contents. *)
 let list_directory ~root directory =
   let path = Filename.concat root directory in
-  match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
-  | stat when stat.Unix.st_kind = Unix.S_DIR ->
+  let lstat_failed error = Error (Sweep_refused ("lstat: " ^ Unix.error_message error)) in
+  match Store.exact_directory path with
+  | Error error -> lstat_failed error
+  | Ok Store.Exact_directory_absent -> Ok []
+  | Ok Exact_directory_refused ->
+    Error (Sweep_refused ("an Exact directory is not a directory: " ^ directory))
+  | Ok Exact_directory_present ->
     Sys.readdir path
     |> Array.to_list
     |> List.sort String.compare
     |> List.fold_left
          (fun acc file_name ->
            let* acc = acc in
-           if Fs_compat.is_atomic_orphan_name file_name then Ok acc
-           else
-             let file = Filename.concat path file_name in
-             let stat = Unix.lstat file in
-             if stat.Unix.st_kind = Unix.S_REG && Filename.check_suffix file_name ".json" then
-               Ok ({ file_name; path = file; size = Int64.of_int stat.Unix.st_size } :: acc)
-             else Error (Sweep_refused "an Exact directory entry is not a JSON file"))
+           match Store.exact_directory_entry ~directory:path file_name with
+           | Ok (Store.Exact_staged | Exact_gone) -> Ok acc
+           | Ok (Exact_file { size }) ->
+             Ok ({ file_name; path = Filename.concat path file_name; size } :: acc)
+           | Ok (Exact_refused (Not_a_json_name | Not_a_regular_file)) ->
+             Error
+               (Sweep_refused
+                  ("an Exact directory entry is not a JSON file: " ^ Filename.concat directory file_name))
+           | Error error -> lstat_failed error)
          (Ok [])
-  | _ -> Error (Sweep_refused "an Exact directory is not a directory")
 
 let read_json path =
   match Yojson.Safe.from_file path with

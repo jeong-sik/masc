@@ -17,7 +17,7 @@ portable = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(portable)
 
 
-def package(dist, stage, platform, commit, lock_path):
+def package(dist, stage, platform, commit, lock_path, ocaml_notices):
     if stage.exists():
         raise ValueError('runtime stage must be new')
     lock = json.loads(lock_path.read_text())
@@ -31,6 +31,8 @@ def package(dist, stage, platform, commit, lock_path):
         archive.write(archive_bytes)
         archive.flush()
         portable.unpack_python(Path(archive.name), stage)
+    if ocaml_notices is not None:
+        portable.stage_ocaml_notices(stage, ocaml_notices)
     for name in portable.NAMES:
         shutil.copy2(dist / (name + '-' + platform), stage / name)
     if portable.run(str(stage.resolve() / 'masc'), 'build-commit').strip() != commit:
@@ -62,5 +64,6 @@ if __name__ == '__main__':
     parser.add_argument('--platform', choices=['linux-arm64', 'linux-x64'], required=True)
     parser.add_argument('--source-commit', required=True)
     parser.add_argument('--python-lock', type=Path, default=Path(__file__).with_name('portable-python-runtime.lock.json'))
+    portable.add_ocaml_notice_arguments(parser)
     args = parser.parse_args()
-    package(args.dist, args.stage, args.platform, args.source_commit, args.python_lock)
+    package(args.dist, args.stage, args.platform, args.source_commit, args.python_lock, args.ocaml_notices)

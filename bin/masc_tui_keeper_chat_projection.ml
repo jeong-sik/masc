@@ -29,7 +29,7 @@ type request = {
   references : image_reference list;
 }
 
-type acceptance_state =
+type acceptance_state = Keeper_chat_operation.State_name.t =
   | Queued
   | Running
   | Succeeded
@@ -630,14 +630,6 @@ let validate_exact_fields ~surface ~allowed fields =
 let validate_thread ~surface ~expected fields =
   validate_expected_string ~surface ~field:"threadId" ~expected fields
 
-let acceptance_state_of_string = function
-  | "Queued" -> Ok Queued
-  | "Running" -> Ok Running
-  | "Succeeded" -> Ok Succeeded
-  | "Failed" -> Ok Failed
-  | "Cancelled" -> Ok Cancelled
-  | value -> Error (Printf.sprintf "unknown Keeper chat operation state %S" value)
-
 let decode_interactive_receipt ~operation_id json =
   let surface = "KEEPER_CHAT_OPERATION_ACCEPTED.value.interactive" in
   let* fields = exact_object_fields ~surface
@@ -687,7 +679,7 @@ let decode_acceptance ?expected_request_id json =
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
   let* state =
-    acceptance_state_of_string state_raw
+    Keeper_chat_operation.State_name.of_wire state_raw
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
   let* queued_count =

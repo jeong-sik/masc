@@ -333,6 +333,35 @@ let exact_request_directory ~declaration_id =
   Filename.concat exact_requests_directory (digest declaration_id)
 let exact_request_path ~declaration_id ~request_id =
   Filename.concat (exact_request_directory ~declaration_id) (digest request_id ^ ".json")
+type exact_entry_refusal = Not_a_json_name | Not_a_regular_file
+type exact_entry =
+  | Exact_file of { size : int64 }
+  | Exact_staged
+  | Exact_gone
+  | Exact_refused of exact_entry_refusal
+(* A staged write is known by its name. Any other entry is read with lstat,
+   so a symbolic link is judged as a link and never followed. *)
+let exact_directory_entry ~directory name =
+  if Fs_compat.is_atomic_orphan_name name then Ok Exact_staged
+  else
+    match Unix.lstat (Filename.concat directory name) with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Exact_gone
+    | exception Unix.Unix_error (error, _, _) -> Error error
+    | stat ->
+      if not (Filename.check_suffix name ".json") then Ok (Exact_refused Not_a_json_name)
+      else
+        (match stat.Unix.st_kind with
+         | Unix.S_REG -> Ok (Exact_file { size = Int64.of_int stat.Unix.st_size })
+         | Unix.S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK -> Ok (Exact_refused Not_a_regular_file))
+type exact_directory = Exact_directory_present | Exact_directory_absent | Exact_directory_refused
+let exact_directory path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Exact_directory_absent
+  | exception Unix.Unix_error (error, _, _) -> Error error
+  | stat ->
+    (match stat.Unix.st_kind with
+     | Unix.S_DIR -> Ok Exact_directory_present
+     | Unix.S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK -> Ok Exact_directory_refused)
 let save_exact_request t ~declaration_id ~request_id json =
   save_record_with ~sync_parent:sync_parent_directory t (exact_request_path ~declaration_id ~request_id) json
 let tool_request_owner_path ~scope ~request_id =

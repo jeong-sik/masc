@@ -71,6 +71,11 @@ let with_fixture run =
       @@ fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
+      (* A fixture hang detector, like test_tui_io_domain's existing deadline;
+         it is not a product timeout or publication outcome classifier. It
+         also covers the end of [sw]: a fiber that keeps the fixture's switch
+         open fails the case instead of letting it pass late. *)
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 @@ fun () ->
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
@@ -94,12 +99,16 @@ let with_fixture run =
        | Masc_tui_credential.Held | Masc_tui_credential.Minted _ -> ()
        | Masc_tui_credential.Not_required | Masc_tui_credential.Workspace_pending
        | Masc_tui_credential.Mint_failed _ -> fail "temporary operator credential unavailable");
-      Client.start_io_domain ~sw ~env;
-      Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
-      (* A fixture hang detector, like test_tui_io_domain's existing deadline;
-         it is not a product timeout or publication outcome classifier. *)
-      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
-        run ~env ~sw ~base_path ~port ~posts))
+      (* The server serves each connection in a fiber of [sw] that ends when
+         the client closes the connection, and [sw] waits for those fibers
+         before it cancels its daemons. The request domain would be one of
+         those daemons, and its pool keeps connections open until the domain
+         ends, so the clients get a switch of their own. It ends, closing
+         those connections, before [sw] starts waiting. *)
+      Eio.Switch.run @@ fun io_sw ->
+      Client.start_io_domain ~sw:io_sw ~env;
+      Masc_http_client.with_scoped_pool ~sw:io_sw ~env @@ fun () ->
+      run ~env ~sw ~base_path ~port ~posts)
 
 let state base_path port =
   let state = Types.create_state ~workspace:"publication" ~local_base_path:base_path

@@ -129,7 +129,7 @@ let validate_schema schema =
       then Error "action context must require exactly instance_id and incarnation"
       else Ok ()
 let check_arguments ~schema ~name ~args =
-  Tool_input_contract.check_arguments ~contract:Host_tool ~schema:(Some schema) ~name ~args
+  Tool_input_contract.check_arguments ~contract:Declared_schema ~schema:(Some schema) ~name ~args
   |> Result.map (fun _ -> ())
   |> Result.map_error (fun rejection -> rejection.Tool_input_contract.message)
 let rec validate_node ~name schema value =

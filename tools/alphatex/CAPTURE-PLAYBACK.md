@@ -80,7 +80,9 @@ MIDI 1.0 UMP words; no MIDI 2.0 expression is reduced to that dialect.
 
 Previously changed fields need an explicit source baseline. The restored prefix
 is sent at once, so a controller, pressure or pitch bend that follows a surviving
-Note On still reaches that voice. Values a voice keeps need their baseline
+Note On still reaches that voice. An absolute value replaced later in the prefix
+is not sent unless a retained Note On, Program Change or Detach keeps it, so a
+long controller or pressure stream restores as its final value. Values a voice keeps need their baseline
 before its Note On: program and bank, Portamento Time and On/Off, Tuning
 Program/Bank, MPE Configuration, Per-Note Pitch Bend Sensitivity, Registered
 Per-Note Controller #3 Pitch 7.25 and assignable controllers. MIDI 1.0 Bank

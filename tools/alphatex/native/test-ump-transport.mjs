@@ -128,6 +128,15 @@ try checkRestore(restore([event(0,on),event(0.1,off),event(0.2,detach),event(0.3
 let timing:[[UInt32]]=[[0x13f80000],[0x13fe0000],[0x00000000],[0x00101234],[0x00201234]]
 let timed=timing.map{event(0,$0)}+[event(0.1,on),event(0.2,bend)]
 try checkRestore(restore(timed,0.5,footprint(timed))==[on,bend],"timing and liveness messages are neither obstacles nor replayed")
+// A seek sends each continuous field's final value once. A sounding attack still
+// finds the patch it began with ahead of it; only the final patch follows it.
+func steps(_ words:[[UInt32]])->[UmpEvent] {words.enumerated().map{event(Double($0.offset)*0.0001,$0.element)}}
+let cc11=(0..<1000).map{[0x43b50b00,UInt32($0)<<20]},pressures=(0..<1000).map{[0x43d50000,UInt32($0)<<16]}
+let flood=steps(cc11+[on]+pressures)
+try checkRestore(restore(flood,0.5,footprint(flood))==[cc11[999],on,pressures[999]],"controller and pressure streams restore as their final values")
+let programs=(0..<1000).map{[0x43c50000,UInt32($0 % 128)<<24]}
+let heldPatch=steps(Array(programs[..<500])+[on]+Array(programs[500...]))
+try checkRestore(restore(heldPatch,0.5,footprint(heldPatch))==[programs[499],on,programs[999]],"sounding attack keeps its own patch before the final one")
 for opaque in [[0x13fa0000],[0x13ff0000],[0x00300060]] as [[UInt32]] { requireFailure{_ = try restore([event(0,opaque)],0.5)} }
 // Real transport methods with a synthetic clock/send edge: staging releases
 // owned keys but sounds no restored key until the common epoch. A late first

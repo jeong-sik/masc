@@ -366,6 +366,29 @@ let test_a_person_wait_is_the_reading_that_made_it () =
     (row ~waiting:(waiting ~items:[ schedule ] "s") "s");
   check_wait "a tool wait waits on no person" "none" None (row ~turn:tool_waiting "w")
 
+let failure_reason_text = function
+  | Model.Failure_sentence sentence -> "sentence: " ^ sentence
+  | Model.Failure_next_action action -> "next action: " ^ action
+  | Model.Failure_unstated -> "unstated"
+
+(* #51764: the server names why each source could not be read. *)
+let test_a_failed_waiting_read_keeps_each_source_reason () =
+  let failed ~what ~next_action source : Decode.waiting_item =
+    { (waiting_item ~source ~since:None ()) with kwi_what = what; kwi_next_action = next_action }
+  in
+  Alcotest.(check (list string)) "each source keeps its own reason, in the order sent"
+    [ "sentence: 운영자 확인 기한 관측 불가"
+    ; "next action: repair_schedule_ledger"
+    ; "unstated"
+    ]
+    (List.map failure_reason_text
+       (Model.waiting_failure_reasons
+          [ failed ~what:"운영자 확인 기한 관측 불가" ~next_action:"wait_for_observation_recovery"
+              Model.Waiting_source_observation_unavailable
+          ; failed ~what:"  " ~next_action:"repair_schedule_ledger" Model.Waiting_source_read_error
+          ; failed ~what:"" ~next_action:" " Model.Waiting_source_read_error
+          ]))
+
 (* Stops (RFC-0515 E12): a state view over five rows, two attention, one
    failing, two active. *)
 let attention_group = Model.Group_state Model.Attention
@@ -814,6 +837,10 @@ let () =
     ; ( "person wait"
       , [ Alcotest.test_case "a person wait is the reading that made it" `Quick
             test_a_person_wait_is_the_reading_that_made_it
+        ] )
+    ; ( "waiting failure"
+      , [ Alcotest.test_case "a failed waiting read keeps each source's reason" `Quick
+            test_a_failed_waiting_read_keeps_each_source_reason
         ] )
     ; ( "stops"
       , [ Alcotest.test_case "each group opens with its heading" `Quick

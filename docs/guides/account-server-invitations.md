@@ -66,8 +66,10 @@ and is revoked as any other.
 
 ## From the page of an Admin
 
-Until the account console has a control for it, an Admin calls the routes
-from the browser console of the page at `/`, signed in:
+The 초대 링크 (invitation links) panel of the account console at
+`/accounts/console` makes, lists and revokes invitations. A script, or the
+browser's developer console on that page, calls the routes from an Admin's
+session as follows:
 
 ```js
 const { csrf_token } = await (await fetch("/auth/session")).json();
@@ -96,5 +98,4 @@ await fetch("/api/v1/auth/invites/" + issued.invite_id, {
 
 ## What is not there yet
 
-- No screen calls the routes.
 - An invitation has no other lifetime than 24 hours.

@@ -17,7 +17,7 @@ val load :
   diagram_colors:(string * string) option ->
   board_worker:Masc_tui_board_preview_work.t option ->
   admit_vector:(unit -> (Masc_tui_board_preview_work.t * Masc_tui_board_preview_work.admission, string) result) ->
-  run:(string -> Unix.process_status) -> vector_run:(string -> Unix.process_status) ->
+  run:(string -> Masc_tui_image_cache.ending) -> vector_run:(string -> Masc_tui_image_cache.ending) ->
   display:Masc_tui_image_cache.display -> source ->
   (Masc_tui_image_cache.presentation * Masc_tui_pele.scene option, string) result
 (** [Local_file] reads its selected path and [Draft] decodes its captured

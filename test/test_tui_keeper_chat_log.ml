@@ -326,6 +326,41 @@ let test_decode_exact_operation_state () =
     ; `Assoc ["schema", `String "masc.keeper_chat_operation.v1";
         "operation_id", `String "another"; "state", `String "Queued"] ]
 
+(* The server publishes an operation and the TUI reads it back: every state
+   returns as the same state with the same facts. Another case of the word, or
+   a word the server never writes, is refused rather than read as a state. *)
+let test_published_operation_state_reads_back () =
+  let open Keeper_chat_operation in
+  let operation_id =
+    Operation_id.of_string "exact" |> Result.fold ~ok:Fun.id ~error:failwith in
+  let publish state =
+    to_public_json
+      { operation_id; batch_membership = None
+      ; admission_digest = String.make 64 'a'; execution_digest = String.make 64 'b'
+      ; sequence = 1L; source = `Assoc []; input = None; state; created_at = 1. } in
+  (* The public object carries the fixed message for the failure kind and no
+     outcome reference; the original failure here already has that shape. *)
+  let failure =
+    { kind = Turn_cancelled; detail = public_failure_message Turn_cancelled
+    ; outcome_ref = None } in
+  List.iter (fun state ->
+    let word = State_name.to_wire (state_name state) in
+    match Log.decode_operation_state ~operation_id:"exact" (publish state) with
+    | Ok read -> check bool ("published " ^ word ^ " reads back unchanged") true (read = state)
+    | Error detail -> fail ("published " ^ word ^ " was refused: " ^ detail))
+    [ Queued
+    ; Running { started_at = 2. }
+    ; Succeeded { completed_at = 3.; outcome_ref = "turn-1" }
+    ; Failed { completed_at = 4.; failure }
+    ; Cancelled { completed_at = 5. } ];
+  List.iter (fun word ->
+    check bool (word ^ " is not a state the server writes") true
+      (Result.is_error
+         (Log.decode_operation_state ~operation_id:"exact"
+            (`Assoc [ "schema", `String "masc.keeper_chat_operation.v1"
+                    ; "operation_id", `String "exact"; "state", `String word ]))))
+    [ "queued"; "Paused" ]
+
 let test_decode_events_page () =
   let lines =
     [ line 0 1.0 (E.Run_started { run_id = "r"; thread_id = "keeper:keeper.one" })
@@ -1284,6 +1319,8 @@ let () =
             test_failed_operation_recheck_keeps_the_working_observation
         ; test_case "operation and journal observation order" `Quick test_operation_and_journal_read_order
         ; test_case "decode exact operation state" `Quick test_decode_exact_operation_state
+        ; test_case "a published operation state reads back" `Quick
+            test_published_operation_state_reads_back
         ; test_case "decode events page" `Quick test_decode_events_page
         ; test_case "add_journaled holds undrawn positions" `Quick
             test_add_journaled_holds_undrawn_positions

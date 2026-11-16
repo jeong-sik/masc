@@ -7,7 +7,8 @@
     checks Agent-Core does not make: undeclared fields under
     [additionalProperties: false], [oneOf] branch selection, declared
     range/length bounds, and arguments that did not arrive. Underscore-prefixed
-    protocol markers are stripped before validation. *)
+    protocol markers are stripped before a host tool's arguments are
+    validated. *)
 
 type numeric_keyword =
   | Minimum
@@ -105,8 +106,13 @@ val constraint_declaration_paths : Yojson.Safe.t -> string list
 type accepted = Accepted_empty_schema | Accepted_valid | Accepted_normalized | Accepted_external_subset
 val accepted_reason : accepted -> string
 val violation_reason : violation -> string
-type argument_contract = Host_tool | External_export
-(** Host tools own protocol markers and fieldless-call restrictions. External
+type argument_contract = Host_tool | Declared_schema | External_export
+(** Host tools own protocol markers and fieldless-call restrictions: a host
+    call drops underscore-prefixed keys, and [masc_transition] refuses its
+    retired [to] and [note] aliases. A declared schema (a Lane package's
+    action, binding or output) keeps every other host check and neither of
+    those two rules: an underscore-prefixed member it declares is its own, and
+    a tool name it shares with a host tool brings no host alias. External
     exports own every declared argument name and their open-object schema. *)
 val check_arguments : contract:argument_contract ->
   schema:Yojson.Safe.t option -> name:string -> args:Yojson.Safe.t ->

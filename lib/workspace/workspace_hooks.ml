@@ -377,9 +377,10 @@ let goal_criterion_review_pending_fn
   = Atomic.make (fun _config ~goal_id ->
       Log.Misc.warn "goal criterion review requested without an installed reviewer goal_id=%s" goal_id)
 
-(* Called after an operator Drop or Reopen moved a Goal. The goal verifier
-   lane cancels that Goal's in-flight review and releases its claim. With no
-   lane installed there is no review to cancel, so the default does nothing. *)
+(* Called after a Drop, a Reopen or a criterion edit moved a Goal. The goal
+   verifier lane cancels that Goal's in-flight review and releases its claim.
+   With no lane installed there is no review to cancel, so the default does
+   nothing. *)
 let goal_verification_abandoned_fn
   : (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
   = Atomic.make (fun _config ~goal_id:_ -> ())

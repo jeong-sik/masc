@@ -516,6 +516,84 @@ let test_persistent_container_commits_under_the_keeper_name_with_login () =
       args
 ;;
 
+let github_credential_wiring host =
+  Printf.sprintf
+    "[credential \"https://%s\"]\n\thelper = \n\thelper = !gh auth git-credential\n"
+    host
+;;
+
+(* A persistent container with a live login: the stable directory, its
+   hosts.yml, and the gitconfig the container's creation wrote into it. *)
+let with_persistent_login ~keeper_name run =
+  with_temp_base @@ fun _base_path config ->
+  let host_dir =
+    match Github.ensure_config_dir ~config ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok path -> path
+  in
+  let hosts = Filename.concat host_dir "hosts.yml" in
+  write_file hosts "github.com:\n  user: stored-user\n  oauth_token: first-token\n";
+  Unix.chmod hosts 0o600;
+  (match
+     Github.docker_args_persistent
+       ~config
+       ~keeper_name
+       ~container_masc_dir:"/tmp/masc-runtime/.masc"
+   with
+   | Error message -> Alcotest.fail message
+   | Ok _ -> ());
+  let adopt () =
+    match Github.refresh_git_credential_config ~config ~keeper_name with
+    | Error message -> Alcotest.fail message
+    | Ok has_git_wiring ->
+      Alcotest.(check bool) "the login gives git a credential helper" true has_git_wiring
+  in
+  run ~hosts ~gitconfig:(Filename.concat host_dir "gitconfig") ~adopt
+;;
+
+(* #31874: every turn adopts the running container and refreshes the
+   gitconfig its git reads through the read-only mount. A token rotation
+   changes hosts.yml but not the hosts it names, so the mounted file must
+   stay the same file rather than be swapped under a running git. *)
+let test_persistent_gitconfig_survives_adoption_and_token_rotation () =
+  with_persistent_login ~keeper_name:"persistent-rotation"
+  @@ fun ~hosts ~gitconfig ~adopt ->
+  let created = Unix.lstat gitconfig in
+  adopt ();
+  adopt ();
+  write_file hosts "github.com:\n  user: stored-user\n  oauth_token: rotated-token\n";
+  adopt ();
+  let after = Unix.lstat gitconfig in
+  Alcotest.(check int)
+    "adoptions and a token rotation leave the mounted gitconfig in place"
+    created.Unix.st_ino
+    after.Unix.st_ino;
+  Alcotest.(check string) "the wiring still names the logged-in hosts"
+    (github_credential_wiring "github.com" ^ github_credential_wiring "gist.github.com")
+    (read_file gitconfig);
+  Alcotest.(check int) "the gitconfig stays owner read-only" 0o400
+    (after.Unix.st_perm land 0o777)
+;;
+
+let test_persistent_gitconfig_follows_a_host_change () =
+  with_persistent_login ~keeper_name:"persistent-host-change"
+  @@ fun ~hosts ~gitconfig ~adopt ->
+  write_file
+    hosts
+    "github.com:\n  user: stored-user\n  oauth_token: first-token\n\
+     ghe.example.com:\n  user: stored-user\n  oauth_token: enterprise-token\n";
+  adopt ();
+  Alcotest.(check string) "a newly logged-in host gets its wiring"
+    (github_credential_wiring "github.com"
+     ^ github_credential_wiring "ghe.example.com"
+     ^ github_credential_wiring "gist.github.com")
+    (read_file gitconfig);
+  Unix.chmod gitconfig 0o600;
+  adopt ();
+  Alcotest.(check int) "a loosened mode is put back to owner read-only" 0o400
+    ((Unix.lstat gitconfig).Unix.st_perm land 0o777)
+;;
+
 let test_tool_projection_uses_safe_existing_identity () =
   with_temp_base @@ fun base_path config ->
   let keeper_name = "configured-identity" in
@@ -1413,6 +1491,14 @@ let () =
             "persistent container commits under the keeper name with login"
             `Quick
             test_persistent_container_commits_under_the_keeper_name_with_login
+        ; Alcotest.test_case
+            "persistent gitconfig survives adoption and token rotation"
+            `Quick
+            test_persistent_gitconfig_survives_adoption_and_token_rotation
+        ; Alcotest.test_case
+            "persistent gitconfig follows a host change"
+            `Quick
+            test_persistent_gitconfig_follows_a_host_change
         ] )
     ; ( "login stream"
       , [ Alcotest.test_case

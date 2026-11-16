@@ -4,14 +4,19 @@
     and the lone [.] that ends them; durations [:1] [:2] [:4] [:8] [:16];
     notes [fret.string] with an optional [.dur], the fret one or two digits or
     [x], or [-] for a tie; chords [(…).dur]; rests [r] and [r.dur]; and bars
-    [|]. A tie holds the latest earlier note on its string, past rests and
-    notes on other strings, in its bar or the three before it -- where
-    alphaTab 1.8.4 looks. Those bars are counted as alphaTab counts them: an
-    empty bar is one, and a directive after a beat opens the next one even
-    though the measure drawn here keeps it. A tie with no such note, or one
-    that holds a dead note, fails: alphaTab reads the first as a struck open
-    string and the second as a held one, [(0)], neither of which [-] says. A
-    beat that
+    [|]. The measures are alphaTab 1.8.4's bars: a bar is its directives and
+    then its beats, and it ends at [|] or at a directive after a beat, which
+    starts the next bar. A bar with no beat -- between two [|], before the
+    first, or started by a directive and ended before a beat -- is a measure
+    with no beats, which alphaTab plays as a rest for the whole bar. At the
+    end of the score those are dropped, as alphaTab drops them, unless one
+    carries a change of its own: a repeat sign, a [\tempo], a [\section], or
+    a time signature, key or clef other than the bar before it. A tie holds
+    the latest earlier note on its string, past rests and notes on other
+    strings, in its bar or the three before it -- where alphaTab looks. A tie
+    with no such note, or one that holds a dead note, fails: alphaTab reads
+    the first as a struck open string and the second as a held one, [(0)],
+    neither of which [-] says. A beat that
     says its own duration sets it for the beats after it. [\title],
     [\subtitle], [\tempo] and [\ts] are kept on the score: the pane draws them
     on the header line ahead of the tab, with the subtitle behind the title. A
@@ -31,23 +36,21 @@
     a staff with no properties uses the default that includes tabs. Additional
     tracks/staves, structure after music, percussion, unknown properties and
     staff modes without tabs fail instead of flattening independent parts.
-    [\ks], [\clef] and [\section] require the start of a bar (initially or
-    after [|]); their implicit bar-boundary form after notes is outside this
-    subset. A [\clef] names alphaTab's clefs -- [treble], [bass], [alto],
-    [tenor], [neutral] or their sign forms [g2], [f4], [c3], [c4], [n] -- and
-    is not drawn.
+    A [\clef] names alphaTab's clefs -- [treble], [bass], [alto], [tenor],
+    [neutral] or their sign forms [g2], [f4], [c3], [c4], [n] -- and is not
+    drawn.
 
-    Repeat signs stand in the bar they mark: [\ro] opens the repeat, [\rc N]
-    closes it with the count of total plays, and [\ae n …] names the ending
-    passes the bar plays on. [\ae] also takes alphaTab's own parenthesized
-    list, [\ae (1 2 3)], which is the form the writer emits; a single pass
-    may carry or drop the parentheses. [N] counts total plays the way
-    alphaTab's example does: [\ro … \rc 2] plays the passage twice. A second
-    [\rc] says the count again; [\ae]
-    numbers gather across the bar. A sign with no bar of its own -- on a bar
-    with no beat, or after the last bar -- fails rather than being dropped.
-    Open and close are not paired: a close without an open, or an open
-    without a close, reads fine.
+    Repeat signs belong to the bar whose start they stand at, a close too:
+    [\ro] opens the repeat, [\rc N] closes it with the count of total plays,
+    and [\ae n …] names the ending passes the bar plays on. A sign written
+    after a bar's beats starts the next bar, so [:4 3.3 \rc 2 | 5.3] closes
+    a bar of its own between the two, as alphaTab draws it. [\ae] also takes
+    alphaTab's own parenthesized list, [\ae (1 2 3)], which is the form the
+    writer emits; a single pass may carry or drop the parentheses. [N]
+    counts total plays the way alphaTab's example does: [\ro … \rc 2] plays
+    the passage twice. A second [\rc] says the count again; [\ae] numbers
+    gather across the bar's directives. Open and close are not paired: a
+    close without an open, or an open without a close, reads fine.
 
     Technique markup in braces -- a [{…}] after a beat or on a chord member --
     marks its note. A dot ([{d}]), a double dot ([{dd}]), a tuplet ([{tu 3}])
@@ -98,9 +101,6 @@ type failure =
   | Instrument_after_music
   | Invalid_key_signature of string
   | Invalid_clef of string
-  | Key_signature_after_note
-  | Clef_after_note
-  | Section_after_note
   | Quoted_without_metadata
   | Duration_outside_subset of string  (** the duration as written *)
   | Chord_dot_without_duration
@@ -117,7 +117,6 @@ type failure =
   | String_past_tuning of { string : int; strings : int }
   | Repeat_count_out_of_range of string  (** the count as written *)
   | Alternate_ending_out_of_range of string  (** the ending as written *)
-  | Repeat_without_bar  (** a repeat sign with no bar of its own *)
 
 val failure_text : failure -> string
 (** The failure in a sentence a reader can show. *)
@@ -155,8 +154,10 @@ type beat = {
 }
 
 type measure = {
-  ticks : int;  (** the ticks a whole measure takes *)
-  beats : beat list;  (** never empty *)
+  ticks : int;  (** the ticks its beats take *)
+  beats : beat list;
+      (** [[]] is a bar with no beat, which alphaTab plays as a rest for the
+          whole bar *)
   repeat_start : bool;  (** a [\ro] opened this bar *)
   repeat_end : int option;  (** a [\rc N] closed it: the count of total plays *)
   endings : int list;  (** [\ae] numbers, ascending, no two alike *)
@@ -164,7 +165,7 @@ type measure = {
 
 type t = {
   tuning : string list;  (** line names, highest string first; 1 to 12 *)
-  measures : measure list;  (** never empty *)
+  measures : measure list;  (** never empty, and at least one has a beat *)
   title : string option;  (** [\title]; [None] when none was said *)
   subtitle : string option;  (** [\subtitle]; [None] when none was said *)
   tempo : int option;  (** [\tempo] in BPM; [None] when none fit an int *)

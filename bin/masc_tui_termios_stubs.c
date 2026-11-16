@@ -22,9 +22,10 @@
 #error "disabling a special character requires _POSIX_VDISABLE"
 #endif
 
-/* The c_cc slot for a [Masc_tui_termios.reclaimed_key], or -1 where this
-   platform's tty has no such key. The constructor is passed as its constant
-   representation, so the cases follow the order the type declares them in.
+/* Each [Masc_tui_termios.reclaimed_key]'s c_cc slot, or -1 where this
+   platform's tty has no such key. One stub per key: OCaml matches on the key
+   and calls its stub, so nothing here reads the order the type declares the
+   constructors in.
 
    - Literal_next (VLNEXT, Ctrl-V). While IEXTEN is set, the tty layer
      consumes it and passes the *following* byte through uninterpreted, so a
@@ -39,41 +40,63 @@
      VDSUSP was 0x19, and one Ctrl-Y ended the TUI with exit 2 on
      Unix_error(EAGAIN, "read"); with VDSUSP disabled from outside, the same
      binary received the byte.
+   - Quit (VQUIT, Ctrl-backslash). POSIX, so every platform has it. With ISIG
+     set -- which this program's raw mode keeps for Ctrl-C and Ctrl-Z -- the
+     byte becomes SIGQUIT, and SIGQUIT ends the session unconfirmed. Measured
+     in #49845 on TUI 0.68.0 in tmux: one Ctrl-backslash ended the process,
+     and its log's last line was "exit: normal (signal SIGQUIT)".
 
    Each key is disabled on its own rather than by clearing IEXTEN, which would
-   take VSTATUS with it. */
-static int reclaimed_key_index(value v_key)
+   take VSTATUS with it, or ISIG, which would take Ctrl-C and Ctrl-Z. */
+CAMLprim value masc_tui_termios_literal_next_slot(value unit)
 {
-  switch (Int_val(v_key)) {
-  case 0:
-    return VLNEXT;
-  case 1:
-#ifdef VDISCARD
-    return VDISCARD;
-#else
-    return -1;
-#endif
-  case 2:
-#ifdef VDSUSP
-    return VDSUSP;
-#else
-    return -1;
-#endif
-  default:
-    return -1;
-  }
+  return Val_int(VLNEXT);
 }
 
-/* The key's current character as 0..255, or -1 when the descriptor is not a
-   terminal or the platform has no such key. The caller needs this before
-   turning the key off: [Unix.tcsetattr] restores only the fields
-   [Unix.terminal_io] names, and c_cc is not one of them, so handing the
-   terminal back at exit does not put this character back. */
-CAMLprim value masc_tui_termios_key_char(value v_fd, value v_key)
+CAMLprim value masc_tui_termios_discard_output_slot(value unit)
 {
-  CAMLparam2(v_fd, v_key);
+#ifdef VDISCARD
+  return Val_int(VDISCARD);
+#else
+  return Val_int(-1);
+#endif
+}
+
+CAMLprim value masc_tui_termios_delayed_suspend_slot(value unit)
+{
+#ifdef VDSUSP
+  return Val_int(VDSUSP);
+#else
+  return Val_int(-1);
+#endif
+}
+
+CAMLprim value masc_tui_termios_quit_slot(value unit)
+{
+  return Val_int(VQUIT);
+}
+
+/* [v_slot] as an index into c_cc, or -1 when it is not one: the -1 a slot
+   stub returns for a key this platform lacks. */
+static int slot_index(value v_slot)
+{
+  int slot = Int_val(v_slot);
+
+  if (slot < 0 || slot >= NCCS)
+    return -1;
+  return slot;
+}
+
+/* The slot's current character as 0..255, or -1 when the descriptor is not a
+   terminal or the platform has no such key. The caller needs this before
+   turning the key off: handing the terminal back with [Unix.tcsetattr] puts
+   back only the c_cc characters [Unix.terminal_io] names, and VLNEXT,
+   VDISCARD and VDSUSP are not among them. */
+CAMLprim value masc_tui_termios_slot_char(value v_fd, value v_slot)
+{
+  CAMLparam2(v_fd, v_slot);
   struct termios attrs;
-  int index = reclaimed_key_index(v_key);
+  int index = slot_index(v_slot);
 
   if (index < 0 || tcgetattr(Int_val(v_fd), &attrs) != 0)
     CAMLreturn(Val_int(-1));
@@ -81,12 +104,12 @@ CAMLprim value masc_tui_termios_key_char(value v_fd, value v_key)
   CAMLreturn(Val_int((int)(unsigned char)attrs.c_cc[index]));
 }
 
-/* Put the key's character back to [v_byte]. */
-CAMLprim value masc_tui_termios_set_key_char(value v_fd, value v_key, value v_byte)
+/* Put the slot's character back to [v_byte]. */
+CAMLprim value masc_tui_termios_set_slot_char(value v_fd, value v_slot, value v_byte)
 {
-  CAMLparam3(v_fd, v_key, v_byte);
+  CAMLparam3(v_fd, v_slot, v_byte);
   struct termios attrs;
-  int index = reclaimed_key_index(v_key);
+  int index = slot_index(v_slot);
 
   if (index < 0 || tcgetattr(Int_val(v_fd), &attrs) != 0)
     CAMLreturn(Val_false);
@@ -104,11 +127,11 @@ CAMLprim value masc_tui_termios_set_key_char(value v_fd, value v_key, value v_by
    Returns false when the descriptor is not a terminal, the platform has no
    such key, or the kernel refused the change. The caller keeps its own
    terminal either way. */
-CAMLprim value masc_tui_termios_disable_key(value v_fd, value v_key)
+CAMLprim value masc_tui_termios_disable_slot(value v_fd, value v_slot)
 {
-  CAMLparam2(v_fd, v_key);
+  CAMLparam2(v_fd, v_slot);
   struct termios attrs;
-  int index = reclaimed_key_index(v_key);
+  int index = slot_index(v_slot);
 
   if (index < 0 || tcgetattr(Int_val(v_fd), &attrs) != 0)
     CAMLreturn(Val_false);

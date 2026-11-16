@@ -71,27 +71,6 @@ let recede_rgb ~foreground ~background =
     ~max_ratio:recede_max_ratio foreground
 ;;
 
-let recede_for ~colors_enabled ~default_foreground ~project palette =
-  if not colors_enabled then ""
-  else
-    match palette with
-    | None -> default_foreground
-    | Some palette ->
-      let background = Terminal_palette.background palette in
-      match recede_rgb ~foreground:(Terminal_palette.foreground palette)
-              ~background with
-      | None -> default_foreground
-      | Some blended ->
-        match project blended with
-        | None -> default_foreground
-        | Some projected ->
-          if Color.contrast_ratio
-               (Terminal_palette.estimated_rgb projected) background
-             >= recede_contrast_floor
-          then projected_foreground ~colors_enabled (Some projected)
-          else default_foreground
-;;
-
 (* How far the reader's own row is set apart from the page behind it. A light
    page darkens by a little and a dark page lightens by more, because the same
    step reads as less against a dark ground. *)
@@ -110,6 +89,40 @@ let user_message_background_rgb background =
     ~red:(component Terminal_palette.red)
     ~green:(component Terminal_palette.green)
     ~blue:(component Terminal_palette.blue)
+;;
+
+type surface = Page | Side_pane
+
+(* The ground a colour is measured against is the ground it is drawn on. A
+   side pane sits one step off the page -- the step [side_pane_background]
+   paints -- and a colour lifted to clear the page by a hair falls under the
+   floor on that ground. *)
+let surface_background surface palette =
+  let page = Terminal_palette.background palette in
+  match surface with
+  | Page -> page
+  | Side_pane -> user_message_background_rgb page
+;;
+
+let recede_for ~colors_enabled ~default_foreground ~project ~surface palette =
+  if not colors_enabled then ""
+  else
+    match palette with
+    | None -> default_foreground
+    | Some palette ->
+      let background = surface_background surface palette in
+      match recede_rgb ~foreground:(Terminal_palette.foreground palette)
+              ~background with
+      | None -> default_foreground
+      | Some blended ->
+        match project blended with
+        | None -> default_foreground
+        | Some projected ->
+          if Color.contrast_ratio
+               (Terminal_palette.estimated_rgb projected) background
+             >= recede_contrast_floor
+          then projected_foreground ~colors_enabled (Some projected)
+          else default_foreground
 ;;
 
 let user_message_background_for ~colors_enabled ~project palette =
@@ -195,15 +208,28 @@ let user_message_background palette =
 
 (* One distance off the page for everything that sits apart from it. A pane
    receding by a different amount than the reader's own rows would put three
-   greys on one screen and ask the eye to rank them. *)
+   greys on one screen and ask the eye to rank them. The ground painted here
+   and the ground a side-pane colour is measured against are both
+   [surface_background Side_pane], so the two cannot part. *)
+let side_pane_background_for ~colors_enabled ~project palette =
+  if not colors_enabled then ""
+  else
+    match palette with
+    | Some palette ->
+      surface_background Side_pane palette
+      |> project
+      |> projected_background ~colors_enabled
+    | None -> ""
+;;
+
 let side_pane_background palette =
-  user_message_background_for ~colors_enabled
+  side_pane_background_for ~colors_enabled
     ~project:Terminal_palette.best_color palette
 ;;
 
-let recede palette =
+let recede ~surface palette =
   recede_for ~colors_enabled ~default_foreground:Sgr.default_fg
-    ~project:Terminal_palette.best_color palette
+    ~project:Terminal_palette.best_color ~surface palette
 ;;
 
 module Term = struct
@@ -301,7 +327,8 @@ let lift_is_enabled () = !lift_enabled
 
 type contrast_fallback = Keep_ansi | Default_foreground
 
-let ansi_readable_with_fallback ~fallback ~colors_enabled ~project palette color =
+let ansi_readable_with_fallback ~fallback ~colors_enabled ~project ~surface
+    palette color =
   let code = ansi_color_code color in
   let fallback_code () =
     match fallback with
@@ -334,7 +361,7 @@ let ansi_readable_with_fallback ~fallback ~colors_enabled ~project palette color
       match Terminal_palette.ansi palette (ansi_color_index color) with
       | None -> fallback_code ()
       | Some entry ->
-        let background = Terminal_palette.background palette in
+        let background = surface_background surface palette in
         let lifted =
           Color.lift_for_contrast ~background ~floor:status_contrast_floor
             entry
@@ -350,28 +377,30 @@ let ansi_readable_with_fallback ~fallback ~colors_enabled ~project palette color
              else fallback_code ()))
 ;;
 
-let ansi_readable_for ~colors_enabled ~project palette color =
+let ansi_readable_for ~colors_enabled ~project ~surface palette color =
   ansi_readable_with_fallback ~fallback:Keep_ansi ~colors_enabled ~project
-    palette color
+    ~surface palette color
 ;;
 
-let status_readable_for ~colors_enabled ~project palette state =
-  ansi_readable_for ~colors_enabled ~project palette (status_ansi_color state)
+let status_readable_for ~colors_enabled ~project ~surface palette state =
+  ansi_readable_for ~colors_enabled ~project ~surface palette
+    (status_ansi_color state)
 ;;
 
 (* For labels whose words already identify the state, use the terminal's own
    foreground when the colour is unknown or cannot be verified. That
    foreground can itself be low-contrast. Colour-only distinctions continue to
    use [status_readable_for]. *)
-let status_text_readable_for ~colors_enabled ~project palette state =
+let status_text_readable_for ~colors_enabled ~project ~surface palette state =
   ansi_readable_with_fallback ~fallback:Default_foreground ~colors_enabled
-    ~project palette (status_ansi_color state)
+    ~project ~surface palette (status_ansi_color state)
 ;;
 
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb
   let user_message_background = user_message_background_for
+  let side_pane_background = side_pane_background_for
   let recede_rgb = recede_rgb
   let recede = recede_for
   let ansi_color_index = ansi_color_index
@@ -380,19 +409,19 @@ module For_testing = struct
   let status_text_readable = status_text_readable_for
 end
 
-let ansi_readable palette color =
+let ansi_readable ~surface palette color =
   ansi_readable_for ~colors_enabled ~project:Terminal_palette.best_color
-    palette color
+    ~surface palette color
 ;;
 
-let status_readable palette state =
+let status_readable ~surface palette state =
   status_readable_for ~colors_enabled ~project:Terminal_palette.best_color
-    palette state
+    ~surface palette state
 ;;
 
-let status_text_readable palette state =
+let status_text_readable ~surface palette state =
   status_text_readable_for ~colors_enabled ~project:Terminal_palette.best_color
-    palette state
+    ~surface palette state
 ;;
 
 let selection = Sgr.reverse

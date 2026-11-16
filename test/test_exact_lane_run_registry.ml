@@ -1701,6 +1701,95 @@ let test_slot_metadata_does_not_change_original_completion () =
   remove_if_exists path
 ;;
 
+let cli_observation slot_id =
+  Masc.Exact_lane_slot_observation.cli ~slot_id ~started_at:(Some 12.) ~finished_at:(Some 13.)
+    ~generation_dispatched:true ~outcome:Accepted
+;;
+
+let complete_with_observation registry ~run_id ~started_at observation =
+  R.register_running registry ~run_id ~lane:R.Librarian ~actor:"keeper" ~started_at
+    ~input:(R.Exact_input `Null);
+  match
+    R.mark_completed registry ~run_id ~outcome:R.Succeeded ~elapsed_s:1.
+      ~selected_slot:(Some "client") ~slot_observations:[ observation ] ~output:`Null ()
+  with
+  | Ok () -> ()
+  | Error error -> fail (R.completion_error_to_string error)
+;;
+
+(* A run completed in this process shows the slot observations its row shows
+   after a restart: what the registry writes it reads the way it reads a
+   replayed row, so an observation the replay refuses is refused before the
+   restart too. *)
+let test_written_slot_observations_read_as_a_replay_reads_them () =
+  let path = fresh_log_path "exact-slot-observations-written-" in
+  let registry = R.create ~path () in
+  complete_with_observation registry ~run_id:"readable" ~started_at:10. (cli_observation "client");
+  complete_with_observation registry ~run_id:"blank-slot" ~started_at:11. (cli_observation " ");
+  let shown registry ~run_id = (R.get registry ~run_id |> Option.get).slot_observations in
+  let replayed = R.replay path in
+  List.iter
+    (fun run_id ->
+       check bool (run_id ^ " reads the same before and after a restart") true
+         (shown registry ~run_id = shown replayed ~run_id))
+    [ "readable"; "blank-slot" ];
+  check bool "a readable observation reads" true
+    (match shown registry ~run_id:"readable" with
+     | Some (Ok [ _ ]) -> true
+     | None | Some (Error _) | Some (Ok _) -> false);
+  check bool "a blank slot id is refused before the restart" true
+    (match shown registry ~run_id:"blank-slot" with
+     | Some (Error _) -> true
+     | None | Some (Ok _) -> false);
+  remove_if_exists path
+;;
+
+(* Every register and completion rebuilds the projection over every retained
+   run. The rebuild takes each run's slot observations from the registry's
+   own read of them, so it costs a few words per run and not one more read of
+   each run's observations. The bound comes from this test's own measure: a
+   quarter of one read of the observation it writes, per retained run. *)
+let test_a_rebuild_does_not_read_retained_observations_again () =
+  let observation = cli_observation "client" in
+  let retained_runs = 50 in
+  let allowed_share_of_a_read_per_run = 0.25 in
+  let registry_with runs =
+    let path = fresh_log_path "exact-slot-observations-rebuild-" in
+    let registry = R.create ~path () in
+    for index = 1 to runs do
+      complete_with_observation registry ~run_id:(Printf.sprintf "retained-%d" index)
+        ~started_at:(float_of_int index) observation
+    done;
+    path, registry
+  in
+  let words_to_register registry =
+    let before = Gc.minor_words () in
+    R.register_running registry ~run_id:"next" ~lane:R.Librarian ~actor:"keeper"
+      ~started_at:1000. ~input:(R.Exact_input `Null);
+    Gc.minor_words () -. before
+  in
+  let words_to_read_one =
+    let json = Masc.Exact_lane_slot_observation.to_yojson observation in
+    let before = Gc.minor_words () in
+    (match Masc.Exact_lane_slot_observation.of_yojson json with
+     | Ok _ -> ()
+     | Error detail -> fail detail);
+    Gc.minor_words () -. before
+  in
+  let full_path, full = registry_with retained_runs in
+  let empty_path, empty = registry_with 0 in
+  let words_with_none = words_to_register empty in
+  let words_with_retained = words_to_register full in
+  let extra = words_with_retained -. words_with_none in
+  check bool
+    (Printf.sprintf "%.0f more words with %d retained runs; one read is %.0f words" extra
+       retained_runs words_to_read_one)
+    true
+    (extra < float_of_int retained_runs *. words_to_read_one *. allowed_share_of_a_read_per_run);
+  remove_if_exists full_path;
+  remove_if_exists empty_path
+;;
+
 let () =
   run
     "exact_lane_run_registry"
@@ -1722,6 +1811,10 @@ let () =
         ; test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
         ; test_case "slot metadata preserves original completion through damage" `Quick
             test_slot_metadata_does_not_change_original_completion
+        ; test_case "written slot observations read as a replay reads them" `Quick
+            test_written_slot_observations_read_as_a_replay_reads_them
+        ; test_case "a rebuild does not read retained observations again" `Quick
+            test_a_rebuild_does_not_read_retained_observations_again
         ; test_case "memory and disk preserve available JSON null" `Quick
             test_memory_only_and_disk_null_are_available_values
         ; test_case "missing payload files preserve terminal identity" `Quick

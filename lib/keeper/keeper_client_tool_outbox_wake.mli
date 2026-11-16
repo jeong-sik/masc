@@ -2,7 +2,17 @@
     Queue admission and wake hints do not acknowledge the result and never
     execute tools. Only a completed consumer owns the exact ACK. *)
 
-val notify : base_path:string -> keeper_name:string -> (unit, string) result
+(** Why [notify] did not finish. *)
+type notify_error =
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+      (** A shutdown operation holds the Keeper's intake. Nothing failed: the
+          receipts stay in the outbox, and the first pass after the operation
+          releases the intake notifies them. *)
+  | Notify_failed of string
+
+val notify_error_to_string : notify_error -> string
+
+val notify : base_path:string -> keeper_name:string -> (unit, notify_error) result
 (** Read the authoritative outbox, durably enqueue pointer-only notifications
     with pending/outbox deduplication, then hint the existing live owner.
     Failed provider turns may be notified again while receipts remain unread.
@@ -11,7 +21,9 @@ val notify : base_path:string -> keeper_name:string -> (unit, string) result
     deliver original result context. Unavailable and unknown routes
     retain receipts without initiating model turns that cannot consume them.
     A receipt that an unsettled execution owns gets no stimulus; the Owner is
-    told it arrived ({!Keeper_receipt_wait_resolution.arrived}). *)
+    told it arrived ({!Keeper_receipt_wait_resolution.arrived}). A shutdown
+    hold stops at the first refused receipt, before the live hint and the
+    Owner's arrival notice, exactly as a failed enqueue does. *)
 
 val route_can_consume : Keeper_meta_contract.keeper_meta -> bool
 (** Every candidate in the current route must resolve to original-result
@@ -32,4 +44,6 @@ val pulse : sw:Eio.Switch.t -> t -> unit
     child, coalescing only overlapping scans. Cancellation releases reservations
     and propagates. Disk state, not the process-local reservation, is authority.
     Retained Keeper names are discovered afresh each pass; individual failures
-    leave their receipts for a later existing maintenance pulse. *)
+    leave their receipts for a later existing maintenance pulse. A Keeper
+    whose intake a shutdown holds is logged as a routine line, not a
+    warning. *)

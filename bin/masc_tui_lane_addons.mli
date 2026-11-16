@@ -266,6 +266,13 @@ val value_rows : depth:int -> Yojson.Safe.t -> value_row list
 (** A result value as an outline: an object field is a key, a list item is a
     bullet, a string is its own text, and a nested value sits one level
     deeper. A written line break starts a row. *)
+type led_placement = Beside | Below
+val led_placement : width:int -> lead_cells:int -> string list -> led_placement
+(** Where a row of [width] cells starts its text after a lead of
+    [lead_cells], such as a key or a label, given the pieces the text was cut
+    into for the cells beside the lead. [Beside] when every piece fits there.
+    Otherwise [Below]: the lead takes its own row and the text starts on the
+    next one. A text with no character stays [Beside]. *)
 val result_readings :
   instance -> Row.row ->
   (Masc.Lane_addon_presentation.reading * (Yojson.Safe.t, Masc.Lane_addon_presentation.reading_refusal) result) list
@@ -318,7 +325,11 @@ val paste_records : text:string -> t -> t
 (** Pasted text goes to the overlay's open add form. *)
 val can_observe : instance -> bool
 val removal_block_reason : t -> instance -> string option
-val overview_hints : t -> string
+val overview_hints : t -> string list
+(** The keys the current Plugins screen answers, one item per key or notice,
+    the way out first. The footer joins them two spaces apart and drops whole
+    items from the back on a short row; the overview body packs whole items
+    into rows with {!Masc_tui_message_layout.pack_clauses}. *)
 val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
 val move_observation : t -> int -> t
 val evidence_request : t -> (request, string) result

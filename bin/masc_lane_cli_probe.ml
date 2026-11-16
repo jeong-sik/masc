@@ -218,7 +218,7 @@ let () =
     ~cwd_default:(Eio.Stdenv.cwd env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  (match Runtime.init_default ~config_path with
+  (match Runtime_model_catalog_boot.init_standalone ~gate:Routing_only ~config_path with
    | Error detail ->
      Printf.eprintf "runtime init failed (%s): %s
 " config_path detail;

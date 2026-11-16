@@ -3969,12 +3969,17 @@ let keeper_secret_status_of_string = function
   | "error" -> Secret_error
   | other -> Secret_status_unknown other
 
-let keeper_secret_status_to_string = function
-  | Secret_ready -> "ready"
-  | Secret_empty -> "empty"
-  | Secret_absent -> "absent"
-  | Secret_error -> "error"
-  | Secret_status_unknown other -> other
+(* HIGH-RISK-UNREVIEWED: terminal output boundary. The unknown word is the
+   producer's bytes; the Secrets tab draws this result between style codes
+   without another pass. *)
+let keeper_secret_status_text ~ko status =
+  let say korean english = if ko then korean else english in
+  match status with
+  | Secret_ready -> say "준비됨" "ready"
+  | Secret_empty -> say "비어 있음" "empty"
+  | Secret_absent -> say "미설정" "absent"
+  | Secret_error -> say "읽지 못함" "error"
+  | Secret_status_unknown other -> Tui_terminal_text.sanitize_terminal_text other
 
 let decode_string_list label items =
   decode_list label
@@ -4406,18 +4411,23 @@ let gate_input_preview ~operation ~server_preview envelope =
 (* The queue row is durable after Auto Judge stops. Calling every such row
    "waiting" made a completed [require_human] judgment look like a worker that
    had been computing for hours, and hid quarantined/failed attempts behind
-   the same word. Project only the closed backend states already carried by
-   the row; absent legacy fields remain queued rather than gaining invented
-   success. *)
+   the same word. The server projects the phase and owns its words
+   ([Keeper_approval_queue_rules_types]), so the row is read with the server's
+   decoder; a row without a phase or with a word the server never emits is a
+   wire error. The panes match on the TUI constructors, and naming every
+   server phase here makes a new one a compile error instead of a rejected
+   row. *)
+let gate_pending_phase_of_approval_queue_phase = function
+  | Keeper_approval_queue_rules_types.Phase_queued -> Gate_queued
+  | Keeper_approval_queue_rules_types.Phase_judging -> Gate_judging
+  | Keeper_approval_queue_rules_types.Phase_human_required -> Gate_human_required
+  | Keeper_approval_queue_rules_types.Phase_blocked -> Gate_blocked
+
 let gate_pending_phase_of_json json =
   let* raw = required_string_field json "phase" in
-  match raw with
-  | "queued" -> Ok Gate_queued
-  | "judging" -> Ok Gate_judging
-  | "human_required" -> Ok Gate_human_required
-  | "blocked" -> Ok Gate_blocked
-  | other ->
-    Error (Printf.sprintf "unknown gate pending phase: %S" other)
+  match Keeper_approval_queue_rules_types.approval_queue_phase_of_string raw with
+  | Some phase -> Ok (gate_pending_phase_of_approval_queue_phase phase)
+  | None -> Error (Printf.sprintf "unknown gate pending phase: %S" raw)
 
 let gate_auto_judge_detail_of_json json =
   let summary = member "summary_status" json in
@@ -5436,6 +5446,16 @@ type server_identity = {
    a version to show, and a footer that fails to render because one string was
    missing tells the operator less than a footer with a gap in it. *)
 let decode_server_identity json =
+  (* An answer that carries [account_mode] is no masc server's: the account
+     server of a multi-account installation serves no workspace, so its
+     answer read as an identity would name an empty one. Callers that tell it
+     apart read {!decode_server_reading}; every other one is refused here. *)
+  let* () =
+    match member "account_mode" json with
+    | `Null -> Ok ()
+    | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ ->
+      Error "/health carries account_mode, which no masc server identity carries"
+  in
   let* build = optional_object_field json "build" in
   let* paths = optional_object_field json "paths" in
   let* startup = optional_object_field json "startup" in
@@ -5491,11 +5511,21 @@ let decode_server_identity json =
     | Some _ | None -> None
   in
   let sid_state_ready =
-    (* Three-valued like the worktree verdict: [None] is a probe without a
-       startup section, so the TUI neither waits on it nor calls it ready. *)
-    match Option.map (member "state_ready") startup with
-    | Some (`Bool value) -> Some value
-    | Some _ | None -> None
+    (* One server build answers [/health] in two shapes. The reader's body
+       carries a startup section and its [state_ready]. The public probe,
+       which is also what every requester gets before the workspace is
+       published, carries no startup section and says [ready] at the top
+       level. Three-valued like the worktree verdict: [None] is an answer
+       with neither, so the TUI neither waits on it nor calls it ready. *)
+    match startup with
+    | Some startup ->
+      (match member "state_ready" startup with
+       | `Bool value -> Some value
+       | _ -> None)
+    | None ->
+      (match member "ready" json with
+       | `Bool value -> Some value
+       | _ -> None)
   in
   let sid_uptime =
     match member "uptime" json with
@@ -5595,6 +5625,38 @@ let decode_server_identity json =
     ; sid_scheduler
     ; sid_operator_action
     }
+;;
+
+type server_reading =
+  | Masc_server of server_identity
+  | Account_server of { account_server_version : string }
+
+(* The account server of a multi-account installation answers [/health] with
+   [server] "masc" ([Server_health_public.server_name]), its [version] and
+   [account_mode] "Multi_account", and nothing else
+   ([Server_accounts.health]); [Server_accounts.health_version] reads the
+   same three. No masc server carries the member: its answers are objects
+   without it. Every other shape is refused, so the TUI takes nothing else
+   for either server, and the refusal does not repeat what the peer sent. *)
+let decode_server_reading json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "account_mode" fields with
+     | None -> Result.map (fun identity -> Masc_server identity) (decode_server_identity json)
+     | Some mode ->
+       (match Masc_domain.account_mode_of_json mode with
+        | Some Masc_domain.Multi_account ->
+          (match List.assoc_opt "server" fields, List.assoc_opt "version" fields with
+           | Some (`String "masc"), Some (`String version) ->
+             Ok (Account_server { account_server_version = version })
+           | _ ->
+             Error
+               "/health says account_mode Multi_account without server masc and a \
+                string version")
+        | Some Masc_domain.Single_user | None ->
+          Error "/health carries an account_mode other than Multi_account"))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error "/health answered with no JSON object"
 ;;
 
 type prompt_operator_surface =

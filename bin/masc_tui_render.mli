@@ -161,6 +161,7 @@ val compact_frame_required :
 val frame_choice :
   Masc_tui_types.state -> terminal_rows:int -> terminal_cols:int -> now:float ->
   [ `Too_small of int
+  | `Account_server of string
   | `Play_card of Masc_tui_play_card.t
   | `Collab of Masc_tui_collab.t
   | `Account_login of Masc_tui_account_login.t

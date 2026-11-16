@@ -11,6 +11,7 @@ import sys
 import types
 import unittest
 from unittest.mock import call, patch
+from urllib.parse import parse_qs, unquote, urlsplit
 
 
 HERE = Path(__file__).resolve().parent
@@ -1195,7 +1196,9 @@ class FollowingAcceptedMerges(unittest.TestCase):
              redirect_stdout(io.StringIO()) as output:
             code = MERGE.main()
         self.assertEqual(code, 0)
-        arm.assert_not_called(); admit.assert_not_called(); run.assert_not_called()
+        arm.assert_not_called()
+        admit.assert_not_called()
+        run.assert_not_called()
         wake.assert_called_once_with(REPO)
         cleanup.assert_called_once_with(REPO, [101, 102])
         closing.assert_called_once_with(REPO, [101, 102])
@@ -1664,22 +1667,68 @@ class DeletingMergedHeadBranches(unittest.TestCase):
 
     def merged(self, **changes):
         row = {'number': 102, 'state': 'closed', 'merged': True,
-               'head': {'ref': 'feat/x#1', 'sha': sha(102), 'repo': HOME}}
+               'head': {'ref': 'feat/x#1', 'sha': sha(102),
+                        'repo': dict(HOME, default_branch='main')}}
         row['head'].update(changes.pop('head', {}))
         return dict(row, **changes)
 
-    def delete(self, row, dependants=(), returncode=0, stderr=''):
+    def branch(self, number, ref=None, default: str | None = 'main'):
+        return self.merged(number=number, head={
+            'ref': ref or f'b{number}', 'sha': sha(number),
+            'repo': dict(HOME, default_branch=default)})
+
+    @staticmethod
+    def unused(path):
+        """GitHub's answer for a branch nothing protects and no pull request uses."""
+        return {'protected': False} if urlsplit(path).path.startswith(PREFIX + '/branches/') else []
+
+    def delete(self, row, returncode=0, stderr=''):
         result = subprocess.CompletedProcess([], returncode, '', stderr)
         with patch.object(MERGE, 'pull', return_value=row), \
-             patch.object(MERGE, 'read', return_value=list(dependants)) as read, \
+             patch.object(MERGE, 'read', side_effect=self.unused) as read, \
              patch.object(MERGE.subprocess, 'run', return_value=result) as run:
             return MERGE.delete_merged_head(REPO, 102), read, run
+
+    def heads(self, rows, *, opened_after_first_delete=(), unreadable=(), protected=()):
+        """`delete_merged_heads` over `rows` against GitHub answered from memory.
+
+        GitHub lists the pull requests in `opened_after_first_delete`, as
+        (side, branch, number), only once a first branch is gone. Reading the
+        open pull requests of a branch in `unreadable` fails.
+        """
+        deleted = []
+        by_number = {row['number']: row for row in rows}
+
+        def answer(path):
+            address = urlsplit(path)
+            if address.path.startswith(PREFIX + '/branches/'):
+                return {'protected': unquote(address.path.rsplit('/', 1)[1]) in protected}
+            query = parse_qs(address.query)
+            side = 'head' if 'head' in query else 'base'
+            asked = query[side][0]
+            if asked.removeprefix('owner:') in unreadable:
+                raise ValueError('API rate limit exceeded')
+            listed = opened_after_first_delete if deleted else ()
+            return [{'number': number} for opened_side, name, number in listed
+                    if opened_side == side and
+                    asked == (f'owner:{name}' if side == 'head' else name)]
+
+        def push(command, **_):
+            deleted.append(command[-1].removeprefix(':refs/heads/'))
+            return subprocess.CompletedProcess(command, 0, '', '')
+
+        with patch.object(MERGE, 'pull', side_effect=lambda repo, number: by_number[number]), \
+             patch.object(MERGE, 'read', side_effect=answer), \
+             patch.object(MERGE.subprocess, 'run', side_effect=push):
+            return MERGE.delete_merged_heads(REPO, list(by_number)), deleted
 
     def test_the_push_is_leased_on_the_merged_head(self):
         record, read, run = self.delete(self.merged())
         self.assertEqual(record, {'pr': 102, 'branch': 'feat/x#1', 'deleted': True})
-        read.assert_called_once_with(
-            PREFIX + '/pulls?state=open&base=feat%2Fx%231&per_page=1')
+        self.assertEqual(read.call_args_list, [
+            call(PREFIX + '/branches/feat%2Fx%231'),
+            call(PREFIX + '/pulls?state=open&head=owner%3Afeat%2Fx%231&per_page=1'),
+            call(PREFIX + '/pulls?state=open&base=feat%2Fx%231&per_page=1')])
         command = run.call_args.args[0]
         self.assertEqual(command[-3:], [
             f'--force-with-lease=refs/heads/feat/x#1:{sha(102)}',
@@ -1691,23 +1740,43 @@ class DeletingMergedHeadBranches(unittest.TestCase):
             'head is in another repository': self.merged(head={'repo': {'full_name': 'fork/repo'}}),
             'head is in another repository ': self.merged(head={'repo': None}),
             'protected branch name': self.merged(head={'ref': 'release/v1.2.3'}),
-            'protected branch name ': self.merged(head={'ref': 'main'}),
+            'the default branch': self.merged(head={'ref': 'main'}),
         }
         for reason, row in cases.items():
             with self.subTest(reason=reason):
                 record, _, run = self.delete(row)
                 self.assertEqual((record['deleted'], record['reason']), (False, reason.strip()))
                 run.assert_not_called()
-        record, _, run = self.delete(self.merged(), dependants=[{'number': 103}])
-        self.assertEqual(record['reason'], 'an open pull request uses it as base')
-        run.assert_not_called()
+
+    def test_a_pull_request_opened_after_the_first_delete_keeps_the_next_branch(self):
+        for side in ('base', 'head'):
+            with self.subTest(side=side):
+                records, deleted = self.heads([self.branch(101), self.branch(102)],
+                                              opened_after_first_delete=[(side, 'b102', 103)])
+                self.assertEqual(deleted, ['b101'])
+                self.assertEqual([record['deleted'] for record in records], [True, False])
+
+    def test_a_branch_whose_open_pull_requests_cannot_be_read_stays(self):
+        records, deleted = self.heads([self.branch(101), self.branch(102)], unreadable={'b101'})
+        self.assertEqual(deleted, ['b102'])
+        self.assertEqual([record['deleted'] for record in records], [False, True])
+
+    def test_the_default_branch_and_a_protected_branch_stay_whatever_their_names(self):
+        develop = self.branch(101, 'develop', default='develop')
+        records, deleted = self.heads([develop, self.branch(102, 'staging')],
+                                      protected={'staging'})
+        self.assertEqual(deleted, [])
+        self.assertEqual([record['reason'] for record in records],
+                         ['the default branch', 'a protection rule or a ruleset applies to it'])
+        records, deleted = self.heads([self.branch(101, default=None)])
+        self.assertEqual((deleted, records[0]['deleted']), ([], False))
 
     def test_a_refused_push_and_a_failed_read_are_records_not_errors(self):
         record, _, _ = self.delete(self.merged(), returncode=1, stderr='! [rejected] (stale info)')
         self.assertEqual((record['deleted'], record['reason']),
                          (False, '! [rejected] (stale info)'))
         with patch.object(MERGE, 'pull', side_effect=[OSError('gh missing'), self.merged()]), \
-             patch.object(MERGE, 'read', return_value=[]), \
+             patch.object(MERGE, 'read', side_effect=self.unused), \
              patch.object(MERGE.subprocess, 'run',
                           return_value=subprocess.CompletedProcess([], 0, '', '')):
             records = MERGE.delete_merged_heads(REPO, [101, 102])

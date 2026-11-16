@@ -25,8 +25,9 @@ let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
 
 let require = function Ok value -> value | Error error -> fail error
 
+(* A symbolic link is removed itself, not followed. *)
 let rec remove_tree path =
-  if Sys.is_directory path then (
+  if (Unix.lstat path).Unix.st_kind = Unix.S_DIR then (
     Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
     Unix.rmdir path)
   else Sys.remove path
@@ -488,7 +489,7 @@ let test_original_consumer_recovers_proof_without_worker_rpc () =
     require (Store.save_exact_request store ~declaration_id
       ~request_id:original.request_id unpublished);
     let calls=ref 0 in
-    let result=Submit.resume ~store ~label:"Proven original" ~original:retained
+    let result=Submit.resume_retained ~store ~label:"Proven original" ~original:retained
       ~request:original ~schema ~decode_final:(Exact.final_of_json ~schema)
       ~prepare:(fun () -> fail "recovery requested fresh admission")
       ~call:(fun ~arguments:_ -> incr calls; fail "recovery contacted the worker")
@@ -539,6 +540,66 @@ let proof_address original =
   let tuple values=Yojson.Safe.to_string (`List values) in
   tuple [`String "exact-original-execution";`String declaration_id],
   tuple [`String "original-request";`String original.Exact.request_id;`String (Exact.digest original)]
+
+(* A waiting owner reads the host record by the request's ID and digest. *)
+let test_an_open_record_is_observed_by_identity () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let observe_open identity = Eio_unix.run_in_systhread (fun () ->
+      Exact.observe_open ~store ~declaration_id identity) in
+    let is expected identity = match observe_open identity with
+      | Ok actual -> actual = expected
+      | Error _ -> false in
+    let invalid identity = match observe_open identity with
+      | Error (Exact.Recovery_invalid _) -> true
+      | Error (Exact.Recovery_unavailable _) | Ok _ -> false in
+    let record ?(digest_of) (stored : Exact.request) = `Assoc
+      [ "declaration_id", `String declaration_id; "request_id", `String stored.request_id
+      ; "digest", `String (Exact.digest (Option.value digest_of ~default:stored))
+      ; "request", Exact.request_to_json stored
+      ; "attempts", `List [other_process_marker]; "final", `Null ] in
+    let original = request "o1" in
+    check bool "no record and no link is No_record" true (is Exact.No_record (Exact.identity original));
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o1" (record original));
+    check bool "a self-consistent open record of the same digest is Open" true
+      (is Exact.Open (Exact.identity original));
+    check bool "the digest an owner kept names the same record" true
+      (is Exact.Open (Exact.identity_of_digest ~request_id:"o1" ~digest:(Exact.digest original)));
+    check bool "another caller digest is invalid" true
+      (invalid (Exact.identity (request ~message:"Another input." "o1")));
+    let instance_id, link_id = proof_address original in
+    require (Store.save_host_result store ~instance_id ~request_id:link_id (`Assoc ["executions", `List []]));
+    check bool "an execution link needs the whole request, whatever it holds" true
+      (is Exact.Needs_request (Exact.identity original));
+    let forged = request ~message:"Another input." "o2" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o2"
+      (record ~digest_of:(request "o2") forged));
+    check bool "a stored request that is not the one its digest names is invalid" true
+      (invalid (Exact.identity (request "o2")));
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o5" (match record (request "o6") with
+      | `Assoc fields -> `Assoc (("request_id", `String "o5") :: List.remove_assoc "request_id" fields)));
+    check bool "a stored request of another ID is invalid" true
+      (invalid (Exact.identity_of_digest ~request_id:"o5" ~digest:(Exact.digest (request "o6"))));
+    let disordered = request "o7" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o7" (match record disordered with
+      | `Assoc fields -> `Assoc (("attempts", `List [other_process_marker; other_process_marker])
+          :: List.remove_assoc "attempts" fields)));
+    check bool "an open record with two started attempts is invalid" true
+      (invalid (Exact.identity disordered));
+    let linked = request "o3" in
+    let instance_id, link_id = proof_address linked in
+    require (Store.save_host_result store ~instance_id ~request_id:link_id (`Assoc ["executions", `List []]));
+    check bool "a link without a record needs the whole request" true
+      (is Exact.Needs_request (Exact.identity linked));
+    check bool "and that read refuses it as it does now" true
+      (match Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread (fun () ->
+         Exact.recover_retained ~store ~declaration_id ~schema linked)) with
+       | Error (Exact.Recovery_invalid _) -> true
+       | Error (Exact.Recovery_unavailable _) | Ok _ -> false);
+    let runner, _, _ = counting_runner store (ref [Answer question]) in
+    check bool "a request is answered" true (answered_with question (run_request store runner (request "o4")));
+    check bool "a record with a final needs the whole request" true
+      (is Exact.Needs_request (Exact.identity (request "o4"))))
 
 (* A proof names its request by request_id and digest and holds no request
    body (RFC exact-request-skips-a-slot-that-refused-its-input, section 3.3).
@@ -1763,6 +1824,106 @@ let test_preflight_binds_a_link_written_between_its_reads () =
     check (list (pair string (list string))) "the link is bound to the record read after it" []
       (refused report))
 
+(* The startup sweep over the declaration, as a package that needs an
+   original: the sweep lists only such declarations. *)
+module Sweep = Server_unowned_exact_sweep
+let sweep store =
+  let declaration : Masc.Lane_addon_config.declaration =
+    { id = declaration_id; enabled = true; run_id = "sweep"; manifest_path = "/nonexistent/lane.toml"
+    ; package = { package with id = Server_workspace_memory_addon_validation.package_id }
+    ; binding = `Null; revision = "1"; source_revision = "1"; source_path = "/nonexistent/quiz.toml"
+    ; max_exact_in_flight = Masc.Lane_addon_config.one_exact_at_a_time } in
+  Sweep.run ~store ~declarations:[declaration]
+
+(* The slot observation file of the request's first attempt. *)
+let observed store original =
+  let proof = match Yojson.Safe.Util.member "executions" (Yojson.Safe.from_file (link_file store original)) with
+    | `List [proof] -> proof
+    | _ -> fail "expected one original proof" in
+  require (Observation.retain ~store ~declaration_id ~request_id:original.Exact.request_id
+    ~attempt_ordinal:1 ~proof []);
+  let observations = Filename.concat (Store.root store) (Observation.directory ~declaration_id) in
+  match Sys.readdir observations with
+  | [|name|] -> Filename.concat observations name
+  | _ -> fail "expected one slot observation"
+
+let beside path name =
+  let stray = Filename.concat (Filename.dirname path) name in
+  write_bytes stray "not an Exact file";
+  stray
+
+(* Moves the file or directory out of the store and leaves a symbolic link
+   to it. *)
+let symlinked ~base path =
+  let target = Filename.concat base (Filename.basename path) in
+  Sys.rename path target;
+  Unix.symlink target path;
+  path
+
+(* The path below the store root the sweep names. *)
+let below_root store path =
+  let root = Store.root store ^ Filename.dir_sep in
+  if String.starts_with ~prefix:root path
+  then String.sub path (String.length root) (String.length path - String.length root)
+  else fail (path ^ " is not below the store root")
+
+(* The startup sweep stops at an Exact directory that is not a directory, or
+   at an entry of one that is not a regular <name>.json file or a staged
+   write, and deletes nothing (#51820). The preflight judges the path the
+   same way, refuses it and deletes it. A proof link the record is read with
+   goes with the record, as a link [run] cannot read does. *)
+let test_preflight_refuses_an_entry_the_sweep_stops_at () =
+  let entry store stray = "an Exact directory entry is not a JSON file: " ^ below_root store stray in
+  List.iter (fun (label, place) -> with_workspace (fun ~base store ->
+    let original = answered store "preflight-stray" in
+    let record = record_file store original and link = link_file store original in
+    let observation = observed store original in
+    let stray, deletes, stop = place ~base ~store ~record ~link ~observation in
+    let report = preflight base in
+    check (list (pair string (list string))) (label ^ ": what fresh state deletes")
+      [stray, deletes] (refused report);
+    check (list string) (label ^ ": the sweep's listing refuses it")
+      [Preflight.decoder_name Preflight.Exact_directory_entry] (readers report);
+    (match sweep store with
+     | Error (Sweep.Sweep_refused detail) -> check string (label ^ ": the sweep stops there") stop detail
+     | Error (Sweep.Removal_stopped _ as error) -> fail (Sweep.error_to_string error)
+     | Ok _ -> fail (label ^ ": the sweep must stop"));
+    check (list bool) (label ^ ": the stopped sweep deletes nothing") [true; true; true]
+      (List.map Sys.file_exists [record; link; observation])))
+    [ "a text file beside the records", (fun ~base:_ ~store ~record ~link:_ ~observation:_ ->
+        let stray = beside record "notes.txt" in stray, [stray], entry store stray)
+    ; "a record that is a symbolic link", (fun ~base ~store ~record ~link:_ ~observation:_ ->
+        let stray = symlinked ~base record in stray, [stray], entry store stray)
+    ; "a declaration directory that is a symbolic link", (fun ~base ~store ~record ~link:_ ~observation:_ ->
+        let directory = symlinked ~base (Filename.dirname record) in
+        directory, [directory], "an Exact directory is not a directory: " ^ below_root store directory)
+    ; "a text file beside the proof links", (fun ~base:_ ~store ~record:_ ~link ~observation:_ ->
+        let stray = beside link "notes.txt" in stray, [stray], entry store stray)
+    ; "a proof link that is a symbolic link", (fun ~base ~store ~record ~link ~observation ->
+        let stray = symlinked ~base link in stray, [record; stray; observation], entry store stray)
+    ; "a text file beside the slot observations", (fun ~base:_ ~store ~record:_ ~link:_ ~observation ->
+        let stray = beside observation "notes.txt" in stray, [stray], entry store stray)
+    ; "a slot observation that is a symbolic link", (fun ~base ~store ~record:_ ~link:_ ~observation ->
+        let stray = symlinked ~base observation in stray, [stray], entry store stray) ]
+
+(* A staged write an interrupted publication left is skipped by both. *)
+let test_preflight_and_the_sweep_skip_a_staged_write () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-staged" in
+    let observation = observed store original in
+    let staged =
+      List.map (fun path -> beside path ".atomic_interrupted.tmp")
+        [record_file store original; link_file store original; observation] in
+    let report = preflight base in
+    check int "the record and the slot observation are read" 2 report.Preflight.rows;
+    check (list (pair string (list string))) "nothing is refused" [] (refused report);
+    match sweep store with
+    | Error error -> fail (Sweep.error_to_string error)
+    | Ok swept ->
+      check (list int) "the sweep deletes the unowned record, link and observation" [1; 1; 1]
+        [swept.Sweep.removed_exact_records; swept.removed_proofs; swept.removed_observations];
+      check (list bool) "the staged writes stay" [true; true; true] (List.map Sys.file_exists staged))
+
 let () =
   run "lane add-on exact requests"
     [ ( "retention"
@@ -1801,6 +1962,8 @@ let () =
             test_a_retained_answer_is_checked_against_the_schema_declared_now
         ; test_case "confirmed proof recovers lost outcome publication" `Quick
             test_confirmed_proof_recovers_lost_outcome_publication
+        ; test_case "an open record is observed by ID and digest" `Quick
+            test_an_open_record_is_observed_by_identity
         ; test_case "v2 proof recovers lost outcome publication" `Quick
             test_v2_proof_recovers_lost_outcome_publication
         ; test_case "original consumer recovers proof without worker RPC" `Quick
@@ -1864,4 +2027,8 @@ let () =
         ; test_case "an observation of another store root stops the check" `Quick
             test_preflight_stops_on_an_observation_of_another_store_root
         ; test_case "a link written between the reads is bound to the second read" `Quick
-            test_preflight_binds_a_link_written_between_its_reads ] ) ]
+            test_preflight_binds_a_link_written_between_its_reads
+        ; test_case "an entry the startup sweep stops at is refused" `Quick
+            test_preflight_refuses_an_entry_the_sweep_stops_at
+        ; test_case "a staged write is skipped by the preflight and the sweep" `Quick
+            test_preflight_and_the_sweep_skip_a_staged_write ] ) ]

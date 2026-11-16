@@ -207,6 +207,40 @@ let test_save_receipts_remain_with_their_workspace () =
   check int "B can independently reopen its unsent receipt" 1
     (List.length (Types.visible_preset_save_receipts state))
 
+let test_latest_save_settles_an_unconfirmed_name () =
+  let state = preset_state () in
+  let a = preset_identity "/fixture/preset-a" in
+  state.server_identity <- Some a;
+  (* Each finished save is prepended, as the Preset_saved handler does. *)
+  let finish name result =
+    state.preset_save_receipts <-
+      { Types.psr_request = preset_pending state a name; psr_result = result; psr_visible = true }
+      :: state.preset_save_receipts in
+  let hide_all () =
+    state.preset_save_receipts <-
+      List.map (fun receipt -> { receipt with Types.psr_visible = false }) state.preset_save_receipts in
+  finish "Foo" (Error (Types.Preset_save_unconfirmed "timeout"));
+  check bool "an unanswered save guards the name" true
+    (Types.preset_save_is_unconfirmed state "foo");
+  finish "foo" (Error (Types.Preset_save_not_sent "offline"));
+  finish "FOO" (Error (Types.Preset_save_refused "invalid description"));
+  check bool "later saves that wrote nothing keep the doubt" true
+    (Types.preset_save_is_unconfirmed state "foo");
+  hide_all ();
+  Types.reveal_unconfirmed_preset_save state "foo";
+  check int "the unanswered save's notice reopens" 1
+    (List.length (Types.visible_preset_save_receipts state));
+  finish "foo" (Ok { morning with D.pm_name = "foo" });
+  check bool "a later confirmed save releases the guard" false
+    (Types.preset_save_is_unconfirmed state "Foo");
+  hide_all ();
+  Types.reveal_unconfirmed_preset_save state "foo";
+  check int "a settled notice does not reopen" 0
+    (List.length (Types.visible_preset_save_receipts state));
+  finish "foo" (Error (Types.Preset_save_unconfirmed "connection reset"));
+  check bool "a newer unanswered save guards the name again" true
+    (Types.preset_save_is_unconfirmed state "foo")
+
 let test_pending_saves_follow_workspace_and_name () =
   let state = preset_state () in
   let a = preset_identity "/fixture/preset-a" and b = preset_identity "/fixture/preset-b" in
@@ -293,6 +327,8 @@ let () =
             test_decode_preserved_and_skipped_lanes
         ; test_case "save receipts remain with their workspace" `Quick
             test_save_receipts_remain_with_their_workspace
+        ; test_case "a later confirmed save settles an unconfirmed name" `Quick
+            test_latest_save_settles_an_unconfirmed_name
         ; test_case "pending saves follow workspace and name" `Quick
             test_pending_saves_follow_workspace_and_name
         ; test_case "confirmation requires contiguous current frames" `Quick

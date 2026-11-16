@@ -584,7 +584,7 @@ let test_start_prompt_frames_system_history_and_goal () =
     ; composed_context = None; turn_observation = None; tools = []; reasoning_effort = None }
   in
   match Keeper_official_client_host.framed_prompt_for_turn
-      ~held:[] ~is_resume:false ~goal prepared with
+      ~held:[] ~delivery:(Keeper_official_client_host.Framed_start { started_at = 0. }) ~goal prepared with
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok prompt ->
     let positions =

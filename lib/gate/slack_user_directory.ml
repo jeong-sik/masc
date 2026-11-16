@@ -101,19 +101,9 @@ let display_label t ~user_id =
     store_entry t ~user_id entry;
     (match entry with Label label -> Some label | Fetch_failed -> None)
 
-type self =
+type self = Connector_self_mention.t =
   | Bot_user_id_unknown
   | Bound_keeper of { bot_user_id : string; keeper_name : string }
-
-(* The bot's own id names the Keeper the channel is bound to, whatever the
-   workspace calls the bot (#28401). Its Slack display name is another name:
-   a Keeper that read "@KinoBot" for itself took it for a different bot and
-   refused the turn. Decided by id equality alone. *)
-let self_label ~self ~user_id =
-  match self with
-  | Bot_user_id_unknown -> None
-  | Bound_keeper { bot_user_id; keeper_name } ->
-    if String.equal user_id bot_user_id then Some keeper_name else None
 
 (* Rewrite Slack mention escapes into plain [@label] text before a message
    reaches keeper prompts and durable transcripts. Only the user-mention
@@ -141,7 +131,7 @@ let rewrite_mentions t ~self text =
       if id_end < len && text.[id_end] = '>' && String.length user_id >= 2
       then begin
         let label =
-          match self_label ~self ~user_id with
+          match Connector_self_mention.label self ~user_id with
           | Some _ as keeper_name -> keeper_name
           | None -> display_label t ~user_id
         in
@@ -159,7 +149,7 @@ let rewrite_mentions t ~self text =
                                   (close - id_end - 1))
                              <> "" ->
           let label =
-            match self_label ~self ~user_id with
+            match Connector_self_mention.label self ~user_id with
             | Some keeper_name -> keeper_name
             | None -> String.sub text (id_end + 1) (close - id_end - 1)
           in

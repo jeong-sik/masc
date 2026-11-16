@@ -230,6 +230,12 @@ val all_of_operator_disposition_reason : operator_disposition_reason list
 (** Every reason, in declaration order. *)
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string
+(** The [operator_disposition_reason] field of the receipt JSON. The dashboard
+    labels it from its own closed list ([OPERATOR_DISPOSITION_REASONS]). That
+    list and {!all_of_operator_disposition_reason} are each checked against
+    [dashboard/src/api/fixtures/receipt-operator-disposition-reasons.json], so
+    a reason added, renamed or removed here fails a test until the fixture and
+    the dashboard list change with it. *)
 
 val operator_disposition_reason_of_string : string -> operator_disposition_reason option
 (** [None] for a string {!operator_disposition_reason_to_string} never

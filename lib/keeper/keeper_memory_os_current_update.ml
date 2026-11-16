@@ -28,6 +28,21 @@ type 'error equal_facts =
   | Keep_stored
   | Write_revision of 'error retraction_plan option
 
+(* What a commit owes the readers of the Keeper's memory health row once both
+   locks unwind (RFC-0487). *)
+type owed_announcement =
+  | Nothing_owed
+      (* No replacement became durable. A kept snapshot's journal line tells
+         the readers itself, and a failed replacement leaves its receipt to
+         the next writer's recovery. *)
+  | Commit_notification of publication_receipt
+      (* The journal is finalized; dispatching the receipt tells the readers. *)
+  | Health_input
+      (* The snapshot is durable and its journal did not finalize: the line
+         or the pending receipt failed. The receipt stays on disk, and the
+         recovery a reader runs finishes the journal and dispatches the commit
+         notification. Until a reader is told, nothing runs it. *)
+
 (* Caller holds the aggregate and snapshot locks. Both boot and ordinary
    writers must move the removal receipt with an undecodable snapshot. *)
 let quarantine_snapshot_and_receipt ~keepers_dir ~keeper_id ~snapshot_path ~now ~rejection =
@@ -178,15 +193,18 @@ let update_locked_with_output
     Fs_compat.mkdir_p keepers_dir;
     let* () = recover_publication ~keepers_dir ~keeper_id |> Result.map_error store_error in
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-    let committed = ref None in
+    let owed = ref Nothing_owed in
     (* The snapshot and output of a commit that rewrote the snapshot, counted
        once both locks are released. A kept snapshot is never counted. *)
     let rewritten = ref None in
     let notify () =
-      Option.iter (fun receipt ->
-        match dispatch_publication ~sync_parent:Unix.fsync ~keepers_dir ~keeper_id receipt with
-        | Ok () -> ()
-        | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id "%s" detail) !committed
+      match !owed with
+      | Nothing_owed -> ()
+      | Commit_notification receipt ->
+        (match dispatch_publication ~sync_parent:Unix.fsync ~keepers_dir ~keeper_id receipt with
+         | Ok () -> ()
+         | Error detail -> Log.Keeper.warn ~keeper_name:keeper_id "%s" detail)
+      | Health_input -> Keeper_memory_health_input.written ~keepers_dir ~keeper_id
     in
     let write () = Keeper_memory_os_aggregate_lock.with_lock
       ?clock
@@ -522,6 +540,7 @@ let update_locked_with_output
          let complete () =
              (* The snapshot is durable now. Publish the original producer's
                 commit marker before any cancellable secondary I/O. *)
+             owed := Health_input;
              observe next Rewritten;
              (* In memory and under both locks, so the gauges of one keeper
                 follow its commit order. *)
@@ -530,7 +549,7 @@ let update_locked_with_output
              let journal_result =
                match finalize_journal ~keepers_dir ~keeper_id publication with
                | Ok pending ->
-                 committed := Some pending;
+                 owed := Commit_notification pending;
                  (match retraction_receipt with
                   | None -> Ok ()
                   | Some _ -> remove_retraction_plan_receipt ~keepers_dir ~keeper_id)
@@ -593,7 +612,7 @@ let update_locked_with_output
          in
          protected commit))
     in
-    (* Count and dispatch only after BOTH locks unwind. The durable pending
+    (* Count and announce only after BOTH locks unwind. The durable pending
        phase is written after exact journal finalization. If interrupted, a
        subsequent public read or writer resumes it without replaying the
        producer callback. A commit that returns an error after its rename,

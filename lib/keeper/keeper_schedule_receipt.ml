@@ -46,7 +46,13 @@ let receipt ~receipt_key ending : Outbox.receipt =
 let notify ~base_path ~keeper_name ~receipt_key =
   match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
   | Ok () -> ()
-  | Error detail ->
+  | Error (Keeper_client_tool_outbox_wake.Intake_shutdown_reserved operation_id) ->
+    Log.Keeper.routine
+      ~keeper_name
+      "schedule receipt %s: wake held by shutdown operation=%s"
+      (Schedule_supported_kinds.receipt_key_to_string receipt_key)
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Error (Keeper_client_tool_outbox_wake.Notify_failed detail) ->
     Log.Keeper.warn
       ~keeper_name
       "schedule receipt %s: wake deferred: %s"

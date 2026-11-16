@@ -2407,6 +2407,47 @@ let test_owner_keeps_its_lease_when_asked_under_another_spelling () =
              Alcotest.(check bool) "the second acquisition did not drop the lease" true
                (lease_is_held_in_the_kernel ~run_dir base_path))))
 
+(* The pid of the lease owner is read without a handle on the process: the
+   process that holds the lease, no pid once it left, and the lease of this
+   process, which the read finds without a second descriptor on it and so
+   does not drop. Which error names a lease nobody holds is the case of
+   [Owner_process_identity.lease_holder] in its own suite. *)
+let test_the_owner_pid_is_read_without_a_handle () =
+  with_base_and_run "startup-takeover-owner-pid" (fun ~base_path ~run_dir ->
+    let read () =
+      match Server_startup_takeover.existing_owner_pid ~run_dir ~base_path with
+      | Ok pid -> Printf.sprintf "pid %d" pid
+      | Error Server_startup_takeover.Current_process_owner -> "this process"
+      | Error (Server_startup_takeover.Owner_identity_unavailable _) -> "no pid"
+      | Error (Server_startup_takeover.Owner_lease_rejected rejection) ->
+        "rejected: " ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection
+    in
+    Alcotest.(check string) "a workspace nobody holds" "no pid" (read ());
+    let owner_pid, release =
+      spawn_announcing_owner
+        ~announce:(fun (_ : Server_startup_takeover.base_path_lease) ~port:(_ : int) -> Ok ())
+        ~run_dir base_path ~port:9000
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        close_quietly release;
+        ignore (waitpid_nointr owner_pid))
+      (fun () ->
+        Alcotest.(check string) "the process that holds the lease"
+          (Printf.sprintf "pid %d" owner_pid) (read ()));
+    Alcotest.(check string) "the owner left" "no pid" (read ());
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned _
+    | Server_startup_takeover.Base_path_rejected _ ->
+      Alcotest.fail "the lease was not acquired"
+    | Server_startup_takeover.Base_path_acquired lease ->
+      Fun.protect
+        ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+        (fun () ->
+          Alcotest.(check string) "the lease of this process" "this process" (read ());
+          Alcotest.(check bool) "the read did not drop the lease" true
+            (lease_is_held_in_the_kernel ~run_dir base_path)))
+
 (* The role of this executable after an exec, named by the environment: the
    image is new and its lease table is empty, and the process still holds the
    lock it took before the exec. It asks for the lease as [masc start] does
@@ -2562,6 +2603,8 @@ let () =
             "the owner keeps its lease when asked under another spelling"
             `Quick
             test_owner_keeps_its_lease_when_asked_under_another_spelling;
+          Alcotest.test_case "the owner pid is read without a handle" `Quick
+            test_the_owner_pid_is_read_without_a_handle;
           Alcotest.test_case
             "the lease is kept across exec while another process waits"
             `Quick

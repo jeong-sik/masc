@@ -10,7 +10,8 @@
     [Eio_unix.Process.spawn_unix], any descriptor map. Children are awaited
     through [Eio_unix.Process.sigchld]; only a backend that installs a SIGCHLD
     handler broadcasts it, and eio_linux installs none, so the manager
-    installs one itself on each spawn. Children are killed and reaped when
+    installs one itself when a spawn finds none
+    ({!Posix_spawn_detached.ensure_sigchld_handler}). Children are killed and reaped when
     their switch is cancelled or released. Cancellation settles the original
     process handle before its reaper exits, including when a caller is already
     awaiting it under cancellation protection. Reaper failure is propagated to

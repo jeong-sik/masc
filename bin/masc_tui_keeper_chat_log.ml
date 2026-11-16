@@ -138,22 +138,24 @@ let decode_operation_state ~operation_id (json : Yojson.Safe.t) =
       else if id <> operation_id then Error "operation identity does not match the requested source"
       else begin
         let* state = string "state" in
-        match state with
-        | "Queued" -> Ok Queued
-        | "Running" -> let* started_at = timestamp "started_at" in Ok (Running { started_at })
-        | "Succeeded" ->
+        let* name = State_name.of_wire state in
+        match name with
+        | State_name.Queued -> Ok Queued
+        | State_name.Running ->
+            let* started_at = timestamp "started_at" in Ok (Running { started_at })
+        | State_name.Succeeded ->
             let* completed_at = timestamp "completed_at" in
             let* outcome_ref = string "outcome_ref" in
             Ok (Succeeded { completed_at; outcome_ref })
-        | "Failed" ->
+        | State_name.Failed ->
             let* completed_at = timestamp "completed_at" in
             let* kind = string "failure_kind" in
             let* kind = failure_kind_of_string kind in
             let* detail = string "failure_detail" in
             let* outcome_ref = optional_string "outcome_ref" in
             Ok (Failed { completed_at; failure = { kind; detail; outcome_ref } })
-        | "Cancelled" -> let* completed_at = timestamp "completed_at" in Ok (Cancelled { completed_at })
-        | _ -> Error ("unknown operation state: " ^ state)
+        | State_name.Cancelled ->
+            let* completed_at = timestamp "completed_at" in Ok (Cancelled { completed_at })
       end
   | _ -> Error "operation is not an object"
 ;;

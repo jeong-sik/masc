@@ -265,7 +265,7 @@ let write path value =
     (fun () -> output_string channel value)
 
 let apple_fixture = {|#!/usr/bin/env python3
-import hashlib, json, os, pathlib, signal, sys
+import hashlib, json, os, pathlib, re, signal, sys
 root = pathlib.Path(__file__).parent
 argv = sys.argv[1:]
 digest = 'sha256:' + 'a' * 64
@@ -299,7 +299,10 @@ elif argv[:1] == ['create']:
     assert value('--cap-drop') == 'ALL' and '--read-only' in argv, argv
     assert argv[argv.index('--') + 1] == 'fixture/image', argv
     cid = value('--name')
-    assert len(cid) == 64, cid
+    # Apple container refuses a name longer than a DNS label (ManagedContainer.nameValid).
+    if len(cid) > 63 or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]+', cid):
+        print(f'Error: container ID {cid} is not a valid container ID', file=sys.stderr)
+        raise SystemExit(1)
     mode = argv[-1]
     config = {'id': cid, 'Id': cid, 'mode': mode, 'argv': argv, 'status': 'running',
         'configuration': {'id': cid, 'labels': dict(item.split('=', 1) for flag, item in zip(argv, argv[1:]) if flag == '--label'),
@@ -387,12 +390,17 @@ let with_apple_fixture f = with_fixture (fun env sw dir _ ->
   Unix.chmod command 0o700;
   f env sw dir command)
 
+(* The base package's resources as Apple container accepts them: whole vCPUs,
+   no pids limit, and the 200 MiB it creates at least (#52244). *)
+let apple_resources base =
+  {(container base).resources with cpus=1.;pids=None;memory_bytes=209_715_200L}
+
 let start_apple ?state_owner ?(instance_id = Random_id.uuid_v7 ()) env sw dir command mode =
   let base = package dir mode in
   let package = { base with
     state_storage = (match state_owner with None -> Types.Ephemeral | Some _ -> Types.Persistent);
     execution = Types.Container {(container base) with runtime=Types.Apple_container;
-      resources={(container base).resources with cpus=1.;pids=None}} } in
+      resources=apple_resources base} } in
   Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id ~package ?state_owner
     ~container_command:command ()
@@ -403,7 +411,7 @@ let test_apple_state_has_one_writer_and_survives_detach () =
     let runtime = Types.Apple_container in
     let owner = match State.create_owner ~workspace_root:dir ~installation_id:"apple-state"
         ~package_id:"worker-test" with Ok value -> value | Error message -> fail message in
-    check int "Apple writer ID fits the engine name contract" 64
+    check int "Apple writer ID fits the engine name contract" 63
       (String.length (State.container_name ~runtime owner));
     let first = unwrap (start_apple ~state_owner:owner ~instance_id:"first" env sw dir command "good") in
     let volume = Filename.concat dir (State.volume_name ~runtime owner ^ ".volume") in
@@ -820,6 +828,30 @@ let test_apple_engine_identity_is_the_service_app_root () = with_apple_fixture (
    | Error (Worker.Engine_fault {runtime = Types.Apple_container; fault = Masc.Lane_addon_lifecycle.Unreachable _}) -> ()
    | Ok _ | Error _ -> fail "an Apple service that exits non-zero must be Unreachable"))
 
+(* Apple container takes the name the host gives as the container ID and
+   refuses one longer than 63 characters; Docker prints a 64-digit ID. *)
+let test_apple_container_names_fit_the_engine () =
+  let module Engine = Masc.Lane_addon_engine in
+  let module Worker_state = Masc.Lane_addon_worker_state in
+  let apple = Engine.owned_name Types.Apple_container "instance-a" in
+  check int "Apple instance name fits a DNS label" 63 (String.length apple);
+  check bool "Apple instance name is an Apple container ID" true (Engine.valid_id Types.Apple_container apple);
+  check bool "Apple instance name is not a Docker container ID" false (Engine.valid_id Types.Docker apple);
+  check bool "two instances get two Apple names" false
+    (String.equal apple (Engine.owned_name Types.Apple_container "instance-b"));
+  (match Worker_state.container_name_of_identity ~runtime:Types.Apple_container
+           {|["/workspace","installation","package"]|} with
+   | Ok writer ->
+       check int "Apple writer name fits a DNS label" 63 (String.length writer);
+       check bool "Apple writer name is an Apple container ID" true (Engine.valid_id Types.Apple_container writer)
+   | Error detail -> fail detail);
+  let docker = Engine.owned_name Types.Docker "instance-a" in
+  check bool "Docker instance name keeps its prefix and full digest" true
+    (String.starts_with ~prefix:"masc-lane-" docker && String.length docker = 74);
+  let docker_id = String.make 64 'a' in
+  check bool "a 64-digit ID is a Docker container ID" true (Engine.valid_id Types.Docker docker_id);
+  check bool "a 64-digit name is not an Apple container ID" false (Engine.valid_id Types.Apple_container docker_id)
+
 let test_engine_identity_parsing_has_no_default () =
   let module Engine = Masc.Lane_addon_engine in
   let module Lifecycle = Masc.Lane_addon_lifecycle in
@@ -1110,7 +1142,7 @@ let test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot () =
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"new-writer"
       ~package:{base with state_storage=Types.Persistent;
                 execution=Types.Container {(container base) with runtime=Types.Apple_container;
-                  resources={(container base).resources with cpus=1.;pids=None}}}
+                  resources=apple_resources base}}
       ~state_owner:owner ~is_live_instance:(fun id -> String.equal id "new-writer")
       ~container_command:command ()) in
     let labels = match List.assoc "configuration" (read_container path) with
@@ -2006,7 +2038,7 @@ let test_large_sampling_sources_fit_without_duplicate_response_bodies () = with_
     "source_id",`String id;"kind",`String "lane_output";"installation_id",`String id;
     "selection",`String "latest_completed"]) producers)] in
   let acquired = require (Sources.acquire ~access:Sources.Operator_configuration ~store ~package
-    ~read_browser_document:(fun ~route:_ ~tab_id:_ -> Error "no browser owner in this fixture")
+    ~read_browser_document:(fun ~installation_id:_ ~route:_ ~tab_id:_ -> Error "no browser owner in this fixture")
     ~resolve_machine_output:(fun _ -> Error "no attached machine fixture") ~resolve_lane_output:(fun ~installation_id -> match List.assoc_opt installation_id producers with
       | Some producer -> Ok producer | None -> Error "unknown producer") ~binding) in
   check bool "combined source array stays within the configured ingress envelope" true
@@ -2704,6 +2736,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "engine identity comes from the info command" `Quick test_engine_identity_comes_from_the_info_command;
   test_case "Apple engine identity is the service root" `Quick test_apple_engine_identity_is_the_service_app_root;
   test_case "engine identity parsing has no default" `Quick test_engine_identity_parsing_has_no_default;
+  test_case "Apple container names fit the engine" `Quick test_apple_container_names_fit_the_engine;
   test_case "a blank label reads as no label" `Quick test_a_blank_label_reads_as_no_label;
   test_case "start is refused before create when the engine is unreachable" `Quick
     test_start_is_refused_before_create_when_the_engine_is_unreachable;

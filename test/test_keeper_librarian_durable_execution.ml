@@ -2743,6 +2743,36 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   io (fun () -> write parent_body parent_bytes);
   check (result unit string) "the host's lineage check passes with the parent's body" (Ok ())
     (io (fun () -> Lineage.confirm_predecessor_by_body ~store:fixture.store ~require_confirmed:true child_request));
+  let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+    |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+  let authorization=Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+    ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request child_request |> get)
+    |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
+    |> get |> Option.get in
+  let guard ()=authorization.before_dispatch () in
+  check (result unit string) "an unchanged fenced ancestor passes the actual dispatch recheck" (Ok ()) (guard ());
+  let posts=F.post_count fixture.server and positions=progress fixture in
+  let preserve_parent action=Fun.protect
+    ~finally:(fun () -> Eio.Cancel.protect (fun () -> io (fun () -> write parent_body parent_bytes))) action in
+  preserve_parent (fun () ->
+    io (fun () -> Sys.remove parent_body);
+    check bool "a missing ancestor body refuses actual dispatch" true (Result.is_error (guard ())));
+  preserve_parent (fun () ->
+    let corrupted=Bytes.of_string parent_bytes in
+    Bytes.set corrupted 0 (if Bytes.get corrupted 0='{' then '[' else '{');
+    io (fun () -> write parent_body (Bytes.to_string corrupted));
+    check bool "same-length ancestor corruption refuses actual dispatch" true (Result.is_error (guard ())));
+  let proof=io (fun () -> Lineage.verify_predecessors ~store:fixture.store
+    ~require_confirmed:true child_request |> get) in
+  let copied=io (fun () -> Capture.restore ~owner:(Capture.physical_owner request) child |> get) in
+  check bool "another request object cannot borrow an authorization's ancestor proof" true
+    (Result.is_error (io (fun () -> Lineage.recheck_predecessors ~store:fixture.store
+      ~require_confirmed:true copied proof)));
+  check bool "another store object cannot borrow an authorization's ancestor proof" true
+    (Result.is_error (io (fun () -> Lineage.recheck_predecessors
+      ~store:(Store.create ~root) ~require_confirmed:true child_request proof)));
+  check int "ancestor rechecks call no provider" posts (F.post_count fixture.server);
+  check bool "ancestor rechecks acknowledge no source" true (progress fixture=positions);
   let with_summary_json id name value f=
     let path=record_path id in
     let honest=io (fun () -> In_channel.with_open_bin path In_channel.input_all) in
@@ -2759,6 +2789,10 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     io (fun () -> write path honest);
     result in
   let with_summary_value id name value f=with_summary_json id name (`String value) f in
+  check bool "a changed ancestor summary refuses actual dispatch" true
+    (with_summary_value original.request_id "source_digest" (String.make 64 '0')
+      (fun () -> Result.is_error (guard ())));
+  check (result unit string) "restoring the ancestor lets the same authorization recheck again" (Ok ()) (guard ());
   (* The resolution pass reads a waiting pair as two records and their
      indexes, and neither body. *)
   let resolution_pass ()=memory_action fixture (fun () -> Resolution_work.run_serialized

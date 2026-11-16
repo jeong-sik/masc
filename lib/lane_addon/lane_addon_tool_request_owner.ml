@@ -271,6 +271,35 @@ let reload ~store (previous : retained) =
     if same_identity record (listed previous)
     then Ok (Some (with_request record previous.request))
     else Error (Store_unavailable "a reloaded original names another request or binding")
+type verified_body = Verified_body of {
+  scope:string;request_id:string;installation_id:string;package_id:string;
+  tool:string;request_digest:string;summary:Yojson.Safe.t;
+}
+let verified_body (original:retained) =
+  Verified_body {scope=original.scope;request_id=original.request_id;
+    installation_id=original.installation_id;package_id=original.package_id;
+    tool=original.tool;request_digest=original.request_digest;summary=original.summary}
+let recheck_body ~store (Verified_body previous) =
+  let scope=previous.scope and request_id=previous.request_id in
+  let* read=Lane_addon_store.load_tool_request store ~scope ~request_id ~name_body:(fun json ->
+    let* current=decode ~scope ~request_id json in
+    if String.equal previous.scope current.Record.scope
+      && String.equal previous.request_id current.request_id
+      && String.equal previous.installation_id current.installation_id
+      && String.equal previous.package_id current.package_id
+      && String.equal previous.tool current.tool
+      && String.equal previous.request_digest current.request_digest
+      && Yojson.Safe.equal previous.summary current.summary
+    then Ok (current,current.request_digest)
+    else Error "a verified original names another request or binding") |> unavailable in
+  match read with
+  | None -> Error (Store_unavailable "a verified original disappeared")
+  | Some (_,None) -> Error (Store_unavailable "original request body named by its record is missing")
+  | Some (record,Some bytes) ->
+    let matches=Domain_pool_ref.submit_cpu_or_inline ~name:"lane-addon-original-body-recheck"
+      (fun () -> String.equal (Lane_addon_store.digest bytes) record.Record.request_digest) in
+    if matches then Ok record
+    else Error (Store_unavailable "original request body does not match its record's digest")
 let load_record ~store ~scope ~request_id =
   let* () = validate_identity ["scope", scope; "request_id", request_id] in
   let* json = Lane_addon_store.load_tool_request_owner store ~scope ~request_id |> unavailable in

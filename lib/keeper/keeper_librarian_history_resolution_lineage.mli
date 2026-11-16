@@ -12,6 +12,19 @@ val confirm_predecessor_by_body : store:Lane_addon_store.t -> require_confirmed:
   Keeper_librarian_durable_request.t -> (unit, string) result
 (** {!validate_predecessor_payload} over the store, with live source roots.
     The host's check before it runs or dispatches an original. *)
+type verified_predecessors
+val verify_predecessors : store:Lane_addon_store.t -> require_confirmed:bool ->
+  Keeper_librarian_durable_request.t -> (verified_predecessors, string) result
+(** The same full body/index/lineage validation as {!confirm_predecessor_by_body}.
+    Keep only verified ancestor identities and indexes for this authorization;
+    their decoded requests are not retained. *)
+val recheck_predecessors : store:Lane_addon_store.t -> require_confirmed:bool ->
+  Keeper_librarian_durable_request.t -> verified_predecessors -> (unit, string) result
+(** Bound to the same store and original request objects. Freshly read every
+    ancestor record and body and require its previously verified bytes and
+    index. Recheck live source roots, fences, intent ACKs, digests and cycles.
+    Fenced links reuse the verified decode; known-basis links still restore
+    their requests to compare the current full publication intent. *)
 val confirm_predecessor : store:Lane_addon_store.t -> require_confirmed:bool ->
   Keeper_librarian_durable_request.t -> (unit, string) result
 (** The Keeper pass's check. A predecessor is read as its record and the index

@@ -93,6 +93,15 @@ val load_listed : store:Lane_addon_store.t -> Record.t -> (retained, error) resu
     Consumers may select known typed subjects before reading their bodies;
     this operation does not turn a partial selection into a complete scope
     inventory or authorize any effect. *)
+type verified_body
+val verified_body : retained -> verified_body
+(** The identity of a body {!load} verified, without keeping its JSON value. *)
+val recheck_body : store:Lane_addon_store.t -> verified_body -> (Record.t, error) result
+(** Read the current record and complete body together through the owned store.
+    Require the verified identity, binding and summary and hash the actual body
+    bytes again. Equal bytes need no second JSON/canonical decode. Missing,
+    changed or unreadable records/bodies refuse. Progress may advance; this
+    does not establish domain, lineage or execution authority. *)
 val discover_all : store:Lane_addon_store.t -> (retained list, error) result
 (** Validate the directory and record identity of each published scope, then
     strictly load each original body. This observation is not an atomic

@@ -125,9 +125,13 @@ val compact_health_version : string -> string option
 
 type error =
   | Invalid_health  (** The port gave no compact [/health] version. *)
+  | Sign_in_failed
+      (** The local sign-in of this command failed or left no credential it
+          could read. Nothing was sent to the running server. *)
   | Admin_required
-      (** The local sign-in failed or left no credential, or the running
-          server read the credential and refused it (401 or 403). *)
+      (** The running server answered 401 or 403 to the operator credential
+          that this command had just checked or written for the workspace:
+          this MASC accepts the credential and the server does not. *)
   | Server_starting
       (** [/health/ready] of the running server says it is not ready yet. It
           was not asked about the credential. Signing in does not change
@@ -158,7 +162,7 @@ val authorize_initial :
     refuses); a compact [GET /health] on the announced port within
     {!Masc_http_client.default_request_timeout_sec} ([Invalid_health] when no
     version is read); a version other than [expected_version] gives
-    [Incumbent_changed]; then [login ()] ([Admin_required] on [false]).
+    [Incumbent_changed]; then [login ()] ([Sign_in_failed] on [false]).
     [login] mints the admin credential, so it never runs before the kernel
     check. *)
 

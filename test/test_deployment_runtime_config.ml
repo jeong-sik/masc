@@ -235,6 +235,32 @@ let test_resolve_workspace_follows_masc exe () = with_workspace (fun root ->
       let output = passes "MASC_BASE_PATH" (resolve []) in
       reports output "source=explicit_env")))
 
+(* A deployment command that a signal ends makes the helper exit the way a
+   shell reports it: 128 plus the host signal number (#52223). [$$] is the
+   command itself. [$PPID] is the helper, which forwards the signal to the
+   command's process group. The [lease-handoff] preparation fails here, so
+   its next executable never runs. *)
+let signalled_commands =
+  [ "kill -TERM $$", 143
+  ; "kill -KILL $$", 137
+  ; "kill -TERM $PPID; exec sleep 5", 143 ]
+
+let lease_run root = [ "lease-run"; "--base-path"; root ]
+
+let lease_handoff root =
+  [ "lease-handoff"; "--base-path"; root; "--next-executable"; "/bin/sh" ]
+
+let test_signalled_command_exit_code exe subcommand () = with_workspace (fun root ->
+  List.iter (fun (script, expected) ->
+    let status, output =
+      run_exe exe root (subcommand root @ [ "--"; "/bin/sh"; "-c"; script ])
+    in
+    match status with
+    | Unix.WEXITED code -> check int (script ^ ": " ^ output) expected code
+    | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      fail ("the helper itself did not exit after " ^ script ^ ": " ^ output))
+    signalled_commands)
+
 let () =
   let exe = Sys.getenv "MASC_TEST_DEPLOYMENT_PREFLIGHT_EXE" in
   run "deployment runtime config"
@@ -256,4 +282,9 @@ let () =
       test_case "resolve-workspace follows masc's order" `Quick
         (test_resolve_workspace_follows_masc exe);
       test_case "a missing MASC_CONFIG_DIR needs an empty workspace" `Quick
-        (test_missing_config_dir_needs_empty_workspace exe)]]
+        (test_missing_config_dir_needs_empty_workspace exe)];
+     "signalled deployment command",
+     [test_case "lease-run exits 128 plus the host signal number" `Quick
+        (test_signalled_command_exit_code exe lease_run);
+      test_case "lease-handoff preparation exits 128 plus the host signal number" `Quick
+        (test_signalled_command_exit_code exe lease_handoff)]]

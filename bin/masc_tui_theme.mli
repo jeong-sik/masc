@@ -24,16 +24,24 @@ val user_message_background : Masc_tui_terminal_palette.t option -> string
 val side_pane_background : Masc_tui_terminal_palette.t option -> string
 (** The ground a side pane sits on beside a surface: the same step off the
     page {!user_message_background} takes, so the two things set apart from
-    the page are set apart by the same amount. Same fallbacks. *)
+    the page are set apart by the same amount. Same fallbacks. A colour drawn
+    on it is measured against it by passing [Side_pane] as its {!surface}. *)
+
+(** The ground a colour is drawn on, which is the ground its contrast is
+    measured against. [Page] is the terminal's own background. [Side_pane]
+    is {!side_pane_background}: the Keeper roster, a list index beside a
+    detail, the Activity pane. A colour lifted to clear the page by a hair
+    is under the floor one step off it, so the caller names the ground. *)
+type surface = Page | Side_pane
 
 val sidebar_selection : Masc_tui_terminal_palette.t option -> string
 (** A restrained neutral band derived from the terminal palette. Falls back
     to reverse video without a usable colour palette. Indexed colours use
     xterm defaults for projection, not observed slot values. *)
 
-val recede : Masc_tui_terminal_palette.t option -> string
+val recede : surface:surface -> Masc_tui_terminal_palette.t option -> string
 (** Secondary text is blended toward the palette background while the projected
-    colour is estimated to retain 4.5:1 contrast. For ANSI-256 the estimate
+    colour is estimated to retain 4.5:1 contrast against [surface]'s ground. For ANSI-256 the estimate
     uses xterm's default slot value, which the terminal may have changed.
     Otherwise retain the terminal's default foreground.
     Missing palette or unsupported colour depth also retains that foreground;
@@ -161,10 +169,11 @@ type ansi_color =
   | Bright_black
 
 val ansi_readable
-  :  Masc_tui_terminal_palette.t option
+  :  surface:surface
+  -> Masc_tui_terminal_palette.t option
   -> ansi_color
   -> string
-(** The colour, adjusted toward readability against the palette's page.
+(** The colour, adjusted toward readability against [surface]'s ground.
 
     masc draws these out of the reader's own palette, so what they come out as
     is their theme's call -- and across twelve base16 schemes that call fails
@@ -183,8 +192,12 @@ val status : status -> string
 (** The plain SGR code. What the reader's own theme puts in that palette
     entry; use {!status_readable} where the palette is known. *)
 
-val status_readable : Masc_tui_terminal_palette.t option -> status -> string
-(** The same colour, adjusted toward readability against the palette's page.
+val status_readable
+  :  surface:surface
+  -> Masc_tui_terminal_palette.t option
+  -> status
+  -> string
+(** The same colour, adjusted toward readability against [surface]'s ground.
 
     A status colour is drawn out of the reader's palette, so what it comes out
     as is their theme's call -- and across twelve base16 schemes that call
@@ -200,10 +213,14 @@ val status_readable : Masc_tui_terminal_palette.t option -> status -> string
     the reply -- the plain code goes out, which is what every row drew before
     this existed. *)
 
-val status_text_readable : Masc_tui_terminal_palette.t option -> status -> string
+val status_text_readable
+  :  surface:surface
+  -> Masc_tui_terminal_palette.t option
+  -> status
+  -> string
 (** For text that names its own status, use the terminal's default foreground
     when a palette entry is unknown or a projected colour cannot be verified
-    above the text contrast floor. This fallback cannot guarantee readability
+    above the text contrast floor against [surface]'s ground. This fallback cannot guarantee readability
     if the terminal's own foreground is low-contrast. Preserve the original
     ANSI colour when the reader has explicitly disabled
     colour lifting. Colour-only distinctions continue to use {!status_readable}. *)
@@ -236,6 +253,16 @@ module For_testing : sig
     -> string
   (** Pure capability/environment fixture for the production semantic token. *)
 
+  val side_pane_background
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Capability fixture for {!val:side_pane_background}: the ground bytes a
+      side pane draws, so a test measures a colour against what is behind it. *)
+
   val recede_rgb
     :  foreground:Masc_tui_terminal_palette.rgb
     -> background:Masc_tui_terminal_palette.rgb
@@ -259,6 +286,7 @@ module For_testing : sig
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
     -> Masc_tui_terminal_palette.t option
     -> ansi_color
     -> string
@@ -270,6 +298,7 @@ module For_testing : sig
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
     -> Masc_tui_terminal_palette.t option
     -> status
     -> string
@@ -281,6 +310,7 @@ module For_testing : sig
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
     -> Masc_tui_terminal_palette.t option
     -> string
   (** Pure capability/environment fixture for {!val:recede}. *)

@@ -852,13 +852,54 @@ let test_status_of_error () =
   check "commit storage failure is 503" `Service_unavailable (Actions.Save_failed (Runtime_setup_batch.Write_failed "disk full"));
   check "commit validation refusal is 400" `Bad_request (Actions.Save_failed (Runtime_setup_batch.Commit_refused "invalid source"));
   check "missing net is 503" `Service_unavailable Actions.Network_unavailable;
-  check "unreadable configuration is 503" `Service_unavailable Actions.Configuration_unavailable;
+  check "unreadable configuration is 503" `Service_unavailable
+    (Actions.Configuration_unavailable (Actions.Unreadable "failed to read runtime config"));
   check "wrong body is 400" `Bad_request Actions.Invalid_request;
   check "moved revision is 409" `Conflict (Actions.Save_failed Runtime_setup_batch.Changed_configuration);
   check "upstream discovery failure is 502" `Bad_gateway
     (Actions.Discovery_failed Runtime_model_discovery.Request_failed);
   check "wrong discovery connection is 400" `Bad_request
     (Actions.Discovery_failed Runtime_model_discovery.Invalid_connection)
+(* #51793: a missing runtime.toml and one that does not parse are told apart
+   for the operator, while the person still gets the one 503 sentence. *)
+let test_unread_configuration_keeps_its_reason () = Eio_main.run (fun _env -> Eio.Switch.run (fun sw ->
+  let base=Filename.temp_dir "masc-web-setup-unread-" "" |> Unix.realpath in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base);
+  let masc=Common.masc_dir_from_base_path ~base_path:base in Unix.mkdir masc 0o700;
+  let config=Filename.concat masc "config" in Unix.mkdir config 0o700;
+  let runtime=Filename.concat config "runtime.toml" in
+  (* The ring of a fresh process is empty and since_seq is exclusive, so a
+     cursor is passed only when the ring already held an entry. *)
+  let unread expected_kind =
+    let baseline=match Log.Ring.recent ~limit:1 () with
+      | (entry : Log.Ring.entry) :: _ -> Some entry.seq | [] -> None in
+    let reason=match Actions.config ~base_path:base with
+      | Ok _ -> Alcotest.fail "an unusable runtime.toml was parsed"
+      | Error (Actions.Configuration_unavailable reason) -> reason
+      | Error error -> Alcotest.fail (Actions.error_message error) in
+    let warnings=Log.Ring.recent ?since_seq:baseline ~module_filter:"Server"
+      ~min_level:(Log.level_to_int Log.Warn) () in
+    let open Yojson.Safe.Util in
+    Alcotest.check (Alcotest.list (Alcotest.pair Alcotest.string Alcotest.string))
+      "the operator log names the file and the reason once" [runtime,expected_kind]
+      (List.map (fun (entry : Log.Ring.entry) ->
+         entry.details |> member "path" |> to_string, entry.details |> member "reason" |> to_string) warnings);
+    reason in
+  let missing=unread "unreadable" in
+  (match missing with
+   | Actions.Unreadable _ -> ()
+   | Actions.Unparsable _ -> Alcotest.fail "a missing runtime.toml was reported as unparsable");
+  save runtime "[runtime\ndefault = \n";
+  let broken=unread "unparsable" in
+  (match broken with
+   | Actions.Unparsable _ -> ()
+   | Actions.Unreadable _ -> Alcotest.fail "a runtime.toml with a syntax error was reported as unreadable");
+  List.iter (fun reason ->
+    let error=Actions.Configuration_unavailable reason in
+    Alcotest.check Alcotest.bool "an unusable runtime.toml answers 503" true
+      (Actions.status_of_error error = `Service_unavailable);
+    Alcotest.check Alcotest.string "the person gets the same sentence for either reason"
+      "The workspace configuration could not be read." (Actions.error_message error)) [missing;broken]))
 let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "repeated web sources share one provider and credential without changing indexes" `Quick test_repeated_web_source_shares_one_credential;
   Alcotest.test_case "different web source keys and endpoints remain separate" `Quick test_distinct_web_sources_remain_separate;
@@ -887,4 +928,5 @@ let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "bound models follow account home across provider IDs" `Quick test_bound_models_follow_account_home;
   Alcotest.test_case "native save rechecks image capability" `Quick test_native_save_rechecks_image_capabilities;
   Alcotest.test_case "named default route survives HTTP save" `Quick test_named_lane_save;
-  Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]
+  Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error;
+  Alcotest.test_case "unusable runtime.toml keeps its reason behind one 503 sentence" `Quick test_unread_configuration_keeps_its_reason]]

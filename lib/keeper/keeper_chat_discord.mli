@@ -59,6 +59,17 @@ val adapter_loop :
 
     Falls back to a single POST if no deltas arrive before [Run_finished].
 
+    The streaming POST, its one retry, and the final POST that follows an
+    unanswered one carry the reply's one {!Discord_rest_client.nonce} with
+    [enforce_nonce]. Discord checks a nonce only "in the past few minutes"
+    and documents no exact length. Inside that window a failed request that
+    landed is returned to the next request instead of being posted again,
+    and the adapter PATCHes the returned message with the text it meant to
+    send. A request past the window, such as a retry or final POST after a
+    long tool call, creates a second message. A turn that ends with an
+    external effect delivered, or with no text, sends nothing more and leaves
+    a landed partial message as it is.
+
     [on_send_result] is invoked exactly once when the turn terminates through
     [Run_finished] or [Event_error]. The result reports whether the primary
     final text/error reply was actually delivered: the final PATCH plus every
@@ -93,13 +104,15 @@ module For_testing : sig
     token:string ->
     channel_id:string ->
     events:Keeper_chat_events.t ->
-    post_message:(content:string -> (string, error) result) ->
+    post_message:
+      (nonce:Discord_rest_client.nonce -> content:string -> (string, error) result) ->
     edit_message:(message_id:string -> content:string -> (unit, error) result) ->
     send_message:(content:string -> (unit, error) result) ->
     ?show_activity:(unit -> (unit, error) result) ->
     ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     ?base_url:string ->
     ?now:(unit -> float) ->
+    ?fresh_nonce:(unit -> Discord_rest_client.nonce) ->
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->
     unit
@@ -107,7 +120,8 @@ module For_testing : sig
       {!Discord_rest_client}; tests can inject exact POST/PATCH outcomes while
       exercising the real event-loop state machine. [show_activity] represents
       one native typing refresh; its failure is observational and never settles
-      [on_send_result]. [now] makes edit pacing deterministic. Rich
+      [on_send_result]. [now] makes edit pacing deterministic, and
+      [fresh_nonce] makes the per-reply create-message nonce deterministic. Rich
       side-message helpers remain production-backed and should not be emitted
       by transport tests. *)
 end

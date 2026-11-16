@@ -285,20 +285,35 @@ and handle_array ~key form editor =
           let* value = Validation.validate_value ~schema:field.schema ~name:(String.concat "." field.path) (`List editor.items) in
           Ok (Updated (replace {form with array_editor=None} (Some value)))
       | _ -> update editor
-(* Same order as the dashboard binding form: title, description, constant
-   members, position. *)
-let alternative_label index schema =
+(* The name an alternative's own schema gives it, in the order of the
+   dashboard binding form: title, description, constant members. *)
+let alternative_name schema =
   let text key = match member key schema with
     | Some (`String text) when String.trim text<>"" -> Some text | Some _ | None -> None in
   match text "title",text "description" with
-  | Some title,_ -> title
-  | None,Some description -> description
+  | Some title,_ -> Some title
+  | None,Some description -> Some description
   | None,None ->
       let constants = match member "properties" schema with
         | Some (`Assoc properties) -> List.filter_map (fun (key,child) -> Option.map (fun value ->
             key ^ ": " ^ Yojson.Safe.to_string value) (member "const" child)) properties
         | Some _ | None -> [] in
-      if constants=[] then Printf.sprintf "Alternative %d" (index+1) else String.concat " · " constants
+      if constants=[] then None else Some (String.concat " · " constants)
+(* An alternative its schema does not name is shown by its position. *)
+let alternative_label index schema =
+  Option.value (alternative_name schema) ~default:(Printf.sprintf "Alternative %d" (index+1))
+(* For a caller whose own root holds such a schema one member down. The form
+   edits alternatives only at its root, so that caller spreads its root over
+   these. The answer is [None] unless every alternative has a name and no two
+   share one. The form shows an alternative by its name and by its members'
+   names, never by a member's type, so alternatives named alike, or known
+   only by position, cannot be told apart when their members are named alike. *)
+let named_alternatives schema =
+  Option.bind (alternatives schema) (fun alternatives ->
+    let named = List.filter_map (fun alternative ->
+      Option.map (fun name -> name,alternative) (alternative_name alternative)) alternatives in
+    let names = List.sort_uniq String.compare (List.map fst named) in
+    if List.length names=List.length alternatives then Some named else None)
 let locked_lines form = List.map (fun (name,value) ->
   "  " ^ name ^ ": " ^ Yojson.Safe.to_string value ^ " · locked") form.locked
 let union_lines form =

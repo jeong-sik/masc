@@ -152,8 +152,29 @@ export function ControlStatusFixture() {
   `
 }
 
+// The delivered tool row reads its output through the exact per-execution
+// endpoint. The page answers that read itself so no request leaves the
+// fixture; any other read fails as an output the fixture does not provide.
+function fixtureFetch(input: RequestInfo | URL): Promise<Response> {
+  const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin)
+  const executionId = url.searchParams.get('execution_id')
+  if (
+    url.pathname === `/api/v1/keepers/${keeperName}/tool-calls`
+    && executionId !== null
+    && executionId === deliveredSurfacePost.execution_id
+  ) {
+    const body = { keeper: keeperName, execution_id: executionId, entry: deliveredSurfacePost }
+    return Promise.resolve(new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+  }
+  return Promise.reject(new Error(`Historical output not provided by this fixture: ${url.pathname}${url.search}`))
+}
+
 const root = document.getElementById('app')
 if (root) {
+  window.fetch = fixtureFetch
   resetToolCallOutputs()
   recordToolCallOutputs([deliveredSurfacePost])
   render(html`<${ControlStatusFixture} />`, root)

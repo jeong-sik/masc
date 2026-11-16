@@ -703,7 +703,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     (* Antigravity exposes no compaction or context-reset witness. A settled
        delivery cannot prove these blocks remain in its current model input,
        so keep the frontier's held set empty and resend on every resume. *)
-    let* prompt = Host.framed_prompt_for_turn ?composed_context ~held:[] ~is_resume ~goal prepared in
+    let* prompt =
+      Host.framed_prompt_for_turn ?composed_context ~held:[]
+        ~delivery:(if is_resume then Host.Framed_resume
+       else Host.Framed_start { started_at = Time_compat.now () })
+        ~goal prepared
+    in
     (* Recording the half this process controls, mirroring the Codex and
        Claude Code composition lines: an oversized prompt was invisible until
        the client's own log showed promptLength=11,386,764 (2026-08-14). *)

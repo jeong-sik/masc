@@ -40,9 +40,6 @@ type failure =
   | Instrument_after_music
   | Invalid_key_signature of string
   | Invalid_clef of string
-  | Key_signature_after_note
-  | Clef_after_note
-  | Section_after_note
   | Quoted_without_metadata
   | Duration_outside_subset of string
   | Chord_dot_without_duration
@@ -59,7 +56,6 @@ type failure =
   | String_past_tuning of { string : int; strings : int }
   | Repeat_count_out_of_range of string
   | Alternate_ending_out_of_range of string
-  | Repeat_without_bar
 
 (* How a note sounds on its beat: picked, picked dead ([x] where the fret
    goes), or held on from the earlier note on its string ([-] there). *)
@@ -168,9 +164,6 @@ let failure_text = function
       Printf.sprintf "\"%s\" is not a key signature" (quoted name)
   | Invalid_clef name ->
       Printf.sprintf "\"%s\" is not a clef" (quoted name)
-  | Key_signature_after_note -> "\\ks requires a bar line before it after notes"
-  | Clef_after_note -> "\\clef requires a bar line before it after notes"
-  | Section_after_note -> "\\section requires a bar line before it after notes"
   | Quoted_without_metadata -> "a quoted string with no metadata directive before it"
   | Duration_outside_subset what ->
       Printf.sprintf "a duration \"%s\" outside :1 :2 :4 :8 :16" (quoted what)
@@ -198,7 +191,6 @@ let failure_text = function
       Printf.sprintf "a repeat count of \"%s\" is not 1 or more" (quoted count)
   | Alternate_ending_out_of_range ending ->
       Printf.sprintf "an alternate ending of \"%s\" is not 1 to 31" (quoted ending)
-  | Repeat_without_bar -> "a repeat sign with no bar"
 
 (* A beat's length in sixteenth notes, the unit every position is counted in. *)
 let units_of_digits = function
@@ -595,12 +587,11 @@ type sounding = {
   s_span : int;
   s_notes : note list;  (* [] is a rest *)
   s_marked : bool;  (* a rhythm effect rode on it, and a cell draws that *)
-  s_bar : int;  (* the bar alphaTab puts it in, which a tie's search counts *)
 }
 
-(* The repeat signs read since the last bar line, waiting for the open
-   measure to close: an [\ro], the latest [\rc] count, and every [\ae]
-   number. A sign belongs to the bar it stands in. *)
+(* The repeat signs read since the open bar began, waiting for it to close:
+   an [\ro], the latest [\rc] count, and every [\ae] number. A sign belongs
+   to the bar whose start it stands at. *)
 type marks = {
   m_start : bool;
   m_end : int option;
@@ -609,28 +600,120 @@ type marks = {
 
 let no_marks = { m_start = false; m_end = None; m_endings = [] }
 
-let marks_pending marks =
+let has_sign marks =
   marks.m_start || Option.is_some marks.m_end || not (List.is_empty marks.m_endings)
 
-(* Measures and the open measure are both kept newest beat first, so the beat
-   an effect or a trailing duration belongs to is at hand whichever side of a
-   bar line it is on. A closed measure keeps the signs its bar carried. *)
+(* A key signature the way alphaTab 1.8.4 keeps it on a bar
+   (AlphaTex1EnumMappings.keySignature, keySignatureType): the sharps,
+   negative for flats, and the mode. *)
+type mode =
+  | Major
+  | Minor
+
+type key = {
+  fifths : int;
+  mode : mode;
+}
+
+(* A clef the way alphaTab 1.8.4 names it (AlphaTex1EnumMappings.clef). *)
+type clef =
+  | Neutral
+  | C3
+  | C4
+  | F4
+  | G2
+
+(* What a bar is played under that alphaTab carries on to the bars after it
+   until a directive says otherwise: the time signature as said, the key and
+   the clef. None of it moves a fret or a count here; a bar that changes it
+   is a bar alphaTab keeps even with no beat in it (see [close_bar]). *)
+type carried = {
+  meter : int option * int option;
+  key : key;
+  clef : clef;
+}
+
+(* alphaTab's own before any directive: 4/4, C major, the treble clef. *)
+let initial_carried =
+  { meter = (Some 4, Some 4); key = { fifths = 0; mode = Major }; clef = G2 }
+
+let same_mode a b =
+  match a, b with
+  | Major, Major | Minor, Minor -> true
+  | Major, Minor | Minor, Major -> false
+
+let same_clef a b =
+  match a, b with
+  | Neutral, Neutral | C3, C3 | C4, C4 | F4, F4 | G2, G2 -> true
+  | Neutral, (C3 | C4 | F4 | G2)
+  | C3, (Neutral | C4 | F4 | G2)
+  | C4, (Neutral | C3 | F4 | G2)
+  | F4, (Neutral | C3 | C4 | G2)
+  | G2, (Neutral | C3 | C4 | F4) -> false
+
+(* alphaTab compares a bar with the one before it field by field: the time
+   signature's numbers, the key and its mode, the clef (MasterBar.hasChanges,
+   Bar.hasChanges). *)
+let same_carried a b =
+  let top_a, bottom_a = a.meter and top_b, bottom_b = b.meter in
+  Option.equal Int.equal top_a top_b
+  && Option.equal Int.equal bottom_a bottom_b
+  && Int.equal a.key.fifths b.key.fifths
+  && same_mode a.key.mode b.key.mode
+  && same_clef a.clef b.clef
+
+(* A bar read whole, as alphaTab 1.8.4 reads it: its signs, whether it
+   carries a change of its own -- a sign, a [\tempo], a [\section], or a
+   time signature, key or clef other than the bar before it, which keeps an
+   empty bar at the end of a score -- and its beats, newest first. [[]] is a
+   bar with no beat, which alphaTab plays as a rest for the whole bar. *)
+type bar = {
+  marks : marks;
+  changed : bool;
+  soundings : sounding list;
+}
+
+(* Bars and the open bar are both kept newest beat first, so the beat an
+   effect or a trailing duration belongs to is at hand whichever side of a
+   bar line it is on. Each closed bar is one of alphaTab's: the measures
+   drawn and the bars a tie's search counts are the same bars. *)
 type builder = {
   b_tuning : string list option;
   b_track_declared : bool;
   b_staff_declared : bool;
   b_instrument_declared : bool;
   b_default : int;
-  b_measures : (marks * sounding list) list;  (* newest measure first, each newest beat first *)
-  b_beats : sounding list;  (* the open measure, newest beat first *)
-  b_marks : marks;  (* the signs of the open measure *)
+  b_measures : bar list;  (* newest bar first *)
+  b_beats : sounding list;  (* the open bar, newest beat first *)
+  b_marks : marks;  (* the signs of the open bar *)
+  b_tempo_or_section : bool;  (* a [\tempo] or a [\section] stood in the open bar *)
+  b_carried : carried;  (* what the open bar is played under so far *)
+  b_carried_before : carried;  (* what the bar before the open one was played under *)
   b_title : string option;  (* the last [\title] said *)
   b_subtitle : string option;  (* the last [\subtitle] said *)
   b_tempo : int option;  (* the last [\tempo] that fit an int *)
   b_ts : (int * int) option;  (* the last [\ts] whose numbers fit *)
-  b_bar : int;  (* alphaTab's bar count so far, for a tie's search *)
-  b_bar_has_beat : bool;  (* a beat stands in alphaTab's current bar *)
 }
+
+(* The open bar ends at [|], and at a directive after a beat, where
+   alphaTab 1.8.4 starts the next bar (AlphaTexParser._barBeats stops at a
+   tag). The next bar starts under what this one was played under. *)
+let close_bar state =
+  let bar =
+    { marks = state.b_marks
+    ; changed =
+        has_sign state.b_marks || state.b_tempo_or_section
+        || not (same_carried state.b_carried state.b_carried_before)
+    ; soundings = state.b_beats
+    }
+  in
+  { state with
+    b_measures = bar :: state.b_measures
+  ; b_beats = []
+  ; b_marks = no_marks
+  ; b_tempo_or_section = false
+  ; b_carried_before = state.b_carried
+  }
 
 (* A beat that says its own length sets the length for the beats after it,
    the way a [:n] does. [said] is the unit a trailing [.n] names; the tick
@@ -647,10 +730,8 @@ let push_beat ?said notes state =
       Ok
         { state with
           b_beats =
-            { s_dur = dur; s_span = span; s_notes = notes; s_marked = false; s_bar = state.b_bar }
-            :: state.b_beats
+            { s_dur = dur; s_span = span; s_notes = notes; s_marked = false } :: state.b_beats
         ; b_default = unit
-        ; b_bar_has_beat = true
         }
   | None -> Error (Duration_outside_subset (Printf.sprintf ":%d" unit))
 
@@ -724,10 +805,10 @@ let apply_effect_to_latest state ~make_dur ~markup =
       Ok { state with b_beats = beat :: earlier }
   | [] -> (
       match state.b_measures with
-      | (marks, beat :: earlier) :: measures ->
+      | ({ soundings = beat :: earlier; _ } as bar) :: measures ->
           let* beat = apply beat in
-          Ok { state with b_measures = (marks, beat :: earlier) :: measures }
-      | (_, []) :: _ | [] -> Error Effect_without_note)
+          Ok { state with b_measures = { bar with soundings = beat :: earlier } :: measures }
+      | { soundings = []; _ } :: _ | [] -> Error Effect_without_note)
 
 let mark_latest_beat state =
   let mark (sounding : sounding) =
@@ -740,9 +821,9 @@ let mark_latest_beat state =
   in
   match state.b_beats, state.b_measures with
   | beat :: earlier, _ -> Ok { state with b_beats = mark beat :: earlier }
-  | [], (marks, beat :: earlier) :: measures ->
-      Ok { state with b_measures = (marks, mark beat :: earlier) :: measures }
-  | [], ((_, []) :: _ | []) -> Error Effect_without_note
+  | [], ({ soundings = beat :: earlier; _ } as bar) :: measures ->
+      Ok { state with b_measures = { bar with soundings = mark beat :: earlier } :: measures }
+  | [], ({ soundings = []; _ } :: _ | []) -> Error Effect_without_note
 
 (* Digits: all of them, and the value fits an int or it does not -- a tempo
    too large to draw reads fine and the header omits it, the way an absent
@@ -764,28 +845,54 @@ let text_argument missing = function
       Error (Missing_argument missing)
 
 (* These signatures change standard notation, not the string/fret coordinates
-   of tablature. Validate alphaTab's finite signature vocabulary before leaving
-   that presentation metadata out of this projection. *)
-let valid_key_signature name =
+   of tablature, and the tab does not draw them. alphaTab's finite signature
+   vocabulary is read to the key it names, so a bar that changes the key is
+   told from one that says the key again. *)
+let key_signature name =
+  let key fifths mode = Some { fifths; mode } in
   match String.lowercase_ascii name with
-  | "cb" | "gb" | "db" | "ab" | "eb" | "bb" | "f" | "c"
-  | "g" | "d" | "a" | "e" | "b" | "f#" | "c#"
-  | "cbmajor" | "gbmajor" | "dbmajor" | "abmajor" | "ebmajor" | "bbmajor"
-  | "fmajor" | "cmajor" | "gmajor" | "dmajor" | "amajor" | "emajor"
-  | "bmajor" | "f#major" | "c#major"
-  | "abminor" | "ebminor" | "bbminor" | "fminor" | "cminor" | "gminor"
-  | "dminor" | "aminor" | "eminor" | "bminor" | "f#minor" | "c#minor"
-  | "g#minor" | "d#minor" | "a#minor" -> true
-  | _ -> false
+  | "cb" | "cbmajor" -> key (-7) Major
+  | "gb" | "gbmajor" -> key (-6) Major
+  | "db" | "dbmajor" -> key (-5) Major
+  | "ab" | "abmajor" -> key (-4) Major
+  | "eb" | "ebmajor" -> key (-3) Major
+  | "bb" | "bbmajor" -> key (-2) Major
+  | "f" | "fmajor" -> key (-1) Major
+  | "c" | "cmajor" -> key 0 Major
+  | "g" | "gmajor" -> key 1 Major
+  | "d" | "dmajor" -> key 2 Major
+  | "a" | "amajor" -> key 3 Major
+  | "e" | "emajor" -> key 4 Major
+  | "b" | "bmajor" -> key 5 Major
+  | "f#" | "f#major" -> key 6 Major
+  | "c#" | "c#major" -> key 7 Major
+  | "abminor" -> key (-7) Minor
+  | "ebminor" -> key (-6) Minor
+  | "bbminor" -> key (-5) Minor
+  | "fminor" -> key (-4) Minor
+  | "cminor" -> key (-3) Minor
+  | "gminor" -> key (-2) Minor
+  | "dminor" -> key (-1) Minor
+  | "aminor" -> key 0 Minor
+  | "eminor" -> key 1 Minor
+  | "bminor" -> key 2 Minor
+  | "f#minor" -> key 3 Minor
+  | "c#minor" -> key 4 Minor
+  | "g#minor" -> key 5 Minor
+  | "d#minor" -> key 6 Minor
+  | "a#minor" -> key 7 Minor
+  | _ -> None
 
 (* A clef, too, changes standard notation, not the string/fret coordinates of
-   tablature. Validate alphaTab's finite clef vocabulary before leaving that
-   presentation metadata out of this projection. *)
-let valid_clef name =
+   tablature, and is read to the clef alphaTab's finite vocabulary names. *)
+let clef_of_name name =
   match String.lowercase_ascii name with
-  | "neutral" | "n" | "c3" | "alto" | "c4" | "tenor"
-  | "f4" | "bass" | "g2" | "treble" -> true
-  | _ -> false
+  | "neutral" | "n" -> Some Neutral
+  | "c3" | "alto" -> Some C3
+  | "c4" | "tenor" -> Some C4
+  | "f4" | "bass" -> Some F4
+  | "g2" | "treble" -> Some G2
+  | _ -> None
 
 (* General MIDI programs 24--39 are guitars and basses. Their timbres do not
    alter explicit fret coordinates, but their default string sets differ, so
@@ -948,16 +1055,14 @@ let tie_bars_back = 3
 
 (* The note a tie on [on_string] holds, found the way alphaTab finds it: the
    latest earlier note on that string, past rests and notes on other strings,
-   in the tie's bar or the three before it. The bars are alphaTab's, not the
-   measures this reader draws: an empty bar counts as one, as alphaTab reads
-   it as a bar of rest, and so does a bar a directive opened after a beat.
-   With none there, alphaTab plays the tie as an open string; the reader
-   refuses it instead. *)
+   in the tie's bar or the three before it. A bar with no beat counts as one,
+   as alphaTab reads it as a bar of rest. With none there, alphaTab plays the
+   tie as an open string; the reader refuses it instead. *)
 let held_note state on_string =
-  let earliest_bar = state.b_bar - tie_bars_back in
   Seq.append (List.to_seq state.b_beats)
-    (Seq.concat_map (fun (_, beats) -> List.to_seq beats) (List.to_seq state.b_measures))
-  |> Seq.take_while (fun (sounding : sounding) -> sounding.s_bar >= earliest_bar)
+    (List.to_seq state.b_measures
+     |> Seq.take tie_bars_back
+     |> Seq.concat_map (fun bar -> List.to_seq bar.soundings))
   |> Seq.find_map (fun (sounding : sounding) ->
          List.find_opt (fun (note : note) -> note.on_string = on_string) sounding.s_notes)
 
@@ -1039,35 +1144,35 @@ let read source =
   let rec step state tokens =
     match tokens with
     | [] ->
-        (* A sign with no bar of its own fails before the music is counted:
-           with no bar it marks nothing, whether or not earlier bars sang. *)
-        if List.is_empty state.b_beats && marks_pending state.b_marks then Error Repeat_without_bar
+        let bars = (close_bar state).b_measures in
+        if List.for_all (fun bar -> List.is_empty bar.soundings) bars then Error No_music
         else
-          (* A bar line with nothing between it and the next -- a leading or a
-             doubled [|] -- holds no beat and is no measure. *)
-          let measures =
-            List.rev ((state.b_marks, state.b_beats) :: state.b_measures)
-            |> List.filter_map (function
-                 | _, [] -> None
-                 | marks, soundings -> Some (place_beats marks (List.rev soundings)))
+          (* alphaTab drops the bars with no beat from the end of a score,
+             up to one that carries a change of its own
+             (ModelUtils.trimEmptyBarsAtEnd). A last [|] with nothing after
+             it opens no bar there at all, which comes to the same. *)
+          let rec kept = function
+            | { soundings = []; changed = false; marks = _ } :: earlier -> kept earlier
+            | ({ soundings = []; changed = true; marks = _ } | { soundings = _ :: _; _ }) :: _
+              as bars ->
+                bars
+            | [] -> []
           in
-          let tuning = Option.value state.b_tuning ~default:default_tuning in
-          (match measures with
-           | [] -> Error No_music
-           | _ :: _ ->
-               Ok
-                 { tuning
-                 ; measures
-                 ; title = state.b_title
-                 ; subtitle = state.b_subtitle
-                 ; tempo = state.b_tempo
-                 ; time_signature = state.b_ts
-                 })
-    (* alphaTab 1.8.4 ends its bar at any directive that follows a beat in
-       it, and the directive opens the next bar. The measure drawn here keeps
-       the directive; only the bar count a tie's search reads moves on. *)
-    | Tk_directive _ :: _ when state.b_bar_has_beat ->
-        step { state with b_bar = state.b_bar + 1; b_bar_has_beat = false } tokens
+          let measures =
+            List.rev_map (fun bar -> place_beats bar.marks (List.rev bar.soundings)) (kept bars)
+          in
+          Ok
+            { tuning = Option.value state.b_tuning ~default:default_tuning
+            ; measures
+            ; title = state.b_title
+            ; subtitle = state.b_subtitle
+            ; tempo = state.b_tempo
+            ; time_signature = state.b_ts
+            }
+    (* alphaTab 1.8.4 reads a bar as its directives and then its beats: a
+       directive after a beat ends that bar, and the bar it starts holds
+       the directive (AlphaTexParser._bar). *)
+    | Tk_directive _ :: _ when not (List.is_empty state.b_beats) -> step (close_bar state) tokens
     | Tk_directive Title :: rest ->
         let* text, after = text_argument Title_text rest in
         (* The latest title wins, the way the latest tempo does. *)
@@ -1081,8 +1186,6 @@ let read source =
         let* _, after = text_argument Artist_text rest in
         step state after
     | Tk_directive Section :: rest ->
-        if not (List.is_empty state.b_beats) then Error Section_after_note
-        else
         let* _, after = text_argument Section_text rest in
         (* The two-string form adds a section marker before its name. Neither
            label changes fret coordinates or starts another timeline. *)
@@ -1092,24 +1195,22 @@ let read source =
           | ([] | (Tk_directive _ | Tk_unknown_directive _ | Tk_effect _ | Tk_chord _ | Tk_bar | Tk_word _) :: _) as tokens ->
               tokens
         in
-        step state after
+        step { state with b_tempo_or_section = true } after
     | Tk_directive Key_signature :: rest ->
-        if not (List.is_empty state.b_beats) then Error Key_signature_after_note
-        else
         (match rest with
          | Tk_word name :: after ->
-             if valid_key_signature name then step state after
-             else Error (Invalid_key_signature name)
+             (match key_signature name with
+              | Some key -> step { state with b_carried = { state.b_carried with key } } after
+              | None -> Error (Invalid_key_signature name))
          | []
          | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
              Error (Missing_argument Key_signature_name))
     | Tk_directive Clef :: rest ->
-        if not (List.is_empty state.b_beats) then Error Clef_after_note
-        else
         (match rest with
          | Tk_word name :: after ->
-             if valid_clef name then step state after
-             else Error (Invalid_clef name)
+             (match clef_of_name name with
+              | Some clef -> step { state with b_carried = { state.b_carried with clef } } after
+              | None -> Error (Invalid_clef name))
          | []
          | (Tk_directive _ | Tk_unknown_directive _ | Tk_quoted _ | Tk_effect _ | Tk_chord _ | Tk_bar) :: _ ->
              Error (Missing_argument Clef_name))
@@ -1155,7 +1256,7 @@ let read source =
           step { state with b_staff_declared = true } after
     | Tk_directive Tempo :: rest ->
         let* value, after = number_argument Tempo_number rest in
-        step { state with b_tempo = value } after
+        step { state with b_tempo = value; b_tempo_or_section = true } after
     | Tk_directive Time_signature :: rest ->
         let* top, after = number_argument Time_signature_numbers rest in
         let* bottom, after = number_argument Time_signature_numbers after in
@@ -1164,7 +1265,8 @@ let read source =
           | Some top, Some bottom -> Some (top, bottom)
           | _ -> None
         in
-        step { state with b_ts = ts } after
+        step { state with b_ts = ts; b_carried = { state.b_carried with meter = (top, bottom) } }
+          after
     | Tk_directive Tuning :: rest ->
         (match state.b_tuning with
          | Some _ -> Error Second_tuning
@@ -1230,20 +1332,7 @@ let read source =
         let* notes = chord_notes ~strings:(string_count state) ~held:(held_note state) inner in
         let* state = push_beat ?said notes state in
         step state rest
-    | Tk_bar :: rest ->
-        (* A sign on a bar with no beat marks a measure that is dropped, and
-           with it the sign's meaning. *)
-        if List.is_empty state.b_beats && marks_pending state.b_marks then Error Repeat_without_bar
-        else
-          step
-            { state with
-              b_measures = (state.b_marks, state.b_beats) :: state.b_measures
-            ; b_beats = []
-            ; b_marks = no_marks
-            ; b_bar = state.b_bar + 1
-            ; b_bar_has_beat = false
-            }
-            rest
+    | Tk_bar :: rest -> step (close_bar state) rest
     (* alphaTex ends its metadata with a lone [.]: it separates the directives
        from the music and is no beat. *)
     | Tk_word "." :: rest when not (started state) -> step state rest
@@ -1260,11 +1349,12 @@ let read source =
     ; b_measures = []
     ; b_beats = []
     ; b_marks = no_marks
+    ; b_tempo_or_section = false
+    ; b_carried = initial_carried
+    ; b_carried_before = initial_carried
     ; b_title = None
     ; b_subtitle = None
     ; b_tempo = None
     ; b_ts = None
-    ; b_bar = 0
-    ; b_bar_has_beat = false
     }
     tokens

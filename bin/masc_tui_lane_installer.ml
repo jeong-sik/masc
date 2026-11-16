@@ -8,8 +8,40 @@ let field name = function
 let text name json = let* value = field name json in match value with
   | `String text when String.trim text<>"" -> Ok text | _ -> Error ("expected nonblank " ^ name)
 let string_schema = `Assoc ["type",`String "string";"minLength",`Int 1]
-let object_schema properties = `Assoc ["type",`String "object";"properties",`Assoc properties;
-  "required",`List (List.map (fun (key,_) -> `String key) properties);"additionalProperties",`Bool false]
+let object_schema ?title properties =
+  `Assoc ((match title with None -> [] | Some title -> ["title",`String title]) @
+    ["type",`String "object";"properties",`Assoc properties;
+     "required",`List (List.map (fun (key,_) -> `String key) properties);"additionalProperties",`Bool false])
+(* The form edits alternatives only at its own root, and the binding schema
+   sits one member below this root. A binding schema with alternatives is
+   therefore spread into one root per alternative, named after it. The host's
+   validator takes the same values under the spread root: the other two
+   members are the same in every root, so a value fits exactly one root when
+   its binding fits exactly one alternative. Three conditions keep that true
+   and the choice readable. The spread drops the node that held the
+   alternatives, so that node may say nothing but its type, its alternatives
+   and its annotations, and the annotations have to be text: the host refuses
+   every value of a node whose description is not. Every alternative has to
+   be an object, as the node is. And every alternative has to have a name no
+   other one has (Form.named_alternatives). Any other binding schema stays a
+   plain member. The spread schema stays in the form; the host checks the
+   saved binding against the package's own schema. *)
+let install_schema binding_schema =
+  let root ?title binding =
+    object_schema ?title ["installation_id",string_schema;"run_id",string_schema;"binding",binding] in
+  let says_no_more (key,value) = match key,value with
+    | ("type" | "oneOf"),_ | ("title" | "description"),`String _ -> true
+    | _,_ -> false in
+  let is_object alternative = field "type" alternative=Ok (`String "object") in
+  let spread = match binding_schema,Form.named_alternatives binding_schema with
+    | `Assoc members,Some alternatives
+      when List.for_all says_no_more members
+           && List.for_all (fun (_,alternative) -> is_object alternative) alternatives ->
+        Some (List.map (fun (title,alternative) -> root ~title alternative) alternatives)
+    | _,(Some _ | None) -> None in
+  match spread with
+  | Some roots -> `Assoc ["type",`String "object";"oneOf",`List roots]
+  | None -> root binding_schema
 type inspection = Available of string | Unverified of string
 type execution = Host_process | Container of {runtime:Masc.Lane_addon_types.runtime;image_name:string;inspection:inspection}
 type service = Mcp_tools | Browser_service
@@ -82,8 +114,7 @@ let accept_preview json =
     | Some value -> Masc.Lane_addon_category.of_json value |> Result.map Option.some in
   let* binding_schema = field "binding_schema" package in
   if binding_schema=`Null then Ok None else
-  let* form = Form.create ~schema:(object_schema ["installation_id",string_schema;"run_id",string_schema;"binding",binding_schema])
-      ~initial:(`Assoc []) in
+  let* form = Form.create ~schema:(install_schema binding_schema) ~initial:(`Assoc []) in
   Ok (Some (Binding ({path;title;revision;execution;service;role},form)))
 (* The refusal names the key that works where the preview returns. Only the
    package browser answers n; a text input takes it as a letter, and Esc leads

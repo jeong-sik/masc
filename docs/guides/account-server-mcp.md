@@ -48,19 +48,23 @@ same name, and each of you lists, assigns and runs only your own.
 
 ## Connect a client
 
-1. Sign in at `/` on the account server.
-2. Connect a subscription under **My subscriptions**. The endpoint has no
-   tool for this step: the login of a CLI needs the browser.
-3. Under **My PATs**, replace the scope with the effects you want the token
-   to carry, then press **Issue**. For every tool:
+1. Sign in at `/` on the account server. The browser goes on to the
+   console at `/accounts/console`.
+2. Connect a subscription in the **구독** (subscriptions) panel. The
+   endpoint has no tool for this step: the login of a CLI needs the
+   browser.
+3. In the **토큰** (tokens) panel, pick **MCP 클라이언트** (MCP client) and
+   press **토큰 만들기** (make a token). The token carries this scope, which
+   every tool needs:
 
    ```json
    {"runtimes":"all","channels":["direct"],"allowed_effects":["invoke_model","manage_own_keeper","manage_own_provider","read_state","use_tool"]}
    ```
 
-   The labels of `allowed_effects` are in ascending order; another order
-   is refused. The scope the page fills in holds `read_state` alone, which
-   is enough for `masc_whoami` and nothing else.
+   The other choice, **읽기 전용** (read only), holds `read_state` alone,
+   which is enough for `masc_whoami` and nothing else. A script that issues
+   a token itself (`POST /api/v1/auth/pats`) sends the labels of
+   `allowed_effects` in ascending order; another order is refused.
 
    A turn runs on your subscription, so the token must allow it as a turn:
    its scope holds `invoke_model` and `use_tool`, the `direct` channel, and
@@ -76,7 +80,7 @@ same name, and each of you lists, assigns and runs only your own.
      --header "Authorization: Bearer <token>"
    ```
 
-Revoking the PAT on the page takes effect on the next request. The
+Revoking the token in the console takes effect on the next request. The
 endpoint keeps no session, so there is nothing else to close.
 
 ## Check it by hand

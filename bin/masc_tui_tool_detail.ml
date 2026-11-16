@@ -113,25 +113,33 @@ let terminal_json json =
    and indented under the member that owns them, instead of as one line of
    [\n] and [\t]. The block carries no trailing comma; the next member at the
    same indent is where it ends. This is a rendering for reading, not a
-   serialisation for parsing back. *)
-let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
-  : string list
-  =
-  let pad = String.make indent ' ' in
+   serialisation for parsing back.
+
+   A line comes out as the cells it is indented by and its text, and the
+   spaces are left to whoever draws it. A row keeps an indent only up to
+   half its width, and a note nested ten thousand deep has twenty thousand
+   lines up to twenty thousand cells in: spaces made here for all of them
+   would be thrown away row by row. The lines are gathered newest first
+   onto [drawn] and turned once by [document], so a deep document is not
+   copied again at every level it closes either. *)
+let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t) drawn =
   let punct = paint palette palette.punctuation in
+  let line text drawn = (indent, text) :: drawn in
   let members ~open_ ~close items render_item =
-    let count = List.length items in
-    (pad ^ prefix ^ punct open_)
-    :: List.concat
-         (List.mapi
-            (fun index item ->
-              render_item ~suffix:(if index = count - 1 then "" else punct ",") item)
-            items)
-    @ [ pad ^ punct close ^ suffix ]
+    let last = List.length items - 1 in
+    let drawn, _ =
+      List.fold_left
+        (fun (drawn, index) item ->
+          ( render_item ~suffix:(if index = last then "" else punct ",") item drawn
+          , index + 1 ))
+        (line (prefix ^ punct open_) drawn, 0)
+        items
+    in
+    line (punct close ^ suffix) drawn
   in
   match json with
-  | `Assoc [] -> [ pad ^ prefix ^ punct "{}" ^ suffix ]
-  | `List [] -> [ pad ^ prefix ^ punct "[]" ^ suffix ]
+  | `Assoc [] -> line (prefix ^ punct "{}" ^ suffix) drawn
+  | `List [] -> line (prefix ^ punct "[]" ^ suffix) drawn
   | `Assoc fields ->
     members ~open_:"{" ~close:"}" fields (fun ~suffix (key, value) ->
       render
@@ -149,23 +157,17 @@ let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
     (* The block's own lines stay in the pane's foreground. They are the
        command's output, not a value in a document, and colouring them would
        claim a reading of bytes this module cannot read. *)
-    (pad ^ prefix ^ punct "|")
-    :: List.map
-         (fun line ->
-           pad ^ "  " ^ Keeper_chat.terminal_safe_text line)
-         (block_lines text)
+    List.fold_left
+      (fun drawn block_line ->
+        (indent + 2, Keeper_chat.terminal_safe_text block_line) :: drawn)
+      (line (prefix ^ punct "|") drawn)
+      (block_lines text)
   | `String _ as scalar ->
-    [ pad ^ prefix
-      ^ paint palette palette.string_ (terminal_json scalar)
-      ^ suffix ]
+    line (prefix ^ paint palette palette.string_ (terminal_json scalar) ^ suffix) drawn
   | (`Int _ | `Intlit _ | `Float _) as scalar ->
-    [ pad ^ prefix
-      ^ paint palette palette.number (terminal_json scalar)
-      ^ suffix ]
+    line (prefix ^ paint palette palette.number (terminal_json scalar) ^ suffix) drawn
   | (`Bool _ | `Null) as scalar ->
-    [ pad ^ prefix
-      ^ paint palette palette.literal (terminal_json scalar)
-      ^ suffix ]
+    line (prefix ^ paint palette palette.literal (terminal_json scalar) ^ suffix) drawn
 ;;
 
 (* A tool argument or result that is a whole JSON document is re-served with
@@ -178,19 +180,25 @@ let rec render ~palette ~indent ~prefix ~suffix (json : Yojson.Safe.t)
 let document ?(palette = plain) value =
   match Yojson.Safe.from_string value with
   | (`Assoc _ | `List _) as json ->
-    Some (String.concat "\n" (render ~palette ~indent:0 ~prefix:"" ~suffix:"" (unfold json)))
+    Some (List.rev (render ~palette ~indent:0 ~prefix:"" ~suffix:"" (unfold json) []))
   | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
   | exception Yojson.Json_error _ -> None
 ;;
 
-(* The rest goes out as one terminal-safe block: it is the only path here
+(* The chat's tree draws a document's lines whole, each under its branch,
+   and the server has already bounded the result it serves there, so here
+   the indent is spelled out as spaces.
+
+   The rest goes out as one terminal-safe block: it is the only path here
    that the tree's own escaping does not cover. The tree sanitizes serialized
    JSON leaves before styling them, while block lines use
    [terminal_safe_text]. The fallback is the payload itself, so it must be
    made safe before it reaches a terminal row too. *)
 let structured ?(palette = plain) value =
   match document ~palette value with
-  | Some text -> text
+  | Some lines ->
+    String.concat "\n"
+      (List.map (fun (indent, text) -> String.make indent ' ' ^ text) lines)
   | None -> Keeper_chat.terminal_safe_text ~preserve_newlines:true value
 ;;
 

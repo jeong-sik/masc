@@ -333,6 +333,38 @@ let test_a_plain_body_leaves_a_tab_to_the_escape () =
   check (list string) "a body without a renderer still shows the byte"
     [ {|a\x09b|} ] rows
 
+(* #37666: the Keeper Calls screen escaped a tool's output whole, so each
+   newline was printed as \x0A inside one run. The escape is the stand-in for
+   [Terminal_text.single_line]: like it, it would print a newline it is handed
+   as \x0A. *)
+let test_an_output_keeps_its_lines_and_escapes_the_rest () =
+  let wrap = Layout.wrap_indented_body ~max_cells:40 ~sanitize:escape_control_bytes in
+  check (list string) "each stored line is its own row" [ "a"; "b" ] (wrap "a\nb");
+  let rows = wrap "before\n\x1b[31mred\n\nafter\n" in
+  check (list string) "an escape is still escaped and a blank line stays"
+    [ "before"; {|\x1B[31mred|}; ""; "after"; "" ] rows;
+  check bool "no newline is printed as \\x0A" false
+    (List.exists (fun row -> holds row {|\x0A|}) rows);
+  check bool "no raw ESC is left in a row" false
+    (List.exists (fun row -> String.contains row '\x1b') rows)
+
+(* The leading spaces of a line of code or of a served document are its
+   structure. [wrap_words] drops them, so [wrap_body] cannot be used here. *)
+let test_an_output_keeps_its_indentation () =
+  let wrap max_cells =
+    Layout.wrap_indented_body ~max_cells ~sanitize:escape_control_bytes
+  in
+  let document = "{\n  \"ok\": true,\n  \"items\": [\n    1\n  ]\n}" in
+  check string "a value whose lines fit comes back byte for byte" document
+    (String.concat "\n" (wrap 40 document));
+  let rows = wrap 14 "    alpha beta gamma" in
+  check (list string) "a wrapped line stays in its column"
+    [ "    alpha beta"; "    gamma" ] rows;
+  check bool "every row fits the width" true
+    (List.for_all (fun row -> Layout.display_width row <= 14) rows);
+  check (list string) "an indent as wide as the row is dropped for that line"
+    [ "ab" ] (wrap 4 "    ab")
+
 let timeline_bucket ?(is_dst = false) hour : Layout.timeline_bucket =
   { tb_year = 2026
   ; tb_month = 9
@@ -627,6 +659,10 @@ let () =
             test_a_rendered_body_draws_a_tab_as_spaces
         ; test_case "a plain body leaves a tab to the escape" `Quick
             test_a_plain_body_leaves_a_tab_to_the_escape
+        ; test_case "an output keeps its lines and escapes the rest" `Quick
+            test_an_output_keeps_its_lines_and_escapes_the_rest
+        ; test_case "an output keeps its indentation" `Quick
+            test_an_output_keeps_its_indentation
         ; test_case "a second walk pays for what it newly reaches" `Quick
             test_a_second_walk_pays_for_what_it_newly_reaches
         ; test_case "one frame renders capacity + 1 markdown entries once" `Quick

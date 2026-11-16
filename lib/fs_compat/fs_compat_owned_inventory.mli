@@ -130,9 +130,16 @@ val load_owned_regular_file_range_with_sha256_blocking :
    owned_regular_file_read_error)
   result
 
+exception No_exactly_named_entry
+(** The cause of the failure [with_owned_inventory_entry ~exact_names:true]
+    returns when a held directory lists no name of the same bytes as the
+    component asked for, or when a component before the last names a regular
+    file. It is raised nowhere else. *)
+
 val with_owned_inventory_entry :
   ?owner_uid:int ->
   ?single_link:bool ->
+  ?exact_names:bool ->
   ?excluded_stat:Unix.stats ->
   owned_inventory_root ->
   string ->

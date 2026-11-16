@@ -9,7 +9,11 @@ into the phrase note schema.
 
 The sender folds the ordered original wire prefix at the destination position.
 Bank select, program and ordinary controller/RPN writes retain their original
-order. Absolute RPN components remain separate, so a source using only Data
+order. A write that a later write of the same field replaces is not resent,
+unless a Program Change applied its bank or a Data Entry its parameter
+selection, so a long controller or pitch bend stream restores as its final
+value. Relative Data Increment/Decrement steps are resent with the absolute
+values they adjust, because devices step different components. Absolute RPN components remain separate, so a source using only Data
 Entry MSB can resume without an invented LSB; relative writes require their full
 absolute baseline. Channel and polyphonic pressures are restored. Sources retain
 ports and explicit destination bindings. A split short message retains its

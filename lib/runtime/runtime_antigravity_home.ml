@@ -756,12 +756,13 @@ let parse_generation_record ~path body =
    when the fallback file still names the selected one. Refuse a readable
    divergent keychain item the same way a divergent file refuses, and refuse a
    readable item that does not decode, as go-keyring reads it, to a known login.
-   The CLI writes the item through /usr/bin/security, and on 2026-11-06 the
-   operator item's ACL admitted only that tool, so this no-UI read returns
-   [Unavailable] for an item the CLI wrote and the check sees no account
-   there (#49243). Refusing on [Unavailable] would refuse every HOME the CLI
-   saved a token in, and would also brick the reboot path, where the stale
-   locked keychain is only rebuilt after admission by [ensure_login_keychain]. *)
+   The CLI writes the item through /usr/bin/security, whose ACL admits only
+   that tool; [Apple_keychain.read] runs the same tool after its no-UI check
+   (#49243), so the account the CLI saved is the one compared here.
+   [Unavailable] is a locked keychain or an item security(1) could read only
+   through a dialog. Refusing on it would brick the reboot path, where the
+   stale locked keychain is only rebuilt after admission by
+   [ensure_login_keychain]. *)
 let check_managed_keychain ~home_dir ~account_sha256 ~read_keychain =
   let keychain_path = login_keychain_path home_dir in
   match read_keychain ~path:keychain_path with

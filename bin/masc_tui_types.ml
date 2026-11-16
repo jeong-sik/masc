@@ -1392,6 +1392,19 @@ type keeper_history_owed = {
   kho_audit : bool;
 }
 
+(* Entering the chat pane owes one history read (#42012). The place that opens
+   the pane starts it; the surface-needs delta starts it for the ways in that
+   do not. The delta can run a loop pass after the opening, when that read has
+   already landed, so it asks whether one started rather than whether one is
+   in flight. *)
+type chat_entry_read =
+  | Chat_entry_unread
+      (** No history read has started for the pane since the delta last saw
+          a frame without it. *)
+  | Chat_entry_read_started of string
+      (** A history read of this Keeper started while its chat pane was on
+          screen. Landed or not, it answers the entry. *)
+
 (* Each requested source owns a result slot. Workers publish before returning;
    the UI's owned-result drain offers each slot once without a mailbox wait.
    Offering is not settlement: the request stays busy until UI admission. *)
@@ -9231,6 +9244,14 @@ type preset_save_receipt =
   ; psr_visible : bool
   }
 
+(* What a finished save tells about the named snapshot on the server. A
+   refusal or a request that never left wrote nothing, so it says nothing
+   about an earlier save whose answer was lost. *)
+type preset_save_name_evidence =
+  | Preset_name_written
+  | Preset_name_unknown
+  | Preset_name_untouched
+
 (* The two Schedules forms an $EDITOR round trip fills. *)
 type schedule_change = Schedule_create | Schedule_modify
 
@@ -11488,6 +11509,7 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: Keeper_history_read.t option;
   mutable msg_history_owed: keeper_history_owed option;
+  mutable msg_chat_entry_read: chat_entry_read;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -11702,14 +11724,28 @@ let reveal_unsent_preset_save_receipts (state : state) =
            | Ok _ | Error (Preset_save_refused _ | Preset_save_unconfirmed _) -> false)
     then { receipt with psr_visible = true } else receipt) state.preset_save_receipts
 
+let preset_save_name_evidence receipt =
+  match receipt.psr_result with
+  | Ok _ -> Preset_name_written
+  | Error (Preset_save_unconfirmed _) -> Preset_name_unknown
+  | Error (Preset_save_not_sent _ | Preset_save_refused _
+           | Preset_save_auth_retry_not_sent _) -> Preset_name_untouched
+
+(* Receipts are prepended as results arrive, and a workspace has at most one
+   save of a name in flight (a same-name request joins it). The first receipt
+   for the name that wrote or may have written it is therefore the latest word
+   on that snapshot: a later confirmed save settles an earlier unknown one. *)
 let preset_save_is_unconfirmed (state : state) name =
-  List.exists (fun receipt ->
-    same_preset_save_name receipt.psr_request.psp_name name
-    && match receipt.psr_result with
-       | Error (Preset_save_unconfirmed _) -> true
-       | Ok _ | Error (Preset_save_not_sent _ | Preset_save_refused _
-                      | Preset_save_auth_retry_not_sent _) -> false)
-    (workspace_preset_save_receipts state)
+  let rec latest = function
+    | [] -> false
+    | receipt :: rest when same_preset_save_name receipt.psr_request.psp_name name ->
+      (match preset_save_name_evidence receipt with
+       | Preset_name_unknown -> true
+       | Preset_name_written -> false
+       | Preset_name_untouched -> latest rest)
+    | _ :: rest -> latest rest
+  in
+  latest (workspace_preset_save_receipts state)
 
 let workspace_preset_save_pending (state : state) =
   match workspace_input_identity_of_server state.server_identity with
@@ -11729,16 +11765,20 @@ let preset_save_needs_workspace_text ~ko =
   if ko then workspace ^ " 확인 후 저장하세요 · 입력은 유지됩니다"
   else "Confirm the " ^ workspace ^ " before saving · input retained"
 
+(* Reopens only the notice [preset_save_is_unconfirmed] stands on. *)
 let reveal_unconfirmed_preset_save (state : state) name =
   let workspace = workspace_input_identity_of_server state.server_identity in
-  state.preset_save_receipts <- List.map (fun receipt ->
-    if receipt.psr_request.psp_workspace = workspace
-       && same_preset_save_name receipt.psr_request.psp_name name
-       && (match receipt.psr_result with
-           | Error (Preset_save_unconfirmed _) -> true
-           | Ok _ | Error (Preset_save_not_sent _ | Preset_save_refused _
-                          | Preset_save_auth_retry_not_sent _) -> false)
-    then { receipt with psr_visible = true } else receipt) state.preset_save_receipts
+  let rec reveal = function
+    | [] -> []
+    | receipt :: rest when receipt.psr_request.psp_workspace = workspace
+                          && same_preset_save_name receipt.psr_request.psp_name name ->
+      (match preset_save_name_evidence receipt with
+       | Preset_name_unknown -> { receipt with psr_visible = true } :: rest
+       | Preset_name_written -> receipt :: rest
+       | Preset_name_untouched -> receipt :: reveal rest)
+    | receipt :: rest -> receipt :: reveal rest
+  in
+  state.preset_save_receipts <- reveal state.preset_save_receipts
 
 let dismiss_latest_preset_save_receipt (state : state) =
   let workspace = workspace_input_identity_of_server state.server_identity in
@@ -18461,13 +18501,29 @@ let lane_inventory_lead (state : state) =
 
 (* Exact-only editors retain their current data contract. The inventory cursor
    names a row by identity, never by its position in the exact-only snapshot. *)
-let selected_standalone_lane (state : state) =
-  match selected_inventory_lane state, state.standalone_lanes with
-  | Some { Masc.Tui_decode_lane_inventory.selection = Exact target; _ }, Some snapshot ->
+let standalone_lane_of_inventory_row (state : state) (row : Masc.Tui_decode_lane_inventory.row) =
+  match row.selection, state.standalone_lanes with
+  | Exact target, Some snapshot ->
       List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
         Standalone_lane.equal lane.sl_lane target) snapshot.sls_lanes
-  | Some { selection = (Browser _ | Machine _ | Declaration _ | Manual_instance _); _ }, _
-  | None, _ | _, None -> None
+  | (Browser _ | Machine _ | Declaration _ | Manual_instance _), _ | Exact _, None -> None
+
+let selected_standalone_lane (state : state) =
+  Option.bind (selected_inventory_lane state) (standalone_lane_of_inventory_row state)
+
+(* The exact lane the Lanes screen names: the overview's cursor row, or the
+   row one Lane's inventory detail reads. The detail finds that row by its
+   id, as its drawing does, not by the cursor. *)
+let lanes_screen_standalone_lane (state : state) =
+  match state.lanes_mode with
+  | Lanes_overview -> selected_standalone_lane state
+  | Lanes_inventory_detail (Some id) ->
+      Option.bind
+        (List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
+           String.equal row.id id) (lane_inventory_rows state))
+        (standalone_lane_of_inventory_row state)
+  | Lanes_inventory_detail None | Lanes_run_list _ | Lanes_run_detail _
+  | Lanes_measurement_detail _ -> None
 
 let lanes_inventory_count state = List.length (lane_inventory_rows state)
 
@@ -19344,6 +19400,31 @@ let revalidate_workspace_surfaces (state : state) ~workspace_moved ~(needs : sur
           (match state.tool_series with Tool_series_unread -> true | Tool_series_read _ | Tool_series_error _ -> false))
   | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> false
 
+(* A history read of [keeper_name] is on the wire, started now or already in
+   flight. It answers the chat pane's entry only while that pane shows this
+   Keeper; a read started from another surface does not. *)
+let note_chat_entry_read (state : state) ~keeper_name =
+  if state.view = Keepers Keeper_message
+     && Option.equal String.equal state.msg_target_keeper_name (Some keeper_name)
+  then state.msg_chat_entry_read <- Chat_entry_read_started keeper_name
+
+(* The loop has taken [needs] as what is drawn. A frame without the chat pane
+   means the pane left the screen, so its next entry owes a read again. *)
+let note_drawn_surface_needs (state : state) (needs : surface_needs) =
+  if not needs.needs_keeper_chat then state.msg_chat_entry_read <- Chat_entry_unread
+
+(* The Keeper whose history read entering the chat pane still owes, when the
+   surface-needs delta [needs] brings the pane on screen. Only a pane at its
+   newest row reads on entry. *)
+let chat_entry_read_due (state : state) ~(needs : surface_needs) =
+  if needs.needs_keeper_chat && state.msg_scroll = 0 then
+    match state.msg_target_keeper_name, state.msg_chat_entry_read with
+    | Some keeper_name, Chat_entry_read_started started
+      when String.equal started keeper_name -> None
+    | Some keeper_name, (Chat_entry_unread | Chat_entry_read_started _) -> Some keeper_name
+    | None, (Chat_entry_unread | Chat_entry_read_started _) -> None
+  else None
+
 (* A period change is an explicit read demand on the same surface. Its
    dataset ticket must supersede the previous period even when cycling back
    to the same number of days; the surface-needs delta cannot express this. *)
@@ -20075,6 +20156,18 @@ let modal_owns_keys (state : state) =
   || Option.is_some state.client_detail
   || Option.is_some state.collab
   || Option.is_some (play_card_shown state)
+
+(* Where a paste goes once no field has claimed it. A key reaches the chat
+   draft only while no overlay holds the keys ([composer_claimed] asks
+   [modal_owns_keys]), and a paste asks the same question: behind Git
+   Changes or a client detail the draft is not on screen, and text put there
+   unseen is what a voice send would deliver. The overlays with a field of
+   their own -- a reader's search, the Collab form, the skill source filter
+   -- take their paste before this is asked. *)
+type unclaimed_paste = Paste_into_draft | Paste_held_by_overlay
+
+let unclaimed_paste (state : state) =
+  if modal_owns_keys state then Paste_held_by_overlay else Paste_into_draft
 
 (* Whether [?] opens the help sheet on the frame being drawn. A text field
    holding printable keys takes [?] as a character, a modal owns its own
@@ -21423,6 +21516,7 @@ let create_state
   msg_history_load_generation = 0;
   msg_history_inflight = None;
   msg_history_owed = None;
+  msg_chat_entry_read = Chat_entry_unread;
   msg_copy_generation = 0;
   msg_copy_pending = None;
   chat_command_reads = [];
@@ -25164,6 +25258,31 @@ let select_slot_editor_row state index =
 let open_slot_editor state target =
   state.slot_editor <- Some { se_target = target; se_selection = None };
   select_slot_editor_row state 0
+;;
+
+(* [s] on the Lanes surface. The editor opens on the exact lane the screen
+   names and covers that screen. [lanes_mode] keeps naming the screen, so
+   [close_slot_editor] returns to the overview or the inventory detail the
+   editor was opened from. A screen that names no exact lane opens nothing. *)
+let open_lanes_slot_editor (state : state) =
+  Option.iter (fun (lane : Tui_decode.standalone_lane) ->
+    open_slot_editor state (Exact_lane_slots lane.sl_lane);
+    dismiss_runtime_lane_notice state;
+    state.lanes_action_error <- None)
+    (lanes_screen_standalone_lane state)
+;;
+
+let close_slot_editor (state : state) =
+  state.slot_editor <- None;
+  dismiss_runtime_lane_notice state
+;;
+
+(* The lane an open exact-lane editor edits. Its keys act on this lane, not
+   on the cursor of the screen it covers. *)
+let slot_editor_exact_lane (state : state) =
+  match state.slot_editor with
+  | Some { se_target = Exact_lane_slots lane; _ } -> Some lane
+  | Some { se_target = Media_failover_slots; _ } | None -> None
 ;;
 
 let reconcile_slot_editor_selection state =

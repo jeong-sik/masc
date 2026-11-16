@@ -262,8 +262,14 @@ val load_single_link_regular_file_beneath
     identity no component of the requested path may match; an absent excluded
     directory is allowed. An invalid or unreadable excluded directory fails
     closed. Unlike owned mutation helpers, this read does not require files
-    to belong to the process UID. [None] means the entry was absent or vanished
-    during the read; other failures remain explicit. The snapshot is the one
+    to belong to the process UID. [None] means the tree has no regular file of
+    exactly that name: every component must equal, byte for byte, a name its
+    held directory lists, so a spelling the file system would fold onto an
+    entry (another case or Unicode form) is absent. A component before the
+    last that names a regular file, a last component that names a directory,
+    and an entry that vanished during the read are absent too. Other failures
+    remain explicit, among them a symbolic link, a second hard link and a
+    directory that cannot be listed. The snapshot is the one
     of the opened descriptor, which the file still had after the read. When
     the Eio filesystem is active in a fiber, the whole blocking scope runs in
     a system thread. *)

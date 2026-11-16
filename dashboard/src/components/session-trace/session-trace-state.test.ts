@@ -222,7 +222,6 @@ describe('scheduleSessionTraceReload', () => {
     dashboardApiMocks.fetchKeeperTrajectory.mockResolvedValue({
       keeper: 'keeper-a',
       trace_id: 'trace-1',
-      total_entries: 1,
       showing: 1,
       entries: [{
         type: 'thinking',
@@ -278,7 +277,7 @@ describe('buildTraceEvents', () => {
     const events = buildTraceEvents(
       { agent: 'test', period: { from: '', to: '' }, events: [{ type: 'broadcast', ts: '2024-04-06T10:00:00Z', detail: { content: 'Starting work on feature X' } }], summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 } },
       {
-        keeper: 'test', trace_id: 't1', total_entries: 1, showing: 1,
+        keeper: 'test', trace_id: 't1', showing: 1,
         entries: [{
           ts: 1712397700,
           ts_iso: '2024-04-06T10:01:40Z',
@@ -344,7 +343,6 @@ describe('buildTraceEvents', () => {
       {
         keeper: 'test',
         trace_id: 'trace-1',
-        total_entries: 1,
         showing: 1,
         entries: [{
           ts: 1712397700,
@@ -406,7 +404,6 @@ describe('buildTraceEvents', () => {
       {
         keeper: 'test',
         trace_id: 'trace-1',
-        total_entries: 1,
         showing: 1,
         entries: [{
           ts: 1712397700,
@@ -510,7 +507,6 @@ describe('buildTraceEvents', () => {
       {
         keeper: 'test',
         trace_id: 'trace-1',
-        total_entries: 1,
         showing: 1,
         entries: [{
           ts: 1712397700,
@@ -569,7 +565,6 @@ describe('buildTraceEvents', () => {
       {
         keeper: 'test',
         trace_id: 'trace-1',
-        total_entries: 1,
         showing: 1,
         entries: [{
           ts: 1712397700,
@@ -620,7 +615,6 @@ describe('buildTraceEvents', () => {
       {
         keeper: 'test',
         trace_id: 'trace-1',
-        total_entries: 1,
         showing: 1,
         entries: [{
           ts: 1712397700,

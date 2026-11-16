@@ -59,7 +59,13 @@ let text_of_blocks ~runtime_label ~field blocks =
   loop [] blocks
 ;;
 
-let encode_history_message = Keeper_official_client_context_codec.encode
+let encode_history_message =
+  Keeper_official_client_context_codec.(encode Canonical_source)
+;;
+
+let encode_start_message ~started_at =
+  Keeper_official_client_context_codec.(encode (Session_start { started_at }))
+;;
 
 let user_message text : Agent_core.Types.message =
   { origin = Llm_provider.Types.Conversation;  role = User

@@ -36,6 +36,17 @@ val has_png_structure : ?single_frame:bool -> string -> bool
 
 (** {1 The fetch} *)
 
+type ending =
+  | Exited of Unix.process_status
+      (** The child ended on its own, or by a signal this module did not send. *)
+  | Killed_at_deadline  (** The runner killed the child at its deadline. *)
+  | Cancelled
+      (** The runner killed the child because it was cancelled, or did not
+          start it because subprocesses were stopping. *)
+(** How a run supplied to the functions below ended. Only {!run_bounded} and
+    {!wait_bounded} kill a child, so only they end with [Killed_at_deadline]
+    or [Cancelled]. *)
+
 type runner_failure = { error : Unix.error; operation : string; argument : string }
 (** An operating-system failure starting or supervising the supplied runner,
     distinct from a command's exit status. *)
@@ -49,11 +60,13 @@ type fetch_failure =
   | Curl_exit of { code : int }  (** Any other documented curl exit code. *)
   | Curl_signaled of { signal : int }
   | Curl_stopped of { signal : int }
+  | Curl_killed_at_deadline
+  | Curl_cancelled
   | Curl_runner_failed of runner_failure
   | No_body_written  (** curl exited 0 and wrote no file. *)
 
-val fetch_failure_of_status :
-  Unix.process_status -> body_present:bool -> fetch_failure option
+val fetch_failure_of_ending :
+  ending -> body_present:bool -> fetch_failure option
 (** [None] when curl exited 0 and the body file exists. *)
 
 val fetch_failure_text : fetch_failure -> string
@@ -79,13 +92,15 @@ type decode_failure =
           output permissions, disk space, or other environment failures. *)
   | Decoder_signaled of { signal : int }
   | Decoder_stopped of { signal : int }
+  | Decoder_killed_at_deadline
+  | Decoder_cancelled
   | Decoder_runner_failed of runner_failure
   | No_frame_written  (** ffmpeg exited 0 and wrote no frame. *)
   | Frame_unreadable of { detail : string }
       (** The frame file could not be read back. *)
 
-val decode_failure_of_status :
-  Unix.process_status -> output_present:bool -> decode_failure option
+val decode_failure_of_ending :
+  ending -> output_present:bool -> decode_failure option
 (** [None] when ffmpeg exited 0 and the frame file exists. *)
 
 val decode_failure_text : decode_failure -> string
@@ -115,7 +130,7 @@ val with_download_snapshot :
     the callback. Remove that file after the callback returns or raises. *)
 
 val download :
-  ?force_fetch:bool -> ?max_bytes:int -> run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  ?force_fetch:bool -> ?max_bytes:int -> run:(string -> ending) -> cache_dir:string -> string ->
   (download, download_error) result
 (** Fetch or reuse nonempty input bytes. Failed fetches and empty bodies are
     removed; unknown signatures remain eligible for a decoder. The result owns
@@ -124,62 +139,70 @@ val download :
     retains shared cache files on refusals and does not publish a new cache
     entry. Callers must also bound the fetcher's output file while it runs. *)
 
-val run_bounded : ?max_file_bytes:int -> deadline_seconds:float -> string -> Unix.process_status
+val run_bounded : ?max_file_bytes:int -> deadline_seconds:float -> string -> ending
 (** A [run] for the functions below that cannot hang the caller. [command] is
     one simple command, run by [sh] with the null device for input and
     output, and killed with SIGKILL when it has not exited after
-    [deadline_seconds]; the status is then [WSIGNALED Sys.sigkill]. When
-    supplied, [max_file_bytes] is a multiple of 1024 and caps each file a
-    child can write, including files written by its descendants. *)
+    [deadline_seconds] ([Killed_at_deadline]) or when {!stop_subprocesses}
+    runs ([Cancelled]). When supplied, [max_file_bytes] is a multiple of 1024
+    and caps each file a child can write, including files written by its
+    descendants. *)
 
-val wait_bounded : ?cancelled:(unit -> bool) -> deadline_seconds:float -> int -> Unix.process_status
-(** Reap an already-started child, killing it at the same deadline or when
-    [cancelled] becomes true. *)
+val run_unbounded : string -> ending
+(** [Unix.system] as a [run]: no deadline and no cancellation, so the ending
+    is always [Exited]. *)
+
+val wait_bounded : ?cancelled:(unit -> bool) -> deadline_seconds:float -> int -> ending
+(** Reap an already-started child, killing it at the same deadline
+    ([Killed_at_deadline]) or when [cancelled] becomes true ([Cancelled]).
+    A child that ends before the kill takes effect keeps its own status. *)
 
 val stop_subprocesses : unit -> unit
 (** Prevent future bounded subprocesses and cancel and reap existing ones. *)
 
-val run_decoder :
-  run:(string -> Unix.process_status) -> output_path:string -> string ->
-  (string, decode_failure) result
-(** Run one command after discarding any old output, returning a nonempty
-    output file. Output from a failed command is removed. After a runner OS
-    failure or unexpected exception, the output is left for its owner to
-    remove, since callers may share the path. Never removes input bytes. *)
+val with_decoder_output :
+  run:(string -> ending) -> cache_dir:string -> prefix:string -> suffix:string ->
+  (string -> string) -> ((string, decode_failure) result -> 'a) -> 'a
+(** [with_decoder_output ~run ~cache_dir ~prefix ~suffix command f] runs
+    [command output] and passes [f] the nonempty bytes it wrote. [output] is a
+    new empty file in [cache_dir], created with O_EXCL, so no other run is
+    handed its name while it exists. It stays in place while [f] runs and is
+    removed when [f] returns or raises. A failure to create it is
+    [Frame_unreadable]. Never removes input bytes. *)
 
 val convert_to_png :
-  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  run:(string -> ending) -> cache_dir:string -> string ->
   (string, conversion_failure) result
 (** Try the existing converter sequence, preserving every failed attempt's
-    typed status. A runner failure, signal or stop ends the sequence: a
-    descendant could still be writing the attempt path. Input is retained even
-    when no converter succeeds. *)
+    typed status. Each converter writes its own reserved output. A runner
+    failure, signal or stop ends the sequence: a descendant could still be
+    running. Input is retained even when no converter succeeds. *)
 
 val prepare_png :
-  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  run:(string -> ending) -> cache_dir:string -> string ->
   (string, string) result
 (** Fetch, convert if needed, and read PNG bytes for the [v] path. *)
 
 val prepare_downloaded_png :
-  run:(string -> Unix.process_status) -> cache_dir:string -> url:string -> download ->
+  run:(string -> ending) -> cache_dir:string -> url:string -> download ->
   (string, string) result
 (** Prepare an already captured download, retaining the source for the caller. *)
 
 val prepare_captured_png :
-  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  run:(string -> ending) -> cache_dir:string -> string ->
   (string, string) result
 (** Convert an already captured source through a private input snapshot,
     returning its PNG bytes without reusing or publishing a conversion cache. *)
 
 val prepare_payload :
-  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  run:(string -> ending) -> cache_dir:string -> string ->
   (string, string) result
 (** Prepare already fetched or decoded image bytes. PNG passes through;
     other formats use the same converters as remote images. Cache publication
     is atomic and addressed by the payload, not its display label. *)
 
 val prepare_file :
-  run:(string -> Unix.process_status) -> cache_dir:string -> string ->
+  run:(string -> ending) -> cache_dir:string -> string ->
   (string, string) result
 (** Read the selected local file and prepare PNG through the same byte-owned
     converter as decoded payloads. Reads the file's length once and refuses
@@ -215,7 +238,7 @@ val stop_captured_copies : unit -> unit
 (** Stop new saves and remove all copies not handed to an opener or operator. *)
 
 val prepare_presentation :
-  ?max_bytes:int -> ?max_cells:int -> run:(string -> Unix.process_status) -> cache_dir:string -> display -> string ->
+  ?max_bytes:int -> ?max_cells:int -> run:(string -> ending) -> cache_dir:string -> display -> string ->
   (presentation, string) result
 (** Prepare image bytes for the captured display. Pixel graphics require PNG;
     character cells accept PNG, JPEG or GIF, and use the existing aspect-preserving

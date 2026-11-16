@@ -43,7 +43,7 @@ let test_original_admission () =
    | (_,Masc_tui_image_preview.Output_image {source=Inline_svg raw;_}) :: _ ->
        check string "XML TAB and CRLF survive admission" svg raw
    | [] | (_, (Masc_tui_image_preview.Named_path _ | Staged _ | Stored_attachment _
-       | Output_image {source=(Inline_data _ | Inline_mermaid _ | Server_path _ | Remote_uri _);_}
+       | Output_image {source=(Inline_data _ | Inline_mermaid _ | Inline_graph _ | Server_path _ | Remote_uri _);_}
        | Unavailable_image _ | No_image)) :: _ -> fail "expected original SVG source");
   check bool "retain original immutable observation" true (original == admitted);
   match admitted with
@@ -1147,9 +1147,9 @@ let test_initial_vector_worker () =
     let run_vector _ =
       incr calls;
       blocked := Option.is_none (Work.reserve worker);
-      Unix.WEXITED 1 in
+      Masc_tui_image_cache.Exited (Unix.WEXITED 1) in
     let board_calls=ref 0 in
-    let run_board _ = incr board_calls; Unix.WEXITED 1 in
+    let run_board _ = incr board_calls; Masc_tui_image_cache.Exited (Unix.WEXITED 1) in
     let source=Requests.Generated (Masc_tui_image_preview.mermaid_source "graph TD; A-->B") in
     let load ~board_worker ~vector_admission source = Requests.load
         ~host:"127.0.0.1" ~port:0 ~cache_dir:(fun () -> directory)
@@ -1223,8 +1223,9 @@ let test_vector_character_presentation_is_bounded () =
       let bounded_calls=ref 0 and unbounded_calls=ref 0 in
       let vector_run command =
         incr bounded_calls;
-        if !bounded_calls = 1 then Unix.system command else Unix.WEXITED 1 in
-      let run _ = incr unbounded_calls; Unix.WEXITED 1 in
+        if !bounded_calls = 1 then Masc_tui_image_cache.run_unbounded command
+        else Masc_tui_image_cache.Exited (Unix.WEXITED 1) in
+      let run _ = incr unbounded_calls; Masc_tui_image_cache.Exited (Unix.WEXITED 1) in
       let source=Requests.Generated (Masc_tui_image_preview.mermaid_source "graph TD; A-->B") in
       let result=Requests.load ~host:"127.0.0.1" ~port:0 ~cache_dir:(fun () -> directory)
           ~diagram_width:100 ~diagram_height:100 ~diagram_font_size:12 ~diagram_colors:None
@@ -1270,14 +1271,15 @@ let test_board_pele_deadline () =
       | Ok started -> started | Error error -> fail error in
     check bool "first opener failure is observable" true
       (match Masc_tui_image_cache.wait_bounded ~deadline_seconds:hang_detector_deadline_seconds pid with
-       | Unix.WEXITED 3 -> true | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false);
+       | Masc_tui_image_cache.Exited (Unix.WEXITED 3) -> true
+       | Exited (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) | Killed_at_deadline | Cancelled -> false);
     let second,pid=match Masc_tui_browser.spawn_url ~after:first "image with spaces.png" with
       | Ok started -> started | Error error -> fail error in
     check string "failed opener advances to the next executable" "xdg-open" second;
     check bool "hung external opener is reaped at its deadline" true
       (match Masc_tui_image_cache.wait_bounded ~deadline_seconds:0.2 pid with
-       | Unix.WSIGNALED signal -> signal=Sys.sigkill
-       | Unix.WEXITED _ | Unix.WSTOPPED _ -> false);
+       | Masc_tui_image_cache.Killed_at_deadline -> true
+       | Exited _ | Cancelled -> false);
     let _,pid=match Masc_tui_browser.spawn_url ~after:first "image with spaces.png" with
       | Ok started -> started | Error error -> fail error in
     let cancelled=Atomic.make false and status=ref None in
@@ -1287,8 +1289,8 @@ let test_board_pele_deadline () =
     Atomic.set cancelled true;
     Thread.join thread;
     check bool "shutdown cancellation kills and reaps the opener" true
-      (match !status with Some (Unix.WSIGNALED signal) -> signal=Sys.sigkill
-       | Some (Unix.WEXITED _ | Unix.WSTOPPED _) | None -> false);
+      (match !status with Some Masc_tui_image_cache.Cancelled -> true
+       | Some (Exited _ | Killed_at_deadline) | None -> false);
     check bool "cancelled child cannot be reaped a second time" true
       (match Unix.waitpid [Unix.WNOHANG] pid with
        | exception Unix.Unix_error (Unix.ECHILD,_,_) -> true

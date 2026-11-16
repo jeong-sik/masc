@@ -98,7 +98,23 @@ let test_initial_login_waits_for_the_kernel_and_the_version () =
   Alcotest.check Alcotest.int "rejected identity never mints" 0 !logins;
   (match authorize ~confirm:(fun () -> Ok ()) ~answered:(Some "0.35.4") with
    | Ok () -> () | Error _ -> Alcotest.fail "exact identity rejected");
-  Alcotest.check Alcotest.int "exact identity authorizes once" 1 !logins
+  Alcotest.check Alcotest.int "exact identity authorizes once" 1 !logins;
+  (* A login that fails is this command's own, and the server was sent no
+     credential to refuse (#36877): setup ends on it instead of offering to
+     keep the running server, which only a refusal by the server does. *)
+  (match
+     Upgrade.For_testing.authorize_initial ~confirm:(fun () -> Ok ())
+       ~version:(fun () -> Some "0.35.4") ~expected_version:"0.35.4" ~login:(fun () -> false)
+   with
+   | Error Sign_in_failed -> ()
+   | Error Admin_required -> Alcotest.fail "a failed local login was taken for the server refusing the credential"
+   | Ok ()
+   | Error
+       ( Invalid_health | Server_starting | Admin_check_unanswered | Owner_unavailable
+       | Incumbent_changed
+       | Not_confirmed { listener = (_ : Upgrade.single_user_listener); departure = (_ : Upgrade.departure) }
+       | Already_requested | Closed | Port_unavailable ) ->
+     Alcotest.fail "a failed local login was not a sign-in failure")
 let test_termination_request_survives_observation_failure () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
     List.iter (fun expected ->
@@ -136,15 +152,16 @@ let test_refused_termination_never_observes () =
     | Not_requested _ | Requested _ -> Alcotest.fail "refused request reported as sent"))
 (* The stop of a single-user server tells a server that is still starting
    from one that refused the credential, and both from one that gave no
-   verdict: the first is waited for, only the second is signed in to. *)
+   verdict: the first is waited for, and the second is not asked again,
+   since another sign-in writes the same kind of credential (#36877). *)
 let test_starting_server_is_not_a_refused_login () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
     let label = function
       | Ok (_ : Upgrade.t) -> "prepared"
       | Error Upgrade.Server_starting -> "wait: still starting"
-      | Error Admin_required -> "sign in: credential refused"
+      | Error Admin_required -> "refused: the server refused the credential"
       | Error Admin_check_unanswered -> "no verdict on the credential"
-      | Error (Invalid_health | Owner_unavailable | Incumbent_changed
+      | Error (Invalid_health | Sign_in_failed | Owner_unavailable | Incumbent_changed
               | Not_confirmed { listener = (_ : Upgrade.single_user_listener);
                                 departure = (_ : Upgrade.departure) }
               | Already_requested | Closed | Port_unavailable) -> "another refusal" in
@@ -157,16 +174,18 @@ let test_starting_server_is_not_a_refused_login () =
     Alcotest.(check string) "a starting server is waited for" "wait: still starting"
       (judged ~readiness:starting_answer ~access:not_initialized);
     Alcotest.(check int) "a starting server is not sent the bearer" 0 !bearers;
-    Alcotest.(check string) "a 401 to the bearer asks for a sign-in" "sign in: credential refused"
+    Alcotest.(check string) "a 401 to the bearer is the server refusing it"
+      "refused: the server refused the credential"
       (judged ~readiness:ready_answer ~access:refused);
-    Alcotest.(check string) "a 403 to the bearer asks for a sign-in" "sign in: credential refused"
+    Alcotest.(check string) "a 403 to the bearer is the server refusing it"
+      "refused: the server refused the credential"
       (judged ~readiness:ready_answer ~access:(fun () -> Ok (403, {|{"error":"forbidden"}|})));
     Alcotest.(check string) "a 503 to the bearer is no verdict" "no verdict on the credential"
       (judged ~readiness:ready_answer ~access:not_initialized);
     Alcotest.(check string) "no answer to the bearer is no verdict" "no verdict on the credential"
       (judged ~readiness:ready_answer ~access:(fun () -> Error "connection refused"));
     Alcotest.(check string) "an unread readiness leaves the verdict to the bearer"
-      "sign in: credential refused"
+      "refused: the server refused the credential"
       (judged ~readiness:(fun () -> Error "connection refused") ~access:refused);
     (* The same reading holds at the stop itself: a server that began
        starting again after the preparation is not signalled. *)
@@ -626,8 +645,9 @@ let refusal_label = function
     Printf.sprintf "pid %d is not confirmed: %s" (Upgrade.listener_pid listener)
       (departure_label (Error departure))
   | Error
-      ( Upgrade.Invalid_health | Admin_required | Server_starting | Admin_check_unanswered
-      | Owner_unavailable | Incumbent_changed | Already_requested | Closed | Port_unavailable ) ->
+      ( Upgrade.Invalid_health | Sign_in_failed | Admin_required | Server_starting
+      | Admin_check_unanswered | Owner_unavailable | Incumbent_changed | Already_requested
+      | Closed | Port_unavailable ) ->
     "another refusal"
 (* The server the kernel named left before the stop was prepared, and the
    port goes on answering: the capture of the lease owner finds nobody, and

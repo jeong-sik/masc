@@ -13,7 +13,13 @@ import { createConnect } from './connect'
 import { ConsoleFrame, createConsole } from './console'
 import type { ConsoleModel, Shown, View } from './console'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
+import { createAllowlist } from './allowlist'
+import type { AllowlistModel } from './allowlist'
+import { createInvites } from './invites'
+import type { InvitesModel } from './invites'
 import { createKeepers } from './keepers'
+import { createMembers } from './members'
+import type { MembersModel } from './members'
 import type { KeepersModel } from './keepers'
 import { createTokens } from './tokens'
 import type { TokensModel } from './tokens'
@@ -87,6 +93,9 @@ const waitingPanel = (): SubscriptionsModel => ({
     tests; here it only has to be there. */
 const waitingKeepers = (): KeepersModel => createKeepers({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn() })
 const waitingTokens = (): TokensModel => createTokens({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), now: () => 0 })
+const waitingInvites = (): InvitesModel => createInvites({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn() })
+const waitingAllowlist = (): AllowlistModel => createAllowlist({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn() })
+const waitingMembers = (): MembersModel => createMembers({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn() })
 
 /** Longer than any wait the console announces or times. */
 const longMs = 1000
@@ -376,7 +385,7 @@ describe('the frame', () => {
   const drawn = (view: View) => {
     const state = signal(view)
     const model = { view: state, load: vi.fn(() => Promise.resolve()), signOut: vi.fn(() => Promise.resolve()) } satisfies ConsoleModel
-    return { container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} keepers=${waitingKeepers()} tokens=${waitingTokens()} />`).container, model, state }
+    return { container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} keepers=${waitingKeepers()} tokens=${waitingTokens()} invites=${waitingInvites()} allowlist=${waitingAllowlist()} members=${waitingMembers()} />`).container, model, state }
   }
   const count = (selector: string) => views.map(([name, view]) => [name, drawn(view).container.querySelectorAll(selector).length])
 
@@ -391,6 +400,12 @@ describe('the frame', () => {
 
   it('draws the subscriptions panel only for someone signed in', () => {
     expect(count('section[aria-labelledby="subscriptions-heading"]')).toEqual(named('signed in', 'signing out', 'a sign-out that failed', 'signed out'))
+  })
+
+  it('draws the invitations, allowlist and members panels only for an Admin signed in', () => {
+    const panel = ['invites-heading', 'allowlist-heading', 'members-heading'].map((id) => `section[aria-labelledby="${id}"]`).join(', ')
+    const admin = drawn({ kind: 'signed_in', session, who: { id: person, role: 'admin' }, signOut: { kind: 'idle' } })
+    expect([count(panel), admin.container.querySelectorAll(panel).length]).toEqual([named(), 3])
   })
 
   it('offers the way out only to someone signed in', () => {
@@ -434,7 +449,7 @@ describe('the frame', () => {
   const live = (answers: readonly Scripted[]) => {
     const { send } = scripted(answers)
     const model = createConsole({ send, leave: vi.fn() })
-    return { model, container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} keepers=${waitingKeepers()} tokens=${waitingTokens()} />`).container }
+    return { model, container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} keepers=${waitingKeepers()} tokens=${waitingTokens()} invites=${waitingInvites()} allowlist=${waitingAllowlist()} members=${waitingMembers()} />`).container }
   }
 
   it('puts a new note on the page when a reading fails again', async () => {

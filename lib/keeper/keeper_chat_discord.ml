@@ -274,6 +274,25 @@ let send_text_rich_embeds ?clock ~token ~channel_id text =
 
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
+(* What one reply knows about its Discord message. The streaming POST, its
+   retry, and the final POST after an unanswered one carry the reply's nonce
+   with enforce_nonce. Discord checks a nonce only "in the past few minutes":
+   a repeat inside that window gets back the message an earlier request
+   created, and a repeat after it creates a second message. A long tool call
+   between a failed POST and the next request can outlast the window. *)
+type create_retry =
+  | Retry_available
+  | Retry_spent
+
+type reply_message =
+  | Not_requested
+    (* No create-message request has been sent for this reply. *)
+  | Unanswered of create_retry
+    (* A create-message request failed without an id. It may still have
+       landed, holding the text that request carried. *)
+  | Created of string
+    (* Discord answered with this message id. *)
+
 let combine_delivery_results primary overflow =
   match primary with
   | Error _ -> primary
@@ -284,6 +303,9 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     (* NDT-OK: wall time only paces external Discord edits; tests inject
        [now]. *)
     ?(now = Unix.gettimeofday)
+    (* NDT-OK: a nonce is an opaque Discord dedupe key; nothing branches on
+       its value. Tests inject [fresh_nonce]. *)
+    ?(fresh_nonce = Discord_rest_client.fresh_nonce)
     ?(on_send_result = fun _ -> ()) () =
   let external_effect_completed = ref false in
   let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
@@ -301,15 +323,14 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                (Format.asprintf "%a" Discord_rest_client.pp_error err)
          | Error _ -> ())
   in
-  let rec loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
-      ~post_attempts_left ~ownership =
-    let continue ?(acc_text = acc_text) ?(msg_id = msg_id)
+  let rec loop ~acc_text ~message ~nonce ~last_edit_time ~last_edited_text
+      ~ownership =
+    let continue ?(acc_text = acc_text) ?(message = message)
         ?(last_edit_time = last_edit_time)
         ?(last_edited_text = last_edited_text)
-        ?(post_attempts_left = post_attempts_left)
         ?(ownership = ownership) () =
-      loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
-        ~post_attempts_left ~ownership
+      loop ~acc_text ~message ~nonce ~last_edit_time ~last_edited_text
+        ~ownership
     in
     match Keeper_chat_events.subscribe events with
     | Keeper_chat_events.Closed ->
@@ -338,31 +359,55 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
          | Admitted ownership | Preserved_unobserved ownership ->
         let acc_text = acc_text ^ text in
         let patch_content = streaming_patch_content acc_text in
-        (match msg_id with
-         | None when String.length patch_content = 0 -> continue ~ownership ~acc_text ()
-         | None when post_attempts_left > 0 ->
-             (match post_message ~content:patch_content with
-              | Ok created_id ->
-                  continue ~ownership ~acc_text ~msg_id:(Some created_id)
-                    ~last_edit_time:(now ()) ~last_edited_text:patch_content ()
-              | Error err ->
-                  (* A failed POST may still have landed server-side (network
-                     error after send, or a 2xx whose body we could not read an
-                     id from), and Discord offers no idempotency key for message
-                     creation. One bounded retry, then this turn degrades to
-                     log-only streaming rather than risk a duplicate channel
-                     message; Run_finished still delivers the reply as a fresh
-                     message. *)
-                  Log.Keeper.warn
-                    "keeper_chat_discord: streaming POST failed: %s"
-                    (Format.asprintf "%a" Discord_rest_client.pp_error err);
-                  continue ~ownership ~acc_text
-                    ~post_attempts_left:(post_attempts_left - 1) ())
-         | None ->
-             (* The POST retry budget is spent; skip live edits until the
-                final send. *)
+        let post_failed err ~next =
+          (* A failed POST may still have landed server-side (network error
+             after send, or a 2xx whose body we could not read an id from).
+             The retry and the final delivery ask again with this reply's
+             nonce, which Discord answers with the landed message while its
+             window lasts. One retry keeps a failing channel from receiving a
+             POST per token; live edits then wait for Run_finished. *)
+          Log.Keeper.warn
+            "keeper_chat_discord: streaming POST failed: %s"
+            (Format.asprintf "%a" Discord_rest_client.pp_error err);
+          continue ~ownership ~acc_text ~message:(Unanswered next) ()
+        in
+        (match message with
+         | (Not_requested | Unanswered (Retry_available | Retry_spent))
+           when String.length patch_content = 0 ->
              continue ~ownership ~acc_text ()
-         | Some mid ->
+         | Not_requested ->
+             (match post_message ~nonce ~content:patch_content with
+              | Ok created_id ->
+                  continue ~ownership ~acc_text ~message:(Created created_id)
+                    ~last_edit_time:(now ()) ~last_edited_text:patch_content ()
+              | Error err -> post_failed err ~next:Retry_available)
+         | Unanswered Retry_available ->
+             (match post_message ~nonce ~content:patch_content with
+              | Ok created_id ->
+                  (* Discord may answer with the message the unanswered
+                     attempt created, holding that attempt's shorter text.
+                     The PATCH writes this request's text over it, so
+                     [last_edited_text] names what Discord holds. While the
+                     PATCH fails, nothing is known to be there. *)
+                  (match
+                     edit_message ~message_id:created_id ~content:patch_content
+                   with
+                   | Ok () ->
+                       continue ~ownership ~acc_text
+                         ~message:(Created created_id) ~last_edit_time:(now ())
+                         ~last_edited_text:patch_content ()
+                   | Error err ->
+                       Log.Keeper.warn
+                         "keeper_chat_discord: retried POST PATCH failed \
+                          (msg=%s): %s"
+                         created_id
+                         (Format.asprintf "%a" Discord_rest_client.pp_error err);
+                       continue ~ownership ~acc_text
+                         ~message:(Created created_id) ~last_edit_time:(now ())
+                         ())
+              | Error err -> post_failed err ~next:Retry_spent)
+         | Unanswered Retry_spent -> continue ~ownership ~acc_text ()
+         | Created mid ->
              let elapsed = now () -. last_edit_time in
              if patch_content = last_edited_text then continue ~ownership ~acc_text ()
              else if elapsed < min_edit_interval_s then continue ~ownership ~acc_text ()
@@ -385,8 +430,8 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                     continue ~ownership ~acc_text ~last_edit_time:(now ()) ())))
     | Text_message_end ->
         let final_content = truncate acc_text in
-        (match msg_id with
-         | Some mid when final_content <> last_edited_text ->
+        (match message with
+         | Created mid when final_content <> last_edited_text ->
              (match edit_message ~message_id:mid ~content:final_content with
               | Ok () ->
                   continue ~last_edit_time:(now ())
@@ -397,36 +442,58 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                     mid
                     (Format.asprintf "%a" Discord_rest_client.pp_error err);
                   continue ())
-         | _ -> continue ())
+         | Created _
+         | Not_requested
+         | Unanswered (Retry_available | Retry_spent) -> continue ())
     | Run_finished { run_id = _ } ->
         let delivered_text = Keeper_chat_tool_trail.append_to !tool_trail ~text:acc_text in
+        let send_overflow = function
+          | None -> Ok ()
+          | Some overflow -> send_message ~content:overflow
+        in
         let final_result =
-          match msg_id with
-          | None when !external_effect_completed -> Ok ()
-          | None ->
+          match message with
+          | (Not_requested | Unanswered (Retry_available | Retry_spent))
+            when !external_effect_completed -> Ok ()
+          | (Not_requested | Unanswered (Retry_available | Retry_spent))
+            when String.length delivered_text = 0 ->
               (* Ask whether there is anything to send, which is
                  [delivered_text] — the accumulated text plus the tool trail.
                  Checking [acc_text] asked about a different value: a turn that
                  only called tools has no assistant text but does have a trail,
                  so it settled Error while the turn layer had already settled
                  Delivered (#26406). *)
-              if String.length delivered_text = 0 then
-                Error
-                  (Discord_rest_client.Other
-                     { request_id = "keeper_chat_discord.final_reply"
-                     ; reason = "primary final Discord reply contained no text"
-                     ; body_bytes = 0
-                     })
-              else send_message ~content:delivered_text
-          | Some mid ->
+              Error
+                (Discord_rest_client.Other
+                   { request_id = "keeper_chat_discord.final_reply"
+                   ; reason = "primary final Discord reply contained no text"
+                   ; body_bytes = 0
+                   })
+          | Not_requested ->
+              (* No request of this reply was sent, so Discord holds nothing
+                 a nonce could return in place of this message. *)
+              send_message ~content:delivered_text
+          | Unanswered (Retry_available | Retry_spent) ->
+              (* An earlier POST of this reply may have landed. Asking again
+                 with the reply's nonce returns that message while Discord's
+                 window lasts, and the PATCH writes the complete text over the
+                 partial text it may hold. Past the window Discord creates a
+                 second message. *)
+              let head, overflow = final_head_and_overflow delivered_text in
+              let head_result =
+                match post_message ~nonce ~content:head with
+                | Ok mid -> edit_message ~message_id:mid ~content:head
+                | Error err ->
+                    Log.Keeper.warn
+                      "keeper_chat_discord: final POST failed: %s"
+                      (Format.asprintf "%a" Discord_rest_client.pp_error err);
+                    Error err
+              in
+              combine_delivery_results head_result (send_overflow overflow)
+          | Created mid ->
               let head, overflow = final_head_and_overflow delivered_text in
               let patch_result = edit_message ~message_id:mid ~content:head in
-              let overflow_result =
-                match overflow with
-                | None -> Ok ()
-                | Some overflow -> send_message ~content:overflow
-              in
-              combine_delivery_results patch_result overflow_result
+              combine_delivery_results patch_result (send_overflow overflow)
         in
         on_send_result final_result;
         send_text_rich_embeds ?clock ~token ~channel_id acc_text;
@@ -442,8 +509,8 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         (* A new run's work is its own; the previous run's trail was delivered
            with the previous run's reply. *)
         tool_trail := Keeper_chat_tool_trail.create ();
-        loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
-          ~last_edited_text:"" ~post_attempts_left:2
+        loop ~acc_text:"" ~message:Not_requested ~nonce:(fresh_nonce ())
+          ~last_edit_time:0.0 ~last_edited_text:""
           ~ownership:(Keeper_chat_response_ownership.create ())
     | Agent_core_runtime_attempt_started _ ->
         let ownership = Keeper_chat_response_ownership.retire_attempt ownership in
@@ -517,8 +584,8 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         continue ()
   in
   let run () =
-    loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
-      ~last_edited_text:"" ~post_attempts_left:2
+    loop ~acc_text:"" ~message:Not_requested ~nonce:(fresh_nonce ())
+      ~last_edit_time:0.0 ~last_edited_text:""
       ~ownership:(Keeper_chat_response_ownership.create ())
   in
   match clock, show_activity with
@@ -537,8 +604,9 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
 let adapter_loop ~clock ~token ~channel_id ~events ?base_url
     ?(on_send_result = fun _ -> ()) () =
   adapter_loop_with_transport ~token ~channel_id ~events
-    ~post_message:(fun ~content ->
-      Discord_rest_client.send_message ~clock ~token ~channel_id ~content ())
+    ~post_message:(fun ~nonce ~content ->
+      Discord_rest_client.send_message ~clock ~token ~channel_id ~content
+        ~nonce ())
     ~edit_message:(fun ~message_id ~content ->
       edit_message ~clock ~token ~channel_id ~message_id ~content ())
     ~send_message:(fun ~content -> send_message ~clock ~token ~channel_id ~content ())

@@ -275,6 +275,17 @@ let keeper_waiting_item_text (item : Tui_decode.waiting_item) =
      else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
      else item.kwi_waiting_on)
 
+(* The reasons the server gave for each source the fleet waiting read could
+   not observe. The Plain header and the axis views say the same thing. *)
+let keeper_waiting_failure_reasons ~ko errors =
+  List.map
+    (function
+      | Keeper_list_model.Failure_sentence sentence -> Terminal_text.single_line sentence
+      | Keeper_list_model.Failure_next_action action ->
+          (if ko then "다음 조치: " else "next action: ") ^ Terminal_text.single_line action
+      | Keeper_list_model.Failure_unstated -> if ko then "원인 미기록" else "reason not stated")
+    (Keeper_list_model.waiting_failure_reasons errors)
+
 let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
   match row.waiting with
   | Keeper_list_model.Waiting_observed { Tui_decode.kwr_waiting_on = (first :: rest as items); _ } ->
@@ -2199,8 +2210,8 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
      fold into a single summary line. Either way the header grows by one line
      instead of one per failure, so a burst of read errors cannot shove the
      whole list up and down. *)
+  let cells = max 0 (inner - 2) in
   let errors =
-    let cells = max 0 (inner - 2) in
     match keeper_observation_errors state with
     | [] -> []
     | [ (label, reason) ] ->
@@ -2233,9 +2244,17 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
   in
   let waiting = match state.keeper_waiting_failure with
     | Some (Tui_decode.Keeper_waiting_invalid reason) -> [warning (text "대기 관측 미확인: " "waiting unknown: ") reason]
-    | Some (Tui_decode.Keeper_waiting_sources_unavailable _) ->
-        [warning "" (text "대기 원본을 읽지 못했습니다 · 대기 목록이 업무 차단을 뜻하지는 않습니다"
-                       "waiting sources unavailable · inventory is not a work blocker")]
+    | Some (Tui_decode.Keeper_waiting_sources_unavailable errors) ->
+        (* One line like the read errors above. The reasons come right after
+           the failure, so a narrow frame cuts the closing note first. *)
+        let failure = text "대기 원본을 읽지 못했습니다" "waiting sources unavailable" in
+        let failure = match keeper_waiting_failure_reasons ~ko:(state.ui_language = Lang_ko) errors with
+          | [] -> failure
+          | reasons -> failure ^ ": " ^ String.concat ", " reasons
+        in
+        [warning "" (Message_layout.fit_width
+           (failure ^ text " · 대기 목록이 업무 차단을 뜻하지는 않습니다"
+              " · inventory is not a work blocker") cells)]
     | None ->
         (match keeper_waiting_refresh_slow state with
          | Some age ->
@@ -2778,13 +2797,8 @@ let render_keeper_axes (state : state) =
        let detail =
          match failure with
          | Tui_decode.Keeper_waiting_sources_unavailable errors ->
-             errors
-             |> List.map (fun item ->
-               let detail =
-                 if item.Tui_decode.kwi_source = Tui_decode.Waiting_source_observation_unavailable
-                 then item.kwi_what else item.kwi_waiting_on in
-               Terminal_text.single_line detail)
-             |> String.concat ", "
+             String.concat ", "
+               (keeper_waiting_failure_reasons ~ko:(state.ui_language = Lang_ko) errors)
          | Tui_decode.Keeper_waiting_invalid detail -> Terminal_text.single_line detail
        in
        box_line buf cols

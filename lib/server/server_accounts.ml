@@ -107,14 +107,19 @@ let readiness zone (_ : Httpun.Request.t) reqd =
       reqd
 ;;
 
+let add_routes_of_people login ~env ~base_path router =
+  router
+  |> Server_login_http.add_routes login
+  |> Server_login_http.add_person_routes login ~env ~base_path
+  |> Server_account_console.add_routes
+;;
+
 let register ~login ~env ~base_path zone router =
   router
   |> Server_route.get Server_route.Always_public Server_health_paths.health health
   |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness
   |> Server_route.get Server_route.Always_public Server_health_paths.readiness (readiness zone)
-  |> Server_login_http.add_routes login
-  |> Server_login_http.add_person_routes login ~env ~base_path
-  |> Server_account_console.add_routes ~draw:login.Login_routes.draw
+  |> add_routes_of_people login ~env ~base_path
 ;;
 
 (* A value of the HTTP mode that is not in its vocabulary stops the boot here,

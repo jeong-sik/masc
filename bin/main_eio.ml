@@ -1284,6 +1284,11 @@ let auth_cmd =
           "MASC_HTTP_BASE_URL must be the http(s) address the person opens, as \
            for masc auth bootstrap. The command takes the workspace lease, so \
            stop the server first."
+      ; `P
+          "While the account server runs, an Admin who has signed in issues \
+           Member and Admin invitations from the 초대 링크 (invitations) panel \
+           of the console at /accounts/console, with no stop of the server. \
+           When the lease is held, the refusal of this command points there."
       ]
     in
     Cmd.v
@@ -1329,10 +1334,10 @@ let auth_cmd =
           "A person signs in with GitHub, connects their own Claude Code or \
            Codex subscription, makes Runtimes and Keepers on it, and sends a \
            Keeper a message that the subscription answers once. The preview \
-           serves the login routes, the routes of a person's own \
-           subscriptions, Runtimes and Keepers, and the MCP endpoint of a \
-           person, and no Board route. It takes the workspace lease until it \
-           stops."
+           serves the login routes, the console of a signed-in person at \
+           /accounts/console, the routes of a person's own subscriptions, \
+           Runtimes and Keepers, and the MCP endpoint of a person, and no \
+           Board route. It takes the workspace lease until it stops."
       ; `P
           "The workspace must be activated with masc auth bootstrap. Make the \
            invitation link with MASC_HTTP_BASE_URL=http://127.0.0.1:PORT so it \
@@ -1358,6 +1363,7 @@ let auth_cmd =
       Term.(
         const (fun base_path port github_client_id ->
           Masc_cli_auth.preview
+            ~select_dashboard:initialize_served_identity
             ~base_path:(Env_config.normalize_masc_base_path_input base_path)
             ~port
             ~github_client_id)

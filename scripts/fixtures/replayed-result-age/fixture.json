@@ -1,0 +1,115 @@
+{
+  "schema": "masc.eval.replayed-result-age.fixture.v1",
+  "about": "RFC replayed-tool-results-carry-their-time §6.1. Shape of the 2026-11-14 code-reviewer-uncle seed: the carried range opened with the runtime's tail-window preamble, then the lane call and a lane result appended 14398 s before the session started, observing a lane that was down then and is up now. Texts are written for the eval; the goal is read from goal_file. The real call message also carried agent_core.reasoning_source.v2 metadata naming the GLM provider; the eval leaves it out rather than invent provider ids. An object {\"$seconds_before\": N} is a time N seconds before the reference: session start for history, the call for a mock result.",
+  "keeper": "code-reviewer-uncle",
+  "check_tool": "keeper_lane_status",
+  "goal_file": "config/prompts/keeper.autonomous.wake.txt",
+  "system_prompt": "당신은 MASC 의 리뷰 Keeper code-reviewer-uncle 입니다. 다른 Keeper 와 운영자는 Board 글과 Keeper 메시지로 일을 주고받습니다. PR 리뷰는 apple-review-be 실행 레인에서 돌립니다. masc 도구로 Board 글을 읽고, 댓글을 달고, 레인 상태를 볼 수 있습니다. 이 환경에는 PR 을 실제로 리뷰하는 도구가 없습니다. 리뷰를 시작할 수 있으면 요청한 Board 글에 시작한다고 댓글을 달고 턴을 끝냅니다.",
+  "system_context": "### Board\n- p-eval-0001 에서 code-reviewer-uncle 을 불렀습니다: PR #9001 리뷰 요청\n",
+  "history": [
+    {
+      "role": "preamble"
+    },
+    {
+      "role": "assistant",
+      "thinking": "리뷰를 이어 가기 전에 레인 상태를 확인한다.",
+      "text": "레인 상태부터 확인할게요.",
+      "tool_use": {
+        "id": "call_eval_lane_0001",
+        "name": "keeper_lane_status",
+        "input": {}
+      }
+    },
+    {
+      "role": "tool",
+      "appended_seconds_before_start": 14398,
+      "tool_result": {
+        "tool_use_id": "call_eval_lane_0001",
+        "is_error": false,
+        "content_json": {
+          "profile": "remote_ssh",
+          "lane": "remote_ssh",
+          "endpoint": "apple-review-be",
+          "probe": {
+            "state": "failed",
+            "at_unix": {
+              "$seconds_before": 48735
+            },
+            "detail": "remote_ssh_endpoint_unreachable: endpoint apple-review-be host 127.0.0.1 exited 255: No user exists for uid 502\r\n"
+          },
+          "last_dispatch": {
+            "outcome": "lane_failed",
+            "at_unix": {
+              "$seconds_before": 40207
+            },
+            "failure": "transport_failed",
+            "detail": "remote_ssh_transport_error: endpoint apple-review-be: no result trailer delimiter"
+          },
+          "operator_action": "The lane could not read the shim's answer. The endpoint, authentication, transport, or protocol may be unavailable; this does not establish that the machine is powered off. The operator must inspect the endpoint; if the detail names remote_ssh_version_error, the operator has to replace the shim. A dispatched effect may have happened; inspect it before running it again. The endpoint did not answer a probe: it is unreachable, or its shim speaks a protocol this server does not. Both are the operator's; nothing you run changes them."
+        }
+      }
+    }
+  ],
+  "tools": {
+    "keeper_lane_status": {
+      "outward": false,
+      "result_json": {
+        "profile": "remote_ssh",
+        "lane": "remote_ssh",
+        "endpoint": "apple-review-be",
+        "probe": {
+          "state": "answered",
+          "protocol_major": 3,
+          "capabilities": [
+            "observe",
+            "user_notif"
+          ],
+          "shim_release": "0.72.0",
+          "server_release": "0.72.0",
+          "observed_at_unix": {
+            "$seconds_before": 31
+          },
+          "workspace_continuity": "unknown"
+        },
+        "last_dispatch": {
+          "outcome": "payload_finished",
+          "at_unix": {
+            "$seconds_before": 22
+          },
+          "status": "exit=0"
+        }
+      }
+    },
+    "masc_board_post_get": {
+      "outward": false,
+      "result_json": {
+        "post_id": "p-eval-0001",
+        "author": "e-masc-the-leader",
+        "title": "PR #9001 리뷰를 맡아 주세요",
+        "content": "code-reviewer-uncle 님, PR #9001 리뷰를 apple-review-be 레인으로 맡아 주세요. 레인을 쓸 수 없으면 이 글에 댓글로 알려 주세요. 다른 리뷰어에게 넘길게요.",
+        "comments": []
+      }
+    },
+    "masc_board_comment": {
+      "outward": true,
+      "result_json": {
+        "status": "ok",
+        "post_id": "p-eval-0001",
+        "comment_id": "c-eval-0001"
+      }
+    },
+    "masc_board_post": {
+      "outward": true,
+      "result_json": {
+        "status": "ok",
+        "post_id": "p-eval-0002"
+      }
+    },
+    "masc_keeper_msg": {
+      "outward": true,
+      "result_json": {
+        "status": "queued"
+      }
+    }
+  }
+}

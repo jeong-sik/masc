@@ -851,6 +851,86 @@ let test_binding_explicit_source_change () = with_net (fun net ->
     ) [false;true]))
 ;;
 
+(* The record names every excluded message once and each reason once: a
+   history that crossed producers repeats a few reasons over thousands of
+   messages (#52350). Groups follow the order each reason first appears;
+   indexes follow the order of [drops]. Every reason here repeats, and each
+   producer is built anew per message as restore and dispatch build it, so
+   a group only forms over equal values. [rotated] differs from [first]
+   only in its endpoint, which names a different producer. *)
+let test_replay_exclusion_record_groups_drops_by_reason () =
+  let first () = binding_source (binding_provider "https://first.example") in
+  let rotated () = binding_source (binding_provider "https://rotated.example") in
+  let second () = binding_source (binding_provider ~model:"other-model" "https://second.example") in
+  let target = binding_source (binding_provider ~model:"target-model" "https://target.example") in
+  let drop message_index reason = { Binding_projection.message_index; reason } in
+  let no_replay = Llm_provider.Reasoning_replay_contract.No_replay in
+  let all_assistant = Llm_provider.Reasoning_replay_contract.All_assistant_messages in
+  let exclusion =
+    { Binding_projection.boundary = Checkpoint_restore
+    ; target
+    ; drops =
+        [ drop 1 (Incompatible_reasoning_source (first ()))
+        ; drop 3 (Incompatible_reasoning_source (second ()))
+        ; drop 4 (Incompatible_reasoning_source (first ()))
+        ; drop 5 (Incompatible_reasoning_source (rotated ()))
+        ; drop 6 Missing_reasoning_source
+        ; drop 7 (Replay_policy_excluded no_replay)
+        ; drop 8 Missing_reasoning_source
+        ; drop 9 (Replay_policy_excluded all_assistant)
+        ; drop 10 (Incompatible_reasoning_source (first ()))
+        ; drop 11 (Replay_policy_excluded no_replay)
+        ; drop 12 Reasoning_on_non_assistant
+        ; drop 13 (Replay_policy_excluded all_assistant)
+        ; drop 14 Reasoning_on_non_assistant
+        ]
+    }
+  in
+  let source = Llm_provider.Types.Reasoning_source.to_yojson in
+  let policy = Llm_provider.Reasoning_replay_contract.replay_policy_to_yojson in
+  let indexes values = "message_indexes", `List (List.map (fun index -> `Int index) values) in
+  let expected =
+    `Assoc
+      [ "boundary", `String "checkpoint_restore"
+      ; "target", source target
+      ; ( "drop_groups"
+        , `List
+            [ `Assoc
+                [ "reason", `String "incompatible_reasoning_source"
+                ; "stored", source (first ())
+                ; indexes [ 1; 4; 10 ]
+                ]
+            ; `Assoc
+                [ "reason", `String "incompatible_reasoning_source"
+                ; "stored", source (second ())
+                ; indexes [ 3 ]
+                ]
+            ; `Assoc
+                [ "reason", `String "incompatible_reasoning_source"
+                ; "stored", source (rotated ())
+                ; indexes [ 5 ]
+                ]
+            ; `Assoc [ "reason", `String "missing_reasoning_source"; indexes [ 6; 8 ] ]
+            ; `Assoc
+                [ "reason", `String "replay_policy_excluded"
+                ; "replay_policy", policy no_replay
+                ; indexes [ 7; 11 ]
+                ]
+            ; `Assoc
+                [ "reason", `String "replay_policy_excluded"
+                ; "replay_policy", policy all_assistant
+                ; indexes [ 9; 13 ]
+                ]
+            ; `Assoc [ "reason", `String "reasoning_on_non_assistant"; indexes [ 12; 14 ] ]
+            ] )
+      ]
+  in
+  Alcotest.(check (testable Yojson.Safe.pp Yojson.Safe.equal))
+    "one group per reason, every message once"
+    expected
+    (Binding_projection.replay_exclusion_to_json exclusion)
+;;
+
 let anthropic_target () =
   Binding_provider.make ~kind:Binding_provider.Anthropic ~model_id:"claude-sonnet-5-5"
     ~base_url:"https://api.anthropic.com" ~max_tokens:64 ()
@@ -1235,6 +1315,7 @@ let () =
     [ "provider replay binding", [
         test_case "explicit provider/model failover preserves canonical history and tool effects" `Quick test_binding_explicit_source_change;
         test_case "source-change exclusion protects active replay and control boundaries" `Quick test_binding_source_change_respects_active_replay;
+        test_case "exclusion record groups drops by reason" `Quick test_replay_exclusion_record_groups_drops_by_reason;
         test_case "source-change admission follows actual tools and hook suppression in both dispatch modes" `Quick test_binding_source_change_uses_effective_request_tools;
         test_case "source-change exclusion still rejects invalid provenance" `Quick test_binding_source_change_rejects_invalid_provenance;
         test_case "Anthropic sends finished turns other providers produced" `Quick test_binding_anthropic_sends_finished_foreign_turns;

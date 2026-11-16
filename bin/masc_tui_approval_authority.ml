@@ -25,11 +25,25 @@ let same_identity left right =
   | Masc_tui_approvals_model.Operator_row _, (Masc_tui_approvals_model.Keeper_tool_row _ | Masc_tui_approvals_model.Gate_row _) ->
       false
 
+let still_listed ~presented ~current =
+  Option.bind presented (fun row -> List.find_opt (same_identity row) current)
+
 let resolve ~presented ~current decision =
-  Option.bind presented (fun row ->
-      Option.map
-        (fun current_row -> { row = current_row; decision })
-        (List.find_opt (same_identity row) current))
+  Option.map
+    (fun current_row -> { row = current_row; decision })
+    (still_listed ~presented ~current)
+
+type retry_target =
+  | Retry_gate of Tui_decode.gate_pending
+  | Row_gone
+  | Not_retryable
+
+let retry_target ~presented ~current =
+  match still_listed ~presented ~current with
+  | Some (Masc_tui_approvals_model.Gate_row pending) -> Retry_gate pending
+  | Some (Masc_tui_approvals_model.Operator_row _ | Masc_tui_approvals_model.Keeper_tool_row _) ->
+      Not_retryable
+  | None -> Row_gone
 
 let authority_changed ~presented ~candidate =
   not (Option.equal same_identity presented candidate)

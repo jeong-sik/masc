@@ -1881,6 +1881,43 @@ let test_inventory_selection_keeps_exact_editor_identity () =
     (Some "librarian_exact")
     (Option.map (fun lane -> Standalone_lane.to_id lane.Tui_decode.sl_lane) (selected_standalone_lane state))
 
+(* [s] opens the model order editor over one exact Lane's inventory detail as
+   it does over the list, and closing the editor returns to the screen it
+   covered. A reading that names no exact lane opens nothing. *)
+let test_slot_editor_opens_over_the_inventory_detail () =
+  let state = lanes_state () in
+  let index id =
+    List.find_index (fun (row : Masc.Tui_decode_lane_inventory.row) -> row.id = id)
+      (lane_inventory_rows state) |> Option.get in
+  let edited () = Option.map Standalone_lane.to_id (slot_editor_exact_lane state) in
+  select_inventory_lane state (index "exact/librarian_exact");
+  let detail = Lanes_inventory_detail (Some "exact/librarian_exact") in
+  state.lanes_mode <- detail;
+  open_lanes_slot_editor state;
+  Alcotest.(check (option string)) "s on the detail edits the lane the detail reads"
+    (Some "librarian_exact") (edited ());
+  Alcotest.(check bool) "the detail stays under the editor" true (state.lanes_mode = detail);
+  close_slot_editor state;
+  Alcotest.(check bool) "Esc closes the editor" true (Option.is_none state.slot_editor);
+  Alcotest.(check bool) "Esc returns to the detail" true (state.lanes_mode = detail);
+  state.lanes_mode <- Lanes_overview;
+  open_lanes_slot_editor state;
+  Alcotest.(check (option string)) "s on the list edits the lane under the cursor"
+    (Some "librarian_exact") (edited ());
+  close_slot_editor state;
+  Alcotest.(check bool) "Esc from the list's editor returns to the list" true
+    (state.lanes_mode = Lanes_overview);
+  select_inventory_lane state (index "machine/dos");
+  state.lanes_mode <- Lanes_inventory_detail (Some "machine/dos");
+  open_lanes_slot_editor state;
+  Alcotest.(check bool) "a machine Lane's detail opens no slot editor" true
+    (Option.is_none state.slot_editor);
+  select_inventory_lane state (index "exact/librarian_exact");
+  state.lanes_mode <- Lanes_inventory_detail None;
+  open_lanes_slot_editor state;
+  Alcotest.(check bool) "the inventory-wide reading opens no slot editor" true
+    (Option.is_none state.slot_editor)
+
 let test_grouped_inventory_keeps_original_action_target () =
   let module I = Masc.Tui_decode_lane_inventory in
   let module D = Masc_tui_lane_inventory in
@@ -2390,6 +2427,102 @@ let test_workspace_activity_offers_no_row_search () =
   Alcotest.(check (option int)) "Workspace Activity answers no search"
     None (Masc_tui_surface_search.surface_search_count ~cols:120 state Repositories ~query:"masc")
 
+let acting_tool_call ~at ~keeper tool : Masc_tui_acting.entry =
+  { Masc_tui_acting.ae_at = at
+  ; ae_event =
+      Masc_tui_observer.Keeper_tool_call
+        { Masc_tui_observer.kt_keeper = keeper
+        ; kt_turn = None
+        ; kt_tool = tool
+        ; kt_duration_ms = None
+        ; kt_disposition = None
+        ; kt_at = at
+        ; kt_tool_use_id = None
+        ; kt_schedule = None
+        ; kt_tool_args = None
+        ; kt_tool_result = None
+        ; kt_tool_args_preview = None
+        ; kt_tool_output_preview = None
+        }
+  }
+
+let acting_heartbeat ~at keeper : Masc_tui_acting.entry =
+  { Masc_tui_acting.ae_at = at
+  ; ae_event =
+      Masc_tui_observer.Keeper_heartbeat
+        { Masc_tui_observer.hb_keeper = keeper
+        ; hb_phase = None
+        ; hb_in_turn = None
+        ; hb_in_flight_ms = None
+        ; hb_at = at
+        }
+  }
+
+(* "/" and n land through [row_list], which names [acting_cursor], so a
+   match index has to be the cursor position of the row it matched. The
+   ring holds a heartbeat between two of scout's calls; Actions hides it,
+   and a search that walked the ring instead of the rows the filter keeps
+   would land one row late for every hidden entry above the match. *)
+let test_activity_search_lands_on_the_row_the_cursor_reads () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Acting;
+  state.acting <-
+    [ acting_tool_call ~at:4. ~keeper:"scout" "keeper_board_read"
+    ; acting_heartbeat ~at:3. "scout"
+    ; acting_tool_call ~at:2. ~keeper:"probe" "keeper_task_claim"
+    ; acting_tool_call ~at:1. ~keeper:"scout" "keeper_artifact_read"
+    ];
+  let needle = "scout" in
+  let mentions text =
+    let width = String.length needle in
+    let rec from index =
+      index + width <= String.length text
+      && (String.equal (String.sub text index width) needle || from (index + 1))
+    in
+    from 0
+  in
+  (* Every cursor position whose row the query matches, in the order a
+     search from the top visits them: "/" takes the first, n each next. *)
+  let landings () =
+    match Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting with
+    | None -> Alcotest.fail "the flat filter offers no row search"
+    | Some rows ->
+        List.concat (List.mapi (fun index text -> if mentions text then [ index ] else []) rows)
+  in
+  let under_cursor index =
+    state.acting_cursor <- index;
+    match selected_acting_entry state with
+    | Some { Masc_tui_acting.ae_event = Masc_tui_observer.Keeper_tool_call call; _ } ->
+        call.Masc_tui_observer.kt_tool
+    | Some { Masc_tui_acting.ae_event = Masc_tui_observer.Keeper_heartbeat beat; _ } ->
+        "heartbeat of " ^ beat.Masc_tui_observer.hb_keeper
+    | Some _ -> "another event"
+    | None -> "no row"
+  in
+  let count () =
+    Masc_tui_surface_search.surface_search_count ~cols:120 state Acting ~query:needle
+  in
+  Alcotest.(check bool) "Turns opens no search" true
+    (Option.is_none (Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting));
+  Alcotest.(check (option int)) "Turns counts nothing" None (count ());
+  state.acting_filter <- Masc_tui_acting.Actions;
+  Alcotest.(check (list string)) "Actions: / lands on scout's newest call, n on the next"
+    [ "keeper_board_read"; "keeper_artifact_read" ]
+    (List.map under_cursor (landings ()));
+  Alcotest.(check (option int)) "Actions counts the rows it can land on" (Some 2) (count ());
+  state.acting_filter <- Masc_tui_acting.Everything;
+  Alcotest.(check (list string)) "Everything lands on the heartbeat it draws"
+    [ "keeper_board_read"; "heartbeat of scout"; "keeper_artifact_read" ]
+    (List.map under_cursor (landings ()));
+  state.acting_detail <- selected_acting_entry state;
+  Alcotest.(check bool) "open evidence opens no search" true
+    (Option.is_none (Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting));
+  state.acting_detail <- None;
+  state.acting <- [ acting_heartbeat ~at:3. "scout" ];
+  state.acting_filter <- Masc_tui_acting.Actions;
+  Alcotest.(check bool) "a filter that leaves no row opens no search" true
+    (Option.is_none (Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting))
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -2411,6 +2544,8 @@ let () =
             `Quick test_detail_search_counts_follow_the_active_pane
         ; Alcotest.test_case "Workspace Activity offers no row search"
             `Quick test_workspace_activity_offers_no_row_search
+        ; Alcotest.test_case "Activity search lands on the row the cursor reads"
+            `Quick test_activity_search_lands_on_the_row_the_cursor_reads
         ;] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick
@@ -2551,6 +2686,8 @@ let () =
             test_inventory_category_preserves_metadata_owner
         ; Alcotest.test_case "inventory selection retains exact editor identity" `Quick
             test_inventory_selection_keeps_exact_editor_identity
+        ; Alcotest.test_case "s opens the slot editor over the inventory detail" `Quick
+            test_slot_editor_opens_over_the_inventory_detail
         ; Alcotest.test_case "search includes all inventory families" `Quick
             test_lanes_search_texts_lead_with_the_standalone_labels
         ; Alcotest.test_case "sub-modes stay unsearchable" `Quick

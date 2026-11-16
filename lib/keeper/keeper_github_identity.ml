@@ -816,6 +816,63 @@ let microvm_git_credential_env ~config ~keeper_name ~container_config_dir =
     ~config_dir:container_config_dir
 ;;
 
+let git_credential_config_mode = 0o400
+
+type git_credential_config_state =
+  | Git_credential_config_current
+  | Git_credential_config_stale
+
+(* Current means: [content], mode 0400, this process's uid, one link — the
+   state a write leaves. The file is derived and carries no authority, and
+   before the skip every call replaced it, so a leaf that cannot be shown
+   current is replaced as before. A replacement that cannot repair the leaf
+   (a directory there) returns its own error. A refused directory boundary
+   is an error, as it is for hosts.yml: writing would trust a directory the
+   owned read just rejected. *)
+let inspect_git_credential_config ~snapshot ~target ~content =
+  match
+    Fs_compat.load_owned_regular_file_with_snapshot
+      ~single_link:true
+      ~ownership_root:snapshot
+      target
+  with
+  | Ok None -> Ok Git_credential_config_stale
+  | Ok (Some (existing : Fs_compat.owned_regular_file_contents)) ->
+    if String.equal existing.content content
+       && Int.equal existing.snapshot.permissions git_credential_config_mode
+       && Int.equal existing.snapshot.owner_uid (Unix.getuid ())
+    then Ok Git_credential_config_current
+    else Ok Git_credential_config_stale
+  | Error ({ failure; close_failure = _ } as error) ->
+    (match failure with
+     (* The rename replaces a symlink, FIFO or socket without following it,
+        and fails on a directory. *)
+     | Fs_compat.Path_is_not_regular_file _
+     (* The file, or the directory above it, changed during the read, as a
+        concurrent adoption's replacement does. The reader does not say
+        which; this call writes what the hosts.yml it just read derives, as
+        every call did before the skip. *)
+     | Fs_compat.Filesystem_identity_changed _
+     (* The leaf could not be opened, read or closed, or has a second link.
+        A fresh file has one link and the intended mode. *)
+     | Fs_compat.Owned_file_operation_failed
+         { operation =
+             ( Fs_compat.Inspect_path
+             | Fs_compat.Open_path
+             | Fs_compat.Inspect_descriptor
+             | Fs_compat.Read_contents
+             | Fs_compat.Close_descriptor )
+         ; _
+         } -> Ok Git_credential_config_stale
+     | Fs_compat.Ownership_boundary_rejected _
+     | Fs_compat.Owned_file_operation_failed { operation = Fs_compat.Inspect_parent; _ }
+     (* Raised only for a read that passes [owner_uid]; this one does not,
+        so reaching them means the reader changed and is reported. *)
+     | Fs_compat.Owned_path_owner_mismatch _
+     | Fs_compat.Owned_path_writable_by_others _ ->
+       Error (Fs_compat.owned_regular_file_read_error_to_string error))
+;;
+
 (* git never consults gh's hosts.yml on its own: an https push without a
    credential helper prompts for a username, and a sandbox has no terminal
    to answer, so a projected token sits unused ("could not read Username",
@@ -828,7 +885,14 @@ let microvm_git_credential_env ~config ~keeper_name ~container_config_dir =
 
    [dir_mode_after] is the directory mode restored after the write: a locked
    0500 for turn snapshots, 0700 for the stable config directory
-   ([validate_existing_config_dir] rejects anything else). *)
+   ([validate_existing_config_dir] rejects anything else).
+
+   A file that already is what the write would leave is not replaced, and
+   the directory is left as it is. The stable directory is bind-mounted into
+   a running container, and every turn adopts that container and calls this
+   again. A token rotation rewrites hosts.yml but not its hostnames, so the
+   derived content stays the same. Replacing it anyway swapped the inode
+   under a git that was reading it through the mount (#31874). *)
 let write_git_credential_config ~dir_mode_after ~snapshot =
   match
     Fs_compat.load_owned_regular_file
@@ -842,16 +906,20 @@ let write_git_credential_config ~dir_mode_after ~snapshot =
      | None -> Ok false
      | Some content ->
        let target = Filename.concat snapshot git_credential_config_file_name in
-       Unix.chmod snapshot 0o700;
-       let result =
-         match Fs_compat.save_file_atomic target content with
-         | Error _ as error -> error
-         | Ok () ->
-           Unix.chmod target 0o400;
-           Ok true
-       in
-       Unix.chmod snapshot dir_mode_after;
-       result)
+       (match inspect_git_credential_config ~snapshot ~target ~content with
+        | Error _ as error -> error
+        | Ok Git_credential_config_current -> Ok true
+        | Ok Git_credential_config_stale ->
+          Unix.chmod snapshot 0o700;
+          let result =
+            match Fs_compat.save_file_atomic target content with
+            | Error _ as error -> error
+            | Ok () ->
+              Unix.chmod target git_credential_config_mode;
+              Ok true
+          in
+          Unix.chmod snapshot dir_mode_after;
+          result))
 ;;
 
 (* The commit names are not part of the GitHub login: every container a

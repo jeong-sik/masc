@@ -1,4 +1,5 @@
 """Adversarial upstream archive tests for the regular-only macOS payload."""
+import argparse
 import importlib.util
 import io
 import hashlib
@@ -111,7 +112,7 @@ class LinuxRuntimeProbe(unittest.TestCase):
                     patch.object(linux.portable, 'freeze_python_bytecode',
                                  side_effect=RuntimeError('probe ran')):
                 with self.assertRaisesRegex(RuntimeError, 'probe ran'):
-                    linux.package(dist, root / 'stage', self.PLATFORM, commit, lock)
+                    linux.package(dist, root / 'stage', self.PLATFORM, commit, lock, None)
         interpreter.assert_called_once()
         (argv,), _ = interpreter.call_args
         self.assertEqual(argv[1:3], ['-I', '-c'])
@@ -153,6 +154,102 @@ class LinuxRuntimeProbe(unittest.TestCase):
             with self.assertRaises(urllib.error.URLError) as raised:
                 exec(probe, {})
         self.assertIs(raised.exception, error)
+
+
+class OcamlNoticeShipping(unittest.TestCase):
+    """The statically linked OCaml libraries' notices travel in the runtime archive (#39934)."""
+    PLATFORM = 'linux-x64'
+
+    def runtime_members(self, make_notices):
+        script = SCRIPT.with_name('package-linux-runtime.py')
+        spec = importlib.util.spec_from_file_location('linux_runtime_notices', script)
+        linux = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(linux)
+        commit, archive = 'a' * 40, b'reviewed Linux Python archive'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dist = root / 'dist'
+            dist.mkdir()
+            for name in linux.portable.NAMES:
+                (dist / (name + '-' + self.PLATFORM)).write_bytes(b'staged executable')
+            lock = root / 'lock.json'
+            lock.write_text(json.dumps({'release': 'pinned', 'upstream': 'pinned', 'platforms': {self.PLATFORM: {
+                'browser_download_url': 'https://github.com/astral-sh/python-build-standalone/pinned.tar.gz',
+                'size': len(archive), 'digest': 'sha256:' + hashlib.sha256(archive).hexdigest()}}}))
+            with patch.object(linux.portable, 'fetch', return_value=archive), \
+                    patch.object(linux.portable, 'unpack_python'), \
+                    patch.object(linux.portable, 'run', return_value=commit + '\n'), \
+                    patch.object(linux.subprocess, 'run'), \
+                    patch.object(linux.portable, 'freeze_python_bytecode'):
+                linux.package(dist, root / 'stage', self.PLATFORM, commit, lock, make_notices(root))
+            with tarfile.open(dist / ('masc-runtime-' + self.PLATFORM + '.tar.gz')) as output:
+                return {member.name: (member.mode, output.extractfile(member).read())
+                        for member in output.getmembers()}
+
+    FILES = {'tls/LICENSE.md': b'Copyright (c) 2014, David Kaloper and Hannes Mehnert\n',
+             'yaml/vendor/License': b'Copyright (c) 2006-2016 Kirill Simonov\n'}
+
+    @classmethod
+    def collected(cls, root):
+        notices = root / 'notices'
+        for name, data in cls.FILES.items():
+            (notices / name).parent.mkdir(parents=True, exist_ok=True)
+            (notices / name).write_bytes(data)
+            (notices / name).chmod(0o600)
+        (notices / 'packages.json').write_text(json.dumps({'schema': 'masc.ocaml-notices.v1', 'packages': [
+            {'name': name.split('/')[0], 'notices': [{'file': name, 'sha256': hashlib.sha256(data).hexdigest()}]}
+            for name, data in cls.FILES.items()] + [{'name': 'zstd', 'notices': []}]}))
+        return notices
+
+    def test_release_runtime_ships_the_collected_notices_under_licenses_ocaml(self):
+        members = self.runtime_members(self.collected)
+        for name, data in self.FILES.items():
+            self.assertEqual((0o644, data), members['licenses/ocaml/' + name])
+        self.assertEqual(0o644, members['licenses/ocaml/packages.json'][0])
+
+    def test_a_file_the_manifest_does_not_name_is_refused(self):
+        def extra(root):
+            notices = self.collected(root)
+            (notices / 'tls/COPYING').write_bytes(b'added after the collector ran\n')
+            return notices
+        with self.assertRaisesRegex(ValueError, 'OCaml notices differ from .*: tls/COPYING$'):
+            self.runtime_members(extra)
+
+    def test_a_notice_whose_bytes_differ_from_the_manifest_is_refused(self):
+        def changed(root):
+            notices = self.collected(root)
+            (notices / 'yaml/vendor/License').write_bytes(b'another text\n')
+            return notices
+        with self.assertRaisesRegex(ValueError, 'OCaml notices differ from .*: yaml/vendor/License$'):
+            self.runtime_members(changed)
+
+    def test_a_named_notice_that_is_missing_is_refused(self):
+        def missing(root):
+            notices = self.collected(root)
+            (notices / 'tls/LICENSE.md').unlink()
+            return notices
+        with self.assertRaisesRegex(ValueError, 'OCaml notices differ from .*: tls/LICENSE.md$'):
+            self.runtime_members(missing)
+
+    def test_a_notice_directory_the_collector_did_not_finish_is_refused(self):
+        def unfinished(root):
+            notices = self.collected(root)
+            (notices / 'packages.json').unlink()
+            return notices
+        with self.assertRaisesRegex(ValueError, 'OCaml notice manifest missing'):
+            self.runtime_members(unfinished)
+
+    def test_a_probe_runtime_carries_no_ocaml_notices(self):
+        members = self.runtime_members(lambda root: None)
+        self.assertFalse([name for name in members if name.startswith('licenses/ocaml/')])
+
+    def test_every_packager_caller_chooses_whether_notices_ship(self):
+        parser = argparse.ArgumentParser()
+        package.add_ocaml_notice_arguments(parser)
+        with patch('sys.stderr', io.StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args([])
+        self.assertEqual(Path('n'), parser.parse_args(['--ocaml-notices', 'n']).ocaml_notices)
+        self.assertIsNone(parser.parse_args(['--without-ocaml-notices']).ocaml_notices)
 
 
 class PythonArchive(unittest.TestCase):
@@ -209,11 +306,11 @@ class PinnedDownload(unittest.TestCase):
                     package, 'unpack_python', side_effect=RuntimeError('verified bytes reached extraction')) as unpack:
                 if reaches_extraction:
                     with self.assertRaisesRegex(RuntimeError, 'verified bytes reached extraction'):
-                        package.package(root / 'dist', root / 'stage', 'macos-arm64', 'a' * 40, lock)
+                        package.package(root / 'dist', root / 'stage', 'macos-arm64', 'a' * 40, lock, None)
                     unpack.assert_called_once()
                 else:
                     with self.assertRaisesRegex(ValueError, 'checksum differs from pin'):
-                        package.package(root / 'dist', root / 'stage', 'macos-arm64', 'a' * 40, lock)
+                        package.package(root / 'dist', root / 'stage', 'macos-arm64', 'a' * 40, lock, None)
                     unpack.assert_not_called()
                 fetch.assert_called_once_with(url)
 

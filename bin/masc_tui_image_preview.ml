@@ -4,6 +4,7 @@ type output_source =
   | Inline_data of Masc_tui_image_payload.t
   | Inline_svg of string
   | Inline_mermaid of string
+  | Inline_graph of string
   | Server_path of string
   | Remote_uri of string
 
@@ -49,6 +50,7 @@ let output_image ~name ~src =
 let inline_svg ~name svg = Output_image { name; source = Inline_svg svg }
 let inline_payload ~name payload = Output_image { name; source = Inline_data payload }
 let mermaid ~name source = Output_image { name; source = Inline_mermaid source }
+let graph ~name source = Output_image { name; source = Inline_graph source }
 let mermaid_source source = Inline_mermaid source
 
 let is_image = function
@@ -66,7 +68,7 @@ let in_message_previews ~text ~attachments =
     |> List.filter (fun source -> not (List.exists (function
       | Output_image {source=Inline_mermaid other;_} -> String.equal source other
       | Named_path _ | Staged _ | Stored_attachment _
-      | Output_image {source=(Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _);_}
+      | Output_image {source=(Inline_data _ | Inline_svg _ | Inline_graph _ | Server_path _ | Remote_uri _);_}
       | Unavailable_image _ | No_image -> false) attachments))
     |> List.map (mermaid ~name:"Mermaid") in
   List.map (fun path -> Named_path path) (Masc_tui_image_ref.paths text)

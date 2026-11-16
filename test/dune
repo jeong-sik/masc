@@ -1,9 +1,4 @@
 (rule
- (alias runtest-test_auth_preview_pat_expiry)
- (deps test_auth_preview_pat_expiry.js ../lib/auth_preview.ml)
- (action (run node %{dep:test_auth_preview_pat_expiry.js} %{dep:../lib/auth_preview.ml})))
-
-(rule
  (alias runtest-test_auth_preview_invite)
  (deps test_auth_preview_invite.js ../lib/auth_preview.ml)
  (action (run node %{dep:test_auth_preview_invite.js} %{dep:../lib/auth_preview.ml})))
@@ -16,7 +11,6 @@
 (alias
  (name runtest)
  (deps
-  (alias runtest-test_auth_preview_pat_expiry)
   (alias runtest-test_auth_preview_invite)
   (alias runtest-test_auth_preview_session)))
 
@@ -80,6 +74,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_ci_failing_suites)))
+
+(rule
+ (alias runtest-test_collect_ocaml_notices)
+ (deps ../scripts/collect-ocaml-notices.py
+       ../scripts/tests/test_collect_ocaml_notices.py)
+ (action (run python3 %{dep:../scripts/tests/test_collect_ocaml_notices.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_collect_ocaml_notices)))
 
 (rule
  (alias runtest-test_keeper_remote_workspace_cleanup)
@@ -2736,6 +2740,7 @@
 (include stanzas/test_anti_rationalization_empty_reject.inc)
 (include stanzas/coding_eval_lib.inc)
 (include stanzas/coding_eval_report_cli.inc)
+(include stanzas/replayed_result_age_seed.inc)
 (include stanzas/test_coding_eval_cases.inc)
 (include stanzas/test_dedup_rules.inc)
 (include stanzas/test_jsonl_retention_window.inc)
@@ -3491,6 +3496,7 @@
 (include stanzas/test_keeper_official_argument_window.inc)
 (include stanzas/test_keeper_official_client_host.inc)
 (include stanzas/test_official_client_canonical_source_digest.inc)
+(include stanzas/test_official_client_result_time.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
@@ -4033,7 +4039,8 @@
  (name test_tui_autonomous_journal)
  (modules test_tui_autonomous_journal)
  (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer
-  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_transcript
   masc_tui_keeper_chat_history masc_tui_render_chat masc_tui_image_preview masc_tui_message_layout
   masc_tui_frame_presenter masc_tui_ansi masc_tui_render_schedule masc_tui_roster_pane yojson))
 
@@ -4820,7 +4827,7 @@
 (test
  (name test_tui_memory_lineage)
  (modules test_tui_memory_lineage)
- (libraries alcotest masc masc_tui_memory_lineage))
+ (libraries alcotest masc masc_tui_memory_lineage masc_tui_terminal_palette yojson))
 
 (test
  (name test_tui_memory_facts_explorer)
@@ -5067,6 +5074,12 @@
  (name test_tui_planning_detail)
  (modules test_tui_planning_detail)
  (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched yojson))
+
+; #39571: a Goal at work past its due date stands apart from one due later.
+(test
+ (name test_tui_planning_due)
+ (modules test_tui_planning_due)
+ (libraries alcotest masc masc.masc_goal masc_tui_planning_due ptime))
 
 (test
  (name test_tui_roster_pane)
@@ -5317,6 +5330,7 @@
 (include stanzas/test_tui_hit.inc)
 (include stanzas/test_tui_pane_selection.inc)
 (include stanzas/test_tui_wheel_reader.inc)
+(include stanzas/test_tui_workspace_precondition.inc)
 (include stanzas/test_tui_wrap_words.inc)
 (include stanzas/test_tui_hint_lines.inc)
 (include stanzas/test_tui_numbered_list.inc)
@@ -5743,6 +5757,14 @@
  (modules test_exec_shim)
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
 
+; #52033: the real shim started with a standard descriptor closed.
+(test
+ (name test_exec_shim_standard_descriptors)
+ (modules test_exec_shim_standard_descriptors)
+ (libraries alcotest exec_ssh_protocol exec_shim unix)
+ (deps ../bin/masc_exec_shim.exe)
+ (action (run %{test} %{dep:../bin/masc_exec_shim.exe})))
+
 (rule
  (alias runtest-test_shim_execution_receipts)
  (enabled_if (= %{system} linux))
@@ -5954,7 +5976,8 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix yojson masc masc.msx_lane masc_tui_types masc_tui_machine_live masc_tui_msx))
+ (libraries alcotest unix yojson masc masc.msx_lane masc_tui_types masc_tui_machine_live masc_tui_msx
+  masc_tui_message_layout))
 
 ; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
 ; shape, the malformed ones, and what a read does to the drawn view.
@@ -6377,6 +6400,12 @@
  (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.fs_compat
   masc.http_client masc.masc_eio_context))
 
+; The lease owner test_onboarding_journey.py runs the setup stop against (#36877).
+(executable
+ (name setup_stop_owner_fixture)
+ (modules setup_stop_owner_fixture)
+ (libraries unix yojson ipaddr masc.server))
+
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_docker_account_access.inc)
 
@@ -6486,7 +6515,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries masc.toml_line_editor alcotest yojson unix eio eio_main masc.agent_core.llm_provider masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries masc.toml_line_editor alcotest yojson unix eio eio_main masc.agent_core.llm_provider masc.auth masc.server masc.runtime masc.masc_core masc.masc_log masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)
@@ -7258,7 +7287,7 @@
 (test
  (name test_tui_pele_protocol)
  (modules test_tui_pele_protocol)
- (libraries alcotest masc_tui_pele unix yojson))
+ (libraries alcotest masc_tui_image_cache masc_tui_pele unix yojson))
 
 (test
  (name test_tui_resource_image_admission)
@@ -7543,3 +7572,5 @@
 (include stanzas/test_server_dashboard_keeper_decisions_current.inc)
 
 (include stanzas/test_http_response_content.inc)
+
+(include stanzas/test_tui_termios_reclaim.inc)

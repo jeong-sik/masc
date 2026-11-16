@@ -13,7 +13,9 @@ let replay ~persist_checkpoint agent ~response ~turn ~invocations ~tool_results 
   in
   let tool_uses_list = Nonempty.to_list tool_uses in
   (* The journal's settled results enter history here, through the same
-     conversion as a live turn's results. *)
+     conversion as a live turn's results. They carry no
+     [Tool_results_appended_at] stamp: the journal does not keep when they
+     settled, and the replay time would make them look new. *)
   let* history_results =
     Agent_turn.make_tool_results ~media_store:agent.media_store report.completed_results
   in

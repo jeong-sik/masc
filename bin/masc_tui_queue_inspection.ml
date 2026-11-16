@@ -93,13 +93,17 @@ let source_integrity = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error "Queue response must be an object"
 
+let queued_state ~not_queued json =
+  let* state = string "state" json in
+  match Keeper_chat_operation.State_name.of_wire state with
+  | Ok Keeper_chat_operation.State_name.Queued -> Ok ()
+  | Ok (Running | Succeeded | Failed | Cancelled) | Error _ -> Error not_queued
+
 let peer_snapshot ~keeper_name json =
   let* schema = string "schema" json in
   let* () = if String.equal schema "masc.keeper_chat_operations.list.v1" then Ok ()
     else Error "Queue response has an unsupported list schema" in
-  let* list_state = string "state" json in
-  let* () = if String.equal list_state "Queued" then Ok ()
-    else Error "Queue response is not a queued operation list" in
+  let* () = queued_state ~not_queued:"Queue response is not a queued operation list" json in
   let* operations = list "operations" json in
   let* decoded = map_result (fun operation ->
     let* schema = string "schema" operation in
@@ -108,9 +112,8 @@ let peer_snapshot ~keeper_name json =
     let* id = string "operation_id" operation in
     let* id = Keeper_chat_operation.Operation_id.of_string id in
     let operation_id = Keeper_chat_operation.Operation_id.to_string id in
-    let* state = string "state" operation in
-    let* () = if String.equal state "Queued" then Ok ()
-      else Error "Queue response contains an operation that is not queued" in
+    let* () = queued_state operation
+      ~not_queued:"Queue response contains an operation that is not queued" in
     let* source = field "source" operation in
     let* integrity = source_integrity operation in
     let* observation = match integrity with

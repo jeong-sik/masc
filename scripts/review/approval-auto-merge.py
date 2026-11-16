@@ -31,6 +31,7 @@ REVIEWS = sibling('github-reviews')
 STACKS = sibling('stack-scope')
 GET = sibling('github-get')
 ISSUES = sibling('linked-issues')
+KEEP = sibling('branch-deletion')  # the sweep keeps the same branches
 CLIENT = GET.Client(
     run=lambda *args, **kwargs: subprocess.run(*args, **kwargs),
     clock=lambda: time.time(), sleep=lambda seconds: time.sleep(seconds),
@@ -685,10 +686,12 @@ def delete_merged_head(repo, number):
     this worker kept their branch and 155 of 156 merged by a user account lost
     it (#51366). The worker therefore removes the branch itself.
 
-    The branch stays when the pull request is not merged, comes from a fork,
-    is a release branch, or is the base of an open pull request. The push
-    carries a lease on the merged head, so a branch that received a commit
-    after the merge is refused by the server and kept.
+    The branch stays when the pull request is not merged or comes from a fork,
+    and for every reason the sweep keeps a branch too (branch-deletion.py):
+    it is the default branch or a release branch, a protection rule or a
+    ruleset applies to it, or an open pull request has it as head or base.
+    The push carries a lease on the merged head, so a branch that received a
+    commit after the merge is refused by the server and kept.
     """
     current = pull(repo, number)
     ref, head = current['head']['ref'], current['head']['sha']
@@ -697,10 +700,16 @@ def delete_merged_head(repo, number):
         return dict(record, deleted=False, reason='not merged')
     if current['head']['repo'] is None or current['head']['repo']['full_name'] != repo:
         return dict(record, deleted=False, reason='head is in another repository')
-    if ref == 'main' or ref.startswith('release/'):
-        return dict(record, deleted=False, reason='protected branch name')
-    if read(f'repos/{repo}/pulls?state=open&base={quote(ref, safe="")}&per_page=1'):
-        return dict(record, deleted=False, reason='an open pull request uses it as base')
+    default = current['head']['repo']['default_branch']
+    if not isinstance(default, str):
+        raise ValueError('the pull request names no default branch')
+    protected = read(f'repos/{repo}/branches/{quote(ref, safe="")}')['protected']
+    if not isinstance(protected, bool):
+        raise ValueError(f'the protection of {ref} was not read')
+    reason = (KEEP.kept_by_rule(ref, default, protected) or
+              KEEP.kept_by_open_pull(repo, ref, read))
+    if reason is not None:
+        return dict(record, deleted=False, reason=reason)
     operation = subprocess.run(
         ['git', '-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential',
          'push', f'--force-with-lease=refs/heads/{ref}:{head}',

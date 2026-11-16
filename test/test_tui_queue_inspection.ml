@@ -242,6 +242,18 @@ let test_peer_relations_use_the_recorded_keeper_identity () =
       (Result.is_error (Inbox.peer_snapshot ~keeper_name:target (peer_page [invalid]))))
     [without "schema" moved; replace "schema" (`String "future") moved;
      duplicate "schema" (`String "masc.keeper_chat_operation.v1") moved];
+  (* The server writes the literal "Queued" for both the list tag and each
+     operation; any other spelling is refused rather than read as queued. *)
+  Alcotest.(check bool) "the server's queued spelling is admitted" true
+    (Result.is_ok (Inbox.peer_snapshot ~keeper_name:target (peer_page [moved])));
+  List.iter (fun spelling ->
+    Alcotest.(check bool) ("list state " ^ spelling ^ " is not a queued list") true
+      (Result.is_error (Inbox.peer_snapshot ~keeper_name:target
+        (replace "state" (`String spelling) (peer_page [moved]))));
+    Alcotest.(check bool) ("operation state " ^ spelling ^ " is not queued") true
+      (Result.is_error (Inbox.peer_snapshot ~keeper_name:target
+        (peer_page [replace "state" (`String spelling) moved]))))
+    ["queued"; "Paused"];
   let sequenced sequence operation = match operation with
     | `Assoc fields -> `Assoc (("sequence", `String sequence) :: fields)
     | _ -> failwith "operation fixture must be an object" in

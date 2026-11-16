@@ -448,10 +448,12 @@ let test_default_limit_is_reported_not_assumed () =
 ;;
 
 (* A list without [detailed] answers which Keepers exist and whether each can
-   take work, so its rows carry the five fields that answer that. In the 240
+   take work, so its rows carry the six fields that answer that. In the 240
    hours to 2026-11-11 12:11 KST that answer was about 58 KB at the median
-   because every row was the whole detail row. *)
-let roster_fields = [ "health"; "name"; "paused"; "phase"; "status" ]
+   because every row was the whole detail row. A Running, healthy Keeper whose
+   every path rests cannot take work until a path releases, and only
+   [runtime_path_rest] says so (#52076). *)
+let roster_fields = [ "health"; "name"; "paused"; "phase"; "runtime_path_rest"; "status" ]
 
 let field_names row =
   match row with
@@ -485,7 +487,7 @@ let test_default_list_carries_roster_rows () =
         check int "one row per Keeper" 2 (List.length rows);
         List.iter
           (fun row ->
-            check (list string) "a roster row carries the five fields and nothing else"
+            check (list string) "a roster row carries the six fields and nothing else"
               roster_fields (field_names row))
           rows))
     [ `Assoc []; `Assoc [ "detailed", `Bool false ] ]

@@ -3,7 +3,7 @@ rfc: "librarian-durable-message-floor"
 title: "Librarian durable 경로도 메시지 바닥까지 나눠 읽고, 그래도 못 읽는 메시지는 기록하고 지나간다"
 status: Implemented (L2~L5 병합 2026-10-29, 맨 위 #46690. 긴 턴의 비용은 3.10, #46717)
 created: 2026-10-27
-updated: 2026-10-29
+updated: 2026-11-15
 author: claude
 related: ["librarian-lifecycle", "librarian-history-original-holds-what-it-read"]
 ---
@@ -131,7 +131,7 @@ L3 을 한 PR 로 쓰지 않고 아래로 나눠 L2(#46568) 위에 쌓는다.
 | L3b | Runtime 이 durable 단계를 준비·복원·검증하고, 보관된 답과 gate 판정으로 `memory_step` 을 찍는 입구 | #46580 |
 | L3c | 단계 request: 일반 history original 과 다른 scope·ID·kind. 자기 입력(메시지 하나, 그 시점의 facts, 이어받는 상태)을 담아 record 하나로 복원한다. 거절된 범위 original 과 앞 단계를 ID 와 digest 로 가리킨다. 호스트 증명과 질문 코덱은 history 요청과 같은 모듈을 쓴다 | #46587 |
 | L3d | 단계를 worker 로 돌리고 사슬로 잇는다. 첫 층은 단계 owner(retain·discover·resume)이고, host 의 Exact 권한 검사와 wake 가 단계를 알아본다. 둘째 층은 단계 gate 저널(`Keeper_librarian_original_gate.Make`), gate 만 거친 단계 판정, 사슬 구동(`Keeper_librarian_floor_chain.run`)이다. 구동은 단계를 찾거나 만들고, 답을 판정해 기계에 넣고, 크기로 거절된 메시지는 구멍으로 두고 넘어가고, 그 밖의 거절에서 멈춘다 | #46596, #46607 |
-| L3e~L5 | 5절. 부르는 곳이 없는 두 층(L3e, L4)을 먼저 쌓고, 마지막 층(L5)에서 `consume_one` 에 연결한다 | 예정 |
+| L3e~L5 | 5절. 부르는 곳이 없는 두 층(L3e, L4)을 먼저 쌓고, 마지막 층(L5)에서 `consume_one` 에 연결한다 | #46674, #46677, #46690 |
 
 확정한 것.
 
@@ -164,7 +164,7 @@ L3d 에서 정한 것.
 
 열린 것.
 
-- **게시 때 Memory 가 달라졌을 때.** `Program.replay` 가 그사이 바뀐 Memory 때문에 거절하면 사슬을 어떻게 할지는 L4 에서 정한다. 3.9 의 6번이 현재 안이다.
+- **게시 때 Memory 가 달라졌을 때.** 정했다(3.10 의 8번): 사슬의 단계를 모두 정리하고, 다음 pass 가 그때의 Memory 로 처음부터 돌린다.
 - **단계 gate 저널의 inventory 검증.** history 원본은 consume pass 마다 inventory 로 gate 사슬을 검증한다(`Commit.validate_inventory`). 단계에는 아직 같은 검증이 없고, `judge` 가 저널을 돌릴 때만 확인한다. L5 에서도 넣지 않았다(3.10).
 - **켜진 gate 의 모델 호출.** 시험은 gate 를 끈 상태로 돈다(history 시험과 같다). 켜진 gate 가 모델에게 묻는 부분은 단계 경로도 history 경로도 시험이 거치지 않는다.
 
@@ -224,9 +224,9 @@ L3e 이후를 쓰려고 `consume_one`, `Commit`, `Source_lock` 코드를 읽고 
 |---|---|---|
 | L1 | 이 RFC | — |
 | L2 | durable `refusal_report` 가 3.1 의 크기 거절에만 `Smaller_input_may_help`·`provider_input_refusals` 를 싣는다. host 기록이 없는 frame 거절은 final 만으로, 기록이 있는 거절은 실행 영수증의 소진 증거로 판정한다. 바닥은 아직 없다 | 크기 거절과 다른 거절의 보고 차이, 영수증 증거가 없는 `Input_capacity` 는 근거 없음 |
-| L3 | 3.8 의 L3a~L3d. 바닥의 상태기계, Runtime 입구, 단계 request, 단계 owner, 사슬 구동. 부르는 곳이 없다 | 단계 사슬 crash·재개, 같은 단계 재호출 없음, 구멍 보존 |
-| L3e | 하강 후보 판정과 사슬 입력 읽기(3.9 의 1번, 7번). 부르는 곳이 없다 | 크기 거절은 후보. `Invalid_request`, 열린 host 기록, 여러 턴 범위, 영수증이 있는 범위, 읽기 위치가 움직인 원본은 후보가 아님. 체크포인트가 원본 출처와 다르면 거절. 외부 커서가 움직여도 읽는다 |
-| L4 | 게시(3.9 의 3번, 5번, 6번, 9번). 끝난 사슬의 program 을 Memory 에 쓰고, 영수증에 구멍을 싣고, 위치를 옮기고, 단계 기록을 정리한다. 부르는 곳이 없다 | 구멍 하나와 나머지 메시지의 Memory, 위치 이동, crash 뒤 재개, 영수증이 있을 때 다시 쓰지 않음. `specs/bug-models/LibrarianRead.tla` 의 `NoAtomPassedUnread` 와 맞는지 |
+| L3 | 3.8 의 L3a~L3d. 바닥의 상태기계, Runtime 입구, 단계 request, 단계 owner, 사슬 구동 | 단계 사슬 crash·재개, 같은 단계 재호출 없음, 구멍 보존 |
+| L3e | 하강 후보 판정과 사슬 입력 읽기(3.9 의 1번, 7번) | 크기 거절은 후보. `Invalid_request`, 열린 host 기록, 여러 턴 범위, 영수증이 있는 범위, 읽기 위치가 움직인 원본은 후보가 아님. 체크포인트가 원본 출처와 다르면 거절. 외부 커서가 움직여도 읽는다 |
+| L4 | 게시(3.9 의 3번, 5번, 6번, 9번). 끝난 사슬의 program 을 Memory 에 쓰고, 영수증에 구멍을 싣고, 위치를 옮기고, 단계 기록을 정리한다 | 구멍 하나와 나머지 메시지의 Memory, 위치 이동, crash 뒤 재개, 영수증이 있을 때 다시 쓰지 않음. `specs/bug-models/LibrarianRead.tla` 의 `NoAtomPassedUnread` 와 맞는지 |
 | L5 | `consume_one` 에 연결(3.9 의 2번, 4번, 8번, 구현은 3.10). 후보 원본을 보관소로 옮기지 않고(frontier 로는 세지 않는다) 사슬을 돌린다. 후보가 아닌 사슬의 단계 기록을 정리한다. bench 는 `1:5` 만 7,200초까지 쟀고 `5:5` 는 끝까지 돌리지 못했다(3.10) | 실제 worker 와 실제 4 MiB frame 으로 5 MB 메시지 하나가 든 턴: 하강은 한 번, 구멍 하나, 나머지 메시지의 Memory, 위치 이동 |
 
 L3e~L5 를 이렇게 나눈 이유는 연결을 마지막에 두려는 것이다. 게시가 없는 채로 `consume_one` 에 연결하면 사슬이 끝나도 쓸 곳이 없다. L3e 와 L4 는 부르는 곳이 없어서 L5 가 들어갈 때까지 동작이 바뀌지 않는다.

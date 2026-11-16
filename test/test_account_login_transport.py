@@ -14,8 +14,10 @@ HELPER = Path(__file__).resolve().parents[1] / 'scripts/account-login-transport.
 
 class Transport:
     def __init__(self, source, mode='pipe'):
+        # The native caller gives a PTY its rows and columns after the mode.
+        invocation = ['pty', '24', '80'] if mode == 'pty' else [mode]
         self.process = subprocess.Popen(
-            [sys.executable, str(HELPER), mode, sys.executable, '-u', '-c', source],
+            [sys.executable, str(HELPER), *invocation, sys.executable, '-u', '-c', source],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.pending = b''
         self.events = []
@@ -117,6 +119,22 @@ class LoginTransportTests(unittest.TestCase):
         self.assertIn('echo-off', transport.output())
         self.assertIn('accepted', transport.output())
         self.assertNotIn('private-code', transport.output())
+
+    def test_pty_has_the_screen_size_the_caller_reads(self):
+        transport = self.transport(
+            "import os\nsize=os.get_terminal_size(0)\n"
+            "print(size.lines, size.columns, flush=True)\n", 'pty')
+        self.assertEqual(transport.complete()['code'], 0)
+        self.assertIn('24 80', transport.output())
+
+    def test_pty_size_must_be_two_positive_numbers(self):
+        for size in (['0', '80'], ['24', '65536'], ['x', '80'], ['24']):
+            result = subprocess.run(
+                [sys.executable, str(HELPER), 'pty', *size, sys.executable, '-c', 'pass'],
+                stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 1, size)
+            self.assertEqual(json.loads(result.stdout), {'event': 'transport_error'}, size)
+            self.assertEqual(result.stderr, b'', size)
 
     def test_pty_arrow_and_eof_bytes(self):
         transport = self.transport(

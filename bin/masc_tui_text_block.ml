@@ -46,13 +46,17 @@ let leading_spaces line =
 (* [wrap_words] reads words, so the spaces that open a line are not part of
    what it returns. Prose has no use for them. Pretty-printed JSON, code and
    an indented list are made of them, so [keep_indent] gives them back: the
-   line keeps its own indent, and so does every row it wraps to. *)
-let rows_of_line ~sanitize ~wrap ~keep_indent ~max_cells line =
+   line keeps its own indent, and so does every row it wraps to.
+
+   [counted] is indent that arrives as a number of cells rather than as
+   spaces in [line]; the line's indent is that and the spaces it opens with
+   together. *)
+let rows_of_line ~sanitize ~wrap ~keep_indent ~max_cells ~counted line =
   let line = drop_line_terminator line in
   let opening = if keep_indent then leading_spaces line else 0 in
   (* Half the width is the most an indent can take, so a deeply nested line
      still has room for its text. *)
-  let indent = min opening (max_cells / 2) in
+  let indent = min (counted + opening) (max_cells / 2) in
   let text =
     if opening = 0 then line
     else String.sub line opening (String.length line - opening)
@@ -68,7 +72,8 @@ let rows_of_line ~sanitize ~wrap ~keep_indent ~max_cells line =
 
 let rows_with ~sanitize ~wrap ~keep_indent ~max_cells text =
   String.split_on_char '\n' text
-  |> List.concat_map (rows_of_line ~sanitize ~wrap ~keep_indent ~max_cells)
+  |> List.concat_map
+       (rows_of_line ~sanitize ~wrap ~keep_indent ~max_cells ~counted:0)
   |> trim_blank_edges
 
 let sanitize = Masc.Tui_terminal_text.sanitize_terminal_text
@@ -84,7 +89,14 @@ let preformatted_rows ~max_cells text =
 (* The text already carries its colour, so it cannot go through the sanitiser:
    the escapes are what it would spell out. Its writer made it safe and put
    those escapes there. A wrapped row opens the style it continues and closes
-   it, as {!Message_layout.wrap_styled_words} does. *)
-let preformatted_styled_rows ~max_cells text =
-  rows_with ~sanitize:Fun.id ~wrap:Message_layout.wrap_styled_words
-    ~keep_indent:true ~max_cells text
+   it, as {!Message_layout.wrap_styled_words} does.
+
+   The lines arrive with their indent counted, so a margin is made only for
+   the cells a row keeps: a line indented twenty thousand cells costs the
+   half row it is drawn with, not twenty thousand spaces. *)
+let preformatted_styled_rows ~max_cells lines =
+  lines
+  |> List.concat_map (fun (counted, line) ->
+    rows_of_line ~sanitize:Fun.id ~wrap:Message_layout.wrap_styled_words
+      ~keep_indent:true ~max_cells ~counted line)
+  |> trim_blank_edges

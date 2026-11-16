@@ -23,7 +23,7 @@ type source =
   | Msx_capture of { id : string }
   | Dos_capture of { id : string }
   | Lane_output of { id : string; installation_id : string; output_id : string option }
-  | Browser_document of { id : string; selection : browser_selection;
+  | Browser_document of { id : string; installation_id : string; selection : browser_selection;
       tab_id : int; target_id : string; environment : string; request_id : string }
 type kind = Snapshot_file_kind | Msx_capture_kind | Dos_capture_kind
   | Lane_output_kind | Browser_document_kind | Fusion_run_kind
@@ -103,6 +103,9 @@ let parse_source = function
             | Some (`String "latest_completed") -> Ok (Lane_output {id;installation_id;output_id})
             | _ -> Error "lane_output selection must be latest_completed")
        | Some Browser_document_kind ->
+           let* installation_id = match List.assoc_opt "installation_id" fields with
+             | None -> Error "browser_document requires installation_id, the declaration id of the browser Add-on installation it reads"
+             | Some _ -> text fields "installation_id" in
            let* client_id = match List.assoc_opt "client_id" fields with
              | None | Some `Null -> Ok None
              | Some (`String value) ->
@@ -127,7 +130,7 @@ let parse_source = function
            let* target_id = text fields "target_id" in
            let* environment = text fields "environment" in
            let* request_id = text fields "request_id" in
-           Ok (Browser_document {id;selection;tab_id;target_id;environment;request_id})
+           Ok (Browser_document {id;installation_id;selection;tab_id;target_id;environment;request_id})
        | None -> Error "unknown observation source kind")
   | _ -> Error "source requires an object"
 let parse = function
@@ -163,6 +166,9 @@ let interested sources activity = List.exists (function
   | Dos_capture _ -> activity=Machine_changed Machine_lane.Dos
   | Browser_document _ -> activity=Browser_changed
   | Lane_output _ -> false) sources
+let reads_browser_installation sources installation_id = List.exists (function
+  | Browser_document {installation_id=bound;_} -> String.equal bound installation_id
+  | Fusion_run _ | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ -> false) sources
 (* Which typed activity a finished misc tool stands for, named beside the
    activity it produces. Every operation is listed: a tool added to
    {!Tool_schemas_misc.misc_operation} has to say whether it moves an MSX or a
@@ -445,10 +451,10 @@ let machine_capture ~store ~resolve_machine_output ~machine ~id =
     "input_cursor",cursor;"input_ledger",`Assoc ["format",`String format;
       "entry_count",`Int count;"evidence",evidence_json input_ledger]] @ extra) in
   Ok (envelope ~id ~incarnation ~cursor ~complete:true ~detail:`Null [observation])
-let browser_document ~store ~max_bytes ~read_browser_document ~id ~selection ~tab_id ~target_id ~environment ~request_id =
+let browser_document ~store ~max_bytes ~read_browser_document ~id ~installation_id ~selection ~tab_id ~target_id ~environment ~request_id =
   let route = match selection with
     | Live client -> Browser_lane.Live_route (Some client) in
-  let* fields = match read_browser_document ~route ~tab_id with
+  let* fields = match read_browser_document ~installation_id ~route ~tab_id with
     | Error message -> Error message
     | Ok (Browser_lane.Answered (`Assoc envelope)) ->
         (match List.assoc_opt "ok" envelope, List.assoc_opt "data" envelope with
@@ -546,8 +552,8 @@ let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_machin
       | Dos_capture {id} -> machine_capture ~store ~resolve_machine_output ~machine:Machine_lane.Dos ~id
       | Lane_output {id;installation_id;output_id} ->
           lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~output_id
-      | Browser_document {id;selection;tab_id;target_id;environment;request_id} ->
-          browser_document ~store ~max_bytes ~read_browser_document ~id ~selection
+      | Browser_document {id;installation_id;selection;tab_id;target_id;environment;request_id} ->
+          browser_document ~store ~max_bytes ~read_browser_document ~id ~installation_id ~selection
             ~tab_id ~target_id ~environment ~request_id in
     match result with Ok json -> json | Error message -> unavailable source message in
   (* Reserve room for an honest unavailable result for every source before

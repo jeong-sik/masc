@@ -1,0 +1,23 @@
+{
+  "operator_disposition_reasons": [
+    "healthy",
+    "runtime_exhausted",
+    "config_invalid",
+    "authorization_refused",
+    "degraded_retry",
+    "runtime_fallback",
+    "transient_runtime_retry",
+    "provider_runtime_error",
+    "internal_error",
+    "input_required",
+    "cancelled",
+    "phase_skipped",
+    "transcript_corruption",
+    "official_client_recovery_required",
+    "provider_attempt_effect_fenced",
+    "tool_correction_lost",
+    "accept_rejected",
+    "terminal_effect_failed",
+    "unmapped_runtime_state"
+  ]
+}

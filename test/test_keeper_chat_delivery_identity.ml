@@ -215,11 +215,41 @@ let test_autonomous_input_wire () =
     ; [ input "approval-a" (String.make 64 'A') ]; [ input "bad id" (String.make 64 'a') ] ]
 ;;
 
+let test_delivery_key_order_respects_identity () =
+  let request value = Identity.Request_id.of_string value |> expect_ok in
+  let checkpoint trace turn digest =
+    Keeper_checkpoint_ref.of_persisted ~trace_id:(Keeper_id.Trace_id.of_string trace)
+      ~turn_count:turn ~sha256:(String.make 64 digest) |> Result.get_ok
+  in
+  let keys =
+    List.concat_map (fun id ->
+      let operation_id = request id in
+      [ Identity.Operation operation_id; Identity.Fusion_run operation_id
+      ; Identity.Workspace_message operation_id; Identity.Connector_message operation_id
+      ; Identity.Approval_lifecycle operation_id
+      ; Identity.Autonomous_turn (Ids.Turn_ref.make ~trace_id:id ~absolute_turn:1)
+      ; Identity.Autonomous_turn (Ids.Turn_ref.make ~trace_id:id ~absolute_turn:2)
+      ; Identity.Operation_native { operation_id; continuation_id = request "first" }
+      ; Identity.Operation_native { operation_id; continuation_id = request "second" }
+      ] @ List.map (fun checkpoint -> Identity.Operation_checkpoint { operation_id; checkpoint })
+        [ checkpoint "trace-a" 1 'a'; checkpoint "trace-b" 1 'a'
+        ; checkpoint "trace-a" 2 'a'; checkpoint "trace-a" 1 'b' ])
+      [ "delivery-a"; "delivery-b" ]
+  in
+  List.iter (fun left -> List.iter (fun right ->
+    check bool "set equality matches typed delivery identity"
+      (Identity.delivery_key_equal left right) (Identity.delivery_key_compare left right = 0);
+    check int "order is antisymmetric" 0
+      (Int.compare (Identity.delivery_key_compare left right) 0
+       + Int.compare (Identity.delivery_key_compare right left) 0)) keys) keys
+;;
+
 let () =
   run
     "keeper chat delivery identity"
     [ ( "identity"
       , [ test_case "operation roundtrip" `Quick test_operation_roundtrip
+        ; test_case "delivery ordering respects identity" `Quick test_delivery_key_order_respects_identity
         ; test_case "native operation roundtrip" `Quick test_native_operation_roundtrip
         ; test_case
             "Fusion run roundtrip"

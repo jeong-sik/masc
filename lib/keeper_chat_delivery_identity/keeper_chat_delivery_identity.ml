@@ -262,6 +262,42 @@ let delivery_key_equal left right =
     false
 ;;
 
+let delivery_key_compare left right =
+  let request id = Request_id.to_string id in
+  let checkpoint (value : Keeper_checkpoint_ref.t) =
+    Keeper_id.Trace_id.to_string value.trace_id, value.turn_count, value.sha256
+  in
+  let rank = function
+    | Operation _ -> 0 | Operation_checkpoint _ -> 1 | Operation_native _ -> 2
+    | Fusion_run _ -> 3 | Workspace_message _ -> 4 | Connector_message _ -> 5
+    | Approval_lifecycle _ -> 6 | Autonomous_turn _ -> 7
+  in
+  match left, right with
+  | Operation left, Operation right
+  | Fusion_run left, Fusion_run right
+  | Workspace_message left, Workspace_message right
+  | Connector_message left, Connector_message right
+  | Approval_lifecycle left, Approval_lifecycle right ->
+    String.compare (request left) (request right)
+  | Operation_checkpoint left, Operation_checkpoint right ->
+    Stdlib.compare
+      (request left.operation_id, checkpoint left.checkpoint)
+      (request right.operation_id, checkpoint right.checkpoint)
+  | Operation_native left, Operation_native right ->
+    Stdlib.compare
+      (request left.operation_id, request left.continuation_id)
+      (request right.operation_id, request right.continuation_id)
+  | Autonomous_turn left, Autonomous_turn right ->
+    Stdlib.compare
+      (Ids.Turn_ref.trace_id left, Ids.Turn_ref.absolute_turn left)
+      (Ids.Turn_ref.trace_id right, Ids.Turn_ref.absolute_turn right)
+  | (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _
+    | Workspace_message _ | Connector_message _ | Approval_lifecycle _ | Autonomous_turn _),
+    (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _
+    | Workspace_message _ | Connector_message _ | Approval_lifecycle _ | Autonomous_turn _) ->
+    Int.compare (rank left) (rank right)
+;;
+
 let transcript_slot_to_yojson = function
   | Accepted_user -> `Assoc [ "kind", `String "accepted_user" ]
   | Terminal_result -> `Assoc [ "kind", `String "terminal_result" ]

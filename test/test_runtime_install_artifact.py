@@ -74,7 +74,7 @@ class RuntimeInstallArtifact(unittest.TestCase):
         installed = subprocess.run(["bash", str(extracted / artifact.SOURCES[0]),
                                    "--skip-build", "--build-dir", str(extracted / "bin"),
                                    "--prefix", str(prefix),
-                                   "--base-path", str(self.root / "new-workspace"), "--no-guest-shim"],
+                                   "--base-path", str(self.root / "new-workspace")],
                                   env=env, capture_output=True, text=True)
         self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
         inputs = [extracted / name for name in artifact.targets(self.repo)]

@@ -65,11 +65,13 @@ browser refresh procedures apply, with an explicit workspace base path:
 
 ```sh
 bash runtime/scripts/install-local-build.sh --skip-build \
-  --build-dir "$PWD/runtime/bin" --base-path /path/to/workspace --no-guest-shim
+  --build-dir "$PWD/runtime/bin" --base-path /path/to/workspace
 ```
 
-`--no-guest-shim` leaves an existing guest release shim in place; the artifact
-does not contain a guest image or shim upgrade. The installer also accepts its
+Local installation leaves an existing guest release shim in place without
+querying a release. Use `--refresh-guest-shim` when a microVM deployment needs
+the build's release shim; the artifact itself contains no guest image or shim.
+The installer also accepts its
 normal prefix and manifest directory options. A running server keeps its old
 build until explicitly restarted. Verify the installed executable, process,
 effective base path, Add-on generation and actual browser behavior separately.

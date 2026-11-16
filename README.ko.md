@@ -155,6 +155,9 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 
 대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`와
 배포 사전점검 도구를 한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요.
+평소 설치는 microVM 게스트 shim 을 그대로 두며 릴리즈를 조회하지 않습니다.
+서버·shim 변경을 microVM 에 배포하거나 `remote_shim_outdated` 를 해결할 때만
+`--refresh-guest-shim` 을 붙이세요. 기존 릴리즈 shim 을 갱신합니다.
 아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`을 검사합니다.
 경로가 해석되고 아직 존재하지 않는다고 확인되면 새 작업 공간으로 취급하고 검사는
 미실행으로 표시합니다. 경로를 해석하거나 관측할 수 없으면 교체 전에

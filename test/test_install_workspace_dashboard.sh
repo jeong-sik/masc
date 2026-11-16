@@ -141,7 +141,7 @@ case "$1" in
 esac
 HELPER
     chmod +x "$dir/repo/_build/default/bin/deployment_preflight_helper.exe"
-    ( cd "$dir/repo" && bash scripts/install-local-build.sh --skip-build --no-guest-shim \
+    ( cd "$dir/repo" && bash scripts/install-local-build.sh --skip-build \
         --prefix "$dir/prefix" --base-path "$dir/runtime" >"$OUT" 2>"$ERR" ) \
         || { cat "$ERR" >&2; fail "the installer failed"; }
 }

@@ -805,7 +805,7 @@ class LocalBuildInstall(unittest.TestCase):
                     result = subprocess.run(
                         ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
                          "--prefix", str(prefix),
-                         "--base-path", str(selected), "--no-guest-shim"],
+                         "--base-path", str(selected)],
                         capture_output=True, text=True)
                 finally:
                     if inaccessible is not None:

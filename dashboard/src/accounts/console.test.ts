@@ -15,7 +15,7 @@ import type { ConsoleModel, Shown, View } from './console'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
 import { createAllowlist } from './allowlist'
 import type { AllowlistModel } from './allowlist'
-import { createInvites } from './invites'
+import { createInvites, followInvites } from './invites'
 import type { InvitesModel } from './invites'
 import { createKeepers } from './keepers'
 import { createMembers } from './members'
@@ -354,6 +354,162 @@ describe('signing out', () => {
   })
 })
 
+describe('a request of a panel that the server refused', () => {
+  const other = 'usr_someone_else'
+  const panelPath = '/api/v1/auth/tokens'
+  const write = (token: string): RequestInit => ({ method: 'POST', headers: { accept: 'application/json', [csrfHeader]: token }, body: '{}' })
+  const readOnly: RequestInit = { method: 'GET', headers: { accept: 'application/json' } }
+  const done = (): Response => json(200, {})
+  const notAllowed = (): Response => json(403, { error: 'the account may not do this' })
+  const sentTokens = (sent: readonly Sent[], path = panelPath): Array<string | null> =>
+    sent.filter((one) => one.path === path).map((one) => new Headers(one.init.headers).get(csrfHeader))
+  const readings = (sent: readonly Sent[]): number => sent.filter((one) => one.path === paths.session).length
+
+  /** A model that has read the session of `person` with the token `token`. */
+  async function signedIn(after: readonly Scripted[]) {
+    const started = start([aSession(), aWho(), ...after])
+    await started.model.load()
+    return started
+  }
+
+  it('sends a write once more with the token of now when the same person signed in again, and keeps that session', async () => {
+    const { model, sent, leave } = await signedIn([staleToken(), aSession('token-of-now'), aWho(), done()])
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(200)
+    expect(sentTokens(sent)).toEqual(['token', 'token-of-now'])
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', session: { userId: person, csrfToken: 'token-of-now' }, signOut: { kind: 'idle' } })
+    expect(leave).not.toHaveBeenCalled()
+  })
+
+  it('says the account changed, and sends nothing again, when another person signed in', async () => {
+    const { model, sent } = await signedIn([staleToken(), aSession('token-of-them', other), aWho('worker', other)])
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(403)
+    expect(sentTokens(sent)).toEqual(['token'])
+    expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+  })
+
+  it('says the account changed when the two answers of the reading name two people', async () => {
+    const { model, sent } = await signedIn([staleToken(), aSession('token-of-now'), aWho('worker', other)])
+    await model.send(panelPath, write('token'))
+    expect(sentTokens(sent)).toEqual(['token'])
+    expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+  })
+
+  it('leaves for the sign-in page when no session is left', async () => {
+    const { model, sent, leave } = await signedIn([staleToken(), noSession()])
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(403)
+    expect(leave).toHaveBeenCalledTimes(1)
+    expect(model.view.value).toEqual({ kind: 'leaving' })
+    expect(sentTokens(sent)).toEqual(['token'])
+  })
+
+  it('gives the refusal when the session still has the token sent: the account may not do it', async () => {
+    const { model, sent } = await signedIn([notAllowed(), aSession(), aWho()])
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(403)
+    expect(sentTokens(sent)).toEqual(['token'])
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', session: { csrfToken: 'token' } })
+  })
+
+  it('gives the refusal, and keeps the page, when the session cannot be read again', async () => {
+    const { model, sent, leave } = await signedIn([staleToken(), 'no answer'])
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(403)
+    expect(sentTokens(sent)).toEqual(['token'])
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', session: { csrfToken: 'token' } })
+    expect(leave).not.toHaveBeenCalled()
+  })
+
+  it('sends a request that carried no token only once, and still takes the session of now', async () => {
+    const { model, sent } = await signedIn([notAllowed(), aSession('token-of-now'), aWho()])
+    const answer = await model.send(panelPath, readOnly)
+    expect(answer.status).toBe(403)
+    expect(sentTokens(sent)).toEqual([null])
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', session: { csrfToken: 'token-of-now' } })
+  })
+
+  it('sends once more only: the answer to that one is the answer', async () => {
+    const { model, sent } = await signedIn([staleToken(), aSession('token-of-now'), aWho(), staleToken()])
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(403)
+    expect(sentTokens(sent)).toEqual(['token', 'token-of-now'])
+    expect(readings(sent)).toBe(2)
+  })
+
+  it('reads the session once for refusals that come together, and sends each again', async () => {
+    const otherPath = '/api/v1/auth/invites'
+    const { model, sent } = await signedIn([staleToken(), staleToken(), aSession('token-of-now'), aWho(), done(), done()])
+    const answers = await Promise.all([model.send(panelPath, write('token')), model.send(otherPath, write('token'))])
+    expect(answers.map((one) => one.status)).toEqual([200, 200])
+    expect([sentTokens(sent), sentTokens(sent, otherPath)]).toEqual([['token', 'token-of-now'], ['token', 'token-of-now']])
+    expect(readings(sent)).toBe(2)
+  })
+
+  it('sends a write refused for a token older than the page holds again without reading the session', async () => {
+    const { model, sent } = await signedIn([staleToken(), aSession('token-of-now'), aWho(), done(), staleToken(), done()])
+    await model.send(panelPath, write('token'))
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(200)
+    expect(sentTokens(sent)).toEqual(['token', 'token-of-now', 'token', 'token-of-now'])
+    expect(readings(sent)).toBe(2)
+  })
+
+  it('does not send again, as another person, a write made for the person the page showed when it left', async () => {
+    const otherPath = '/api/v1/auth/invites'
+    let answerFirst: (response: Response) => void = () => undefined
+    const first = new Promise<Response>((resolve) => { answerFirst = resolve })
+    const them = (): Response[] => [aSession('token-of-them', other), aWho('worker', other)]
+    const { model, sent } = await signedIn([first, staleToken(), ...them(), ...them(), ...them()])
+    const pending = model.send(panelPath, write('token'))
+    // Another refusal finds that another person signed in, and the page
+    // reads that person on a retry, while the first write is under way.
+    await model.send(otherPath, write('token'))
+    expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+    await model.load()
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', who: { id: other } })
+    answerFirst(staleToken())
+    expect((await pending).status).toBe(403)
+    expect(sentTokens(sent)).toEqual(['token'])
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', who: { id: other }, session: { csrfToken: 'token-of-them' } })
+  })
+
+  it('passes every other answer through and reads nothing', async () => {
+    const { model, sent } = await signedIn([notReady()])
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(503)
+    expect(sentPaths(sent).slice(2)).toEqual([panelPath])
+  })
+
+  it('reads nothing before anyone is signed in', async () => {
+    const { model, sent } = start([staleToken()])
+    const answer = await model.send(panelPath, write('token'))
+    expect(answer.status).toBe(403)
+    expect(sentPaths(sent)).toEqual([panelPath])
+  })
+
+  it('lets an Admin make an invitation after signing in again in another tab, with no new page', async () => {
+    const { send, sent } = scripted([
+      aSession(), aWho('admin'), json(200, { invites: [] }),
+      staleToken(), aSession('token-of-now'), aWho('admin'),
+      json(200, { invite_id: 'inv_1', role: 'member', expires_at_ms: 1, link: '/accounts/invite#secret' }),
+      json(200, { invites: [] }),
+    ])
+    const model = createConsole({ send, leave: vi.fn() })
+    const invites = createInvites({ send: model.send, leave: vi.fn() })
+    const stop = followInvites(model.view, invites)
+    await model.load()
+    await waitFor(() => { expect(invites.view.value.kind).toBe('read') })
+    await invites.make('member')
+    expect(invites.making.value).toMatchObject({ kind: 'issued', issued: { id: 'inv_1' } })
+    expect(sentTokens(sent, '/api/v1/auth/invites').filter((token) => token !== null)).toEqual(['token', 'token-of-now'])
+    // The list read after the invitation is the last request.
+    await waitFor(() => { expect(sent).toHaveLength(8) })
+    stop()
+  })
+})
+
 it('keeps nothing of a session in web storage', async () => {
   const { model } = start([aSession(), aWho(), signedOut()])
   await model.load()
@@ -384,7 +540,12 @@ describe('the frame', () => {
   /** The frame of one state, over a model that only counts what it is asked. */
   const drawn = (view: View) => {
     const state = signal(view)
-    const model = { view: state, load: vi.fn(() => Promise.resolve()), signOut: vi.fn(() => Promise.resolve()) } satisfies ConsoleModel
+    const model = {
+      view: state,
+      load: vi.fn(() => Promise.resolve()),
+      signOut: vi.fn(() => Promise.resolve()),
+      send: () => Promise.reject(new Error('nothing is sent')),
+    } satisfies ConsoleModel
     return { container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} keepers=${waitingKeepers()} tokens=${waitingTokens()} invites=${waitingInvites()} allowlist=${waitingAllowlist()} members=${waitingMembers()} />`).container, model, state }
   }
   const count = (selector: string) => views.map(([name, view]) => [name, drawn(view).container.querySelectorAll(selector).length])

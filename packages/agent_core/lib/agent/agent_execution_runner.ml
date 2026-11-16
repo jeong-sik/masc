@@ -57,6 +57,7 @@ let store ~(runtime : runtime) ~dir ?on_scope_ready ?on_terminal_disposition ?re
 let locator_to_yojson = Execution_agent_scope.scope_locator_to_yojson
 let locator_of_yojson = Execution_agent_scope.scope_locator_of_yojson
 let locator_run_id = Execution_agent_scope.scope_locator_run_id
+let locator_scope (locator : locator) = locator
 
 let execution_failure detail =
   Provider_failure_attribution.of_core_error

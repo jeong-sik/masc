@@ -37,6 +37,16 @@ const TOOLS = [
   { name: 'masc_board_list', publicNames: ['masc_board_list'], perHour: 22, failShare: 0, p50: 85, p95: 410, maxMs: 1_300, longShare: 0, longMs: 0, resultBytes: 3_100 },
 ]
 const QUIET_BUCKET_FROM_END = 7
+// How a bucket's failed calls split over the classes the server records (`Tool_result.tool_failure_class`).
+// What the shares leave over has no recorded class, as a failure stored before classes were kept.
+const FAILURE_CLASS_SHARES = {
+  dependency_unavailable: 0.25,
+  policy_rejection: 0.15,
+  runtime_failure: 0.4,
+  workflow_rejection: 0.1,
+  operator_cancelled: 0,
+}
+const FAILURE_CLASSES = Object.keys(FAILURE_CLASS_SHARES)
 
 // The observer instance the stub admits. The keepalive interval and the idle deadline are the
 // server's own (lib/server/server_mcp_transport_http_headers.ml: `sse_ping_interval_s`,
@@ -71,11 +81,21 @@ function bucketStarts(sinceHours, bucket, utcOffsetMin) {
   return { since, length, starts }
 }
 
+/** The class counts of `failures` failed calls and the count left with no class; together they are `failures`. */
+function failureClassesOf(failures) {
+  const failure_classes = Object.fromEntries(
+    FAILURE_CLASSES.map(name => [name, Math.floor(failures * FAILURE_CLASS_SHARES[name])]),
+  )
+  const classified = FAILURE_CLASSES.reduce((sum, name) => sum + failure_classes[name], 0)
+  return { failure_classes, failure_unclassified_count: failures - classified }
+}
+
 function statOf(tool, index, factor, quiet) {
   if (quiet) {
     return {
-      call_count: 0, failure_count: 0, deferred_count: 0, total_ms: 0, p50_ms: null, p95_ms: null, max_ms: null,
-      long_count: 0, long_total_ms: 0, result_observed_count: 0, result_bytes_total: 0, result_bytes_max: null,
+      call_count: 0, failure_count: 0, ...failureClassesOf(0), deferred_count: 0, total_ms: 0, p50_ms: null,
+      p95_ms: null, max_ms: null, long_count: 0, long_total_ms: 0, result_observed_count: 0, result_bytes_total: 0,
+      result_bytes_max: null,
     }
   }
   const calls = Math.round(tool.perHour * factor * (0.45 + 1.1 * wobble(index, tool.perHour)))
@@ -87,6 +107,7 @@ function statOf(tool, index, factor, quiet) {
   return {
     call_count: calls,
     failure_count: failures,
+    ...failureClassesOf(failures),
     deferred_count: 0,
     total_ms: Math.round(calls * p50 * 1.6) + longTime,
     p50_ms: p50,
@@ -110,6 +131,10 @@ function sumStats(rows) {
   return {
     call_count: calls,
     failure_count: rows.reduce((sum, row) => sum + row.failure_count, 0),
+    failure_classes: Object.fromEntries(
+      FAILURE_CLASSES.map(name => [name, rows.reduce((sum, row) => sum + row.failure_classes[name], 0)]),
+    ),
+    failure_unclassified_count: rows.reduce((sum, row) => sum + row.failure_unclassified_count, 0),
     deferred_count: 0,
     total_ms: rows.reduce((sum, row) => sum + row.total_ms, 0),
     p50_ms: mean('p50_ms'),
@@ -137,16 +162,20 @@ function synthesize(query) {
     rows: starts.map((_, index) => statOf(entry, index, factor, index === quietAt)),
   }))
   const buckets = starts.map((start, index) => ({ start, ...sumStats(perTool.map(item => item.rows[index])) }))
+  const total = sumStats(buckets)
   return {
     generated_at: NOW,
     window: { since, until: NOW, bucket, bucket_seconds: length, utc_offset_min: utcOffsetMin },
     tool,
     long_call_ms: LONG_CALL_MS,
-    total: sumStats(buckets),
+    total,
     buckets,
     top_by_time: perTool
       .map(item => ({ name: item.entry.name, public_names: item.entry.publicNames, ...sumStats(item.rows) }))
       .sort((a, b) => b.total_ms - a.total_ms),
+    // The stub records no caller, so every call counts as one with no recorded caller.
+    by_caller: [],
+    caller_unobserved_count: total.call_count,
   }
 }
 

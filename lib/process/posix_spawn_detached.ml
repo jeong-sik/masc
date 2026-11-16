@@ -45,11 +45,19 @@ let linux_parent pid =
   | Some line -> Parent line.Linux_proc_stat.parent
   | None -> Unreadable
 
+(* pid_t is a signed 32-bit integer on Darwin and on Linux. A number outside
+   it is answered here, so it reads the same on every platform instead of
+   reaching /proc or the sysctl. *)
+let largest_pid = Int32.to_int Int32.max_int
+
 let parent_pid pid =
-  match darwin_parent pid with
-  | Some (Some parent) -> Parent parent
-  | Some None -> No_process
-  | None -> linux_parent pid
+  if pid <= 0 || pid > largest_pid
+  then No_process
+  else
+    match darwin_parent pid with
+    | Some (Some parent) -> Parent parent
+    | Some None -> No_process
+    | None -> linux_parent pid
 
 let rec reaped pid =
   match Unix.waitpid [ Unix.WNOHANG ] pid with

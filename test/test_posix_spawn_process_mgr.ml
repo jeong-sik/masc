@@ -755,8 +755,9 @@ let test_a_zombie_still_names_its_parent () =
   check parent "the same child once reaped" Posix_spawn_detached.No_process (Posix_spawn_detached.parent_pid pid)
 ;;
 
-(* Darwin casts the number to pid_t; a number past it would otherwise read
-   the row of the pid it wraps to. *)
+(* A number outside pid_t is answered before either platform is asked.
+   Otherwise Darwin would cast it and read the row of the pid it wraps to,
+   and a Linux without /proc would read it Unreadable. *)
 let test_a_number_that_is_no_pid_reads_no_process () =
   List.iter
     (fun (label, number) ->
@@ -773,10 +774,10 @@ let stat_line =
       Format.fprintf ppf "{ state = %S; parent = %d; group = %d; start = %S }" state parent group start)
     ( = )
 
-(* pid 4242, ppid 17, pgrp 23 and starttime 98765 all differ, so a field
-   read from the wrong place shows. *)
+(* pid 4242, ppid 17, pgrp 23, session 29, tpgid 31 and starttime 98765
+   all differ, so a field read one place off shows. *)
 let stat_fields_after_command =
-  "S 17 23 23 34816 23 4194304 100 0 0 0 1 2 0 0 20 0 1 0 98765 1024 10\n"
+  "S 17 23 29 34816 31 4194304 100 0 0 0 1 2 0 0 20 0 1 0 98765 1024 10\n"
 
 let test_proc_stat_fields_start_after_the_last_parenthesis () =
   check (option stat_line) "a command holding spaces and ')'"

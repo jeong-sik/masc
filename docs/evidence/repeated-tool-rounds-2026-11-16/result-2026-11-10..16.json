@@ -4,16 +4,19 @@
   "min_rounds": 10,
   "runs": 41,
   "rounds": 4708,
+  "repeats": 4667,
   "span_h": 50.7,
   "by_runtime": {
     "agent_core-glm-coding.glm-5.3-flash": {
       "runs": 36,
       "rounds": 3107,
+      "repeats": 3071,
       "span_h": 47.67
     },
     "agent_core-kimi_coding.kimi-k3-1-pro": {
       "runs": 5,
       "rounds": 1601,
+      "repeats": 1596,
       "span_h": 3.03
     }
   },
@@ -25,6 +28,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 175,
+      "repeats": 174,
       "span_h": 6.58
     },
     {
@@ -33,6 +37,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_lane_status",
       "rounds": 177,
+      "repeats": 176,
       "span_h": 6.56
     },
     {
@@ -41,6 +46,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 96,
+      "repeats": 95,
       "span_h": 3.27
     },
     {
@@ -49,6 +55,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 43,
+      "repeats": 42,
       "span_h": 2.78
     },
     {
@@ -57,6 +64,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 130,
+      "repeats": 129,
       "span_h": 2.71
     },
     {
@@ -65,6 +73,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 115,
+      "repeats": 114,
       "span_h": 2.59
     },
     {
@@ -73,6 +82,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_artifact_read",
       "rounds": 106,
+      "repeats": 105,
       "span_h": 2.28
     },
     {
@@ -81,6 +91,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 31,
+      "repeats": 30,
       "span_h": 2.03
     },
     {
@@ -89,6 +100,7 @@
       "runtime": "agent_core-kimi_coding.kimi-k3-1-pro",
       "tool": "masc_keeper_delegate_status_many",
       "rounds": 1000,
+      "repeats": 999,
       "span_h": 1.97
     },
     {
@@ -97,6 +109,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_lane_status",
       "rounds": 30,
+      "repeats": 29,
       "span_h": 1.94
     },
     {
@@ -105,6 +118,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "masc_schedule_note_add",
       "rounds": 62,
+      "repeats": 61,
       "span_h": 1.9
     },
     {
@@ -113,6 +127,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_lane_status",
       "rounds": 744,
+      "repeats": 743,
       "span_h": 1.44
     },
     {
@@ -121,6 +136,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 48,
+      "repeats": 47,
       "span_h": 1.24
     },
     {
@@ -129,6 +145,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 47,
+      "repeats": 46,
       "span_h": 1.12
     },
     {
@@ -137,6 +154,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_lane_status",
       "rounds": 523,
+      "repeats": 522,
       "span_h": 0.93
     },
     {
@@ -145,6 +163,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 37,
+      "repeats": 36,
       "span_h": 0.8
     },
     {
@@ -153,6 +172,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_lane_status",
       "rounds": 40,
+      "repeats": 39,
       "span_h": 0.71
     },
     {
@@ -161,6 +181,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 21,
+      "repeats": 20,
       "span_h": 0.69
     },
     {
@@ -169,6 +190,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_artifact_read",
       "rounds": 27,
+      "repeats": 26,
       "span_h": 0.68
     },
     {
@@ -177,6 +199,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 36,
+      "repeats": 35,
       "span_h": 0.67
     },
     {
@@ -185,6 +208,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_lane_status",
       "rounds": 27,
+      "repeats": 26,
       "span_h": 0.63
     },
     {
@@ -193,6 +217,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 32,
+      "repeats": 31,
       "span_h": 0.6
     },
     {
@@ -201,6 +226,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 24,
+      "repeats": 23,
       "span_h": 0.58
     },
     {
@@ -209,6 +235,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 23,
+      "repeats": 22,
       "span_h": 0.53
     },
     {
@@ -217,6 +244,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_lane_status",
       "rounds": 211,
+      "repeats": 210,
       "span_h": 0.48
     },
     {
@@ -225,6 +253,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 15,
+      "repeats": 14,
       "span_h": 0.48
     },
     {
@@ -233,6 +262,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 11,
+      "repeats": 10,
       "span_h": 0.44
     },
     {
@@ -241,6 +271,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_lane_status",
       "rounds": 77,
+      "repeats": 76,
       "span_h": 0.44
     },
     {
@@ -249,6 +280,7 @@
       "runtime": "agent_core-kimi_coding.kimi-k3-1-pro",
       "tool": "masc_keeper_delegate_status",
       "rounds": 269,
+      "repeats": 268,
       "span_h": 0.43
     },
     {
@@ -257,6 +289,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "keeper_capability_search",
       "rounds": 11,
+      "repeats": 10,
       "span_h": 0.4
     },
     {
@@ -265,6 +298,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 18,
+      "repeats": 17,
       "span_h": 0.39
     },
     {
@@ -273,6 +307,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 18,
+      "repeats": 17,
       "span_h": 0.38
     },
     {
@@ -281,6 +316,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 12,
+      "repeats": 11,
       "span_h": 0.33
     },
     {
@@ -289,6 +325,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 11,
+      "repeats": 10,
       "span_h": 0.27
     },
     {
@@ -297,6 +334,7 @@
       "runtime": "agent_core-kimi_coding.kimi-k3-1-pro",
       "tool": "masc_keeper_delegate_status_many",
       "rounds": 161,
+      "repeats": 160,
       "span_h": 0.26
     },
     {
@@ -305,6 +343,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "WebFetch",
       "rounds": 78,
+      "repeats": 77,
       "span_h": 0.26
     },
     {
@@ -313,6 +352,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "Execute",
       "rounds": 11,
+      "repeats": 10,
       "span_h": 0.22
     },
     {
@@ -321,6 +361,7 @@
       "runtime": "agent_core-kimi_coding.kimi-k3-1-pro",
       "tool": "masc_keeper_delegate_status",
       "rounds": 99,
+      "repeats": 98,
       "span_h": 0.21
     },
     {
@@ -329,6 +370,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "WebFetch",
       "rounds": 15,
+      "repeats": 14,
       "span_h": 0.19
     },
     {
@@ -337,6 +379,7 @@
       "runtime": "agent_core-kimi_coding.kimi-k3-1-pro",
       "tool": "masc_keeper_delegate_status_many",
       "rounds": 72,
+      "repeats": 71,
       "span_h": 0.15
     },
     {
@@ -345,6 +388,7 @@
       "runtime": "agent_core-glm-coding.glm-5.3-flash",
       "tool": "WebFetch",
       "rounds": 25,
+      "repeats": 24,
       "span_h": 0.11
     }
   ]

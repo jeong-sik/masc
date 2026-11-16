@@ -20,25 +20,27 @@ Raw traces rotate oldest first, so a later run reads fewer files.
 
 ## Definition
 
-A repeat round is a model response that holds exactly one tool call whose name and input equal the single call
-of the response before it. Results are not compared. This differs from
+The count is built from execution start records. The `tool_execution_started` records that share one
+`tool_turn` stand for one model response. A stretch is a run of consecutive responses that each started exactly
+one call with the same tool name and input. `rounds` is the number of calls in the stretch, first call
+included, and `repeats` is `rounds - 1`. Results are not compared. This differs from
 `docs/evidence/repeated-calls-2026-11/`, which also compares results: a status read such as
 `keeper_lane_status` returns a new observation time on every call, so that script does not count the loop this
 RFC is about. `--min-rounds 10` only cuts the report.
 
 ## Results
 
-41 runs, 4,708 repeat rounds, 50.7 hours from the first to the last call of each stretch. Every run was an
-Agent Core run:
+41 runs. Their stretches hold 4,708 calls (4,667 repeats after the first call) and 50.7 hours from the first
+to the last call of each stretch. Every run was an Agent Core run:
 
-| Runtime | Runs | Rounds | Hours |
-|---|---:|---:|---:|
-| `glm-coding.glm-5.3-flash` | 36 | 3,107 | 47.7 |
-| `kimi_coding.kimi-k3-1-pro` | 5 | 1,601 | 3.0 |
+| Runtime | Runs | Calls | Repeats | Hours |
+|---|---:|---:|---:|---:|
+| `glm-coding.glm-5.3-flash` | 36 | 3,107 | 3,071 | 47.7 |
+| `kimi_coding.kimi-k3-1-pro` | 5 | 1,601 | 1,596 | 3.0 |
 
-The longest stretches, with what the model wrote in those rounds (read by hand from the same traces):
+The longest stretches, with what the model wrote in those responses (read by hand from the same traces):
 
-| Keeper | Tool and input | Rounds | Hours | Text in the rounds |
+| Keeper | Tool and input | Calls | Hours | Text in those responses |
 |---|---|---:|---:|---|
 | ocaml-agent-ic | `Execute {"command":"true"}` | 175 | 6.6 | "순찰 B 종료 — … 이 턴 종료 후 자체 턴으로" |
 | code-reviewer-uncle | `keeper_lane_status {}` | 177 | 6.6 | "이 턴 종료(도구 호출 없음) — 큐된 순찰 wake가 다음 턴에서…" |
@@ -61,7 +63,12 @@ The longest stretches, with what the model wrote in those rounds (read by hand f
 
 ## Limits
 
-- A response with two or more calls breaks a stretch, so a loop that adds a second call is not counted.
+- A response with two or more started calls breaks a stretch, so a loop that adds a second call is not counted.
+- A response whose calls were all refused at admission leaves no start record and is invisible. A refused
+  second call does not break a stretch. `tool_turn` gaps are not checked; the 41 stretches here have none.
+- `runtime` is the last `run_started` of the file. A file with several workers gets the last one; the 41 here
+  do not mix workers inside a stretch.
+- Results are not compared, so the 50.7 hours are not all wasted time.
 - The table's text column is a hand reading of samples. No count in this directory classifies text.
 - The provider's raw `finish_reason` is not in the raw trace, so whether the model sent `stop` with the tool
   call is unknown.

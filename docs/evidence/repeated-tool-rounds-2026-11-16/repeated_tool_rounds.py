@@ -2,17 +2,24 @@
 """Find runs that send one tool call with the same input, response after response.
 
 A run is one raw trace file of a Keeper (`<base>/.masc/keepers/<keeper>/raw-traces/turn-<ms>-*.jsonl`).
-A response is the set of `tool_execution_started` records that share one `tool_turn`.
-A repeat round is a response that holds exactly one call whose tool name and
-input equal the single call of the response right before it. The result is not
-compared: a status read returns a new observation time on every call, so equal
-results would miss the loop this measures.
+The count is built from execution start records, not from model responses:
+the `tool_execution_started` records that share one `tool_turn` stand for one
+response. A response whose calls never started (all refused at admission)
+leaves no record and is invisible here, and a refused second call does not
+break a stretch. `tool_turn` gaps are not checked.
 
-Per run, the longest stretch of such responses is reported when it holds at
-least `--min-rounds` responses. `span_h` runs from the first call start of the
-stretch to the last one. `runtime` is the `agent_name` of the run's last
-`run_started` record, which names the Agent Core runtime when one served the
-run. Runs are chosen by the millisecond stamp in the file name.
+A stretch is a run of consecutive such responses that each started exactly one
+call with the same tool name and input. The result is not compared: a status
+read returns a new observation time on every call, so equal results would miss
+the loop this measures. `rounds` is the number of calls in the stretch, first
+call included; `repeats` is `rounds - 1`.
+
+Per run, the longest stretch is reported when `rounds` is at least
+`--min-rounds`. `span_h` runs from the first call start of the stretch to the
+last one. `runtime` is the `agent_name` of the run's last `run_started` record,
+which names the Agent Core runtime when one served the run; a run with several
+workers gets the last one. Runs are chosen by the millisecond stamp in the
+file name.
 
 `--min-rounds` only cuts the report. Nothing in MASC uses it.
 
@@ -141,9 +148,10 @@ def main() -> None:
 
     by_runtime: dict[str, dict[str, float]] = {}
     for s in found:
-        row = by_runtime.setdefault(s.runtime, {"runs": 0, "rounds": 0, "span_h": 0.0})
+        row = by_runtime.setdefault(s.runtime, {"runs": 0, "rounds": 0, "repeats": 0, "span_h": 0.0})
         row["runs"] += 1
         row["rounds"] += s.rounds
+        row["repeats"] += s.rounds - 1
         row["span_h"] += (s.last_ts - s.first_ts) / S_PER_H
 
     report: JsonObject = {
@@ -152,9 +160,15 @@ def main() -> None:
         "min_rounds": min_rounds,
         "runs": len(found),
         "rounds": sum(s.rounds for s in found),
+        "repeats": sum(s.rounds - 1 for s in found),
         "span_h": round(sum(s.last_ts - s.first_ts for s in found) / S_PER_H, PRINT_DIGITS),
         "by_runtime": {
-            k: {"runs": int(v["runs"]), "rounds": int(v["rounds"]), "span_h": round(v["span_h"], PRINT_DIGITS)}
+            k: {
+                "runs": int(v["runs"]),
+                "rounds": int(v["rounds"]),
+                "repeats": int(v["repeats"]),
+                "span_h": round(v["span_h"], PRINT_DIGITS),
+            }
             for k, v in sorted(by_runtime.items())
         },
         "unreadable_lines": unreadable,
@@ -165,6 +179,7 @@ def main() -> None:
                 "runtime": s.runtime,
                 "tool": s.tool,
                 "rounds": s.rounds,
+                "repeats": s.rounds - 1,
                 "span_h": round((s.last_ts - s.first_ts) / S_PER_H, PRINT_DIGITS),
             }
             for s in found

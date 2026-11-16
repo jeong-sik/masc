@@ -289,6 +289,7 @@ let small_answer_view answer =
   Keeper_identity_tools.tool_result_of_call ~base_path:(Filename.get_temp_dir_name ())
     ~retain_artifacts:(fun _ -> Alcotest.fail "transport error unexpectedly retained result content")
     ~accepts_image_input:false ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes answer
+  |> fun projection -> projection.Keeper_identity_tools.tool_result
 ;;
 
 let recoverable answer =

@@ -50,7 +50,13 @@ let projected_model_text ~base_path
          [ Agent_core.Types.user_msg message.text ]
      with
      | Ok [ _canonical; projected ] ->
-       Agent_core.Types.text_of_content projected.content
+       (match projected.content with
+        | [Agent_core.Types.Text instruction; Agent_core.Types.Text marker] ->
+          (match Tool_output.decode_from_agent_core marker with
+           | Tool_output.Decoded _ -> instruction
+           | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+             Alcotest.fail "canonical replay input lost its artifact owner")
+        | _ -> Alcotest.fail "replay input must carry instruction and exact marker")
      | Ok _ -> Alcotest.fail "replay projection did not append exact evidence"
      | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
 ;;
@@ -592,8 +598,8 @@ let test_multimodal_goal_projects_replay_reference () =
        | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail)
        | Ok [ original; projected ] ->
          (match original.content, projected.content with
-          | ( Agent_core.Types.Image _ :: Agent_core.Types.Text _ :: []
-            , [ Agent_core.Types.Text evidence_text ] ) ->
+          | ( [ Agent_core.Types.Image _; Agent_core.Types.Text _; Agent_core.Types.Text _ ]
+            , [ Agent_core.Types.Text evidence_text; Agent_core.Types.Text _ ] ) ->
             Alcotest.check
               Alcotest.bool
               "media block survives replay projection"

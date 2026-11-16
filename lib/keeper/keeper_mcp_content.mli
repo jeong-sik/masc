@@ -15,18 +15,29 @@ val private_result_mime : string
     audiences. Retention owners keep its reference; model status projections
     must not expose that reference as an indirect way to read the envelope. *)
 
+type block =
+  | Native_block of Llm_provider.Types.content_block
+  | Binary_resource of
+      { uri : string
+      ; mime_type : string option
+      ; bytes : string
+      }
+(** A valid embedded blob need not have a native model representation. Its
+    decoded bytes remain a resource; the consumer publishes a readable byte
+    artifact without guessing a document or fetching its URI. *)
+
 type projection = private
   { content : string
     (** Text fallback, including descriptions of visible media and resource
         references. Never includes base64 payloads or user-only content. *)
-  ; content_blocks : Llm_provider.Types.content_block list option
+  ; content_blocks : block list option
     (** The complete assistant-visible sequence, with native media and the
         separate structuredContent value. [None] means no visible blocks. *)
   }
 
 val project : Mcp_client.tool_result -> (projection, string) result
 (** Media uses canonical padded base64. Embedded resources must contain
-    exactly one of text/blob. A blob requires a MIME type with a supported
-    image, audio or PDF representation; other binary resources are refused
-    without guessing from their URI. Resource links remain text references
+    exactly one of text/blob. Recognized image, audio or PDF types use native
+    blocks; other blobs, including absent MIME and empty files, use
+    [Binary_resource]. Resource links remain text references
     and are never fetched. The original result is not mutated. *)

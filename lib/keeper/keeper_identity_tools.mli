@@ -235,13 +235,20 @@ val effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_
 
 val call_error_to_string : call_error -> string
 
+type call_projection = private
+  { tool_result : Agent_core.Types.tool_result
+  ; model_artifact : Tool_output.artifact_ref option
+      (** Complete model-visible result, already durable. [None] means the
+          result is inline. Private received envelopes never enter this field. *)
+  }
+
 val tool_result_of_call :
   base_path:string ->
   inline_ceiling_bytes:int ->
   accepts_image_input:bool ->
   retain_artifacts:(Tool_output.artifact_ref list -> unit) ->
   (Mcp_client.tool_result, call_error) result ->
-  Agent_core.Types.tool_result
+  call_projection
 (** The model's view of one call. A transport or server failure is
     recoverable only when the failure proves the effect never began
     ({!effect_disposition_of_call_error}). An unknown outcome is not
@@ -252,7 +259,13 @@ val tool_result_of_call :
     the exact execution owner; raw result references never enter model text
     or metadata. Audience filtering and native media projection are shared
     with replay. Native images require [accepts_image_input] and a supported
-    MIME type. Other media become individually readable durable byte artifacts.
+    MIME type. Other media become individually readable durable byte artifacts,
+    owned by a public manifest containing only references this producer created.
+    External declarations of either internal manifest or private receipt MIME
+    are stored as ordinary binary bytes; their original MIME stays in the
+    description and raw receipt and grants no retention authority.
+    An exact manifest marker remains in both the fallback and authoritative
+    blocks, so history alone retains those children after execution logs retire.
     A tool-reported error uses byte references for all visible media because
     its error carrier has no native blocks. Original MIME values stay in the
     model-facing descriptions. Text exceeding [inline_ceiling_bytes] becomes a reference to

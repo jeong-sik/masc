@@ -3,9 +3,13 @@ module P = Llm_provider.Types
 
 let private_result_mime = "application/vnd.masc.mcp-result+json"
 
+type block =
+  | Native_block of P.content_block
+  | Binary_resource of { uri : string; mime_type : string option; bytes : string }
+
 type projection =
   { content : string
-  ; content_blocks : P.content_block list option
+  ; content_blocks : block list option
   }
 
 let ( let* ) = Result.bind
@@ -86,6 +90,13 @@ let annotations = function
   | Mcp.ResourceContent { annotations; _ }
   | Mcp.ResourceLinkContent { annotations; _ } -> annotations
 
+let decode_base64 data =
+  match Base64.decode data with
+  | Error (`Msg _) -> Error "payload is not valid base64"
+  | Ok bytes when not (String.equal (Base64.encode_string bytes) data) ->
+    Error "payload is not canonical padded base64"
+  | Ok bytes -> Ok bytes
+
 let media ~kind ~media_type ~data make =
   (* MIME type/subtype are case-insensitive; parameter values need not be.
      Keep the original spelling in the retained MCP envelope. *)
@@ -96,16 +107,13 @@ let media ~kind ~media_type ~data make =
       ^ String.sub media_type index (String.length media_type - index)
   in
   if String.trim media_type = "" then Error "media has no MIME type"
-  else match Base64.decode data with
-    | Error (`Msg _) -> Error "media payload is not valid base64"
-    | Ok "" -> Error "media payload is empty"
-    | Ok raw ->
-      if not (String.equal (Base64.encode_string raw) data)
-      then Error "media payload is not canonical padded base64"
-      else
+  else
+    let* raw = decode_base64 data in
+    if String.equal raw "" then Error "media payload is empty"
+    else
         Ok
           ( Printf.sprintf "[MCP %s: %s, %d bytes]" kind media_type (String.length raw)
-          , [ make ~media_type ~source:(P.Base64 data) ] )
+          , [ Native_block (make ~media_type ~source:(P.Base64 data)) ] )
 
 let resource_reference ~uri ~name ~description ~mime_type =
   let optional key = function None -> [] | Some value -> [ key, `String value ] in
@@ -116,8 +124,8 @@ let resource_reference ~uri ~name ~description ~mime_type =
 type resource_media = Resource_image | Resource_audio | Resource_pdf
 
 (* MCP's ResourceContent has no modality tag. Decode only the declared MIME
-   forms our existing image and H5 readers carry; a URI supplies no authority
-   to reinterpret an arbitrary binary resource as a document. *)
+   forms our existing image and H5 readers carry. Other blobs remain binary
+   resources; a URI supplies no authority to reinterpret them as documents. *)
 let resource_media media_type =
   let mime = Tool_blob_media_store.blob_mime media_type |> String.lowercase_ascii in
   if List.mem mime Runtime_official_client_tool.official_client_image_media_types
@@ -130,30 +138,36 @@ let resource_media media_type =
     | _ -> None
 
 let project_item = function
-  | Mcp.TextContent { text; _ } -> Ok (text, [ P.Text text ])
+  | Mcp.TextContent { text; _ } -> Ok (text, [ Native_block (P.Text text) ])
   | Mcp.ImageContent { data; mime_type; _ } ->
     media ~kind:"image" ~media_type:mime_type ~data P.image_block
   | Mcp.AudioContent { data; mime_type; _ } ->
     media ~kind:"audio" ~media_type:mime_type ~data P.audio_block
   | Mcp.ResourceLinkContent { uri; name; description; mime_type; _ } ->
     let reference = resource_reference ~uri ~name ~description ~mime_type in
-    Ok (reference, [ P.Text reference ])
+    Ok (reference, [ Native_block (P.Text reference) ])
   | Mcp.ResourceContent { resource; _ } ->
     let reference = resource_reference ~uri:resource.uri ~name:None
       ~description:None ~mime_type:resource.mime_type in
     (match resource.text, resource.blob with
-     | Some text, None -> Ok (reference ^ "\n" ^ text, [ P.Text reference; P.Text text ])
+     | Some text, None ->
+       Ok (reference ^ "\n" ^ text, [ Native_block (P.Text reference); Native_block (P.Text text) ])
      | None, Some data ->
-       (match resource.mime_type with
-        | None -> Error "embedded blob has no MIME type"
-        | Some media_type ->
-          let* kind, make = match resource_media media_type with
-            | Some Resource_image -> Ok ("image", P.image_block)
-            | Some Resource_audio -> Ok ("audio", P.audio_block)
-            | Some Resource_pdf -> Ok ("document", P.document_block)
-            | None -> Error "embedded blob has no supported media representation" in
+       (match resource.mime_type, Option.bind resource.mime_type resource_media with
+        | Some media_type, Some kind ->
+          let kind, make = match kind with
+            | Resource_image -> "image", P.image_block
+            | Resource_audio -> "audio", P.audio_block
+            | Resource_pdf -> "document", P.document_block in
           let* summary, blocks = media ~kind ~media_type ~data make in
-          Ok (reference ^ "\n" ^ summary, P.Text reference :: blocks))
+          Ok (reference ^ "\n" ^ summary, Native_block (P.Text reference) :: blocks)
+        | (None | Some _), None | None, Some _ ->
+          let* bytes = decode_base64 data in
+          let summary = Printf.sprintf "[MCP binary resource: %d bytes]" (String.length bytes) in
+          Ok (reference ^ "\n" ^ summary,
+              [ Native_block (P.Text reference)
+              ; Binary_resource { uri = resource.uri; mime_type = resource.mime_type; bytes }
+              ]))
      | Some _, Some _ -> Error "embedded resource has both text and blob"
      | None, None -> Error "embedded resource has no body")
 
@@ -185,6 +199,6 @@ let project (result : Mcp_client.tool_result) =
     | Some structured ->
       let text = (if blocks = [] then "" else "structuredContent: ")
                  ^ Yojson.Safe.to_string structured in
-      texts @ [ text ], blocks @ [ P.Text text ] in
+      texts @ [ text ], blocks @ [ Native_block (P.Text text) ] in
   Ok { content = String.concat "\n" texts
      ; content_blocks = (match blocks with [] -> None | _ :: _ -> Some blocks) }

@@ -2789,6 +2789,88 @@ let test_consumed_delivery_with_acknowledged_wake_leaves_the_store () =
     Alcotest.(check int) "nothing left to retire" 0 second.retired_deliveries)
 ;;
 
+let test_replay_retirement_repairs_public_artifact_owner () =
+  with_spent_fixture "queue-replay-public-owner" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "official replay" ] in
+    let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+    consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+    let store = Tool_blob_store.create ~base_path in
+    let media_bytes = "%PDF-public replay bytes" in
+    let media_ref = Tool_blob_store.put_durable store ~bytes:media_bytes ~mime:"application/pdf" in
+    let private_ref = Tool_blob_store.put_durable store
+        ~bytes:"private original MCP envelope" ~mime:"application/json" in
+    let public_ref = Tool_blob_store.put_durable store
+        ~mime:Tool_output.artifact_manifest_mime
+        ~bytes:(Tool_output.artifact_manifest_to_json ~content:"public document result"
+          ~structured_content:(Tool_output.normalized_artifact_ref_to_json media_ref)
+          |> Yojson.Safe.to_string) in
+    let outcome = Masc.Keeper_approval_queue_result.Replay_applied
+        (replay_evidence ~retained_artifacts:[private_ref; public_ref; media_ref] public_ref) in
+    (match AQ.record_consumed_resolution_replay ~base_path ~id:approval_id ~outcome with
+     | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
+     | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> Alcotest.fail "new replay was already recorded"
+     | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+    acknowledge_wake ~base_path ~keeper_name;
+    let sidecar = AQ.For_testing.replay_results_store_path ~base_path in
+    let sidecar_before = Fs_compat.load_file sidecar in
+    let chat_path = Chat_store.chat_path ~base_dir:base_path ~keeper_name in
+    let original_chat = Fs_compat.load_file chat_path in
+    (* The effect and wake are already settled. An unavailable transcript
+       must leave the replay result's existing owner in place. *)
+    Chat_store.purge_transcript chat_path ~remove:Unix.unlink;
+    Unix.mkdir chat_path 0o700;
+    let failed = reinstall_exn ~base_path in
+    Alcotest.(check int) "chat failure retains the sidecar owner" 0 failed.retired_deliveries;
+    Alcotest.(check int) "repair never replays the consumed service" 0 failed.replayed_deliveries;
+    (match failed.delivery_retirement_error with
+     | Some error -> Alcotest.(check string) "retirement exposes the failed owner path" chat_path error.path
+     | None -> Alcotest.fail "chat owner failure was hidden");
+    check_delivery_kept ~base_path approval_id;
+    Alcotest.(check string) "failed handoff preserves exact replay sidecar"
+      sidecar_before (Fs_compat.load_file sidecar);
+    Chat_store.purge_transcript chat_path ~remove:Unix.rmdir;
+    Fs_compat.save_file chat_path original_chat;
+    let repaired = reinstall_exn ~base_path in
+    Alcotest.(check int) "durable chat root permits retirement" 1 repaired.retired_deliveries;
+    Alcotest.(check int) "successful repair does not replay the service" 0 repaired.replayed_deliveries;
+    Alcotest.(check bool) "repair clears the retirement diagnostic" true
+      (Option.is_none repaired.delivery_retirement_error);
+    check_delivery_retired ~base_path approval_id;
+    let chat_refs = Chat_store.load_all ~base_dir:base_path ~keeper_name
+      |> List.filter_map (fun message -> Option.bind message.Chat_store.approval_lifecycle
+          (fun lifecycle -> lifecycle.artifact_ref)) in
+    Alcotest.(check bool) "chat owns the exact public manifest" true
+      (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = public_ref.sha256) chat_refs);
+    Alcotest.(check bool) "chat does not expose the private original root" false
+      (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = private_ref.sha256) chat_refs);
+    (* Official sessions can outlive the audit window. The canonical chat
+       ledger remains a root even with an mtime far before that window. *)
+    Unix.utimes chat_path 0.0 0.0;
+    ignore (Server_runtime_startup_maintenance.prune_shared_jsonl_stores
+      ~days:1 ~masc_root:(Common.masc_dir_from_base_path ~base_path));
+    Alcotest.(check bool) "audit retention does not remove canonical chat" true
+      (Sys.file_exists chat_path);
+    for _pass = 1 to 2 do
+      match Tool_blob_maintenance.run ~base_path ~scope:Server_tool_blob_scope.scope
+          ~mode:Tool_blob_maintenance.Delete_previous_candidates with
+      | Ok report -> Alcotest.(check (list string)) "complete fixture GC scope" [] report.unclassified
+      | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
+    done;
+    let retained reference expected = match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
+      | Ok (Some bytes) -> Alcotest.(check string) "public bytes survive sidecar retirement" expected bytes
+      | Ok None -> Alcotest.fail "retirement orphaned public replay bytes"
+      | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error) in
+    retained media_ref media_bytes;
+    (match Tool_blob_store.fetch store ~sha256:public_ref.sha256 with
+     | Ok (Some _) -> ()
+     | Ok None -> Alcotest.fail "chat-owned manifest was collected"
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
+    (match Tool_blob_store.fetch store ~sha256:private_ref.sha256 with
+     | Ok None -> ()
+     | Ok (Some _) -> Alcotest.fail "public ownership retained a private original"
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)))
+;;
+
 let test_consumed_delivery_with_queued_wake_survives_a_restart () =
   with_spent_fixture "queue-spent-delivery-wake-queued" (fun ~base_path ~keeper_name ->
     let input = `Assoc [ "target", `String "wake-queued" ] in
@@ -7445,6 +7527,10 @@ let () =
             "consumed delivery with acknowledged wake leaves the store"
             `Quick
             test_consumed_delivery_with_acknowledged_wake_leaves_the_store
+        ; Alcotest.test_case
+            "replay retirement repairs the public chat artifact owner"
+            `Quick
+            test_replay_retirement_repairs_public_artifact_owner
         ; Alcotest.test_case
             "consumed delivery with queued wake survives a restart"
             `Quick

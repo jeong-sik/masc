@@ -26,7 +26,11 @@ let project raw = match Keeper_mcp_content.project raw with
   | Ok projected -> projected
   | Error detail -> fail detail
 
-let blocks projected = Option.value projected.Keeper_mcp_content.content_blocks ~default:[]
+let items projected = Option.value projected.Keeper_mcp_content.content_blocks ~default:[]
+
+let blocks projected = List.map (function
+  | Keeper_mcp_content.Native_block block -> block
+  | Keeper_mcp_content.Binary_resource _ -> fail "expected native content") (items projected)
 
 let kind = function
   | P.Text _ -> "text"
@@ -87,6 +91,8 @@ let test_audience_filters_every_payload_kind () =
     ; hidden (`Assoc [ "type", `String "resource_link"; "uri", `String "private:link" ])
     ; hidden (`Assoc [ "type", `String "resource"; "resource", `Assoc
         [ "uri", `String "private:resource"; "text", `String "private resource" ] ])
+    ; hidden (`Assoc [ "type", `String "resource"; "resource", `Assoc
+        [ "uri", `String "private:binary"; "blob", `String "cHJpdmF0ZQ==" ] ])
     ; annotated (audience []) (text "nobody") ]) in
   check (list string) "only assistant-visible text survives"
     [ "unrestricted"; "assistant-visible"; "shared" ]
@@ -139,11 +145,30 @@ let test_resources_keep_declared_content_and_links () =
   check (list string) "a link remains text" [ "text" ]
     (project (result [ link ]) |> blocks |> List.map kind)
 
-let test_ambiguous_and_untyped_resources_are_refused () =
+let test_generic_binary_resources_preserve_bytes_without_native_guessing () =
+  List.iter (fun (mime, bytes) ->
+    let mime_fields = match mime with None -> [] | Some value -> [ "mimeType", `String value ] in
+    let raw = result [ text "before"; resource
+      ([ "uri", `String "archive:one"; "blob", `String (Base64.encode_string bytes) ] @ mime_fields)
+      ; text "after" ] in
+    match items (project raw) with
+    | [ Keeper_mcp_content.Native_block (P.Text "before")
+      ; Keeper_mcp_content.Native_block (P.Text _)
+      ; Keeper_mcp_content.Binary_resource actual
+      ; Keeper_mcp_content.Native_block (P.Text "after") ] ->
+      check string "resource URI remains a reference" "archive:one" actual.uri;
+      check (option string) "MIME declaration including absence is preserved" mime actual.mime_type;
+      check string "exact resource bytes" bytes actual.bytes
+    | _ -> fail "binary resource or sibling text was lost or retyped")
+    [ Some "application/zip", "PK\003\004archive"
+    ; Some "application/octet-stream", "\000\255"
+    ; None, "untyped bytes"
+    ; None, "" ]
+
+let test_ambiguous_and_malformed_resources_are_refused () =
   List.iter (fun fields -> check_refused (result [ resource fields ]))
     [ [ "uri", `String "r:"; "text", `String "text"; "blob", `String "YQ==" ]
-    ; [ "uri", `String "r:"; "blob", `String "YQ==" ]
-    ; [ "uri", `String "r:"; "blob", `String "YQ=="; "mimeType", `String "application/octet-stream" ]
+    ; [ "uri", `String "r:"; "blob", `String "not base64" ]
     ; [ "uri", `String "r:"; "blob", `String "YQ=="; "mimeType", `String "application/pdf"
       ; "mime_type", `String "image/png" ]
     ; [ "uri", `String "r:"; "text", `Bool true ] ];
@@ -175,7 +200,8 @@ let () = run "Keeper MCP content"
     ; test_case "audience filtering" `Quick test_audience_filters_every_payload_kind
     ; test_case "strict annotations and duplicate fields" `Quick test_malformed_annotations_and_duplicate_keys_fail_closed
     ; test_case "resources and links" `Quick test_resources_keep_declared_content_and_links
-    ; test_case "resource ambiguity and MIME" `Quick test_ambiguous_and_untyped_resources_are_refused
+    ; test_case "generic binary resources" `Quick test_generic_binary_resources_preserve_bytes_without_native_guessing
+    ; test_case "resource ambiguity and shape" `Quick test_ambiguous_and_malformed_resources_are_refused
     ; test_case "invalid media and safe diagnostics" `Quick test_invalid_media_and_unknown_items_do_not_echo_source
     ; test_case "structured-only after audience filtering" `Quick test_structured_only_result_and_hidden_text
     ] ]

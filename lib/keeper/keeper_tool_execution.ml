@@ -17,6 +17,7 @@ type terminal_effect_receipt =
 
 type t =
   { retained_artifacts : Tool_output.artifact_ref list
+  ; model_artifact : Tool_output.artifact_ref option
   ; raw_output : string
   ; data : Yojson.Safe.t option
   ; content_blocks : Llm_provider.Types.content_block list option
@@ -41,6 +42,7 @@ let resolve_repeated_keys data =
 
 let success raw_output =
   { retained_artifacts = []
+  ; model_artifact = None
   ; raw_output
   ; data = None
   ; content_blocks = None
@@ -56,6 +58,7 @@ let success raw_output =
 let success_data ?metadata data =
   let data = resolve_repeated_keys data in
   { retained_artifacts = []
+  ; model_artifact = None
   ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; content_blocks = None
@@ -71,6 +74,7 @@ let success_data ?metadata data =
 let deferred_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
   let data = resolve_repeated_keys data in
   { retained_artifacts = []
+  ; model_artifact = None
   ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; content_blocks = None
@@ -90,6 +94,7 @@ let deferred_composition_result ~binding data =
 let deferred_external_effect_data ?approval_id ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
   let data = resolve_repeated_keys data in
   { retained_artifacts = []
+  ; model_artifact = None
   ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; content_blocks = None
@@ -113,6 +118,7 @@ let failure
       raw_output
   =
   { retained_artifacts = []
+  ; model_artifact = None
   ; raw_output
   ; data = None
   ; content_blocks = None
@@ -134,6 +140,7 @@ let failure_data
   =
   let data = resolve_repeated_keys data in
   { retained_artifacts = []
+  ; model_artifact = None
   ; raw_output = message
   ; data = Some data
   ; content_blocks = None
@@ -207,6 +214,13 @@ let with_retained_artifacts retained_artifacts result =
   { result with retained_artifacts }
 ;;
 
+let with_model_artifact model_artifact result =
+  match result.disposition with
+  | Tool_result.Completed () | Tool_result.Failed _ ->
+    { result with model_artifact = Some model_artifact }
+  | Tool_result.Deferred () -> result
+;;
+
 let success_with_blocks ~content_blocks raw_output =
   { (success raw_output) with content_blocks }
 ;;
@@ -225,6 +239,7 @@ let of_tool_result
   match result with
   | Tool_result.Completed { metadata; content_blocks; _ } ->
     { retained_artifacts = Tool_result.retained_artifacts result
+    ; model_artifact = None
     ; raw_output
     ; data
     ; content_blocks
@@ -237,6 +252,7 @@ let of_tool_result
     }
   | Tool_result.Deferred { metadata; content_blocks; _ } ->
     { retained_artifacts = Tool_result.retained_artifacts result
+    ; model_artifact = None
     ; raw_output
     ; data
     ; content_blocks
@@ -249,6 +265,7 @@ let of_tool_result
     }
   | Tool_result.Failed { class_; _ } ->
     { retained_artifacts = Tool_result.retained_artifacts result
+    ; model_artifact = None
     ; raw_output
     ; data
     ; content_blocks = None

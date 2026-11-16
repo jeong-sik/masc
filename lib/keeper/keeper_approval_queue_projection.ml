@@ -288,7 +288,7 @@ let ensure_resolution_chat_projection
     }
 ;;
 
-let ensure_replay_chat_projection
+let reconcile_replay_chat_projection
       ~base_path
       ~keeper_name
       ~approval_id
@@ -317,6 +317,10 @@ let ensure_replay_chat_projection
       ; artifact_ref = Some artifact_ref
       ; call_summary
       }
+;;
+
+let ensure_replay_chat_projection ~base_path ~keeper_name ~approval_id ~tool_name ~outcome =
+  reconcile_replay_chat_projection ~base_path ~keeper_name ~approval_id ~tool_name ~outcome
   |> Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ())
 ;;
 

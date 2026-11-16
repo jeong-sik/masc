@@ -130,6 +130,7 @@ let execute_offered ?(post = never_post) ~base_path
     (Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path)
        ~keeper_name:"acme-daycare" ~provider:offered.Identity_tools.provider
        ~remote_name:offered.Identity_tools.remote_name ~arguments ())
+  |> fun projection -> projection.Identity_tools.tool_result
 
 (* ── the on/off switch ───────────────────────────────────────────────── *)
 
@@ -1500,6 +1501,7 @@ let small_answer_view answer =
   Identity_tools.tool_result_of_call ~base_path:(temp_base ())
     ~retain_artifacts:(fun roots -> retained := roots)
     ~accepts_image_input:false ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes answer
+  |> fun projection -> projection.Identity_tools.tool_result
 
 let test_tool_error_does_not_authorize_retry () =
   let result : Mcp_client.tool_result =

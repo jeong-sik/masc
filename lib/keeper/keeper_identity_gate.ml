@@ -338,6 +338,7 @@ let agent_tool
       ~base_path:config.Workspace.base_path
       ~inline_ceiling_bytes:(inline_ceiling_bytes ())
       answer
+    |> fun projection -> projection.Keeper_identity_tools.tool_result
   in
   let tool_name = offered.Keeper_identity_tools.schema.Agent_core.Types.name in
   let observe result =
@@ -431,10 +432,10 @@ let agent_tool
 
 let execution_of_call_result ~base_path ~inline_ceiling_bytes result =
   let retained = ref [] in
-  let read = Keeper_identity_tools.tool_result_of_call ~base_path ~inline_ceiling_bytes
+  let projection = Keeper_identity_tools.tool_result_of_call ~base_path ~inline_ceiling_bytes
     ~accepts_image_input:false
     ~retain_artifacts:(fun roots -> retained := roots) result in
-  let execution = match read with
+  let execution = match projection.tool_result with
     | Ok output -> Keeper_tool_execution.success_with_blocks
         ~content_blocks:output.Agent_core.Types.content_blocks output.content
     | Error error ->
@@ -443,6 +444,9 @@ let execution_of_call_result ~base_path ~inline_ceiling_bytes result =
         | Ok _ -> reported_error_effect in
       Keeper_tool_execution.failure ~class_:call_failure_class ~effect_disposition
         error.Agent_core.Types.message in
+  let execution = match projection.model_artifact with
+    | None -> execution
+    | Some reference -> Keeper_tool_execution.with_model_artifact reference execution in
   Keeper_tool_execution.with_retained_artifacts !retained execution
 ;;
 

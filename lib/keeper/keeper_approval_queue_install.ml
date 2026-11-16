@@ -129,7 +129,7 @@ let delivery_is_spent readers delivery =
     && delivery_wake_was_observed delivery
 ;;
 
-let spent_delivery_ids ~base_path loaded_deliveries =
+let spent_deliveries ~base_path loaded_deliveries =
   let readers_by_keeper = Hashtbl.create 8 in
   let readers_of keeper_name =
     match Hashtbl.find_opt readers_by_keeper keeper_name with
@@ -146,12 +146,41 @@ let spent_delivery_ids ~base_path loaded_deliveries =
       Hashtbl.add readers_by_keeper keeper_name readers;
       readers
   in
-  List.filter_map
-    (fun delivery ->
-       if delivery_is_spent (readers_of delivery.entry.keeper_name) delivery
-       then Some delivery.entry.id
-       else None)
-    loaded_deliveries
+  let candidates, first_error = List.fold_left
+    (fun (candidates, first_error) delivery ->
+       let keeper_name = delivery.entry.keeper_name in
+       let readers = readers_of keeper_name in
+       if not (delivery_is_spent readers delivery) then candidates, first_error
+       else
+         (* Official clients own their native transcript, not a Core history
+            checkpoint. Its public replay artifact therefore needs this
+            canonical chat root before the sidecar can relinquish it. The
+            chat ledger is outside the dated audit-retention stores. A removed
+            Keeper keeps the existing removal semantics; do not recreate its
+            transcript after an explicit purge.
+
+            Reconciliation takes chat locks and reads its request row. Keep
+            this I/O outside [pending_store_lock], then compare the captured
+            delivery again under that lock before deleting it. *)
+         let retained = match readers, delivery.replay_outcome with
+           | Keeper_readers _, Some outcome ->
+             (match Keeper_approval_queue_projection.reconcile_replay_chat_projection
+                 ~base_path ~keeper_name ~approval_id:delivery.entry.id
+                 ~tool_name:(Some delivery.entry.tool_name) ~outcome with
+              | Ok (Keeper_chat_store.Appended _ | Keeper_chat_store.Already_present _) -> Ok ()
+              | Error reason -> Error reason)
+           | (Keeper_gone | Keeper_readers_unknown _), _
+           | Keeper_readers _, None -> Ok () in
+         match retained with
+         | Ok () -> delivery :: candidates, first_error
+         | Error reason ->
+           Log.Keeper.warn ~keeper_name
+             "approval_queue: replay artifact owner repair failed; delivery retained approval=%s: %s"
+             delivery.entry.id reason;
+           let error = { path = Keeper_chat_store.chat_path ~base_dir:base_path ~keeper_name; reason } in
+           candidates, (match first_error with None -> Some error | Some _ -> first_error))
+    ([], None) loaded_deliveries in
+  List.rev candidates, first_error
 ;;
 
 (* The sidecar is written before the snapshot. A crash between the two leaves
@@ -159,24 +188,26 @@ let spent_delivery_ids ~base_path loaded_deliveries =
    the same way; the other order would leave an outcome whose delivery is
    gone, and that fails the sidecar load. An unreadable sidecar is left
    alone: rewriting it from memory would drop the outcomes it still holds. *)
-let retire_spent_deliveries ~base_path ids =
+let retire_spent_deliveries ~base_path candidates =
   with_pending_store_lock (fun () ->
     if
       SMap.mem base_path (Atomic.get unavailable_stores)
       || SMap.mem base_path (Atomic.get replay_projection_errors)
-    then Ok 0
+    then Ok []
     else (
       let current = Atomic.get deliveries in
       let retired =
-        List.filter
-          (fun id ->
+        List.filter_map
+          (fun expected ->
+             let id = expected.entry.id in
              match SMap.find_opt id current with
-             | Some delivery -> String.equal delivery.entry.audit_base_path base_path
-             | None -> false)
-          ids
+             | Some delivery when delivery = expected
+                 && String.equal delivery.entry.audit_base_path base_path -> Some id
+             | Some _ | None -> None)
+          candidates
       in
       match retired with
-      | [] -> Ok 0
+      | [] -> Ok []
       | _ :: _ ->
         let updated_deliveries =
           List.fold_left (fun map id -> SMap.remove id map) current retired
@@ -195,7 +226,7 @@ let retire_spent_deliveries ~base_path ids =
             | Error error -> Error error
             | Ok () ->
               Atomic.set deliveries updated_deliveries;
-              Ok (List.length retired)))))
+              Ok retired))))
 ;;
 
 let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
@@ -337,15 +368,14 @@ let install_persistence_internal ~after_load ~after_pending_publish ~base_path =
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
   | Ok (loaded_pending, loaded_deliveries, replay_projection_error) ->
-    let spent_ids = spent_delivery_ids ~base_path loaded_deliveries in
+    let candidates, preparation_error = spent_deliveries ~base_path loaded_deliveries in
     let retired_deliveries, delivery_retirement_error, loaded_deliveries =
-      match retire_spent_deliveries ~base_path spent_ids with
-      | Ok 0 -> 0, None, loaded_deliveries
-      | Ok count ->
-        ( count
-        , None
+      match retire_spent_deliveries ~base_path candidates with
+      | Ok retired_ids ->
+        ( List.length retired_ids
+        , preparation_error
         , List.filter
-            (fun delivery -> not (List.mem delivery.entry.id spent_ids))
+            (fun delivery -> not (List.mem delivery.entry.id retired_ids))
             loaded_deliveries )
       | Error error -> 0, Some error, loaded_deliveries
     in

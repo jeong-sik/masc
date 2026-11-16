@@ -20,9 +20,12 @@
     [queued_hitl_wake_ids] reads the queued wakes and
     [gate_references_of_operations] the approvals that the operations name.
     [delivery_is_spent] says whether a delivery may leave the store.
-    [spent_delivery_ids] collects those deliveries, reading the readers of a
-    keeper once, and [retire_spent_deliveries] removes them, writing the
-    replay results file before the snapshot.
+    [spent_deliveries] collects those deliveries, reading the readers of a
+    keeper once. Before releasing a living Keeper's replay result, it commits
+    or validates the exact public artifact root in the canonical chat ledger.
+    This runs outside the pending-store lock; failures retain the sidecar and
+    appear in [delivery_retirement_error]. [retire_spent_deliveries] removes
+    only unchanged candidates, writing the replay results before the snapshot.
     [Keeper_approval_queue] includes this module. *)
 open Keeper_approval_queue_result
 

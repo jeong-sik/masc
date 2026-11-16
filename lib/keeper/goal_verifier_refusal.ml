@@ -112,7 +112,7 @@ let ended_run evidence =
                Run_ended {cause; run; tools; observations}) (tools_of tools))
            | _ -> None)
         | Error _, _ | _, Error _ -> None)
-     | Some _, _ | _, None ->
+     | _ ->
        (match List.assoc_opt "run" fields with
         | Some encoded_run when List.length fields = 1 ->
           (match run_of_json encoded_run with

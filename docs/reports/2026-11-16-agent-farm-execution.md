@@ -51,9 +51,38 @@ Keeper 재시작 전체를 SSH 가용성으로 막던 중간 후보는 철회했
 승인된 SSH 명령·파일 쓰기 경계에 연결했다. 원격 장애가 다른 Keeper 활동을 막지
 않도록 하는 소스 변경이며, 실제 SSH 동작은 아직 검증하지 않았다.
 
-협업 세션은 TLJ-S02의 E8 worker 교체 구현을 시작했다고 전달했다.
-이는 일부 구현과 구문 검사에 관한 상대 세션의 보고다. 해당 후보의 독립 검토와
-실제 동작은 이 기록에서 확인하지 않았으며, 완료로 집계하지 않는다.
+협업 세션의 TLJ-S02/E8 다섯 층은
+`715d3dd28e0f2ee3a8a13c9c66ead42ed900726c`다. 해당 worktree의 head와 clean 상태,
+`docs/reports/2026-11-16-librarian-declaration-replacement.md`를 직접 확인했다.
+연결된 history Captured/Cut까지 종료 증거와 후속 요청의 intent/ACK를 연결하고,
+완료된 descendant의 range receipt로 원래 operator resolution을 추적한다는 보고다.
+작성 세션은 두 독립 소스 리뷰와 49개 파일 중 OCaml 47개 구문 검사를 보고했다.
+이 기록의 작성자가 그 전체 소스나 동작을 다시 검증한 것은 아니다. 타입·회귀·운영은
+미실행이며, native submit도 token not found로 종료됐다고 보고했다. partial을 유지한다.
+
+## UID 생성과 실제 첫 쓰기의 연결
+
+같은 UID/SSH 스택에 아래 네 층을 추가했다. 앞서 적은 SSH 경로 분리의 동작 증거나
+전체 시작 경로의 완료 판정으로 합치지 않는다.
+
+| 커밋 | 변경 | 확인한 증거 |
+| --- | --- | --- |
+| `0b45cf34b998c26ee20e98bbc6add8df6f9ca04a` | 공용 admission이 실제 Host 설정 해소와 바깥 BasePath 준비, UID 생성·확인을 한 native 작업으로 수행한다. 직접 Workspace가 기존 linked root를 열 때에는 UID 확인과 fsync만 한다. | 실제 소스 179개, 컴파일·링크·실행 명령 184개, 집중 시험 7개 통과. `admission-3` manifest `ec42689cb5b9e8d2b0c9288d5c6792b57ce36b92ac3eeab6854bd4a1bfd6de2d` |
+| `dda168069b6e0416592005a3ce7b2787c605c16d` | 서버 lifetime lease 이후 strict birth를 수행하고, restart도 stop/log/spawn 전에 strict 준비를 한다. 서버의 linked root 거절은 유지한다. | takeover 시험 55개는 linked-root 확인 helper 추가 전의 저장된 의존성 스냅샷으로 실행했다. 최신 전체 head의 동작 증거가 아니다. restart·UID 문서 inventory는 소스·구문 검토만 했다. |
+| `62af6cb40b830fec898923a1713234415d1c440b` | Workspace factory/init, config bootstrap, `workspace-create`, 저장 CLI, prerequisites와 installer의 첫 쓰기를 연결했다. UID 오류를 Memory fallback으로 숨기지 않는다. | 37개 파일 독립 소스 리뷰와 구문 검사 35개. installer Python 경계 시험 6개는 모의 CLI 응답으로 순서·거절을 확인했다. 실제 설치·CLI 실행 증거가 아니다. manifest `bfb73c54017067d8602823a39c916f54b280699beaa9c7a7813a742e4942e946` |
+| `6e328cde52221f8443973d6f31198431ca59a682` | Item, Gate, direct resume, Goal confirmation의 HTTP 검증 스크립트가 선택한 후보로 workspace-create한 뒤 fixture를 쓴다. | 네 파일 독립 소스 리뷰와 Python 구문 검사. 두 스크립트의 통제된 후보 거절 시 runtime·서버 로그가 생기지 않음을 확인했다. native UID·서버·provider는 실행하지 않았다. manifest `4b709aaba3061b336b67ed9c8f20654a443bfc3569b885c2017b88a6c1d2163e` |
+
+이 네 층의 해당 소스 범위에는 독립 리뷰의 추가 P0/P1/P2가 없다. 전체 스택에는
+여전히 실제 첫 쓰기 문제가 남는다. Docker와 공용 harness의 수정은 작업 중이며,
+native login/MCP config/revoke, TUI의 credential lock과 세 로그 생성 경로,
+source start/quickstart/seed-team, presentation CI 준비, carts/monitor도 후속 대상이다.
+각 호출자의 생성·읽기 의도를 먼저 구분한다. 읽기나 실패한 revoke를 계기로 UID를
+자동 발급하거나, 기존 UID 없는 루트를 뒤늦게 등록하는 방식으로 해결하지 않는다.
+
+로컬 증거는 UID/SSH worktree의 `artifacts/farm-workspace-bootstrap-20261116/`와
+`artifacts/farm-workspace-first-writers-20261116/`에 있다. 전체 Dune 그래프, Linux,
+설치된 바이너리, 실제 SSH, 원래 멈춘 요청 회복과 Farm 규모 행렬은 미검증이다.
+`U02:IA-S13`의 기존 volume 전환·삭제 승인 상태도 바뀌지 않았다.
 
 ## 원래 25개 요구의 현재 위치
 
@@ -121,8 +150,8 @@ P=`tick·schedule·Board·maintenance·Goal`, H=`1·2·4`, M=`1·2`다.
 
 ## 다음 갱신
 
-워크스페이스 UID 생성을 서버 시작과 직접 Workspace 생성 경로에 연결하고,
-별도 TLJ-S02 후보의 현재 상태를 받는다.
+남은 첫 쓰기 경로를 고치되 읽기 전용 동작과 서버의 strict admission을 보존한다.
+별도 TLJ-S02 후보는 현재 head의 실제 실행 근거를 이어서 확인한다.
 게시 가능한 시점에 두 기존 스택의 원격 head와 중복 작업을 다시 읽는다. 후보의 행동
 시험·설치·격리된 실패 재현·장시간 행렬은 실제 실행 영수증을 얻은 순서대로 이 기록에
 추가한다. 각 항목은 source/binary/config와 원본 증거 위치를 적고, 실행하지 않은 항목은

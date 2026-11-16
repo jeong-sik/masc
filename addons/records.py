@@ -676,17 +676,18 @@ def last_cursor(grant: Grant, earlier: list[tuple[bool, list[Read]]]) -> str | N
 
     A cursor the host refused for this grant (the branch no longer reaches
     it, or the grant now names another repository) is skipped, so the next
-    session starts from the cursor before it, or from none."""
-    refused = {(r.request["source_id"], r.request["after"])
-               for _, session_reads in earlier for r in session_reads
-               if r.request["kind"] == "read_records" and isinstance(r.result, Refused)}
+    session starts from the cursor before it, or from none. A refusal counts
+    against the sessions before it only: a later session that read up to
+    the same cursor again left a cursor of its own (#52417)."""
+    refused: set[tuple[str, str | None]] = set()
     for moves, session_reads in reversed(earlier):
-        if not moves:
-            continue
-        pages = [r.result for r in session_reads if r.request["kind"] == "read_records"
-                 and r.request["source_id"] == grant.source_id and isinstance(r.result, Page)]
-        if pages and (grant.source_id, pages[-1].next_cursor) not in refused:
-            return pages[-1].next_cursor
+        if moves:
+            pages = [r.result for r in session_reads if r.request["kind"] == "read_records"
+                     and r.request["source_id"] == grant.source_id and isinstance(r.result, Page)]
+            if pages and (grant.source_id, pages[-1].next_cursor) not in refused:
+                return pages[-1].next_cursor
+        refused |= {(r.request["source_id"], r.request["after"]) for r in session_reads
+                    if r.request["kind"] == "read_records" and isinstance(r.result, Refused)}
     return None
 
 

@@ -973,7 +973,7 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
     match Owner.load ~store:changed_store ~scope:gate.scope ~request_id:gate.request_id |> owned with
     | Some record -> record
     | None -> fail "the changed gate was not retained") in
-  let rejected=io (fun () -> Gate.validate_payload ~owner:(Capture.physical_owner capture)
+  let rejected=io (fun () -> Gate.validate_payload ~proofs:(Gate.proofs ()) ~owner:(Capture.physical_owner capture)
     ~capture ~parent:finished ~record:changed_gate
     ~read:(fun ~scope:_ ~request_id:_ -> fail "a changed proposal must refuse before ancestry lookup")
     ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "a changed proposal must refuse before body lookup")) in

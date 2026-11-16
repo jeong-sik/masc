@@ -267,25 +267,54 @@ let pending_child ~(prior:Owner.retained) (child:Owner.retained) =
       "Unacknowledged original gate child has execution progress"
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> Ok ()
+(* Binding chains one deploy check proved. The check reads every gate record
+   of a scope and follows each record's retry links back to its root, so
+   proving every record's whole chain again proved a journal of n attempts
+   n(n+1)/2 times. A chain proved for an attempt stays proved for the rest of
+   the check while the attempt, its execution parent, the parent's capture and
+   its owner read the same, as the check's forest proof does. A failed proof
+   is not kept: the next record that reaches it proves it again and is refused
+   as before. Records are compared by their listed form, which names the
+   request by digest, and the capture by a digest, so a proof holds no request
+   body. *)
+type chain_proof =
+  {owner_key:string; capture_key:string; parent_key:string; record_key:string; proved:Yojson.Safe.t}
+type proofs = (string, chain_proof) Hashtbl.t
+let proofs () : proofs = Hashtbl.create 64
+let json_key json = Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
+let listed_key (record:Owner.retained) = json_key (Owner.record_to_json (Owner.listed record))
 (* Captured links only. Live owner and host-proof restoration stay in the
    runtime path below. *)
-let validate_binding_chain ~read ~owner ~capture ~parent record =
+let validate_binding_chain ~proofs ~read ~owner ~capture ~parent record =
+  let owner_key=Yojson.Safe.to_string (Capture.owner_to_json owner)
+  and capture_key=json_key (Capture.to_json capture) and parent_key=listed_key parent in
+  let recall (record:Owner.retained) record_key =
+    List.find_map (fun proof ->
+      if String.equal proof.owner_key owner_key && String.equal proof.capture_key capture_key
+         && String.equal proof.parent_key parent_key && String.equal proof.record_key record_key
+      then Some proof.proved else None)
+      (Hashtbl.find_all proofs record.request_id) in
   let rec visit visited (record:Owner.retained) =
     let* ()=require (not (List.mem record.request_id visited)) "Cyclic gate retry ancestry" in
-    let* proposal,_,_,_,predecessor=retained_payload ~owner ~capture ~parent record in
-    let* _=parent_final ~capture ~proposal parent in
-    let* ()=match predecessor with
-      | None -> root_binding ~parent record
-      | Some request_id ->
-        let* prior=read ~scope:(scope owner) ~request_id in
-        let* prior=Option.to_result ~none:"Original predecessor gate is absent" prior in
-        let* prior_proposal=visit (record.request_id::visited) prior in
-        let* ()=equal prior_proposal proposal "Gate retry changed the original proposal" in
-        let* ()=predecessor_binding ~prior record in pending_child ~prior record in
-    Ok proposal in
+    let record_key=listed_key record in
+    match recall record record_key with
+    | Some proposal -> Ok proposal
+    | None ->
+      let* proposal,_,_,_,predecessor=retained_payload ~owner ~capture ~parent record in
+      let* _=parent_final ~capture ~proposal parent in
+      let* ()=match predecessor with
+        | None -> root_binding ~parent record
+        | Some request_id ->
+          let* prior=read ~scope:(scope owner) ~request_id in
+          let* prior=Option.to_result ~none:"Original predecessor gate is absent" prior in
+          let* prior_proposal=visit (record.request_id::visited) prior in
+          let* ()=equal prior_proposal proposal "Gate retry changed the original proposal" in
+          let* ()=predecessor_binding ~prior record in pending_child ~prior record in
+      Hashtbl.add proofs record.request_id {owner_key;capture_key;parent_key;record_key;proved=proposal};
+      Ok proposal in
   visit [] record
-let validate_payload ~read ~read_body ~owner ~capture ~parent ~record =
-  let* proposal=validate_binding_chain ~read ~owner ~capture ~parent record in
+let validate_payload ~proofs ~read ~read_body ~owner ~capture ~parent ~record =
+  let* proposal=validate_binding_chain ~proofs ~read ~owner ~capture ~parent record in
   List.fold_left (fun result event ->
     let* ()=result in match event with
     | Progress.Successor_intended successor ->
@@ -310,7 +339,7 @@ let validate_payload ~read ~read_body ~owner ~capture ~parent ~record =
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
     | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_observed _ | Observer _ -> Ok ()) (Ok ()) (Progress.events record.progress)
-let validate_preparation_payload ~read ~read_body ~owner ~capture ~(parent:Owner.retained) =
+let validate_preparation_payload ~proofs ~read ~read_body ~owner ~capture ~(parent:Owner.retained) =
   match Progress.preparation parent.progress with
   | None -> Ok ()
   | Some (Preparation_pending intent | Preparation_confirmed intent) ->
@@ -324,7 +353,7 @@ let validate_preparation_payload ~read ~read_body ~owner ~capture ~(parent:Owner
         | Some (Preparation_pending _) -> true | None | Some (Preparation_confirmed _) -> false)
         "Acknowledged original gate root is absent"
     | Some child ->
-      let* ()=validate_payload ~read ~read_body ~owner ~capture ~parent ~record:child in
+      let* ()=validate_payload ~proofs ~read ~read_body ~owner ~capture ~parent ~record:child in
       let* ()=equal child.request intent.request "Original gate root differs from its full parent intent" in
       require (match Progress.preparation parent.progress with
         | Some (Preparation_pending _) -> Progress.phase child.progress=Progress.Captured

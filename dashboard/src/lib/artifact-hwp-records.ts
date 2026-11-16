@@ -1,6 +1,7 @@
 //HIGH-RISK-UNREVIEWED: Original records must not disappear through a tolerant native parser.
 import { readHwpTextControls } from './artifact-hwp-text'
 import { checkOfficeTableGrid, type OfficeTableCellBounds } from './artifact-office-table-grid'
+import { hwpxTableLimits } from './artifact-hwpx-template'
 const tag = { properties: 16, binData: 18, paragraph: 66, text: 67, chars: 68, lines: 69, ranges: 70,
   control: 71, list: 72, page: 73, footnoteStyle: 74, pageBorder: 75, shape: 76, table: 77, ole: 84, picture: 85 } as const
 const extendedSize = 0xFFF, headerBytes = 4, listPrefixBytes = 8, cellBytes = 34, oleReferenceOffset = 12, pictureReferenceOffset = 71
@@ -149,6 +150,10 @@ export function checkHwpBody(data: Uint8Array, binData: readonly HwpBinData[]): 
         if (!owner || owner.kind !== 'table' || owner.seen || record.data.byteLength < 18
           || parent?.tag !== tag.control || record.level !== owner.level + 1) throw new Error('HWP 표 속성이 없거나 겹칩니다.')
         owner.rows = bytes.getUint16(4, true); owner.columns = bytes.getUint16(6, true); owner.seen = true; owner.list = false
+        // Reject axes the destination cannot import before Core expands cell spans into its logical grid.
+        if (owner.rows > hwpxTableLimits.rows || owner.columns > hwpxTableLimits.columns) {
+          throw new Error('HWP 표의 행·열 수가 가져오기 지원 범위를 넘습니다.')
+        }
         break
       case tag.shape:
         if (!owner || owner.kind !== 'graphic' || owner.shape !== null || record.data.byteLength < 4

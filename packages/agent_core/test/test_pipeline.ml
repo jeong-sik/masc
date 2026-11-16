@@ -2721,7 +2721,7 @@ let test_native_parent_cancellation ?(resumed = false) source boundary () =
         | Error error -> Alcotest.fail (Internal_writer.scope_failure_to_string error)
       in
       match Agent.execution_locator_of_yojson saved with
-      | Ok locator -> Some locator
+      | Ok locator -> Some (Agent.Resume_writer_exit_unproven locator)
       | Error detail -> Alcotest.fail detail
   in
   let execution_store =
@@ -2833,7 +2833,7 @@ let test_native_parent_cancellation ?(resumed = false) source boundary () =
     (match boundary with Before_callback | Provider_wait -> 0 | Tool_effect -> 1) !tool_effects;
   (match resume, !locator with
    | None, Some _ -> ()
-   | Some expected, Some actual ->
+   | Some (Agent.Resume_writer_exit_unproven expected | Agent.Resume_after_writer_exit expected), Some actual ->
      Alcotest.(check bool) "resume preserves the admitted locator" true
        (Agent.execution_locator_to_yojson expected = Agent.execution_locator_to_yojson actual)
    | None, None | Some _, None -> Alcotest.fail "native locator was not published");
@@ -3264,7 +3264,7 @@ let test_agent_run_resumes_tool_without_duplicate_effects
            ~on_terminal_disposition:(fun disposition ->
              terminal_disposition := Some disposition;
              Ok ())
-           ~resume:locator
+           ~resume:(Agent.Resume_writer_exit_unproven locator)
            ()
        in
        let run_result = Agent.run ~sw:runtime_sw ~execution_store agent resume_prompt in
@@ -3832,7 +3832,7 @@ let test_agent_run_resumes_settled_closed_turn
            ~on_terminal_disposition:(fun disposition ->
              terminal_disposition := Some disposition;
              Ok ())
-           ~resume:locator
+           ~resume:(Agent.Resume_writer_exit_unproven locator)
            ()
        in
        (match window, Agent.run ~sw:runtime_sw ~execution_store agent "run the tool" with
@@ -3972,7 +3972,7 @@ let check_advanced_settled_terminal_replay
     let agent = Agent.create ~media_store ~net:(Eio.Stdenv.net env) ~config ~tools:[] ~options () in
     Agent.set_state agent { provider_binding = None;config;messages=[Types.user_msg "finish this request";
       Types.make_message ~role:Types.Assistant persisted_content];turn_count=8;usage=Types.empty_usage};
-    let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+    let execution_store = Agent.execution_store ~runtime ~dir ~resume:(Agent.Resume_writer_exit_unproven locator) () in
     (match expected, Agent.Advanced.run_blocks ~sw:runtime_sw ~execution_store ~api_strategy:Agent.Sync
        ~on_tool_boundary:(fun _ -> Alcotest.fail "terminal replay reached a tool boundary")
        agent [Types.Text "finish this request"] with
@@ -4140,7 +4140,7 @@ let test_active_terminal_resumes_committed_checkpoint
     | Ok value -> value | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
   let agent = match Agent.resume ~media_store ~net:env#net ~checkpoint ~config ~options () with
     | Ok value -> value | Error error -> Alcotest.fail (Agent_checkpoint.resume_error_to_string error) in
-  let store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+  let store = Agent.execution_store ~runtime ~dir ~resume:(Agent.Resume_writer_exit_unproven locator) () in
   let result = match entry with
     | Resume_regular -> Agent.run ~sw ~execution_store:store agent "finish this request"
     | Resume_streaming -> Agent.run_stream ~sw ~execution_store:store ~on_event:(fun _->
@@ -4367,7 +4367,7 @@ let test_terminal_stop_reason_owns_tool_content
     | Extend_terminal_surface -> tools @ extra_tools in
   let agent = match Agent.resume ~media_store ~net:env#net ~tools:resume_tools ~checkpoint ~config ~options () with
     | Ok value -> value | Error error -> Alcotest.fail (Agent_checkpoint.resume_error_to_string error) in
-  let store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+  let store = Agent.execution_store ~runtime ~dir ~resume:(Agent.Resume_writer_exit_unproven locator) () in
   let result = match entry with
     | Resume_regular -> Agent.run ~sw ~execution_store:store agent "finish this request"
     | Resume_streaming -> Agent.run_stream ~sw ~execution_store:store ~on_event:(fun _->
@@ -5119,7 +5119,7 @@ let test_agent_run_replays_stale_checkpoint_terminal_settlement () =
                Ok ())
              () |> Result.get_ok)
          in
-         let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+         let execution_store = Agent.execution_store ~runtime ~dir ~resume:(Agent.Resume_writer_exit_unproven locator) () in
          (match
             Agent.run ~sw:runtime_sw ~execution_store resumed_agent "run the durable tool"
           with
@@ -5326,7 +5326,7 @@ let test_agent_run_resumes_all_blocked_settled_turn () =
            ~on_terminal_disposition:(fun disposition ->
              terminal_disposition := Some disposition;
              Ok ())
-           ~resume:locator
+           ~resume:(Agent.Resume_writer_exit_unproven locator)
            ()
        in
        (match Agent.run ~sw:runtime_sw ~execution_store agent "run the tool" with
@@ -5499,7 +5499,7 @@ let test_agent_run_resume_fires_on_yield () =
          ; turn_count = 1
          ; usage = Types.empty_usage
          };
-       let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+       let execution_store = Agent.execution_store ~runtime ~dir ~resume:(Agent.Resume_writer_exit_unproven locator) () in
        let (), records =
          with_debug_log_records (fun () ->
            match

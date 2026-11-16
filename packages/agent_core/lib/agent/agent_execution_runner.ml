@@ -18,9 +18,13 @@ type terminal_disposition =
   ; recovery : recovery_action
   }
 
+type resume =
+  | Resume_writer_exit_unproven of locator
+  | Resume_after_writer_exit of locator
+
 type store_mode =
   | Fresh
-  | Resume of locator
+  | Resume of resume
 
 type store =
   { codec : Execution_codec_executor.t
@@ -58,7 +62,7 @@ let store
   let mode =
     match resume with
     | None -> Fresh
-    | Some locator -> Resume locator
+    | Some resume -> Resume resume
   in
   { codec = runtime.codec; dir; on_scope_ready; on_terminal_disposition; host_stop; mode }
 ;;
@@ -444,7 +448,8 @@ let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw
 let with_store store agent run =
   match store.mode with
   | Fresh -> with_fresh store agent run
-  | Resume locator -> with_resumed store locator agent run
+  | Resume (Resume_writer_exit_unproven locator | Resume_after_writer_exit locator) ->
+    with_resumed store locator agent run
 ;;
 
 let is_resume store =

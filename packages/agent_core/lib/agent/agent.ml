@@ -34,6 +34,10 @@ type execution_runtime = Agent_execution_runner.runtime
 type execution_store = Agent_execution_runner.store
 type execution_locator = Agent_execution_runner.locator
 
+type execution_resume = Agent_execution_runner.resume =
+  | Resume_writer_exit_unproven of execution_locator
+  | Resume_after_writer_exit of execution_locator
+
 type execution_terminal_outcome = Agent_execution_runner.terminal_outcome =
   | Terminal_succeeded
   | Terminal_failed

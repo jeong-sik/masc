@@ -147,7 +147,7 @@ let run_restart () =
     | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail) in
   let terminal = ref None in
   let resume config input =
-    let execution_store = Agent_core.Agent.execution_store ~runtime ~dir ~resume:locator
+    let execution_store = Agent_core.Agent.execution_store ~runtime ~dir ~resume:(Agent_core.Agent.Resume_writer_exit_unproven locator)
         ~on_terminal_disposition:(fun disposition -> terminal := Some disposition; Ok ()) () in
     let config = {config with Runtime_agent.execution_store=Some execution_store} in
     Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds

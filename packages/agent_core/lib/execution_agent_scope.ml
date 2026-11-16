@@ -8,6 +8,9 @@ module Json = Execution_json
 type t =
   { writer : Writer.t
   ; run : Journal.run
+  ; writer_exited : bool
+    (* The host said the process that last wrote this run has exited
+       ([after_writer_exit]). False means no such claim was made. *)
   }
 
 type turn =
@@ -216,7 +219,7 @@ let transact_cleanup writer transaction =
 
 let start ~writer ~agent_name =
   transact writer (Tx.start_run ~agent_name ())
-  |> Result.map (fun (run, _event) -> { writer; run })
+  |> Result.map (fun (run, _event) -> { writer; run; writer_exited = false })
 ;;
 
 let resume ~writer ~agent_name (locator : scope_locator) =
@@ -227,7 +230,7 @@ let resume ~writer ~agent_name (locator : scope_locator) =
     (match Event.node_kind view.Journal.opened.value with
      | Event.Agent_run { agent_name = durable_agent_name }
        when String.equal agent_name durable_agent_name ->
-       Ok { writer; run = view.Journal.run }
+       Ok { writer; run = view.Journal.run; writer_exited = false }
      | Event.Agent_run { agent_name = durable_agent_name } ->
        Error
          (Agent_identity_mismatch { expected = durable_agent_name; actual = agent_name })
@@ -249,6 +252,8 @@ let resume_running ~writer ~agent_name locator =
        Error (Resume_topology_mismatch "execution run is already terminal")
      | Ok None -> Error Run_not_found)
 ;;
+
+let after_writer_exit scope = { scope with writer_exited = true }
 
 let open_turn scope ~ordinal =
   transact
@@ -773,7 +778,50 @@ let provider_settled_invocations provider =
     rebind_all [] invocation_nodes
 ;;
 
+let writer_exited_content =
+  "The tool call was cut off: the process running it exited before the tool \
+   returned. Whether its effect happened is unknown. The tool was not run again."
+;;
+
+let writer_exited_terminal =
+  Event.Cancelled
+    { reason = Some "the process that wrote this run exited before the tool returned"
+    ; data = None
+    }
+;;
+
+(* A Tool that ends the run keeps failing closed: its result cannot continue
+   the turn (RFC restart-resumes-running-chat-operations 4.5). *)
+let settle_unreturned_after_writer_exit invocation =
+  let durable = invocation.durable in
+  match
+    invocation.scope.writer_exited, Tool_contract.Invocation.completion durable.invocation
+  with
+  | false, (Tool_contract.Continue_after_success | Tool_contract.Terminal_after_success _)
+  | true, Tool_contract.Terminal_after_success _ -> Ok ()
+  | true, Tool_contract.Continue_after_success ->
+    let result =
+      Llm_provider.Types.ToolResult
+        { tool_use_id = Tool_contract.Invocation.tool_use_id durable.invocation
+        ; content = writer_exited_content
+        ; outcome =
+            Llm_provider.Types.Tool_failed
+              { failure_kind = Llm_provider.Types.Writer_exited_tool_error
+              ; error_class = None
+              }
+        ; json = None
+        ; content_blocks = None
+        }
+    in
+    Settlement.settle_unreturned durable.authority ~result writer_exited_terminal
+    |> Result.map (function
+      | Settlement.Not_unreturned | Settlement.Unreturned_settled -> ())
+    |> Result.map_error (fun error -> Settlement_failed error)
+;;
+
 let execute_phased invocation ~invoke =
+  let open Result_syntax in
+  let* () = settle_unreturned_after_writer_exit invocation in
   let durable = invocation.durable in
   let settled =
     Settlement.execute_with_attempt_phased
@@ -781,7 +829,8 @@ let execute_phased invocation ~invoke =
       ~invoke:(fun parent_attempt ->
         let start_child ~agent_name =
           transact invocation.scope.writer (Tx.start_run ~parent_attempt ~agent_name ())
-          |> Result.map (fun (run, _event) -> { writer = invocation.scope.writer; run })
+          |> Result.map (fun (run, _event) ->
+            { writer = invocation.scope.writer; run; writer_exited = false })
         in
         let (content, content_blocks, outcome), after_settle =
           invoke ~start_child ~tool_name:durable.tool_name ~input:durable.input

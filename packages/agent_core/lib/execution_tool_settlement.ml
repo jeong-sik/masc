@@ -17,8 +17,13 @@ type durable_invocation =
 
 type status =
   | Ready_to_execute
+  | Unreturned of Event.Node_id.t
   | Outcome_unknown
   | Settled of Llm_provider.Types.content_block
+
+type unreturned_settlement =
+  | Not_unreturned
+  | Unreturned_settled
 
 type error =
   | Authority_unavailable of Writer.read_error
@@ -117,6 +122,24 @@ let rebind ~writer ~invocation_node =
   | Event.Tool_attempt -> Error Invocation_identity_mismatch
 ;;
 
+(* The one attempt of an open invocation is still open: its handler never
+   returned in the writer that admitted it. *)
+let unreturned_attempt authority (attempt : Event.node Journal.event_record) =
+  let attempt_node = Event.node_id attempt.value in
+  match read_node authority.writer attempt_node with
+  | Error _ as error -> error
+  | Ok attempt_view ->
+    (match Event.node_kind attempt_view.node, attempt_view.status with
+     | Event.Tool_attempt, Journal.Open -> Ok (Unreturned attempt_node)
+     | Event.Tool_attempt, Journal.Closed _ -> Ok Outcome_unknown
+     | ( ( Event.Agent_run _
+         | Event.Agent_turn _
+         | Event.Provider_attempt _
+         | Event.Output_block _
+         | Event.Tool_invocation _ )
+       , _ ) -> Error Invocation_identity_mismatch)
+;;
+
 let status authority =
   match read_node authority.writer authority.invocation_node with
   | Error _ as error -> error
@@ -126,9 +149,11 @@ let status authority =
        Ok (Settled result)
      | Journal.Tool_invocation_state { result = None; _ }, [], Journal.Open ->
        Ok Ready_to_execute
-     | ( Journal.Tool_invocation_state { result = None; _ }
-       , _
-       , (Journal.Open | Journal.Closed _) ) -> Ok Outcome_unknown
+     | Journal.Tool_invocation_state { result = None; _ }, [ attempt ], Journal.Open ->
+       unreturned_attempt authority attempt
+     | Journal.Tool_invocation_state { result = None; _ }, _ :: _ :: _, Journal.Open
+     | Journal.Tool_invocation_state { result = None; _ }, _, Journal.Closed _ ->
+       Ok Outcome_unknown
      | ( ( Journal.Agent_run_state
          | Journal.Agent_turn_state
          | Journal.Provider_attempt_state _
@@ -178,7 +203,7 @@ let execute_with_attempt_phased_internal authority ~after_attempt_committed ~inv
   let* current = status authority in
   match current with
   | Settled result -> Ok (Replayed result)
-  | Outcome_unknown -> Error Effect_outcome_unknown
+  | Unreturned _ | Outcome_unknown -> Error Effect_outcome_unknown
   | Ready_to_execute ->
     let* attempt = begin_attempt authority in
     after_attempt_committed ();
@@ -190,6 +215,28 @@ let execute_with_attempt_phased_internal authority ~after_attempt_committed ~inv
 
 let execute_with_attempt_phased authority ~invoke =
   execute_with_attempt_phased_internal authority ~after_attempt_committed:Fun.id ~invoke
+;;
+
+let settle_unreturned authority ~result terminal =
+  let open Result_syntax in
+  let* current = status authority in
+  match current with
+  | Ready_to_execute | Outcome_unknown | Settled _ -> Ok Not_unreturned
+  | Unreturned attempt ->
+    let transaction =
+      Journal.Transaction.settle_unreturned_tool_attempt
+        ~attempt
+        ~invocation:authority.invocation_node
+        ~result
+        terminal
+    in
+    Eio.Cancel.protect (fun () ->
+      match Writer.submit authority.writer transaction with
+      | Error error -> Error (Receipt_admission_outcome_unknown error)
+      | Ok ticket ->
+        (match Writer.await ticket with
+         | Error error -> Error (Receipt_settlement_outcome_unknown error)
+         | Ok _committed -> Ok Unreturned_settled))
 ;;
 
 let execute_with_attempt authority ~invoke =

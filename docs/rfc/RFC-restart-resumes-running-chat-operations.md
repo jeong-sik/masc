@@ -214,19 +214,24 @@ agent_core 는 masc 의 예외를 모른다. 의존 순서가 agent_core 아래�
 이어 한 실행이 3.3 의 「attempt 는 열렸고 결과가 없는 invocation」을 만나면:
 
 - 핸들러를 부르지 않는다.
-- 새 journal transaction 하나로 끊긴 attempt 를 닫는다. 지금 결과를 쓰는 transaction 은 attempt 를 언제나 `Succeeded` 로 닫으므로 쓰지 않는다(`execution_journal.ml:1812`). 끊긴 attempt 를 `Succeeded` 로 적으면 사실과 다르다.
-  - attempt 는 성공이 아닌 terminal 로 닫는다.
-  - invocation 에 「결과 모름」 결과를 typed 로 적는다. `Types.tool_result_outcome` 에는 이 값을 담을 생성자가 없다(`packages/agent_core/lib/llm_provider/types.mli:69`). 생성자를 더하고 journal·체크포인트 codec 을 함께 바꾼다.
-  - attempt 아래에 열린 하위 실행(child run)이 있으면 같은 transaction 에서 `Cancelled` 로 닫는다. 열린 하위 노드가 있으면 결과를 쓸 수 없다(`execution_journal.ml:805-807`, 1107-1110). 하위 실행이 낸 효과는 부모의 「결과 모름」에 포함된다.
-- recovery 판정은 이 결과를 「결과 모름」으로 센다. 그래야 그 실행의 terminal 이 `Operator_repair_required Effect_outcome_unknown` 를 잃지 않는다(`execution_agent_scope.ml:846-875`).
+- 새 journal transaction `Settle_unreturned_tool_attempt` 하나로 끊긴 attempt 를 닫는다(#52568). 지금 결과를 쓰는 transaction 은 attempt 를 언제나 `Succeeded` 로 닫으므로 쓰지 않는다. 끊긴 attempt 를 `Succeeded` 로 적으면 사실과 다르다.
+  - attempt 는 `Cancelled` 로 닫는다.
+  - invocation 에 「결과 모름」 결과를 typed 로 적는다. 실패 종류 `Writer_exited_tool_error` 를 `Types.tool_failure_kind` 에 더한다(#52565). `tool_result_outcome` 은 그대로 둔다. 「결과 모름」도 실패이고, 실패의 종류를 가르는 자리가 이미 있다.
+  - attempt 아래에 열린 하위 실행(child run)이 있으면 같은 transaction 에서 `Cancelled` 로 닫는다. 열린 하위 노드가 있으면 결과를 쓸 수 없다(`Tool_result_while_children_open`). 하위 실행이 낸 효과는 부모의 「결과 모름」에 포함된다.
+  - 하위 Tool invocation 에 attempt 가 있고 결과가 없으면 transaction 이 거절한다. 하위 실행을 이미 취소로 닫은 경우도 전체 자식 이력에서 확인한다. 이 결과를 부모 결과로 대신하면 recovery 는 여전히 `Operator_repair_required` 다. 거절하지 않으면 이어 한 실행이 provider 를 다시 부르고 성공으로 끝난 뒤에야 `Turn_invariant` 실패로 드러난다. 결과를 기록한 하위 호출은 허용한다. 거절하면 `Resume_writer_exit_unproven` 과 같이 실패로 끝난다(§10).
+- 닫은 attempt 에는 결과가 있으므로 recovery 판정은 `Retire` 다. 「결과 모름」은 결과의 실패 종류로만 남는다.
+  - recovery 를 `Operator_repair_required` 로 두면 이어 한 작업이 성공할 수 없다. Owner 는 성공과 `Effect_outcome_unknown` 이 같이 오면 `Turn_invariant` 실패로 적는다(`keeper_owner.ml` `native_call_unknown_effect_success_detail`).
+  - `Operator_repair_required` 는 「결과 없는 attempt 가 남았다」는 뜻이다. 여기서는 결과를 적었으니 그 상태가 아니다. 다음 행동은 결과를 본 Keeper 가 고른다.
 - 턴은 계속된다. 다음 provider 호출이 이 결과를 본다. 결과 문구에는 사실만 쓴다. 「호출이 서버 재기동으로 끊겼다」, 「효과가 일어났는지 모른다」, 「다시 실행하지 않았다」.
-- 이 처리는 호스트가 「재기동 뒤 이어 한다」고 알린 실행에서만 한다. 호스트는 `execution_store` 의 resume 에 typed 원인(재기동 뒤 / 같은 프로세스 안)을 넘긴다. 이름은 L3 에서 정한다.
+- 이 처리는 호스트가 「실행을 마지막으로 쓴 프로세스가 끝났다」고 알린 실행에서만 한다. 호스트는 `execution_store` 의 resume 으로 `Resume_after_writer_exit` 를 넘긴다. 아무 주장도 하지 않으면 `Resume_writer_exit_unproven` 이다(#52567).
   - `with_resume_once`(`agent_execution_runner.ml:407`)로는 가를 수 없다. 같은 프로세스 안에서도 resume 이 있다. Owner 는 미룬 작업(`Operation_deferred`)의 호출을 `Active` 로 두고(`keeper_owner.ml:964`), 다음 claim 이 그 호출을 resume 한다(`keeper_direct_native_continuation.ml:232-240`, 471).
   - 같은 프로세스 안에서는 이 모양이 생기지 않는다. 핸들러가 값을 돌려주면 settle 이 돈다. 예외를 던지면 settle 을 건너뛰고 `abort` 가 실행을 닫는다(`execution_tool_settlement.ml:176-188`). 4.2 뒤에 닫지 않는 경우는 멈춤뿐이고, 멈춘 Owner 는 다시 claim 하지 않는다(4.2 의 표).
   - 그래도 같은 프로세스 resume 에서 이 모양을 만나면 지금처럼 `Effect_outcome_unknown` 으로 실패한다. 위 근거가 틀려도 「결과 모름」을 지어 쓰지 않는다.
+  - 같은 프로세스에서는 핸들러가 바깥 switch 에 띄운 fiber 가 아직 돌 수 있다. 프로세스가 끝났다면 그런 코드가 남지 않는다. 이 차이가 원인을 타입으로 받는 이유다.
   - masc 는 기동 정리가 다시 큐에 넣은 행의 첫 claim 에만 「재기동 뒤」를 넘긴다. 4.6 의 기록이 그 행을 가른다.
-- terminal Tool(`Terminal_after_success`)은 바꾸지 않는다. 결과를 모르면 지금처럼 `TerminalToolEffectFailed` 로 실행이 끝난다(`pipeline/pipeline_terminal_tool.ml:22-40`). 실행을 끝내는 Tool 이라 「턴을 잇는다」가 성립하지 않는다.
-- 공개 계약 `agent.mli:320-326` 과 resume 의 거절 갈래 `agent_tools.ml:443-447` 를 바꾼다.
+- terminal Tool(`Terminal_after_success`)은 바꾸지 않는다. 결과를 모르면 지금처럼 `Durability_failure` 로 실패하고, 실행은 `TerminalToolDurabilityFailed` 로 끝난다(`pipeline/pipeline_terminal_tool.ml` `durability_failure`). 실행을 끝내는 Tool 이라 「턴을 잇는다」가 성립하지 않는다.
+  - terminal Tool 결과에 `Writer_exited_tool_error` 가 오면 `Terminal_failed` 이고 효과 구분은 `Effect_outcome_unknown` 이다. Tool 이 선언한 효과 구분은 핸들러가 돌려준 실패에만 맞는다.
+- 공개 계약 `Agent.execution_store` 문서를 바꾼다. resume 의 거절 갈래(`agent_tools.ml` `Invocation_attempted_or_settled`)는 그대로 둔다. 닫은 attempt 는 settle 된 결과로 다시 쓰인다(`Replayed`).
 
 이 방법은 지금보다 모르는 채로 다시 실행하는 일을 줄인다. 지금은 작업이 실패한다. 사람이 같은 요청을 다시 보내면, 새 실행은 앞 시도가 있었다는 사실도 모른 채 모든 Tool 을 다시 실행한다. 이 RFC 뒤에는 모델이 끊긴 호출 하나를 알고 상태를 먼저 확인할 수 있다. 무엇을 할지는 Keeper 가 고른다.
 
@@ -319,12 +324,16 @@ agent_core:
 - 호스트 멈춤으로 Tool 핸들러 중 취소 → attempt 열림, 결과 없음, terminal 없음.
 - 멈춤이 `Multiple`·`Finally_raised` 로 감싸여 와도 같다. 멈춤과 운영자 중단이 섞이면 닫힌다.
 - 운영자 중단 생성자로 취소 → 지금처럼 `Cancelled` 로 닫힘.
-- 열린 attempt·결과 없음으로 이어 하기 → 핸들러 0회, attempt 는 성공이 아닌 terminal, invocation 에 「결과 모름」, 다음 provider 요청에 그 결과가 실림, 실행 terminal 의 recovery 는 `Operator_repair_required`.
+- 열린 attempt·결과 없음으로 `Resume_after_writer_exit` 이어 하기 → 핸들러·gate·hook 0회, attempt 는 `Cancelled`, invocation 에 `Writer_exited_tool_error` 결과, 다음 provider 요청에 그 결과가 실림, 실행은 성공하고 recovery 는 `Retire`.
+- 이미 결과가 있는 invocation 을 `Resume_after_writer_exit` 로 이어 하기 → 지금처럼 결과를 다시 쓴다.
 - 같은 모양에 열린 하위 실행이 있음 → 하위 실행도 `Cancelled` 로 닫히고 결과가 쓰인다.
-- terminal Tool 이 끊긴 모양 → 지금처럼 `TerminalToolEffectFailed`.
+- 하위 실행 안에 열린 Tool attempt 가 있음 → transaction 이 거절하고 아무것도 쓰지 않는다.
+- 하위 Tool 을 결과 없이 취소로 닫은 뒤 부모를 settle → transaction 이 거절하고 아무것도 쓰지 않으며 부모 attempt 는 열린 채 남는다.
+- 하위 Tool 에 결과를 기록하고 하위 실행을 닫은 뒤 부모를 settle → 허용하며 하위 결과를 보존한다.
+- terminal Tool 이 끊긴 모양 → 지금처럼 `TerminalToolDurabilityFailed`.
 - 이어 하지 않는 실행(fresh)에서 같은 처리가 일어나지 않는다.
 - 결과 없이 `Cancelled` 로 닫힌 invocation 으로 이어 하기 → 지금과 같음.
-- 같은 프로세스 원인으로 이어 하는 실행이 열린 attempt·결과 없음을 만남 → 지금처럼 `Effect_outcome_unknown` 으로 실패, 결과를 쓰지 않음.
+- `Resume_writer_exit_unproven` 으로 이어 하는 실행이 열린 attempt·결과 없음을 만남 → 지금처럼 `Effect_outcome_unknown` 으로 실패, 결과를 쓰지 않음.
 - 멈춘 실행 뒤 runner 의 terminal 전달 0회, writer 는 terminal 없이 닫히고 잠금이 풀림.
 
 masc:
@@ -351,15 +360,16 @@ masc:
 | L0 | 이 RFC, #52359 에 결정 기록 | — | 없음 |
 | L1 | agent_core `retire_uncollected_turn` (#52359 L1) | — | 없음. 부르는 곳이 없다 |
 | L2 | agent_core: 호스트 멈춤은 기록을 닫지 않는다(4.2) | — | 없음. masc 가 함수를 넘기기 전이다 |
-| L3 | agent_core: 끊긴 Tool 을 typed 결과로(4.5), codec | — | 비정상 종료 뒤 Tool 이 끊긴 작업이 `Durability_failure` 대신 「결과 모름」으로 이어진다 |
-| L4 | masc 기동 정리: retire 뒤 retained 체크포인트에서 새 호출(4.4), 이어 한 지점(4.6), #52359 L2 를 대신함 | L1 | 비정상 종료 뒤 모으기 전에 끊긴 작업이 turn counter 불일치 대신 이어진다. 진전 없이 다시 끊긴 작업은 끝난다 |
+| L3 | agent_core: 끊긴 Tool 을 typed 결과로(4.5). 실패 종류 #52565, resume 원인 #52567, journal transaction #52568, 연결 L3d | — | 없음. masc 는 `Resume_writer_exit_unproven` 만 넘긴다 |
+| L4 | masc 기동 정리: retire 뒤 retained 체크포인트에서 새 호출(4.4), 이어 한 지점(4.6), #52359 L2 를 대신함. 기동 정리가 다시 넣은 행의 첫 claim 에 `Resume_after_writer_exit` | L1·L3 | 비정상 종료 뒤 모으기 전에 끊긴 작업이 turn counter 불일치 대신 이어진다. Tool 이 끊긴 작업은 `Durability_failure` 대신 「결과 모름」으로 이어진다. 진전 없이 다시 끊긴 작업은 끝난다 |
 | L5 | masc Owner: 멈출 때 4.2 의 함수를 넘긴다(4.3) | L2·L3·L4 | 정상 재기동도 위 두 경로를 탄다 |
 
-- L3 과 L4 는 비정상 종료 경로만 바꾼다. 둘 다 지금 실패로 끝나는 작업을 잇는 쪽이다.
+- L3 은 운영 동작을 바꾸지 않는다. 「재기동 뒤」를 가르는 기록(4.6)이 L4 에 생기므로, `Resume_after_writer_exit` 를 넘기는 일도 L4 다.
+- L4 는 비정상 종료 경로만 바꾼다. 지금 실패로 끝나는 작업을 잇는 쪽이다.
 - L5 가 마지막이다. L5 를 먼저 넣으면 끊긴 provider 호출과 Tool 이 각각 turn counter 불일치와 `Durability_failure` 로 실패한다. 실패 종류만 바뀌고 일은 여전히 사라진다.
 - 층마다 거짓이 되는 문서·주석을 같은 층에서 고친다.
   - L2: `agent.mli:350-363`.
-  - L3: `agent.mli:320-326`.
+  - L3: `Agent.execution_store` 문서.
   - L5: `docs/design/keeper-repetition-scope-boundaries.md:13`, `keeper_owner_registry.ml:426-434`, `keeper_owner.ml:951-956`·1862-1868.
 
 ## 10. 정할 것
@@ -371,4 +381,5 @@ masc:
 - **저장된 runtime·계정이 재기동 뒤 없는 경우**(6). #52359 §10 셋째 항목과 같다. 재현한 뒤, 4.4 처럼 호출을 내리고 retained 체크포인트에서 새 호출을 열지 정한다.
 - **retire 와 다시 큐에 넣기 사이에 죽는 경우**. 판정은 4.4 의 표다. 다음 기동은 terminal 을 읽고 `Interrupted_by_restart` 로 끝낸다(#52359 §5). terminal 증거에 retire 원인을 남기면(#52359 §10 첫 항목) 이 구간도 이어 할 수 있다. 좁은 구간이라 이 RFC 는 지금 경로를 두고, 시험(§8)으로 판정을 고정한다.
 - **「결과 모름」 문구에 자식 프로세스 상태를 적을지**. 정상 재기동은 자식을 SIGKILL 로 끝낸다(3.1 의 4). 비정상 종료 뒤 자식이 남는지는 확인하지 않았다.
+- **하위 실행 안에서 끊긴 Tool**. 4.5 는 지금 거절한다. 끊긴 하위 invocation 마다 같은 「결과 모름」 결과를 적으면 이어 할 수 있다. 하위 Tool 의 `provider_tool_use_id` 가 없을 수 있고, 하위 terminal Tool 도 다뤄야 한다. Tool 핸들러 안에서 하위 실행을 여는 호출처가 생기면 정한다.
 - **retained 체크포인트를 canonical 로 먼저 설치하는 방법**. 4.4 대신 `call.checkpoint` 를 canonical 로 설치하고 기존 loader 를 쓰는 길도 있다. canonical 저장은 turn 번호가 엄격히 작을 때만 낡은 것으로 막는다(`keeper_checkpoint_store_save.ml:94`). 이 길은 먼저 돈 다른 작업이 canonical 을 앞으로 옮긴 경우(5.4)에 막히므로 4.4 를 고른다.

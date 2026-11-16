@@ -63,7 +63,7 @@ All Keepers (`result-split-all-*.json`, `sum`):
 
 The seven review Keepers (`result-split-*.json`):
 
-| Keeper | Received earlier → later | Later started / executions | Later wait h | Mean run min earlier → later |
+| Keeper | Received earlier → later | Started by read time / executions | Later wait h | Mean run min earlier → later |
 |---|---|---|---|---|
 | context-reviewer | 17 → 123 | 123 / 108 | 355.0 | 6.1 → 15.8 |
 | code-reviewer-uncle | 320 → 111 | 102 / 96 | 226.9 | 2.7 → 11.0 |
@@ -94,9 +94,11 @@ The 17.3 hours with no turn, by cause (`result-gap-causes-2026-11-13..16.json`):
 | Turns cut by the 11-13 deploy restart | 3.7 | `masc-start-20261113T004828Z.log` ends at 06:30:04Z and the next server starts at 06:30:03Z. Inside each of the five gaps the Keeper logs `checkpoint_save` 6 to 45 times. No turn record and no raw trace covers these turns. |
 | Not separated | 2.4 | 676 intervals, 13 seconds on average. |
 
-Mean run minutes are `completed_at - started_at` over operations that started in the window and completed.
+"Started" counts operations whose wait overlaps the window and that had a `started_at` at read time
+(`waited_started`), so it includes operations that started after the window end. Mean run minutes are
+`completed_at - started_at` over those that completed; `started_at` is the last segment start.
 `code-reviewer-mother` ran its direct turns mostly on `glm-coding.glm-5.3-flash` in both windows (330 and 283
-turns in `result-runtime-by-window.json`), and its mean run still grew 7.6 times.
+turns in `result-runtime-by-window.json`), and its mean run still grew 7.7 times (17.392 / 2.272).
 
 ## Limits
 

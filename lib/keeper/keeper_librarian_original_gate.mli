@@ -38,9 +38,10 @@ module Make (Capture : Capture) : sig
   type proofs
   val proofs : unit -> proofs
   (** Binding chains one deploy check proved. A chain proved for an attempt
-      stays proved while the attempt, its execution parent, the parent's
-      capture and its owner read the same; a failed proof is not kept. One
-      check passes the same proofs to every payload validation it makes. *)
+      stays proved while the attempt, its execution parent and its owner read
+      the same; [capture] is the one the check restored from [parent]. A
+      failed proof is not kept. One check passes the same proofs to every
+      payload validation it makes. *)
   val validate_payload :
     proofs:proofs ->
     read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->

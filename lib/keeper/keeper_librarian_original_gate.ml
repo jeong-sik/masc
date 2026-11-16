@@ -271,28 +271,31 @@ let pending_child ~(prior:Owner.retained) (child:Owner.retained) =
    of a scope and follows each record's retry links back to its root, so
    proving every record's whole chain again proved a journal of n attempts
    n(n+1)/2 times. A chain proved for an attempt stays proved for the rest of
-   the check while the attempt, its execution parent, the parent's capture and
-   its owner read the same, as the check's forest proof does. A failed proof
-   is not kept: the next record that reaches it proves it again and is refused
-   as before. Records are compared by their listed form, which names the
-   request by digest, and the capture by a digest, so a proof holds no request
-   body. *)
-type chain_proof =
-  {owner_key:string; capture_key:string; parent_key:string; record_key:string; proved:Yojson.Safe.t}
+   the check while the attempt, its execution parent and its owner read the
+   same, as the check's forest proof does. The check restores the capture
+   from that parent, so the parent fixes the capture too. A failed proof is
+   not kept: the next record that reaches it proves it again and is refused
+   as before.
+   The check is not a snapshot of the store. A record it checked is not read
+   again when a running server changes the store later in the check, and a
+   chain it proved is not read again either. On a store that does not change
+   during the check, the same records are refused with the same text.
+   Records are compared by their listed form, which names the request by
+   digest. A proof keeps the attempt's proposal for the rest of the check,
+   and no request body. *)
+type chain_proof = {owner_key:string; parent_key:string; record_key:string; proved:Yojson.Safe.t}
 type proofs = (string, chain_proof) Hashtbl.t
 let proofs () : proofs = Hashtbl.create 64
-let json_key json = Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
-let listed_key (record:Owner.retained) = json_key (Owner.record_to_json (Owner.listed record))
+let listed_key (record:Owner.retained) =
+  Agent_core_sha256.(digest_string (Yojson.Safe.to_string (Owner.record_to_json (Owner.listed record))) |> to_hex)
 (* Captured links only. Live owner and host-proof restoration stay in the
    runtime path below. *)
 let validate_binding_chain ~proofs ~read ~owner ~capture ~parent record =
-  let owner_key=Yojson.Safe.to_string (Capture.owner_to_json owner)
-  and capture_key=json_key (Capture.to_json capture) and parent_key=listed_key parent in
+  let owner_key=Yojson.Safe.to_string (Capture.owner_to_json owner) and parent_key=listed_key parent in
   let recall (record:Owner.retained) record_key =
     List.find_map (fun proof ->
-      if String.equal proof.owner_key owner_key && String.equal proof.capture_key capture_key
-         && String.equal proof.parent_key parent_key && String.equal proof.record_key record_key
-      then Some proof.proved else None)
+      if String.equal proof.owner_key owner_key && String.equal proof.parent_key parent_key
+         && String.equal proof.record_key record_key then Some proof.proved else None)
       (Hashtbl.find_all proofs record.request_id) in
   let rec visit visited (record:Owner.retained) =
     let* ()=require (not (List.mem record.request_id visited)) "Cyclic gate retry ancestry" in
@@ -310,7 +313,7 @@ let validate_binding_chain ~proofs ~read ~owner ~capture ~parent record =
           let* prior_proposal=visit (record.request_id::visited) prior in
           let* ()=equal prior_proposal proposal "Gate retry changed the original proposal" in
           let* ()=predecessor_binding ~prior record in pending_child ~prior record in
-      Hashtbl.add proofs record.request_id {owner_key;capture_key;parent_key;record_key;proved=proposal};
+      Hashtbl.add proofs record.request_id {owner_key;parent_key;record_key;proved=proposal};
       Ok proposal in
   visit [] record
 let validate_payload ~proofs ~read ~read_body ~owner ~capture ~parent ~record =

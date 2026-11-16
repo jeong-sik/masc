@@ -583,11 +583,11 @@ let test_a_journal_read_restores_each_attempt_once () = with_fixture (fun fixtur
 
 (* A deploy check reads every gate record of a journal and follows each
    record's retry links back to the journal's first attempt. A check that
-   proved each record's whole chain again would prove eleven links when the
-   eleventh attempt arrives, against two when the second does. A check that
-   proves each attempt once proves one link for either. The rest of what an
-   attempt adds to the check, its parent's capture and its successor, is the
-   same for both, so the eleventh may cost at most half again the second. *)
+   proves each attempt once reads the gate scope two more times for each
+   attempt a journal grows by: the new attempt's predecessor, and the
+   successor that predecessor names. A check that proved each record's whole
+   chain again would also read every earlier attempt once more: three more
+   reads for the third attempt and five for the fifth. *)
 let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture ->
   fixture.respond := (fun body ->
     if contains body second_text then `OK, F.openai_response (answer ~claim:"claim 2" ~state:"state 2")
@@ -612,31 +612,36 @@ let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture 
       if attempts () < count then
         if runs = 0 then failf "the first step's journal did not reach %d attempts" count
         else (fail_once (); grow_to count (runs - 1)) in
-    let scan () =
-      let before = Gc.allocated_bytes () in
-      let report = io (fun () -> Lane_addon_store_preflight.scan
-        ~validate_tool_request:Keeper_librarian_store_preflight.preflight
+    let gate_scope = Gate.scope owner in
+    (* One deploy check, counting the reads of the journal's gate scope. *)
+    let gate_reads () =
+      let reads = ref 0 in
+      let counting () =
+        let validate = Keeper_librarian_store_preflight.validator () in
+        fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_ record ->
+          let read ~scope ~request_id =
+            if String.equal scope gate_scope then incr reads;
+            read ~scope ~request_id in
+          match validate ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record with
+          | Ok () -> Lane_addon_store_preflight.Payload_valid
+          | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
+      let report = io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
         Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
-      let cost = Gc.allocated_bytes () -. before in
       check (list string) "the deploy check refuses no record" []
         (List.map (fun (refusal : Lane_addon_store_preflight.refusal) -> refusal.detail) report.refusals);
-      cost in
-    (* The first check after a run also pays for whatever the process loads
-       once, so each cost is that of the second check after a run. *)
-    let check_cost () = ignore (scan ()); scan () in
-    grow_to 1 2;
-    let one = check_cost () in
-    grow_to 2 2;
-    let two = check_cost () in
-    grow_to 10 9;
-    let ten = check_cost () in
-    grow_to 11 2;
-    let eleven = check_cost () in
-    check int "the first step's journal holds eleven attempts" 11 (attempts ());
-    Printf.printf "deploy check: the second attempt added %.0f bytes, the eleventh %.0f\n%!"
-      (two -. one) (eleven -. ten);
-    check bool "a deploy check grows with the attempts of a journal and not with their square" true
-      (eleven -. ten < 1.5 *. (two -. one))))
+      !reads in
+    grow_to 2 3;
+    let two = gate_reads () in
+    grow_to 3 2;
+    let three = gate_reads () in
+    grow_to 4 2;
+    let four = gate_reads () in
+    grow_to 5 2;
+    let five = gate_reads () in
+    check int "the first step's journal holds five attempts" 5 (attempts ());
+    check bool "a longer journal costs the check more gate reads" true (three > two);
+    check int "the fifth attempt adds as many gate reads to the check as the third"
+      (three - two) (five - four)))
 
 let () =
   run "keeper_librarian_floor_chain"

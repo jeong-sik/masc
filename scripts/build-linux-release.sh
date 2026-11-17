@@ -270,11 +270,22 @@ docker exec "$container" bash -lc '
   set -e
   cd /src
   eval "$(opam env --switch=masc)"
-  # The image ships a repo index from its own build date. A dependency the lock
-  # file names can be newer than that index, and --locked then has no candidate
-  # at all (v0.73.1 stopped on "matrix >= 0.2.0 / no matching version"). The
-  # switch step above updates only when this image lacks the OCaml patch
-  # release, so refresh the index unconditionally before resolving.
+  # A block that silently runs on the host instead of inside the container is
+  # the failure this assertion exists to stop: candidate 9fbc2b95fb ran its
+  # whole dependency step on the runner that way and reported opam missing.
+  command -v opam >/dev/null || {
+    echo "opam is not on PATH: this block is not running inside the container" >&2
+    exit 1
+  }
+  # The image ships `default` as a local clone with no remote
+  # (git+file:///home/opam/opam-repository), so refreshing it reports "no
+  # changes" forever and a version the lock names but the image predates can
+  # never appear (v0.73.1: matrix >= 0.2.0 / no matching version). Point the
+  # repository at the public index the macOS jobs already resolve from, then
+  # refresh. Fatal on purpose: without a remote index this build cannot be shown
+  # to match the lock file.
+  opam repository set-url default https://opam.ocaml.org \
+    || opam repository add default https://opam.ocaml.org
   #
   # --repositories only: a bare `opam update` also advances the branch pins
   # taken just above (compact-protocol#main, bisect_ppx#5.2), which would move a

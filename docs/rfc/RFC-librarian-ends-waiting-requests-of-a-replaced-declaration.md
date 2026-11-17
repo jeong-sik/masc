@@ -250,7 +250,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 이 보장은 기존 Keeper Memory lane의 Keeper별 직렬화와 workspace lease 안에서 성립한다. owner 갱신은 전체 expected record와 progress를 다시 비교하며 다른 tail을 거절한다.
 
 - history 가 읽는 자리는 둘이다.
-  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다. 지금은 `keeper_librarian_durable_commit.ml` 의 `frontier` 가 `Settled_if_replaced` 로 읽는다. 운영자 해소 흐름도 같은 검사 함수를 쓴다.
+  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다. 지금은 `keeper_librarian_durable_commit.ml` 의 `frontier` 가 `Unfinished | Settled` 두 값이고, 교체가 이미 끝난 Cut 인지는 `Keeper_librarian_declaration_replacement.released_cut` 이 정해 `Settled` 로 접힌다. 운영자 해소 흐름도 같은 검사 함수를 쓴다.
   - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 문제 확인 당시에는 오류였다. 지금은 `lib/keeper/keeper_librarian_durable_owner.ml` 이 `Submit.End_replaced` 로 끝낸다. pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
 - 이 갈래는 거절 갈래(`Refused`)를 지나지 않는다. 다음 읽기를 좁히지 않는다.
   - 새 원본을 만든 바로 그 pass 에서 이 갈래가 나와도 같다. 그 자리는 거절을 `Memory_refused` 로 돌려주고, 그 값은 좁히기 표시를 남긴다(`keeper_librarian_durable_execution.ml` 519~530행, `lib/keeper/keeper_librarian_durable_consumer.ml` 1692~1719행). 이 갈래는 그 값으로 돌려주지 않는다.
@@ -299,7 +299,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 
 main `cd28f2ac4174`의 L3(#52695)는 다음 경로로 Cut 원본을 정리한다.
 
-- inventory 검사는 원래 host의 `Cut`을 확인하고 `Settled_if_replaced`를 돌려준다. pass가 현재 목적지와 비교해 정리할지 정한다. `Cut`을 `Interrupted`나 답으로 바꾸지 않는다.
+- inventory 검사는 원래 host의 `Cut`을 확인하고 `frontier`를 돌려준다. 그 `Cut`의 교체가 released 이면 `Settled`, 아니면 `Unfinished` 다. pass가 현재 목적지와 비교해 정리할지 정한다. `Cut`을 `Interrupted`나 답으로 바꾸지 않는다.
 - 현재 목적지는 그 pass가 첫 Cut 원본을 만났을 때 한 번 읽는다. inventory 판정과 owner의 깨움은 그 값을 함께 쓴다. 새 원본을 만들거나 접수 전을 확인하는 다른 자리는 따로 읽는다.
 - inventory 검사는 `io`에서 돌고 목적지는 pass의 fiber에서 읽는다. 목적지를 읽지 못하면 기다리고 까닭을 로그에 남긴다. `Finished`·`Conflicted`만 묻는 운영자 해소 흐름은 이 판정을 쓰지 않는다.
 - 정상 Exact 경로는 요청별 claim을 잡은 채 실행한다. 이미 terminal이 있으면 다시 실행하지 않는다. proof로 답을 복원하는 경로도 terminal이 없는 `Started`에만 열린다.

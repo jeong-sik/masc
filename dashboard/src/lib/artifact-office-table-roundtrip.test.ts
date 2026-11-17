@@ -16,6 +16,10 @@ function artifact(content: string): ArtifactDocument {
 }
 const table = '<table><tr><td>첫 열</td><td>둘</td><td>셋</td></tr><tr><td colspan="3">전체 병합</td></tr></table>'
 const word = officeNs.word, hp = hwpxNs.paragraph
+function htmlTable(content: string): HTMLTableElement {
+  const container = document.createElement('div'); container.innerHTML = content
+  return container.querySelector('table')!
+}
 
 // Set native HWPX fields independently of the HTML producer. The values are
 // deliberately not multiples of a twip, so a DOCX detour cannot pass this test.
@@ -84,6 +88,7 @@ it('preserves all-merged and conflicting source cell widths without inventing or
     expect(native[0]!.cells.map(cell => cell.width)).toEqual(content.includes('병합') ? ['5001'] : ['1000', '2000', '3100'])
     expect(hwpx.notices.some(notice => notice.includes('너비'))).toBe(true)
     const imported = await importArtifactHwpx(hwpx.data)
+    expect(htmlTable(imported.content).style.tableLayout).not.toBe('fixed')
     const again = await nativeHwpx((await artifactHwpxFile(artifact(imported.content))).data)
     expect(again).toEqual(native)
   }
@@ -199,4 +204,77 @@ it.each(['tblW', 'tcW', 'pct', 'all'])('reads OOXML omitted width defaults (%s) 
   expect(imported.content).toContain('A'); expect(imported.content).toContain('B')
   await expect(artifactWordFile(artifact(imported.content))).resolves.toHaveProperty('data')
   await expect(artifactHwpxFile(artifact(imported.content))).resolves.toHaveProperty('data')
+})
+
+it.each(['docx', 'hwpx'] as const)('keeps known absolute columns fixed in canonical %s HTML and preserves native output geometry', async format => {
+  const original = await importArtifactHwpx(await sourceHwpx())
+  const file = format === 'docx' ? await artifactWordFile(artifact(original.content)) : await artifactHwpxFile(artifact(original.content))
+  const imported = await (format === 'docx' ? importArtifactDocx : importArtifactHwpx)(file.data), table = htmlTable(imported.content)
+  expect(table.style.tableLayout).toBe('fixed'); expect(table.style.borderCollapse).toBe('collapse')
+  expect(table.style.borderSpacing).toMatch(/^0(?:px)?$/)
+  expect(table.querySelectorAll('col')).toHaveLength(3)
+  if (format === 'hwpx') {
+    expect(table.style.width).toBe('32.13pt')
+    expect((await nativeHwpx(file.data))[0]!.cells.map(cell => cell.width)).toEqual(['1477', '1002', '734', '3213'])
+  } else {
+    expect(table.style.width).toBe('32.15pt')
+    const xml = await readOfficeXml(await JSZip.loadAsync(file.data), 'word/document.xml')
+    expect(xmlDescendants(xml, word, 'gridCol').map(col => col.getAttributeNS(word, 'w'))).toEqual(['295', '201', '147'])
+  }
+})
+
+it.each(['PAPER', 'PAGE', 'COLUMN', 'PARA'])('does not freeze a native HWPX %s-relative table from absolute cell hints', async reference => {
+  const zip = await JSZip.loadAsync(await sourceHwpx()), xml = await readOfficeXml(zip, 'Contents/section0.xml')
+  xmlChild(xmlDescendants(xml, hp, 'tbl')[0]!, hp, 'sz')!.setAttribute('widthRelTo', reference)
+  zip.file('Contents/section0.xml', new XMLSerializer().serializeToString(xml))
+  const imported = await importArtifactHwpx(await zip.generateAsync({ type: 'uint8array' })), table = htmlTable(imported.content)
+  expect(table.style.tableLayout).not.toBe('fixed'); expect(table.style.width).toBe('')
+  expect(table.querySelector('td')!.style.width).toBe('14.77pt')
+})
+
+it.each(['auto', 'nil', 'pct'])('keeps a Word %s table preference despite fully known grid and cell widths', async type => {
+  const source = await artifactWordFile(artifact('<table style="width:30pt"><tr><td style="width:10pt">A</td><td style="width:20pt">B</td></tr></table>'))
+  const zip = await JSZip.loadAsync(source.data), xml = await readOfficeXml(zip, 'word/document.xml')
+  const preferred = xmlDescendants(xml, word, 'tblW')[0]!
+  preferred.setAttributeNS(word, 'w:type', type); preferred.setAttributeNS(word, 'w:w', type === 'pct' ? '5000' : '0')
+  zip.file('word/document.xml', new XMLSerializer().serializeToString(xml))
+  const imported = await importArtifactDocx(await zip.generateAsync({ type: 'uint8array' })), table = htmlTable(imported.content)
+  expect(table.style.tableLayout).not.toBe('fixed'); expect(table.style.width).toBe(type === 'pct' ? '100%' : 'auto')
+  expect(table.querySelector('col')!.style.width).toBe('10pt')
+})
+
+it('includes continuation-cell preferences when deciding whether a Word rowspan has exact tracks', async () => {
+  const source = await artifactWordFile(artifact('<table style="width:30pt"><tr><td rowspan="2" style="width:10pt">A</td><td style="width:20pt">B</td></tr><tr><td style="width:20pt">C</td></tr></table>'))
+  const zip = await JSZip.loadAsync(source.data), xml = await readOfficeXml(zip, 'word/document.xml')
+  const continuation = xmlDescendants(xml, word, 'tc').find(cell => {
+    const merge = xmlDescendants(cell, word, 'vMerge')[0]
+    return merge && merge.getAttributeNS(word, 'val') !== 'restart'
+  })!
+  const preferred = xmlDescendants(continuation, word, 'tcW')[0]!
+  preferred.setAttributeNS(word, 'w:type', 'auto'); preferred.setAttributeNS(word, 'w:w', '0')
+  zip.file('word/document.xml', new XMLSerializer().serializeToString(xml))
+  const imported = await importArtifactDocx(await zip.generateAsync({ type: 'uint8array' }))
+  expect(htmlTable(imported.content).style.tableLayout).not.toBe('fixed')
+  expect(htmlTable(imported.content).querySelector('td')!.rowSpan).toBe(2)
+})
+
+it('derives a fixed table display width when absolute cells identify the complete grid', async () => {
+  const zip = await JSZip.loadAsync(await sourceHwpx()), xml = await readOfficeXml(zip, 'Contents/section0.xml')
+  const size = xmlChild(xmlDescendants(xml, hp, 'tbl')[0]!, hp, 'sz')!; size.parentNode!.removeChild(size)
+  zip.file('Contents/section0.xml', new XMLSerializer().serializeToString(xml))
+  const imported = await importArtifactHwpx(await zip.generateAsync({ type: 'uint8array' })), table = htmlTable(imported.content)
+  expect(table.style.tableLayout).toBe('fixed'); expect(table.style.width).toBe('32.13pt')
+})
+
+it('emits inferred Word column tracks even when the first row is merged and tblGrid is absent', async () => {
+  const source = await artifactWordFile(artifact('<table style="width:30pt"><tr><td colspan="2" style="width:30pt">전체</td></tr><tr><td style="width:10pt">A</td><td style="width:20pt">B</td></tr></table>'))
+  const zip = await JSZip.loadAsync(source.data), xml = await readOfficeXml(zip, 'word/document.xml')
+  const grid = xmlDescendants(xml, word, 'tblGrid')[0]!; grid.parentNode!.removeChild(grid)
+  zip.file('word/document.xml', new XMLSerializer().serializeToString(xml))
+  const imported = await importArtifactDocx(await zip.generateAsync({ type: 'uint8array' })), table = htmlTable(imported.content)
+  expect(table.style.tableLayout).toBe('fixed'); expect(table.style.width).toBe('30pt')
+  expect([...table.querySelectorAll('col')].map(column => column.style.width)).toEqual(['10pt', '20pt'])
+  const again = await artifactWordFile(artifact(imported.content)), output = await readOfficeXml(await JSZip.loadAsync(again.data), 'word/document.xml')
+  expect(xmlDescendants(output, word, 'gridCol').map(column => column.getAttributeNS(word, 'w'))).toEqual(['200', '400'])
+  expect((await nativeHwpx((await artifactHwpxFile(artifact(imported.content))).data))[0]!.cells.map(cell => cell.width)).toEqual(['3000', '1000', '2000'])
 })

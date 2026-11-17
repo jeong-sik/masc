@@ -9,6 +9,7 @@ export type OfficeTableWidthCell = { readonly column: number; readonly columns: 
 export type OfficeTableWidthResolution = { readonly kind: 'unique'; readonly widths: readonly number[] }
   | { readonly kind: 'partial' | 'conflicting'; readonly widths: readonly (number | null)[] }
 type WidthSources = { readonly columns?: readonly OfficeTableWidth[]; readonly table?: OfficeTableWidth }
+export type OfficeTableFixedLayout = { readonly width: number; readonly widths: readonly number[] }
 type Edge = { readonly to: number; readonly width: number }
 const hwpUnitsPerPoint = 100
 const units: Readonly<Record<string, readonly [number, number]>> = {
@@ -84,6 +85,43 @@ export function officeTableWidthStyle(width: OfficeTableWidth): string {
       return `width:${whole}${fraction ? `.${String(fraction).padStart(2, '0').replace(/0$/, '')}` : ''}pt`
     }
   }
+}
+
+/** Only absolute, fully determined preferences can define fixed browser tracks.
+ * Count observed boundaries before resolving: a few huge merged spans must not
+ * allocate an array for every unobserved logical column. */
+export function officeTableFixedLayout(columnCount: number, cells: readonly OfficeTableWidthCell[], options: WidthSources = {}, resolved?: OfficeTableWidthResolution): OfficeTableFixedLayout | null {
+  const absolute = (width: OfficeTableWidth) => width.kind === 'absolute' || width.kind === 'absent'
+  if ((options.table && !absolute(options.table)) || options.columns?.some(width => !absolute(width)) || cells.some(cell => !absolute(cell.width))) return null
+  if (!Number.isSafeInteger(columnCount) || columnCount <= 0) throw new Error('표의 열 수가 올바르지 않습니다.')
+  if (options.columns && options.columns.length > columnCount) throw new Error('표의 열 너비 개수가 열 수와 다릅니다.')
+  let geometry = resolved
+  if (!geometry) {
+    const boundaries = new Set([0, columnCount])
+    for (const cell of cells) {
+      const end = cell.column + cell.columns
+      if (!Number.isSafeInteger(cell.column) || !Number.isSafeInteger(end) || cell.column < 0 || end <= cell.column || end > columnCount) throw new Error('표의 셀 너비 구간이 올바르지 않습니다.')
+      if (cell.width.kind === 'absolute') { boundaries.add(cell.column); boundaries.add(end) }
+    }
+    options.columns?.forEach((width, index) => { if (width.kind === 'absolute') { boundaries.add(index); boundaries.add(index + 1) } })
+    if (boundaries.size !== columnCount + 1) return null
+    const columns = options.columns && Array.from({ length: columnCount }, (_, index): OfficeTableWidth => options.columns![index] ?? { kind: 'absent' })
+    geometry = resolveOfficeTableWidths(columnCount, cells, { ...options, columns })
+  }
+  if (geometry.kind !== 'unique' || geometry.widths.length !== columnCount) return null
+  let total = 0
+  for (const width of geometry.widths) {
+    if (width <= 0 || !Number.isSafeInteger(width) || !Number.isSafeInteger(total + width)) return null
+    total += width
+  }
+  return options.table?.kind === 'absolute' && options.table.hwpUnits !== total ? null : { width: total, widths: geometry.widths }
+}
+
+/** Cell widths alone are preferences under auto layout. Fixed tracks and zero
+ * inter-cell spacing make the canonical absolute grid control browser layout. */
+export function officeTableHtmlStyle(preferred: OfficeTableWidth, layout: OfficeTableFixedLayout | null): string {
+  if (layout === null) return officeTableWidthStyle(preferred)
+  return `${officeTableWidthStyle({ kind: 'absolute', hwpUnits: layout.width })};table-layout:fixed;border-collapse:collapse;border-spacing:0`
 }
 
 /** Derive exact boundary differences. A merged interval never invents its inner tracks.

@@ -264,6 +264,11 @@ let tool_observations messages =
 type projection = {messages:Agent_core.Types.message list;
   tool_observations:Keeper_librarian.tool_observation list;
   historical_task_contexts:Historical.t list}
+type message_manifest = {
+  ordered_sources:Keeper_librarian_unread.source list;
+  checkpoint:Agent_core.Types.message list option;
+  selected_turns:(int * Ids.Turn_ref.t * Agent_core.Types.message list) list;
+}
 type projection_step = Atom_cut of checkpoint * R.atom_cut | Official_cut of official * R.official_line
 
 module Trace_map = Map.Make (String)
@@ -308,7 +313,7 @@ let index_official_fragments (official : official) =
         Trace_map.add trace.trace_id turns traces)
     Trace_map.empty official.traces
 
-let project_source ~boundaries source =
+let project_source_with ~include_manifest ~boundaries source =
   let atom,official=match source with Checkpoint_only atom -> Some atom,None
     | Official_only official -> None,Some official | Mixed (atom,official) -> Some atom,Some official in
   let* atom_steps=match atom with
@@ -334,34 +339,47 @@ let project_source ~boundaries source =
   let records=List.fold_left (fun acc (line,value) -> match value with
     | Ok record -> Line_map.add line record acc | Error _ -> acc) Line_map.empty boundaries in
   let start=match atom with None -> 0 | Some atom -> atom.range.start_atom in
-  let* _,_,_,messages,tools,contexts=List.fold_left (fun result step ->
-    let* prev_end,count,tool_count,messages,tools,contexts=result in
+  let* _,_,_,messages,tools,contexts,sources,turns=List.fold_left (fun result step ->
+    let* prev_end,count,tool_count,messages,tools,contexts,sources,turns=result in
     match step with
     | Atom_cut (atom,cut) ->
       let trace_id=Keeper_id.Trace_id.to_string atom.trace_id in
       let scopes=Historical.atom_spans ~trace_id
         ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest atom.messages)
         ~start_atom:prev_end ~end_atom:cut.cut_end_atom ~boundary:(Line_map.find_opt cut.cut_line records) in
-      let count,tool_count,messages,tools,contexts=List.fold_left
-        (fun (count,tool_count,messages,tools,contexts) scope ->
-          let slice=match scope.Historical.source with
-            | Historical.Atom_span {start_atom;end_atom;_} -> R.slice atom.messages {atom.range with start_atom;end_atom}
-            | Historical.Official_turn | Historical.Boundary_only -> [] in
+      let* count,tool_count,messages,tools,contexts,sources=List.fold_left
+        (fun result scope ->
+          let* count,tool_count,messages,tools,contexts,sources=result in
+          let* slice,selected_sources=match scope.Historical.source with
+            | Historical.Atom_span {start_atom;end_atom;_} ->
+              let slice=R.slice atom.messages {atom.range with start_atom;end_atom} in
+              let+ selected_sources=if not include_manifest then Ok [] else
+                Keeper_librarian_unread.sources_for_atom_range ~trace_id
+                  ~history_start_boundary_line:atom.range.history_start_boundary_line
+                  ~start_atom ~end_atom ~messages:atom.messages
+                |> Result.map_error (fun detail -> Inconsistent_source detail) in
+              slice,selected_sources
+            | Historical.Official_turn | Historical.Boundary_only -> Ok ([],[]) in
           let after_message=count+List.length slice in
           let observations=tool_observations slice in
           let after_tool_observation=tool_count+List.length observations in
           let context={Historical.scope;first_message=count;after_message;
             first_tool_observation=tool_count;after_tool_observation} in
-          after_message,after_tool_observation,List.rev_append slice messages,
-            List.rev_append observations tools,context::contexts)
-        (count,tool_count,messages,tools,contexts) scopes in
-      Ok (cut.cut_end_atom,count,tool_count,messages,tools,contexts)
+          Ok (after_message,after_tool_observation,List.rev_append slice messages,
+            List.rev_append observations tools,context::contexts,List.rev_append selected_sources sources))
+        (Ok (count,tool_count,messages,tools,contexts,sources)) scopes in
+      Ok (cut.cut_end_atom,count,tool_count,messages,tools,contexts,sources,turns)
     | Official_cut (_,cut) ->
       (match Trace_map.find_opt (Ids.Turn_ref.trace_id cut.turn_ref) official_fragments with
        | None -> refuse "Durable official projection has no original file capture"
-       | Some turns ->
-         let fragments = match Turn_map.find_opt cut.turn_ref turns with
+       | Some indexed_turns ->
+         let fragments = match Turn_map.find_opt cut.turn_ref indexed_turns with
            | None -> [] | Some fragments -> fragments in
+         let selected_messages=if not include_manifest then [] else List.filter_map (function
+           | F.Message {message;_} -> Some message | Tool_observation _ -> None) fragments in
+         let selected_sources=List.mapi (fun message_in_turn message ->
+           Keeper_librarian_unread.Official_turn {turn_ref=cut.turn_ref;boundary_line=cut.line;
+             message_in_turn;message_sha256=Keeper_librarian_unread.message_digest message}) selected_messages in
          let after_message,after_tools,messages,tools=List.fold_left
            (fun (count,tool_count,messages,tools) -> function
              | F.Message {message;_} -> count+1,tool_count,message::messages,tools
@@ -372,9 +390,14 @@ let project_source ~boundaries source =
            | Some {B.event=B.History_restarted _;_} | None -> Historical.Unattributed in
          let context={Historical.scope={source=Historical.Official_turn;attribution};
            first_message=count;after_message;first_tool_observation=tool_count;after_tool_observation=after_tools} in
-         Ok (prev_end,after_message,after_tools,messages,tools,context::contexts)))
-    (Ok (start,0,0,[],[],[])) steps in
-  Ok {messages=List.rev messages;tool_observations=List.rev tools;historical_task_contexts=List.rev contexts}
+         let turns=if include_manifest then (cut.line,cut.turn_ref,selected_messages)::turns else turns in
+         Ok (prev_end,after_message,after_tools,messages,tools,context::contexts,
+           List.rev_append selected_sources sources,turns)))
+    (Ok (start,0,0,[],[],[],[],[])) steps in
+  Ok ({messages=List.rev messages;tool_observations=List.rev tools;historical_task_contexts=List.rev contexts},
+    List.rev sources,List.rev turns)
+let project_source ~boundaries source =
+  let+ projected,_,_=project_source_with ~include_manifest:false ~boundaries source in projected
 
 let contiguous rows = List.mapi (fun index (line,_) -> line=index+1) rows |> List.for_all Fun.id
 let source_parts = function
@@ -452,7 +475,7 @@ let validate_record original =
    cuts and official turns as the original holds, and project to its input.
    [source] is the capture's own read at creation, and the live prefixes the
    original's spans name in {!confirm_sources}. *)
-let validate_selection ~boundaries ~source original =
+let validate_selection_with ~include_manifest ~boundaries ~source original =
   let input=original.original_input and positions=original.original_positions in
   let atom,official=source_parts source in
   let* ()=check (contiguous boundaries) "Durable boundary rows are not the original numbered sequence" in
@@ -521,13 +544,15 @@ let validate_selection ~boundaries ~source original =
   let* ()=match List.rev pieces with
     | (_,turn_ref)::_ -> check (Ids.Turn_ref.equal input.turn_ref turn_ref) "Durable input ends at another original turn"
     | [] -> refuse "Durable capture has no selected source" in
-  let* projected=project_source ~boundaries source in
-  check (projected.tool_observations=input.tool_observations
+  let* ((projected,_,_) as material)=project_source_with ~include_manifest ~boundaries source in
+  let+ ()=check (projected.tool_observations=input.tool_observations
       && projected.historical_task_contexts=input.historical_task_contexts
       && same_read_messages ~contexts:projected.historical_task_contexts projected.messages input.messages)
-    "Durable input tools or historical attribution differ from its original sources"
+    "Durable input tools or historical attribution differ from its original sources" in material
+let validate_selection ~boundaries ~source original =
+  let+ _,_,_=validate_selection_with ~include_manifest:false ~boundaries ~source original in ()
 
-let confirm_sources ~boundaries ~messages ~traces original =
+let materialize_sources ~boundaries ~messages ~traces original =
   let* boundaries=held_prefix ~changed:"Original completed-turn boundary prefix changed"
     boundary_line_json original.boundary_span boundaries in
   let live_checkpoint (held:Held.checkpoint) = match messages with
@@ -557,7 +582,25 @@ let confirm_sources ~boundaries ~messages ~traces original =
     | Mixed (checkpoint,official) ->
       let* checkpoint=live_checkpoint checkpoint in
       let+ official=live_official official in Mixed (checkpoint,official) in
+  Ok (boundaries,source)
+let confirm_sources ~boundaries ~messages ~traces original =
+  let* boundaries,source=materialize_sources ~boundaries ~messages ~traces original in
   validate_selection ~boundaries ~source original
+let message_manifest ~boundaries ~messages ~traces original =
+  let* boundaries,source=materialize_sources ~boundaries ~messages ~traces original in
+  let* _,ordered_sources,selected_turns=validate_selection_with ~include_manifest:true ~boundaries ~source original in
+  let rec bind seen sources messages=match sources,messages with
+    | [],[] -> Ok ()
+    | source::sources,message::messages ->
+      let key=Keeper_librarian_unread.Source_key.of_source source in
+      let* ()=check (not (Keeper_librarian_unread.Source_keys.mem key seen)
+        && Keeper_librarian_unread.source_digest source=Keeper_librarian_unread.message_digest message)
+        "Original source manifest repeats a coordinate or differs from its retained message" in
+      bind (Keeper_librarian_unread.Source_keys.add key seen) sources messages
+    | [],_::_ | _::_,[] -> refuse "Original source manifest differs from its complete input" in
+  let* ()=bind Keeper_librarian_unread.Source_keys.empty ordered_sources original.original_input.messages in
+  let checkpoint,_=source_parts source in
+  Ok {ordered_sources;checkpoint=Option.map (fun (value:checkpoint) -> value.messages) checkpoint;selected_turns}
 
 let create ~runtime_keepers_dir ~extent ~boundaries ~positions
     ~source ~counterparts ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input =

@@ -116,6 +116,18 @@ val confirm_sources : boundaries:boundary_lines -> messages:Agent_core.Types.mes
     [traces] the current Main and Internal rows of each trace the original
     names. Atom messages are compared in their checkpoint encoding. Reads
     nothing itself. *)
+type message_manifest = private {
+  ordered_sources : Keeper_librarian_unread.source list;
+  checkpoint : Agent_core.Types.message list option;
+  selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list;
+}
+val message_manifest : boundaries:boundary_lines -> messages:Agent_core.Types.message list option ->
+  traces:official_trace list -> t -> (message_manifest, error) result
+(** Materialize the exact retained prefixes and run the same strict source
+    validation as [confirm_sources]. The manifest follows [project_source]'s
+    original atom/official interleaving, with one unique, hash-bound source per
+    original input message. Appended material cannot enlarge it. This is pure
+    data, never source-lock, owner, publication or acknowledgement authority. *)
 val to_json : t -> Yojson.Safe.t
 val basis_json : t -> Yojson.Safe.t
 (** {!to_json} of the source with the two fields {!with_current} sets, the

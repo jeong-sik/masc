@@ -90,6 +90,7 @@ let authorize_floor_step ~base_path ~store ~declaration_id ~(package:Lane_addon_
           let* fresh=Option.to_result ~none:"Original floor step disappeared before provider dispatch" fresh in
           let* actual=Step.observe_record_owner ~base_path ~keepers_dir fresh in
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
+          let* ()=Keeper_librarian_history_resolution_floor.validate_retained_step ~store step in
           Keeper_librarian_runtime.require_counterpart_template (Step.step step).preparation)
           |> Result.map_error not_now in
         Lane_addon_runtime.authorize_captured_exact_dispatch ~store ~declaration_id

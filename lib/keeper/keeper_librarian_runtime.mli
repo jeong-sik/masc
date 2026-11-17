@@ -464,11 +464,20 @@ type durable_step_context = {
   previous_state : string option;
   unread_messages : Keeper_librarian_unread.t list;
 }
+type retained_step_source = {
+  request_id : string;
+  request_digest : string;
+  source_basis_digest : string;
+}
+(** Immutable source identity carried by a complete-original floor question.
+    These are data, not a Cut witness or permission to dispatch or publish. *)
+type durable_step_mode = Ordinary_floor | Retained_original of retained_step_source
 type durable_step_preparation = {
+  mode : durable_step_mode;
   context : durable_step_context;
   preparation : durable_preparation;
-      (** [preparation.source_input] is the question's input with its working
-          context cleared, as the Runtime floor clears it. *)
+      (** Ordinary floors clear the working context. Retained-original floors
+          preserve the original captured context and frozen prompt assets. *)
 }
 val durable_step_source_input : Keeper_librarian.input -> Keeper_librarian.input
 (** The input a step's preparation holds for a floor question's input: the
@@ -481,8 +490,9 @@ val prepare_durable_step : now:float -> context:durable_step_context ->
     asks it. A question carrying counterpart input requires its substitution in
     the resolved prompt. *)
 val validate_durable_step_preparation : durable_step_preparation -> (unit, string) result
-(** Pure restoration check: the captured input holds no working context, and the
-    substitutions, rendered prompt and continuity schema match the input,
+(** Pure restoration check: ordinary questions hold no working context;
+    retained-original questions carry a syntactically valid source identity.
+    Substitutions, rendered prompt and continuity schema match the input,
     context and retained resolutions. No environment or prompt lookup. *)
 val restore_durable_step_preparation : context:durable_step_context ->
   source_input:Keeper_librarian.input -> parsing_now:float -> policy:durable_policy ->
@@ -491,6 +501,28 @@ val restore_durable_step_preparation : context:durable_step_context ->
   output_schema:Yojson.Safe.t -> (durable_step_preparation, string) result
 (** Render the substitutions and prompt again from the captured input, context
     and retained resolutions, then {!validate_durable_step_preparation}. *)
+val restore_retained_durable_step_preparation : source:retained_step_source ->
+  context:durable_step_context -> source_input:Keeper_librarian.input ->
+  parsing_now:float -> policy:durable_policy ->
+  rule_prompt:Prompt_registry.prompt_resolution -> turn_prompts:turn_input_prompts ->
+  prompt:Prompt_registry.prompt_resolution -> output_schema:Yojson.Safe.t ->
+  (durable_step_preparation, string) result
+(** Closed retained-original restoration. It preserves the context and source
+    identity, but supplies no live source, Cut or publication authority. *)
+val prepare_retained_durable_step : source:retained_step_source ->
+  original:durable_preparation -> context:durable_step_context ->
+  Keeper_librarian.input -> (durable_step_preparation, string) result
+(** Purely derive a question from the input-refused leaf original's captured policy, parsing
+    time, rule, turn slots and template. No registry, environment or source
+    lookup. The question preserves the original Keeper, instructions, turn,
+    Goal context and working context; its message/observations and Current are
+    the floor machine's projection. This never substitutes the Cut ancestor's
+    older preparation for the definite leaf's sealed question. *)
+val validate_retained_durable_step : source:retained_step_source ->
+  original:durable_preparation -> durable_step_preparation -> (unit, string) result
+(** Rejoin a restored step to the actual full original. The mode and every
+    frozen asset must match; ordinary preparations are refused. The machine
+    separately checks the exact projected message and carried observations. *)
 type durable_step_proposal = private {
   proposal : durable_proposal;
       (** The Memory answer as a durable pass reads it, parsed against the

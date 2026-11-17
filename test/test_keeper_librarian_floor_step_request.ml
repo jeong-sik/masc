@@ -195,6 +195,49 @@ let restore_for ~owner question record =
   | Error _ as error -> error
   | Ok step -> Result.map (fun () -> step) (Step.matches_question question step)
 
+let test_retained_step_has_a_closed_source_bound_codec () =
+  with_fixture @@ fun ~owner ~other_owner:_ ~fresh_store ->
+  let module C=Masc.Keeper_librarian_context in
+  let original=Runtime.prepare_durable ~source_lines:[] ~now:1_000_000.
+    {(input messages) with working_context={C.empty with
+      sources=[{C.reference="captured-source";content=`String "Captured working context"}]}} |> ok in
+  let range={Step.request_id=Durable.fresh_request_id owner;request_digest=sha_hex 'a'} in
+  let source : Runtime.retained_step_source = {request_id=range.request_id;
+    request_digest=range.request_digest;source_basis_digest=sha_hex 'b'} in
+  let question=question_over original.source_input in
+  let preparation=Runtime.prepare_retained_durable_step ~source ~original
+    ~context:{Runtime.previous_state=question.previous_state;unread_messages=question.unread_messages}
+    question.input |> ok in
+  let anchor=Memory.capture_program_anchor ~keepers_dir:(Durable.keepers_dir owner)
+    ~keeper_id:(Durable.keeper_id owner) |> ok |> Memory.program_anchor_evidence in
+  let basis : Step.retained_chain_basis = {anchor;sources=sources_of original.source_input.messages} in
+  let step=Step.create ~basis ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~transaction_id
+    ~range ~previous:None ~question ~step:preparation () |> ok in
+  let json=Step.to_json step in
+  let record=retain ~store:(fresh_store ()) step json in
+  let restored=restore_for ~owner question record |> ok in
+  Runtime.validate_retained_durable_step ~source ~original (Step.step restored) |> ok;
+  check bool "the retained floor index marks its exact leaf identity" true
+    ((Step.header ~owner record |> ok).retained_source=Some source);
+  check bool "retained source codec roundtrip preserves captured context" true
+    ((Step.step restored).preparation.source_input.working_context=original.source_input.working_context);
+  let closed edit=check bool "unknown, missing and mismatched retained mode fields refuse" true
+    (Result.is_error (Step.of_json ~owner (edit json))) in
+  closed (replace_field "schema" (fun _ -> `Int 1));
+  closed (replace_field "basis" (fun _ -> `Null));
+  closed (replace_field "basis" (replace_field "anchor" (function
+    | `Assoc f -> `Assoc (("unknown",`Bool true)::f) | value -> value)));
+  closed (replace_field "basis" (replace_field "source_manifest" (fun _ -> `List [])));
+  closed (replace_field "retained_source" (replace_field "request_digest" (fun _ -> `String (sha_hex 'c'))));
+  closed (replace_field "retained_source" (function
+    | `Assoc f -> `Assoc (("extra",`Bool true)::f) | value -> value));
+  closed (function `Assoc f -> `Assoc (List.remove_assoc "retained_source" f) | value -> value);
+  let ordinary=chain ~owner in
+  check bool "ordinary steps still use the unchanged schema-one shape" true
+    (match Step.to_json ordinary.first_step with
+     | `Assoc f -> List.assoc "schema" f=`Int 1 && not (List.mem_assoc "retained_source" f)
+     | _ -> false)
+
 let test_a_step_restores_from_its_record_alone () =
   with_fixture @@ fun ~owner ~other_owner:_ ~fresh_store ->
   let chain = chain ~owner in
@@ -466,6 +509,8 @@ let () =
   run "keeper_librarian_floor_step_request"
     [ ( "step request"
       , [ test_case "restores from its record alone" `Quick test_a_step_restores_from_its_record_alone
+        ; test_case "retained step has a closed source-bound codec" `Quick
+            test_retained_step_has_a_closed_source_bound_codec
         ; test_case "a question that differs does not match it" `Quick
             test_a_question_that_differs_does_not_match_the_step
         ; test_case "a tampered request is refused" `Quick test_a_tampered_request_is_refused

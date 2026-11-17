@@ -76,3 +76,36 @@ val run :
     asks, or a step whose previous link or transaction differs. An Eio entry
     point: offload no part of it; its blocking store accesses offload
     themselves. *)
+
+type retained_outcome = {
+  outcome : outcome;
+  basis : Keeper_librarian_floor_step_request.retained_chain_basis;
+  transaction_id : string;
+}
+val run_complete_original :
+  store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
+  original:Keeper_librarian_durable_request.t ->
+  fresh:(unit -> (fresh * Keeper_librarian_floor_step_request.retained_chain_basis, string) result) ->
+  before_inference:(Keeper_librarian_floor_step_request.retained_chain_basis -> (unit, string) result) ->
+  (retained_outcome, string) result
+(** Separate full retained-original path. The definite input-refused leaf's
+    captured preparation supplies every step; no registry/policy refresh.
+    Position zero durably carries the complete ordered manifest and initial
+    Memory anchor before dispatch. A restart restores that basis before any
+    live-source check and reobserves the same in-flight requests. Only fresh
+    admission/new Gate work requires [before_inference]'s actual source and
+    anchor check. Changed facts alone never retire pending/unknown work.
+    New questions capture the ready Runtime destination under its serializer.
+    The installation/package/tool must match the leaf; a supported semantic
+    revision change is allowed for a fresh question. Every retained question
+    keeps its own immutable semantic destination and submit-once identity.
+    A strictly confirmed non-executed declaration ending may publish a complete
+    same-coordinate replacement intent and child, then return Pending and signal
+    the next Memory unit. Selection requires the exact parent's publication ACK;
+    every historical parent and the initial position-zero basis stay retained.
+    Unknown effects, permission refusals, answered steps and actual Gate work
+    cannot create these replacement edges. Saved intents reuse their exact
+    child even after configuration rollback; no original question is replayed.
+    A refused message stops with its actual report; it cannot become a hole.
+    No Memory publication, source ACK, cleanup or Cut authority is supplied
+    by this API. *)

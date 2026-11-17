@@ -11,6 +11,8 @@ module Current = Keeper_memory_os_current
 module Progress = Lane_addon_request_progress
 module Edge = Keeper_librarian_durable_edge
 module Cursor = Keeper_external_read_cursor
+module Floor = Keeper_librarian_history_resolution_floor
+module Commit = Keeper_librarian_durable_commit
 open Result.Syntax
 type error = Intent.error
 type submission = {intent:Intent.t;reobserved:bool}
@@ -155,6 +157,8 @@ let recover_child ~config ~keeper_name ~store intent =
 (* Descends by record and index. A fenced original leads to its resolution
    child; an unfenced one is read, body and all, only once its progress says
    it settled. *)
+type completion_candidate = Completed of Owner.retained * Request.t
+  | Capacity_refused of Owner.retained * Request.t
 let find_completed ~config ~keeper_name ~store ~child_id =
   let rec descend seen id =
     let* ()=require (not (List.mem id seen)) "Resolution completion ancestry contains a cycle" in
@@ -182,7 +186,7 @@ let find_completed ~config ~keeper_name ~store ~child_id =
     let* frontier=io (fun () ->
       Keeper_librarian_durable_commit.validate ~store ~request ~record:original) in
     match Progress.phase original.progress,frontier with
-    | Progress.Finished _,Keeper_librarian_durable_commit.Settled -> Ok (Some (original,request))
+    | Progress.Finished _,Keeper_librarian_durable_commit.Settled -> Ok (Some (Completed (original,request)))
     | (Conflicted _ | Rejected _),Settled ->
       (match Progress.replacement original.progress with
        | Some (Preparation_confirmed next) -> descend (id::seen) next.request_id
@@ -195,19 +199,53 @@ let find_completed ~config ~keeper_name ~store ~child_id =
     | Subdividing _ | Subdivided _ -> let+ ()=by_record () in None
     | Rejected _ ->
       (match Progress.replacement (Owner.Record.progress record) with
-       | None -> let+ ()=by_record () in None
+       | None ->
+         let* ()=by_record () in
+         let+ original,request=io (fun () ->
+           let* original=Owner.load_listed ~store record |> Result.map_error Owner.error_to_string in
+           let+ request=Request.restore ~owner:index.owner original in original,request) in
+         Some (Capacity_refused (original,request))
        | Some (Preparation_pending _ | Preparation_confirmed _) -> follow_settled ())
     | Finished _ | Conflicted _ -> follow_settled () in
   descend [] child_id
+let retain_program_completion ~config ~store intent floor =
+  let commit program =
+    let* settled=io (fun () -> Commit.settle_program ~store ~floor ~program) |> unavailable in
+    let+ _=io (fun () -> Intent.observe_program_commit ~store ~expected:intent ~settled) in None in
+  let* recovered=Floor.recover_committed floor |> unavailable in
+  match recovered with
+  | Some program -> commit program
+  | None ->
+    let* outcome=Floor.descend ~config ~reserved:(Edge.reserved ()) floor |> unavailable in
+    match outcome with
+    | Floor.Prepared prepared ->
+      let* program=Floor.publish floor prepared |> unavailable in commit program
+    | Pending pending -> Ok (Some pending)
+    | Attention attention ->
+      let detail=match attention with
+        | Floor.No_message_coordinate -> "The retained Cut source has no message coordinate to split"
+        | Message_refused {position;report} -> Printf.sprintf
+          "Retained Cut message %d remains unread: %s" position report.Keeper_librarian_runtime.detail
+        | Declaration_replaced {position;request_id} -> Printf.sprintf
+          "Retained Cut step %d ended after its declaration changed (%s)" position request_id in
+      Ok (Some (Keeper_librarian_pending.Message_floor
+        {request_id=Request.request_id (Floor.request floor);detail}))
 let retain_completion ~config ~keeper_name ~store intent =
   match intent.Intent.phase with
   | Child_confirmed child ->
     let* completed=find_completed ~config ~keeper_name ~store ~child_id:child.request_id |> unavailable in
-    (match completed with None -> Ok () | Some (completed,request) ->
-      io (fun () -> Intent.observe_memory_commit ~store ~expected:intent ~request ~completed) |> Result.map (fun _ -> ()))
-  | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> Ok ()
+    (match completed with
+     | None -> Ok None
+     | Some (Completed (completed,request)) ->
+       io (fun () -> Intent.observe_memory_commit ~store ~expected:intent ~request ~completed)
+         |> Result.map (fun _ -> None)
+     | Some (Capacity_refused (record,request)) ->
+       let* floor=Floor.candidate ~store ~record ~request |> unavailable in
+       (match floor with None -> Ok None
+        | Some floor -> retain_program_completion ~config ~store intent floor))
+  | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> Ok None
 let rec process ~config ~keeper_name ~store intent = match intent.Intent.phase with
-  | Refused _ -> Ok ()
+  | Refused _ -> Ok None
   | Requested ->
     (match intent.origin with
     | Intent.Worker_absence ->
@@ -222,10 +260,10 @@ let rec process ~config ~keeper_name ~store intent = match intent.Intent.phase w
        let* next=io (fun () -> Intent.confirm_fence ~store ~expected:intent fence) in
        process ~config ~keeper_name ~store next
      | Error Resolution.Observation_changed ->
-       io (fun () -> Intent.refuse ~store ~expected:intent Intent.Observation_changed) |> Result.map (fun _ -> ())
+       io (fun () -> Intent.refuse ~store ~expected:intent Intent.Observation_changed) |> Result.map (fun _ -> None)
      | Error ((Original_absent | Ineligible _ | Range_already_recorded) as error) ->
        io (fun () -> Intent.refuse ~store ~expected:intent (Intent.No_longer_eligible (Resolution.error_to_string error)))
-       |> Result.map (fun _ -> ())
+       |> Result.map (fun _ -> None)
      | Error (Unavailable detail) -> Error (Intent.Unavailable detail)
      | Error (Publication_uncertain detail) -> Error (Intent.Publication_uncertain detail)
      | Error Host_claim_busy -> Error Intent.Host_claim_busy)
@@ -254,18 +292,25 @@ let rec process ~config ~keeper_name ~store intent = match intent.Intent.phase w
       fence_matches intent fence) |> unavailable in
     let* next=io (fun () -> Intent.intend_child ~store ~expected:intent prepared.request) in
     process ~config ~keeper_name ~store next
-  | Child_intended _ -> recover_child ~config ~keeper_name ~store intent
+  | Child_intended _ -> recover_child ~config ~keeper_name ~store intent |> Result.map (fun () -> None)
   | Child_confirmed _ ->
     let* ()=recover_child ~config ~keeper_name ~store intent in
     retain_completion ~config ~keeper_name ~store intent
-let run_serialized ~config ~keeper_name =
+let run_pending_serialized ~config ~keeper_name =
   try
     let store=Store.of_config config in
     let* intents=io (fun () -> Intent.active_for_keeper ~config ~keeper_name) in
-    List.fold_left (fun result intent -> let* ()=result in
-      process ~config ~keeper_name ~store intent) (Ok ()) intents
+    let rec run = function
+      | [] -> Ok None
+      | intent::rest ->
+        let* pending=process ~config ~keeper_name ~store intent in
+        (match pending with Some _ -> Ok pending | None -> run rest) in
+    run intents
   with Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error (Intent.Publication_uncertain (Printexc.to_string exn))
+let run_serialized ~config ~keeper_name =
+  run_pending_serialized ~config ~keeper_name |> Result.map (fun _ -> ())
+
 type automatic_resolution = Original_waiting | Reobserve_original | Resume_history
 let resolve_missing_serialized ~config ~keeper_name ~request_id =
   try
@@ -273,7 +318,7 @@ let resolve_missing_serialized ~config ~keeper_name ~request_id =
     let* intents=io (fun () -> Intent.read ~config ~keeper_name ~request_id) in
     let latest=match List.rev intents with [] -> None | intent::_ -> Some intent in
     let continue intent =
-      let* ()=process ~config ~keeper_name ~store intent in
+      let* _=process ~config ~keeper_name ~store intent in
       let* current=io (fun () -> Intent.reload ~store intent) in
       let+ fence=io (fun () -> Resolution.read ~config ~keeper_name ~request_id)
         |> Result.map_error (fun error -> Intent.Unavailable (Resolution.error_to_string error)) in
@@ -314,7 +359,7 @@ let resolve_cut_serialized ~config ~keeper_name ~request_id =
   let store=Store.of_config config in
   let* intents=io (fun () -> Intent.read ~config ~keeper_name ~request_id) in
   let continue intent =
-    let* ()=process ~config ~keeper_name ~store intent in
+    let* _=process ~config ~keeper_name ~store intent in
     let+ current=io (fun () -> Intent.reload ~store intent) in
     match current.phase with
     | Intent.Requested | Refused _ -> Original_waiting

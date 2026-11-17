@@ -628,32 +628,49 @@ type durable_step_context = {
   previous_state : string option;
   unread_messages : Keeper_librarian_unread.t list;
 }
-type durable_step_preparation = {context : durable_step_context; preparation : durable_preparation}
+type retained_step_source = {request_id:string;request_digest:string;source_basis_digest:string}
+type durable_step_mode = Ordinary_floor | Retained_original of retained_step_source
+type durable_step_preparation = {
+  mode : durable_step_mode;
+  context : durable_step_context;
+  preparation : durable_preparation;
+}
 let durable_step_continuity (context : durable_step_context) =
   `Assoc ["previous_working_state",
     (match context.previous_state with None -> `Null | Some state -> `String state);
     "unread_messages", Keeper_librarian_unread.list_to_json context.unread_messages]
-let check_durable_step_input (preparation : durable_preparation) =
-  if preparation.source_input.working_context=Keeper_librarian_context.empty then Ok ()
-  else Error "Original history floor step must not carry a working context"
+let check_retained_step_source (source : retained_step_source) =
+  if String.trim source.request_id<>""
+    && String_util.is_lowercase_sha256_hex source.request_digest
+    && String_util.is_lowercase_sha256_hex source.source_basis_digest
+  then Ok () else Error "Retained history floor source identity is invalid"
+let check_durable_step_input mode (preparation : durable_preparation) =
+  match mode with
+  | Ordinary_floor ->
+    if preparation.source_input.working_context=Keeper_librarian_context.empty then Ok ()
+    else Error "Original history floor step must not carry a working context"
+  | Retained_original source -> check_retained_step_source source
 let validate_durable_step_preparation (step : durable_step_preparation) =
   let open Result.Syntax in
-  let* ()=check_durable_step_input step.preparation in
+  let* ()=check_durable_step_input step.mode step.preparation in
   check_durable_preparation ~continuity:(durable_step_continuity step.context)
     ~expected_schema:Keeper_structured_output_schema.librarian_continuity_output_schema step.preparation
-let restore_durable_step_preparation ~context ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts
+let restore_step_preparation ~mode ~context ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts
     ~prompt ~output_schema =
   let open Result.Syntax in
   let continuity=durable_step_continuity context in
   let* rule,variables,rendered_prompt=durable_substitutions ~continuity ~policy ~rule_prompt ~turn_prompts
     ~prompt source_input in
-  let step={context;preparation={source_input;parsing_now;policy;rule_prompt;turn_prompts;prompt;variables;
+  let step={mode;context;preparation={source_input;parsing_now;policy;rule_prompt;turn_prompts;prompt;variables;
     rendered_prompt;output_schema}} in
-  let* ()=check_durable_step_input step.preparation in
+  let* ()=check_durable_step_input mode step.preparation in
   let* ()=check_durable_fields step.preparation in
   let+ ()=check_durable_rendering
     ~expected_schema:Keeper_structured_output_schema.librarian_continuity_output_schema
     ~rule ~variables ~rendered:rendered_prompt step.preparation in step
+let restore_durable_step_preparation = restore_step_preparation ~mode:Ordinary_floor
+let restore_retained_durable_step_preparation ~source =
+  restore_step_preparation ~mode:(Retained_original source)
 (* A floor step reads the input the Runtime floor's volatile Memory pass reads.
    The pass's state and unread arguments do not change that input. *)
 let durable_step_source_input input = input_for_pass (Volatile_memory_pass (None,[])) input
@@ -663,8 +680,39 @@ let prepare_durable_step ~now ~context ~source_lines input =
   let* preparation=prepare_durable_with ~continuity:(durable_step_continuity context)
     ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema ~now ~source_lines
     source_input in
-  let step={context;preparation} in
-  let+ ()=check_durable_step_input step.preparation in step
+  let step={mode=Ordinary_floor;context;preparation} in
+  let+ ()=check_durable_step_input step.mode step.preparation in step
+(* Compare the fixed part without rebuilding any current prompt or policy.
+   The machine owns the five fields it projects for each question. Complete
+   input encoding keeps JSON field order from becoming a second identity. *)
+let retained_step_fixed_input (input : Keeper_librarian.input) =
+  Keeper_librarian_input_capture.to_json {input with current=None;messages=[];
+    historical_task_contexts=[];tool_observations=[];counterpart_observations=[]}
+let check_retained_step_original ~source ~(original:durable_preparation)
+    (step:durable_step_preparation) =
+  let open Result.Syntax in
+  let* ()=check_retained_step_source source in
+  let* ()=validate_durable_preparation original in
+  let* fixed_original=Lane_addon_action.canonical (retained_step_fixed_input original.source_input) in
+  let* fixed_step=Lane_addon_action.canonical (retained_step_fixed_input step.preparation.source_input) in
+  let p=step.preparation in
+  if step.mode=Retained_original source && Yojson.Safe.equal fixed_original fixed_step
+    && p.parsing_now=original.parsing_now && p.policy=original.policy
+    && p.rule_prompt=original.rule_prompt && p.turn_prompts=original.turn_prompts
+    && p.prompt=original.prompt
+  then Ok () else Error "Retained history floor question differs from its original source or frozen preparation"
+let validate_retained_durable_step ~source ~original step =
+  let open Result.Syntax in
+  let* ()=check_retained_step_original ~source ~original step in
+  validate_durable_step_preparation step
+let prepare_retained_durable_step ~source ~(original:durable_preparation) ~context source_input =
+  let open Result.Syntax in
+  let* step=restore_retained_durable_step_preparation ~source ~context ~source_input
+    ~parsing_now:original.parsing_now ~policy:original.policy ~rule_prompt:original.rule_prompt
+    ~turn_prompts:original.turn_prompts ~prompt:original.prompt
+    ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema in
+  let* ()=validate_retained_durable_step ~source ~original step in
+  let+ ()=require_counterpart_template step.preparation in step
 let render_librarian_prompt ~source_lines input =
   prepare_durable ~now:(Time_compat.now ()) ~source_lines input
   |> Result.map (fun (preparation : durable_preparation) -> preparation.rendered_prompt)

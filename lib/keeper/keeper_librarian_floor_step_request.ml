@@ -7,6 +7,7 @@ module Machine = Keeper_librarian_message_floor.Machine
 module Unread = Keeper_librarian_unread
 module Owner = Lane_addon_tool_request_owner
 module Destination = Lane_addon_captured_destination
+module Current = Keeper_memory_os_current
 let ( let* ) = Result.bind
 let ( let+ ) result f = Result.map f result
 let require condition detail = if condition then Ok () else Error detail
@@ -68,9 +69,10 @@ let link_of_json json =
   {request_id;request_digest}
 
 (* [digest] names the canonical bytes of [to_json], as for a history original. *)
+type retained_chain_basis = {anchor:Current.program_anchor_evidence;sources:Unread.source list}
 type t = {id:string;owner:Durable.owner;destination:Durable.destination;transaction_id:string;range:link;
   previous:link option;position:int;sources:Unread.source list;step:Runtime.durable_step_preparation;
-  digest:string}
+  basis:retained_chain_basis option;digest:string}
 let request_id step=step.id
 let physical_owner step=step.owner
 let destination step=step.destination
@@ -80,6 +82,7 @@ let previous step=step.previous
 let position step=step.position
 let sources step=step.sources
 let step step=step.step
+let chain_basis step=step.basis
 let request step = Question.request ~request_id:step.id step.step.preparation
 let context_json (context:Runtime.durable_step_context) = `Assoc [
   "previous_state",(match context.previous_state with None -> `Null | Some state -> `String state);
@@ -92,14 +95,57 @@ let context_of_json json =
     | _ -> Error "Original floor step carried state is not text" in
   let+ unread_messages=Unread.list_of_json (value "unread_messages" f) in
   {Runtime.previous_state;unread_messages}
-let to_json step = `Assoc ["schema",`Int 1;"kind",`String "completed-history-floor-step";
+let retained_source = function
+  | Runtime.Ordinary_floor -> None
+  | Retained_original source -> Some source
+let retained_source_json (source:Runtime.retained_step_source) = `Assoc [
+  "request_id",`String source.request_id;"request_digest",`String source.request_digest;
+  "source_basis_digest",`String source.source_basis_digest]
+let retained_source_of_json json =
+  let* f=fields ["request_id";"request_digest";"source_basis_digest"] json in
+  let* request_id=nonblank (value "request_id" f) in
+  let* request_digest=nonblank (value "request_digest" f) in
+  let* source_basis_digest=nonblank (value "source_basis_digest" f) in
+  let+ ()=require (String_util.is_lowercase_sha256_hex request_digest
+    && String_util.is_lowercase_sha256_hex source_basis_digest)
+    "Retained floor source digest is invalid" in
+  {Runtime.request_id;request_digest;source_basis_digest}
+let mode_fields source = match source with
+  | None -> 1,[]
+  | Some source -> 2,["retained_source",retained_source_json source]
+let basis_json = function None -> `Null | Some basis -> `Assoc [
+  "anchor",Current.program_anchor_evidence_to_json basis.anchor;
+  "source_manifest",`List (List.map Unread.source_to_json basis.sources)]
+let basis_of_json = function
+  | `Null -> Ok None
+  | json ->
+    let* f=fields ["anchor";"source_manifest"] json in
+    let* anchor=Current.program_anchor_evidence_of_json (value "anchor" f) in
+    let* sources=match value "source_manifest" f with
+      | `List sources -> all Unread.source_of_json sources
+      | _ -> Error "Retained floor source manifest is not a list" in
+    let rec unique seen = function
+      | [] -> Ok ()
+      | source::rest ->
+        let key=Unread.Source_key.of_source source in
+        let* ()=require (not (Unread.Source_keys.mem key seen)) "Retained floor source manifest repeats a coordinate" in
+        unique (Unread.Source_keys.add key seen) rest in
+    let* ()=require (sources<>[]) "Retained floor source manifest is empty" in
+    let+ ()=unique Unread.Source_keys.empty sources in Some {anchor;sources}
+let basis_sha256 = function
+  | None -> Ok None
+  | Some basis -> let+ digest=Owner.request_digest (basis_json (Some basis)) in Some digest
+let to_json step =
+  let schema,mode=mode_fields (retained_source step.step.mode) in
+  let mode=if schema=1 then mode else mode @ ["basis",basis_json step.basis] in
+  `Assoc (["schema",`Int schema;"kind",`String "completed-history-floor-step";
   "request_id",`String step.id;"owner",Durable.owner_to_json step.owner;
   "destination",Destination.to_json step.destination;"transaction_id",`String step.transaction_id;
   "range",link_json step.range;
   "previous",(match step.previous with None -> `Null | Some link -> link_json link);
   "position",`Int step.position;"sources",`List (List.map Unread.source_to_json step.sources);
   "context",context_json step.step.context;"input",Input.to_json step.step.preparation.source_input;
-  "preparation",Question.to_json step.step.preparation]
+  "preparation",Question.to_json step.step.preparation] @ mode)
 let asked (question:Machine.question) ~position ~sources =
   require (position=question.position && sources=question.sources)
     "Original floor step is not the question it was asked"
@@ -132,6 +178,16 @@ let validate_binding step =
     "Original floor step belongs to another Keeper" in
   let* ()=require (input.goal_context=Keeper_librarian.No_task)
     "Original floor step cannot borrow a task's Goal context" in
+  let* ()=match retained_source step.step.mode with
+    | None -> require (step.basis=None) "Ordinary floor question cannot carry a retained Memory anchor"
+    | Some source -> require (source.request_id=step.range.request_id
+        && source.request_digest=step.range.request_digest
+        && Option.is_some step.basis=(step.position=0))
+        "Retained floor step names another complete original" in
+  let* ()=match step.basis with
+    | None -> Ok ()
+    | Some basis -> require (match basis.sources with first::_ -> step.sources=[first] | [] -> false)
+        "Retained floor first question differs from its complete source manifest" in
   match step.sources,input.messages with
     | [],[] -> Ok ()
     | [source],[message] ->
@@ -146,18 +202,28 @@ let matches_question (question:Machine.question) step =
   let* ()=require (step.step.context.previous_state=question.previous_state
     && step.step.context.unread_messages=question.unread_messages)
     "Original floor step context differs from its question" in
-  equal (Input.to_json step.step.preparation.source_input)
-    (Input.to_json (Runtime.durable_step_source_input question.input))
+  let input=match step.step.mode with
+    | Runtime.Ordinary_floor -> Runtime.durable_step_source_input question.input
+    | Retained_original _ -> question.input in
+  equal (Input.to_json step.step.preparation.source_input) (Input.to_json input)
     "Original floor step input differs from its question"
 type header = {request_id:string;destination:Durable.destination;transaction_id:string;range:link;
-  previous:link option;position:int;sources:Unread.source list}
+  previous:link option;position:int;sources:Unread.source list;
+  retained_source:Runtime.retained_step_source option;basis_sha256:string option}
 type index = {owner:Durable.owner;header:header;exact_digest:string}
 let header_fields = ["schema";"kind";"request_id";"owner";"destination";"transaction_id";"range";"previous";
   "position";"sources";"context";"input";"preparation"]
+let versioned_fields ~kind ~retained_fields expected json =
+  let* schema=match json with
+    | `Assoc f -> (match List.assoc_opt "schema" f with
+        | Some (`Int (1 | 2 as version)) -> Ok version
+        | Some _ | None -> Error "Unknown original floor step schema")
+    | _ -> Error "Original floor step is not an object" in
+  let* f=fields (if schema=1 then expected else retained_fields @ expected) json in
+  let+ ()=require (value "kind" f=`String kind) "Unknown original floor step schema or kind" in f
 let body_fields json =
-  let* f=fields header_fields json in
-  let+ ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-floor-step")
-    "Unknown original floor step schema or kind" in f
+  versioned_fields ~kind:"completed-history-floor-step" ~retained_fields:["retained_source";"basis"]
+    header_fields json
 (* Everything but the context, input and preparation. *)
 let header_of_fields ~owner f =
   let* request_id=nonblank (value "request_id" f) in
@@ -172,8 +238,22 @@ let header_of_fields ~owner f =
   let* sources=match value "sources" f with
     | `List items -> all Unread.source_of_json items
     | _ -> Error "Original floor step sources are not a list" in
+  let* retained_source=match List.assoc_opt "retained_source" f with
+    | None -> Ok None
+    | Some json -> let+ source=retained_source_of_json json in Some source in
+  let* basis_sha256=match List.assoc_opt "basis" f,List.assoc_opt "basis_sha256" f with
+    | None,None -> Ok None
+    | Some json,None -> let* basis=basis_of_json json in basis_sha256 basis
+    | None,Some `Null -> Ok None
+    | None,Some (`String digest) when String_util.is_lowercase_sha256_hex digest -> Ok (Some digest)
+    | None,Some _ | Some _,Some _ -> Error "Retained floor anchor digest is invalid" in
+  let* ()=match retained_source with
+    | None -> require (basis_sha256=None) "Ordinary floor index has a retained Memory anchor"
+    | Some source -> require (source.request_id=range.request_id && source.request_digest=range.request_digest
+        && Option.is_some basis_sha256=(position=0))
+        "Retained floor index names another original" in
   let+ ()=validate_links ~owner ~id:request_id ~range ~previous ~position in
-  {request_id;destination;transaction_id;range;previous;position;sources}
+  {request_id;destination;transaction_id;range;previous;position;sources;retained_source;basis_sha256}
 let binds_record ~owner ~id ~(destination:Durable.destination) (record:Owner.Record.t) =
   let module Record=Owner.Record in
   require (Record.scope record=scope owner && Record.request_id record=id
@@ -181,23 +261,28 @@ let binds_record ~owner ~id ~(destination:Durable.destination) (record:Owner.Rec
     && Record.package_id record=destination.package_id && Record.tool record=destination.tool)
     "Original floor step host binding differs"
 let index (step:t) =
-  let+ exact=request step in
+  let* exact=request step in
+  let+ basis_sha256=basis_sha256 step.basis in
   {owner=step.owner;header={request_id=step.id;destination=step.destination;
     transaction_id=step.transaction_id;range=step.range;previous=step.previous;
-    position=step.position;sources=step.sources};exact_digest=Lane_addon_exact.digest exact}
+    position=step.position;sources=step.sources;retained_source=retained_source step.step.mode;basis_sha256};
+    exact_digest=Lane_addon_exact.digest exact}
 let index_to_json (index:index) =
   let header=index.header in
-  `Assoc ["schema",`Int 1;"kind",`String "completed-history-floor-step-index";
+  let schema,mode=mode_fields header.retained_source in
+  let mode=if schema=1 then mode else mode @ ["basis_sha256",(match header.basis_sha256 with
+    | None -> `Null | Some digest -> `String digest)] in
+  `Assoc (["schema",`Int schema;"kind",`String "completed-history-floor-step-index";
     "owner",Durable.owner_to_json index.owner;"request_id",`String header.request_id;
     "destination",Destination.to_json header.destination;"transaction_id",`String header.transaction_id;
     "range",link_json header.range;"previous",(match header.previous with None -> `Null | Some link -> link_json link);
     "position",`Int header.position;"sources",`List (List.map Unread.source_to_json header.sources);
-    "exact_digest",`String index.exact_digest]
+    "exact_digest",`String index.exact_digest] @ mode)
 let index_of_summary record =
-  let* f=fields ["schema";"kind";"owner";"request_id";"destination";"transaction_id";
-    "range";"previous";"position";"sources";"exact_digest"] (Owner.Record.summary record) in
-  let* ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-floor-step-index")
-    "Unknown original floor step index schema" in
+  let* f=versioned_fields ~kind:"completed-history-floor-step-index"
+    ~retained_fields:["retained_source";"basis_sha256"]
+    ["schema";"kind";"owner";"request_id";"destination";"transaction_id";
+     "range";"previous";"position";"sources";"exact_digest"] (Owner.Record.summary record) in
   let* owner=Durable.owner_of_json (value "owner" f) in
   let* header=header_of_fields ~owner f in
   let* exact_digest=nonblank (value "exact_digest" f) in
@@ -210,27 +295,44 @@ let confirm_index step record =
   require (stored=actual) "Original floor step index differs from its request"
 let decode ~owner ~digest json =
   let* f=body_fields json in
-  let* {request_id=id;destination;transaction_id;range;previous;position;sources}=header_of_fields ~owner f in
+  let* {request_id=id;destination;transaction_id;range;previous;position;sources;retained_source;
+    basis_sha256=_}=header_of_fields ~owner f in
+  let* basis=match retained_source with
+    | None -> Ok None
+    | Some _ -> basis_of_json (value "basis" f) in
   let* context=context_of_json (value "context" f) in
   let* source_input=Input.of_json (value "input" f) in
   let* {Question.parsing_now;policy;rule_prompt;turn_prompts;prompt;output_schema;_} as frozen=Question.of_json (value "preparation" f) in
-  let* step=Runtime.restore_durable_step_preparation ~context ~source_input
+  let restore=match retained_source with
+    | None -> Runtime.restore_durable_step_preparation
+    | Some source -> Runtime.restore_retained_durable_step_preparation ~source in
+  let* step=restore ~context ~source_input
     ~parsing_now ~policy ~rule_prompt ~turn_prompts ~prompt ~output_schema in
   let* ()=Question.rendered_matches frozen step.preparation in
-  let draft={id;owner;destination;transaction_id;range;previous;position;sources;step;digest=""} in
+  let draft={id;owner;destination;transaction_id;range;previous;position;sources;step;basis;digest=""} in
   let* ()=validate_binding draft in
   let* ()=equal json (to_json draft) "Original floor step request encoding differs" in
   let+ digest=match digest with Some digest -> Ok digest | None -> Owner.request_digest json in
   {draft with digest}
-let create ~request_id ~owner ~destination ~transaction_id ~range ~previous ~(question:Machine.question) ~step () =
+let create ?basis ~request_id ~owner ~destination ~transaction_id ~range ~previous ~(question:Machine.question) ~step () =
   let* destination=Durable.destination_of_json (Destination.to_json destination) in
   let draft={id=request_id;owner;destination;transaction_id;range;previous;position=question.position;
-    sources=question.sources;step;digest=""} in
+    sources=question.sources;step;basis;digest=""} in
   let* ()=validate_binding draft in
   let* ()=Runtime.validate_durable_step_preparation step in
   let* ()=matches_question question draft in
   decode ~owner ~digest:None (to_json draft)
 let of_json ~owner json = decode ~owner ~digest:None json
+let replace_declaration ~request_id ~destination (parent:t) =
+  let* ()=match parent.step.mode with
+    | Runtime.Retained_original _ -> Ok ()
+    | Ordinary_floor -> Error "Only a retained original question has declaration replacement lineage" in
+  let* ()=require (request_id<>parent.id) "A replacement question must have its own original ID" in
+  let* ()=match Destination.relation ~captured:parent.destination ~current:destination with
+    | Destination.Same | Replaced -> Ok ()
+    | Other_owner -> Error "Replacement question belongs to another destination owner" in
+  let draft={parent with id=request_id;destination;digest=""} in
+  decode ~owner:parent.owner ~digest:None (to_json draft)
 let binds (step:t) record = binds_record ~owner:step.owner ~id:step.id ~destination:step.destination (Owner.listed record)
 let header ~owner (record:Owner.retained) =
   let* f=body_fields record.request in
@@ -259,11 +361,12 @@ let validate_ancestry_payload ~read (step:t) =
       let* record=load ~scope:(scope step.owner) link in
       let* previous=restore ~owner:step.owner record in
       let* ()=require (previous.range=current.range && previous.transaction_id=current.transaction_id
+        && retained_source previous.step.mode=retained_source current.step.mode
         && previous.position=current.position-1) "Original floor chain predecessor belongs to another chain or position" in
       visit (current.id::seen) previous in
   visit [] step
 let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
-  let* f=fields header_fields record.request in
+  let* f=body_fields record.request in
   let* original=Durable.owner_of_json (value "owner" f) in
   let* expected_scope=scope_of_request_id record.request_id in
   let* ()=require (record.scope=expected_scope && expected_scope=scope original)

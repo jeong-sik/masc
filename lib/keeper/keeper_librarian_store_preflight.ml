@@ -62,9 +62,13 @@ let history_capture ~indexes ~read ~read_fence ~read_resolution ~owner (record:O
   let* capture=History.restore_payload ~owner record in
   let+ ()=Keeper_librarian_history_resolution_lineage.validate_predecessor_payload ~indexes ~read ~read_fence ~read_resolution
     ~require_confirmed:(Lane_addon_request_progress.events record.progress<>[]) capture in capture
-let floor_capture ~read ~owner record =
+let floor_capture ~read ~read_scope ~owner record =
   let* capture=Floor.restore ~owner record in
-  let+ ()=Floor.validate_ancestry_payload ~read capture in capture
+  let* ()=Floor.validate_ancestry_payload ~read capture in
+  let+ ()=match (Floor.step capture).mode with
+    | Keeper_librarian_runtime.Ordinary_floor -> Ok ()
+    | Retained_original source -> Keeper_librarian_retained_step_replacement.validate_payload
+      ~read_scope ~owner ~range:(Floor.range capture) ~source in capture
 
 (* What one scope's gate records proved about the executions they name. A
    journal's records all name one execution, and restoring its capture and
@@ -130,7 +134,7 @@ let validator () =
       ~read ~read_body ~owner ~capture ~parent:record
   | Some Floor_execution ->
     let* owner=history_owner record in
-    let* capture=floor_capture ~read ~owner record in
+    let* capture=floor_capture ~read ~read_scope ~owner record in
     Keeper_librarian_floor_step_gate.validate_preparation_payload ~proofs:(Keeper_librarian_floor_step_gate.proofs ())
       ~read ~read_body ~owner ~capture ~parent:record
   | Some Admission_gate ->
@@ -155,7 +159,7 @@ let validator () =
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(Floor.scope owner) ~request_id in
     let* capture=parent_capture gates.floor_gates ~owner_key:(history_key owner) ~parent
-        (fun () -> floor_capture ~read ~owner parent) in
+        (fun () -> floor_capture ~read ~read_scope ~owner parent) in
     Gate.validate_payload ~proofs:gates.floor_gates.proofs ~read ~read_body ~owner ~capture ~parent ~record
   in
   (* Unlike the immutable forest payload, absence is not stable: a running
@@ -222,6 +226,9 @@ type consumer_read =
   | Confirm_ending of Owner.Record.t * Lane_addon_captured_destination.t
       (* A declaration ending: its strict cause, host record and independent
          proof read, or positive absence of both before admission. *)
+  | Confirm_unadmitted_child
+      (* A full replacement intent has a body but no publication ACK. The
+         actual host must still have neither a record nor an execution proof. *)
 
 let consumer_read ~(target:Final.target) ~destination (record:Owner.retained) =
   let ending () =
@@ -346,6 +353,7 @@ let judge_files ~wording ~body_refusal (target:Final.target) (files:Preflight.ex
     let* ended=Keeper_librarian_declaration_replacement.ended_with ~reads ~original
       ~exact:target.exact ~captured in
     if ended then Ok () else Error "Original Librarian has no confirmed declaration ending"
+  | Confirm_unadmitted_child -> confirm_before_dispatch_files files
 (* A proof link the original's request names while no record of it is left.
    Fresh state deletes it with the owner's scopes. *)
 let recordless_proof (target:Final.target) (files:Preflight.exact_files) =
@@ -409,10 +417,19 @@ let history_original ~read_fence ~owner (record:Owner.retained) =
     let* exact=History.request capture in
     exact_original ~wording:Final.unconfirmed_detail ~body_refusal:Final_alone
       ~destination:(History.destination capture) exact record
-let floor_original ~owner record =
+let floor_original ~read_scope ~owner record =
   let* step=Floor.restore ~owner record in
   let* exact=Floor.request step in
-  exact_original ~wording:Final.unconfirmed_detail ~body_refusal:Final_alone
+  let* unadmitted=match (Floor.step step).mode with
+    | Keeper_librarian_runtime.Ordinary_floor -> Ok false
+    | Retained_original source ->
+      let+ status=Keeper_librarian_retained_step_replacement.payload_status ~read_scope ~owner
+        ~range:(Floor.range step) ~source ~request_id:(Floor.request_id step) in
+      (match status with Original_question -> false | Child_awaiting_publication -> true) in
+  if unadmitted then
+    let+ target=Final.target ~installation_id:(installation_id (Floor.destination step)) exact in
+    Some {target;read=Confirm_unadmitted_child;wording=Final.unconfirmed_detail;body_refusal=Final_alone}
+  else exact_original ~wording:Final.unconfirmed_detail ~body_refusal:Final_alone
     ~destination:(Floor.destination step) exact record
 
 (* The forest of each owner, read once for the scan by the first record that
@@ -539,7 +556,7 @@ let exact_check () =
   | Some Floor_execution ->
     original_verdict ~read_exact
       (let* owner=history_owner record in
-       let+ original=floor_original ~owner record in floor_scopes owner,original)
+       let+ original=floor_original ~read_scope ~owner record in floor_scopes owner,original)
   | Some Floor_gate ->
     (match
        let* request_id=Keeper_librarian_floor_step_gate.parent_execution_id record in
@@ -550,7 +567,7 @@ let exact_check () =
      | Ok (owner,parent) ->
        gate_verdict passed ~owner_key:(history_key owner) ~parent (fun () ->
          original_verdict ~read_exact
-           (let+ original=floor_original ~owner parent in floor_scopes owner,original)))
+           (let+ original=floor_original ~read_scope ~owner parent in floor_scopes owner,original)))
 
 (* The same isolation boundary as durable execution's record-only ending
    recovery. A gate or a lineage link still needs the complete request. *)

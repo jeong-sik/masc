@@ -292,7 +292,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 다시 만든 요청은 model을 한 번 더 부를 수 있다. 정상 결과·Gate·Memory·ACK 검사는 새 요청에서도 모두 필요하다.
 - 이 정책은 같은 선언의 Cut, `raised`, floor Cut, admission Cut를 허용하지 않는다. 같은 선언에서의 복구 계약은 #50828에서 따로 다룬다.
 - 첫 생성 요청의 허가를 기다리다 취소되어 시작 표시가 없는 원본은 3.2의 실행 전 경로를 따른다. 시작 표시를 가진 Cut과 섞지 않는다.
-- 첫 생성 요청 전에 guard가 거절된 요청은 typed `Replaced_declaration` 종료를 따른다. 앞서 완료된 deferral의 실제 bound proof가 남을 수 있으며, 이를 Cut 결과와 혼동하지 않는다.
+- 첫 생성 요청 전에 guard가 선언 교체로 거절한 요청은 typed `Replaced_declaration` 종료를 따른다. 앞서 완료된 deferral의 실제 bound proof가 남을 수 있으며, 이를 Cut 결과와 혼동하지 않는다.
 
 main `cd28f2ac4174`의 L3(#52695)는 다음 경로로 Cut 원본을 정리한다.
 

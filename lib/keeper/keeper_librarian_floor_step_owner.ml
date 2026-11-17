@@ -63,7 +63,8 @@ let refused final record = match final with
   | Call_final _ | Not_allowed _ | Request_id_reused -> Refused (final,record)
 type admission_check = Admission_continues | Admission_unavailable
   | Admission_replaced of Owner.retained
-let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call) =
+let resume_with_admission ~before_admission ~store ~config ~reserved
+    ~(original:Owner.retained) ~step ~(call:call) =
   let owner=Step.physical_owner step in
   let confirm_live_owner () =
     let base_path=config.Workspace.base_path in
@@ -109,6 +110,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
     Edge.confirm_destination ~config ~reserved destination in
   let admit () =
     let* ()=Memory_runtime.require_counterpart_template (Step.step step).preparation |> rejected in
+    let* ()=before_admission () in
     prepare () in
   let call ~arguments =
     match prepare () with
@@ -137,3 +139,6 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
      commit belongs to the chain and no step writes a split into successors.
      A declaration replacement before dispatch was handled above. *)
   | Commit_pending _ | Settled _ -> Error (Rejected "Original floor step is in a phase no step writes")
+let resume ~store ~config ~reserved ~original ~step ~call =
+  resume_with_admission ~before_admission:(fun () -> Ok ())
+    ~store ~config ~reserved ~original ~step ~call

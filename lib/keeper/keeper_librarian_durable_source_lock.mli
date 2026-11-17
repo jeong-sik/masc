@@ -42,3 +42,10 @@ val positions_unchanged : Keeper_librarian_durable_request.t -> (bool, string) r
 (** Whether the atom and official read positions are still the ones the
     original captured. A position that cannot be read is an error, not [false].
     Blocking reads; offload the call in an Eio caller. *)
+val with_original_manifest : request:Keeper_librarian_durable_request.t ->
+  (Keeper_librarian_durable_capture.message_manifest -> ('a, string) result) -> ('a, string) result
+(** [with_original_snapshot]'s actual source/owner/cursor fence, yielding the
+    complete retained message manifest from those same locked observations.
+    It preserves original mixed ordering and full-source receipt coordinates.
+    The callback must not reenter source locks. Offload this entire blocking
+    scope; retaining its data grants no lock or later effect authority. *)

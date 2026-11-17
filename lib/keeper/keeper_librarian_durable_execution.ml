@@ -433,9 +433,10 @@ let rec consume_one ~config ~keeper_name ~wake =
              "durable Librarian original was ended unrun under a replaced declaration: the next pass reads the same range whole";
            wake ());
       refused in
-  match Resolution_work.run_serialized ~config ~keeper_name with
+  match Resolution_work.run_pending_serialized ~config ~keeper_name with
   | Error failure -> error (Keeper_librarian_history_resolution_intent.error_to_string failure)
-  | Ok () ->
+  | Ok (Some pending) -> Ok (Consumer.Pending pending)
+  | Ok None ->
   (* Discovery does not initialize an epoch or create a replacement request.
      Any malformed old original fails the full inventory before fresh selection. *)
   let inventory_started=Mtime_clock.now () in

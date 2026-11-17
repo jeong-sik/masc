@@ -9,6 +9,7 @@ module Current = Keeper_memory_os_current
 module Memory = Keeper_memory_os_current_types
 module Receipts = Keeper_memory_os_current_receipt_store
 module Codec = Keeper_memory_os_current_range_codec
+module Program_settlement = Keeper_librarian_history_program_settlement
 open Result.Syntax
 
 type refusal = Observation_changed | No_longer_eligible of string
@@ -17,7 +18,8 @@ type child = {request_id:string;request_digest:string}
 type prepared_child = {child:child;request:Request.t}
 type phase = Requested | Refused of refusal | Fenced
   | Child_prepared of prepared_child | Child_intended of child | Child_confirmed of child
-type memory_commit = {request_id:string;receipts:Memory.durable_range_receipt list}
+type memory_commit = {request_id:string;receipts:Memory.durable_range_receipt list;
+  program:Program_settlement.retained option}
 type t = {
   intent_id:string;scope:string;original_request_id:string;expected:Fence.guard;origin:origin;
   actor:string;reason:string;submitted_at:float;phase:phase;
@@ -66,7 +68,10 @@ let to_public_json intent = `Assoc (("memory_commit",(match intent.memory_commit
   public_fields ~phase:(public_phase_json intent.phase) intent)
 let to_json intent = `Assoc (("scope",`String intent.scope)::
   ("memory_commit",(match intent.memory_commit with None -> `Null | Some proof ->
-    `Assoc ["request_id",`String proof.request_id;"receipts",`List (List.map Codec.durable_range_receipt_to_json proof.receipts)]))::
+    (match proof.program with
+     | Some program -> Program_settlement.retained_to_json program
+     | None -> `Assoc ["request_id",`String proof.request_id;
+         "receipts",`List (List.map Codec.durable_range_receipt_to_json proof.receipts)])))::
   public_fields ~phase:(phase_json intent.phase) intent)
 let hash = function
   | `String value when String_util.is_lowercase_sha256_hex value -> Ok value
@@ -120,12 +125,17 @@ let phase_of_json json =
 let memory_commit_of_json json =
   let context="history resolution Memory receipt" in
   let* fields=Json.object_fields ~context json in
+  match List.assoc_opt "kind" fields with
+  | Some _ ->
+    let+ program=Program_settlement.retained_of_json json in
+    {request_id=program.request_id;receipts=program.receipts;program=Some program}
+  | None ->
   let* request_id,fields=Json.field ~context "request_id" Json.as_non_blank fields in
   let* receipts,fields=Json.field ~context "receipts" (Json.as_list (fun json ->
     Codec.durable_range_receipt_of_json json |> Result.map_error Keeper_memory_os_types.wire_error_to_string)) fields in
   let* ()=Json.finish ~context fields in
   let+ ()=require (receipts<>[] && List.for_all (function Memory.Committed _ -> true | Prepared _ -> false) receipts)
-    "Resolution completion has no committed Memory receipts" in {request_id;receipts}
+    "Resolution completion has no committed Memory receipts" in {request_id;receipts;program=None}
 let child intent = match intent.phase with
   | Child_intended child | Child_confirmed child -> Some child
   | Requested | Refused _ | Fenced | Child_prepared _ -> None
@@ -192,7 +202,11 @@ let of_json json =
     | None,(Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _) -> Ok ()
     | Some proof,Child_confirmed _ ->
       let* proof_scope=Request.scope_of_request_id proof.request_id in
-      require (proof_scope=scope) "Resolution completion belongs to another scope"
+      let* ()=require (proof_scope=scope) "Resolution completion belongs to another scope" in
+      (match proof.program,origin with
+       | None,(Worker_absence | Same_binding_cut _) -> Ok ()
+       | Some program,(Worker_absence | Same_binding_cut _) -> require (Request.scope program.owner=scope)
+           "Ordered completion has another physical owner")
     | Some _,(Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _) ->
       Error "Resolution completion precedes its child acknowledgement" in
   Ok {intent_id;scope;original_request_id;expected;origin;actor;reason;submitted_at;phase;memory_commit}
@@ -500,4 +514,95 @@ let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) 
             snapshot.revision>snapshot_revision || (snapshot.revision=snapshot_revision && Store.digest bytes=snapshot_sha256)
           | Prepared _ -> false) receipts in
         let+ ()=require (receipts<>[] && complete_receipts source receipts) "Resolution Memory commit is not receipt-proved" in receipts)) in
-    Ok {actual with memory_commit=Some {request_id=completed.request_id;receipts}})
+    Ok {actual with memory_commit=Some {request_id=completed.request_id;receipts;program=None}})
+
+(* Walk to this intent's exact acknowledged child. Only confirmed ordinary
+   replacement links or another intent's confirmed fenced child may intervene;
+   a shared source digest alone does not establish descendant identity. *)
+let confirm_program_descendant ~store intent (child:child) request =
+  let owner=Request.physical_owner request in
+  let* basis=Request.source_basis_digest request in
+  let* root=Owner.load_record ~store ~scope:intent.scope ~request_id:child.request_id
+    |> Result.map_error Owner.error_to_string in
+  let* root=Option.to_result ~none:"Resolution confirmed child is absent" root in
+  let* ()=require (Owner.Record.request_digest root=child.request_digest)
+    "Resolution confirmed child digest changed" in
+  let* index=Request.index_of_summary root in
+  let* ()=require (index.owner=owner && index.source_basis_digest=basis)
+    "Program descendant changed the confirmed child's owner or source" in
+  let read ~scope ~request_id=Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string in
+  let rec visit seen ~id ~digest ~(index:Request.index) ~body =
+    let* ()=require (not (List.mem id seen)) "Program descendant ancestry contains a cycle" in
+    if id=child.request_id then
+      require (digest=child.request_digest) "Program did not reach the confirmed child"
+    else
+      let* predecessor=Option.to_result ~none:"Program is not a descendant of the confirmed child"
+        index.predecessor in
+      let* parent=Owner.load_record ~store ~scope:intent.scope ~request_id:predecessor.request_id
+        |> Result.map_error Owner.error_to_string in
+      let* parent=Option.to_result ~none:"Program descendant predecessor is absent" parent in
+      let parent_id=Owner.Record.request_id parent in
+      let* ()=require (Owner.Record.scope parent=intent.scope && parent_id=predecessor.request_id
+        && Owner.Record.request_digest parent=predecessor.request_digest)
+        "Program descendant predecessor digest changed" in
+      let* previous=Request.index_of_summary parent in
+      let* ()=require (previous.owner=owner && previous.source_basis_digest=basis)
+        "Program descendant predecessor changed its owner or source" in
+      let parent_body () =
+        let* loaded=Owner.load_listed ~store parent |> Result.map_error Owner.error_to_string in
+        Request.restore_payload ~owner loaded in
+      let* fence=Fence.read ~store ~scope:intent.scope ~request_id:parent_id in
+      let* ()=match fence with
+        | None ->
+          let* current=body () in
+          let* ()=Request.validate_predecessor_link_payload ~read ~require_confirmed:true current in
+          (match Progress.phase (Owner.Record.progress parent) with
+           | Rejected _ ->
+             let* request=parent_body () in
+             let* exact=Request.request request in
+             let* ended=Keeper_librarian_declaration_replacement.ended ~store
+               ~original:parent ~exact ~captured:previous.destination in
+             require ended "Program predecessor has no confirmed declaration ending"
+           | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+           | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok ())
+        | Some fence ->
+          let* ()=Fence.confirm_binding_index ~index:previous ~original:parent fence in
+          let* _,intents=load ~store ~scope:intent.scope ~request_id:parent_id
+            |> Result.map_error error_to_string in
+          let* grant=Option.to_result ~none:"Program descendant has no confirmed resolution link"
+            (List.find_opt (fun grant -> match grant.phase with
+              | Child_confirmed child -> child.request_id=id && child.request_digest=digest
+              | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> false) intents) in
+          let* ()=require_successor_authority grant fence in
+          (match grant.origin with
+           | Worker_absence -> Ok ()
+           | Same_binding_cut _ -> require (Lane_addon_captured_destination.same_semantic
+               index.destination previous.destination)
+               "Program Cut descendant changed its semantic destination") in
+      visit (id::seen) ~id:parent_id ~digest:(Owner.Record.request_digest parent) ~index:previous ~body:parent_body in
+  let* index=Request.index request in
+  visit [] ~id:(Request.request_id request) ~digest:(Request.body_digest request) ~index ~body:(fun () -> Ok request)
+let observe_program_commit ~store ~expected ~settled:proof =
+  update ~store ~expected (fun actual ->
+    let* child=match actual.phase with
+      | Child_confirmed child -> Ok child
+      | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ ->
+        Error "Program resolution child is not acknowledged" in
+    let* ()=require (Option.is_none actual.memory_commit) "Resolution completion was already recorded" in
+    let* fence=Fence.read ~store ~scope:actual.scope ~request_id:actual.original_request_id in
+    let* fence=Option.to_result ~none:"Program resolution fence is absent" fence in
+    let* ()=require_successor_authority actual fence in
+    let* original=Owner.load_record ~store ~scope:actual.scope ~request_id:actual.original_request_id
+      |> Result.map_error Owner.error_to_string in
+    let* original=Option.to_result ~none:"Program resolution original is absent" original in
+    let* index=Request.index_of_summary original in
+    let* ()=Fence.confirm_binding_index ~index ~original fence in
+    let request=Program_settlement.request proof in
+    let* basis=Request.source_basis_digest request in
+    let* ()=require (Request.scope (Request.physical_owner request)=actual.scope
+      && Request.physical_owner request=index.owner && basis=index.source_basis_digest)
+      "Program resolution changed its fenced original source or owner" in
+    let* ()=confirm_program_descendant ~store actual child request in
+    let* ()=Program_settlement.recheck proof in
+    let program=Program_settlement.retained proof in
+    Ok {actual with memory_commit=Some {request_id=program.request_id;receipts=program.receipts;program=Some program}})

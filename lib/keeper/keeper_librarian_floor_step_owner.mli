@@ -61,3 +61,10 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
     frozen prompt; observing pending/unknown or retained terminals does not
     rewrite the step or authorize another dispatch. The step's gate judgment
     and Memory decision are not made here. *)
+val resume_with_admission : before_admission:(unit -> (unit, error) result) ->
+  store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
+  original:Lane_addon_tool_request_owner.retained -> step:Keeper_librarian_floor_step_request.t ->
+  call:call -> (outcome, error) result
+(** The same machine, with an additional retained whole-source basis check
+    before fresh dispatch. No such check blocks reobservation of an already
+    dispatched or terminal original. It grants no extra dispatch authority. *)

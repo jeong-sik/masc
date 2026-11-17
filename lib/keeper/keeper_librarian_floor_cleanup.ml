@@ -107,7 +107,8 @@ let check_pending_floor ~owner ~settled steps =
 let cleanup ~store ~owner ~candidates ~settled =
   let* steps = discover ~store ~owner in
   let unowned = List.filter (fun (_, (index : Step.index)) ->
-    not (List.exists (fun candidate -> owns candidate index.header) candidates)) steps in
+    index.header.retained_source=None
+    && not (List.exists (fun candidate -> owns candidate index.header) candidates)) steps in
   let* unowned = load_steps ~store unowned in
   let* () = check_pending_floor ~owner ~settled unowned in
   let* settled = settle_steps ~store ~owner unowned in
@@ -116,14 +117,16 @@ let cleanup ~store ~owner ~candidates ~settled =
 
 let settle_chain ~store ~owner candidate =
   let* steps = discover ~store ~owner in
-  let selected = List.filter (fun (_, (index : Step.index)) -> owns candidate index.header) steps in
+  let selected = List.filter (fun (_, (index : Step.index)) ->
+    index.header.retained_source=None && owns candidate index.header) steps in
   let* selected = load_steps ~store selected in
   settle_steps ~store ~owner selected
 
 let settle_step ~store ~owner candidate ~position =
   let* steps = discover ~store ~owner in
   match List.filter (fun (_, (index : Step.index)) ->
-    owns candidate index.header && index.header.position = position) steps with
+    index.header.retained_source=None && owns candidate index.header
+    && index.header.position = position) steps with
   | [] -> Error (Printf.sprintf "Floor chain has no retained step at position %d to settle" position)
   | stopped ->
     let* stopped = load_steps ~store stopped in

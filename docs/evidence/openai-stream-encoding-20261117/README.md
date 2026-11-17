@@ -42,7 +42,8 @@ separately compare exception constructors and detail.
 | Raw-literal fallback 4 KiB | 4,392 | 1.00051 | 0.97037 |
 | Raw-literal fallback 256 KiB | 262,440 | 1.00002 | 0.97222 |
 
-Each row uses four paired rounds, alternating order, eight requests per side.
+Each row uses four paired rounds, alternating order, with eight requests per
+side in each round: 32 requests per side across the row.
 Allocation is `Gc.allocated_bytes` for the current standalone domain; CPU is
 `Sys.time`. The large ordinary case uses 30,839,456 versus 11,162,784 counter bytes
 per eight calls. Fallback retains the old work and adds 40 counter bytes per call;

@@ -68,6 +68,9 @@ let anchor_of_json json =
   then Ok {epoch;snapshot;journal_length;journal_sha256}
   else Error "invalid program store anchor"
 
+let store_anchor_to_json = anchor_to_json
+let store_anchor_of_json = anchor_of_json
+
 let single_boundary_of_json json =
   let* fields = match json with `Assoc fields -> Ok fields | _ -> Error "source boundary is not an object" in
   let* kind = string "kind" fields in

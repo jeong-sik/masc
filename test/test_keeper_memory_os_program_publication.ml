@@ -526,6 +526,110 @@ let test_mixed_missing_component_preserves_pending () = List.iter (fun keep_atom
   ignore (read ~keepers_dir);
   check_mixed_ranges ~keepers_dir atom official) [false;true]
 
+let retained_anchor anchor =
+  Current.program_anchor_evidence anchor |> Current.program_anchor_evidence_to_json
+  |> Current.program_anchor_evidence_of_json |> require
+
+let committed_program ~keepers_dir transaction_id =
+  match Current.read_committed_program ~keepers_dir ~keeper_id:keeper ~transaction_id |> require with
+  | Some proof -> proof
+  | None -> fail "actual canonical program and receipts were not observed"
+
+let test_retained_anchor_roundtrip_and_unrelated_growth () = fixture @@ fun keepers_dir _ ->
+  let path=snapshot_path ~keepers_dir in
+  (* Preserve noncanonical-but-valid original bytes, not a re-encoding whose
+     digest would pretend to be the captured snapshot. *)
+  let original=Fs_compat.load_file path in
+  Fs_compat.save_file path ("  " ^ original ^ "\n");
+  let anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper |> require in
+  let evidence=retained_anchor anchor in
+  ignore (rewrite ~keepers_dir [extra;a] : Current.t);
+  let resumed=Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> require in
+  check bool "resume keeps the original full basis" true
+    (Option.map (fun (snapshot : Current.t) -> snapshot.facts) (Current.program_anchor_snapshot resumed)=Some [a]);
+  let committed=publish ~keepers_dir ~anchor:resumed (program ()) |> require in
+  Current.program_anchor_evidence_matches_publication evidence committed.proof |> require;
+  check bool "late unrelated addition remains current" true (committed.snapshot.facts=[extra;c]);
+  let fresh=Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper |> require |> retained_anchor in
+  Current.program_anchor_evidence_matches_publication fresh committed.proof |> refused
+
+let test_retained_anchor_rejects_bad_data_and_aba () =
+  fixture (fun keepers_dir anchor ->
+    let encoded=Current.program_anchor_evidence anchor |> Current.program_anchor_evidence_to_json in
+    let change key value=match encoded with
+      | `Assoc fields -> `Assoc (List.map (fun (name,held) -> name,(if name=key then value else held)) fields)
+      | _ -> fail "retained anchor fixture is not an object" in
+    Current.program_anchor_evidence_of_json (change "snapshot_bytes" (`String "{}")) |> refused;
+    Current.program_anchor_evidence_of_json (change "schema_version" (`Int 99)) |> refused;
+    let evidence=retained_anchor anchor in
+    ignore (rewrite ~keepers_dir [{a with Memory.first_seen=5.}] : Current.t);
+    ignore (rewrite ~keepers_dir [a] : Current.t);
+    Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> refused);
+  fixture (fun keepers_dir anchor ->
+    let evidence=retained_anchor anchor in
+    Current.with_program_reset ~keepers_dir ~keeper_id:keeper (fun () -> Ok ()) |> require;
+    Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> refused);
+  fixture (fun keepers_dir anchor ->
+    let evidence=retained_anchor anchor in
+    Fs_compat.save_file (journal ~keepers_dir) "";
+    Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> refused)
+
+let test_committed_program_actual_effect_and_later_retirement () = fixture @@ fun keepers_dir anchor ->
+  check bool "unexecuted transaction grants no commit evidence" true
+    (Current.read_committed_program ~keepers_dir ~keeper_id:keeper ~transaction_id:"ordered-publication" |> require=None);
+  let committed=publish ~keepers_dir ~anchor (program ()) |> require in
+  let proof=committed_program ~keepers_dir "ordered-publication" in
+  check bool "readback names the actual full program" true (proof.publication=committed.proof);
+  check int "readback names the actual one revision" committed.snapshot.revision proof.snapshot_revision;
+  check string "readback binds exact stored snapshot bytes" (Current.snapshot_sha256 committed.snapshot) proof.snapshot_sha256;
+  Current.confirm_committed_program proof |> require;
+  ignore (rewrite ~keepers_dir [extra] : Current.t);
+  (* Later retirement does not undo a completed transaction; inference anchors
+     remain more restrictive because their decisions have not yet committed. *)
+  Current.confirm_committed_program proof |> require;
+  let evidence=retained_anchor anchor in
+  Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> refused
+
+let test_committed_mixed_requires_both_actual_receipts () = List.iter (fun keep_atom -> fixture @@ fun keepers_dir anchor ->
+  let module Codec=Masc.Keeper_memory_os_current_range_codec in
+  let module Receipts=Masc.Keeper_memory_os_current_receipt_store in
+  let _,_,source,program,_=mixed_fixture () in
+  ignore (publish_mixed ~keepers_dir ~anchor ~source program |> require : Current.program_commit);
+  let proof=committed_program ~keepers_dir program.Program.transaction_id in
+  check int "Mixed effect has two actual committed receipts" 2 (List.length proof.receipts);
+  let rows,skipped=Codec.read_durable_range_receipts ~keepers_dir ~keeper_id:keeper |> require in
+  check int "receipt fixture is strictly decoded" 0 (List.length skipped);
+  let partial=List.filter (fun receipt -> match Receipts.receipt_range_id receipt with
+    | Range_types.Atom_range _ -> keep_atom
+    | Range_types.Official_range _ -> not keep_atom
+    | Range_types.Explicit_candidate _ | Explicit_candidate_with_recall _ -> false) rows in
+  Receipts.write_durable_range_receipts ~keepers_dir ~keeper_id:keeper partial |> require;
+  let before=Fs_compat.load_file (snapshot_path ~keepers_dir) in
+  Current.confirm_committed_program proof |> refused;
+  check string "missing component cannot rewrite Memory" before (Fs_compat.load_file (snapshot_path ~keepers_dir))) [false;true]
+
+let test_committed_program_rejects_gap_duplicate_and_reset () =
+  fixture (fun keepers_dir anchor ->
+    ignore (publish ~keepers_dir ~anchor (program ()) |> require : Current.program_commit);
+    let proof=committed_program ~keepers_dir "ordered-publication" in
+    let before=Fs_compat.load_file (journal ~keepers_dir) in
+    ignore (rewrite ~keepers_dir [extra] : Current.t);
+    Fs_compat.save_file (journal ~keepers_dir) before;
+    Current.confirm_committed_program proof |> refused);
+  fixture (fun keepers_dir anchor ->
+    ignore (publish ~keepers_dir ~anchor (program ()) |> require : Current.program_commit);
+    let proof=committed_program ~keepers_dir "ordered-publication" in
+    let path=journal ~keepers_dir in
+    let rows=Fs_compat.load_jsonl path in
+    let target=List.hd (List.rev rows) in
+    Fs_compat.save_file path (Fs_compat.load_file path ^ Yojson.Safe.to_string target ^ "\n");
+    Current.confirm_committed_program proof |> refused);
+  fixture (fun keepers_dir anchor ->
+    ignore (publish ~keepers_dir ~anchor (program ()) |> require : Current.program_commit);
+    let proof=committed_program ~keepers_dir "ordered-publication" in
+    Current.with_program_reset ~keepers_dir ~keeper_id:keeper (fun () -> Ok ()) |> require;
+    Current.confirm_committed_program proof |> refused)
+
 let () = run "keeper_memory_os_program_publication"
   ["atomic ordered publication",[
     test_case "one real revision, exact proof and original-only archive" `Quick test_single_commit_and_original_archive;
@@ -539,6 +643,12 @@ let () = run "keeper_memory_os_program_publication"
     test_case "committed journal failure and failed reset remain recoverable" `Quick test_committed_pending_journal_and_failed_reset;
     test_case "conflicting original-boundary proof preserves pending stores" `Quick test_pending_boundary_conflict_preserves_stores;
     test_case "quarantine and absent-Memory reset invalidate captures" `Quick test_quarantine_and_empty_incarnation];
+   "retained original basis and actual commit readback",[
+    test_case "exact retained bytes resume the original basis with unrelated growth" `Quick test_retained_anchor_roundtrip_and_unrelated_growth;
+    test_case "bad evidence, ABA, reset and lost prefix refuse" `Quick test_retained_anchor_rejects_bad_data_and_aba;
+    test_case "actual effect survives later valid retirement" `Quick test_committed_program_actual_effect_and_later_retirement;
+    test_case "Mixed readback requires both actual original receipts" `Quick test_committed_mixed_requires_both_actual_receipts;
+    test_case "journal gap, duplicate transaction and reset refuse" `Quick test_committed_program_rejects_gap_duplicate_and_reset];
    "mixed original publication",[
     test_case "interleaved full original publishes both boundaries once" `Quick test_mixed_exact_atomic_program;
     test_case "changed complete manifest refuses before any effect" `Quick test_mixed_manifest_rejects_before_effect;

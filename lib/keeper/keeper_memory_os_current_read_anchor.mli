@@ -42,6 +42,7 @@ type removal_lookup =
 type program_anchor =
   { anchor_keeper : string
   ; anchor_snapshot : t option
+  ; anchor_snapshot_bytes : string option
   ; anchor_identity : Keeper_memory_os_program_types.store_anchor
   }
 
@@ -49,6 +50,26 @@ val program_anchor_snapshot : program_anchor -> t option
 
 val capture_program_anchor :
   keepers_dir:string -> keeper_id:string -> (program_anchor, string) result
+
+type program_anchor_evidence
+val program_anchor_evidence : program_anchor -> program_anchor_evidence
+val program_anchor_evidence_to_json : program_anchor_evidence -> Yojson.Safe.t
+val program_anchor_evidence_of_json : Yojson.Safe.t -> (program_anchor_evidence, string) result
+val program_anchor_evidence_matches_publication : program_anchor_evidence ->
+  Keeper_memory_os_program_types.publication -> (unit, string) result
+(** Pure exact join of the retained keeper, captured identity and original
+    full facts with a publication. It grants no live store or ACK authority. *)
+(** Pure exact evidence codec, including the captured full snapshot and journal
+    prefix. Decoding validates its internal identities but grants no live
+    Memory or publication authority. Retain once at the first floor step. *)
+val resume_program_anchor : keepers_dir:string -> keeper_id:string ->
+  program_anchor_evidence -> (program_anchor, string) result
+(** Recover pending publication, then rejoin the exact recorded incarnation,
+    journal prefix and snapshot lineage under Memory locks. Preserve the
+    original anchor. A reset, ABA, missing transition or changed captured fact
+    refuses; unrelated compatible additions may remain. May perform the
+    standard publication recovery. Caller retains source-owner serialization;
+    never invoke from a Memory-locked callback. *)
 
 val verify_program_anchor :
   keepers_dir:string ->
@@ -58,6 +79,15 @@ val verify_program_anchor :
   t option ->
   Keeper_memory_os_program_types.t ->
   (Keeper_memory_os_program_types.store_anchor, string) result
+
+val read_program_journal_target_locked :
+  keepers_dir:string -> keeper_id:string -> transaction_id:string ->
+  snapshot_content:string option -> t option ->
+  ((Keeper_memory_os_program_types.publication * t) option, string) result
+(** Low-level journal data read. Caller holds aggregate/snapshot locks. Require
+    one actual marked transaction, exact locked prefix, current incarnation
+    and all later snapshot transitions. This does not validate range receipts
+    and supplies no committed-program or source settlement authority. *)
 
 val find_removal :
   keepers_dir:string -> keeper_id:string -> string -> removal_lookup

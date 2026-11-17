@@ -1,6 +1,8 @@
 open Keeper_memory_os_types
 open Result.Syntax
 module Journal_codec = Keeper_memory_os_journal_codec
+module Snapshot_codec = Keeper_memory_os_snapshot_codec
+module Program_publication = Keeper_memory_os_program_publication
 open Keeper_memory_os_current_types
 open Keeper_memory_os_support_core
 open Keeper_memory_os_current_layout
@@ -94,10 +96,51 @@ type removal_lookup =
 type program_anchor =
   { anchor_keeper : string
   ; anchor_snapshot : t option
+  ; anchor_snapshot_bytes : string option
   ; anchor_identity : Keeper_memory_os_program_types.store_anchor
   }
 
 let program_anchor_snapshot anchor = anchor.anchor_snapshot
+
+type program_anchor_evidence = Program_anchor_evidence of program_anchor
+let program_anchor_evidence anchor = Program_anchor_evidence anchor
+let program_anchor_evidence_to_json (Program_anchor_evidence anchor) =
+  `Assoc ["schema_version",`Int 1;"keeper_id",`String anchor.anchor_keeper;
+    "identity",Program_publication.store_anchor_to_json anchor.anchor_identity;
+    "snapshot_bytes",Option.fold ~none:`Null ~some:(fun bytes -> `String bytes) anchor.anchor_snapshot_bytes]
+let program_anchor_evidence_of_json json =
+  let* fields=match json with
+    | `Assoc fields ->
+      let+ ()=exact_field_names_result ["schema_version";"keeper_id";"identity";"snapshot_bytes"] fields
+        |> Result.map_error wire_error_to_string in fields
+    | _ -> Error "retained program anchor is not an object" in
+  let* version=wire_int_field "schema_version" fields |> Result.map_error wire_error_to_string in
+  let* keeper=wire_string_field "keeper_id" fields |> Result.map_error wire_error_to_string in
+  let* identity=Program_publication.store_anchor_of_json (List.assoc "identity" fields) in
+  let* snapshot,bytes=match List.assoc "snapshot_bytes" fields with
+    | `Null -> Ok (None,None)
+    | `String bytes ->
+      let* json=try Ok (Yojson.Safe.from_string bytes) with
+        | Yojson.Json_error detail -> Error ("retained program snapshot: " ^ detail) in
+      let+ snapshot=Snapshot_codec.of_json json |> Result.map_error Snapshot_codec.snapshot_rejection_to_string in
+      Some snapshot,Some bytes
+    | _ -> Error "retained program snapshot bytes are not a string or null" in
+  let matches=match identity.snapshot,snapshot,bytes with
+    | None,None,None -> true
+    | Some (revision,digest),Some snapshot,Some bytes -> snapshot.revision=revision && sha256 bytes=digest
+    | (None | Some _),(None | Some _),(None | Some _) -> false in
+  if version<>1 || keeper="" || keeper<>String.trim keeper || not matches
+  then Error "retained program anchor identities conflict"
+  else Ok (Program_anchor_evidence {anchor_keeper=keeper;anchor_snapshot=snapshot;
+    anchor_snapshot_bytes=bytes;anchor_identity=identity})
+
+let program_anchor_evidence_matches_publication (Program_anchor_evidence anchor)
+    (publication : Keeper_memory_os_program_types.publication) =
+  if anchor.anchor_keeper=Keeper_identity.Keeper_id.to_string publication.execution.program.keeper_id
+     && anchor.anchor_identity=publication.captured
+     && Option.map (fun (snapshot : t) -> snapshot.facts) anchor.anchor_snapshot
+       =publication.execution.program.initial_current
+  then Ok () else Error "retained Memory anchor differs from the committed program"
 
 let program_journal_bytes ~keepers_dir ~keeper_id =
   let+ journal = Fs_compat.read_private_jsonl_durable_locked_result
@@ -133,36 +176,26 @@ let capture_program_anchor ~keepers_dir ~keeper_id =
       let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
       let* snapshot = match Fs_compat.load_file_opt path with
         | None -> Ok None
-        | Some bytes -> let+ current = parse path bytes in Some (current,sha256 bytes) in
+        | Some bytes -> let+ current = parse path bytes in Some (current,bytes,sha256 bytes) in
       let* epoch = ensure_epoch ~keepers_dir ~keeper_id in
       let* bytes = program_journal_bytes ~keepers_dir ~keeper_id in
       let* _ = decode_program_journal bytes in
-      Ok {anchor_keeper=keeper_id; anchor_snapshot=Option.map fst snapshot;
+      Ok {anchor_keeper=keeper_id; anchor_snapshot=Option.map (fun (current,_,_) -> current) snapshot;
+        anchor_snapshot_bytes=Option.map (fun (_,bytes,_) -> bytes) snapshot;
         anchor_identity=store_anchor ~epoch
-          ~snapshot:(Option.map (fun (current,digest) -> current.revision,digest) snapshot) ~bytes}))
+          ~snapshot:(Option.map (fun (current,_,digest) -> current.revision,digest) snapshot) ~bytes}))
 
-let verify_program_anchor ~keepers_dir ~keeper_id anchor ~snapshot_content previous program =
-  let module P = Keeper_memory_os_program_types in
-  let* epoch = read_epoch ~keepers_dir ~keeper_id in
-  let* () = if anchor.anchor_keeper=keeper_id && epoch=Some anchor.anchor_identity.epoch then Ok ()
-    else Error "Memory program incarnation changed since inference" in
-  let* () =
-    if program.P.initial_current = Option.map (fun (snapshot : t) -> snapshot.facts) anchor.anchor_snapshot
-    then Ok () else Error "Memory program did not judge its captured full snapshot" in
-  let* bytes = program_journal_bytes ~keepers_dir ~keeper_id in
-  let original = anchor.anchor_identity in
+let verify_program_state ~bytes ~(original : Keeper_memory_os_program_types.store_anchor) ~initial_facts ~protected_ids
+    ~snapshot_content previous =
   let* () =
     if String.length bytes >= original.journal_length
        && sha256 (String.sub bytes 0 original.journal_length) = original.journal_sha256 then Ok ()
     else Error "Memory program journal prefix changed or disappeared" in
   let* suffix = decode_program_journal
     (String.sub bytes original.journal_length (String.length bytes-original.journal_length)) in
-  let initial_ids = Set_util.StringSet.of_list
-    (List.map memory_id (Option.fold ~none:[] ~some:Fun.id program.initial_current)) in
   let first_revision = Option.fold ~none:0 ~some:fst original.snapshot in
   let table facts = List.fold_left (fun values fact ->
     Identity_map.add (memory_id fact) (fact_payload fact) values) Identity_map.empty facts in
-  let initial_facts = Option.fold ~none:[] ~some:(fun (current : t) -> current.facts) anchor.anchor_snapshot in
   let rec verify revision values last_rewrite = function
     | [] ->
       let current_revision=Option.fold ~none:0 ~some:(fun (current : t) -> current.revision) previous in
@@ -205,7 +238,7 @@ let verify_program_anchor ~keepers_dir ~keeper_id anchor ~snapshot_content previ
             && entry.change.added=[] && entry.change.removed=[] -> Ok (revision,values,last_rewrite)
         | Some (Rewritten | Unchanged) | None -> Error "Memory program history has a gap or reused revision" in
       let touched=Option.fold ~none:[] ~some:Keeper_memory_os_program_publication.touched_ids entry.program in
-      if List.exists (fun identity -> Set_util.StringSet.mem identity initial_ids)
+      if List.exists (fun identity -> Set_util.StringSet.mem identity protected_ids)
         (retired_identities entry.change@touched)
       then Error "Memory program input identity was retired, rewritten or recreated after inference"
       else verify next_revision next_values last_rewrite rest
@@ -216,6 +249,68 @@ let verify_program_anchor ~keepers_dir ~keeper_id anchor ~snapshot_content previ
     | Some current,Some bytes -> Some (current.revision,sha256 bytes)
     | None,Some _ | Some _,None -> None in
   Ok (store_anchor ~epoch:original.epoch ~snapshot ~bytes)
+
+let verify_program_anchor_current ~keepers_dir ~keeper_id anchor ~snapshot_content previous ~initial_current =
+  let* epoch = read_epoch ~keepers_dir ~keeper_id in
+  let* () = if anchor.anchor_keeper=keeper_id && epoch=Some anchor.anchor_identity.epoch then Ok ()
+    else Error "Memory program incarnation changed since inference" in
+  let* () =
+    if initial_current = Option.map (fun (snapshot : t) -> snapshot.facts) anchor.anchor_snapshot
+    then Ok () else Error "Memory program did not judge its captured full snapshot" in
+  let* bytes = program_journal_bytes ~keepers_dir ~keeper_id in
+  let initial_facts=Option.fold ~none:[] ~some:(fun (snapshot : t) -> snapshot.facts) anchor.anchor_snapshot in
+  let protected_ids=Set_util.StringSet.of_list (List.map memory_id initial_facts) in
+  verify_program_state ~bytes ~original:anchor.anchor_identity ~initial_facts ~protected_ids
+    ~snapshot_content previous
+
+let verify_program_anchor ~keepers_dir ~keeper_id anchor ~snapshot_content previous program =
+  verify_program_anchor_current ~keepers_dir ~keeper_id anchor ~snapshot_content previous
+    ~initial_current:program.Keeper_memory_os_program_types.initial_current
+
+let resume_program_anchor ~keepers_dir ~keeper_id (Program_anchor_evidence anchor) =
+  let* ()=recover_publication ~keepers_dir ~keeper_id in
+  Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
+    File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
+      let* ()=publication_read_guard ~keepers_dir ~keeper_id in
+      let* observed=match Fs_compat.load_file_opt (path_for_keepers_dir ~keepers_dir ~keeper_id) with
+        | None -> Ok None
+        | Some bytes -> let+ snapshot=parse (path_for_keepers_dir ~keepers_dir ~keeper_id) bytes in
+          Some (snapshot,bytes) in
+      let* _=verify_program_anchor_current ~keepers_dir ~keeper_id anchor
+        ~snapshot_content:(Option.map snd observed) (Option.map fst observed)
+        ~initial_current:(Option.map (fun (snapshot : t) -> snapshot.facts) anchor.anchor_snapshot) in
+      Ok anchor))
+
+
+let read_program_journal_target_locked ~keepers_dir ~keeper_id ~transaction_id ~snapshot_content current =
+  let* epoch=read_epoch ~keepers_dir ~keeper_id in
+  let* bytes=program_journal_bytes ~keepers_dir ~keeper_id in
+  let* rows=decode_program_journal bytes in
+  let* found=List.fold_left (fun result (_,row) ->
+    let* found=result in
+    match row with
+    | Journal_committed {program=Some publication;revision;recorded_at;source;change;_}
+        when publication.execution.program.transaction_id=transaction_id ->
+      (match found with
+       | Some _ -> Error "Memory journal repeats an ordered transaction identity"
+       | None ->
+         let snapshot : t={revision;updated_at=recorded_at;source;
+           facts=publication.execution.final_facts;change} in
+         let+ snapshot=Snapshot_codec.of_json (Snapshot_codec.to_json snapshot)
+           |> Result.map_error Snapshot_codec.snapshot_rejection_to_string in
+         Some (publication,snapshot))
+    | Journal_committed _ | Journal_failed _ | Journal_quarantined _ -> Ok found)
+    (Ok None) rows in
+  match found with
+  | None -> Ok None
+  | Some (publication,target) ->
+    let* ()=if epoch=Some publication.locked_prior.epoch
+        && keeper_id=Keeper_identity.Keeper_id.to_string publication.execution.program.keeper_id
+      then Ok () else Error "ordered transaction belongs to a different Memory incarnation or keeper" in
+    let+ _=verify_program_state ~bytes ~original:publication.locked_prior
+      ~initial_facts:publication.execution.initial_facts ~protected_ids:Set_util.StringSet.empty
+      ~snapshot_content current in
+    Some (publication,target)
 
 type journal_mention =
   | Mentioned_as_current

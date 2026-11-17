@@ -445,8 +445,8 @@ let load_owned_regular_file_with_snapshot ?owner_uid ?single_link ~ownership_roo
        result)
 ;;
 
-let observe_owned_regular_file_blocking ?parent_lstat ~owner_uid ~ownership_root path =
-  load_owned_regular_file_blocking_with ~owner_uid ?parent_lstat ~ownership_root
+let observe_owned_regular_file_blocking ?single_link ?parent_lstat ~owner_uid ~ownership_root path =
+  load_owned_regular_file_blocking_with ~owner_uid ?single_link ?parent_lstat ~ownership_root
     ~read_descriptor:(fun ~path:_ _ descriptor ->
       Ok (owned_regular_file_snapshot_of_stats descriptor))
     path

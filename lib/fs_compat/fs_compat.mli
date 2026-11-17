@@ -1778,6 +1778,32 @@ val read_private_jsonl_durable_locked_result :
   after:Private_jsonl_cursor.t option ->
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 
+type owned_private_jsonl_permissions = Owned_regular | Private_0600
+type owned_private_jsonl_role = Owned_data | Owned_stable_lock
+type owned_private_jsonl_read_error =
+  | Owned_admission_failed of
+      { role : owned_private_jsonl_role; error : owned_regular_file_read_error }
+  | Owned_private_permissions_required of
+      { role : owned_private_jsonl_role; path : string; actual : int }
+  | Owned_transaction_failed of private_jsonl_transaction_error
+
+val read_owned_private_jsonl_durable_locked_result :
+  owner_uid:int -> ownership_root:string ->
+  permissions:owned_private_jsonl_permissions -> string ->
+  after:Private_jsonl_cursor.t option ->
+  (private_jsonl_snapshot, owned_private_jsonl_read_error) result
+(** Owned, single-link data and stable-lock admission runs under the canonical
+    data-path mutex, before any parent/lock creation or body read. All admission
+    descriptors close before the stable lock is acquired. The same mutex then
+    covers the unchanged stable-lock snapshot read and its settlement.
+    [Private_0600] additionally requires exact 0600 on both existing leaves;
+    [Owned_regular] retains their modes (the stable protocol still requires a
+    private lock). Missing leaves remain admissible; [after] retains the
+    ordinary snapshot reader's missing/cursor semantics. Eio cancellation is
+    checked after the worker has settled every descriptor and released the
+    mutex; it does not return a stale read result after cancellation. *)
+
+
 (** Process-start or prepared-transaction recovery read of a private JSONL store
     under its stable sibling lock. Behaves like
     {!read_private_jsonl_durable_locked_result} with [after = None], except that
@@ -1876,6 +1902,19 @@ val update_private_file_durable_locked_with_io_for_testing :
     [before_sync_parent] runs after opening the data descriptor, before the
     parent sync and locked canonical read. It can physically replace the path
     to verify that stale descriptor bytes never reach [decide]. *)
+
+(** Production-path seams for owned admission, mutex ownership and settlement. *)
+module Owned_private_jsonl_for_testing : sig
+  val read :
+    parent_lstat:(string -> Unix.stats) ->
+    io:private_jsonl_transaction_io_for_testing ->
+    owner_uid:int -> ownership_root:string ->
+    permissions:owned_private_jsonl_permissions -> string ->
+    after:Private_jsonl_cursor.t option ->
+    (private_jsonl_snapshot, owned_private_jsonl_read_error) result
+  val path_mutex_available : string -> bool
+  (** Nonblocking probe of the actual canonical transaction mutex. *)
+end
 
 (** Production-path seam for deterministic stable-lock creation and descriptor
     settlement tests. *)
@@ -1989,8 +2028,11 @@ val rewrite_private_jsonl_durable_locked_at_snapshot_with_stage_hooks_for_testin
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
 (** Production-path seam proving that a descriptor settlement failure while
-    reading the rewrite precondition is not classified as a committed rewrite. *)
+    reading the rewrite precondition is not classified as a committed rewrite.
+    [before_sync_rewrite_parent] runs after publication inside the real
+    [Sync_rewrite_parent] boundary, as in the snapshot rewrite seam. *)
 val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
+  ?before_sync_rewrite_parent:(string -> unit) ->
   io:private_jsonl_transaction_io_for_testing ->
   string ->
   expected:Private_jsonl_cursor.t ->

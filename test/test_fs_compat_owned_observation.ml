@@ -158,6 +158,8 @@ let test_replacement_and_lost_binding () =
     [2, `Unlink; 3, `Unlink; 2, `Replace; 3, `Replace; 2, `Ancestor; 3, `Ancestor]
 ;;
 
+let () = Owned_private_jsonl_cases.run_child_if_requested ()
+
 let () = Eio_main.run (fun env ->
   Alcotest.run "Owned file metadata observation"
     ["owned descriptor", [
@@ -166,4 +168,5 @@ let () = Eio_main.run (fun env ->
       test_case "parent policy before/open/after observation" `Quick test_parent_policy_at_each_boundary;
       test_case "descriptor UID checked independently" `Quick test_leaf_owner;
       test_case "aliases and nonregular files remain refused" `Quick test_aliases_and_nonregular_files;
-      test_case "lost and replaced bindings never become absence" `Quick test_replacement_and_lost_binding]])
+      test_case "lost and replaced bindings never become absence" `Quick test_replacement_and_lost_binding];
+     "owned private transaction", Owned_private_jsonl_cases.cases])

@@ -147,6 +147,15 @@ val observe_owned_regular_file :
   string ->
   (owned_regular_file_snapshot option, owned_regular_file_read_error) result
 
+val observe_owned_regular_file_blocking :
+  ?single_link:bool ->
+  ?parent_lstat:(string -> Unix.stats) ->
+  owner_uid:int ->
+  ownership_root:string ->
+  string ->
+  (owned_regular_file_snapshot option, owned_regular_file_read_error) result
+(** Filesystem worker only. No dispatch while a transaction mutex is held. *)
+
 module Owned_read_for_testing :
   sig
     val load_with_snapshot :

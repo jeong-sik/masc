@@ -665,65 +665,78 @@ let rec try_lock_whole_file fd =
   | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> false
 ;;
 
-let with_private_jsonl_stable_lock_fd ~io ~success requested_path f =
+(* The caller owns the canonical data-path mutex. Keep every independent
+   admission descriptor closed before this process-scoped POSIX lock opens. *)
+let private_jsonl_with_stable_lock_fd_under_mutex ~io ~success ~dir ~path f =
+  let lock_path = private_jsonl_lock_path path in
+  match private_jsonl_open_stable_lock lock_path with
+  | Error _ as error -> error
+  | Ok stable_lock ->
+    private_jsonl_with_fd
+      ~close_operation:Close_stable_lock
+      ~close_fd:io.close_fd
+      ~success
+      stable_lock.fd
+      (fun () ->
+         let open Result.Syntax in
+         let* () =
+           private_jsonl_validate_open_binding
+             ~operation:Inspect_stable_lock ~path:lock_path stable_lock.fd
+         in
+         let* acquired =
+           private_jsonl_capture Acquire_stable_lock (fun () ->
+             try_lock_whole_file stable_lock.fd)
+           |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+         in
+         if not acquired then Error (Stable_lock_contended { lock_path })
+         else
+           let* () =
+             private_jsonl_validate_open_binding
+               ~operation:Inspect_stable_lock ~path:lock_path stable_lock.fd
+           in
+           let* () = private_jsonl_prepare_stable_lock ~io ~dir ~path:lock_path stable_lock in
+           f ~dir ~path ~lock_fd:stable_lock.fd)
+;;
+
+let private_jsonl_with_prepared_path requested_path f =
   let requested_dir = Filename.dirname requested_path in
+  match private_jsonl_capture Create_parent_directory (fun () ->
+    test_exec_home_guard ~op:"private_jsonl_transaction" requested_path;
+    mkdir_p_unix requested_dir)
+  with
+  | Error failure -> Error (Private_jsonl_operation_failed failure)
+  | Ok () ->
+    (match private_jsonl_capture Canonicalize_parent_directory (fun () ->
+       Unix.realpath requested_dir)
+     with
+     | Error failure -> Error (Private_jsonl_operation_failed failure)
+     | Ok dir ->
+       let path = Filename.concat dir (Filename.basename requested_path) in
+       f ~dir ~path)
+;;
+
+let with_private_jsonl_stable_lock_fd ~io ~success requested_path f =
   run_blocking_private_file_transaction
-    ~label:"fs-compat-private-jsonl-transaction"
-    ~path:requested_path
+    ~label:"fs-compat-private-jsonl-transaction" ~path:requested_path
     (fun () ->
-       match private_jsonl_capture Create_parent_directory (fun () ->
-         test_exec_home_guard ~op:"private_jsonl_transaction" requested_path;
-         mkdir_p_unix requested_dir)
-       with
-       | Error failure -> Error (Private_jsonl_operation_failed failure)
-       | Ok () ->
-         (match private_jsonl_capture Canonicalize_parent_directory (fun () ->
-            Unix.realpath requested_dir)
-          with
-          | Error failure -> Error (Private_jsonl_operation_failed failure)
-          | Ok dir ->
-            let path = Filename.concat dir (Filename.basename requested_path) in
-            let lock_path = private_jsonl_lock_path path in
-            with_append_path_mutex path (fun () ->
-              match private_jsonl_open_stable_lock lock_path with
-              | Error _ as error -> error
-              | Ok stable_lock ->
-                private_jsonl_with_fd
-                  ~close_operation:Close_stable_lock
-                  ~close_fd:io.close_fd
-                  ~success
-                  stable_lock.fd
-                  (fun () ->
-                     let open Result.Syntax in
-                     let* () =
-                       private_jsonl_validate_open_binding
-                         ~operation:Inspect_stable_lock
-                         ~path:lock_path
-                         stable_lock.fd
-                     in
-                     let* acquired =
-                       private_jsonl_capture Acquire_stable_lock (fun () ->
-                         try_lock_whole_file stable_lock.fd)
-                       |> Result.map_error (fun failure ->
-                         Private_jsonl_operation_failed failure)
-                     in
-                     if not acquired
-                     then Error (Stable_lock_contended { lock_path })
-                     else
-                       let* () =
-                         private_jsonl_validate_open_binding
-                           ~operation:Inspect_stable_lock
-                           ~path:lock_path
-                           stable_lock.fd
-                       in
-                       let* () =
-                         private_jsonl_prepare_stable_lock
-                           ~io
-                           ~dir
-                           ~path:lock_path
-                           stable_lock
-                       in
-                       f ~dir ~path ~lock_fd:stable_lock.fd))))
+       private_jsonl_with_prepared_path requested_path (fun ~dir ~path ->
+         with_append_path_mutex path (fun () ->
+           private_jsonl_with_stable_lock_fd_under_mutex ~io ~success ~dir ~path f)))
+;;
+
+let with_private_jsonl_admitted_stable_lock
+      ~io ~success ~admit ~map_transaction_error requested_path f =
+  run_blocking_private_file_transaction
+    ~label:"fs-compat-owned-private-jsonl-transaction" ~path:requested_path
+    (fun () ->
+       with_append_path_mutex requested_path (fun () ->
+         match admit () with
+         | Error _ as error -> error
+         | Ok () ->
+           private_jsonl_with_prepared_path requested_path (fun ~dir ~path ->
+             private_jsonl_with_stable_lock_fd_under_mutex ~io ~success ~dir ~path
+               (fun ~dir ~path ~lock_fd:_ -> f ~dir ~path))
+           |> Result.map_error map_transaction_error))
 ;;
 
 let with_private_jsonl_stable_lock ~io ~success requested_path f =

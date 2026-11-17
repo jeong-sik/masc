@@ -214,6 +214,19 @@ val with_private_jsonl_stable_lock :
   (dir:string -> path:string -> ('a, private_jsonl_transaction_error) result) ->
   ('a, private_jsonl_transaction_error) result
 
+val with_private_jsonl_admitted_stable_lock :
+  io:private_jsonl_transaction_io_for_testing ->
+  success:('a -> private_jsonl_transaction_success) ->
+  admit:(unit -> (unit, 'error) result) ->
+  map_transaction_error:(private_jsonl_transaction_error -> 'error) ->
+  string ->
+  (dir:string -> path:string -> ('a, private_jsonl_transaction_error) result) ->
+  ('a, 'error) result
+(** One filesystem worker holds the canonical data-path mutex through admission,
+    parent preparation, stable-lock acquisition and settlement. [admit] must
+    finish all independent descriptor closes before returning; it runs before
+    mkdir or lock creation, and must not re-enter this path's transaction. *)
+
 val with_private_jsonl_identified_stable_lock :
   io:private_jsonl_transaction_io_for_testing ->
   success:('a -> private_jsonl_transaction_success) ->

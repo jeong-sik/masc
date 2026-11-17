@@ -722,6 +722,7 @@ let append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
 ;;
 
 let rewrite_private_jsonl_durable_locked_at_cursor_with_io
+      ?before_sync_rewrite_parent
       ~io
       path
       ~expected
@@ -741,7 +742,7 @@ let rewrite_private_jsonl_durable_locked_at_cursor_with_io
     | Ok actual ->
       if not (Private_jsonl_cursor.equal expected actual)
       then Error (Cursor_mismatch { expected; actual })
-      else private_jsonl_replace_locked ~dir path content
+      else private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content
 ;;
 
 let rewrite_private_jsonl_durable_locked_at_cursor_result
@@ -757,12 +758,14 @@ let rewrite_private_jsonl_durable_locked_at_cursor_result
 ;;
 
 let rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+      ?before_sync_rewrite_parent
       ~io
       path
       ~expected
       content
   =
   rewrite_private_jsonl_durable_locked_at_cursor_with_io
+    ?before_sync_rewrite_parent
     ~io
     path
     ~expected

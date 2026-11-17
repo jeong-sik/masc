@@ -113,6 +113,7 @@ val rewrite_private_jsonl_durable_locked_at_cursor_result :
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
 
 val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
+  ?before_sync_rewrite_parent:(string -> unit) ->
   io:private_jsonl_transaction_io_for_testing ->
   string ->
   expected:Private_jsonl_cursor.t ->

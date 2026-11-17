@@ -134,10 +134,12 @@ let cut_rows ~max_cells ~max_rows ~more ~after kept long =
   let rows_left = max_rows - List.length before in
   if rows_left > 0
   then (
-    (* On rows of its own, as an uncapped block lays it out. *)
+    (* On rows of its own, as an uncapped block lays it out. It needs at
+       least [rows_left] of them: with fewer, the fact and the count behind
+       it would have fitted, and [layout] would have kept it whole. *)
     let pieces = broken_rows ~max_cells (Fact long) in
     let whole_rows = List.take (rows_left - 1) pieces in
-    if room < 1 || List.compare_length_with pieces rows_left < 0
+    if room < 1
     then None
     else (
       let last =

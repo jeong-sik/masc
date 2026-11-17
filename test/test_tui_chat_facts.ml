@@ -101,6 +101,20 @@ let test_a_fact_with_no_text_is_not_a_fact () =
   check int "an empty fact is not counted as omitted" total
     (Facts.layout ~max_cells:40 ~max_rows:0 ~more with_empty).Facts.omitted
 
+(* The cap holds at every width, down to rows too narrow for a fact or for
+   the count: the pane subtracts the rows it granted, so a block that drew
+   one more would push the composer off its row. *)
+let test_a_capped_block_takes_no_more_rows_than_granted () =
+  for max_cells = 1 to 24 do
+    for max_rows = 0 to 3 do
+      let layout = Facts.layout ~max_cells ~max_rows ~more facts in
+      check bool
+        (Printf.sprintf "%d cells, %d rows" max_cells max_rows)
+        true
+        (List.compare_length_with layout.Facts.rows max_rows <= 0)
+    done
+  done
+
 (* A fact wider than a row is prose -- a failed turn's message. Its head is
    what the reader needs, so a cap that cannot hold all of it cuts it rather
    than replacing it with a count. *)
@@ -145,6 +159,8 @@ let () =
         ; test_case "no rows omit every fact" `Quick test_no_rows_omit_every_fact
         ; test_case "a fact with no text is not a fact" `Quick
             test_a_fact_with_no_text_is_not_a_fact
+        ; test_case "a capped block takes no more rows than granted" `Quick
+            test_a_capped_block_takes_no_more_rows_than_granted
         ; test_case "a fact wider than a row is cut, not dropped" `Quick
             test_a_fact_wider_than_a_row_is_cut_not_dropped
         ] )

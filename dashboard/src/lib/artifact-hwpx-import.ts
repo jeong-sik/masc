@@ -4,12 +4,13 @@ import { readOfficeChart } from './artifact-office-chart-read'
 import { fromByteArray } from 'base64-js'
 import { officeImageDimensions } from './artifact-office-image'
 import { checkOfficeTableGrid, type OfficeTableCellBounds } from './artifact-office-table-grid'
+import { officeTableWidthStyle, resolveOfficeTableWidths, type OfficeTableWidth } from './artifact-office-table-width'
 import { loadOfficeArchive, readOfficeBytes, readOfficeXml, resolveOfficePart, xmlChild, xmlChildren, xmlDescendants, type OfficeXmlElement } from './artifact-office-xml'
 import { hwpUnitsPerCssPixel, hwpxTableLimits, hwpxNs } from './artifact-hwpx-template'
 
 type Fragment = { readonly kind: 'inline' | 'block'; readonly content: string }
 type ManifestItem = { readonly path: string; readonly mime: string }
-type Cell = OfficeTableCellBounds & { readonly element: OfficeXmlElement }
+type Cell = OfficeTableCellBounds & { readonly element: OfficeXmlElement; readonly width: OfficeTableWidth }
 export type HwpxImportSource = { readonly kind: 'hwpx' }
   | { readonly kind: 'hwp5'; readonly readOleChart: (data: Uint8Array) => Promise<OfficeChart> }
 const hwpxChartNamespace = 'http://www.hancom.co.kr/hwpml/2016/ooxmlchart'
@@ -114,17 +115,34 @@ export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array, source:
 
   async function table(element: OfficeXmlElement): Promise<string> {
     const rows = tableInteger(element.getAttribute('rowCnt'), '행 수', 1, hwpxTableLimits.rows), columns = tableInteger(element.getAttribute('colCnt'), '열 수', 1, hwpxTableLimits.columns)
+    const size = xmlChild(element, hwpxNs.paragraph, 'sz')
+    let width: OfficeTableWidth = { kind: 'absent' }
+    if (size) {
+      if ((size.getAttribute('widthRelTo') ?? 'ABSOLUTE') === 'ABSOLUTE') width = { kind: 'absolute', hwpUnits: tableInteger(size.getAttribute('width'), '표 너비', 0, Number.MAX_SAFE_INTEGER) }
+      else notices.add('종이·문단에 대한 상대 표 너비는 셀의 절대 너비를 기준으로 옮겼습니다.')
+    }
+    const spacing = element.getAttribute('cellSpacing')
+    if (spacing !== null && tableInteger(spacing, '셀 간격', 0, Number.MAX_SAFE_INTEGER) > 0) notices.add('표의 셀 간격과 여백은 출력 문서의 기본값으로 바뀝니다.')
+    const style = (value: OfficeTableWidth) => {
+      const css = officeTableWidthStyle(value)
+      return css ? ` style="${officeHtmlText(css)}"` : ''
+    }
     const rowElements = xmlChildren(element, hwpxNs.paragraph, 'tr')
     if (rowElements.length !== rows) throw new Error('HWPX 표의 행 수가 본문과 다릅니다.')
     const cellsByRow: Cell[][] = rowElements.map((row, rowIndex) => xmlChildren(row, hwpxNs.paragraph, 'tc').map(cell => {
       const address = xmlChild(cell, hwpxNs.paragraph, 'cellAddr'), span = xmlChild(cell, hwpxNs.paragraph, 'cellSpan')
+      const cellSize = xmlChild(cell, hwpxNs.paragraph, 'cellSz')
       if (!address || !span) throw new Error('HWPX 표의 셀 주소 또는 병합 정보가 없습니다.')
-      const item = { element: cell, row: tableInteger(address.getAttribute('rowAddr'), '셀 행', 0, rows - 1), column: tableInteger(address.getAttribute('colAddr'), '셀 열', 0, columns - 1),
+      const item: Cell = { element: cell, width: cellSize ? { kind: 'absolute', hwpUnits: tableInteger(cellSize.getAttribute('width'), '셀 너비', 0, Number.MAX_SAFE_INTEGER) } : { kind: 'absent' }, row: tableInteger(address.getAttribute('rowAddr'), '셀 행', 0, rows - 1), column: tableInteger(address.getAttribute('colAddr'), '셀 열', 0, columns - 1),
         rows: tableInteger(span.getAttribute('rowSpan'), '행 병합', 1, rows), columns: tableInteger(span.getAttribute('colSpan'), '열 병합', 1, columns) }
       if (item.row !== rowIndex || item.row + item.rows > rows || item.column + item.columns > columns) throw new Error('HWPX 표의 셀 범위가 올바르지 않습니다.')
       return item
     }))
     checkOfficeTableGrid(rows, columns, cellsByRow.flat(), 'HWPX 표')
+    const geometry = resolveOfficeTableWidths(columns, cellsByRow.flat(), { table: width })
+    if (geometry.kind !== 'unique') notices.add(geometry.kind === 'conflicting'
+      ? '표의 선호 너비가 서로 다릅니다. 셀 너비를 보존하고 출력에서 다시 배치합니다.'
+      : '병합 셀 안쪽의 열 너비는 원본만으로 알 수 없습니다. 셀의 합계 너비를 보존합니다.')
     const output: string[] = []
     for (const cells of cellsByRow) {
       const row: string[] = []
@@ -132,11 +150,12 @@ export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array, source:
         const list = xmlChild(cell.element, hwpxNs.paragraph, 'subList')
         if (!list) throw new Error('HWPX 표 셀의 본문이 없습니다.')
         const contents = await paragraphs(list), tag = cellHeader(cell.element) ? 'th' : 'td'
-        row.push(`<${tag} rowspan="${cell.rows}" colspan="${cell.columns}">${contents}</${tag}>`)
+        row.push(`<${tag} rowspan="${cell.rows}" colspan="${cell.columns}"${style(cell.width)}>${contents}</${tag}>`)
       }
       output.push(`<tr>${row.join('')}</tr>`)
     }
-    return `<table><tbody>${output.join('')}</tbody></table>`
+    const grid = geometry.kind === 'unique' ? `<colgroup>${geometry.widths.map(hwpUnits => `<col${style({ kind: 'absolute', hwpUnits })}>`).join('')}</colgroup>` : ''
+    return `<table${style(width)}>${grid}<tbody>${output.join('')}</tbody></table>`
   }
 
   async function withCaption(element: OfficeXmlElement, object: Fragment): Promise<Fragment[]> {

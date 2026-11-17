@@ -9,7 +9,7 @@ import { ArtifactWordExport } from './artifact-word-export'
 vi.mock('../../lib/artifact-word-export',()=>({artifactWordFile:vi.fn()}))
 vi.mock('../../lib/artifact-hwpx-export',()=>({artifactHwpxFile:vi.fn()}))
 const doc:ArtifactDocument={content:'# 원본',revisions:[],artifact:{id:`artifact-${'a'.repeat(32)}`,revision:3,title:'문서',summary:'요약',format:'markdown',author:'keeper',created_at:'now',task_id:null,goal_id:null,url:'/',body:{_blob:{sha256:'f'.repeat(64)}}}}
-const file:ArtifactWordFile={data:new Uint8Array([1,2,3]).buffer,notices:['외부 그림을 링크로 바꿨습니다.']}
+const file:ArtifactWordFile={data:new Uint8Array([1,2,3]).buffer,notices:['외부 그림을 링크로 바꿨습니다.'],blocks:[]}
 function deferred(){let resolve!:(value:ArtifactWordFile)=>void;const promise=new Promise<ArtifactWordFile>(ok=>{resolve=ok});return {promise,resolve}}
 beforeEach(()=>{setStoredToken('word-export-user');vi.mocked(artifactWordFile).mockReset();vi.mocked(artifactHwpxFile).mockReset();vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:word-export');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{})})
 afterEach(()=>{cleanup();clearStoredToken();vi.restoreAllMocks()})

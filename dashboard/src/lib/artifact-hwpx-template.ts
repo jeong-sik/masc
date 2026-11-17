@@ -11,6 +11,9 @@ export const hwpxNs = {
 export const hwpxXmlDeclaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 export const hwpxPage = { width: 59530, height: 84190, margin: 7200, fontHeight: 1100, cellHeight: 2200 } as const
 export const hwpUnitsPerCssPixel = 75
+// The supported @rhwp/core 0.9.0 reader parses native sizes as u32; larger
+// numbers otherwise become zero without a conversion notice.
+export const maximumHwpxWidth = 0xffff_ffff
 // Both OWPML's unsignedShort fields and HTML's cell-span bounds must be representable.
 export const hwpxTableLimits = { columns: 1000, rows: 65534 } as const
 export type HwpxCharacterStyle = { readonly bold: boolean; readonly italic: boolean; readonly height: number }

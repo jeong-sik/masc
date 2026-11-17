@@ -3,18 +3,23 @@ import { XMLSerializer } from '@xmldom/xmldom'
 import type { ArtifactDocument } from '../api/published-artifacts'
 import { officeXmlText } from './artifact-office-text'
 import { artifactWordFile } from './artifact-word-export'
+import type { PreparedOfficeBlock, PreparedOfficeCell, PreparedOfficeTable } from './artifact-office-prepared'
 import { loadOfficeArchive, officeNs, readOfficeBytes, readOfficeRelationships, readOfficeXml, resolveOfficePart, xmlChild, xmlChildren, xmlDescendants, type OfficeXmlElement } from './artifact-office-xml'
-import { hwpxGeometry, hwpxHeader, hwpxManifest, hwpxTableLimits, hwpxNs, hwpxObjectAttributes, hwpxPage, hwpxParagraph, hwpxPicture, hwpxSection, hwpxXmlDeclaration, type HwpxCharacterStyle, type HwpxManifestItem } from './artifact-hwpx-template'
+import { hwpxGeometry, hwpxHeader, hwpxManifest, hwpxTableLimits, maximumHwpxWidth, hwpxNs, hwpxObjectAttributes, hwpxPage, hwpxParagraph, hwpxPicture, hwpxSection, hwpxXmlDeclaration, type HwpxCharacterStyle, type HwpxManifestItem } from './artifact-hwpx-template'
 
 const word = officeNs.word, emuPerHwpUnit = 127, hwpUnitsPerTwip = 5, hwpUnitsPerHalfPoint = 50
 const wordprocessingDrawing = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
 const embeddedPackageRelation = `${officeNs.relationships}/package`
 const minimumCellPadding = 150
-type TableCell = { readonly node: OfficeXmlElement; readonly row: number; readonly col: number; readonly cols: number; rows: number; readonly header: boolean }
+type TableCell = { readonly node: OfficeXmlElement; readonly row: number; readonly col: number; readonly cols: number; rows: number; readonly header: boolean; readonly source: PreparedOfficeCell }
 function value(node: OfficeXmlElement | undefined): string | null { return node?.getAttributeNS(word, 'val') ?? null }
 function positive(value: string | null, description: string): number {
   if (!value || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) throw new Error(`${description} 값이 올바르지 않습니다.`)
   return Number(value)
+}
+function tableWidth(width: number): number {
+  if (!Number.isSafeInteger(width) || width < 0 || width > maximumHwpxWidth) throw new Error('표 너비가 HWPX를 읽는 변환기의 32비트 범위를 벗어납니다.')
+  return width
 }
 function flag(node: OfficeXmlElement | undefined): boolean {
   if (!node) return false
@@ -35,7 +40,7 @@ function relativePart(source: string, target: string): string {
 
 /** Map the existing DOCX producer's native elements; reuse its chart XML and embedded workbook bytes. */
 export async function artifactHwpxFile(doc: ArtifactDocument): Promise<{ data: ArrayBuffer; notices: readonly string[] }> {
-  const file = await artifactWordFile(doc), source = await loadOfficeArchive(file.data), zip = new JSZip()
+  const file = await artifactWordFile(doc, 'hwpx'), source = await loadOfficeArchive(file.data), zip = new JSZip()
   // OCF requires the MIME entry first and uncompressed, before adding chart/image parts.
   zip.file('mimetype', 'application/hwp+zip', { compression: 'STORE' })
   const sourcePath = 'word/document.xml', document = await readOfficeXml(source, sourcePath), body = xmlChild(document.documentElement!, word, 'body')
@@ -129,16 +134,20 @@ export async function artifactHwpxFile(doc: ArtifactDocument): Promise<{ data: A
     }
     return output.join('')
   }
-  async function table(node: OfficeXmlElement): Promise<string> {
+  async function table(node: OfficeXmlElement, prepared: PreparedOfficeTable): Promise<string> {
     const grid = xmlChild(node, word, 'tblGrid'), rows = xmlChildren(node, word, 'tr')
     if (!grid || !rows.length) throw new Error('Word 표의 격자가 없습니다.')
     const widths = xmlChildren(grid, word, 'gridCol').map(item => positive(item.getAttributeNS(word, 'w'), '표 열 너비') * hwpUnitsPerTwip)
     if (!widths.length) throw new Error('Word 표의 열이 없습니다.')
     if (widths.length > hwpxTableLimits.columns || rows.length > hwpxTableLimits.rows) throw new Error('표의 행 또는 열 수를 HWPX와 HTML 양쪽에 옮길 수 없습니다.')
+    if (prepared.columns !== widths.length || prepared.rows.length !== rows.length) throw new Error('생성한 표의 격자가 원본 너비 구조와 다릅니다.')
     const cells: TableCell[] = []
+    const cellsByRow: TableCell[][] = []
     let active = new Map<number, TableCell>()
     for (const [rowIndex, row] of rows.entries()) {
       let col = 0
+      const owned: TableCell[] = []
+      cellsByRow.push(owned)
       const nextActive = new Map<number, TableCell>(), rowProperties = xmlChild(row, word, 'trPr'), header = !!rowProperties && flag(xmlChild(rowProperties, word, 'tblHeader'))
       for (const cell of xmlChildren(row, word, 'tc')) {
         const properties = xmlChild(cell, word, 'tcPr'), span = properties && xmlChild(properties, word, 'gridSpan'), merge = properties && xmlChild(properties, word, 'vMerge')
@@ -149,44 +158,57 @@ export async function artifactHwpxFile(doc: ArtifactDocument): Promise<{ data: A
           if (!previous || previous.cols !== cols || (value(merge) !== null && value(merge) !== 'continue')) throw new Error('Word 표의 세로 병합이 이어지지 않습니다.')
           previous.rows++; nextActive.set(col, previous)
         } else {
-          const item = { node: cell, row: rowIndex, col, cols, rows: 1, header }
+          const source = prepared.rows[rowIndex]![owned.length]
+          if (!source || source.column !== col || source.columns !== cols) throw new Error('생성한 표 셀의 위치가 원본 너비 구조와 다릅니다.')
+          const item = { node: cell, row: rowIndex, col, cols, rows: 1, header, source }
+          owned.push(item)
           cells.push(item); if (merge) nextActive.set(col, item)
         }
         col += cols
       }
       if (col !== widths.length) throw new Error('Word 표의 행 너비가 격자와 다릅니다.')
+      if (owned.length !== prepared.rows[rowIndex]!.length) throw new Error('생성한 표의 셀 수가 원본 너비 구조와 다릅니다.')
       active = nextActive
     }
     const rowXml: string[] = []
-    for (const [rowIndex] of rows.entries()) {
+    for (const owned of cellsByRow) {
       const cellXml: string[] = []
-      for (const cell of cells.filter(item => item.row === rowIndex)) {
-        const width = widths.slice(cell.col, cell.col + cell.cols).reduce((sum, value) => sum + value, 0), height = cell.rows * hwpxPage.cellHeight
-        cellXml.push(`<hp:tc name="" header="${cell.header ? '1' : '0'}" hasMargin="1" protect="0" editable="1" dirty="0" borderFillIDRef="2"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${await blocks(cell.node) || paragraph('')}</hp:subList><hp:cellAddr colAddr="${cell.col}" rowAddr="${cell.row}"/><hp:cellSpan colSpan="${cell.cols}" rowSpan="${cell.rows}"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="${minimumCellPadding}" right="${minimumCellPadding}" top="${minimumCellPadding}" bottom="${minimumCellPadding}"/></hp:tc>`)
+      for (const cell of owned) {
+        if (cell.rows !== cell.source.rows) throw new Error('생성한 표의 세로 병합이 원본 너비 구조와 다릅니다.')
+        const width = tableWidth(cell.source.width ?? widths.slice(cell.col, cell.col + cell.cols).reduce((sum, value) => sum + value, 0)), height = cell.rows * hwpxPage.cellHeight
+        cellXml.push(`<hp:tc name="" header="${cell.header ? '1' : '0'}" hasMargin="1" protect="0" editable="1" dirty="0" borderFillIDRef="2"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${await blocks(cell.node, cell.source.children) || paragraph('')}</hp:subList><hp:cellAddr colAddr="${cell.col}" rowAddr="${cell.row}"/><hp:cellSpan colSpan="${cell.cols}" rowSpan="${cell.rows}"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="${minimumCellPadding}" right="${minimumCellPadding}" top="${minimumCellPadding}" bottom="${minimumCellPadding}"/></hp:tc>`)
       }
       rowXml.push(`<hp:tr>${cellXml.join('')}</hp:tr>`)
     }
-    const width = widths.reduce((sum, item) => sum + item, 0), height = rows.length * hwpxPage.cellHeight
+    const width = tableWidth(prepared.width ?? widths.reduce((sum, item) => sum + item, 0)), height = rows.length * hwpxPage.cellHeight
     const contents = `<hp:tbl ${hwpxObjectAttributes(objectId++)} pageBreak="CELL" repeatHeader="${cells.some(cell => cell.row === 0 && cell.header) ? '1' : '0'}" rowCnt="${rows.length}" colCnt="${widths.length}" cellSpacing="0" borderFillIDRef="2" noAdjust="0">${hwpxGeometry(width, height)}<hp:inMargin left="${minimumCellPadding}" right="${minimumCellPadding}" top="${minimumCellPadding}" bottom="${minimumCellPadding}"/>${rowXml.join('')}</hp:tbl>`
     return paragraph(`<hp:run charPrIDRef="0">${contents}</hp:run>`)
   }
-  async function blocks(owner: OfficeXmlElement): Promise<string> {
+  async function blocks(owner: OfficeXmlElement, prepared: readonly PreparedOfficeBlock[]): Promise<string> {
     const output: string[] = []
+    let index = 0
     for (const child of xmlChildren(owner)) {
       if (child.namespaceURI !== word) throw new Error('Word 변환 결과에 알 수 없는 본문 요소가 있습니다.')
+      if (child.localName === 'sectPr' || child.localName === 'tcPr') continue
+      const block = prepared[index++]
+      if (!block) throw new Error('생성한 문서의 블록 수가 원본 구조와 다릅니다.')
       switch (child.localName) {
         case 'p': {
+          if (block.kind !== 'paragraph') throw new Error('생성한 문단이 원본 구조와 다릅니다.')
           const label = listLabel(child), content = await runs(child)
           output.push(paragraph(`${label ? `<hp:run charPrIDRef="0"><hp:t>${officeXmlText(label)}</hp:t></hp:run>` : ''}${content}`)); break
         }
-        case 'tbl': output.push(await table(child)); break
-        case 'sectPr': case 'tcPr': break
+        case 'tbl': {
+          if (block.kind !== 'table') throw new Error('생성한 표가 원본 구조와 다릅니다.')
+          output.push(await table(child, block)); break
+        }
         default: throw new Error(`지원하지 않는 Word 본문 요소입니다: ${child.localName}`)
       }
     }
+    if (index !== prepared.length) throw new Error('생성한 문서의 블록 수가 원본 구조와 다릅니다.')
     return output.join('')
   }
-  const content = await blocks(body)
+  const content = await blocks(body, file.blocks)
   zip.file('META-INF/container.xml', `${hwpxXmlDeclaration}<ocf:container xmlns:ocf="${hwpxNs.container}"><ocf:rootfiles><ocf:rootfile full-path="Contents/content.hpf" media-type="application/hwpml-package+xml"/></ocf:rootfiles></ocf:container>`)
   zip.file('version.xml', `${hwpxXmlDeclaration}<hv:HCFVersion xmlns:hv="http://www.hancom.co.kr/hwpml/2011/version" tagetApplication="WORDPROCESSOR" major="5" minor="1" micro="1" buildNumber="0" os="0" xmlVersion="1.5" application="MASC" appVersion="1.0"/>`)
   zip.file('Contents/header.xml', hwpxHeader(styles)); zip.file('Contents/section0.xml', hwpxSection(content))

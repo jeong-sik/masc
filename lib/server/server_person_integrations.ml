@@ -114,27 +114,44 @@ let integration_json { integration_id; display_name; models; withheld; calls } =
 ;;
 
 type start_note =
+  | Access_unpublished
   | No_person_provider
   | No_model of
       { integration_id : string
       ; withheld : (string * withheld) list
       }
 
-(* A provider whose calls are refused gets no note: a model of it would
-   still not be called here. *)
+(* A provider whose calls are refused for its tools gets no note: a model of
+   it would still not be called here. Before the publication every provider
+   reads as refused, and that is one note of its own, not the silence of a
+   table where every provider offers a model. *)
 let start_notes = function
   | [] -> [ No_person_provider ]
   | _ :: _ as integrations ->
-    List.filter_map
-      (fun { integration_id; display_name = (_ : string); models; withheld; calls } ->
-        match calls, models with
-        | Allowed, [] -> Some (No_model { integration_id; withheld })
-        | Allowed, _ :: _ -> None
-        | Refused (_ : Runtime_account_access.native_refusal), (_ : string list) -> None)
-      integrations
+    let notes =
+      List.filter_map
+        (fun { integration_id; display_name = (_ : string); models; withheld; calls } ->
+          match calls, models with
+          | Refused Runtime_account_access.Native_unpublished, (_ : string list) ->
+            Some Access_unpublished
+          | Allowed, [] -> Some (No_model { integration_id; withheld })
+          | Allowed, _ :: _ -> None
+          | ( Refused
+                Runtime_account_access.(
+                  ( Native_tools_reach_other_homes (_ : Runtime_native_tools.posture)
+                  | Native_tools_reach_person_homes (_ : Runtime_native_tools.posture)
+                  | Person_homes_unread
+                      { posture = (_ : Runtime_native_tools.posture); unread = (_ : Unix.error) } ))
+            , (_ : string list) ) -> None)
+        integrations
+    in
+    if List.mem Access_unpublished notes then [ Access_unpublished ] else notes
 ;;
 
 let start_note_to_string = function
+  | Access_unpublished ->
+    "what people may connect was read before this process published its access, so which \
+     provider offers people a model is not known"
   | No_person_provider ->
     "runtime.toml declares no provider that a person signs in to, so people can connect nothing"
   | No_model { integration_id; withheld = [] } ->
@@ -154,10 +171,17 @@ let start_note_to_string = function
 
 (* [Server_runtime_setup_actions.config] writes a file it cannot read to the
    log itself, so that failure has no line here. It gives no other error;
-   one that it came to give would be said here. *)
+   one that it came to give would be said here. [of_config] finds the command
+   of each provider, which reads the working directory for a relative one
+   ([Runtime_official_cli_install]): with that directory gone it raises, and
+   a start says so and goes on. *)
 let start_lines ~base_path =
   match Server_runtime_setup_actions.config ~base_path with
-  | Ok config -> List.map start_note_to_string (start_notes (of_config config))
+  | Ok config ->
+    (match of_config config with
+     | integrations -> List.map start_note_to_string (start_notes integrations)
+     | exception Sys_error reason ->
+       [ Printf.sprintf "what people may connect was not read at this start: %s" reason ])
   | Error
       Server_runtime_setup_actions.(
         Configuration_unavailable

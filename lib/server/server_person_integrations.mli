@@ -56,6 +56,10 @@ val of_config : Runtime_schema.config -> integration list
 (** What a start of the routes of people says once about the providers a
     person signs in to. *)
 type start_note =
+  | Access_unpublished
+      (** The providers were read before this process published its access:
+          each reads as refused then, and which of them offers a model is
+          not known. *)
   | No_person_provider
       (** runtime.toml declares no provider that a person signs in to. *)
   | No_model of
@@ -66,11 +70,12 @@ type start_note =
           [withheld] holds its bindings, and is empty when it has none. *)
 
 (** The notes of the providers {!of_config} gave, in their order. A provider
-    whose calls are [Refused] gets no note: a model of it would still not be
-    called here, and the page of a person says that refusal. For a provider
-    with a note, the page says beside the model check which models are
-    withheld and why. [calls] is read from the access this process
-    published, so this is asked after the publication. *)
+    whose calls are [Refused] for its tools gets no note: a model of it would
+    still not be called here, and the page of a person says that refusal. For
+    a provider with a note, the page says beside the model check which models
+    are withheld and why. [calls] is read from the access this process
+    published: asked before the publication, the answer is
+    [Access_unpublished] alone. *)
 val start_notes : integration list -> start_note list
 
 (** The lines of {!start_notes} for the runtime.toml of [base_path], with the
@@ -78,7 +83,9 @@ val start_notes : integration list -> start_note list
     ({!Server_accounts.run}) writes to its log and [masc auth preview] prints.
     The person is not the one who edits runtime.toml, so the operator reads
     them there. A file that cannot be read gives no line:
-    {!Server_runtime_setup_actions.config} writes that to the log itself. *)
+    {!Server_runtime_setup_actions.config} writes that to the log itself. A
+    working directory that is gone, which the lookup of a relative provider
+    command reads, is a line and not an exception, so a start goes on. *)
 val start_lines : base_path:string -> string list
 
 (** [/api/v1/auth/integrations]. *)

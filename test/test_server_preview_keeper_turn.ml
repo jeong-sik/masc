@@ -701,6 +701,8 @@ let test_turn () =
         (let note =
            Alcotest.testable
              (fun out -> function
+               | Server_person_integrations.Access_unpublished ->
+                 Format.pp_print_string out "Access_unpublished"
                | Server_person_integrations.No_person_provider ->
                  Format.pp_print_string out "No_person_provider"
                | Server_person_integrations.No_model { integration_id; withheld } ->
@@ -733,7 +735,39 @@ let test_turn () =
                    ]
                }
            ]
-           (notes ~offered:""));
+           (notes ~offered:"");
+         (* The notes of providers as they would be read in other states of
+            a process: none declared, one with no binding at all, and a
+            reading before the access is published, where each provider reads
+            as refused and the answer must not look like a table in which
+            every provider offers a model. *)
+         let provider ~models ~calls =
+           { Server_person_integrations.integration_id = "claude_code"
+           ; display_name = "Claude Code"
+           ; models
+           ; withheld = []
+           ; calls
+           }
+         in
+         Alcotest.(check (list note))
+           "no provider a person signs in to"
+           [ Server_person_integrations.No_person_provider ]
+           (Server_person_integrations.start_notes []);
+         Alcotest.(check (list note))
+           "a provider with no binding"
+           [ Server_person_integrations.No_model { integration_id = "claude_code"; withheld = [] } ]
+           (Server_person_integrations.start_notes
+              [ provider ~models:[] ~calls:Server_person_integrations.Allowed ]);
+         Alcotest.(check (list note))
+           "a reading before the publication is one note, whatever the providers offer"
+           [ Server_person_integrations.Access_unpublished ]
+           (Server_person_integrations.start_notes
+              [ provider
+                  ~models:[ "claude-sonnet-5" ]
+                  ~calls:
+                    (Server_person_integrations.Refused Runtime_account_access.Native_unpublished)
+              ; provider ~models:[] ~calls:Server_person_integrations.Allowed
+              ]));
         (* The model left out is the one a verification of her account
            refuses before any client starts. The window is never reached. *)
         (let left_out =

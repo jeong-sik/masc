@@ -21,6 +21,7 @@ type model_entry =
   ; supports_required_tool_choice : bool option
   ; supports_named_tool_choice : bool option
   ; supports_parallel_tool_calls : bool option
+  ; supports_function_response_parts : bool option
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
@@ -142,6 +143,7 @@ let with_model_overrides catalog declarations =
     ; supports_required_tool_choice = entry.supports_required_tool_choice
     ; supports_named_tool_choice = entry.supports_named_tool_choice
     ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
+    ; supports_function_response_parts = entry.supports_function_response_parts
     ; assistant_tool_content_format = entry.assistant_tool_content_format
     ; chat_output_budget_field = entry.chat_output_budget_field
     ; tool_schema_conformance = entry.tool_schema_conformance
@@ -438,6 +440,7 @@ let known_entry_keys =
   ; "supports_required_tool_choice"
   ; "supports_named_tool_choice"
   ; "supports_parallel_tool_calls"
+  ; "supports_function_response_parts"
   ; "assistant_tool_content_format"
   ; "chat_output_budget_field"
   ; "tool_schema_conformance"
@@ -558,6 +561,9 @@ let parse_entry entry_toml =
   in
   let* supports_parallel_tool_calls =
     bool_field ~entry_id "supports_parallel_tool_calls" entry_toml
+  in
+  let* supports_function_response_parts =
+    bool_field ~entry_id "supports_function_response_parts" entry_toml
   in
   let* assistant_tool_content_format =
     canonical_string_opt
@@ -731,6 +737,7 @@ let parse_entry entry_toml =
     ; supports_required_tool_choice
     ; supports_named_tool_choice
     ; supports_parallel_tool_calls
+    ; supports_function_response_parts
     ; assistant_tool_content_format
     ; chat_output_budget_field
     ; tool_schema_conformance

@@ -88,6 +88,7 @@ let test_default_no_limits () =
 let test_default_new_fields_false () =
   let c = Capabilities.default_capabilities in
   check bool "no parallel tools" false c.supports_parallel_tool_calls;
+  check bool "no function response media parts" false c.supports_function_response_parts;
   check bool "no structured output" false c.supports_structured_output;
   check bool "no image input" false c.supports_image_input;
   check bool "no audio input" false c.supports_audio_input;
@@ -291,6 +292,53 @@ let test_lookup_gemini () =
     check bool "video" true c.supports_video_input;
     check bool "structured output" true c.supports_structured_output
   | None -> fail "should match gemini"
+;;
+
+let test_gemini_function_response_parts_require_a_declaration () =
+  let generic = Capabilities.gemini_capabilities in
+  check bool "generic Gemini accepts direct documents" true generic.supports_document_input;
+  check bool "direct document support does not grant function response parts" false
+    generic.supports_function_response_parts;
+  let model_id = Model_identifiers.Model_id.of_string_exn "gemini-3.1-pro" in
+  (match Model_catalog.lookup (current_catalog ()) model_id with
+   | Some entry ->
+     check (option bool) "the exact chat row explicitly declares response parts" (Some true)
+       entry.supports_function_response_parts
+   | None -> fail "expected the exact Gemini chat catalog row");
+  match Capabilities.for_model_id "gemini-3.1-pro" with
+  | Some capabilities ->
+    check bool "the exact catalog declaration reaches resolution" true
+      capabilities.supports_function_response_parts;
+    check bool "direct documents remain a separate admitted capability" true
+      capabilities.supports_document_input
+  | None -> fail "expected resolved Gemini chat capabilities"
+;;
+
+let test_model_row_function_response_parts_override_independently () =
+  let inherited =
+    { Capabilities.gemini_capabilities with supports_function_response_parts = true } in
+  List.iter (fun (parts, documents) ->
+    let catalog = match Model_catalog.of_toml_string ~source:"function response model fixture"
+        (Printf.sprintf {|[[models]]
+model_id = "function-response-model"
+provider_name = "function-response-provider"
+supports_function_response_parts = %b
+supports_document_input = %b
+|} parts documents) with
+      | Ok catalog -> catalog
+      | Error detail -> fail detail in
+    match Model_catalog.model_entries catalog with
+    | [entry] ->
+      check (option bool) "model declaration preserves explicit false" (Some parts)
+        entry.supports_function_response_parts;
+      let capabilities = Capabilities.apply_catalog_entry ~base:inherited
+        ~provider_entry:None ~wire:None entry in
+      check bool "model response-parts declaration overrides the positive base" parts
+        capabilities.supports_function_response_parts;
+      check bool "model document declaration is independent" documents
+        capabilities.supports_document_input
+    | [] | _ :: _ :: _ -> fail "expected one scoped model declaration")
+    [false, true; true, false; false, false; true, true]
 ;;
 
 let test_gemini_catalog_drives_capabilities () =
@@ -1733,6 +1781,34 @@ let make_manifest ?(base = "default_capabilities") ?(extra_fields = []) model_id
   match Capability_manifest.of_json json with
   | Ok m -> m
   | Error e -> Alcotest.failf "manifest parse error: %s" e
+;;
+
+let test_manifest_function_response_parts_override_independently () =
+  let original = current_catalog () in
+  let model_id = "gemini-3.1-pro" in
+  (match catalog_capabilities original model_id with
+   | Some capabilities ->
+     check bool "the replaced catalog row starts with native response parts" true
+       capabilities.supports_function_response_parts
+   | None -> fail "expected the original exact Gemini model");
+  List.iter (fun (parts, documents) ->
+    let manifest = make_manifest ~base:"gemini"
+      ~extra_fields:
+        [ "supports_function_response_parts", string_of_bool parts
+        ; "supports_document_input", string_of_bool documents ] model_id in
+    (match Capability_manifest.entries manifest with
+     | [entry] ->
+       check (option bool) "manifest preserves explicit false before composition" (Some parts)
+         entry.supports_function_response_parts
+     | [] | _ :: _ :: _ -> fail "expected one manifest declaration");
+    match catalog_capabilities (Model_catalog.with_model_overrides original manifest) model_id with
+    | Some capabilities ->
+      check bool "manifest replaces the exact row's response-parts support" parts
+        capabilities.supports_function_response_parts;
+      check bool "manifest document support remains independent" documents
+        capabilities.supports_document_input
+    | None -> fail "composed exact Gemini model must remain present")
+    [false, true; true, false; false, false; true, true]
 ;;
 
 let test_explicit_composition_replaces_exact_model () =
@@ -3271,6 +3347,10 @@ let () =
         ; test_case "claude sonnet" `Quick test_lookup_claude_sonnet
         ; test_case "gpt-5" `Quick test_lookup_gpt5
         ; test_case "gemini" `Quick test_lookup_gemini
+        ; test_case "Gemini function response parts require a declaration" `Quick
+            test_gemini_function_response_parts_require_a_declaration
+        ; test_case "model response-parts override is independent of documents" `Quick
+            test_model_row_function_response_parts_override_independently
         ; test_case
             "gemini catalog drives 1M ctx capabilities"
             `Quick
@@ -3394,6 +3474,8 @@ let () =
         ; test_case "base openai_chat" `Quick test_manifest_base_label_openai_chat
         ; test_case "base anthropic" `Quick test_manifest_base_label_anthropic
         ; test_case "base absent = default" `Quick test_manifest_base_absent_uses_default
+        ; test_case "manifest response-parts override is independent of documents" `Quick
+            test_manifest_function_response_parts_override_independently
         ; test_case
             "shared preset constructor rejects unknown"
             `Quick

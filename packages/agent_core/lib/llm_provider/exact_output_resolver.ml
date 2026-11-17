@@ -532,6 +532,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; option_bool model.supports_audio_input
       ; option_bool model.supports_video_input
       ; option_bool model.supports_document_input
+      ; option_bool model.supports_function_response_parts
       ; option_string model.modality_priority
       ; (match model.task with
          | None -> "none"

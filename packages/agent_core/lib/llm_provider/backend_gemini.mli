@@ -107,6 +107,12 @@ val media_content_block_of_inline_data
   :  Yojson.Safe.t
   -> gemini_part_signature_target * Types.content_block
 
-(** Extract [contents] list and optional [systemInstruction] from messages.
-    Exposed for unit-testing the AGENT_CORE-to-Gemini message mapping. *)
-val contents_of_messages : Types.message list -> Yojson.Safe.t list * Yojson.Safe.t option
+(** Extract [contents] and optional [systemInstruction] from already admitted
+    messages. Native media inside function responses requires the exact
+    model's explicit declaration; direct input support alone does not imply it.
+    Undeclared document/audio tool media must be projected before this codec.
+    The existing labelled image followup remains available when native parts
+    are not declared. *)
+val contents_of_messages :
+  supports_function_response_parts:bool ->
+  Types.message list -> Yojson.Safe.t list * Yojson.Safe.t option

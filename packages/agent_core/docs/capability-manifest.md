@@ -96,6 +96,7 @@ and `lib/llm_provider/capability_manifest.mli` for the authoritative schema cont
 | `supports_required_tool_choice` | bool | from base | Required/any forced tool selection. |
 | `supports_named_tool_choice` | bool | from base | Named forced tool selection. |
 | `supports_parallel_tool_calls` | bool | from base | Multiple tool calls per turn. |
+| `supports_function_response_parts` | bool | from base (false for generic Gemini) | Gemini generateContent media inside `FunctionResponse.parts`. Each media kind also requires its direct input capability. |
 | `assistant_tool_content_format` | string | from base | Wire shape for assistant messages with tool calls and no visible text. Accepted values: `null`, `empty_string`. |
 | `supports_assistant_prefill` | bool | from base | Whether Anthropic Messages wire accepts a final assistant continuation prefill (e.g. `false` for Haiku 5.5). |
 | `supports_reasoning` | bool | from base | Any reasoning capability (union). |

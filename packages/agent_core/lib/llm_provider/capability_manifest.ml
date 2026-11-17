@@ -12,6 +12,7 @@ type entry =
   ; supports_required_tool_choice : bool option
   ; supports_named_tool_choice : bool option
   ; supports_parallel_tool_calls : bool option
+  ; supports_function_response_parts : bool option
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
@@ -311,6 +312,7 @@ let known_entry_keys =
   ; "supports_required_tool_choice"
   ; "supports_named_tool_choice"
   ; "supports_parallel_tool_calls"
+  ; "supports_function_response_parts"
   ; "assistant_tool_content_format"
   ; "chat_output_budget_field"
   ; "tool_schema_conformance"
@@ -505,6 +507,7 @@ let parse_entry json =
   let* supports_required_tool_choice = member_bool "supports_required_tool_choice" json in
   let* supports_named_tool_choice = member_bool "supports_named_tool_choice" json in
   let* supports_parallel_tool_calls = member_bool "supports_parallel_tool_calls" json in
+  let* supports_function_response_parts = member_bool "supports_function_response_parts" json in
   let* supports_reasoning = member_bool "supports_reasoning" json in
   let* supports_response_format_json = member_bool "supports_response_format_json" json in
   let* supports_structured_output = member_bool "supports_structured_output" json in
@@ -538,6 +541,7 @@ let parse_entry json =
     ; supports_required_tool_choice
     ; supports_named_tool_choice
     ; supports_parallel_tool_calls
+    ; supports_function_response_parts
     ; assistant_tool_content_format
     ; chat_output_budget_field
     ; tool_schema_conformance

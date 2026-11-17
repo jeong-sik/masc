@@ -10,6 +10,22 @@
 초기에는 다른 세션의 작업을 별도 worktree에서 확인했으며, 원격 main과 열린 PR의
 구현 대조는 아래 게시 준비 checkpoint에서 이어갔다. 미확인은 기능 부재 판정이 아니다.
 
+## 2026-11-17 Gemini 실제 실패와 후속 수리
+
+Document11의 `9036a38c`를 실제 Keeper가 빌드·실행했다. OCaml 5.5.1에서
+문서 admission 18개 중 1개가 실패했고 기존 Gemini 55개는 통과했다.
+문서 지원을 켠 중첩 ToolResult의 PDF가 preflight에는 남지만 전송에서
+빠지는 결함이다. 기존 소스 리뷰와 구문 성공은 이 동작의 통과 증거가 아니다.
+
+후속 수리는 직접 문서 입력과 function response 미디어 지원을 별도로 선언하고,
+지원하는 모델에는 원래 호출과 연결된 native parts로 첨부를 보낸다.
+중첩 JSON·오류·요약과 첨부 위치도 보존한다. 지원하지 않는 조합은 명시적으로
+누락을 표시하며 직접 사용자 PDF는 별도 입력 선언을 따른다. 원래 실패 조합을
+유지한 회귀표와 추가 사례를 작성했으며, 수정 후보의 실제 재실행은 아직 필요하다.
+[실패·수리·이전 원본 로그 수신 기록](../evidence/2026-11-17-farm-document-followup/README.md#gemini-execution-failure-and-repair)에
+범위를 분리했다. 4ccdd508의 이전 12+51개 시험 로그는 이후 전체 해시 대조를
+마쳤지만 이 Gemini 수리나 실제 provider 호출의 증거로 옮기지 않는다.
+
 ## 2026-11-17 게시 준비 checkpoint
 
 `gh api user`의 계정 조회와 지정된 협업 세션의 읽기·메시지 전달이 다시 성공했다.

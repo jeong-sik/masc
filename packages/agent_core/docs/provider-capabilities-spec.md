@@ -56,6 +56,7 @@ infer them from model names.
 | `supports_required_tool_choice` | exists in code | keep separate | Required/any forced tool selection can differ from named forced tool selection. |
 | `supports_named_tool_choice` | exists in code | keep separate | Named forced tool selection can differ from `required`/`any` forced selection and from mere auto/none tool choice support. |
 | `supports_parallel_tool_calls` | exists | keep | Request builders derive effective `disable_parallel_tool_use` from caller intent plus provider/model capability. |
+| `supports_function_response_parts` | exists | keep | Gemini generateContent media inside `FunctionResponse.parts`; false in the generic preset and explicitly enabled on supported model rows. Direct modality flags remain independent. |
 | `assistant_tool_content_format` | exists in code | keep separate | Assistant tool-call content shape (`content:null` vs `content:""`) is a provider wire-contract axis, independent from reasoning replay. |
 | `supports_system_prompt` | exists in code | keep | Most models support it, but some fine-tuned/distilled variants do not. Agent must fold system into first user message. |
 | `supports_assistant_prefill` | exists in code | keep | Controls whether trailing assistant continuation messages are admitted on the wire (for example, Haiku 5.5 declares `false`). |

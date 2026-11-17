@@ -364,6 +364,105 @@ let test_tool_result () =
   check string "function call id" "call_123" (function_call |> member "id" |> to_string)
 ;;
 
+let media_result_messages () =
+  let message role content : Types.message =
+    { origin = Types.Conversation; role; content; name = None;
+      tool_call_id = None; metadata = [] }
+  in
+  let failed = Types.Tool_failed
+    { failure_kind = Types.Reported_tool_error; error_class = Some Types.Deterministic } in
+  [ Types.user_msg "read the attachments"
+  ; message Types.Assistant
+      [ Types.ToolUse { id = "media-call"; name = "read_media"; input = `Assoc [] } ]
+  ; message Types.Tool
+      [ Types.ToolResult
+          { tool_use_id = "media-call"; content = "outer summary"; outcome = failed;
+            json = Some (`Assoc ["outer", `Int 17; "original_ref", `Assoc ["$ref", `String "attachment-0"]]);
+            content_blocks = Some
+              [ Types.Text "outer caption"
+              ; Types.Image {media_type = "image/png"; source = Types.Base64 "SU1H"}
+              ; Types.ToolResult
+                  { tool_use_id = "nested-call"; content = "nested summary";
+                    outcome = failed; json = Some (`Assoc ["nested", `Bool true; "original_ref", `Assoc ["$ref", `String "attachment-1"]]);
+                    content_blocks = Some
+                      [ Types.Document {media_type = "application/pdf"; source = Types.Base64 "UERG"}
+                      ; Types.Audio {media_type = "audio/wav"; source = Types.Base64 "QVVE"} ] }
+              ] }
+      ]
+  ]
+;;
+
+let test_function_response_retains_nested_media () =
+  let messages = media_result_messages () in
+  let contents = Backend_gemini.build_request ~config:(gemini_config ()) ~messages ()
+    |> parse_body |> member "contents" |> to_list in
+  check int "no synthetic user followup" 3 (List.length contents);
+  let response = List.nth contents 2 |> member "parts" |> to_list |> List.hd
+    |> member "functionResponse" in
+  check string "original call id" "media-call" (response |> member "id" |> to_string);
+  check string "resolved call name" "read_media" (response |> member "name" |> to_string);
+  let payload = response |> member "response" in
+  check string "summary retained" "outer summary" (payload |> member "result" |> to_string);
+  check bool "failure retained" true (payload |> member "is_error" |> to_bool);
+  check int "structured JSON retained" 17 (payload |> member "data" |> member "outer" |> to_int);
+  check string "original JSON reference remains unchanged" "attachment-0"
+    (payload |> member "data" |> member "original_ref" |> member "$ref" |> to_string);
+  let blocks = payload |> member "content_blocks" |> to_list in
+  let nested = List.nth blocks 2 in
+  check string "nested identity" "nested-call" (nested |> member "tool_use_id" |> to_string);
+  check string "nested summary" "nested summary" (nested |> member "result" |> to_string);
+  check bool "nested failure" true (nested |> member "is_error" |> to_bool);
+  check bool "nested JSON" true (nested |> member "data" |> member "nested" |> to_bool);
+  let nested_blocks = nested |> member "content_blocks" |> to_list in
+  let sources = List.map (fun block -> block |> member "source")
+    (List.nth blocks 1 :: nested_blocks) in
+  let media = response |> member "parts" |> to_list in
+  check int "every native attachment retained once" 3 (List.length media);
+  List.iter2 (fun (source, part) (mime, bytes) ->
+    let inline = part |> member "inlineData" in
+    check string "exact MIME" mime (inline |> member "mimeType" |> to_string);
+    check string "exact bytes" bytes (inline |> member "data" |> to_string);
+    let name = inline |> member "displayName" |> to_string in
+    check bool "generated name cannot capture an existing JSON reference" false
+      (List.mem name ["attachment-0"; "attachment-1"]);
+    check bool "response has an exact single-key reference" true
+      (source = `Assoc ["$ref", `String name]))
+    (List.combine sources media)
+    ["image/png", "SU1H"; "application/pdf", "UERG"; "audio/wav", "QVVE"]
+;;
+
+let test_undeclared_function_response_retains_result () =
+  let caps = { Capabilities.gemini_capabilities with
+    supports_image_input = true; supports_audio_input = true;
+    supports_document_input = true; supports_function_response_parts = false } in
+  let config = Provider_config.make ~kind:Gemini ~model_id:"custom-gemini"
+    ~base_url:"http://127.0.0.1:0" ~model_capabilities_override:caps () in
+  let contents = Backend_gemini.build_request ~config ~messages:(media_result_messages ()) ()
+    |> parse_body |> member "contents" |> to_list in
+  check int "existing image followup remains" 4 (List.length contents);
+  let response = List.nth contents 2 |> member "parts" |> to_list |> List.hd
+    |> member "functionResponse" in
+  check bool "undeclared native parts absent" true (response |> member "parts" = `Null);
+  check string "original call id" "media-call" (response |> member "id" |> to_string);
+  check string "resolved name" "read_media" (response |> member "name" |> to_string);
+  let payload = response |> member "response" in
+  check bool "outer failure retained" true (payload |> member "is_error" |> to_bool);
+  check int "outer JSON retained" 17 (payload |> member "data" |> member "outer" |> to_int);
+  let nested = payload |> member "content_blocks" |> to_list |> fun blocks -> List.nth blocks 2 in
+  check string "nested identity retained" "nested-call" (nested |> member "tool_use_id" |> to_string);
+  check bool "nested failure retained" true (nested |> member "is_error" |> to_bool);
+  check bool "nested JSON retained" true (nested |> member "data" |> member "nested" |> to_bool);
+  let notes = nested |> member "content_blocks" |> to_list
+    |> List.map (fun block -> block |> member "text" |> to_string) in
+  check bool "both unsupported attachments explicitly omitted" true
+    (List.for_all (fun text -> String.length text > 0) notes && List.length notes = 2);
+  let followup = List.nth contents 3 |> member "parts" |> to_list in
+  let images = List.filter (fun part -> part |> member "inlineData" <> `Null) followup in
+  check int "only the image is in the followup" 1 (List.length images);
+  check string "image bytes" "SU1H"
+    (List.hd images |> member "inlineData" |> member "data" |> to_string)
+;;
+
 let test_tool_result_missing_correlation_fails_closed () =
   let messages =
     [ ({ origin = Llm_provider.Types.Conversation;  role = Types.Tool
@@ -383,7 +482,7 @@ let test_tool_result_missing_correlation_fails_closed () =
        : Types.message)
     ]
   in
-  match Backend_gemini.contents_of_messages messages with
+  match Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages with
   | _ -> fail "expected missing Gemini tool correlation to fail closed"
   | exception Invalid_argument message ->
     check
@@ -406,7 +505,7 @@ let test_conflicting_tool_identity_fails_closed () =
     ; metadata = []
     }
   in
-  match Backend_gemini.contents_of_messages [ message ] with
+  match Backend_gemini.contents_of_messages ~supports_function_response_parts:false [ message ] with
   | _ -> fail "expected conflicting Gemini tool identity to fail closed"
   | exception Invalid_argument message ->
     check
@@ -773,7 +872,7 @@ let test_textual_part_signature_broken_adjacency_fails_closed () =
     (Backend_gemini.Gemini_api_error
        "Gemini thoughtSignature carrier targets text but its adjacent content block is \
         thought")
-    (fun () -> ignore (Backend_gemini.contents_of_messages messages))
+    (fun () -> ignore (Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages))
 ;;
 
 let message_with_blocks role content : Types.message =
@@ -791,7 +890,7 @@ let test_textual_part_signature_non_assistant_fails_closed () =
     "model signature on user role"
     (Backend_gemini.Gemini_api_error
        "Gemini thoughtSignature carrier is only valid on an assistant/model message")
-    (fun () -> ignore (Backend_gemini.contents_of_messages messages))
+    (fun () -> ignore (Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages))
 ;;
 
 let test_other_provider_replay_is_not_a_gemini_signature () =
@@ -805,7 +904,7 @@ let test_other_provider_replay_is_not_a_gemini_signature () =
             ])
   in
   let contents, _ =
-    Backend_gemini.contents_of_messages
+    Backend_gemini.contents_of_messages ~supports_function_response_parts:false
       [ message_with_blocks Assistant [ RedactedThinking carrier; Text "visible" ] ]
   in
   match contents with
@@ -830,7 +929,7 @@ let check_gemini_replay_payload_rejected label payload =
        "Malformed Gemini thoughtSignature carrier in conversation history")
     (fun () ->
        ignore
-         (Backend_gemini.contents_of_messages
+         (Backend_gemini.contents_of_messages ~supports_function_response_parts:false
             [ message_with_blocks Assistant [ RedactedThinking carrier; Text "visible" ] ]))
 ;;
 
@@ -889,7 +988,7 @@ let test_malformed_provider_replay_fails_closed () =
        "Malformed Gemini thoughtSignature carrier in conversation history")
     (fun () ->
        ignore
-         (Backend_gemini.contents_of_messages
+         (Backend_gemini.contents_of_messages ~supports_function_response_parts:false
             [ message_with_blocks Assistant [ RedactedThinking carrier; Text "visible" ] ]))
 ;;
 
@@ -1079,14 +1178,14 @@ let test_parse_error () =
 
 let test_contents_system_extraction () =
   let messages = [ Types.system_msg "Be brief."; Types.user_msg "Hi" ] in
-  let contents, sys_instr = Backend_gemini.contents_of_messages messages in
+  let contents, sys_instr = Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages in
   check int "one content" 1 (List.length contents);
   check bool "has system" true (Option.is_some sys_instr)
 ;;
 
 let test_contents_role_mapping () =
   let messages = [ Types.user_msg "A"; Types.assistant_msg "B"; Types.user_msg "C" ] in
-  let contents, sys_instr = Backend_gemini.contents_of_messages messages in
+  let contents, sys_instr = Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages in
   check int "three contents" 3 (List.length contents);
   check bool "no system" true (Option.is_none sys_instr);
   check string "first role" "user" (List.nth contents 0 |> member "role" |> to_string);
@@ -1109,7 +1208,7 @@ let test_contents_multimodal () =
       }
     ]
   in
-  let contents, _ = Backend_gemini.contents_of_messages messages in
+  let contents, _ = Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages in
   check int "one content" 1 (List.length contents);
   let parts = List.hd contents |> member "parts" |> to_list in
   check int "two parts" 2 (List.length parts);
@@ -1769,6 +1868,8 @@ let () =
             `Quick
             test_disable_parallel_tool_use_dropped
         ; test_case "tool result" `Quick test_tool_result
+        ; test_case "native function response nested media" `Quick test_function_response_retains_nested_media
+        ; test_case "undeclared function response retains result" `Quick test_undeclared_function_response_retains_result
         ; test_case
             "tool result missing correlation"
             `Quick

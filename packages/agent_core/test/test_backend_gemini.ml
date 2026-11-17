@@ -439,9 +439,9 @@ let test_undeclared_function_response_retains_result () =
     ~base_url:"http://127.0.0.1:0" ~model_capabilities_override:caps () in
   let contents = Backend_gemini.build_request ~config ~messages:(media_result_messages ()) ()
     |> parse_body |> member "contents" |> to_list in
-  check int "existing image followup remains" 4 (List.length contents);
-  let response = List.nth contents 2 |> member "parts" |> to_list |> List.hd
-    |> member "functionResponse" in
+  check int "image followup stays inside the tool response query" 3 (List.length contents);
+  let response_parts = List.nth contents 2 |> member "parts" |> to_list in
+  let response = List.hd response_parts |> member "functionResponse" in
   check bool "undeclared native parts absent" true (response |> member "parts" = `Null);
   check string "original call id" "media-call" (response |> member "id" |> to_string);
   check string "resolved name" "read_media" (response |> member "name" |> to_string);
@@ -456,8 +456,7 @@ let test_undeclared_function_response_retains_result () =
     |> List.map (fun block -> block |> member "text" |> to_string) in
   check bool "both unsupported attachments explicitly omitted" true
     (List.for_all (fun text -> String.length text > 0) notes && List.length notes = 2);
-  let followup = List.nth contents 3 |> member "parts" |> to_list in
-  let images = List.filter (fun part -> part |> member "inlineData" <> `Null) followup in
+  let images = List.filter (fun part -> part |> member "inlineData" <> `Null) response_parts in
   check int "only the image is in the followup" 1 (List.length images);
   check string "image bytes" "SU1H"
     (List.hd images |> member "inlineData" |> member "data" |> to_string)

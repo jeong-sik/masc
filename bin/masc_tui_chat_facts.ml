@@ -198,6 +198,7 @@ type 'reading palette =
   { label_style : string
   ; who_style : string
   ; amount_style : string
+  ; plain_style : string
   ; reading_style : 'reading -> string
   ; reset : string
   }
@@ -215,5 +216,5 @@ let draw palette row =
          | Value (Who, text) -> span palette.who_style text
          | Value (Amount, text) -> span palette.amount_style text
          | Value (Reading reading, text) -> span (palette.reading_style reading) text
-         | Value (Plain, text) -> text)
+         | Value (Plain, text) -> span palette.plain_style text)
        row)

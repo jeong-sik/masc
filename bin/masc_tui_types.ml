@@ -27126,26 +27126,34 @@ let keeper_message_preparation_operation_targets state ~keeper_name =
   | Some (_, (Ok _ | Error _)), (Some _ | None) | None, (Some _ | None) -> []
 ;;
 
-let keeper_message_unfolded_status_rows (state : state) live ~now =
+(* A turn's status rows, and the clauses of the progress row they lead with.
+   Both are read with the one set of arguments bound here, so the row a pane
+   lays out from the clauses is the row the projection counted. *)
+let keeper_message_unfolded_status (state : state) live ~now =
   let ko = state.ui_language = Lang_ko in
-  Masc_tui_keeper_chat_transcript.status_rows
-    ?preparation:(keeper_message_preparation state live)
-    ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
-    ~show_timing:(keeper_message_timing_visible state) ~ko ~now live
-  @ (match keeper_message_preparation_timeline state live with
-     | Some timeline -> Masc_tui_keeper_chat_transcript.preparation_timeline_rows ~ko timeline
-     | None -> [])
-  @ keeper_message_saved_preparation_rows state live
+  let preparation = keeper_message_preparation state live in
+  let compact = state.msg_origin_display = Masc_tui_message_layout.Origin_bare in
+  let show_timing = keeper_message_timing_visible state in
+  ( Masc_tui_keeper_chat_transcript.status_rows ?preparation ~compact ~show_timing ~ko ~now live
+    @ (match keeper_message_preparation_timeline state live with
+       | Some timeline -> Masc_tui_keeper_chat_transcript.preparation_timeline_rows ~ko timeline
+       | None -> [])
+    @ keeper_message_saved_preparation_rows state live
+  , Masc_tui_keeper_chat_transcript.progress_facts ?preparation ~compact ~show_timing ~ko ~now
+      live )
 
 type keeper_message_status_projection =
   { kmsp_rows : (Masc_tui_keeper_chat_transcript.status_kind * string) list
+  ; kmsp_progress_facts : string Masc_tui_chat_facts.t list
+        (* The clauses of the [Progress] row in [kmsp_rows]. A turn that leads
+           with no progress row has none. *)
   ; kmsp_folded_count : int
   ; kmsp_details_hint : bool
   ; kmsp_row_count : int
   }
 
 let keeper_message_status_projection (state : state) live ~now =
-  let rows = keeper_message_unfolded_status_rows state live ~now in
+  let rows, progress_facts = keeper_message_unfolded_status state live ~now in
   let visible = if state.msg_turn_folded then
     List.filter
       (fun (kind, _) ->
@@ -27164,7 +27172,9 @@ let keeper_message_status_projection (state : state) live ~now =
   let details_hint = folded_count > 0 && not (List.exists
     (fun (kind, _) -> kind = Masc_tui_keeper_chat_transcript.Progress)
     visible) in
-  { kmsp_rows=visible; kmsp_folded_count=folded_count; kmsp_details_hint=details_hint
+  { kmsp_rows=visible
+  ; kmsp_progress_facts=(match progress_facts with Some facts -> facts | None -> [])
+  ; kmsp_folded_count=folded_count; kmsp_details_hint=details_hint
   ; kmsp_row_count=visible_count + if details_hint then 1 else 0 }
 
 type keeper_message_status_source =
@@ -27891,6 +27901,9 @@ type keeper_message_status_frame =
   ; kmsf_status_block_rows : int
         (* Rows the Keeper status block below the composer is given. The fixed
            chrome holds the first; the rest come out of the history. *)
+  ; kmsf_progress_rows : int
+        (* Rows the turn's progress row is given. Its first is counted with
+           the status rows; the rest come out of the history. *)
   }
 
 (* Warnings have counted rows. A complete reading stays in the title when it
@@ -27959,7 +27972,8 @@ let keeper_message_evidence_layout state ~terminal_cols =
     | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
               | Keeper_message | Keeper_runtime_pick)), (Some _ | None) -> [], ""
 
-let keeper_message_schedule_cells state ~terminal_cols =
+(* The cells of one body row of the chat pane at this terminal width. *)
+let keeper_message_inner_cells state ~terminal_cols =
   Masc_tui_frame.inner_width
     ~cols:(Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state)
              ~cols:terminal_cols)
@@ -27973,10 +27987,11 @@ let keeper_message_status_frame ?(schedule_budget = 1) ?(terminal_cols = max_int
   ; kmsf_activity_rows = keeper_message_activity_rows state
   ; kmsf_interrupt_rows = keeper_observed_interrupt_rows state
   ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:schedule_budget
-      ~max_cells:(keeper_message_schedule_cells state ~terminal_cols)
+      ~max_cells:(keeper_message_inner_cells state ~terminal_cols)
   ; kmsf_evidence_rows = evidence_rows
   ; kmsf_title_suffix = title_suffix
   ; kmsf_status_block_rows = 1
+  ; kmsf_progress_rows = 1
   }
 
 let keeper_message_status_rows ?status_frame ?scroll (state : state) =
@@ -27995,6 +28010,7 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + List.length status_frame.kmsf_schedule_rows
   + List.length status_frame.kmsf_evidence_rows
   + (status_frame.kmsf_status_block_rows - 1)
+  + (status_frame.kmsf_progress_rows - 1)
   + unavailable_target
   + (match status_frame.kmsf_source with
      | No_message_status -> 0
@@ -28029,27 +28045,32 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + composer_extra_rows state
 
 (* [status_block_rows] is how many rows the Keeper status block takes at this
-   width when nothing caps it. The caller measures it because the facts are
-   the renderer's; this decides how many of those rows the viewport grants. *)
-let keeper_message_frame_for_viewport ?scroll ~status_block_rows state ~now ~terminal_rows
-    ~terminal_cols =
+   width when nothing caps it, and [progress_rows_of] answers the same for the
+   turn's progress row of a frame, 0 when the frame draws none. The caller
+   measures both because the facts are the renderer's; this decides how many
+   of those rows the viewport grants. *)
+let keeper_message_frame_for_viewport ?scroll ~status_block_rows ~progress_rows_of state ~now
+    ~terminal_rows ~terminal_cols =
   let frame = keeper_message_status_frame ~schedule_budget:0 ~terminal_cols state ~now in
   let status_rows = keeper_message_status_rows ~status_frame:frame ?scroll state
     + (if keeper_message_reading_back ?scroll state then 0 else 1) in
   (* Keep the existing three-row transcript minimum. The status block takes
      what it needs of the rows above that first, because it names whom the
-     next Enter reaches; schedule rows are a viewport choice, never a limit on
+     next Enter reaches, and the running turn's progress row is next;
+     schedule rows are a viewport choice, never a limit on
      stored jobs or their execution, and take what is left. How many jobs an
      open block lists is [chat_schedule_open_entries]; how many rows they
      wrap to follows the width. *)
   let spare = max 0
       (Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows - 3) in
   let block_extra = min spare (max 0 (status_block_rows - 1)) in
+  let progress_extra = min (spare - block_extra) (max 0 (progress_rows_of frame - 1)) in
   { frame with
     kmsf_status_block_rows = 1 + block_extra
+  ; kmsf_progress_rows = 1 + progress_extra
   ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now
-      ~max_rows:(spare - block_extra)
-      ~max_cells:(keeper_message_schedule_cells state ~terminal_cols)
+      ~max_rows:(spare - block_extra - progress_extra)
+      ~max_cells:(keeper_message_inner_cells state ~terminal_cols)
   }
 
 let keeper_message_command_window ~status_frame ?scroll state ~terminal_rows ~terminal_cols =

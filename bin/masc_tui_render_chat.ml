@@ -994,9 +994,174 @@ let keeper_status_palette () =
   { Chat_facts.label_style = Theme.recede ()
   ; who_style = Theme.category Theme.Slot_1
   ; amount_style = Theme.category Theme.Slot_2
+  ; plain_style = ""
   ; reading_style = Fun.id
   ; reset = Ansi.reset
   }
+
+(* The turn's progress row as the pane draws it: the mark that leads it, the
+   colour its plain clauses take, and its facts in reading order. The row's
+   measure and its draw read this one value. *)
+type turn_progress =
+  { tp_mark : string
+  ; tp_base : string
+  ; tp_facts : string Chat_facts.t list
+  ; tp_working : bool
+  }
+
+let turn_progress_lead turn = "  " ^ turn.tp_mark ^ " "
+
+let keeper_turn_progress state (frame : keeper_message_status_frame) =
+  match frame.kmsf_source with
+  | No_message_status -> None
+  | Message_status (log, status) ->
+      let drawn =
+        List.exists
+          (fun (kind, _) ->
+            match kind with
+            | Keeper_chat_transcript.Progress -> true
+            | Keeper_chat_transcript.Diagnostic
+            | Keeper_chat_transcript.Answer_needed
+            | Keeper_chat_transcript.Approval _
+            | Keeper_chat_transcript.Attention -> false)
+          status.kmsp_rows
+      in
+      if not drawn
+      then None
+      else
+        Some
+          (let live = log.tl_transcript in
+          let ko = state.ui_language = Lang_ko in
+          let fact = Chat_facts.fact in
+          (* The clauses the projection joined into the row's text. *)
+          let clauses = status.kmsp_progress_facts in
+          let expand =
+            fact Chat_facts.Plain
+              (Masc_tui_keys.expand_turn_label ^ if ko then ":턴 상세" else ":details")
+          in
+          let folded_away = status.kmsp_folded_count in
+          (* The streaming turn is the row the eye waits on: drawn in the
+             accent rather than dimmed, behind the mark a running turn wears
+             everywhere else on the screen.
+
+             It wore a second one -- four braille frames of its own, stepped
+             from the wall clock by the whole second. The screen repaints
+             every 150ms while a turn runs, so six or seven consecutive frames
+             drew the same glyph and then jumped, and the four frames chosen
+             are not adjacent in the braille rotation, so the jump did not
+             read as turning either. [activity_frame] is the counter that
+             ticker advances, and stepping from it means one repaint, one
+             frame. *)
+          let mark, heading =
+            let mark = Masc_tui_value.Mark.glyph in
+            let waiting = mark Masc_tui_value.Mark.Waiting in
+            match Keeper_chat_transcript.phase live with
+            | Keeper_chat_transcript.Waiting ->
+                waiting, [ ui_text state ~ko:"시작 대기" ~en:"WAITING TO START" ]
+            | Working ->
+                ( Masc_tui_answering.running_glyph ~frame:state.activity_frame
+                , [ ui_text state ~ko:"턴" ~en:"TURN"
+                  ; (if Keeper_chat_transcript.attempt live > 0 then
+                       ui_text state ~ko:"다음 후보로 진행 중"
+                         ~en:"IN PROGRESS ON NEXT CANDIDATE"
+                     else ui_text state ~ko:"진행 중" ~en:"IN PROGRESS")
+                  ] )
+            | Stream_ended -> waiting, [ ui_text state ~ko:"마무리 중" ~en:"FINALIZING" ]
+            (* [!] is not a status mark (RFC tui-one-screen-grammar §7.2); a
+               failed turn wears the screen's failure mark. *)
+            | Stream_failed _ ->
+                ( mark Masc_tui_value.Mark.Failed
+                , [ ui_text state ~ko:"요청 실패" ~en:"REQUEST ERROR" ] )
+          in
+          let working =
+            match Keeper_chat_transcript.phase live with
+            | Working -> true
+            | Waiting | Stream_ended | Stream_failed _ -> false
+          in
+          if state.msg_origin_display = Message_layout.Origin_bare
+          then
+            { tp_mark = mark
+            ; tp_base =
+                (match Keeper_chat_transcript.phase live with
+                 | Stream_failed _ -> Theme.bad ()
+                 | Waiting | Working | Stream_ended -> Theme.recede ())
+            ; tp_facts = clauses @ (if folded_away > 0 then [ expand ] else [])
+            ; tp_working = working
+            }
+          else (
+            let base = Theme.accent () in
+            (* The age belongs to the progress clauses, which already end
+               with it (masc #29229 pins that a turn which never started
+               still reports one). Printing it in the heading too put the
+               same number twice in one row, and a number that repeats reads
+               as a frozen screen rather than a clock. *)
+            (* An operator who has typed while a turn runs is about to press
+               Enter and does not know what it will do. The footer says it,
+               forty columns away from the caret; said here it is beside the
+               row that is holding them up. Only while there is something to
+               queue. The key names are the footer's own. *)
+            let queue_hint =
+              if Masc_tui_message_input.length state.msg_input > 0
+              then
+                [ fact Chat_facts.Plain
+                    (match
+                       send_disposition state
+                         ~keeper_name:(Keeper_chat_transcript.keeper_name live)
+                     with
+                     | Updates _ ->
+                         ui_text state ~ko:"Enter:추가 전송; Ctrl-T:대기열"
+                           ~en:"Enter:send update; Ctrl-T:queue"
+                     | Sends -> ui_text state ~ko:"Enter:전송" ~en:"Enter:send"
+                     | Queues_until_resume ->
+                         ui_text state ~ko:"Enter:대기열; /queue resume"
+                           ~en:"Enter:queue; /queue resume")
+                ]
+              else []
+            in
+            (* What the fold took, said on the row that stays. A count the
+               reader can see is a thing they can ask for; rows that simply
+               were not drawn are a screen that looks complete and is not. *)
+            let gate_waiting =
+              match state.msg_target_keeper_name with
+              | Some keeper_name when state.msg_turn_folded ->
+                  List.length (Masc_tui_types.keeper_effects_at_the_gate state ~keeper_name)
+              | Some _ | None -> 0
+            in
+            let folded =
+              (if gate_waiting > 0
+               then
+                 [ fact
+                     ~label:(if ko then "도구 심사 " else "gate ")
+                     Chat_facts.Amount (string_of_int gate_waiting)
+                 ]
+               else [])
+              @ (if folded_away > 0
+                 then [ fact Chat_facts.Plain (Printf.sprintf "+%d" folded_away) ]
+                 else [])
+            in
+            { tp_mark = mark
+            ; tp_base = base
+            ; tp_facts =
+                List.map (fact (Chat_facts.Reading (Ansi.bold ^ base))) heading
+                @ clauses
+                @ queue_hint
+                @ (match folded with
+                   | [] -> []
+                   | _ :: _ -> folded @ [ expand ])
+            ; tp_working = working
+            }))
+
+(* Rows the progress row of this frame takes at this width when nothing caps
+   it, 0 when the frame draws none. *)
+let keeper_turn_rows_wanted state ~terminal_cols frame =
+  match keeper_turn_progress state frame with
+  | None -> 0
+  | Some turn ->
+      Chat_facts.rows_wanted
+        ~max_cells:
+          (Masc_tui_types.keeper_message_inner_cells state ~terminal_cols
+           - Message_layout.display_width (turn_progress_lead turn))
+        turn.tp_facts
 
 (* The chat's status frame for this terminal. The rows the Keeper status block
    asks for are measured from the facts the pane draws, so paging and viewport
@@ -1011,6 +1176,7 @@ let keeper_message_viewport_frame ?scroll ?status_facts state ~now ~terminal_row
   keeper_message_frame_for_viewport ?scroll
     ~status_block_rows:
       (Chat_facts.rows_wanted ~max_cells:(keeper_status_cells ~cols:terminal_cols) facts)
+    ~progress_rows_of:(keeper_turn_rows_wanted state ~terminal_cols)
     state ~now ~terminal_rows ~terminal_cols
 ;;
 
@@ -4718,6 +4884,7 @@ let render_keeper_message (state : state) =
       { Chat_facts.label_style = Theme.recede ()
       ; who_style = Theme.category Theme.Slot_1
       ; amount_style = Theme.category Theme.Slot_2
+      ; plain_style = ""
       ; reading_style =
           (function
             | Schedule_failed -> Theme.bad ()
@@ -4893,61 +5060,6 @@ let render_keeper_message (state : state) =
          let request_id = turn_log_request_id live in
          let live = live.tl_transcript in
          let ko = state.ui_language = Lang_ko in
-         (* The streaming turn is the row the eye waits on: drawn in the
-            accent rather than dimmed, behind the mark a running turn wears
-            everywhere else on the screen.
-
-            It wore a second one -- four braille frames of its own, stepped
-            from the wall clock by the whole second. The screen repaints every
-            150ms while a turn runs, so six or seven consecutive frames drew
-            the same glyph and then jumped, and the four frames chosen are not
-            adjacent in the braille rotation, so the jump did not read as
-            turning either. [activity_frame] is the counter that ticker
-            advances, and stepping from it means one repaint, one frame. *)
-         let running_mark, progress_heading =
-           let mark = Masc_tui_value.Mark.glyph in
-           let waiting = mark Masc_tui_value.Mark.Waiting in
-           match Keeper_chat_transcript.phase live with
-           | Keeper_chat_transcript.Waiting ->
-               waiting, ui_text state ~ko:"시작 대기" ~en:"WAITING TO START"
-           | Working ->
-               let heading =
-                 if Keeper_chat_transcript.attempt live > 0 then
-                   ui_text state ~ko:"턴 · 다음 후보로 진행 중"
-                     ~en:"TURN · IN PROGRESS ON NEXT CANDIDATE"
-                 else
-                   ui_text state ~ko:"턴 · 진행 중" ~en:"TURN · IN PROGRESS"
-               in
-               Masc_tui_answering.running_glyph ~frame:state.activity_frame,
-               heading
-           | Stream_ended -> waiting, ui_text state ~ko:"마무리 중" ~en:"FINALIZING"
-           (* [!] is not a status mark (RFC tui-one-screen-grammar §7.2); a
-              failed turn wears the screen's failure mark. *)
-           | Stream_failed _ ->
-               mark Masc_tui_value.Mark.Failed, ui_text state ~ko:"요청 실패" ~en:"REQUEST ERROR"
-         in
-         (* The age belongs to the progress row, which already ends with it
-            (masc #29229 pins that a turn which never started still reports
-            one). Printing it here too put the same number twice in one line,
-            and a number that repeats reads as a frozen screen rather than a
-            clock. *)
-         (* An operator who has typed while a turn runs is about to press
-            Enter and does not know what it will do. The footer says it, forty
-            columns away from the caret; said here it is beside the line that
-            is holding them up. Only while there is something to queue. *)
-         let queue_hint =
-           if Masc_tui_message_input.length state.msg_input > 0 then
-             (* The key names are the footer's own (enter_hint below). *)
-             (match send_disposition state ~keeper_name with
-              | Updates _ ->
-                  ui_text state ~ko:" · Enter:추가 전송; Ctrl-T:대기열"
-                    ~en:" · Enter:send update; Ctrl-T:queue"
-              | Sends -> ui_text state ~ko:" · Enter:전송" ~en:" · Enter:send"
-              | Queues_until_resume ->
-                  ui_text state ~ko:" · Enter:대기열; /queue resume"
-                    ~en:" · Enter:queue; /queue resume")
-           else ""
-         in
          (* The gate and the prompt describe the same held call. Drawn apart,
             one row asked the operator to answer while another said a judge
             was deciding, and neither said how they related — so the screen
@@ -4980,32 +5092,9 @@ let render_keeper_message (state : state) =
                   else " · the judge is deciding%s; your answer ends it now")
                  age)
          in
-         (* What the fold took, said on the line that stays. A count the
-            reader can see is a thing they can ask for; rows that simply were
-            not drawn are a screen that looks complete and is not. *)
          let folded_away = status.kmsp_folded_count in
-         let gate_waiting =
-           match state.msg_target_keeper_name with
-           | Some keeper_name when state.msg_turn_folded ->
-               List.length
-                 (Masc_tui_types.keeper_effects_at_the_gate state ~keeper_name)
-           | Some _ | None -> 0
-         in
-         let fold_suffix =
-           let parts =
-             (if gate_waiting > 0 then
-                [ Printf.sprintf (if ko then "도구 심사 %d" else "gate %d") gate_waiting ]
-              else [])
-             @ (if folded_away > 0 then [ Printf.sprintf "+%d" folded_away ]
-                else [])
-           in
-           match parts with
-           | [] -> ""
-           | parts ->
-               " · " ^ String.concat " · " parts ^ " · "
-               ^ Masc_tui_keys.expand_turn_label
-         in
          let status_rows = status.kmsp_rows in
+         let turn_progress = keeper_turn_progress state status_frame in
          if status.kmsp_details_hint
          then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
            (Printf.sprintf (if ko then "  +%d · %s:턴 상세" else "  +%d · %s:details")
@@ -5014,27 +5103,44 @@ let render_keeper_message (state : state) =
            (fun (kind, text) ->
              (match kind with
               | Keeper_chat_transcript.Progress ->
-                  let style, content =
-                    if state.msg_origin_display = Message_layout.Origin_bare then
-                      ( (match Keeper_chat_transcript.phase live with
-                          | Stream_failed _ -> Theme.bad ()
-                          | Waiting | Working | Stream_ended -> Theme.recede ())
-                      , "  " ^ running_mark ^ " " ^ text
-                        ^ (if folded_away > 0 then
-                             " · " ^ Masc_tui_keys.expand_turn_label
-                             ^ (if ko then ":턴 상세" else ":details")
-                           else "") )
-                    else
-                      ( Theme.accent ()
-                      , "  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
-                        ^ Ansi.reset ^ (Theme.accent ())
-                        ^ " · " ^ text ^ queue_hint ^ fold_suffix ) in
-                  (match Keeper_chat_transcript.phase live with
-                   | Working -> Render_schedule.Activity_tick.note_motion_if_visible
-                       ~text:content ~width:(framed_inner_width chat_cols)
-                       ~through_cell:(2 + Message_layout.display_width running_mark)
-                   | Waiting | Stream_ended | Stream_failed _ -> ());
-                  box_line_styled chat_buf chat_cols ~style content
+                  Option.iter
+                    (fun turn ->
+                      let lead = turn_progress_lead turn in
+                      let lead_cells = Message_layout.display_width lead in
+                      let palette =
+                        { (keeper_status_palette ()) with Chat_facts.plain_style = turn.tp_base }
+                      in
+                      let layout =
+                        Chat_facts.layout
+                          ~max_cells:(framed_inner_width chat_cols - lead_cells)
+                          ~max_rows:status_frame.kmsf_progress_rows
+                          ~more:(Printf.sprintf (if ko then "외 %d" else "%d more"))
+                          turn.tp_facts
+                      in
+                      List.iteri
+                        (fun index row ->
+                          let content =
+                            (if index = 0
+                             then "  " ^ turn.tp_base ^ turn.tp_mark ^ Ansi.reset ^ " "
+                             else String.make lead_cells ' ')
+                            ^ Chat_facts.draw palette row
+                          in
+                          if index = 0 && turn.tp_working
+                          then
+                            Render_schedule.Activity_tick.note_motion_if_visible
+                              ~text:content ~width:(framed_inner_width chat_cols)
+                              ~through_cell:(2 + Message_layout.display_width turn.tp_mark);
+                          box_line chat_buf chat_cols content)
+                        layout.Chat_facts.rows;
+                      (* Rows the frame granted and this instant's clauses do
+                         not fill stay blank, so the history above keeps its
+                         height. *)
+                      for _ = List.length layout.Chat_facts.rows + 1
+                        to status_frame.kmsf_progress_rows
+                      do
+                        box_empty chat_buf chat_cols
+                      done)
+                    turn_progress
               | Keeper_chat_transcript.Diagnostic ->
                   box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
                     ("  " ^ text)

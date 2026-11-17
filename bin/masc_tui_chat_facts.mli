@@ -75,6 +75,9 @@ type 'reading palette =
   { label_style : string  (** Labels, separators and the omission mark. *)
   ; who_style : string
   ; amount_style : string
+  ; plain_style : string
+        (** Values of no kind: empty for the terminal's own colour, or the
+            colour of a row that reads as one state. *)
   ; reading_style : 'reading -> string
   ; reset : string
   }

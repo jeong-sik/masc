@@ -20,6 +20,7 @@ module Keeper_control = Masc_tui_keeper_control
 module Search = Masc_tui_chat_search
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
+module Chat_facts = Masc_tui_chat_facts
 module Message_layout = Masc_tui_message_layout
 module Observation_layout = Masc_tui_observation_layout
 module Tool_detail = Masc_tui_tool_detail
@@ -741,155 +742,6 @@ let skill_tone_of_state :
   | Keeper_chat_transcript.Skill_evidence_unavailable -> Message_layout.Skill_failure
 
 
-let keeper_message_identity ~max_cells state keeper_name =
-  let fit_identity text =
-    if Message_layout.display_width text <= max_cells then text
-    else fit_width text max_cells
-  in
-  match
-    List.find_opt
-      (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-      state.keepers
-  with
-  | None ->
-      fit_identity
-        (Ansi.dim ^ "\xc3\x97 unavailable \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset)
-  | Some keeper ->
-      let reading = keeper_reading state keeper in
-      let health = Keeper_control.health reading in
-      (* Never clip a suggested action into another word or displace the
-         existing identity, gate, runtime or stream facts. The Info pane and
-         selected-Keeper summary carry it when this header has no room. *)
-      let with_suggested_action text =
-        match Keeper_control.next_action reading with
-        | None -> text
-        | Some _ ->
-            let clause =
-              ui_text state ~ko:" \xc2\xb7 다음: " ~en:" \xc2\xb7 next: "
-              ^ keeper_suggested_action ~ko:(state.ui_language = Lang_ko) reading in
-            if Message_layout.display_width text + Message_layout.display_width clause
-               <= max_cells then text ^ clause else text
-      in
-      let runtime =
-        match reading.Keeper_control.liveness with
-        | Keeper_control.Present row -> Some row
-        | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
-      in
-      let status_color =
-        keeper_action_color ~surface:Masc_tui_theme.Page
-          (Keeper_control.next_action reading)
-      in
-      (* Two stances that decide what this Keeper does with a tool call, on
-         the row an operator reads before typing to it. Show defaults too:
-         this is operational state, and an absent label made AUTO look like
-         unknown while a visible YOLO label looked like the only real mode. *)
-      let stance =
-        let yolo = List.mem keeper.k_name state.keeper_yolo_names in
-        let workspace_gate_mode =
-          Option.map
-            (fun modes -> modes.Tui_decode.glm_workspace)
-            state.gate_modes
-        in
-        let chat_mode, gate_mode =
-          keeper_chat_mode_labels ~yolo
-            ~keeper_gate_mode:(List.assoc_opt keeper.k_name state.keeper_gate_modes)
-            ~workspace_gate_mode
-        in
-        (* "gate: " with the space every other label on this header uses.
-           Written tight, the stance ran into its value -- "gate:Auto Judge"
-           -- beside "configured: <runtime>" on the same row. *)
-        Printf.sprintf " %s%s%s %s\xc2\xb7 gate: %s%s"
-          (if yolo then (Theme.bad ()) else (Theme.info ()))
-          chat_mode Ansi.reset Ansi.dim
-          (* Nothing observed is said in the words every other surface uses
-             for it. "?" beside a stance that decides what a send can do left
-             the reader to guess whether it meant manual or unread. *)
-          (match gate_mode with
-           | Some word -> Terminal_text.single_line word
-           | None -> Masc_tui_types.field_unread ~ko:(state.ui_language = Lang_ko))
-          Ansi.reset
-      in
-      let status =
-        String.concat ""
-          [ status_color
-          ; keeper_state_glyph ~paused:reading.Keeper_control.paused ~health
-          ; " "
-          ; Keeper_control.health_label ~ko:(state.ui_language = Lang_ko) reading
-          ; Ansi.reset
-          ; stance
-          ]
-      in
-      if state.msg_origin_display = Message_layout.Origin_bare then
-        let compact_status = match reading.Keeper_control.liveness with
-          | Keeper_control.Absent ->
-              (match keeper.k_origin with
-               | Tui_decode.Declared_keeper _ ->
-                   Tui_decode.keeper_never_started_text ~ko:(state.ui_language = Lang_ko)
-               (* [status] is the only place the bare header carries the
-                  Keeper's AUTO/YOLO mode and gate, so the absent label keeps
-                  that stance. *)
-               | Persisted_keeper | Remote_keeper ->
-                   Keeper_control.health_label ~ko:(state.ui_language = Lang_ko) reading
-                   ^ stance)
-          | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
-        with_suggested_action (fit_identity (compact_status ^ Ansi.reset))
-      else (match runtime with
-       | None ->
-           let detail = match keeper.k_origin with
-             | Tui_decode.Declared_keeper requirements ->
-               Tui_decode.keeper_never_started_text ~ko:(state.ui_language = Lang_ko)
-               ^ " · " ^ String.concat " · "
-                 (List.map Masc.Keeper_declared_roster.requirement_label requirements)
-             | Persisted_keeper | Remote_keeper -> status ^ " · —"
-           in
-           fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
-       | Some row ->
-           (* The runtime this row names belongs to the execution the pane
-              follows, the one its status follows too. A sent request is only
-              one kind: an autonomous turn has none, and a header that read
-              sent requests alone said "configured: ..." through every turn
-              the Keeper ran by itself, whichever runtime answered it. *)
-           let transcript =
-             Option.map (fun log -> log.tl_transcript)
-               (Masc_tui_types.keeper_message_status_log state)
-           in
-           let runtime_id =
-             Keeper_chat_transcript.runtime_identity_text ~keeper_name
-               ~configured_runtime:row.kr_runtime_id transcript
-           in
-           (* The phase and the runtime are two facts, and the runtime label
-              starts with a word of its own ("configured:", "turn:"). Set side
-              by side with only a space, they read as one phrase -- the header
-              said "paused configured: anthropic.claude-sonnet-4", which names
-              no state a person can act on. The separator the rest of the row
-              uses keeps them apart. *)
-           let prefix =
-             Printf.sprintf "%s%s \xc2\xb7 %s \xc2\xb7 " status Ansi.dim
-               (Tui_decode.keeper_phase_to_string row.kr_phase)
-           in
-           (* What the answer now streaming has spent and why the provider
-              stopped writing, in the same clause shape as the rest of the
-              row. It is an addition to this row, never a claim on it: it is
-              drawn whole or not at all, so it can neither cut the runtime id
-              nor arrive as a half-written number that reads as a smaller bill
-              than the real one, nor as a stop reason cut down to another
-              word. A row with room for the counters but not for both keeps
-              the counters: the newer fact must not take away the one the
-              screen was already showing. *)
-           let prefix_width = Message_layout.display_width prefix in
-           with_suggested_action (if prefix_width >= max_cells then
-             fit_width (prefix ^ runtime_id ^ Ansi.reset) max_cells
-           else
-             let room = max_cells - prefix_width in
-             let id_width = Message_layout.display_width runtime_id in
-             (match
-                Keeper_chat_transcript.stream_details_within ~keeper_name
-                  ~room:(room - id_width) transcript
-              with
-              | Some clause -> prefix ^ runtime_id ^ clause ^ Ansi.reset
-              | None -> prefix ^ fit_runtime_id room runtime_id ^ Ansi.reset)))
-
-
 (** Render message input/conversation view *)
 (* The clock text and the bucket of one moment read the same local time; an
    entry that needs both converts it once. *)
@@ -909,6 +761,257 @@ let bucket_of_local_time (time : Unix.tm) =
 ;;
 
 let keeper_message_clock at = clock_of_local_time (Unix.localtime at)
+;;
+
+(* The facts of the Keeper the composer addresses, in reading order: who it
+   is, how it is, the two stances that decide what it does with a tool call,
+   how its memory and context stand, what the roster suggests next, where its
+   turn runs, and what the answer now streaming has spent.
+
+   The order is also what a block capped by a short terminal keeps, because a
+   cap drops facts from the end: a failing Librarian and the context share
+   outlast the token counters.
+
+   Every fact is returned whatever the terminal's width and whatever metadata
+   view the conversation is in. The block wraps instead of choosing which of
+   them a narrow row may keep (RFC tui-one-screen-grammar section 5.5).
+
+   A reading of state carries the colour this pane's status dictionary gives
+   it, because the dictionary is the renderer's. *)
+let keeper_status_facts state keeper_name : string Chat_facts.t list =
+  let ko = state.ui_language = Lang_ko in
+  let fact = Chat_facts.fact in
+  let who = fact Chat_facts.Who (Keeper_chat.terminal_safe_text keeper_name) in
+  let context_unread =
+    fact ~label:(ui_text state ~ko:"컨텍스트 " ~en:"Context ") Chat_facts.Plain "\xe2\x80\x94"
+  in
+  let registered = keeper_available_for_new_message state keeper_name in
+  (* A Librarian that keeps failing is a state of this Keeper's memory. It
+     is said here, once, for as long as the run lasts, instead of as a row
+     between every pair of turns ([project_memory_history]). It is read from
+     the conversation, so a Keeper the roster does not list reports it too. *)
+  let memory =
+    match Masc_tui_types.librarian_failing (chat_rows_for state keeper_name) with
+    | None -> []
+    | Some failing ->
+        [ fact
+            (Chat_facts.Reading (Theme.warn ()))
+            (Masc_tui_types.librarian_failing_text
+               ~since:(keeper_message_clock failing.lf_since)
+               failing)
+        ]
+  in
+  match
+    List.find_opt
+      (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+      state.keepers
+  with
+  | None ->
+      [ who
+      ; fact (Chat_facts.Reading Ansi.dim) "\xc3\x97 unavailable"
+      ; fact (Chat_facts.Reading Ansi.dim) "\xe2\x80\x94"
+      ]
+      @ memory
+      @ if registered then [ context_unread ] else []
+  | Some keeper ->
+      let reading = keeper_reading state keeper in
+      (* Health in the status colours the Activity pane's Keeper mark uses. The
+         roster colours this word by the suggested action instead; here that
+         action is spelled out as its own fact, and the hue the roster gives a
+         direct message is the one this block gives amounts. *)
+      let health_style =
+        if reading.Keeper_control.paused
+        then Ansi.dim
+        else (
+          match
+            Option.map Tui_decode.keeper_health_reading (Keeper_control.health reading)
+          with
+          | Some Tui_decode.Health_running -> Theme.ok ()
+          | Some Tui_decode.Health_failing -> Theme.warn ()
+          | Some Tui_decode.Health_offline -> Theme.bad ()
+          | Some Tui_decode.Health_idle | None -> Ansi.dim)
+      in
+      let status =
+        fact
+          (Chat_facts.Reading health_style)
+          (keeper_state_glyph ~paused:reading.Keeper_control.paused
+             ~health:(Keeper_control.health reading)
+           ^ " "
+           ^ Keeper_control.health_label ~ko reading)
+      in
+      (* Two stances that decide what this Keeper does with a tool call, on
+         the block an operator reads before typing to it. Defaults are drawn
+         too: this is operational state, and an absent label made AUTO look
+         like unknown while a visible YOLO label looked like the only real
+         mode. *)
+      let stance =
+        let yolo = List.mem keeper.k_name state.keeper_yolo_names in
+        let chat_mode, gate_mode =
+          keeper_chat_mode_labels ~yolo
+            ~keeper_gate_mode:(List.assoc_opt keeper.k_name state.keeper_gate_modes)
+            ~workspace_gate_mode:
+              (Option.map (fun modes -> modes.Tui_decode.glm_workspace) state.gate_modes)
+        in
+        [ fact (if yolo then Chat_facts.Reading (Theme.bad ()) else Chat_facts.Who) chat_mode
+        ; (match gate_mode with
+           | Some word ->
+               fact ~label:"gate: " Chat_facts.Who (Terminal_text.single_line word)
+           (* Nothing observed is said in the words every other surface uses
+              for it. "?" beside a stance that decides what a send can do left
+              the reader to guess whether it meant manual or unread. *)
+           | None ->
+               fact ~label:"gate: " Chat_facts.Plain (Masc_tui_types.field_unread ~ko))
+        ]
+      in
+      let suggested =
+        match Keeper_control.next_action reading with
+        | None -> []
+        | Some _ ->
+            [ fact
+                ~label:(ui_text state ~ko:"다음: " ~en:"next: ")
+                Chat_facts.Plain
+                (keeper_suggested_action ~ko reading)
+            ]
+      in
+      let context =
+        if not registered
+        then []
+        else (
+          match keeper.k_identity with
+          (* A Keeper that never started has no context to read, so the block
+             draws no failed read for it. *)
+          | Error Tui_decode.Keeper_not_started -> []
+          | Ok _ | Error (Tui_decode.Identity_unreadable _) ->
+              (match live_context_view state keeper with
+               | Masc_tui_fetched.Ready observation ->
+                   Observation_layout.context_facts ~ko
+                     ~inspect_key:Masc_tui_keys.context_inspector_label observation
+               | Masc_tui_fetched.Stale _ ->
+                   [ fact Chat_facts.Plain
+                       (ui_text state ~ko:"컨텍스트 새로 조회 실패" ~en:"Context refresh failed")
+                   ]
+               | Masc_tui_fetched.Failed _ ->
+                   [ fact Chat_facts.Plain
+                       (ui_text state ~ko:"컨텍스트 조회 실패" ~en:"Context read failed")
+                   ]
+               | Masc_tui_fetched.Loading ->
+                   [ fact Chat_facts.Plain
+                       (ui_text state ~ko:"컨텍스트 조회 중" ~en:"Context reading")
+                   ]
+               | Masc_tui_fetched.Absent -> [ context_unread ]))
+      in
+      (match reading.Keeper_control.liveness with
+       | Keeper_control.Present row ->
+           (* The runtime this block names belongs to the execution the pane
+              follows, the one its status follows too. A sent request is only
+              one kind: an autonomous turn has none, and a block that read
+              sent requests alone said "configured: ..." through every turn
+              the Keeper ran by itself, whichever runtime answered it. *)
+           let transcript =
+             Option.map (fun log -> log.tl_transcript)
+               (Masc_tui_types.keeper_message_status_log state)
+           in
+           let identity =
+             Keeper_chat_transcript.runtime_identity ~keeper_name
+               ~configured_runtime:row.kr_runtime_id transcript
+           in
+           let observed =
+             match identity.Keeper_chat_transcript.observed with
+             | Some (Keeper_chat_transcript.Turn_runtime runtime) ->
+                 [ fact ~label:"turn: " Chat_facts.Who runtime ]
+             | Some (Keeper_chat_transcript.Stream_model model) ->
+                 [ fact ~label:"model: " Chat_facts.Who model ]
+             | None -> []
+           in
+           (* What the answer now streaming has spent. Only counters the
+              provider reported appear, and each is written out in full: a
+              reader comparing this against a bill needs the digits, not a
+              rounded stand-in. Each counter is its own fact and names itself,
+              so the block can break between two of them. *)
+           let spent =
+             match Keeper_chat_transcript.stream_usage ~keeper_name transcript with
+             | None -> []
+             | Some usage ->
+                 let counter label value =
+                   Option.map
+                     (fun value ->
+                       fact ~label Chat_facts.Amount (Masc_tui_value.Count.grouped value))
+                     value
+                 in
+                 List.filter_map Fun.id
+                   [ counter "tokens in: " usage.Masc_tui_keeper_chat_live.input_tokens
+                   ; counter "tokens out: " usage.Masc_tui_keeper_chat_live.output_tokens
+                   ; counter "cache read: "
+                       usage.Masc_tui_keeper_chat_live.cache_read_input_tokens
+                   ; counter "cache write: "
+                       usage.Masc_tui_keeper_chat_live.cache_creation_input_tokens
+                   ]
+           in
+           let stopped =
+             match Keeper_chat_transcript.stream_stop_reason ~keeper_name transcript with
+             | None -> []
+             | Some reason -> [ fact ~label:"stopped: " Chat_facts.Plain reason ]
+           in
+           [ who; status ]
+           @ stance
+           @ [ fact Chat_facts.Plain (Tui_decode.keeper_phase_to_string row.kr_phase) ]
+           @ memory
+           @ context
+           @ suggested
+           @ observed
+           @ [ fact ~label:"configured: " Chat_facts.Who
+                 identity.Keeper_chat_transcript.configured
+             ]
+           @ spent
+           @ stopped
+       | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ ->
+           (match keeper.k_origin with
+            | Tui_decode.Declared_keeper requirements ->
+                [ who; fact Chat_facts.Plain (Tui_decode.keeper_never_started_text ~ko) ]
+                @ List.map
+                    (fun requirement ->
+                      fact Chat_facts.Plain
+                        (Masc.Keeper_declared_roster.requirement_label requirement))
+                    requirements
+                @ memory
+                @ context
+            | Tui_decode.Persisted_keeper | Tui_decode.Remote_keeper ->
+                [ who; status ]
+                @ stance
+                @ [ fact Chat_facts.Plain "\xe2\x80\x94" ]
+                @ memory
+                @ context))
+;;
+
+(* The block spans the full surface below both panes, one cell in from its
+   edge. The roster must not take the width that names the runtime the
+   composer will address. *)
+let keeper_status_cells ~cols = max 0 (cols - 1)
+
+(* Kind colours are the two slots no status token draws (RFC-0431), so a
+   runtime id or a token count is never read as a state. *)
+let keeper_status_palette () =
+  { Chat_facts.label_style = Theme.recede ()
+  ; who_style = Theme.category Theme.Slot_1
+  ; amount_style = Theme.category Theme.Slot_2
+  ; reading_style = Fun.id
+  ; reset = Ansi.reset
+  }
+
+(* The chat's status frame for this terminal. The rows the Keeper status block
+   asks for are measured from the facts the pane draws, so paging and viewport
+   admission subtract exactly what the renderer does. *)
+let keeper_message_viewport_frame ?scroll ?status_facts state ~now ~terminal_rows ~terminal_cols =
+  let facts =
+    match status_facts, state.msg_target_keeper_name with
+    | Some facts, (Some _ | None) -> facts
+    | None, Some keeper_name -> keeper_status_facts state keeper_name
+    | None, None -> []
+  in
+  keeper_message_frame_for_viewport ?scroll
+    ~status_block_rows:
+      (Chat_facts.rows_wanted ~max_cells:(keeper_status_cells ~cols:terminal_cols) facts)
+    state ~now ~terminal_rows ~terminal_cols
 ;;
 
 let keeper_message_timeline_bucket at = bucket_of_local_time (Unix.localtime at)
@@ -4455,7 +4558,8 @@ let render_keeper_message (state : state) =
        precedes its first paint, the pin already restores a reading position
        although the stored scroll is still zero. Reserve and draw its chrome
        from that same requested position, before measuring the history. *)
-    let status_frame = keeper_message_frame_for_viewport ~scroll:requested state
+    let status_facts = keeper_status_facts state keeper_name in
+    let status_frame = keeper_message_viewport_frame ~scroll:requested ~status_facts state
         ~now:(Unix.gettimeofday ()) ~terminal_rows:rows ~terminal_cols:cols in
     let command_window = keeper_message_command_window ~status_frame ~scroll:requested state
       ~terminal_rows:rows ~terminal_cols:cols in
@@ -4491,100 +4595,15 @@ let render_keeper_message (state : state) =
       title, mode_suffix
     in
     let inner_cells = framed_inner_width chat_cols in
-    (* Navigation stays above the conversation. The selected Keeper's status
-       spans the full surface below both panes; the roster must not consume
-       the width needed to identify the runtime the composer will address. *)
-    let telemetry_cells = max 0 (cols - 1) in
-    let telemetry_keeper =
-      if state.msg_origin_display = Message_layout.Origin_bare then ""
-      else Theme.accent ()
-      ^ fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ Ansi.reset ^ " · "
-    in
-    let telemetry_identity_cells =
-      max 0 (telemetry_cells - Message_layout.display_width telemetry_keeper)
-    in
     let title_row =
       Message_layout.chat_title_row ~inner_cells ~title ~mode_suffix
     in
-    let context_separator = "  " in
-    let context_item =
-      if not target_registered then None
-      else
-        let keeper =
-          List.find_opt (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-            state.keepers
-        in
-        match keeper with
-        (* A Keeper that never started has no context to read, so the header
-           draws no failed read for it. *)
-        | Some { k_identity = Error Tui_decode.Keeper_not_started; _ } -> None
-        | Some { k_identity = Ok _ | Error (Tui_decode.Identity_unreadable _); _ } | None ->
-        let reading =
-          match keeper with
-          | None -> Masc_tui_fetched.Absent
-          | Some keeper -> live_context_view state keeper in
-        match reading with
-        | Masc_tui_fetched.Ready observation ->
-            Observation_layout.context_header_item
-              ~ko:(state.ui_language = Lang_ko)
-              ~max_cells:(min
-                (if state.msg_origin_display = Message_layout.Origin_bare then 24 else 48)
-                (telemetry_identity_cells / 2))
-              ~inspect_key:Masc_tui_keys.context_inspector_label observation
-        | Masc_tui_fetched.Stale _ ->
-            Some (ui_text state ~ko:"컨텍스트 새로 조회 실패" ~en:"Context refresh failed")
-        | Masc_tui_fetched.Failed _ ->
-            Some (ui_text state ~ko:"컨텍스트 조회 실패" ~en:"Context read failed")
-        | Masc_tui_fetched.Loading ->
-            Some (ui_text state ~ko:"컨텍스트 조회 중" ~en:"Context reading")
-        | Masc_tui_fetched.Absent ->
-            Some (ui_text state ~ko:"컨텍스트 —" ~en:"Context —")
-    in
-    let context_cells =
-      match context_item with
-      | None -> 0
-      | Some item ->
-          Message_layout.display_width context_separator
-          + Message_layout.display_width item
-    in
-    (* A Librarian that keeps failing is a state of this keeper's memory. It
-       is said here, once, for as long as the run lasts, instead of as a row
-       between every pair of turns ([project_memory_history]). It takes at
-       most half of what the context item leaves; the runtime id in the
-       identity yields first, as it does to the context item. *)
-    let librarian_item =
-      Option.map
-        (fun (failing : Masc_tui_types.librarian_failing) ->
-          fit_width
-            (Masc_tui_types.librarian_failing_text
-               ~since:(keeper_message_clock failing.lf_since) failing)
-            (max 0 ((telemetry_identity_cells - context_cells) / 2)))
-        (Masc_tui_types.librarian_failing (chat_rows_for state keeper_name))
-    in
-    let librarian_cells =
-      match librarian_item with
-      | None -> 0
-      | Some item ->
-          Message_layout.display_width context_separator
-          + Message_layout.display_width item
-    in
-    let identity =
-      keeper_message_identity
-        ~max_cells:(max 0 (telemetry_identity_cells - context_cells - librarian_cells))
-        state keeper_name
-    in
-    let identity_row =
-      String.concat ""
-        ((telemetry_keeper ^ identity)
-         :: List.filter_map Fun.id
-              [ Option.map
-                  (fun item ->
-                    context_separator ^ Theme.warn () ^ item ^ Ansi.reset)
-                  librarian_item
-              ; Option.map
-                  (fun item -> context_separator ^ item ^ Ansi.reset)
-                  context_item
-              ])
+    let status_cells = keeper_status_cells ~cols in
+    let status_block =
+      Chat_facts.layout ~max_cells:status_cells
+        ~max_rows:status_frame.kmsf_status_block_rows
+        ~more:(Printf.sprintf (if state.ui_language = Lang_ko then "외 %d" else "%d more"))
+        status_facts
     in
     if
       not
@@ -5461,9 +5480,15 @@ let render_keeper_message (state : state) =
           }
       end
     in
-    (* History already reserves these two fixed rows. Append them once after
-       composing the panes, with the same full width in split and plain chat. *)
-    Buffer.add_string buf (" " ^ fit_width identity_row telemetry_cells ^ "\n");
+    (* History already reserves the rows the frame granted this block and the
+       key footer's one. Append them once after composing the panes, with the
+       same full width in split and plain chat. *)
+    let status_palette = keeper_status_palette () in
+    let status_row text = Buffer.add_string buf (" " ^ fit_width text status_cells ^ "\n") in
+    List.iter (fun row -> status_row (Chat_facts.draw status_palette row)) status_block.rows;
+    for _ = List.length status_block.rows + 1 to status_frame.kmsf_status_block_rows do
+      status_row ""
+    done;
     finish_frame_beside_acting_pane state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll_feedback) ?roster
       ~recovery_in_slot

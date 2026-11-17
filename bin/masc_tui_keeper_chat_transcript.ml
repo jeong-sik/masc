@@ -554,55 +554,6 @@ let stream_stop_reason ~keeper_name transcript =
       t.observed_stop_reason
   | Some _ | None -> None
 
-(* The same readings as the clauses the chat's one-row status line draws. *)
-let runtime_identity_text ~keeper_name ~configured_runtime transcript =
-  let identity = runtime_identity ~keeper_name ~configured_runtime transcript in
-  let configured = "configured: " ^ identity.configured in
-  match identity.observed with
-  | Some (Turn_runtime runtime) -> "turn: " ^ runtime ^ " \xc2\xb7 " ^ configured
-  | Some (Stream_model model) -> "model: " ^ model ^ " \xc2\xb7 " ^ configured
-  | None -> configured
-
-let stream_tokens_text ~keeper_name transcript =
-  match stream_usage ~keeper_name transcript with
-  | None -> None
-  | Some usage ->
-    let clause label value = Option.map (Printf.sprintf "%s %d" label) value in
-    (match
-       List.filter_map Fun.id
-         [ clause "in" usage.Live.input_tokens
-         ; clause "out" usage.Live.output_tokens
-         ; clause "cache read" usage.Live.cache_read_input_tokens
-         ; clause "cache write" usage.Live.cache_creation_input_tokens
-         ]
-     with
-     | [] -> None
-     | parts -> Some ("tokens: " ^ String.concat " \xc2\xb7 " parts))
-
-let stream_details_text ~keeper_name transcript =
-  match
-    List.filter_map Fun.id
-      [ stream_tokens_text ~keeper_name transcript
-      ; Option.map (fun reason -> "stopped: " ^ reason)
-          (stream_stop_reason ~keeper_name transcript)
-      ]
-  with
-  | [] -> None
-  | parts -> Some (String.concat " \xc2\xb7 " parts)
-
-(* The clause a row draws beside the runtime id when it has [room] cells left,
-   separator included. A clause is drawn whole or not at all, so a row that
-   cannot hold both facts falls back to the counters alone. *)
-let stream_details_within ~keeper_name ~room transcript =
-  let clause text = " \xc2\xb7 " ^ text in
-  List.find_opt
-    (fun text -> Masc_tui_message_layout.display_width text <= room)
-    (List.filter_map
-       (fun text -> Option.map clause text)
-       [ stream_details_text ~keeper_name transcript
-       ; stream_tokens_text ~keeper_name transcript
-       ])
-
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it, and reasoning also closes on a delta of another block.
    Coalescing here rather than at draw time keeps the trail bounded by the

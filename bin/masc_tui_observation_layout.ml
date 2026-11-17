@@ -22,17 +22,6 @@ type log_cells = {
   latency : string;
 }
 
-(* Cells, not bytes. [String.length] counts bytes, and a Korean label spends
-   three of them a character, so an eight-character name measured twenty and
-   every one of them came back cut with a tilde -- in a column it fits. The cut
-   was a byte offset too, which lands inside a character and hands the terminal
-   a broken one.
-
-   [Message_layout.fit_width] already measures display cells and keeps grapheme
-   clusters whole, with this same tilde marker. These three were a second copy
-   of it that could not read anything but ASCII. *)
-let cells = Masc_tui_message_layout.display_width
-
 type context_pressure =
   | Quiet
   | Pressure
@@ -134,36 +123,36 @@ let context_summary = function
       Context_unavailable
         (Tui_decode.context_unavailable_reason_to_string reason)
 
-let context_header_item ~ko ~max_cells ~inspect_key observation =
+(* The context reading as facts of the chat's Keeper status block: the share,
+   the token counts behind it, and the key that opens the breakdown. The key
+   travels with the number. This block is the only place the pane says how
+   full the context is, and the breakdown otherwise lives behind [/context],
+   which is in [/help] and nowhere a reader looking at this figure would find
+   it. The key says what it opens, because a narrow block can put it on a row
+   of its own. *)
+let context_facts ~ko ~inspect_key observation =
   let say korean english = if ko then korean else english in
-  let context = say "컨텍스트" "Context" in
+  let fact = Masc_tui_chat_facts.fact in
+  let context = say "컨텍스트 " "Context " in
   let tok = say "토큰" "tok" in
+  let key =
+    fact Masc_tui_chat_facts.Plain
+      (inspect_key ^ say ":컨텍스트 내역" ":context breakdown")
+  in
   match context_summary observation with
   | Context_measured { ratio; tokens; maximum; _ } ->
-      (* The key travels with the number. This line was the only place the
-         pane said how full the context is, and there was no way in from it:
-         the breakdown lived behind [/context], which is in [/help] and
-         nowhere a reader looking at this figure would find it.
-
-         Dropped first when the header runs out of room -- the figure is what
-         the line is for, and a reader who has met the key once does not need
-         it printed again. *)
       let grouped_int = Masc_tui_value.Count.grouped in
-      let figure =
-        Printf.sprintf "%s %.0f%% %s" context (ratio *. 100.0) (say "사용" "used")
-      in
-      let measured =
-        Printf.sprintf "%s %.0f%% \xc2\xb7 %s/%s %s" context (ratio *. 100.0)
-          (grouped_int tokens) (grouped_int maximum) tok
-      in
-      let with_key text = text ^ " \xc2\xb7 " ^ inspect_key in
-      [ with_key measured; measured; with_key figure; figure ]
-      |> List.find_opt (fun candidate -> max_cells >= cells candidate)
-  | Context_partial {tokens; _} ->
-      [ Printf.sprintf "%s %d %s · %s —" context tokens tok (say "한도" "limit")
-      ; Printf.sprintf "%s %d %s" context tokens tok ]
-      |> List.find_opt (fun candidate -> max_cells >= cells candidate)
+      (* The share and the counts behind it are one fact: the counts alone on
+         the next row would not say what they count. *)
+      [ fact ~label:context Masc_tui_chat_facts.Amount
+          (Printf.sprintf "%.0f%% (%s/%s %s)" (ratio *. 100.0) (grouped_int tokens)
+             (grouped_int maximum) tok)
+      ; key
+      ]
+  | Context_partial { tokens; _ } ->
+      [ fact ~label:context Masc_tui_chat_facts.Amount
+          (Printf.sprintf "%s %s (%s —)" (Masc_tui_value.Count.grouped tokens) tok
+             (say "한도" "limit"))
+      ]
   | Context_unavailable _ ->
-      let unavailable = say "컨텍스트 측정 없음" "Context unavailable" in
-      [ unavailable ^ " · " ^ inspect_key; unavailable; context ^ " —" ]
-      |> List.find_opt (fun candidate -> max_cells >= cells candidate)
+      [ fact Masc_tui_chat_facts.Plain (say "컨텍스트 측정 없음" "Context unavailable"); key ]

@@ -36,12 +36,12 @@ val log_entry_rows : width:int -> time:string -> Tui_decode.log_entry -> string 
 (** Full observed facts, wrapped in display cells. Entries retain their own
     field order; callers order entries newest first before slicing rows. *)
 val context_summary : Tui_decode.context_observation -> context_summary
-val context_header_item :
+val context_facts :
   ko:bool ->
-  max_cells:int ->
   inspect_key:string ->
   Tui_decode.context_observation ->
-  string option
-(** [inspect_key] is the name of the key that opens the breakdown, spelled by
-    the key table; this layout cannot see the table, so the caller hands it
-    over. *)
+  'reading Masc_tui_chat_facts.t list
+(** The context reading as facts of the chat's Keeper status block: the share,
+    the token counts behind it, and the key that opens the breakdown.
+    [inspect_key] is the name of that key, spelled by the key table; this
+    layout cannot see the table, so the caller hands it over. *)

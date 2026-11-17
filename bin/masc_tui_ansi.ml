@@ -250,13 +250,6 @@ module Theme = struct
   let tool_origin () = (resolved ()).tool
   let quiet_origin () = (resolved ()).quiet
 
-  (* The two next-action colours that are not a health reading. A keeper about
-     to be probed is not unwell, and one a person just spoke to is not well --
-     they say which kind of thing is about to happen, so they draw through
-     their own names rather than borrowing [ok] and [bad]. *)
-  let action_probe () = (resolved ()).probe
-  let action_message () = (resolved ()).message
-
   (* The frame's one accent: a key letter in a hint row, a label, a column the
      reader scans for. Bright cyan reads under 4.5:1 against the page in 11 of
      the 53 bundled themes, so it goes through the same lift as every other
@@ -306,6 +299,11 @@ module Theme = struct
     let bad () = (resolved ()).bad
     let info () = (resolved ()).info
     let recede () = (resolved ()).recede
+
+    (* The two next-action colours that are not a health reading. A keeper
+       about to be probed is not unwell, and one a person just spoke to is not
+       well -- they say which kind of thing is about to happen, so they draw
+       through their own names rather than borrowing [ok] and [bad]. *)
     let action_probe () = (resolved ()).probe
     let action_message () = (resolved ()).message
   end

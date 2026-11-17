@@ -1228,7 +1228,7 @@
  (name masc_tui_observation_layout)
  (wrapped false)
  (modules masc_tui_observation_layout)
- (libraries masc masc_tui_message_layout masc_tui_table masc_tui_value))
+ (libraries masc masc_tui_chat_facts masc_tui_message_layout masc_tui_table masc_tui_value))
 
 (library
  (name masc_tui_tool_table)
@@ -2655,6 +2655,7 @@
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript
   masc_tui_chat_media
+  masc_tui_chat_facts
   masc_tui_keeper_control
   masc_tui_markdown
   masc_tui_observation_layout

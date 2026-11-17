@@ -2387,23 +2387,13 @@ let keeper_roster_pane_shown (state : state) ~cols =
 (* The colour reinforces the runtime's suggested action; the selected Keeper
    also names that action in text, including when colours are unavailable.
    Pause, health and lifecycle remain separate readings. *)
-(* [surface] is the ground the glyph is drawn on: the chat header sits on the
-   page, the roster on its side pane, and a colour measured against one is
-   not readable on the other. *)
-let keeper_action_color ~(surface : Masc_tui_theme.surface)
-    (action : Status.keeper_next_action_path option) =
-  let warn, action_probe, action_message =
-    match surface with
-    | Masc_tui_theme.Page -> Theme.warn, Theme.action_probe, Theme.action_message
-    | Masc_tui_theme.Side_pane ->
-      ( Theme.Side_pane.warn
-      , Theme.Side_pane.action_probe
-      , Theme.Side_pane.action_message )
-  in
+(* The roster is the only surface that draws it, so the colours are the ones
+   measured against the side pane's ground. *)
+let keeper_action_color (action : Status.keeper_next_action_path option) =
   match action with
   | None -> Ansi.dim
-  | Some Status.Recover -> warn ()
-  | Some Status.Probe -> action_probe ()
+  | Some Status.Recover -> Theme.Side_pane.warn ()
+  | Some Status.Probe -> Theme.Side_pane.action_probe ()
   (* Green until this measurement. The cell draws its readings in separate
      channels and this is the only one carried by colour alone, so the three
      action colours have to stay apart for a reader who cannot separate red
@@ -2417,7 +2407,7 @@ let keeper_action_color ~(surface : Masc_tui_theme.surface)
      0.121 for ordinary vision, 0.015 to 0.044 for deuteranopia, 0.019 to
      0.027 for protanopia. Blue and white came out worse than green even for
      ordinary vision, because they close on [Probe]'s cyan. *)
-  | Some Status.Direct_message -> action_message ()
+  | Some Status.Direct_message -> Theme.Side_pane.action_message ()
 
 (* Preserve what was actually observed: a runtime that names no action is not
    evidence that nothing needs doing, and an unread roster is not absence. *)
@@ -2509,7 +2499,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
           ; Theme.Side_pane.recede (), "  " ^ label
           ; Ansi.bold, "  " ^ Message_layout.fit_middle (max 0 (inner - 4))
               (Terminal_text.single_line keeper.k_name)
-          ; "", "  " ^ keeper_action_color ~surface:Masc_tui_theme.Side_pane
+          ; "", "  " ^ keeper_action_color
                   (Keeper_control.next_action reading)
               ^ keeper_state_glyph ~paused:reading.paused
                   ~health:(Keeper_control.health reading)
@@ -2567,7 +2557,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
           draw ~style:(Theme.sidebar_selection ()) (" › " ^ glyph ^ " " ^ name ^ " ")
         else
           let caret = if selected then " › " else "   " in
-          draw (caret ^ keeper_action_color ~surface:Masc_tui_theme.Side_pane
+          draw (caret ^ keeper_action_color
                           (Keeper_control.next_action reading)
                 ^ glyph ^ restore ^ " "
                 ^ name ^ restore ^ " ")

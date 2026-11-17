@@ -56,6 +56,19 @@ val keeper_message_find_scroll :
   older_than:Masc_tui_types.chat_search_cursor option ->
   chat_search_result
 
+val keeper_message_viewport_frame :
+  ?scroll:int ->
+  ?status_facts:string Masc_tui_chat_facts.t list ->
+  Masc_tui_types.state ->
+  now:float ->
+  terminal_rows:int ->
+  terminal_cols:int ->
+  Masc_tui_types.keeper_message_status_frame
+(** The chat's status frame for this terminal, with the rows the Keeper status
+    block is given. The block's facts are measured at this width from the same
+    facts the pane draws, so paging and viewport admission subtract exactly
+    what the renderer does. *)
+
 val render_keeper_message :
   Masc_tui_types.state ->
   Masc_tui_render_prim.Frame_presenter.frame *

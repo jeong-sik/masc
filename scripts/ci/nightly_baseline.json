@@ -12,6 +12,12 @@
       "head_sha": "5eb171738dd1960cc1d3df27c995af7bb35d7406",
       "issue": 51439,
       "note": "v0.72.0 cut-over: TUI terminal 3 failures at 5eb17173 - (b) test_tui_task_event fixed on main by #51439; (c) test_tui_observer_epoch and (d) test_waiting_event are deletion-policy subjects (operator ask66c5e0bc c1, campaign 64-test bundle)."
+    },
+    {
+      "run_id": 44140222890,
+      "head_sha": "91149d7e218e88ec5be1f72ccf2978d32fb176a8",
+      "issue": 42430,
+      "note": "v0.73.1 cut-over, release owner decision (leader e-masc-the-leader, board p-9596188421bdd70e2de37e4708aeeffd c-39b34000fe2a69df4cd0c37044a6dd4e): the scheduled nightly at 91149d7e failed after 90m30s (17:44:07Z-19:23:31Z, Test step exit 2) with 46 [FAIL] cases across 41 suites plus 7 [exception] lines. All 10 release-essential-v2 suites in config/release-behavior.json ran in this run and each reports 0 failures (test_keeper_turn_interrupt, test_keeper_chat_operation_http, test_keeper_chat_delivery_identity, test_mcp_session_task_lifecycle, test_keeper_chat_operation_store, test_goal_tools, test_goal_verification_agent, test_workspace_memory_ledger, test_keeper_librarian_continuity, test_schedule_store). The suite runner stopped at the 5400s MASC_TEST_SUITE_DEADLINE cut, so suites ordered after the cut did not run. Failure class matches the previous red night 44108863467 (44 cases / 39 suites) and is tracked in issue 42430. One of the 46, Keeper_approval_queue case 16, was reproduced and root-caused as a test-side reader idiom that parsed the product's blob marker line as JSON; before/after evidence is on task-3722."
     }
   ]
 }

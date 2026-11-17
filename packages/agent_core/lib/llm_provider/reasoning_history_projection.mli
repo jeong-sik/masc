@@ -248,9 +248,12 @@ val content_wire_digest
     before the message, and the recorded message digest equals
     {!content_wire_digest} of its current content.
 
-    Callers pass post-projection, post-merge messages with the exact encoder
-    the wire serializes with; [message_header] contains the exact native role and semantic message
-    fields such as clear_at, excluding cache markers. The
+    Callers pass post-projection, post-merge messages with the exact, pure encoder
+    the wire serializes with. Encoded block bytes from an accepted reasoning
+    message are reused for that message's chain steps only; no bytes are retained
+    between messages or calls. [message_header] is also pure and contains the
+    exact native role and semantic message fields such as clear_at, excluding
+    cache markers. The
     fold mirrors {!project}: emptied assistants are removed, other roles
     never are. [final_digest] is the chain after the last message — the
     value the record side stamps as the new response's request digest.

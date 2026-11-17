@@ -716,11 +716,19 @@ let chain_extend previous_hex tag payload =
 
 let block_bytes ~encode_block block = Yojson.Safe.to_string (encode_block block)
 
+let frame_block bytes = "blk\000" ^ bytes
+
+let hash_framed_content framed =
+  sha256_hex ("msg\000" ^ String.concat "\000" framed)
+;;
+
 let content_wire_digest ~encode_block content =
-  let material =
-    String.concat "\000" (List.map (fun block -> "blk\000" ^ block_bytes ~encode_block block) content)
-  in
-  sha256_hex ("msg\000" ^ material)
+  hash_framed_content
+    (List.map (fun block -> frame_block (block_bytes ~encode_block block)) content)
+;;
+
+let encoded_content_wire_digest encoded =
+  hash_framed_content (List.map frame_block encoded)
 ;;
 
 let verify_prefix_binding ~head ~encode_block ~message_header messages =
@@ -738,11 +746,12 @@ let verify_prefix_binding ~head ~encode_block ~message_header messages =
       let has_reasoning = content_has_reasoning message.content in
       let dropped ?stored_message_digest cause =
         ( without_reasoning message.content
-        , Some { message_index; cause; stored_message_digest } )
+        , Some { message_index; cause; stored_message_digest }
+        , None )
       in
-      let (content, retained_indices), drop =
+      let (content, retained_indices), drop, encoded =
         if not has_reasoning
-        then (message.content, List.mapi (fun index _ -> index) message.content), None
+        then (message.content, List.mapi (fun index _ -> index) message.content), None, None
         else (
           match Types.Reasoning_source.classify message.metadata with
           | Types.Reasoning_source.Present _ -> (
@@ -766,10 +775,13 @@ let verify_prefix_binding ~head ~encode_block ~message_header messages =
                 in
                 dropped ~stored_message_digest cause)
               else (
-                let current = content_wire_digest ~encode_block message.content in
+                let encoded = List.map (block_bytes ~encode_block) message.content in
+                let current = encoded_content_wire_digest encoded in
                 if not (String.equal stored_message_digest current)
                 then dropped ~stored_message_digest Prefix_reasoning_mismatch
-                else (message.content, List.mapi (fun index _ -> index) message.content), None))
+                else
+                  (message.content, List.mapi (fun index _ -> index) message.content),
+                  None, Some encoded))
           | Types.Reasoning_source.Absent
           | Types.Reasoning_source.Invalid
           | Types.Reasoning_source.Duplicate ->
@@ -782,8 +794,14 @@ let verify_prefix_binding ~head ~encode_block ~message_header messages =
        | Assistant, [] -> ()
        | (System | User | Tool), _ | Assistant, _ :: _ ->
          chain := chain_extend !chain "header" (Yojson.Safe.to_string (`Assoc (message_header message)));
-         List.iter (fun block ->
-           chain := chain_extend !chain "blk" (block_bytes ~encode_block block)) content);
+         (* Only an accepted binding owns these bytes. Rejected bindings keep
+            the original retained-block encoding order and discard the scratch. *)
+         (match encoded with
+          | Some encoded ->
+            List.iter (fun bytes -> chain := chain_extend !chain "blk" bytes) encoded
+          | None ->
+            List.iter (fun block ->
+              chain := chain_extend !chain "blk" (block_bytes ~encode_block block)) content));
       let metadata = match Response_replay.retain_metadata
           ~original_content:message.content ~content ~retained_indices message.metadata with
         | Ok metadata -> metadata

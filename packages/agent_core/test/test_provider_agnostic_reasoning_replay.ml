@@ -1035,6 +1035,112 @@ let stamp_over ~head ~request_messages content =
     content
 ;;
 
+let prefix_reuse_content =
+  [ Thinking { content = "line\000\n"; signature = Some "sig" }
+  ; Text "한글"
+  ; ToolUse
+      { id = "call"
+      ; name = "inspect"
+      ; input = `Assoc [ "a", `List [ `Int 1; `String "quote\"" ]; "z", `Bool true ]
+      }
+  ]
+;;
+
+let observe_prefix_encodings ~head messages =
+  let encoded = ref [] in
+  let verdict =
+    Reasoning_history_projection.verify_prefix_binding
+      ~head
+      ~encode_block:(fun block ->
+        encoded := block :: !encoded;
+        Api_common.content_block_to_json block)
+      ~message_header:(fun (message : message) ->
+        [ "role", `String (fold_role_tag message.role) ])
+      messages
+  in
+  verdict, List.rev !encoded
+;;
+
+let test_prefix_binding_reuses_accepted_message_bytes () =
+  let head = [ "system", `String "fixture" ] in
+  let user = message User [ Text "start" ] in
+  let assistant = stamp_over ~head ~request_messages:[ user ] prefix_reuse_content in
+  let verdict, encoded = observe_prefix_encodings ~head [ user; assistant ] in
+  Alcotest.(check (list drop_testable)) "the signed message is retained" [] verdict.prefix_drops;
+  check_bool "every admitted block was encoded once"
+    true (encoded = user.content @ prefix_reuse_content);
+  check_bool "messages and metadata remain intact"
+    true (verdict.messages = [ user; assistant ]);
+  (* SHA-256 over explicitly framed native JSON, including NUL, newline,
+     UTF-8 and ordered tool input; independently calculated with hashlib. *)
+  Alcotest.(check string) "content framing is unchanged"
+    "5358f2906c78ff0cbe072f90fb709e41b7478905f9518d3c3d46961a66b9be91"
+    (stored_message_digest_exn assistant);
+  Alcotest.(check string) "request-chain framing is unchanged"
+    "2d14835382c3a16f5e14ab0c41a805f36bb69723a94f3bc15559763ee95aaa8c"
+    verdict.final_digest
+;;
+
+let test_prefix_binding_content_mismatch_keeps_retained_encoding_order () =
+  let head = [] in
+  let user = message User [ Text "start" ] in
+  let original = stamp_over ~head ~request_messages:[ user ] prefix_reuse_content in
+  let replay =
+    [ { Response_replay.kind = Reasoning; content_count = 1 }
+    ; { Response_replay.kind = Message Final_answer; content_count = 1 }
+    ; { Response_replay.kind = Function_call; content_count = 1 }
+    ]
+  in
+  let retained = List.tl prefix_reuse_content in
+  let changed =
+    { original with
+      content = Thinking { content = "changed"; signature = Some "sig" } :: retained
+    ; metadata = original.metadata @ [ Response_replay.metadata replay ]
+    }
+  in
+  let verdict, encoded = observe_prefix_encodings ~head [ user; changed ] in
+  Alcotest.(check (list drop_testable)) "edited reasoning fails its own binding"
+    [ { Reasoning_history_projection.message_index = 1
+      ; cause = Reasoning_history_projection.Prefix_reasoning_mismatch
+      ; stored_message_digest = Some (stored_message_digest_exn original)
+      }
+    ]
+    verdict.prefix_drops;
+  check_bool "failed binding encodes its retained blocks after verification"
+    true (encoded = user.content @ changed.content @ retained);
+  match verdict.messages with
+  | [ actual_user; assistant ] ->
+    check_bool "user remains intact" true (actual_user = user);
+    check_bool "only reasoning was removed" true (assistant.content = retained);
+    (match Response_replay.of_metadata ~content:assistant.content assistant.metadata with
+     | Ok (Some groups) ->
+       check_bool "retained indices preserve replay groups" true (groups = List.tl replay)
+     | Ok None -> Alcotest.fail "replay grouping was lost"
+     | Error detail -> Alcotest.fail detail)
+  | [] | [ _ ] | _ :: _ :: _ :: _ -> Alcotest.fail "message positions changed"
+;;
+
+let test_prefix_binding_preserves_encoding_error_order () =
+  let head = [] in
+  let signed = stamp_over ~head ~request_messages:[] prefix_reuse_content in
+  let verify messages =
+    Reasoning_history_projection.verify_prefix_binding
+      ~head
+      ~encode_block:(fun _ -> failwith "encode")
+      ~message_header:(fun _ -> failwith "header")
+      messages
+  in
+  Alcotest.check_raises "nonreasoning header is checked first" (Failure "header")
+    (fun () -> ignore (verify [ message User [ Text "text" ] ]));
+  Alcotest.check_raises "eligible reasoning is encoded before its header" (Failure "encode")
+    (fun () -> ignore (verify [ signed ]));
+  let absent_source = message Assistant [ Thinking { content = "unbound"; signature = Some "s" } ] in
+  let removed = verify [ absent_source ] in
+  check_bool "an emptied assistant reaches neither callback" true (removed.messages = []);
+  Alcotest.(check (list int)) "the removed source position remains visible"
+    [ 0 ] removed.removed_empty_assistant_indices
+;;
+
 let hex_head_12 digest = String.sub digest 0 12
 
 let test_a_cut_counts_once_per_request_and_later_blocks_survive () =
@@ -3176,6 +3282,18 @@ let () =
             "a corrupted tag in history does not block requests"
             `Quick
             test_a_corrupted_tag_in_history_does_not_block_requests
+        ; Alcotest.test_case
+            "prefix binding reuses accepted message bytes"
+            `Quick
+            test_prefix_binding_reuses_accepted_message_bytes
+        ; Alcotest.test_case
+            "prefix content mismatch keeps retained encoding order"
+            `Quick
+            test_prefix_binding_content_mismatch_keeps_retained_encoding_order
+        ; Alcotest.test_case
+            "prefix binding preserves encoding error order"
+            `Quick
+            test_prefix_binding_preserves_encoding_error_order
         ; Alcotest.test_case
             "a cut counts once per request and later blocks survive"
             `Quick

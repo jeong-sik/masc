@@ -249,6 +249,11 @@ type tool_stream_observation =
       { turn : int
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
+  | Turn_restored of
+      { turn : int
+      ; response : Agent_core.Types.api_response
+      ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
+      }
   | Child_content_observed of
       { attempt : Runtime_native_tasks.attempt
       ; observation : Keeper_claude_task_binding.child_observation
@@ -688,13 +693,14 @@ let make_hooks
                turn (Printexc.to_string exn));
         tool_call_count_ref := 0;
         Agent_core.Hooks.Continue
-      | Agent_core.Hooks.AfterRestoredTurn { turn; response = _; tool_source_map } ->
+      | Agent_core.Hooks.AfterRestoredTurn { turn; response; tool_source_map } ->
         (* A turn resumed in a new process. Its usage, cost and preview were
            recorded when it was collected; what this process lacks is where
            each admitted ToolUse stood among the provider's calls, which the
            stream projection needs before the turn's tools report their
-           executions (#30728). *)
-        on_tool_stream_observation (Turn_collected { turn; tool_source_map });
+           executions (#30728). No stream is replayed, so the journaled
+           admission seals the turn, not streamed blocks. *)
+        on_tool_stream_observation (Turn_restored { turn; response; tool_source_map });
         Agent_core.Hooks.Continue
       | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 

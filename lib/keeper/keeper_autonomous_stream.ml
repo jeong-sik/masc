@@ -151,6 +151,10 @@ let on_tool_stream_observation t = function
       with_open_stream t (fun _ ->
       (match Accum.seal_turn t.accum ~turn ~tool_source_map with
        | Ok events -> List.iter (publish t) events | Error detail -> mapping_failed t detail))
+  | Keeper_hooks_agent_core.Turn_restored {turn; response; tool_source_map} ->
+      with_open_stream t (fun _ ->
+      (match Accum.seal_restored_turn t.accum ~turn ~response ~tool_source_map with
+       | Ok () -> () | Error detail -> mapping_failed t detail))
   | Keeper_hooks_agent_core.Turn_closed_without_sources {turn} ->
       with_open_stream t (fun _ ->
       (match Accum.close_turn_without_sources t.accum ~turn with

@@ -236,9 +236,16 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - `Submit.resume` 은 소비자 넷이 함께 쓴다. history, floor step, admission, Curator 다. 관계는 소비자가 넘기는 확인 함수의 결과로 받는다.
   - admission 도 관계를 구분하되 part 하나의 종료를 묶음 소비로 보지 않는다(3.9). Curator 의 확인 함수는 `Replaced` 를 돌려주지 않는다.
 - 이 사건은 공용 규약의 `Refused` 전이를 쓴다(`lib/lane_addon/lane_addon_request_progress.ml`).
-- 접수 전 phase와 worker의 저장 순서는 확인의 출발점이다(2절의 표). phase만으로 실행 부재를 추정하지 않는다.
-- 종료 증거는 원래 owner·요청 ID·본문 digest·목적지에 묶는다. 권위 있는 원본 inventory에서 Exact 기록과 실행 proof가 실제로 없는지 확인한다. 읽지 못하거나 모순되는 실행 증거가 있으면 끝내지 않는다.
-- 저장된 종료 증거는 예전 목적지와 확인한 새 목적지뿐 아니라 위의 원본 결속과 실행 부재 확인을 함께 검증할 수 있어야 한다. 목적지 둘만 있는 값으로 종료를 승인하지 않는다. 읽을 때 정해진 타입으로 풀리지 않으면 거절한다.
+- 접수 전 판정은 정본 owner journal의 사건을 복원해 얻은 phase를 쓴다.
+  - `Captured`에는 확정된 전송 의도가 없으며 submit RPC를 보내지 않았다.
+  - `Admission_wait`에는 전송 의도를 거절한 기록이 있다. 이 원본의 producer는 submit RPC 전 `Not_sent` 거절이나 worker의 명시적인 `capacity_wait` 응답일 때만 그 기록을 쓴다.
+  - `capacity_wait`는 RPC를 받지 않았다는 뜻이 아니다. worker가 submit RPC를 받았지만 요청을 접수·저장하지 않았다는 뜻이다. 같은 ID가 이미 저장돼 있으면 worker는 먼저 pending·finished를 돌려준다.
+- `Submit.resume`는 `Dispatch_intended`를 새로 확정 저장한 `Fresh`일 때만 submit RPC를 보낸다. 같은 의도가 이미 저장됐거나 저장 결과가 불확실하면 보내지 않는다.
+  - 전송 뒤 응답 유실·해석 실패·취소로 접수 결과를 확정하지 못하면 `Dispatch_pending`에 남는다. worker의 후속 부재 응답도 접수 전 phase로 돌리지 않는다.
+  - `Refused {Before_dispatch}`는 `Captured`·`Admission_wait`에서만 저장할 수 있다. `Dispatch_pending`의 원본을 접수 전 종료로 바꾸지 않는다.
+- 종료 증거는 원래 owner·요청 ID·본문 digest·목적지와 정본 journal에 결속한다. 두 목적지만 있는 외부 값은 원본의 종료 권한이 아니다. 복원한 원본과 증거가 결속되지 않거나 journal을 읽지 못하면 끝내지 않는다.
+- 위 순서와 전이는 이 원본의 미접수를 증명한다. 같은 부재를 확인하기 위한 추가 Exact inventory·proof 조회는 필요하지 않다.
+- 이 보장은 기존 Keeper Memory lane의 Keeper별 직렬화와 workspace lease 안에서 성립한다. owner 갱신은 전체 expected record와 progress를 다시 비교하며 다른 tail을 거절한다.
 
 - history 가 읽는 자리는 둘이다.
   - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다(`keeper_librarian_durable_commit.ml` 252~253행). 운영자 해소 흐름도 같은 검사 함수를 쓴다.
@@ -246,8 +253,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 이 갈래는 거절 갈래(`Refused`)를 지나지 않는다. 다음 읽기를 좁히지 않는다.
   - 새 원본을 만든 바로 그 pass 에서 이 갈래가 나와도 같다. 그 자리는 거절을 `Memory_refused` 로 돌려주고, 그 값은 좁히기 표시를 남긴다(`keeper_librarian_durable_execution.ml` 519~530행, `lib/keeper/keeper_librarian_durable_consumer.ml` 1692~1719행). 이 갈래는 그 값으로 돌려주지 않는다.
 - 그다음 pass 는 정리된 원본을 옮기고 같은 범위를 지금 목적지로 새로 만든다. 정리된 거절이 가는 길 그대로다. 그 pass 는 3.6 이 부른다.
-- main `8e78ac5f9e10`의 L2a(#52674)는 두 목적지를 담는 `Request.replaced`와 원본 record·본문·owner 결속을 검증한다. `Captured`·`Admission_wait`에서 관계와 live owner를 확인한 뒤 종료를 저장한다.
-  - 이 종료 갈래는 Exact inventory·proof 부재를 직접 조회하지 않는다. 위의 실제 실행 부재 확인은 이 정책이 요구하는 미완료 검증이다. 현재의 두 목적지 증거만으로 그 요구까지 구현됐다고 판정하지 않는다.
+- main `8e78ac5f9e10`의 L2a(#52674)는 위 순서를 따른다. `Captured`·`Admission_wait`에서 관계와 live owner를 확인하고, 두 목적지를 담는 `Request.replaced`를 원본 record·본문·owner와 결속해 저장한다. 이 절은 그 소스 경로를 설명하며 동작 시험 완료를 뜻하지 않는다.
 
 - 문제 확인 당시 목적지 확인 코드는 두 벌이었다(`keeper_librarian_durable_edge.ml` 51행, `keeper_librarian_admission_dispatch.ml` 38행). 오류 글자만 다르고 하는 일이 같았다.
   - 현재 L2a는 관계를 돌려주는 함수 하나를 쓴다. 한쪽만 타입으로 바꾸면 두 벌이 서로 달라진다.
@@ -428,7 +434,7 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 | L0 | 목적지 관계 타입(3.1). `Not_allowed` 사유 타입과 worker wire, 명시적인 교체 종료의 저장·복원, 좁히기(3.4), 깨움(3.6)의 공통 계약 | 8절의 종료 증거·좁히기·깨움 시험 |
 | L1 | guard 결과 타입, `run`의 갈래, Runtime 판정과 host의 종료 사유(3.2). Exact·Runtime의 계약과 설명서. keeper-librarian package 0.2.5 | 8절의 host 시험 |
 | L1b | CLI walker가 전송 전 guard 거절을 값으로 받아 멈추고 receipt를 남긴다(3.2). #51343으로 main에 병합됐다 | 8절의 CLI 시험. 이 병합은 다른 층의 완료 증거가 아니다 |
-| L2a | 목적지 확인 통합, 접수 전 원본의 실제 실행 부재 확인, history owner·inventory의 같은 종료 판정(3.3) | 8절의 Keeper 시험 |
+| L2a | 목적지 확인 통합, 정본 접수 phase·전송 의도에 결속한 종료, history owner·inventory의 같은 종료 판정(3.3) | 8절의 Keeper 시험 |
 | L2b | floor step owner·chain의 실행 전 교체 종료와 후속 pass(3.3) | 8절의 floor 시험 |
 | L3 | history Cut의 별도 미소비 종료, 후속 요청 결속과 옛 실행의 효과 차단(3.5) | 8절의 Cut·재시작·Memory·ACK 시험 |
 | L4 | admission 미소비 묶음 전체의 새 root, Deferred 후보 보존과 소유권 인계(3.9) | 8절의 admission 시험 |
@@ -466,8 +472,9 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
   - CLI slot 을 보내기 직전에 guard 가 거절하면 그 slot 의 runner 는 불리지 않는다. host 기록의 그 시도는 미뤄진 시도이고 결과는 없다. `raised` 가 아니다.
   - 그 뒤 guard 가 `Declaration_replaced` 를 주면 같은 요청이 `Not_allowed` 로 끝난다. guard 가 허락하면 같은 요청이 실행된다.
 - Keeper
-  - 접수 전 원본에 관계가 `Replaced`이고 권위 있는 실행 부재가 확인되면 `Refused {Before_dispatch}`를 저장한다. worker에 보내지 않는다.
-  - phase가 접수 전이어도 실제 Exact 기록·proof가 있거나 inventory를 읽지 못하면 종료를 거절한다. `Dispatch_pending`을 접수 전으로 취급하지 않는다.
+  - 정본 journal의 phase가 `Captured`·`Admission_wait`이고 관계가 `Replaced`면 `Refused {Before_dispatch}`를 저장한다. worker에 보내지 않는다.
+  - submit RPC는 새 `Fresh` 전송 의도 뒤에만 보낸다. 같은 의도의 재확인·저장 불확실은 다시 보내지 않는다. `capacity_wait`는 RPC 뒤에도 미접수이며, 전송 뒤 Unknown·부재 응답은 `Dispatch_pending`에 남는다.
+  - 원본 binding·journal이 맞지 않거나 읽지 못하면 종료를 거절한다. `Dispatch_pending`을 접수 전으로 취급하지 않는다.
   - 한 Keeper 의 두 pass: 접수된 원본에 host 의 `Not_allowed` 가 있으면 첫 pass 가 정리하고 둘째 pass 가 지금 목적지로 새 원본을 만든다. 접수 거절된 원본도 같은 끝에 닿는다.
 - floor
   - 접수 전 step 의 선언이 교체되면 chain 이 "교체된 선언에서 멈췄다"를 돌려준다. pass 는 `wake` 를 한 번 부르고, 다음 pass 가 같은 자리를 새 id 로 묻는다.
@@ -506,7 +513,7 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
   - `Declaration_replaced` 를 `Not_now` 로 바꾸면 host 시험이 실패한다.
   - 3.1 의 조건 3 을 빼면 "파일만 고친 때" 시험이 실패한다.
   - 저장된 종료 대신 현재 관계만 보면 rollback·목적지 조회 실패 시험이 실패해야 한다.
-  - phase만으로 실행 부재를 정하거나 Cut claim·Memory receipt 확인을 빼면 대응 경계 시험이 실패해야 한다.
+  - 전송 의도 확정 전에 submit을 보내거나 전송 뒤 Unknown을 접수 전으로 돌리면 대응 경계 시험이 실패해야 한다. Cut claim·Memory receipt 확인을 빼도 해당 시험이 실패해야 한다.
   - Deferred 후보를 빼거나, 미해소 형제를 다른 후보의 종료에 동승시키거나, 전송된 Gate를 미실행으로 취급하면 각각의 묶음 보존·권한·Gate 재전송 방지 시험이 실패해야 한다.
   - 좁히기 규칙이 사유를 가리지 않게 하면 일반 `Permission_refused`의 좁히기 시험이 실패해야 한다.
   - 깨움이 사유를 가리지 않게 하면 일반 거절은 깨우지 않는다는 시험이 실패해야 한다.
@@ -544,7 +551,7 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
 - #50828: 끊긴 원본과 worker 에 기록이 없는 원본.
 - #51250, #51269: host 는 시작 표시를 첫 생성 요청을 보내기 직전에 저장한다. 그 허가를 기다리다 끊긴 요청은 표시 없이 남고 다음 cycle 에 다시 실행된다.
 - #51326: 기다리는 원본의 pass 가 본문을 다시 읽지 않게 하는 설계다. 그 문서도 `Submit.resume` 의 접수 전 갈래를 바꾼다. 순서는 이 문서의 관계 판정(3.3)이 먼저고 그 문서의 `load` 가 뒤다. 판정은 원본 기록의 목적지와 지금 목적지만 읽는다. `load` 는 `Same` 일 때만, 접수 의도를 저장하기 전에 부른다. 다만 pass 는 접수 전 원본의 본문을 inventory 에서 먼저 읽는다(`keeper_librarian_durable_execution.ml` 의 `waits` 는 `Dispatch_pending` 만 고른다). 그래서 본문을 읽지 못하는 접수 전 원본은 이 판정에 닿기 전에 pass 가 오류로 끝난다. 나중에 들어가는 쪽이 이 순서로 맞춘다.
-  - 교체 판정과 실제 실행 부재 확인(3.3)은 새 전송을 위한 `load`보다 먼저 한다. 본문을 읽지 못한다는 사실 자체를 종료 증거로 삼지는 않는다. 나중에 통합하는 쪽도 이 권한과 순서를 함께 보존한다.
+  - 교체 판정과 정본 journal의 접수 전 증거 확인(3.3)은 새 전송을 위한 `load`보다 먼저 한다. 본문을 읽지 못한다는 사실 자체를 종료 증거로 삼지는 않는다. 나중에 통합하는 쪽도 이 권한과 순서를 함께 보존한다.
 - #51343: L1b 의 구현이다.
 - #51300: `ui_category` 만 바꾸면 host 와 Keeper 의 package 비교가 갈린다.
 - RFC-0489 2.5절: Goal 검증도 접수 전 원본을 같은 사건으로 끝내기로 했다. 그쪽은 다음 시도를 잇는 전이를 더 넓힌다. Librarian 은 읽은 위치에서 다시 고르므로 그 전이가 필요 없다. 증거 타입은 소비자마다 자기 것을 쓴다.

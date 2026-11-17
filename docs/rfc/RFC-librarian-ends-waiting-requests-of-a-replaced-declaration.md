@@ -1,9 +1,9 @@
 ---
 rfc: "librarian-ends-waiting-requests-of-a-replaced-declaration"
 title: "선언이 교체되면 그 선언으로 만든 대기 요청을 끝내고 새 선언으로 다시 만든다"
-status: Draft
+status: Active
 created: 2026-11-11
-updated: 2026-11-11
+updated: 2026-11-17
 author: claude
 supersedes: []
 superseded_by: null
@@ -14,6 +14,9 @@ related: ["0489", "0500", "librarian-history-unknown-resolution", "librarian-his
 
 이슈 #51278 의 설계 문서다. 코드 위치는 main `3c876bd23e9d` 기준이다. 시작 표시를 저장하는 때와 guard 를 부르는 순서(1.3, 3.2, 3.5, 4.1)는 #51269 가 들어간 main `b6fb3b3ee07e` 기준이고, 그 대목은 줄 번호 대신 함수 이름으로 가리킨다.
 
+운영자는 2026-11-16에 9절의 네 정책을 선택했다. 이 문서의 정책은 합의됐으며 구현은 진행 중이다.
+정책 선택과 소스 변경만으로 회귀 실행·배포·실제 Memory 반영과 ACK가 끝났다고 판정하지 않는다.
+
 ## 0. 요약
 
 - keeper-librarian 설치 선언의 revision 이 바뀌면, 그 전에 만든 끝나지 않은 원본은 끝나지 않는다.
@@ -21,18 +24,22 @@ related: ["0489", "0500", "librarian-history-unknown-resolution", "librarian-his
   - Keeper 는 pass 마다 같은 거절을 받고 새 범위를 고르지 않는다.
   - 선언을 예전 값으로 되돌려야만 풀린다.
 - 실행을 막는 규칙은 있는데 끝내는 규칙이 없다. 이 문서는 끝내는 규칙을 정한다.
-- 다섯을 바꾼다.
+- 다음을 바꾼다.
   1. host 는 결과도 실행 중 표시도 없는 요청의 선언이 교체됐으면 그 요청을 `Not_allowed` 로 끝낸다.
   2. 실행 중인 요청이 CLI slot 을 보내기 직전에 거절되면 `raised` 대신 미뤄진 시도로 남긴다. 다음 cycle 에 1번으로 끝난다.
   3. Keeper 는 worker 에 접수되지 않은 원본의 선언이 교체됐으면 그 원본을 `Refused {stage=Before_dispatch}` 로 끝낸다.
-  4. Keeper 는 교체된 선언에서 실행이 끊긴 원본을 끝난 것으로 읽는다.
+  4. Keeper 는 교체된 선언에서 실행이 끊긴 history 원본에 미소비 종료 증거를 남긴다. 원래 결과 불명은 보존한다.
   5. 교체된 선언의 원본을 끝낸 pass 는 다음 읽기를 좁히지 않고, 자기 Keeper 를 한 번 깨운다.
+  6. admission은 전체 묶음의 실행 상태를 확인한 뒤 교체로 끝난 후보와 보류 후보가 섞인 미소비 묶음 전체를 새 요청으로 다시 판단한다(3.9).
+  7. 이미 받은 답은 보존한다. 같은 물리 Keeper·Memory epoch·설치·package·tool이면 새 선언에서 미실행 Gate를 이어간다.
 - 끝난 원본의 범위는 다음 pass 가 지금 선언으로 다시 고른다. 읽은 위치가 그대로라 입력을 잃지 않는다.
-- 새 phase 와 새 설정은 없다. 공용 규약에 있는 사건과 host 에 있는 거절 길을 쓴다. 저장 모양에 더하는 것은 walk receipt 의 갈래 하나다.
-- 풀리는 것은 history 원본이다. admission 과, 답을 받고 gate 를 시작하지 못한 원본은 풀지 않는다(5절).
-- 먼저 정할 것은 하나다. 교체된 선언의 요청을 끝내고 다시 만들지, 새 선언에서 그대로 실행할지다(9절).
+- 새 설정은 없다. 공용 진행 기록과 host 거절 경로를 쓰되, 선언 교체 종료와 일반 거절은 명시적인 타입과 저장 증거로 구분한다.
+- 범위는 history, 실행 전 floor step, admission 의 미소비 묶음, 이미 받은 답의 Gate다. floor·admission 의 결과 불명까지 재실행 권한을 넓히지 않는다(5절).
+- 요청을 만든 선언의 실행 권한은 유지한다. 답 없는 옛 요청을 새 선언에서 그대로 실행하는 길은 선택하지 않았다(9.1).
 
-## 1. 지금
+## 1. 문제 확인 당시의 코드와 관측
+
+이 절의 코드 위치와 관측은 위에 적은 main 두 버전과 2026-11-11 조사 기준이다. 현재 설치 상태나 회복 완료의 증거로 쓰지 않는다.
 
 ### 1.1 선언 revision
 
@@ -129,8 +136,8 @@ related: ["0489", "0500", "librarian-history-unknown-resolution", "librarian-his
 | 끝나지 않은 원본과 gate 기록이 함께 있던 pass | 4,164번 가운데 0번 | 11-11 00:00~07:40Z, inventory 로그 줄 |
 | 이 거절이 로그에 남은 횟수 | 0건 | 11-04~11-11 WARN·ERROR 줄. 라이브 선언 파일은 10-23 이후 바뀌지 않았다 |
 
-- 아직 일어난 적은 없다. 코드로 따라간 결과다.
-- 지금 package 를 올리면 대기 15명과 접수 거절 9명, 합쳐 24명의 durable Librarian 이 새로 멈춘다. 기다리는 admission 실행 1개도 멈춘다.
+- 그 조사에서는 선언 교체로 생긴 실제 장애를 관측하지 않았다. 코드로 따라간 결과다.
+- 당시 상태에서 package 를 올리면 대기 15명과 접수 거절 9명, 합쳐 24명의 durable Librarian 이 새로 멈출 수 있었다. 기다리는 admission 실행 1개도 같은 영향권이었다. 현재 수량은 배포 전에 다시 읽는다.
 
 ## 2. 무엇이 문제인가
 
@@ -197,6 +204,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
     - 사유는 host 기록, worker 기록, Keeper 의 진행 기록에 그대로 남는다. 뒤에 선언을 되돌려도, 지금 선언을 읽지 못해도 바뀌지 않는다.
     - worker 가 이 사유를 돌려주면 `Submit.resume` 이 host 기록에서 같은 사유를 확인한다. host 기록이 없거나, 열려 있거나, 다른 결과면 거절한다.
     - 이 모양을 받는 worker 는 keeper-librarian 0.2.5 부터다(7절).
+    - 소비자는 현재 목적지 비교로 저장된 사유를 다시 추정하지 않는다.
   - `Not_now` 면 지금처럼 `Error` 다. 아무것도 쓰지 않고 요청은 대기 목록에 남는다.
 - 이미 끝난 기록은 guard 를 부르지 않는다(971~972행).
   - 답이 있는 요청은 지금 package 가 그 output 과 schema 를 그대로 선언하는 한, 선언이 교체된 뒤에도 그 답을 전달한다.
@@ -205,14 +213,14 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
   - guard 를 부르는 자리는 둘이다. `run` 이 실행을 시작하기 전에 한 번 부르고, walk 가 slot 마다 부른다(`run` 안의 `before_dispatch`).
   - 생성 요청(`Generation`) 앞에서는 시작 표시를 먼저 저장하고 그 뒤에 guard 를 부른다(#51269). 계량 요청(`Measurement`) 앞에서는 guard 만 부른다.
   - HTTP slot 에서 거절되면 walk 가 그 자리에서 멈춘다. 끝 저장이 그 시도를 미뤄진 시도(`Deferred`)로 적는다(`lib/server/server_lane_addon_exact.ml` 117~119행, 146~157행). 방금 쓴 시작 표시는 그 저장에서 `Deferred` 로 바뀐다. 다음 cycle 에 위 갈래로 온다.
-  - CLI slot 에서 거절되면 예외로 끝나고, 끝 저장이 그 시도를 `raised` 로 적는다(같은 파일 174~177행, 225~229행, `lane_addon_exact.ml` 995행). CLI walker 의 관찰 함수가 값을 돌려주지 못해서다(`lib/keeper/keeper_lane_cli_oneshot.ml` 400행). `raised` 원본은 끝내는 길이 없다.
+  - L1b 이전에는 CLI slot에서 거절되면 예외로 끝나고, 끝 저장이 그 시도를 `raised`로 적었다(같은 파일 174~177행, 225~229행, `lane_addon_exact.ml` 995행). CLI walker의 관찰 함수가 값을 돌려주지 못해서였다(`lib/keeper/keeper_lane_cli_oneshot.ml` 400행). 이 정책은 이미 남은 `raised` 원본의 종료 권한을 더하지 않는다.
   - guard 가 거절했다는 것은 그 slot 에 보내지 않았다는 뜻이다. 결과를 모르는 것이 아니다. CLI walker 가 보내기 전의 거절을 값으로 받아 그 자리에서 멈추게 한다. 그 시도는 HTTP 와 같이 `Deferred` 로 남고 다음 cycle 에 위 갈래로 온다(7절의 L1b, #51343).
   - walk 안의 guard 에는 두 결과를 글자로 바꿔 넘긴다. walk 안에서는 어느 쪽이든 멈추기만 한다.
 - 실행이 취소되어 끊긴 요청은 3.5 에 있다.
 - `authorize_captured_exact_dispatch` 는 3.1 의 조건으로 셋 가운데 하나를 돌려준다. 허가, `Declaration_replaced`, `Not_now` 다.
 - Librarian guard 는 셋이다(`lib/server/server_librarian_addon_validation.ml` 43·88·138행).
   - history 와 floor step 의 guard 는 Runtime 의 결과를 그대로 돌려준다. 그 앞의 읽기 실패는 `Not_now` 다.
-  - admission 의 guard 는 모두 `Not_now` 로 돌려준다. 지금 동작 그대로다. 이유는 5절에 있다.
+  - admission 도 실행 전 선언 교체를 명시적인 사유로 전달한다. 미소비 묶음을 다시 만드는 조건은 3.9절을 따른다.
 - Curator 의 guard 는 `Ok ()` 뿐이라 바뀌지 않는다(`lib/server/server_lane_addon_exact.ml` 268행).
 - worker 가 전달된 결과를 받으면 Runtime 이 `Exact_result_delivered` 를 낸다(`lane_addon_runtime.ml` 1290~1293행). Librarian 이 그 요청의 Keeper 를 깨운다(`lib/server/server_librarian_addon_wake.ml` 105행).
 - Keeper 는 1.6 의 길로 그 결과를 받는다. 더할 것은 둘이다. 좁히지 않는 것(3.4)과 다음 pass 를 부르는 것(3.6)이다.
@@ -226,67 +234,72 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
   - `Same` 이면 지금처럼 조회하고 접수한다.
   - `Other_owner` 면 지금처럼 거절 오류다.
 - `Submit.resume` 은 소비자 넷이 함께 쓴다. history, floor step, admission, Curator 다. 관계는 소비자가 넘기는 확인 함수의 결과로 받는다.
-  - admission 과 Curator 의 확인 함수는 `Replaced` 를 돌려주지 않는다. 그 둘의 동작은 그대로다.
-- 이 사건과 전이는 공용 규약에 이미 있다(`lib/lane_addon/lane_addon_request_progress.ml` 의 `Refused` 전이). 지금 `lib` 와 `bin` 어디에도 이 사건을 쓰는 곳이 없다.
-- 접수 전 phase 의 요청을 worker 가 들고 있지 않다는 것은 두 사실에서 나온다(2절의 표). Keeper 가 저장하는 순서와, worker 가 접수를 거절할 때 저장하지 않는 것이다. 그래서 조회 없이 끝낸다. 교체된 선언에서는 조회를 보낼 수도 없다.
-  - worker 가 그 요청을 들고 있었다면 지금 코드가 오류로 보는 모순이다. 그때는 host 가 3.2 로 그 요청을 끝내고, 그 결과는 아무도 읽지 않는다.
-- 증거는 Librarian 의 타입 하나다. 예전 목적지와 지금 목적지를 담는다. 읽을 때 이 타입으로 풀리지 않으면 거절한다.
-
-```ocaml
-type replaced = { captured : Lane_addon_captured_destination.t; current : Lane_addon_captured_destination.t }
-```
+  - admission 도 관계를 구분하되 part 하나의 종료를 묶음 소비로 보지 않는다(3.9). Curator 의 확인 함수는 `Replaced` 를 돌려주지 않는다.
+- 이 사건은 공용 규약의 `Refused` 전이를 쓴다(`lib/lane_addon/lane_addon_request_progress.ml`).
+- 접수 전 판정은 정본 owner journal의 사건을 복원해 얻은 phase를 쓴다.
+  - `Captured`에는 확정된 전송 의도가 없으며 submit RPC를 보내지 않았다.
+  - `Admission_wait`에는 전송 의도를 거절한 기록이 있다. 이 원본의 producer는 submit RPC 전 `Not_sent` 거절이나 worker의 명시적인 `capacity_wait` 응답일 때만 그 기록을 쓴다.
+  - `capacity_wait`는 RPC를 받지 않았다는 뜻이 아니다. worker가 submit RPC를 받았지만 요청을 접수·저장하지 않았다는 뜻이다. 같은 ID가 이미 저장돼 있으면 worker는 먼저 pending·finished를 돌려준다.
+- `Submit.resume`는 `Dispatch_intended`를 새로 확정 저장한 `Fresh`일 때만 submit RPC를 보낸다. 같은 의도가 이미 저장됐거나 저장 결과가 불확실하면 보내지 않는다.
+  - 전송 뒤 응답 유실·해석 실패·취소로 접수 결과를 확정하지 못하면 `Dispatch_pending`에 남는다. worker의 후속 부재 응답도 접수 전 phase로 돌리지 않는다.
+  - `Refused {Before_dispatch}`는 `Captured`·`Admission_wait`에서만 저장할 수 있다. `Dispatch_pending`의 원본을 접수 전 종료로 바꾸지 않는다.
+- 종료 증거는 원래 owner·요청 ID·본문 digest·목적지와 정본 journal에 결속한다. 두 목적지만 있는 외부 값은 원본의 종료 권한이 아니다. 복원한 원본과 증거가 결속되지 않거나 journal을 읽지 못하면 끝내지 않는다.
+- 위 순서와 전이는 이 원본의 미접수를 증명한다. 같은 부재를 확인하기 위한 추가 Exact inventory·proof 조회는 필요하지 않다.
+- 이 보장은 기존 Keeper Memory lane의 Keeper별 직렬화와 workspace lease 안에서 성립한다. owner 갱신은 전체 expected record와 progress를 다시 비교하며 다른 tail을 거절한다.
 
 - history 가 읽는 자리는 둘이다.
-  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 지금은 오류다(`keeper_librarian_durable_commit.ml` 252~253행). 운영자 해소 흐름도 같은 검사 함수를 쓴다.
-  - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 지금은 오류다(`lib/keeper/keeper_librarian_durable_owner.ml` 216~217행). pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
+  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다(`keeper_librarian_durable_commit.ml` 252~253행). 운영자 해소 흐름도 같은 검사 함수를 쓴다.
+  - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 문제 확인 당시에는 오류였다(`lib/keeper/keeper_librarian_durable_owner.ml` 216~217행). pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
 - 이 갈래는 거절 갈래(`Refused`)를 지나지 않는다. 다음 읽기를 좁히지 않는다.
   - 새 원본을 만든 바로 그 pass 에서 이 갈래가 나와도 같다. 그 자리는 거절을 `Memory_refused` 로 돌려주고, 그 값은 좁히기 표시를 남긴다(`keeper_librarian_durable_execution.ml` 519~530행, `lib/keeper/keeper_librarian_durable_consumer.ml` 1692~1719행). 이 갈래는 그 값으로 돌려주지 않는다.
 - 그다음 pass 는 정리된 원본을 옮기고 같은 범위를 지금 목적지로 새로 만든다. 정리된 거절이 가는 길 그대로다. 그 pass 는 3.6 이 부른다.
-- 목적지 확인은 지금 두 벌이다(`keeper_librarian_durable_edge.ml` 51행, `keeper_librarian_admission_dispatch.ml` 38행). 오류 글자만 다르고 하는 일이 같다.
-  - 이 층에서 관계를 돌려주는 함수 하나로 합친다. 한쪽만 타입으로 바꾸면 두 벌이 서로 달라진다.
-  - admission 은 `Replaced` 와 `Other_owner` 를 모두 지금처럼 거절한다.
+- main `8e78ac5f9e10`의 L2a(#52674)는 위 순서를 따른다. `Captured`·`Admission_wait`에서 관계와 live owner를 확인하고, 두 목적지를 담는 `Request.replaced`를 원본 record·본문·owner와 결속해 저장한다. 이 절은 그 소스 경로를 설명하며 동작 시험 완료를 뜻하지 않는다.
+
+- 문제 확인 당시 목적지 확인 코드는 두 벌이었다(`keeper_librarian_durable_edge.ml` 51행, `keeper_librarian_admission_dispatch.ml` 38행). 오류 글자만 다르고 하는 일이 같았다.
+  - 현재 L2a는 관계를 돌려주는 함수 하나를 쓴다. 한쪽만 타입으로 바꾸면 두 벌이 서로 달라진다.
+  - admission 은 `Other_owner` 를 거절하며 `Replaced` 는 3.9절의 묶음 교체로 처리한다.
 - floor step 은 같은 규칙을 따로 옮긴다(7절의 L2b).
   - floor step owner 는 `Settled` 로 돌아온 이 phase 를 지금 오류로 본다(`lib/keeper/keeper_librarian_floor_step_owner.ml` 95행). 결과에 갈래 하나를 더한다. "접수 전에 끝났다"이다.
   - chain 의 결과에도 갈래 하나를 더한다. "교체된 선언에서 멈췄다"이다. 지금 `Stopped` 는 자리와 report 만 담아서 같은 선언의 거절과 가를 수 없다(`lib/keeper/keeper_librarian_floor_chain.ml` 131~145행).
-    - chain 은 두 경우에 이 갈래를 돌려준다. step owner 가 "접수 전에 끝났다"를 줬을 때와, host 가 끝낸 `Not_allowed` 를 받았고 그 사유가 `Replaced_declaration` 일 때다.
+    - chain 은 두 경우에 이 갈래를 돌려준다. step owner 가 검증된 "접수 전에 끝났다"를 줬을 때와, host 가 남긴 `Not_allowed {reason=Replaced_declaration}` 를 복원했을 때다. 일반 `Not_allowed`와 현재 목적지 비교만으로 이 갈래를 만들지 않는다.
     - 이 갈래는 report 를 만들지 않는다. 읽을 범위를 줄일 근거가 없다.
   - pass 는 그 step 을 `Stopped` 와 같은 길로 정리하고 `wake` 를 부른다(3.6). 다음 pass 가 같은 자리를 새 id 로 묻는다(`keeper_librarian_durable_execution.ml` 550~555행).
 
-### 3.4 교체된 선언에서 실행 없이 끝난 요청은 다음 읽기를 좁히지 않는다
+### 3.4 선언 교체 종료는 다음 읽기를 좁히지 않는다
 
-- 지금은 거절이 pass 에 닿으면 다음 읽기가 한 턴으로 좁아진다(`keeper_librarian_durable_execution.ml` 335~343행, `lib/keeper/keeper_librarian_durable_consumer.ml` 1692~1719행). 밀린 것이 다 비워질 때까지 좁은 채다.
-- 좁히기는 model 입력을 나누려는 것이다(335~338행의 주석).
-- 3.2 가 들어가면 선언을 바꿀 때 기다리던 Keeper 가 모두 `Not_allowed` 를 받는다. 지금 규칙대로면 모두 한 턴씩 읽게 된다.
-- 지금 원본은 모두 밀린 범위 전체를 담는다(1.8). 한 턴씩 읽으면 그 범위가 턴 수만큼의 요청으로 나뉜다. 턴 수는 재지 않았다.
-- 규칙: 거절이 `Not_allowed` 이고 host 가 저장한 사유가 `Replaced_declaration` 이면 좁히지 않는다. 그 밖은 지금과 같다.
-  - `Not_allowed` 는 host 가 그 요청을 실행하지 않았다는 뜻이다. 입력 크기에 대해 아무것도 말하지 않는다.
-  - 교체 전에 실행되어 받은 크기 거절은 호출 결과(`Call_final`)라 이 규칙에 들지 않는다. 지금처럼 좁힌다. provider registry 는 revision 밖이라 그 증거는 새 선언에서도 유효하다.
-  - 권한·소유 거절(`Permission_refused`)은 지금처럼 좁힌다. 이 문서는 그 동작을 바꾸지 않는다(6절). 그 뒤에 선언이 교체돼도 같다.
-  - 지금 선언은 읽지 않는다. host 가 끝낼 때 저장한 사유 하나로 정한다. 선언을 되돌린 뒤에 읽어도, 지금 목적지를 얻지 못해도 결과가 같다.
-- `Not_allowed` 의 설명 글자는 읽지 않는다. 사유의 타입으로 정한다. 교체를 설명하는 글자를 담은 `Permission_refused` 는 교체가 아니다.
+- 선언 교체 종료는 요청을 실행하지 않았거나, 결과를 모르는 옛 요청을 미소비 상태로 끝냈다는 사실이다. 입력이 크다는 판정이 아니다.
+- host가 저장한 `Replaced_declaration` 사유 또는 소비자가 검증한 종료 증거가 있을 때만 다음 읽기를 좁히지 않는다.
+- 일반 `Not_allowed`와 설명 글자가 같다는 이유로 교체 종료를 만들지 않는다. 지금 목적지와의 비교만으로 사유를 추정하지도 않는다.
+- 교체 전에 실제로 받은 입력 크기 거절과 이미 좁힌 범위는 보존한다. 새 선언은 그 증거를 없애지 않는다.
+- 종료 증거를 저장한 뒤에는 현재 worker나 목적지를 읽지 못해도 같은 종료로 읽는다. 선언을 되돌렸다고 일반 거절로 바뀌지 않는다.
+- 다음 pass는 읽은 위치에서 미소비 입력을 다시 고른다. 그 사이 도착한 입력이 함께 포함될 수 있다.
+- `Permission_refused {detail}`는 권한·소유 거절이다. 설명에 교체를 가리키는 글자가 있어도 교체 종료가 아니다. 다음 읽기는 기존처럼 좁힌다.
 
-### 3.5 교체된 선언에서 끊긴 원본을 끝난 것으로 읽는다
+### 3.5 교체된 선언에서 끊긴 history 원본은 미소비 종료 증거를 남긴다
 
-- 선언을 바꾸는 순간 host 가 실행 중이던 요청은 끊긴다(1.3). Keeper 는 그 원본을 pass 마다 기다리고, 끝내는 길이 없다.
-- RFC-0500 은 서버가 멈춰 끊긴 원본(`interrupted`)만 끝난 것으로 읽게 했다. 같은 프로세스 안에서 끊긴 원본(`cut`)을 막은 이유는 되풀이다(RFC-0500 3.6절). 다시 만든 요청이 같은 까닭으로 다시 끊길 수 있고, 그 횟수를 묶는 것이 없다.
-- 규칙: 거절 증거가 `cut` 이고, 원본이 담은 목적지와 지금 목적지의 관계가 `Replaced` 면 그 원본을 `interrupted` 와 같게 읽는다.
-  - inventory 검사가 정리된 원본으로 읽는다(`keeper_librarian_durable_commit.ml` 246~251행).
-  - 그 거절을 받은 pass 가 자기 Keeper 를 깨운다(`keeper_librarian_durable_owner.ml` 195~202행).
-  - 다음 읽기를 좁히지 않는다. 끊긴 까닭은 범위 크기와 상관없다(RFC-0500 3.3절).
-- 두 자리는 같은 관계 값을 본다. 이 판정에 쓰는 지금 목적지는 pass 함수를 한 번 부를 때 많아야 한 번, 끊긴 원본을 처음 만났을 때 읽는다. inventory 검사의 결과를 정할 때와 owner 가 깨울지 정할 때 그 읽기 하나를 쓴다. 같은 pass 의 다른 자리(새 원본을 만들 때, 접수 전 확인)는 목적지를 따로 읽는다.
-  - owner 는 거절을 처음 받은 것인지 다시 받은 것인지 가르지 못한다. 실행에서 거절된 원본은 이어 갈 때마다 같은 거절로 돌아온다(`lib/lane_addon/lane_addon_submit_once.ml` 187~196행). 깨움이 한 번으로 끝나는 것은 다음 pass 의 inventory 검사가 그 원본을 정리된 것으로 읽어 옮기기 때문이다.
-  - 두 자리가 다르게 읽으면 그 Keeper 는 다른 신호 없이 pass 를 되풀이한다. 그래서 값 하나를 함께 쓴다.
-  - 지금 목적지를 얻지 못하면 둘 다 지금 동작이다. inventory 검사는 끝나지 않은 원본으로 읽고 owner 는 깨우지 않는다. 얻지 못한 까닭(Add-on 이 꺼짐, 붙는 중, 선언 읽기 실패)은 로그에 남긴다. 같은 선언이라 기다리는 것과 읽지 못해 기다리는 것을 그 로그로 가른다.
-  - inventory 검사 함수는 지금 목적지를 읽지 않는다. 끊긴 원본에는 "선언이 교체됐으면 정리됨"(`Settled_if_replaced`)을 돌려주고, pass 가 자기 읽기로 정리됨과 끝나지 않음 가운데 하나로 정한다. 검사는 `io` 로 넘겨 돌리고 목적지 읽기는 pass 의 fiber 에서 한다. 운영자 해소 흐름은 `Finished` 와 `Conflicted` 원본만 묻기 때문에 이 값을 정하지 않는다.
-- 되풀이는 선언 변경 횟수로 묶인다. 다시 만든 원본은 지금 선언을 담는다. 그 원본이 다시 이 규칙에 들려면 선언이 또 교체돼야 한다. `interrupted` 가 서버 정지 횟수로 묶이는 것과 같은 모양이다.
-- 끊긴 까닭이 선언 교체가 아니어도 이 규칙에 든다. 다른 까닭으로 끊긴 원본이 있을 때 운영자가 선언을 바꾸면 그 원본도 풀린다. 설명서는 `run_id` 변경을 새 시도의 허락으로 적는다(1.4).
-- 끊긴 시도가 provider 에서 끝났는지는 알 수 없다. 다시 만들면 model 을 한 번 더 부른다. 답은 받은 적이 없으므로 두 번 반영되지 않는다.
-- `raised` 는 바꾸지 않는다. 같은 선언에서 끊긴 원본도 그대로다(5절).
-  - 선언을 바꿀 때 `raised` 가 생기는 길은 CLI slot 의 guard 거절 하나다. 그 길은 3.2 가 `raised` 를 만들지 않게 고친다. 이미 `raised` 로 끝난 원본은 남는다.
-- 이 규칙은 history 원본의 것이다. floor step 은 끊긴 시도를 원인과 상관없이 기다린다(`lib/keeper/keeper_librarian_floor_step_owner.ml` 49~51행). 서버가 멈춰 끊긴 것도 그렇다. 이 문서는 그 동작을 바꾸지 않는다(5절).
-- 이 규칙이 푸는 것은 시작 표시가 남은 원본이다. host 는 시작 표시를 첫 생성 요청을 보내기 직전에 저장한다(#51269).
-  - 첫 생성 요청의 허가를 기다리다 취소된 실행은 시작 표시가 없다. 그 요청은 host 기록에 결과도 실행 중 표시도 없으므로 다음 cycle 에 3.2 의 갈래로 온다. 선언이 교체됐으면 거기서 `Not_allowed` 로 끝난다.
-  - 앞 slot 에 생성 요청을 보낸 뒤 뒤 slot 의 허가를 기다리다 취소된 실행은 시작 표시가 있다. 그 원본은 이 규칙으로 풀린다.
+- 실행 중이던 요청은 선언 교체 때 취소되어 host에 `cut`이 남을 수 있다. provider에서 실제로 끝났는지는 여전히 알 수 없다.
+- 운영자는 이 경우도 종료 증거를 남긴 뒤 미소비 입력으로 새 요청을 만드는 쪽을 선택했다(9.2).
+- 허용 조건은 실행 단계의 history 원본, 엄격하게 결속된 원래 Exact request·schema·digest·attempt·proof, 그리고 3.1의 `Replaced`다.
+- 원래 거절과 결과 불명은 보존한다. `cut`을 `interrupted`나 성공으로 다시 쓰지 않는다. 별도 종료 증거가 원본 binding과 새로 준비된 목적지를 가리킨다.
+- 저장한 종료 증거는 현재 선언을 다시 빌려 권한으로 삼지 않고 검증한다. owner와 inventory는 같은 증거를 읽는다.
+- 종료 자체는 Memory 반영, source 소비나 외부 ACK가 아니다. linked 원본은 기존 후속 요청의 durable intent와 부모 확인 절차를 따른다.
+- host의 Cut 기록은 provider의 종료나 옛 실행의 배타성을 증명하지 않는다. 후속 반영과 ACK는 원본의 실행 claim과 효과 차단을 실제로 확인하는 경계를 따로 거쳐야 한다.
+- 같은 종료 사실로 새 root를 반복해서 만들지 않는다. 새 원본을 이 정책으로 다시 끝내려면 그 원본의 선언이 또 교체돼야 한다.
+- 끊긴 원인이 선언 교체였다고 단정하지 않는다. 준비된 새 선언을 적용한 운영자의 선택이 새 시도를 허용한다.
+- 다시 만든 요청은 model을 한 번 더 부를 수 있다. 정상 결과·Gate·Memory·ACK 검사는 새 요청에서도 모두 필요하다.
+- 이 정책은 같은 선언의 Cut, `raised`, floor Cut, admission Cut를 허용하지 않는다. 같은 선언에서의 복구 계약은 #50828에서 따로 다룬다.
+- 첫 생성 요청의 허가를 기다리다 취소되어 시작 표시가 없는 원본은 3.2의 실행 전 경로를 따른다. 시작 표시를 가진 Cut과 섞지 않는다.
+
+main `cd28f2ac4174`의 L3(#52695)는 다음 경로로 Cut 원본을 정리한다.
+
+- inventory 검사는 원래 host의 `Cut`을 확인하고 `Settled_if_replaced`를 돌려준다. pass가 현재 목적지와 비교해 정리할지 정한다. `Cut`을 `Interrupted`나 답으로 바꾸지 않는다.
+- 현재 목적지는 그 pass가 첫 Cut 원본을 만났을 때 한 번 읽는다. inventory 판정과 owner의 깨움은 그 값을 함께 쓴다. 새 원본을 만들거나 접수 전을 확인하는 다른 자리는 따로 읽는다.
+- inventory 검사는 `io`에서 돌고 목적지는 pass의 fiber에서 읽는다. 목적지를 읽지 못하면 기다리고 까닭을 로그에 남긴다. `Finished`·`Conflicted`만 묻는 운영자 해소 흐름은 이 판정을 쓰지 않는다.
+- 정상 Exact 경로는 요청별 claim을 잡은 채 실행한다. 이미 terminal이 있으면 다시 실행하지 않는다. proof로 답을 복원하는 경로도 terminal이 없는 `Started`에만 열린다.
+- Memory 반영은 살아 있는 원본을 다시 읽고 실제 `Answered` judgment와 host 답을 요구한다. 원래 Cut은 그 검사를 통과하지 못한다. provider가 원격에서 끝났는지는 여전히 모른다.
+- 현재 L3는 별도 교체 종료를 저장하지 않고 archive 이동을 종료로 삼는다. 별도 종료 기록과 rollback에 관한 위 정책과의 차이는 3.7에 적는다. 기존 효과 차단은 위의 claim·terminal·원본 재확인으로 설명한다.
+
+이 설명은 소스에서 확인한 경로다. 동작 시험·배포·실제 Memory 반영이나 ACK 완료를 뜻하지 않는다.
 
 ### 3.6 교체된 선언의 원본을 끝낸 pass 는 자기 Keeper 를 깨운다
 
@@ -294,27 +307,56 @@ type replaced = { captured : Lane_addon_captured_destination.t; current : Lane_a
   - `Exact_result_delivered` 는 요청 하나에 한 번 나온다. 그 한 번을 정리하는 pass 가 쓴다.
   - 그 pass 는 "반영하지 않음"으로 끝나고 drain 은 다시 돌지 않는다(`lib/keeper/keeper_librarian_queue_refresh.ml` 326~337행).
   - 쉬는 Keeper 는 다음 턴이 끝나거나 다른 설정 사건이 올 때까지 그 범위를 다시 만들지 않는다.
-- 규칙: 교체된 선언의 원본을 끝낸 pass 는 받은 `wake` 를 한 번 부른다. 자리는 셋이다.
-  1. host 가 끝낸 `Not_allowed` 를 받았고 사유가 `Replaced_declaration` 일 때(3.2)
-  2. Keeper 가 접수되지 않은 원본을 끝냈을 때(3.3)
-  3. 끊긴 거절을 받았고 관계가 `Replaced` 일 때(3.5)
+- 규칙: 검증된 선언 교체 종료를 저장하거나 복원해 원본을 정리한 pass는 받은 `wake`를 한 번 부른다. 자리는 셋이다.
+  1. host가 저장한 `Not_allowed {reason=Replaced_declaration}`를 복원했을 때(3.2)
+  2. Keeper가 접수되지 않은 원본의 종료 증거를 저장하거나 복원했을 때(3.3)
+  3. history Cut의 별도 미소비 종료 증거를 저장하거나 복원했을 때(3.5)
+- 현재 관계만으로 깨움 권한을 만들지 않는다. 저장 뒤 선언을 되돌리거나 목적지를 읽지 못해도 같은 종료를 복원한다.
 - 서버가 멈춰 끊긴 거절이 이미 같은 자리에서 같은 일을 한다(`keeper_librarian_durable_owner.ml` 195~202행).
-- 되풀이하지 않는다. 깨워진 pass 가 만드는 원본은 지금 선언을 담는다. host 는 선언이 다시 교체된 때에만 그 원본을 이 사유로 끝낸다. 3.3 과 3.5 의 규칙도 그 원본에는 서지 않는다. 그 원본의 관계는 `Same` 이다.
-  - package 를 올리면서 output 이나 schema 를 뺐다면 한 번 더 돈다. 새 원본도 `Not_allowed` 를 받는다(`lane_addon_exact.ml` 의 `deny`). 그 사유는 `Permission_refused` 라 깨우지 않고 거기서 멈춘다.
-- 조건 없이 깨우지 않는다. 권한·소유 거절은 원인이 남아 있을 수 있다. 그때 깨우면 만들기, 거절, 정리, 깨움이 다른 신호 없이 돈다.
+- 같은 종료를 읽을 때마다 root나 깨움 의무를 새로 만들지 않는다. 저장된 후속 요청이 있으면 그것을 이어간다. 깨워진 pass가 지금 선언으로 만든 새 원본은 새 선언 교체가 없으면 이 규칙에 들지 않는다.
+  - package 를 올리면서 output 이나 schema 를 뺐다면 새 원본도 `Not_allowed`를 받을 수 있다(`lane_addon_exact.ml` 945~951행). 그 사유는 `Permission_refused`라 교체 종료가 아니므로 다시 깨우지 않는다.
+- 조건 없이 깨우지 않는다. 같은 선언에서 받은 `Not_allowed` 는 원인이 남아 있을 수 있다. 그때 깨우면 만들기, 거절, 정리, 깨움이 다른 신호 없이 돈다.
 - floor step 은 chain 의 "교체된 선언에서 멈췄다" 갈래를 받은 pass 가 같은 `wake` 를 부른다(3.3, L2b). `Stopped` 는 깨우지 않는다.
+- admission도 3.9의 묶음 교체 의무를 저장한 뒤 같은 원칙으로 다음 pass를 요청한다.
 
 ### 3.7 선언을 되돌리면
 
-- 교체된 선언에서 끝난 요청은 끝난 채다. 선언을 되돌려도 살아나지 않는다.
-- 새 선언으로 다시 만든 원본은, 선언을 되돌리면 교체된 선언의 원본이 된다. 같은 규칙으로 끝나고 되돌린 선언으로 다시 만들어진다.
-- 선언을 한 번 바꿀 때마다 history 원본을 기다리던 Keeper 는 원본 하나를 다시 만든다. 5절의 경우는 지금처럼 남는다.
-- 새 worker 가 붙기 전에 되돌리면 아무것도 끝나지 않는다(3.1 의 조건 3).
-- 끊긴 원본(3.5)은 사유가 저장되지 않는다. 끝난 기록은 archive 로 옮긴 것이다.
-  - 옮기는 pass 가 돌기 전에 되돌리면 그 원본은 같은 선언에서 끊긴 원본이 되어 기다린다(5절). Keeper 가 끊김을 읽기 전에 되돌린 때와, 읽고 깨운 뒤 옮기기 전에 되돌린 때가 같다.
-  - 옮긴 뒤에는 되돌려도 그대로다.
-  - 옮겨지지 않는 원본이 하나 있다. 해소 흐름이 만든 자식 원본이다(5절, #52659). 교체된 선언에서 pass 는 그 원본을 정리된 것으로 읽고 새 범위를 고르지만 기록은 라이브에 남는다. 선언을 그 원본이 담은 값으로 되돌리면 그 원본은 다시 끝나지 않은 원본이 된다. 그때 새로 만든 원본이 끝나지 않았으면 pass 는 "끝나지 않은 원본이 둘"이라는 오류로 끝나고, 끝났으면 그 원본을 기다리며 새 범위를 고르지 않는다. 선언을 다시 바꾸면 풀린다. 3.2 와 3.3 으로 끝난 자식 원본은 사유가 저장돼 있어서 되돌려도 뒤집히지 않는다.
-- host 가 요청을 끝낸 뒤, Keeper 가 그 결과를 읽기 전에 되돌려도 저장된 사유는 그대로다. 좁히지 않고 깨운다. 깨워진 pass 가 되돌린 선언으로 범위 전체를 다시 만든다.
+- 저장된 선언 교체 종료는 유지된다. 선언을 되돌려도 끝난 ID를 다시 실행하지 않는다.
+- 다음 읽기는 당시 준비된 선언으로 새 원본을 만든다. 그 원본도 나중에 실제 선언 교체가 확인되면 같은 종료 정책을 따른다.
+- 새 worker가 준비되기 전에 되돌렸다면 3.1의 교체 조건이 성립하지 않으므로 종료 증거를 만들지 않는다.
+- host가 끝낸 뒤 Keeper가 읽기 전에 되돌려도, 저장된 명시적인 종료 사유를 복원한다. 현재 관계가 `Same`이라는 이유로 좁히거나 실행을 재개하지 않는다.
+
+위는 별도 종료 증거를 남기는 정책이다. 현재 main L3(#52695)는 다음처럼 동작한다.
+
+- 별도 교체 종료 사유를 저장하지 않는다. archive로 옮기는 pass 전에 선언을 되돌리면 같은 선언의 Cut으로 읽고 다시 기다린다. Keeper가 Cut을 읽기 전이나 읽고 깨운 뒤에 되돌려도 같다.
+- archive로 옮긴 뒤에는 선언을 되돌려도 끝난 상태를 유지한다.
+- 해소 흐름이 만든 자식 원본은 archive로 옮겨지지 않을 수 있다(5절, #52659). 교체된 선언에서는 정리된 것으로 읽지만 라이브 기록이 남는다. 선언을 원래 값으로 되돌리면 다시 끝나지 않은 원본으로 읽힌다. 새 원본도 끝나지 않았으면 "끝나지 않은 원본이 둘"이라는 오류가 나고, 새 원본이 끝났으면 옛 원본을 기다린다. 선언을 다시 바꾸면 풀린다.
+- 3.2·3.3으로 끝난 자식은 사유가 저장돼 있어 rollback으로 뒤집히지 않는다. 9.1·9.2의 별도 종료 기록과 그 기록을 복원하는 정책은 현재 L3에 들어 있지 않다.
+
+### 3.8 이미 받은 답과 미실행 Gate
+
+- 운영자는 답을 보존하고 Gate를 이어가는 쪽을 선택했다(9.3). history·floor step·admission에 같은 정책을 적용한다.
+- 이 절의 Gate 재개는 흡수 판정이나 반영이 남은 답에 적용한다. admission의 `Deferred` 판정은 보존하되 Gate·Memory 반영을 기다리는 답으로 취급하지 않는다. 그 미소비 후보는 3.9의 전체 재판단에 포함한다.
+- 원래 host 답과 proof를 먼저 확인한다. 받은 답을 새 Librarian 요청의 결과로 바꾸거나 다시 묻지 않는다.
+- 새 Gate 실행 전에는 같은 물리 Keeper·Memory epoch·설치·package·tool이며, 현재 선언으로 준비된 worker인지 확인한다.
+- 선언 revision만 달라졌다는 이유로 Gate를 막지 않는다. 다른 owner·설치·package·tool이나 준비되지 않은 worker는 권한을 주지 않는다.
+- 이미 저장한 Gate의 질문, 판정 목적지와 원래 답의 결속은 계속 검증한다. 이미 받은 판정은 복원한다.
+- 이미 전송한 Gate의 결과와 불확실성은 보존한다. 전송 중이거나 결과가 불명확한 Gate를 미실행으로 바꿔 다시 보내지 않는다.
+- 이 권한은 받은 답의 미실행 Gate에만 해당한다. 답 없는 옛 원본의 접수·provider 전송이나 새 admission part의 실행 권한을 넓히지 않는다.
+
+### 3.9 admission의 미소비 묶음
+
+- part나 실행이 명시적인 선언 교체 종료 조건을 충족하면 미소비 묶음 전체를 새 root 요청으로 다시 판단한다(9.4).
+- 한 part의 종료가 형제 part나 실행의 권한을 대신하지 않는다. 인계 전에 묶음 전체 frontier와 각 연결 실행을 확인한다.
+- Gate·반영이 남은 `Accepted` 답이 있으면 기존 원본의 Gate·Memory·receipt·ACK 경로를 먼저 마친다(3.8). 그 답을 새 root에 넣어 다시 판단하지 않는다. `Deferred` 후보에는 Gate나 소비 receipt를 먼저 요구하지 않고 아래의 인계 대상에 남긴다.
+- 접수됐거나 전송 중인 실행, 결과 불명, Cut·Raised가 미해소 상태로 남아 있으면 전체 인계를 보류한다. 다른 part의 교체 종료에 동승해 다시 실행하지 않는다.
+- 그 뒤 남은 모든 후보가 `Deferred` 판정이거나 엄격하게 검증된 교체 종료로 인계 가능한지 확인하고, 남은 미소비 묶음 전체를 새 root로 넘긴다.
+- 같은 묶음에서 이미 `Deferred`였던 후보도 포함한다. 후보별로 소유권을 쪼개 이어가지 않는다.
+- 실제 완료 receipt와 ACK로 소비된 후보는 제외한다. 새 root는 남은 후보를 빠뜨리거나 중복 소유하지 않아야 한다.
+- 실행 요청을 아직 만들지 않은 part는 전체 실행 inventory에서 자신을 가리키는 실행이 실제로 없는지 확인한다. 가짜 capture나 실행 부재 증거를 만들지 않는다.
+- 새 root의 전체 후보·원본·목적지 결속과 이전 root의 소유권을 저장하고 확인한다. 재시작이나 선언 rollback 뒤에도 같은 새 root를 복구한다.
+- 종료 사실 하나를 반복 사용해 새 root를 계속 만들지 않는다. 이전 part와 실행은 실제 후속 완료와 전체 후보 receipt·ACK가 확인된 뒤 정리한다.
+- admission Cut·Raised와 Gate·반영이 남은 `Accepted` 답은 새 root를 허용하는 종료 사유가 아니다. 그런 답은 3.8의 Gate 정책을 따른다. `Deferred`와 구분한다.
 
 ## 4. 순서 따라가기
 
@@ -334,10 +376,11 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 | N+1 | Runtime 이 바뀐 선언을 관찰하고 앞 worker 를 물린다 | | | 실행이 취소된다. 첫 생성 요청을 보내기 직전까지 갔으면 시작 표시가 남는다 |
 | N+2 | 새 worker 가 붙고 대기 목록을 이어받는다. export 목록이 바뀌어 저장된 Keeper 가 모두 깬다 | | | |
 | N+3 | host cycle 이 목록을 돈다 | 선언이 교체됐다. `Not_allowed {reason=Replaced_declaration}` 을 저장하고 전달한다. A 가 깬다 | 목록에 없다 | 끊긴 시도를 `outcome_unknown` 으로 끝내고 전달한다. C 가 깬다 |
-| N+4 | 각 Keeper 의 pass | host 기록의 `Not_allowed` 로 원본을 끝낸다. 좁히지 않는다. 자기를 깨운다 | 접수되지 않았고 선언이 교체됐다. `Refused {Before_dispatch}`. 자기를 깨운다 | 끊긴 거절을 남긴다. 선언이 교체됐으므로 자기를 깨운다 |
-| N+5 | 깨워진 pass | 원본을 옮기고 같은 범위를 새 선언으로 만들어 보낸다 | 같다 | 같다 |
+| N+4 | 각 Keeper 의 pass | host의 명시적인 교체 종료로 원본을 끝낸다. 좁히지 않는다. 자기를 깨운다 | 실행 부재와 선언 교체를 확인해 `Refused {Before_dispatch}`를 남긴다. 자기를 깨운다 | 엄격하게 결속된 Cut을 확인하고 별도 미소비 종료 증거를 남긴다. 자기를 깨운다 |
+| N+5 | 깨워진 pass | 읽은 위치에서 미소비 입력을 새 선언으로 고른다 | 같다 | 원래 Cut은 보존하고, 저장된 후속 요청과 효과 차단 조건을 확인해 이어간다 |
 
-- D 와 E 는 지금처럼 남는다(5절).
+- D는 원래 답을 보존하고 3.8의 조건으로 미실행 Gate를 이어간다. 이미 전송한 Gate는 다시 보내지 않는다.
+- E의 worker 부재는 별도 복구 계약을 따른다(5절, #50828). 선언 교체만으로 실행 부재를 만들어내지 않는다.
 - 깨움 사건은 N 과 N+2 사이에 세 번 나온다. 바뀐 선언을 관찰할 때, 앞 worker 를 물릴 때, 새 worker 가 붙을 때다(`lane_addon_runtime.ml` 4566행, 3407행, 1394행). 깨는 것은 저장된 Keeper 전부, admission 큐의 Keeper, 원본을 든 Keeper 다(`server_librarian_addon_wake.ml` 71~104행). 앞의 둘은 새 worker 가 붙기 전이라 그 pass 들은 지금처럼 오류로 끝난다.
 - N+2 의 신호로 깬 Keeper pass 가 host 의 N+3 보다 먼저 오면 A 는 지금처럼 거절 오류를 한 번 낸다. host 가 끝낸 뒤의 pass 가 정리한다.
 - 위 표의 C 는 시작 표시가 남은 경우다. C 가 첫 생성 요청의 허가를 기다리다 취소됐으면 시작 표시가 없다(#51269). 그 C 는 N+3 에 A 와 같은 길로 간다.
@@ -355,8 +398,8 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 | Keeper 가 저장하기 전 | 다음 pass 가 같은 비교를 다시 한다 |
 | host 가 history 요청을 실행 중일 때 | 그 시도는 `interrupted` 로 끝난다. RFC-0500 의 길이다. floor step 과 admission 은 그 길이 없다(5절) |
 
-- 어느 자리에서도 같은 요청이 두 번 반영되지 않는다. 끝난 원본은 답이 없고, 새 원본은 id 가 다르다.
-- 서버가 살아 있는 채로 깨움이 빠지는 경우가 셋 있다. Keeper 의 `Refused` 저장 결과가 불확실하게 돌아온 때와, 저장과 깨움 사이에서 pass 가 취소된 때다. 그 pass 는 오류로 끝나고 깨우지 않는다. 저장이 됐다면 다음 신호(턴 종료, 설정 사건)의 pass 가 정리된 원본으로 읽고 새로 만든다. 서버가 멈춰 끊긴 거절의 깨움(RFC-0500)도 같은 모양이다. 저장이 안 된 것을 깨움으로 메우면 저장이 계속 실패하는 동안 pass 가 다른 신호 없이 돈다. 셋째는 끊긴 거절을 받은 pass 가 지금 목적지를 읽지 못한 때다(3.5). 그 pass 는 깨우지 않고 까닭을 로그에 남긴다. 선언이 교체된 채라면 다음 신호의 pass 가 inventory 에서 정리된 원본으로 읽는다. Add-on 이 다시 붙는 것도 그 신호다.
+- 재시작 뒤에도 원래 결과, 교체 종료, 후속 요청의 결속을 각각 복원해야 한다. 새 ID라는 사실만으로 중복 반영 방지가 증명되지는 않는다. 결과·Gate·Memory receipt·source 소비·ACK 경계의 확인이 모두 필요하다.
+- 서버가 살아 있는 채로 깨움이 빠지는 경우가 셋 있다. Keeper 의 `Refused` 저장 결과가 불확실하게 돌아온 때와, 저장과 깨움 사이에서 pass 가 취소된 때다. 그 pass 는 오류로 끝나고 깨우지 않는다. 저장이 됐다면 다음 신호(턴 종료, 설정 사건)의 pass 가 정리된 원본으로 읽고 새로 만든다. 서버가 멈춰 끊긴 거절의 깨움(RFC-0500)도 같은 모양이다. 저장이 안 된 것을 깨움으로 메우면 저장이 계속 실패하는 동안 pass 가 다른 신호 없이 돈다. 셋째는 Cut 거절을 받은 pass가 현재 목적지를 읽지 못한 때다(현재 L3, 3.5). 그 pass는 깨우지 않고 까닭을 로그에 남긴다. 선언이 교체된 채라면 다음 신호의 pass가 inventory에서 정리된 원본으로 읽는다. Add-on이 다시 붙는 것도 그 신호다.
 
 ### 4.3 설명서의 `run_id` 절차
 
@@ -370,28 +413,27 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 - 다시 만든 요청은 id 가 새것이라 앞 요청의 시도를 이어받지 않는다. 실행될 때의 registry 로 slot 을 처음부터 고른다.
 - 선언 revision 은 registry 를 담지 않는다(1.1). context window 가 다른 slot 으로 넘어가는 흐름은 이 규칙과 만나지 않는다.
 
-## 5. 풀지 않는 것
+## 5. 별도 복구 계약을 따르는 경우
 
-| 무엇 | 지금 동작 | 어디서 다루나 |
+이미 받은 답의 Gate와 admission 미소비 묶음은 각각 3.8·3.9에서 다룬다. 아래 경우는 그 권한을 얻지 않는다. 수량은 1.8의 역사적 관측으로 대신하지 않고 실제 배포 대상에서 확인한다.
+
+| 무엇 | 이 정책의 경계 | 어디서 다루나 |
 |---|---|---|
-| 답을 받았고 gate 를 시작하지 못한 원본(`Judged`) | gate 를 시작하려면 목적지 비교를 지나야 한다. 교체된 선언에서는 pass 마다 기다린다. 선언을 되돌리면 이어진다. gate 가 이미 끝난 원본은 그대로 반영된다 | 9절. 공용 규약에 `Judged` 에서 나가는 길은 반영뿐이다. 두 번의 조회(06:39Z, 07:44Z)에서 이 phase 의 history 원본은 0개였다 |
-| 답을 받았고 gate 를 시작하지 못한 floor step | 같은 비교에 막혀 chain 이 pass 마다 기다린다(`lib/keeper/keeper_librarian_floor_step_judgment.ml` 65~70행, `keeper_librarian_floor_chain.ml` 113~114행) | 위와 함께 다룬다. 라이브 floor step 기록은 0개다 |
-| worker 에 기록이 없는 `Dispatch_pending` 원본 | worker 조회가 목적지 확인에 막혀 pass 마다 오류다. 지금 2개가 이 phase 다 | #50828. 조회만 설치·package·tool 로 허락하면 "없다"는 답을 받아 그쪽 흐름으로 간다. 이 문서의 층이 아니다 |
+| worker 에 기록이 없는 `Dispatch_pending` 원본 | worker 조회가 목적지 확인에 막힐 수 있다 | #50828. 부재를 증명하는 조회와 기존 원본의 후속 요청 계약을 따른다. 이 문서는 부재를 추정해 끝내지 않는다 |
 | 선언의 `id` 를 바꾼 때 | Keeper 는 tool 이름으로 지금 설치를 찾는다(`keeper_librarian_durable_edge.ml` 57~59행). 설치가 달라서 pass 마다 거절한다. worker 저장소는 설치마다 따로라 새 설치의 worker 는 앞 설치의 대기 목록을 받지 않는다. host 는 그 요청을 보지 못한다 | 따로 설계한다. 이 문서의 host 규칙은 대기 목록을 이어받은 worker 가 있어야 선다 |
-| admission 요청 | host guard 는 실행을 거절하고 Keeper 는 pass 마다 거절한다. 선언을 바꾸는 순간 실행 중이던 admission 은 끊긴 채 남는다 | 따로 설계한다. admission 은 part 가 목적지를 담는다(`keeper_librarian_admission_owner.ml` 133~134행). `Not_allowed` 를 받은 part 는 기다리기만 한다(같은 파일 `size_refused`). host 가 끝내면 되돌려도 풀리지 않게 된다. 그래서 3.2 에서 뺐다. 그때까지는 선언을 바꾸기 전에 기다리는 admission 실행이 0개인지 본다 |
 | 새 worker 가 앞 worker 의 기록을 host 에 주지 못할 때 | worker 는 기록 하나라도 읽지 못하면 멈춘다(`addons/exact_worker.py` 289~292행). 대기 목록이 새 frame 에 들어가지 않으면 목록 호출이 실패한다(433~434행). host 는 대기 목록을 받지 못하고 아무것도 끝나지 않는다 | package 를 바꾸는 쪽이 지킬 조건이다. 새 package 는 저장된 기록을 그대로 읽고 `max_reply_bytes` 를 줄이지 않는다. #51280 의 수리가 이 조건을 지켜야 한다 |
 | `ui_category` 만 바꾼 설치 | revision 이 그대로라 교체가 아니다. host 가 그 설치의 요청을 실행하지 않고 Keeper 는 계속 접수한다 | #51300, 수리는 #51308 |
-| 같은 선언에서 끊긴 원본, `raised` 로 끝난 원본 | Keeper 가 pass 마다 기다린다 | #50828 |
-| 해소 흐름이 만든 자식 원본(선행 원본이 fence 됨)이 답 없이 정리된 때 | 끝난 자식은 archive 로 옮겨지지 않는다. chain 을 옮기는 규칙은 선행 원본이 정리된 목록에 있을 때만 서고, fence 된 원본은 그 목록에 들지 않는다(`keeper_librarian_durable_execution.ml` 의 `finished_chains`). 해소 intent 는 완료가 관찰되지 않은 채 남는다. pass 는 막히지 않고 새 범위를 고른다. 실행에서 거절된 자식도 같다. 3.3 과 3.5 는 이 모양에 닿는 길을 하나씩 더한다. 3.5 로 정리된 자식은 선언을 되돌리면 끝나지 않은 원본으로 돌아온다(3.7) | #52659 |
-| 실행 중 끊긴 floor step | step owner 가 끊긴 시도를 원인과 상관없이 기다림으로 돌려준다(`keeper_librarian_floor_step_owner.ml` 49~51행). chain 이 pass 마다 기다리고, 그 Keeper 의 그 범위는 다시 읽히지 않는다. 서버가 멈춰 끊긴 것도 같다 | RFC-0500 3.4절이 floor step 을 뒤로 미뤘다. 그 설계와 함께 다룬다. 라이브 floor step 기록은 0개다 |
+| 같은 선언의 history Cut·`raised`로 끝난 원본 | 선언 교체 종료로 해소하지 않는다 | #50828. 실제 원인과 실행 증거를 보존한다 |
+| 해소 흐름이 만든 자식 원본(선행 원본이 fence 됨)이 답 없이 정리된 때 | 끝난 자식은 archive 로 옮겨지지 않는다. chain 을 옮기는 규칙은 선행 원본이 정리된 목록에 있을 때만 서고, fence 된 원본은 그 목록에 들지 않는다(`keeper_librarian_durable_execution.ml` 의 `finished_chains`). 해소 intent 는 완료가 관찰되지 않은 채 남는다. pass 는 막히지 않고 새 범위를 고른다. 실행에서 거절된 자식도 같다. 3.3과 현재 L3의 Cut 정리는 이 모양에 닿는 길을 하나씩 더한다. 현재 L3로 정리된 자식은 rollback 뒤 끝나지 않은 원본으로 돌아온다(3.7) | #52659 |
+| 실행 중 끊긴 floor step·admission | history의 Cut 교체 정책을 적용하지 않는다. 원래 결과 불명을 보존한다 | 각각의 복구 계약을 따로 설계한다. RFC-0500 3.4절도 floor step을 뒤로 미뤘다 |
 
 ## 6. 고르지 않은 길
 
 | 길 | 고르지 않은 이유 |
 |---|---|
-| 새 선언에서 예전 요청을 그대로 실행한다 | 선언 revision 은 새 provider 호출의 권한으로 정해져 있다(1.7). 이 길은 그 계약을 없앤다. 9절의 첫 결정이다. 이 문서는 계약을 두고 끝을 정하는 쪽을 추천한다 |
+| 새 선언에서 답 없는 예전 요청을 그대로 실행한다 | 운영자는 요청을 만든 선언의 전송 권한을 유지하고 미소비 입력으로 새 요청을 만드는 쪽을 선택했다(9.1). 받은 답의 Gate 권한(3.8)은 원본의 재전송 권한이 아니다 |
 | 접수되지 않은 원본도 worker 에 보내 host 가 끝내게 한다 | `Admission_wait` 는 대기 목록에 못 들어가서 생긴 phase 다. 다시 보내도 같은 이유로 거절된다(#51280). 끝나지 않는다 |
-| Keeper 가 접수된 요청을 스스로 끝낸다 | worker 가 그 요청을 계속 들고 대기 목록의 자리를 차지한다. 선언을 되돌리면 host 가 실행하고 답은 아무도 읽지 않는다. 시작했는지는 host 기록만 안다 |
+| Keeper가 host 증거 없이 접수된 요청을 스스로 끝낸다 | worker가 그 요청을 계속 들고 있을 수 있다. 선언을 되돌리면 host가 실행하고 답은 아무도 읽지 않는다. 실제 원본 실행·종료 증거와 효과 차단을 확인해야 한다 |
 | worker 에 취소 호출을 더한다 | package 를 바꿔야 한다. 그 배포가 선언 revision 을 바꾼다. 지금 기다리는 원본에는 쓸 수 없다 |
 | 거절이 N번 쌓이거나 T시간 지나면 끝낸다 | 근거 없는 숫자다. 선언이 교체됐는지는 비교로 정해진다 |
 | 사유를 저장하지 않고, Keeper 가 읽을 때 원본의 목적지와 지금 목적지를 비교해 정한다 | 얻는 것: worker 가 받는 모양이 그대로라 서버만 올리면 된다. 고르지 않은 이유: host 가 끝낼 때 아는 까닭을 Keeper 가 나중 설정으로 다시 짐작하게 된다. 선언을 되돌린 뒤에 읽으면 같은 선언의 거절로 읽혀 좁아지고 깨우지 않는다. 지금 선언을 읽지 못하면 정하지 못한다. 권한 거절 뒤에 선언이 바뀌면 교체로 읽힌다. host 의 guard 와 Keeper 가 설정을 따로 읽어 둘이 어긋날 수 있다. 사유를 저장하는 쪽의 대가는 worker 가 받는 모양 하나와 package 0.2.5 다(7절). `reason` 글자를 가진 기록은 `Permission_refused` 로 그대로 읽혀서 저장된 기록은 건드리지 않는다 |
@@ -403,20 +445,27 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 
 ## 7. 층
 
+아래는 구현을 나누는 단위다. 층 목록은 현재 head의 구현·회귀·배포 판정을 대신하지 않는다.
+
 | 층 | 바꾸는 것 | 확인 |
 |---|---|---|
-| L0 | 목적지 관계 타입(3.1). `Not_allowed` 의 사유 타입과 worker 가 받는 모양(3.2). history 의 좁히기 규칙(3.4)과 깨움 규칙의 첫 자리(3.6). 그 계약 문장 | 8절의 좁히기·깨움·worker 시험 |
-| L1 | guard 결과 타입, `run` 의 갈래와 저장하는 사유, Runtime 의 판정, history·floor step guard(3.2). 계약 문장 둘(`lane_addon_exact.mli`, `lane_addon_runtime.mli`)과 설명서. keeper-librarian package 0.2.5 | 8절의 host 시험 |
-| L1b | CLI walker 가 보내기 전의 guard 거절을 값으로 받아 멈춘다. walk receipt 에 "보내기 전에 멈춤"을 더한다(3.2). 구현은 #51343 이다 | 8절의 CLI 시험 |
-| L2a | 목적지 확인 두 벌을 하나로, `Submit.resume` 의 접수 전 갈래, 증거 타입, history 가 읽는 자리 둘, 깨움 규칙의 둘째 자리(3.3) | 8절의 Keeper 시험 |
-| L2b | 같은 규칙을 floor step 에. step owner 와 chain 의 결과에 갈래 하나씩(3.3) | 8절의 floor 시험 |
-| L3 | 교체된 선언에서 끊긴 원본, inventory 검사의 결과 갈래 하나와 pass 가 한 번 읽는 지금 목적지, 깨움 규칙의 셋째 자리(3.5). 설명서 문장 | 8절의 끊김 시험 |
+| L0 | 목적지 관계 타입(3.1). `Not_allowed` 사유 타입과 worker wire, 명시적인 교체 종료의 저장·복원, 좁히기(3.4), 깨움(3.6)의 공통 계약 | 8절의 종료 증거·좁히기·깨움 시험 |
+| L1 | guard 결과 타입, `run`의 갈래, Runtime 판정과 host의 종료 사유(3.2). Exact·Runtime의 계약과 설명서. keeper-librarian package 0.2.5 | 8절의 host 시험 |
+| L1b | CLI walker가 전송 전 guard 거절을 값으로 받아 멈추고 receipt를 남긴다(3.2). #51343으로 main에 병합됐다 | 8절의 CLI 시험. 이 병합은 다른 층의 완료 증거가 아니다 |
+| L2a | 목적지 확인 통합, 정본 접수 phase·전송 의도에 결속한 종료, history owner·inventory의 같은 종료 판정(3.3) | 8절의 Keeper 시험 |
+| L2b | floor step owner·chain의 실행 전 교체 종료와 후속 pass(3.3) | 8절의 floor 시험 |
+| L3 | history Cut의 별도 미소비 종료, 후속 요청 결속과 옛 실행의 효과 차단(3.5). 현재 archive 방식과 정책 차이는 3.5·3.7에 구분한다 | 8절의 Cut·재시작·Memory·ACK 시험 |
+| L4 | admission 미소비 묶음 전체의 새 root, Deferred 후보 보존과 소유권 인계(3.9) | 8절의 admission 시험 |
+| L5 | 받은 답을 보존하고 같은 owner·설치의 미실행 Gate를 이어가는 권한(3.8) | 8절의 Gate 시험 |
 
 - L0 이 L1 보다 먼저다. L1 만 들어가면 선언을 바꿀 때 기다리던 Keeper 가 모두 한 턴씩 읽게 되고, 쉬는 Keeper 는 다음 턴까지 그 범위를 다시 만들지 않는다.
 - L1b 는 다른 층에 기대지 않는다. L1 없이 들어가도 CLI slot 의 guard 거절이 `raised` 대신 미뤄진 시도로 남는다. 그 요청은 선언을 되돌리면 다시 실행된다.
   - CLI walker 는 Librarian 밖의 소비자도 쓴다. 바꾸는 것은 관찰 함수가 거절을 돌려줄 수 있게 하는 것이고, 거절을 돌려주지 않는 소비자의 동작은 그대로다.
-- L3 은 관계 타입만 쓴다. L0 뒤라면 다른 층과 순서를 가리지 않는다.
-- L2b 는 라이브 floor step 기록이 0개인 지금 뒤로 미뤄도 1.8 의 원본이 모두 풀린다.
+- L3은 관계 타입 외에도 원래 실행 증거, 저장된 후속 요청과 source 효과 차단을 함께 쓴다. L4·L5도 각각 묶음 소유권과 Gate의 원래 답을 검증한다. 공통 관계 타입만 붙였다고 소비자 통합이 끝난 것은 아니다.
+- 1.8의 floor·admission 수량을 근거로 구현을 생략하거나 배포를 허용하지 않는다. 실제 대상의 전체 연결 기록을 확인한다.
+- 서버 설치, 새 package 적용, 실제 원본의 회복은 별도 단계다. `/health`의 build commit은 실행 중인 바이너리의 근거이며 회복 증거가 아니다.
+- package 적용 전에는 대상 후보에서 저장된 원본·owner·Gate·source·receipt·ACK의 연결을 읽고, 새 worker가 기존 대기 목록을 읽어 host에 줄 수 있는지 확인한다(5절).
+- 새 종료 증거와 후속 요청의 저장 형식은 각 구현 층에서 엄격하게 정의한다. 기존 codec으로 모두 읽힌다고 미리 가정하지 않는다. 읽기 전용 preflight의 성공은 Memory 반영이나 ACK 완료가 아니다.
 - L0 은 worker 코드(`addons/exact_worker.py`)도 바꾼다. 새 모양(`"cause":"declaration_replaced"`)을 받는 image 는 keeper-librarian 0.2.5 다. 나머지는 서버 코드다.
   - 0.2.4 image 의 worker 는 그 전달에 오류로 답하고 요청을 대기 목록에 남긴다. base 의 `exact_worker.py` 에 `addons/tests/test_keeper_librarian.py` 의 재시작 시험을 돌려 확인했다.
   - 그때도 Keeper 는 다음 pass 에 host 기록에서 그 종료를 읽는다(`lane_addon_submit_once.ml` 의 `Dispatch_pending` 갈래). 전달 사건이 없어서 그 pass 는 다른 신호를 기다린다. worker 의 대기 기록은 0.2.5 가 붙을 때까지 남아 목록의 자리를 차지하고, host 는 cycle 마다 전달을 다시 해 본다. 이 문단은 코드를 읽어 적었고 실행으로 확인하지 않았다.
@@ -426,71 +475,92 @@ Keeper 다섯이 서로 다른 phase 에 있다.
   - 올리기 전에 볼 것은 둘이다(5절).
   - 기다리는 admission 실행이 0개인가.
   - 새 package 가 저장된 기록을 그대로 읽고 `max_reply_bytes` 를 줄이지 않는가.
-- 앞서 저장된 기록은 그대로 읽힌다. `reason` 글자를 가진 `Not_allowed` 는 `Permission_refused` 로 읽힌다. 진행 기록의 `Refused` 는 지금 codec 그대로다. L1b 가 walk receipt 에 갈래 하나를 더한다. 그 모양은 L1b 에서 정한다.
+- 3.2의 `reason` 글자를 가진 `Not_allowed` 기록은 `Permission_refused`로 읽힌다. 진행 기록의 `Refused`도 기존 codec을 쓴다. 이 사실은 새 Cut 종료·admission 인계 형식을 이미 읽을 수 있다는 증거가 아니다. L1b walk receipt의 갈래는 그 층에서 정한다.
 
 ## 8. 시험
 
-화면 배치 시험은 쓰지 않는다. 모두 함수 단위다.
+host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 확인한다. 이 절은 필요한 검증 시나리오이며 실행 결과표가 아니다. 화면 배치 시험은 쓰지 않는다.
 
 - host
-  - guard 가 `Not_now` 면 host 기록이 없다. 다시 허락하면 같은 요청이 실행된다. 지금 시험을 타입만 바꿔 남긴다.
-  - guard 가 `Declaration_replaced` 면 결과가 `Not_allowed {reason=Replaced_declaration}` 이다. host 기록에 그 결과가 있고 runner 는 한 번도 불리지 않는다. 그 뒤 guard 가 허락해도 같은 결과다.
+  - 실행을 시작하기 전 guard가 `Not_now`면 종료나 새 실행 증거를 만들지 않는다. 다시 허락하면 같은 요청이 실행된다.
+  - guard가 `Declaration_replaced`면 `Not_allowed {reason=Replaced_declaration}`를 저장하고 runner를 부르지 않는다. 선언을 되돌린 뒤에도 같은 종료를 복원한다.
   - 답이 있는 기록은 guard 를 부르지 않고 답을 전달한다. 지금 시험 그대로다.
   - Runtime 의 판정: 파일만 고친 때는 `Not_now`, 새 worker 가 붙은 뒤는 `Declaration_replaced`, 끈 때와 파일이 깨진 때는 `Not_now` 다.
 - CLI
   - CLI slot 을 보내기 직전에 guard 가 거절하면 그 slot 의 runner 는 불리지 않는다. host 기록의 그 시도는 미뤄진 시도이고 결과는 없다. `raised` 가 아니다.
   - 그 뒤 guard 가 `Declaration_replaced` 를 주면 같은 요청이 `Not_allowed` 로 끝난다. guard 가 허락하면 같은 요청이 실행된다.
 - Keeper
-  - 접수 전 원본에 관계가 `Replaced` 면 `Refused {Before_dispatch}` 사건 하나가 쌓이고 worker 호출은 0번이다.
-  - `Dispatch_pending` 원본은 이 비교를 보지 않는다.
+  - 정본 journal의 phase가 `Captured`·`Admission_wait`이고 관계가 `Replaced`면 `Refused {Before_dispatch}`를 저장한다. worker에 보내지 않는다.
+  - submit RPC는 새 `Fresh` 전송 의도 뒤에만 보낸다. 같은 의도의 재확인·저장 불확실은 다시 보내지 않는다. `capacity_wait`는 RPC 뒤에도 미접수이며, 전송 뒤 Unknown·부재 응답은 `Dispatch_pending`에 남는다.
+  - 원본 binding·journal이 맞지 않거나 읽지 못하면 종료를 거절한다. `Dispatch_pending`을 접수 전으로 취급하지 않는다.
   - 한 Keeper 의 두 pass: 접수된 원본에 host 의 `Not_allowed` 가 있으면 첫 pass 가 정리하고 둘째 pass 가 지금 목적지로 새 원본을 만든다. 접수 거절된 원본도 같은 끝에 닿는다.
 - floor
   - 접수 전 step 의 선언이 교체되면 chain 이 "교체된 선언에서 멈췄다"를 돌려준다. pass 는 `wake` 를 한 번 부르고, 다음 pass 가 같은 자리를 새 id 로 묻는다.
   - 같은 선언에서 거절된 step 은 지금처럼 `Stopped` 다. `wake` 를 부르지 않는다.
 - 좁히기
-  - `Not_allowed` 이고 사유가 `Replaced_declaration` 이면 좁히지 않는다. 다음 원본의 범위가 `all_unread` 다. 저장했다 다시 읽은 값으로도, 선언을 되돌린 뒤에도 같다.
-  - `Not_allowed` 이고 사유가 `Permission_refused` 면 좁힌다. 교체를 설명하는 글자를 담아도 같다. 지금과 같다.
-  - 크기 거절은 좁힌다. 지금과 같다.
+  - 검증된 교체 종료는 좁히지 않는다. 저장 뒤 rollback되거나 현재 목적지를 읽지 못해도 같다.
+  - 일반 `Not_allowed`는 현재 관계가 `Replaced`여도 교체 종료가 되지 않는다. 설명 글자가 같아도 같다. `Permission_refused`의 다음 읽기는 기존처럼 좁힌다.
+  - 실제 입력 크기 거절과 이미 좁힌 범위는 교체 후에도 보존된다. 다음 pass는 그 위치에서 미소비 입력을 고른다.
 - worker
   - 교체 종료는 worker 를 다시 띄운 뒤에도 그 모양으로 읽히고 대기 목록에서 빠진다.
   - 모르는 `cause` 와, `cause` 와 `reason` 을 함께 실은 종료는 거절하고 요청은 대기로 남는다.
   - worker 가 교체 종료를 돌려줬는데 host 기록이 없거나, 열려 있거나, 다른 결과면 `Submit.resume` 이 거절한다.
 - 깨움
-  - 위 첫 경우의 pass 는 `wake` 를 한 번 부른다. 나머지 둘은 부르지 않는다.
-  - 접수 전 원본을 끝낸 pass 는 `wake` 를 한 번 부른다.
+  - 검증된 교체 종료를 정리한 pass는 `wake`를 한 번 부른다. 일반 거절만으로 깨우지 않는다.
+  - 종료 저장 뒤 깨우기 전에 서버가 멈추면 저장된 종료와 후속 요청을 복원한다. 같은 종료로 root를 반복 생성하지 않는다.
 - 끊김
-  - 증거가 `cut` 이고 관계가 `Replaced` 면 첫 pass 가 `wake` 를 부르고, 둘째 pass 가 원본을 옮기고 새로 만든다.
-  - 증거가 `cut` 이고 관계가 `Same` 이면 지금처럼 기다린다. `wake` 를 부르지 않는다.
-  - 증거가 `raised` 면 관계와 상관없이 지금처럼 기다린다. 이 시험은 없다. durable 시험의 provider 는 HTTP 서버라서 host 호출이 시작 표시 뒤에 예외로 끝나는 상황을 만들지 못한다. `raised` 갈래의 코드는 L3 이 바꾸지 않았고 `cut` 과 타입으로 갈린다.
-  - 증거가 `cut` 이고 지금 목적지를 얻지 못하면 inventory 검사는 끝나지 않은 원본으로 읽고 owner 는 `wake` 를 부르지 않는다. 두 자리가 같은 값을 본다는 시험이다.
+  - 실행 단계 history Cut의 원래 request·schema·digest·attempt·proof와 교체 관계를 확인해야 별도 종료를 저장한다. 원래 Unknown은 보존한다.
+  - 같은 선언의 Cut·Raised·floor Cut·admission Cut는 그 종료를 허용하지 않는다. 시작 표시가 없는 원본은 실행 전 경로와 구분한다.
+  - 현재 L3의 durable 시험은 HTTP fixture로 Cut 경로를 검사한다. 시작 표시 뒤 host 예외로 끝나는 Raised 시험은 없다. 그 갈래는 L3가 바꾸지 않았고 Cut과 타입으로 구분한다.
+  - 종료를 아직 저장하지 않았고 현재 목적지를 얻지 못하면 inventory와 owner 모두 종료를 만들지 않는다. 이미 저장한 종료는 현재 관계를 다시 빌리지 않고 복원한다.
+- 후속 요청·Memory·ACK
+  - 후속 요청을 저장한 뒤 본문 준비나 전송 전에 멈춰도 같은 결속을 복원한다. 원본과 결속되지 않은 자식, 바뀐 본문·목적지, 중복 root를 거절한다.
+  - 옛 실행이 claim을 놓지 않았거나 효과 차단을 확인하지 못하면 후속 Memory 반영·source 소비·ACK를 하지 않는다. 관찰 fiber만 취소한 경우도 포함한다.
+  - Memory receipt가 없거나 다른 원본을 가리키면 source를 소비하지 않는다. 일부 ACK 뒤 재시작해도 증명된 부분만 복원한다.
+- Gate
+  - history·floor step·admission에서 Gate 대상 답과 proof를 먼저 복원하고, 같은 물리 Keeper·Memory epoch·설치·package·tool과 준비된 worker일 때만 미실행 Gate를 보낸다.
+  - owner·epoch·설치·package·tool이 다르거나 worker가 준비되지 않으면 새 Gate를 보내지 않는다.
+  - 이미 받은 판정은 보존한다. 이미 전송했거나 결과 불명인 Gate를 미실행으로 바꾸어 다시 보내지 않는다. 받은 답을 원본 재전송 권한으로 쓰지 않는다.
+- admission
+  - 전체 frontier가 인계 가능한지 확인한 뒤 교체로 끝난 후보와 Deferred 후보가 섞인 남은 미소비 묶음 전체를 새 root로 재판단한다. 실제 소비 receipt·ACK가 있는 후보만 제외한다.
+  - 한 후보가 교체로 끝났어도 형제 실행이 접수·전송 중이거나 Unknown·Cut·Raised가 미해소 상태면 전체 인계를 보류한다. Gate·반영이 남은 `Accepted` 답을 가진 형제는 기존 Gate·Memory·ACK로 먼저 마치고 새 root에 재포함하지 않는다. `Deferred` 후보는 Gate나 소비 receipt를 먼저 요구하지 않고 새 묶음에 포함한다.
+  - 실행을 아직 만들지 않은 part도 전체 inventory에서 연결 실행의 부재를 확인한다. 일부 목록만 읽었거나 연결 실행이 남아 있으면 교체하지 않는다.
+  - 새 root 준비 전후·소유권 인계 전후에 멈춰도 같은 묶음을 복원한다. rollback 후에도 후보 누락·중복 소유·반복 root가 없다.
+  - admission Cut·Raised·Gate·반영이 남은 `Accepted` 답은 묶음 교체 사유가 아니며 다른 후보의 종료에도 동승하지 않는다. Gate 대상 답은 기존 Gate 경로로 이어간다.
 - 변이
   - CLI walker 가 guard 거절을 다시 예외로 던지게 하면 CLI 시험이 `raised` 로 실패한다.
-  - inventory 검사만 관계를 `Replaced` 로 고정하면 "지금 목적지를 얻지 못하면" 시험이 실패한다.
   - `Declaration_replaced` 를 `Not_now` 로 바꾸면 host 시험이 실패한다.
   - 3.1 의 조건 3 을 빼면 "파일만 고친 때" 시험이 실패한다.
-  - 좁히기 규칙이 사유를 가리지 않게 하면 "`Permission_refused` 면 좁힌다" 시험이 실패한다.
-  - 깨움이 사유를 가리지 않게 하면 "나머지 둘은 부르지 않는다" 시험이 실패한다.
-  - 끊김 규칙에서 관계 비교를 빼면 "`Same` 이면 기다린다" 시험이 실패한다.
+  - 저장된 종료 대신 현재 관계만 보면 rollback·목적지 조회 실패 시험이 실패해야 한다.
+  - 전송 의도 확정 전에 submit을 보내거나 전송 뒤 Unknown을 접수 전으로 돌리면 대응 경계 시험이 실패해야 한다. Cut claim·Memory receipt 확인을 빼도 해당 시험이 실패해야 한다.
+  - Deferred 후보를 빼거나, 미해소 형제를 다른 후보의 종료에 동승시키거나, 전송된 Gate를 미실행으로 취급하면 각각의 묶음 보존·권한·Gate 재전송 방지 시험이 실패해야 한다.
+  - 좁히기 규칙이 사유를 가리지 않게 하면 일반 `Permission_refused`의 좁히기 시험이 실패해야 한다.
+  - 깨움이 사유를 가리지 않게 하면 일반 거절은 깨우지 않는다는 시험이 실패해야 한다.
 
-## 9. 정할 것
 
-1. **교체된 선언의 요청을 끝내고 다시 만들지, 새 선언에서 그대로 실행할지.** 추천은 끝내고 다시 만드는 쪽이다.
-   - 지금 계약: 요청은 만든 선언 안에서만 실행된다. 선언을 되돌리면 이어지고, 되돌리지 않으면 끝나지 않는다(1.7).
-   - 추천: 계약을 그대로 두고 끝을 정한다. 교체된 선언의 요청 가운데 답을 받지 못한 것은 끝나고, 그 범위는 새 선언으로 다시 만들어진다.
-     - 다시 만든 요청은 지금 서버와 지금 선언이 만든 것이다. 새 package 가 예전 요청을 접수·조회·실행 단계마다 받아 주는지에 기대지 않는다.
-     - 대가: 기다리던 Keeper 마다 원본 하나를 다시 쓴다. 지금 원본 본문은 합쳐 72.9 MB 다(#51281). 대기 순서를 잃는다. 선언을 잘못 고쳤다가 되돌려도 그 사이에 끝난 요청은 살아나지 않는다. 5절의 아홉 가지가 남는다.
-   - 다른 길: 선언 revision 을 실행 권한에서 뺀다. 설치, package, tool 이 같으면 예전 요청을 새 선언에서 그대로 접수하고 실행하고 반영한다.
-     - 얻는 것: 다시 만드는 비용이 없고 대기 순서가 남는다. 5절의 `Judged`, 답을 받은 floor step, 조회, admission 은 모두 같은 비교에 막힌 것이라 생기지 않는다. 이 문서의 L1, L2a, L2b 와 L0 의 좁히기·깨움 규칙이 필요 없다. 관계 타입과 L1b, L3 은 남는다.
-     - 대가: "요청은 만든 선언 안에서만 실행된다"는 계약을 없앤다. 계약 문장 둘(1.7), 그 시험 둘, 설계 문서의 문장 하나(`docs/design/librarian-addon-execution.md` 257~260행)를 고친다.
-     - 새 package 가 그 output 이나 schema 를 선언하지 않으면 host 가 지금 규칙대로 `Not_allowed` 로 끝낸다(1.6). worker 가 앞 기록을 host 에 주지 못하는 경우는 어느 길에서나 남는다(5절).
-     - keeper-librarian 은 prompt 와 schema 를 서버 코드가 만든다(`lib/keeper/keeper_librarian_durable_question.ml` 43~46행, `lib/keeper/keeper_librarian_runtime.ml` 487~495행). 지금 package 만 보면 그대로 실행해도 답이 달라지지 않는다.
-     - 실행 중에 끊긴 요청은 이 길에서도 남는다. 3.5 는 어느 쪽에서나 필요하다.
-2. **교체된 선언에서 끊긴 원본을 끝난 것으로 읽을지(3.5).** 추천은 넣는 것이다.
-   - 넣지 않으면 선언을 바꿀 때마다 그 순간 실행 중이던 요청의 Keeper 가 끊긴 원본으로 남는다. 지금 코드에 그 원본을 끝내는 길이 없다.
-   - 대가: `cut` 을 막아 둔 RFC-0500 의 규칙에 예외 하나가 생긴다. 다른 까닭으로 끊긴 원본도 선언을 바꾸면 풀린다.
-3. **`Judged` 와 admission.** 이 문서는 그대로 둔다.
-   - `Judged` 는 반영 단계가 설치·package·tool 만 보게 하거나, 공용 규약에 반영 없이 끝나는 길을 더해야 풀린다. 앞의 것은 결정 1 의 다른 길과 같은 변화다.
-   - admission 은 part 가 목적지를 담는 구조라서 이 문서의 규칙을 그대로 쓸 수 없다. 기다리는 실행이 1개인 지금은, 선언을 바꾸기 전에 0개인지 보는 것으로 넘긴다.
+## 9. 운영자가 정한 정책
+
+2026-11-16에 네 선택을 확인했다. 아래 정책은 구현·회귀·배포 완료 주장과 구분한다.
+
+### 9.1 답 없는 요청은 끝내고 새 선언으로 다시 만든다
+
+요청은 만든 선언 안에서만 실행한다는 계약을 유지한다. 선언이 교체되면 검증된 종료 증거를 남기고, 읽은 위치를 옮기지 않은 채 다음 pass가 미소비 입력을 새 요청으로 고른다.
+
+종료된 ID는 선언을 되돌려도 살아나지 않는다. 새 원본을 쓰는 비용과 대기 순서 변경은 받아들인다. 새 worker가 준비되기 전이거나 다른 설치인 경우에는 이 권한이 생기지 않는다.
+
+### 9.2 결과가 불명확한 history Cut도 미소비 종료 후 다시 판단한다
+
+3.5의 Cut 조건과 선언 교체가 확인되면 별도 종료 증거를 남긴다. provider 결과의 불명확성은 그대로 보존한다. 추가 model 요청이 전송될 수 있음을 포함한 선택이다.
+
+이 선택은 같은 선언의 Cut이나 Raised, floor·admission의 결과 불명까지 일반화하지 않는다. 기존 원본의 Memory 반영이나 ACK를 허락하는 선택도 아니다.
+
+### 9.3 받은 답은 보존하고 미실행 Gate를 이어간다
+
+같은 물리 Keeper·Memory epoch·설치·package·tool과 준비된 worker라면 새 선언에서 미실행 Gate를 이어간다. 이미 받은 판정, 이미 전송한 Gate의 결과와 불확실성은 보존한다. 원래 Librarian 요청을 다시 보내지 않는다. Gate 대상이 아닌 admission `Deferred` 후보는 3.9의 전체 재판단을 따른다.
+
+### 9.4 보류 후보와 종료 후보가 섞인 admission 묶음은 전체를 다시 판단한다
+
+3.9의 전체 frontier 확인을 거친 뒤 남은 미소비 묶음 전체를 새 root 요청으로 판단한다. 기존 보류 후보도 포함하고, 실제 receipt·ACK로 소비된 후보는 제외한다. Gate·반영이 남은 `Accepted` 답은 기존 Gate·Memory·ACK 경로로 먼저 마치며 미해소 실행이 있으면 전체 인계를 보류한다. `Deferred` 후보에는 Gate나 소비 receipt를 먼저 요구하지 않는다. 모델 호출이 더 생길 수 있는 대가를 받아들이되, 같은 종료 증거로 root를 반복 생성하거나 후보를 잃지 않는다.
 
 ## 10. 관련
 
@@ -500,7 +570,8 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 - #50828: 끊긴 원본과 worker 에 기록이 없는 원본.
 - #51250, #51269: host 는 시작 표시를 첫 생성 요청을 보내기 직전에 저장한다. 그 허가를 기다리다 끊긴 요청은 표시 없이 남고 다음 cycle 에 다시 실행된다.
 - #51326: 기다리는 원본의 pass 가 본문을 다시 읽지 않게 하는 설계다. 그 문서도 `Submit.resume` 의 접수 전 갈래를 바꾼다. 순서는 이 문서의 관계 판정(3.3)이 먼저고 그 문서의 `load` 가 뒤다. 판정은 원본 기록의 목적지와 지금 목적지만 읽는다. `load` 는 `Same` 일 때만, 접수 의도를 저장하기 전에 부른다. 다만 pass 는 접수 전 원본의 본문을 inventory 에서 먼저 읽는다(`keeper_librarian_durable_execution.ml` 의 `waits` 는 `Dispatch_pending` 만 고른다). 그래서 본문을 읽지 못하는 접수 전 원본은 이 판정에 닿기 전에 pass 가 오류로 끝난다. 나중에 들어가는 쪽이 이 순서로 맞춘다.
+  - 교체 판정과 정본 journal의 접수 전 증거 확인(3.3)은 새 전송을 위한 `load`보다 먼저 한다. 본문을 읽지 못한다는 사실 자체를 종료 증거로 삼지는 않는다. 나중에 통합하는 쪽도 이 권한과 순서를 함께 보존한다.
 - #51343: L1b 의 구현이다.
 - #51300: `ui_category` 만 바꾸면 host 와 Keeper 의 package 비교가 갈린다.
 - RFC-0489 2.5절: Goal 검증도 접수 전 원본을 같은 사건으로 끝내기로 했다. 그쪽은 다음 시도를 잇는 전이를 더 넓힌다. Librarian 은 읽은 위치에서 다시 고르므로 그 전이가 필요 없다. 증거 타입은 소비자마다 자기 것을 쓴다.
-- RFC-0500: 서버가 멈춰 끊긴 원본을 정리하고 다시 고르는 길. 이 문서의 3.5 가 같은 길에 조건 하나를 더한다.
+- RFC-0500: 서버가 멈춰 끊긴 원본을 정리하고 다시 고르는 길. 이 문서의 3.5는 선언 교체의 history Cut을 별도 미소비 종료로 다루며 원래 결과 불명을 보존한다.

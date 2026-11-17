@@ -100,6 +100,10 @@ Operational meaning:
   `expected_source_revision` under the config write lock before validating and committing.
   It is also replaced when `POST /api/v1/runtime/setup/resume` re-reads the file.
   A hand edit to the file takes effect at the next restart or resume request.
+- `[[media_readers]]` follows that same publication path. Captured declaration
+  lists remain unchanged after reload, and rejected writes do not publish a
+  partial list. Loading these rows does not select or start an external reader;
+  see [the declaration contract](RUNTIME-TOML-REFERENCE.md#10-media_readers--external-reader-declarations).
 - `POST /api/v1/runtime/config/raw` requires `source_text`,
   `expected_source_revision` from the original GET's `source_revision`, and
   `expected_source_path` from that same GET's `path`.

@@ -458,6 +458,8 @@ module For_testing : sig
 
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
+  (** Capture/restore the entire atomic loaded state, including media reader
+      declarations and their unpublished/published distinction. *)
 
   val with_config_lock_observed_with_release_failure :
     release_failure:File_lock_eio.durable_lock_error -> runtime_config_path:string ->
@@ -711,6 +713,13 @@ val browser_configuration : unit -> Browser_configuration.t option
 val machine_configuration : unit -> Machine_configuration.t option
 (** Activity from the same atomic published configuration as Runtime. [None]
     means no valid configuration is currently published. *)
+
+val media_reader_declarations : unit -> Runtime_schema.media_reader_decl list option
+(** The immutable declaration list from the same atomic loaded state.
+    [None] means no configuration is published; [Some []] is a valid published
+    configuration with no media reader declarations. A returned list remains
+    that exact snapshot after reload or restore. Declaration order is preserved
+    and does not select a reader, confer priority, or probe an executable. *)
 
 val lsp_servers : unit -> Lsp_process_manager.language -> string * string list
 (** [\[lsp.servers\]] applied over the client's own table: the command that

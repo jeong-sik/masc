@@ -419,6 +419,7 @@ type materialized_config =
   ; typesafeai : Runtime_schema.typesafeai
   ; browser : Browser_configuration.t
   ; machines : Machine_configuration.t
+  ; media_readers : Runtime_schema.media_reader_decl list
   ; admission_allowances : Llm_provider.Provider_admission.published_allowances
       (** One agreed allowance per provider account, published to provider
           admission by [set_loaded]. *)
@@ -678,6 +679,7 @@ let materialize_config
     ; typesafeai = cfg.typesafeai
     ; browser = cfg.browser
     ; machines = cfg.machines
+    ; media_readers = cfg.media_readers
     ; admission_allowances
     }
   in
@@ -743,6 +745,7 @@ type loaded_state =
   ; lanes : Runtime_lane.t list
   ; browser : Browser_configuration.t option
   ; machines : Machine_configuration.t option
+  ; media_readers : Runtime_schema.media_reader_decl list option
   ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
   ; startup_degradation : startup_degradation option
@@ -763,6 +766,7 @@ let empty_loaded_state : loaded_state =
   ; lanes = []
   ; browser = None
   ; machines = None
+  ; media_readers = None
   ; lsp_servers = []
   ; config_path = None
   ; startup_degradation = None
@@ -853,6 +857,7 @@ let set_loaded
     ; lanes = loaded.lanes
     ; browser = Some loaded.browser
     ; machines = Some loaded.machines
+    ; media_readers = Some loaded.media_readers
     ; lsp_servers = loaded.lsp_servers
     ; config_path = Some config_path
     ; startup_degradation
@@ -1154,6 +1159,7 @@ let init_default_degraded_observation (observation : config_observation) =
 let runtime_state () = Atomic.get loaded_state_ref
 let browser_configuration () = (runtime_state ()).browser
 let machine_configuration () = (runtime_state ()).machines
+let media_reader_declarations () = (runtime_state ()).media_readers
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes

@@ -5774,6 +5774,8 @@
 (include stanzas/test_runtime_toml_source_reading.inc)
 
 (include stanzas/test_runtime_media_readers.inc)
+
+(include stanzas/test_runtime_media_reader_publication.inc)
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 
 (test

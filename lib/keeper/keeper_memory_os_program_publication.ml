@@ -202,12 +202,16 @@ let require_receipt_ranges publication ranges =
        | Official_boundary boundary | Mixed_boundary {atom=_;official=boundary} -> official_matches boundary range
        | Atom_boundary _ -> false)
     | R.Explicit_candidate _ | Explicit_candidate_with_recall _ -> false in
-  let exact_kinds=match publication.boundary,ranges with
-    | Atom_boundary _,[R.Atom_range _]
-    | Official_boundary _,[R.Official_range _]
-    | Mixed_boundary _,[R.Atom_range _;R.Official_range _]
-    | Mixed_boundary _,[R.Official_range _;R.Atom_range _] -> true
-    | (Atom_boundary _ | Official_boundary _ | Mixed_boundary _),_ -> false in
+  let counts=List.fold_left (fun (atoms,officials,foreign) -> function
+    | R.Atom_range _ -> atoms+1,officials,foreign
+    | R.Official_range _ -> atoms,officials+1,foreign
+    | R.Explicit_candidate _ | R.Explicit_candidate_with_recall _ -> atoms,officials,foreign+1)
+    (0,0,0) ranges in
+  let expected=match publication.boundary with
+    | Atom_boundary _ -> 1,0,0
+    | Official_boundary _ -> 0,1,0
+    | Mixed_boundary _ -> 1,1,0 in
+  let exact_kinds=counts=expected in
   if exact_kinds && List.for_all matches ranges then Ok ()
   else Error "ordered publication and original-boundary receipt set conflict; stores preserved"
 

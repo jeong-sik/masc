@@ -246,6 +246,209 @@ let test_with_span_exception_ends_span () =
   check string "end with ok=false" "end:err:ok=false" (List.nth evts 1)
 ;;
 
+let observer_failure_attrs : Tracing.span_attrs =
+  { kind = Tool_exec
+  ; name = "observer-failure"
+  ; agent_name = "tracing-test"
+  ; turn = 0
+  ; extra = []
+  ; links = []
+  }
+;;
+
+(* Close only this test's descriptor. The real Fmt tracer still writes through
+   Format.err_formatter, whose previous output functions are always restored. *)
+let with_private_fmt_channel f =
+  Format.pp_print_flush Format.err_formatter ();
+  let saved = Format.pp_get_formatter_out_functions Format.err_formatter () in
+  let channel = Unix.out_channel_of_descr (Unix.dup Unix.stderr) in
+  Format.pp_set_formatter_out_channel Format.err_formatter channel;
+  Fun.protect
+    ~finally:(fun () ->
+      Format.pp_set_formatter_out_functions Format.err_formatter saved;
+      close_out_noerr channel;
+      Format.pp_print_flush Format.err_formatter ())
+    (fun () -> f (fun () -> close_out_noerr channel))
+;;
+
+let test_fmt_start_failure_runs_body_once () =
+  let effects = ref 0 in
+  let result =
+    with_private_fmt_channel (fun close_output ->
+      close_output ();
+      Tracing.with_span Tracing.fmt observer_failure_attrs (fun _ ->
+        incr effects;
+        42))
+  in
+  check int "operation survives failed span start" 42 result;
+  check int "operation executed once" 1 !effects
+;;
+
+let test_fmt_finish_failure_preserves_result () =
+  let effects = ref 0 in
+  let result =
+    with_private_fmt_channel (fun close_output ->
+      Tracing.with_span Tracing.fmt observer_failure_attrs (fun _ ->
+        incr effects;
+        close_output ();
+        42))
+  in
+  check int "operation result survives failed span finish" 42 result;
+  check int "completed effect is not replayed" 1 !effects
+;;
+
+let first_backtrace_location backtrace =
+  check bool "body backtrace is available" true
+    (Printexc.raw_backtrace_length backtrace > 0);
+  let slot = Printexc.get_raw_backtrace_slot backtrace 0 in
+  match Printexc.Slot.location (Printexc.convert_raw_backtrace_slot slot) with
+  | Some location -> location
+  | None -> fail "body raise location was not recorded"
+;;
+
+let test_fmt_finish_failure_preserves_body_exception () =
+  let was_recording = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace was_recording)
+    (fun () ->
+      let effects = ref 0 in
+      let original = Failure "body-failure" in
+      let origin = ref None in
+      let outcome =
+        with_private_fmt_channel (fun close_output ->
+          match
+            Tracing.with_span Tracing.fmt observer_failure_attrs (fun _ ->
+              incr effects;
+              close_output ();
+              try raise original with
+              | exn ->
+                let backtrace = Printexc.get_raw_backtrace () in
+                origin := Some backtrace;
+                Printexc.raise_with_backtrace exn backtrace)
+          with
+          | _ -> None
+          | exception observed ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            Some (observed, backtrace))
+      in
+      (* Alcotest's verbose assertions also use the formatter. Observe the
+         fault first and report only after restoring its healthy output. *)
+      match outcome, !origin with
+      | Some (observed, backtrace), Some original_backtrace ->
+          check bool "original exception object survives failed finish" true
+            (observed == original);
+          check int "failed effect is not replayed" 1 !effects;
+          check bool "original raise location survives failed finish" true
+            (first_backtrace_location backtrace = first_backtrace_location original_backtrace)
+      | None, _ -> fail "body exception was swallowed"
+      | Some _, None -> fail "body raise was not observed")
+;;
+
+let test_trace_context_failure_is_optional () =
+  let module Failing_context = struct
+    include Tracing.Null_tracer
+    let trace_context_headers () = raise (Sys_error "trace context unavailable")
+  end
+  in
+  check (list (pair string string)) "failed observation adds no trace headers" []
+    (Tracing.trace_context_headers (module Failing_context))
+;;
+
+let test_tracer_control_exceptions_propagate () =
+  let effects = ref 0 in
+  let module Interrupted_start = struct
+    include Tracing.Null_tracer
+    let with_span _attrs _f = raise Sys.Break
+  end
+  in
+  check_raises "reserved start failure does not enter the body" Sys.Break
+    (fun () ->
+      ignore (Tracing.with_span (module Interrupted_start) observer_failure_attrs
+        (fun _ -> incr effects)));
+  check int "interrupted start executed no effect" 0 !effects;
+  let module Interrupted_finish = struct
+    include Tracing.Null_tracer
+    let with_span _attrs f =
+      ignore (f ());
+      raise Sys.Break
+  end
+  in
+  check_raises "reserved finish failure still propagates" Sys.Break
+    (fun () ->
+      ignore (Tracing.with_span (module Interrupted_finish) observer_failure_attrs
+        (fun _ -> incr effects)));
+  check int "interrupted finish does not replay the effect" 1 !effects;
+  let module Interrupted_context = struct
+    include Tracing.Null_tracer
+    let trace_context_headers () = raise Sys.Break
+  end
+  in
+  check_raises "reserved context failure is not converted to missing context" Sys.Break
+    (fun () -> ignore (Tracing.trace_context_headers (module Interrupted_context)))
+;;
+
+let cleanup_failure_tracer ~before_body failure : Tracing.t =
+  let module Failing_cleanup = struct
+    include Tracing.Null_tracer
+    let with_span _attrs f =
+      if before_body then raise failure
+      else Fun.protect ~finally:(fun () -> raise failure) f
+    let trace_context_headers () = raise failure
+  end
+  in
+  (module Failing_cleanup)
+;;
+
+let test_wrapped_control_exceptions_propagate () =
+  let backtrace = Printexc.get_callstack 0 in
+  let cancellation = Eio.Cancel.Cancelled (Failure "cancelled test scope") in
+  let wrapped =
+    [ "cleanup interrupt", Fun.Finally_raised Sys.Break
+    ; "cleanup cancellation", Fun.Finally_raised cancellation
+    ; ( "parallel mixed cancellation"
+      , Eio.Exn.Multiple
+          [ Failure "other observer error", backtrace
+          ; cancellation, backtrace
+          ] )
+    ]
+  in
+  List.iter
+    (fun (label, failure) ->
+      let effects = ref 0 in
+      let before = cleanup_failure_tracer ~before_body:true failure in
+      check_raises (label ^ " before entry") failure (fun () ->
+        ignore (Tracing.with_span before observer_failure_attrs (fun _ -> incr effects)));
+      check int "wrapped control did not start the body" 0 !effects;
+      let after = cleanup_failure_tracer ~before_body:false failure in
+      check_raises (label ^ " after success") (Fun.Finally_raised failure)
+        (fun () ->
+          ignore (Tracing.with_span after observer_failure_attrs (fun _ -> incr effects)));
+      check int "wrapped control did not replay a completed effect" 1 !effects;
+      check_raises (label ^ " after a body failure") (Fun.Finally_raised failure)
+        (fun () ->
+          ignore (Tracing.with_span after observer_failure_attrs (fun _ ->
+            incr effects;
+            failwith "original body error")));
+      check int "wrapped control did not replay a failed effect" 2 !effects;
+      check_raises (label ^ " during context observation") failure
+        (fun () -> ignore (Tracing.trace_context_headers before)))
+    wrapped
+;;
+
+let test_ordinary_cleanup_failure_remains_diagnostic () =
+  let tracer = cleanup_failure_tracer ~before_body:false
+      (Failure "ordinary observer failure") in
+  let effects = ref 0 in
+  let result = Tracing.with_span tracer observer_failure_attrs (fun _ -> incr effects; 42) in
+  check int "ordinary cleanup failure preserves the value" 42 result;
+  let original = Failure "body error survives ordinary cleanup failure" in
+  (match Tracing.with_span tracer observer_failure_attrs (fun _ -> incr effects; raise original) with
+   | _ -> fail "ordinary cleanup failure swallowed the body error"
+   | exception observed -> check bool "original body exception" true (observed == original));
+  check int "neither effect was replayed" 2 !effects
+;;
+
 let () =
   run
     "Tracing"
@@ -258,10 +461,24 @@ let () =
       , [ test_case "success path" `Quick test_with_span_success
         ; test_case "exception path" `Quick test_with_span_exception
         ; test_case "exception ends span" `Quick test_with_span_exception_ends_span
+        ; test_case "Fmt start failure runs the operation once" `Quick
+            test_fmt_start_failure_runs_body_once
+        ; test_case "Fmt finish failure preserves the operation result" `Quick
+            test_fmt_finish_failure_preserves_result
+        ; test_case "Fmt finish failure preserves the body exception and origin" `Quick
+            test_fmt_finish_failure_preserves_body_exception
+        ; test_case "tracer control exceptions propagate" `Quick
+            test_tracer_control_exceptions_propagate
+        ; test_case "wrapped tracer controls propagate through cleanup" `Quick
+            test_wrapped_control_exceptions_propagate
+        ; test_case "ordinary cleanup failure remains diagnostic" `Quick
+            test_ordinary_cleanup_failure_remains_diagnostic
         ] )
     ; ( "custom"
       , [ test_case "recording tracer" `Quick test_custom_tracer
         ; test_case "trace context headers" `Quick test_trace_context_headers
+        ; test_case "trace context failure remains optional" `Quick
+            test_trace_context_failure_is_optional
         ] )
     ; "coverage", [ test_case "all span_kind variants" `Quick test_span_kind_coverage ]
     ]

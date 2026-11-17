@@ -134,12 +134,58 @@ let fmt : t = (module Fmt_tracer)
 
 let trace_context_headers (type a) (tracer : t) =
   let module T = (val tracer : TRACER) in
-  T.trace_context_headers ()
+  try T.trace_context_headers () with
+  | exn ->
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
+    []
 ;;
 
-(** Run [f] within a traced span. Delegates to [TRACER.with_span] so the
-    tracer can manage fiber-local context around [start_span]/[end_span]. *)
+type 'a body_outcome =
+  | Body_not_entered
+  | Body_running
+  | Body_returned of 'a
+  | Body_raised of exn * Printexc.raw_backtrace
+
+(** The wrapped operation owns its outcome. The tracer may fail before entry
+    or after an effect has already happened; only the first case admits an
+    untraced call. Keep the result and original exception/backtrace here,
+    rather than trusting a tracer's cleanup to preserve them. *)
 let with_span (type a) (tracer : t) (attrs : span_attrs) (f : t -> a) : a =
   let module T = (val tracer : TRACER) in
-  T.with_span attrs (fun () -> f tracer)
+  let body_outcome = ref Body_not_entered in
+  let body () =
+    match !body_outcome with
+    | Body_not_entered ->
+      body_outcome := Body_running;
+      (match f tracer with
+       | result ->
+         body_outcome := Body_returned result;
+         result
+       | exception exn ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         body_outcome := Body_raised (exn, backtrace);
+         Printexc.raise_with_backtrace exn backtrace)
+    | Body_returned result -> result
+    | Body_raised (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
+    | Body_running -> invalid_arg "tracer re-entered a running span body"
+  in
+  match T.with_span attrs body with
+  | result -> result
+  | exception observer_exn ->
+    let observer_backtrace = Printexc.get_raw_backtrace () in
+    (match !body_outcome with
+     | Body_not_entered ->
+       Llm_provider.Reserved_exn.reraise_if_reserved observer_exn;
+       body ()
+     | Body_returned result ->
+       Llm_provider.Reserved_exn.reraise_if_reserved observer_exn;
+       result
+     | Body_raised (body_exn, body_backtrace) ->
+       if observer_exn != body_exn
+       then Llm_provider.Reserved_exn.reraise_if_reserved observer_exn;
+       Printexc.raise_with_backtrace body_exn body_backtrace
+     | Body_running ->
+       (* A tracer that returned control while its body is still running has
+          no settled result to recover. Never launch the operation again. *)
+       Printexc.raise_with_backtrace observer_exn observer_backtrace)
 ;;

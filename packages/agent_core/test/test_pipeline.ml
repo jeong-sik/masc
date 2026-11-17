@@ -2246,6 +2246,162 @@ let test_trace_write_failure_keeps_execution fault () =
   | None -> Alcotest.fail "lifecycle missing"
 ;;
 
+(* Exercise the built-in tracer's real channel errors without closing the
+   process stderr descriptor. Only execute and collect observations here:
+   Alcotest reports assertions through the shared formatter too, so all
+   assertions belong after this helper restores it, including on exceptions. *)
+let with_private_fmt_channel f =
+  Format.pp_print_flush Format.err_formatter ();
+  let output = Format.pp_get_formatter_out_functions Format.err_formatter () in
+  let channel = Unix.out_channel_of_descr (Unix.dup Unix.stderr) in
+  let closed = ref false in
+  let close_trace () =
+    if not !closed then (
+      closed := true;
+      close_out channel)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Format.pp_set_formatter_out_functions Format.err_formatter output;
+      close_out_noerr channel;
+      Format.pp_print_flush Format.err_formatter ())
+    (fun () ->
+      Format.pp_set_formatter_out_channel Format.err_formatter channel;
+      f close_trace)
+;;
+
+type fmt_channel_fault =
+  | Fmt_start_closed
+  | Fmt_provider_finished_closed
+  | Fmt_tool_finished_closed
+
+let test_fmt_failure_keeps_durable_run fault () =
+  with_execution_test_dir "agent_core-fmt-observation-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let provider_calls = ref 0 and tool_calls = ref 0 in
+  let injected = ref false in
+  let completions = ref [] and locator = ref None in
+  let result, state, lifecycle = with_private_fmt_channel (fun close_trace ->
+    let break_trace () = injected := true; close_trace () in
+    let responses = ref
+      [ Provider_mock.tool_use_response
+          ~tool_name:"fmt_effect" ~tool_input:(`Assoc []) () []
+      ; Provider_mock.text_response ~input_tokens:7 ~output_tokens:3 "durable answer" []
+      ]
+    in
+    let next_response () =
+      incr provider_calls;
+      (match fault with
+       | Fmt_provider_finished_closed -> break_trace ()
+       | Fmt_start_closed | Fmt_tool_finished_closed -> ());
+      match !responses with
+      | response :: rest -> responses := rest; Ok response
+      (* Keep reporting outside the failed formatter. A replay still fails
+         the result and the exact provider-call assertion below. *)
+      | [] ->
+        Error (Llm_provider.Http_client.AcceptRejected
+          { reason = "tracer failure repeated a provider request" })
+    in
+    let transport = Llm_provider.Llm_transport.custom
+      { complete_sync = (fun _request ->
+          { Llm_provider.Llm_transport.response = next_response (); latency_ms = Some 0 })
+      ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ())
+      }
+    in
+    let tool = Tool.create ~name:"fmt_effect" ~description:"effect under a failed tracer"
+        ~parameters:[] (fun _ ->
+          incr tool_calls;
+          (match fault with
+           | Fmt_tool_finished_closed -> break_trace ()
+           | Fmt_start_closed | Fmt_provider_finished_closed -> ());
+          Ok { Types.content = "settled once"; content_blocks = None; _meta = None })
+    in
+    let agent = Agent.create ~media_store:(History.Memory_store.create ())
+        ~net:(Eio.Stdenv.net env)
+        ~config:{ (Types.default_config ~model:"test-model") with name = "fmt-observation" }
+        ~tools:[tool]
+        ~options:{ Agent.default_options with
+          transport = Some transport
+        ; provider_config = Some (Provider_mock.to_provider_config ())
+        ; tracer = Tracing.fmt
+        ; on_run_complete = Some (fun ok -> completions := ok :: !completions)
+        } ()
+    in
+    let store = Agent.execution_store ~runtime ~dir
+        ~on_scope_ready:(fun value -> locator := Some value; Ok ()) ()
+    in
+    (match fault with
+     | Fmt_start_closed -> break_trace ()
+     | Fmt_provider_finished_closed | Fmt_tool_finished_closed -> ());
+    let result = Agent.run ~sw ~execution_store:store agent "settle the effect" in
+    result, Agent.state agent, Agent.lifecycle agent)
+  in
+  (match result with
+   | Ok response ->
+     Alcotest.(check string) "provider answer survives Fmt failure"
+       "durable answer" (Types.text_of_response response)
+   | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check bool) "the selected channel fault occurred" true !injected;
+  Alcotest.(check int) "each provider turn executes once" 2 !provider_calls;
+  Alcotest.(check int) "external effect executes once" 1 !tool_calls;
+  Alcotest.(check (list bool)) "completion callback observes success once" [true] !completions;
+  Alcotest.(check int) "both accepted provider turns retain usage" 2 state.usage.api_calls;
+  Alcotest.(check int) "accepted input tokens survive" 7 state.usage.total_input_tokens;
+  Alcotest.(check int) "accepted output tokens survive" 3 state.usage.total_output_tokens;
+  (match lifecycle with
+   | Some snapshot ->
+     Alcotest.(check bool) "lifecycle completes" true (snapshot.status = Agent.Completed)
+   | None -> Alcotest.fail "lifecycle missing after Fmt fault");
+  let locator = match !locator with
+    | Some locator -> locator
+    | None -> Alcotest.fail "canonical locator missing after Fmt fault"
+  in
+  let projection = match Agent.open_execution_projection ~runtime ~dir locator with
+    | Ok projection -> projection
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error)
+  in
+  let terminal = match Agent.read_execution_terminal projection with
+    | Ok (Some terminal) -> terminal
+    | Ok None -> Alcotest.fail "Fmt failure left the canonical run open"
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error)
+  in
+  check_terminal_disposition ~outcome:"succeeded" ~recovery:"retire" (Some terminal.disposition);
+  Alcotest.(check int) "canonical journal settles the effect once" 1
+    (List.length terminal.settled_tool_results);
+  let latest = match Agent.Execution_projection.latest_checkpoint projection with
+    | Ok (Some latest) -> latest
+    | Ok None -> Alcotest.fail "canonical checkpoint missing after Fmt fault"
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error)
+  in
+  let checkpoint = match Checkpoint_snapshot.checkpoint latest.snapshot with
+    | Ok checkpoint -> checkpoint
+    | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error)
+  in
+  Alcotest.(check int) "canonical checkpoint retains both provider turns" 2
+    checkpoint.usage.api_calls;
+  let tool_results = List.concat_map (fun (message : Types.message) ->
+      List.filter_map (function
+        | Types.ToolResult {content; _} -> Some content
+        | _ -> None) message.content) checkpoint.messages
+  in
+  Alcotest.(check (list string)) "canonical checkpoint retains one tool result"
+    ["settled once"] tool_results
+;;
+
+(* Deliberately broken observation fixture: even a body exception is replaced
+   by an ordinary diagnostic exception. Agent.run must preserve its checkpoint
+   authority and real Eio cancellation through this public tracer boundary. *)
+let failing_scope_observer : Tracing.t =
+  (module struct
+    include Tracing.Null_tracer
+
+    let with_span _attrs f =
+      match f () with
+      | _ -> raise (Failure "injected tracer finalization failure")
+      | exception _ -> raise (Failure "injected tracer finalization failure")
+  end)
+;;
+
 exception Checkpoint_authority_refused
 
 let test_durable_turn_bus_uses_canonical_facts
@@ -2445,7 +2601,8 @@ let test_nested_execution_stores_use_their_own_bus_observers () =
     [dir,root_locator,root_subscription; child_dir,child_locator,child_subscription]
 ;;
 
-let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoint_failure () =
+let test_durable_tool_bus_uses_canonical_facts
+    ?(delivery_fault=false) ?(tracer=Tracing.null) ?checkpoint_failure () =
   with_execution_test_dir "agent_core-tool-observation-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let bus=Event_bus.create () in
@@ -2466,6 +2623,7 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoi
   let transport=Llm_provider.Llm_transport.custom
     {complete_sync=(fun _ -> {Llm_provider.Llm_transport.response=next ();latency_ms=None});
      complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> next ())} in
+  let checkpoint_exception = ref None in
   let checkpoint_sink=Option.map (fun fail (snapshot:Agent.checkpoint_snapshot) ->
     match snapshot.stage with
     | Agent.After_tool_results_appended ->
@@ -2478,12 +2636,17 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoi
         | Ok settled->settled
         | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error) in
       Alcotest.(check int) "effect committed before checkpoint observer failure" 1 (List.length settled);
-      fail ()
+      (match fail () with
+       | result -> result
+       | exception exn ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         checkpoint_exception := Some exn;
+         Printexc.raise_with_backtrace exn backtrace)
     | Agent.After_assistant_collected | Agent.After_context_injection
     | Agent.After_input_wait_changed | Agent.After_rejected_response_dropped -> Ok ()) checkpoint_failure in
   let agent=Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env) ~tools:[tool] ?checkpoint_sink
       ~config:{(Types.default_config ~model:"test-model") with name="canonical-bus"}
-      ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;
+      ~options:{Agent.default_options with transport=Some transport;event_bus=Some bus;tracer;
         provider_config=Some (Provider_mock.to_provider_config ())} () in
   let store=Agent.execution_store ~runtime ~dir
       ~on_scope_ready:(fun value ->locator:=Some value;Ok ()) () in
@@ -2519,8 +2682,18 @@ let test_durable_tool_bus_uses_canonical_facts ?(delivery_fault=false) ?checkpoi
            | Ok ()->() |Error error->Alcotest.fail (Internal_scope.error_to_string error));
           result) with
       | Ok result->result |Error error->Alcotest.fail (Internal_writer.scope_failure_to_string error) in
+  let observed_checkpoint_exception = ref None in
   let outcome=try run () with
-    | Checkpoint_authority_refused -> Error (Error.Internal "required checkpoint authority raised") in
+    | Checkpoint_authority_refused as exn ->
+      observed_checkpoint_exception := Some exn;
+      Error (Error.Internal "required checkpoint authority raised") in
+  (match !checkpoint_exception with
+   | None -> ()
+   | Some expected ->
+     Alcotest.(check bool) "the original checkpoint exception reaches the caller" true
+       (match !observed_checkpoint_exception with
+        | Some actual -> actual == expected
+        | None -> false));
   match checkpoint_failure with
   | Some _ ->
     Alcotest.(check bool) "required checkpoint authority refusal rejects continuation" true
@@ -2691,7 +2864,7 @@ type native_cancel_boundary = Before_callback | Provider_wait | Tool_effect
 (* Raising Cancelled directly does not cancel the writer's parent context.
    Exercise real cancellation while the provider or a tool is in flight, then
    read the canonical journal after the caller has finished unwinding. *)
-let test_native_parent_cancellation ?(resumed = false) source boundary () =
+let test_native_parent_cancellation ?(resumed = false) ?(tracer = Tracing.null) source boundary () =
   with_execution_test_dir "agent_core-native-parent-cancel-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let locator = ref None in
@@ -2779,7 +2952,7 @@ let test_native_parent_cancellation ?(resumed = false) source boundary () =
     let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:(Eio.Stdenv.net env)
         ~config:{(Types.default_config ~model:"test-model") with name="native-parent-cancel"}
         ~tools:[tool]
-        ~options:{Agent.default_options with transport=Some transport;
+        ~options:{Agent.default_options with transport=Some transport;tracer;
           provider_config=Some (Provider_mock.to_provider_config ())} ()
     in
     if resumed then Agent.set_state agent
@@ -6091,6 +6264,18 @@ let () =
             "trace write failure keeps a blocking hook decision"
             `Quick
             (test_trace_write_failure_keeps_execution Trace_fails_under_blocking_hook)
+        ; Alcotest.test_case
+            "Fmt start failure preserves the durable run"
+            `Quick
+            (test_fmt_failure_keeps_durable_run Fmt_start_closed)
+        ; Alcotest.test_case
+            "Fmt provider finish failure preserves the durable run"
+            `Quick
+            (test_fmt_failure_keeps_durable_run Fmt_provider_finished_closed)
+        ; Alcotest.test_case
+            "Fmt tool finish failure preserves the durable run"
+            `Quick
+            (test_fmt_failure_keeps_durable_run Fmt_tool_finished_closed)
         ; Alcotest.test_case "durable turn observations keep committed identity" `Quick
             (test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint:false)
         ; Alcotest.test_case "caller-owned checkpoint preserves canonical turn observations" `Quick
@@ -6110,6 +6295,10 @@ let () =
               ~checkpoint_failure:(fun () -> Error "checkpoint delivery refused"))
         ; Alcotest.test_case "required checkpoint sink exception refuses continuation" `Quick
             (test_durable_tool_bus_uses_canonical_facts
+              ~checkpoint_failure:(fun () -> raise Checkpoint_authority_refused))
+        ; Alcotest.test_case "tracer failure preserves checkpoint authority refusal" `Quick
+            (test_durable_tool_bus_uses_canonical_facts
+              ~tracer:failing_scope_observer
               ~checkpoint_failure:(fun () -> raise Checkpoint_authority_refused))
         ; Alcotest.test_case
             "durable tool partial delivery retains source cursor"
@@ -6153,6 +6342,16 @@ let () =
             "parent cancellation preserves unknown tool effects"
             `Quick
             (test_native_parent_cancellation Parent_switch Tool_effect)
+        ; Alcotest.test_case
+            "tracer failure preserves real nested provider cancellation"
+            `Quick
+            (test_native_parent_cancellation ~tracer:failing_scope_observer
+              Nested_context Provider_wait)
+        ; Alcotest.test_case
+            "tracer failure preserves real cancelled tool uncertainty"
+            `Quick
+            (test_native_parent_cancellation ~tracer:failing_scope_observer
+              Parent_switch Tool_effect)
         ] )
     ]
 ;;

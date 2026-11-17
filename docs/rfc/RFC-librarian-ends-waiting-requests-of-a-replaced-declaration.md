@@ -213,7 +213,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
   - guard 를 부르는 자리는 둘이다. `run` 이 실행을 시작하기 전에 한 번 부르고, walk 가 slot 마다 부른다(`run` 안의 `before_dispatch`).
   - 생성 요청(`Generation`) 앞에서는 시작 표시를 먼저 저장하고 그 뒤에 guard 를 부른다(#51269). 계량 요청(`Measurement`) 앞에서는 guard 만 부른다.
   - HTTP slot 에서 거절되면 walk 가 그 자리에서 멈춘다. 끝 저장이 그 시도를 미뤄진 시도(`Deferred`)로 적는다(`lib/server/server_lane_addon_exact.ml` 117~119행, 146~157행). 방금 쓴 시작 표시는 그 저장에서 `Deferred` 로 바뀐다. 다음 cycle 에 위 갈래로 온다.
-  - CLI slot 에서 거절되면 예외로 끝나고, 끝 저장이 그 시도를 `raised` 로 적는다(같은 파일 174~177행, 225~229행, `lane_addon_exact.ml` 995행). CLI walker 의 관찰 함수가 값을 돌려주지 못해서다(`lib/keeper/keeper_lane_cli_oneshot.ml` 400행). `raised` 원본은 끝내는 길이 없다.
+  - L1b 이전에는 CLI slot에서 거절되면 예외로 끝나고, 끝 저장이 그 시도를 `raised`로 적었다(같은 파일 174~177행, 225~229행, `lane_addon_exact.ml` 995행). CLI walker의 관찰 함수가 값을 돌려주지 못해서였다(`lib/keeper/keeper_lane_cli_oneshot.ml` 400행). 이 정책은 이미 남은 `raised` 원본의 종료 권한을 더하지 않는다.
   - guard 가 거절했다는 것은 그 slot 에 보내지 않았다는 뜻이다. 결과를 모르는 것이 아니다. CLI walker 가 보내기 전의 거절을 값으로 받아 그 자리에서 멈추게 한다. 그 시도는 HTTP 와 같이 `Deferred` 로 남고 다음 cycle 에 위 갈래로 온다(7절의 L1b, #51343).
   - walk 안의 guard 에는 두 결과를 글자로 바꿔 넘긴다. walk 안에서는 어느 쪽이든 멈추기만 한다.
 - 실행이 취소되어 끊긴 요청은 3.5 에 있다.
@@ -312,6 +312,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 ### 3.8 이미 받은 답과 미실행 Gate
 
 - 운영자는 답을 보존하고 Gate를 이어가는 쪽을 선택했다(9.3). history·floor step·admission에 같은 정책을 적용한다.
+- 이 절의 Gate 재개는 흡수 판정이나 반영이 남은 답에 적용한다. admission의 `Deferred` 판정은 보존하되 Gate·Memory 반영을 기다리는 답으로 취급하지 않는다. 그 미소비 후보는 3.9의 전체 재판단에 포함한다.
 - 원래 host 답과 proof를 먼저 확인한다. 받은 답을 새 Librarian 요청의 결과로 바꾸거나 다시 묻지 않는다.
 - 새 Gate 실행 전에는 같은 물리 Keeper·Memory epoch·설치·package·tool이며, 현재 선언으로 준비된 worker인지 확인한다.
 - 선언 revision만 달라졌다는 이유로 Gate를 막지 않는다. 다른 owner·설치·package·tool이나 준비되지 않은 worker는 권한을 주지 않는다.
@@ -323,7 +324,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 
 - part나 실행이 명시적인 선언 교체 종료 조건을 충족하면 미소비 묶음 전체를 새 root 요청으로 다시 판단한다(9.4).
 - 한 part의 종료가 형제 part나 실행의 권한을 대신하지 않는다. 인계 전에 묶음 전체 frontier와 각 연결 실행을 확인한다.
-- 이미 받은 미반영 답이 있으면 기존 원본의 Gate·Memory·receipt·ACK 경로를 먼저 마친다(3.8). 그 답을 새 root에 넣어 다시 판단하지 않는다.
+- Gate·반영이 남은 `Accepted` 답이 있으면 기존 원본의 Gate·Memory·receipt·ACK 경로를 먼저 마친다(3.8). 그 답을 새 root에 넣어 다시 판단하지 않는다. `Deferred` 후보에는 Gate나 소비 receipt를 먼저 요구하지 않고 아래의 인계 대상에 남긴다.
 - 접수됐거나 전송 중인 실행, 결과 불명, Cut·Raised가 미해소 상태로 남아 있으면 전체 인계를 보류한다. 다른 part의 교체 종료에 동승해 다시 실행하지 않는다.
 - 그 뒤 남은 모든 후보가 `Deferred` 판정이거나 엄격하게 검증된 교체 종료로 인계 가능한지 확인하고, 남은 미소비 묶음 전체를 새 root로 넘긴다.
 - 같은 묶음에서 이미 `Deferred`였던 후보도 포함한다. 후보별로 소유권을 쪼개 이어가지 않는다.
@@ -331,7 +332,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 실행 요청을 아직 만들지 않은 part는 전체 실행 inventory에서 자신을 가리키는 실행이 실제로 없는지 확인한다. 가짜 capture나 실행 부재 증거를 만들지 않는다.
 - 새 root의 전체 후보·원본·목적지 결속과 이전 root의 소유권을 저장하고 확인한다. 재시작이나 선언 rollback 뒤에도 같은 새 root를 복구한다.
 - 종료 사실 하나를 반복 사용해 새 root를 계속 만들지 않는다. 이전 part와 실행은 실제 후속 완료와 전체 후보 receipt·ACK가 확인된 뒤 정리한다.
-- admission Cut·Raised와 이미 받은 미반영 답은 새 root를 허용하는 종료 사유가 아니다. 받은 답은 3.8의 Gate 정책을 따른다.
+- admission Cut·Raised와 Gate·반영이 남은 `Accepted` 답은 새 root를 허용하는 종료 사유가 아니다. 그런 답은 3.8의 Gate 정책을 따른다. `Deferred`와 구분한다.
 
 ## 4. 순서 따라가기
 
@@ -491,15 +492,15 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
   - 옛 실행이 claim을 놓지 않았거나 효과 차단을 확인하지 못하면 후속 Memory 반영·source 소비·ACK를 하지 않는다. 관찰 fiber만 취소한 경우도 포함한다.
   - Memory receipt가 없거나 다른 원본을 가리키면 source를 소비하지 않는다. 일부 ACK 뒤 재시작해도 증명된 부분만 복원한다.
 - Gate
-  - history·floor step·admission에서 받은 답과 proof를 먼저 복원하고, 같은 물리 Keeper·Memory epoch·설치·package·tool과 준비된 worker일 때만 미실행 Gate를 보낸다.
+  - history·floor step·admission에서 Gate 대상 답과 proof를 먼저 복원하고, 같은 물리 Keeper·Memory epoch·설치·package·tool과 준비된 worker일 때만 미실행 Gate를 보낸다.
   - owner·epoch·설치·package·tool이 다르거나 worker가 준비되지 않으면 새 Gate를 보내지 않는다.
   - 이미 받은 판정은 보존한다. 이미 전송했거나 결과 불명인 Gate를 미실행으로 바꾸어 다시 보내지 않는다. 받은 답을 원본 재전송 권한으로 쓰지 않는다.
 - admission
   - 전체 frontier가 인계 가능한지 확인한 뒤 교체로 끝난 후보와 Deferred 후보가 섞인 남은 미소비 묶음 전체를 새 root로 재판단한다. 실제 소비 receipt·ACK가 있는 후보만 제외한다.
-  - 한 후보가 교체로 끝났어도 형제 실행이 접수·전송 중이거나 Unknown·Cut·Raised가 미해소 상태면 전체 인계를 보류한다. 받은 답이 있는 형제는 기존 Gate·Memory·ACK로 먼저 마치고 새 root에 재포함하지 않는다.
+  - 한 후보가 교체로 끝났어도 형제 실행이 접수·전송 중이거나 Unknown·Cut·Raised가 미해소 상태면 전체 인계를 보류한다. Gate·반영이 남은 `Accepted` 답을 가진 형제는 기존 Gate·Memory·ACK로 먼저 마치고 새 root에 재포함하지 않는다. `Deferred` 후보는 Gate나 소비 receipt를 먼저 요구하지 않고 새 묶음에 포함한다.
   - 실행을 아직 만들지 않은 part도 전체 inventory에서 연결 실행의 부재를 확인한다. 일부 목록만 읽었거나 연결 실행이 남아 있으면 교체하지 않는다.
   - 새 root 준비 전후·소유권 인계 전후에 멈춰도 같은 묶음을 복원한다. rollback 후에도 후보 누락·중복 소유·반복 root가 없다.
-  - admission Cut·Raised·받은 미반영 답은 묶음 교체 사유가 아니며 다른 후보의 종료에도 동승하지 않는다. 받은 답은 Gate 경로로 이어간다.
+  - admission Cut·Raised·Gate·반영이 남은 `Accepted` 답은 묶음 교체 사유가 아니며 다른 후보의 종료에도 동승하지 않는다. Gate 대상 답은 기존 Gate 경로로 이어간다.
 - 변이
   - CLI walker 가 guard 거절을 다시 예외로 던지게 하면 CLI 시험이 `raised` 로 실패한다.
   - `Declaration_replaced` 를 `Not_now` 로 바꾸면 host 시험이 실패한다.
@@ -529,11 +530,11 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
 
 ### 9.3 받은 답은 보존하고 미실행 Gate를 이어간다
 
-같은 물리 Keeper·Memory epoch·설치·package·tool과 준비된 worker라면 새 선언에서 미실행 Gate를 이어간다. 이미 받은 판정, 이미 전송한 Gate의 결과와 불확실성은 보존한다. 원래 Librarian 요청을 다시 보내지 않는다.
+같은 물리 Keeper·Memory epoch·설치·package·tool과 준비된 worker라면 새 선언에서 미실행 Gate를 이어간다. 이미 받은 판정, 이미 전송한 Gate의 결과와 불확실성은 보존한다. 원래 Librarian 요청을 다시 보내지 않는다. Gate 대상이 아닌 admission `Deferred` 후보는 3.9의 전체 재판단을 따른다.
 
 ### 9.4 보류 후보와 종료 후보가 섞인 admission 묶음은 전체를 다시 판단한다
 
-3.9의 전체 frontier 확인을 거친 뒤 남은 미소비 묶음 전체를 새 root 요청으로 판단한다. 기존 보류 후보도 포함하고, 실제 receipt·ACK로 소비된 후보는 제외한다. 받은 답은 기존 Gate·Memory·ACK 경로로 먼저 마치며 미해소 실행이 있으면 전체 인계를 보류한다. 모델 호출이 더 생길 수 있는 대가를 받아들이되, 같은 종료 증거로 root를 반복 생성하거나 후보를 잃지 않는다.
+3.9의 전체 frontier 확인을 거친 뒤 남은 미소비 묶음 전체를 새 root 요청으로 판단한다. 기존 보류 후보도 포함하고, 실제 receipt·ACK로 소비된 후보는 제외한다. Gate·반영이 남은 `Accepted` 답은 기존 Gate·Memory·ACK 경로로 먼저 마치며 미해소 실행이 있으면 전체 인계를 보류한다. `Deferred` 후보에는 Gate나 소비 receipt를 먼저 요구하지 않는다. 모델 호출이 더 생길 수 있는 대가를 받아들이되, 같은 종료 증거로 root를 반복 생성하거나 후보를 잃지 않는다.
 
 ## 10. 관련
 

@@ -28,8 +28,8 @@ async function refreshServerConfigSurface(): Promise<void> {
 async function refreshActiveKeeperChatSurface(): Promise<void> {
   const { refreshActiveKeeperChatHistory } = await import('./keeper-runtime')
   // Guard-respecting (non-force): a no-op while the open keeper's transcript
-  // is already hydrated, so route visits and the periodic refresh do not poll
-  // the history endpoint. The SSE reconnect path forces its own re-hydration.
+  // is already hydrated, so route visits do not re-read the history
+  // endpoint. The SSE reconnect path forces its own re-hydration.
   refreshActiveKeeperChatHistory()
 }
 
@@ -55,8 +55,9 @@ type RefreshTask =
 //            each declare their own view-aware or static refresh plan.
 //   Tier 2 — hidden diagnostic sections (
 //            transport-health) share an identical light
-//            fallback plan. Their mounted panels own telemetry polling, so
-//            route visits only need to refresh namespace/mission context.
+//            fallback plan. Their mounted panels own their telemetry
+//            observations, so route visits only need to refresh
+//            namespace/mission context.
 //   Outliers — `journey` (execution only) keeps a dedicated branch above.
 const HIDDEN_DIAGNOSTIC_FALLBACK_PLAN: readonly RefreshTask[] = ['namespaceTruth', 'missionSnapshot']
 
@@ -106,7 +107,7 @@ function surfaceRefreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         if (view === 'tool-quality') return ['toolQuality']
         if (view === 'comparison') return ['execution', 'toolQuality']
         // default + event-log + Gate: keep the route visit light.
-        // Mounted fleet-health panels own telemetry/tool/Gate polling.
+        // Mounted fleet-health panels own their telemetry/tool/Gate observations.
         return ['namespaceTruth']
       }
       // Hidden diagnostic sections fall through here. See the

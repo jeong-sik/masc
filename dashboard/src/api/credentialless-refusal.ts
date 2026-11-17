@@ -2,7 +2,7 @@ import { isRecord } from '../lib/type-guards'
 
 /* A request that carries no credential and is answered 401 `missing_token`
    names a route that needs a credential. The same request without one gets
-   the same answer until a credential is stored, so a page that keeps polling
+   the same answer until a credential is stored, so a page that keeps reading
    without one (a remote tab after its token was cleared) only resends a
    refusal. The answer is kept per route and per stored-token revision, and a
    request with no credential to that route is answered from it. Storing or

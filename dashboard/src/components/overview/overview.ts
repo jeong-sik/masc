@@ -1324,9 +1324,9 @@ export function Overview() {
     const dispose = setupObservationRefresh(signal => loadOverviewTelemetry(Date.now(), signal), { topics: ['telemetry'], cancelRead: () => overviewTelemetryResource.reset(), readError: () => overviewTelemetryResource.readError(), resetRead: () => overviewTelemetryResource.reset() })
     // Overview and the shell consume one shared full-health resource. The
     // subscriber owns ref-counted refresh lifetime, so mounting both surfaces
-    // never creates a second backend poller.
+    // never opens a second backend read.
     const stopFullHealthRefresh = subscribeDashboardFullHealthRefresh()
-    // Schedule state is its own projection with its own poller. Root used to
+    // Schedule state is its own projection with its own observation. Root used to
     // reach it through the tool inventory, which meant entering the home
     // surface fetched the whole tool registry.
     const stopScheduleRefresh = subscribeScheduledAutomationRefresh()

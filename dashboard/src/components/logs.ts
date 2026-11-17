@@ -82,10 +82,10 @@ const logLimit = signal(DEFAULT_LOG_LIMIT)
 const kindFilter = signal<LogDisplayKind | ''>('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
-// "load older" backward paging: the merge cap is derived per-poll by
+// "load older" backward paging: the merge cap is derived per delta frame by
 // [deltaMergeCap] from the currently shown rows, so it does not need to persist
 // in a signal. [pagedOlder] records whether the view has been expanded past the
-// base limit; while it is false the delta poller keeps a fixed newest-N sliding
+// base limit; while it is false each delta frame keeps a fixed newest-N sliding
 // window (bounded memory, steady state), and once true the cap grows to cover
 // every shown row plus genuinely-new rows so neither path evicts history the
 // operator paged into.
@@ -196,12 +196,12 @@ export function mergeLogEntries(
     .slice(0, Math.max(1, maxEntries))
 }
 
-// Cap for the delta poll's merge with the currently loaded rows.
+// Cap for a delta frame's merge with the currently loaded rows.
 // Un-paged steady state: a fixed newest-N sliding window ([baseLimit]) so memory
 // stays bounded and old rows roll off as new ones arrive.
 // Paged-open (operator used "load older"): keep EVERY currently shown row plus
 // the genuinely-new (non-overlapping) incoming rows, so newest-first slicing in
-// [mergeLogEntries] cannot evict the just-paged-in oldest rows on the next poll.
+// [mergeLogEntries] cannot evict the just-paged-in oldest rows on the next frame.
 export function deltaMergeCap(
   current: readonly LogEntry[],
   incoming: readonly LogEntry[],
@@ -930,7 +930,7 @@ export function LogViewer() {
   const logError = nativeLogError.value?.message ?? (s._tag === 'Failure' ? s.error.message : undefined)
   // summarizeLogWindow iterates the full entries array (counts errors/warnings,
   // builds cause/module Maps). When logData is loaded the entries ref is stable
-  // across unrelated re-renders (toolbar interactions, polling status flips);
+  // across unrelated re-renders (toolbar interactions, stream status flips);
   // memoizing on [logEntries] skips the recount. In the loading state logEntries
   // is a fresh `[]` so the memo misses, but the derivation is cheap then.
   const summary = useMemo(() => summarizeLogWindow(logEntries), [logEntries])

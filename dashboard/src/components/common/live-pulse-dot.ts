@@ -1,84 +1,62 @@
-// LivePulseDot — tiny pulsing dot that answers "is polling still live?".
+// LivePulseDot — tiny pulsing dot that answers "is the live stream connected?".
 //
-// Reference UIs (Datadog host-list "live" column, Grafana dashboard
-// refresh indicator, GitHub Status page): a pulsing green dot beside
-// the section header says "data under this header is being refreshed
-// right now". When the dot stops pulsing (stale) or goes idle (never
-// sampled), the operator immediately sees that the view is frozen —
-// a frozen heartbeat strip looks identical to a legitimately stable
-// one, so this indicator is the only surface that tells them apart.
-//
-// Pure classifier — a test pins the threshold math so a future change
-// to HEARTBEAT_SAMPLE_MS doesn't silently break the stale banding.
+// The dashboard learns about changes over one SSE observer stream
+// (dashboard-observer.ts). While that stream is admitted the data under the
+// header follows the server; otherwise the view stays on its last read. A
+// silent stream is closed by its idle deadline, so the observer's phase alone
+// says whether the page is following, and whether it is trying to again.
 
 import { html } from 'htm/preact'
+import { dashboardObserverPhase, type DashboardObserverPhase } from '../../dashboard-observer-state'
 
-type LivePulseState = 'live' | 'stale' | 'idle'
+type LivePulseTone = 'live' | 'waiting' | 'down'
 
 interface LivePulseView {
-  state: LivePulseState
+  tone: LivePulseTone
   /** Human-readable status tucked into title/aria so hover + AT both
       explain what the dot means without a separate tooltip chip. */
   label: string
 }
 
-/** Pure: classify the pulse state from the last-tick timestamp.
-    - `idle`: sampler has never fired (null). Grey dot, no pulse.
-    - `live`: last tick within 2× the sample interval — the operator's
-      view is fresh. Green dot, breathing pulse.
-    - `stale`: last tick older than 2× interval — sampler is frozen or
-      tab was backgrounded. Amber dot, no pulse.
-    2× threshold mirrors Datadog's "missed one expected heartbeat →
-    still healthy; missed two → something's wrong" convention, tolerant
-    of one-off scheduling jitter. */
-export function classifyLivePulse(
-  lastTickMs: number | null,
-  nowMs: number,
-  sampleIntervalMs: number,
-): LivePulseView {
-  if (lastTickMs === null) {
-    return { state: 'idle', label: 'Live polling · 샘플 대기 중' }
+/** Pure: the dot for each observer phase. */
+export function classifyLivePulse(phase: DashboardObserverPhase): LivePulseView {
+  switch (phase) {
+    case 'live':
+      return { tone: 'live', label: '실시간 연결 · 서버 변경을 받는 중' }
+    case 'connecting':
+      return { tone: 'waiting', label: '실시간 연결 · 연결하는 중' }
+    case 'retrying':
+      return { tone: 'down', label: '실시간 연결 끊김 · 다시 연결하는 중' }
+    case 'refused':
+      return { tone: 'down', label: '실시간 연결 거부됨 · 인증을 확인해야 다시 연결해요' }
+    case 'stopped':
+      return { tone: 'waiting', label: '실시간 연결 안 함' }
   }
-  const ageMs = nowMs - lastTickMs
-  if (ageMs > sampleIntervalMs * 2) {
-    const ageSec = Math.max(1, Math.floor(ageMs / 1000))
-    return { state: 'stale', label: `Live polling · 샘플 멈춤 (${ageSec}s ago)` }
-  }
-  return { state: 'live', label: 'Live polling · 샘플링 정상' }
 }
 
 const DOT_BASE = 'inline-block h-2 w-2 rounded-full'
 
-const DOT_TONE: Record<LivePulseState, string> = {
+const DOT_TONE: Record<LivePulseTone, string> = {
   live: 'bg-[var(--ok-10)] animate-pulse shadow-[0_0_6px_rgb(var(--ok-glow)/0.6)]',
-  stale: 'bg-[var(--warn-10)]',
-  idle: 'bg-[var(--color-bg-hover)]',
+  waiting: 'bg-[var(--color-bg-hover)]',
+  down: 'bg-[var(--warn-10)]',
 }
 
 interface LivePulseDotProps {
-  lastTickMs: number | null
-  nowMs: number
-  sampleIntervalMs: number
   class?: string
   testId?: string
 }
 
-export function LivePulseDot({
-  lastTickMs,
-  nowMs,
-  sampleIntervalMs,
-  class: cx,
-  testId,
-}: LivePulseDotProps) {
-  const view = classifyLivePulse(lastTickMs, nowMs, sampleIntervalMs)
-  const tone = DOT_TONE[view.state]
+export function LivePulseDot({ class: cx, testId }: LivePulseDotProps) {
+  const phase = dashboardObserverPhase.value
+  const view = classifyLivePulse(phase)
   return html`<span
-    class=${`${DOT_BASE} ${tone} ${cx ?? ''}`}
+    class=${`${DOT_BASE} ${DOT_TONE[view.tone]} ${cx ?? ''}`}
     role="img"
     aria-label=${view.label}
     title=${view.label}
     data-live-pulse-dot
-    data-live-pulse-state=${view.state}
+    data-live-pulse-state=${phase}
     data-testid=${testId}
   ></span>`
 }

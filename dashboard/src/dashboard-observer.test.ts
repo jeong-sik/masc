@@ -27,7 +27,7 @@ vi.mock('./sse-store', () => ({ routeServerPushEvent: mocks.route }))
 vi.mock('./sse', () => ({ recordServerPushEvent: mocks.record }))
 
 import { connectDashboardObserver, disconnectDashboardObserver, receiveDashboardObserverEvent } from './dashboard-observer'
-import { dashboardObserverReady, dashboardObserverAdmissionCount, _resetDashboardObserverCounterForTests } from './dashboard-observer-state'
+import { dashboardObserverReady, dashboardObserverAdmissionCount, dashboardObserverPhase, _resetDashboardObserverCounterForTests } from './dashboard-observer-state'
 import * as observerState from './dashboard-observer-state'
 import { subscribeDashboardObservation } from './lib/observation-refresh'
 import { TRANSPORT_RETRY_BASE_MS } from './config/constants'
@@ -129,11 +129,14 @@ describe('Dashboard observation SSE', () => {
     mocks.fetch.mockImplementation(() => Promise.resolve(response()))
     connectDashboardObserver()
     await flush()
+    expect(dashboardObserverPhase.peek()).toBe('live')
     source.close()
     await flush()
     expect(dashboardObserverReady.peek()).toBe(false)
+    expect(dashboardObserverPhase.peek()).toBe('retrying')
     await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS)
     expect(dashboardObserverAdmissionCount.peek()).toBe(2)
+    expect(dashboardObserverPhase.peek()).toBe('live')
     expect(mocks.fetch).toHaveBeenCalledTimes(2)
     expect(mocks.fetch.mock.calls[1]![1].headers).not.toHaveProperty('Last-Event-ID')
   })
@@ -156,10 +159,12 @@ describe('Dashboard observation SSE', () => {
     await vi.advanceTimersByTimeAsync(300_000)
     expect(mocks.fetch).toHaveBeenCalledTimes(1)
     if (status === 403) expect(mocks.refresh).not.toHaveBeenCalled()
+    expect(dashboardObserverPhase.peek()).toBe('refused')
     mocks.fetch.mockResolvedValue(response())
     mocks.changed?.()
     await flush()
     expect(dashboardObserverReady.peek()).toBe(true)
+    expect(dashboardObserverPhase.peek()).toBe('live')
   })
 
   it('does not remint again if the renewed credential is also refused', async () => {

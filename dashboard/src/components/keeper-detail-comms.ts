@@ -14,7 +14,7 @@ export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   const isOffline = isKeeperOffline(keeper)
 
   // The conversation panel stays mounted even while the keeper is
-  // offline: a transient offline flip during a status poll used to
+  // offline: a transient offline flip during a status read used to
   // unmount the panel and drop the draft text and scroll position.
   // Past transcript stays readable; only new sends need a live keeper.
   return html`

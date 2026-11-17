@@ -3,7 +3,7 @@
 // The running-turn slot lives in the server's Keeper Owner (process
 // memory), not in the keeper snapshots the roster renders from, so the
 // "answering now" badge has to ask this projection — same reason the TUI
-// polls it. One row per registered keeper; `turn` is null while idle.
+// reads it. One row per registered keeper; `turn` is null while idle.
 
 import { get, type AbortableRequestOptions } from './core'
 
@@ -34,7 +34,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 /** Strict-enough normalization: an unknown schema or a mistyped row is an
  *  error, not a silently defaulted fleet — a badge drawn from a shape we do
- *  not recognize would claim knowledge the poll does not have. */
+ *  not recognize would claim knowledge the read does not have. */
 export function normalizeKeeperTurnsResponse(raw: unknown): KeeperTurnsResponse {
   const record = asRecord(raw)
   if (!record) throw new Error('keeper turns: response is not an object')

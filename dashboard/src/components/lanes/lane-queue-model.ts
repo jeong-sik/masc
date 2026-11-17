@@ -35,9 +35,27 @@ export { drainStateOfEvidence }
 /** Observation window of the swimlane, seconds (design WINDOW_S = 20분). */
 export const LANE_QUEUE_WINDOW_S = 1200
 
-/** Observation buffer depth per keeper. At the 30 s fleet poll cadence this
- *  covers the full 20-minute window plus one boundary sample. */
-export const LANE_QUEUE_MAX_OBSERVATIONS = 41
+/** Keep the observations the swimlane window can draw: every one inside
+ *  [newest - LANE_QUEUE_WINDOW_S, newest], plus the newest one before it, which
+ *  says what each lane held when the window opens. Observations arrive per
+ *  change, so a count cap would cut a busy Keeper's window short. The window is
+ *  read from timestamps, not positions: a snapshot without a server `ts` is
+ *  stamped with the browser clock, so arrival order need not be time order.
+ *  The result is sorted by ts. */
+export function retainLaneWindow<T extends { ts: number }>(observations: readonly T[]): T[] {
+  if (observations.length === 0) return []
+  const newest = observations.reduce((max, observation) => Math.max(max, observation.ts), -Infinity)
+  const windowStart = newest - LANE_QUEUE_WINDOW_S
+  const before = observations.filter(observation => observation.ts < windowStart)
+  const opening = before.length === 0
+    ? undefined
+    : before.reduce((latest, observation) => (observation.ts > latest.ts ? observation : latest))
+  // The swimlane reads segments by position, so the kept window is returned
+  // in time order with the opening observation first.
+  return observations
+    .filter(observation => observation.ts >= windowStart || observation === opening)
+    .sort((left, right) => left.ts - right.ts)
+}
 
 const SECONDS_PER_MINUTE = 60
 const HOUR_MINUTES = 60

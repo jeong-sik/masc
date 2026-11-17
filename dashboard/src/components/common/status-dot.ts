@@ -14,7 +14,7 @@
 // via `class` so it composes with existing helpers instead of
 // duplicating them — the shared invariants are size + shape + shrink.
 //
-// Distinct from LivePulseDot (animate-pulse "is polling live?"
+// Distinct from LivePulseDot (animate-pulse "is the live stream connected?"
 // indicator): StatusDot is the static per-row state marker. Pairing
 // them is expected (LivePulseDot for the top of a list, StatusDot
 // per row).

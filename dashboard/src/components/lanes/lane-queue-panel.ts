@@ -67,7 +67,7 @@ import {
   DRAIN_QUEUE_AXIS,
   DRAIN_REACTION_AXIS,
   LANE_QUEUE_LANES,
-  LANE_QUEUE_MAX_OBSERVATIONS,
+  retainLaneWindow,
   LANE_QUEUE_WINDOW_S,
   LANE_STAGES,
   LANE_STAGE_LABELS,
@@ -145,9 +145,9 @@ export function ingestLaneQueueFleetSnapshot(snapshot: FleetCompositeSnapshot | 
     if (!name) continue
     const previous = nextBuffers[name] ?? []
     const ts = typeof snap.ts === 'number' && snap.ts > 0 ? snap.ts : fallbackTs
-    const merged = appendCompositeObservation(previous, observeSnapshot(snap, ts), LANE_QUEUE_MAX_OBSERVATIONS)
-    if (merged !== previous) {
-      nextBuffers[name] = merged
+    const appended = appendCompositeObservation(previous, observeSnapshot(snap, ts), Number.POSITIVE_INFINITY)
+    if (appended !== previous) {
+      nextBuffers[name] = retainLaneWindow(appended)
       buffersChanged = true
     }
     nextSnapshots[name] = snap

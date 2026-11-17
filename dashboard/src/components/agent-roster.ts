@@ -821,8 +821,9 @@ export function countRuntimeKinds(
 }
 
 
-// "3m" reads at a glance in a tooltip; second-precision would imply the
-// badge refreshes faster than its 5s poll actually does.
+// "3m" reads at a glance in a tooltip. The badge re-reads when the
+// keeper_turns observation changes, not every second, so seconds would
+// suggest a precision it does not have.
 function answeringElapsed(startedAtUnix: number): string {
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - startedAtUnix))
   if (seconds < 60) return `${seconds}s`
@@ -833,8 +834,9 @@ function answeringElapsed(startedAtUnix: number): string {
 export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFilterMode } = {}) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const fleetFilter = fleetKeeperFilterFromRoute(route.value.params.filter)
-  // The "answering now" badge polls the Owner's running-turn projection;
-  // keeper snapshots cannot answer it (the slot is process memory).
+  // The "answering now" badge reads the Owner's running-turn projection when
+  // its keeper_turns observation changes; keeper snapshots cannot answer it
+  // (the slot is process memory).
   useEffect(() => subscribeKeeperTurnsRefresh(), [])
 
   const agentList = agents.value

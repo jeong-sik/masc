@@ -39,8 +39,9 @@ import {
 
 
 /**
- * Time-axis window (LT-16c). 30 snapshots × 10s poll = 5-minute
- * history per (keeper, axis). Matches MAX_OBSERVATIONS = 30 in
+ * History depth (LT-16c): the last 30 observed snapshots per (keeper,
+ * axis). A snapshot arrives when the fleet changes, so this is a count of
+ * observations, not a fixed time span. Matches MAX_OBSERVATIONS = 30 in
  * fsm-hub-types.ts so the FsmHub drill-down and this matrix keep
  * visually compatible timelines.
  */
@@ -506,7 +507,7 @@ export function tallyRuntimeAttention(
  * Preact's identity render path notices the change. Keepers that
  * disappear from the latest snapshot are dropped — operators care
  * about currently-registered keepers and a restart re-populates the
- * name on the next poll.
+ * name on the next snapshot.
  */
 export function pushObservation(
   history: KeeperFleetHistory,

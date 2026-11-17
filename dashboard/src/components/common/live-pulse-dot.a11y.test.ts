@@ -1,14 +1,14 @@
 // @vitest-environment happy-dom
 //
-// jest-axe coverage for LivePulseDot — pulsing dot indicating polling
-// liveness. Tests pin all 3 states (live/stale/idle) and verify the
-// component's accessible-name strategy (title + aria-label combine to
-// give the dot a descriptive name beyond color-only signaling).
+// jest-axe coverage for LivePulseDot, the dot that says whether the
+// dashboard's observer stream is admitted. Both states keep an accessible
+// name (title + aria-label) beyond colour.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import { LivePulseDot } from './live-pulse-dot'
+import { dashboardObserverPhase } from '../../dashboard-observer-state'
 
 describe('LivePulseDot a11y', () => {
   let container: HTMLElement
@@ -19,28 +19,18 @@ describe('LivePulseDot a11y', () => {
   afterEach(() => {
     render(null, container)
     document.body.removeChild(container)
+    dashboardObserverPhase.value = 'stopped'
   })
 
-  it('live state (recent tick) passes axe', async () => {
-    const recentTick = new Date().toISOString()
-    render(
-      html`<${LivePulseDot} lastTickAt=${recentTick} />`,
-      container,
-    )
+  it('live state passes axe', async () => {
+    dashboardObserverPhase.value = 'live'
+    render(html`<${LivePulseDot} />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('stale state (older tick) passes axe', async () => {
-    const oldTick = new Date(Date.now() - 60_000).toISOString()
-    render(
-      html`<${LivePulseDot} lastTickAt=${oldTick} />`,
-      container,
-    )
-    expect(await axe(container)).toHaveNoViolations()
-  })
-
-  it('idle state (null tick — never sampled) passes axe', async () => {
-    render(html`<${LivePulseDot} lastTickAt=${null} />`, container)
+  it('refused state passes axe', async () => {
+    dashboardObserverPhase.value = 'refused'
+    render(html`<${LivePulseDot} />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 })

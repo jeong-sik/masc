@@ -287,7 +287,7 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
     rows = await fetchKeeperToolApprovals()
   } catch {
     // Listing is best-effort hydration; the REQUESTED stream event remains
-    // the primary source. A failed poll must not surface as an error row.
+    // the primary source. A failed listing must not surface as an error row.
     return
   }
   if (executionWorkspaceAuthority.peek() !== workspace
@@ -1055,7 +1055,7 @@ async function hydrateTrackedKeeperChatOperation(
       // A lookup observation cannot revoke a receipt already restored/applied.
       // History may now hold the canonical turn even though the lookup
       // itself fails: reconcile before retaining the receipt so the record
-      // is released instead of re-polling the placeholder on every mount.
+      // is released instead of re-reading the placeholder on every mount.
       const detail = err instanceof Error ? err.message : 'Operation lookup unavailable'
       persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
       try {
@@ -1215,8 +1215,8 @@ export function noteKeeperChatAppended(name: string, audio?: unknown): void {
  *  is currently open (`activeKeeperName`). No-op when no panel is open.
  *
  *  The route refresh plan calls this. A transcript that is already loaded
- *  stays as it is, and only a failed hydration retries, so route visits and
- *  periodic refreshes do not poll the history endpoint. */
+ *  stays as it is, and only a failed hydration retries, so route visits do
+ *  not re-read the history endpoint. */
 export function refreshActiveKeeperChatHistory(): void {
   const keeperName = activeKeeperName.value.trim()
   if (!keeperName) return
@@ -1743,7 +1743,7 @@ export async function sendKeeperThreadMessage(
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
-    // The queued-liveness poll (Gap B above) must never outlive this send:
+    // The queued-operation observer (Gap B above) must never outlive this send:
     // every exit path stops it here even if no reply event ever arrived.
     stopQueuedOperationObserver()
     // Release cancellation bookkeeping on every accepted exit. The exact

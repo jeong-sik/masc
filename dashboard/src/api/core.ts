@@ -458,7 +458,7 @@ async function credentialedFetch(path: string, init: CredentialedRequestInit): P
   }
   const response = await fetch(path, requestInit)
   if (requestInit.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
-  // Kept before the caller sees the 401, so a poll that starts after it is
+  // Kept before the caller sees the 401, so a request that starts after it is
   // answered from the table instead of sending the same request again.
   if (credentialless !== null && response.status === 401) {
     try {
@@ -616,14 +616,14 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
 ])
 
 /**
- * Routes whose polled body the browser may hold and revalidate.
+ * Routes whose body the browser may hold and revalidate.
  *
  * Reads default to `no-store`, so a body reaches the browser's HTTP cache only
  * when its route is listed here. Two conditions gate membership, both measured
  * against a running server rather than assumed:
  *
- *   1. The body repeats byte-identically across polls. A route whose body
- *      changes every poll can never answer 304, so listing it would buy a
+ *   1. The body repeats byte-identically across reads. A route whose body
+ *      changes on every read can never answer 304, so listing it would buy a
  *      digest computation and nothing else. `/dashboard/bootstrap` and
  *      `/activity/events` fail this and are absent.
  *   2. The body carries no secret projection. `/keepers/composite` embeds

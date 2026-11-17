@@ -3742,16 +3742,57 @@ let test_retained_question_replacement_refuses_unsafe_state unsafe () =
          |> owned |> Option.get) in
        let child=Step.restore ~owner child |> get in
        let posts=F.post_count fixture.server in
-       (match Exact.run ~store:fixture.store ~declaration_id:"librarian" ~package
-           ~runner:(Server_lane_addon_exact.runner ~base_path:fixture.base_path)
-           ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path)
-           (Step.request child |> get) |> get with
-        | Exact.Final (Not_allowed {reason=Permission_refused _}) -> ()
-        | Final _ | Not_final _ -> fail "an unacknowledged child obtained direct host execution authority");
+       let child_exact=Step.request child |> get in
+       let run_child ()=Exact.run ~store:fixture.store ~declaration_id:"librarian" ~package
+         ~runner:(Server_lane_addon_exact.runner ~base_path:fixture.base_path)
+         ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path) child_exact in
+       let authority=match Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path
+         ~store:fixture.store ~declaration_id:"librarian" ~package child_exact with
+         | Ok authority -> authority
+         | Error (Exact.Unowned {reason}) -> fail reason
+         | Error (Undecided {detail}) -> fail detail in
+       (match authority.Exact.before_dispatch () with
+        | Error (Exact.Not_now _) -> ()
+        | Ok () | Error Declaration_replaced -> fail "an unacknowledged child lacks its temporary dispatch veto");
+       check bool "direct host dispatch waits for the parent ACK" true (Result.is_error (run_child ()));
        check int "direct host dispatch before the actual parent ACK reaches no provider" posts (F.post_count fixture.server);
-       check bool "deployment cannot treat a Captured unacknowledged child's host evidence as absence" true
-         (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
-           refusal.decoder=Lane_addon_store_preflight.Tool_request_exact_reads) (librarian_refusals fixture))
+       check bool "temporary dispatch veto retains no Exact record" true
+         (io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+           ~request_id:child_id |> get)=None);
+       check (option string) "temporary dispatch veto retains no execution proof" None
+         (io (fun () -> Fs_compat.load_file_opt (proof_path fixture child_exact)));
+       check int "an unexecuted pending child remains readable for deployment" 0 (List.length (librarian_refusals fixture));
+       let parent=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+         ~request_id:original.request_id |> owned |> Option.get) in
+       check bool "the veto leaves the same child pending its parent ACK" true
+         (match Progress.replacement parent.progress with
+          | Some (Preparation_pending intended) -> intended.request_id=child_id
+          | None | Some (Preparation_confirmed _) -> false);
+       let child_record=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+         ~request_id:child_id |> owned |> Option.get) in
+       check bool "the veto preserves the unexecuted child phase" true (Progress.phase child_record.progress=Captured);
+       let resumed=memory_action fixture (fun () -> Replacement.resume ~store:fixture.store
+         ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original:parent ~step) |> get in
+       check string "normal ACK recovery reuses the retained child" child_id resumed;
+       let acknowledged=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+         ~request_id:original.request_id |> owned |> Option.get) in
+       check bool "normal recovery confirms the exact child publication" true
+         (match Progress.replacement acknowledged.progress with
+          | Some (Preparation_confirmed intended) -> intended.request_id=child_id
+          | None | Some (Preparation_pending _) -> false);
+       io (fun () -> Replacement.confirm_selected ~store:fixture.store child) |> get;
+       check int "parent ACK itself reaches no provider" posts (F.post_count fixture.server);
+       fixture.set_step_response (fun _ -> `OK,F.openai_response step_output);
+       ignore (advance_original fixture child_record Progress.Dispatch_intended);
+       (match run_child () |> get with
+        | Exact.Final (Call_final (Answered _)) -> ()
+        | Final (Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+            | Outcome_unknown | Not_allowed _ | Request_id_reused) | Not_final _ ->
+          fail "the same child did not dispatch after its real parent ACK");
+       check int "only the acknowledged child reaches the provider once" (posts+1) (F.post_count fixture.server);
+       check bool "host recovery publishes no Memory or source ACK" true
+         (cut_source_positions fixture=positions && cut_memory_bytes fixture=memory);
+       raise Retained_question_negative_checked
      | Wrong_retained_child ->
        let module Steps=Keeper_librarian_floor_step_owner in
        let child_id=seed_floor_replacement fixture ~stage:Replacement_intent_saved original step in

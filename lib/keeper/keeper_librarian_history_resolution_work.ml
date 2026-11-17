@@ -230,10 +230,10 @@ let rec process ~config ~keeper_name ~store intent = match intent.Intent.phase w
      | Error (Publication_uncertain detail) -> Error (Intent.Publication_uncertain detail)
      | Error Host_claim_busy -> Error Intent.Host_claim_busy)
     | Same_binding_cut basis ->
-      let* granted=io (fun () -> Resolution.with_cut_fence_serialized ~config ~keeper_name
+      let* granted=Resolution.with_cut_fence_serialized ~config ~keeper_name
         ~request_id:intent.original_request_id ~expected:intent.expected ~basis
         ~actor:intent.actor ~reason:intent.reason ~now:(Time_compat.now ())
-        ~use:(fun grant -> Intent.confirm_cut_fence ~store ~expected:intent grant))
+        ~use:(fun grant -> Intent.confirm_cut_fence ~store ~expected:intent grant)
         |> Result.map_error (function
           | Resolution.Host_claim_busy -> Intent.Host_claim_busy
           | Publication_uncertain detail -> Intent.Publication_uncertain detail
@@ -324,7 +324,7 @@ let resolve_cut_serialized ~config ~keeper_name ~request_id =
     continue intent
   | {origin=Worker_absence;_}::_ -> Ok Original_waiting
   | [] | {origin=Same_binding_cut _;phase=Refused _;_}::_ ->
-    match io (fun () -> Resolution.preview_cut_command ~config ~keeper_name ~request_id) with
+    match Resolution.preview_cut_command ~config ~keeper_name ~request_id with
     | Error (Resolution.Already_fenced _ | Original_absent | Ineligible _ | Observation_changed | Range_already_recorded) ->
       Ok Original_waiting
     | Error Host_claim_busy -> Error Intent.Host_claim_busy

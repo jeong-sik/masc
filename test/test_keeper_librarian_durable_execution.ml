@@ -3000,8 +3000,8 @@ let test_cut_fence_is_not_direct_child_or_host_authority () =
     check bool "denied authority changes no Memory, source position or provider count" true
       (before=(cut_memory_bytes fixture,cut_source_positions fixture,F.post_count fixture.server)))
 let submit_cut_command fixture original =
-  let preview,basis=io (fun () -> Resolution.preview_cut_command ~config:fixture.config
-    ~keeper_name ~request_id:original.Owner.request_id |> Result.map_error Resolution.error_to_string |> get) in
+  let preview,basis=Resolution.preview_cut_command ~config:fixture.config
+    ~keeper_name ~request_id:original.Owner.request_id |> Result.map_error Resolution.error_to_string |> get in
   io (fun () -> Resolution_work.submit_cut ~config:fixture.config ~keeper_name ~request_id:original.request_id
     ~expected:preview.expected ~basis ~actor:"operator" ~reason:"Continue this same-binding Cut"
     ~now:(Time_compat.now ()) |> Result.map_error Resolution_intent.error_to_string |> get)
@@ -3059,10 +3059,10 @@ let test_cut_command_recovers_fence_before_grant_after_memory_rebase () =
     let accepted=submit_cut_command fixture original in
     let basis=match accepted.intent.origin with Same_binding_cut basis -> basis | Worker_absence -> fail "Cut command origin" in
     let escaped=ref None in
-    let interrupted=memory_action fixture (fun () -> io (fun () ->
+    let interrupted=memory_action fixture (fun () ->
       Resolution.with_cut_fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
         ~expected:accepted.intent.expected ~basis ~actor:accepted.intent.actor ~reason:accepted.intent.reason
-        ~now:(Time_compat.now ()) ~use:(fun grant -> escaped:=Some grant;raise Exit))) in
+        ~now:(Time_compat.now ()) ~use:(fun grant -> escaped:=Some grant;raise Exit)) in
     check bool "interruption after fence has an uncertain publication result" true
       (match interrupted with Error (Resolution.Publication_uncertain _) -> true
        | Ok _ | Error (Original_absent | Ineligible _ | Observation_changed | Range_already_recorded
@@ -3416,11 +3416,11 @@ let test_cut_fence_outer_cancellation_joins_fs_scope () =
     let mutex=Stdlib.Mutex.create () and condition=Stdlib.Condition.create () and released=ref false in
     let release ()=Stdlib.Mutex.protect mutex (fun () ->
       if not !released then (released:=true;Stdlib.Condition.broadcast condition)) in
-    let after_publish ()=io (fun () ->
+    let after_publish ()=
       Stdlib.Mutex.lock mutex;
       Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) (fun () ->
         Eio.Promise.resolve published_u ();
-        while not !released do Stdlib.Condition.wait condition mutex done)) in
+        while not !released do Stdlib.Condition.wait condition mutex done) in
     let cancelled,pending,claim_busy,source_held,sibling_worker,published_bytes,blocked_intent,blocked_positions,blocked_memory =
       Eio.Switch.run (fun cleanup_sw ->
         (* The cancelled context belongs to the actual submitting Memory action,
@@ -3548,12 +3548,12 @@ let test_cut_fence_outer_cancellation_joins_fs_scope () =
 let test_cut_command_busy_and_late_proof_keep_requested () =
   with_same_binding_cut (fun fixture original _request exact schema ->
     let accepted=submit_cut_command fixture original and before=cut_source_positions fixture in
-    let held=memory_action fixture (fun () -> io (fun () -> Exact.with_cut_exclusion
+    let held=memory_action fixture (fun () -> Exact.with_cut_exclusion
       ~store:fixture.store ~declaration_id:"librarian" ~schema exact ~use:(fun _ ->
         check bool "busy is a typed retryable command result" true
           (match Resolution_work.run_serialized ~config:fixture.config ~keeper_name with
            | Error Resolution_intent.Host_claim_busy -> true
-           | Ok () | Error (Invalid _ | Conflict _ | Unavailable _ | Publication_uncertain _) -> false))))
+           | Ok () | Error (Invalid _ | Conflict _ | Unavailable _ | Publication_uncertain _) -> false)))
       |> Result.map_error Exact.describe_recovery_error |> get in
     (match held with Exact.Cut_excluded () -> () | Cut_busy | Cut_not_retained _ -> fail "actual claim was not held");
     check bool "busy retains Requested and the original intent ID" true

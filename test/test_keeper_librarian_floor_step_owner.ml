@@ -31,7 +31,7 @@ let test_unadmitted_step_ends_only_for_a_ready_replacement ~capacity_wait () = w
    | Step_owner.Pending (Worker_unreachable,unchanged) ->
      check json "an unavailable declaration retains the original phase" (Progress.to_json record.progress)
        (Progress.to_json unchanged.progress)
-   | Pending ((Capacity | Worker_pending | Worker_unknown | Missing_after_dispatch | Journal_recheck),_)
+   | Pending ((Worker_pending | Worker_unknown | Missing_after_dispatch | Journal_recheck),_)
    | Answered _ | Refused _ | Before_dispatch_replaced _ ->
      fail "an unavailable declaration ended or dispatched the original step");
   io (fun () -> write fixture.source (fixture.declaration true));

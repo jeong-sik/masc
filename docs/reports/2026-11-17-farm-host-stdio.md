@@ -35,6 +35,19 @@ carrier 종료값과 맞지 않는 trailer를 정상 실행으로 만들지 않�
 stderr의 기존 acceptance/trailer decoder를 별도 모듈로 옮겨 framed runner와
 공유한다. payload stdout에는 경로 치환이나 출력 길이 축약을 적용하지 않는다.
 
+후속 검토에서 기존 stderr decoder의 64 KiB 제한이 긴 Observe 결과를 자르고
+제어 JSON을 payload로 내보내는 결함을 확인했다. wire의 `observed_syscalls`에는
+그 제한이 없다. 마지막 두 RS delimiter부터의 suffix를 Buffer로 보관하고,
+새 chunk만 읽어 같은 긴 본문을 반복 복사하지 않도록 고쳤다. framed runner도
+잘린 process 미리보기 대신 이 완전한 suffix로 결과를 판정한다. payload stderr
+미리보기에만 기존 head/tail 제한을 적용한다.
+
+현재 wire는 payload에도 RS가 있을 수 있다. 따라서 다음 delimiter나 종단이
+오기 전에는 긴 payload suffix와 제어 응답을 구분할 수 없고, 그 미확정 영역의
+고정 메모리 상한을 보장하지 않는다. 기존 wire 의미를 바꾸거나 관측 목록을
+생략하지 않았다. 큰 실제 직렬화 응답과 process 미리보기보다 큰 거절 응답의
+fixture를 추가했으며, 타입·실행 결과는 아직 없다.
+
 ## 현재 범위와 검증
 
 이 층은 OpenSSH와 microVM `Exec_per_request` carrier를 연결한다. guest-agent

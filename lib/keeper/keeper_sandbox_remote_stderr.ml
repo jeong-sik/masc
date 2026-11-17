@@ -14,51 +14,74 @@ let split_final_trailer stderr =
        Ok (payload_stderr, trailer))
 ;;
 
-let trailer_tail_limit = 64 * 1024
-
 (* The front of a stderr stream is held only while it could still become the
    acceptance frame, and only for a request that asked for one. *)
 type stderr_head =
   | Head_released
   | Awaiting_head of string
 
+(* Each segment starts with its delimiter. Only these last two segments can
+   still belong to the final frame; a third delimiter releases the oldest. *)
+type stderr_suffix =
+  | No_delimiter
+  | One_delimiter of Buffer.t
+  | Two_delimiters of Buffer.t * Buffer.t
+
 type t =
   { callback : (string -> unit) option
-  ; mutable tail : string
+  ; mutable suffix : stderr_suffix
+  ; mutable materialized_tail : string option
   ; mutable head : stderr_head
   ; on_accepted : unit -> unit
   }
 
-(* The trailer is the final RS-delimited frame, so its opening delimiter is the
-   second-to-last RS of the completed stream, and every byte before that RS is
-   payload no matter what arrives next. Returns how much of [text] can be handed
-   to the caller now. Holding the whole tail back instead would delay a stderr
-   line until the process exits, and [gh auth login] writes its one-time code to
-   stderr and then waits for the browser: a code delivered at exit arrives after
-   the login it was needed for has already timed out. *)
-let releasable_prefix_len text =
-  match String.rindex_opt text rs with
-  | None -> String.length text
-  | Some last ->
-    (match String.rindex_from_opt text (last - 1) rs with
-     | None -> last
-     | Some second_last -> second_last)
-;;
-
 let stream_payload_chunk stream chunk =
-  let combined = stream.tail ^ chunk in
-  (* The tail limit still bounds the retained region when payload bytes carry an
-     RS of their own; a trailer is orders of magnitude below it. *)
-  let release =
-    max (releasable_prefix_len combined) (String.length combined - trailer_tail_limit)
+  stream.materialized_tail <- None;
+  let released = ref [] in
+  let release bytes = released := bytes :: !released in
+  let append start length =
+    if length > 0 then
+      match stream.suffix with
+      | No_delimiter ->
+        release (String.sub chunk start length)
+      | One_delimiter latest | Two_delimiters (_, latest) ->
+        Buffer.add_substring latest chunk start length;
+        stream.materialized_tail <- None
   in
-  if release > 0
-  then (
-    Option.iter
-      (fun callback -> callback (String.sub combined 0 release))
-      stream.callback;
-    stream.tail <- String.sub combined release (String.length combined - release))
-  else stream.tail <- combined
+  let new_segment () =
+    let segment = Buffer.create 256 in
+    Buffer.add_char segment rs;
+    segment
+  in
+  let delimiter () =
+    stream.suffix <-
+      (match stream.suffix with
+      | No_delimiter -> One_delimiter (new_segment ())
+      | One_delimiter latest -> Two_delimiters (latest, new_segment ())
+      | Two_delimiters (older, latest) ->
+        release (Buffer.contents older);
+        (* Reuse the segment object without retaining a previously large
+           payload allocation after that segment has been released. *)
+        Buffer.reset older;
+        Buffer.add_char older rs;
+        Two_delimiters (latest, older));
+    stream.materialized_tail <- None
+  in
+  let rec consume start =
+    match String.index_from_opt chunk start rs with
+    | None -> append start (String.length chunk - start)
+    | Some at ->
+      append start (at - start);
+      delimiter ();
+      consume (at + 1)
+  in
+  (* Scan only the arriving chunk; appending is amortized linear even for an
+     unbounded observed_syscalls trailer split over many transport chunks. *)
+  consume 0;
+  (* A finite process collector may continue after a user callback raises.
+     Retain every control byte already read before that policy takes effect;
+     interactive callers still receive the original callback exception. *)
+  Option.iter (fun callback -> List.iter callback (List.rev !released)) stream.callback
 ;;
 
 let stream_chunk stream chunk =
@@ -91,12 +114,23 @@ let settle_head stream =
 
 let flush_payload stream payload =
   if payload <> "" then Option.iter (fun callback -> callback payload) stream.callback;
-  stream.tail <- ""
+  stream.suffix <- No_delimiter;
+  stream.materialized_tail <- None
 ;;
 
 let create ?callback ~acceptance_frame ~on_accepted () =
-  { callback; tail = "";
+  { callback; suffix = No_delimiter; materialized_tail = None;
     head = (if acceptance_frame then Awaiting_head "" else Head_released);
     on_accepted }
 
-let tail stream = stream.tail
+let tail stream =
+  match stream.materialized_tail with
+  | Some tail -> tail
+  | None ->
+    let tail = match stream.suffix with
+      | No_delimiter -> ""
+      | One_delimiter latest -> Buffer.contents latest
+      | Two_delimiters (older, latest) -> Buffer.contents older ^ Buffer.contents latest
+    in
+    stream.materialized_tail <- Some tail;
+    tail

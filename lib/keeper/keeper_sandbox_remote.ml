@@ -1299,11 +1299,29 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                   | None -> (try Buffer.add_string buffer chunk with (Out_of_memory | Invalid_argument _) as exn -> binary_capture_failure := Some exn));
                  Option.iter (fun emit -> emit chunk) on_stdout_chunk), (fun () -> ())) in
            let stderr_path_stream = Option.map path_stream on_stderr_chunk in
+           let payload_stderr_capture = Exec_buffer.create
+               ~head_cap:Common.max_process_capture_head_bytes
+               ~tail_cap:Common.max_process_capture_tail_bytes in
+           let pending_stderr_payload = ref [] in
            let stderr_stream =
-             Stderr.create ?callback:(Option.map fst stderr_path_stream)
+             Stderr.create ~callback:(fun bytes ->
+               Exec_buffer.add_string payload_stderr_capture bytes;
+               pending_stderr_payload := bytes :: !pending_stderr_payload)
                ~acceptance_frame
                ~on_accepted:(fun () ->
                  observation := Execution_unavailable (Transport_unavailable Acceptance_read)) ()
+           in
+           let deliver_stderr_payload update =
+             update ();
+             let payload = List.rev !pending_stderr_payload in
+             pending_stderr_payload := [];
+             (* Preserve the finite collector's callback-error policy, but
+                only after receipt retention and the payload preview advance
+                through every byte already received in this chunk. *)
+             Option.iter (fun (emit, _) -> List.iter emit payload) stderr_path_stream
+           in
+           let receive_stderr bytes =
+             deliver_stderr_payload (fun () -> stream_stderr_chunk stderr_stream bytes)
            in
            let rewrite text =
              match t.transport with
@@ -1326,7 +1344,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                    ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
                    ?on_stdout_chunk:
                      (Option.map fst stdout_path_stream)
-                   ~on_stderr_chunk:(stream_stderr_chunk stderr_stream)
+                   ~on_stderr_chunk:receive_stderr
                    ~stdin_content:frame
                    request
                in
@@ -1335,7 +1353,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                (match
                   run_agent_socket t
                     ?on_stdout_chunk:(Option.map fst stdout_path_stream)
-                    ~on_stderr_chunk:(stream_stderr_chunk stderr_stream)
+                    ~on_stderr_chunk:receive_stderr
                     ~budget_sec:budget ~host_socket ~expected
                     (Keeper_guest_socket.Run { frame })
                 with
@@ -1358,21 +1376,22 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                (Dispatch_failed
                   { at = Unix.gettimeofday (); failure = Transport_failed; detail = error });
              transport_failed ~failure:Transport_failed error
-           | Wire_answered { ended; stdout; raw_stderr } ->
+           | Wire_answered { ended; stdout; raw_stderr = wire_preview } ->
            Option.iter (fun (_, finish) -> finish ()) stdout_path_stream;
-           settle_stderr_head stderr_stream;
-           (* The frame the stream took off the front is not payload here
-              either: the trailer split and the error messages below read this
-              text. *)
-           let raw_stderr =
-             if not acceptance_frame
-             then raw_stderr
-             else
-               match Exec_ssh_protocol.split_acceptance_head raw_stderr with
-               | Exec_ssh_protocol.Head_frame { preamble; rest; _ } -> preamble ^ rest
-               | Exec_ssh_protocol.Head_pending ->
-                 Exec_ssh_protocol.settle_acceptance_head raw_stderr
-               | Exec_ssh_protocol.Head_payload -> raw_stderr
+           deliver_stderr_payload (fun () -> settle_stderr_head stderr_stream);
+           (* Process/guest captures are previews, not a control-frame owner.
+              Keep the complete unresolved suffix for receipt settlement and
+              capture only emitted payload bytes in the bounded preview. *)
+           let control_tail = Stderr.tail stderr_stream in
+           (* A process helper can return a spawn/transport diagnostic that
+              never traversed a stream callback. Retain this preview only for
+              failure reporting; it is never authoritative receipt input. *)
+           let diagnostic_stderr =
+             if not acceptance_frame then wire_preview
+             else match Exec_ssh_protocol.split_acceptance_head wire_preview with
+               | Exec_ssh_protocol.Head_frame {preamble;rest;_} -> preamble ^ rest
+               | Exec_ssh_protocol.Head_pending -> Exec_ssh_protocol.settle_acceptance_head wire_preview
+               | Exec_ssh_protocol.Head_payload -> wire_preview
            in
            let local_timed_out =
              match ended with
@@ -1383,7 +1402,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            in
            let settle record triple =
              Option.iter (fun value -> observation := value)
-               (completed_execution_observation record raw_stderr);
+               (completed_execution_observation record control_tail);
              record_dispatch t.shared ~keeper_name:t.keeper_name record;
              triple
            in
@@ -1396,9 +1415,9 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              let detail = "binary_stdout_capture_failed: " ^ Printexc.to_string error in
              settle (failed Transport_failed detail) (transport_failed ~failure:Transport_failed detail)
            | None ->
-           match split_final_trailer raw_stderr with
+           match split_final_trailer control_tail with
            | Error detail ->
-             flush_stderr_payload stderr_stream (Stderr.tail stderr_stream);
+             deliver_stderr_payload (fun () -> flush_stderr_payload stderr_stream control_tail);
              Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
              let failure, error =
                if local_timed_out
@@ -1412,17 +1431,12 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              in
              settle (failed failure error)
                (transport_failed ~failure ~stdout:(rewrite stdout)
-                  ~prefix_stderr:(rewrite raw_stderr) error)
-           | Ok (payload_stderr, trailer_bytes) ->
-             let streamed_payload =
-               match split_final_trailer (Stderr.tail stderr_stream) with
-               | Ok (payload, _) -> payload
-               | Error _ -> (Stderr.tail stderr_stream)
-             in
-             flush_stderr_payload stderr_stream streamed_payload;
+                  ~prefix_stderr:(rewrite diagnostic_stderr) error)
+           | Ok (streamed_payload, trailer_bytes) ->
+             deliver_stderr_payload (fun () -> flush_stderr_payload stderr_stream streamed_payload);
              Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
              let stdout = match binary_output with Some buffer -> Buffer.contents buffer | None -> rewrite stdout in
-             let payload_stderr = rewrite payload_stderr in
+             let payload_stderr = rewrite (Exec_buffer.render payload_stderr_capture) in
              let broken detail =
                let error = transport_error t detail in
                settle (failed Transport_failed error)

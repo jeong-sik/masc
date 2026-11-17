@@ -413,7 +413,9 @@ val runner :
     remote payload timeout.
 
     [on_receipt] receives only this runner call's response evidence. The caller
-    owns its collection; endpoint-wide [last_dispatch] is never consulted. *)
+    owns its collection; endpoint-wide [last_dispatch] is never consulted.
+    Final control frames are retained independently of the bounded payload
+    stderr preview, so a large Observe receipt is not parsed from clipped text. *)
 
 val bootstrap_keeper_control_root :
   timeout_sec:float -> t -> Masc_exec.Sandbox_target.run_outcome

@@ -240,6 +240,28 @@ let test_a_turn_phase_does_not_move_its_row () =
     (fun phase -> Alcotest.(check (list string)) "same place in every phase" expected (order phase))
     Masc.Keeper_turn_preview.[ Preparing; Awaiting_response; Receiving_response; Tool_observed ]
 
+let test_recent_follows_the_age_column () =
+  let rows =
+    [ row ~last_activity_at:(Some 100.) ~turn:(running ~started_at:10. ~event_at:100.) "streaming-long"
+    ; row ~last_activity_at:(Some 50.) ~turn:Decode.Keeper_turn_idle "idle-recent"
+    ]
+  in
+  Alcotest.(check (list string)) "recent orders by the freshest event the age column shows"
+    [ "streaming-long"; "idle-recent" ]
+    (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Recent rows))
+
+let test_a_failed_attempt_rises_above_running_turns () =
+  let rows =
+    [ row ~last_activity_at:(Some 20.) ~turn:(turn ~started_at:20.
+        Masc.Keeper_turn_preview.Receiving_response) "streaming"
+    ; row ~last_activity_at:(Some 10.) ~turn:(turn ~started_at:10.
+        Masc.Keeper_turn_preview.Failed) "failed-attempt"
+    ]
+  in
+  Alcotest.(check (list string)) "a failed attempt is for a person to see"
+    [ "failed-attempt"; "streaming" ]
+    (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Priority rows))
+
 let test_runtime_view_contains_only_failing_rows () =
   let rows =
     [ row ~health:(health "healthy") "sound"
@@ -882,6 +904,10 @@ let () =
             test_running_rows_keep_their_place_while_events_stream
         ; Alcotest.test_case "a turn phase does not move its row" `Quick
             test_a_turn_phase_does_not_move_its_row
+        ; Alcotest.test_case "recent follows the age column" `Quick
+            test_recent_follows_the_age_column
+        ; Alcotest.test_case "a failed attempt rises above running turns" `Quick
+            test_a_failed_attempt_rises_above_running_turns
         ] )
     ; ( "person wait"
       , [ Alcotest.test_case "a person wait is the reading that made it" `Quick

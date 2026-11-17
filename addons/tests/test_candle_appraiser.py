@@ -191,25 +191,29 @@ class CandleWorker(unittest.TestCase):
             with self.assertRaises(module.InvalidInput):
                 worker.host_requests({})
 
-    def test_frame_capacity_defers_new_admission_without_hiding_existing_work(self):
-        spec = importlib.util.spec_from_file_location("candle_appraiser_capacity", SERVER)
+    def test_a_frame_one_intent_fills_admits_the_next_and_lists_each_on_its_own_page(self):
+        spec = importlib.util.spec_from_file_location("candle_appraiser_paged", SERVER)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as directory:
             worker = exact_worker.Worker(Path(directory), 4194304, module.CONTRACT)
-            one, two = request("one"), request("two")
-            original = worker.invoke({"kind": "submit", "request": one}, {"kind": "operator"})
+            name = lambda original: worker.store.path(original["request_id"]).name
+            first, second = sorted((request("one"), request("two")), key=name)
+            page = lambda original, **more: {"requests": [worker.host_request(original)], **more}
             envelope = {"jsonrpc": "2.0", "id": 2 ** 53,
-                        "result": exact_worker.tool_result({"requests": [worker.host_request(one)]})}
+                        "result": exact_worker.tool_result(page(first, next=name(first)))}
+            # Both ids have one length, so this frame holds either intent with next and never both.
             worker.max_reply_bytes = len((exact_worker.encode_output(envelope) + "\n").encode("utf-8"))
-            self.assertEqual(original["state"], "pending")
-            waiting = worker.invoke({"kind": "submit", "request": two}, {"kind": "operator"})
-            self.assertEqual(waiting["state"], "capacity_wait")
-            self.assertIsNone(worker.store.read("two"))
-            self.assertEqual([item["request_id"] for item in worker.host_requests({})["requests"]], ["one"])
-            worker.host_result({"request_id": "one", "result": {"status": "outcome_unknown"}})
-            accepted = worker.invoke({"kind": "submit", "request": two}, {"kind": "operator"})
-            self.assertEqual(accepted["state"], "pending")
+            self.assertFalse(worker.fits({"requests": [worker.host_request(x) for x in (first, second)]}))
+            for original in (second, first):
+                admitted = worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
+                self.assertEqual(admitted, {"request_id": original["request_id"], "state": "pending"})
+            self.assertEqual(worker.host_requests({}), page(first, next=name(first)))
+            self.assertEqual(worker.host_requests({"after": name(first)}), page(second))
+            reopened = exact_worker.Worker(Path(directory), worker.max_reply_bytes, module.CONTRACT)
+            self.assertEqual(reopened.host_requests({}), page(first, next=name(first)))
+            reopened.host_result({"request_id": first["request_id"], "result": {"status": "outcome_unknown"}})
+            self.assertEqual(reopened.host_requests({}), page(second))
 
     def test_missing_store_is_an_error_instead_of_absent_or_an_empty_listing(self):
         spec = importlib.util.spec_from_file_location("candle_appraiser_missing_store", SERVER)

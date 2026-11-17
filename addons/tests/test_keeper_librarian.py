@@ -323,35 +323,74 @@ class LibrarianWorker(unittest.TestCase):
                 replies = self.run_worker(directory, [read(original), listing(), submit(original)])
                 self.assertTrue(all(x["isError"] for x in replies))
 
-    def test_capacity_refusal_restart_and_released_frame_keep_original_identity(self):
+    def test_a_request_is_admitted_while_another_fills_the_frame_and_both_survive_a_restart(self):
         contract = runpy.run_path(str(SERVER))["CONTRACT"]
-        from exact_worker import InvalidInput, Worker, encode_output, tool_result
+        from exact_worker import InvalidInput, Worker
         with tempfile.TemporaryDirectory() as directory:
-            first = request("admission", "original-before-capacity")
-            second = request("durable", "original-waiting-for-frame")
-            worker = Worker(Path(directory), 4194304, contract)
-            frames = [{"jsonrpc": "2.0", "id": 2 ** 53,
-                       "result": tool_result({"requests": [worker.host_request(x)]})}
-                      for x in (first, second)]
-            frame_bytes = max(len((encode_output(x) + "\n").encode("utf-8")) for x in frames)
-            worker.max_reply_bytes = frame_bytes
-            caller = {"kind": "operator"}
-            invoke = lambda w, x: w.invoke({"kind": "submit", "request": x}, caller,
-                                          tool_name=tool(x["output"]))
-            self.assertEqual(invoke(worker, first)["state"], "pending")
-            self.assertEqual(invoke(worker, second)["state"], "capacity_wait")
-            self.assertFalse(worker.store.path(second["request_id"]).exists())
-            reopened = Worker(Path(directory), frame_bytes, contract)
-            self.assertEqual(invoke(reopened, second)["state"], "capacity_wait")
-            self.assertEqual(reopened.invoke({"kind": "read", "request_id": second["request_id"]},
-                                            caller, tool_name=tool("durable"))["state"], "absent")
-            reopened.host_result({"request_id": first["request_id"], "result": {"status": "outcome_unknown"}})
-            restarted = Worker(Path(directory), frame_bytes, contract)
-            self.assertEqual(invoke(restarted, second)["state"], "pending")
-            self.assertEqual(invoke(restarted, second)["state"], "pending")
-            self.assertEqual(restarted.host_requests({})["requests"], [second])
+            first = request("admission", "original-still-waiting")
+            second = request("durable", "original-admitted-behind")
+            worker = Worker(Path(directory), FRAME, contract)
+            name = lambda x: worker.store.path(x["request_id"]).name
+            # A frame that holds either request on a page of its own, never both.
+            frame = max(self.reply_bytes({"requests": [x], "next": name(x)}) for x in (first, second))
+            self.assertGreater(self.reply_bytes({"requests": [first, second]}), frame)
+            worker.max_reply_bytes = frame
+            self.assertEqual(self.admit(worker, first)["state"], "pending")
+            # Admitting the second reads no record but its own.
+            with patch.object(worker.store, "read_path", wraps=worker.store.read_path) as read_path:
+                self.assertEqual(self.admit(worker, second)["state"], "pending")
+            self.assertEqual([read.args[0] for read in read_path.call_args_list], [name(second)])
+            head, tail = sorted((first, second), key=name)
+            walk = [{"requests": [head], "next": name(head)}, {"requests": [tail]}]
+            self.assertEqual(self.pages(worker), walk)
+            reopened = Worker(Path(directory), frame, contract)
+            for original in (first, second):
+                pending = {"request_id": original["request_id"], "state": "pending"}
+                self.assertEqual(reopened.invoke({"kind": "read", "request_id": original["request_id"]},
+                                                 {"kind": "operator"}, tool_name=tool(original["output"])), pending)
+                self.assertEqual(self.admit(reopened, original), pending)
+            self.assertEqual(self.pages(reopened), walk)
             with self.assertRaises(InvalidInput):
-                invoke(restarted, {**second, "system": "different frozen input"})
+                self.admit(reopened, {**second, "system": "different frozen input"})
+            self.finish(reopened, head)
+            self.assertEqual(self.pages(reopened), [{"requests": [tail]}])
+
+    def test_admission_measures_the_page_that_names_the_request_as_next(self):
+        contract = runpy.run_path(str(SERVER))["CONTRACT"]
+        from exact_worker import REQUEST_BODY_REFUSED, Worker
+        with tempfile.TemporaryDirectory() as directory:
+            worker = Worker(Path(directory), FRAME, contract)
+            name = lambda x: worker.store.path(x["request_id"]).name
+            # Ids of one length give each of these requests the same reply length.
+            head, tail, *edge = sorted((request("durable", f"original-edge-{index}") for index in range(4)), key=name)
+            alone = self.reply_bytes({"requests": [head]})
+            followed = self.reply_bytes({"requests": [head], "next": name(head)})
+            self.assertLess(alone, followed)
+            # A frame that holds the request alone only on a page without next.
+            for frame, original in zip((alone, followed - 1), edge):
+                worker.max_reply_bytes = frame
+                self.assertEqual(self.admit(worker, original),
+                                 {"request_id": original["request_id"], "state": "finished",
+                                  "result": REQUEST_BODY_REFUSED})
+                self.assertNotIn("request", json.loads(worker.store.path(original["request_id"]).read_text()))
+            # One byte more holds that page, so the request is listed while another waits behind it.
+            worker.max_reply_bytes = followed
+            for original in (tail, head):
+                self.assertEqual(self.admit(worker, original)["state"], "pending")
+            self.assertEqual(self.pages(worker), [{"requests": [head], "next": name(head)}, {"requests": [tail]}])
+
+    def test_requests_beyond_one_frame_are_admitted_and_paged_by_the_real_worker(self):
+        # Each body is over half the manifest frame, so no page carries two.
+        body = "큰" * (FRAME // 2 // len("큰".encode("utf-8")) + 1)
+        originals = [{**request(output), "system": body} for output in ("admission", "durable")]
+        name = lambda x: hashlib.sha256(json.dumps(x["request_id"]).encode("utf-8")).hexdigest() + ".json"
+        head, tail = sorted(originals, key=name)
+        with tempfile.TemporaryDirectory() as directory:
+            replies = self.run_worker(directory, list(map(submit, originals)))
+            self.assertEqual([self.output(reply)["state"] for reply in replies], ["pending"] * 2)
+            walked = self.run_worker(directory, [listing(), listing(name(head)), listing(name(tail))])
+            self.assertEqual([self.output(reply) for reply in walked],
+                             [{"requests": [head], "next": name(head)}, {"requests": [tail]}, {"requests": []}])
 
     def admit(self, worker, original):
         return worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"},

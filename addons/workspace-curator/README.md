@@ -43,12 +43,17 @@ Version 2 stores drop the original input body when retaining any terminal,
 keeping its request ID, digest and result. Deploy this revision with the
 [worker state hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md).
 
-The complete pending listing must fit the manifest's actual reply frame before
-new work is saved. `capacity_wait` leaves a request unadmitted; it does not consume
-host facts or silently omit already pending work. Observation exposes pending and
-finished counts, request identities where they fit, and an explicit individual
-read path otherwise. Finished means the worker retained an Exact terminal; it
-does not mean the host committed its ledger or published a complete briefing.
+`lane_host_requests` answers in pages. Each page carries as many pending requests
+as fit one reply frame, and while more remain it carries `next`, the record name
+the host passes back as `after` to get the following page. A request is saved
+when a page that carries it alone, `next` included, fits the manifest's actual
+reply frame; other pending requests do not change that answer. A request that
+cannot fit such a page ends as the body-free `request_body_refused` result. A
+pending request that no page can carry makes its page an error; the listing
+never omits pending work silently. Observation exposes pending and finished
+counts, request identities where they fit, and an explicit individual read path
+otherwise. Finished means the worker retained an Exact terminal; it does not
+mean the host committed its ledger or published a complete briefing.
 
 Build the optional image from the repository root:
 

@@ -33,15 +33,14 @@ def closed(properties):
 
 
 TOOL_OUTPUT = {"type": "object", "oneOf": [
-    closed({"request_id": TEXT,
-            "state": {"type": "string", "enum": ["absent", "pending", "capacity_wait"]}}),
+    closed({"request_id": TEXT, "state": {"type": "string", "enum": ["absent", "pending"]}}),
     closed({"request_id": TEXT, "state": {"type": "string", "const": "finished"}, "result": OBJECT}),
 ]}
 # A listing page starts at the first pending record, or after the named one.
 HOST_REQUESTS = {"type": "object", "properties": {"after": TEXT}, "additionalProperties": False}
 HOST_RESULT = closed({"request_id": TEXT, "result": OBJECT})
 CONTROL = closed({"tool": TEXT, "arguments": OBJECT, "caller": OBJECT})
-# The typed result for a request this worker could never list to the host.
+# The typed result for a request that does not fit a listing page of its own.
 REQUEST_BODY_REFUSED = {"status": "input_refused", "kind": "request_body_refused"}
 
 
@@ -178,8 +177,8 @@ class Store:
         self.failure: str | None = None
         # Every record's identity and state by file name, built by the first
         # inventory and kept current by write. The host mounts each state
-        # volume into one worker, so this worker is the only writer. Listings
-        # and submits recheck pending records and stop on external changes.
+        # volume into one worker, so this worker is the only writer. A listing
+        # rechecks the pending records it reads and stops on external changes.
         # read() checks its named record: a missing leaf is absent, a damaged
         # record fails only that call. Added records and changes to finished
         # records otherwise become visible at the next inventory after restart.
@@ -320,12 +319,6 @@ class Store:
             raise self.stop(f"Exact request record {name!r} was finished outside this worker")
         return record
 
-    def pending(self) -> list[dict]:
-        """Every pending record in name order, each read and checked again."""
-        names = self.pending_names(None)
-        with self.open_directory() as directory_fd:
-            return [self.pending_record(name, directory_fd) for name in names]
-
     def write(self, record: dict) -> None:
         self.trusted()
         try:
@@ -413,17 +406,19 @@ class Worker:
                     if self.retained_tool(old) != tool_name:
                         raise InvalidInput("retained Exact request belongs to another tool")
                     return self.status(request_id, old)
-                listing = [self.host_request(request)]
-                if not self.fits({"requests": listing}):
-                    # No listing reply can carry this request, so it never
-                    # becomes an intent. The refusal is kept without the body:
-                    # a read after a lost reply gives this answer, not absent.
+                # Admission measures this request alone, on the longest page
+                # that can carry only it: the one that also names its record
+                # as `next` because other requests wait behind it. A request
+                # that fits there is listed however much else is pending.
+                if not self.fits({"requests": [self.host_request(request)],
+                                  "next": self.store.path(request_id).name}):
+                    # No listing page is sure to carry this request, so it
+                    # never becomes an intent. The refusal is kept without the
+                    # body: a read after a lost reply gives this answer, not
+                    # absent.
                     refused = self.terminal_record(request_id, request_digest, {**REQUEST_BODY_REFUSED}, tool_name)
                     self.store.write(refused)
                     return self.status(request_id, refused)
-                pending = [self.host_request(record["request"]) for record in self.store.pending()]
-                if not self.fits({"requests": pending + listing}):
-                    return {"request_id": request_id, "state": "capacity_wait"}
                 accepted = {"version": 2, "request": request, "digest": request_digest, "result": None}
                 self.store.write(accepted)
                 return self.status(request_id, accepted)

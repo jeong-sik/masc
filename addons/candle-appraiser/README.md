@@ -52,11 +52,14 @@ Missing or replaced storage is an error, including individual reads.
 Directory sync failure makes that running worker refuse further reads/listings;
 it cannot advertise an unconfirmed write as a completed judgment.
 
-The complete pending listing must fit the manifest's actual reply frame. A new
-intent that would exceed it returns `capacity_wait` without being stored; existing
-work can finish before the host retries admission. A reduced frame that cannot
-carry retained work refuses the listing explicitly instead of silently hiding
-pending requests.
+`lane_host_requests` answers in pages. Each page carries as many pending requests
+as fit one reply frame, and while more remain it carries `next`, the record name
+the host passes back as `after` to get the following page. An intent is stored
+when a page that carries it alone, `next` included, fits the manifest's actual
+reply frame; other pending intents do not change that answer. An intent that
+cannot fit such a page ends as the body-free `request_body_refused` result. A
+reduced frame that cannot carry a retained request refuses that page explicitly
+instead of silently hiding pending requests.
 
 `lane_observe` exposes pending/finished counts and request IDs. When an ID list
 would exceed the declared reply frame, counts remain available and the output

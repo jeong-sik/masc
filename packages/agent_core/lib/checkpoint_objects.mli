@@ -116,14 +116,16 @@ type boundary =
   | Turn_continues
   | Turn_closes
 
-(** The messages of the last save or load with the chain values over them, so
-    a save whose messages begin with those values ([==]) hashes only what
-    follows them. One memo serves one sequence of saves of one checkpoint.
+(** The written messages of the last save or load with their chain values.
+    A save whose messages begin with those values ([==]), or with the still
+    live source messages they were encoded from, hashes only what follows
+    them. Source-message identities are weak: the memo does not keep fields
+    the writer omitted, such as [ToolResult.json], alive after their caller
+    releases them. One memo serves one sequence of saves of one checkpoint.
 
-    What a message is written as does not live here. The process keeps it for
-    each message it has encoded, by identity ([==]), for as long as the
-    message is alive, so a save, a digest or another memo encodes only
-    messages no call has encoded. What a load read stays in the memo the
+    Encoded entries are shared with the process's weak identity cache, so a
+    save, a digest or another memo reuses entries for still-live messages
+    already encoded by this process. What a load read stays in the memo the
     load filled: another memo encodes the loaded records once. *)
 type memo
 
@@ -156,7 +158,8 @@ type plan =
     objects of [previous] that are not stored: an absent last segment is not
     kept, a kept turn whose bundle is absent has its bundle written again from
     [checkpoint]'s messages, and an absent open message or header object is
-    written again. After a success, [memo] holds [checkpoint]'s messages.
+    written again. After a success, [memo] holds the written messages and
+    their encodings, with weak identities for [checkpoint]'s source messages.
     Fails when a message or the fields around them do not pass the checkpoint
     codec's checks. *)
 val plan_save

@@ -72,11 +72,11 @@ let test_oversized ?(status = 200) kind = with_runtime (fun env sw ->
   let pool = Pool.create ~sw ~env () in
   (match Pool.request pool ~max_body_bytes:limit ~method_:`GET ~url () with
    | Ok _ -> Alcotest.fail "oversized response was returned as success"
-   | Error (Pool.Exchange_failed message) ->
-     Alcotest.(check string) "receive refusal names its bound"
-       (Printf.sprintf "HTTP %d: body exceeds %d bytes" status limit) message
+   | Error (Pool.Body_limit_exceeded { status = refused_status; limit = refused_limit }) ->
+     Alcotest.(check int) "receive refusal names the response status" status refused_status;
+     Alcotest.(check int) "receive refusal names its bound" limit refused_limit
    | Error error ->
-     Alcotest.failf "oversized response failed outside the exchange: %s"
+     Alcotest.failf "oversized response failed as something other than its limit: %s"
        (Pool.request_error_to_string error));
   Eio.Stream.take completed;
   Alcotest.(check int) "partial connection was not parked" 0

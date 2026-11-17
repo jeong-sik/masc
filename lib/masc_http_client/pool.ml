@@ -350,6 +350,8 @@ type request_error =
   | Connect_held_back of
       { origin : origin; failure : connect_failure; retry_in_seconds : float }
   | Timed_out of { after_seconds : float }
+  | Idle_timed_out of { after_seconds : float }
+  | Body_limit_exceeded of { status : int; limit : int }
   | Exchange_failed of string
   | Invalid_request of invalid_request
 
@@ -599,6 +601,10 @@ let request_error_to_string = function
       retry_in_seconds
   | Timed_out { after_seconds } ->
     Printf.sprintf "Pool.request: timeout after %.1fs" after_seconds
+  | Idle_timed_out { after_seconds } ->
+    Printf.sprintf "idle timeout after %.1fs" after_seconds
+  | Body_limit_exceeded { status; limit } ->
+    Printf.sprintf "HTTP %d: body exceeds %d bytes" status limit
   | Exchange_failed detail -> detail
   | Invalid_request (Negative_body_limit _) ->
     "max_body_bytes must be non-negative"
@@ -830,27 +836,26 @@ let ensure_host_header ~uri headers =
 
 (* Enforce an explicit caller limit before retaining a body chunk. A refused
    body remains unread; the request owner closes that connection on Error. *)
-let read_response_body ?max_body_bytes ~status body =
+let read_response_body ?max_body_bytes ~status body : (string, request_error) result =
+  let piaf_failed err = Exchange_failed (piaf_error_message err) in
   match max_body_bytes with
-  | None -> Piaf.Body.to_string body
+  | None -> Piaf.Body.to_string body |> Result.map_error piaf_failed
   | Some limit ->
-    let too_large () =
-      Error (`Msg (Printf.sprintf "HTTP %d: body exceeds %d bytes" status limit))
-    in
+    let too_large () = Error (Body_limit_exceeded { status; limit }) in
     match Piaf.Body.length body with
     | `Fixed length when Int64.compare length (Int64.of_int limit) > 0 ->
       too_large ()
     | `Fixed _ | `Chunked | `Unknown | `Close_delimited | `Error _ ->
       let buffer = Buffer.create 0 in
-      let exception Body_limit_exceeded in
+      let exception Over_limit in
       try
         match Piaf.Body.iter_string body ~f:(fun chunk ->
           if String.length chunk > limit - Buffer.length buffer then
-            raise Body_limit_exceeded;
+            raise Over_limit;
           Buffer.add_string buffer chunk) with
         | Ok () -> Ok (Buffer.contents buffer)
-        | Error _ as error -> error
-      with Body_limit_exceeded -> too_large ()
+        | Error err -> Error (piaf_failed err)
+      with Over_limit -> too_large ()
 
 (* A fixed-length stream waits for the transport to flush its payload before
    closing the writer. Piaf's eager string body closes before flushing; H2
@@ -868,7 +873,7 @@ let request_body body =
   Piaf.Body.of_stream ~length:(`Fixed (Int64.of_int length)) stream
 
 (* Wrap a single request: acquire-or-create client, send, release.
-   Errors return [Error string]; the connection is dropped (close)
+   Errors return [Error request_error]; the connection is dropped (close)
    on error, parked on success. *)
 let do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri : (response, request_error) result =
   let key = Host_key.of_uri uri in
@@ -915,12 +920,13 @@ let do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri
             Piaf.Response.headers resp |> Piaf.Headers.to_list
           in
           let body_result =
-            with_client_scope client ~on_error:(fun exn -> `Exn exn)
+            with_client_scope client
+              ~on_error:(fun exn -> Exchange_failed (exn_message exn))
               (fun () -> read_response_body ?max_body_bytes ~status (Piaf.Response.body resp)) in
           (match body_result with
-           | Error err ->
+           | Error error ->
              release_once ~close_only:true;
-             Error (Exchange_failed (piaf_error_message (err :> Piaf.Error.t)))
+             Error error
            | Ok body_str ->
              release_once ~close_only:(Option.is_some resolved_addresses);
              Ok { status; headers = headers_list; body = body_str }))
@@ -989,7 +995,7 @@ let read_body_with_idle
     ~(start_sec : float)
     ~(idle_timeout_sec : float)
     (body : Piaf.Body.t)
-  : (retained * body_progress, string * body_progress) result =
+  : (retained * body_progress, request_error * body_progress) result =
   let keep, kept =
     (match retention with
      | Keep_body ->
@@ -1026,7 +1032,7 @@ let read_body_with_idle
        match Piaf.Body.iter_string ~f:observe body with
        | Ok () -> Ok (kept (), !progress)
        | Error err ->
-         Error (piaf_error_message (err :> Piaf.Error.t), !progress))
+         Error (Exchange_failed (piaf_error_message (err :> Piaf.Error.t)), !progress))
     ~watcher:(fun () ->
        (* Idle watcher: sleep one idle window, then compare the last
           observed chunk timestamp. If the body fiber did not record a
@@ -1036,9 +1042,7 @@ let read_body_with_idle
          let last_known = !progress.last_chunk_at_sec in
          Eio.Time.sleep clock idle_timeout_sec;
          if !progress.last_chunk_at_sec = last_known then
-           Error
-             (Printf.sprintf "idle timeout after %.1fs" idle_timeout_sec,
-              !progress)
+           Error (Idle_timed_out { after_seconds = idle_timeout_sec }, !progress)
          else
            watch ()
        in
@@ -1126,17 +1130,18 @@ let do_request_streaming
             on_response;
           let start_sec = Eio.Time.now clock in
           let read (type retained) (retention : retained body_retention) on_chunk
-            : (retained * body_progress, string) result
+            : (retained * body_progress, request_error) result
             =
-            with_client_scope client ~on_error:exn_message (fun () ->
+            with_client_scope client
+              ~on_error:(fun exn -> Exchange_failed (exn_message exn)) (fun () ->
               read_body_with_idle ~retention ?on_chunk ~clock ~start_sec
                 ~idle_timeout_sec (Piaf.Response.body resp)
               |> Result.map_error fst)
           in
           let settle outcome_of = function
-            | Error detail ->
+            | Error error ->
               release_once ~close_only:true;
-              Error (Exchange_failed detail)
+              Error error
             | Ok (held, progress) ->
               release_once ~close_only:false;
               Ok (outcome_of held progress)
@@ -1207,8 +1212,7 @@ module For_testing = struct
   let request_body = request_body
   let with_request_timeout ~clock ~timeout_seconds f =
     with_optional_timeout ~clock ~timeout_seconds
-      ~timed_out:(fun after_seconds ->
-        request_error_to_string (Timed_out { after_seconds }))
+      ~timed_out:(fun after_seconds -> Timed_out { after_seconds })
       f
 
   let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =

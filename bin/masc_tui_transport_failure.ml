@@ -44,6 +44,12 @@ let line ~verb ~url = function
      | Pool.Timed_out { after_seconds } ->
        exchange_line ~verb ~url
          (Printf.sprintf "no answer within %.0fs" (Float.ceil after_seconds))
+     | Pool.Idle_timed_out { after_seconds } ->
+       exchange_line ~verb ~url
+         (Printf.sprintf "the response stopped for %.0fs" (Float.ceil after_seconds))
+     | Pool.Body_limit_exceeded { status; limit } ->
+       exchange_line ~verb ~url
+         (Printf.sprintf "the HTTP %d response is larger than %d bytes" status limit)
      | Pool.Exchange_failed detail -> exchange_line ~verb ~url detail
      | Pool.Invalid_request _ ->
        exchange_line ~verb ~url (Pool.request_error_to_string error))
@@ -54,7 +60,8 @@ let log ~verb ~url = function
   | Client (Http.Request_failed (Pool.Connect_failed _ as error)) ->
     Log.Transport.warn "http %s %s: %s" verb url (Pool.request_error_to_string error)
   | Client (Http.Request_failed
-              ( Pool.Connect_held_back _ | Pool.Timed_out _ | Pool.Exchange_failed _
+              ( Pool.Connect_held_back _ | Pool.Timed_out _ | Pool.Idle_timed_out _
+              | Pool.Body_limit_exceeded _ | Pool.Exchange_failed _
               | Pool.Invalid_request _ ))
   | Client Http.Pool_unavailable | Request_domain_not_started -> ()
 

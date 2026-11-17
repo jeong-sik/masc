@@ -240,13 +240,3 @@ val all_domain_pools : unit -> (int * Pool.t) list
     [(domain_id, pool)] pairs.  Used by [Pool_metrics] to aggregate
     counters across all OCaml Domains.  Thread-safe; acquires an
     internal [Stdlib.Mutex] for the duration of the snapshot. *)
-
-module For_testing : sig
-  val with_request_timeout :
-    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-    timeout_sec:float ->
-    (unit -> ('a, string) result) ->
-    ('a, string) result
-  (** Transport-independent proof seam for the exact deadline race used by
-      [post_sync]/[patch_sync]. *)
-end

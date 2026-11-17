@@ -44,7 +44,8 @@ let is_tcp (failure : Masc_http_client.Pool.connect_failure) =
 let is_tcp_refusal (error : Masc_http_client.Pool.request_error) =
   match error with
   | Connect_failed { failure; _ } -> is_tcp failure
-  | Connect_held_back _ | Timed_out _ | Exchange_failed _ | Invalid_request _ ->
+  | Connect_held_back _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+    | Exchange_failed _ | Invalid_request _ ->
     false
 
 (* A request the pool refused without a socket because an earlier connect to
@@ -53,7 +54,8 @@ let held_back_failure (error : Masc_http_client.Pool.request_error) =
   match error with
   | Connect_held_back { failure; retry_in_seconds; origin = _ } ->
     Some (failure, retry_in_seconds)
-  | Connect_failed _ | Timed_out _ | Exchange_failed _ | Invalid_request _ -> None
+  | Connect_failed _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+    | Exchange_failed _ | Invalid_request _ -> None
 
 let test_dead_server_fd_flat () =
   Eio_main.run @@ fun env ->
@@ -82,7 +84,8 @@ let test_dead_server_fd_flat () =
     (match warm_up with
      | Connect_failed { retry = Retry_unblocked; _ } -> true
      | Connect_failed { retry = Retry_in _; _ }
-     | Connect_held_back _ | Timed_out _ | Exchange_failed _ | Invalid_request _ ->
+     | Connect_held_back _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+     | Exchange_failed _ | Invalid_request _ ->
        false);
   Alcotest.(check bool) "and the refusal reads as one line" false
     (String.contains (Masc_http_client.Pool.request_error_to_string warm_up) '\n');
@@ -126,7 +129,8 @@ let test_backoff_fast_fails_without_socket () =
     (match first with
      | Connect_failed { retry = Retry_in seconds; _ } -> Float.equal seconds 30.0
      | Connect_failed { retry = Retry_unblocked; _ }
-     | Connect_held_back _ | Timed_out _ | Exchange_failed _ | Invalid_request _ ->
+     | Connect_held_back _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+     | Exchange_failed _ | Invalid_request _ ->
        false);
   let fd_mid = (Fd_accountant.fd_snapshot ()).fd_open in
   let second = request_error (Masc_http_client.Pool.request pool ~method_:`GET ~url ()) in
@@ -523,7 +527,8 @@ let test_establishment_timeout_during_tls () =
          | Connect_failed
              { failure = (No_addresses | Dns_failure _ | Tcp_failure _ | Client_failure _); _ }
          | Connect_failed { retry = Retry_unblocked; _ }
-         | Connect_held_back _ | Timed_out _ | Exchange_failed _ | Invalid_request _ ->
+         | Connect_held_back _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+         | Exchange_failed _ | Invalid_request _ ->
            false);
       (* Published after the server sees EOF and closes its own socket. *)
       Eio.Stream.take completed;

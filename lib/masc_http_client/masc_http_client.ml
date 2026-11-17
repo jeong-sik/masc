@@ -216,11 +216,6 @@ let get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response ~on_chunk () 
     ~url ~headers ?on_response ~on_chunk ()
   |> Result.map_error failure_to_string
 
-module For_testing = struct
-  let with_request_timeout ~clock ~timeout_sec f =
-    Pool.For_testing.with_request_timeout ~clock ~timeout_seconds:timeout_sec f
-end
-
 (* ── Observability ────────────────────────────────────────────────── *)
 
 (** Return all domain pools created so far.

@@ -132,10 +132,15 @@ type request_error =
           [retry_in_seconds] more. *)
   | Timed_out of { after_seconds : float }
       (** The request window passed before any response finished. *)
+  | Idle_timed_out of { after_seconds : float }
+      (** A streamed response body produced no chunk for [after_seconds]. *)
+  | Body_limit_exceeded of { status : int; limit : int }
+      (** The response to a request with [max_body_bytes] carried more than
+          [limit] bytes; the body was not kept. [status] is the response's. *)
   | Exchange_failed of string
-      (** The connection was established and the exchange then failed: a
-          protocol or I/O error, an exceeded body limit, or an idle stream.
-          The text is the transport's own. *)
+      (** The connection was established and the exchange then failed with a
+          protocol or I/O error. The text is Piaf's own message for it, or
+          the exception's when the client scope closed under the read. *)
   | Invalid_request of invalid_request
 
 val request_error_to_string : request_error -> string
@@ -188,6 +193,7 @@ val request :
     - timeout when [clock] and [timeout_seconds] are both provided and
       the request has not finished by then; a response that arrived as
       the window passed is the result
+    - [Body_limit_exceeded] when the body is larger than [max_body_bytes]
 
     Notably absent: silent retry. If a reused connection fails, the
     caller sees [Error] with the underlying reason. Caller decides
@@ -277,7 +283,8 @@ val request_streaming :
     error, released under cancellation.
 
     [clock] measures progress and protocol-specific idle periods. Chunk arrival
-    resets the idle timer. An infinite idle window leaves lifetime to the
+    resets the idle timer; a window with no chunk ends the request as
+    [Error (Idle_timed_out _)]. An infinite idle window leaves lifetime to the
     request owner and cancellation, as needed for human-driven login.
 
     [on_chunk] runs on the calling fiber between reads. Work done in it delays
@@ -321,8 +328,8 @@ module For_testing : sig
   val with_request_timeout :
     clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
     timeout_seconds:float ->
-    (unit -> ('a, string) result) ->
-    ('a, string) result
+    (unit -> ('a, request_error) result) ->
+    ('a, request_error) result
 
   (** Drive the real establishment sequence with controlled DNS, TCP and
       client stages, without fabricating a Piaf client. A client whose
@@ -361,7 +368,7 @@ module For_testing : sig
     start_sec:float ->
     idle_timeout_sec:float ->
     Piaf.Body.t ->
-    ('retained * body_progress, string * body_progress) result
+    ('retained * body_progress, request_error * body_progress) result
 
   (** The idle-queue decision, separated from the resource so it can be
       driven with plain values: given (client, last_used) in park order,

@@ -1069,7 +1069,13 @@ let test_native_mcp_result_and_retention_match_approved_replay () =
   (* Exercise the real post-tool hook, not a manually assembled retention row. *)
   let module Log = Masc.Keeper_tool_call_log in
   Fun.protect ~finally:(fun () -> Log.reset_for_testing ();
-      Masc.Keeper_execution_join.For_testing.clear ()) (fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      (* The handle below belongs to this [Eio_main.run] and dies with it.
+         Leaving it in [Fs_compat] hands every later case a dead handle, which
+         the backend reads as "Stale Eio fs context" and answers with the
+         Memory fallback -- so a later case's retained artifacts land in the
+         shared store instead of its own directory (task-3742). *)
+      Fs_compat.clear_fs ()) (fun () ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     Log.init ~base_path ();

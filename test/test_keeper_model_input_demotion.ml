@@ -1095,7 +1095,7 @@ let with_signed_argument_store f =
     (fun () -> f ~base_path (Tool_blob_store.create ~base_path))
 ;;
 
-let signed_argument_view ?frozen_arguments ?materialize
+let signed_argument_view ?frozen_arguments ?materialize ?current_turn_results ?finished_turn_results
     ?(project_request_media = fun messages -> Ok messages) ~base_path ~store ~config messages =
   let atom_count = snd (Window.annotate messages) in
   let completed_arguments = match frozen_arguments with
@@ -1112,14 +1112,15 @@ let signed_argument_view ?frozen_arguments ?materialize
   match Signed_provider.For_testing.request_view
     ~project_request_media
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
-    ?completed_arguments
+    ?completed_arguments ?finished_turn_results
     ~tools:signed_argument_tools ~provider_config:config ~measure_message_bytes
     ~measure_wire_bytes:(Masc.Keeper_model_input_wire_bytes.measurer ~config)
     ~front:(Some { Masc.Keeper_carried_front.first_atom = 0
       ; front = Model_input_front.At_atom first_digest
       ; source = Masc.Keeper_carried_front.Ledger })
     ~accepted:None ~history_digest_at:(Window.atom_opening_digest messages)
-    ~current_turn_results:(Signed_provider.Current_turn_demoted { refused_atom_count = atom_count })
+    ~current_turn_results:(Option.value current_turn_results
+      ~default:(Signed_provider.Current_turn_demoted { refused_atom_count = atom_count }))
     ~base_path
     ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary {end_atom = atom_count})
     ~materialize
@@ -1172,11 +1173,20 @@ let signed_call_keeps_its_own_arguments () = with_signed_argument_store @@ fun ~
   let signed = stamp_signed_call ~config ~prefix:[user] ~id:"signed" input in
   let source = [user; signed; tool_message ~id:"signed" "done"] in
   ignore (assert_signed_argument_wire ~config ~reasoning_index:1 source : Yojson.Safe.t list);
-  let view = signed_argument_view ~base_path ~store ~config source in
-  Alcotest.(check bool) "changing the signed message forces argument protection" true
-    view.argument_prefix_protected;
-  let inputs = assert_signed_argument_wire ~config ~reasoning_index:1 view.carried in
-  Alcotest.(check bool) "the signed ToolUse input remains exact on actual wire" true (inputs = [input])
+  let views =
+    [ signed_argument_view ~base_path ~store ~config source
+    ; signed_argument_view
+        ~current_turn_results:Signed_provider.Current_turn_verbatim
+        ~finished_turn_results:Signed_provider.Finished_turns_as_markers
+        ~base_path ~store ~config source
+    ]
+  in
+  List.iter (fun (view : Signed_provider.request_view) ->
+    Alcotest.(check bool) "changing the signed message forces argument protection" true
+      view.argument_prefix_protected;
+    let inputs = assert_signed_argument_wire ~config ~reasoning_index:1 view.carried in
+    Alcotest.(check bool) "the signed ToolUse input remains exact on actual wire" true (inputs = [input]))
+    views
 ;;
 
 (* The callback fixture below uses the actual H5 reader/cache. Runtime modality
@@ -2335,10 +2345,8 @@ let rec shared_prefix first second =
   | _ -> 0
 ;;
 
-(* A result of a turn that ended leaves as a marker the blob store reads back
-   in full, this turn's results stay as they are, and no argument is
-   touched, whatever its size. The ended turns' arguments are bound the way
-   a size refusal's resend binds them; this composition still leaves them. *)
+(* An ended turn's arguments and results are recoverable without carrying
+   their bodies into the next request. This turn's calls stay verbatim. *)
 let finished_turn_results_leave_as_markers () =
   let big_input = `Assoc [ "command", `String (String.make 4_000 'h') ] in
   let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
@@ -2366,8 +2374,8 @@ let finished_turn_results_leave_as_markers () =
   in
   Alcotest.(check int) "the demotion stops at the turn boundary" turn_start
     composed.Try_provider.demote_before;
-  Alcotest.(check int) "each result of an ended turn is planned"
-    (List.length earlier_bodies)
+  Alcotest.(check int) "each ended call's arguments and result are planned"
+    (2 * List.length earlier_bodies)
     (List.length composed.Try_provider.planned.Demotion.pending);
   let sent = materialized ~base_path composed in
   let carried = markers sent in
@@ -2401,29 +2409,34 @@ let finished_turn_results_leave_as_markers () =
          true
          (List.exists (String.equal (String.make size (letter i))) carried))
     newest_bodies;
-  Alcotest.(check bool) "every argument is exactly as it was" true
-    (List.for_all
-       (fun (message : Types.message) ->
-          List.for_all
-            (function
-              | Types.ToolUse { input; _ } -> input = big_input
-              | Types.Text _ | Types.ToolResult _ | Types.Thinking _
-              | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.Image _
-              | Types.Document _ | Types.Audio _ -> true)
-            message.Types.content)
-       sent);
-  (* Control: the same bound arguments are demoted by the resend that answers
-     a size refusal, so the check above would fail if this composition used
-     them. *)
-  let refused =
-    compose_from_the_oldest_atom ~completed_arguments ~base_path
-      ~current_turn_results:(demoted_after_refusal messages)
-      ~turn_boundary:(finished_turns_through turn_start) messages
+  let inputs = argument_inputs sent in
+  List.iter
+    (fun input ->
+       match Tool_output.normalized_artifact_ref_of_json input with
+       | Tool_output.Decoded_normalized_artifact_ref reference ->
+         (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+                  ~sha256:reference.Tool_output.sha256 with
+          | Ok (Some bytes) ->
+            Alcotest.(check string) "archived arguments read back exactly"
+              (Yojson.Safe.to_string big_input) bytes
+          | Ok None | Error _ -> Alcotest.fail "argument reference has no stored body")
+       | Tool_output.Not_normalized_artifact_ref
+       | Tool_output.Invalid_normalized_artifact_ref _ ->
+         Alcotest.fail "ended call still carries its full arguments")
+    (List.take (List.length earlier_bodies) inputs);
+  Alcotest.(check bool) "this turn's arguments stay verbatim" true
+    (List.for_all (( = ) big_input) (List.drop (List.length earlier_bodies) inputs));
+  Alcotest.(check bool) "durable arguments stay verbatim" true
+    (List.for_all (( = ) big_input) (argument_inputs messages));
+  let later_messages = messages @ [ assistant "later request in this turn" ] in
+  let later =
+    compose_from_the_oldest_atom ~completed_arguments ~finished_turn_results:as_markers
+      ~base_path ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~turn_boundary:(finished_turns_through turn_start) later_messages
+    |> materialized ~base_path
   in
-  Alcotest.(check bool) "a size refusal's resend does demote these arguments" true
-    (List.exists
-       (fun input -> input <> big_input)
-       (argument_inputs refused.Try_provider.projection.Window.messages))
+  Alcotest.(check int) "archived prefix stays byte-identical on the next request"
+    (List.length sent) (shared_prefix sent later)
 ;;
 
 (* A result goes as a marker from [aged_result_min_bytes] on; a smaller one

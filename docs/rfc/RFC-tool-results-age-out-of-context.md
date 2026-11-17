@@ -3,7 +3,7 @@ rfc: "tool-results-age-out-of-context"
 title: "도구 결과는 만든 턴에서만 원문이다 — 히스토리에 남은 누적을 닫는다"
 status: Draft
 created: 2026-09-03
-updated: 2026-11-12
+updated: 2026-11-17
 author: claude
 supersedes: []
 superseded_by: null
@@ -220,7 +220,34 @@ PY
 
 - 규칙: 현재 턴(마지막 user 메시지)보다 앞이고, 이미지가 없고, 크기가 문턱 이상인 도구 결과를 마커로 바꿔요. 이 문턱은 늙은 결과를 바꾸는 문턱이고, 만들 때 blob 으로 넘기는 상한(64 KB)과 별개예요. 재생은 2 KB 로 했어요.
 - 한 번 바뀐 결과는 이후 요청에서도 같은 바이트여야 해요. 히스토리는 뒤로만 자라니 요청마다 같은 함수를 부르면 그렇게 돼요. 저장된 체크포인트는 원문 그대로 두고, 제공자로 가는 복사본에서만 바꿔요.
-- 자리: `current_turn_results` 에 변종을 더하지 않고 `compose_carried_model_input` 에 `?finished_turn_results`(`Finished_turns_verbatim` / `Finished_turns_as_markers`, 기본은 verbatim)를 더했어요. `Current_turn_verbatim` 일 때 `Keeper_carried_front` 의 턴 경계(끝난 턴의 끝 atom)를 `Keeper_model_input_demotion.plan` 의 `demote_before` 로 넘겨요. 크기 거절에 답하는 재전송(`Current_turn_demoted`)은 이 값과 상관없이 전과 같아요. 드라이버의 요청 조립은 `artifact_read` 를 쓸 수 있을 때만 켜요. `completed_arguments` 를 빼서 호출 인자는 그대로 남아요.
+- 자리: `current_turn_results` 에 변종을 더하지 않고 `compose_carried_model_input` 에 `?finished_turn_results`(`Finished_turns_verbatim` / `Finished_turns_as_markers`, 기본은 verbatim)를 더했어요. `Current_turn_verbatim` 일 때 `Keeper_carried_front` 의 턴 경계(끝난 턴의 끝 atom)를 `Keeper_model_input_demotion.plan` 의 `demote_before` 로 넘겨요. 크기 거절에 답하는 재전송(`Current_turn_demoted`)은 이 값과 상관없이 전과 같아요. 드라이버의 요청 조립은 `artifact_read` 를 쓸 수 있을 때만 켜요. 완료가 검증된 호출의 `completed_arguments` 도 함께 넘겨서 인자를 원본 저장소의 참조로 바꿔요.
 - 문턱: `plan` 에 `?min_result_bytes`(기본 0)를 더했고 드라이버가 2,048 을 넘겨요. 본문이 문턱보다 짧은 결과는 건너뛰어요. 호출 인자에는 이 문턱을 적용하지 않아요. 문턱을 더 낮추거나 없애는 것도 선택지예요(재생 값은 1 KB 35.7%, 2 KB 33.7%예요. 11-01 ~ 11-05 평균이고, 1 KB 아래는 재지 않았어요).
 - 확인: 같은 히스토리의 두 요청에서 앞 메시지 바이트가 같은지(prefix 안정성), 이미 마커인 결과를 다시 바꾸지 않는지.
+
+## 끝난 호출의 인자도 보관하기 (2026-11-17)
+
+이전 구현은 끝난 턴의 큰 결과만 먼저 마커로 바꾸고, 호출 인자는 공급자가
+크기를 거절한 재전송에서만 바꿨어요. `code-reviewer`의 한 성공 요청을 확인하니
+도구 호출 1,534개의 인자만 1,267,397 B였어요. 결과는 별도로 1,216,654 B였고,
+공급자가 보고한 마지막 요청 입력은 1,041,722토큰이었어요. 같은 호출 ID의
+중복은 없었어요. 이 수치는 그 요청의 관측이며 독립 토크나이저 재계산은 아니에요.
+
+운영자는 같은 날 이 요청을 보고 과거 도구 호출도 아카이빙해야 하며 계속 전부
+읽을 필요가 없다고 지적했어요([#52700](https://github.com/jeong-sik/masc/issues/52700)에 원래 Codex 요청의 범위를 기록했어요). 그 지시에 따라
+인자 보관을 크기 거절 뒤로 미루던 규칙을 바꿔요. 이전 규칙의 검사 성공을
+새 동작의 검증으로 쓰지 않으며, 아래 시나리오를 수정된 후보에서 확인해야 해요.
+
+- 원래 이력에서 호출과 결과가 닫혔고, 검증한 완료 턴 경계보다 앞에 있는
+  호출만 고릅니다. 입장 과정에서 만든 결과로 완료 범위를 넓히지 않습니다.
+- 원문은 체크포인트와 blob 저장소에 남깁니다. 모델로 보내는 복사본의 인자만
+  기존 `_blob` 참조로 바꾸며 호출 ID와 도구 이름은 보존합니다.
+- 참조를 읽는 도구가 없거나 원문 결속·저장에 실패하면 원문을 보냅니다.
+  서명된 reasoning이 원래 인자에 의존하면 해당 인자도 원문을 유지합니다.
+- 결과의 기존 2,048 B 문턱과 인자·결과의 크기 감소 검사는 유지합니다.
+  현재 턴의 호출을 새로 아카이빙하거나, 입력량을 기준으로 턴을 중단하지 않습니다.
+
+첫 변경 시점에는 이전 provider 캐시의 접두가 달라질 수 있어요. 이후 같은
+완료 호출은 같은 참조로 보내요. 원문 재조회, 현재 턴 보존, 다음 요청의 참조
+안정성과 signed reasoning 보존을 기존 동작 검사에서 확인해요. 배포 뒤의
+입력 절감량과 캐시 영향은 별도 실측이 필요해요.
 - 효과: 규칙을 넣은 뒤 `measure_aged_tool_results.py` 로 "현재 턴보다 앞선 도구 결과의 몫" 이 0 에 가까워졌는지, `measure_turn_requests.py` 로 첫 요청의 캐시 적중이 같은 간격 구간에서 안 내려갔는지 봐요. 적중이 내려가면 규칙을 되돌려요.

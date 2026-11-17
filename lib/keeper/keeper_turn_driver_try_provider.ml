@@ -992,10 +992,11 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
    [aged_result_min_bytes] or more that belongs to a turn that ended leaves
    as its marker ([finished_turn_results], RFC-tool-results-age-out-of-context).
    Each such result changes once, on the first request after its turn ended,
-   and goes as the same marker on every later request. Every other result,
-   and every argument, still goes as the range first sent it: rewriting them
-   when the turn boundary moves would change the prefix the provider cached
-   at that message, on the first request of every turn. The range shrinks
+   and goes as the same marker on every later request. Verified arguments of
+   closed calls in ended turns also go as stored references, unless signed
+   reasoning requires their original prefix. Each payload changes once after
+   its turn ends; this can invalidate the provider cache from that point.
+   Other bodies stay as the range first sent them. The range shrinks
    only where its front moves, or as the answer to a size refusal.
 
    No cut refuses and nothing here measures a size against anything: the
@@ -1020,10 +1021,9 @@ let current_turn_results_to_string = function
     Printf.sprintf "demoted_through_%d" refused_atom_count
 ;;
 
-(* What a composition does with the tool results of turns that already
-   ended, the atoms before the turn boundary. Arguments are not part of it:
-   they go as the range first sent them outside the resend that answers a
-   size refusal. A Keeper that can read markers back asks for
+(* What a composition does with the tool bodies of turns that already
+   ended. Argument references additionally require the frozen, verified
+   closed-call binding. A Keeper that can read markers back asks for
    [Finished_turns_as_markers]; the others, and every caller that does not
    say, keep every result as sent. *)
 type finished_turn_results =
@@ -1437,7 +1437,7 @@ let compose_carried_model_input
        | Finished_turns_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
        | Finished_turns_as_markers ->
          let finished = finished_turn_atoms ~atom_count:history_atom_count turn_boundary in
-         ( demotion_plan ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
+         ( demotion_plan ?completed_arguments ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
              ~measure_wire_bytes
              ~base_path ~demote_before:finished messages
          , applied_demote_before ~base_path ~demote_before:finished ))
@@ -1879,9 +1879,9 @@ let bounded_model_input_projection
   (* Core may deserialize a retained native checkpoint after dispatch. Bind
      once to its first actual request, while closure eligibility still comes
      exclusively from the pre-admission seed. Result resends never rebind it.
-     The bound set is demoted only once a size refusal has demoted the current
-     turn's results: by the resend that answers it and by every later request
-     of the run, the max-tokens continuation among them. *)
+     The bound set belongs only to already completed turns. Ordinary requests
+     archive it with the aged results; later requests cannot add newly closed
+     calls to this frozen set. *)
   let argument_binding = ref Arguments_unbound in
   let argument_protection_reported = ref false in
   let completed_arguments_for messages =
@@ -2029,18 +2029,9 @@ let bounded_model_input_projection
       | None | Some Without_snapshot -> None
     in
     let current_turn_results = !(state.current_turn_results) in
-    (* The bound arguments ride only on the requests sent after a size refusal
-       demoted the current turn's results: the resend that answers it and every
-       later request of the run, the max-tokens continuation among them. Any
-       other request sends every argument as the range first sent it. *)
-    let view_arguments =
-      match current_turn_results with
-      | Current_turn_verbatim -> None
-      | Current_turn_demoted _ -> completed_arguments
-    in
     let* view =
       request_view
-        ?continuity:(input_continuity ctx.request_input) ?completed_arguments:view_arguments
+        ?continuity:(input_continuity ctx.request_input) ?completed_arguments
         ~finished_turn_results
         ~history_at_start:ctx.history_at_start
         ~same_turn_result_as_pointer
@@ -2085,14 +2076,9 @@ let bounded_model_input_projection
     in
     (* A failed store can change the actual prefix a newly produced reasoning
        block binds to. Recheck each demoting request and only narrow the frozen
-       set; a request that carried no arguments leaves the binding as it is. *)
-    let completed_arguments =
-      match current_turn_results with
-      | Current_turn_verbatim -> completed_arguments
-      | Current_turn_demoted _ ->
-        argument_binding := Arguments_bound view.completed_arguments;
-        view.completed_arguments
-    in
+       set, including the first ordinary request after a turn ends. *)
+    argument_binding := Arguments_bound view.completed_arguments;
+    let completed_arguments = view.completed_arguments in
     if view.argument_prefix_protected && not !argument_protection_reported then (
       argument_protection_reported := true;
       Log.Keeper.info ~keeper_name:ctx.keeper_name

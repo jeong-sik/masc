@@ -52,6 +52,16 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 그 폴더는 저장소의 `addons/<이름>/` 아래 `.toml`·`.json`·`.py` 파일과 `Dockerfile`을 같은 바이트로
 담아야 한다. 서버는 폴더가 이 빌드가 가진 파일과 같을 때만 선언을 받는다.
 
+`masc exact-addon-setup --base-path <base-path>`가 네 폴더를 쓰고, 각 manifest가 적은 Docker 이미지를
+만든다. `scripts/install-local-build.sh`는 설치 끝에 이 명령을 부른다.
+
+- 폴더가 없을 때만 쓴다. 이미 있는 폴더는 다시 쓰지 않는다. 파일이 다른 폴더는 그 파일 이름을 적어 알린다.
+- 이미지는 `Dockerfile`과 공용 모듈 `exact_worker.py`·`protocol.py`로 만든다. package 자기 파일은 이미지에
+  넣지 않고 worker가 폴더를 `/addon`으로 마운트해 읽는다.
+- 이미지에 위 세 파일의 digest를 label `masc.lane.carried.digest`로 붙인다. 같은 label의 이미지가 있으면
+  다시 만들지 않는다.
+- Docker가 없거나 빌드가 실패하면 그 package만 실패로 알리고 나머지는 계속한다. 선언은 쓰지 않는다.
+
 - 폴더가 없으면 패키지가 설치되지 않았다고 거절한다.
 - 파일이 빠졌거나, 더 있거나, 바이트가 다르면 그 파일 이름을 적어 거절한다.
 - 폴더 안의 심볼릭 링크도 다른 파일로 보고 거절한다.

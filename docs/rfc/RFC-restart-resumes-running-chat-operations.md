@@ -10,12 +10,12 @@ related: ["uncollected-provider-turn-is-not-resumed", "last-path-resumes-after-p
 
 # RFC: 서버를 다시 띄워도 돌던 채팅 작업은 마지막 기록부터 이어 한다
 
-- 상태: 초안. 코드는 바꾸지 않았다.
+- 상태: 초안. L1~L3 과 4.7 의 코드는 main 에 있다(§9).
 - 이슈: #46505(재시작이 Keeper 턴을 끊는다). 앞선 RFC: `uncollected-provider-turn-is-not-resumed`(#52359).
 - 결정(운영자, 2026-11-16): 정상 재기동과 비정상 종료 모두 돌던 채팅 작업을 이어 한다. #52359 §10 의 「끊긴 메시지를 이어 할지」에 대한 답이다.
 - 리뷰 보강(2026-11-16): #52453 리뷰의 보류 네 가지를 4.2·4.4·4.5·4.6·8 에 반영했다. 보강 부분의 코드는 `origin/main` `83461169d090` 에서 읽었다.
-- L4 결정(2026-11-17): 4.6 목록의 저장 자리와 4.7(「재기동 뒤」 근거). 코드는 `origin/main` `f51362a745d9` 에서 읽었다.
-- L4 고침(2026-11-17): 4.6 의 저장 자리를 작업 저장소의 새 표에서 Core journal 사건으로 바꿨다. 코드는 `origin/main` `a820715c1467` 에서 읽었다.
+- L4 결정(2026-11-17): 4.7(「재기동 뒤」 근거). 코드는 `origin/main` `f51362a745d9` 에서 읽었다.
+- L4 다시 정함(2026-11-17): 이어 한 횟수나 진전으로 작업을 끝내지 않는다(4.6). 모으기 전에 끊긴 턴은 기동 정리가 아니라 그 작업을 집은 claim 이 닫는다(4.4). 4.5 의 미루기 서술과 4.7 의 집합 범위를 고쳤다. 고친 부분의 코드는 `origin/main` `467cfe8e8373` 에서 읽었다.
 - 근거: 코드는 `origin/main` `4a8a9920776a` 에서 읽었다. §1 수치는 Keeper 마다 `chat-operations.sqlite3` 를 읽기 전용으로 한 번 열어 셌다. 입력 문장은 열지 않았다. 시각은 KST 다.
 
 ## 0. 요약
@@ -24,11 +24,12 @@ related: ["uncollected-provider-turn-is-not-resumed", "last-path-resumes-after-p
 
 Owner 는 이미 「멈춘 작업의 native 호출은 열어 두고 다음 기동이 이어 하게 한다」고 정해 두었다. 그런데 agent_core 가 취소를 받으면 실행 기록을 먼저 닫는다. 그래서 Owner 의 의도가 닿지 않는다.
 
-이 RFC 는 재기동이 실행을 멈추기만 하고 기록은 닫지 않게 한다. 정상 재기동과 비정상 종료는 같은 기록 모양을 남긴다. 다음 기동의 정리 하나가 둘을 같은 규칙으로 판정한다.
+이 RFC 는 재기동이 실행을 멈추기만 하고 기록은 닫지 않게 한다. 정상 재기동과 비정상 종료는 같은 기록 모양을 남긴다. 다음 기동이 둘을 같은 규칙으로 판정한다.
 
 - provider 응답을 모으기 전에 끊긴 턴은 #52359 의 함수로 닫는다. 그 호출이 남긴 마지막 체크포인트에서 새 native 호출을 연다.
 - 실행 중 끊긴 Tool 은 다시 실행하지 않는다. 「결과를 모른다」는 typed 결과를 모델에게 주고 턴을 잇는다.
-- 진전 없이 다시 끊긴 작업은 이어 하지 않고 끝낸다. 서버를 자동으로 다시 띄우는 감시자 아래에서 같은 작업이 서버를 계속 죽이는 고리를 끊는다.
+- 이어 한 횟수나 진전을 세어 작업을 끝내지 않는다. 같은 작업이 서버를 계속 죽이는 고리(3.5)는 운영자가 그 작업을 취소해 끊는다(4.6).
+- 이어 하기는 조건이 맞을 때만 일어난다. 정상 재기동이 작업을 언제나 보존한다고 약속하지 않는다(4.1).
 - 공식 클라이언트(CLI) 레인은 이 RFC 의 구현 범위 밖이다. CLI 마다 죽은 세션을 다시 열었을 때 무엇이 남는지 먼저 잰다(§10).
 
 ## 1. 사건
@@ -99,6 +100,7 @@ Owner 는 이미 「멈춘 작업의 native 호출은 열어 두고 다음 기�
 
 - 다시 큐에 넣은 행은 새 순번을 받아 큐 맨 뒤로 간다(`requeue_continuation_with_db`, `:2507-2521`). 입력은 남는다.
 - `Active` 호출을 이어 할 때, 끊긴 구간이 provider 응답을 모으기 전이면 turn counter 불일치로 실패한다(#52341, RFC #52359 §3).
+- 다시 큐에 넣은 행은 `queued` 이고 호출은 `Active` 로 남는다. 운영자가 이 행을 큐에서 취소하면 거절된다. 취소는 semantic 실행을 `Settle` 로 닫는데(`keeper_chat_operation_store.ml:3401-3426`, 3461-3471), `Active` 호출이 있으면 `Settle` 이 `Native_call_unsettled` 로 거절된다(`keeper_semantic_execution.ml:858-861`). 코드로 읽은 흐름이고 재현하지 않았다.
 
 ### 3.3 Tool 이 도는 중에 끊기면
 
@@ -128,13 +130,21 @@ Owner 는 이미 「멈춘 작업의 native 호출은 열어 두고 다음 기�
 
 ### 4.1 규칙
 
-> 재기동은 실행을 멈출 뿐 실행 기록을 닫지 않는다. 다음 기동의 정리가 기록을 읽고 판정한다. 진전 없이 다시 끊긴 작업은 이어 하지 않는다.
+> 재기동은 실행을 멈출 뿐 실행 기록을 닫지 않는다. 다음 기동이 기록을 읽고 판정한다. 이어 한 횟수나 진전을 세어 작업을 끝내지 않는다.
 
 - 정상 재기동이 남기는 기록 모양을 비정상 종료와 같게 만든다. 그러면 3.2 의 표 하나가 두 경로를 판정한다.
 - 운영자 중단(`Operator_interrupt`)은 지금처럼 기록을 닫는다. 운영자가 끝내라고 한 일이다.
 - 작업의 새 실패 종류와 횟수 한도는 더하지 않는다. 이어 하지 않는 작업은 지금처럼 `Interrupted_by_restart` 로 끝난다.
-- 저장 상태는 두 가지를 더한다. 4.5 의 「끊긴 Tool 결과」와 4.6 의 「이어 하기 표시」다. 없으면 기록이 사실과 다르게 남거나(4.5), 같은 작업이 서버를 계속 죽인다(4.6).
-- 둘 다 Core journal 에 생성자를 더하기만 한다. 이미 있는 journal 은 그대로 읽힌다. 작업 저장소의 형식은 바꾸지 않는다(4.6).
+- 저장 상태는 하나를 더한다. 4.5 의 「끊긴 Tool 결과」다. 없으면 기록이 사실과 다르게 남는다.
+- 「끊긴 Tool 결과」는 Core journal 에 생성자를 더하기만 한다. 이미 있는 journal 은 그대로 읽힌다. 작업 저장소의 형식은 바꾸지 않는다.
+- 이어 하기는 조건이 맞을 때만 일어난다. 아래 모양은 이어지지 않는다. 정상 재기동이 작업을 언제나 보존한다고 약속하지 않는다.
+  - 기록에 terminal 이 이미 있다(3.2). 호스트 멈춤이 아닌 취소는 지금처럼 기록을 닫는다(4.2).
+  - writer 종료가 증명되지 않았다(4.7).
+  - 끊긴 Tool 이 terminal Tool 이거나 하위 실행 안에 있다(4.5).
+  - 4.4 의 retire 뒤 새 호출을 묶기 전에 claim 이 끝났다.
+  - 묶인 runtime 이 재기동 뒤 설정에 없다(§6).
+  - 공식 클라이언트 레인이다(3.4).
+  - native 호출이 묶이기 전에 끊겼고 continuation 이 없다(§7).
 
 ### 4.2 agent_core: 호스트가 멈춘 실행은 닫지 않는다
 
@@ -174,43 +184,55 @@ agent_core 는 masc 의 예외를 모른다. 의존 순서가 agent_core 아래�
 
 ### 4.4 모으기 전에 끊긴 턴은 남은 체크포인트에서 새 호출로 잇는다
 
-#52359 §4.2 의 3 단계를 바꾼다. 기동 정리가 `retire_uncollected_turn` 으로 기록을 닫은 뒤의 일이다.
+#52359 의 `retire_uncollected_turn` 을 그 작업을 집은 claim 이 부른다. 기동 정리는 지금처럼 기록을 읽고 다시 큐에 넣기만 한다(3.2).
 
-**쓰기는 두 번이다**
+**기동 정리가 아니라 claim 인 이유**
 
-1. `retire_uncollected_turn` 이 journal 을 닫는다. journal 파일에 쓴다(#52359 L1).
-2. 한 store transaction 이 아래를 쓴다. semantic 실행과 작업 행은 같은 sqlite 파일에 있다(`keeper_chat_operation_store.ml:95`, 121).
+- 기동 정리는 Owner 의 명령 안에서 돈다(`keeper_owner.ml:2033-2094`). 그 안에서는 그 Owner 의 mailbox 를 부를 수 없다(`keeper_direct_native_continuation.ml:165-167`). 기동 정리에서 닫으려면 호출 terminal·`Suspend`·다시 큐를 한 번에 쓰는 store transaction 과, retained 체크포인트를 가리키는 continuation 의 저장 모양을 새로 만들어야 한다.
+- claim 은 Owner 의 자식 fiber 에서 돈다. 이미 있는 Owner 명령 둘이면 된다. 호출에 terminal 을 적는 명령(`keeper_direct_native_continuation.ml:159-162`)과, `Retire` 로 끝난 호출을 새 호출로 바꾸는 Bind(`:387-419`)다.
+- 기동 정리에서 닫으면 journal 을 쓰는 동안 Owner 가 다른 명령을 받지 못한다. 예외가 새면 registry 가 그 Owner 를 멈춘다(`keeper_owner.ml:2092-2094`, `keeper_owner_registry.ml:274-277`). claim 에서 닫으면 실패가 그 작업 하나에서 끝난다.
+- 새 저장 필드, 새 store transaction, 스키마 변경이 없다.
 
-두 쓰기는 저장소가 달라 한 transaction 으로 묶이지 않는다. 그 사이에서 죽은 모양은 다음 기동이 이렇게 판정한다.
+**순서**
+
+claim 이 native 호출을 열기 직전의 준비(`keeper_direct_native_continuation.ml:295`)에서 한다. 준비는 지금도 `Active` 호출을 복원하고(`:308-309`), writer 종료를 Owner 에 묻는다(`:346-356`).
+
+1. writer 종료가 증명된 호출(4.7)이면 `retire_uncollected_turn` 을 부른다. `checkpoint_turn_count` 는 `call.checkpoint` 참조의 `turn_count` 다(`keeper_checkpoint_ref.mli:4-8`). 증명이 없는 호출에는 부르지 않는다.
+2. `Not_uncollected` 면 지금처럼 같은 호출을 이어 한다(5.2).
+3. `Retired` 면 그 disposition 을 호출의 terminal 로 적는다. 호출은 `Terminal_unacknowledged(Retire)` 가 된다.
+4. 끊긴 호출의 `call.checkpoint` 에서 새 실행을 연다. 실행이 준비되면 Bind 가 앞 호출을 새 호출로 바꾼다.
+5. 새 호출이 끊긴 턴 k 의 provider 호출을 다시 낸다.
+
+- retire 가 오류를 내면 기록을 한 번 더 읽는다(#52359 §4.2 의 5). terminal 이 생겼으면 3 으로 간다. 없으면 그 claim 은 실패하고 호출은 `Active` 로 남는다.
+
+**새 호출을 여는 근거는 이번 retire 의 결과다**
+
+- 근거는 1 이 돌려준 `Retired` 값이다. 영수증의 `Retire` 로 가르지 않는다. `Succeeded` 로 끝난 실행도 recovery 가 `Retire` 다(`packages/agent_core/lib/agent/agent.mli:326-330`). `Retire` 로 가르면 끝난 작업을 다시 돌린다.
+- claim 이 처음 본 호출이 이미 `Terminal_unacknowledged` 이거나 기록에 terminal 이 있으면 지금처럼 거절한다(`keeper_direct_native_continuation.ml:232-244`, `keeper_turn.ml:478-479`).
+
+**죽는 구간**
 
 | 죽은 때 | 남은 모양 | 다음 기동 |
 |---|---|---|
-| 1 전 | 호출 `Active`, journal 열림 | 같은 판정을 처음부터 한다 |
-| 1 과 2 사이 | 호출 `Active`, journal 에 `Cancelled` terminal | 3.2 의 「`Active` 호출, 기록에 terminal 있음」. 작업은 `Interrupted_by_restart` 로 끝난다. 일은 사라지지만 끝난 일을 다시 돌리지는 않는다 |
-| 2 뒤 | 호출은 내려가고 행은 큐에 있음 | 보통 claim 이다 |
+| claim 뒤, retire 전 | 행 `running`, 호출 `Active`, journal 열림 | 다시 큐에 넣는다. 다음 claim 이 1 부터 한다 |
+| retire 뒤, 3 전 | 호출 `Active`, journal 에 `Cancelled` terminal | 3.2 의 「`Active` 호출, 기록에 terminal 있음」. 작업은 `Interrupted_by_restart` 로 끝난다 |
+| 3 뒤, Bind 전 | 호출 `Terminal_unacknowledged(Retire)` | 3.2 의 「`Terminal_unacknowledged`」. 작업은 `Interrupted_by_restart` 로 끝난다 |
+| Bind 뒤 | 새 호출 `Active`, 새 journal | 새 호출을 같은 규칙으로 판정한다 |
 
-1 과 2 사이도 이어 하려면 journal terminal 이 「기동 정리가 닫았다」를 typed 로 담아야 한다(§10).
+- 둘째·셋째 구간에서는 일이 사라진다. 끝난 일을 다시 돌리지는 않는다.
+- 두 구간도 이어 하려면 journal terminal 이 「재기동 뒤 정리가 닫았다」를 typed 로 담아야 한다(§10).
+- 3 과 Bind 사이에 준비가 실패하면 작업을 실패로 끝낸다. 다음 후보로 넘어가거나 미루지 않는다. `Suspend` 계열 전이는 `Retire` 로 끝난 호출을 내리면서 다른 continuation 을 받는다(`keeper_semantic_execution.ml:872-877`). 그 continuation 의 loader 는 retained 체크포인트를 모른다.
 
-2 의 store transaction 은 아래를 쓴다.
-
-- 호출에 terminal(`Retire`)을 기록한다.
-- semantic 실행을 `Suspend` 로 옮긴다. 이 전이는 `Terminal_unacknowledged(Retire)` 인 호출을 함께 내린다(`keeper_semantic_execution.ml:672-675`, 870-876). 영수증 의무는 그대로 남는다(`:896-930`).
-- 행을 다시 큐에 넣는다.
-- Owner mailbox 를 부르지 않는다. 기동 정리는 그 Owner 의 명령 안에서 돌기 때문이다(`keeper_owner.ml:2016-2060`, `keeper_direct_native_continuation.ml:166-168`). 그래서 cooperative 미루기의 `defer` 는 쓸 수 없다.
-
-**관측은 typed 로 나눈다**
-
-기동 정리가 받는 관측에 「이번 정리가 닫았다」를 따로 둔다. 「기록에 terminal 이 이미 있다」와 같은 값으로 두지 않는다. `Succeeded` 로 끝난 실행도 recovery 가 `Retire` 이고, 그 `call.checkpoint` 는 마지막 체크포인트다(`keeper_direct_native_continuation.ml:422-431`). `Retire` 로 가르면 끝난 작업을 다시 돌린다.
-
-**다음 claim 은 retained 체크포인트에서 연다**
+**새 호출은 retained 체크포인트에서 연다**
 
 - 새 native 호출의 시작점은 끊긴 호출의 `call.checkpoint` 다. 그 호출이 마지막으로 옮긴 retained 체크포인트이고, 끊긴 턴 k 의 provider 호출 전이다(#52359 §4.2 의 1).
-- 새 호출은 `Continue_from_checkpoint` 로 연다. 체크포인트로 시작하는 native 호출이 이미 쓰는 경로다(`keeper_turn_driver_try_provider.ml:2716`).
-- 기존 `Bound_checkpoint` loader 는 쓸 수 없다. loader 는 canonical head 에서 이어 하고, 저장된 참조는 접두어 확인에만 쓴다(`keeper_direct_checkpoint_continuation.ml:43-79`). native 호출의 seed 와 그 뒤 체크포인트는 retained 영역에만 있다. canonical 은 keeper sink 가 native 진행 뒤에 쓴다(`keeper_agent_run.ml:1371-1406`, `keeper_direct_native_continuation.ml:461-462`).
-  - 작업의 첫 provider 호출에서 끊기면 `call.checkpoint` 는 seed 다(`keeper_native_call.ml:30-38`). seed 에는 새 입력이 있고 canonical 에는 없다. loader 의 접두어 확인이 실패하고 작업은 `Turn_continuation_unpersisted` 로 끝난다(`keeper_turn.ml:497-501`).
-  - native 진행과 canonical 저장 사이에서 끊겨도 같다.
-- continuation 의 이름과 저장 모양은 L4 에서 정한다.
-- 새 호출은 레인 후보 선택과 문맥 준비를 처음부터 거친다. 같은 턴에서 provider 를 다시 부르지 않는다는 #52359 의 기록 규칙은 그대로다. 닫힌 실행과 새 실행이 따로 있다.
+- 새 호출은 `Continue_from_checkpoint` 로 연다. 체크포인트로 시작하는 native 호출이 이미 쓰는 경로다(`keeper_turn_driver_try_provider.ml:2748`).
+- 새 호출의 runtime 은 끊긴 호출에 묶인 `runtime_id` 다. 준비는 호출을 복원할 때 runtime 과 모델이 같은지 이미 확인한다(`keeper_direct_native_continuation.ml:318-322`). 5.2 와 같은 준비 경로를 쓴다. 이 경로로 새 호출을 여는 코드는 아직 읽지 않았다(§10).
+- Bind 는 지금 검증을 그대로 한다. 새 seed 는 앞 호출이 settle 한 Tool 결과를 모두 가져야 한다. 앞 호출에 Tool 시도가 있었으면 앞 호출의 마지막 체크포인트 이력이 새 seed 의 접두어여야 한다(`:393-407`). 그래서 새 호출은 이력을 줄이거나 바꾸지 않고 연다.
+- canonical loader(`Bound_checkpoint`)는 쓰지 않는다. loader 는 canonical head 에서 이어 하고, 저장된 참조는 접두어 확인에만 쓴다(`keeper_direct_checkpoint_continuation.ml:43-79`). native 호출의 seed 와 그 뒤 체크포인트는 retained 영역에만 있다. canonical 은 keeper sink 가 native 진행 뒤에 쓴다(`keeper_agent_run.ml:1371-1406`, `keeper_direct_native_continuation.ml:472-474`).
+  - 작업의 첫 provider 호출에서 끊기면 `call.checkpoint` 는 seed 다(`keeper_native_call.ml:30-38`). seed 에는 새 입력이 있고 canonical 에는 없다.
+  - native 진행과 canonical 저장 사이에서 끊겨도 canonical 이 뒤처진다.
+- 같은 턴에서 provider 를 다시 부르지 않는다는 #52359 의 기록 규칙은 그대로다. 닫힌 실행과 새 실행이 따로 있다.
 
 ### 4.5 결과를 모르는 Tool 은 다시 실행하지 않고 모델에게 알린다
 
@@ -227,11 +249,12 @@ agent_core 는 masc 의 예외를 모른다. 의존 순서가 agent_core 아래�
   - `Operator_repair_required` 는 「결과 없는 attempt 가 남았다」는 뜻이다. 여기서는 결과를 적었으니 그 상태가 아니다. 다음 행동은 결과를 본 Keeper 가 고른다.
 - 턴은 계속된다. 다음 provider 호출이 이 결과를 본다. 결과 문구에는 사실만 쓴다. 「호출이 서버 재기동으로 끊겼다」, 「효과가 일어났는지 모른다」, 「다시 실행하지 않았다」.
 - 이 처리는 호스트가 「실행을 마지막으로 쓴 프로세스가 끝났다」고 알린 실행에서만 한다. 호스트는 `execution_store` 의 resume 으로 `Resume_after_writer_exit` 를 넘긴다. 아무 주장도 하지 않으면 `Resume_writer_exit_unproven` 이다(#52567).
-  - `with_resume_once`(`agent_execution_runner.ml:407`)로는 가를 수 없다. 같은 프로세스 안에서도 resume 이 있다. Owner 는 미룬 작업(`Operation_deferred`)의 호출을 `Active` 로 두고(`keeper_owner.ml:964`), 다음 claim 이 그 호출을 resume 한다(`keeper_direct_native_continuation.ml:232-240`, 471).
+  - `with_resume_once`(`agent_execution_runner.ml:462`)로는 가를 수 없다. resume 이 다른 프로세스에서 왔다는 사실을 Core 는 알 수 없다. 한 프로세스가 pool 을 다시 설치하면 같은 프로세스 안에서 resume 한다(4.7).
+  - masc 의 Owner 는 지금 같은 프로세스에서 `Active` 호출을 다시 집지 않는다. 미루기 전이는 `Active` 호출이 있으면 `Native_call_unsettled` 로 거절된다(`keeper_semantic_execution.ml:858-869`, 시험 `test_keeper_native_call_store.ml:462-481`). 자식이 `Active` 호출을 남긴 채 끝나면 행이 `running` 으로 남아 다음 기동을 기다린다(`keeper_owner.ml:973-991`, 1815-1822).
   - 같은 프로세스 안에서는 이 모양이 생기지 않는다. 핸들러가 값을 돌려주면 settle 이 돈다. 예외를 던지면 settle 을 건너뛰고 `abort` 가 실행을 닫는다(`execution_tool_settlement.ml:176-188`). 4.2 뒤에 닫지 않는 경우는 멈춤뿐이고, 멈춘 Owner 는 다시 claim 하지 않는다(4.2 의 표).
   - 그래도 같은 프로세스 resume 에서 이 모양을 만나면 지금처럼 `Effect_outcome_unknown` 으로 실패한다. 위 근거가 틀려도 「결과 모름」을 지어 쓰지 않는다.
   - 같은 프로세스에서는 핸들러가 바깥 switch 에 띄운 fiber 가 아직 돌 수 있다. 프로세스가 끝났다면 그런 코드가 남지 않는다. 이 차이가 원인을 타입으로 받는 이유다.
-  - masc 는 기동 정리가 다시 큐에 넣은 호출의 첫 claim 에만 「재기동 뒤」를 넘긴다. 그 호출을 가르는 근거는 4.7 이다.
+  - masc 는 끝난 이미지가 마지막으로 쓴 호출을 이 이미지가 처음 열 때만 「재기동 뒤」를 넘긴다. 그 호출을 가르는 근거는 4.7 이다.
 - terminal Tool(`Terminal_after_success`)은 바꾸지 않는다. 결과를 모르면 지금처럼 `Durability_failure` 로 실패하고, 실행은 `TerminalToolDurabilityFailed` 로 끝난다(`pipeline/pipeline_terminal_tool.ml` `durability_failure`). 실행을 끝내는 Tool 이라 「턴을 잇는다」가 성립하지 않는다.
   - terminal Tool 결과에 `Writer_exited_tool_error` 가 오면 `Terminal_failed` 이고 효과 구분은 `Effect_outcome_unknown` 이다. Tool 이 선언한 효과 구분은 핸들러가 돌려준 실패에만 맞는다.
 - 공개 계약 `Agent.execution_store` 문서를 바꾼다. resume 의 거절 갈래(`agent_tools.ml` `Invocation_attempted_or_settled`)는 그대로 둔다. 닫은 attempt 는 settle 된 결과로 다시 쓰인다(`Replayed`).
@@ -240,57 +263,35 @@ agent_core 는 masc 의 예외를 모른다. 의존 순서가 agent_core 아래�
 
 닫힌 모양(옛 `abort` 가 결과 없이 `Cancelled` 로 닫은 invocation)은 바꾸지 않는다. 4.2 뒤에는 재기동이 이 모양을 새로 만들지 않는다.
 
-### 4.6 진전 없이 다시 끊기면 끝낸다
+### 4.6 이어 한 횟수나 진전으로 작업을 끝내지 않는다
 
-3.5 의 고리를 끊는다. 횟수나 시간이 아니라 진전으로 판정한다.
+3.5 의 고리를 호스트의 판정으로 끊지 않는다. 운영자가 그 작업을 취소해 끊는다.
 
-**진전의 뜻**
+**진전을 판정하지 않는 이유**
 
-- 진전은 native 호출의 체크포인트(`call.checkpoint`)가 나아간 것이다. 이어 하는 실행은 언제나 이 체크포인트에서 다시 시작한다.
-- 체크포인트는 masc 의 sink 가 옮긴다. 모은 응답 뒤, Tool 결과를 붙인 뒤 같은 단계마다 옮긴다(`keeper_direct_native_continuation.ml:375-386`, 446-484).
-- Core journal 의 사건 수로는 진전을 세지 않는다. Core 는 호스트 sink 가 없을 때만 journal 에 체크포인트를 쓰고(`agent_checkpoint_sink.ml:45-58`), masc 는 sink 를 넘긴다.
-  - journal 에 provider 응답이 남아도 체크포인트가 그대로면 다음 이어 하기는 그 호출을 다시 낸다. 응답을 처리하다 서버가 죽는 작업이면 고리가 끝나지 않는다.
+- 체크포인트가 나아갔는지를 대조해도 고리는 끊기지 않는다. 이어 한 실행은 끊긴 Tool 에 「결과 모름」을 붙이고 체크포인트를 저장한다(`packages/agent_core/lib/pipeline/pipeline.ml:600`). masc 의 sink 가 그때 `call.checkpoint` 를 옮긴다(`keeper_direct_native_continuation.ml:375-386`, 470-471). 서버를 죽인 Tool 을 모델이 다시 부르면, 기동마다 체크포인트가 나아간 채 같은 일이 되풀이된다.
+- 범용 Keeper 에서 「진전」을 사실 대조만으로 정하는 방법을 찾지 못했다. Tool 호출·응답·문장이 되풀이된 횟수는 정체나 중단의 근거가 아니다(`docs/constitution.xml` 의 `magic_number`). 재기동·실패 횟수는 관측에만 쓴다(`budget_gate`).
+- 다음 행동은 「결과 모름」을 받은 Keeper 가 고른다(4.5).
 
-**이어 하기 표시를 journal 에 남긴다**
+**운영자가 끊는 길**
 
-- 재기동 뒤 이어 할 때 그 호출의 Core journal 에 typed 사건 하나를 남긴다. run root 의 `node_update` 에 생성자를 더한다. 이 글은 「이어 하기 표시」라고 부른다. 이름은 코드 층에서 정한다.
-- 표시에는 그때의 호스트 체크포인트를 담는다. Core 는 값을 해석하지 않는다. masc 가 `Keeper_checkpoint_ref` 의 엄격한 codec 으로 쓰고 읽는다. provider 사건과 Tool 진행도 codec 이 가진 JSON 을 같은 방식으로 담는다(`execution_event.mli` `node_update`).
-- 표시는 writer-exit 주장과 함께만 쓴다. 체크포인트 값을 writer-exit 생성자 안에 둔다. 그래서 `Resume_writer_exit_unproven` 이나 보통 fresh 실행에는 표시를 붙일 수 없다. 표시만 쓰는 함수는 두지 않는다.
-  - 같은 호출을 잇는 경우(5.2): `Resume_after_writer_exit` 로 다시 열 때 Core 가 쓴다(`agent_execution_runner.ml:417-444`). 값은 그 호출의 `call.checkpoint` 다.
-  - 새 호출을 여는 경우(5.1, 4.4): 새 실행을 열 때 Core 가 첫 사건으로 쓴다. 값은 새 호출의 seed 다.
-  - 4.4 가 내린 호출의 id 도 4.7 의 메모리 집합에 둔다. 그 작업의 다음 claim 은 native 호출 이력(`native_calls`)의 마지막 항목이 집합에 있을 때 표시를 넘긴다. Bind 에서 그 id 를 지운다.
-- 표시는 claim 이 실제로 이어 할 때 쓴다. 기동 정리가 다시 넣은 작업이 돌기 전에 또 재기동하면 표시는 늘지 않는다. 돌지 않은 작업은 서버를 죽이지 않는다.
+- 도는 중: 운영자 중단은 지금처럼 호출을 닫고 작업을 `Turn_cancelled` 로 끝낸다(4.2, `keeper_owner.ml:973-975`, 1687-1708).
+- 큐에 있는 중: 기동 정리가 다시 넣은 작업은 호출이 `Active` 라서 지금은 취소가 거절된다(3.2). 취소를 받게 고친다. Owner 가 그 호출을 「효과 모름」 영수증(`Keeper_native_call.unknown_effect_disposition`)으로 닫고 작업을 `cancelled` 로 끝낸다. 도는 중의 운영자 중단이 남기는 영수증과 같다. 「효과 모름」 영수증은 `Settle Cancelled` 를 막지 않는다(`keeper_semantic_execution.ml:883-896`).
+- Keeper 가 일시 정지(`paused`)면 Owner 는 작업을 집지 않는다(`keeper_owner.ml:1369-1373`, 1835). 일시 정지가 재기동 뒤에도 남는지는 확인하지 않았다(§10).
 
-**기동 정리의 판정**
+**남는 위험**
 
-`Active` 호출마다 journal terminal 을 읽는 자리(`keeper_direct_native_continuation.ml:168-182`)에서 마지막 표시도 함께 읽는다. 체크포인트는 `Keeper_checkpoint_ref.equal` 로 비교한다. trace·turn·내용 digest 가 모두 같아야 같다.
+- #52587 뒤로 main 은 비정상 종료로 Tool 실행 중 끊긴 호출을 이미 이어 한다(5.2). 서버를 죽인 Tool 을 모델이 다시 부르는 작업은 감시자(3.5) 아래에서 되풀이된다.
+- 작업이 claim 직후 서버를 죽이면 운영자가 끼어들 틈이 좁다.
+- L5 뒤에는 고리가 정상 종료로도 생긴다. `masc restart` 는 서버에 종료를 요청하고 다음 서버를 띄운다(`bin/masc_cli_restart.ml:361-388`). Keeper 의 Tool 이 이 명령을 부를 수 있는 환경이면, 비정상 종료 뒤에만 잇지 않는 규칙으로는 이 고리가 남는다.
+- 비정상 종료 뒤에도 이을지는 L5 에서 관측값을 보고 다시 정한다(§10).
 
-| journal | 다음 기동 |
-|---|---|
-| terminal 있음 | 지금처럼 실패로 정리한다(3.2) |
-| terminal 없음, 표시 없음 | 이어 한다. 이 호출이 처음 맞는 재기동이다 |
-| terminal 없음, 마지막 표시의 체크포인트가 `call.checkpoint` 와 같음 | 이어 하지 않는다. `Interrupted_by_restart` 로 끝낸다 |
-| terminal 없음, 마지막 표시의 체크포인트가 `call.checkpoint` 와 다름 | 이어 한다 |
-| 표시를 masc codec 이 거절 | 이어 하지 않는다. 진전을 증명하지 못한다 |
+**기동마다 남기는 관측**
 
-- 끝나는 이유: 재기동 뒤 이어 할 때마다 표시가 하나 붙는다. 다음 이어 하기는 그 사이 체크포인트가 나아갔을 때만 일어난다. 체크포인트는 앞으로만 간다(`Keeper_native_call.advance`). 그래서 한 호출을 이어 한 횟수는 체크포인트가 나아간 횟수보다 하나 더 많을 수 없다.
-- 대가 하나: 사람이 provider 호출 하나보다 짧은 간격으로 두 번 재기동하면, 그 사이 진전이 없던 작업은 두 번째에 끝난다. 지금은 첫 번째에 끝난다.
-- 대가 둘: Tool 결과가 journal 에 남았어도 체크포인트가 그대로면 진전이 아니다. 그 작업은 끝난다.
-
-**작업 저장소는 바꾸지 않는다**
-
-L4 결정(2026-11-17)은 이 목록을 작업 저장소의 새 표에 두었다. journal 사건으로 바꾼다.
-
-- 표를 더하면 저장소 스키마가 v3 에서 v4 로 바뀐다. 저장소는 스키마를 그대로 대조하고 다른 판은 열지 않는다(`keeper_chat_operation_store.ml:726-751`).
-- 옮기는 길은 운영자가 Keeper 마다 오프라인으로 밟는 `masc workspace upgrade journal` 절차다(준비·채택·설치). 그 절차의 복사는 v2 원본만 받는다(`Store.Offline.prepare_v2_copy`). v3→v4 복사를 새로 만들고 모든 Keeper 저장소를 그 절차로 옮겨야 한다.
-- 옮기지 않으면 `docs/guides/DURABLE-STORE-HARD-CUT.md` 의 hard cut 이다. 큐에 있거나 돌던 작업과 native 호출 연결이 사라진다. 이 RFC 가 막으려는 손실을 한 번 더 낸다.
-- journal 생성자는 더하기만 한다. 이미 있는 journal 은 그대로 읽힌다.
-  - 되돌림 위험: 표시가 있는 journal 을 옛 바이너리가 읽으면 그 사건에서 거절한다(`execution_event.ml` 「unknown node update」). 표시를 쓰기 시작한 뒤에는 옛 바이너리로 되돌리지 않는다.
-
-**작업별 관측**
-
-- 작업을 재기동 뒤 이어 한 횟수는 그 작업의 native 호출 journal 들에 붙은 표시 수다. 지난 호출은 `native_calls` 이력으로 찾는다.
-- Dashboard·TUI 는 이 수를 읽어 작업마다 보여 준다. 판정에는 쓰지 않는다. 판정은 지금 호출의 마지막 표시만 본다.
+- 기동 정리가 끝나면 Keeper 마다 로그를 남긴다. 다시 큐에 넣은 작업의 id, 실패로 정리한 작업의 id, journal 을 읽지 못한 호출 수다. 지금은 실패로 정리한 수와 읽기 실패만 남긴다(`keeper_owner.ml:1422-1428`, 2046-2051).
+- 다시 큐에 넣은 작업의 끝 상태는 작업 저장소가 가진다. 같은 id 가 다음 기동 로그에 또 나오면 다시 끊긴 작업이다.
+- 작업마다 이어 한 횟수는 저장하지 않는다.
+- 관측값으로 작업을 끝내지 않는다. 운영자의 판단과 L5 의 결정(§10)에 쓴다.
 
 ### 4.7 「재기동 뒤」는 프로세스 이미지 단위로 증명한다
 
@@ -301,21 +302,22 @@ L4 결정(2026-11-17)은 이 목록을 작업 저장소의 새 표에 두었다.
 - 서버는 프로세스가 사는 동안 base path 임대(커널 `lockf`)를 쥔다(`server_startup_takeover.mli` `acquire_base_path_lock`). 다음 프로세스는 앞 프로세스의 descriptor 가 닫힌 뒤에야 임대를 얻는다(`acquire_base_path_lock_after_owner_exits`). exec 은 임대를 넘기지만 앞 이미지의 코드는 남지 않는다.
 - pool 은 base path 마다 하나다. 두 번째 설치는 `Inventory_already_installed` 로 거절된다(`keeper_owner_registry.ml` `install_from_store`).
 - 한 pool 안에서 `Keeper_owner.start` 는 Keeper 마다 한 번 돈다. 첫 적재(`start_all` → `ensure_in_pool`)와 런타임 생성(`ensure_empty_in_pool`)만 Owner 를 만든다. 런타임 생성은 이미 있는 Owner 를 돌려준다. 기동 정리에 실패해 빠진 Keeper 는 `unavailable` 로 거절한다(`:280`, `:340`).
-- 그래서 한 이미지의 첫 pool 에서 기동 정리가 본 `Active` 호출은 이미 끝난 이미지가 마지막으로 썼다.
+- 그래서 한 이미지의 첫 pool 에서 Owner 가 뜰 때 저장소에 있던 `Active` 호출은 이미 끝난 이미지가 마지막으로 썼다.
 
 **코드 모양에 기대는 부분을 타입으로 고정한다**
 
 - 셋째 사실은 지금 코드 모양일 뿐이고 타입이 막지 않는다. 같은 이미지에서 앞 pool 의 switch 가 끝난 뒤 pool 을 다시 설치하면 깨진다. 시험 프로세스 하나가 pool 을 여러 번 설치한다(`test/test_keeper_native_reconcile_after_dispatch.ml` 126·326·396·481).
 - registry 가 base path 마다 「이 이미지에서 기동 정리를 했다」를 프로세스 메모리에 적는다. 첫 pool 의 Owner 에만 `Prior_writers_exited` 를 넘긴다. 그 밖에는 `Prior_writers_unproven` 이다.
-- Owner 는 `Prior_writers_exited` 일 때만 기동 정리가 다시 큐에 넣은 호출의 id 를 메모리 집합에 둔다. 기동 정리가 볼 호출은 지금도 `pending_restart_calls` 에 있다(`keeper_owner.ml:1417-1455`, 2016-2060).
-- claim 이 그 집합의 호출을 resume 하면 `Resume_after_writer_exit` 를 넘긴다. `on_scope_ready` 의 Bind(`keeper_direct_native_continuation.ml:380-421`)에서 그 id 를 지운다. 그 뒤로는 이 이미지가 writer 다. 미룬 작업의 다음 claim 은 `Resume_writer_exit_unproven` 이다.
+- Owner 는 `Prior_writers_exited` 일 때, 뜰 때 저장소에 있던 `Active` 호출의 id 를 모두 메모리 집합에 둔다. 행이 `running` 이든 `queued` 든 같다. 기동 정리가 실패로 닫은 작업의 호출은 뺀다. 집합은 그 Owner 가 첫 작업을 집기 전에 정해진다.
+  - 지금 코드(#52587)는 `running` 행의 호출만 읽는다(`keeper_owner.ml:1436`, `keeper_chat_operation_store.ml:3557-3580`). 기동 정리가 다시 큐에 넣은 작업이 claim 되기 전에 서버가 또 재기동하면, 그 행은 `queued` 이고 호출은 `Active` 다. 다음 기동은 그 호출을 집합에 넣지 않는다. claim 은 `Resume_writer_exit_unproven` 을 넘기고, 끊긴 Tool 이 있는 작업은 `Effect_outcome_unknown` 으로 실패한다. 모으기 전에 끊긴 턴은 retire 를 받지 못한다(4.4).
+  - 지금 코드는 집합을 기동 정리 명령 안에서 채운다(`keeper_owner.ml:2033`, 2076-2086). Owner 가 작업을 집는 조건(`:1831-1839`, 1846-1848)에는 그 명령이 끝났는지가 없다. 증명은 pool 을 설치할 때 정해진다(`keeper_owner_registry.ml:374-379`). Owner 를 만들 때 넘긴다.
+- claim 이 그 집합의 호출을 열면 `Resume_after_writer_exit` 를 넘긴다(`keeper_direct_native_continuation.ml:346-356`). 4.4 의 retire 도 그 집합의 호출에만 한다. 같은 호출을 이어 하는 Bind 에서 그 id 를 지운다(`keeper_owner.ml:2416-2417`). 그 뒤로는 이 이미지가 writer 다. 이 이미지가 같은 호출을 다시 열면 `Resume_writer_exit_unproven` 이다.
 - 집합은 저장하지 않는다. 이미지가 끝나면 같이 사라지고, 다음 이미지의 기동 정리가 처음부터 다시 판정한다.
 - 이 근거는 이미지 안의 코드만 다룬다. journal 을 쓸 수 있는 것은 그 코드뿐이다. Tool 이 띄운 자식 프로세스는 비정상 종료 뒤에 남을 수 있다(§10). 남아도 「결과 모름」 문구는 사실이다.
 
 **하지 않는 것**
 
 - native 호출 기록에 writer 이미지 식별자를 저장하지 않는다. 저장하면 같은 호출의 Bind 가 기록을 바꾸는 일이 되고 호출 codec 이 바뀐다. 「writer 가 끝났다」는 이미지 단위 사실이라 이미지 메모리가 맞는 자리다.
-- 4.6 의 이어 하기 표시로 가르지 않는다. 표시는 「writer 가 끝났다」고 판단한 claim 이 남기는 결과라 근거가 될 수 없다.
 
 ## 5. 순서와 상태
 
@@ -326,8 +328,8 @@ Keeper 하나, Agent API 레인, 채팅 작업 하나의 틱이다.
 | 틱 | 일 | 지금 | 제안 |
 |---|---|---|---|
 | N | 턴 k 의 provider 호출 중 SIGTERM | 기록 `Cancelled` 로 닫힘, 작업 `failed`, 입력 지움 | 기록 열린 채, 작업 `running`, 입력 남음 |
-| N+1 | 기동 정리 | 정리할 행 없음 | 표시 판정(4.6) → #52359 retire → 호출 terminal·`Suspend`·다시 큐 |
-| N+2 | Owner 가 작업을 집는다 | — | retained `call.checkpoint` 에서 `Continue_from_checkpoint` 로 새 native 호출, 첫 사건은 표시(seed), 턴 k 를 다시 한다 |
+| N+1 | 기동 정리 | 정리할 행 없음 | terminal 없음 → 다시 큐 |
+| N+2 | Owner 가 작업을 집는다 | — | #52359 retire → 호출 terminal → retained `call.checkpoint` 에서 `Continue_from_checkpoint` 로 새 native 호출을 묶고 턴 k 를 다시 한다 |
 | N+3 | 작업이 끝난다 | 보낸 쪽은 N 에 실패를 받음 | 보낸 쪽은 N+3 에 답을 받음 |
 
 ### 5.2 Tool 실행 중에 정상 재기동
@@ -335,18 +337,19 @@ Keeper 하나, Agent API 레인, 채팅 작업 하나의 틱이다.
 | 틱 | 일 | 지금 | 제안 |
 |---|---|---|---|
 | N | 턴 k 의 Tool 실행 중 SIGTERM | 기록 닫힘, `Operator_repair_required`, 작업 `failed` | 기록 열린 채, 작업 `running` |
-| N+1 | 기동 정리 | — | terminal 없음, 표시 판정(4.6) → 다시 큐 |
-| N+2 | Owner 가 작업을 집는다 | — | 같은 호출을 `call.checkpoint`(모은 체크포인트)에서 이어 하고 표시(`call.checkpoint`)를 남김. 끊긴 invocation 에 「결과 모름」을 쓰고, 끝난 invocation 은 기록에서 다시 쓰고, 시작 안 한 invocation 은 실행 |
+| N+1 | 기동 정리 | — | terminal 없음 → 다시 큐 |
+| N+2 | Owner 가 작업을 집는다 | — | 같은 호출을 `call.checkpoint`(모은 체크포인트)에서 이어 한다. 끊긴 invocation 에 「결과 모름」을 쓰고, 끝난 invocation 은 기록에서 다시 쓰고, 시작 안 한 invocation 은 실행 |
 | N+3 | 다음 provider 호출 | — | 모델이 「결과 모름」을 보고 다음 일을 고른다 |
 
-비정상 종료는 N 의 「제안」 열과 같은 모양으로 시작한다. 그래서 N+1 부터 같은 표를 따른다. 지금은 5.2 의 비정상 종료가 N+2 에서 `Durability_failure` 로 실패한다.
+비정상 종료는 N 의 「제안」 열과 같은 모양으로 시작한다. 그래서 N+1 부터 같은 표를 따른다. #52587 뒤로 main 은 5.2 의 비정상 종료를 이미 이렇게 잇는다. 5.1 의 비정상 종료는 4.4 가 들어가기 전까지 N+2 에서 turn counter 불일치로 실패한다.
 
 ### 5.3 N..N+M: 이어 하는 도중 다시 재기동
 
 - 이어 하기는 작업마다 재기동 한 번에 provider 호출 하나를 잃는다. 끊긴 호출 하나다.
-- 진전이 남으면 다음 재기동은 그 뒤에서 잇는다.
-- 진전 없이 다시 끊기면 4.6 에 따라 끝난다. 감시자가 30초마다 서버를 다시 띄워도 같은 작업은 두 번째 기동에서 끝난다. 그 작업 때문에 서버가 죽는 경우도 여기서 멈춘다.
-- 작업마다 native 호출 기록과 실행 디렉터리가 이어 하기 한 번에 하나씩 는다. 4.6 이 그 수를 진전 수 안으로 묶는다.
+- 다음 재기동은 그때의 `call.checkpoint` 에서 잇는다. 그 사이 체크포인트가 나아갔으면 그 뒤에서, 그대로면 같은 자리에서 잇는다.
+- 재기동이 몇 번 이어져도 같은 규칙이다. 횟수로 끝내지 않는다(4.6).
+- 기동 정리가 다시 넣은 작업이 claim 되기 전에 또 재기동해도 같다. 행은 `queued`, 호출은 `Active` 로 남고, 다음 기동의 집합이 그 호출을 담는다(4.7).
+- 5.1 의 경로는 이어 하기 한 번에 native 호출 기록과 실행 디렉터리가 하나씩 는다. 상한은 없다. 그 작업이 도는 중에 맞은 재기동 수만큼 는다.
 
 ### 5.4 Keeper 여럿
 
@@ -357,9 +360,9 @@ Keeper 하나, Agent API 레인, 채팅 작업 하나의 틱이다.
 ## 6. runtime 바꿈·문맥 창·계정·위임·전달
 
 - **같은 호출을 잇는 경우(5.2)**: native 호출에 묶인 `runtime_id` 로 잇는다. 문맥 창과 계정이 끊기기 전과 같다.
-- **새 호출을 여는 경우(5.1)**: 레인 후보를 처음부터 고른다. 재기동 사이에 레인 설정이나 계정이 바뀌었으면 새 설정을 따른다. 문맥 창이 다른 runtime 이 고르면, 체크포인트는 그 runtime 의 문맥 준비(크기 판정·압축)를 거친다.
+- **새 호출을 여는 경우(5.1)**: 새 호출도 끊긴 호출에 묶인 `runtime_id` 로 연다(4.4). 문맥 창과 계정이 끊기기 전과 같다. Bind 가 앞 호출의 이력을 접두어로 요구하므로, 이력을 줄이는 문맥 준비를 거치지 않는다.
 - **Official → API → Official**: Agent API 체크포인트를 공식 클라이언트로 옮기는 규칙을 이 RFC 가 새로 만들지 않는다. 체크포인트로 시작하는 새 native 호출이 지금 따르는 규칙을 쓴다.
-- **저장된 runtime 이 사라진 경우**: 5.2 에서 묶인 `runtime_id` 나 모델이 재기동 뒤 설정에 없으면 `Agent.run` 전에 거절된다. 그 뒤 동작은 #52359 §10 셋째 항목이고 재현하지 않았다. §10 에 둔다.
+- **저장된 runtime 이 사라진 경우**: 5.1·5.2 에서 묶인 `runtime_id` 나 모델이 재기동 뒤 설정에 없으면 `Agent.run` 전에 거절된다. 그 뒤 동작은 #52359 §10 둘째 항목이고 재현하지 않았다. §10 에 둔다.
 - **계정과 지출**: 끊긴 provider 호출은 provider 가 청구했어도 masc 가 사용량을 본 적이 없다. 이 RFC 는 그 사용량을 되살리지 않는다(#52359 §6 과 같다). 이어 하기는 그 호출 하나를 다시 낸다. 지금은 작업 전체를 잃고, 다시 보내면 모든 턴을 다시 낸다.
 - **provider 쪽에서 도는 Tool**: provider 가 요청 안에서 직접 돌리는 Tool(서버 쪽 검색 등)은 5.1 의 새 호출에서 다시 돈다. masc 는 그 실행을 기록하지 않으므로 막을 수 없다.
 - **위임**: 위임받은 Keeper 의 작업도 같은 규칙으로 이어 한다. 위임한 Keeper 의 Tool 호출이 끊겼으면 그쪽은 4.5 의 「결과 모름」을 받는다. 위임받은 작업의 상태는 `masc_keeper_delegate_status` 로 따로 읽을 수 있다.
@@ -375,7 +378,9 @@ Keeper 하나, Agent API 레인, 채팅 작업 하나의 틱이다.
 - 결과를 모르는 Tool 을 호스트가 다시 실행하지 않는다.
 - 같은 턴에서 provider 를 다시 부르지 않는다(#52359 의 기록 규칙).
 - 오류 문구로 상태를 가르지 않는다.
-- 이어 하기 횟수·시간 한도를 두지 않는다. 진전으로 판정한다(4.6).
+- 이어 한 횟수·시간·진전으로 작업을 끝내지 않는다(4.6).
+- 작업마다 이어 한 횟수를 저장하지 않는다. 기동 로그가 관측을 남긴다(4.6).
+- 정상 재기동과 비정상 종료를 가르는 저장 상태를 더하지 않는다. 가를지는 L5 에서 정한다(§10).
 - 공식 클라이언트 레인의 동작을 바꾸지 않는다(§10).
 - native 호출이 묶이기 전에 끊긴 행(3.2 의 「호출 없음, continuation 없음」)은 바꾸지 않는다. 11-16 에 1건이다.
 
@@ -397,31 +402,31 @@ agent_core:
 - 결과 없이 `Cancelled` 로 닫힌 invocation 으로 이어 하기 → 지금과 같음.
 - `Resume_writer_exit_unproven` 으로 이어 하는 실행이 열린 attempt·결과 없음을 만남 → 지금처럼 `Effect_outcome_unknown` 으로 실패, 결과를 쓰지 않음.
 - 멈춘 실행 뒤 runner 의 terminal 전달 0회, writer 는 terminal 없이 닫히고 잠금이 풀림.
-- `Resume_after_writer_exit` 로 다시 열기 → run root 에 이어 하기 표시 하나, 값은 넘긴 그대로. 결과 없는 attempt 를 settle 하는 실행에서도 같다.
-- 4.4 의 새 실행 시작 → 첫 사건이 표시다. 보통 fresh 실행과 `Resume_writer_exit_unproven` → 표시 0개.
-- 표시가 여럿인 journal → projection 이 마지막 값을 돌려준다. 표시가 없는 journal → 없음을 돌려준다.
-- 표시 생성자가 생기기 전에 쓴 journal → 지금처럼 읽힌다.
 
 masc:
 - Agent API 레인, provider 호출 중 정상 재기동 → 작업 `running`, 입력 남음. 다음 기동 → 새 호출 1회, 작업 `succeeded`.
 - 위 경우를 작업의 **첫** provider 호출에서 → 같은 결과. canonical 에 입력이 없어도 retained seed 에서 연다.
 - native 진행 뒤 canonical 저장 전에 끊김 → 같은 결과.
 - `Succeeded` terminal 이 기록에 있는 `Active` 호출 → 다시 돌리지 않는다(지금처럼 실패 정리).
+- claim 이 처음 본 호출이 이미 `Terminal_unacknowledged(Retire)` → 새 호출을 열지 않는다.
+- retire 가 `Retired` → 앞 호출은 `Terminal_unacknowledged(Retire)`, 새 호출이 묶이고 새 seed 는 앞 호출의 `call.checkpoint` 이력을 그대로 가진다. runtime 은 앞 호출과 같다.
+- retire 가 `Not_uncollected` → 같은 호출을 이어 한다.
+- writer 종료가 증명되지 않은 호출 → retire 를 부르지 않는다.
 - Agent API 레인, Tool 실행 중 정상 재기동 → 다음 기동 → Tool 핸들러 다시 실행 0회, 모델이 「결과 모름」을 받음, 작업 `succeeded`.
 - 같은 경우들을 비정상 종료로 → 결과가 위 시험과 같다. 이 RFC 의 핵심 시험이다.
-- 연속 재기동 둘, 그 사이 진전 없음 → 두 번째 기동에서 `Interrupted_by_restart`. 진전 있음 → 두 번째에도 이어 한다.
+- 연속 재기동 둘, 그 사이 체크포인트가 그대로 → 두 번째 기동도 이어 한다.
+- 기동 정리가 다시 넣은 작업이 claim 전에 다시 재기동 → 다음 기동의 첫 claim 도 `Resume_after_writer_exit`.
+- 기동 정리 명령보다 먼저 시작한 claim → 집합이 이미 채워져 있다.
 - 같은 Keeper 의 다른 작업이 먼저 돌아 canonical 을 바꾼 뒤 → 이어 하는 작업은 retained 체크포인트에서 연다.
 - 멈춤과 운영자 중단이 두 순서로 → `Turn_cancelled`.
 - 멈춘 Owner → 새 자식 0개, `Bind` 거절. 같은 Keeper 에 새 Owner 를 만들면 기동 정리부터 돈다.
-- 4.4 의 두 쓰기 앞·사이·뒤에서 죽음을 주입 → 다음 기동이 4.4 표대로 판정한다. 사이에서 죽으면 `Interrupted_by_restart`, 끝난 일은 다시 돌지 않는다.
-- 미룬 작업을 같은 프로세스에서 다시 claim → 「재기동 뒤」를 넘기지 않는다.
-- 기동 정리가 다시 넣은 호출의 첫 claim → `Resume_after_writer_exit`. Bind 뒤 같은 호출을 다시 claim → `Resume_writer_exit_unproven`.
+- 4.4 의 retire 전, retire 와 호출 terminal 사이, 호출 terminal 과 Bind 사이, Bind 뒤에 죽음을 주입 → 다음 기동이 4.4 표대로 판정한다. 둘째·셋째는 `Interrupted_by_restart` 이고 끝난 일은 다시 돌지 않는다.
+- retire 뒤 Bind 전에 준비가 실패 → 작업 `failed`. 다음 후보로 넘어가거나 미루지 않는다.
+- 기동 정리가 다시 넣은 호출의 첫 claim → `Resume_after_writer_exit`. Bind 뒤 같은 호출을 다시 열면 → `Resume_writer_exit_unproven`.
 - 같은 이미지에서 pool 을 다시 설치 → Owner 는 `Prior_writers_unproven`, claim 은 `Resume_writer_exit_unproven`.
-- 마지막 표시의 체크포인트가 `call.checkpoint` 와 같음 → `Interrupted_by_restart`. 다름 → 이어 함. 표시 없음 → 이어 함.
-- 표시 값을 masc codec 이 거절 → `Interrupted_by_restart`.
-- 기동 정리가 다시 넣은 작업이 claim 전에 다시 재기동 → 표시 수가 그대로.
-- 4.4 로 연 새 호출 → 첫 사건이 표시이고 값은 seed. 그 뒤 진전 없이 재기동 → `Interrupted_by_restart`.
-- 이어 하기 두 번 → 작업의 표시 수 2, 화면에 같은 값.
+- 다시 큐에 든 작업(`queued`, 호출 `Active`)을 운영자가 취소 → 호출은 「효과 모름」 영수증, 작업 `cancelled`, 그 작업의 claim 0회.
+- 서버를 죽이는 Tool 을 모델이 되풀이해 부르는 작업 → 기동마다 이어 한다. 운영자가 취소한 뒤의 기동은 잇지 않는다.
+- 기동 정리 로그에 다시 넣은 작업 id, 실패로 정리한 작업 id, 읽지 못한 호출 수가 남는다.
 - 작업 저장소의 스키마 판은 v3 그대로다.
 - 공식 클라이언트 레인 정상 재기동 → 지금과 같다.
 - transcript: 작업마다 최종 행 하나, 재기동 때 실패 행 없음. 5.2 로 이어 한 뒤 Tool 행이 빠짐없이 남는다.
@@ -431,20 +436,23 @@ masc:
 | 층 | 내용 | 앞 층 | 바뀌는 운영 동작 |
 |---|---|---|---|
 | L0 | 이 RFC, #52359 에 결정 기록 | — | 없음 |
-| L1 | agent_core `retire_uncollected_turn` (#52359 L1) | — | 없음. 부르는 곳이 없다 |
-| L2 | agent_core: 호스트 멈춤은 기록을 닫지 않는다(4.2) | — | 없음. masc 가 함수를 넘기기 전이다 |
-| L3 | agent_core: 끊긴 Tool 을 typed 결과로(4.5). 실패 종류 #52565, resume 원인 #52567, journal transaction #52568, 연결 L3d | — | 없음. masc 는 `Resume_writer_exit_unproven` 만 넘긴다 |
-| L4 | masc 기동 정리: retire 뒤 retained 체크포인트에서 새 호출(4.4), Core journal 의 이어 하기 표시와 진전 판정(4.6), #52359 L2 를 대신함. 기동 정리가 다시 넣은 호출의 첫 claim 에 `Resume_after_writer_exit`(4.7) | L1·L3 | 비정상 종료 뒤 모으기 전에 끊긴 작업이 turn counter 불일치 대신 이어진다. Tool 이 끊긴 작업은 `Durability_failure` 대신 「결과 모름」으로 이어진다. 진전 없이 다시 끊긴 작업은 끝난다 |
-| L5 | masc Owner: 멈출 때 4.2 의 함수를 넘긴다(4.3) | L2·L3·L4 | 정상 재기동도 위 두 경로를 탄다 |
+| L1 | agent_core `retire_uncollected_turn` (#52359 L1, #52473) | — | 없음. 부르는 곳이 없다 |
+| L2 | agent_core: 호스트 멈춤은 기록을 닫지 않는다(4.2, #52550) | — | 없음. masc 가 함수를 넘기기 전이다 |
+| L3 | agent_core: 끊긴 Tool 을 typed 결과로(4.5). 실패 종류 #52565, resume 원인 #52567, journal transaction #52568, 연결 #52570 | — | 없음. masc 는 `Resume_writer_exit_unproven` 만 넘긴다 |
+| L4.1 | masc: 끝난 이미지가 쓴 호출의 첫 claim 에 `Resume_after_writer_exit`(4.7, #52587) | L3 | 비정상 종료 뒤 Tool 이 끊긴 작업이 `Durability_failure` 대신 「결과 모름」으로 이어진다 |
+| L4.2 | masc 기동: 집합을 Owner 가 뜰 때의 `Active` 호출 전부로 채운다(4.7). 다시 큐에 든 작업의 취소를 받는다(4.6). 기동 관측(4.6) | L4.1 | 연속 재기동 뒤에도 이어 하기가 실패하지 않는다. 운영자가 다시 큐에 든 작업을 취소할 수 있다 |
+| L4.3 | masc claim: retire 뒤 retained 체크포인트에서 새 호출(4.4). #52359 L2 다 | L1·L4.2 | 비정상 종료 뒤 모으기 전에 끊긴 작업이 turn counter 불일치 대신 이어진다 |
+| L5 | masc Owner: 멈출 때 4.2 의 함수를 넘긴다(4.3) | L2·L3·L4.3 | 정상 재기동도 위 두 경로를 탄다 |
 
 - L3 은 운영 동작을 바꾸지 않는다. 「재기동 뒤」 근거(4.7)가 L4 에 생기므로, `Resume_after_writer_exit` 를 넘기는 일도 L4 다.
-- L4 의 순서: 4.7(#52587) → 표시 생성자와 projection 읽기(agent_core) → 기동 정리의 진전 판정 → 4.4 의 새 호출. 판정이 4.4 보다 먼저다. 판정 없이 새 호출을 열면 3.5 의 고리가 생긴다.
-  - #52587 병합 뒤 main 은 5.2 경로를 판정 없이 잇는다. 기동 정리가 terminal 없는 호출을 다시 큐에 넣는 동작은 그 전부터 있었다. 진전 판정이 다음 코드 층이다.
+- L4.2 가 L4.3 보다 먼저다. L4.3 과 L5 는 이어 하는 작업을 늘린다. 그 전에 운영자가 다시 큐에 든 작업을 취소할 수 있어야 하고, 연속 재기동이 이어 하기를 실패로 바꾸지 않아야 한다.
+  - #52587 병합 뒤 main 은 5.2 경로를 이미 잇는다. 서버를 죽인 Tool 을 모델이 다시 부르는 작업은 지금 도는 중의 운영자 중단으로만 멈춘다(4.6).
 - L4 는 비정상 종료 경로만 바꾼다. 지금 실패로 끝나는 작업을 잇는 쪽이다.
-- L5 가 마지막이다. L5 를 먼저 넣으면 끊긴 provider 호출과 Tool 이 각각 turn counter 불일치와 `Durability_failure` 로 실패한다. 실패 종류만 바뀌고 일은 여전히 사라진다.
+- L5 가 마지막이다. L5 를 L4.3 보다 먼저 넣으면 끊긴 provider 호출이 turn counter 불일치로 실패한다. 실패 종류만 바뀌고 일은 여전히 사라진다. 비정상 종료 뒤에도 이을지는 L5 에서 다시 정한다(§10).
 - 층마다 거짓이 되는 문서·주석을 같은 층에서 고친다.
   - L2: `agent.mli:350-363`.
   - L3: `Agent.execution_store` 문서.
+  - L4.2: `keeper_direct_native_continuation.ml:349-350` 주석. 미룬 작업이 같은 프로세스에서 호출을 잇는다고 적는데, 미루기는 `Active` 호출을 둔 채 못 한다(4.5).
   - L5: `docs/design/keeper-repetition-scope-boundaries.md:13`, `keeper_owner_registry.ml:426-434`, `keeper_owner.ml:951-956`·1862-1868.
 
 ## 10. 정할 것
@@ -453,8 +461,16 @@ masc:
   - CLI 마다 SIGKILL 뒤 세션을 다시 열었을 때 끊긴 Tool 호출이 모델에게 어떻게 보이는지 먼저 잰다.
   - 비정상 종료 뒤 `Process_restarted` 가 `Ambiguous` 로 남는 동작도 같이 정한다. 세션 저장소 주석은 이런 상태가 그 Keeper 의 다음 턴을 모두 막았다고 적는다(`keeper_official_client_session_store.ml:54-59`, #28012).
   - 이 RFC 와 따로 쓴다.
-- **저장된 runtime·계정이 재기동 뒤 없는 경우**(6). #52359 §10 셋째 항목과 같다. 재현한 뒤, 4.4 처럼 호출을 내리고 retained 체크포인트에서 새 호출을 열지 정한다.
-- **retire 와 다시 큐에 넣기 사이에 죽는 경우**. 판정은 4.4 의 표다. 다음 기동은 terminal 을 읽고 `Interrupted_by_restart` 로 끝낸다(#52359 §5). terminal 증거에 retire 원인을 남기면(#52359 §10 첫 항목) 이 구간도 이어 할 수 있다. 좁은 구간이라 이 RFC 는 지금 경로를 두고, 시험(§8)으로 판정을 고정한다.
+- **저장된 runtime·계정이 재기동 뒤 없는 경우**(6). #52359 §10 둘째 항목과 같다. 재현한 뒤, 4.4 처럼 호출을 닫고 다른 runtime 으로 새 호출을 열지 정한다.
+- **retire 와 Bind 사이에 claim 이 끝나는 경우**. 판정은 4.4 의 표다. 다음 기동은 terminal 을 읽고 `Interrupted_by_restart` 로 끝낸다(#52359 §5). terminal 증거에 retire 원인을 남기면(#52359 §10 첫 항목) 두 구간도 이어 할 수 있다. 좁은 구간이라 이 RFC 는 지금 경로를 두고, 시험(§8)으로 판정을 고정한다.
+- **새 호출을 묶인 runtime 으로 여는 준비 경로**(4.4). 준비가 복원한 호출의 runtime 으로 새 호출을 여는 코드는 읽지 않았다. L4.3 에서 확인한다. 새 호출의 첫 provider 시도가 실패해 미뤄진 뒤 어느 continuation 으로 이어 하는지도 그때 시험으로 고정한다.
+- **비정상 종료 뒤에도 이을지**. 이 RFC 는 정상 재기동과 비정상 종료를 같게 잇는다(운영자 결정, 2026-11-16). 4.6 의 남는 위험 때문에 L5 에서 다시 정한다.
+  - 같게 잇는 쪽: 코드가 더 들지 않는다. 서버를 죽이는 작업은 운영자 취소로만 멈춘다.
+  - 비정상 종료 뒤에는 실패로 끝내는 쪽: 돌던 작업이 프로세스를 직접 죽이는 고리가 한 번에 끝난다. 정상 종료로 생기는 고리(4.6)는 남는다. 멈춘 원인을 typed 로 남기는 저장 상태가 필요하다. 지금 `Child_stopped_by_owner` 는 일반 취소도 담고(`keeper_owner.ml:1915-1921`), 기동 정리 실패도 Owner 를 멈춘다(`keeper_owner_registry.ml:274-277`).
+  - 판단에 쓸 값: 기동 관측(4.6)에서 비정상 종료 뒤 이어 한 작업의 수와 끝 상태.
+- **기동 정리가 journal 을 읽지 못한 호출**. 지금은 다시 큐에 넣는다(`keeper_chat_operation_store.ml:3661-3662`). 읽기 실패는 로그에 남는다(`keeper_owner.ml:2046-2051`). claim 이 기록을 다시 읽고(`keeper_direct_native_continuation.ml:232-238`), 그때도 못 읽으면 그 claim 은 실패한다. 이어 할지는 claim 이 기록을 읽은 뒤에만 정하므로 지금 경로를 둔다. 읽지 못한 것과 terminal 이 없는 것이 기동 정리에서 같은 동작이 되는 점은 기동 관측(4.6)이 읽지 못한 수를 센 뒤 다시 본다.
+- **일시 정지(`paused`)가 재기동 뒤에도 남는지**(4.6). 남으면 운영자는 Keeper 를 일시 정지한 뒤 큐에서 작업을 취소해 고리를 끊을 수 있다. 확인하지 않았다.
+- **실패로 끝난 작업의 입력**. 이어 하지 못해 실패한 작업은 지금처럼 입력이 지워진다(3.1 의 8). 입력을 남기려면 끝난 행의 `input_json IS NULL` 제약(`keeper_chat_operation_store.ml:121`)과 묶음 구성원 정리(`:3429-3438`)를 함께 바꿔야 한다. 이 RFC 는 다루지 않는다.
 - **「결과 모름」 문구에 자식 프로세스 상태를 적을지**. 정상 재기동은 자식을 SIGKILL 로 끝낸다(3.1 의 4). 비정상 종료 뒤 자식이 남는지는 확인하지 않았다.
 - **하위 실행 안에서 끊긴 Tool**. 4.5 는 지금 거절한다. 끊긴 하위 invocation 마다 같은 「결과 모름」 결과를 적으면 이어 할 수 있다. 하위 Tool 의 `provider_tool_use_id` 가 없을 수 있고, 하위 terminal Tool 도 다뤄야 한다. Tool 핸들러 안에서 하위 실행을 여는 호출처가 생기면 정한다.
 - **retained 체크포인트를 canonical 로 먼저 설치하는 방법**. 4.4 대신 `call.checkpoint` 를 canonical 로 설치하고 기존 loader 를 쓰는 길도 있다. canonical 저장은 turn 번호가 엄격히 작을 때만 낡은 것으로 막는다(`keeper_checkpoint_store_save.ml:94`). 이 길은 먼저 돈 다른 작업이 canonical 을 앞으로 옮긴 경우(5.4)에 막히므로 4.4 를 고른다.

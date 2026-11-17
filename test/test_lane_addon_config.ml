@@ -841,7 +841,7 @@ let a_declaration_names_a_carried_package () = with_directory (fun _root package
   let carried = Lane_addon_carried.Keeper_librarian in
   let folder = unwrap (Lane_addon_carried.folder ~packages carried) in
   declare "package = \"keeper-librarian\"\n";
-  refused "a carried package that is not installed" ["is not installed"; folder];
+  refused "a carried package that is not installed" ["is not installed"; folder; "masc exact-addon-setup"];
   ignore (place_carried packages carried);
   let declaration = unwrap (load_declaration ~path) in
   check string "the declaration resolves to the installed folder"

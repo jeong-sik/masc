@@ -28,6 +28,10 @@ type 'reading t =
 
 val fact : ?label:string -> 'reading tone -> string -> 'reading t
 
+val line : 'reading t list -> string
+(** The facts on one line of any width, joined the way a row joins them. For a
+    caller that wants the text and does no layout. *)
+
 type 'reading piece
 
 type 'reading layout =

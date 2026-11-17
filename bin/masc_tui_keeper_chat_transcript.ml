@@ -932,8 +932,18 @@ let model_phase_text ~ko ~show_timing ~now t =
   | Some (Tool_returned_at (tool_name, since)) -> observed ~since (tool_name ^ say " 반환됨" " returned")
 ;;
 
-let phase_text ~ko ~show_timing ~now t =
+(* The progress row is built as facts and joined into a line only where a
+   caller wants one string. A pane that draws the row lays the facts out
+   itself, so a narrow one breaks between two of them instead of cutting the
+   row (RFC tui-one-screen-grammar section 5.5). *)
+module Facts = Masc_tui_chat_facts
+
+let clause text = Facts.fact Facts.Plain text
+let clauses texts = List.map clause texts
+
+let phase_facts ~ko ~show_timing ~now t =
   let say korean english = if ko then korean else english in
+  let said korean english = clauses (if ko then korean else english) in
   match t.phase with
   | Waiting -> (
       (* The wait before RUN_STARTED is the one an operator cannot read from
@@ -950,18 +960,26 @@ let phase_text ~ko ~show_timing ~now t =
          masc_tui_keeper_chat_live.mli names that wording as what left a wait
          of minutes with no way to tell a busy keeper from a stuck one, and
          says a pane may report that the request went out and nothing more. *)
-      | None -> say "보냄 · 아직 접수 전" "sent; not accepted yet"
+      | None -> said ["보냄"; "아직 접수 전"] ["sent; not accepted yet"]
       | Some (Live.Queued, queue_length) ->
-          if ko then Printf.sprintf "대기 · 키퍼 대기열 메시지 %d개" queue_length
+          if ko then
+            [ clause "대기"
+            ; Facts.fact ~label:"키퍼 대기열 메시지 " Facts.Amount
+                (Printf.sprintf "%d개" queue_length)
+            ]
           else
-            Printf.sprintf "queued \xc2\xb7 %s in the keeper's queue"
-              (Masc_tui_message_layout.count_noun queue_length "message")
-      | Some (Live.Running, _) -> say "접수됨 · 실행 시작 중" "accepted; the run is starting"
+            [ clause "queued"
+            ; clause
+                (Printf.sprintf "%s in the keeper's queue"
+                   (Masc_tui_message_layout.count_noun queue_length "message"))
+            ]
+      | Some (Live.Running, _) ->
+          said ["접수됨"; "실행 시작 중"] ["accepted; the run is starting"]
       | Some (Live.Settled, _) ->
           (* The server had already run this operation and replayed its
              outcome. Nothing is waiting on a run that finished. *)
-          say "접수됨 · 이미 끝난 실행을 다시 읽는 중"
-            "accepted; replaying an operation that already ran")
+          said ["접수됨"; "이미 끝난 실행을 다시 읽는 중"]
+            ["accepted; replaying an operation that already ran"])
   | Working ->
       let activities = tool_calls t in
       let calls = List.length activities in
@@ -1006,13 +1024,16 @@ let phase_text ~ko ~show_timing ~now t =
       in
       let describe_pending label outcome =
         match List.filter (fun activity -> activity.outcome = outcome) activities_now with
-        | [] -> ""
-        | pending -> " · " ^ label ^ ": " ^ String.concat ", " (compact_tool_parts pending)
+        | [] -> []
+        | pending ->
+            [ Facts.fact ~label:(label ^ ": ") Facts.Plain
+                (String.concat ", " (compact_tool_parts pending))
+            ]
       in
       let running =
         describe_pending (say "준비 중" "preparing") Started
-        ^ describe_pending (say "결과 대기" "awaiting results") Awaiting_result
-        ^ describe_pending (say "네이티브 실행 중" "native running") Native_running
+        @ describe_pending (say "결과 대기" "awaiting results") Awaiting_result
+        @ describe_pending (say "네이티브 실행 중" "native running") Native_running
       in
       (* No pending tool does not prove that the model has stopped. Report the
          outstanding approval as its own fact while preserving turn activity. *)
@@ -1023,12 +1044,15 @@ let phase_text ~ko ~show_timing ~now t =
           | Outcome_unrecorded -> false)
         activities_now in
       let approval_pending = match t.awaiting, has_pending_activity with
-        | Some awaiting, false -> say "승인 대기: " "approval pending: " ^ awaiting.tool_name ^ " · "
-        | Some _, true | None, _ -> "" in
+        | Some awaiting, false ->
+            [ Facts.fact ~label:(say "승인 대기: " "approval pending: ") Facts.Plain
+                awaiting.tool_name
+            ]
+        | Some _, true | None, _ -> [] in
       (* Keep the age beside the current pending calls. A held approval's
          age belongs to the approval surface, not another call's progress. *)
       let in_this_call =
-        if not show_timing then "" else
+        if not show_timing then [] else
         match List.filter
           (fun (call : live_tool_call) ->
             Some call.local_id <> awaiting_call
@@ -1039,11 +1063,14 @@ let phase_text ~ko ~show_timing ~now t =
           current_calls
           |> List.sort (fun (a : live_tool_call) b -> Float.compare a.started_at b.started_at)
         with
-        | [] -> ""
+        | [] -> []
         | call :: _ -> (
           match Masc_tui_message_layout.age_text ~now ~since:call.started_at with
-          | None -> ""
-          | Some age -> Printf.sprintf (if ko then " · 이 호출 %s 경과" else " · in this call %s") age)
+          | None -> []
+          | Some age ->
+              [ (if ko then Facts.fact ~label:"이 호출 " Facts.Amount (age ^ " 경과")
+                 else Facts.fact ~label:"in this call " Facts.Amount age)
+              ])
       in
       (* Counted from 0 internally, shown from 1 -- the superseded blocks on
          the same screen label themselves [attempt + 1] (render.ml), so a
@@ -1079,10 +1106,13 @@ let phase_text ~ko ~show_timing ~now t =
       let runtime_tag =
         match t.current_runtime_id with
         | Some rid when t.attempt > 0 ->
-            Printf.sprintf (if ko then "[%s] 시도 %d" else "[%s] attempt %d") rid attempt_shown
-        | Some rid -> Printf.sprintf "[%s]" rid
-        | None when t.attempt > 0 -> Printf.sprintf (if ko then "시도 %d" else "attempt %d") attempt_shown
-        | None -> ""
+            [ Facts.fact Facts.Who
+                (Printf.sprintf (if ko then "[%s] 시도 %d" else "[%s] attempt %d") rid attempt_shown)
+            ]
+        | Some rid -> [ Facts.fact Facts.Who (Printf.sprintf "[%s]" rid) ]
+        | None when t.attempt > 0 ->
+            [ clause (Printf.sprintf (if ko then "시도 %d" else "attempt %d") attempt_shown) ]
+        | None -> []
       in
       (* The first clause answers what is happening right now, in the slot a
          reader's eye learns: a mode word the way an editor's status line
@@ -1097,47 +1127,56 @@ let phase_text ~ko ~show_timing ~now t =
         if has_pending_activity then runtime_tag
         else
           match model_phase_text ~ko ~show_timing ~now t with
-          | Some phase -> String.concat " \xc2\xb7 " (List.filter (fun part -> part <> "") [phase; runtime_tag])
-          | None -> (
-            match t.current_runtime_id with
-            | Some rid when t.attempt > 0 ->
-                Printf.sprintf
-                  (if ko then "런타임 후보: [%s] 기다리는 중 (시도 %d)%s"
-                   else "runtime candidate: waiting on [%s] (attempt %d)%s")
-                  rid attempt_shown silent_for
-            | Some rid ->
-                Printf.sprintf (if ko then "[%s] 기다리는 중%s" else "waiting on [%s]%s") rid silent_for
-            | None when t.attempt > 0 ->
-                Printf.sprintf
-                  (if ko then "런타임 후보: 진행 중 (시도 %d)" else "runtime candidate: working (attempt %d)")
-                  attempt_shown
-            | None -> say "진행 중" "working")
+          | Some phase -> clause phase :: runtime_tag
+          | None ->
+            [ clause
+                (match t.current_runtime_id with
+                 | Some rid when t.attempt > 0 ->
+                     Printf.sprintf
+                       (if ko then "런타임 후보: [%s] 기다리는 중 (시도 %d)%s"
+                        else "runtime candidate: waiting on [%s] (attempt %d)%s")
+                       rid attempt_shown silent_for
+                 | Some rid ->
+                     Printf.sprintf (if ko then "[%s] 기다리는 중%s" else "waiting on [%s]%s") rid silent_for
+                 | None when t.attempt > 0 ->
+                     Printf.sprintf
+                       (if ko then "런타임 후보: 진행 중 (시도 %d)" else "runtime candidate: working (attempt %d)")
+                       attempt_shown
+                 | None -> say "진행 중" "working")
+            ]
       in
       let work =
-        if calls = 0 then leading ^ in_this_call
+        if calls = 0 then leading @ in_this_call
         else
-          Printf.sprintf "%s%s%s%s \xc2\xb7 %s"
-            (if leading = "" then "" else leading ^ " \xc2\xb7 ")
-            (if ko then Printf.sprintf "도구 %d개" calls
-             else Masc_tui_message_layout.count_noun calls "tool")
-            running in_this_call
-            (compact_tool_mix activities)
+          leading
+          @ [ (if ko then Facts.fact ~label:"도구 " Facts.Amount (Printf.sprintf "%d개" calls)
+               else Facts.fact Facts.Amount (Masc_tui_message_layout.count_noun calls "tool"))
+            ]
+          @ running
+          @ in_this_call
+          @ clauses (compact_tool_parts activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed
          the difference between that and a stall. *)
-      let work = approval_pending ^ work in
+      let work = approval_pending @ work in
       if t.checkpoints = 0 then work
       else
-        Printf.sprintf
-          (if ko then "%s, 컨텍스트 체크포인트 %d번 넘기고 이어감"
-           else "%s, continued past %d context checkpoint(s)")
-          work t.checkpoints
-  | Stream_ended -> say "스트림 끝남 · 결과 확정 중" "stream ended; settling the outcome"
+        work
+        @ [ (if ko then
+               Facts.fact ~label:"컨텍스트 체크포인트 " Facts.Amount
+                 (Printf.sprintf "%d번 넘기고 이어감" t.checkpoints)
+             else
+               clause
+                 (Printf.sprintf "continued past %d context checkpoint(s)" t.checkpoints))
+          ]
+  | Stream_ended -> said ["스트림 끝남"; "결과 확정 중"] ["stream ended; settling the outcome"]
   | Stream_failed message ->
-      (match t.current_runtime_id with
-       | None -> message
-       | Some runtime -> message ^ say " · 런타임: " " · runtime: " ^ runtime)
+      clause message
+      :: (match t.current_runtime_id with
+          | None -> []
+          | Some runtime ->
+              [ Facts.fact ~label:(say "런타임: " "runtime: ") Facts.Who runtime ])
 
 (* Says what was sent, not what became of the turn. A signalled turn parked in
    an uncancellable section keeps running, and reading the signal as the
@@ -1187,18 +1226,20 @@ let elapsed_text ~now t =
       else Some (Masc_tui_message_layout.span_text (ended -. t.started_at))
   | None -> Masc_tui_message_layout.age_text ~now ~since:t.started_at
 
-let progress_text ~ko ~show_timing ~now t =
-  let phase = phase_text ~ko ~show_timing ~now t in
+let with_elapsed ~show_timing ~now t phase =
   if not show_timing then phase else
   match elapsed_text ~now t with
   | None -> phase
-  | Some age -> Printf.sprintf "%s · %s" phase age
+  | Some age -> phase @ [ Facts.fact Facts.Amount age ]
 
-let compact_progress_text ~ko ~show_timing ~now t =
+let full_progress_facts ~ko ~show_timing ~now t =
+  with_elapsed ~show_timing ~now t (phase_facts ~ko ~show_timing ~now t)
+
+let compact_progress_facts ~ko ~show_timing ~now t =
   let say korean english = if ko then korean else english in
   let phase =
     match t.phase with
-    | Waiting | Stream_ended | Stream_failed _ -> phase_text ~ko ~show_timing ~now t
+    | Waiting | Stream_ended | Stream_failed _ -> phase_facts ~ko ~show_timing ~now t
     | Working ->
         let current_calls = t.reversed_tool_calls
           |> List.filter (fun (call : live_tool_call) ->
@@ -1229,21 +1270,21 @@ let compact_progress_text ~ko ~show_timing ~now t =
                | Outcome_unrecorded -> None)
         in
         match t.awaiting, pending with
-        | _, _ :: _ -> String.concat " · " pending
-        | Some awaiting, [] -> say "승인 대기: " "approval pending: " ^ awaiting.tool_name
+        | _, _ :: _ -> clauses pending
+        | Some awaiting, [] ->
+            [ Facts.fact ~label:(say "승인 대기: " "approval pending: ") Facts.Plain
+                awaiting.tool_name
+            ]
         | None, [] ->
             match model_phase_text ~ko ~show_timing ~now t with
-            | Some phase -> phase
-            | None -> say "응답 기다리는 중" "waiting for response"
+            | Some phase -> [ clause phase ]
+            | None -> [ clause (say "응답 기다리는 중" "waiting for response") ]
   in
   let phase =
     if t.attempt = 0 then phase
-    else Printf.sprintf (if ko then "%s · 시도 %d" else "%s · attempt %d") phase (t.attempt + 1)
+    else phase @ [ clause (Printf.sprintf (if ko then "시도 %d" else "attempt %d") (t.attempt + 1)) ]
   in
-  if not show_timing then phase else
-  match elapsed_text ~now t with
-  | None -> phase
-  | Some age -> phase ^ " · " ^ age
+  with_elapsed ~show_timing ~now t phase
 
 (* The question, as an Attention row. It is the one row an operator has to act
    on, so it is styled like the others that need them rather than like
@@ -1286,21 +1327,30 @@ let preparation_rejection_label ~ko phase =
   | Tool_preparation | Skill_preparation -> if ko then "거절됨" else "rejected"
 ;;
 
-let preparation_status ~ko preparation =
+let preparation_facts ~ko preparation =
   let open Masc.Keeper_turn_preview in
   let say korean english = if ko then korean else english in
   let phase = preparation_phase_label ~ko preparation.phase in
-  let last_seen = say "최근 확인 · " "last seen · " in
+  let last_seen = clause (say "최근 확인" "last seen") in
   match preparation.state with
-  | Preparation_active -> Progress, last_seen ^ phase ^ say " 중" " in progress"
+  | Preparation_active -> Progress, [ last_seen; clause (phase ^ say " 중" " in progress") ]
   | Preparation_finished {outcome=Prepared;_} ->
-    Progress, last_seen ^ phase ^ say "됨 · 다음 활동 확인 중" " done · checking the next activity"
+    ( Progress
+    , [ last_seen
+      ; clause (phase ^ say "됨" " done")
+      ; clause (say "다음 활동 확인 중" "checking the next activity")
+      ] )
   | Preparation_finished {outcome=(Rejected | Raised | Cancelled) as outcome;_} ->
     let outcome = match outcome with
       | Rejected -> preparation_rejection_label ~ko preparation.phase
       | Raised -> say "실패" "failed" | Cancelled -> say "취소됨" "cancelled"
       | Prepared -> say "완료됨" "done" in
-    Attention, last_seen ^ phase ^ " " ^ outcome
+    Attention, [ last_seen; clause (phase ^ " " ^ outcome) ]
+;;
+
+let preparation_status ~ko preparation =
+  let kind, facts = preparation_facts ~ko preparation in
+  kind, Facts.line facts
 ;;
 
 let preparation_timeline_rows ?(archived=false) ~ko timeline =
@@ -1325,15 +1375,31 @@ let preparation_timeline_rows ?(archived=false) ~ko timeline =
       (preparation_phase_label ~ko span.preparation.phase) outcome)
 ;;
 
+(* The row that leads the status rows: where the turn is, as facts. *)
+let lead_facts ?preparation ~compact ~show_timing ~ko ~now t =
+  if awaiting_continuation t then None
+  else
+    Some (match preparation with
+    | Some preparation when can_observe_preparation t -> preparation_facts ~ko preparation
+    | Some _ | None ->
+      ( Progress
+      , if compact then compact_progress_facts ~ko ~show_timing ~now t
+        else full_progress_facts ~ko ~show_timing ~now t ))
+
+let progress_facts ?preparation ~compact ~show_timing ~ko ~now t =
+  match lead_facts ?preparation ~compact ~show_timing ~ko ~now t with
+  | Some (Progress, facts) ->
+    Some
+      (List.map
+         (fun (fact : _ Facts.t) ->
+           { fact with Facts.label = safe_line fact.label; value = safe_line fact.value })
+         facts)
+  | Some ((Diagnostic | Answer_needed | Approval _ | Attention), _) | None -> None
+
 let status_rows ?preparation ?(compact = false) ?(show_timing = true) ~ko ~now t =
-  [ (if awaiting_continuation t then None
-     else
-       Some (match preparation with
-       | Some preparation when can_observe_preparation t -> preparation_status ~ko preparation
-       | Some _ | None ->
-         ( Progress
-         , (if compact then compact_progress_text else progress_text)
-             ~ko ~show_timing ~now t )))
+  [ Option.map
+      (fun (kind, facts) -> kind, Facts.line facts)
+      (lead_facts ?preparation ~compact ~show_timing ~ko ~now t)
   ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text ~ko t)
   ; Option.map
       (fun settlement ->

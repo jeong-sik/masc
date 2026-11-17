@@ -568,9 +568,6 @@ let compact_tool_parts (activities : tool_activity list) =
   List.fold_left add [] activities
   |> List.map (fun (name, count) -> Printf.sprintf "%s %d" name count)
 
-let compact_tool_mix activities =
-  String.concat " · " (compact_tool_parts activities)
-
 type activity_kind =
   | Skill_activity
   | Delegate_activity
@@ -1022,7 +1019,7 @@ let skill_block_state (activities : skill_activity list) =
     Skill_used activities
 
 (* The kind a run of calls amounts to, when the names alone do not show it.
-   [compact_tool_mix] on the same line already names every distinct tool with
+   [compact_tool_parts] on the same line already names every distinct tool with
    its count, so a tag over a single name is that name's number said twice --
    on one live screen every [Keeper N] was exactly the count of one
    [keeper_*] tool named a few clauses along, in all eight blocks that had

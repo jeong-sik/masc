@@ -98,6 +98,9 @@ let fill ~max_cells items =
   in
   List.fold_left place ([], [], 0) items |> close |> List.rev
 
+let line facts =
+  String.concat separator (List.map (fun fact -> fact.label ^ fact.value) facts)
+
 let facts_as_items facts = List.map (fun fact -> Fact fact) facts
 
 (* A fact with no text has nothing to draw. Left in, it would still take a

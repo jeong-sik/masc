@@ -751,7 +751,7 @@ let test_client_session_gap_is_its_own_reason () =
 let test_ctx_composition_preserves_input_measurement_boundary () =
   let estimate =
     Masc.Keeper_codex_runtime.request_context_of_last_usage
-      (Masc.Runtime_codex_app_server.Context_estimate { estimated_tokens = 45_000 }) in
+      (Runtime_codex_app_server.Context_estimate { estimated_tokens = 45_000 }) in
   List.iter
     (fun (provenance, expected) ->
        List.iter

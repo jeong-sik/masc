@@ -6016,6 +6016,11 @@
  (libraries alcotest yojson base64 masc masc_tui_machine_live))
 
 (test
+ (name test_tui_terminal_out)
+ (modules test_tui_terminal_out)
+ (libraries alcotest threads.posix unix masc_tui_terminal_out))
+
+(test
  (name test_tui_msx_refusal)
  (modules test_tui_msx_refusal)
  (libraries alcotest yojson masc_tui_msx_refusal masc.msx_wire))

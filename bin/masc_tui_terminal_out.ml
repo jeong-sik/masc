@@ -1,0 +1,75 @@
+(* Every byte the TUI sends to its terminal goes through here, in order. A
+   system thread does the blocking write; the UI only appends.
+
+   The UI used to write and flush stdout itself. A terminal that stopped
+   reading its pty for a while held that write, and with it the whole UI
+   domain: input, async results and the observer queue all waited (a live
+   terminal stalled up to 191s, every sampled second spent in write(2),
+   2026-11-17).
+
+   No mutex guards the queue. Ctrl-Z runs the suspend handler at the next
+   poll point of whatever the UI was doing, and that handler drains this
+   queue; a lock the interrupted code held would refuse the handler. Chunks
+   go on an atomic list instead, and the writer is woken by a binary
+   semaphore, whose release does not allocate and so cannot be interrupted
+   by a handler. *)
+
+(* Newest first. *)
+let queued : string list Atomic.t = Atomic.make []
+let writing = Atomic.make false
+let wake = Semaphore.Binary.make false
+let started = Atomic.make false
+
+let rec write_all fd bytes offset =
+  if offset < String.length bytes then
+    match Unix.write_substring fd bytes offset (String.length bytes - offset) with
+    | written -> write_all fd bytes (offset + written)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_all fd bytes offset
+
+(* [writing] is set before the queue is taken and cleared only once a take
+   finds it empty, so [behind] never reads false while bytes are in hand. A
+   terminal that is gone takes nothing more; what was queued for it is
+   dropped so [drain] does not wait for a reader that will never come. *)
+let rec writer () =
+  Semaphore.Binary.acquire wake;
+  let rec take () =
+    Atomic.set writing true;
+    match Atomic.exchange queued [] with
+    | [] -> Atomic.set writing false
+    | chunks ->
+        (match write_all Unix.stdout (String.concat "" (List.rev chunks)) 0 with
+         | () -> ()
+         | exception Unix.Unix_error (_, _, _) -> ());
+        take ()
+  in
+  take ();
+  writer ()
+
+let start () =
+  if Atomic.compare_and_set started false true then
+    ignore (Thread.create writer ())
+
+let rec push text =
+  let current = Atomic.get queued in
+  if not (Atomic.compare_and_set queued current (text :: current)) then push text
+
+let write text =
+  if String.length text > 0 then begin
+    start ();
+    push text
+  end
+
+let flush () =
+  if Atomic.get started then Semaphore.Binary.release wake
+
+let behind () = Atomic.get writing || Atomic.get queued <> []
+
+(* Polled rather than waited on: a wait would need the lock the comment
+   above keeps out. It runs only when the terminal changes hands. *)
+let drain_poll_s = 0.002
+
+let drain () =
+  flush ();
+  while behind () do
+    Thread.delay drain_poll_s
+  done

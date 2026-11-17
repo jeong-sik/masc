@@ -3054,12 +3054,14 @@ let test_automatic_cut_continuation_commits_and_retains_compact_proof history_ki
       if Sys.file_exists receipts then Sys.remove receipts);
     check bool "compact completion survives raw body and rolling receipt pruning" true
       (Result.is_ok (io (fun () -> Keeper_librarian_history_resolution_selection.check ~config:fixture.config ~keeper_name))))
-let test_cut_owned_full_source_floor history_kind ~refuse_message () =
+let test_cut_owned_full_source_floor ?(production=false) history_kind ~refuse_message () =
   let module Floor=Keeper_librarian_history_resolution_floor in
   let module Steps=Keeper_librarian_floor_step_owner in
   let module Step=Keeper_librarian_floor_step_request in
-  with_same_binding_cut ~history_kind (fun fixture original parent_request _exact _schema ->
+  with_same_binding_cut ~history_kind (fun fixture original parent_request exact _schema ->
     let positions=cut_source_positions fixture and parent=Owner.to_json original in
+    let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+      ~request_id:exact.Exact.request_id |> get) in
     let original_override=(Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
     let restore_prompt ()=match original_override with
       | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
@@ -3077,7 +3079,9 @@ let test_cut_owned_full_source_floor history_kind ~refuse_message () =
       let child=match (last_cut_intent fixture original).phase with
         | Child_confirmed child -> child
         | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> fail "Cut has no confirmed child" in
-      fixture.set_response (fun _ -> size_refusal);
+      fixture.set_response (fun capture ->
+        check string "the capacity refusal belongs only to the exact child" child.request_id (Capture.request_id capture);
+        size_refusal);
       let before= !(fixture.deliveries) in
       assert_pending (run_worker fixture);await_delivery fixture ~after:before;
       (match run_worker fixture with
@@ -3092,18 +3096,39 @@ let test_cut_owned_full_source_floor history_kind ~refuse_message () =
       let selected=Floor.candidate ~store:fixture.store ~record:leaf ~request |> get
         |> Option.to_result ~none:"actual Cut capacity descendant was not a floor candidate" |> get in
       let step_calls=ref 0 in
-      fixture.set_step_response (fun _ ->
+      fixture.set_step_response (fun body ->
         incr step_calls;
+        check bool "the provider receives the definite leaf's frozen template" true
+          (Astring.String.is_infix ~affix:"Frozen leaf floor template" body);
+        check bool "later live template changes do not reach a retained question" false
+          (Astring.String.is_infix ~affix:"Changed live template" body);
         if !step_calls=1 then (ignore (Eio.Promise.try_resolve arrived ());Eio.Promise.await release);
         if refuse_message then size_refusal else `OK,F.openai_response (`Assoc [
           "new_claims",`List [new_claim (Printf.sprintf "Retained message %d was read" !step_calls)];
           "dropped",`List [];"working_state",`String "Retained source state";"working_contexts",`List []]));
-      let run ()=memory_action fixture (fun () -> Floor.descend ~config:fixture.config
-        ~reserved:(Keeper_librarian_durable_edge.reserved ()) selected) |> get in
+      let run ()=if production then
+          (match memory_action fixture (fun () -> Resolution_work.run_pending_serialized
+             ~config:fixture.config ~keeper_name) |> Result.map_error Resolution_intent.error_to_string |> get with
+           | Some pending -> `Pending pending
+           | None -> `Completed)
+        else match memory_action fixture (fun () -> Floor.descend ~config:fixture.config
+          ~reserved:(Keeper_librarian_durable_edge.reserved ()) selected) |> get with
+          | Floor.Pending pending -> `Pending pending
+          | Attention attention -> `Attention attention
+          | Prepared prepared -> `Prepared prepared in
       let waiting=match run () with
-        | Floor.Pending (Keeper_librarian_pending.Worker worker) -> worker.request_id
-        | Pending _ | Attention _ | Prepared _ -> fail "the first retained message did not await its actual worker" in
+        | `Pending (Keeper_librarian_pending.Worker worker) -> worker.request_id
+        | `Pending _ | `Attention _ | `Prepared _ | `Completed -> fail "the first retained message did not await its actual worker" in
       Eio.Promise.await blocked;
+      let first_basis,transaction_id=let owner=Capture.physical_owner request in
+        let found=Steps.discover ~store:fixture.store ~owner |> Result.map_error Steps.error_to_string |> get in
+        let first=List.filter (fun (_, (index:Step.index)) ->
+          index.header.range.request_id=leaf.request_id && index.header.position=0) found in
+        let record,_=match first with
+          | [first] -> Steps.load ~store:fixture.store first |> Result.map_error Steps.error_to_string |> get
+          | [] | _::_ -> fail "actual floor has no unique initial question" in
+        let first=Step.restore ~owner record |> get in
+        Step.chain_basis first |> Option.get,Step.transaction_id first in
       let posts=F.post_count fixture.server in
       check int "ordinary cleanup cannot archive the retained Cut's in-flight question" 0
         (memory_action fixture (fun () -> Keeper_librarian_floor_cleanup.cleanup ~store:fixture.store
@@ -3115,38 +3140,67 @@ let test_cut_owned_full_source_floor history_kind ~refuse_message () =
         ~source:{kind=Current.Librarian;trace_id} ~new_claims:[unrelated] () |> get)) |> ignore;
       Prompt_registry.set_override Prompt_names.librarian (leaf_template ^ "\nChanged live template") |> get;
       (match run () with
-       | Floor.Pending (Keeper_librarian_pending.Worker worker) ->
+       | `Pending (Keeper_librarian_pending.Worker worker) ->
          check string "basis change pins the actual pending message ID" waiting worker.request_id
-       | Pending _ | Attention _ | Prepared _ -> fail "basis change dropped or replaced pending work");
+       | `Pending _ | `Attention _ | `Prepared _ | `Completed -> fail "basis change dropped or replaced pending work");
       check int "reobservation sends no new provider question" posts (F.post_count fixture.server);
       let before= !(fixture.deliveries) in
       ignore (Eio.Promise.try_resolve unblock ());await_delivery fixture ~after:before;
       let rec drive remaining =
         let before= !(fixture.deliveries) in
         match run () with
-        | Floor.Pending (Keeper_librarian_pending.Worker _) when remaining>0 ->
+        | `Pending (Keeper_librarian_pending.Worker _) when remaining>0 ->
           await_delivery fixture ~after:before;drive (remaining-1)
         | result -> result in
       let result=drive (List.length (Source.input (Capture.source request)).messages) in
       if refuse_message then (
-        (match result with Floor.Attention (Message_refused {position=0;_}) -> ()
-         | Pending _ | Attention _ | Prepared _ -> fail "a refused single message became a completed program");
+        (match result with `Attention (Floor.Message_refused {position=0;_}) -> ()
+         | `Pending _ | `Attention _ | `Prepared _ | `Completed -> fail "a refused single message became a completed program");
         check bool "a refused message publishes no program" true (Floor.recover_committed selected |> get=None);
         let posts=F.post_count fixture.server in
         ignore (run ());check int "a stopped message retains its final instead of minting another question" posts
           (F.post_count fixture.server))
       else (
-        let prepared=match result with Floor.Prepared prepared -> prepared
-          | Pending _ | Attention _ -> fail "the complete retained source did not reach a finished program" in
-        let proof=memory_action fixture (fun () -> Floor.publish selected prepared) |> get in
+        let proof=match result with
+          | `Prepared prepared -> memory_action fixture (fun () -> Floor.publish selected prepared) |> get
+          | `Completed when production -> memory_action fixture (fun () -> io (fun () ->
+              Keeper_librarian_durable_source_lock.with_original_settlement ~request (fun () ->
+                Current.read_committed_program ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+                  ~transaction_id))) |> get |> Option.get
+          | `Pending _ | `Attention _ | `Completed -> fail "the complete retained source did not reach a finished program" in
         check int "all original source range kinds commit together" (if history_kind=Mixed then 2 else 1)
           (List.length proof.receipts);
         check bool "every original message is read, with no unread holes" true
-          (proof.publication.execution.program.unread=[]);
+          (proof.publication.execution.program.unread=[]
+           && proof.publication.execution.program.sources=first_basis.sources);
         check bool "publication retains concurrent unrelated Memory" true
           (List.mem "Unrelated concurrent Memory" (io (fun () -> claims fixture.keepers_dir)));
-        let recovered=Floor.recover_committed selected |> get |> Option.get in
-        check bool "restart reads the same canonical publication" true (recovered.publication=proof.publication));
+        if production then (
+          let completed=last_cut_intent fixture original in
+          check bool "ordinary Work retains actual program completion for the exact refused child" true
+            (match completed.memory_commit with
+             | Some completed -> completed.request_id=leaf.request_id && completed.receipts=proof.receipts
+             | None -> false);
+          check bool "actual program completion releases the original selection fence" true
+            (Result.is_ok (io (fun () -> Keeper_librarian_history_resolution_selection.check
+              ~config:fixture.config ~keeper_name)));
+          check bool "ordinary Work actually ACKs all original source positions" true
+            (cut_source_positions fixture<>positions);
+          let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source request)) in
+          check bool "external ACK is the original full counterpart frontier" true (io (fun () ->
+            let cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
+              ~keeper_name |> get in
+            Keeper_external_read_cursor.observation_matches_preparation cursor ~after:through ~through ~atom:None ~official:None));
+          let bytes=cut_memory_bytes fixture and positions=cut_source_positions fixture and posts=F.post_count fixture.server in
+          for _=1 to 2 do
+            (match run_worker fixture with Ok _ -> () | Error error -> fail (Consumer.error_to_string error));
+            check bool "repeated ordinary wakes write no additional Memory or receipt" true (cut_memory_bytes fixture=bytes);
+            check bool "repeated ordinary wakes preserve the already settled frontiers" true (cut_source_positions fixture=positions);
+            check int "repeated ordinary wakes replay no parent, child or floor RPC" posts (F.post_count fixture.server)
+          done)
+        else (
+          let recovered=Floor.recover_committed selected |> get |> Option.get in
+          check bool "restart reads the same canonical publication" true (recovered.publication=proof.publication)));
       let owner=Capture.physical_owner request in
       let steps=Steps.discover ~store:fixture.store ~owner |> Result.map_error Steps.error_to_string |> get in
       List.iter (fun listed ->
@@ -3155,9 +3209,13 @@ let test_cut_owned_full_source_floor history_kind ~refuse_message () =
         check bool "steps use the definite leaf's frozen template and complete working context" true
           (step.preparation.prompt=(Capture.preparation request).prompt
            && step.preparation.source_input.working_context=(Capture.preparation request).source_input.working_context)) steps;
-      check bool "neither floor decisions nor Memory publication ACK the source" true (cut_source_positions fixture=positions);
+      if not production then check bool "neither floor decisions nor Memory publication ACK the source" true
+        (cut_source_positions fixture=positions);
       check json "the Cut parent Unknown remains unchanged" parent (io (fun () ->
-        Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> owned |> Option.get |> Owner.to_json))))
+        Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> owned |> Option.get |> Owner.to_json));
+      check bool "no wake replays or changes the original host Cut request" true
+        (host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+          ~request_id:exact.request_id |> get))))
 
 let test_cut_command_recovers_fence_before_grant_after_memory_rebase () =
   with_same_binding_cut (fun fixture original _request _exact _schema ->
@@ -7066,6 +7124,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_cut_owned_full_source_floor Atoms ~refuse_message:true);
   test_case "Cut-owned mixed message refusal cannot become an unread hole" `Slow
     (test_cut_owned_full_source_floor Mixed ~refuse_message:true);
+  test_case "ordinary Work completes a Cut-owned mixed floor with real full-source ACK and compact proof" `Slow
+    (test_cut_owned_full_source_floor ~production:true Mixed ~refuse_message:false);
   test_case "Cut command recovers fence before grant with rebased Memory" `Slow
     test_cut_command_recovers_fence_before_grant_after_memory_rebase;
   test_case "Cut command busy and late proof stay Requested" `Slow

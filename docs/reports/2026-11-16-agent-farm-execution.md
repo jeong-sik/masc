@@ -18,7 +18,7 @@
 | WIM-S03 문서 입력 | 현재 Core `db69904f29c6f4a6166957fbdffa4f7e8e910a7a`, MASC `be648b8e1bfe796c250ddb37fab6c9b00f03ccb6`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 기존 79개 파일의 소스 리뷰와 후속 Core 3개 파일 수리를 구분한다. 실제 Core 미디어 suite 18개 통과; 최종 커밋과 소스 118개·metadata 9개가 일치한다. 이전 Dashboard 타입 검사와 decoder 1건은 당시 범위다. MASC 전체 타입·실제 provider·PDF/STT·브라우저·설치 미확인 |
 | TLJ-S01 위임 결과 | 협업 세션 `01a1e1b9…`, `.worktrees/farm-evolution-20261116`. 세 층 최종 head `e6ea78da93a1ebac6f6020aafb134631024ba769`, base `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`. canonical 종단 상태, 기동 재투영, 영속 전달 의도·답 원문·전달 영수증을 연결 | 두 P2였던 보관 기간 뒤 중복 전달과 fail-open journal 뒤 답 유실을 소스에서 수정했다. 재기반 후 독립 검토에서 미해결 P0/P1/P2 없음. 기존 세 패치와 range-diff가 같고 32개 후보 파일이 이전 최종 head와 일치함을 확인했다. 작성 세션의 OCaml 31개 구문 검사 기록이 있다. 타입·동작·CI·설치·원래 요청 회복·GitHub 정식 승인·게시 미확인 |
 | WIM-S04 MCP 결과 | 현재 소스 `4202159afd7cdbc9259296ceb09f7fa8f6c0d05f`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 현재 base의 독립 소스 리뷰에 미해결 P0/P1/P2 없음. 고정 `ad6ba29`의 실제 decoder/projection suite 8개 통과, 원본 입력 239개를 대조했다. 일반 MCP 호출·승인 replay·GC·H5·실제 provider·전체 MASC 타입은 미검증. 기존 구문 기록과 Core 18개 시험은 별도 범위다 |
-| Lifecycle START 입력 | 실행 검증한 UID 26층 `62fc143233fb88b22ee5ddc9a733ee07e63ac3e9`의 17파일 변경. C 진입점이 START를 보존·제거하고 선택한 실행 소유자에게 전달한다 | 실제 원본 입력 187개의 maintained suite 13개와 별도 ingress probe 8개 통과. 준비 중에는 ring이 없고 명시 TUI 기록은 자체 로그 준비 뒤, 서버 기록은 자기 lease 뒤 시작하도록 연결했다. 실제 전체 CLI/TUI·설치·Linux `sg`·전체 Dune 검증은 아니다 |
+| Lifecycle START 입력 | UID 26층 `7e3227db41ee1b14016621a26eb4e921872851ca`, 고정 base `d2fa5aadd2f4f64ec0ee1574decb769085b4f3cf`: 준비·TUI·서버 소유 시점에 맞춘 START 전달 | 새 base의 실제 원본 입력 187개를 fresh compile/link해 maintained suite 13개 통과, skip 0. 이전 `62fc1432`의 baseline 3개와 ingress probe 8개는 재실행하지 않았다. 전체 CLI/TUI·설치·Linux `sg`·전체 Dune 검증은 아니다 |
 | IA-S13 공유 SSH 이름 | 현재 26층 top `7e3227db41ee1b14016621a26eb4e921872851ca`, 고정 local base `d2fa5aadd2f4f64ec0ee1574decb769085b4f3cf`. 아래 초기 구현 커밋과 이전 실행은 원래 head의 기록이다. `.worktrees/farm-remote-namespace-20261116`의 재기반 전 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 재기반 21층의 독립 소스 리뷰와 새 소스 263개의 집중 시험 76개를 후속 checkpoint에서 확인했다. 이전 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버·Workspace와 첫 쓰기 연결의 후속 커밋은 아래에 적었다. 전체 시작 흐름·실제 SSH·VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
 
 본 세션은 저장·add-on·입력 경계와 이 실행 기록을 맡는다. TLJ-S01의 같은 구현을
@@ -137,7 +137,7 @@ EINTR 처리 시도도 보존했다. 후속 시험은 별도 native test 층
 로컬 게시 인계는 Schedule3·Document5의 원본 53개 파일 packet과 별도
 `artifacts/farm-publication-handoff-20261116-update.json`을 함께 읽는다.
 원본은 `3bdedcea` 기록으로 보존한다. Update note는 후속 문서 및 owner-layer
-수정에 따라 바뀐 다섯 refs와 현재 leaf를 명시하며, 게시 시에는 그 최신 연결을 읽는다.
+수정에 따른 스택 전체 refs와 현재 leaf를 명시하며, 게시 시에는 그 최신 연결을 읽는다.
 원격 push·PR 생성·GitHub 정식 승인·병합·설치는 수행하지 않았다. `gh pr view`도
 여전히 API 연결 실패였고, 상대 세션에 대한 답변 전달도 확인하지 못했다.
 
@@ -438,11 +438,45 @@ late/carried·active tool round는 여전히 initial H5 밖이다. 문서 입력
 테스트도 실제 runtime 생성·resume·dashboard·HTTP 구현을 요구하므로 선언 테스트만
 발췌해 전체 suite 실행으로 보고하지 않는다.
 
-MCP 일반 호출은 별도의 유지 중인 identity-tools suite 40개를 대상으로 실제 의존성을
-연결 중이다. 아직 결과를 얻지 못했다. Source trace에서는 invocation의 보존 참조를
+MCP 일반 호출의 identity-tools suite 40개는 아래 후속 경계에서 멈췄으며 실행은
+0건이다. Source trace에서는 invocation의 보존 참조를
 호출 로그 commit 뒤에 비우고, 현재 서버 blob sweep은 삭제 없이 관측함을 확인했다.
 Blob 게시와 로그 commit 사이의 크래시·복구·offline 유지보수 상호작용은 미실행이다.
 소스 검토만으로 GC 안전성이나 원래 요청의 회복을 완료 처리하지 않는다.
+
+## Identity 이름 참조 수리와 새 base의 lifecycle 실행
+
+문서/MCP 스택에 여섯째 층을 추가했다. 소스 후보
+`77ef965413357353084b6bd2d0833ddd8e5f41e3`의 두 파일·세 참조만 바꿨다.
+정책은 검색 도구 구현 대신 검증된 공개 schema의 이름을 읽고, GitHub credential
+코드는 전체 Keeper 설정 대신 기존 `Keeper_config_text.validate_name`을 직접 쓴다.
+이름 문법·오류·두 entrypoint의 디스크 접근 전 검사와 Runtime 기본값/등록 권위는
+바꾸지 않았다. 독립 검토는 추가 P0/P1/P2를 찾지 못했다.
+
+두 실제 제품 구현과 원본 40-case 시험 모듈은 컴파일됐다. Public CMI 두 개는 같고,
+실제 native imports에서 policy→Search 및 GitHub identity→Keeper_config 직접 경로가
+사라졌다. 최종 링크와 시험 실행은 없다. 앞선 runner는 별도로 만든 empty test
+interface를 실제 ML compile에 적용하지 못했음을 확인했다. 원본 test를 정상
+`-intf-suffix .ml` metadata로 다시 컴파일해 empty CMI를 유지했으며, 이전 inferred
+CMI를 정상 Dune interface 증거로 쓰지 않는다. 이 수리로 전체 의존 경로가 사라진 것은
+아니다. 실제 SSE의 정상 생성 모듈 `Sse_event_t` 준비 경계와 별도 lifecycle/Runtime
+경로가 남는다. 제품 컴파일 결함으로 판정하지 않았고 원래 40개 시험은 줄이지 않았다.
+[범위와 영수증](../evidence/2026-11-16-farm-mcp-content/README.md)에 이를 구분했다.
+
+별도로 UID `7e3227`의 원본 lifecycle 13개를 실제로 다시 실행했다. 같은 187개 입력을
+전부 새로 컴파일했고 repository object 재사용은 0이다. Named ingress C archive를
+연결해 204개 명령이 exit 0, 13 PASS·0 skip이었다. Root와 독립 검토자가 Git/copy
+입력 187개, 출력 303개와 기록된 package 파일 2,119개의 바이트 결속을 확인했다.
+확장자 없는 선택 PPX 실행 파일의 사전 해시는 빠져 있어 모든 toolchain 입력을
+결속했다고 주장하지 않는다. Test-only warning4 설정은 실제 Dune test 정책과 같다.
+이 범위는 전체 Dune·CLI/TUI·설치·provider·Linux나 다른 76/15/8/3 시험의 재실행이 아니다.
+UID worktree의 `artifacts/farm-lifecycle-events-rebase-20261116/`에 실행과 독립 검토를
+보존했다. 원본 seal은 `37aafc898bf2127fa3d568b655d998714fc62afcd7f2a692da1e7e743bb640e1`이다.
+
+H5 후속은 아직 설계 조사다. Canonical carried 범위 결정 뒤, wire 변환·서명 검사 전에
+요청용 읽기 투영을 넣을 위치를 확인했다. 늦은 Text JSON outbox와 Responses tool-result
+PDF의 위치별 wire 표현, official 내부 rounds는 별도 미완료로 남겼다. 이 조사로 H5
+기능을 구현하거나 실제 PDF/provider 동작을 검증한 것은 아니다.
 
 ## 원래 25개 요구의 현재 위치
 

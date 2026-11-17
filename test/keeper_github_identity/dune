@@ -6,7 +6,6 @@
  (modules
   common
   workspace
-  keeper_config
   keeper_secret_projection
   keeper_secret_redaction
   process_eio
@@ -21,6 +20,7 @@
   eio
   eio_main
   masc.exec_ssh_protocol
+  masc.keeper_registry
   masc.fs_compat
   masc.masc_eio_context
   yojson

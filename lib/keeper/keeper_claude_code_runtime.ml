@@ -114,18 +114,15 @@ let model_input_projection_for_capacity ~input_source
   in
   let () =
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-      let full_bytes =
-        List.fold_left
-          (fun total message ->
-             total + measure_model_input_message_bytes message)
-          0
-          windowed
+      let measured =
+        Runtime_model_input_tail_window.measure_history
+          ~measure_message_bytes:measure_model_input_message_bytes windowed
       in
       let target_capacity_bytes =
         if capacity_bytes = unbounded_model_input_capacity_bytes
         then
           Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
-            ~capacity:full_bytes
+            ~capacity:(Runtime_model_input_tail_window.measured_bytes measured)
         else
           Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
             ~capacity:capacity_bytes
@@ -133,13 +130,11 @@ let model_input_projection_for_capacity ~input_source
       observed_next_shrink_capacity_bytes :=
         Runtime_model_input_tail_window.next_shrink_capacity_bytes
           ~allow_empty_history:true
-          ~measure_message_bytes:measure_model_input_message_bytes
           ~target_capacity_bytes
-          windowed;
+          measured;
       observed_floor_capacity_bytes :=
         Runtime_model_input_tail_window.minimum_capacity_bytes
-          ~measure_message_bytes:measure_model_input_message_bytes
-          windowed)
+          measured)
   in
   Host.project_source ~input_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection windowed
 ;;

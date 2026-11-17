@@ -151,17 +151,36 @@ val first_atom_at_or_after
     Kept here so the conversion uses the same labelling as the cut rather than
     a second reading of where an atom begins. *)
 
+type measured_history
+(** Scalar byte measurements for one exact transmitted history. The value
+    retains neither messages nor the measurement callback. It belongs to that
+    history's next/floor calculation, before any later source projection. *)
+
+val measure_history
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> Agent_core.Types.message list
+  -> measured_history
+(** Measure every list occurrence once, in input order, then measure the
+    canonical omission preamble once when the history has an atom. Already
+    materialized preambles count toward the rejected size but not the atoms.
+    The callback must give the stable byte size of this message rendering;
+    its exceptions propagate in occurrence order. No value-equality cache
+    coalesces distinct encodings, including signed zero. *)
+
+val measured_bytes : measured_history -> int
+(** Sum of the original history's measured occurrences, including any
+    materialized preamble. *)
+
 val next_shrink_capacity_bytes
   :  ?allow_empty_history:bool
-  -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> target_capacity_bytes:int
-  -> Agent_core.Types.message list
+  -> measured_history
   -> int option
-(** Choose a smaller projection capacity at an atom boundary after a provider
-    has rejected [messages]. [None] means there is no smaller structural view.
+(** Choose a smaller projection capacity at an atom boundary of the measured
+    history. [None] means there is no smaller structural view.
 
     [allow_empty_history=false] preserves the newest atom. When explicitly
-    [true], a caller that carries the current goal outside [messages] may use a
+    [true], a caller that carries the current goal outside the history may use a
     zero-prior-history floor after every atom boundary has been exhausted.
 
     The returned capacity is never below the bytes required by pinned
@@ -176,12 +195,9 @@ val next_shrink_capacity_bytes
     encoding (#33217). Thus applying {!project} cannot replace a size-driven
     refusal with an equal or larger request. *)
 
-val minimum_capacity_bytes
-  :  measure_message_bytes:(Agent_core.Types.message -> int)
-  -> Agent_core.Types.message list
-  -> int option
+val minimum_capacity_bytes : measured_history -> int option
 (** Return the exact measured capacity of the zero-prior-history view: pinned
-    messages plus the omission preamble. [None] means [messages] has no
+    messages plus the omission preamble. [None] means the measured history has no
     shrinkable atom or the framed floor is not strictly smaller than the
     rejected view. Callers must pass [allow_empty_history=true] to {!project}
     when applying this capacity. *)

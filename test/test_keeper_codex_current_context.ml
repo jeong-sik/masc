@@ -1352,8 +1352,9 @@ let test_a_ceiling_cuts_inside_the_range () =
      the later front wins. *)
   let measure message = String.length (Keeper_official_client_host.encode_history_message message) in
   let framing =
-    match Runtime_model_input_tail_window.minimum_capacity_bytes ~measure_message_bytes:measure
-      (native_unread_messages large_history) with
+    match Runtime_model_input_tail_window.minimum_capacity_bytes
+      (Runtime_model_input_tail_window.measure_history
+         ~measure_message_bytes:measure (native_unread_messages large_history)) with
     | Some bytes -> bytes
     | None -> fail "a history this long has a framed floor"
   in
@@ -1373,8 +1374,8 @@ let test_the_overflow_floor_does_not_restore_the_newest_atom () =
   let floor =
     match
       Runtime_model_input_tail_window.minimum_capacity_bytes
-        ~measure_message_bytes:measure
-        (native_unread_messages large_history)
+        (Runtime_model_input_tail_window.measure_history
+           ~measure_message_bytes:measure (native_unread_messages large_history))
     with
     | Some bytes -> bytes
     | None -> fail "the rejected history must have a smaller floor"

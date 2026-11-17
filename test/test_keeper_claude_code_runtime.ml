@@ -6301,8 +6301,8 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
   let capacity_bytes =
     match
       Runtime_model_input_tail_window.minimum_capacity_bytes
-        ~measure_message_bytes:measure
-        (attach_native_unread messages)
+        (Runtime_model_input_tail_window.measure_history
+           ~measure_message_bytes:measure (attach_native_unread messages))
     with
     | Some floor_bytes -> floor_bytes + newest_two
     | None -> fail "a history this long has a framed floor"
@@ -6522,8 +6522,8 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
   let preamble_bytes =
     match
       Runtime_model_input_tail_window.minimum_capacity_bytes
-        ~measure_message_bytes:measure
-        (attach_native_unread ~unread:Keeper_librarian_request_unread.empty messages)
+        (Runtime_model_input_tail_window.measure_history
+           ~measure_message_bytes:measure (attach_native_unread ~unread:Keeper_librarian_request_unread.empty messages))
     with
     | Some bytes -> bytes
     | None -> fail "the fixture history has no shrinkable atom"
@@ -6646,8 +6646,8 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
   let preamble_bytes =
     match
       Runtime_model_input_tail_window.minimum_capacity_bytes
-        ~measure_message_bytes:measure
-        messages
+        (Runtime_model_input_tail_window.measure_history
+           ~measure_message_bytes:measure messages)
     with
     | Some bytes -> bytes
     | None -> fail "the fixture history has no shrinkable atom"
@@ -6739,8 +6739,8 @@ let test_a_working_state_that_displaces_nothing_goes () =
   let capacity_bytes =
     (match
        Runtime_model_input_tail_window.minimum_capacity_bytes
-         ~measure_message_bytes:measure
-         (attach_native_unread ~unread:Keeper_librarian_request_unread.empty (pinned :: messages))
+         (Runtime_model_input_tail_window.measure_history
+            ~measure_message_bytes:measure (attach_native_unread ~unread:Keeper_librarian_request_unread.empty (pinned :: messages)))
      with
      | Some bytes -> bytes
      | None -> fail "the fixture history has no shrinkable atom")

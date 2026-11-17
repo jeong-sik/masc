@@ -37,7 +37,8 @@ let measure_message_bytes (m : Types.message) =
     (fun acc (block : Types.content_block) ->
        match block with
        | Types.Text text -> acc + String.length text
-       | _ -> acc)
+       | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.ToolUse _
+       | Types.ToolResult _ | Types.Image _ | Types.Document _ | Types.Audio _ -> acc)
     0
     m.content
 ;;
@@ -101,8 +102,13 @@ let count_atoms messages =
 
 let first_text (messages : Types.message list) =
   match messages with
-  | { content = Types.Text text :: _; _ } :: _ -> text
-  | _ -> "<none>"
+  | [] -> "<none>"
+  | message :: _ ->
+    (match message.content with
+     | Types.Text text :: _ -> text
+     | [] | (Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.ToolUse _
+             | Types.ToolResult _ | Types.Image _ | Types.Document _ | Types.Audio _) :: _ ->
+       "<none>")
 ;;
 
 (* A capacity no synthetic history in this file can reach, for the cases that
@@ -202,9 +208,8 @@ let test_next_shrink_capacity_clamps_to_lopsided_newest_atom () =
   let target_capacity_bytes = total_bytes history / 2 in
   match
     Window.next_shrink_capacity_bytes
-      ~measure_message_bytes
       ~target_capacity_bytes
-      history
+      (Window.measure_history ~measure_message_bytes history)
   with
   | None -> Alcotest.fail "two non-empty atoms must have a smaller boundary"
   | Some capacity_bytes ->
@@ -243,9 +248,8 @@ let test_next_shrink_capacity_ignores_materialized_preamble () =
   let newest = padded ~role:Types.User ~tag:"newest|" 600 in
   match
     Window.next_shrink_capacity_bytes
-      ~measure_message_bytes
       ~target_capacity_bytes:500
-      [ preamble; newest ]
+      (Window.measure_history ~measure_message_bytes [ preamble; newest ])
   with
   | None -> ()
   | Some _ ->
@@ -258,9 +262,8 @@ let test_next_shrink_rejects_larger_framed_retry () =
   let newest = padded ~role:Types.Assistant ~tag:"newest|" 600 in
   match
     Window.next_shrink_capacity_bytes
-      ~measure_message_bytes
       ~target_capacity_bytes:350
-      [ oldest; newest ]
+      (Window.measure_history ~measure_message_bytes [ oldest; newest ])
   with
   | None -> ()
   | Some capacity_bytes ->
@@ -287,9 +290,8 @@ let test_next_shrink_walks_past_a_boundary_that_frames_larger () =
      bounded retry of a lane whose history is under half its capacity. *)
   match
     Window.next_shrink_capacity_bytes
-      ~measure_message_bytes
       ~target_capacity_bytes:(2 * rejected_window_bytes)
-      history
+      (Window.measure_history ~measure_message_bytes history)
   with
   | None ->
     Alcotest.fail
@@ -323,9 +325,8 @@ let test_next_shrink_reaches_the_empty_history_past_a_larger_clamp () =
   match
     Window.next_shrink_capacity_bytes
       ~allow_empty_history:true
-      ~measure_message_bytes
       ~target_capacity_bytes:(2 * rejected_window_bytes)
-      history
+      (Window.measure_history ~measure_message_bytes history)
   with
   | None -> Alcotest.fail "the empty history is a smaller view and must be named"
   | Some capacity_bytes ->
@@ -352,7 +353,7 @@ let test_bootstrap_floor_drops_the_only_prior_atom () =
   let only_prior_atom = padded ~role:Types.User ~tag:"prior|" 600 in
   let history = [ pinned; only_prior_atom ] in
   let floor_capacity_bytes =
-    match Window.minimum_capacity_bytes ~measure_message_bytes history with
+    match Window.minimum_capacity_bytes (Window.measure_history ~measure_message_bytes history) with
     | Some capacity -> capacity
     | None -> Alcotest.fail "a single prior atom must have a bootstrap floor"
   in
@@ -378,9 +379,8 @@ let test_bootstrap_next_shrink_reaches_zero_history () =
   match
     Window.next_shrink_capacity_bytes
       ~allow_empty_history:true
-      ~measure_message_bytes
       ~target_capacity_bytes:300
-      [ only_prior_atom ]
+      (Window.measure_history ~measure_message_bytes [ only_prior_atom ])
   with
   | None -> Alcotest.fail "bootstrap shrink must remove the only prior atom"
   | Some capacity_bytes ->
@@ -708,7 +708,8 @@ let test_tool_results_stay_with_their_call () =
             | Some Types.Assistant | Some Types.Tool ->
               scan ~previous_organic:(Some Types.Tool) rest
             | Some Types.User | Some Types.System | None -> false)
-         | role -> scan ~previous_organic:(Some role) rest)
+         | (Types.User | Types.Assistant | Types.System) as role ->
+           scan ~previous_organic:(Some role) rest)
     in
     scan ~previous_organic:None projected
   in
@@ -831,7 +832,7 @@ let test_pinned_bytes_are_charged_before_atoms () =
     Alcotest.(check bool)
       "refusal reports the undroppable bytes" true
       (undroppable_bytes >= 50_000)
-  | Error other ->
+  | Error (Window.Newest_atom_exceeds_available _ as other) ->
     Alcotest.failf
       "expected Reservation_exceeds_capacity, got %s"
       (Window.budget_error_to_string other)
@@ -844,7 +845,7 @@ let test_reservation_exceeding_capacity_is_typed () =
     ->
     Alcotest.(check int) "capacity is reported" 1_000 capacity_bytes;
     Alcotest.(check int) "reservation is reported" 1_000 reserved_bytes
-  | Error other ->
+  | Error (Window.Newest_atom_exceeds_available _ as other) ->
     Alcotest.failf
       "expected Reservation_exceeds_capacity, got %s"
       (Window.budget_error_to_string other)
@@ -863,7 +864,7 @@ let test_single_oversized_atom_is_typed () =
   | Error (Window.Newest_atom_exceeds_available { newest_atom_bytes; _ }) ->
     Alcotest.(check int)
       "refusal reports the atom size" 500_000 newest_atom_bytes
-  | Error other ->
+  | Error (Window.Reservation_exceeds_capacity _ as other) ->
     Alcotest.failf
       "expected Newest_atom_exceeds_available, got %s"
       (Window.budget_error_to_string other)
@@ -900,7 +901,9 @@ let has_tag tag messages =
        match m.content with
        | [ Types.Text text ] ->
          String.length text >= width && String.equal (String.sub text 0 width) tag
-       | _ -> false)
+       | [] | Types.Text _ :: _ :: _
+       | (Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.ToolUse _
+          | Types.ToolResult _ | Types.Image _ | Types.Document _ | Types.Audio _) :: _ -> false)
     messages
 ;;
 
@@ -1121,11 +1124,109 @@ let test_a_window_without_an_atom_observes_the_history_end () =
       (Some (carried_digest observed.Window.model_input_front))
 ;;
 
+let test_measured_history_preserves_exact_occurrences () =
+  let encode message =
+    Keeper_official_client_context_codec.(encode Canonical_source message)
+  in
+  let bytes message = String.length (encode message) in
+  let tool_input value =
+    Types.make_message ~role:Types.Assistant
+      [ Types.ToolUse
+          { id = "same-call"; name = "same-tool"
+          ; input = `Assoc [ "value", `Float value; "body", `String (String.make 1000 'x') ]
+          } ]
+  in
+  let positive = tool_input 0.0 and negative = tool_input (-0.0) in
+  Alcotest.(check bool) "signed zero has different canonical bytes" true
+    (encode positive <> encode negative);
+  let pinned = message ~role:Types.System "current context" in
+  let history = [ pinned; positive; negative; positive ] in
+  let calls = ref [] in
+  let measured = Window.measure_history ~measure_message_bytes:(fun value ->
+    calls := value :: !calls;
+    bytes value) history in
+  let expected_calls = history @ [ Window.preamble_message ] in
+  Alcotest.(check bool) "each occurrence in order, then reserve" true
+    (List.equal ( == ) expected_calls (List.rev !calls));
+  let expected_total = List.fold_left (fun sum value -> sum + bytes value) 0 history in
+  Alcotest.(check int) "exact rejected size" expected_total (Window.measured_bytes measured);
+  let floor = bytes pinned + bytes Window.preamble_message in
+  Alcotest.(check (option int)) "exact floor" (Some floor)
+    (Window.minimum_capacity_bytes measured);
+  Alcotest.(check (option int)) "oldest atom removed with exact signed bytes"
+    (Some (floor + bytes negative + bytes positive))
+    (Window.next_shrink_capacity_bytes ~target_capacity_bytes:expected_total measured);
+  Alcotest.(check bool) "bounds reuse the original measurements" true
+    (List.equal ( == ) expected_calls (List.rev !calls))
+;;
+
+exception Measurement_failed
+
+let test_measured_history_keeps_no_atom_and_error_boundaries () =
+  let pinned = message ~role:Types.System "pinned" in
+  let history = [ Window.preamble_message; pinned ] in
+  let calls = ref [] in
+  let measured = Window.measure_history ~measure_message_bytes:(fun value ->
+    calls := value :: !calls;
+    measure_message_bytes value) history in
+  Alcotest.(check int) "materialized preamble contributes to rejected size"
+    (total_bytes history) (Window.measured_bytes measured);
+  Alcotest.(check (option int)) "no atom has no next boundary" None
+    (Window.next_shrink_capacity_bytes ~allow_empty_history:true ~target_capacity_bytes:0 measured);
+  Alcotest.(check (option int)) "no atom has no floor" None
+    (Window.minimum_capacity_bytes measured);
+  Alcotest.(check bool) "no additional preamble measurement" true
+    (List.equal ( == ) history (List.rev !calls));
+  let bad = message ~role:Types.User "encoding fails here" in
+  calls := [];
+  Alcotest.check_raises "original failure precedes synthetic reserve" Measurement_failed
+    (fun () ->
+       ignore (Window.measure_history ~measure_message_bytes:(fun value ->
+         calls := value :: !calls;
+         if value == bad then raise Measurement_failed;
+         measure_message_bytes value) [ Window.preamble_message; pinned; bad ]));
+  Alcotest.(check bool) "original occurrence order reaches the first error" true
+    (List.equal ( == ) [ Window.preamble_message; pinned; bad ] (List.rev !calls))
+;;
+
+let[@inline never] measured_history_release_fixture () =
+  let payload = String.make (1024 * 1024) 'x' in
+  let original = message ~role:Types.User payload in
+  let original_weak = Weak.create 1 and payload_weak = Weak.create 1 in
+  Weak.set original_weak 0 (Some original);
+  Weak.set payload_weak 0 (Some payload);
+  let measured = Window.measure_history ~measure_message_bytes [ original ] in
+  measured, original_weak, payload_weak, ref (Some original)
+;;
+
+let test_measured_history_releases_source_graphs () =
+  let measured, original, payload, caller = measured_history_release_fixture () in
+  let collect () = for _ = 1 to 8 do Gc.full_major () done in
+  collect ();
+  Alcotest.(check bool) "caller keeps original alive" true (Weak.check original 0);
+  Alcotest.(check bool) "caller keeps payload alive" true (Weak.check payload 0);
+  ignore (Sys.opaque_identity !caller);
+  caller := None;
+  collect ();
+  Alcotest.(check bool) "scalar measurements release original" false (Weak.check original 0);
+  Alcotest.(check bool) "scalar measurements release payload" false (Weak.check payload 0);
+  Alcotest.(check int) "rejected size remains usable" (1024 * 1024)
+    (Window.measured_bytes measured);
+  ignore (Window.minimum_capacity_bytes measured);
+  ignore (Sys.opaque_identity measured)
+;;
+
 let () =
   Alcotest.run
     "runtime_model_input_tail_window"
     [ ( "tail_window"
-      , [ Alcotest.test_case "identity when everything fits" `Quick
+      , [ Alcotest.test_case "measured history preserves exact occurrences" `Quick
+            test_measured_history_preserves_exact_occurrences
+        ; Alcotest.test_case "measured history keeps no-atom and error boundaries" `Quick
+            test_measured_history_keeps_no_atom_and_error_boundaries
+        ; Alcotest.test_case "measured history releases source graphs" `Quick
+            test_measured_history_releases_source_graphs
+        ; Alcotest.test_case "identity when everything fits" `Quick
             test_identity_when_everything_fits
         ; Alcotest.test_case "empty list identity" `Quick
             test_empty_list_identity

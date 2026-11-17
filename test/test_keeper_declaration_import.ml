@@ -40,7 +40,7 @@ let runtime_path config =
     ~base_path:config.Masc.Workspace.base_path
 
 let journal config =
-  Masc.Keeper_config_journal.journal_path_for_base_path
+  Keeper_config_journal.journal_path_for_base_path
     ~base_path:config.Masc.Workspace.base_path
 
 let observe config keeper_name =

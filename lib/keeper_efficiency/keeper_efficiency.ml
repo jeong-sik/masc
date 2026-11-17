@@ -692,8 +692,10 @@ let fold_day_store ~label ~store ~day ~cursors ~fold_row acc =
 let compute_month ~costs_store ~tool_store ~month ~cache =
   let open Result.Syntax in
   let sections = List.init (days_in_month month) (fun i -> empty_section (i + 1)) in
-  let rec loop = function
-    | [] -> Ok { sections }
+  let equal_cursor (path, boundary) (other_path, other_boundary) =
+    String.equal path other_path && Int.equal boundary other_boundary in
+  let rec loop ~changed = function
+    | [] -> Ok ({ sections }, changed)
     | (section : day_section) :: rest ->
       let day = day_string month section.day in
       let cached =
@@ -765,9 +767,13 @@ let compute_month ~costs_store ~tool_store ~month ~cache =
       section.keepers <-
         Hashtbl.fold (fun _ k list -> k :: list) acc.keepers []
         |> List.sort (fun a b -> String.compare a.keeper b.keeper);
-      loop rest
+      let changed =
+        changed || Option.is_none cached || costs_shrank || tools_shrank
+        || not (List.equal equal_cursor costs_cursors returned_costs)
+        || not (List.equal equal_cursor tool_cursors returned_tools) in
+      loop ~changed rest
   in
-  loop sections
+  loop ~changed:(List.length cache.sections <> List.length sections) sections
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -906,8 +912,8 @@ let read_month ~masc_root ~month =
          | Ok costs_store, Ok tool_store ->
            let open Result.Syntax in
            let* cache = load_cache ~masc_root ~month in
-           let* computed = compute_month ~costs_store ~tool_store ~month ~cache in
-           save_cache ~masc_root ~month computed;
+           let* computed, changed = compute_month ~costs_store ~tool_store ~month ~cache in
+           if changed then save_cache ~masc_root ~month computed;
            Ok (month_view_of_cache ~month ~generated_at:(Unix.time ()) computed))
   end
 ;;

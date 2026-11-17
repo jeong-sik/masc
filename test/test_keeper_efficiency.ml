@@ -203,6 +203,38 @@ let month_tests =
           let fourth = KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok in
           check int "after removal days_covered" 0 fourth.KE.days_covered;
           check int "after removal keepers" 0 (List.length fourth.KE.keepers)) )
+  ; ( "unchanged observations keep the projection file; new rows publish"
+    , `Quick
+    , fun () ->
+      with_masc_root (fun root ->
+          let month = today_month () in
+          let read () = KE.read_month ~masc_root:root ~month |> Result.get_ok in
+          let empty = read () in
+          check int "initial empty projection" 0 empty.KE.days_covered;
+          let path = KE.cache_path ~masc_root:root ~month |> Result.get_ok in
+          (* Hold the old inode open so replacement cannot reuse its number. *)
+          let channel = open_in_bin path in
+          Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
+              let original = Unix.fstat (Unix.descr_of_in_channel channel) in
+              let unchanged = read () in
+              check int "unchanged empty totals" 0 unchanged.KE.days_covered;
+              let after_read = Unix.stat path in
+              check bool "unchanged cache is not replaced" true
+                (original.st_dev = after_read.st_dev && original.st_ino = after_read.st_ino);
+              Dated_jsonl.append (tool_store root) (tool_row ~keeper:"polisher" ());
+              let updated = read () in
+              check int "new call appears" 1 ((keeper_row updated "polisher" |> Option.get).KE.calls);
+              let after_append = Unix.stat path in
+              check bool "new boundary publishes cache" true
+                (original.st_dev <> after_append.st_dev || original.st_ino <> after_append.st_ino));
+          let channel = open_in_bin path in
+          Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
+              let original = Unix.fstat (Unix.descr_of_in_channel channel) in
+              let unchanged = read () in
+              check int "call is not counted again" 1 ((keeper_row unchanged "polisher" |> Option.get).KE.calls);
+              let after_read = Unix.stat path in
+              check bool "populated cache is not replaced" true
+                (original.st_dev = after_read.st_dev && original.st_ino = after_read.st_ino))) )
   ; ( "a corrupt cache rebuilds from the ledgers"
     , `Quick
     , fun () ->

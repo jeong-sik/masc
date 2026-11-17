@@ -24,8 +24,10 @@
     Per-day results and per-file read boundaries are cached under
     [<masc_root>/keeper-efficiency/YYYY-MM.json] following the RFC-0162
     boundary-cache shape: a closed day file is never re-read and the growing
-    current-day file only reads bytes appended since the last call, so a
-    call is O(appended bytes) with no staleness window. The cache is a
+    current-day file only reads bytes appended since the last call. Each call
+    also reads the projection cache and checks the retained day files. When
+    their boundaries are unchanged, the cache file stays in place without
+    serializing or writing the same projection again. The cache is a
     rebuildable projection of the ledgers: a corrupt, missing or
     schema-mismatched cache is recomputed from the files, and a day file
     that shrank below its cached boundary (rewrite) is re-read from zero for

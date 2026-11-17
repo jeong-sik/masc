@@ -449,27 +449,16 @@ let confirm_child ~store ~expected child = update ~store ~expected (fun actual -
     && Record.request_digest child=expected_child.request_digest
     && Progress.phase (Record.progress child)=Progress.Captured) "Unacknowledged resolution child differs or has execution progress" in
   {actual with phase=Child_confirmed expected_child})
-let confirm_source_ack request =
+let confirm_source_ack ~plan request =
   let source=Request.source request and owner=Request.physical_owner request in
   let keepers_dir=Source.runtime_keepers_dir source and keeper_name=Request.keeper_id owner in
   let* cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir:keepers_dir ~keeper_name in
   let through=Keeper_librarian_input_sources.external_through (Source.counterparts source) in
   let* ()=require (Keeper_external_read_cursor.observation_matches_preparation cursor
     ~after:through ~through ~atom:None ~official:None) "Resolution original external ACK is unconfirmed" in
-  let* atom=Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name
-    |> Result.map_error Keeper_librarian_progress.read_error_to_string in
-  let* official=Keeper_librarian_official_progress.read ~keepers_dir ~keeper_id:keeper_name
-    |> Result.map_error Keeper_librarian_official_progress.read_error_to_string in
-  let positions=Source.positions source in
-  let atom_target=Option.fold ~none:positions.current ~some:(fun (range:Current.durable_range_id) ->
-    Some {Keeper_librarian_progress.position={trace_id=range.trace_id;end_atom=range.end_atom;
-      last_atom_digest=range.last_atom_digest};boundary_lines_seen=range.boundary_lines_seen}) (Source.range_id source) in
-  let official_target=Option.fold ~none:positions.official ~some:(fun (range:Current.official_range_id) ->
-    Some {Keeper_librarian_official_progress.boundary_line=List.fold_left (fun last (line,_) -> max last line)
-      range.after_boundary_line range.turns}) (Source.official_range_id source) in
-  require (atom=atom_target && official=official_target) "Resolution original read positions are unconfirmed"
+  Keeper_librarian_durable_source_lock.recheck_after plan
 let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) =
-  update ~store ~expected (fun actual ->
+  let retain plan=update ~store ~expected (fun actual ->
     let* child=match actual.phase with Child_confirmed child -> Ok child
       | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> Error "Resolution child is not acknowledged" in
     (* The completed original is the resolution child or a replacement that
@@ -500,7 +489,7 @@ let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) 
     let* receipts=Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
       File_lock_eio.with_lock (Current.path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
         let* ()=Request.confirm_owner request in
-        let* ()=confirm_source_ack request in
+        let* ()=confirm_source_ack ~plan request in
         let* snapshot=Current.read_locked_for_keepers_dir ~keepers_dir ~keeper_id in
         let* snapshot=Option.to_result ~none:"Resolution Memory snapshot is absent" snapshot in
         let* bytes=Option.to_result ~none:"Resolution Memory snapshot disappeared"
@@ -514,7 +503,14 @@ let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) 
             snapshot.revision>snapshot_revision || (snapshot.revision=snapshot_revision && Store.digest bytes=snapshot_sha256)
           | Prepared _ -> false) receipts in
         let+ ()=require (receipts<>[] && complete_receipts source receipts) "Resolution Memory commit is not receipt-proved" in receipts)) in
-    Ok {actual with memory_commit=Some {request_id=completed.request_id;receipts;program=None}})
+    Ok {actual with memory_commit=Some {request_id=completed.request_id;receipts;program=None}}) in
+  (* Source locks precede both the intent update and Memory locks. A finished
+     answer and its actual complete receipts remain necessary; the plan only
+     confirms which already-existing positions must remain unchanged. *)
+  match Keeper_librarian_durable_source_lock.with_original_settlement_plan ~request
+    (fun plan -> Ok (retain plan)) with
+  | Ok result -> result
+  | Error detail -> Error (Publication_uncertain detail)
 
 (* Walk to this intent's exact acknowledged child. Only confirmed ordinary
    replacement links or another intent's confirmed fenced child may intervene;

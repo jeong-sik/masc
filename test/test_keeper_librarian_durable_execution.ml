@@ -228,13 +228,13 @@ let first_messages=[message "The already-read first turn"]
 let selected_messages=first_messages @ [message "Original question to retain";
   Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Original completed answer"]]
 type history_kind = Atoms | Official | Mixed
-let official_empty_turn config ~turn ~time =
+let official_empty_turn ?(trace_id=trace_id) config ~turn ~time =
   let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
   Boundary.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
     {Boundary.recorded_at=time;event=Boundary.Turn_ended {turn_ref;task_context=Keeper_turn_task_context.No_task;
       history_at_start=Boundary.Continued_history;position=Boundary.No_atom_history}}
   |> Result.map_error Boundary.append_error_to_string |> get
-let official_turn config ~turn ~time =
+let official_turn ?(trace_id=trace_id) config ~turn ~time =
   let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
   let session=Keeper_context_core.create_session ~session_id:trace_id ~base_dir:(Keeper_fs.session_store_path config) in
   Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session
@@ -242,8 +242,8 @@ let official_turn config ~turn ~time =
   Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Internal_assistant session
     (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Original official-client answer"]);
   Keeper_context_core_history.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name:"read_file" ~outcome:Tool_result.Ok;
-  official_empty_turn config ~turn ~time
-let prepare_history config kind =
+  official_empty_turn ~trace_id config ~turn ~time
+let prepare_history ?(with_external_attention=true) config kind =
   let now=Time_compat.now () in
   (match kind with
    | Official -> ()
@@ -267,6 +267,7 @@ let prepare_history config kind =
      save_checkpoint config ~trace_id selected_messages turn;
      io (fun () -> append_boundary config ~turn ~time:(now-.1.)
          ~history_at_start:(Boundary.history_at_start_of_messages first_messages) selected_messages));
+  if with_external_attention then (
   let item : Keeper_external_attention.item = {
     event_id=Keeper_external_attention.event_id_of_dedupe_key "original-history-external";
     dedupe_key="original-history-external";keeper_name;
@@ -280,10 +281,10 @@ let prepare_history config kind =
   match Keeper_external_attention.For_testing.record_with_clock
     ~now:(fun () -> now -. 5.) ~base_path:config.Workspace.base_path item with
   | `Recorded -> () | `Duplicate _ -> fail "duplicate original external fixture"
-  | `Error detail -> fail detail
+  | `Error detail -> fail detail)
 let progress fixture = io (fun () -> Position.read ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
   ~keeper_id:keeper_name |> Result.map_error Position.read_error_to_string |> get)
-let with_fixture ?(history_kind=Atoms) ?(with_io_pool=false) f =
+let with_fixture ?(history_kind=Atoms) ?(with_io_pool=false) ?(with_external_attention=true) f =
   let base_path=Filename.temp_dir "librarian-addon-owner-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path) (fun () ->
@@ -311,7 +312,7 @@ let with_fixture ?(history_kind=Atoms) ?(with_io_pool=false) f =
       (* Metadata publication owns an Eio-aware directory lock. Keep it on
          this fiber; only the blocking declaration write goes to [io]. *)
       install_keeper ~config ~name:keeper_name ~trace_id;
-      prepare_history config history_kind;
+      prepare_history ~with_external_attention config history_kind;
       let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
         |> Result.map_error Lane_addon_manifest.error_to_string |> get in
       let source=Filename.concat (Runtime.configuration_directory config) "librarian.toml" in
@@ -8142,7 +8143,250 @@ let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
     check int "publication never replays the original provider request" 1 (F.post_count fixture.server);
     no_memory fixture))
 
+(* Capture an old full mixed input without retaining an executor for it. A
+   different actual configured read then consumes a larger canonical prefix.
+   Only afterwards retain a fresh request that reads the unchanged old input
+   against the new Memory basis. No cursor or Memory result is fabricated. *)
+let retain_old_mixed_input_after_a_later_actual_read fixture =
+  let captured=ref None in
+  (match memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
+    ~commit:(fun source -> captured:=Some source;Consumer.Memory_replaced [])) with
+   | Ok (Consumer.Memory_not_committed []) -> ()
+   | Ok _ | Error _ -> fail "the fixture did not capture the original full mixed input");
+  let original=Option.to_result ~none:"old mixed source is absent" !captured |> get in
+  check bool "the old input has both immutable range components" true
+    (Source.range_id original<>None && Source.official_range_id original<>None);
+  let later_messages=selected_messages @ [message "Later canonical question";
+    Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Later canonical answer"]] in
+  let now=Time_compat.now () in
+  save_checkpoint fixture.config ~trace_id later_messages 4;
+  io (fun () ->
+    append_boundary fixture.config ~turn:4 ~time:(now+.1.)
+      ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) later_messages;
+    official_turn ~trace_id:"later-official-client" fixture.config ~turn:5 ~time:(now+.2.));
+  drive_advanced fixture;
+  let later_record,later_request=only_original fixture in
+  check bool "the later Memory is from an actual finished configured read" true
+    (match Progress.phase later_record.progress with Finished _ -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+  check bool "the larger actual read has real Memory receipts" true
+    (io (fun () -> Commit.receipt_state later_request) |> get);
+  (match run_worker fixture with
+   | Ok Consumer.Nothing_to_read -> ()
+   | Ok _ | Error _ -> fail "the larger completed original was not normally archived");
+  check int "the completed larger read leaves no live original" 0 (List.length (observed_originals fixture));
+  let old_atom=Option.get (Source.range_id original) and old_official=Option.get (Source.official_range_id original) in
+  let atom,official,_=cut_source_positions fixture in
+  check bool "actual atom and official cursors are beyond the old input" true
+    (Option.exists (fun (p:Position.t) -> p.position.end_atom>old_atom.end_atom) atom
+     && Option.exists (fun (p:Keeper_librarian_official_progress.t) ->
+       p.boundary_line>List.fold_left (fun line (next,_) -> max line next)
+         old_official.after_boundary_line old_official.turns) official);
+  let record,request=memory_action fixture (fun () ->
+    Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination ->
+        let source,owner=io (fun () ->
+          let anchor=Current.capture_program_anchor ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get in
+          let snapshot=Current.program_anchor_snapshot anchor in
+          let source=Source.with_current
+            ~expected_revision:(Option.map (fun (snapshot:Current.t) -> snapshot.revision) snapshot)
+            ~current:(Option.map (fun (snapshot:Current.t) ->
+              ({Keeper_librarian.facts=snapshot.facts}:Keeper_librarian.current_selection)) snapshot) original
+            |> Result.map_error Source.error_to_string |> get in
+          let owner=Capture.observe_owner ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir
+            ~keeper_id:keeper_name |> get in
+          source,owner) in
+        let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ())
+          ~source_lines:["Retained full mixed input, at a fresh Memory basis"] (Source.input source) |> get in
+        let request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+          ~owner ~destination ~source ~preparation ()) |> get in
+        let record=Durable_owner.retain ~store:fixture.store request
+          |> Result.map_error Durable_owner.error_to_string |> get in
+        Ok (record,request))) |> get in
+  check bool "the fresh question preserves every old historical source coordinate" true
+    (Source.range_id (Capture.source request)=Source.range_id original
+     && Source.official_range_id (Capture.source request)=Source.official_range_id original
+     && Source.positions (Capture.source request)=Source.positions original
+     && (Source.input (Capture.source request)).messages=(Source.input original).messages);
+  check bool "a superset receipt does not prove the exact old ranges" false
+    (io (fun () -> Commit.receipt_state request) |> get);
+  record,request,later_messages
+
+let answer_retained_old_input request =
+  let fields=Yojson.Safe.Util.to_assoc (answer request) in
+  `Assoc (("new_claims",`List [new_claim "Knowledge from newly reading the complete retained mixed input"])
+    :: List.remove_assoc "new_claims" fields)
+
+let test_an_old_mixed_answer_publishes_new_receipts_without_rewinding_later_frontiers ~lose_ack () =
+  with_fixture ~history_kind:Mixed ~with_external_attention:false (fun ~sw:_ fixture ->
+    let original,request,_=retain_old_mixed_input_after_a_later_actual_read fixture in
+    let before=cut_source_positions fixture and memory=cut_memory_bytes fixture in
+    let provider_ids=ref [] in
+    fixture.set_response (fun actual ->
+      check string "only the fresh old-input question reaches the provider"
+        original.Owner.request_id (Capture.request_id actual);
+      provider_ids:=Capture.request_id actual:: !provider_ids;
+      `OK,F.openai_response (answer_retained_old_input actual));
+    if lose_ack then (
+      let deliveries= !(fixture.deliveries) in
+      assert_pending (run_worker fixture);await_delivery fixture ~after:deliveries;
+      let cursor_path=Keeper_external_read_cursor.path_for_keepers_dir
+        ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name in
+      let original_cursor=io (fun () -> Fs_compat.load_file_opt cursor_path)
+        |> Option.to_result ~none:"the configured read did not prepare its external cursor" |> get in
+      Fun.protect ~finally:(fun () -> io (fun () -> write cursor_path original_cursor)) (fun () ->
+        let result=resume_with_settlement_fault fixture (fun () ->
+          io (fun () -> write cursor_path "{invalid cursor after actual old-range Memory publication}")) in
+        (match result with
+         | Ok (Durable_owner.Resumed (Publication_waiting _,_)) -> ()
+         | Ok (Waited _ | Original_replaced _ | Resumed ((Refused _ | Finished _ | Basis_superseded _ | Ended_unadmitted _),_)) ->
+           fail "the actual old-input publication must remain unfinished after its ACK read fails"
+         | Error error -> fail (Durable_owner.error_to_string error));
+        check bool "ACK recovery begins with both actual old-range Memory receipts" true
+          (io (fun () -> Commit.receipt_state request) |> get));
+      let committed=cut_memory_bytes fixture in
+      check bool "a fresh scope recovers the same old-input question" true (advanced (run_worker fixture));
+      check bool "ACK recovery repeats no Memory effect" true (cut_memory_bytes fixture=committed))
+    else drive_advanced fixture;
+    let finished,actual=only_original fixture in
+    check string "the actual finished result keeps its retained question identity"
+      original.request_id finished.Owner.request_id;
+    check json "publication keeps the immutable original preparation" (Capture.to_json request) (Capture.to_json actual);
+    check bool "only the new complete old-input read finishes" true
+      (match Progress.phase finished.progress with Finished _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check bool "both exact old-range receipts are newly committed" true
+      (io (fun () -> Commit.receipt_state request) |> get);
+    check bool "a fresh actual Memory publication occurred" false (cut_memory_bytes fixture=memory);
+    check (list string) "both actual configured reads retain their distinct Memory facts"
+      ["Knowledge from newly reading the complete retained mixed input";"Knowledge from original completed history"]
+      (io (fun () -> claims fixture.keepers_dir));
+    check bool "later atom, official and exact zero external ACK remain unchanged" true
+      (cut_source_positions fixture=before);
+    check (list string) "the old-input question is evaluated exactly once" [original.request_id] !provider_ids;
+    check int "only the larger read and this new old-input read call the provider" 2 (F.post_count fixture.server))
+
+type later_frontier_damage = Wrong_atom_digest | Wrong_atom_trace | Restarted_history
+  | Nonofficial_frontier | Unreadable_frontier | Changed_original_prefix
+let test_old_input_publication_refuses_unproved_later_frontiers damage () =
+  with_fixture ~history_kind:Mixed ~with_external_attention:false (fun ~sw:_ fixture ->
+    let original,request,later_messages=retain_old_mixed_input_after_a_later_actual_read fixture in
+    fixture.set_response (fun actual -> `OK,F.openai_response (answer_retained_old_input actual));
+    let deliveries= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);await_delivery fixture ~after:deliveries;
+    let runtime_keepers_dir=Workspace.keepers_runtime_dir fixture.config in
+    let atom,_,_=cut_source_positions fixture in
+    let atom=Option.to_result ~none:"fixture lacks its actual later atom position" atom |> get in
+    (match damage with
+     | Wrong_atom_digest -> io (fun () ->
+       Position.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+         {atom with position={atom.position with last_atom_digest=String.make 64 '0'}}
+       |> Result.map_error Position.write_error_to_string |> get)
+     | Wrong_atom_trace -> io (fun () ->
+       Position.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+         {atom with position={atom.position with trace_id="foreign-later-trace"}}
+       |> Result.map_error Position.write_error_to_string |> get)
+     | Restarted_history -> io (fun () ->
+       Boundary.append ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+         {Boundary.recorded_at=Time_compat.now ();event=History_restarted {trace_id}}
+       |> Result.map_error Boundary.append_error_to_string |> get)
+     | Nonofficial_frontier -> io (fun () ->
+       let lines=Boundary.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name |> get in
+       let line=List.find_map (function
+         | line,Ok {Boundary.event=Turn_ended {position=Atom_history _;_};_}
+             when line>List.fold_left (fun last (line,_) -> max last line)
+               (Option.get (Source.official_range_id (Capture.source request))).after_boundary_line
+               (Option.get (Source.official_range_id (Capture.source request))).turns -> Some line
+         | _,Ok {Boundary.event=Turn_ended {position=(Atom_history _ | No_atom_history | Empty_atom_history | Stale_noop);_};_}
+         | _,Ok {event=History_restarted _;_} | _,Error _ -> None) lines
+         |> Option.to_result ~none:"fixture lacks a later atom boundary" |> get in
+       Keeper_librarian_official_progress.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+         {boundary_line=line} |> Result.map_error Keeper_librarian_official_progress.write_error_to_string |> get)
+     | Unreadable_frontier -> io (fun () ->
+       write (Position.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name) "[")
+     | Changed_original_prefix ->
+       let changed=List.mapi (fun index message ->
+         if index=1 then Agent_core.Types.make_message ~role:Agent_core.Types.User
+           [Agent_core.Types.Text "Contradictory original canonical question"] else message) later_messages in
+       save_checkpoint fixture.config ~trace_id changed 6);
+    let files=[Position.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+      Keeper_librarian_official_progress.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name;
+      Keeper_external_read_cursor.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name] in
+    let frontiers ()=io (fun () -> List.map (fun path -> path,Fs_compat.load_file_opt path) files) in
+    let positions=frontiers () and memory=cut_memory_bytes fixture in
+    (match run_worker fixture with
+     | Ok (Consumer.Pending _) | Error (Consumer.Original_publication_blocked _) -> ()
+     | Ok _ | Error _ -> fail "unproved later frontiers must block the actual old-input publication");
+    let retained,actual=only_original fixture in
+    check string "failed canonical proof creates no replacement ID" original.Owner.request_id retained.Owner.request_id;
+    check json "failed canonical proof preserves the full immutable input" (Capture.to_json request) (Capture.to_json actual);
+    check bool "failed canonical proof never publishes old-range receipts" false
+      (io (fun () -> Commit.receipt_state request) |> get);
+    check bool "failed canonical proof changes no Memory or journal" true (cut_memory_bytes fixture=memory);
+    check bool "failed canonical proof rewrites no cursor" true (frontiers ()=positions);
+    check int "proof failure does not repeat either provider evaluation" 2 (F.post_count fixture.server))
+
+let test_an_originals_own_fence_denies_publication_after_canonical_positions_advance () =
+  with_fixture ~history_kind:Mixed ~with_external_attention:false (fun ~sw:_ fixture ->
+    let original,request=retain_absent_history_original ~failed_selection:false fixture in
+    let preview=fence_preview fixture request in
+    let fence=memory_action fixture (fun () -> io (fun () ->
+      Resolution.fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+        ~expected:preview.expected ~actor:"operator" ~reason:"Retain this old unknown original without effects"
+        ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)) in
+    let later_messages=selected_messages @ [message "A later independently selected question";
+      Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "A later completed answer"]] in
+    save_checkpoint fixture.config ~trace_id later_messages 4;
+    let now=Time_compat.now () in
+    io (fun () ->
+      append_boundary fixture.config ~turn:4 ~time:(now+.1.)
+        ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) later_messages;
+      official_turn ~trace_id:"later-official-client" fixture.config ~turn:5 ~time:(now+.2.));
+    drive_advanced fixture;
+    check bool "the actual fence still binds the exact immutable old source" true
+      (io (fun () -> Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get)
+        =Some fence);
+    check bool "the old input has no exact completed old-range receipt" false
+      (io (fun () -> Commit.receipt_state request) |> get);
+    let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture in
+    (* Canonical position compatibility is data, not a fence override or an
+       answered original. The actual effect ports must still refuse it. *)
+    memory_action fixture (fun () -> io (fun () ->
+      Keeper_librarian_durable_source_lock.with_original_publication ~request (fun plan ->
+        Keeper_librarian_durable_source_lock.recheck_before plan))) |> get;
+    refuse_fenced_resume fixture original request;
+    let proposal=Capture.validate_proposal request (answer request) |> get in
+    check bool "public Commit rejects the fenced original before granting any effect" true
+      (Result.is_error (memory_action fixture (fun () -> Commit.publish ~store:fixture.store
+        ~config:fixture.config ~request ~original ~proposal
+        ~fresh_authority:(fun () -> fail "a fenced original cannot request fresh Gate authority"))));
+    check bool "fence denial preserves all source positions and external ACK" true (cut_source_positions fixture=positions);
+    check bool "fence denial preserves actual Memory, journal and receipts" true (cut_memory_bytes fixture=memory);
+    let kept=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id) |> owned |> Option.get in
+    check json "fence denial preserves the original uncertainty" (Owner.to_json original) (Owner.to_json kept);
+    check int "only the independently selected later question reached the provider" 1 (F.post_count fixture.server))
+
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
+  test_case "an old full mixed input gets new Memory receipts while canonical later frontiers stay" `Quick
+    (test_an_old_mixed_answer_publishes_new_receipts_without_rewinding_later_frontiers ~lose_ack:false);
+  test_case "an old full mixed input recovers its real Memory receipt after ACK read failure" `Quick
+    (test_an_old_mixed_answer_publishes_new_receipts_without_rewinding_later_frontiers ~lose_ack:true);
+  test_case "old input refuses a later atom whose opening digest is false" `Quick
+    (test_old_input_publication_refuses_unproved_later_frontiers Wrong_atom_digest);
+  test_case "old input refuses an unwitnessed later trace" `Quick
+    (test_old_input_publication_refuses_unproved_later_frontiers Wrong_atom_trace);
+  test_case "old input refuses the original trace after a restart" `Quick
+    (test_old_input_publication_refuses_unproved_later_frontiers Restarted_history);
+  test_case "old input refuses a later official cursor that names an atom row" `Quick
+    (test_old_input_publication_refuses_unproved_later_frontiers Nonofficial_frontier);
+  test_case "old input refuses an unreadable later cursor" `Quick
+    (test_old_input_publication_refuses_unproved_later_frontiers Unreadable_frontier);
+  test_case "old input refuses a changed canonical original prefix" `Quick
+    (test_old_input_publication_refuses_unproved_later_frontiers Changed_original_prefix);
+  test_case "an own fence still denies old-input publication after canonical frontiers advance" `Quick
+    test_an_originals_own_fence_denies_publication_after_canonical_positions_advance;
   test_case "dispatch rechecks the owner without restoring the verified body" `Quick
     test_dispatch_rechecks_owner_without_restoring_the_body;
   test_case "proved original survives invalid working context on resume" `Quick

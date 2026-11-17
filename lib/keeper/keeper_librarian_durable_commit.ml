@@ -12,6 +12,7 @@ module Atom = Keeper_librarian_progress
 module Official = Keeper_librarian_official_progress
 module Publication = Keeper_librarian_durable_owner
 module Refusal = Keeper_librarian_durable_refusal
+module Source_lock = Keeper_librarian_durable_source_lock
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
@@ -138,12 +139,13 @@ let require_refusal_abandonment ~store ~record request =
   let+ _=Refusal.abandonment ~store ~record ~request in ()
 type position_authority =
   | Original_publication
+  | Answered_publication
   | Cut_program of {
       floor : Keeper_librarian_history_resolution_floor.t;
       program : Current.committed_program;
     }
 let settle_positions_with ~authority ~store ~record request =
-  Keeper_librarian_durable_source_lock.with_original_settlement ~request (fun () ->
+  let settle plan =
   let confirm () =
     let* actual=reload ~store ~previous:record request in
     let* ()=Keeper_librarian_history_resolution_state.check_unfenced
@@ -153,6 +155,8 @@ let settle_positions_with ~authority ~store ~record request =
       let* ()=require (Keeper_librarian_history_resolution_floor.request floor==request)
         "Cut program settlement belongs to another restored request" in
       Keeper_librarian_history_resolution_floor.confirm_program floor program
+    | Answered_publication ->
+      let+ _=original_answer ~store request actual in ()
     | Original_publication ->
       (match Progress.phase actual.Owner.progress with
        | Progress.Rejected {stage=Progress.Execution;_} -> require_refusal_abandonment ~store ~record:actual request
@@ -173,10 +177,13 @@ let settle_positions_with ~authority ~store ~record request =
     |> Result.map_error Official.read_error_to_string in
   let atom_next=atom_target source and official_next=official_target source in
   let positions=Source.positions source in
-  let* ()=require (atom=positions.current || Option.fold ~none:false ~some:(fun next -> atom=Some next) atom_next)
-    "Original history atom position changed outside its settlement" in
-  let* ()=require (official=positions.official || Option.fold ~none:false ~some:(fun next -> official=Some next) official_next)
-    "Original history official position changed outside its settlement" in
+  let* ()=match plan with
+    | Some plan -> Source_lock.recheck_before plan
+    | None ->
+      let* ()=require (atom=positions.current || Option.fold ~none:false ~some:(fun next -> atom=Some next) atom_next)
+        "Original history atom position changed outside its settlement" in
+      require (official=positions.official || Option.fold ~none:false ~some:(fun next -> official=Some next) official_next)
+        "Original history official position changed outside its settlement" in
   let* external_cursor=Cursor.observe ~runtime_keepers_dir ~keeper_name:keeper_id in
   let prepared=Source.external_prepared source in
   let through=Keeper_librarian_input_sources.external_through (Source.counterparts source) in
@@ -185,12 +192,21 @@ let settle_positions_with ~authority ~store ~record request =
   let* ()=require (already || Yojson.Safe.equal (Cursor.observation_to_json external_cursor)
     (Cursor.observation_to_json prepared)) "Original history external cursor differs from its prepared or settled state" in
   let* ()=confirm () in
+  let* ()=match plan with None -> Ok () | Some plan -> Source_lock.recheck_before plan in
   let* ()=if already then Ok () else Cursor.acknowledge ~runtime_keepers_dir ~keeper_name:keeper_id in
-  let* ()=match atom_next with
+  let atom_write=match plan with
+    | None -> atom_next
+    | Some plan -> (match Source_lock.atom_frontier plan with
+        | Advance {target;_} -> Some target | Keep_exact _ | Keep_later _ -> None) in
+  let official_write=match plan with
+    | None -> official_next
+    | Some plan -> (match Source_lock.official_frontier plan with
+        | Advance {target;_} -> Some target | Keep_exact _ | Keep_later _ -> None) in
+  let* ()=match atom_write with
     | None -> Ok ()
     | Some next -> if atom=Some next then Ok () else
       Atom.write ~keepers_dir:runtime_keepers_dir ~keeper_id next |> Result.map_error Atom.write_error_to_string in
-  let* ()=match official_next with
+  let* ()=match official_write with
     | None -> Ok ()
     | Some next -> if official=Some next then Ok () else
       Official.write ~keepers_dir:runtime_keepers_dir ~keeper_id next |> Result.map_error Official.write_error_to_string in
@@ -199,11 +215,18 @@ let settle_positions_with ~authority ~store ~record request =
   let* official=Official.read ~keepers_dir:runtime_keepers_dir ~keeper_id |> Result.map_error Official.read_error_to_string in
   let* ()=require (Cursor.observation_matches_preparation external_cursor ~after:through ~through ~atom:None ~official:None)
     "Original history external ACK remains unconfirmed" in
-  require (atom=Option.fold ~none:positions.current ~some:(fun value -> Some value) atom_next
-    && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
-    "Original history read-position settlement remains unconfirmed")
+  match plan with
+  | Some plan -> Source_lock.recheck_after plan
+  | None -> require (atom=Option.fold ~none:positions.current ~some:(fun value -> Some value) atom_next
+      && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
+      "Original history read-position settlement remains unconfirmed" in
+  match authority with
+  | Answered_publication -> Source_lock.with_original_settlement_plan ~request (fun plan -> settle (Some plan))
+  | Original_publication | Cut_program _ -> Source_lock.with_original_settlement ~request (fun () -> settle None)
 let settle_positions ~store ~record request =
   settle_positions_with ~authority:Original_publication ~store ~record request
+let settle_answer_positions ~store ~record request =
+  settle_positions_with ~authority:Answered_publication ~store ~record request
 
 let settle_program_with ~after_settlement ~store ~floor ~program =
   let request=Keeper_librarian_history_resolution_floor.request floor in
@@ -413,7 +436,7 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
           let* ()=Request.confirm_owner request in advance ~store record event) in
         let confirm record =
           before_settlement ();
-          match io (fun () -> settle_positions ~store ~record request) with
+          match io (fun () -> settle_answer_positions ~store ~record request) with
           | Error detail -> pending detail
           | Ok () ->
             let confirmed=match Progress.phase record.Owner.progress with
@@ -428,14 +451,15 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
         let apply record =
           let source=Request.source request in
           let applied=io (fun () ->
-            Keeper_librarian_durable_source_lock.with_original ~request (fun () ->
+            Source_lock.with_original_publication ~request (fun plan ->
               let* actual=reload ~store ~previous:record request in
               let* ()=Keeper_librarian_history_resolution_state.check_unfenced
                 ~store ~request ~original:actual in
               let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
               let* proved=receipt_state request in
               let* ()=require (not proved) "Original history Memory effect is already receipt-proved" in
-              Ok (Current.apply_disposition_guarded ~pass:Keeper_memory_commit_pass.Durable
+              let* ()=Source_lock.recheck_before plan in
+              let applied=Current.apply_disposition_guarded ~pass:Keeper_memory_commit_pass.Durable
                 ~expected_basis:(expected_basis request)
                 ~dropped_statements:accepted.selection.dropped
                 ?durable_range_id:(Source.range_id source) ?official_range_id:(Source.official_range_id source)
@@ -447,7 +471,8 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
                 ~keepers_dir:(Request.keepers_dir owner) ~keeper_id
                 ~now:(Time_compat.now ())
                 ~source:{Current.kind=Current.Librarian;trace_id=Ids.Turn_ref.trace_id (Source.input source).turn_ref}
-                ~new_claims:(Gate.without_copies gate accepted.selection.new_claims) ()))) in
+                ~new_claims:(Gate.without_copies gate accepted.selection.new_claims) () in
+              let+ ()=Source_lock.recheck_before plan in applied)) in
           (* An atomic save or outer source-lock release can fail after Memory
              publication. The real receipts, never the returned status, decide. *)
           let* proved=io (fun () -> let* ()=Request.confirm_owner request in receipt_state request) in

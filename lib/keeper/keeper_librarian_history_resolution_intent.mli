@@ -93,9 +93,14 @@ val confirm_child : store:Lane_addon_store.t -> expected:t ->
 val observe_memory_commit : store:Lane_addon_store.t -> expected:t ->
   request:Keeper_librarian_durable_request.t ->
   completed:Lane_addon_tool_request_owner.retained -> (t, error) result
-(** Serialized Memory-lane use only. Confirm exact current committed range
-    receipts under Memory locks without recovery, then retain that observation.
+(** Serialized Memory-lane use only; caller holds no source or Memory locks.
+    Confirm exact current committed range receipts under Memory locks without
+    recovery, then retain that observation. Source locks are acquired first.
     A missing/pending/uncertain receipt does not establish completion.
+    The actual Finished answer and complete receipts remain mandatory when
+    canonical later positions are preserved. Their original source generation
+    and exact current coordinates are revalidated in this observation's scope;
+    a stored earlier position plan grants no authority.
     When [request] is a replacement that descends from the resolution child,
     the child is read as its record and index, not its body: the caller has
     confirmed [request]'s lineage, which restores that child. *)

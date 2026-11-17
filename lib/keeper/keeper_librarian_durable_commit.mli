@@ -18,7 +18,15 @@
     stored intent/retry may attempt a source-locked save. Only a typed basis
     refusal from the actual store guard, followed by a receipt recheck, records
     a confirmed supersession; untyped failures remain unconfirmed. Caller must
-    offload no part of this Eio entry point; its blocking scopes offload themselves. *)
+    offload no part of this Eio entry point; its blocking scopes offload themselves.
+
+    An actual answered original and validated Gate may publish its complete
+    frozen input at the current Memory basis while preserving canonically
+    witnessed later atom/official positions. This still writes new exact
+    original-range receipts; a later coordinate proves no previous absorption.
+    Position settlement reconstructs and rechecks that proof under source
+    locks and never rewinds a preserved position. External preparation stays
+    exact. Refusal abandonment retains its strict captured/target policy. *)
 val publish : store:Lane_addon_store.t -> config:Workspace.config ->
   request:Keeper_librarian_durable_request.t ->
   original:Lane_addon_tool_request_owner.retained ->

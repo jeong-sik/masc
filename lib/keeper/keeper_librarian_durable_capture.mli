@@ -107,6 +107,11 @@ val external_before : t -> Keeper_external_read_cursor.observation
 val external_prepared : t -> Keeper_external_read_cursor.observation
 val runtime_keepers_dir : t -> string
 val extent : t -> Keeper_librarian_range.extent
+val confirm_boundary_prefix : boundaries:boundary_lines -> t -> (unit, error) result
+(** Pure exact comparison of the retained numbered boundary prefix alone.
+    Supplies no position/Memory authority and reads no checkpoint or fragments.
+    Receipt-proved later-frontier recovery still uses this append-only witness
+    when the already-read raw message prefix is no longer available. *)
 val confirm_sources : boundaries:boundary_lines -> messages:Agent_core.Types.message list option ->
   traces:official_trace list -> t -> (unit, error) result
 (** Whether the sources as they are now still hold what the original read:

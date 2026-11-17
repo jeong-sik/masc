@@ -98,6 +98,13 @@ val encode_json_compact : Yojson.Safe.t -> (encoded_json, string) result
     no spelling for (NaN, an infinity); the pretty writer behind
     {!write_json_result} spells those, this one refuses them. *)
 
+val encode_json_compact_with_value :
+  Yojson.Safe.t -> (encoded_json * Yojson.Safe.t, string) result
+(** Compact bytes and the UTF-8 repaired value supplied to the same writer.
+    A caller that decodes the value for a written-state cache need not sanitize
+    it again. Encoding and errors are the same as {!encode_json_compact}; this
+    does not write, read back or validate the caller's domain value. *)
+
 (** {!write_json_result} for a document already encoded: the same backend
     routing and local mirror. *)
 val write_encoded_json_result : config -> string -> encoded_json -> (unit, string) result

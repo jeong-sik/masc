@@ -31606,6 +31606,10 @@ let main
   let cleanup_started = Atomic.make false in
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
+      (* The terminal is being given back for good. A Ctrl-Z now would run
+         [suspend], whose resume takes raw mode and the alternate screen
+         again after this restore, and the shell would inherit them. *)
+      Sys.set_signal Sys.sigtstp Sys.Signal_ignore;
       Console_sink.set_after_write_observer None;
       (* Bound by name: the AST guard pins this call by listing every
          labelled argument as an identifier, so the exit writer is a named
@@ -44827,19 +44831,25 @@ Use relative paths for resources already held in the package. -->
       if state.image_open && not state.msx_open then
         Masc_tui_frame_timing.note_external ~surface:"image" ~write:write_terminal_text
           ~frame_start:Frame_presenter.external_frame_start;
+      (* A failed write left the terminal short of what the presenter
+         recorded; diffing against that record would leave rows wrong. *)
+      if Masc_tui_terminal_out.take_lost () then begin
+        Frame_presenter.invalidate frame_presenter;
+        Render_schedule.request render_schedule Render_schedule.Force
+      end;
       (match
          Render_schedule.take
            ~input_pending:ready_input
            render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
-       (* The terminal belongs to the picture until it is dismissed. A frame
-          drawn now would clear the rows it occupies and leave the rest. *)
        (* The terminal has not taken the last frame yet. A new one waits a
           frame interval instead of queueing behind it, so a terminal that
           stops reading holds one frame, not one per pass. *)
        | Render_schedule.Render when Masc_tui_terminal_out.behind () ->
            Render_schedule.request render_schedule Render_schedule.Background
+       (* The terminal belongs to the picture until it is dismissed. A frame
+          drawn now would clear the rows it occupies and leave the rest. *)
        | Render_schedule.Render when state.image_open || state.msx_open ->
            (* This frame is the picture's, so no candle is on screen and
               nothing should keep stepping one, and a candle placed over the

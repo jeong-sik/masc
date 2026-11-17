@@ -51,11 +51,34 @@ let test_a_stalled_reader_does_not_block_the_writer () =
     Thread.join reader;
     Alcotest.(check bool) "caught up" false (Masc_tui_terminal_out.behind ()))
 
+(* A terminal that is gone fails the write. The writer stays alive, says
+   the screen was lost, and still writes what comes after. *)
+let test_a_failed_write_is_reported_and_the_writer_lives () =
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  ignore (Masc_tui_terminal_out.take_lost ());
+  with_stdout_pipe (fun read_end ->
+    let saved = Unix.dup Unix.stdout in
+    let dead_read, dead_write = Unix.pipe ~cloexec:true () in
+    Unix.close dead_read;
+    Unix.dup2 dead_write Unix.stdout;
+    Unix.close dead_write;
+    Masc_tui_terminal_out.write "lost";
+    Masc_tui_terminal_out.drain ();
+    Alcotest.(check bool) "loss reported" true (Masc_tui_terminal_out.take_lost ());
+    Alcotest.(check bool) "loss reported once" false (Masc_tui_terminal_out.take_lost ());
+    Unix.dup2 saved Unix.stdout;
+    Unix.close saved;
+    Masc_tui_terminal_out.write "after";
+    Masc_tui_terminal_out.drain ();
+    Alcotest.(check string) "writer still writes" "after" (read_exactly read_end 5))
+
 let () =
   Alcotest.run "tui_terminal_out"
     [ ( "sink"
       , [ Alcotest.test_case "bytes keep their order" `Quick test_bytes_keep_their_order
         ; Alcotest.test_case "a stalled reader does not block the writer" `Quick
             test_a_stalled_reader_does_not_block_the_writer
+        ; Alcotest.test_case "a failed write is reported and the writer lives" `Quick
+            test_a_failed_write_is_reported_and_the_writer_lives
         ] )
     ]

@@ -13,6 +13,11 @@ val behind : unit -> bool
     frames back while this is true, so a stalled terminal accumulates no
     frames, only the last one presented. *)
 
+val take_lost : unit -> bool
+(** Whether a write failed since the last call, and clear it. The terminal
+    then shows less than the presenter recorded, so the caller repaints in
+    full. *)
+
 val drain : unit -> unit
 (** Wait until every queued byte is written. Call before the terminal goes
     to anyone else: raw mode is put back, a child process takes it, or the

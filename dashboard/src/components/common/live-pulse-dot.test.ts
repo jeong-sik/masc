@@ -3,15 +3,21 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { LivePulseDot, classifyLivePulse } from './live-pulse-dot'
-import { dashboardObserverReady } from '../../dashboard-observer-state'
+import { dashboardObserverPhase, type DashboardObserverPhase } from '../../dashboard-observer-state'
+
+const PHASES: DashboardObserverPhase[] = ['stopped', 'connecting', 'live', 'retrying', 'refused']
 
 describe('classifyLivePulse (pure)', () => {
-  it('an admitted observer stream is live', () => {
-    expect(classifyLivePulse(true).state).toBe('live')
+  it('only an admitted stream is live', () => {
+    expect(PHASES.filter(phase => classifyLivePulse(phase).tone === 'live')).toEqual(['live'])
   })
 
-  it('a stream that is not admitted is idle', () => {
-    expect(classifyLivePulse(false).state).toBe('idle')
+  it('a refused stream and a retrying stream read differently', () => {
+    expect(classifyLivePulse('refused').label).not.toBe(classifyLivePulse('retrying').label)
+  })
+
+  it('the first connect is not shown as a loss', () => {
+    expect(classifyLivePulse('connecting').tone).toBe('waiting')
   })
 })
 
@@ -24,20 +30,20 @@ describe('LivePulseDot component', () => {
   afterEach(() => {
     render(null, container)
     document.body.removeChild(container)
-    dashboardObserverReady.value = false
+    dashboardObserverPhase.value = 'stopped'
   })
 
   const dot = () => container.querySelector('[data-live-pulse-dot]') as HTMLElement
 
-  it('follows the observer stream: pulses while admitted, stands still once it drops', () => {
-    dashboardObserverReady.value = true
+  it('re-renders on its own when the observer phase changes', async () => {
+    dashboardObserverPhase.value = 'live'
     render(html`<${LivePulseDot} />`, container)
     expect(dot().getAttribute('data-live-pulse-state')).toBe('live')
     expect(dot().className).toContain('animate-pulse')
 
-    dashboardObserverReady.value = false
-    render(html`<${LivePulseDot} />`, container)
-    expect(dot().getAttribute('data-live-pulse-state')).toBe('idle')
+    dashboardObserverPhase.value = 'retrying'
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(dot().getAttribute('data-live-pulse-state')).toBe('retrying')
     expect(dot().className).not.toContain('animate-pulse')
   })
 

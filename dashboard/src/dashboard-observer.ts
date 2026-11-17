@@ -15,7 +15,7 @@ import type { DashboardObservationTopic } from './lib/observation-refresh'
 import { captureDashboardObservationOwner } from './lib/observation-read-owner'
 import { rejectOperatorSnapshotFrame, type OperatorSnapshotObservationSource } from './operator-snapshot-observation'
 import {
-  dashboardObserverConnected, dashboardObserverReady, dashboardObserverLastError,
+  dashboardObserverConnected, dashboardObserverReady, dashboardObserverLastError, dashboardObserverPhase,
   dashboardObserverLastActivityAt, noteDashboardObserverReady,
   noteDashboardObserverDisconnected, noteDashboardObserverEvent,
   noteDashboardObserverRejectedFrame,
@@ -95,6 +95,8 @@ function scheduleRetry(attempt: number): void {
 }
 
 function startAttempt(): void {
+  // A scheduled retry keeps saying it is retrying until it is admitted.
+  if (dashboardObserverPhase.peek() !== 'retrying') dashboardObserverPhase.value = 'connecting'
   clearRetry()
   controller?.abort()
   const abort = new AbortController()
@@ -152,6 +154,7 @@ async function observe(attempt: number, abort: AbortController): Promise<void> {
     retryDelay = TRANSPORT_RETRY_BASE_MS
     credentialRecovery = 'available'
     batch(() => {
+      dashboardObserverPhase.value = 'live'
       dashboardObserverConnected.value = true
       dashboardObserverLastError.value = null
       noteDashboardObserverReady(instance, idleTimeoutMs)
@@ -174,7 +177,12 @@ async function observe(attempt: number, abort: AbortController): Promise<void> {
   } catch (error) {
     if (!current(attempt) || (abort.signal.aborted && !timedOut)) return
     lost(timedOut ? new Error('observer connection timed out') : error)
-    if (!(error instanceof ObserverAccessError)) scheduleRetry(attempt)
+    if (error instanceof ObserverAccessError) {
+      dashboardObserverPhase.value = 'refused'
+    } else {
+      dashboardObserverPhase.value = 'retrying'
+      scheduleRetry(attempt)
+    }
   } finally {
     if (deadline !== undefined) clearTimeout(deadline)
     abort.abort()
@@ -207,4 +215,5 @@ export function disconnectDashboardObserver(): void {
   unsubscribeToken?.()
   unsubscribeToken = null
   lost()
+  dashboardObserverPhase.value = 'stopped'
 }

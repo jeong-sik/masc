@@ -1,5 +1,10 @@
 import { signal } from '@preact/signals'
 
+/** Where the observer stream stands. `retrying` has a reconnect scheduled;
+ *  `refused` was turned away for its credential and does not retry until the
+ *  stored token changes. */
+export type DashboardObserverPhase = 'stopped' | 'connecting' | 'live' | 'retrying' | 'refused'
+export const dashboardObserverPhase = signal<DashboardObserverPhase>('stopped')
 export const dashboardObserverConnected = signal(false)
 export const dashboardObserverReady = signal(false)
 export const dashboardObserverInstance = signal<string | null>(null)
@@ -48,6 +53,7 @@ export function noteDashboardObserverEvent(now: number = Date.now()): void {
 export function _resetDashboardObserverCounterForTests(): void {
   hasReachedReady = false
   eventTimestamps.length = 0
+  dashboardObserverPhase.value = 'stopped'
   dashboardObserverConnected.value = false
   dashboardObserverReady.value = false
   dashboardObserverInstance.value = null

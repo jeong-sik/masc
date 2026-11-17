@@ -8,7 +8,7 @@ import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import { LivePulseDot } from './live-pulse-dot'
-import { dashboardObserverReady } from '../../dashboard-observer-state'
+import { dashboardObserverPhase } from '../../dashboard-observer-state'
 
 describe('LivePulseDot a11y', () => {
   let container: HTMLElement
@@ -19,16 +19,17 @@ describe('LivePulseDot a11y', () => {
   afterEach(() => {
     render(null, container)
     document.body.removeChild(container)
-    dashboardObserverReady.value = false
+    dashboardObserverPhase.value = 'stopped'
   })
 
   it('live state passes axe', async () => {
-    dashboardObserverReady.value = true
+    dashboardObserverPhase.value = 'live'
     render(html`<${LivePulseDot} />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('idle state passes axe', async () => {
+  it('refused state passes axe', async () => {
+    dashboardObserverPhase.value = 'refused'
     render(html`<${LivePulseDot} />`, container)
     expect(await axe(container)).toHaveNoViolations()
   })

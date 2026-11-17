@@ -90,6 +90,14 @@ describe('retainLaneWindow', () => {
     expect(retainLaneWindow([at(1), at(2), opening, ...inside])).toEqual([opening, ...inside])
   })
 
+  it('reads the window from timestamps when arrival order is not time order', () => {
+    const newest = at(10_000)
+    const early = at(newest.ts - LANE_QUEUE_WINDOW_S - 100)
+    const opening = at(newest.ts - LANE_QUEUE_WINDOW_S - 5)
+    const inside = at(newest.ts - 10)
+    expect(retainLaneWindow([early, newest, opening, inside])).toEqual([newest, opening, inside])
+  })
+
   it('an empty buffer stays empty', () => {
     expect(retainLaneWindow([])).toEqual([])
   })

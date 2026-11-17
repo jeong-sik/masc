@@ -855,9 +855,8 @@ let read_unified ~masc_root ?sources ?keeper_name ?session_id
 
 (* ── Summary ────────────────────────────────────────── *)
 
-let execution_receipt_summary_stats ~masc_root =
-  discover_execution_receipt_dirs masc_root
-  |> List.fold_left
+let execution_receipt_summary_stats ~masc_root dirs =
+  List.fold_left
        (fun (count_acc, latest_acc) (name, _dir) ->
          let count, latest = store_summary_stats Execution_receipt
            (execution_receipt_location ~masc_root name) "execution_receipt" in
@@ -865,7 +864,7 @@ let execution_receipt_summary_stats ~masc_root =
          match latest with
          | Some ts -> max_ts_opt latest_acc ts
          | None -> latest_acc)
-       (0, None)
+       (0, None) dirs
 
 (* Per-trace-file incremental summary cache for the snapshot loop.
 
@@ -1075,9 +1074,8 @@ let trajectory_file_summary path : trajectory_file_summary option =
          Hashtbl.replace trajectory_summary_cache path entry);
        Some entry)
 
-let trajectory_tool_call_summary_stats ~masc_root =
-  discover_trajectory_keeper_dirs masc_root
-  |> List.fold_left
+let trajectory_tool_call_summary_stats dirs =
+  List.fold_left
        (fun (count_acc, latest_acc) (_name, dir) ->
          protect_source_read Trajectory_tool_call
            ~site:"trajectory_tool_call_summary_readdir"
@@ -1100,7 +1098,7 @@ let trajectory_tool_call_summary_stats ~masc_root =
                           | Some ts -> max_ts_opt latest_acc ts
                           | None -> latest_acc ))
                     (count_acc, latest_acc)))
-       (0, None)
+       (0, None) dirs
 
 let goal_event_summary_stats ~masc_root =
   let path = goal_events_path ~masc_root in
@@ -1215,7 +1213,7 @@ let observe_summary ~now ?keeper_keepalive_interval_s
         | Store_missing | Store_directory -> false
       in
       let count, latest_ts =
-        if dir_state = Store_directory then trajectory_tool_call_summary_stats ~masc_root
+        if dir_state = Store_directory then trajectory_tool_call_summary_stats dirs
         else (0, None)
       in
       let coverage_gap_fields, coverage_gap =
@@ -1253,7 +1251,7 @@ let observe_summary ~now ?keeper_keepalive_interval_s
         | Store_missing | Store_directory -> false
       in
       let count, latest_ts =
-        if dir_state = Store_directory then execution_receipt_summary_stats ~masc_root
+        if dir_state = Store_directory then execution_receipt_summary_stats ~masc_root dirs
         else (0, None)
       in
       let coverage_gap_fields, coverage_gap =
@@ -1395,7 +1393,8 @@ let summary_json ?keeper_keepalive_interval_s ?keeper_metric_producer_active
      ?keeper_metric_producer_active ~masc_root ()).json
 
 module For_testing = struct
-  let trajectory_tool_call_summary_stats = trajectory_tool_call_summary_stats
+  let trajectory_tool_call_summary_stats ~masc_root =
+    trajectory_tool_call_summary_stats (discover_trajectory_keeper_dirs masc_root)
 
   let reset_trajectory_summary_cache_for_testing =
     reset_trajectory_summary_cache_for_testing

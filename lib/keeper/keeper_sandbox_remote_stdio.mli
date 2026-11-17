@@ -24,7 +24,13 @@ val with_stdio :
 
     Without an active Eio fiber, returns [Runtime_unavailable _] before
     probing or acquiring the lease. Process carriers require the initialized
-    process runtime; guest carriers use the Eio network and clock.
+    process runtime. Its manager, default cwd and clock are captured together
+    before the endpoint lease/probe and reused through dispatch and timeout;
+    a runtime reset or replacement during those waits cannot redirect the
+    request carrier to another runtime. The existing finite control probe
+    retains its own runtime path. This preserves the captured cwd
+    path/capability, not a held directory identity. Guest carriers use the
+    Eio network and clock.
     [on_receipt] receives [Execution_unavailable Request_not_sent]
     directly outside Eio; notification does not enter Eio cancellation protection.
 

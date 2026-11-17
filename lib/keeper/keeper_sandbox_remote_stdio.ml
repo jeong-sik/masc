@@ -47,13 +47,13 @@ let with_stdio prepared ~on_dispatch ~on_receipt ~on_stderr_chunk
       Ok (value, completion)
     in
     match runtime, launch.carrier with
-    | `Process clock, Request.Process { argv; env } ->
+    | `Process context, Request.Process { argv; env } ->
       (
          match on_dispatch () with
          | Error refusal -> Error (Dispatch_declined refusal)
          | Ok () ->
            let run () =
-             match Process_eio.with_stdio ~env
+             match Process_eio.with_stdio ~context ~env
                  ~on_stderr_chunk:(Stderr.stream_chunk stderr) ~on_stdout_tail
                  argv (fun ~input ~output ->
                    on_request_write ();
@@ -63,6 +63,7 @@ let with_stdio prepared ~on_dispatch ~on_receipt ~on_stderr_chunk
              | Error refusal -> Error (Process_unavailable refusal)
              | Ok (value, status) -> finish value (Request.Local_status status)
            in
+           let clock = Process_eio.stdio_context_clock context in
            match Eio.Time.with_timeout clock launch.budget_sec (fun () -> Ok (run ())) with
            | Ok result -> result
            | Error `Timeout ->
@@ -93,8 +94,8 @@ let with_stdio prepared ~on_dispatch ~on_receipt ~on_stderr_chunk
     | Fs_compat.Eio_fiber ->
       let runtime = match Request.runtime prepared with
         | Request.Process_runtime ->
-          (match Process_eio.get_clock () with
-           | Ok clock -> Ok (`Process clock)
+          (match Process_eio.capture_stdio_context () with
+           | Ok context -> Ok (`Process context)
            | Error detail -> Error detail)
         | Request.Guest_runtime ->
           (match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with

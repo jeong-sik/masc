@@ -38,7 +38,9 @@ let carrier dir mode binary args =
   let log = open_out_gen [Open_wronly; Open_creat; Open_append] 0o600
       (Filename.concat dir "carrier.log") in
   output_string log (if probe then "probe\n" else "request\n"); close_out log;
-  if not probe then save (Filename.concat dir "carrier.pid") (string_of_int (Unix.getpid ()));
+  if not probe then (
+    save (Filename.concat dir "carrier.pid") (string_of_int (Unix.getpid ()));
+    save (Filename.concat dir "carrier.cwd") (Sys.getcwd ()));
   if probe && List.mem mode ["disabled"; "v2"; "broken"] then (
     print_endline (match mode with
       | "disabled" -> {|{"name":"masc-exec-shim","version":"3.0.0","capabilities":[]}|}
@@ -199,6 +201,39 @@ let test_dispatch_decline_sends_no_request () =
       (fun ~input:_ ~output:_ -> fail "declined dispatch started payload") in
   check bool "typed caller decline is unchanged" true (result = Error (Stdio.Dispatch_declined Declined));
   check (list string) "probe is separate from request dispatch" ["probe"] (log fixture)
+
+let test_dispatch_hook_cannot_redirect_carrier_cwd () =
+  (* The scripted mismatch intentionally supplies no successful sandbox
+     receipt. The assertion is the real host carrier's working directory. *)
+  with_fixture ~mode:"wrong-major" @@ fun fixture ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let initialize cwd =
+    Process_eio.init ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / cwd)
+      ~proc_mgr:Posix_spawn_process_mgr.mgr ~clock:(Eio.Stdenv.clock env)
+  in
+  initialize fixture.dir;
+  Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
+    let prepared = prepare fixture ["/bin/true"] in
+    let dispatches = ref 0 and receipts = ref [] in
+    let result = Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 25.0 (fun () ->
+      invoke prepared
+        ~on_dispatch:(fun () -> incr dispatches; initialize fixture.root; Ok ())
+        ~on_receipt:(fun receipt -> receipts := receipt :: !receipts)
+        (fun ~input:_ ~output:_ -> ())) in
+    (match result with
+     | Ok ((), completion) ->
+       (match completion.Request.dispatch with
+        | Remote.Dispatch_failed {failure=Remote.Trailer_disagreement;_} -> ()
+        | Remote.Dispatch_failed
+            {failure=Remote.Local_timeout | Remote.Remote_timeout | Remote.Transport_failed
+              | Remote.Shim_refused;_}
+        | Remote.Payload_finished _ -> fail "scripted mismatch acquired a successful receipt");
+       check bool "one final observation" true (!receipts = [completion.execution])
+     | Error _ -> fail "host carrier did not complete the scripted request");
+    check int "one dispatch admission" 1 !dispatches;
+    check string "the carrier uses the runtime captured before admission" fixture.dir
+      (load (Filename.concat fixture.dir "carrier.cwd")))
 
 let server = {|import json, os, signal, sys
 open("payload.pid", "w").write(str(os.getpid()))
@@ -492,6 +527,7 @@ let () =
        [test_case "pure preparation refuses before probe" `Quick test_prepare_refusals_do_not_probe;
         test_case "probe and capability refusals precede dispatch" `Quick test_probe_refusals_precede_dispatch;
         test_case "typed dispatch decline sends no request" `Quick test_dispatch_decline_sends_no_request;
+        test_case "dispatch hook cannot redirect carrier cwd" `Quick test_dispatch_hook_cannot_redirect_carrier_cwd;
         test_case "actual shim MCP preserves two full results" `Quick test_actual_shim_mcp_retains_full_results;
         test_case "guest MCP uses socket without process runtime" `Quick test_guest_mcp_uses_socket_without_process_runtime;
         test_case "raw stdout exceeds capture bounds without rewrite" `Quick test_binary_output_is_neither_capped_nor_rewritten;

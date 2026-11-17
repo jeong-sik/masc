@@ -32,9 +32,10 @@ let default_config = {
   max_total_idle    = 256;
   idle_ttl_seconds  = 60.0;
   connect_timeout_seconds = 5.0;
-  (* For 5 s after a connect failure, requests to that host fail at once
-     instead of each opening a socket. Concurrent cold requests can
-     already be connecting when that failure arrives; each owns its own
+  (* For 5 s after a connect failure, a request to that host that needs a
+     new connection fails at once instead of opening a socket; a request
+     that finds an idle connection still uses it. Concurrent cold requests
+     can already be connecting when that failure arrives; each owns its own
      client scope. *)
   connect_failure_cooldown_seconds = 5.0;
 }

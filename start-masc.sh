@@ -8,8 +8,9 @@ set -e
 
 # When OCAMLRUNPARAM is unset, the server sets its own GC parameters:
 # space_overhead from MASC_GC_SPACE_OVERHEAD (default 100) in
-# lib/server/server_runtime_bootstrap.ml, and a 4M-word minor heap on each
-# domain that runs masc work in lib/core/minor_heap.ml.
+# lib/server/server_runtime_bootstrap.ml, and a minor heap of at least 4M
+# words on the HTTP server's main domain and the masc pool domains in
+# lib/core/minor_heap.ml.
 #
 # To override at launch, set OCAMLRUNPARAM before invoking this script.
 

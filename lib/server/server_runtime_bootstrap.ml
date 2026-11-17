@@ -281,24 +281,27 @@ end
 (* Server GC parameters. They apply only when OCAMLRUNPARAM is unset, so an
    operator can override them at launch without code changes.
 
-   minor_heap_size is per domain in OCaml 5, so it is not set here:
-   [Minor_heap.tune] sets it on each domain that runs masc work. *)
+   minor_heap_size is per domain in OCaml 5, so it is not set here.
+   [Minor_heap.tune] sets it on the main domain and on the masc pool
+   domains; Agent Core's codec pool is not covered. *)
 let () =
   ignore (Dashboard.force_link, Operator_tool.force_link);
   Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
   Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in
-    (* A malformed MASC_GC_SPACE_OVERHEAD is reported and the default is
-       used. A negative value also gets the default. *)
+    (* A negative MASC_GC_SPACE_OVERHEAD gets the default. A malformed one
+       is handled like every integer knob ([Env_config_core.get_int]). *)
     let gc_space_overhead =
       Env_config_core.get_int_nonneg
         ~default:(Env_setting.Int_knob.default Gc_space_overhead)
         (Env_setting.Int_knob.env_name Gc_space_overhead)
     in
     let ctrl = get () in
-    (* Default 100, below the runtime's 120: a smaller space_overhead makes
-       the major GC work harder and keep less free memory. *)
+    (* Default 100, below the runtime's 120: the major GC works harder and
+       keeps less free memory. Much lower values stalled the server: at 40,
+       major GC slices touched pages macOS had MADV_FREE'd, and the page
+       faults blocked the Eio loop (2026-04 analysis). *)
     set { ctrl with space_overhead = gc_space_overhead }
   end
 

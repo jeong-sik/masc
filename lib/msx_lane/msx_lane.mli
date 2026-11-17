@@ -81,12 +81,21 @@ type error =
   | Activity_disabled
   | Activity_unobserved
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
-  | Invalid_request of string  (** the caller's arguments *)
+  | Invalid_request of string
+      (** the caller's arguments. A path the caller named that does not resolve
+          inside the allowed roots -- it may not exist, sit outside the roots, or
+          escape through a symlink -- is [Invalid_request]: the caller can fix it
+          by naming another path. Named bytes that come off the file but do not
+          decode as what the request asked for are [Invalid_request] too.
+          [Unreadable] stays reserved for a path that resolves inside the allowed
+          roots and will not read. Files the lane looks for inside a directory the
+          caller named follow that directory's own contract, not this one -- an
+          absent ROM inside a resolved BIOS directory is [Unreadable]
+          ([read_bios]), because the caller named the directory, not the file. *)
   | Effect_unknown of string  (** replacement happened; durable effect is unknown *)
   | Unreadable of string
       (** a file that is there and will not read: a ROM, a cartridge, a
-          checkpoint. A path that does not exist is [Invalid_request] --
-          the caller named it. *)
+          checkpoint. *)
   | Dependency_unavailable of string
       (** something the request needs is not installed, such as the C-BIOS a
           cartridge or disk boots from. Nothing was started; the message names
@@ -155,8 +164,9 @@ type image =
 
 val read_bios : dir:string -> (bios_triple, error) result
 (** Reads [cbios_main_msx2.rom], [cbios_logo_msx2.rom] and [cbios_sub.rom] from
-    [dir]. All three are required: a directory missing one is [Unreadable]
-    naming the first that is absent, never a machine with an empty ROM in it. *)
+    [dir]. All three are required: a directory that resolves and misses one is
+    [Unreadable] naming the first that is absent -- the caller named [dir], not
+    the files inside it -- never a machine with an empty ROM in it. *)
 
 val load : ledger_dir:string -> bios:bios -> image:image -> (loaded, error) result
 (** Creates the workspace machine from [image], replacing any previous one. The

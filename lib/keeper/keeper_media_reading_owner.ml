@@ -41,8 +41,10 @@ let restore (record : Owner.retained) =
   let* () = check_header ~stored_scope:record.scope
       ~stored_installation:record.installation_id ~stored_package:record.package_id
       ~stored_tool:record.tool in
-  let+ original = captured (Original.restore record) in
-  { record; original }
+  let* original = captured (Original.restore record) in
+  match Keeper_media_reading_approval.validate_progress ~original record.progress with
+  | Ok () -> Ok { record; original }
+  | Error detail -> invalid detail
 
 let check_retained record =
   restore record |> Result.map (fun _ -> ()) |> Result.map_error error_to_string

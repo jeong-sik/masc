@@ -94,3 +94,84 @@ let observe_waiting_request ~base_path ~id =
       | None, Some entry when entry.audit_base_path = base_path ->
         Ok (Some {waiting_request=entry; waiting_decision=None})
       | Some _, _ | None, Some _ | None, None -> Ok None)
+
+let exact_matches_entry request (entry : pending_approval) =
+  Keeper_approval_request_fingerprint.matches_entry request
+    ~base_path:entry.audit_base_path ~keeper_name:entry.keeper_name
+    ~operation:entry.tool_name ~input:entry.input ~input_hash:entry.input_hash
+    ~origin:entry.origin ~task_id:entry.task_id ~goal_id:entry.goal_id
+    ~continuation_channel:entry.continuation_channel
+;;
+
+let exact_delivery_observation (delivery : persisted_delivery) : exact_request_observation =
+  let state = match delivery.decision with
+    | Decision.Reject reason -> Exact_rejected reason
+    | Decision.Approve ->
+      if delivery.grant_consumed then Exact_approved_consumed delivery.replay_outcome
+      else Exact_approved_unconsumed
+  in
+  { exact_approval_id = delivery.entry.id; exact_request = delivery.entry; exact_state = state }
+;;
+
+let exact_store_ready ~base_path =
+  match Keeper_approval_queue_persist.next_sequence_lifecycle ~base_path with
+  | Keeper_approval_queue_persist.Uninstalled ->
+    Error { path = pending_store_path ~base_path;
+      reason = "exact Gate lookup requires an installed workspace store" }
+  | Keeper_approval_queue_persist.Unavailable error -> Error error
+  | Keeper_approval_queue_persist.Ready _ ->
+    (match SMap.find_opt base_path (Atomic.get pending_read_errors) with
+     | Some (error :: _) -> Error error
+     | Some [] | None ->
+       match SMap.find_opt base_path (Atomic.get replay_projection_errors) with
+       | Some error -> Error error
+       | None -> Ok ())
+;;
+
+let observe_exact_request ?approval_id request =
+  let base_path = Keeper_approval_request_fingerprint.base_path request in
+  with_pending_store_lock (fun () ->
+    match exact_store_ready ~base_path with
+    | Error error -> Error error
+    | Ok () ->
+      let pending_map = Atomic.get pending in
+      let delivery_map = Atomic.get deliveries in
+      let matches =
+        SMap.fold (fun _ (entry : pending_approval) found ->
+          if exact_matches_entry request entry then
+            { exact_approval_id = entry.id; exact_request = entry; exact_state = Exact_pending } :: found
+          else found) pending_map []
+        |> fun found -> SMap.fold (fun _ delivery found ->
+          if exact_matches_entry request delivery.entry then
+            exact_delivery_observation delivery :: found
+          else found) delivery_map found
+        |> List.sort (fun (a : exact_request_observation) b ->
+          String.compare a.exact_approval_id b.exact_approval_id)
+      in
+      let matching_approval_ids =
+        List.map (fun (row : exact_request_observation) -> row.exact_approval_id) matches
+      in
+      let classify_matches () = match matches with
+        | [] -> Exact_absent
+        | [row] -> Exact_found row
+        | _ :: _ :: _ -> Exact_ambiguous matching_approval_ids
+      in
+      match approval_id with
+        | None -> Ok (classify_matches ())
+        | Some approval_id ->
+          let known = match SMap.find_opt approval_id pending_map,
+              SMap.find_opt approval_id delivery_map with
+            | Some entry, None -> Ok (Some entry)
+            | None, Some delivery -> Ok (Some delivery.entry)
+            | None, None -> Ok None
+            | Some _, Some _ -> Error
+                { path = pending_store_path ~base_path;
+                  reason = "known approval exists in both pending and resolved states" }
+          in
+          (match known with
+           | Error error -> Error error
+           | Ok None -> Ok (Known_approval_missing { approval_id; matching_approval_ids })
+           | Ok (Some entry) ->
+             if exact_matches_entry request entry then Ok (classify_matches ())
+             else Ok (Known_approval_mismatch { approval_id; matching_approval_ids })))
+;;

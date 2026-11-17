@@ -11,6 +11,9 @@ module History = Agent_core.History
 module Request = Keeper_sandbox_remote.Stdio_request
 module Progress = Lane_addon_request_progress
 module Channel = Keeper_continuation_channel
+module Approval = Lane_addon_request_approval
+module Media_approval = Keeper_media_reading_approval
+module Fingerprint = Keeper_approval_request_fingerprint
 
 let get show = function Ok value -> value | Error error -> fail (show error)
 let original result = get Original.error_to_string result
@@ -122,8 +125,9 @@ let retained fixture value = owned (Owner.retain ~store:fixture.store value)
 let ids items = List.map (fun item -> Original.request_id (Owner.original item)) items |> List.sort String.compare
 
 let unknown fixture item =
+  let intent = strings (Media_approval.intent (Owner.original item)) in
   match Generic.advance_events ~store:fixture.store ~expected:(Owner.record item)
-      ~events:[Progress.Dispatch_intended;
+      ~events:[Progress.Approval_intended intent; Progress.Dispatch_intended;
                Progress.Execution_observed (Progress.Outcome_unknown (`Assoc ["fixture", `Bool true]))] with
   | Ok (Generic.Stored record | Generic.Already_stored record) -> record
   | Ok (Generic.Unconfirmed detail) -> fail detail
@@ -267,6 +271,67 @@ let test_idempotence_and_prior_originals () = with_fixture @@ fun fixture ->
   check string "old declaration is not regenerated" declaration.revision
     (Original.declaration (Owner.original first_restored)).revision
 
+let advance fixture item events =
+  match Generic.advance_events ~store:fixture.store ~expected:(Owner.record item) ~events with
+  | Ok (Generic.Stored record | Generic.Already_stored record) -> record
+  | Ok (Generic.Unconfirmed detail) -> fail detail
+  | Error error -> fail (Generic.update_error_to_string error)
+
+let test_approval_link_restores_with_original () = with_fixture @@ fun fixture ->
+  let value = capture fixture in
+  let item = retained fixture value in
+  let intent = strings (Media_approval.intent value) in
+  let request = Approval.request intent in
+  let wait = strings (Approval.wait intent ~approval_id:"retained-fixture-approval"
+      ~input_hash:(Fingerprint.input_hash request)) in
+  let record = advance fixture item
+      [Progress.Approval_intended intent; Progress.Approval_wait_retained wait] in
+  strings (Owner.check_retained record);
+  check bool "approval data does not change Captured into execution" true
+    (Progress.phase record.progress = Progress.Captured);
+  check bool "operation is not advertised as replayable before a producer exists" true
+    (Keeper_gate.replayable_operation Keeper_gate.media_read_gate_operation = None);
+  check (option string) "no goal is invented" None (Fingerprint.goal_id request);
+  json_equal "the exact original supplies task and channel"
+    (Channel.to_yojson (Original.continuation_channel value))
+    (Channel.to_yojson (Fingerprint.continuation_channel request));
+  check (option string) "original task is retained" (Original.task_id value)
+    (Fingerprint.task_id request);
+  let restored = match owned (Owner.load ~store:fixture.store ~owner:fixture.owner
+      ~request_id:(Original.request_id value)) with
+    | None -> fail "linked original disappeared"
+    | Some item -> item in
+  (match Progress.approval (Owner.record restored).progress with
+   | Some (Progress.Waiting_for_approval (restored_intent, restored_wait)) ->
+     check bool "complete intent survives durable restore" true
+       (Approval.equal_intent intent restored_intent);
+     check string "exact approval ID survives durable restore" (Approval.approval_id wait)
+       (Approval.approval_id restored_wait)
+   | None | Some (Progress.Intent_pending _) -> fail "the approval link was lost");
+  check bool "same-original retention preserves the wait" true
+    (Generic.same_record record (Owner.record (retained fixture value)))
+
+let test_media_dispatch_and_approval_binding_refuse () =
+  with_fixture (fun fixture ->
+    let value = capture fixture in
+    let record = advance fixture (retained fixture value) [Progress.Dispatch_intended] in
+    rejects "a generic dispatch without media intent is not a valid media original"
+      (Owner.check_retained record);
+    rejects "discovery cannot conceal missing intent as an empty inventory"
+      (Owner.discover_subject ~store:fixture.store fixture.subject));
+  with_fixture (fun fixture ->
+    let value = capture fixture in
+    let other = capture ~execution_id:"reserved-different-request" fixture in
+    let other_request = Approval.request (strings (Media_approval.intent other)) in
+    let wrong = strings (Approval.intent ~request_id:(Original.request_id value)
+        ~request_digest:(Original.original_digest value) ~request:other_request) in
+    let record = advance fixture (retained fixture value) [Progress.Approval_intended wrong] in
+    rejects "valid generic hashes cannot bind a different complete Gate input"
+      (Owner.check_retained record);
+    rejects "strict original restore rejects the mismatched intent"
+      (Owner.load ~store:fixture.store ~owner:fixture.owner
+         ~request_id:(Original.request_id value)))
+
 type storage_fault = Header | Summary | Body | Malformed | Not_regular
 let fault_label = function
   | Header -> "header" | Summary -> "summary" | Body -> "body"
@@ -329,6 +394,8 @@ let () = Alcotest.run "retained media originals"
     test_case "captured bytes and declaration identity cannot be rebound" `Quick test_captured_bytes_cannot_be_rebound;
     test_case "valid-looking wrong subject cannot hide an unknown original" `Quick test_valid_looking_wrong_subject_cannot_hide_unknown;
     test_case "idempotence and prior declarations survive missing current source" `Quick test_idempotence_and_prior_originals;
+    test_case "durable approval link remains bound to the complete original" `Quick test_approval_link_restores_with_original;
+    test_case "media dispatch and approval input require the same original" `Quick test_media_dispatch_and_approval_binding_refuse;
     test_case "header summary body and physical inventory corruption refuse" `Quick test_store_corruption_refuses;
     test_case "cross-workspace originals refuse before filtering" `Quick test_cross_workspace_refuses;
     test_case "physical root replacement refuses even absent lookup" `Quick test_replaced_root_refuses_absence]]

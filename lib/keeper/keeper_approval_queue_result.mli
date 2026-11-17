@@ -134,6 +134,34 @@ type approved_resolution_delivery =
   ; replay_outcome : resolution_replay_outcome option
   }
 
+type exact_request_state =
+  | Exact_pending
+  | Exact_rejected of string
+  | Exact_approved_unconsumed
+  | Exact_approved_consumed of resolution_replay_outcome option
+(** [Exact_approved_consumed None] retains the absence of a recorded replay
+    outcome. It never permits another execution. *)
+
+type exact_request_observation =
+  { exact_approval_id : string
+  ; exact_request : pending_approval
+  ; exact_state : exact_request_state
+  }
+(** An immutable queue snapshot, not effect authority. The original owner must
+    validate the exact request and obtain the actual one-shot grant separately. *)
+
+type exact_request_lookup =
+  | Exact_absent
+  | Exact_found of exact_request_observation
+  | Exact_ambiguous of string list
+  | Known_approval_missing of
+      { approval_id : string; matching_approval_ids : string list }
+  | Known_approval_mismatch of
+      { approval_id : string; matching_approval_ids : string list }
+(** Matching IDs are sorted and preserve evidence of other matching rows when
+    a known ID is absent or mismatched. Missing does not distinguish retirement
+    from removal and does not permit replacing a known approval. *)
+
 type continuation_readiness =
   | Continuation_waiting_for_replay
   | Continuation_ready of string option

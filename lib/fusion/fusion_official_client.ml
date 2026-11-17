@@ -166,11 +166,12 @@ let muse_config ~turn_timeout_s ~override_s (execution : Runtime_execution.muse_
   }
 ;;
 
-(* Antigravity, Muse Code and Vibe have no system-prompt channel. A one-shot turn
-   puts the instructions at the head of the input in the frame a keeper turn
-   uses ({!Antigravity_input_frame}; the Muse Code keeper start uses the same
-   labels). Without this the panel or judge system prompt — for a
-   judge-of-judges first judge, its whole lens — never reaches the model. *)
+(* Antigravity and Vibe have no system-prompt channel. Muse Code has a native
+   Developer override, but a successful RPC does not confirm its application.
+   These one-shot turns keep instructions at the head of the input in the
+   frame a keeper turn uses ({!Antigravity_input_frame}; the Muse Code keeper
+   start uses the same labels). Without this frame the panel or judge system
+   prompt — for a judge-of-judges first judge, its whole lens — can be lost. *)
 let framed_prompt ~system_prompt ~prompt =
   match system_prompt with
   | None -> Ok prompt

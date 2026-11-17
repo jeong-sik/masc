@@ -222,7 +222,8 @@ val run_with_images
     and, having no system-prompt channel, gets a nonempty [system_prompt]
     framed into its input ({!Antigravity_input_frame}); a missing frame label
     asset is a [Setup_failure]. Muse Code carries the image bytes over
-    [muse serve], gets [system_prompt] framed the same way, and starts a new
+    [muse serve], keeps [system_prompt] framed the same way until native
+    Developer instruction application can be confirmed, and starts a new
     session in a private temporary workspace and native storage tree for each call.
     Vibe runs once in headless mode in an empty private workdir without
     [--trust], with [system_prompt] framed the same way; it refuses an output

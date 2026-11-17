@@ -244,7 +244,7 @@ let environment_account () =
   Masc_test_deps.authorized_muse Runtime_account_access.Process_environment
 ;;
 
-let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account_home ?prepared_home ?mcp_servers ?workspace_origin ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
+let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account_home ?prepared_home ?mcp_servers ?developer_prompt ?workspace_origin ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let run (type where) (account : where Runtime_account_access.muse_authorized) =
@@ -252,6 +252,7 @@ let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account
           ~storage:(Option.value storage ~default:(native_storage dir))
           ?session_mode
           ?mcp_servers
+          ?developer_prompt
           ?workspace_origin
           ?on_session_ready
           ?on_prompt_sent
@@ -288,6 +289,82 @@ let request_with_method method_ requests =
 
 let params_member name json =
   Yojson.Safe.Util.(json |> member "params" |> member name)
+;;
+
+let test_developer_prompt_is_session_config_not_user_input () =
+  List.iter
+    (fun session_mode ->
+      let method_, steps =
+        match session_mode with
+        | Serve.Start -> "session/start", handshake_and_session ~granted:[]
+        | Serve.Resume _ ->
+          let ack = Yojson.Safe.from_string turn_ack in
+          let ack = match ack with
+            | `Assoc fields ->
+              Yojson.Safe.to_string (`Assoc (("id", `Int 4) :: List.remove_assoc "id" fields))
+            | _ -> fail "turn acknowledgement must be an object"
+          in
+          "session/resume",
+          [ Read; Write (init_frame ~granted:[]); Read; Read; Write session_result
+          ; Read; Write (approval_mode_result ~id:3 Msp.Prompt_unmatched)
+          ; Read; Write ack; Write turn_started
+          ]
+      in
+      List.iter
+        (fun (developer_prompt, expected) ->
+          run_scripted ~session_mode ?developer_prompt
+            (steps @ [ Write agent_completed; Write turn_completed ])
+            (fun result requests ->
+              (match result with
+               | Ok turn -> check (option string) "turn completes" (Some "MASC_MUSE_OK") turn.text
+               | Error error -> fail (Serve.error_to_string error));
+              let frame = request_with_method method_ requests in
+              let params = Yojson.Safe.Util.(frame |> member "params" |> to_assoc) in
+              check bool "default omits config entirely"
+                (expected <> None) (List.mem_assoc "config" params);
+              (match params_member "config" frame with
+               | `Null -> check bool "default omits config" true (expected = None)
+               | `Assoc fields ->
+                 check bool "Developer field presence and exact bytes"
+                   true (List.assoc_opt "developerPrompt" fields = expected)
+               | _ -> fail "config must be an object");
+              let turn = request_with_method "turn/start" requests in
+              check string "user input remains the original user prompt"
+                {|[{"type":"text","text":"say MASC_MUSE_OK"}]|}
+                (Yojson.Safe.to_string (params_member "input" turn));
+              check bool "Developer override is absent from turn/start" false
+                (match Yojson.Safe.Util.member "params" turn with
+                 | `Assoc fields -> List.mem_assoc "developerPrompt" fields
+                 | _ -> fail "turn params must be an object")))
+        [ None, None
+        ; Some Msp.Inherit_host, None
+        ; Some (Msp.Developer_text "  개발자 지침\n"), Some (`String "  개발자 지침\n")
+        ; Some (Msp.Developer_text ""), Some (`String "")
+        ; Some (Msp.Developer_text "\xc2\xa0\xe3\x80\x80"), Some (`String "\xc2\xa0\xe3\x80\x80")
+        ; Some Msp.Clear_suppressible_context, Some `Null
+        ])
+    [ Serve.Start; Serve.Resume { session_id = "s-1"; expected_last_turn = Serve.Exactly None } ]
+;;
+
+let test_invalid_developer_prompt_is_refused_before_spawn () =
+  let marker = Filename.temp_file "masc-muse-developer-not-spawned-" "" in
+  Sys.remove marker;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists marker then Sys.remove marker)
+    (fun () ->
+      List.iter
+        (fun session_mode ->
+          run_scripted ~session_mode ~developer_prompt:(Msp.Developer_text "invalid\xff")
+            [ Mark_spawned marker; Exit_with 97 ]
+            (fun result requests ->
+              (match result with
+               | Error (Serve.Invalid_config detail) ->
+                 check string "invalid UTF-8 names the Developer prompt"
+                   "developer_prompt is not valid UTF-8" detail
+               | Error error -> fail (Serve.error_to_string error)
+               | Ok _ -> fail "invalid Developer prompt was admitted");
+              check int "no requests were sent" 0 (List.length requests);
+              check bool "host was never spawned" false (Sys.file_exists marker)))
+        [ Serve.Start; Serve.Resume { session_id = "s-1"; expected_last_turn = Serve.Exactly None } ])
 ;;
 
 (* A whole turn: text streamed and completed, a built-in tool item, and an
@@ -2118,6 +2195,10 @@ let () =
         ; test_case "native-only tool completion keeps status, arguments and output" `Quick
             test_native_tool_completion_preserves_vendor_evidence
         ; test_case "turn with tool and approval" `Quick test_turn_with_tool_and_approval
+        ; test_case "Developer prompt travels in session config only" `Quick
+            test_developer_prompt_is_session_config_not_user_input
+        ; test_case "invalid Developer prompt is refused before spawn" `Quick
+            test_invalid_developer_prompt_is_refused_before_spawn
         ; test_case "turn/start receipt is the line the host read" `Quick
             test_turn_start_receipt_is_the_line_the_host_read
         ; test_case "auth required" `Quick test_auth_required

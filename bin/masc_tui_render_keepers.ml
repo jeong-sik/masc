@@ -1901,6 +1901,22 @@ let keeper_waiting_refresh_slow state =
    frame, blank while the read keeps up: a line that came and went with each
    slow read moved every Keeper row below it (60 moves in 180s on a live
    list, 2026-11-17). *)
+(* The fleet reading's own trouble: a lost stream or failing scans, while the
+   last reading stays on screen. [None] while the reading is current. *)
+let keeper_fleet_trouble_line state ~now =
+  match fleet_stream_view state with
+  | Masc_tui_fleet_stream.Reading { trouble = Some trouble; _ } ->
+      Some
+        (Theme.warn ()
+         ^ ui_text state ~ko:"  관측 상태: " ~en:"  fleet reading: "
+         ^ Masc_tui_fleet_line.trouble_text ~ko:(state.ui_language = Lang_ko) ~now trouble
+         ^ Ansi.reset)
+  | Masc_tui_fleet_stream.Reading { trouble = None; _ }
+  | Masc_tui_fleet_stream.Awaiting_first_reading
+  | Masc_tui_fleet_stream.Unreachable _
+  | Masc_tui_fleet_stream.Cannot_read _
+  | Masc_tui_fleet_stream.Unavailable _ -> None
+
 let keeper_waiting_refresh_line state =
   match keeper_waiting_refresh_slow state with
   | None -> ""
@@ -1911,6 +1927,18 @@ let keeper_waiting_refresh_line state =
           ~ko:("  대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed ^ "초")
           ~en:("  waiting refresh pending · showing last observation · " ^ elapsed ^ "s")
       ^ Ansi.reset
+
+(* One row above the list that is always drawn, so a reading going stale or
+   current does not push every Keeper row down and back. A lost fleet stream
+   takes it first: every reading on the screen is the last one then, the
+   waiting list included. A failure that has its own row ([failure]) keeps
+   it, and the stream's trouble then needs a second row. *)
+let keeper_observation_status_rows state ~now ~failure =
+  match keeper_fleet_trouble_line state ~now, failure with
+  | None, None -> [ keeper_waiting_refresh_line state ]
+  | Some trouble, None -> [ trouble ]
+  | None, Some failure -> [ failure ]
+  | Some trouble, Some failure -> [ trouble; failure ]
 
 (* The operator roster uses the same row readings as the axis views. These
    sentences do not turn missing observations into idle work or no requests. *)
@@ -2186,8 +2214,6 @@ let keeper_plain_fleet_lines (state : state) ~now ~inner =
             else Theme.warn ()
       in
       [tone ^ "  " ^ Message_layout.join_fitting ~sep:" · " ~cells:(max 0 (inner - 2)) clauses ^ Ansi.reset]
-      @ Option.to_list (Option.map
-          (fun trouble -> warning (Masc_tui_fleet_line.trouble_text ~ko ~now trouble)) trouble)
 
 let keeper_observation_errors (state : state) =
   let text korean english = if state.ui_language = Lang_ko then korean else english in
@@ -2270,8 +2296,8 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
            "  live status not read · showing stored roster" ^ Ansi.reset]
     | Keeper_control.Roster_complete _ -> []
   in
-  let waiting = match state.keeper_waiting_failure with
-    | Some (Tui_decode.Keeper_waiting_invalid reason) -> [warning (text "대기 관측 미확인: " "waiting unknown: ") reason]
+  let failure = match state.keeper_waiting_failure with
+    | Some (Tui_decode.Keeper_waiting_invalid reason) -> Some (warning (text "대기 관측 미확인: " "waiting unknown: ") reason)
     | Some (Tui_decode.Keeper_waiting_sources_unavailable errors) ->
         (* One line like the read errors above. The reasons come right after
            the failure, so a narrow frame cuts the closing note first. *)
@@ -2280,11 +2306,12 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
           | [] -> failure
           | reasons -> failure ^ ": " ^ String.concat ", " reasons
         in
-        [warning "" (Message_layout.fit_width
+        Some (warning "" (Message_layout.fit_width
            (failure ^ text " · 대기 목록이 업무 차단을 뜻하지는 않습니다"
-              " · inventory is not a work blocker") cells)]
-    | None -> [ keeper_waiting_refresh_line state ]
+              " · inventory is not a work blocker") cells))
+    | None -> None
   in
+  let waiting = keeper_observation_status_rows state ~now ~failure in
   let waiting_failed = Option.is_some state.keeper_waiting_failure in
   [ here_row ~cols state
       ~path:[ text "일과 도움" "work and help" ]
@@ -2643,15 +2670,6 @@ let render_keeper_axes (state : state) =
        in
        box_line buf cols
          (Printf.sprintf "%s%s%s%s%s" tone lead Ansi.reset joined Ansi.reset);
-       (* Its own row under the fleet line rather than a tail on it: the
-          frame cuts a row from the right, and the counts are what a narrow
-          screen keeps. *)
-       Option.iter
-         (fun trouble ->
-            box_line buf cols
-              ((Theme.warn ()) ^ text "  관측 상태: " "  fleet reading: "
-               ^ Masc_tui_fleet_line.trouble_text ~ko ~now:now_unix trouble ^ Ansi.reset))
-         trouble;
        let failing_entry =
          Option.to_list (Masc_tui_fleet_line.failing_text ~ko fleet)
        in
@@ -2808,13 +2826,19 @@ let render_keeper_axes (state : state) =
    | Some (Request_withdrawn refusal) ->
        kept_back Kept_request.Turn_observation_read refusal
    | None -> ());
-  (match state.keeper_waiting_error with
-   | Some (Request_failed err) ->
-       box_line buf cols
-         (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
-   | Some (Request_withdrawn refusal) ->
-       kept_back Kept_request.Waiting_list_read refusal
-   | None -> box_line buf cols (keeper_waiting_refresh_line state));
+  (* The stream's trouble moved here from under the fleet line: drawn
+     there, it came and went with every reconnect and moved the list. *)
+  let failure = match state.keeper_waiting_error with
+    | Some (Request_failed err) ->
+        Some (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
+    | Some (Request_withdrawn refusal) ->
+        Some (Theme.warn () ^ "  " ^ Terminal_text.single_line
+          (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+             ~request:Kept_request.Waiting_list_read refusal) ^ Ansi.reset)
+    | None -> None
+  in
+  List.iter (box_line buf cols)
+    (keeper_observation_status_rows state ~now:now_unix ~failure);
   (match state.keeper_waiting_failure with
    | None -> ()
    | Some failure ->

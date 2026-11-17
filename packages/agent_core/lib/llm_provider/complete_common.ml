@@ -862,7 +862,7 @@ let serialize_final_http_request_unadmitted
   =
   let parts =
     match stream, Provider_http_codec.of_config config with
-    | true, Provider_http_codec.Openai_chat ->
+    | true, (Provider_http_codec.Openai_chat as http_codec) ->
       (* The builder already owns the request tree and its output receipt.
          Finalize streaming fields there instead of encoding the whole tree
          only to parse and encode it again. Literal validation stays in the
@@ -876,7 +876,7 @@ let serialize_final_http_request_unadmitted
            Http_client.AcceptRejected
              { reason = Http_client.body_injection_error_to_string error })
          |> Result.map (fun body ->
-           Provider_http_codec.Openai_chat, body,
+           http_codec, body,
            Backend_openai_request.request_assoc_output_token_receipt artifact)
        with Invalid_argument reason -> Error (Http_client.AcceptRejected { reason }))
     | false, (Provider_http_codec.Anthropic_messages | Ollama_chat | Openai_responses

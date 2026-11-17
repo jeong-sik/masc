@@ -62,14 +62,17 @@ let assert_ok ~body = function
     Alcotest.failf "unexpected validation error: %s" (error_label error_kind)
 ;;
 
+(* [lstat], not [Sys.is_directory]: a symlink to a directory outside the
+   temporary tree is removed as a link, never followed into. *)
 let rec remove_tree path =
-  if Sys.file_exists path
-  then if Sys.is_directory path
-  then (
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
     Sys.readdir path
     |> Array.iter (fun name -> remove_tree (Filename.concat path name));
-    Unix.rmdir path)
-  else Sys.remove path
+    Unix.rmdir path
+  | { Unix.st_kind = Unix.S_REG | S_LNK | S_CHR | S_BLK | S_FIFO | S_SOCK; _ } ->
+    Unix.unlink path
 ;;
 
 let with_temp_dir f =

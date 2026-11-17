@@ -1733,8 +1733,11 @@ let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
   in
   let check_prefix label path argv =
     match argv with
-    | [ "sh"; "-c"; script; "sh"; actual_path; "4096" ] ->
+    | [ "sh"; "-c"; script; "sh"; root; actual_path; "4096" ] ->
+      Alcotest.(check string) (label ^ " root is the declared path") "/app" root;
       Alcotest.(check string) (label ^ " path") path actual_path;
+      Alcotest.(check bool) (label ^ " the opened file is checked against the root") true
+        (String_util.contains_substring script "readlink /proc/self/fd/0");
       Alcotest.(check bool) (label ^ " sentinel guards missing paths") true
         (String_util.contains_substring script "if [ ! -e ");
       Alcotest.(check bool) (label ^ " sentinel guards non-files") true

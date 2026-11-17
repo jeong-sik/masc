@@ -5668,6 +5668,42 @@ let test_interrupted_native_progress_survives_results_projection () =
            quarantined_occurrence=Some occurrence;detail="invalid correlated native event"})])
 ;;
 
+(* A tool's name is which tool ran: cut, it reads as another tool, and two
+   long names that share a head read as one. The Results view draws every
+   glyph of it in order at any pane width. Where its rows break is not
+   checked: the rows are joined and their spaces taken out before the name is
+   looked for. *)
+let test_results_view_draws_a_long_tool_name_whole () =
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  let name = String.concat "_" (List.init 14 (Printf.sprintf "part%02d")) in
+  Fun.protect ~finally:(fun () -> set_size previous) (fun () ->
+    List.iter (fun cols ->
+      set_size (40, cols);
+      let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
+      state.view <- Tui_types.Keepers Tui_types.Keeper_message;
+      state.roster_pane_preference <- Masc_tui_roster_pane.Hidden;
+      state.msg_target_keeper_name <- Some "alpha";
+      state.msg_loaded_keeper <- Some "alpha";
+      state.msg_tool_visibility <- Tui_types.Tools_results;
+      state.msg_loaded <-
+        [ { (chat_entry ~request_id:"long-name" ~role:Tui_types.Message_tool ~text:"" ~at:2. ()) with
+            me_tool_block = Some (Keeper_chat_transcript.tool_block [
+              Keeper_chat_transcript.make_tool_activity ~execution_id:"long-name-call"
+                ~call_id:(Some "call") ~tool_name:name ~args:"{}"
+                ~outcome:Keeper_chat_transcript.Returned ~duration:None () ]) } ];
+      let frame, _ = Masc_tui_render_chat.render_keeper_message state in
+      let drawn =
+        String.concat "" (List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines)
+        |> Astring.String.filter (fun c -> c <> ' ')
+      in
+      check bool (Printf.sprintf "every glyph of the name at %d columns" cols) true
+        (Astring.String.is_infix ~affix:name drawn))
+      [ 160; 100; 60; 44 ])
+;;
+
 let test_preparation_requires_actual_turn_owner_and_exact_execution () =
   Eio_main.run (fun _ ->
     let module Preview = Masc.Keeper_turn_preview in
@@ -5984,7 +6020,8 @@ let () =
         test_preparation_requires_actual_turn_owner_and_exact_execution;
       test_case "failed preparation refreshes only its selected unsettled operation" `Quick
         test_failed_preparation_refreshes_only_selected_unsettled_operation]);
-     ("native progress density", [test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection]); ( "expanded diagnostics",
+     ("native progress density", [test_case "interrupted native output remains in Results" `Quick test_interrupted_native_progress_survives_results_projection;
+       test_case "a long tool name is drawn whole in Results" `Quick test_results_view_draws_a_long_tool_name_whole]); ( "expanded diagnostics",
         [ test_case "search finds a batched request by its own id" `Quick
             test_search_finds_a_batched_request_by_its_own_id
         ; test_case "persisted execution source and narrow delivery labels" `Quick

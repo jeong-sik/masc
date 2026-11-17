@@ -1288,6 +1288,10 @@ let clip_tool_result ~max_cells text =
     | prefix :: _ -> prefix ^ "…"
 
 
+(* The fewest cells a result preview is given beside its tool row. With less
+   it goes on the row below, where it has the whole line. *)
+let tool_result_beside_cells = 12
+
 let tool_result_preview (activity : Keeper_chat_transcript.tool_activity) value =
   match Keeper_chat_transcript.descriptor_of_tool_name activity.Keeper_chat_transcript.tool_name with
   | Some descriptor
@@ -1316,15 +1320,14 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
         let result_state = Call_evidence.result_state activity.outcome association in
         let marker = Call_evidence.result_marker result_state in
         let status = Call_evidence.result_label result_state in
-        let fixed_cells = Message_layout.display_width (marker ^ "  · " ^ status) in
-        let detail_on_next_line = max_cells < 80 in
-        let name_cells =
-          max 4
-            (min 48
-               (max_cells - fixed_cells
-                - (if detail_on_next_line then 0 else 12)))
+        (* The name is the row's subject and is drawn whole (RFC
+           tui-one-screen-grammar section 5.5): a name cut at a fixed width
+           reads as a different tool, and two long names that share a prefix
+           read as the same one. *)
+        let name =
+          Masc_tui_keeper_chat_projection.terminal_safe_text activity.tool_name
+          |> String.trim
         in
-        let name = clip_tool_result ~max_cells:name_cells activity.tool_name in
         let prefix = Printf.sprintf "%s %s · %s" marker name status in
         let preview, unavailable =
           match association with
@@ -1365,7 +1368,6 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
         in
         (* Only generated status text is dressed. Payload stays terminal-safe
            plain text, including words or glyphs that resemble a failure. *)
-        let prefix = clip_tool_result ~max_cells prefix in
         let tone =
           match result_state with
           | Durable_failed -> Ansi.reset ^ Ansi.bold ^ Theme.bad ()
@@ -1382,28 +1384,40 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
                | Keeper_chat_transcript.Outcome_unrecorded ) as outcome) ->
               tool_outcome_tone outcome
         in
-        let styled_prefix =
-          Printf.sprintf "%s%s%s %s%s%s · %s%s%s"
-            tone marker (tool_reopen ()) (Theme.tool_origin ()) name (tool_reopen ())
-            tone status (tool_reopen ())
+        (* The marker, the name and the status are laid out as the chat's
+           other facts are (RFC tui-one-screen-grammar section 5.5). A name
+           wider than the line is broken at the row's end with the marker on
+           its first row: a name has no space to break at, and a marker alone
+           on a row marks nothing. The status joins the name's last row when
+           it fits there. The result preview is a body and stays one clipped
+           row: beside the facts when the line leaves it room, otherwise
+           under them. *)
+        let prefix_rows =
+          let palette =
+            { (keeper_status_palette ()) with
+              Chat_facts.label_style = ""
+            ; who_style = Theme.tool_origin ()
+            ; reading_style = Fun.id
+            ; reset = tool_reopen ()
+            }
+          in
+          let layout =
+            Chat_facts.layout ~max_cells ~max_rows:max_int ~more:(fun _ -> "")
+              [ Chat_facts.fact
+                  ~label:(tone ^ marker ^ tool_reopen () ^ " ")
+                  Chat_facts.Who name
+              ; Chat_facts.fact (Chat_facts.Reading tone) status
+              ]
+          in
+          List.map (Chat_facts.draw palette) layout.Chat_facts.rows
         in
-        let styled_prefix =
-          if Message_layout.display_width styled_prefix <= max_cells then styled_prefix
-          else
-            match Message_layout.split_styled_cells
-              ~max_cells:(max 1 (max_cells - 1)) styled_prefix with
-            | [] -> "…"
-            | first :: _ -> first ^ "…" ^ tool_reopen ()
-        in
-        match detail with
-        | None -> [styled_prefix]
-        | Some detail when detail_on_next_line ->
-            [ styled_prefix
-            ; "  " ^ clip_tool_result ~max_cells:(max_cells - 2) detail
-            ]
-        | Some detail ->
-            let room = max_cells - Message_layout.display_width prefix - 3 in
-            [styled_prefix ^ " · " ^ clip_tool_result ~max_cells:room detail])
+        let room = max_cells - Message_layout.display_width prefix - 3 in
+        match prefix_rows, detail with
+        | ([] | _ :: _), None -> prefix_rows
+        | [ row ], Some detail when max_cells >= 80 && room >= tool_result_beside_cells ->
+            [ row ^ " \xc2\xb7 " ^ clip_tool_result ~max_cells:room detail ]
+        | ([] | _ :: _), Some detail ->
+            prefix_rows @ [ "  " ^ clip_tool_result ~max_cells:(max_cells - 2) detail ])
       projection.Keeper_chat_transcript.activities
   in
   if projection.omitted_steps = 0 then rows

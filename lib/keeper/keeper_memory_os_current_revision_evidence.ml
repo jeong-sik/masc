@@ -113,6 +113,65 @@ let with_committed_receipts ?(strict_snapshot=false) ?(receipt_read=Reconcile_re
     select snapshot receipts)
 ;;
 
+type committed_program = {
+  keepers_dir : string;
+  keeper_id : string;
+  publication : Keeper_memory_os_program_types.publication;
+  snapshot_revision : int;
+  snapshot_sha256 : string;
+  receipts : durable_range_receipt list;
+}
+
+let read_committed_program ~keepers_dir ~keeper_id ~transaction_id =
+  with_committed_receipts ~strict_snapshot:true ~keepers_dir ~keeper_id (fun snapshot receipts ->
+    let* pending=read_retraction_plan_receipt ~keepers_dir ~keeper_id in
+    let* ()=match pending with None -> Ok ()
+      | Some _ -> Error "ordered transaction journal finalization is pending" in
+    let* snapshot_content=match snapshot with
+      | None -> Ok None
+      | Some _ ->
+        (match Fs_compat.load_file_opt (path_for_keepers_dir ~keepers_dir ~keeper_id) with
+         | Some bytes -> Ok (Some bytes)
+         | None -> Error "ordered transaction snapshot disappeared under serialization") in
+    let* target=Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+      Keeper_memory_os_current_read_anchor.read_program_journal_target_locked
+        ~keepers_dir ~keeper_id ~transaction_id ~snapshot_content snapshot) in
+    match target with
+    | None -> Ok None
+    | Some (publication,target) ->
+      let snapshot_revision=target.revision in
+      let snapshot_sha256=sha256 (Snapshot_codec.snapshot_bytes target) in
+      let belongs range =
+        let module P=Keeper_memory_os_program_types in
+        match publication.boundary,range with
+        | (P.Atom_boundary atom | P.Mixed_boundary {atom;official=_}),Atom_range range ->
+          atom.receipt_scope=range.receipt_scope
+        | (P.Official_boundary official | P.Mixed_boundary {atom=_;official}),Official_range range ->
+          official.receipt_scope=range.receipt_scope
+        | P.Atom_boundary _,Official_range _ | P.Official_boundary _,Atom_range _
+        | (P.Atom_boundary _ | P.Official_boundary _ | P.Mixed_boundary _),
+          (Explicit_candidate _ | Explicit_candidate_with_recall _) -> false in
+      let matching=List.filter (fun receipt -> belongs (receipt_range_id receipt)) receipts in
+      let* ()=if List.for_all (function
+          | Committed receipt -> receipt.snapshot_revision=snapshot_revision
+            && receipt.snapshot_sha256=snapshot_sha256
+          | Prepared _ -> false) matching
+        then Ok () else Error "ordered transaction receipts disagree on the exact target snapshot" in
+      let ranges=List.map receipt_range_id matching in
+      let+ ()=Keeper_memory_os_program_publication.require_receipt_ranges publication ranges in
+      Some {keepers_dir;keeper_id;publication;snapshot_revision;snapshot_sha256;receipts=matching})
+
+let confirm_committed_program (proof : committed_program) =
+  let* actual=read_committed_program ~keepers_dir:proof.keepers_dir ~keeper_id:proof.keeper_id
+    ~transaction_id:proof.publication.execution.program.transaction_id in
+  match actual with
+  | Some actual when actual.publication=proof.publication
+      && actual.snapshot_revision=proof.snapshot_revision
+      && actual.snapshot_sha256=proof.snapshot_sha256
+      && List.sort compare actual.receipts=List.sort compare proof.receipts -> Ok ()
+  | None | Some _ -> Error "committed ordered program evidence changed before settlement"
+;;
+
 let read_with_revision_evidence_for_keepers_dir ~keepers_dir ~keeper_id ~after_revision =
   if after_revision < 0 then Error "revision evidence starting revision must be nonnegative"
   else with_committed_receipts ~strict_snapshot:true ~keepers_dir ~keeper_id

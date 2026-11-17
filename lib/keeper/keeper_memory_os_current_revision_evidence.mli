@@ -8,6 +8,27 @@
 
 open Keeper_memory_os_current_types
 
+type committed_program = private {
+  keepers_dir : string;
+  keeper_id : string;
+  publication : Keeper_memory_os_program_types.publication;
+  snapshot_revision : int;
+  snapshot_sha256 : string;
+  receipts : durable_range_receipt list;
+}
+val read_committed_program : keepers_dir:string -> keeper_id:string ->
+  transaction_id:string -> (committed_program option, string) result
+(** Confirm/recover a real canonical program transaction and its complete
+    committed boundary receipts under Memory serialization. Bind the actual
+    marked journal transition, current incarnation and consistent target
+    revision/hash. A pending, missing component or contradictory proof is an
+    error; None is no matching journal program, never permission to replay.
+    May perform standard publication recovery. No source ACK is performed. *)
+val confirm_committed_program : committed_program -> (unit, string) result
+(** Re-observe the same exact program, target and receipt set. This is Memory
+    evidence, not source ownership or Cut/ACK authority. Caller retains source
+    serialization and must not already hold Memory locks. *)
+
 val read_with_revision_evidence_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> after_revision:int ->
   ((t option * revision_evidence list), string) result

@@ -59,23 +59,28 @@ type store_anchor =
   ; journal_sha256 : string
   }
 
+type atom_boundary =
+  { receipt_scope : string
+  ; trace_id : string
+  ; history_start_boundary_line : int
+  ; start_atom : int
+  ; end_atom : int
+  ; last_atom_digest : string
+  ; end_boundary_line : int
+  ; boundary_lines_seen : int
+  ; checkpoint_sha256 : string
+  }
+
+type official_boundary =
+  { receipt_scope : string
+  ; after_boundary_line : int
+  ; turns : (int * Ids.Turn_ref.t * string) list
+  }
+
 type source_boundary =
-  | Atom_boundary of
-      { receipt_scope : string
-      ; trace_id : string
-      ; history_start_boundary_line : int
-      ; start_atom : int
-      ; end_atom : int
-      ; last_atom_digest : string
-      ; end_boundary_line : int
-      ; boundary_lines_seen : int
-      ; checkpoint_sha256 : string
-      }
-  | Official_boundary of
-      { receipt_scope : string
-      ; after_boundary_line : int
-      ; turns : (int * Ids.Turn_ref.t * string) list
-      }
+  | Atom_boundary of atom_boundary
+  | Official_boundary of official_boundary
+  | Mixed_boundary of { atom : atom_boundary; official : official_boundary }
 
 type publication =
   { execution : execution

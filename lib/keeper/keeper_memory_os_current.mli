@@ -484,12 +484,49 @@ val ensure_epoch : keepers_dir:string -> keeper_id:string -> (string, string) re
     epoch string, or the error detail when creation or reading failed. *)
 
 type program_anchor
+
+type program_anchor_evidence
+val program_anchor_evidence : program_anchor -> program_anchor_evidence
+val program_anchor_evidence_to_json : program_anchor_evidence -> Yojson.Safe.t
+val program_anchor_evidence_of_json : Yojson.Safe.t -> (program_anchor_evidence, string) result
+val program_anchor_evidence_matches_publication : program_anchor_evidence ->
+  Keeper_memory_os_program_types.publication -> (unit, string) result
+(** Pure exact join of the retained keeper, captured identity and original
+    full facts with a publication. It grants no live store or ACK authority. *)
+(** Exact retained snapshot/journal-prefix data. Pure decode supplies no live
+    incarnation, source lock, publication or ACK authority. *)
+val resume_program_anchor : keepers_dir:string -> keeper_id:string ->
+  program_anchor_evidence -> (program_anchor, string) result
+(** Rejoin the recorded original anchor under actual Memory serialization,
+    including standard pending-publication recovery. Check incarnation,
+    captured facts, exact prefix and every later marked transition; preserve
+    the original basis. Caller retains its source-owner scope and holds no
+    Memory lock. *)
+
+type committed_program = private {
+  keepers_dir : string;
+  keeper_id : string;
+  publication : Keeper_memory_os_program_types.publication;
+  snapshot_revision : int;
+  snapshot_sha256 : string;
+  receipts : Keeper_memory_os_current_types.durable_range_receipt list;
+}
+val read_committed_program : keepers_dir:string -> keeper_id:string ->
+  transaction_id:string -> (committed_program option, string) result
+(** Confirm/recover the actual canonical transaction, complete committed range
+    set and shared target under Memory locks, with current incarnation and
+    marked journal transition. Missing/contradictory components refuse. None
+    is no matching program, not permission to infer or replay. No source ACK.
+    Caller retains its source-owner scope and holds no Memory lock. *)
+val confirm_committed_program : committed_program -> (unit, string) result
+(** Re-observe this exact program/target/range set before source settlement.
+    The value is evidence only; the source and Cut owner grant ACK authority. *)
 val capture_program_anchor :
   keepers_dir:string -> keeper_id:string -> (program_anchor, string) result
 val program_anchor_snapshot : program_anchor -> t option
 (** Capture exact Memory bytes, stable incarnation and a durable complete
-    journal prefix under aggregate/snapshot locks. The anchor is process-local
-    authority, never reconstructed from a caller-provided public record. *)
+    journal prefix under aggregate/snapshot locks. Retained data must pass
+    [resume_program_anchor] before it can supply this live anchor. *)
 
 val with_program_reset :
   keepers_dir:string -> keeper_id:string -> (unit -> ('a, string) result) -> ('a, string) result
@@ -709,6 +746,17 @@ type program_source =
       { range : official_range_id
       ; selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list
       }
+  | Mixed_program_source of
+      { atom_range : durable_range_id
+      ; checkpoint : Agent_core.Types.message list
+      ; official_range : official_range_id
+      ; selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list
+      ; ordered_sources : Keeper_librarian_unread.source list
+      }
+(** The Mixed manifest is the exact original input projection, with both full
+    range boundaries and every source/hash exactly once in original order.
+    The producer confirms that ordered projection under its original source
+    locks before publication. This value supplies data, not effect authority. *)
 
 type program_commit =
   { snapshot : t
@@ -730,6 +778,9 @@ val apply_program :
     preparation. Never flatten virtual steps into legacy revision links.
 
     [source] is the host's immutable original checkpoint/selected turn capture.
+    Mixed sources publish both exact range receipts at the one target revision
+    and hash. Their unread coordinates are projected to their respective range
+    kinds; the program retains the complete ordered manifest.
     [validate_source] must run under the caller's source-owner serialization
     held across this call, before Memory's aggregate/snapshot locks in the lock
     order; it confirms the original boundary and cursor remain admissible.

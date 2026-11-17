@@ -47,6 +47,17 @@ type program_source =
       { range : official_range_id
       ; selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list
       }
+  | Mixed_program_source of
+      { atom_range : durable_range_id
+      ; checkpoint : Agent_core.Types.message list
+      ; official_range : official_range_id
+      ; selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list
+      ; ordered_sources : Keeper_librarian_unread.source list
+      }
+(** Mixed [ordered_sources] is the exact retained input projection in original
+    message order. It covers each checkpoint and selected official source
+    exactly once, including the original hashes, and equals the program's
+    manifest. This is source data, not a source-lock or publication grant. *)
 
 type program_commit =
   { snapshot : t

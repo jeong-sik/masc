@@ -4,6 +4,7 @@ module Current = Masc.Keeper_memory_os_current
 module Program = Masc.Keeper_memory_os_program
 module Proof = Masc.Keeper_memory_os_program_publication
 module Source = Masc.Keeper_librarian_unread
+module Range_types = Masc.Keeper_memory_os_current_types
 
 let require = function Ok value -> value | Error detail -> fail detail
 let refused = function Ok _ -> fail "unsafe ordered publication succeeded" | Error _ -> ()
@@ -401,6 +402,234 @@ let test_hole_publication_recovers_external_cursor boundary fault () =
     | Hole_before_rename | Hole_journal_blocked | Hole_ledger_corrupt -> 1 in
   check int "recovery never repeats a live producer callback" expected_callbacks (List.length !callbacks)
 
+let mixed_fixture () =
+  let checkpoint=[List.hd messages;List.nth messages 1] in
+  let atom_sources=Source.sources_for_atom_range ~trace_id:"program-source"
+    ~history_start_boundary_line:1 ~start_atom:0 ~end_atom:2 ~messages:checkpoint |> require in
+  let official_messages=[List.hd messages;Agent_core.Types.make_message ~role:Agent_core.Types.User
+    [Agent_core.Types.Text "An official observation between the two checkpoint atoms."]] in
+  let official_sources=List.mapi (fun message_in_turn message -> Source.Official_turn
+    {turn_ref;boundary_line=1;message_in_turn;message_sha256=Source.message_digest message}) official_messages in
+  let ordered_sources=[List.nth atom_sources 0;List.nth official_sources 0;
+    List.nth official_sources 1;List.nth atom_sources 1] in
+  let last_atom_digest=match Runtime_model_input_tail_window.atom_opening_digest checkpoint 1 with
+    | Some digest -> digest | None -> fail "Mixed fixture final atom missing" in
+  let atom_range : Current.durable_range_id = {receipt_scope="mixed-original";trace_id="program-source";
+    history_start_boundary_line=1;start_atom=0;end_atom=2;last_atom_digest;
+    end_boundary_line=2;boundary_lines_seen=2;unread_messages=[]} in
+  let official_range : Current.official_range_id = {range with receipt_scope="mixed-original"} in
+  let selected_turns=[1,turn_ref,official_messages] in
+  let source=Current.Mixed_program_source {atom_range;checkpoint;official_range;selected_turns;ordered_sources} in
+  let d=fact "The third intermediate observation." and e=fact "The final mixed-source conclusion." in
+  let currents=[a;b;c;d] and nexts=[b;c;d;e] in
+  let decisions=List.mapi (fun index current ->
+    {(decision 0 current (List.nth nexts index)) with
+      Program.run_id="mixed-step-" ^ string_of_int index;sources=[List.nth ordered_sources index]}) currents in
+  let program=Program.create ~transaction_id:"mixed-publication" ~keeper_id ~turn_ref
+    ~sources:ordered_sources ~unread:[] ~initial_current:(Some [a]) ~decisions |> require in
+  atom_range,official_range,source,program,e
+
+let publish_mixed ~keepers_dir ~anchor ~source program =
+  Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:keeper
+    ~now:30. ~anchor ~source ~validate_source:(fun () -> Ok ()) program
+
+let check_mixed_ranges ~keepers_dir (atom : Current.durable_range_id) (official : Current.official_range_id) =
+  check bool "whole original checkpoint is receipt-proved" true
+    (Current.committed_durable_range ~keepers_dir ~keeper_id:keeper ~receipt_scope:atom.Current.receipt_scope
+      |> require = Some atom);
+  check bool "whole original official turn is receipt-proved" true
+    (Current.committed_official_range ~keepers_dir ~keeper_id:keeper ~receipt_scope:official.Current.receipt_scope
+      |> require = Some official)
+
+let test_mixed_exact_atomic_program () = fixture @@ fun keepers_dir anchor ->
+  let atom,official,source,program,final=mixed_fixture () in
+  let committed=publish_mixed ~keepers_dir ~anchor ~source program |> require in
+  check int "interleaved decisions publish one actual revision" 2 committed.snapshot.revision;
+  check bool "both identical texts at distinct source coordinates are decided" true
+    (List.length committed.proof.execution.stages=4 && committed.snapshot.facts=[final]);
+  let encoded=Proof.to_json committed.proof in
+  check bool "Mixed proof uses its explicit schema" true
+    (match encoded with `Assoc fields -> List.assoc_opt "schema_version" fields=Some (`Int 2)
+      | _ -> false);
+  check bool "Mixed proof roundtrips without changing source order" true
+    (Proof.of_json encoded |> require = committed.proof);
+  check_mixed_ranges ~keepers_dir atom official;
+  Proof.require_receipt_ranges committed.proof [Range_types.Atom_range atom] |> refused;
+  Proof.require_receipt_ranges committed.proof [Range_types.Official_range official] |> refused
+
+let test_mixed_manifest_rejects_before_effect () = fixture @@ fun keepers_dir anchor ->
+  let _,_,source,program,_=mixed_fixture () in
+  let make ordered_sources=match source with
+    | Current.Mixed_program_source mixed -> Current.Mixed_program_source {mixed with ordered_sources}
+    | Atom_program_source _ | Official_program_source _ -> fail "Mixed fixture source expected" in
+  let before=Fs_compat.load_file (snapshot_path ~keepers_dir) in
+  List.iter (fun manifest ->
+    publish_mixed ~keepers_dir ~anchor ~source:(make manifest) program |> refused;
+    check string "a changed manifest cannot replace Memory" before (Fs_compat.load_file (snapshot_path ~keepers_dir));
+    check bool "a changed manifest cannot prepare a publication" false (Sys.file_exists (pending_path ~keepers_dir)))
+    [List.rev program.Program.sources;List.tl program.sources;
+     List.hd program.sources::program.sources];
+  let source=match source with
+    | Current.Mixed_program_source mixed ->
+      Current.Mixed_program_source {mixed with official_range={mixed.official_range with receipt_scope="foreign-original"}}
+    | Atom_program_source _ | Official_program_source _ -> fail "Mixed fixture source expected" in
+  publish_mixed ~keepers_dir ~anchor ~source program |> refused;
+  check string "foreign component leaves the original snapshot" before (Fs_compat.load_file (snapshot_path ~keepers_dir))
+
+let test_mixed_staged_recovery () = List.iter (fun after_rename -> fixture @@ fun keepers_dir anchor ->
+  let atom,official,source,program,final=mixed_fixture () in
+  let callbacks=ref 0 in
+  let write_snapshot path bytes=Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+    ~sync_file:(fun _ -> if not after_rename then failwith "before Mixed rename")
+    ~sync_parent:(fun _ -> failwith "after Mixed rename") path bytes in
+  Current.For_testing.apply_program_with_publication_io ~pass:Masc.Keeper_memory_commit_pass.Durable
+    ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source ~validate_source:(fun () -> Ok ())
+    ~write_snapshot ~sync_snapshot:(fun _ -> Error "Mixed durability not confirmed")
+    ~before_journal:(fun () -> ()) ~on_committed:(fun _ -> incr callbacks) program |> refused;
+  check bool "ordinary recovery chooses the complete original or complete target" true
+    (Option.map (fun (snapshot : Current.t) -> snapshot.facts) (read ~keepers_dir)=Some (if after_rename then [final] else [a]));
+  check int "read recovery never invokes a producer callback" 0 !callbacks;
+  if not after_rename then
+    ignore (publish_mixed ~keepers_dir ~anchor ~source program |> require : Current.program_commit);
+  check_mixed_ranges ~keepers_dir atom official;
+  check bool "both receipts settle before clearing the publication" false (Sys.file_exists (pending_path ~keepers_dir))) [false;true]
+
+let test_mixed_missing_component_preserves_pending () = List.iter (fun keep_atom -> fixture @@ fun keepers_dir anchor ->
+  let module Codec=Masc.Keeper_memory_os_current_range_codec in
+  let module Receipts=Masc.Keeper_memory_os_current_receipt_store in
+  let atom,official,source,program,_=mixed_fixture () in
+  let path=journal ~keepers_dir in
+  let prior=Fs_compat.load_file path in
+  ignore (Current.For_testing.apply_program_with_publication_io ~pass:Masc.Keeper_memory_commit_pass.Durable
+    ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source ~validate_source:(fun () -> Ok ())
+    ~write_snapshot:Fs_compat.save_file_atomic_strict_staged ~sync_snapshot:(fun _ -> Ok ())
+    ~before_journal:(fun () -> Sys.remove path;Unix.mkdir path 0o700)
+    ~on_committed:(fun _ -> ()) program |> require : Current.program_commit);
+  Unix.rmdir path;Fs_compat.save_file path prior;
+  let receipt_path=Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper in
+  let complete=Fs_compat.load_file receipt_path in
+  let rows,skipped=Codec.read_durable_range_receipts ~keepers_dir ~keeper_id:keeper |> require in
+  check int "the actual original receipts decode strictly" 0 (List.length skipped);
+  let partial=List.filter (fun row -> match Receipts.receipt_range_id row with
+    | Range_types.Atom_range _ -> keep_atom
+    | Range_types.Official_range _ -> not keep_atom
+    | Range_types.Explicit_candidate _ | Range_types.Explicit_candidate_with_recall _ -> false) rows in
+  Receipts.write_durable_range_receipts ~keepers_dir ~keeper_id:keeper partial |> require;
+  let before_snapshot=Fs_compat.load_file (snapshot_path ~keepers_dir)
+  and before_wal=Fs_compat.load_file (pending_path ~keepers_dir)
+  and before_receipts=Fs_compat.load_file receipt_path in
+  Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper |> refused;
+  check string "a missing component preserves the durable target" before_snapshot (Fs_compat.load_file (snapshot_path ~keepers_dir));
+  check string "a missing component preserves its pending proof" before_wal (Fs_compat.load_file (pending_path ~keepers_dir));
+  check string "recovery cannot manufacture the missing source receipt" before_receipts (Fs_compat.load_file receipt_path);
+  Fs_compat.save_file receipt_path complete;
+  ignore (read ~keepers_dir);
+  check_mixed_ranges ~keepers_dir atom official) [false;true]
+
+let retained_anchor anchor =
+  Current.program_anchor_evidence anchor |> Current.program_anchor_evidence_to_json
+  |> Current.program_anchor_evidence_of_json |> require
+
+let committed_program ~keepers_dir transaction_id =
+  match Current.read_committed_program ~keepers_dir ~keeper_id:keeper ~transaction_id |> require with
+  | Some proof -> proof
+  | None -> fail "actual canonical program and receipts were not observed"
+
+let test_retained_anchor_roundtrip_and_unrelated_growth () = fixture @@ fun keepers_dir _ ->
+  let path=snapshot_path ~keepers_dir in
+  (* Preserve noncanonical-but-valid original bytes, not a re-encoding whose
+     digest would pretend to be the captured snapshot. *)
+  let original=Fs_compat.load_file path in
+  Fs_compat.save_file path ("  " ^ original ^ "\n");
+  let anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper |> require in
+  let evidence=retained_anchor anchor in
+  ignore (rewrite ~keepers_dir [extra;a] : Current.t);
+  let resumed=Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> require in
+  check bool "resume keeps the original full basis" true
+    (Option.map (fun (snapshot : Current.t) -> snapshot.facts) (Current.program_anchor_snapshot resumed)=Some [a]);
+  let committed=publish ~keepers_dir ~anchor:resumed (program ()) |> require in
+  Current.program_anchor_evidence_matches_publication evidence committed.proof |> require;
+  check bool "late unrelated addition remains current" true (committed.snapshot.facts=[extra;c]);
+  let fresh=Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper |> require |> retained_anchor in
+  Current.program_anchor_evidence_matches_publication fresh committed.proof |> refused
+
+let test_retained_anchor_rejects_bad_data_and_aba () =
+  fixture (fun keepers_dir anchor ->
+    let encoded=Current.program_anchor_evidence anchor |> Current.program_anchor_evidence_to_json in
+    let change key value=match encoded with
+      | `Assoc fields -> `Assoc (List.map (fun (name,held) -> name,(if name=key then value else held)) fields)
+      | _ -> fail "retained anchor fixture is not an object" in
+    Current.program_anchor_evidence_of_json (change "snapshot_bytes" (`String "{}")) |> refused;
+    Current.program_anchor_evidence_of_json (change "schema_version" (`Int 99)) |> refused;
+    let evidence=retained_anchor anchor in
+    ignore (rewrite ~keepers_dir [{a with Memory.first_seen=5.}] : Current.t);
+    ignore (rewrite ~keepers_dir [a] : Current.t);
+    Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> refused);
+  fixture (fun keepers_dir anchor ->
+    let evidence=retained_anchor anchor in
+    Current.with_program_reset ~keepers_dir ~keeper_id:keeper (fun () -> Ok ()) |> require;
+    Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> refused);
+  fixture (fun keepers_dir anchor ->
+    let evidence=retained_anchor anchor in
+    Fs_compat.save_file (journal ~keepers_dir) "";
+    Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> refused)
+
+let test_committed_program_actual_effect_and_later_retirement () = fixture @@ fun keepers_dir anchor ->
+  check bool "unexecuted transaction grants no commit evidence" true
+    (Current.read_committed_program ~keepers_dir ~keeper_id:keeper ~transaction_id:"ordered-publication" |> require=None);
+  let committed=publish ~keepers_dir ~anchor (program ()) |> require in
+  let proof=committed_program ~keepers_dir "ordered-publication" in
+  check bool "readback names the actual full program" true (proof.publication=committed.proof);
+  check int "readback names the actual one revision" committed.snapshot.revision proof.snapshot_revision;
+  check string "readback binds exact stored snapshot bytes" (Current.snapshot_sha256 committed.snapshot) proof.snapshot_sha256;
+  Current.confirm_committed_program proof |> require;
+  ignore (rewrite ~keepers_dir [extra] : Current.t);
+  (* Later retirement does not undo a completed transaction; inference anchors
+     remain more restrictive because their decisions have not yet committed. *)
+  Current.confirm_committed_program proof |> require;
+  let evidence=retained_anchor anchor in
+  Current.resume_program_anchor ~keepers_dir ~keeper_id:keeper evidence |> refused
+
+let test_committed_mixed_requires_both_actual_receipts () = List.iter (fun keep_atom -> fixture @@ fun keepers_dir anchor ->
+  let module Codec=Masc.Keeper_memory_os_current_range_codec in
+  let module Receipts=Masc.Keeper_memory_os_current_receipt_store in
+  let _,_,source,program,_=mixed_fixture () in
+  ignore (publish_mixed ~keepers_dir ~anchor ~source program |> require : Current.program_commit);
+  let proof=committed_program ~keepers_dir program.Program.transaction_id in
+  check int "Mixed effect has two actual committed receipts" 2 (List.length proof.receipts);
+  let rows,skipped=Codec.read_durable_range_receipts ~keepers_dir ~keeper_id:keeper |> require in
+  check int "receipt fixture is strictly decoded" 0 (List.length skipped);
+  let partial=List.filter (fun receipt -> match Receipts.receipt_range_id receipt with
+    | Range_types.Atom_range _ -> keep_atom
+    | Range_types.Official_range _ -> not keep_atom
+    | Range_types.Explicit_candidate _ | Explicit_candidate_with_recall _ -> false) rows in
+  Receipts.write_durable_range_receipts ~keepers_dir ~keeper_id:keeper partial |> require;
+  let before=Fs_compat.load_file (snapshot_path ~keepers_dir) in
+  Current.confirm_committed_program proof |> refused;
+  check string "missing component cannot rewrite Memory" before (Fs_compat.load_file (snapshot_path ~keepers_dir))) [false;true]
+
+let test_committed_program_rejects_gap_duplicate_and_reset () =
+  fixture (fun keepers_dir anchor ->
+    ignore (publish ~keepers_dir ~anchor (program ()) |> require : Current.program_commit);
+    let proof=committed_program ~keepers_dir "ordered-publication" in
+    let before=Fs_compat.load_file (journal ~keepers_dir) in
+    ignore (rewrite ~keepers_dir [extra] : Current.t);
+    Fs_compat.save_file (journal ~keepers_dir) before;
+    Current.confirm_committed_program proof |> refused);
+  fixture (fun keepers_dir anchor ->
+    ignore (publish ~keepers_dir ~anchor (program ()) |> require : Current.program_commit);
+    let proof=committed_program ~keepers_dir "ordered-publication" in
+    let path=journal ~keepers_dir in
+    let rows=Fs_compat.load_jsonl path in
+    let target=List.hd (List.rev rows) in
+    Fs_compat.save_file path (Fs_compat.load_file path ^ Yojson.Safe.to_string target ^ "\n");
+    Current.confirm_committed_program proof |> refused);
+  fixture (fun keepers_dir anchor ->
+    ignore (publish ~keepers_dir ~anchor (program ()) |> require : Current.program_commit);
+    let proof=committed_program ~keepers_dir "ordered-publication" in
+    Current.with_program_reset ~keepers_dir ~keeper_id:keeper (fun () -> Ok ()) |> require;
+    Current.confirm_committed_program proof |> refused)
+
 let () = run "keeper_memory_os_program_publication"
   ["atomic ordered publication",[
     test_case "one real revision, exact proof and original-only archive" `Quick test_single_commit_and_original_archive;
@@ -414,6 +643,17 @@ let () = run "keeper_memory_os_program_publication"
     test_case "committed journal failure and failed reset remain recoverable" `Quick test_committed_pending_journal_and_failed_reset;
     test_case "conflicting original-boundary proof preserves pending stores" `Quick test_pending_boundary_conflict_preserves_stores;
     test_case "quarantine and absent-Memory reset invalidate captures" `Quick test_quarantine_and_empty_incarnation];
+   "retained original basis and actual commit readback",[
+    test_case "exact retained bytes resume the original basis with unrelated growth" `Quick test_retained_anchor_roundtrip_and_unrelated_growth;
+    test_case "bad evidence, ABA, reset and lost prefix refuse" `Quick test_retained_anchor_rejects_bad_data_and_aba;
+    test_case "actual effect survives later valid retirement" `Quick test_committed_program_actual_effect_and_later_retirement;
+    test_case "Mixed readback requires both actual original receipts" `Quick test_committed_mixed_requires_both_actual_receipts;
+    test_case "journal gap, duplicate transaction and reset refuse" `Quick test_committed_program_rejects_gap_duplicate_and_reset];
+   "mixed original publication",[
+    test_case "interleaved full original publishes both boundaries once" `Quick test_mixed_exact_atomic_program;
+    test_case "changed complete manifest refuses before any effect" `Quick test_mixed_manifest_rejects_before_effect;
+    test_case "staged failure recovers both original boundaries" `Quick test_mixed_staged_recovery;
+    test_case "either missing original component keeps recovery pending" `Quick test_mixed_missing_component_preserves_pending];
    "hole publication and external recovery",[
     test_case "atom holes survive rollback before snapshot rename" `Quick
       (test_hole_publication_recovers_external_cursor Hole_atom Hole_before_rename);

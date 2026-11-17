@@ -9,8 +9,8 @@ let anchor_to_json anchor =
       `Assoc ["revision",`Int revision;"sha256",`String sha256]);
     "journal_length",`Int anchor.journal_length;"journal_sha256",`String anchor.journal_sha256]
 
-let boundary_to_json = function
-  | Atom_boundary boundary -> `Assoc ["kind",`String "atom";
+let atom_boundary_to_json (boundary : atom_boundary) =
+    `Assoc ["kind",`String "atom";
       "receipt_scope",`String boundary.receipt_scope;"trace_id",`String boundary.trace_id;
       "history_start_boundary_line",`Int boundary.history_start_boundary_line;
       "start_atom",`Int boundary.start_atom;"end_atom",`Int boundary.end_atom;
@@ -18,15 +18,26 @@ let boundary_to_json = function
       "end_boundary_line",`Int boundary.end_boundary_line;
       "boundary_lines_seen",`Int boundary.boundary_lines_seen;
       "checkpoint_sha256",`String boundary.checkpoint_sha256]
-  | Official_boundary boundary -> `Assoc ["kind",`String "official";
+
+let official_boundary_to_json (boundary : official_boundary) =
+    `Assoc ["kind",`String "official";
       "receipt_scope",`String boundary.receipt_scope;
       "after_boundary_line",`Int boundary.after_boundary_line;
       "turns",`List (List.map (fun (line,turn_ref,digest) ->
         `Assoc ["boundary_line",`Int line;"turn_ref",Ids.Turn_ref.to_yojson turn_ref;
           "messages_sha256",`String digest]) boundary.turns)]
 
+let boundary_to_json = function
+  | Atom_boundary boundary -> atom_boundary_to_json boundary
+  | Official_boundary boundary -> official_boundary_to_json boundary
+  | Mixed_boundary {atom;official} ->
+    `Assoc ["kind",`String "mixed";"atom",atom_boundary_to_json atom;
+      "official",official_boundary_to_json official]
+
 let to_json publication =
-  `Assoc ["schema_version",`Int 1;"execution",Program.execution_to_json publication.execution;
+  let version=match publication.boundary with Atom_boundary _ | Official_boundary _ -> 1
+    | Mixed_boundary _ -> 2 in
+  `Assoc ["schema_version",`Int version;"execution",Program.execution_to_json publication.execution;
     "captured",anchor_to_json publication.captured;
     "locked_prior",anchor_to_json publication.locked_prior;
     "boundary",boundary_to_json publication.boundary]
@@ -57,7 +68,10 @@ let anchor_of_json json =
   then Ok {epoch;snapshot;journal_length;journal_sha256}
   else Error "invalid program store anchor"
 
-let boundary_of_json json =
+let store_anchor_to_json = anchor_to_json
+let store_anchor_of_json = anchor_of_json
+
+let single_boundary_of_json json =
   let* fields = match json with `Assoc fields -> Ok fields | _ -> Error "source boundary is not an object" in
   let* kind = string "kind" fields in
   match kind with
@@ -104,27 +118,46 @@ let boundary_of_json json =
     else Error "invalid original official boundary"
   | _ -> Error "unknown program source boundary"
 
+let boundary_of_json json =
+  let* fields=match json with `Assoc fields -> Ok fields
+    | _ -> Error "source boundary is not an object" in
+  let* kind=string "kind" fields in
+  if kind<>"mixed" then single_boundary_of_json json else
+  let* fields=exact ["kind";"atom";"official"] json in
+  let* atom=single_boundary_of_json (List.assoc "atom" fields) in
+  let* official=single_boundary_of_json (List.assoc "official" fields) in
+  match atom,official with
+  | Atom_boundary atom,Official_boundary official ->
+    if atom.receipt_scope=official.receipt_scope then Ok (Mixed_boundary {atom;official})
+    else Error "Mixed program components belong to different source scopes"
+  | (Official_boundary _ | Mixed_boundary _),(Atom_boundary _ | Official_boundary _ | Mixed_boundary _)
+  | Atom_boundary _,(Atom_boundary _ | Mixed_boundary _) ->
+    Error "Mixed program requires one atom and one official boundary"
+
 let source_in_boundary boundary = function
   | Keeper_librarian_unread.Atom source ->
     (match boundary with
-     | Atom_boundary boundary -> source.trace_id = boundary.trace_id
+     | Atom_boundary boundary | Mixed_boundary {atom=boundary;official=_} -> source.trace_id = boundary.trace_id
        && source.history_start_boundary_line = boundary.history_start_boundary_line
        && source.atom >= boundary.start_atom && source.atom < boundary.end_atom
      | Official_boundary _ -> false)
   | Keeper_librarian_unread.Official_turn source ->
     (match boundary with
      | Atom_boundary _ -> false
-     | Official_boundary boundary -> List.exists (fun (line,turn_ref,_) ->
+     | Official_boundary boundary | Mixed_boundary {atom=_;official=boundary} -> List.exists (fun (line,turn_ref,_) ->
          line = source.boundary_line && Ids.Turn_ref.equal turn_ref source.turn_ref) boundary.turns)
 
 let of_json json =
   let* fields = exact ["schema_version";"execution";"captured";"locked_prior";"boundary"] json in
   let* version = integer "schema_version" fields in
-  let* () = if version=1 then Ok () else Error "unknown program publication schema" in
+  let* () = if version=1 || version=2 then Ok () else Error "unknown program publication schema" in
   let* execution = Program.execution_of_json (List.assoc "execution" fields) in
   let* captured = anchor_of_json (List.assoc "captured" fields) in
   let* locked_prior = anchor_of_json (List.assoc "locked_prior" fields) in
   let* boundary = boundary_of_json (List.assoc "boundary" fields) in
+  let* ()=if (match boundary with Atom_boundary _ | Official_boundary _ -> version=1
+      | Mixed_boundary _ -> version=2) then Ok ()
+    else Error "program publication schema differs from its source boundary" in
   let before_revision = function None -> 0 | Some (revision,_) -> revision in
   let captured_presence = match captured.snapshot, execution.program.initial_current with
     | None,None | Some _,Some _ -> true
@@ -141,6 +174,46 @@ let of_json json =
      || not (List.for_all (source_in_boundary boundary) execution.program.sources)
   then Error "program publication bindings conflict"
   else Ok {execution;captured;locked_prior;boundary}
+
+let require_receipt_ranges publication ranges =
+  let module R = Keeper_memory_os_current_types in
+  let atom_unread,official_unread=List.partition (fun (hole : Keeper_librarian_unread.t) ->
+    match hole.source with Atom _ -> true | Official_turn _ -> false)
+    publication.execution.program.unread in
+  let atom_matches (boundary : atom_boundary) (range : R.durable_range_id) =
+    boundary.receipt_scope=range.receipt_scope && boundary.trace_id=range.trace_id
+    && boundary.history_start_boundary_line=range.history_start_boundary_line
+    && boundary.start_atom=range.start_atom && boundary.end_atom=range.end_atom
+    && boundary.last_atom_digest=range.last_atom_digest
+    && boundary.end_boundary_line=range.end_boundary_line
+    && boundary.boundary_lines_seen=range.boundary_lines_seen
+    && range.unread_messages=atom_unread in
+  let official_matches (boundary : official_boundary) (range : R.official_range_id) =
+    boundary.receipt_scope=range.receipt_scope && boundary.after_boundary_line=range.after_boundary_line
+    && List.map (fun (line,turn_ref,_) -> line,turn_ref) boundary.turns=range.turns
+    && range.unread_messages=official_unread in
+  let matches = function
+    | R.Atom_range range ->
+      (match publication.boundary with
+       | Atom_boundary boundary | Mixed_boundary {atom=boundary;official=_} -> atom_matches boundary range
+       | Official_boundary _ -> false)
+    | R.Official_range range ->
+      (match publication.boundary with
+       | Official_boundary boundary | Mixed_boundary {atom=_;official=boundary} -> official_matches boundary range
+       | Atom_boundary _ -> false)
+    | R.Explicit_candidate _ | Explicit_candidate_with_recall _ -> false in
+  let counts=List.fold_left (fun (atoms,officials,foreign) -> function
+    | R.Atom_range _ -> atoms+1,officials,foreign
+    | R.Official_range _ -> atoms,officials+1,foreign
+    | R.Explicit_candidate _ | R.Explicit_candidate_with_recall _ -> atoms,officials,foreign+1)
+    (0,0,0) ranges in
+  let expected=match publication.boundary with
+    | Atom_boundary _ -> 1,0,0
+    | Official_boundary _ -> 0,1,0
+    | Mixed_boundary _ -> 1,1,0 in
+  let exact_kinds=counts=expected in
+  if exact_kinds && List.for_all matches ranges then Ok ()
+  else Error "ordered publication and original-boundary receipt set conflict; stores preserved"
 
 let touched_ids publication = Program.touched_ids publication.execution
 

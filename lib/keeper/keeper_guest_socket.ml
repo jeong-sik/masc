@@ -109,15 +109,16 @@ type inbox =
   }
 
 type read_failure =
-  | Stream_ended of string  (* the connection ended or failed *)
-  | Undecodable of string  (* the agent sent bytes this host cannot read *)
+  | Stream_ended
+  | Stream_failed of string
+  | Undecodable of Relay.decode_error
 
 (* The next chunk, reading more as needed. Only a read moves the undecoded
    rest, so a stream of small chunks costs one copy per read rather than one
    per chunk. *)
 let rec next_chunk flow buffer inbox =
   match Relay.decode inbox.bytes ~pos:inbox.pos with
-  | Error error -> Error (Undecodable (decode_error_to_string error))
+  | Error error -> Error (Undecodable error)
   | Ok (Relay.Chunk { chunk; consumed }) ->
     inbox.pos <- inbox.pos + consumed;
     Ok chunk
@@ -128,19 +129,69 @@ let rec next_chunk flow buffer inbox =
        inbox.bytes <- rest ^ Cstruct.to_string (Cstruct.sub buffer 0 read);
        inbox.pos <- 0;
        next_chunk flow buffer inbox
-     | exception End_of_file -> Error (Stream_ended "the connection ended")
-     | exception (Eio.Io _ as exn) -> Error (Stream_ended (Printexc.to_string exn)))
+     | exception End_of_file -> Error Stream_ended
+     | exception (Eio.Io _ as exn) -> Error (Stream_failed (Printexc.to_string exn)))
 ;;
 
-type connection_result =
+type 'a connection_result =
   | Retry of string
-  | Finished of outcome
+  | Finished of ('a, not_sent) result
 
 type ending =
   | Exit_code of int
   | Broke of string
 
 let finite_and_positive seconds = Float.is_finite seconds && seconds > 0.
+
+(* Each attempt owns its socket. Only a connection or hello failure can
+   retry; [exchange] runs once after an accepted hello and is never replayed.
+   Both connection and hello waits spend the original connect deadline. *)
+let with_accepted_connection ~net ~clock ~accept ~socket ~connect_deadline ~attempts exchange =
+  let connection ~remaining =
+    incr attempts;
+    Eio.Switch.run @@ fun sw ->
+    let connect () =
+      match Eio.Net.connect ~sw net (`Unix socket) with
+      | flow -> Ok (Ok flow)
+      | exception (Eio.Io _ as exn) -> Ok (Error (Printexc.to_string exn))
+      | exception (Unix.Unix_error _ as exn) -> Ok (Error (Printexc.to_string exn))
+    in
+    match Eio.Time.with_timeout clock remaining connect with
+    | Error `Timeout -> Retry "the connection wait exhausted the connect budget"
+    | Ok (Error detail) -> Retry detail
+    | Ok (Ok flow) ->
+      let buffer = Cstruct.create read_size in
+      let inbox = { bytes = ""; pos = 0 } in
+      let wait = Float.min hello_wait_sec (connect_deadline -. Eio.Time.now clock) in
+      if wait <= 0. then Retry "the connect budget ran out before the hello"
+      else
+        match Eio.Time.with_timeout clock wait (fun () -> Ok (next_chunk flow buffer inbox)) with
+        | Error `Timeout -> Retry (Printf.sprintf "no hello within %.1fs" wait)
+        | Ok (Error Stream_ended) -> Retry "the connection ended"
+        | Ok (Error (Stream_failed detail)) -> Retry detail
+        | Ok (Error (Undecodable error)) ->
+          Finished (Error (Incompatible ("the agent's first chunk: " ^ decode_error_to_string error)))
+        | Ok (Ok (Relay.Stdout _ | Relay.Stderr _ | Relay.Exit _)) ->
+          Finished (Error (Incompatible "the agent's first chunk was not a hello"))
+        | Ok (Ok (Relay.Hello hello)) ->
+          match accept hello with
+          | Some refusal -> Finished (Error (Refused refusal))
+          | None -> Finished (Ok (exchange flow buffer inbox ~attempts:!attempts))
+  in
+  let rec attempt last =
+    let remaining = connect_deadline -. Eio.Time.now clock in
+    if remaining <= 0. then Error (Unreachable { attempts = !attempts; last })
+    else
+      match connection ~remaining with
+      | Finished result -> result
+      | Retry reason ->
+        Eio.Time.sleep clock
+          (Float.min reconnect_pause_sec
+             (Float.max 0. (connect_deadline -. Eio.Time.now clock)));
+        attempt reason
+  in
+  attempt "no connection was tried"
+;;
 
 let run ~net ~clock ?on_stdout_chunk ?on_stderr_chunk ~accept ~socket ~connect_budget_sec
       ~budget_sec request =
@@ -169,9 +220,11 @@ let run ~net ~clock ?on_stdout_chunk ?on_stderr_chunk ~accept ~socket ~connect_b
         in
         let rec read () =
           match next_chunk flow buffer inbox with
-          | Error (Stream_ended reason) ->
+          | Error Stream_ended -> Broke "the stream ended before the exit chunk"
+          | Error (Stream_failed reason) ->
             Broke ("the stream ended before the exit chunk: " ^ reason)
-          | Error (Undecodable detail) -> Broke ("an undecodable chunk: " ^ detail)
+          | Error (Undecodable error) ->
+            Broke ("an undecodable chunk: " ^ decode_error_to_string error)
           | Ok (Relay.Stdout bytes) ->
             emit stdout on_stdout_chunk bytes;
             read ()
@@ -201,46 +254,223 @@ let run ~net ~clock ?on_stdout_chunk ?on_stderr_chunk ~accept ~socket ~connect_b
         | Error `Timeout ->
           Timed_out { stdout = rendered_stdout (); stderr = rendered_stderr () })
     in
-    (* One connection, in a switch of its own: whatever it opened is closed
-       when it ends, whether it failed, was refused or ran the request. *)
-    let connection ~attempts ~remaining =
-      Eio.Switch.run
-      @@ fun sw ->
-      match Eio.Net.connect ~sw net (`Unix socket) with
-      | exception (Eio.Io _ as exn) -> Retry (Printexc.to_string exn)
-      | exception (Unix.Unix_error _ as exn) ->
-        (* socket(2) itself, EMFILE for one, is outside Eio's error wrapping. *)
-        Retry (Printexc.to_string exn)
-      | flow ->
-        let buffer = Cstruct.create read_size in
-        let inbox = { bytes = ""; pos = 0 } in
-        let wait = Float.min hello_wait_sec remaining in
-        (match
-           Eio.Time.with_timeout clock wait (fun () -> Ok (next_chunk flow buffer inbox))
-         with
-         | Error `Timeout -> Retry (Printf.sprintf "no hello within %.1fs" wait)
-         | Ok (Error (Stream_ended reason)) -> Retry reason
-         | Ok (Error (Undecodable detail)) ->
-           Finished (Not_sent (Incompatible ("the agent's first chunk: " ^ detail)))
-         | Ok (Ok (Relay.Stdout _ | Relay.Stderr _ | Relay.Exit _)) ->
-           Finished (Not_sent (Incompatible "the agent's first chunk was not a hello"))
-         | Ok (Ok (Relay.Hello hello)) ->
-           (match accept hello with
-            | Some refusal -> Finished (Not_sent (Refused refusal))
-            | None -> Finished (exchange flow buffer inbox ~attempts:(attempts + 1))))
+    match with_accepted_connection ~net ~clock ~accept ~socket ~connect_deadline
+        ~attempts:(ref 0) exchange with
+    | Ok outcome -> outcome
+    | Error error -> Not_sent error)
+
+;;
+
+type stdio_error =
+  | Invalid_request of string
+  | Not_connected of not_sent
+  | Ended_before_exit
+  | Invalid_chunk of Relay.decode_error
+  | Unexpected_hello
+  | Read_failed of string
+  | Write_failed of string
+  | Shutdown_failed of string
+  | Budget_spent
+
+let stdio_error_to_string = function
+  | Invalid_request detail -> "invalid interactive request: " ^ detail
+  | Not_connected (Unreachable { attempts; last }) ->
+    Printf.sprintf "no accepted hello over %d connections: %s" attempts last
+  | Not_connected (Refused reason) -> refusal_to_string reason
+  | Not_connected (Incompatible detail) -> "incompatible guest relay: " ^ detail
+  | Not_connected (Bad_budget { connect_budget_sec; budget_sec }) ->
+    Printf.sprintf "invalid budgets (connect %g, whole %g)" connect_budget_sec budget_sec
+  | Ended_before_exit -> "the connection ended before the exit chunk"
+  | Invalid_chunk error -> "invalid guest chunk: " ^ decode_error_to_string error
+  | Unexpected_hello -> "the guest sent a second hello"
+  | Read_failed detail -> "reading the guest: " ^ detail
+  | Write_failed detail -> "writing the guest: " ^ detail
+  | Shutdown_failed detail -> "closing the guest input: " ^ detail
+  | Budget_spent -> "the interactive guest call exhausted its whole-call budget"
+;;
+
+type 'e stdio_failure =
+  | Dispatch_declined of 'e
+  | Transport_failed of stdio_error
+
+(* Only failures created at this transport's own I/O boundaries use this
+   exception. A user's Eio.Io exception is never classified as a socket error. *)
+exception Stdio_transport_error of stdio_error
+
+type stdout_piece = Bytes of string | End
+
+module Stdio_source = struct
+  type t =
+    { pieces : stdout_piece Eio.Stream.t
+    ; mutable current : string
+    ; mutable offset : int
+    ; mutable ended : bool
+    }
+
+  let read_methods = []
+
+  let rec single_read t buffer =
+    let remaining = String.length t.current - t.offset in
+    if remaining > 0 then (
+      let count = min remaining (Cstruct.length buffer) in
+      Cstruct.blit_from_string t.current t.offset buffer 0 count;
+      t.offset <- t.offset + count;
+      count)
+    else if t.ended then raise End_of_file
+    else (
+      match Eio.Stream.take t.pieces with
+      | End -> t.ended <- true; raise End_of_file
+      | Bytes bytes ->
+        t.current <- bytes;
+        t.offset <- 0;
+        single_read t buffer)
+end
+
+let validate_interactive_frame frame =
+  match Exec_ssh_protocol.decode_request frame with
+  | Error detail -> Error (Invalid_request detail)
+  | Ok (request, initial) ->
+    match request.v, request.stdin with
+    | Exec_ssh_protocol.V3, Exec_ssh_protocol.Interactive when initial = "" -> Ok ()
+    | Exec_ssh_protocol.V3, Exec_ssh_protocol.Interactive ->
+      Error (Invalid_request "interactive requests cannot carry an initial payload")
+    | Exec_ssh_protocol.V2, (Exec_ssh_protocol.Framed _ | Exec_ssh_protocol.Interactive)
+    | Exec_ssh_protocol.V3, Exec_ssh_protocol.Framed _ ->
+      Error (Invalid_request "the guest stdio port requires a V3 Interactive request")
+;;
+
+let with_stdio ~net ~clock ~expected ~socket ~connect_budget_sec ~budget_sec ~frame
+    ~on_dispatch ~on_request_write ~on_stderr_chunk ~on_stdout_tail callback =
+  match validate_interactive_frame frame with
+  | Error error -> Error (Transport_failed error)
+  | Ok () when not (finite_and_positive connect_budget_sec && finite_and_positive budget_sec) ->
+    Error (Transport_failed (Not_connected (Bad_budget { connect_budget_sec; budget_sec })))
+  | Ok () ->
+    let primary = ref None in
+    let transport_failure = ref None in
+    let fail_transport error =
+      transport_failure := Some error;
+      raise (Stdio_transport_error error)
     in
-    let rec attempt attempts last =
-      let remaining = connect_deadline -. Eio.Time.now clock in
-      if remaining <= 0.
-      then Not_sent (Unreachable { attempts; last })
-      else (
-        match connection ~attempts ~remaining with
-        | Finished outcome -> outcome
-        | Retry reason ->
-          Eio.Time.sleep clock
-            (Float.min reconnect_pause_sec
-               (Float.max 0. (connect_deadline -. Eio.Time.now clock)));
-          attempt (attempts + 1) reason)
+    let invoke f =
+      match f () with
+      | value -> value
+      | exception (Stdio_transport_error _ as exn) -> raise exn
+      | exception (Eio.Cancel.Cancelled _ as exn) when Option.is_some !transport_failure ->
+        raise exn
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        if Option.is_none !primary then primary := Some (exn, backtrace);
+        Printexc.raise_with_backtrace exn backtrace
     in
-    attempt 0 "no connection was tried")
+    let write_started = ref false in
+    let attempts = ref 0 in
+    let started = Eio.Time.now clock in
+    let deadline = started +. budget_sec in
+    let connect_deadline = Float.min deadline (started +. connect_budget_sec) in
+    let exchange flow buffer inbox ~attempts =
+      match invoke on_dispatch with
+      | Error error -> Error (Dispatch_declined error)
+      | Ok () ->
+        (* A rendezvous queue adds no independent retention budget. The
+           decoder holds at most one protocol chunk while the source holds
+           the remainder of the chunk currently borrowed by its reader. *)
+        let pieces = Eio.Stream.create 0 in
+        let source_state : Stdio_source.t =
+          { pieces; current = ""; offset = 0; ended = false }
+        in
+        let input = Eio.Resource.T (source_state, Eio.Flow.Pi.source (module Stdio_source)) in
+        let module Output = struct
+          type t = unit
+          let single_write () buffers =
+            match Eio.Flow.single_write flow buffers with
+            | count -> count
+            | exception (Eio.Io _ as exn) -> fail_transport (Write_failed (Printexc.to_string exn))
+          let copy () ~src = Eio.Flow.Pi.simple_copy ~single_write () ~src
+        end in
+        let output = Eio.Resource.T ((), Eio.Flow.Pi.sink (module Output)) in
+        let terminal, resolve_terminal = Eio.Promise.create () in
+        let returned, resolve_returned = Eio.Promise.create () in
+        let rec decode () =
+          match next_chunk flow buffer inbox with
+          | Error Stream_ended -> fail_transport Ended_before_exit
+          | Error (Stream_failed detail) -> fail_transport (Read_failed detail)
+          | Error (Undecodable error) -> fail_transport (Invalid_chunk error)
+          | Ok (Relay.Hello _) -> fail_transport Unexpected_hello
+          | Ok (Relay.Stdout bytes) ->
+            if bytes <> "" then Eio.Stream.add pieces (Bytes bytes);
+            decode ()
+          | Ok (Relay.Stderr bytes) -> invoke (fun () -> on_stderr_chunk bytes); decode ()
+          | Ok (Relay.Exit status) ->
+            Eio.Promise.resolve resolve_terminal status;
+            Eio.Stream.add pieces End
+        in
+        let drain_tail () =
+          let chunk = Cstruct.create Relay.max_payload_bytes in
+          let rec drain () =
+            match Eio.Flow.single_read input chunk with
+            | count ->
+              invoke (fun () -> on_stdout_tail (Cstruct.to_string ~len:count chunk));
+              drain ()
+            | exception End_of_file -> ()
+          in
+          drain ()
+        in
+        let use () =
+          let remaining = deadline -. Eio.Time.now clock in
+          if remaining <= 0. then
+            fail_transport (Not_connected (Unreachable
+              { attempts; last = "the budget ran out before request writing" }));
+          write_started := true;
+          invoke on_request_write;
+          Eio.Flow.copy_string
+            (String.make 1 (Relay.request_kind_byte Relay.Interactive_run) ^ frame) output;
+          let value = invoke (fun () -> callback ~input ~output) in
+          (match Eio.Promise.peek terminal with
+           | Some _ -> ()
+           | None ->
+             match Eio.Flow.shutdown flow `Send with
+             | () -> ()
+             | exception (Eio.Io _ as exn) ->
+               fail_transport (Shutdown_failed (Printexc.to_string exn)));
+          drain_tail ();
+          Eio.Promise.resolve resolve_returned value
+        in
+        (* Either failure cancels its sibling. In particular, a reader must
+           not remain blocked on the rendezvous after the callback fails. *)
+        Eio.Fiber.both use decode;
+        Ok (Eio.Promise.await returned, Eio.Promise.await terminal)
+    in
+    let run () =
+      let exchange () =
+        Ok (with_accepted_connection ~net ~clock ~accept:(refusal ~expected)
+          ~socket ~connect_deadline ~attempts exchange)
+      in
+      match Eio.Time.with_timeout clock budget_sec exchange with
+      | Ok (Ok result) -> result
+      | Ok (Error error) -> Error (Transport_failed (Not_connected error))
+      | Error `Timeout ->
+        let error =
+          if !write_started then Budget_spent
+          else Not_connected (Unreachable
+            { attempts = !attempts; last = "the whole-call budget ran out before request writing" })
+        in
+        Error (Transport_failed error)
+    in
+    match run () with
+    | result ->
+      (match !primary with
+       | None | Some (Eio.Cancel.Cancelled _, _) -> result
+       | Some (primary, backtrace) -> Printexc.raise_with_backtrace primary backtrace)
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      match !primary, !transport_failure with
+      | Some (primary, primary_backtrace), (None | Some _) ->
+        if exn != primary then
+          (match Log.Misc.warn "[guest stdio] secondary transport or cleanup failure: %s"
+              (Printexc.to_string exn) with
+           | () -> () | exception _reporter_failure -> ());
+        Printexc.raise_with_backtrace primary primary_backtrace
+      | None, Some error -> Error (Transport_failed error)
+      | None, None -> Printexc.raise_with_backtrace exn backtrace
 ;;

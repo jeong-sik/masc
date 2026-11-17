@@ -522,6 +522,228 @@ let test_a_budget_that_is_not_a_number_tries_nothing () =
   | Guest.Not_sent (Guest.Bad_budget _) -> ()
   | outcome -> fail (describe outcome)
 
+(* These peers script hello/exit facts to exercise the host boundary. They
+   do not prove a mounted read-only guest or a deployed VM. *)
+let interactive_frame () =
+  match Exec_ssh_protocol.encode_request
+      { Exec_ssh_protocol.v = V3; argv = ["/bin/cat"]; env = [];
+        cwd = "/work"; remote_root = "/work"; timeout_sec = 10.;
+        stdin = Interactive; mode = Effect; acceptance_frame = false }
+      ~stdin:"" with
+  | Ok bytes -> bytes
+  | Error detail -> fail detail
+
+let stdio_read input length =
+  let bytes = Cstruct.create length in
+  Eio.Flow.read_exact input bytes;
+  Cstruct.to_string bytes
+
+let read_interactive_request flow =
+  check string "interactive request kind" "I" (stdio_read flow 1);
+  let header = stdio_read flow 8 in
+  let bytes = header ^ stdio_read flow (Int64.to_int (String.get_int64_be header 0)) in
+  match Exec_ssh_protocol.decode_request bytes with
+  | Ok (request, initial) ->
+    check bool "version and input mode" true
+      (request.v = Exec_ssh_protocol.V3 && request.stdin = Exec_ssh_protocol.Interactive);
+    check string "no initial payload" "" initial
+  | Error _ -> fail "host sent an invalid frame"
+
+let stdio_call ~net ~clock ~socket ?(on_dispatch = fun () -> Ok ())
+    ?(on_request_write = ignore) ?(on_stderr_chunk = ignore)
+    ?(on_stdout_tail = ignore) ?(budget_sec = 5.) use =
+  Guest.with_stdio ~net ~clock ~expected:{Guest.uid=502;gid=20} ~socket
+    ~connect_budget_sec:1. ~budget_sec ~frame:(interactive_frame ())
+    ~on_dispatch ~on_request_write ~on_stderr_chunk ~on_stdout_tail use
+
+let test_stdio_checks_actual_hello_before_request () =
+  List.iter (fun answer ->
+    with_temp_dir @@ fun dir -> with_eio @@ fun ~net ~clock ->
+    Eio.Switch.run @@ fun sw ->
+    let socket = Filename.concat dir "refused.sock" in
+    let got_byte = ref false and dispatched = ref false and wrote = ref false in
+    let served = fake_agent ~sw ~net socket (fun peer ->
+      Eio.Flow.copy_string (Relay.encode (Relay.Hello answer)) peer;
+      match Eio.Flow.single_read peer (Cstruct.create 1) with
+      | _ -> got_byte := true
+      | exception End_of_file -> ()) in
+    let result = stdio_call ~net ~clock ~socket
+        ~on_dispatch:(fun () -> dispatched := true; Ok ())
+        ~on_request_write:(fun () -> wrote := true)
+        (fun ~input:_ ~output:_ -> fail "refused hello lent streams") in
+    let refusal = match Guest.refusal ~expected:{Guest.uid=502;gid=20} answer with
+      | Some refusal -> refusal
+      | None -> fail "fixture hello must be refused" in
+    check bool "actual hello refusal retained" true
+      (result = Error (Guest.Transport_failed (Guest.Not_connected (Guest.Refused refusal))));
+    Eio.Promise.await served;
+    check bool "no request byte" false !got_byte;
+    check bool "no owner dispatch" false !dispatched;
+    check bool "no attempted write" false !wrote)
+    [hello ~relay_version:1 (); hello ~uid:501 (); hello ~root_read_only:false ()]
+
+let test_stdio_decline_sends_no_request () =
+  with_temp_dir @@ fun dir -> with_eio @@ fun ~net ~clock ->
+  Eio.Switch.run @@ fun sw ->
+  let socket = Filename.concat dir "declined.sock" in
+  let wrote = ref false in
+  let served = fake_agent ~sw ~net socket (fun peer ->
+    Eio.Flow.copy_string (good_hello ()) peer;
+    match Eio.Flow.single_read peer (Cstruct.create 1) with
+    | _ -> fail "declined owner still sent bytes"
+    | exception End_of_file -> ()) in
+  let result = stdio_call ~net ~clock ~socket
+      ~on_dispatch:(fun () -> Error `Declined)
+      ~on_request_write:(fun () -> wrote := true)
+      (fun ~input:_ ~output:_ -> fail "declined owner lent streams") in
+  check bool "owner error retained" true (result = Error (Guest.Dispatch_declined `Declined));
+  Eio.Promise.await served;
+  check bool "write boundary was not crossed" false !wrote
+
+let test_stdio_duplex_drains_after_send_shutdown () =
+  with_temp_dir @@ fun dir -> with_eio @@ fun ~net ~clock ->
+  Eio.Switch.run @@ fun sw ->
+  let socket = Filename.concat dir "duplex.sock" in
+  let sent = ref false and half_closed = ref false in
+  let tail = Buffer.create 32 and stderr = Buffer.create 32 in
+  let served = fake_agent ~sw ~net socket (fun peer ->
+    let send chunk = Eio.Flow.copy_string (Relay.encode chunk) peer in
+    Eio.Flow.copy_string (good_hello ()) peer;
+    read_interactive_request peer;
+    check bool "owner observed before first request write" true !sent;
+    check string "dependent input one" "one\000" (stdio_read peer 4);
+    send (Relay.Stdout "first\255");
+    check string "dependent input two" "two\000" (stdio_read peer 4);
+    send (Relay.Stdout "second");
+    (match Eio.Flow.single_read peer (Cstruct.create 1) with
+     | _ -> fail "callback returned but input did not end"
+     | exception End_of_file -> half_closed := true);
+    send (Relay.Stdout "unread\000tail");
+    send (Relay.Stderr "stderr\255");
+    send (Relay.Exit (Relay.Signaled 15))) in
+  let result = stdio_call ~net ~clock ~socket
+      ~on_request_write:(fun () -> sent := true)
+      ~on_stdout_tail:(Buffer.add_string tail)
+      ~on_stderr_chunk:(Buffer.add_string stderr)
+      (fun ~input ~output ->
+        Eio.Flow.copy_string "one\000" output;
+        check string "first answer" "first\255" (stdio_read input 6);
+        Eio.Flow.copy_string "two\000" output;
+        check string "second answer" "second" (stdio_read input 6);
+        2) in
+  check bool "real relay status type retained" true
+    (result = Ok (2, Relay.Signaled 15));
+  Eio.Promise.await served;
+  check bool "send side closed while output remained open" true !half_closed;
+  check string "unread binary tail" "unread\000tail" (Buffer.contents tail);
+  check string "separate stderr" "stderr\255" (Buffer.contents stderr)
+
+let test_stdio_missing_exit_is_incomplete () =
+  with_temp_dir @@ fun dir -> with_eio @@ fun ~net ~clock ->
+  Eio.Switch.run @@ fun sw ->
+  let socket = Filename.concat dir "incomplete.sock" in
+  let (_ : unit Eio.Promise.t) = fake_agent ~sw ~net socket (fun peer ->
+    Eio.Flow.copy_string (good_hello ()) peer;
+    read_interactive_request peer;
+    Eio.Flow.copy_string (Relay.encode (Relay.Stdout "ready")) peer;
+    match Eio.Flow.single_read peer (Cstruct.create 1) with
+    | _ -> fail "input should be closed"
+    | exception End_of_file -> ()) in
+  let result = stdio_call ~net ~clock ~socket (fun ~input ~output:_ ->
+    check string "response before disconnect" "ready" (stdio_read input 5)) in
+  check bool "missing Exit remains incomplete" true
+    (result = Error (Guest.Transport_failed Guest.Ended_before_exit))
+
+type Eio.Exn.err += Stdio_callback_io_failure
+exception Stdio_cancel_requested
+
+let observe_peer_close peer closed =
+  match Eio.Flow.single_read peer (Cstruct.create 1) with
+  | _ -> fail "unexpected input before the owned connection closed"
+  | exception End_of_file -> closed := true
+  | exception Eio.Io _ -> closed := true
+
+let test_stdio_user_io_exception_stays_primary () =
+  with_temp_dir @@ fun dir -> with_eio @@ fun ~net ~clock ->
+  within ~clock 3. @@ fun () -> Eio.Switch.run @@ fun sw ->
+  let socket = Filename.concat dir "callback-io.sock" in
+  let closed = ref false and connections = ref 0 in
+  let served = fake_agent ~sw ~net socket (fun peer ->
+    incr connections;
+    Eio.Flow.copy_string (good_hello ()) peer;
+    read_interactive_request peer;
+    Eio.Flow.copy_string (Relay.encode (Relay.Stdout "ready")) peer;
+    observe_peer_close peer closed) in
+  let primary = Eio.Exn.create Stdio_callback_io_failure in
+  (match stdio_call ~net ~clock ~socket (fun ~input ~output:_ ->
+      check string "callback entered after real response" "ready" (stdio_read input 5);
+      raise primary) with
+   | Ok _ | Error _ -> fail "user Eio.Io became a returned transport outcome"
+   | exception error -> check bool "same user exception" true (error == primary));
+  Eio.Promise.await served;
+  check bool "callback failure closed the connection" true !closed;
+  check int "callback failure was not replayed" 1 !connections
+
+let test_stdio_cancellation_releases_blocked_decoder () =
+  with_temp_dir @@ fun dir -> with_eio @@ fun ~net ~clock ->
+  within ~clock 3. @@ fun () -> Eio.Switch.run @@ fun sw ->
+  let socket = Filename.concat dir "cancel-decoder.sock" in
+  let closed = ref false and cancelled = ref None in
+  let offered, resolve_offered = Eio.Promise.create () in
+  let waiting, resolve_waiting = Eio.Promise.create () in
+  let served = fake_agent ~sw ~net socket (fun peer ->
+    Eio.Flow.copy_string (good_hello ()) peer;
+    read_interactive_request peer;
+    Eio.Flow.copy_string (Relay.encode (Relay.Stdout "ready")) peer;
+    check string "callback is deliberately no longer reading" "go" (stdio_read peer 2);
+    Eio.Flow.copy_string (Relay.encode (Relay.Stdout "unread rendezvous bytes")) peer;
+    Eio.Promise.resolve resolve_offered ();
+    observe_peer_close peer closed) in
+  (match Eio.Cancel.sub (fun context ->
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.await waiting;
+        Eio.Promise.await offered;
+        (* Let the decoder deliver the offered chunk to the rendezvous;
+           the callback below never consumes it. Cancellation must release
+           both the waiting callback and its backpressured decoder. *)
+        Eio.Fiber.yield ();
+        Eio.Cancel.cancel context Stdio_cancel_requested);
+      stdio_call ~net ~clock ~socket (fun ~input ~output ->
+        check string "initial response" "ready" (stdio_read input 5);
+        Eio.Flow.copy_string "go" output;
+        Eio.Promise.resolve resolve_waiting ();
+        try Eio.Fiber.await_cancel () with
+        | Eio.Cancel.Cancelled _ as error -> cancelled := Some error; raise error)) with
+   | Ok _ | Error _ -> fail "explicit cancellation became a normal transport result"
+   | exception (Eio.Cancel.Cancelled _ as error) ->
+     check bool "callback cancellation remains the primary exception" true
+       (match !cancelled with Some original -> original == error | None -> false));
+  Eio.Promise.await served;
+  check bool "cancelled decoder released the owned connection" true !closed
+
+let test_stdio_budget_after_write_closes_connection () =
+  with_temp_dir @@ fun dir -> with_eio @@ fun ~net ~clock ->
+  within ~clock 3. @@ fun () -> Eio.Switch.run @@ fun sw ->
+  let socket = Filename.concat dir "budget-after-write.sock" in
+  let closed = ref false and writes = ref 0 and connections = ref 0 in
+  let served = fake_agent ~sw ~net socket (fun peer ->
+    incr connections;
+    Eio.Flow.copy_string (good_hello ()) peer;
+    read_interactive_request peer;
+    Eio.Flow.copy_string (Relay.encode (Relay.Stdout "ready")) peer;
+    observe_peer_close peer closed) in
+  let result = stdio_call ~net ~clock ~socket ~budget_sec:1.
+      ~on_request_write:(fun () -> incr writes)
+      (fun ~input ~output:_ ->
+        check string "request received a response before timeout" "ready" (stdio_read input 5);
+        Eio.Fiber.await_cancel ()) in
+  check bool "post-write timeout retains typed uncertainty" true
+    (result = Error (Guest.Transport_failed Guest.Budget_spent));
+  Eio.Promise.await served;
+  check int "one actual request write boundary" 1 !writes;
+  check int "timed-out request was not replayed" 1 !connections;
+  check bool "budget expiry closed the owned connection" true !closed
+
 let () =
   if Array.length Sys.argv <> 2 then failwith "expected the masc-exec-shim binary path";
   shim_binary := Unix.realpath Sys.argv.(1);
@@ -537,6 +759,14 @@ let () =
   run ~argv:[| Sys.argv.(0) |] "keeper guest socket"
     [ ( "hello"
       , [ test_case "the refusal checks every fact" `Quick test_refusal_checks_every_fact ] )
+    ; ( "interactive host boundary"
+      , [ test_case "actual hello precedes every request" `Quick test_stdio_checks_actual_hello_before_request
+        ; test_case "owner decline sends nothing" `Quick test_stdio_decline_sends_no_request
+        ; test_case "duplex closes send and drains exact output" `Quick test_stdio_duplex_drains_after_send_shutdown
+        ; test_case "missing Exit remains incomplete" `Quick test_stdio_missing_exit_is_incomplete
+        ; test_case "user Eio.Io remains primary" `Quick test_stdio_user_io_exception_stays_primary
+        ; test_case "cancellation releases backpressured decoder" `Quick test_stdio_cancellation_releases_blocked_decoder
+        ; test_case "post-write budget closes without replay" `Quick test_stdio_budget_after_write_closes_connection ] )
     ; ( "real shim"
       , [ test_case "a request reaches the shim" `Quick test_run_reaches_the_real_shim
         ; test_case "a probe reaches the shim" `Quick test_probe_reaches_the_real_shim

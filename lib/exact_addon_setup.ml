@@ -77,7 +77,8 @@ let build ~docker ~image id =
             In_channel.input_all
         with
         | _, Unix.WEXITED 0 -> Ok Built
-        | _, status -> Error (Image_not_built { image; reason = "docker build " ^ status_detail status })
+        | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ as status) ->
+          Error (Image_not_built { image; reason = "docker build " ^ status_detail status })
         | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
           Error (Image_not_built { image; reason = io_detail exn })
       in

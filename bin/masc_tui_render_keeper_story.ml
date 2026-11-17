@@ -117,7 +117,7 @@ let attention_word (row : Masc_tui_types.schedule_row) =
        | Queued | Queued_at _ -> Some "queued"
        | Missing -> Some "missing"
        | Turn_started -> Some "running"
-       | Turn_ended | Consumed | Settling _ -> Some "settling"
+       | Turn_ended _ | Consumed | Settling _ -> Some "settling"
        | Transferring _ -> Some "handoff"
        | Unknown _ -> Some "unknown"
        | No_occurrence | Completed | Cancelled _ -> None)

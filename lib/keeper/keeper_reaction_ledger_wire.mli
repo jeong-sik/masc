@@ -27,6 +27,23 @@ type reaction_kind =
 
 type reaction_decode_error = Unknown_reaction_kind of string
 
+(** How the turn a stimulus started ended, as recorded on its [turn_finished]
+    reaction (#32468). *)
+module Turn_disposition : sig
+  type t =
+    | Completed
+    | Checkpointed
+    | Input_required
+    | Cancelled
+    | Skipped
+    | Failed
+    | Rested
+
+  val all : t list
+  val to_string : t -> string
+  val of_string : string -> t option
+end
+
 val storage_generation : string
 val schema : string
 val digest_id : string -> string -> string
@@ -79,6 +96,8 @@ type row_quarantine_reason =
   | Quarantine_unknown_reaction_kind
   | Missing_reaction_source
   | Unknown_reaction_source
+  | Missing_turn_disposition
+  | Unknown_turn_disposition
   | Reaction_source_mismatch
   | Missing_reaction_post_id
   | Missing_reaction_stimulus_kind
@@ -118,9 +137,20 @@ type current_row =
       }
   | Current_reaction of
       { metadata : current_row_metadata
-      ; reaction_kind : reaction_kind
-      ; transition_receipt : Keeper_event_queue_state.transition_receipt option
+      ; reaction : reaction
       }
+
+(** Each reaction carries exactly its own payload: a finished turn its
+    disposition, a queue transition its receipt. *)
+and reaction =
+  | Turn_started_reaction
+  | Turn_finished_reaction of Turn_disposition.t
+  | Event_queue_ack_reaction of Keeper_event_queue_state.transition_receipt
+  | Event_queue_cancelled_reaction of Keeper_event_queue_state.transition_receipt
+
+val reaction_kind_of_reaction : reaction -> reaction_kind
+val transition_receipt_of_reaction :
+  reaction -> Keeper_event_queue_state.transition_receipt option
 
 val decode_current_row :
   keeper_name:string -> Yojson.Safe.t -> (current_row, row_quarantine_reason) result

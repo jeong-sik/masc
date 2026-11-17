@@ -9,7 +9,8 @@ type stage =
   | Queued_at of string
   | Missing
   | Turn_started
-  | Turn_ended
+  | Turn_ended of Keeper_reaction_ledger.Turn_disposition.t
+      (** The turn the wake started finished, with the turn's own disposition. *)
   | Consumed
   | Completed
   | Cancelled of string option

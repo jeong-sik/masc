@@ -42,6 +42,32 @@ let optional_nested_string_field json object_field field =
    recorded it. Absent reads as [None] and not as [false]: "the ledger did not
    say" and "the ledger said no" are different answers, and only one of them
    means something went wrong. *)
+(* [null] inside the evidence object is "no turn this wake started has
+   finished"; an absent evidence object is "the ledger did not say". The
+   disposition token is read with the ledger's closed decoder. *)
+let turn_finish_field json =
+  match Yojson.Safe.Util.member "keeper_reaction_evidence" json with
+  | `Null -> Ok None
+  | `Assoc _ as nested -> (
+      match Yojson.Safe.Util.member "turn_finished_disposition" nested with
+      | `Null -> Ok (Some Masc_tui_types.Schedule_turn_open)
+      | `String token -> (
+          match Masc.Keeper_reaction_ledger.Turn_disposition.of_string token with
+          | Some disposition -> Ok (Some (Masc_tui_types.Schedule_turn_finished disposition))
+          | None ->
+              Error
+                ("schedule keeper_reaction_evidence.turn_finished_disposition is unknown: "
+                 ^ token))
+      | value ->
+          Error
+            (Printf.sprintf
+               "schedule keeper_reaction_evidence.turn_finished_disposition must be a string or null: %s"
+               (Yojson.Safe.to_string value)))
+  | value ->
+      Error
+        (Printf.sprintf "schedule keeper_reaction_evidence must be an object or null: %s"
+           (Yojson.Safe.to_string value))
+
 let optional_nested_bool_field json object_field field =
   match Yojson.Safe.Util.member object_field json with
   | `Null -> Ok None
@@ -180,10 +206,7 @@ let decode_schedule_row json =
     optional_nested_string_field json "keeper_reaction_evidence"
       "stimulus_recorded_at_iso"
   in
-  let* sch_turn_finished =
-    optional_nested_bool_field json "keeper_reaction_evidence"
-      "turn_finished_seen"
-  in
+  let* sch_turn_finished = turn_finish_field json in
   let* sch_turn_finished_recorded_at_iso =
     optional_nested_string_field json "keeper_reaction_evidence"
       "turn_finished_recorded_at_iso"

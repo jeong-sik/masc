@@ -2948,6 +2948,11 @@ type board_vote_target =
     [sch_status] stays a string rather than a variant: the pane projects the
     store's own status vocabulary, and a status this build does not name
     renders as itself rather than disappearing. *)
+(** Whether the turn a wake started reached its boundary, and how it ended. *)
+type schedule_turn_finish =
+  | Schedule_turn_open
+  | Schedule_turn_finished of Masc.Keeper_reaction_ledger.Turn_disposition.t
+
 type schedule_row = {
   sch_schedule_id: string;
   sch_schedule_instance_id: string;
@@ -2995,10 +3000,10 @@ type schedule_row = {
           wake that was delivered from one that was acted on; the pane had
           only [sch_reaction_projection_status], a single word for all four
           of these at once. *)
-  sch_turn_finished: bool option;
-      (** Whether the turn the wake opened reached its boundary. A wake that
-          started a turn and one whose turn finished are different facts, and
-          the pane said only the first until the ledger recorded the second. *)
+  sch_turn_finished: schedule_turn_finish option;
+      (** Whether the turn the wake opened reached its boundary, with the
+          turn's own disposition. A wake that started a turn and one whose turn
+          finished are different facts, and how it finished is a third. *)
   sch_queue_ack_seen: bool option;
   sch_wake_cancelled: bool option;
   sch_stimulus_recorded_at_iso: string option;
@@ -3364,7 +3369,7 @@ let schedule_row_queue_keepers row =
         [ owner ]
     | Tui_schedule_observation.Transferring { owner; target } -> [ owner; target ]
     | Tui_schedule_observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
-    | Missing | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
+    | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Cancelled _
     | Unknown _ ->
         []
   in
@@ -3377,7 +3382,7 @@ let schedule_rows_read_queue_of ~keepers rows =
 
 let schedule_row_unsettled row =
   match row.sch_occurrence.Tui_schedule_observation.stage with
-  | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed
+  | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed
   | Settling _ | Transferring _ | Unknown _ | Dispatching -> true
   | No_occurrence | Dispatch_failed _ | Completed | Cancelled _ -> false
 ;;
@@ -3419,7 +3424,7 @@ let chat_schedule_entries ~keeper_name snapshot =
               | Ok Failed -> true
               | Ok (Scheduled | Due | Running | Succeeded | Cancelled | Expired) | Error _ -> false)
          | Dispatch_failed _ | Completed | Cancelled _ -> true
-         | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling _
+         | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Settling _
          | Transferring _ | Unknown _ -> false)
     |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
     |> List.take 1 in
@@ -27845,7 +27850,10 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
               | Queued_at owner -> Schedule_pending, ["최근 회차 인계"; plain owner ^ " 처리 대기"]
               | Missing -> Schedule_pending, ["최근 회차 큐 누락"; "실행 미확인"]
               | Turn_started -> Schedule_running, ["최근 회차 턴 시작 확인"]
-              | Turn_ended -> Schedule_pending, ["최근 회차 턴 종료"; "결과 확인 중"]
+              | Turn_ended disposition ->
+                Schedule_pending,
+                [ "최근 회차 턴 종료: " ^ Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
+                ; "결과 확인 중" ]
               | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 미확인"]
               | Completed -> Schedule_settled, ["최근 회차 턴 완료"]
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
@@ -27871,11 +27879,11 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
               | Some value -> value | None -> row.sch_schedule_id in
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
-              | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
+              | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
                          | Cancelled _ | Settling _ | Transferring _) ->
                   [fact ~label:"다음 예정 " Facts.Plain (local_minute at)]
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
-              | None, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
+              | None, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
                       | Cancelled _ | Settling _ | Transferring _) -> [] in
             List.map (fact (Facts.Reading tone)) occurrence
             @ hold

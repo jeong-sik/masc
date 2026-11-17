@@ -6,7 +6,7 @@ type stage =
   | Queued_at of string
   | Missing
   | Turn_started
-  | Turn_ended
+  | Turn_ended of Keeper_reaction_ledger.Turn_disposition.t
   | Consumed
   | Completed
   | Cancelled of string option
@@ -51,6 +51,18 @@ let optional_text name fields =
   | None | Some `Null -> Ok None
   | Some (`String value) -> Ok (Some value)
   | Some _ -> Error ("schedule observation " ^ name ^ " must be a string or null")
+
+(* The finished turn's disposition, read with the ledger's own closed decoder:
+   [null] is "no turn this stimulus started has finished", an unknown token is
+   a decode failure rather than a guess. *)
+let turn_finished_disposition fields =
+  let* token = optional_text "turn_finished_disposition" fields in
+  match token with
+  | None -> Ok None
+  | Some token ->
+    (match Keeper_reaction_ledger.Turn_disposition.of_string token with
+     | Some disposition -> Ok (Some disposition)
+     | None -> Error ("schedule observation turn_finished_disposition is unknown: " ^ token))
 
 let optional_bool name fields =
   match List.assoc_opt name fields with
@@ -97,7 +109,12 @@ let missing_stimulus_stage ~check_identity queue reaction =
         (match observed with
          | None | Some false -> no_progress rest
          | Some true -> Error "missing stimulus conflicts with reaction progress") in
-  no_progress [ "stimulus_seen"; "turn_started_seen"; "turn_finished_seen"
+  let* () =
+    let* finished = optional_text "turn_finished_disposition" reaction in
+    match finished with
+    | None -> Ok ()
+    | Some _ -> Error "missing stimulus conflicts with reaction progress" in
+  no_progress [ "stimulus_seen"; "turn_started_seen"
               ; "event_queue_ack_seen"; "event_queue_cancelled_seen" ]
 
 let decode row_json =
@@ -165,17 +182,19 @@ let decode row_json =
                              let* () = same "stimulus_id" stimulus reaction in
                              let* seen = optional_bool "stimulus_seen" reaction in
                              let* started = optional_bool "turn_started_seen" reaction in
-                             let* ended = optional_bool "turn_finished_seen" reaction in
+                             let* ended = turn_finished_disposition reaction in
                              let* acked = optional_bool "event_queue_ack_seen" reaction in
                              let* cancelled = optional_bool "event_queue_cancelled_seen" reaction in
                              if acked = Some true && cancelled = Some true then
                                Ok Terminal_conflict
                              else if cancelled = Some true then Ok (Observed (Cancelled None))
                              else if acked = Some true then Ok (Observed Consumed)
-                             else if ended = Some true then Ok (Observed Turn_ended)
-                             else if started = Some true then Ok (Observed Turn_started)
-                             else if seen = Some true then Ok (Observed Queued)
-                             else Ok Unobserved
+                             else (match ended with
+                               | Some disposition -> Ok (Observed (Turn_ended disposition))
+                               | None ->
+                                 if started = Some true then Ok (Observed Turn_started)
+                                 else if seen = Some true then Ok (Observed Queued)
+                                 else Ok Unobserved)
                          | _ -> Ok (Observed (Unknown "예약 반응 상태 미지원"))) in
                   (match queue with
                    | None -> Ok (reaction_stage reaction_observation)
@@ -204,16 +223,16 @@ let decode row_json =
                                (match result with
                                 | Completed -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                | Turn_started | Turn_ended | Consumed | Cancelled _ | Settling _
+                                | Turn_started | Turn_ended _ | Consumed | Cancelled _ | Settling _
                                 | Transferring _ | Unknown _ -> false)
                            | Observed Consumed ->
                                (match result with
                                 | Cancelled _ -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                | Turn_started | Turn_ended | Consumed | Completed
+                                | Turn_started | Turn_ended _ | Consumed | Completed
                                 | Settling _ | Transferring _ | Unknown _ -> false)
                            | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                      | Turn_started | Turn_ended | Completed | Settling _
+                                      | Turn_started | Turn_ended _ | Completed | Settling _
                                       | Transferring _ | Unknown _) -> false in
                          matched (if disagrees then Unknown "예약 종결 증거 충돌" else result) in
                        match reaction_observation with
@@ -225,7 +244,7 @@ let decode row_json =
                               if not (String.equal owner keeper) then matched (Queued_at owner)
                               else (match reaction_observation with
                                | Observed (Consumed | Cancelled _) -> matched (Unknown "예약 큐와 소비 증거 재확인 필요")
-                               | Observed (Unknown _ | Queued | Turn_started | Turn_ended as stage) -> matched stage
+                               | Observed (Unknown _ | Queued | Turn_started | Turn_ended _ as stage) -> matched stage
                                | Unobserved -> matched Queued
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌")
                                | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed
@@ -243,7 +262,7 @@ let decode row_json =
                               (match reaction_observation with
                                | Unobserved | Observed Queued -> matched Missing
                                | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed
-                                          | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Cancelled _
+                                          | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Cancelled _
                                           | Settling _ | Transferring _ | Unknown _) as stage) -> matched stage
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌"))
                           | "withdrawn_at_cancel" -> matched (Cancelled None)
@@ -254,6 +273,6 @@ let decode row_json =
       Ok { stage; due_at_iso }
 
 let needs_attention = function
-  | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended
+  | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _
   | Consumed | Settling _ | Transferring _ | Unknown _ -> true
   | No_occurrence | Completed | Cancelled _ -> false

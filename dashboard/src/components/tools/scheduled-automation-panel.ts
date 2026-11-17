@@ -582,7 +582,7 @@ function reactionEvidenceRows(
     { label: 'reaction_kind', value: evidence.reaction_kind },
     { label: 'stimulus_seen', value: evidence.stimulus_seen },
     { label: 'turn_started_seen', value: evidence.turn_started_seen },
-    { label: 'turn_finished_seen', value: evidence.turn_finished_seen },
+    { label: 'turn_finished', value: evidence.turn_finished_disposition },
     { label: 'event_queue_ack_seen', value: evidence.event_queue_ack_seen },
     { label: 'event_queue_cancelled_seen', value: evidence.event_queue_cancelled_seen },
     { label: 'matched_record_count', value: evidence.matched_record_count },

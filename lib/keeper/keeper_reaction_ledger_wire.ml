@@ -28,6 +28,34 @@ type reaction_kind =
 
 type reaction_decode_error = Unknown_reaction_kind of string
 
+module Turn_disposition = struct
+  type t =
+    | Completed
+    | Checkpointed
+    | Input_required
+    | Cancelled
+    | Skipped
+    | Failed
+    | Rested
+  [@@deriving enumerate]
+
+  let to_string = function
+    | Completed -> "completed"
+    | Checkpointed -> "checkpointed"
+    | Input_required -> "input_required"
+    | Cancelled -> "cancelled"
+    | Skipped -> "skipped"
+    | Failed -> "failed"
+    | Rested -> "rested"
+  ;;
+
+  (* Exact inverse over the enumerated constructors, so a new way for a turn
+     to end is spelled once in [to_string] and read back here unchanged. *)
+  let of_string token =
+    List.find_opt (fun candidate -> String.equal (to_string candidate) token) all
+  ;;
+end
+
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
 let storage_generation = "v8"
@@ -159,6 +187,8 @@ type row_quarantine_reason =
   | Quarantine_unknown_reaction_kind
   | Missing_reaction_source
   | Unknown_reaction_source
+  | Missing_turn_disposition
+  | Unknown_turn_disposition
   | Reaction_source_mismatch
   | Missing_reaction_post_id
   | Missing_reaction_stimulus_kind
@@ -206,6 +236,8 @@ let row_quarantine_reason_to_string = function
   | Quarantine_unknown_reaction_kind -> "unknown_reaction_kind"
   | Missing_reaction_source -> "missing_reaction_source"
   | Unknown_reaction_source -> "unknown_reaction_source"
+  | Missing_turn_disposition -> "missing_turn_disposition"
+  | Unknown_turn_disposition -> "unknown_turn_disposition"
   | Reaction_source_mismatch -> "reaction_source_mismatch"
   | Missing_reaction_post_id -> "missing_reaction_post_id"
   | Missing_reaction_stimulus_kind -> "missing_reaction_stimulus_kind"
@@ -238,9 +270,27 @@ type current_row =
       }
   | Current_reaction of
       { metadata : current_row_metadata
-      ; reaction_kind : reaction_kind
-      ; transition_receipt : Keeper_event_queue_state.transition_receipt option
+      ; reaction : reaction
       }
+
+and reaction =
+  | Turn_started_reaction
+  | Turn_finished_reaction of Turn_disposition.t
+  | Event_queue_ack_reaction of Keeper_event_queue_state.transition_receipt
+  | Event_queue_cancelled_reaction of Keeper_event_queue_state.transition_receipt
+
+let reaction_kind_of_reaction = function
+  | Turn_started_reaction -> Turn_started
+  | Turn_finished_reaction _ -> Turn_finished
+  | Event_queue_ack_reaction _ -> Event_queue_ack
+  | Event_queue_cancelled_reaction _ -> Event_queue_cancelled
+;;
+
+let transition_receipt_of_reaction = function
+  | Turn_started_reaction | Turn_finished_reaction _ -> None
+  | Event_queue_ack_reaction receipt | Event_queue_cancelled_reaction receipt ->
+    Some receipt
+;;
 
 let require_string reason field json =
   match string_field field json with
@@ -384,33 +434,45 @@ let decode_reaction_row ~event_id metadata reaction =
   let* reaction_post_id, reaction_stimulus_kind =
     decode_reaction_stimulus_reference reaction
   in
+  let turn_event_id_matches () =
+    String.equal
+      event_id
+      (metadata.stimulus_id ^ ":reaction:" ^ reaction_kind_to_string reaction_kind)
+  in
+  let transition_receipt () =
+    decode_transition_reaction
+      ~event_id
+      ~metadata
+      ~reaction_kind
+      ~reaction_post_id
+      ~reaction_stimulus_kind
+      reaction
+  in
+  let current reaction = Current_reaction { metadata; reaction } in
   match reaction_kind, source with
-  | (Turn_started | Turn_finished), "keeper_event_queue" ->
-    let expected_event_id =
-      metadata.stimulus_id ^ ":reaction:" ^ reaction_kind_to_string reaction_kind
-    in
-    if String.equal event_id expected_event_id
-    then Ok (Current_reaction { metadata; reaction_kind; transition_receipt = None })
+  | Turn_started, "keeper_event_queue" ->
+    if turn_event_id_matches ()
+    then Ok (current Turn_started_reaction)
     else Error Event_identity_mismatch
-  | (Event_queue_ack | Event_queue_cancelled),
-    "keeper_event_queue_transition" ->
-    let* transition_receipt =
-      decode_transition_reaction
-        ~event_id
-        ~metadata
-        ~reaction_kind
-        ~reaction_post_id
-        ~reaction_stimulus_kind
-        reaction
-    in
-    Ok
-      (Current_reaction
-         { metadata; reaction_kind; transition_receipt = Some transition_receipt })
+  | Turn_finished, "keeper_event_queue" ->
+    if not (turn_event_id_matches ())
+    then Error Event_identity_mismatch
+    else
+      let* token = require_string Missing_turn_disposition "disposition" reaction in
+      (match Turn_disposition.of_string token with
+       | Some disposition -> Ok (current (Turn_finished_reaction disposition))
+       | None -> Error Unknown_turn_disposition)
+  | Event_queue_ack, "keeper_event_queue_transition" ->
+    let* receipt = transition_receipt () in
+    Ok (current (Event_queue_ack_reaction receipt))
+  | Event_queue_cancelled, "keeper_event_queue_transition" ->
+    let* receipt = transition_receipt () in
+    Ok (current (Event_queue_cancelled_reaction receipt))
   | (Turn_started | Turn_finished), "keeper_event_queue_transition"
-  | (Event_queue_ack | Event_queue_cancelled),
-    "keeper_event_queue" -> Error Reaction_source_mismatch
-  | (Turn_started | Turn_finished | Event_queue_ack | Event_queue_cancelled),
-    _ -> Error Unknown_reaction_source
+  | (Event_queue_ack | Event_queue_cancelled), "keeper_event_queue" ->
+    Error Reaction_source_mismatch
+  | (Turn_started | Turn_finished | Event_queue_ack | Event_queue_cancelled), _ ->
+    Error Unknown_reaction_source
 ;;
 
 let decode_current_row ~keeper_name row =

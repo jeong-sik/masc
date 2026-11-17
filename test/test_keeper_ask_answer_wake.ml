@@ -1149,12 +1149,12 @@ let test_followup_reads_exact_source_without_waking () =
   let other = {source with post_id=Keeper_event_queue.ask_answered_post_id other_payload;
       payload=Keeper_event_queue.Ask_answered other_payload} in
   Keeper_reaction_ledger.record_event_queue_turn_finished ~base_path ~keeper_name
-    ~disposition:"test-boundary" other;
+    ~disposition:Keeper_reaction_ledger.Turn_disposition.Completed other;
   let unrelated = observe () |> Wake.followup_to_json in
   check bool "another question cannot supply a turn boundary" true
     (Yojson.Safe.Util.member "turn_finished_at" (Yojson.Safe.Util.member "reaction_evidence" unrelated) = `Null);
   Keeper_reaction_ledger.record_event_queue_turn_finished ~base_path ~keeper_name
-    ~disposition:"test-boundary" source;
+    ~disposition:Keeper_reaction_ledger.Turn_disposition.Completed source;
   let finished = observe () |> Wake.followup_to_json in
   check bool "the original turn boundary is observed" true
     (Yojson.Safe.Util.member "turn_finished_at" (Yojson.Safe.Util.member "reaction_evidence" finished) <> `Null);

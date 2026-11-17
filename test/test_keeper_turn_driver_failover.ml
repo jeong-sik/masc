@@ -1018,6 +1018,14 @@ let test_run_named_media_degrade_emits_typed_manifest () =
       Alcotest.(check int)
         "degraded rows: one per lane candidate" 2
         (List.length degraded_rows);
+      List.iter (fun (row : Runtime_manifest.t) ->
+        let decision = Runtime_manifest.public_projection_of_decision row.decision in
+        Alcotest.(check int) "unavailable audio is projected, not dropped" 0
+          (Yojson.Safe.Util.(decision |> member "media_dropped_total" |> to_int));
+        Alcotest.(check int) "one selected audio occurrence is projected" 1
+          (Yojson.Safe.Util.(decision |> member "media_projected_total" |> to_int));
+        Alcotest.(check string) "the projected occurrence keeps its modality"
+          "audio=1" (string_member "media_projected_counts" decision)) degraded_rows;
       Alcotest.(check string)
         "first degraded row names the head runtime"
         "primary.test_model"
@@ -1657,7 +1665,7 @@ let h5_request_ok = function
 let h5_request_projection ~runtime ~prepare_media =
   let base_path = h5_fresh_dir () in
   Driver.For_testing.prepare_request_media ~eager_images:[]
-    ~on_prepared:(fun ~required:_ -> ()) ~prepare_media
+    ~on_prepared:(fun ~required:_ ~projected:_ -> ()) ~prepare_media
     ~project_images:(Masc.Keeper_vision_ingest.fallback_projector
       ~base_path ~media_store:test_media_store ~keeper_name:"request-media" ()) runtime
 
@@ -1947,7 +1955,7 @@ let test_h5_request_freezes_image_references_before_prefix_comparison () =
     let images = [message ~role:Agent_core.Types.Tool
       [h5_nested_media [synthetic_image (); synthetic_image ()]]] in
     let prepare = Driver.For_testing.prepare_request_media ~eager_images:[]
-      ~on_prepared:(fun ~required:_ -> incr observations)
+      ~on_prepared:(fun ~required:_ ~projected:_ -> incr observations)
       ~prepare_media:(h5_preparer ~read:h5_reader_forbidden ())
       ~project_images:(fun ~mode blocks ->
         Alcotest.(check bool) "image preparation is store-only" true
@@ -1975,6 +1983,45 @@ let test_h5_request_freezes_image_references_before_prefix_comparison () =
      | Ok _ -> Alcotest.fail "comparison admitted an image outside the selected preparation");
     Alcotest.(check int) "unprepared image starts no storage or reader operation" 1 !image_calls)
 
+let test_h5_selected_projection_counts_are_observed_once () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime = Option.get (Runtime.get_runtime_by_id "primary.text_model") in
+    let calls = ref 0 in
+    let observations = ref [] in
+    let audio = h5_audio_block () in
+    let selected = [message ~role:Agent_core.Types.Tool
+      [h5_nested_media [audio; audio; h5_document_block ()]]] in
+    let prepare = Driver.For_testing.prepare_request_media ~eager_images:[]
+      ~on_prepared:(fun ~required ~projected ->
+        observations := (required, projected) :: !observations)
+      ~prepare_media:(h5_preparer
+        ~read:(h5_reader_counting calls ~answer:(Error h5_stt_failure)) ())
+      ~project_images:(fun ~mode:_ _ -> Alcotest.fail "no selected image to project")
+      runtime in
+    let project = match prepare selected with
+      | Ok project -> project
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+    Alcotest.(check int) "two distinct sources are prepared once each" 2 !calls;
+    (match !observations with
+     | [required, projected] ->
+       Alcotest.(check (list string)) "selection records required modalities"
+         ["audio"; "document"] (List.sort String.compare required);
+       Alcotest.(check (list (pair string int)))
+         "failed readings still project each selected occurrence"
+         ["audio", 2; "document", 1] (List.sort Stdlib.compare projected)
+     | [] | _ :: _ :: _ -> Alcotest.fail "selection must be observed exactly once");
+    let first = match project selected with
+      | Ok projected -> projected
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+    Alcotest.(check (list string)) "unavailable markers replace unsupported blocks"
+      [] (h5_required first);
+    Alcotest.(check bool) "prefix replay uses the captured projections" true
+      (project selected = Ok first);
+    ignore (project [] : (Agent_core.Types.message list, Agent_core.Error.t) result);
+    Alcotest.(check int) "prefix comparisons do not read again" 2 !calls;
+    Alcotest.(check int) "prefix comparisons do not emit more observations" 1
+      (List.length !observations))
+
 let test_h5_selected_goal_image_shares_one_captured_reading () =
   let base_path = h5_fresh_dir () in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
@@ -1988,7 +2035,7 @@ let test_h5_selected_goal_image_shares_one_captured_reading () =
       let goal = message ~role:Agent_core.Types.User [goal_image] in
       let calls = ref 0 in
       let prepare = Driver.For_testing.prepare_request_media ~eager_images:[goal_image]
-        ~on_prepared:(fun ~required:_ -> ())
+        ~on_prepared:(fun ~required:_ ~projected:_ -> ())
         ~prepare_media:(h5_preparer ~read:h5_reader_forbidden ())
         ~project_images:(Masc.Keeper_vision_ingest.For_testing.fallback_projector
           ~base_path ~media_store:test_media_store ~keeper_name:"selected-goal-image"
@@ -8359,6 +8406,9 @@ let () =
           Alcotest.test_case
             "H5 request freezes image references before prefix comparison" `Quick
             test_h5_request_freezes_image_references_before_prefix_comparison;
+          Alcotest.test_case
+            "H5 selected projection counts are observed once" `Quick
+            test_h5_selected_projection_counts_are_observed_once;
           Alcotest.test_case
             "H5 selected goal image shares one captured reading" `Quick
             test_h5_selected_goal_image_shares_one_captured_reading;

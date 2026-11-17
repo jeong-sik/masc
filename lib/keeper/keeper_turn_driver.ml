@@ -1921,10 +1921,9 @@ let prepare_request_media ~eager_images ~on_prepared ~prepare_media ~project_ima
       in
       let prepared = prepare_media ~needs_projection
           (List.map (fun (message : Agent_core.Types.message) -> message.content) messages) in
-      on_prepared ~required;
-      Ok (fun messages ->
-        let rec project reversed = function
-          | [] -> Ok (List.rev reversed)
+      let project messages =
+        let rec project reversed counts = function
+          | [] -> Ok (List.rev reversed, counts)
           | (message : Agent_core.Types.message) :: rest ->
              let open Result.Syntax in
              let* blocks = match images with
@@ -1932,13 +1931,19 @@ let prepare_request_media ~eager_images ~on_prepared ~prepare_media ~project_ima
                | Some images -> project_prepared_request_images images message.content
              in
              (match Keeper_media_reading.project_prepared prepared blocks with
-              | Ok (content, _) -> project ({ message with content } :: reversed) rest
+              | Ok (content, projected) ->
+                project ({ message with content } :: reversed)
+                  (Runtime_agent.merge_modality_counts counts projected) rest
               | Error error -> Error (Agent_core.Error.Config
                   (Agent_core.Error.InvalidConfig
                     { field = "media.prepared_projection"
                     ; detail = Keeper_media_reading.preparation_error_to_string error })))
         in
-        project [] messages)
+        project [] [] messages
+      in
+      let* _, projected = project messages in
+      on_prepared ~required ~projected;
+      Ok (fun messages -> Result.map fst (project messages))
 
 let retained_media_reader ?source_reader ~input_source projector =
   match (input_source : Keeper_request_source.t) with
@@ -3916,7 +3921,7 @@ let run_named
             ; prepare_request_media =
                 prepare_request_media
                   ~eager_images:eager_request_images
-                  ~on_prepared:(fun ~required ->
+                  ~on_prepared:(fun ~required ~projected ->
                     emit_runtime_manifest ~status:"prepared"
                       ~decision:(Keeper_runtime_manifest.with_payload_role
                         ~payload_role:Keeper_runtime_manifest.Operator_evidence
@@ -3924,7 +3929,14 @@ let run_named
                           [ "routing_action", `String "selected_request_media_prepared"
                           ; "runtime_id", `String attempt_runtime_id
                           ; "required_modalities", `List (List.map (fun kind -> `String kind) required) ]))
-                      Keeper_runtime_manifest.Runtime_routed)
+                      Keeper_runtime_manifest.Runtime_routed;
+                    match projected with
+                    | [] -> ()
+                    | _ :: _ ->
+                      emit_runtime_manifest ~status:"degraded"
+                        ~decision:(media_projection_manifest_decision
+                          ~runtime_id:attempt_runtime_id projected)
+                        Keeper_runtime_manifest.Runtime_routed)
                   ~prepare_media:(Keeper_media_reading.prepare
                     ?source_reader:(Option.map
                       (fun (readers : Keeper_media_reading.source_readers) -> readers.read)

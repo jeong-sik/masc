@@ -797,7 +797,7 @@ module For_testing : sig
 
   val prepare_request_media :
     eager_images:Agent_core.Types.content_block list ->
-    on_prepared:(required:string list -> unit) ->
+    on_prepared:(required:string list -> projected:(string * int) list -> unit) ->
     prepare_media:
       (needs_projection:(Keeper_media_reading.kind -> bool) ->
        Agent_core.Types.content_block list list -> Keeper_media_reading.prepared) ->
@@ -818,8 +818,11 @@ module For_testing : sig
       share its captured reading, including older history occurrences; other
       history and new tool images use [Store_only]. This may change historical
       prefix bytes, which signed-reasoning validation must still inspect.
-      [on_prepared] observes this selection once, after preparation; it does
-      not report a successful reading or provider dispatch.
+      [on_prepared] observes this selection once, after its first pure projection.
+      [projected] counts audio/document occurrences converted to readings or
+      explicit unavailable markers in that selected bundle, not distinct reader
+      calls. Repeated prefix projections neither observe again nor perform I/O.
+      The observation does not report a successful reading or provider dispatch.
       Only content blocks change; message occurrences
       and canonical history stay intact. *)
 

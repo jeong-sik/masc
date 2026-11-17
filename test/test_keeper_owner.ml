@@ -3994,6 +3994,40 @@ let test_cancel_ends_an_operation_restart_settlement_requeued () =
     (Option.is_none (Owner.claim_next_operation owner |> owner_ok))
 ;;
 
+(* The journal of an inherited call cannot be read. The operation ends there
+   and the Keeper's next operation runs. *)
+let test_restart_settlement_ends_an_operation_whose_journal_is_unreadable () =
+  with_native_restart_store "unreadable-journal" @@ fun path ->
+  let operation, call = seed_active_native_call ~path ~name:"unreadable-journal"
+      ~call_id:"019a0010-1000-7000-8000-000000000016" ~requeued:false in
+  Eio.Switch.run @@ fun sw ->
+  let owner = start_restart_owner ~sw ~path ~name:"unreadable-journal" in
+  let next = operation_id "kmsg-unreadable-journal-next" in
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:next ~source:operation_source
+    ~input:(operation_input "runs after the unread call")));
+  (match Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_exited
+           ~journal_terminal:(fun _ -> Error "journal unreadable") |> owner_ok with
+   | [failed] ->
+     check bool "the failed operation is the one whose journal was unreadable" true
+       (Chat_operation.Operation_id.equal failed.operation_id operation.operation_id)
+   | [] | _ :: _ :: _ -> fail "the settlement did not fail exactly the unread operation");
+  (match (Option.get (owner_ok (Owner.exact_operation owner operation.operation_id))).state with
+   | Chat_operation.Failed {failure={kind=Chat_operation.Interrupted_by_restart; _}; _} -> ()
+   | state -> fail ("the unread operation is " ^ Chat_operation.state_to_string state));
+  (match Owner.direct_native_call owner ~operation_id:operation.operation_id |> owner_ok with
+   | Keeper_native_call.Terminal_unacknowledged (closed, disposition) ->
+     check bool "the receipt names the unread call" true (Keeper_native_call.equal closed call);
+     check bool "the call is closed as an unknown effect" true
+       (disposition = Keeper_native_call.unknown_effect_disposition)
+   | Keeper_native_call.No_native_call | Keeper_native_call.Active _ ->
+     fail "the unread call was left open");
+  check_native_call_writer owner call
+    "a closed call was admitted as resumable" Owner.Writer_unproven;
+  let claimed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+  check bool "the Keeper's next operation is claimed" true
+    (Chat_operation.Operation_id.equal next claimed.operation_id)
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -7537,6 +7571,8 @@ let () =
             test_a_call_bound_before_settlement_stays_unproven
         ; test_case "cancel ends an operation restart settlement requeued" `Quick
             test_cancel_ends_an_operation_restart_settlement_requeued
+        ; test_case "restart settlement ends an operation whose journal is unreadable" `Quick
+            test_restart_settlement_ends_an_operation_whose_journal_is_unreadable
         ; test_case "operation id stop leaves an autonomous slot holder alone" `Quick
             test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone
         ; test_case

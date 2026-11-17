@@ -45,14 +45,17 @@ let run_phase ~child root =
       ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture"
       ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
   let workspace = Workspace.default_config root in
-  let session_dir = Filename.concat root session_id in
+  (* Where production keeps the session (keeper_turn.ml). Restart settlement
+     reads the call's journal under this root; a session kept anywhere else
+     looks to it like a journal it cannot read. *)
+  let session_dir = Filename.concat (Keeper_fs.session_store_path workspace) session_id in
   if child then (
     ignore (Workspace.init workspace ~agent_name:(Some "native-context-test"));
     let meta = Masc_test_deps.meta_of_json_fixture (`Assoc [
       "name", `String keeper_name; "trace_id", `String session_id;
       "activation_mode", `String "manual"]) |> require "meta" in
     Keeper_meta_store.replace_snapshot workspace meta |> require "persist meta";
-    Unix.mkdir session_dir 0o700);
+    Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 Eio.Path.(env#fs / session_dir));
   let settled, resolve_settled = Eio.Promise.create () in
   let execute ~sw:turn_sw ~keeper_name:_ ~claim =
     let operation : Keeper_chat_operation.t =

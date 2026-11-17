@@ -551,10 +551,14 @@ val settle_running_without_executor_with_journal_terminal :
     observation remains Running, outside the interrupted result and batch
     settlement. A supplied observation must still match the exact operation,
     execution revision and native call or the transaction refuses unchanged.
-    Some terminal records the disposition then fails as Interrupted_by_restart;
-    None or journal read Error preserves the existing resume behavior.
-    After_store_recovery retains its unknown-effect policy. The ungated wrapper
-    above keeps its original immediate requeue contract. *)
+    Some terminal records the disposition then fails as Interrupted_by_restart.
+    None puts the operation back in the queue with its call still Active. A
+    journal read Error closes the call with
+    {!Keeper_native_call.unknown_effect_disposition} and fails the operation
+    as Interrupted_by_restart: nothing read whether the call ended or what it
+    did, so it is not run again. After_store_recovery retains its
+    unknown-effect policy. The ungated wrapper above keeps its original
+    immediate requeue contract. *)
 val error_to_string : error -> string
 
 module For_testing : sig

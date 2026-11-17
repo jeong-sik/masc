@@ -141,17 +141,25 @@ let test_journal_gate_keeps_a_resumable_active_restart () = with_store @@ fun pa
        (Operation.Operation_id.equal resumed.operation_id operation.operation_id)
    | None -> fail "the resumable call was interrupted")
 
-let test_journal_gate_read_failure_keeps_resume () = with_store @@ fun path store operation ->
+(* Nothing read whether the call ended or what it did, so it is not run again:
+   the restart closes it as an unknown effect and fails the operation. *)
+let test_journal_gate_read_failure_ends_the_operation () = with_store @@ fun path store operation ->
   bind store operation (make_call operation);
   with_reopened path store @@ fun reopened ->
   let settled = Store.settle_running_without_executor_with_journal_terminal
     ~observations:(List.map (fun observed -> observed, Error "journal unreadable") (Store.running_native_calls reopened |> ok))
     ~cause:Store.After_process_restart reopened ~now:4. |> ok in
-  check int "an unreadable journal keeps the resumable call" 0 (List.length settled);
-  (match Store.claim_next reopened ~now:5. |> ok with
-   | Some resumed -> check bool "the same operation resumed" true
-       (Operation.Operation_id.equal resumed.operation_id operation.operation_id)
-   | None -> fail "a read failure interrupted the call")
+  check int "an unreadable journal interrupts the operation" 1 (List.length settled);
+  check bool "the unread call is closed as an unknown effect" true
+    (match read reopened with
+     | Native.Terminal_unacknowledged (_, disposition) -> disposition = Native.unknown_effect_disposition
+     | Native.No_native_call | Native.Active _ -> false);
+  check bool "the unread call is never dispatched" true (Option.is_none (Store.claim_next reopened ~now:5. |> ok));
+  (match Store.get reopened operation_id |> ok with
+   | Some {Operation.state=Operation.Failed {failure={kind=Operation.Interrupted_by_restart; _}; _}; _} -> ()
+   | _ -> fail "an unreadable journal settled differently");
+  check int "no Active call is left for the next start" 0
+    (List.length (Store.active_native_calls reopened |> ok))
 
 let test_active_calls_cover_running_and_requeued_operations () = with_store @@ fun _path store operation ->
   let listed () = List.map (fun (call : Native.t) -> call.call_id) (Store.active_native_calls store |> ok) in
@@ -1047,7 +1055,8 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "restart observation cannot cross Store handles" `Quick test_restart_observation_cannot_cross_store_handles;
   test_case "restart observation refuses duplicate operation identity" `Quick test_restart_observation_rejects_duplicate_identity;
   test_case "a call without a journal terminal keeps resuming" `Quick test_journal_gate_keeps_a_resumable_active_restart;
-  test_case "an unreadable journal keeps the resumable call" `Quick test_journal_gate_read_failure_keeps_resume;
+  test_case "an unreadable journal ends the operation as an unknown effect" `Quick
+    test_journal_gate_read_failure_ends_the_operation;
   test_case "unknown effect survives settlement and rejects retry" `Quick test_unknown_effect_survives_failure_and_rejects_retry;
   test_case "settling an active call is a precondition, not corruption" `Quick test_settling_an_active_call_is_a_precondition_not_corruption;
   test_case "unknown-effect receipt lets the operation fail but not complete" `Quick test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete;

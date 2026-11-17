@@ -3652,14 +3652,32 @@ let settle_running_without_executor_with_journal_terminal
     (* A running operation with a durable continuation goes back to Queued and
        resumes; one without is a request whose executor ended without
        committing it, and only those are failed below. An active native call
-       resumes only after a restart. After store recovery this process is the
-       one that ran the call, and the commit the outage refused may be the
-       Owner closing it, so it is closed as an unknown effect, not run again. *)
+       resumes only after a restart whose journal read found no terminal.
+       After store recovery this process is the one that ran the call, and the
+       commit the outage refused may be the Owner closing it, so it is closed
+       as an unknown effect, not run again. *)
     let* interrupted = List.fold_left (fun result (operation : Operation.t) ->
       let* interrupted = result in
       let* execution = direct_execution_with_db store.db operation in
       match Option.map (fun (execution : Semantic.t) -> execution.native_call) execution with
       | Some (Keeper_native_call.Active call) ->
+        (* Record the call's terminal first, then settle. Settling an active
+           receipt directly is refused with [Native_call_unsettled]: the
+           receipt must name its disposition before the semantic layer accepts
+           a terminal transition. *)
+        let close_and_fail ~disposition ~detail =
+          let* closed =
+            apply_direct_native_call_with_db store ~now ~operation_id:operation.operation_id
+              ~execution_digest:operation.execution_digest
+              (Keeper_native_call.Terminal
+                 { call_id = call.Keeper_native_call.call_id
+                 ; disposition
+                 })
+          in
+          let* next = semantic_transition ~now (Semantic.Settle (Semantic.Failed detail)) closed in
+          let* () = update_semantic store ~expected:closed next in
+          Ok (operation :: interrupted)
+        in
         (match cause with
          | After_process_restart ->
            (match List.find_opt (fun ((observed : restart_native_call), _) ->
@@ -3667,49 +3685,24 @@ let settle_running_without_executor_with_journal_terminal
             | None -> Ok interrupted
             | Some (_, Ok (Some disposition)) ->
               (* The Owner gate reports a journal terminal for this still-active
-                 receipt: record that terminal first, then settle. Settling an
-                 active receipt directly is refused with
-                 [Native_call_unsettled] — the receipt must name its
-                 disposition before the semantic layer accepts a terminal
-                 transition, the same path an After_store_recovery closure
-                 takes. Re-queueing would end in a bare string error on the
+                 receipt. Re-queueing would end in a bare string error on the
                  next dispatch instead of one interrupted settlement the
                  requester can read. *)
-              let* closed =
-                apply_direct_native_call_with_db store ~now ~operation_id:operation.operation_id
-                  ~execution_digest:operation.execution_digest
-                  (Keeper_native_call.Terminal
-                     { call_id = call.Keeper_native_call.call_id
-                     ; disposition
-                     })
-              in
-              let* next = semantic_transition ~now
-                (Semantic.Settle
-                   (Semantic.Failed (running_settlement_unacknowledged_detail cause)))
-                closed in
-              let* () = update_semantic store ~expected:closed next in
-              Ok (operation :: interrupted)
+              close_and_fail ~disposition
+                ~detail:(running_settlement_unacknowledged_detail cause)
             | Some (_, Ok None) ->
               requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
             | Some (_, Error _) ->
-              requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))
+              (* Nothing read whether the call ended or what it did, so it is
+                 not run again. Requeued, a claim that cannot read the journal
+                 either would leave the row Running with the call Active, and
+                 this Keeper would claim nothing else until the next restart. *)
+              close_and_fail ~disposition:Keeper_native_call.unknown_effect_disposition
+                ~detail:"the restart could not read the native call's journal; its effect is unknown")
          | After_store_recovery ->
-           let* closed =
-             apply_direct_native_call_with_db store ~now ~operation_id:operation.operation_id
-               ~execution_digest:operation.execution_digest
-               (Keeper_native_call.Terminal
-                  { call_id = call.Keeper_native_call.call_id
-                  ; disposition = Keeper_native_call.unknown_effect_disposition
-                  })
-           in
-           let* settled = semantic_transition ~now
-             (Semantic.Settle
-                (Semantic.Failed
-                   "the operation store became unavailable while its native call was active; \
-                    its effect is unknown"))
-             closed in
-           let* () = update_semantic store ~expected:closed settled in
-           Ok (operation :: interrupted))
+           close_and_fail ~disposition:Keeper_native_call.unknown_effect_disposition
+             ~detail:"the operation store became unavailable while its native call was active; \
+                      its effect is unknown")
       | Some (Keeper_native_call.Terminal_unacknowledged _) ->
         (* A committed Core terminal is not an Owner response receipt. Keep
            its identity, report interruption, and never resume its journal. *)

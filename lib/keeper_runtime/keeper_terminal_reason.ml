@@ -72,9 +72,13 @@ type t =
    [provider_error_] prefix tests in [of_wire], because two of the
    authorization wires begin with [api_error_] and two with [provider_error_]
    and would otherwise be claimed as generic provider failures. *)
+(* A turn whose Task Skill pins could not be resolved waits on the operator's
+   Skill configuration or source, the same action as an invalid runtime
+   configuration. The wire keeps which of the four reasons it was (#31131). *)
 let is_config_invalid_wire wire =
   String.equal wire "config_error"
   || String.starts_with ~prefix:wire_provider_error_invalid_config_prefix wire
+  || Option.is_some (Keeper_task_skill_resolution_error.kind_of_code wire)
 ;;
 
 let is_authorization_refused_wire wire =

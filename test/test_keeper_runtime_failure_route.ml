@@ -257,6 +257,24 @@ let test_unmodeled_empty_completion_is_visible_terminal () =
     (empty_completion_error Agent_core.Types.ContextWindowExceeded)
 ;;
 
+(* #31131: unresolved Task Skill pins wait on the operator's Skill
+   configuration, at either boundary. *)
+let test_task_skill_resolution_is_config_mismatch () =
+  let err =
+    Keeper_task_skill_resolution_error.core_error
+      (Keeper_task_skill_resolution_error.Skill_config_unreadable
+         { detail = "config.toml: permission denied" })
+  in
+  List.iter
+    (fun (label, route) ->
+       match route err with
+       | KFR.Exhausted_visible_alive { terminal = KFR.Config_mismatch } -> ()
+       | other ->
+         Alcotest.failf "%s: task skill resolution should exhaust config, got %s"
+           label (KFR.route_kind_label other))
+    [ "agent core", route_of_agent_core_error; "masc", route_of_masc_error ]
+;;
+
 let test_provider_config_judges () =
   match
     route_of_agent_core_error
@@ -987,6 +1005,8 @@ let () =
             `Quick
             test_api_quota_message_does_not_override_rate_limit
         ; Alcotest.test_case "overloaded is provider capacity" `Quick test_api_overloaded_is_provider_capacity
+        ; Alcotest.test_case "task skill resolution is config mismatch" `Quick
+            test_task_skill_resolution_is_config_mismatch
         ; Alcotest.test_case
             "server error typed variant"
             `Quick

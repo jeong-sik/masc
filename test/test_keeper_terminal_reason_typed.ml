@@ -115,6 +115,11 @@ let roundtrip_corpus =
   ; "provider_error"
     (* config/auth preflight (ranked above provider) *)
   ; "config_error"
+    (* Task Skill pins that could not be resolved (#31131) *)
+  ; "task_skill_config_rejected"
+  ; "task_skill_config_unreadable"
+  ; "task_skill_source_unreadable"
+  ; "task_skill_entry_unreadable"
   ; "api_error_auth"
     (* The wire the fleet actually sends. Every authorization refusal in the
        live receipts arrives as this spelling — 852 of the 2,419 turns the
@@ -218,7 +223,11 @@ let frozen_is_transient_provider_runtime_failure terminal_reason =
    Every wire in either set reaches [Disp_operator_action_required]; the
    reason is what tells them apart. *)
 let frozen_is_config_invalid_wire = function
-  | "config_error" -> true
+  | "config_error"
+  | "task_skill_config_rejected"
+  | "task_skill_config_unreadable"
+  | "task_skill_source_unreadable"
+  | "task_skill_entry_unreadable" -> true
   | wire -> String.starts_with ~prefix:"provider_error_invalid_config:" wire
 ;;
 
@@ -450,6 +459,10 @@ let () =
          (String.equal (Tr.to_wire classified) wire))
     [ "config_error", "config"
     ; "provider_error_invalid_config:multimodal_input", "config"
+    ; "task_skill_config_rejected", "config"
+    ; "task_skill_config_unreadable", "config"
+    ; "task_skill_source_unreadable", "config"
+    ; "task_skill_entry_unreadable", "config"
     ; "api_error_auth", "authorization"
     ; "api_error_authorization", "authorization"
     ; "provider_error_auth", "authorization"

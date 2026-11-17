@@ -36,6 +36,11 @@ retains committed output and host-owned evidence after either kind of removal.
 The package's `lane.toml` declares its image, command, contributions, resource
 envelope and optional `world` connections. A separate workspace declaration
 selects the package with `id`, `run_id`, `manifest_path` and `[binding]`.
+The masc server carries four Exact worker packages (`keeper-librarian`,
+`workspace-curator`, `candle-appraiser`, `hitl-auto-judge`). A declaration
+selects one of them with `package = "<name>"` instead of `manifest_path`, and
+`masc exact-addon-setup` writes its folder and builds its image
+([TOML installation](../docs/guides/lane-addon-toml.md)).
 
 Prepare the image in CI and load it into the container engine used by MASC (`[lane_addons] runtime = "docker" | "container"` in `server.toml`, defaulting to `"docker"`). Place the
 package where MASC can read its manifest and bundled Skills, then save the

@@ -4918,6 +4918,7 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
         let event=match event with
           | Progress.Refused {stage=Execution;_} -> Progress.Refused {stage=Execution;
               evidence=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Raised)}
+          | Approval_intended _ | Approval_wait_retained _
           | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
           | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
           | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _

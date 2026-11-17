@@ -28,7 +28,9 @@ type error =
   | Authority_changed of Change.t
   | Execution_pending of string
 type interruption = Cancelled | Raised
-let interruption_label = function Cancelled -> "review_cancelled" | Raised -> "review_raised"
+(* [interruption_of_label] still reads the interruption labels written by the
+   pre-§2.2 handler. New writers put the same strings in a run end
+   ([View.run_end_label]) so one decoder keeps reading both. *)
 let interruption_of_label = function
   | "review_cancelled" -> Ok Cancelled
   | "review_raised" -> Ok Raised
@@ -85,6 +87,8 @@ let run_of_json json =
   let* started_at = Json_util.require_field_float ~surface:scope "started_at" fields in
   if Float.is_finite started_at then Ok {run_id; started_at}
   else Error "Goal verifier run time must be finite"
+let goal_run (run : run_identity) : View.run_identity =
+  {View.run_id = run.run_id; View.started_at = run.started_at}
 
 (* The staged successor and its published owner name the very same complete
    request bytes. In particular, recovery cannot invent another run after the
@@ -423,16 +427,20 @@ let restored_receipt retained =
        let* receipt, _ = decode (refusal_receipt retained r) in Ok (Some receipt)
      | View.Before_dispatch, View.Authority_moved _ ->
        let* _ = moved_authority retained (View.evidence_json refusal) in Ok None
-     | (View.Execution,
-        (View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _))
+     | (View.Execution, View.Authority_moved _)
      | (View.Before_dispatch,
         (View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _)) ->
-       invalid "Goal refusal evidence does not match its refusal stage")
+       invalid "Goal refusal evidence does not match its refusal stage"
+     (* RFC-0489 §2.2/§2.6: a run that ended without a verdict, or an original
+        whose owner exited, left no receipt to restore. The next attempt starts
+        from that fact rather than from a judgment. *)
+     | (View.Execution, (View.Run_ended _ | View.Owner_exited _)) -> Ok None)
   | View.Subdividing (refusal,_) | View.Subdivided (refusal,_) ->
     (match refusal with
      | View.Reviewer_refused r ->
        let* receipt, _ = decode (refusal_receipt retained r) in Ok (Some receipt)
-     | View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _ ->
+     | View.Run_ended _ | View.Owner_exited _ -> Ok None
+     | View.Authority_moved _ ->
        invalid "Goal refusal evidence does not match its refusal stage")
   | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ -> Ok None
 
@@ -468,8 +476,13 @@ let observed_receipt retained =
     | View.Rejected {stage=View.Before_dispatch; _}
     | View.Subdividing (View.Authority_moved _, _)
     | View.Subdivided (View.Authority_moved _, _) -> Ok None
+    (* RFC-0489 §2.2/§2.6: a run that ended without a verdict has no receipt at
+       all, so asking for one is not an error — there is nothing to restore. *)
+    | View.Rejected {stage=View.Execution; refusal=(View.Run_ended _ | View.Owner_exited _)} ->
+      Ok None
     | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _
-    | View.Conflicted _ | View.Rejected {stage=View.Execution; _}
+    | View.Conflicted _
+    | View.Rejected {stage=View.Execution; refusal=(View.Reviewer_refused _ | View.Authority_moved _)}
     | View.Subdividing ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _)
     | View.Subdivided ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _) ->
       invalid "Goal terminal observation lacks its original receipt"
@@ -502,8 +515,18 @@ let tool_observations retained =
     | View.Subdivided (View.Authority_moved _, _) -> Ok []
     | View.Dispatch_pending (Some (View.Waiting _ | View.Absent _)) ->
       invalid "Goal dispatch observation has no retained tool receipt"
+    (* RFC-0489 §2.2: a run that ended without a verdict still carries the tool
+       observations it actually made, and the host publishes those with its
+       cancelled/raised outcome. *)
+    | View.Rejected {stage=View.Execution; refusal=View.Run_ended {run; tools; _}} ->
+      if run = goal_run retained.run then Ok tools
+      else invalid "Goal run end differs from its fixed run"
+    | View.Rejected {stage=View.Execution; refusal=View.Owner_exited {run}} ->
+      if run = goal_run retained.run then Ok []
+      else invalid "Goal owner-less dispatch differs from its fixed run"
     | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _
-    | View.Conflicted _ | View.Rejected {stage=View.Execution; _}
+    | View.Conflicted _
+    | View.Rejected {stage=View.Execution; refusal=(View.Reviewer_refused _ | View.Authority_moved _)}
     | View.Subdividing ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _)
     | View.Subdivided ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _) ->
       invalid "Goal terminal observation lacks its original receipt"
@@ -595,7 +618,14 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
          | None -> Ok ()
          | Some _ -> invalid "Goal explicit retry cannot follow a before-dispatch refusal")
       | View.Run_ended _ | View.Owner_exited _ ->
-        invalid "Goal refusal evidence does not match its refusal stage" in
+        (* RFC-0489 §2.4: a run that ended without a verdict left no receipt to
+           authenticate, so the successor is authorized by the parent's own
+           digest alone — no grant on the automatic path, the exact parent
+           digest on an explicit request. *)
+        (match explicit_retry with
+         | None -> Ok ()
+         | Some grant when grant.parent_digest = parent.record.request_digest -> Ok ()
+         | Some _ -> invalid "Goal explicit retry names another parent") in
     (* The parent's [Successor_intended] digest pins the child's whole body,
        so its lookup grants are the ones it was prepared with. Here the child
        must also ask the parent's question as its next attempt. *)
@@ -637,7 +667,9 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
         | (View.Subdividing _ | View.Subdivided _), _ -> Ok ()
         | (View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
           | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
-          | View.Rejected _), _ ->
+          | View.Rejected
+              {stage=_; refusal=(View.Reviewer_refused _ | View.Authority_moved _
+                                 | View.Run_ended _ | View.Owner_exited _)}), _ ->
           invalid "Goal successor parent changed during restoration"
       in
       let* child = restore_child parent successor in
@@ -651,8 +683,20 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
     | View.Rejected {stage=View.Execution; refusal=View.Reviewer_refused r}, [] ->
       let* retryable = retryable_refusal parent r in
       if not retryable || not automatic then Ok (Some parent) else allocate parent
-    | View.Rejected {stage=View.Execution;
-                     refusal=(View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _)}, [] ->
+    (* RFC-0489 §2.7. A run that ended without a verdict is not a reviewer
+       refusal: there is no receipt to authenticate and no retryable-refusal
+       classification to read. A cancelled or retention-failed run asks again on
+       the next scan; a raised exception does not, because the same input would
+       raise again on every scan, so only an explicit request asks again; an
+       original whose owner exited never produced a verdict at all. *)
+    | View.Rejected {stage=View.Execution; refusal=View.Run_ended {cause; _}}, [] ->
+      (match cause with
+       | View.Raised -> Ok (Some parent)
+       | View.Cancelled | View.Retention_failed ->
+         if not automatic then Ok (Some parent) else allocate parent)
+    | View.Rejected {stage=View.Execution; refusal=View.Owner_exited _}, [] ->
+      if not automatic then Ok (Some parent) else allocate parent
+    | View.Rejected {stage=View.Execution; refusal=View.Authority_moved _}, [] ->
       invalid "Goal refusal evidence does not match its refusal stage"
     | View.Rejected {stage=View.Before_dispatch; refusal}, [] ->
       (* HIGH-RISK-UNREVIEWED: the same question met another lookup authority
@@ -684,11 +728,9 @@ let request_retry ~authority ~store ~installation_id ~package_id ~goal_id ~reque
   match parent with
   | None -> Ok ()
   | Some parent ->
-    match View.view (Progress.phase (progress parent)) with
-    | View.Rejected {stage=View.Execution; refusal=View.Reviewer_refused r} ->
-      let* _ = retryable_refusal parent r in
-      let* _, disposition = decode (refusal_receipt parent r) in
-      let* () = decode (Verifier_review_owner.terminal_result disposition) in
+    (* The explicit request is the attempt: it stages the successor intent and
+       re-reads the frontier under the current authority. *)
+    let spawn parent =
       let* child = successor_of ~authority parent in
       let run = new_run () in
       let* _ = decode (summary child run) in
@@ -700,9 +742,19 @@ let request_retry ~authority ~store ~installation_id ~package_id ~goal_id ~reque
         |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
       let* _ = advance ~store parent (Progress.Successor_intended successor) in
       let* _ = select_frontier ~automatic:false ~authority ~store ~installation_id ~package_id
-        ~goal_id ~request_id ~new_run in Ok ()
-    | View.Rejected {stage=View.Execution;
-                     refusal=(View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _)} ->
+        ~goal_id ~request_id ~new_run in Ok () in
+    match View.view (Progress.phase (progress parent)) with
+    | View.Rejected {stage=View.Execution; refusal=View.Reviewer_refused r} ->
+      let* _ = retryable_refusal parent r in
+      let* _, disposition = decode (refusal_receipt parent r) in
+      let* () = decode (Verifier_review_owner.terminal_result disposition) in
+      spawn parent
+    (* RFC-0489 §2.7. A run that ended without a verdict has no receipt to
+       authenticate and is not a retryable reviewer refusal, so the explicit
+       request is what makes the next attempt. *)
+    | View.Rejected {stage=View.Execution; refusal=(View.Run_ended _ | View.Owner_exited _)} ->
+      spawn parent
+    | View.Rejected {stage=View.Execution; refusal=View.Authority_moved _} ->
       invalid "Goal refusal evidence does not match its refusal stage"
     | View.Dispatch_pending (Some (View.Outcome_unknown _)) ->
       Error (Execution_pending "The original Goal verification outcome is unknown; no new review was started. Inspect its original run.")
@@ -729,13 +781,34 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
               | None -> false)
           | _ -> false in
         if agrees then Ok () else invalid "Goal admission observation differs from its original receipt"
-      | View.Dispatch_pending _ -> Error (Execution_pending "Goal reviewer may have dispatched; no automatic replay")
+      | View.Dispatch_pending _ ->
+        (* RFC-0489 §2.6. A Goal review runs only under its claim and one claim
+           at a time owns a Goal, so an original that is already
+           [Dispatch_pending] here was left by an execution that ended: its
+           process died, its refusal write failed, or it never saw the reply.
+           Record the run as owner-less instead of waiting forever, so the next
+           frontier pass makes the next attempt under the current authority. *)
+        let* _ = advance ~store retained
+          (Progress.Refused {stage=Progress.Execution;
+             evidence=View.evidence_json (View.Owner_exited {run = goal_run retained.run})}) in
+        Error (Execution_pending
+          "The original Goal verification was left dispatched by an execution that ended without a verdict; the next attempt asks again.")
       | View.Rejected {stage=View.Before_dispatch; refusal} ->
         (* Already refused before dispatch: its next attempt asks again. *)
         let* change = moved_authority retained (View.evidence_json refusal) in
         Error (Authority_changed change)
+      (* RFC-0489 §2.2/§2.7. An original whose last run ended without a verdict
+         must not be dispatched again by an ordinary call: the next attempt is a
+         new original created from that run end, and a raised run waits for an
+         explicit request. *)
+      | View.Rejected {stage=View.Execution;
+                       refusal=(View.Run_ended _ | View.Owner_exited _)} ->
+        Error (Execution_pending
+          "The original Goal verification run ended without a verdict; the next attempt is recorded from that run end, not by replaying this one.")
       | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
-      | View.Rejected {stage=View.Execution; _} | View.Subdividing _ | View.Subdivided _ ->
+      | View.Rejected {stage=View.Execution;
+                       refusal=(View.Reviewer_refused _ | View.Authority_moved _)}
+      | View.Subdividing _ | View.Subdivided _ ->
         invalid "Goal review frontier changed" in
     let* () = if V.question_matches retained.original authority then Ok ()
       else Error Question_changed in
@@ -823,11 +896,20 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         match reload ~store retained with
         | Ok saved -> (match View.view (Progress.phase (progress saved)) with
             | View.Dispatch_pending _ ->
-              (match advance ~store saved (Progress.Execution_observed
-                (Progress.Outcome_unknown (`Assoc ["cause", `String (interruption_label cause);
-                  "run", run_json retained.run;
-                  "tools", `List (List.map Verification_run_registry.tool_observation_to_yojson (List.rev !tools));
-                  "observations", `List (List.rev !facts)]))) with
+              (* RFC-0489 §2.2. The run was dispatched and this process is
+                 leaving without a verdict: no receipt exists to authenticate,
+                 so the run itself is the refusal's subject. The next scan then
+                 decides from the §2.7 row — a cancellation asks again
+                 automatically, a raised exception waits for an explicit
+                 request. Writing [Outcome_unknown] here instead left the
+                 original on "no new review was started" forever. *)
+              let ended = View.Run_ended
+                { cause = (match cause with Cancelled -> View.Cancelled | Raised -> View.Raised)
+                ; run = goal_run retained.run
+                ; tools = List.rev !tools
+                ; observations = List.rev !facts } in
+              (match advance ~store saved
+                 (Progress.Refused {stage=Progress.Execution; evidence=View.evidence_json ended}) with
                | Ok _ -> ()
                | Error error -> Log.Misc.error "Goal interrupted review retention failed: %s" (error_to_string error))
             | View.Captured | View.Admission_wait _ | View.Judged _ | View.Committing _

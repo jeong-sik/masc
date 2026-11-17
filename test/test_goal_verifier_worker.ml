@@ -382,8 +382,41 @@ let test_unknown_and_cancellation_never_redispatch () =
       incr calls; raise (Eio.Cancel.Cancelled Exit)) (fun () ->
       (try ignore (run store retained authority); Alcotest.fail "Goal cancellation swallowed"
        with Eio.Cancel.Cancelled _ -> ());
-      (match run store retained authority with
-       | Error (W.Execution_pending _) -> () | Ok _ | Error _ -> Alcotest.fail "cancelled Goal original replayed");
+      (* RFC-0489 §2.2/§2.8. A cancelled run is recorded as a run end rather
+         than as a pending execution, so the original no longer stops on "no
+         new review was started" and the next scan is allowed to ask again. *)
+      let observation = checked (observe_request ~store ~installation_id ~package_id ~config authority) in
+      (match observation.observed_records with
+       | [observed] ->
+         (match P.phase (W.progress observed) with
+          | Rejected {stage=Execution; evidence} ->
+            (match evidence with
+             | `Assoc fields ->
+               Alcotest.(check bool) "cancellation is written as a run end" true
+                 (List.assoc_opt "cause" fields = Some (`String "review_cancelled"));
+               Alcotest.(check bool) "the run end names the run that was cancelled" true
+                 (match List.assoc_opt "run" fields with
+                  | Some (`Assoc run_fields) ->
+                    List.assoc_opt "run_id" run_fields
+                    = Some (`String (W.run_identity retained).run_id)
+                  | _ -> false)
+             | _ -> Alcotest.fail "run-end evidence is not an object")
+          | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+          | Commit_unknown _ | Finished _ | Conflicted _ | Subdividing _ | Subdivided _
+          | Rejected {stage=Before_dispatch; _} ->
+            Alcotest.fail "a cancelled run was not recorded as an execution refusal");
+         let authority_calls, current_authority = counted_authority authority in
+         let subject = V.subject (W.original retained) in
+         (match checked (W.frontier ~authority:current_authority ~store ~installation_id ~package_id
+             ~goal_id:subject.goal_id ~request_id:subject.request_id
+             ~new_run:(fun () ->
+               {run_id="goal-cancel-retry/" ^ subject.request_id; started_at=0.0})) with
+          | Some restored ->
+            Alcotest.(check int) "a cancelled run advances to the next attempt"
+              (V.attempt (W.original retained) + 1) (V.attempt (W.original restored))
+          | None -> Alcotest.fail "a cancelled run disappeared from the frontier");
+         Alcotest.(check int) "a cancelled run prepares its successor authority" 1 !authority_calls
+       | [] | _::_::_ -> Alcotest.fail "observation did not retain the cancelled original");
       Alcotest.(check int) "cancelled reviewer called once" 1 !calls))
 
 let test_pre_admission_repair_keeps_original () = with_workspace (fun config store _ ->

@@ -442,12 +442,33 @@ let test_progress_rewrites_only_the_record_and_its_size_ignores_the_request () =
 let test_an_interrupted_retain_is_completed_by_the_next_retain () = with_store (fun root store ->
   let bytes = Yojson.Safe.to_string (get (Lane_addon_action.canonical request)) in
   get (Store.save_tool_request_body store ~scope ~request_digest:(Store.digest bytes) bytes);
+  let body = body_path root in
+  let identity = Unix.stat body in
   Alcotest.(check bool) "a body no record names is not an original request" true
     (owned (Owner.load ~store ~scope ~request_id) = None);
   Alcotest.(check int) "and discovery does not list it" 0 (List.length (owned (Owner.discover ~store ~scope)));
-  save (body_path root) "changed before any record named it";
   owned (retain store);
-  Alcotest.check json "the next retain publishes the body its record names" request (load store).request)
+  Alcotest.check json "the next retain publishes the body its record names" request (load store).request;
+  Alcotest.(check string) "the next retain preserves the existing body bytes" bytes (Fs_compat.load_file body);
+  Alcotest.(check bool) "the next retain reuses the existing body file" true (same_file identity (Unix.stat body)))
+
+let test_a_corrupted_orphan_body_cannot_be_published_by_retain () = with_store (fun root store ->
+  let bytes = Yojson.Safe.to_string (get (Lane_addon_action.canonical request)) in
+  get (Store.save_tool_request_body store ~scope ~request_digest:(Store.digest bytes) bytes);
+  let body = body_path root in
+  let corrupted = "changed before any record named it" in
+  save body corrupted;
+  let identity = Unix.stat body in
+  (match retain store with
+   | Error (Owner.Store_unavailable _) -> ()
+   | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _)
+   | Ok () -> Alcotest.fail "retain did not refuse the conflicting orphan body as unavailable");
+  Alcotest.(check string) "a refused retain preserves the conflicting evidence" corrupted (Fs_compat.load_file body);
+  Alcotest.(check bool) "a refused retain never rewrites the orphan body" true (same_file identity (Unix.stat body));
+  Alcotest.(check bool) "a corrupted orphan publishes no owner record" true
+    (owned (Owner.load_record ~store ~scope ~request_id) = None);
+  Alcotest.(check int) "a corrupted orphan stays absent from discovery" 0
+    (List.length (owned (Owner.discover ~store ~scope))))
 
 let test_a_record_without_its_body_is_an_error_not_absence () = with_store (fun root store ->
   let pending = dispatch store in
@@ -777,5 +798,7 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
     test_progress_rewrites_only_the_record_and_its_size_ignores_the_request;
   Alcotest.test_case "the next retain completes an interrupted one" `Quick
     test_an_interrupted_retain_is_completed_by_the_next_retain;
+  Alcotest.test_case "a corrupted orphan body cannot be published by retain" `Quick
+    test_a_corrupted_orphan_body_cannot_be_published_by_retain;
   Alcotest.test_case "a record without its body is an error, not absence" `Quick
     test_a_record_without_its_body_is_an_error_not_absence]]

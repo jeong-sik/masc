@@ -337,7 +337,7 @@ let reading_of_records ~include_trace ~keeper_name (run_ref : Turn_record.raw_tr
      retention pruning both remove without restoring -- so a missing
      referenced file never comes back either.
 
-   Without the cache, every dashboard poll re-reads the same rejected
+   Without the cache, every dashboard read re-reads the same rejected
    file and replays the same warning (16,128 WARN/day on 2026-08-27 for
    the version arm; 4,157/hour on 2026-08-28 for the missing arm after
    the hard-cut cleanup deleted pre-cut keeper traces whose turn records

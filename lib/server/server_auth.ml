@@ -1445,7 +1445,7 @@ and with_token_permission_auth ~permission handler request reqd =
       | Ok agent_name ->
           (* The third wrapper that serves both halves, and the one the other
              two hid: /api/v1/dashboard/standalone-lanes is a GET on it.
-             Classified in the other two alone, a dashboard poll of this route
+             Classified in the other two alone, a dashboard read of this route
              kept spending the operation bucket. The tool wrappers above stay
              metered whatever the method -- a tool invocation is an operation
              because of what it does, not because of how it was addressed. *)

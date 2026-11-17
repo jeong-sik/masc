@@ -2213,7 +2213,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
              if not (Atomic.get terminal_pushed) then begin
                Atomic.set client_disconnected true;
                Log.Keeper.info
-                 "keeper_stream: client disconnected keeper=%s request_id=%s; request continues for polling"
+                 "keeper_stream: client disconnected keeper=%s request_id=%s; request continues, replay with since_seq"
                  payload.name request_id;
                signal_client_disconnected ()
              end));

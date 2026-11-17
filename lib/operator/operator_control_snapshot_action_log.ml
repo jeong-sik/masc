@@ -16,9 +16,9 @@
 
     [recent_actions_json] returns the trailing 20 entries via a
     bounded ring buffer ([Queue.t]) so the JSONL never materializes
-    as a full in-memory list — the operator dashboard polls this
-    surface frequently and a multi-MB log shouldn't penalize each
-    poll. *)
+    as a full in-memory list — the operator dashboard reads this
+    surface on each change and a multi-MB log shouldn't penalize each
+    read. *)
 
 type action_result_status =
   | ActionOk

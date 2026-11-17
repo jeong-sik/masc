@@ -348,8 +348,9 @@ let handle_read read state request reqd name =
   else
     let config = Mcp_server.workspace_config state in
     (* The body is hundreds of KB for a tool-heavy keeper (845 KB measured)
-       and the TUI polls it. Serialising it, hashing it for its validator
-       and compressing it held the main domain on every poll, so that runs
+       and the TUI re-reads it on each chat change. Serialising it, hashing
+       it for its validator and compressing it held the main domain on every
+       read, so that runs
        on the CPU executor. Responses in general stay on the serving fiber:
        the executor also runs dashboard computes, and a timeout or error
        answer must not wait behind them. *)

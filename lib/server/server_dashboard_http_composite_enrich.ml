@@ -57,7 +57,7 @@ let dashboard_keeper_composite_json
 ;;
 
 let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe.t =
-  (* Cache the fleet-composite envelope so each dashboard poll does not re-run
+  (* Cache the fleet-composite envelope so each dashboard read does not re-run
      the sequential [List.map] over keepers. Every [dashboard_keeper_composite_json]
      reaches [Keeper_secret_projection.dashboard_status_json], a synchronous disk
      read, so N keepers cost N reads per uncached hit. Mirrors the [/tool-stats]

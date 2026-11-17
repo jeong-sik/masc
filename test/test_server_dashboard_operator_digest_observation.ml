@@ -192,8 +192,6 @@ let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~c
   check string "canonical initial frame keeps its captured instance"
     (Server_observer_scope.instance_id scope)
     Yojson.Safe.Util.(initial |> member "observer_instance_id" |> to_string);
-  check bool "retention does not invent a healthy refresh interval" true
-    Yojson.Safe.Util.(initial |> member "retention" |> member "background_refresh_interval_s" = `Null);
   Eio.Fiber.yield ();
   check bool "healthy empty Digest has no timer" false (Eio_mock.Clock.try_advance mock_clock);
   let now = Time_compat.now () in

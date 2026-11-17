@@ -1662,8 +1662,6 @@ let test_operator_snapshot_default_route_exposes_provenance () =
   check string "generated_at_iso" "2026-05-15T00:00:00Z" (json |> member "generated_at_iso" |> to_string);
   check string "retention scope" "operator_snapshot" (json |> member "retention" |> member "scope" |> to_string);
   check string "retention store" "process_cache" (json |> member "retention" |> member "store_kind" |> to_string);
-  check bool "no healthy background refresh is advertised" true
-    (json |> member "retention" |> member "background_refresh_interval_s" = `Null);
   check string "query effective actor" "dashboard" (json |> member "query" |> member "effective_actor" |> to_string);
   check bool "query default summary" true (json |> member "query" |> member "default_summary_request" |> to_bool);
   check bool "query includes Keepers" true (json |> member "query" |> member "include_keepers" |> to_bool);

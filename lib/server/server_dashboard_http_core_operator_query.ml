@@ -14,7 +14,6 @@ let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
     ; "workspace_path", `String config.workspace_path
     ; "producer", `String producer
     ; "store_kind", `String "process_cache"
-    ; "background_refresh_interval_s", `Null
     ; "cache_policy", `String "default publication follows source changes and policy deadlines"
     ]
 ;;

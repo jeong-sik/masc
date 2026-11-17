@@ -175,7 +175,7 @@ let histogram_json h =
     ]
 ;;
 
-(* /health is polled by every TUI and was about 13 KB on 2026-10-28; a row
+(* /health is read by every TUI on each refresh and was about 13 KB on 2026-10-28; a row
    is about 180 bytes, so a lane reports the 20 names that ran longest in all
    rather than every name it has seen. Two reads of the list a measurement
    window apart still subtract for the names that matter. *)

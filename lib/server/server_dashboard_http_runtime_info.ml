@@ -2204,10 +2204,11 @@ let light_runtime_resolution_json ?profile_snapshot (config : Workspace.config) 
       @ fleet_fields )
 ;;
 
-(* 30-second TTL chosen to match the dashboard frontend's natural refresh
-   cadence (~3s polling × 10 = a fresh value at least every minute under
-   sustained load).  Tool inventory + usage stats rarely change inside a
-   30s window. The effective Keeper selector is part of the cache key because
+(* A source change invalidates this cache
+   ([Server_dashboard_snapshot_sources] calls [invalidate_dashboard_tools]),
+   and the dashboard re-reads on its [tools] observation. The 30-second TTL
+   is the bound for a change no source reports: tool inventory and usage
+   stats rarely change inside 30s. The effective Keeper selector is part of the cache key because
    those surfaces can differ. Schedule FSM projection is attached outside this
    cache because due/pending state is operationally time-sensitive. *)
 let dashboard_tools_cache_ttl_sec = 30.0

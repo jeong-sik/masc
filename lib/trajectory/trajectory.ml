@@ -991,7 +991,7 @@ let trajectory_line_of_json json =
    [Server_dashboard_http_keeper_api_trace.log_internal_history_skips]),
    which already tracks skipped/total and logs a per-read summary. Follow
    the same summarized-WARN pattern rather than warn-per-row: a busy trace
-   file re-read on every dashboard poll would otherwise flood the log the
+   file re-read on every dashboard read would otherwise flood the log the
    same way the internal_history path did before that fix. *)
 let log_trajectory_line_skips ~trace_id ~skipped ~total =
   if skipped > 0 then

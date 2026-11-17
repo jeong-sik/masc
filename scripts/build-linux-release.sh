@@ -288,6 +288,18 @@ docker exec "$container" bash -lc '
     echo "opam update failed (attempt $attempt); retrying in 15s"
     sleep 15
   done
+  # Which index this build resolved against. The refresh above makes the
+  # resolution depend on the day it ran, so the artifact needs the same
+  # provenance MASC_BUILD_COMMIT gives the source: without it, nobody can say
+  # which repository revision produced a published tree, and the same commit
+  # cannot be rebuilt deliberately. Recorded, not pinned -- pinning the revision
+  # here would freeze every future build to today's index.
+  #
+  # Not `--all`: the question is which repository this switch selected, not
+  # which ones are defined. Not fatal either: this line only describes what the
+  # step above did, and `set -e` would otherwise turn a failed query into a
+  # failed build after the dependency step had already succeeded.
+  opam repository list || echo "opam repository list failed; index revision unknown"
   for attempt in 1 2 3; do
     opam install ./masc.opam --deps-only --with-test --locked -y && break
     if [ "$attempt" -eq 3 ]; then echo "opam install failed after 3 attempts" >&2; exit 1; fi

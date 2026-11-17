@@ -8,6 +8,7 @@ let request_view ?continuity ?completed_arguments ?tools ~provider_config
     ~base_path ~turn_boundary ~materialize messages =
   match
     Driver.For_testing.request_view ?continuity ?completed_arguments ?tools
+      ~project_request_media:(fun messages -> Ok messages)
       ~provider_config ~measure_message_bytes
       ~measure_wire_bytes:(Masc.Keeper_model_input_wire_bytes.measurer ~config:provider_config)
       ~front ~accepted ~history_digest_at
@@ -15,7 +16,7 @@ let request_view ?continuity ?completed_arguments ?tools ~provider_config
       ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ())) messages
   with
   | Ok view -> view
-  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
 
 module Snapshot = Masc.Librarian_continuity_snapshot
 module Boundary = Masc.Keeper_turn_boundaries

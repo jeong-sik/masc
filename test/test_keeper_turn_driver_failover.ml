@@ -1617,6 +1617,249 @@ let test_h5_mixed_bundle_projects_all_media_and_restores_canonical_input () =
       Alcotest.(check bool) "next capable candidate receives original nested history" true
         (view.attempt_initial_messages = history && view.attempt_agent_core_checkpoint = Some checkpoint))
 
+(* Request-time H5 uses the same production callback and request builder as a
+   later Core round. The reader is controlled; no PDF/STT executable or provider
+   is called by these fixtures. The input remains canonical Stored history. *)
+let h5_request_result ?(first_atom = 0) ?to_wire ~runtime ~project messages =
+  let module Window = Runtime_model_input_tail_window in
+  let config = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"media-test" ~base_url:"http://127.0.0.1:1"
+      ~model_capabilities_override:(Runtime_agent.input_capabilities_of_runtime runtime) () in
+  let digest = match Window.atom_opening_digest messages first_atom with
+    | Some digest -> digest
+    | None -> Alcotest.fail "request fixture must select an existing atom" in
+  let to_wire = match to_wire with
+    | Some convert -> convert
+    | None -> Agent_core.History.to_wire_message test_media_store in
+  Try_provider.For_testing.request_view
+    ~provider_config:config
+    ~measure_message_bytes:(fun message -> String.length
+      (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
+    ~measure_wire_bytes:(Masc.Keeper_model_input_wire_bytes.measurer ~config)
+    ~front:(Some { Masc.Keeper_carried_front.first_atom
+      ; front = Model_input_front.At_atom digest; source = Masc.Keeper_carried_front.Ledger })
+    ~accepted:None ~history_digest_at:(Window.atom_opening_digest messages)
+    ~current_turn_results:Try_provider.Current_turn_verbatim ~base_path:""
+    ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
+    ~materialize:(fun ~pending:_ _ -> Alcotest.fail "verbatim request unexpectedly materialized demotion")
+    ~project_request_media:project ~to_wire messages
+
+let h5_request_ok = function
+  | Ok view -> view
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+
+let h5_request_projection ~runtime ~project_media =
+  let base_path = h5_fresh_dir () in
+  Driver.For_testing.project_request_media ~project_media
+    ~project_images:(Masc.Keeper_vision_ingest.fallback_projector
+      ~base_path ~media_store:test_media_store ~keeper_name:"request-media" ()) runtime
+
+let rec h5_nested_texts blocks =
+  List.concat_map (function
+    | Agent_core.Types.Text text -> [text]
+    | Agent_core.Types.ToolResult {content_blocks = Some blocks; _} -> h5_nested_texts blocks
+    | _ -> []) blocks
+
+let h5_request_text (messages : Agent_core.Types.message list) =
+  List.concat_map (fun (message : Agent_core.Types.message) -> h5_nested_texts message.content) messages
+  |> String.concat "\n"
+
+let h5_request_transmitted (view : Try_provider.request_view) =
+  match view.transmitted with
+  | Ok messages -> messages
+  | Error error -> Alcotest.fail
+      (Llm_provider.Reasoning_history_projection.error_to_string error)
+
+let h5_required messages =
+  Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
+    ~checkpoint_messages:[] ~initial_messages:messages ~goal_blocks:[]
+
+let test_h5_request_selected_and_new_tool_media_preserve_canonical_history () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let previous_pool = Domain_pool_ref.get () in
+  Eio.Switch.on_release sw (fun () -> match previous_pool with
+    | Some pool -> Domain_pool_ref.set pool
+    | None -> Domain_pool_ref.clear_for_tests ());
+  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 env#domain_mgr);
+  let owner_domain = Domain.self () in
+  Alcotest.(check bool) "CPU preview really uses another domain" true
+    (Try_provider.For_testing.offload_model_input_cpu Domain.self <> owner_domain);
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime = Option.get (Runtime.get_runtime_by_id "primary.text_model") in
+    let reads = ref [] in
+    let project_media = h5_projector ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes ->
+      Alcotest.(check bool) "reader remains on the owning Eio domain" true
+        (Domain.self () = owner_domain);
+      Eio.Fiber.yield ();
+      reads := bytes :: !reads;
+      Ok ("read: " ^ bytes)) () in
+    let dropped = message ~role:Agent_core.Types.User
+      [Agent_core.Types.document_block ~media_type:"application/pdf"
+        ~source:(stored_source ~media_type:"application/pdf" "discarded-document")] in
+    let selected = { (message ~role:Agent_core.Types.User [h5_document_block ()]) with
+      name = Some "request-owner"; metadata = ["source", `String "selected"] } in
+    let use = message [Agent_core.Types.ToolUse
+      {id = "media-tool"; name = "read_media"; input = `Assoc []}] in
+    let appended = { (message ~role:Agent_core.Types.Tool
+      [h5_nested_media [h5_audio_block (); h5_nested_media [h5_document_block ()]]]) with
+      tool_call_id = Some "media-tool"; metadata = ["source", `String "new-tool-result"] } in
+    let before_tool = [dropped; message [Agent_core.Types.Text "earlier answer"]; selected; use] in
+    let canonical = before_tool @ [appended] in
+    let saved = { (checkpoint_with_session_id "request-media") with messages = canonical } in
+    let checkpoint_json = Agent_core.Checkpoint.to_json saved in
+    let project = h5_request_projection ~runtime ~project_media in
+    ignore (h5_request_result ~first_atom:2 ~runtime ~project before_tool |> h5_request_ok);
+    Alcotest.(check (list string)) "only selected document is read before the tool result"
+      [h5_fact_document] !reads;
+    let view = h5_request_result ~first_atom:2 ~runtime ~project canonical |> h5_request_ok in
+    Alcotest.(check (list string)) "new audio is read once; old and dropped documents are not reread"
+      [h5_fact_audio; h5_fact_document] !reads;
+    Alcotest.(check bool) "canonical selected messages keep Stored blocks" true
+      (List.mem selected view.carried && List.mem appended view.carried);
+    let shape messages = List.map (fun (m : Agent_core.Types.message) -> {m with content = []}) messages in
+    Alcotest.(check bool) "projection keeps every message occurrence and its envelope" true
+      (shape view.carried = shape view.projected_carried);
+    (match (List.hd (List.rev view.projected_carried)).content with
+     | [Agent_core.Types.ToolResult outer] ->
+       Alcotest.(check string) "outer ID" "media-tool" outer.tool_use_id;
+       Alcotest.(check string) "original tool text" "original tool answer" outer.content;
+       Alcotest.(check bool) "tool outcome and JSON preserved" true
+         (outer.outcome = Agent_core.Types.Tool_succeeded
+          && outer.json = Some (`Assoc ["artifact", `String "media-artifact"]));
+       (match outer.content_blocks with
+        | Some [Agent_core.Types.Text audio;
+            Agent_core.Types.ToolResult { content_blocks = Some [Agent_core.Types.Text document]; _ }] ->
+          Alcotest.(check bool) "nested audio reading reaches request" true (contains ~needle:h5_fact_audio audio);
+          Alcotest.(check bool) "nested PDF reading reaches request" true (contains ~needle:h5_fact_document document)
+        | _ -> Alcotest.fail "nested request media did not become readings")
+     | _ -> Alcotest.fail "request projection removed tool-result structure");
+    Alcotest.(check (list string)) "selected dispatch contains no unsupported media" []
+      (h5_required view.projected_carried);
+    let transmitted = h5_request_transmitted view in
+    Alcotest.(check bool) "dialect sees both readings" true
+      (contains ~needle:h5_fact_audio (h5_request_text transmitted)
+       && contains ~needle:h5_fact_document (h5_request_text transmitted));
+    let resolved = Agent_core.History.to_wire_messages test_media_store view.projected_carried
+      |> Result.map_error (fun error -> Agent_core.Error.Media error) in
+    Alcotest.(check bool) "wire uses the same projected message value" true
+      (resolved = Ok view.carried_wire);
+    Alcotest.(check bool) "request did not rewrite canonical checkpoint bytes" true
+      (checkpoint_json = Agent_core.Checkpoint.to_json saved);
+    match Agent_core.Checkpoint.of_json checkpoint_json with
+    | Ok restored -> Alcotest.(check bool) "checkpoint codec retains original selected and appended media" true
+        (restored.messages = canonical)
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string error))
+
+let test_h5_request_recomputes_mixed_bundle_and_reuses_reading () =
+  with_runtime_config (h5_runtime_with_document_capabilities ~document:true ~multimodal:false)
+    (fun () ->
+      let frozen = Option.get (Runtime.get_runtime_by_id "media.test_model") in
+      let calls = ref 0 in
+      let project_media = h5_projector ~read:(h5_reader_counting calls ~answer:(Ok h5_fact_document)) () in
+      let project = h5_request_projection ~runtime:frozen ~project_media in
+      let to_wire = Try_provider.For_testing.memoize_wire_message test_media_store in
+      let document = message ~role:Agent_core.Types.User [h5_document_block ()] in
+      let original = [document] in
+      let native = h5_request_result ~runtime:frozen ~project ~to_wire original |> h5_request_ok in
+      Alcotest.(check int) "native document starts no reader" 0 !calls;
+      Alcotest.(check bool) "native document retained in request" true (native.projected_carried = original);
+      let mixed = original @ [message ~role:Agent_core.Types.Tool [h5_nested_media [synthetic_image ()]]] in
+      let first = h5_request_result ~runtime:frozen ~project ~to_wire mixed |> h5_request_ok in
+      let retry = h5_request_result ~runtime:frozen ~project ~to_wire mixed |> h5_request_ok in
+      Alcotest.(check int) "same walk reads document once across repeated requests" 1 !calls;
+      Alcotest.(check (list string)) "new image forces complete mixed bundle into text" []
+        (h5_required first.projected_carried);
+      Alcotest.(check bool) "old native wire cache cannot bypass the reading" true
+        (match (List.hd first.carried_wire).content with
+         | [Llm_provider.Types.Text reading] -> contains ~needle:h5_fact_document reading
+         | _ -> false);
+      Alcotest.(check bool) "retry keeps identical projected wire" true
+        (retry.carried_wire = first.carried_wire);
+      let native_again = h5_request_result ~runtime:frozen ~project ~to_wire original |> h5_request_ok in
+      Alcotest.(check bool) "request without image can use native document again" true
+        (native_again.projected_carried = original && native_again.carried_wire = native.carried_wire);
+      with_runtime_config (h5_runtime_with_document_capabilities ~document:true ~multimodal:true)
+        (fun () ->
+          let capable = Option.get (Runtime.get_runtime_by_id "media.test_model") in
+          let old = h5_request_result ~runtime:frozen ~project ~to_wire mixed |> h5_request_ok in
+          Alcotest.(check (list string)) "runtime reload cannot change an admitted request callback" []
+            (h5_required old.projected_carried);
+          let next_project = h5_request_projection ~runtime:capable
+            ~project_media:(fun ~needs_projection:_ _ -> Alcotest.fail "capable runtime read canonical media") in
+          let next = h5_request_result ~runtime:capable ~project:next_project ~to_wire mixed |> h5_request_ok in
+          Alcotest.(check bool) "next capable candidate receives original media" true
+            (next.projected_carried = mixed && next.carried = mixed)))
+
+let test_h5_request_preserves_typed_projection_and_store_failures () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime = Option.get (Runtime.get_runtime_by_id "primary.text_model") in
+    let source = [message ~role:Agent_core.Types.User [h5_document_block ()]] in
+    let refusal = Agent_core.Error.Config
+      (Agent_core.Error.InvalidConfig {field = "request-media"; detail = "refused by owner"}) in
+    let resolutions = ref 0 in
+    let to_wire message = incr resolutions; Agent_core.History.to_wire_message test_media_store message in
+    (match h5_request_result ~runtime ~project:(fun _ -> Error refusal) ~to_wire source with
+     | Error actual -> Alcotest.(check bool) "callback failure is not relabelled as missing media" true (actual == refusal)
+     | Ok _ -> Alcotest.fail "request admitted after typed projection refusal");
+    Alcotest.(check int) "refusal resolves no wire media" 0 !resolutions;
+    let missing = Agent_core.History.stored_of_raw "request-missing-bytes" in
+    let source = [message ~role:Agent_core.Types.User
+      [Agent_core.Types.Document {media_type = "application/pdf"; source = Agent_core.Types.Stored missing}]] in
+    match h5_request_result ~runtime ~project:(fun messages -> Ok messages) source with
+    | Error (Agent_core.Error.Media (Agent_core.History.Missing_bytes actual)) ->
+      Alcotest.(check bool) "store error retains missing attachment identity" true (actual = missing)
+    | Error error -> Alcotest.failf "unexpected request error: %s" (Agent_core.Error.to_string error)
+    | Ok _ -> Alcotest.fail "request admitted unavailable native bytes")
+
+let test_h5_request_missing_bytes_remain_explicit_without_a_reader_call () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime = Option.get (Runtime.get_runtime_by_id "primary.text_model") in
+    let missing = Agent_core.History.stored_of_raw "request-unavailable-pdf" in
+    let canonical = [message ~role:Agent_core.Types.Tool
+      [h5_nested_media [Agent_core.Types.Document {media_type = "application/pdf"; source = Agent_core.Types.Stored missing}]]] in
+    let project = h5_request_projection ~runtime
+      ~project_media:(h5_projector ~read:h5_reader_forbidden ()) in
+    let view = h5_request_result ~runtime ~project canonical |> h5_request_ok in
+    let text = h5_request_text (h5_request_transmitted view) in
+    Alcotest.(check bool) "missing attachment has explicit unavailable status and digest" true
+      (contains ~needle:"status=unavailable" text && contains ~needle:missing.sha256 text);
+    Alcotest.(check bool) "canonical missing reference remains available for later recovery" true
+      (view.carried = canonical))
+
+let test_h5_request_keeps_reasoning_provenance_refusal () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime = Option.get (Runtime.get_runtime_by_id "primary.text_model") in
+    let module Replay = Llm_provider.Reasoning_replay_contract in
+    let provenance = match Agent_core.Types.Reasoning_source.create
+      ~provider_kind:Llm_provider.Provider_config.OpenAI_compat
+      ~provider_instance:(Agent_core.Types.Reasoning_source.provider_instance
+        ~base_url:"http://127.0.0.1:1" ~request_path:"/v1/chat/completions")
+      ~canonical_model_id:"media-test"
+      ~replay_contract:{ Replay.replay_policy = Replay.No_replay
+        ; streaming = Replay.No_streaming_reasoning
+        ; output_wire = Replay.No_output_control; content_carrier = Canonical_blocks } with
+      | Ok source -> source
+      | Error detail -> Alcotest.fail detail in
+    let malformed = { (message ~role:Agent_core.Types.User [h5_document_block ()]) with
+      metadata = Agent_core.Types.Reasoning_source.metadata provenance } in
+    let calls = ref 0 in
+    let project = h5_request_projection ~runtime
+      ~project_media:(h5_projector ~read:(h5_reader_counting calls ~answer:(Ok h5_fact_document)) ()) in
+    let view = h5_request_result ~runtime ~project [malformed] |> h5_request_ok in
+    Alcotest.(check int) "request media was read before dialect inspection" 1 !calls;
+    Alcotest.(check bool) "declined request retains projected reading and original provenance" true
+      (contains ~needle:h5_fact_document (h5_request_text view.projected_carried)
+       && (List.hd view.projected_carried).metadata = malformed.metadata
+       && view.carried = [malformed]);
+    match view.transmitted with
+    | Error (Llm_provider.Reasoning_history_projection.Reasoning_source_on_non_assistant
+        {message_index = 0; _}) -> ()
+    | Error error -> Alcotest.failf "wrong typed provenance refusal: %s"
+        (Llm_provider.Reasoning_history_projection.error_to_string error)
+    | Ok _ -> Alcotest.fail "media projection bypassed malformed reasoning provenance")
+
 (* Per-attempt image projection: one image turn projected for the text-only
    candidate retains image references in the goal and the history and records
    delegation against that runtime; projected for the vision candidate it is
@@ -7828,6 +8071,21 @@ let () =
           Alcotest.test_case
             "H5 mixed bundles become text and restore canonical media" `Quick
             test_h5_mixed_bundle_projects_all_media_and_restores_canonical_input;
+          Alcotest.test_case
+            "H5 request reads selected and new tool media without changing canonical history" `Quick
+            test_h5_request_selected_and_new_tool_media_preserve_canonical_history;
+          Alcotest.test_case
+            "H5 request recomputes mixed bundles across repeated requests and runtime reload" `Quick
+            test_h5_request_recomputes_mixed_bundle_and_reuses_reading;
+          Alcotest.test_case
+            "H5 request preserves typed projection and media-store failures" `Quick
+            test_h5_request_preserves_typed_projection_and_store_failures;
+          Alcotest.test_case
+            "H5 request marks missing bytes unavailable without invoking the reader" `Quick
+            test_h5_request_missing_bytes_remain_explicit_without_a_reader_call;
+          Alcotest.test_case
+            "H5 request keeps typed reasoning provenance refusal" `Quick
+            test_h5_request_keeps_reasoning_provenance_refusal;
           Alcotest.test_case
             "H5-S2 document fact reaches text-only fallback"
             `Quick

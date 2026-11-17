@@ -63,6 +63,7 @@ let seed first_atom : Front.seed =
 
 let view ~front history : Try_provider.request_view =
   match Try_provider.For_testing.request_view
+    ~project_request_media:(fun messages -> Ok messages)
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ~provider_config
     ~measure_message_bytes
@@ -76,7 +77,7 @@ let view ~front history : Try_provider.request_view =
     history
   with
   | Ok view -> view
-  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
 ;;
 
 (* A turn that did not finish is read at the position it reached. The range it

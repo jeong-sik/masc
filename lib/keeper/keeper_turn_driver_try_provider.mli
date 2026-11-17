@@ -393,6 +393,16 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection
+  ; project_request_media : Keeper_history_projection.t
+        (** The selected runtime's request-only media view for [Keeper_history],
+            using the lane walk's shared readers. [Completion_review] retains
+            its separate admitted-evidence contract and does not call this.
+            Runs on the owning fiber after canonical
+            range selection and materialization, before media resolution and
+            dialect/prefix inspection. It preserves message order, roles,
+            origins, metadata and ToolResult identity/outcome/JSON, changing
+            only media blocks. Reader failures remain typed errors or explicit
+            unavailable readings; canonical history is unchanged. *)
   ; model_input_projection : Keeper_history_projection.t option
   ; stream_idle_timeout_s : float
   ; first_event_timeout_s : float
@@ -868,17 +878,21 @@ type request_view =
         (** The composed messages with their demotions materialized: what the
             ledger and the turn record count, in atoms of the checkpoint
             history. *)
+  ; projected_carried : Agent_core.Types.message list
+        (** [carried] after the request-only media projection. Message
+            occurrence coordinates are unchanged. Both wire resolution and
+            dialect/prefix inspection consume this same view. *)
   ; carried_wire : Agent_core.Llm_provider.Types.message list
-        (** [carried] with its media read back from the store, and nothing
-            else of the history. *)
+        (** [projected_carried] with its remaining media read back from the
+            store, and nothing else of the history. *)
   ; transmitted :
       ( Agent_core.Types.message list
         , Agent_core.Llm_provider.Reasoning_history_projection.error )
         result
-        (** The dialect's reasoning projection over [carried] alone, still in
-            history form, or why it declined; [carried] itself is then handed
-            over, and the backend, running the same projection, refuses the
-            request with its typed error. *)
+        (** The dialect's reasoning projection over [projected_carried], still
+            in history form, or why it declined; [projected_carried] itself is
+            then handed over, and the backend, running the same projection,
+            refuses the request with its typed error. *)
   }
 (** One request as {!For_testing.request_view} views it: composed in the
     durable vocabulary first, projected for the wire afterwards. The order
@@ -960,6 +974,14 @@ module For_testing : sig
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int
 
+  val memoize_wire_message :
+    Agent_core.History.media_store ->
+    Agent_core.Types.message ->
+    (Agent_core.Llm_provider.Types.message, Agent_core.History.media_error) result
+  (** The production attempt's wire conversion cache, keyed by the projected
+      message value. Reusing a canonical message in a different request media
+      view must not reuse its earlier wire body. *)
+
   val message_measurement_hash : Agent_core.Types.message -> int
 
   val aged_result_min_bytes : int
@@ -1009,11 +1031,15 @@ module For_testing : sig
       (pending:Keeper_model_input_demotion.pending list ->
        Agent_core.Types.message list ->
        Agent_core.Types.message list) ->
+    project_request_media:Keeper_history_projection.t ->
     to_wire:
       (Agent_core.Types.message ->
        (Agent_core.Llm_provider.Types.message, Agent_core.History.media_error) result) ->
     Agent_core.Types.message list ->
-    (request_view, Agent_core.History.media_error) result
+    (request_view, Agent_core.Error.t) result
+  (** Media projection failures retain their original typed error. Only
+      Stored-to-wire failures become [Agent_core.Error.Media]. The reader
+      callback runs on the owning fiber, outside CPU projection work. *)
 
   val current_turn_demotion : refused:composed -> demoted:composed -> int option
   (** Whether [demoted], the refused range composed under

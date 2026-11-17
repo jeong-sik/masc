@@ -1788,6 +1788,45 @@ let project_input_for_attempt
        ; attempt_replay_prefix_projection = replay_projection
        })
 
+(* A request can carry media that did not exist at candidate admission: tools
+   append their original results to Agent history before the next request.
+   Decide against the complete selected bundle each time, so a newly added
+   image also changes the treatment of a native document on a runtime that
+   cannot accept their mixed bundle. The walk owns both projectors and their
+   memo/deadline; this view never writes back into canonical history. *)
+let project_request_media ~project_media ~project_images
+    (runtime : Runtime_instance.t) : Keeper_history_projection.t =
+  fun messages ->
+    match
+      Runtime_agent.decide_modality_reroute_for_runtime_candidates
+        ~assigned:runtime ~candidates:[] ~initial_messages:messages []
+    with
+    | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ -> Ok messages
+    | Runtime_agent.No_capable_runtime { required } ->
+      let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+      let project_all_media =
+        Runtime_agent.requires_text_media_projection caps ~required
+      in
+      let needs_projection = function
+        | Keeper_media_reading.Audio ->
+          project_all_media || not caps.supports_audio_input
+        | Keeper_media_reading.Document ->
+          project_all_media || not caps.supports_document_input
+      in
+      Ok
+        (List.map
+           (fun (message : Agent_core.Types.message) ->
+             let blocks =
+               if caps.supports_image_input && not project_all_media
+               then message.content
+               else
+                 (project_images ~mode:Keeper_vision_ingest.Store_only
+                    message.content).Keeper_vision_ingest.blocks
+             in
+             let content, _ = project_media ~needs_projection blocks in
+             { message with content })
+           messages)
+
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
@@ -3729,6 +3768,10 @@ let run_named
             ; history_at_start
             ; argument_demotion_seed
             ; argument_replay_prefix = replay_prefix_projection
+            ; project_request_media =
+                project_request_media
+                  ~project_media:(Keeper_media_reading.project media_projector)
+                  ~project_images runtime
             ; request_input
             ; (* The range the newest response-observed turn record on this
                  history measured, whichever runtime ran it. Without a
@@ -3892,6 +3935,7 @@ module For_testing = struct
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
   let project_input_for_attempt = project_input_for_attempt
+  let project_request_media = project_request_media
 	  let attempt_inference_policy = attempt_inference_policy
   let attempt_runtime_candidates = attempt_runtime_candidates
 

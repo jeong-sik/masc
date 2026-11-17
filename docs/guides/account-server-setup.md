@@ -119,6 +119,12 @@ masc start --base-path <base> --port <port>
 
 - Export the secret variable of every login client in `config.json`. A
   `google` client names its own.
+- The server's `PATH` must include an absolute directory containing an
+  executable regular file named `true`. Without it, a person's subscription
+  sign-in returns 503 before starting the client. Look in the server log for
+  `Setup login was not prepared: PATH holds no true utility`. Correct `PATH`
+  in the shell that runs `masc restart`, restart the server, then retry the
+  connection.
 - The log says that the account server listens on the port and serves the
   routes of its own table, and no route that reads the credentials of a
   single user.

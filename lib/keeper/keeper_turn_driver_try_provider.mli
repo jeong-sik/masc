@@ -717,10 +717,9 @@ val this_turn_start_resend_sequence :
 
 type current_turn_results =
   | Current_turn_verbatim
-      (** No size refusal yet: every message goes as the range first sent it,
-          tool results and arguments of earlier turns included (RFC-0363
-          §3.4.1), but for the results {!finished_turn_results} asks to send
-          as markers. *)
+      (** No size refusal yet: this turn's results keep their ordinary form. Completed
+          turns may carry result markers and verified argument references
+          under {!finished_turn_results}. *)
   | Current_turn_demoted of { refused_atom_count : int }
       (** A request carrying [refused_atom_count] atoms was refused for size:
           every tool result below [refused_atom_count], and every completed
@@ -730,9 +729,10 @@ type current_turn_results =
 
 (** What a composition under {!Current_turn_verbatim} does with the tool
     results of turns that already ended, the atoms before the turn boundary.
-    Arguments are never part of it. The resend that answers a size refusal
-    ignores it: {!Current_turn_demoted} covers every result of the refused
-    request. *)
+    Marker projection also archives the supplied, independently bound completed
+    arguments. Unbound or signed-prefix-protected arguments stay verbatim.
+    The resend that answers a size refusal ignores it:
+    {!Current_turn_demoted} covers every result of the refused request. *)
 type finished_turn_results =
   | Finished_turns_verbatim
       (** Every result goes as the range first sent it (RFC-0363 §3.4.1). *)
@@ -868,7 +868,7 @@ type composed =
     RFC-0363 demotion over every atom up to the refused request's end, then
     the carried range from where {!choose_range_start} opens it (§13.4,
     §13.6). Under {!Current_turn_verbatim} nothing the range already sent is
-    rewritten but the results {!Finished_turns_as_markers} asks for. Nothing
+    rewritten but the results and verified arguments {!Finished_turns_as_markers} asks for. Nothing
     here measures the request against a limit. *)
 
 type request_view =

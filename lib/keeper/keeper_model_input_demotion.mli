@@ -12,8 +12,8 @@
     Substitution reduces body bytes inside that range without adding or removing
     atoms. Every substitution rewrites a message a provider may already hold in
     its prompt cache, so the keeper's agent_core assembly asks for it in two
-    places only: the results of turns that already ended, once each, on the
-    first request after their turn ended (RFC-tool-results-age-out-of-context,
+    places only: the results and verified arguments of turns that already
+    ended, once each, on the first request after their turn ended (RFC-tool-results-age-out-of-context,
     an exception to RFC-0363 §3.4.1), and every result of the resend that
     answers a size refusal.
 

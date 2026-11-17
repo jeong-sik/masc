@@ -130,8 +130,24 @@ let record_with_clock ~activation_clock ~config ~keeper_name ~trace_id (activati
          turned a repeat into [Invocation_id_collision]. The key already
          matched the recorded activation, so the recorded time stands and the
          remaining fields decide whether this is the same frame or a real
-         collision. *)
+         collision.
+
+         A composition's [execution_id] is minted per invocation attempt
+         ([Keeper_tool_call_log.invocation_execution_id]), so the same
+         tool_use_id invoked again carries a fresh one while naming the same
+         Skill. Like the clock, it is not what the activation is: the recorded
+         execution id stands and the rest of the frame still has to match. *)
       let expected = {activation with activated_at=existing.activated_at} in
+      let expected =
+        match existing.invocation, expected.invocation with
+        | Composition_invocation recorded, Composition_invocation candidate ->
+          {expected with
+           invocation=
+             Composition_invocation
+               {candidate with execution_id=recorded.execution_id}}
+        | (Instruction_invocation _ | Nested_composition_invocation _), _ -> expected
+        | Composition_invocation _, _ -> expected
+      in
       ignore activation_clock;
       if Yojson.Safe.equal (activation_to_yojson (recorded_part existing))
           (activation_to_yojson (recorded_part expected))

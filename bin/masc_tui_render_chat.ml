@@ -1384,55 +1384,39 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
                | Keeper_chat_transcript.Outcome_unrecorded ) as outcome) ->
               tool_outcome_tone outcome
         in
-        let styled_prefix =
-          Printf.sprintf "%s%s%s %s%s%s · %s%s%s"
-            tone marker (tool_reopen ()) (Theme.tool_origin ()) name (tool_reopen ())
-            tone status (tool_reopen ())
-        in
-        (* A prefix wider than the line continues on the next row. The result
-           preview is a body and stays one clipped row: beside the prefix when
-           the line leaves it room, otherwise under it. *)
-        let prefix_cells = Message_layout.display_width prefix in
+        (* The marker, the name and the status are laid out as the chat's
+           other facts are (RFC tui-one-screen-grammar section 5.5). A name
+           wider than the line is broken at the row's end with the marker on
+           its first row: a name has no space to break at, and a marker alone
+           on a row marks nothing. The status joins the name's last row when
+           it fits there. The result preview is a body and stays one clipped
+           row: beside the facts when the line leaves it room, otherwise
+           under them. *)
         let prefix_rows =
-          if prefix_cells <= max_cells
-          then [ styled_prefix ]
-          else (
-            (* The name is broken by cells, with the marker on its first row:
-               a name has no space to break at, and a marker alone on a row
-               marks nothing. The status joins the name's last row when it
-               fits there. *)
-            let line_cells = max 1 max_cells in
-            let dress_name chunk = Theme.tool_origin () ^ chunk ^ tool_reopen () in
-            let dressed_status = tone ^ status ^ tool_reopen () in
-            let head, rest =
-              Message_layout.split_cells_after_prefix
-                ~prefix_cells:(max 1 (line_cells - Message_layout.display_width marker - 1))
-                ~max_cells:line_cells name
-            in
-            let first = tone ^ marker ^ tool_reopen () ^ " " ^ dress_name head in
-            let last_cells, earlier, last =
-              match List.rev rest with
-              | [] -> Message_layout.display_width marker + 1 + Message_layout.display_width head, [], first
-              | tail :: middle ->
-                  ( Message_layout.display_width tail
-                  , first :: List.rev_map dress_name middle
-                  , dress_name tail )
-            in
-            if last_cells + 3 + Message_layout.display_width status <= line_cells
-            then earlier @ [ last ^ " \xc2\xb7 " ^ dressed_status ]
-            else
-              earlier
-              @ [ last ]
-              @ List.map
-                  (fun chunk -> tone ^ chunk ^ tool_reopen ())
-                  (Message_layout.split_cells ~max_cells:line_cells status))
+          let palette =
+            { (keeper_status_palette ()) with
+              Chat_facts.label_style = ""
+            ; who_style = Theme.tool_origin ()
+            ; reading_style = Fun.id
+            ; reset = tool_reopen ()
+            }
+          in
+          let layout =
+            Chat_facts.layout ~max_cells ~max_rows:max_int ~more:(fun _ -> "")
+              [ Chat_facts.fact
+                  ~label:(tone ^ marker ^ tool_reopen () ^ " ")
+                  Chat_facts.Who name
+              ; Chat_facts.fact (Chat_facts.Reading tone) status
+              ]
+          in
+          List.map (Chat_facts.draw palette) layout.Chat_facts.rows
         in
-        let room = max_cells - prefix_cells - 3 in
-        match detail with
-        | None -> prefix_rows
-        | Some detail when max_cells >= 80 && room >= tool_result_beside_cells ->
-            [ styled_prefix ^ " · " ^ clip_tool_result ~max_cells:room detail ]
-        | Some detail ->
+        let room = max_cells - Message_layout.display_width prefix - 3 in
+        match prefix_rows, detail with
+        | ([] | _ :: _), None -> prefix_rows
+        | [ row ], Some detail when max_cells >= 80 && room >= tool_result_beside_cells ->
+            [ row ^ " \xc2\xb7 " ^ clip_tool_result ~max_cells:room detail ]
+        | ([] | _ :: _), Some detail ->
             prefix_rows @ [ "  " ^ clip_tool_result ~max_cells:(max_cells - 2) detail ])
       projection.Keeper_chat_transcript.activities
   in

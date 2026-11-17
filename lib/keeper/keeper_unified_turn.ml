@@ -1071,7 +1071,7 @@ let run_keeper_cycle
                     "%s: keeper cycle %s runtime=%s lane=%s error_origin=%s \
                      attempts=%s deferred_next_runtime=%s \
                      max_context=%d context_budget=%d \
-                     primary_budget=%d requested_override=%s masc_rendered_bytes_estimate=%s \
+                     primary_budget=%d requested_override=%s system_and_user_bytes=%s \
                      cycle_latency=%dms%s error=%s"
                     meta.name
                     cycle_end

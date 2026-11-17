@@ -18,10 +18,10 @@ import { createConnect } from './connect'
 import type { ConnectModel } from './connect'
 import { ConnectArea } from './connect-area'
 import type { View } from './console'
-import { AccountList, runnable } from './account-rows'
+import { AccountList } from './account-rows'
 import { ProblemNote, Retry, fell, sessionEndedWords, slowAfterMs } from './notes'
 import type { Failure, Next } from './notes'
-import { integrationName, integrations as readIntegrations, owned as readOwned } from './wire'
+import { checkable, integrationName, integrations as readIntegrations, owned as readOwned } from './wire'
 import type { Integration, Owned, Problem, Send, Session } from './wire'
 
 export type PanelView =
@@ -176,12 +176,15 @@ export function follow(frame: ReadonlySignal<View>, panel: SubscriptionsModel): 
   })
 }
 
-/** What the server lets a Keeper run on, said before anything is connected. */
+/** The subscriptions an account connected now comes to run a Keeper on, said
+    before anything is connected: those with a model to check. An account
+    checked earlier is not what this line is about; its card says what it
+    can do. */
 function Offer({ integrations }: { readonly integrations: readonly Integration[] }): VNode {
-  const names = runnable(integrations).map(integrationName)
+  const names = integrations.filter(checkable).map(integrationName)
   if (integrations.length === 0) return html`<p class="hint">이 서버에는 연결할 수 있는 구독이 없어요.</p>`
-  if (names.length === 0) return html`<p class="hint">이 서버에서는 지금 어떤 구독으로도 Keeper를 실행할 수 없어요.</p>`
-  return html`<p class="hint">이 서버에서 Keeper를 실행할 수 있는 구독: ${names.join(', ')}</p>`
+  if (names.length === 0) return html`<p class="hint">이 서버에는 지금 새로 연결해서 Keeper를 실행할 수 있는 구독이 없어요.</p>`
+  return html`<p class="hint">지금 새로 연결해서 Keeper를 실행할 수 있는 구독: ${names.join(', ')}</p>`
 }
 
 function PanelBody({ view, connecting, checking, onRetry }: {

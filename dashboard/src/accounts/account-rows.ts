@@ -1,7 +1,8 @@
 // The rows of the subscriptions panel: a card for each account the person
 // connected, with the Runtimes made on it and whether a Keeper may run on it
 // here. Each card says before anything is pressed what its account cannot do,
-// and on an account a Keeper may run on, the person checks a model in its card.
+// and on an account whose subscription has a model to check, the person
+// checks one in its card.
 
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
@@ -9,7 +10,7 @@ import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
 import { Callout, ProblemNote, fell, idTail, noModelWords, operatorWords, sessionEndedWords } from './notes'
-import { integrationName } from './wire'
+import { checkable, integrationName } from './wire'
 import type { CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, ProviderAccount, Runtime, Withheld } from './wire'
 
 // ---- what the panel knows of each account ----
@@ -33,8 +34,10 @@ export interface AccountFacts {
 export type KeeperOn =
   /** The server lets a Keeper run on the subscription, and a model was checked on the account. */
   | { readonly kind: 'can_run' }
-  /** The server lets a Keeper run on the subscription; no model of the account is checked. */
+  /** The server lets a Keeper run on the subscription; no model of the account is checked, and one can be. */
   | { readonly kind: 'needs_model' }
+  /** As `needs_model`, and the server offers no model of the subscription to check. */
+  | { readonly kind: 'no_model' }
   | { readonly kind: 'refused'; readonly refusal: CallRefusal }
   /** The account's subscription is not known, or the server no longer offers it. */
   | { readonly kind: 'not_offered' }
@@ -42,16 +45,9 @@ export type KeeperOn =
 function keeperOn(offered: Integration | null, checked: boolean): KeeperOn {
   if (offered === null) return { kind: 'not_offered' }
   if (offered.calls.kind === 'refused') return { kind: 'refused', refusal: offered.calls.refusal }
-  return checked ? { kind: 'can_run' } : { kind: 'needs_model' }
+  if (checked) return { kind: 'can_run' }
+  return checkable(offered) ? { kind: 'needs_model' } : { kind: 'no_model' }
 }
-
-/** The subscriptions a Keeper may run on here: those whose models the server
-    calls. One with no model to check is among them: the rule that leaves a
-    model out is asked of a check and not of a turn
-    (`Runtime_verification.model_refusal`), so a Runtime of a model checked
-    before stays one a Keeper is given. */
-export const runnable = (integrations: readonly Integration[]): readonly Integration[] =>
-  integrations.filter((one) => one.calls.kind === 'allowed')
 
 /** The facts of each account, in the order the server lists the accounts.
     No Runtime is left out: an account is never unlinked
@@ -175,7 +171,7 @@ function Chips({ facts }: { readonly facts: AccountFacts }): VNode {
   if (keeper.kind === 'not_offered') return html`<p class="chips"><span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
   return html`
     <p class="chips">
-      <span class=${checked ? 'chip' : 'chip chip-todo'}>${checked ? '모델 확인됨' : '모델 확인 필요'}</span>
+      <span class=${checked ? 'chip' : 'chip chip-todo'}>${checked ? '모델 확인됨' : keeper.kind === 'no_model' ? '확인할 모델 없음' : '모델 확인 필요'}</span>
       ${keeper.kind === 'can_run' ? html`<span class="chip">Keeper 실행 가능</span>` : null}
       ${keeper.kind === 'refused' ? html`<span class="chip chip-todo">Keeper 실행 불가</span>` : null}
     </p>
@@ -263,17 +259,17 @@ function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly 
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
   const title = useRef<HTMLHeadingElement>(null)
-  const checkable = offered !== null && offered.calls.kind === 'allowed' && offered.models.length > 0
-  const couldCheck = useRef(checkable)
+  const canCheck = offered !== null && checkable(offered)
+  const couldCheck = useRef(canCheck)
   // A reading after a check can find the subscription with no model to
   // check, or its calls refused, which takes the pressed button away. The focus then
   // goes to the title of the card, not to the body of the page; a focus the
   // person moved elsewhere meanwhile stays.
   useEffect(() => {
     const before = couldCheck.current
-    couldCheck.current = checkable
-    if (before && !checkable && fell()) title.current?.focus()
-  }, [checkable])
+    couldCheck.current = canCheck
+    if (before && !canCheck && fell()) title.current?.focus()
+  }, [canCheck])
   const titleId = `row-title-${account.id}`
   const accountLine = `row-account-${account.id}`
   return html`

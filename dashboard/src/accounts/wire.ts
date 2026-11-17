@@ -95,6 +95,13 @@ export interface Integration {
   readonly calls: Calls
 }
 
+/** Whether a model of the subscription can be checked here now: the server
+    calls its models and offers one. A check makes the Runtime a Keeper runs
+    on, so an account connected now comes to run a Keeper only on such a
+    subscription. A Runtime made by an earlier check is another matter: the
+    page reads that from the Runtime (`Runtime.model`). */
+export const checkable = (one: Integration): boolean => one.calls.kind === 'allowed' && one.models.length > 0
+
 /** The name the operator gave a subscription, or its id when the name is empty. */
 export const integrationName = (integration: Integration): string =>
   integration.displayName === '' ? integration.id : integration.displayName

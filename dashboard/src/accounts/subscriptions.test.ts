@@ -15,11 +15,11 @@ import type { ConnectModel } from './connect'
 import type { View } from './console'
 import { loginPath } from './login'
 import { slowAfterMs } from './notes'
-import { accountFacts, runnable } from './account-rows'
+import { accountFacts } from './account-rows'
 import type { AccountFacts } from './account-rows'
 import { SubscriptionsPanel, createSubscriptions, follow } from './subscriptions'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
-import { csrfHeader, paths } from './wire'
+import { checkable, csrfHeader, paths } from './wire'
 import type { Integration, Send, Session } from './wire'
 
 interface Sent { readonly path: string; readonly init: RequestInit }
@@ -440,12 +440,24 @@ describe('what the panel knows of each account', () => {
     ])
   })
 
-  it('names the subscriptions a Keeper may run on here', () => {
-    expect(runnable(integrations).map((one) => one.id)).toEqual(['claude_code'])
+  it('finds a model to check only on a subscription the server calls and offers a model of', () => {
+    const bare = integrations.map((one) => ({ ...one, models: [] }))
+    expect([...integrations, ...bare].map((one) => [one.id, one.calls.kind, one.models.length, checkable(one)])).toEqual([
+      ['claude_code', 'allowed', 1, true], ['codex', 'refused', 1, false], ['claude_code', 'allowed', 0, false], ['codex', 'refused', 0, false],
+    ])
   })
 
-  it('names a subscription the server calls even while it has no model to check', () => {
-    expect(runnable(integrations.map((one) => ({ ...one, models: [] }))).map((one) => one.id)).toEqual(['claude_code'])
+  it('tells an account that has a model to check from one whose subscription offers none', () => {
+    const owned = {
+      accounts: [
+        { id: 'acct_checked', integration: { read: true, value: 'claude_code' } },
+        { id: 'acct_new', integration: { read: true, value: 'claude_code' } },
+      ],
+      runtimes: [{ id: 'acct_checked.claude-sonnet-5', accountId: 'acct_checked', model: { read: true, value: 'claude-sonnet-5' } }],
+    } as const
+    const kinds = (offered: readonly Integration[]) => accountFacts(offered, owned).map((one) => [one.account.id, one.keeper.kind])
+    expect(kinds(integrations)).toEqual([['acct_checked', 'can_run'], ['acct_new', 'needs_model']])
+    expect(kinds(integrations.map((one) => ({ ...one, models: [] })))).toEqual([['acct_checked', 'can_run'], ['acct_new', 'no_model']])
   })
 
   it('counts a model as checked only while the server still finds it in its settings', () => {
@@ -531,9 +543,26 @@ describe('the panel', () => {
     expect(count('button').map(([name, all], at) => [name, Number(all) - Number(checks[at]?.[1])])).toEqual(named('a reading that failed', 'a retry under way', 'a retry that found no session', ...connectable))
   })
 
-  it('offers to check a model only on an account of a subscription a Keeper may run on', () => {
+  it('offers to check a model only on an account of a subscription with a model to check', () => {
     expect(count('.check button')).toEqual(named('accounts of each kind'))
     expect(count('.check select')).toEqual(named('accounts of each kind'))
+  })
+
+  it('names, before anything is connected, only the subscriptions with a model to check', () => {
+    const called = { kind: 'allowed' } as const
+    const { container } = drawn({
+      kind: 'read',
+      forUser: person,
+      integrations: [
+        { id: 'with_model', displayName: 'Has-A-Model', models: ['m'], withheld: [], calls: called },
+        { id: 'no_model', displayName: 'Has-No-Model', models: [], withheld: [{ model: 'w', reason: 'tools_not_declared' }], calls: called },
+        { id: 'refused', displayName: 'Is-Refused', models: ['m'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+      ],
+      owned: { accounts: [], runtimes: [] },
+    })
+    // The line that follows the lead of the panel: the three names are also in the choices below it.
+    const offer = container.querySelectorAll('section > p.hint')[1]?.textContent ?? ''
+    expect(['Has-A-Model', 'Has-No-Model', 'Is-Refused'].map((name) => offer.includes(name))).toEqual([true, false, false])
   })
 
   it('has a row for each account', () => {

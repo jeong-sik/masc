@@ -1,10 +1,11 @@
 import { html } from 'htm/preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { artifactHtmlTextEditor, escapeArtifactHtmlText } from '../../lib/artifact-html-text'
+import { artifactHtmlTextEditor } from '../../lib/artifact-html-text'
+import { replaceArtifactHtmlText } from '../../lib/artifact-html-text-replacement'
 import { artifactMarkdownTextEditor } from '../../lib/artifact-markdown-text'
 import { selectedArtifactText } from '../../lib/artifact-text-frame'
 import { draftBase64, draftBytes, type ArtifactLiveSession, type ArtifactLiveState } from '../../lib/artifact-live-session'
-import { replaceSharedSelection, resolveSharedSelection, restoreSharedDocument, selectSharedTextRanges, sharedState } from '../../lib/artifact-shared-document'
+import { replaceSharedSelection, resolveSharedSelection, restoreSharedDocument, selectSharedTextRanges, SharedDocumentError, sharedSource, sharedState } from '../../lib/artifact-shared-document'
 import { artifactSentenceRecoveries, discardArtifactSentence, retainArtifactSentence, type ArtifactSentenceInput, type ArtifactSentenceRecovery } from '../../lib/artifact-sentence-recovery'
 import { sameDraftTarget } from '../../api/artifact-draft-live'
 
@@ -79,7 +80,15 @@ export function ArtifactSentenceEditor({ session, state, format, onPending }: {
   const apply = () => {
     if (!sentence || !dirty) return
     try {
-      const selection = replaceSharedSelection(session.doc, sentence.selection, sentence.expected, format==='html'?escapeArtifactHtmlText(sentence.input):sentence.input)
+      let replacement = sentence.input
+      if (format === 'html') {
+        const range = resolveSharedSelection(session.doc, sentence.selection)
+        if (!range) throw new SharedDocumentError('invalid_selection', '선택 영역을 현재 원고에서 찾지 못했습니다.')
+        replacement = replaceArtifactHtmlText(sharedSource(session.doc), {
+          start: Math.min(range.anchor, range.head), end: Math.max(range.anchor, range.head), expected: sentence.expected, input: sentence.input,
+        }).replacement
+      }
+      const selection = replaceSharedSelection(session.doc, sentence.selection, sentence.expected, replacement)
       session.select(resolveSharedSelection(session.doc, selection), format==='html'?'html_text':'source')
       copies(sentence).forEach(record=>applied.current.set(record.revision,record))
       discardApplied()

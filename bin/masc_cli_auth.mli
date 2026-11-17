@@ -19,14 +19,14 @@
     {!Authz_activation.link} once on standard output. The link is printed
     nowhere else.
 
-    After the activation and still under the lease, it puts the runtime.toml
-    this binary embeds at {!Server_runtime_setup_actions.config_path} when
-    nothing is there
+    Under the lease, once {!Authz_activation.asked} says a boot asks for the
+    activation and before {!Authz_activation.activate}, it puts the
+    runtime.toml this build embeds at
+    {!Server_runtime_setup_actions.config_path} where no entry is
     ({!Server_runtime_config_root_bootstrap.place_embedded_runtime_toml}): the
-    account server reads what people may connect from that file. A file that
-    is there is kept. A write that fails is reported on standard error and as
-    the first of the next steps. The activation is committed by then and does
-    not run twice, so the link is still printed.
+    account server reads what people may connect from that file. An entry
+    that is there is kept. A placement that fails refuses the command with
+    nothing activated, so the same command runs again.
 
     Returns the exit code: [0] once the link is printed, [1] otherwise, with
     the reason on standard error. *)

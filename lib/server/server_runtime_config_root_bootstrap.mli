@@ -21,18 +21,28 @@ val backfill_startup_required_from_embedded : config_root:string -> int
 
 type runtime_toml_placement =
   | Embedded_written
-      (** Nothing was at the path. It now holds the runtime.toml this binary
-          embeds. *)
+      (** No entry was at the path. It now holds the runtime.toml this build
+          embeds, readable by its owner only, and the file and its directory
+          are synced. *)
   | Existing_kept
-      (** An entry was at the path, a link whose target is gone included. It
-          is untouched. *)
+      (** An entry was at the path: a file, a directory or a link, also a link
+          whose target is gone. It is untouched. *)
 
-val place_embedded_runtime_toml : path:string -> (runtime_toml_placement, string) result
-(** Put the runtime.toml this binary embeds at [path] when nothing is there,
-    making its directory. It is the file {!backfill_startup_required_from_embedded}
-    writes at a server start. The file is written beside [path] and renamed,
-    so [path] holds it whole or not at all. [Error] says why the write did not
-    finish. The caller excludes other writers of [path]. *)
+type runtime_toml_placement_error =
+  | Not_published of string  (** No entry was made at the path. *)
+  | Published_unsynced of string
+      (** The path holds the whole file. It or its directory was not synced. *)
+
+val runtime_toml_placement_error_to_string : runtime_toml_placement_error -> string
+
+val place_embedded_runtime_toml
+  :  path:string
+  -> (runtime_toml_placement, runtime_toml_placement_error) result
+(** Put the runtime.toml this build embeds at [path] where no entry is, making
+    its directory. The file is staged beside [path] and published by a rename
+    that replaces nothing, so [path] holds the whole file or the entry that
+    was there. The calls block on the file system: a command calls this, not
+    a fiber of a server. *)
 
 val bootstrap_base_path_config_root : base_path:string -> unit
 

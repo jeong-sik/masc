@@ -98,15 +98,25 @@ let test_backfill_repairs_only_startup_required () =
 (* [masc auth bootstrap] places the embedded runtime.toml for an account
    workspace. The account server reads what people may connect at the path
    [Server_runtime_setup_actions.config_path] names, so a placement there on
-   an empty base path is read back by that reader, and the file this binary
-   ships offers a person a provider with a model. *)
+   an empty base path is read back by that reader, and the file this build
+   embeds offers a person a provider with a model. *)
+let placed path =
+  match Seed.place_embedded_runtime_toml ~path with
+  | Ok placement -> placement
+  | Error error -> fail (Seed.runtime_toml_placement_error_to_string error)
+
+let beside path = Array.to_list (Sys.readdir (Filename.dirname path))
+
 let test_placed_runtime_toml_is_what_people_connect () =
   let base_path = fresh_dst () in
   let path = Server_runtime_setup_actions.config_path ~base_path in
-  (match Seed.place_embedded_runtime_toml ~path with
-   | Ok Seed.Embedded_written -> ()
-   | Ok Seed.Existing_kept -> fail "an empty base path holds no runtime.toml to keep"
-   | Error reason -> fail reason);
+  (match placed path with
+   | Seed.Embedded_written -> ()
+   | Seed.Existing_kept -> fail "an empty base path holds no runtime.toml to keep");
+  check (option string) "the embedded file, whole"
+    (Embedded_config.read "runtime.toml") (Some (read_file path));
+  check int "readable by its owner only" 0o600 (Unix.stat path).st_perm;
+  check (list string) "the staged file is not left beside it" [ "runtime.toml" ] (beside path);
   match Server_runtime_setup_actions.config ~base_path with
   | Error error -> fail (Server_runtime_setup_actions.error_message error)
   | Ok config ->
@@ -116,44 +126,63 @@ let test_placed_runtime_toml_is_what_people_connect () =
             integration.models <> [])
          (Server_person_integrations.of_config config))
 
-(* What is at the path is the operator's: a file keeps its bytes, and a link
-   whose target is gone stays a link. *)
+(* An entry at the path is the operator's. A file keeps its bytes, a directory
+   stays one, and a link keeps where it points, also when nothing is there.
+   Nothing is written beside it. *)
 let test_placement_keeps_what_is_there () =
   let base_path = fresh_dst () in
   let path = Server_runtime_setup_actions.config_path ~base_path in
   Fs_compat.mkdir_p (Filename.dirname path);
+  let kept what =
+    (match placed path with
+     | Seed.Existing_kept -> ()
+     | Seed.Embedded_written -> fail (what ^ " was replaced"));
+    check (list string) (what ^ ": nothing is written beside it") [ "runtime.toml" ]
+      (beside path)
+  in
   let operator_runtime = "# operator runtime\n" in
   Fs_compat.save_file path operator_runtime;
-  let kept what =
-    match Seed.place_embedded_runtime_toml ~path with
-    | Ok Seed.Existing_kept -> ()
-    | Ok Seed.Embedded_written -> fail (what ^ " was replaced")
-    | Error reason -> fail reason
-  in
   kept "the operator's runtime.toml";
   check string "operator runtime.toml untouched" operator_runtime (read_file path);
   Sys.remove path;
-  Unix.symlink (Filename.concat base_path "gone") path;
+  Unix.mkdir path 0o700;
+  kept "a directory";
+  check bool "the directory is still one" true ((Unix.lstat path).st_kind = Unix.S_DIR);
+  Unix.rmdir path;
+  let elsewhere = Filename.concat base_path "operator.toml" in
+  Fs_compat.save_file elsewhere operator_runtime;
+  Unix.symlink elsewhere path;
+  kept "a link to the operator's file";
+  check string "the link points where it did" elsewhere (Unix.readlink path);
+  check string "the file it points at is untouched" operator_runtime (read_file elsewhere);
+  Sys.remove path;
+  let gone = Filename.concat base_path "gone" in
+  Unix.symlink gone path;
   kept "a link whose target is gone";
-  check bool "the link is still a link" true ((Unix.lstat path).st_kind = Unix.S_LNK)
+  check string "that link points where it did" gone (Unix.readlink path);
+  check bool "its target was not made" false (Sys.file_exists gone)
 
-(* A path that cannot be written is an [Error] the command reports, not an
-   exception that ends it before the invitation link is printed. Under a file
-   the path cannot be looked at; under a link whose target is gone it can, and
-   the write is what fails. *)
+(* A path where no entry can be made is an [Error] that says no file was
+   made. Under a file the path cannot be looked at; under a link whose target
+   is gone it can, and the staging beside it fails. *)
 let test_placement_reports_a_path_it_cannot_write () =
   let base_path = fresh_dst () in
-  let refused parent =
-    Result.is_error
-      (Seed.place_embedded_runtime_toml ~path:(Filename.concat parent "runtime.toml"))
+  let not_published parent =
+    match Seed.place_embedded_runtime_toml ~path:(Filename.concat parent "runtime.toml") with
+    | Error (Seed.Not_published (_ : string)) -> true
+    | Error (Seed.Published_unsynced (_ : string))
+    | Ok (Seed.Embedded_written | Seed.Existing_kept) -> false
   in
   let file = Filename.concat base_path "file" in
   Fs_compat.save_file file "";
-  check bool "under a file" true (refused file);
+  check bool "under a file" true (not_published file);
+  check string "the file is untouched" "" (read_file file);
   let link = Filename.concat base_path "link" in
-  Unix.symlink (Filename.concat base_path "gone") link;
-  check bool "under a link whose target is gone" true (refused link);
-  check bool "the link is still a link" true ((Unix.lstat link).st_kind = Unix.S_LNK)
+  let gone = Filename.concat base_path "gone" in
+  Unix.symlink gone link;
+  check bool "under a link whose target is gone" true (not_published link);
+  check string "the link points where it did" gone (Unix.readlink link);
+  check bool "its target was not made" false (Sys.file_exists gone)
 
 (* The packages the binary ships are whatever the embedded listing holds, so
    the expectation is read from that listing rather than typed in: a typed

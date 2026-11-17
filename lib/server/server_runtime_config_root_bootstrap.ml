@@ -241,36 +241,81 @@ type runtime_toml_placement =
   | Embedded_written
   | Existing_kept
 
-(* [lstat]: a link whose target is gone is still something the operator made,
-   and a write would replace it. *)
+type runtime_toml_placement_error =
+  | Not_published of string
+  | Published_unsynced of string
+
+let runtime_toml_placement_error_to_string = function
+  | Not_published reason -> "no file was made: " ^ reason
+  | Published_unsynced reason -> "the file was made, and syncing it failed: " ^ reason
+;;
+
+(* Owner only, as the stores of an account workspace are. *)
+let runtime_toml_permissions = 0o600
+
+let unix_failure error operation argument =
+  Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error)
+;;
+
+(* [lstat]: a link whose target is gone is an entry too. *)
 let entry_at path =
   match Unix.lstat path with
   | (_ : Unix.stats) -> Ok true
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
-  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+  | exception Unix.Unix_error (error, operation, argument) ->
+    Error (unix_failure error operation argument)
 ;;
 
-(* The same file [backfill_startup_required_from_embedded] writes, for a
-   caller that names the path its reader opens and must say what happened.
-   The file is renamed into place whole, so a run that dies midway leaves no
-   partial runtime.toml for a later run to keep as the operator's. *)
+(* The file is staged beside [path], synced, and published by a rename that
+   replaces nothing. [path] then holds the whole file or the entry that was
+   there, and never a part of the file. *)
+let publish_staged ~path content =
+  let staged, channel =
+    Fs_compat.open_atomic_temp_file ~temp_dir:(Filename.dirname path) ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr channel;
+      (* Gone already when the rename published it. *)
+      try Unix.unlink staged with
+      | Unix.Unix_error _ -> ())
+    (fun () ->
+      let descriptor = Unix.descr_of_out_channel channel in
+      Unix.fchmod descriptor runtime_toml_permissions;
+      output_string channel content;
+      flush channel;
+      Unix.fsync descriptor;
+      close_out channel;
+      match Fs_compat.rename_noreplace staged path with
+      | () -> Embedded_written
+      | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Existing_kept)
+;;
+
+(* [masc auth bootstrap] names the path the account server reads and says
+   what happened there. An entry at the path is kept without a write, so a
+   directory the operator made read-only keeps its file. *)
 let place_embedded_runtime_toml ~path =
-  let ( let* ) = Result.bind in
-  let* present = entry_at path in
-  if present
-  then Ok Existing_kept
-  else (
-    match Embedded_config.read Config_dir_resolver.runtime_toml_filename with
-    | None -> Error "this binary carries no runtime.toml"
-    | Some content ->
-      let* () =
-        match Fs_compat.mkdir_p (Filename.dirname path) with
-        | () -> Ok ()
-        | exception ((Unix.Unix_error _ | Sys_error _ | Eio.Io _) as error) ->
-          Error (Printexc.to_string error)
-      in
-      let* () = Fs_compat.save_file_atomic_strict path content in
-      Ok Embedded_written)
+  match entry_at path with
+  | Error reason -> Error (Not_published reason)
+  | Ok true -> Ok Existing_kept
+  | Ok false ->
+    (match Embedded_config.read Config_dir_resolver.runtime_toml_filename with
+     | None -> Error (Not_published "this build embeds no runtime.toml")
+     | Some content ->
+       let publish () =
+         Fs_compat.mkdir_p (Filename.dirname path);
+         publish_staged ~path content
+       in
+       (match publish () with
+        | exception Unix.Unix_error (error, operation, argument) ->
+          Error (Not_published (unix_failure error operation argument))
+        | exception Sys_error reason -> Error (Not_published reason)
+        | exception (Eio.Io _ as error) -> Error (Not_published (Printexc.to_string error))
+        | Existing_kept -> Ok Existing_kept
+        | Embedded_written ->
+          Fs_compat.sync_file_and_parent_strict path
+          |> Result.map (fun () -> Embedded_written)
+          |> Result.map_error (fun reason -> Published_unsynced reason)))
 ;;
 
 let builtin_skills () =

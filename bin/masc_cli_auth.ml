@@ -169,63 +169,79 @@ let refused command reason =
 (* What people may connect is read from runtime.toml
    ([Server_runtime_setup_actions.config]), and a workspace that has none
    offers nothing: the integrations route answers 503 and every connection is
-   refused. An activation therefore leaves, at the path the account server
-   reads, the runtime.toml this release ships: the file a single-user server
-   writes at its start for a workspace without one. A file that is there is
-   the operator's and is kept. *)
+   refused. A bootstrap therefore puts the runtime.toml this build embeds at
+   the path the account server reads, where no entry is. An entry that is
+   there is the operator's and is kept.
+
+   The file is placed after a boot is known to ask for the activation and
+   before the activation, which is committed once and is not run twice. A
+   placement that fails refuses the bootstrap with nothing activated, and the
+   same command runs again. *)
 type declaration =
   { path : string
-  ; outcome : (Config_root.runtime_toml_placement, string) result
+  ; placement : Config_root.runtime_toml_placement
   }
-
-let declare_connections ~base_path =
-  let path = Server_runtime_setup_actions.config_path ~base_path in
-  { path; outcome = Config_root.place_embedded_runtime_toml ~path }
-;;
 
 let setup_guide_step_6 = "docs/guides/account-server-setup.md, step 6"
 
-let declaration_line { path; outcome } =
-  match outcome with
-  | Ok Config_root.Embedded_written ->
-    Printf.sprintf
-      "- %s declares what people may connect. The workspace had none, so it is the file \
-       this release ships; an edit of it changes what they connect (%s).\n"
-      path
-      setup_guide_step_6
-  | Ok Config_root.Existing_kept ->
-    Printf.sprintf
-      "- %s declares what people may connect. It was there and is kept as it is (%s).\n"
-      path
-      setup_guide_step_6
-  | Error (_ : string) ->
-    Printf.sprintf
-      "- %s, which declares what people may connect, was not written.\n"
-      path
+let declare_connections ~base_path =
+  let path = Server_runtime_setup_actions.config_path ~base_path in
+  match Config_root.place_embedded_runtime_toml ~path with
+  | Ok placement -> Ok { path; placement }
+  | Error (Config_root.Not_published reason) ->
+    Error
+      (Printf.sprintf
+         "%s, which declares what people may connect, could not be made, and nothing \
+          was activated: %s. Make the path writable or put a runtime.toml there (%s), \
+          and run the command again."
+         path
+         reason
+         setup_guide_step_6)
+  | Error (Config_root.Published_unsynced reason) ->
+    Error
+      (Printf.sprintf
+         "%s, which declares what people may connect, was made but not synced, and \
+          nothing was activated: %s. The next run keeps the file."
+         path
+         reason)
 ;;
 
-let declaration_steps { path; outcome } =
-  match outcome with
-  | Ok (Config_root.Embedded_written | Config_root.Existing_kept) -> []
-  | Error (_ : string) ->
-    [ Printf.sprintf
-        "Write %s: it declares what people may connect, and the account server offers \
-         nothing without it (%s)."
-        path
-        setup_guide_step_6
-    ]
+let declaration_line { path; placement } =
+  match placement with
+  | Config_root.Embedded_written ->
+    Printf.sprintf
+      "- %s is the runtime.toml this release ships: no entry was there. It declares \
+       what people may connect, and an edit of it changes that (%s).\n"
+      path
+      setup_guide_step_6
+  | Config_root.Existing_kept ->
+    Printf.sprintf
+      "- An entry was at %s and is left as it is. The account server reads what people \
+       may connect from that path at each request (%s).\n"
+      path
+      setup_guide_step_6
+;;
+
+(* An activation that stops after the placement leaves the file it wrote. *)
+let written_before_the_refusal { path; placement } =
+  match placement with
+  | Config_root.Embedded_written ->
+    Printf.sprintf "; %s now holds the runtime.toml this release ships" path
+  | Config_root.Existing_kept -> ""
 ;;
 
 let bootstrap ~base_path ~external_store =
-  (* The file is placed under the lease and after the activation: no server
-     reads the workspace meanwhile, and a refused activation writes nothing. *)
   let activate ~base_path ~config_dir ~anonymous_mutations ~now_ms =
-    let* activated =
+    let* () =
       Result.map_error
         A.error_to_string
-        (A.activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms)
+        (A.asked ~base_path ~config_dir ~anonymous_mutations)
     in
-    Ok (activated, declare_connections ~base_path)
+    let* declaration = declare_connections ~base_path in
+    match A.activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms with
+    | Ok activated -> Ok (activated, declaration)
+    | Error error ->
+      Error (A.error_to_string error ^ written_before_the_refusal declaration)
   in
   match under_lease ~held:T.base_path_contention_message ~base_path activate with
   | Error reason -> refused "bootstrap" reason
@@ -242,24 +258,14 @@ let bootstrap ~base_path ~external_store =
       (String.capitalize_ascii Authz_boot_mode_read.turn_off_line)
       external_store
       (declaration_line declaration);
-    (match declaration.outcome with
-     | Ok (Config_root.Embedded_written | Config_root.Existing_kept) -> ()
-     | Error reason ->
-       (* The activation is committed and is not run twice, so this is
-          reported on its own and the link is still printed. *)
-       Printf.eprintf
-         "masc auth bootstrap: the workspace is activated, and %s was not written: %s\n"
-         declaration.path
-         reason);
     print_link
       ~command:"bootstrap"
       ~base_url
       ~next:
-        (declaration_steps declaration
-         @ [ start_step ~base_url ~base_path
-           ; "Hand the link to the person who becomes the first Admin. They open it and \
-              sign in."
-           ])
+        [ start_step ~base_url ~base_path
+        ; "Hand the link to the person who becomes the first Admin. They open it and \
+           sign in."
+        ]
       invitation
 ;;
 

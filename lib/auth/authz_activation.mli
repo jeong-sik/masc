@@ -93,6 +93,17 @@ type error =
 
 val error_to_string : error -> string
 
+(** The first step of {!activate} on its own: [Ok ()] where a boot asks for
+    the activation, and otherwise the refusal {!activate} gives. It writes no
+    record. A caller that prepares the workspace for the activation asks
+    first, so that a refused activation has prepared nothing. {!activate}
+    asks again. *)
+val asked
+  :  base_path:string
+  -> config_dir:string option
+  -> anonymous_mutations:bool
+  -> (unit, error) result
+
 val activate
   :  base_path:string
   -> config_dir:string option

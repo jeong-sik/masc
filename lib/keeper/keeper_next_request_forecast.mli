@@ -190,9 +190,11 @@ val carry
     every candidate of the turn. *)
 type range_reads =
   { messages : Agent_core.Types.message list  (** The history and the wake line. *)
+  ; atom_count : int
+        (** Count from the same {!Runtime_model_input_tail_window.atom_opening_index}
+            as [digest_at], shared by every candidate of this observation. *)
   ; digest_at : int -> string option
-        (** {!Runtime_model_input_tail_window.atom_opening_digest} of
-            [messages]. *)
+        (** Opening-digest lookup for [messages]. *)
   ; continuity : Keeper_turn_driver_try_provider.continuity
         (** {!Keeper_turn_driver_try_provider.read_keeper_continuity}; its
             notes are not logged. *)

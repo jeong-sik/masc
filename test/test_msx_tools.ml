@@ -464,14 +464,45 @@ let test_press_validation () =
   let loaded = incarnation () in
   Fs_compat.mkdir_p (carts_dir base_path);
   write_cart (carts_dir base_path) "hero.rom" (String.make 0x4000 '\000');
+  let failure_class r =
+    Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r)
+  in
   let r = dispatch ~base_path "masc_msx_load"
     [ ("roms_dir", `String "/nonexistent/roms"); ("cart", `String "hero") ] in
-  check (option string) "a missing BIOS directory is a runtime failure"
-    (Some Tool_result.Runtime_failure |> Option.map Tool_result.tool_failure_class_to_string)
-    (Option.map Tool_result.tool_failure_class_to_string (Tool_result.failure_class r));
+  check (option string) "a roms_dir that names nothing is the caller's argument"
+    (Some Tool_result.Workflow_rejection |> Option.map Tool_result.tool_failure_class_to_string)
+    (failure_class r);
   check bool "the missing BIOS directory is refused before the machine changes" true
     (took_no_effect r);
-  check string "the refused load leaves the loaded machine in place" loaded (incarnation ())
+  check string "the refused load leaves the loaded machine in place" loaded (incarnation ());
+  (* A regular file in the middle of the path names nothing either, and the
+     contract puts both under the caller's argument rather than a read
+     failure. *)
+  let probe = Filename.concat base_path "hero.rom.probe" in
+  Out_channel.with_open_bin probe (fun oc -> output_string oc "x");
+  let through_file = Filename.concat probe "roms" in
+  let r = dispatch ~base_path "masc_msx_load"
+    [ ("roms_dir", `String through_file); ("cart", `String "hero") ] in
+  check (option string) "a roms_dir through a regular file is the caller's argument"
+    (Some Tool_result.Workflow_rejection |> Option.map Tool_result.tool_failure_class_to_string)
+    (failure_class r);
+  check bool "that refusal also leaves the machine alone" true (took_no_effect r);
+  (* The other side of the line: the directory is there and resolves, and the
+     ROM inside it is not. The caller named the directory, not the file, so
+     this stays a read failure. *)
+  let partial_roms = Filename.concat base_path "partial-roms" in
+  Fs_compat.mkdir_p partial_roms;
+  Out_channel.with_open_bin
+    (Filename.concat partial_roms "cbios_main_msx2.rom")
+    (fun oc -> output_string oc (String.make 0x8000 '\000'));
+  let r = dispatch ~base_path "masc_msx_load"
+    [ ("roms_dir", `String partial_roms); ("cart", `String "hero") ] in
+  check (option string) "a resolved BIOS directory missing a ROM stays a read failure"
+    (Some Tool_result.Runtime_failure |> Option.map Tool_result.tool_failure_class_to_string)
+    (failure_class r);
+  check bool "the incomplete directory is refused before the machine changes" true
+    (took_no_effect r);
+  check string "none of the refusals replaced the machine" loaded (incarnation ())
 ;;
 
 let test_inventory () =

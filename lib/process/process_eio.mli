@@ -258,6 +258,30 @@ type spawn_refusal =
 
 val spawn_refusal_to_string : spawn_refusal -> string
 
+type spawn_outlook =
+  | Same_input_fails_again
+      (** Spawning the same argv, env and cwd again fails the same way until
+          someone changes them or the host. *)
+  | Resources_may_free
+      (** A shortage the system releases on its own (descriptors, memory,
+          process slots, an interrupted call): a later spawn can succeed. *)
+
+val unix_error_spawn_outlook : Unix.error -> spawn_outlook
+val spawn_refusal_outlook : spawn_refusal -> spawn_outlook
+
+val spawn_child :
+  sw:Eio.Switch.t ->
+  [> 'tag Eio.Process.mgr_ty ] Eio.Resource.t ->
+  ?cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  ?stdin:_ Eio.Flow.source ->
+  ?stdout:_ Eio.Flow.sink ->
+  ?stderr:_ Eio.Flow.sink ->
+  ?env:string array ->
+  string list ->
+  ('tag Eio.Process.ty Eio.Resource.t, spawn_refusal) result
+(** [Eio.Process.spawn] with every failure that precedes the child returned as
+    a {!spawn_refusal}. Other exceptions, cancellation included, propagate. *)
+
 type stdio_refusal =
   | Runtime_unavailable of string
       (** No initialized runtime or no Eio fiber in which to own the child.

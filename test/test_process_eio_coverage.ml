@@ -222,6 +222,32 @@ let test_or_refusal_carries_the_spawn_errno () =
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
+(* #28072: a refusal the same argv, env and cwd meet again is told apart from
+   a shortage that passes, so the caller does not pay for retries that cannot
+   succeed. *)
+let test_spawn_refusal_outlook () =
+  let outlook refusal =
+    match Process_eio.spawn_refusal_outlook refusal with
+    | Process_eio.Same_input_fails_again -> "same input fails again"
+    | Process_eio.Resources_may_free -> "resources may free"
+  in
+  let failed error = Process_eio.Spawn_failed { executable = "cli"; error } in
+  List.iter
+    (fun (label, refusal, expected) -> check string label expected (outlook refusal))
+    [ "argv over the limit", failed Unix.E2BIG, "same input fails again"
+    ; "program missing at spawn", failed Unix.ENOENT, "same input fails again"
+    ; "not executable", failed Unix.EACCES, "same input fails again"
+    ; "unnamed errno", failed (Unix.EUNKNOWNERR 999), "same input fails again"
+    ; "process slots full", failed Unix.EAGAIN, "resources may free"
+    ; "descriptor table full", failed Unix.EMFILE, "resources may free"
+    ; "memory short", failed Unix.ENOMEM, "resources may free"
+    ; "executable not found", Process_eio.Executable_not_found "cli", "same input fails again"
+    ; ( "child setup failed"
+      , Process_eio.Child_setup_failed { executable = "cli"; detail = "execve: Argument list too long" }
+      , "same input fails again" )
+    ; "empty argv", Process_eio.Empty_argv, "same input fails again"
+    ]
+
 (* Native foreground execution owns a posix_spawn group. A failed exec
    therefore reports libc's errno, rather than a fork error-pipe string. *)
 let test_or_refusal_carries_the_native_spawn_errno () =
@@ -1856,6 +1882,7 @@ let () =
              test_capture_leaves_small_stdout_untouched;
            test_case "exit-reason-classifies-the-timeout-status" `Quick
              test_exit_reason_classifies_the_timeout_status;
+           test_case "spawn-refusal-outlook" `Quick test_spawn_refusal_outlook;
             test_case "run_argv_with_stdin_held_open-handles-early-closed-pipe"
               `Quick
               test_run_argv_with_stdin_held_open_handles_early_closed_pipe;

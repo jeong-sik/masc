@@ -268,6 +268,71 @@ let spawn_refusal_to_string = function
          | Native_cwd_error error -> Unix.error_message error
          | Eio_cwd_error error -> Format.asprintf "%a" Eio.Exn.pp_err error)
 
+type spawn_outlook =
+  | Same_input_fails_again
+  | Resources_may_free
+
+(* Whether spawning the same argv, env and cwd again can succeed without
+   anyone changing them. Only a shortage the system releases on its own
+   (descriptors, memory, process slots, an interrupted call) can clear; every
+   other errno names something about the request or the host that stays as
+   it is until an operator changes it (#28072). Listed without a wildcard so
+   a new [Unix.error] constructor has to be answered here. *)
+let unix_error_spawn_outlook : Unix.error -> spawn_outlook = function
+  | Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.ENOMEM | Unix.EMFILE | Unix.ENFILE
+  | Unix.EINTR | Unix.ENOSPC | Unix.ENOBUFS | Unix.EBUSY | Unix.EDEADLK
+  | Unix.ENOLCK | Unix.ETIMEDOUT | Unix.EINPROGRESS | Unix.EALREADY ->
+    Resources_may_free
+  | Unix.E2BIG | Unix.EACCES | Unix.EBADF | Unix.ECHILD | Unix.EDOM
+  | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG | Unix.EINVAL | Unix.EIO
+  | Unix.EISDIR | Unix.EMLINK | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOENT
+  | Unix.ENOEXEC | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY
+  | Unix.ENXIO | Unix.EPERM | Unix.EPIPE | Unix.ERANGE | Unix.EROFS
+  | Unix.ESPIPE | Unix.ESRCH | Unix.EXDEV | Unix.ENOTSOCK | Unix.EDESTADDRREQ
+  | Unix.EMSGSIZE | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT
+  | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT
+  | Unix.EAFNOSUPPORT | Unix.EADDRINUSE | Unix.EADDRNOTAVAIL | Unix.ENETDOWN
+  | Unix.ENETUNREACH | Unix.ENETRESET | Unix.ECONNABORTED | Unix.ECONNRESET
+  | Unix.EISCONN | Unix.ENOTCONN | Unix.ESHUTDOWN | Unix.ETOOMANYREFS
+  | Unix.ECONNREFUSED | Unix.EHOSTDOWN | Unix.EHOSTUNREACH | Unix.ELOOP
+  | Unix.EOVERFLOW ->
+    Same_input_fails_again
+  (* An errno OCaml has no name for: nothing says it clears, so the same
+     request is not sent again on its own. *)
+  | Unix.EUNKNOWNERR (_ : int) -> Same_input_fails_again
+
+(* A child's setup failure (fchdir, dup2, execve) depends on the argv, env and
+   cwd it was given, which a retry repeats. *)
+let spawn_refusal_outlook = function
+  | Empty_argv | Executable_not_found _ | Child_setup_failed _ | Cwd_unavailable _ ->
+    Same_input_fails_again
+  | Spawn_failed { executable = _; error } -> unix_error_spawn_outlook error
+
+(* [Eio.Process.spawn] for a child the caller keeps talking to. Only this one
+   call is inside the handler, so each exception below has the single source
+   the table above [cwd_error] gives it: a [Failure] here is the child's own
+   setup report and a [Unix_error] is the pipe or fork. Anything else,
+   cancellation included, is not a refusal and propagates. *)
+let spawn_child ~sw mgr ?cwd ?stdin ?stdout ?stderr ?env argv =
+  match argv with
+  | [] -> Error Empty_argv
+  | executable :: _ ->
+    (match Eio.Process.spawn ~sw mgr ?cwd ?stdin ?stdout ?stderr ?env argv with
+     | child -> Ok child
+     | exception Eio.Io (Eio.Process.E (Eio.Process.Executable_not_found program), _) ->
+       Error (Executable_not_found program)
+     | exception Failure detail -> Error (Child_setup_failed { executable; detail })
+     | exception Unix.Unix_error (error, _, _) -> Error (Spawn_failed { executable; error })
+     | exception Eio.Io (Eio.Fs.E error, _) ->
+       Error
+         (Cwd_unavailable
+            { cwd =
+                (match cwd with
+                 | Some path -> Format.asprintf "%a" Eio.Path.pp path
+                 | None -> "<inherited>")
+            ; error = Eio_cwd_error (Eio.Fs.E error)
+            }))
+
 (* True while the child does not exist yet. [phase_ref] moves to [Command]
    right after [Eio.Process.spawn] returns, so an exception seen in [Spawn]
    came from creating the pipes, forking, or the child's own setup. *)

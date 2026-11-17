@@ -1928,6 +1928,17 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
 fi
 # --- end committed builtin Skill refresh ------------------------------------
 configure_shell_path
+# --- Exact worker packages the workspace declares ---------------------------
+# A Lane declaration that names a package this masc carries with
+# package = "<name>" reads it from the workspace. The packages the workspace's
+# declarations name are written and built for this version; a workspace that
+# declares none gets nothing. A package that cannot be installed, for one when
+# Docker is absent, is reported and the install goes on: the server then
+# reports that package as not installed.
+if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
+  "$DEST" exact-addon-setup --declared --base-path "$BASE_PATH" ||
+    warn "an Exact worker package of $BASE_PATH is not installed; the lines above say which, and masc exact-addon-setup --declared --base-path $BASE_PATH tries again"
+fi
 # Setup can start a runtime and write workspace state. Run it only after the
 # installed bundle is committed, so cancelling setup cannot roll the binary back.
 finish_setup_journey

@@ -425,6 +425,62 @@ let test_source_changes_do_not_replace_the_original () = with_fixture Mixed @@ f
   check bool "the replaced checkpoint no longer loads" true (after.messages=None);
   expect_unconfirmed "replaced official files" {after with messages=before.messages} restored
 
+let test_atom_projection_preserves_interleaved_scopes () = with_fixture Atoms (fun config trace_id _ ->
+  let module Types = Agent_core.Types in
+  let module Window = Runtime_model_input_tail_window in
+  let module Historical = Keeper_librarian_task_context in
+  let pinned text = Types.make_message ~origin:Types.System_context ~role:Types.System [Types.Text text] in
+  let first = message "first selected user" in
+  let call = Types.make_message ~role:Types.Assistant
+    [Types.ToolUse {id="indexed-call";name="Execute";input=`Assoc ["command",`String "pwd"]}] in
+  let result = Types.make_message ~role:Types.Tool
+    [Types.ToolResult {tool_use_id="indexed-call";content="original result";
+      outcome=Types.Tool_succeeded;json=None;content_blocks=None}] in
+  let historical = Types.make_message ~origin:Types.Historical_system_context ~role:Types.System
+    [Types.Text "historical context belongs with the call"] in
+  let next = message "unattributed selected user" in
+  let last = Types.make_message ~role:Types.Assistant [Types.Text "attributed answer"] in
+  let messages = [pinned "before";first;call;result;historical;pinned "between";
+    next;last;message "outside the selected range"] in
+  save_checkpoint config ~trace_id messages 8;
+  let session_dir = Keeper_fs.keeper_session_dir config trace_id in
+  let snapshot = C.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
+    |> Result.map_error C.checkpoint_ref_load_error_to_string |> get in
+  let digest atom = match Window.atom_opening_digest (C.exact_snapshot_messages snapshot) atom with
+    | Some digest -> digest | None -> fail "fixture atom is missing" in
+  let turn absolute_turn = Ids.Turn_ref.make ~trace_id ~absolute_turn in
+  let boundary line end_atom history_at_start = line, Ok {B.recorded_at=Float.of_int line;
+    event=B.Turn_ended {turn_ref=turn line;task_context=Keeper_turn_task_context.No_task;
+      history_at_start;position=B.Atom_history {end_atom;last_atom_digest=digest (end_atom-1)}}} in
+  let boundaries = [boundary 10 2 B.Fresh_history;
+    boundary 20 2 (B.Continued_history_from {start_atom=2;start_atom_digest=digest 1});
+    boundary 40 4 (B.Continued_history_from {start_atom=3;start_atom_digest=digest 2})] in
+  let range : Keeper_librarian_range.range = {history_start_boundary_line=0;
+    start_atom=0;end_atom=4;last_atom_digest=digest 3} in
+  let atom = Capture.checkpoint ~snapshot ~range ~boundary_lines_seen:40 ~end_boundary_line:40 in
+  let official_message = message "interleaved official turn" in
+  let official : Capture.official = {selected=[{line=30;turn_ref=turn 30;recorded_at=30.}];
+    traces=[{trace_id;main=[1,Ok (F.Fragment (F.Message {turn_ref=turn 30;
+      recorded_at=30.;source=None;message=official_message}))];internal=[]}]} in
+  let projected = Capture.project_source ~boundaries (Capture.Mixed (atom,official))
+    |> Result.map_error Capture.error_to_string |> get in
+  let encode messages = List.map Agent_core.Checkpoint.message_to_json messages in
+  check bool "pinned and later rows are excluded; call/result/context and official order are retained" true
+    (encode projected.messages = encode [first;call;result;historical;official_message;next;last]);
+  check int "the call has one observation across repeated cuts" 1
+    (List.length projected.tool_observations);
+  let offsets = List.map (fun (context : Historical.t) ->
+    context.first_message,context.after_message,context.first_tool_observation,context.after_tool_observation)
+    projected.historical_task_contexts in
+  check bool "attribution scopes retain exact message and tool offsets" true
+    (offsets=[0,4,0,1;4,5,1,1;5,6,1,1;6,7,1,1]);
+  let empty_range = {range with start_atom=2;end_atom=2;last_atom_digest=digest 1} in
+  let empty = Capture.checkpoint ~snapshot ~range:empty_range ~boundary_lines_seen:20 ~end_boundary_line:20 in
+  let projected = Capture.project_source ~boundaries (Capture.Checkpoint_only empty)
+    |> Result.map_error Capture.error_to_string |> get in
+  check bool "an empty atom interval does not include pinned messages" true
+    (projected.messages=[] && projected.tool_observations=[] && projected.historical_task_contexts=[]))
+
 let test_official_projection_preserves_turn_identity_and_offsets () =
   let turn trace_id absolute_turn = Ids.Turn_ref.make ~trace_id ~absolute_turn in
   let a1 = turn "alpha#part" 1 and a2 = turn "alpha#part" 2 and b1 = turn "beta" 1 in
@@ -463,6 +519,8 @@ let test_official_projection_preserves_turn_identity_and_offsets () =
   | Error (Capture.Checkpoint_source _) | Ok _ -> fail "a missing trace must be refused"
 
 let () = Alcotest.run "durable source original capture" ["actual source retention",[
+  test_case "atom projection preserves interleaved scopes, pinned rows and tool pairs" `Quick
+    test_atom_projection_preserves_interleaved_scopes;
   test_case "official projection preserves turn identity, order and historical offsets" `Quick
     test_official_projection_preserves_turn_identity_and_offsets;
   test_case "checkpoint original survives strict disk roundtrip" `Quick (check_roundtrip Atoms);

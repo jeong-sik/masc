@@ -523,6 +523,42 @@ Document 스택은 이제 일곱 층이며, 새 층의 검토와 전체 원격 p
 후속 읽기 전용 진단에서는 이 실행 환경의 GitHub DNS 해석 실패와 기존 MCP 포트의
 TCP 연결 거절을 확인했다. 인증 유효성과 호스트 전체 상태는 확인되지 않았다.
 
+## 11월 17일: 수신 확인과 원본 보관 분리
+
+Document7 `2c5a574c793264a963c1a994285fb4b332c4daa7` 위에 여덟째 층
+`fix/farm-retained-result-ownership-20261117`을 만들었다. 보관된 결과에 H5 읽기를
+붙이기 전, ACK 뒤 원본의 보관 근거를 조사했다. 일반 Add-on의 미디어 결과는 outbox가
+유일한 blob 참조일 수 있다. 일반 로그·raw trace는 모든 content_blocks에서 자동으로
+참조를 만들지 않는다. 별도 참조를 등록하는 MCP bridge와 구분했다.
+
+기존 묶음 축소 RFC도 ACK 뒤 blob을 GC가 지울 수 있고 vendor의 과거 주소가 실패하는
+한계를 기록하고 있었다. 이번 변경은 그중 원본 결과의 수명을 늘린다. ACK는 같은
+Keeper의 `consumed-tool-results`에 검증된 원본을 내구 저장한 뒤 대기 파일을 삭제한다.
+새 보관 위치는 다음 모델 요청의 pending 목록에 들어가지 않는다. 동일 파일의 존재만으로
+내구성을 추정하지 않으며, 실패한 게시와 바뀐 원본은 pending을 삭제할 근거가 아니다.
+두 위치의 임의 response JSON이 history media 소유권을 만들지 않도록 동일한 엄격한
+receipt 출처 판정을 사용한다.
+
+[원본 보관 계약](../design/retained-result-ownership.md)에 순서·실패·재시도와 비용을
+적었다. 소비 결과 파일과 blob이 누적되고 ACK I/O와 오프라인 스캔 비용이 늘어난다.
+규모에 따른 비용은 미측정이다. 임시 By_address 묶음 blob과 H5 reading cache의 수명,
+실제 보관 결과 읽기 연결은 이 변경으로 완료되지 않는다. 원래 Farm의 25개 요구와
+장시간·다중 Keeper/Queue/Proactive 조건은 계속 열려 있다.
+
+새 유지 시험은 원본 보관과 두 번의 GC, 충돌한 보관 파일, 내구 저장을 막는 실제
+디렉터리 장애와 재시도, 이미 사라진 pending, 전달 경계의 snapshot, 새 결과 보존,
+동시 ACK를 다루는 7개다. 동시 호출의 성공 개수를 가정하지 않고 각 결과를 기록하며,
+재시도 전에도 GC 두 번을 거친 원본 보존을 검사하도록 작성했다.
+
+기존 코드의 실행 준비는 `Tool_blob_maintenance → Keeper_semantic_execution →
+Agent_core.Agent`의 실제 값 의존성에서 멈췄다. 공개 locator codec이 Agent 구현을
+요구하므로 다른 codec으로 대신하지 않았다. 최종 링크·시험 실행은 0건이며 기존
+한계를 실행으로 재현했다고 주장하지 않는다. 대신 변경한 제품 구현 3개와 공개
+인터페이스 2개, 새 시험 모듈 전체의 타입 검사는 실제 인터페이스로 통과했다.
+기존 ToolBlobStore 시험 변경은 구문 검사·소스 리뷰 범위다. 전체 MASC·설치·장애 복구나
+GC 동작이 검증된 것은 아니다. 실행 준비와 제한된 타입 검사 기록은
+`artifacts/farm-retained-result-ownership-20261117/`에 보존했다.
+
 ## 원래 25개 요구의 현재 위치
 
 아래 조각은 원래 계획 §8의 핵심 연결이다. 전체 연결과 의존·결정은 원래 표를 따른다.

@@ -293,7 +293,15 @@ docker exec "$container" bash -lc '
   # provenance MASC_BUILD_COMMIT gives the source: without it, nobody can say
   # which repository revision produced a published tree, and the same commit
   # cannot be rebuilt deliberately. Recorded, not pinned -- pinning the revision
-  # here would freeze every future build to today's index.
+  # here would freeze every future build to the index of the day.
+  #
+  # No apostrophe anywhere in this quoted block. The whole block is one
+  # single-quoted argument to bash -lc, so one stray single quote in a comment
+  # ends it early and every later line runs on the HOST instead of inside the
+  # container. That is exactly how v0.73.1 candidate 9fbc2b95fb failed: the
+  # comment on former line 296 contained one, so opam install on former line
+  # 304 ran on the runner, where opam does not exist, and reported
+  # "opam: command not found" three times.
   #
   # Not `--all`: the question is which repository this switch selected, not
   # which ones are defined. Not fatal: these lines only describe what the step
@@ -306,7 +314,7 @@ docker exec "$container" bash -lc '
   opam repository list || echo "opam repository list failed"
   repo_root="${OPAMROOT:-$(opam var root 2>/dev/null || echo /root/.opam)}"
   for name in $(opam repository list --short 2>/dev/null || true); do
-    url=$(opam repository list 2>/dev/null | awk -v n="$name" '$2 == n {print $3; exit}')
+    url=$(opam repository list 2>/dev/null | sed -n "s/^ *[0-9][0-9]* *$name *//p")
     path=${url#git+file://}
     path=${path#file://}
     path=${path#git+}

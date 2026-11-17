@@ -1100,7 +1100,7 @@ let restore_runtime ~commit ~base_path ~assignments ~lanes =
        result, skipped_assignments, skipped_runtime_lanes))
 ;;
 
-let restore_with_config_commit ~commit ~base_path name =
+let restore_locked_with_config_commit ~commit ~base_path name =
   (* The target is read before the autosave is written, so restoring the
      autosave itself applies what it held, not the state just captured. *)
   let* target = load ~base_path name in
@@ -1120,6 +1120,23 @@ let restore_with_config_commit ~commit ~base_path name =
      ; skipped_lanes; skipped_assignments }
 ;;
 
+(* Keep this inode outside the preset directories save/delete replace. The
+   narrower manifest/runtime locks remain inside the whole restore scope. *)
+let restore_lock_path ~base_path =
+  Filename.concat (Filename.dirname (presets_dir ~base_path)) "preset-restore.lock"
+;;
+
+let restore_with_config_commit ~commit ~base_path name =
+  match File_lock_eio.with_durable_lock_observed ~lock_path:(restore_lock_path ~base_path)
+    (fun () -> restore_locked_with_config_commit ~commit ~base_path name) with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (File_lock_eio.durable_lock_error_to_string error)
+  | Body_completed {value;release_error} ->
+    Option.iter (fun error -> Log.Pages.warn "preset restore %s lock release warning: %s"
+      name (File_lock_eio.durable_lock_error_to_string error)) release_error;
+    value
+;;
+
 let restore ~base_path name =
   restore_with_config_commit
     ~commit:(fun ~runtime_config_path text ->
@@ -1128,6 +1145,7 @@ let restore ~base_path name =
 ;;
 
 module For_testing = struct
+  let restore_lock_path = restore_lock_path
   let restore_with_config_commit = restore_with_config_commit
 end
 

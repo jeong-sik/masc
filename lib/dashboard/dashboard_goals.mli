@@ -133,7 +133,8 @@ val dashboard_goals_tree_json :
 (** Returns the full goals dashboard envelope: forest +
     rolled-up summary + lifecycle event projection. Used
     by the [/api/dashboard/goals/tree] route and the
-    regression test. *)
+    regression test. Listed timelines and unlisted history share one event-log
+    read, including its malformed-line count. Each call reads the log afresh. *)
 
 (** {1 Per-goal detail} *)
 

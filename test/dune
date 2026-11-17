@@ -7611,3 +7611,5 @@
 (include stanzas/test_os_mutex.inc)
 
 (include stanzas/bench_os_mutex_cost.inc)
+
+(include stanzas/test_schedule_authority.inc)

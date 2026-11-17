@@ -59,3 +59,45 @@ could not validate the active account. Connector access does not supply the
 local native-stack CLI with credentials; no standalone PR was substituted.
 See the [Farm follow-up report](../../reports/2026-11-16-farm-storage-and-input-audit.md)
 for the broader product scope.
+
+
+## 2026-11-16 integration and executed component proof
+
+The whole native stack was rebased onto
+`e0e819e29968366c1dffb59ad625ba4e17d4ac22`. The rebased source head is
+`236754fcfb72f49ef9c365465dfd1e63cf3e6010`; its documentation parent for this
+new test layer is `8d4a43c0f7832ef93d64eaaa165293db032efb1d`.
+Both old patches are unchanged in range-diff and all nine candidate files
+match the old reviewed bytes. Independent changed-base source review by
+`continuity_audit` found no actionable P0/P1/P2 after reading current backend,
+locking and direct-consumer changes. This is not a GitHub approval.
+
+This layer adds `test_schedule_authority`, using the actual FileSystem backend,
+public workspace config, store, service and runner. Eleven cases passed,
+including six real self-exec child reopenings. The cases cover missing/corrupt
+primary state with stale Scheduled or Running mirrors, cancellation/settlement,
+mutation refusal, service callback ordering, unchanged mirror bytes and signal
+rows, and restored terminal authority. A genuinely fresh store remains writable.
+The service withdrawal assertion belongs to `Schedule_service.cancel`; it does
+not cover the server's separate `cancel_keeper_schedules` purge choreography.
+
+The standalone receipt is retained under this worktree's ignored
+`artifacts/farm-schedule-behavior-20261116/`. Its fixed product snapshot is
+`8d4a43c0`, with 273 source inputs and generated Embedded_config from 430 committed
+config assets. The two promoted test/stanza files match draft manifest
+`76c5fc07e54a6694605523a49988a5773c19f6b822861fd2dae91cb649367954`.
+Compiler/environment probes were captured before compilation. The final run-3
+records six successful commands and eleven passing cases; it reused verified
+compiled inputs and rebuilt the changed test. Result SHA-256:
+`4b1dbab944c2ae327c981c8f43f47da0ea05546159f52cf7bea3e0d9e034264e`.
+
+Earlier attempts are preserved: run-1 omitted the actual stage_flock C stub
+from the standalone link; run-2 reached successful child assertions but failed
+when the parent's waitpid was interrupted. The final fixture retries waiting
+for that same child on EINTR; it does not replay a process or store operation.
+
+This does not execute the whole existing store/runner suites, Memory backend,
+Keeper teardown/queue/provider integration, crash-mid-write scenarios, full
+Dune graph or a deployed server. The earlier syntax-only and unrun-suite rows
+remain historical evidence. No CI, remote submission, merge, installation or
+original operational recovery is established here.

@@ -14,7 +14,14 @@
     Establishing an initial baseline writes the atom position without a
     Memory commit. Verified unread evidence is durably accumulated under the
     Memory lock before external acknowledgements or either progress write.
-    Recovering a hole-bearing range also checks its exact source messages. *)
+    Recovering a hole-bearing range also checks its exact source messages.
+
+    Pure atom-range selection, cut construction and unread counting use the
+    shared CPU pool with the already-read immutable checkpoint and boundary
+    values. Existing worker calls and calls without a pool run inline under
+    {!Domain_pool_ref}'s policy. Digest lookup order and writer exceptions are
+    preserved; moving this work does not grant source freshness, Memory commit
+    or cursor authority. *)
 
 type commit_result =
   | Memory_committed

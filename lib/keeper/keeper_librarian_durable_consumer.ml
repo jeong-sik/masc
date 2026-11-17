@@ -1142,11 +1142,15 @@ let unread_turns_as ~read_use ~on_checkpoint_load ~config ~keeper_name =
                 | History.Objects_invalid _ ) as error) ->
             Error (Checkpoint_unreadable { trace_id = current_trace_id; error })
           | Ok (History.Read (checkpoint, witness)) ->
-            let atoms = R.unread_turns
-                 ~trace_id:current_trace_id
-                 ~lines:positions.lines
-                 ~progress:positions.progress
-                 ~messages:checkpoint.Agent_core.Checkpoint.messages in
+            let messages = checkpoint.Agent_core.Checkpoint.messages in
+            let atoms =
+              Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+                R.unread_turns
+                  ~trace_id:current_trace_id
+                  ~lines:positions.lines
+                  ~progress:positions.progress
+                  ~messages)
+            in
             let observation = match atoms, key, witness with
               | Some atoms, Some key, Some witness ->
                 Some (Unread_observation.remember key ~atoms ~witness)
@@ -1240,7 +1244,11 @@ let consume_one_with_extent
     | Error error, _ -> Error error
     | Ok (Captured_checkpoint snapshot), progress ->
       let messages = Keeper_checkpoint_store.exact_snapshot_messages snapshot in
-      Ok (trace_id, progress, Some snapshot, messages, R.select ~trace_id ~lines ~progress ~messages extent)
+      let selection =
+        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+          R.select ~trace_id ~lines ~progress ~messages extent)
+      in
+      Ok (trace_id, progress, Some snapshot, messages, selection)
   in
   (* [previous]'s trace has nothing left, or its checkpoint is gone. Each trace
      that started after it is read from its own start, in the order the log
@@ -1297,12 +1305,13 @@ let consume_one_with_extent
        | Ok (Captured_checkpoint snapshot) ->
          let messages = Keeper_checkpoint_store.exact_snapshot_messages snapshot in
          let selection =
-           R.select
-             ~trace_id:position.trace_id
-             ~lines
-             ~progress:(Some previous)
-             ~messages
-             extent
+           Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+             R.select
+               ~trace_id:position.trace_id
+               ~lines
+               ~progress:(Some previous)
+               ~messages
+               extent)
          in
          (match selection with
           | R.Nothing_to_read ->
@@ -1398,7 +1407,8 @@ let consume_one_with_extent
         in
         let recovery_range, recovery_boundary_line, recovery_boundary_lines_seen =
           match
-            R.select ~trace_id ~lines ~progress:selection_progress ~messages R.All_unread
+            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+              R.select ~trace_id ~lines ~progress:selection_progress ~messages R.All_unread)
           with
           | R.Read { range; boundary_lines_seen } ->
             (match
@@ -1477,7 +1487,8 @@ let consume_one_with_extent
       match atom with
       | None -> []
       | Some (range, _, end_boundary_line, ended_at, turn_ref) ->
-        (match R.cut_lines ~trace_id ~lines ~messages range with
+        (match Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+           R.cut_lines ~trace_id ~lines ~messages range) with
          | [] ->
            [ Atoms
                { line = end_boundary_line

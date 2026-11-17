@@ -379,17 +379,27 @@ type observation =
       ; building : (Workspace_memory_briefing.pass option, string) result
       }
 
-let observe ~base_path =
+let read_current ~base_path =
   let ledger_path = path ~base_path in
-  try
-    match Unix.lstat ledger_path with
+  match Unix.lstat ledger_path with
     | { Unix.st_kind = Unix.S_REG; _ } ->
-      let stored = io (fun () ->
+      io (fun () ->
         let text = Fs_compat.load_file ledger_path in
         let* json = try Ok (Yojson.Safe.from_string text)
           with Yojson.Json_error detail -> Error (ledger_path ^ ": " ^ detail) in
-        of_json json |> Result.map_error (fun detail -> ledger_path ^ ": " ^ detail)) in
-      (match stored with
+        of_json json |> Result.map_error (fun detail -> ledger_path ^ ": " ^ detail))
+    | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+      Error (ledger_path ^ ": not a regular file")
+
+let check_readable ~base_path =
+  try Result.map (fun _ -> ()) (read_current ~base_path) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> io (fun () -> require_base ~base_path)
+  | Unix.Unix_error (error, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+
+let observe ~base_path =
+  try
+      match read_current ~base_path with
        | Error detail -> Unavailable detail
        | Ok ledger ->
          let ledger_sha256 = sha256 ledger in
@@ -413,9 +423,7 @@ let observe ~base_path =
                      classified_count = List.length (dispositions ledger);
                      excluded_count;
                      briefing;
-                     building })
-    | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
-      Unavailable (ledger_path ^ ": not a regular file")
+                     building }
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) ->
     (match io (fun () -> require_base ~base_path) with

@@ -213,7 +213,11 @@ let attach_projection_diagnostics json metadata =
 
 let projection_diagnostics_fields ~surface ~started_at ~extra json =
   let build_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
-  let payload_bytes = String.length (Yojson.Safe.to_string json) in
+  let payload_bytes =
+    let buffer = Buffer.create 256 in
+    Yojson.Safe.to_buffer buffer json;
+    Buffer.length buffer
+  in
     ([ "surface", `String surface
      ; "build_ms", `Int build_ms
      ; "payload_bytes", `Int payload_bytes

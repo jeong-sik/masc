@@ -117,6 +117,48 @@ let test_exact_streams_and_real_status () =
   check string "stderr callback receives raw NUL bytes" "err\000raw" (Buffer.contents stderr);
   check string "unread stdout is delivered after callback return" "tail\000raw" (Buffer.contents tail)
 
+let test_captured_runtime_keeps_its_cwd () =
+  let first = Unix.realpath (Filename.temp_dir "stdio-first-cwd-" "") in
+  let second = Unix.realpath (Filename.temp_dir "stdio-second-cwd-" "") in
+  Fun.protect ~finally:(fun () -> Unix.rmdir second; Unix.rmdir first) (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let initialize cwd =
+      P.init ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / cwd)
+        ~proc_mgr:Posix_spawn_process_mgr.mgr ~clock:(Eio.Stdenv.clock env)
+    in
+    Fun.protect ~finally:P.reset_for_testing (fun () ->
+      initialize first;
+      let context = match P.capture_stdio_context () with
+        | Ok context -> context | Error detail -> fail detail in
+      initialize second;
+      let pwd ?context () =
+        match P.with_stdio ?context ~on_stderr_chunk:ignore ~on_stdout_tail:ignore
+            ["/bin/pwd"; "-P"] (fun ~input ~output:_ ->
+              Eio.Buf_read.line (Eio.Buf_read.of_flow input
+                ~max_size:(1 + max (String.length first) (String.length second)))) with
+        | Ok (cwd, Unix.WEXITED 0) -> cwd
+        | Ok (_, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _))
+        | Error _ -> fail "cwd fixture did not finish successfully"
+      in
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 20.0 (fun () ->
+        check string "captured runtime launches in its original directory" first
+          (pwd ~context ());
+        check string "ordinary callers use the current runtime directory" second
+          (pwd ()))))
+
+let test_captured_context_does_not_enable_non_eio_spawn () =
+  let context = Eio_main.run (fun env ->
+    P.init ~cwd_default:(Eio.Stdenv.fs env)
+      ~proc_mgr:Posix_spawn_process_mgr.mgr ~clock:(Eio.Stdenv.clock env);
+    Fun.protect ~finally:P.reset_for_testing (fun () ->
+      match P.capture_stdio_context () with
+      | Ok context -> context | Error detail -> fail detail)) in
+  match P.with_stdio ~context ~on_stderr_chunk:ignore ~on_stdout_tail:ignore
+      ["/bin/true"] (fun ~input:_ ~output:_ -> fail "closed runtime spawned outside Eio") with
+  | Error (P.Runtime_unavailable _) -> ()
+  | Error (P.Spawn_refused _) | Ok _ -> fail "captured context bypassed the Eio requirement"
+
 let test_callback_exception_is_not_spawn_refusal () =
   List.iter (fun raised ->
     with_runtime @@ fun _clock -> with_group @@ fun pids ->
@@ -174,6 +216,8 @@ let () =
       ["lifecycle",
        [test_case "refusals precede spawn" `Quick test_refusal_before_spawn;
         test_case "exact duplex bytes tail and actual exit" `Quick test_exact_streams_and_real_status;
+        test_case "captured runtime preserves actual child cwd" `Quick test_captured_runtime_keeps_its_cwd;
+        test_case "captured runtime cannot spawn outside Eio" `Quick test_captured_context_does_not_enable_non_eio_spawn;
         test_case "post-spawn exceptions remain exceptions" `Quick test_callback_exception_is_not_spawn_refusal;
         test_case "stderr callback failure cleans blocked session" `Quick
           (test_stream_callback_failure_cleans_the_group "stderr");

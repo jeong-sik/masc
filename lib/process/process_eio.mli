@@ -265,7 +265,22 @@ type stdio_refusal =
   | Spawn_refused of spawn_refusal
       (** A failure before the child exists, never a callback failure. *)
 
+type stdio_context
+(** One captured initialized process runtime: its process manager, default
+    cwd capability/path and clock. Reinitialization or reset does not replace
+    these values. This borrows their existing lifetime; it neither keeps a
+    closed resource alive nor pins the directory named by the path. *)
+
+val capture_stdio_context : unit -> (stdio_context, string) result
+(** Capture the initialized runtime once, without spawning or opening a
+    directory. [Error] means no runtime is initialized. The capture does not
+    establish an active Eio fiber; {!with_stdio} checks that at use time. *)
+
+val stdio_context_clock : stdio_context -> float Eio.Time.clock_ty Eio.Resource.t
+(** The clock from that same captured runtime, without rereading global state. *)
+
 val with_stdio :
+  ?context:stdio_context ->
   ?env:string array ->
   ?cwd:string ->
   on_stderr_chunk:(string -> unit) ->
@@ -287,7 +302,10 @@ val with_stdio :
     Callback, stream, and cancellation exceptions propagate after the owned
     child/group is released. Stream callback failures are not swallowed.
     Only initialization and pre-child spawn failures return [Error]. The
-    process-wide spawn guard and initialized cwd capability are preserved. *)
+    process-wide spawn guard and initialized cwd capability are preserved.
+    With [context], manager, cwd and clock all come from that capture; without
+    it, this call captures the currently initialized runtime. Either form
+    refuses outside an active Eio fiber and never falls back to Unix. *)
 
 val run_argv_with_status_split_or_refusal :
   ?timeout_sec:float ->

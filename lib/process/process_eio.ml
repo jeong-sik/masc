@@ -280,14 +280,30 @@ type stdio_refusal =
   | Runtime_unavailable of string
   | Spawn_refused of spawn_refusal
 
-let with_stdio ?env ?cwd ~on_stderr_chunk ~on_stdout_tail argv callback =
+type stdio_context = runtime
+
+let capture_stdio_context () =
+  match Atomic.get runtime_state with
+  | Some runtime -> Ok runtime
+  | None -> Error "Process_eio.capture_stdio_context: init not called"
+
+let stdio_context_clock (context : stdio_context) = context.clock
+
+let with_stdio ?context ?env ?cwd ~on_stderr_chunk ~on_stdout_tail argv callback =
   match argv with
   | [] -> Error (Spawn_refused Empty_argv)
   | executable :: _ ->
-    (match Fs_compat.execution_context (), Atomic.get runtime_state with
-     | Fs_compat.Non_eio, (None | Some _) | Fs_compat.Eio_fiber, None ->
+    (match Fs_compat.execution_context () with
+     | Fs_compat.Non_eio ->
        Error (Runtime_unavailable "Process_eio.with_stdio requires an initialized Eio runtime")
-     | Fs_compat.Eio_fiber, Some runtime ->
+     | Fs_compat.Eio_fiber ->
+       let captured = match context with
+         | Some context -> Ok context
+         | None -> capture_stdio_context ()
+       in
+       match captured with
+       | Error detail -> Error (Runtime_unavailable detail)
+       | Ok runtime ->
        Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status
          ~argv ?env ?cwd ();
        with_spawn_guard (fun () ->

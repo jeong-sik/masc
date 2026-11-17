@@ -502,9 +502,6 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
         | Subdividing _ | Subdivided _ -> Error "Original history publication cannot commit in this phase"
 
 let publish = publish_with ~before_settlement:(fun () -> ())
-module For_testing = struct
-  let publish = publish_with
-end
 
 (* An execution refusal that can never be answered (counterpart-only input that
    is over capacity, which has no smaller form to retry). The operator chose to
@@ -514,7 +511,7 @@ end
    ACK and read positions move past the range, and only then is the fact
    recorded. A cut at any point re-enters here: receipts already proved are not
    written again and a position already at its target is left alone. *)
-let settle_refused ~store ~request ~(record : Owner.retained) ~diagnosis =
+let settle_refused_with ~before_settlement ~store ~request ~(record : Owner.retained) ~diagnosis =
   let source=Request.source request and owner=Request.physical_owner request in
   let keeper_id=Request.keeper_id owner in
   let* ()=match Progress.phase record.progress,Progress.settlement record.progress with
@@ -524,13 +521,23 @@ let settle_refused ~store ~request ~(record : Owner.retained) ~diagnosis =
       | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
       | Subdividing _ | Subdivided _),(None | Some _) ->
       Error "Only an execution refusal can be settled by abandoning its range" in
-  let* ()=io (fun () ->
-    Keeper_librarian_durable_source_lock.with_original ~request (fun () ->
+  let inspect () =
       let* actual=reload ~store ~previous:record request in
       let* ()=Keeper_librarian_history_resolution_state.check_unfenced
         ~store ~request ~original:actual in
       let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
-      let* proved=receipt_state request in
+      receipt_state request in
+  (* Receipt lookup can reconcile an earlier Memory publication, so inspect
+     first confirms the live owner, retained record and effect fence. It selects
+     a lock scope, never authority for a new disposition. Both callbacks repeat
+     these checks and reread actual receipts under the source locks. *)
+  let* receipt_proved=inspect () in
+  let* ()=if receipt_proved then
+    Keeper_librarian_durable_source_lock.with_original_settlement ~request (fun () ->
+      let* proved=inspect () in
+      require proved "Refused original Memory receipts disappeared before settlement recovery")
+    else Keeper_librarian_durable_source_lock.with_original ~request (fun () ->
+      let* proved=inspect () in
       if proved then Ok () else
       let* _=Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable
         ?durable_range_id:(Source.range_id source)
@@ -538,9 +545,15 @@ let settle_refused ~store ~request ~(record : Owner.retained) ~diagnosis =
         ~keepers_dir:(Request.keepers_dir owner) ~keeper_id ~now:(Time_compat.now ())
         ~source:{Current.kind=Current.Librarian;trace_id=Ids.Turn_ref.trace_id (Source.input source).turn_ref}
         ~new_claims:[] () in
-      Ok ())) in
-  let* proved=io (fun () -> let* ()=Request.confirm_owner request in receipt_state request) in
+      Ok ()) in
+  let* proved=let* ()=Request.confirm_owner request in receipt_state request in
   let* ()=require proved "Refused original range has no Memory receipts to settle against" in
-  let* ()=io (fun () -> settle_positions ~store ~record request) in
+  let* ()=before_settlement () in
+  let* ()=settle_positions ~store ~record request in
   let* _,record=advance ~store record (Progress.Refusal_settled diagnosis) in
   Ok record
+let settle_refused = settle_refused_with ~before_settlement:(fun () -> Ok ())
+module For_testing = struct
+  let publish = publish_with
+  let settle_refused = settle_refused_with
+end

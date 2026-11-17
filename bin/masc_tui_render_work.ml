@@ -903,16 +903,16 @@ let render_planning_list (state : state) =
              ~list_lines ~preview_title:(text "목표와 성공 조건" "Goal and success criterion")
              ~preview_lines)))
 
-let planning_measurement_lines (state : state) (goal : planning_goal) =
+let planning_measurement_lines (state : state) ~width (goal : planning_goal) =
   let text ko en = ui_text state ~ko ~en in
-  let line tone text = { Planning_detail.tone; text } in
+  let line tone text = Planning_detail.wrapped ~width tone text in
   let unavailable reason =
-    [ line Planning_detail.Unreadable
-        ((text "실제 측정 조회 실패: " "Actual measurement unavailable: ") ^ Terminal_text.single_line reason) ]
+    line Planning_detail.Unreadable
+      ((text "실제 측정 조회 실패: " "Actual measurement unavailable: ") ^ Terminal_text.single_line reason)
   in
   if Option.is_none goal.pg_criterion_revision then []
   else match state.overview_goals with
-  | Goals_unread -> [ line Planning_detail.Waiting (text "실제 측정 미조회" "Actual measurement not observed") ]
+  | Goals_unread -> line Planning_detail.Waiting (text "실제 측정 미조회" "Actual measurement not observed")
   | Goals_failed reason -> unavailable reason
   | Goals_read goals ->
       (match List.find_opt
@@ -934,22 +934,22 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
              in
              (match row.og_measurement with
               | Goal_measurement_unread ->
-                  [ line Planning_detail.Waiting (text "실제 측정 미조회" "Actual measurement not observed"); tasks ]
+                  line Planning_detail.Waiting (text "실제 측정 미조회" "Actual measurement not observed") @ tasks
               | Goal_measurement_not_recorded ->
-                  [ line Planning_detail.Quiet (text "실제 측정 미기록" "Actual measurement not recorded"); tasks ]
-              | Goal_measurement_unavailable reason -> unavailable reason @ [ tasks ]
+                  line Planning_detail.Quiet (text "실제 측정 미기록" "Actual measurement not recorded") @ tasks
+              | Goal_measurement_unavailable reason -> unavailable reason @ tasks
               | Goal_measurement_reported { value; evidence; actor; recorded_at } ->
                   (* "Measured:", not "Evidence:": this row is the goal tree's
                      measurement provenance, and on a confirmation screen the
                      same label already names the proof's evidence. *)
-                  [ line Planning_detail.Proven
-                      ((text "실제값: " "Actual: ") ^ Terminal_text.single_line value ^ (text " (보고된 값)" " (reported)"))
-                  ; line Planning_detail.Note
+                  line Planning_detail.Proven
+                    ((text "실제값: " "Actual: ") ^ Terminal_text.single_line value ^ (text " (보고된 값)" " (reported)"))
+                  @ line Planning_detail.Note
                       ((text "측정 근거: " "Measured: ") ^ Terminal_text.single_line evidence)
-                  ; line Planning_detail.Quiet
+                  @ line Planning_detail.Quiet
                       ((text "측정 주체: " "Measured by: ") ^ Terminal_text.single_line actor
                        ^ " · " ^ (text "기록 시각: " "recorded: ") ^ wire_moment recorded_at)
-                  ; tasks ]))
+                  @ tasks))
 
 let planning_confirmation_view (state : state) ~goal_id =
   let ko = state.ui_language = Lang_ko in
@@ -1020,22 +1020,18 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
                 (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 
-(* A verdict's reason runs to several wrapped rows. The first row keeps its
-   two-space lead; a continuation goes one step further in, so a long reason
-   reads as hanging under the row that began it instead of as rows the wrap
-   dropped at the same edge. The wrap happens at the continuation width --
-   the deeper of the two indents -- or a row wrapped at the full width and
-   then pushed four cells in would run past the frame and lose its tail to
-   the fitter, which does not carry the cut word to the next row. *)
-let planning_proof_rows ~width lines =
-  List.concat_map (fun (line : Planning_detail.line) ->
-    match Masc_tui_text_block.rows ~max_cells:(max 1 (width - 4)) line.text with
-    | [] -> [{line with text=""}]
-    | rows ->
-        List.mapi
-          (fun index text ->
-             { line with text = (if index = 0 then "  " else "    ") ^ text })
-          rows) lines
+(* The proof block sits two cells in. Its rows arrive wrapped by
+   [Planning_detail] at [planning_proof_width], which leaves room for that
+   lead, so nothing here wraps again: a second wrap split rows the first one
+   had filled and left one- or two-word rows behind. *)
+let planning_proof_lead = "  "
+
+let planning_proof_width ~width =
+  max 1 (width - Message_layout.display_width planning_proof_lead)
+
+let planning_proof_rows lines =
+  List.map (fun (line : Planning_detail.line) ->
+    { line with text = planning_proof_lead ^ line.text }) lines
 
 let planning_detail_content (state : state) ~confirmation ~cols (goal : planning_goal) =
   let ko = state.ui_language = Lang_ko in
@@ -1138,20 +1134,21 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
         field ~separator:"  " task.id
           (task_status_word state task.status ^ " · " ^ task.title)) linked_tasks
   in
+  let proof_width = planning_proof_width ~width in
   let confirmation_rows =
     (match confirmation with
        | `Submitting -> [{Planning_detail.tone = Waiting; text = (text "근거 최종 확인 요청 중" "Sending proof confirmation...")}]
        | `Inspect (Masc_tui_fetched.Ready value) ->
-           Planning_detail.confirmation_lines ~width
+           Planning_detail.confirmation_lines ~width:proof_width
              ~ko:(state.ui_language = Lang_ko) value
        | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = (text "확인할 근거 조회 중" "Reading the proof to confirm...")}]
-       | `Inspect (Stale (_, reason) | Failed reason) -> [{Planning_detail.tone = Unreadable; text = reason}]
+       | `Inspect (Stale (_, reason) | Failed reason) -> Planning_detail.wrapped ~width:proof_width Unreadable reason
        | `Inspect Masc_tui_fetched.Absent ->
-           (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~ko ~width blocked | None -> [])
-           @ Planning_detail.body ~ko ~width goal.pg_proof goal.pg_last_review_note)
+           (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~ko ~width:proof_width blocked | None -> [])
+           @ Planning_detail.body ~ko ~width:proof_width goal.pg_proof goal.pg_last_review_note)
   in
-  let measurement = planning_measurement_lines state goal in
-  let criterion_review = Planning_detail.criterion_review_lines ~width
+  let measurement = planning_measurement_lines state ~width:proof_width goal in
+  let criterion_review = Planning_detail.criterion_review_lines ~width:proof_width
     ~ko:(state.ui_language = Lang_ko) goal.pg_criterion_review in
   let timeline =
     Planning_detail.timeline ~ko ~now:(Unix.gettimeofday ()) ~width
@@ -1267,7 +1264,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   (* Confirmation stays at physical row zero: the presented-row guard below
      measures this exact block. Other core observations follow it. *)
   let proof = confirmation_rows @ measurement @ criterion_review in
-  let wrapped_proof = planning_proof_rows ~width proof in
+  let wrapped_proof = planning_proof_rows proof in
   let before_candle = match confirmation with
     | `Inspect Masc_tui_fetched.Absent ->
         request_results @ overview @ gap @ section (text "판정과 측정" "Proof and measurement")
@@ -1351,8 +1348,8 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
   let seen = match confirmation with
     | `Inspect (Masc_tui_fetched.Ready proof) ->
         let width = max 1 (framed_inner_width cols - 2) in
-        let last = List.length (planning_proof_rows ~width
-          (Planning_detail.confirmation_lines ~width
+        let last = List.length (planning_proof_rows
+          (Planning_detail.confirmation_lines ~width:(planning_proof_width ~width)
              ~ko:(state.ui_language = Lang_ko) proof)) - 1 in
         if last >= scroll && last < scroll + height then Some proof else None
     | `Submitting | `Inspect (Masc_tui_fetched.Absent | Loading | Stale _ | Failed _) -> None in

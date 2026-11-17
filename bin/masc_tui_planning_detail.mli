@@ -106,6 +106,9 @@ val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
     presented reader frame containing the block's final evidence row; this
     does not establish that each earlier row was read. *)
 
+val wrapped : width:int -> tone -> string -> line list
+(** [text] split at its line breaks and wrapped between words to [width]. *)
+
 val body :
   ko:bool -> width:int -> Tui_decode.goal_proof -> string option -> line list
 (** The verdict, its reason, and the keeper's own note, wrapped to [width].

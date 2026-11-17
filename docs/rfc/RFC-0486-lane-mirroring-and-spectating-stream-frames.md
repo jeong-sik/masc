@@ -20,7 +20,7 @@ RFC-0480은 TUI의 주기 읽기를 없앤다. 브라우저 lane 미러링과 MS
   `launch_owed_browser_observation`이 `Browser_lane_view.observation_operation`으로
   화면 진입·변경 알림·읽기 실패 뒤 관측을 시작한다.
 - MSX·DOS 화면: 관전(`Observe_machine`)은 읽기뿐이다.
-  MSX 는 `launch_msx_live_read`, DOS 는 `launch_dos_live_poll` 이
+  MSX 는 `launch_msx_live_read`, DOS 는 `launch_dos_live_read` 가
   `Masc_tui_http.fetch_machine_live` 로 `since` 이후 프레임을 읽는다.
   화면 진입·변경 알림·읽기 실패 뒤 다시 요청한다.
   MSX 저장·복원은 `run_machine_change ~checkpoint_boundary:true`에서
@@ -54,4 +54,4 @@ TUI 를 닫으면 프레임 읽기도 멈춘다. 서버에는 "누가 보고 있
 
 ## 4. 층
 
-결정 1~4 가 정해진 뒤 나눈다. RFC-0480 의 Lz(2초 블록 삭제)는 이 RFC 의 층이 들어간 뒤에 들어간다.
+결정 1~4 가 정해진 뒤 나눈다.

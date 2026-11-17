@@ -328,7 +328,15 @@ let test_tool_audit_observes_same_count_rotation_and_pruning () =
   Fun.protect
     ~finally:(fun () -> Eio_guard.disable (); Fs_compat.remove_tree base_path)
     (fun () ->
-      let config = Workspace.default_config base_path in
+      (* This fixture states its path explicitly: ambient base-path discovery
+         must never redirect its rotation/pruning writes to a live workspace. *)
+      let backend_config = Workspace.backend_config_for base_path in
+      let backend = match Workspace.create_backend backend_config with
+        | Ok backend -> backend
+        | Error error -> Alcotest.fail (Backend_types.show_error error) in
+      let config : Workspace.config =
+        { base_path; workspace_path = base_path; lock_expiry_minutes = 2;
+          backend_config; backend } in
       let keeper_name = "same-count-rotation" in
       let row name =
         `Assoc

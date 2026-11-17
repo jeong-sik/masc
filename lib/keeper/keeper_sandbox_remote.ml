@@ -998,12 +998,242 @@ module Stdio_request = struct
         ; connect_budget_sec : float
         }
 
+  type carrier_binding =
+    | Process_binding of { argv : string list; env_sha256 : string }
+    | Guest_binding of
+        { socket : string; uid : int; gid : int; connect_budget_sec : float }
+
+  type binding =
+    { bound_base_path : string
+    ; bound_keeper_name : string
+    ; frame_sha256 : string
+    ; frame_bytes : int
+    ; payload_argv : string list
+    ; bound_carrier : carrier_binding
+    ; endpoint_sha256 : string
+    ; bound_budget_sec : float
+    }
+
+  type binding_error = Owner_mismatch | Payload_argv_mismatch
+
   type t =
     { endpoint : endpoint
     ; request : Exec_ssh_protocol.request
     ; carrier : carrier
     ; budget_sec : float
+    ; captured_binding : binding
     }
+
+  let strings_json values = `List (List.map (fun value -> `String value) values)
+  let optional_strings_json = function None -> `Null | Some values -> strings_json values
+  let sha256 bytes = Agent_core_sha256.(to_hex (digest_string bytes))
+  let json_sha256 json = sha256 (Yojson.Safe.to_string json)
+
+  (* These are endpoint declarations, not a second request-header schema.
+     Secret environment values only enter the digest; no such JSON is retained. *)
+  let transport_binding_json = function
+    | Openssh (ssh : openssh) ->
+      `Assoc
+        [ "kind", `String "openssh"
+        ; "endpoint", `String (Exec_ssh_endpoint.to_toml ssh.endpoint)
+        ; "ssh_bin", `String ssh.ssh_bin
+        ; "identity_file", `String ssh.identity_file
+        ; "known_hosts_file", `String ssh.known_hosts_file
+        ]
+    | Microvm { container_name; shim_path; delivery } ->
+      let delivery = match delivery with
+        | Exec_per_request { prefix; probe_prefix } ->
+          `Assoc
+            [ "kind", `String "exec_per_request"
+            ; "prefix", strings_json prefix
+            ; "probe_prefix", optional_strings_json probe_prefix
+            ]
+        | Agent_socket { host_socket; expected } ->
+          `Assoc
+            [ "kind", `String "agent_socket"
+            ; "socket", `String host_socket
+            ; "uid", `Int expected.uid
+            ; "gid", `Int expected.gid
+            ]
+      in
+      `Assoc
+        [ "kind", `String "microvm"
+        ; "container_name", `String container_name
+        ; "shim_path", `String shim_path
+        ; "delivery", delivery
+        ]
+    | Docker_exec { prefix; probe_prefix; container_name; shim_path } ->
+      `Assoc
+        [ "kind", `String "docker"
+        ; "prefix", strings_json prefix
+        ; "probe_prefix", optional_strings_json probe_prefix
+        ; "container_name", `String container_name
+        ; "shim_path", `String shim_path
+        ]
+
+  let endpoint_binding_sha256 (endpoint : endpoint) =
+    let _, _, _, _, _, max_concurrent_sessions = endpoint.identity in
+    let injected =
+      `List (List.map (fun (key, value) -> `List [ `String key; `String value ])
+        (injected_env endpoint))
+    in
+    json_sha256
+      (`Assoc
+        [ "name", `String endpoint.name
+        ; "transport", transport_binding_json endpoint.transport
+        ; "remote_root", `String endpoint.remote_root
+        ; "env_allowlist", strings_json endpoint.env_allowlist
+        ; "connect_timeout_sec", `Int endpoint.connect_timeout_sec
+        ; "max_concurrent_sessions", `Int max_concurrent_sessions
+        ; "gh_config_dir", `String endpoint.gh_config_dir
+        ; "injected_env_sha256", `String (json_sha256 injected)
+        ])
+
+  let capture_binding ~(endpoint : endpoint) ~(request : Exec_ssh_protocol.request)
+      ~(carrier : carrier) ~budget_sec ~frame : binding =
+    let bound_carrier = match carrier with
+      | Process { argv; env } ->
+        Process_binding { argv; env_sha256 = json_sha256 (strings_json (Array.to_list env)) }
+      | Guest { socket; expected; connect_budget_sec } ->
+        Guest_binding { socket; uid = expected.uid; gid = expected.gid; connect_budget_sec }
+    in
+    { bound_base_path = endpoint.base_path
+    ; bound_keeper_name = endpoint.keeper_name
+    ; frame_sha256 = sha256 frame
+    ; frame_bytes = String.length frame
+    ; payload_argv = request.argv
+    ; bound_carrier
+    ; endpoint_sha256 = endpoint_binding_sha256 endpoint
+    ; bound_budget_sec = budget_sec
+    }
+
+  let validate_binding (value : binding) ~base_path ~keeper_name ~expected_argv =
+    if String.trim base_path = "" || String.trim keeper_name = ""
+       || not (String.equal value.bound_base_path base_path)
+       || not (String.equal value.bound_keeper_name keeper_name)
+    then Error Owner_mismatch
+    else if value.payload_argv <> expected_argv then Error Payload_argv_mismatch
+    else Ok ()
+
+  let binding (prepared : t) ~base_path ~keeper_name ~expected_argv =
+    let* () = validate_binding prepared.captured_binding ~base_path ~keeper_name ~expected_argv in
+    Ok prepared.captured_binding
+
+  let matches_binding (prepared : t) (value : binding) = prepared.captured_binding = value
+
+  let binding_schema = "keeper-stdio-binding.v1"
+
+  let binding_to_json (value : binding) =
+    let carrier = match value.bound_carrier with
+      | Process_binding { argv; env_sha256 } ->
+        `Assoc
+          [ "kind", `String "process"; "argv", strings_json argv
+          ; "env_sha256", `String env_sha256 ]
+      | Guest_binding { socket; uid; gid; connect_budget_sec } ->
+        `Assoc
+          [ "kind", `String "guest"; "socket", `String socket
+          ; "uid", `Int uid; "gid", `Int gid
+          ; "connect_budget_sec", `Float connect_budget_sec ]
+    in
+    `Assoc
+      [ "schema", `String binding_schema
+      ; "base_path", `String value.bound_base_path
+      ; "keeper_name", `String value.bound_keeper_name
+      ; "frame_sha256", `String value.frame_sha256
+      ; "frame_bytes", `Int value.frame_bytes
+      ; "payload_argv", strings_json value.payload_argv
+      ; "carrier", carrier
+      ; "endpoint_sha256", `String value.endpoint_sha256
+      ; "budget_sec", `Float value.bound_budget_sec
+      ]
+
+  let typed_binding_field ~path getter json =
+    try Ok (getter json) with
+    | Yojson.Safe.Util.Type_error _ -> Error (path ^ " has the wrong JSON type")
+
+  let exact_binding_fields ~path expected json =
+    let* fields = typed_binding_field ~path Yojson.Safe.Util.to_assoc json in
+    if List.sort String.compare (List.map fst fields) = List.sort String.compare expected
+    then Ok fields
+    else Error (path ^ " has unknown, duplicate or missing fields")
+
+  let binding_text ~path = typed_binding_field ~path Yojson.Safe.Util.to_string
+  let binding_int ~path = typed_binding_field ~path Yojson.Safe.Util.to_int
+  let binding_strings ~path =
+    typed_binding_field ~path
+      (fun json -> List.map Yojson.Safe.Util.to_string (Yojson.Safe.Util.to_list json))
+
+  let binding_nonblank ~path json =
+    let* value = binding_text ~path json in
+    if String.trim value = "" then Error (path ^ " must not be blank") else Ok value
+
+  let binding_digest ~path json =
+    let* value = binding_text ~path json in
+    if String_util.is_lowercase_sha256_hex value then Ok value
+    else Error (path ^ " must be a lowercase SHA-256 digest")
+
+  let positive_finite value = Float.is_finite value && Float.compare value 0.0 > 0
+
+  let binding_integer_budget ~path encoded =
+    match Float.of_string_opt encoded with
+    | Some value when positive_finite value
+                      && String.equal (Printf.sprintf "%.0f" value) encoded -> Ok value
+    | Some _ | None -> Error (path ^ " must be an exact positive finite integer budget")
+
+  let binding_budget ~path json =
+    (* The original store normalizes integral floats to Int/Intlit. Requiring
+       the exact decimal roundtrip rejects an integer a float would round. *)
+    match (json : Yojson.Safe.t) with
+    | `Float value when positive_finite value -> Ok value
+    | `Int value -> binding_integer_budget ~path (string_of_int value)
+    | `Intlit value -> binding_integer_budget ~path value
+    | `Float _ | `Null | `Bool _ | `String _ | `Assoc _ | `List _ ->
+      Error (path ^ " must be a positive finite budget")
+
+  let carrier_binding_of_json json =
+    let path = "binding.carrier" in
+    let* fields = typed_binding_field ~path Yojson.Safe.Util.to_assoc json in
+    let* kind = match List.assoc_opt "kind" fields with
+      | None -> Error (path ^ ".kind is missing")
+      | Some value -> binding_text ~path:(path ^ ".kind") value
+    in
+    match kind with
+    | "process" ->
+      let* fields = exact_binding_fields ~path [ "kind"; "argv"; "env_sha256" ] json in
+      let* argv = binding_strings ~path:(path ^ ".argv") (List.assoc "argv" fields) in
+      let* env_sha256 = binding_digest ~path:(path ^ ".env_sha256")
+          (List.assoc "env_sha256" fields) in
+      Ok (Process_binding { argv; env_sha256 })
+    | "guest" ->
+      let* fields = exact_binding_fields ~path
+          [ "kind"; "socket"; "uid"; "gid"; "connect_budget_sec" ] json in
+      let* socket = binding_text ~path:(path ^ ".socket") (List.assoc "socket" fields) in
+      let* uid = binding_int ~path:(path ^ ".uid") (List.assoc "uid" fields) in
+      let* gid = binding_int ~path:(path ^ ".gid") (List.assoc "gid" fields) in
+      let* connect_budget_sec = binding_budget ~path:(path ^ ".connect_budget_sec")
+          (List.assoc "connect_budget_sec" fields) in
+      Ok (Guest_binding { socket; uid; gid; connect_budget_sec })
+    | _ -> Error (path ^ ".kind is unknown")
+
+  let binding_of_json json : (binding, string) result =
+    let* fields = exact_binding_fields ~path:"binding"
+        [ "schema"; "base_path"; "keeper_name"; "frame_sha256"; "frame_bytes"
+        ; "payload_argv"; "carrier"; "endpoint_sha256"; "budget_sec" ] json in
+    let field name = List.assoc name fields in
+    let* schema = binding_text ~path:"binding.schema" (field "schema") in
+    let* () = if String.equal schema binding_schema then Ok ()
+      else Error "binding.schema is unknown" in
+    let* bound_base_path = binding_nonblank ~path:"binding.base_path" (field "base_path") in
+    let* bound_keeper_name = binding_nonblank ~path:"binding.keeper_name" (field "keeper_name") in
+    let* frame_sha256 = binding_digest ~path:"binding.frame_sha256" (field "frame_sha256") in
+    let* frame_bytes = binding_int ~path:"binding.frame_bytes" (field "frame_bytes") in
+    let* () = if frame_bytes > 0 then Ok () else Error "binding.frame_bytes must be positive" in
+    let* payload_argv = binding_strings ~path:"binding.payload_argv" (field "payload_argv") in
+    let* bound_carrier = carrier_binding_of_json (field "carrier") in
+    let* endpoint_sha256 = binding_digest ~path:"binding.endpoint_sha256" (field "endpoint_sha256") in
+    let* bound_budget_sec = binding_budget ~path:"binding.budget_sec" (field "budget_sec") in
+    Ok { bound_base_path; bound_keeper_name; frame_sha256; frame_bytes; payload_argv
+       ; bound_carrier; endpoint_sha256; bound_budget_sec }
 
   type refusal =
     | Docker_unavailable
@@ -1047,6 +1277,15 @@ module Stdio_request = struct
       match mode_check with
       | Error refusal -> Error refusal
       | Ok () ->
+        let budget_sec = local_wall_budget endpoint timeout_sec in
+        let budgets_valid = positive_finite budget_sec &&
+          match prepared_carrier with
+          | Process _ -> true
+          | Guest { connect_budget_sec; _ } -> positive_finite connect_budget_sec
+        in
+        if not budgets_valid then
+          Error (Invalid_request "interactive host and Guest connect budgets must be finite and greater than zero")
+        else
         match wire_env endpoint env with
         | Error detail -> Error (Invalid_request detail)
         | Ok env ->
@@ -1063,9 +1302,12 @@ module Stdio_request = struct
             in
             match Exec_ssh_protocol.encode_request request ~stdin:"" with
             | Error detail -> Error (Invalid_request detail)
-            | Ok _ ->
+            | Ok frame ->
+              let captured_binding =
+                capture_binding ~endpoint ~request ~carrier:prepared_carrier ~budget_sec ~frame
+              in
               Ok { endpoint; request; carrier = prepared_carrier;
-                   budget_sec = local_wall_budget endpoint timeout_sec }
+                   budget_sec; captured_binding }
 
   type launch =
     { carrier : carrier

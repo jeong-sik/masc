@@ -7660,3 +7660,5 @@
 (include stanzas/test_schedule_authority.inc)
 
 (include stanzas/test_keeper_mcp_content.inc)
+
+(include stanzas/test_keeper_stdio_binding.inc)

@@ -2218,10 +2218,15 @@ let test_resolution_is_durable_and_origin_scoped () =
             | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
        in
        let replay_evidence =
+         (* The projection appends the artifact marker after the canonical
+            evidence, so the last line is a marker, not JSON. Skip markers
+            (Tool_output.is_marker) and take the last remaining line. *)
          projected_text
          |> String.split_on_char '\n'
          |> List.rev
-         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> List.find (fun line ->
+                let line = String.trim line in
+                (not (String.equal line "")) && not (Tool_output.is_marker line))
          |> Yojson.Safe.from_string
        in
        List.iter (fun private_value ->

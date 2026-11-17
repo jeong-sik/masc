@@ -479,10 +479,15 @@ let test_large_replay_result_stays_reference_only () =
          false
          (String_util.contains_substring message.text "LARGE-REPLAY-END");
        let canonical_evidence =
+         (* Same rule as test_keeper_approval_queue: a projection may append an
+            artifact marker after the canonical evidence, so take the last line
+            that is JSON rather than the last non-empty line. *)
          message.text
          |> String.split_on_char '\n'
          |> List.rev
-         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> List.find (fun line ->
+                let line = String.trim line in
+                (not (String.equal line "")) && not (Tool_output.is_marker line))
          |> Yojson.Safe.from_string
        in
        (match
@@ -515,7 +520,9 @@ let test_large_replay_result_stays_reference_only () =
          projected
          |> String.split_on_char '\n'
          |> List.rev
-         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> List.find (fun line ->
+                let line = String.trim line in
+                (not (String.equal line "")) && not (Tool_output.is_marker line))
          |> Yojson.Safe.from_string
        in
        (match

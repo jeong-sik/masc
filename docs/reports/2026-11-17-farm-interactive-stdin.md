@@ -31,6 +31,11 @@ timeout 여부는 유지하며, 그 오류를 정상 완료된 출력으로 다�
 framed·interactive 감독 루프 모두 준비된 알림 하나에 응답한 뒤 입력·출력·취소
 감시로 돌아가도록 바꾼다. 응답 전 대상이 사라진 알림은 실행 증거로 기록하지 않는다.
 
+추가 독립 리뷰에서 기존 Observe 채널 준비 실패가 정적 네트워크 차단도 없는
+실행으로 이어지는 경로를 확인했다. listener 전달용 socketpair를 준비하지 못하면
+payload를 fork하기 전에 scratch를 정리하고 `Refused` receipt로 끝낸다.
+capability probe 성공만으로 대체 차단 장치가 실제 설치됐다고 판단하지 않는다.
+
 ## 검증 범위
 
 - 프로토콜 시험은 V2 거절, capability 일치, 입력 키 중복, 초기 payload 거절,

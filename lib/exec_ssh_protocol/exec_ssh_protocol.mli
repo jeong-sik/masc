@@ -261,8 +261,9 @@ type trailer =
   ; signal : int option  (** set iff the payload died on a signal *)
   ; timed_out : bool  (** true iff the shim killed the payload on
                           [timeout_sec] *)
-  ; shim_error : string option  (** set iff the shim itself failed
-                                    before/without running the payload *)
+  ; shim_error : string option  (** a shim-level failure, including setup
+                                    refusal before payload execution or
+                                    incomplete output delivery after it *)
   ; observed_syscalls : int list
     (** syscall numbers the supervisor's user_notif drain recorded and
         denied during an [Observe]-mode run, oldest first; [[]] outside

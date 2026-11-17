@@ -15,6 +15,10 @@ open Alcotest
 
 let fixture_flag = "--standard-descriptor-fixture"
 
+(* Only used by the Linux receipt harness. The filter is inherited across
+   exec, so the harness still exercises the real shim and kernel probe. *)
+external deny_socketpair : bool -> unit = "ocaml_test_deny_socketpair"
+
 let shim = ref ""
 
 let all_descriptors =
@@ -69,10 +73,22 @@ let exec_shim shim_path names =
   close_all (descriptors_named names);
   Unix.execv shim_path [| shim_path |]
 
+let exec_without_socketpair errno shim_path args =
+  let unsupported_family =
+    match errno with
+    | "EPERM" -> false
+    | "EAFNOSUPPORT" -> true
+    | _ -> raise (Refused Unknown_mode)
+  in
+  deny_socketpair unsupported_family;
+  Unix.execv shim_path (Array.of_list (shim_path :: args))
+
 let fixture mode args =
   match mode, args with
   | "report", report_path :: names -> report_closed report_path names
   | "exec-shim", shim_path :: names -> exec_shim shim_path names
+  | "deny-socketpair", errno :: shim_path :: rest ->
+    exec_without_socketpair errno shim_path rest
   | _, _ -> raise (Refused Unknown_mode)
 
 let run_fixture mode args =

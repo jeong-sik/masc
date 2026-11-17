@@ -3408,7 +3408,8 @@ let test_cut_fence_outer_cancellation_joins_fs_scope () =
     let protected_before=protected_bytes () and positions=cut_source_positions fixture in
     let memory_before=cut_memory_bytes fixture and posts=F.post_count fixture.server in
     let published,published_u=Eio.Promise.create () and owner_context,owner_context_u=Eio.Promise.create () in
-    let worker_done,worker_done_u=Eio.Promise.create () in
+    let pool_invocation_done,pool_invocation_done_u=Eio.Promise.create () in
+    let source_scope_joined=Atomic.make None and runtime_owner_joined=Atomic.make None in
     let worker_entries=Atomic.make 0 in
     let cancel_requested=Atomic.make false and readback_after_cancel=Atomic.make false in
     let confirmed=Atomic.make None and escaped=Atomic.make None in
@@ -3430,7 +3431,7 @@ let test_cut_fence_outer_cancellation_joins_fs_scope () =
               Eio.Promise.resolve owner_context_u context;
               ignore (Domain_pool.submit_io ~name:__FUNCTION__ pool (fun () ->
                 Atomic.incr worker_entries;
-                Fun.protect ~finally:(fun () -> Eio.Promise.resolve worker_done_u ()) (fun () ->
+                Fun.protect ~finally:(fun () -> Eio.Promise.resolve pool_invocation_done_u ()) (fun () ->
                   Resolution.For_testing.with_cut_fence_serialized ~after_publish
                     ~config:fixture.config ~keeper_name ~request_id:original.request_id
                     ~expected:accepted.intent.expected ~basis ~actor:accepted.intent.actor ~reason:accepted.intent.reason
@@ -3441,11 +3442,23 @@ let test_cut_fence_outer_cancellation_joins_fs_scope () =
                       Atomic.set confirmed (Some result);result))));
               false)
           with Eio.Cancel.Cancelled _ -> true) in
-        (* Cleanup always frees the systhread and joins the Memory action before
-           a failing observer or fixture timeout can tear down its filesystem. *)
-        Eio.Switch.on_release cleanup_sw (fun () ->
-          release ();ignore (Eio.Promise.await_exn owner);
-          Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name);
+        (* A cancelled cross-domain Runtime waiter may finish before its actual
+           owner callback. First drain the held source locks, then pass that
+           callback's configuration/action serializers. Neither barrier writes
+           product state. A failing baseline must join these scopes as well. *)
+        Eio.Switch.on_release cleanup_sw (fun () -> Eio.Cancel.protect (fun () ->
+          release ();
+          let sources=io (fun () -> List.map (fun lock_path ->
+            File_lock_eio.with_durable_lock ~lock_path (fun () -> ())) lock_paths) in
+          Atomic.set source_scope_joined (Some sources);
+          let joined=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+            ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun actual ->
+              Ok (Lane_addon_captured_destination.same_semantic actual (Capture.destination request))) in
+          Atomic.set runtime_owner_joined (Some joined);
+          (* Preserve an action exception for the ordinary observer; it cannot
+             skip the actual owner/source barriers during cleanup. *)
+          ignore (Eio.Promise.await owner);
+          Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name));
         let context=Eio.Promise.await owner_context in
         Eio.Promise.await published;
         Eio.Cancel.cancel context Exit;
@@ -3464,7 +3477,7 @@ let test_cut_fence_outer_cancellation_joins_fs_scope () =
           (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id))) in
         let blocked_intent=last_cut_intent fixture original in
         let blocked_positions=cut_source_positions fixture and blocked_memory=cut_memory_bytes fixture in
-        let pending=not (Eio.Promise.is_resolved owner) && not (Eio.Promise.is_resolved worker_done) in
+        let pending=not (Eio.Promise.is_resolved owner) && not (Eio.Promise.is_resolved pool_invocation_done) in
         release ();
         let cancelled=Eio.Promise.await_exn owner in
         Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
@@ -3480,7 +3493,13 @@ let test_cut_fence_outer_cancellation_joins_fs_scope () =
     check bool "blocked fence advances no source ACK" true (blocked_positions=positions);
     check bool "blocked fence writes no Memory" true (blocked_memory=memory_before);
     check bool "the actual submitting fiber propagates cancellation" true cancelled;
-    check bool "entered worker finished before the Memory lane drained" true (Eio.Promise.is_resolved worker_done);
+    check bool "pool invocation finished before the Memory lane drained" true (Eio.Promise.is_resolved pool_invocation_done);
+    check bool "cleanup joined the actual source scope before filesystem teardown" true
+      (match Atomic.get source_scope_joined with
+       | Some sources -> sources<>[] && List.for_all Result.is_ok sources
+       | None -> false);
+    check bool "cleanup crossed the same Runtime owner serializers after source release" true
+      (Atomic.get runtime_owner_joined=Some (Ok true));
     check int "cancelled filesystem work is never replayed" 1 (Atomic.get worker_entries);
     check bool "strict fence readback runs after outer cancellation" true (Atomic.get readback_after_cancel);
     let fenced=match Atomic.get confirmed with

@@ -22,12 +22,14 @@ related: ["0387", "0267", "0444", "0362", "goal-candle-ledger", "tui-one-screen-
 3. 검증 판정은 판정자가 잰 값을 같은 모양으로 함께 남긴다. 이유 글은 그 값에 덧붙는 설명이다.
 4. `last_review_note` 를 지운다. 판정 이유는 검증 원장에, 중단·재개 사유는 Goal 이벤트에 있다.
 5. TUI 목록은 Goal 마다 진척(`1/14 층`)과 판정 종류를 같은 꼴로 보인다. 이유 글은 상세에서만 보인다.
-6. 저장소는 hard cut 이다. 지금 Goal 넷(goals, measurements, verifications, criterion reviews)은
-   새 스키마를 읽지 못하는 행을 `Schema_rejected` 로 알리고 지운 뒤 새로 쓴다(RFC-0444 §2.7).
-   Candle 원장도 같은 배포에서 새로 시작하고, Snapshot 은 타입 있는 값을 담는다(§6).
+6. 저장소는 hard cut 이다. Goal 과 Candle 이 쓰는 파일 여덟과 그 복구 미러 다섯(§6 표)은 새
+   스키마를 읽지 못하는 행을 `Schema_rejected` 로 알리고 지운 뒤 새로 쓴다(RFC-0444 §2.7).
+   Candle Snapshot 은 타입 있는 값을 담는다(§6).
+7. 통과 판정의 잰 값은 목표에 닿아야 한다. 닿지 않은 값을 단 통과는 판정 출력 오류로 다룬다(§3).
 
-완료 판정은 바뀌지 않는다. Verifier 가 증명하고 사람이 확인해야 완료다(RFC-0387 B3, constitution
-goal). 측정값이 목표에 닿았다는 계산은 화면 표시에만 쓰고, phase 를 움직이지 않는다.
+완료 판정의 단계는 바뀌지 않는다. Verifier 가 증명하고 사람이 확인해야 완료다(RFC-0387 B3,
+constitution goal). 측정값이 목표에 닿았는지의 계산은 두 곳에서만 쓴다: 화면 표시와, 판정자의
+통과가 스스로 모순되는지 보는 판정 출력 검사(§3). 측정 기록만으로 phase 가 움직이지는 않는다.
 
 ## 1. 원인 — 지금 무엇이 보이나
 
@@ -71,31 +73,51 @@ goal). 측정값이 목표에 닿았다는 계산은 화면 표시에만 쓰고,
 
 ```ocaml
 (* lib/goal/goal_measure.mli *)
-type unit_label = private string
-(** 화면에 붙는 단위 낱말: "층", "ms", "%", "건". 비어 있지 않은 한 줄. 비교에 쓰지 않는다. *)
+type label = private string
+(** 비어 있지 않은 한 줄. 단위 낱말("층", "ms", "%")과 조건 문장이 이 타입이다. 화면에 붙여 보일
+    뿐 비교에 쓰지 않는다. *)
+type count = private int        (** 1 이상 *)
+type finite = private float     (** nan, infinity 가 아닌 수 *)
 
 type direction = At_least | At_most
 
-type t =
-  | Count of { noun : unit_label; total : int }
-      (** [total] 개 가운데 몇 개가 됐나. 다계정 1단계 14개 층. total >= 1 *)
-  | Quantity of { unit : unit_label; direction : direction; target : float }
-      (** 잴 수 있는 양과 그 한계. p99 <= 100 ms, 적중률 >= 90 %. target 은 유한한 수 *)
-  | Done_when of { condition : string }
-      (** 셀 수도 잴 수도 없는 것. 한 문장으로 적은 조건 *)
+type t = private
+  | Count of { noun : label; total : count }
+  | Quantity of { unit : label; direction : direction; target : finite }
+  | Done_when of { condition : label }
 
-type observed =
-  | Counted of { done_ : int }            (** 0 <= done_ <= total *)
-  | Quantified of { value : float }       (** 유한한 수 *)
+type observed = private
+  | Counted of { done_ : int }    (** 0 이상 *)
+  | Quantified of { value : finite }
   | Decided of bool
 
-val observed_fits : t -> observed -> bool
-(** 모양이 맞나만 본다. Count 에는 Counted, Quantity 에는 Quantified, Done_when 에는 Decided. *)
+(* 짝이 맞는 측정과 측정값. 이 타입이 있어야 [reach] 를 부를 수 있다. *)
+type paired = private
+  | Count_pair of { noun : label; total : count; done_ : int }   (** done_ <= total *)
+  | Quantity_pair of { unit : label; direction : direction; target : finite; value : finite }
+  | Done_pair of { condition : label; decided : bool }
 
-type reach = Reached | Short_of of { gap : string }
-val reach : t -> observed -> reach
-(** 화면 표시용. phase 를 움직이는 곳에서 부르지 않는다. *)
+type mismatch =
+  | Shape_differs                         (** Count 에 Quantified 를 단 것처럼 모양이 다르다 *)
+  | Count_over_total of { done_ : int; total : int }
+
+val make_label : string -> (label, string) result
+val make : (* 바깥 입력을 받는 생성자. of_yojson 은 이 함수를 지난다 *) ...
+val pair : t -> observed -> (paired, mismatch) result
+
+type reach = Reached | Short_of
+val reach : paired -> reach
+(** 모자란 정도는 화면이 [paired] 에서 적는다(`1/14 층`, `140 / ≤100 ms`). 여기에는 글이 없다. *)
 ```
+
+- 불변식은 주석이 아니라 생성자가 지킨다. `t`·`observed`·`paired` 는 `private` 이고, 만드는 길은
+  `make…`·`pair` 와 `of_yojson` 뿐이다. `of_yojson` 은 같은 생성자를 지나므로 빈 단위, 0 개짜리
+  `Count`, 무한대 목표, `15/14` 같은 값이 저장소에 들어올 수 없다.
+- 짝 검사는 GADT 대신 `paired` 합타입으로 한다. GADT(`'a t`, `'a observed`)로 하면 짝이 틀린 값을
+  만들 수 없지만, 측정 조건(goals.json)과 측정값(goal_measurements.json)이 다른 파일에서 따로
+  읽히므로 읽을 때마다 existential 로 싸고 풀어야 한다. `paired` 는 두 값을 만나는 자리(`pair`)에서
+  한 번 검사하고, 그 뒤의 `reach` 와 화면은 짝이 맞는 값만 받는다. 짝이 틀린 값은 `mismatch` 로
+  이름이 붙는다.
 
 - 측정 방법은 따로 둔다: `procedure : string`. 어디를 어떻게 읽어 이 값을 얻는지 적는 글이다.
   지금 `metric` 칸에 들어 있는 긴 글(이슈 #46477 본문을 읽고…)이 여기로 간다. 판정자와 Keeper 가
@@ -130,7 +152,7 @@ val reach : t -> observed -> reach
 
 `masc_goal_measure` 는 `observed_value` 문자열 대신 `observed` 객체를 받는다:
 `{ "kind": "counted", "done": 1 }`, `{ "kind": "quantified", "value": 140 }`, `{ "kind": "decided", "value": false }`.
-`Goal_measurement.record` 는 `observed_fits` 가 거짓이면 `Conflict` 로 거절한다. `evidence` 와
+`Goal_measurement.record` 는 `pair` 가 `mismatch` 를 내면 `Conflict` 로 거절한다. `evidence` 와
 `criterion_revision` 규칙은 그대로다(`goal_measurement.ml:220-294`). 측정은 지금처럼
 `completion_effect=unchanged` 다.
 
@@ -149,10 +171,19 @@ type verdict_outcome =
 
 - 판정자 출력 계약(`config/prompts/goal_verification.md`, `verifier_review_original.ml:50-54`)에
   잰 값을 넣는다. 판정자는 `procedure` 를 따라 직접 읽은 값을 Goal 의 `measure` 모양으로 낸다.
-- 통과에는 잰 값이 있어야 한다. 값이 없는 통과는 지금 이유가 빈 판정과 같은 길로 간다
-  (`goal_verifier_host.ml:214`, `Invalid_original "Goal judgment has no stated reason"`).
+- 판정 출력을 받는 자리(`goal_verifier_host.ml:207-216`)가 잰 값을 Goal 의 `measure` 와 `pair` 한다.
+  다음은 모두 판정 출력 오류이고, 지금 이유가 빈 판정과 같은 길로 간다
+  (`goal_verifier_host.ml:215`, `Invalid_original "Goal judgment has no stated reason"`):
+  - 잰 값이 없는 통과
+  - 모양이 다르거나 `done_ > total` 인 잰 값(`mismatch`)
+  - `reach = Short_of` 인 통과. 판정자가 미달 값을 재고도 통과라 한 것은 스스로 모순이다.
+    목록이 `1/14 층` 과 `● 통과` 를 한 줄에 그리는 일이 없다.
+- 판정자가 증명을 읽고 목표가 틀렸다고 보면, 그것은 통과가 아니라 기준 수정이다. 기준 심사
+  (`Goal_criterion_review`, `Criterion_needs_revision`)와 Goal 수정으로 간다.
+- 거절에는 이유 글이 있어야 한다(지금처럼 빈 이유는 판정 출력 오류, `goal_verifier_host.ml:213`).
+  종류는 잰 값에서 나오지만, 사람이 상세에서 읽을 설명은 이유 글뿐이다.
 - 거절의 종류는 이유 글이 아니라 잰 값에서 나온다:
-  - `Refuted { measured = Measured o; _ }` 이고 `reach measure o = Short_of _` → `측정 미달`
+  - `Refuted { measured = Measured o; _ }` 이고 `reach (pair …) = Short_of` → `측정 미달`
   - `Refuted { measured = Measured o; _ }` 이고 `Reached` → `측정은 닿음 · 다른 이유`
   - `Refuted { measured = Not_measured _; _ }` → `측정 못 함`
   화면은 이 셋을 낱말로, 이유 글은 상세에서 보인다. 이유 글을 읽어 종류를 고르는 코드는 없다
@@ -238,8 +269,25 @@ type verdict_outcome =
 - constitution forbidden#legacy_residue("미출시 제품이라 내부 마이그레이션도 불필요")와 RFC-0352 에 따라
   옛 행을 바꿔 읽는 reader·converter 를 만들지 않는다.
 - RFC-0444 §2.7 이 schema hard cut 에 요구하는 것을 같은 PR 에 싣는다: `Schema_rejected` 와
-  `reset_step`, 파일 넷마다의 효과, 바뀌는 소비자, CHANGELOG 의 "Fresh state required" 줄, 모든 phase 를
+  `reset_step`, 파일마다의 효과, 바뀌는 소비자, CHANGELOG 의 "Fresh state required" 줄, 모든 phase 를
   덮는 fixture, 두 번 부팅 digest 시험.
+- 지우는 파일은 아래 여덟과 그 복구 미러 다섯이다(모두 `<base-path>/.masc/` 아래). 복구 미러(`.last-good`,
+  `Common.recovery_mirror_suffix`)는 본 파일과 함께 지운다. 미러만 남으면 저장소는 `Uninitialized` 가
+  아니라 "본 파일 없음, 미러 있음"으로 읽혀(`goal_store.ml:7`, `:283`; `goal_criterion_review.ml:188-190`)
+  옛 행을 다시 꺼내거나 읽기 불가가 된다.
+
+  | 파일 | 미러 | 지우는 이유 |
+  |---|---|---|
+  | `goals.json` | `goals.json.last-good` | Goal 행 모양이 바뀐다 |
+  | `goal_events.jsonl` | 없음 | 지운 Goal 을 가리키는 이벤트가 대시보드 투영(`dashboard_goals.ml:461`, `:518`)에 남는다. §4 의 메모가 새 이벤트 모양으로 들어온다 |
+  | `goal_measurements.json` | `.last-good` | 측정값 모양이 바뀐다 |
+  | `goal_verifications.json` | `.last-good` | 판정 모양이 바뀐다 |
+  | `goal_criterion_reviews.json` | `.last-good` | 심사 대상 기준 모양이 바뀐다 |
+  | `goal-verification-runs.jsonl` | 없음 | 지운 Goal 의 검증 실행을 가리킨다 |
+  | `tasks/goal_task_links.json` | `.last-good` | 지운 Goal 을 가리킨다. Task 는 남고 Goal 없는 Task 가 된다(RFC-0267 §2 의 정상 상태). 다시 등록한 Goal 에 다시 잇는다 |
+  | `candle-ledger.jsonl` | 없음 | 아래 Candle 항목 |
+
+- Task 저장소는 지우지 않는다. Task 는 Goal 없이도 정상이다.
 - 지금 열린 Goal 32개는 새로 등록해야 한다. 지우는 일은 배포한 사람이 `reset_step` 으로 한다. 다시
   등록은 Goal 을 만든 Keeper 들에게 요청한다. 32개의 원문은 지우기 전에 `masc_goal_list` 출력으로
   운영 저장소 밖에 남긴다(복원용이 아니라 다시 쓸 때 읽을 원문).
@@ -261,6 +309,7 @@ type verdict_outcome =
 | 판정자 프롬프트·출력 (`config/prompts/goal_verification.md`, `lib/keeper/goal_verifier_original.ml:22-41`) | 문자열, APPROVE/REJECT | measure + procedure, 잰 값 |
 | `goal_verifier_host.ml:207-216` | Reject reason → evidence | `Refuted { measured; reason }` |
 | `/api/v1/dashboard/planning` (`lib/server/server_dashboard_http.ml:625-715`), `/goals`, `/goals/detail`, `masc_goal_list` | goal_to_yojson | measure, 최신 observed, 판정 |
+| Goal 이벤트 투영 `lib/dashboard/dashboard_goals.ml:461`, `:518` | 메모가 Goal 칸에 있음 | Phase 이벤트의 note(§4) |
 | TUI 디코드 `lib/tui_decode.ml:1467-1520`, `:3127` | 문자열 | measure, observed, measured |
 | TUI 그리기 `bin/masc_tui_render_work.ml` 목록·상세 | 문자열 자르기 | §5 |
 | Keeper 프롬프트 `lib/keeper/keeper_unified_prompt.ml:251-256`, `:331-350` | criterion JSON, review note | measure 표시, 진척, 판정 종류 |
@@ -277,7 +326,7 @@ type verdict_outcome =
 - 측정값이 목표에 닿으면 자동으로 완료 요청을 보내는 것. 완료는 Verifier 증명과 사람 확인이다.
 - 측정 이력(시계열). 측정 저장소는 Goal 마다 최신 한 행이다(`goal_measurement.ml:256-262`).
   진척 그래프가 필요하면 소비자를 먼저 세운다.
-- 단위 변환과 단위 비교. `unit_label` 은 붙여 보이는 낱말이다.
+- 단위 변환과 단위 비교. 단위(`label`)는 붙여 보이는 낱말이다.
 - Goal 아래 Goal(Initiative). Task 연결 규칙(RFC-0267)은 그대로다.
 
 ## 9. 넣는 순서(구현 스택)

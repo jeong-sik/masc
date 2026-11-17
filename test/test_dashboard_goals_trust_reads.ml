@@ -128,11 +128,143 @@ let test_reads_trust_once_for_assigned_keepers_only () =
     forest
 ;;
 
+let with_goal_events f =
+  let base_path = Filename.temp_dir "dashboard-goals-event-reads" "" in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:Fs_compat.clear_fs @@ fun () ->
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None);
+  let goal, _, _ =
+    get_ok Goal_store.write_error_to_string
+      (Goal_store.upsert_goal_with_events ~actor:"test" config
+         ~title:"Listed" ~metric:"tasks" ~target_value:"1" ())
+  in
+  f config goal
+;;
+
+let phase_row ~goal_id ~ts phase =
+  `Assoc
+    [ "goal_id", `String goal_id; "ts", `String ts
+    ; "event_type", `String "goal_phase"
+    ; "payload", `Assoc ["phase", `String phase; "actor", `String "test"]
+    ]
+;;
+
+let write_events config rows =
+  write_file (Goal_store.goal_events_path config)
+    (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n")
+;;
+
+let listed_timeline json =
+  let open Yojson.Safe.Util in
+  json |> member "tree" |> to_list |> List.hd |> member "timeline_events" |> to_list
+;;
+
+let unlisted_history json =
+  let open Yojson.Safe.Util in
+  json |> member "goal_history" |> member "unlisted" |> to_list
+;;
+
+let capture_stderr path f =
+  Out_channel.with_open_bin path @@ fun output ->
+  flush stderr;
+  let previous = Unix.dup Unix.stderr in
+  Fun.protect
+    ~finally:(fun () ->
+      flush stderr;
+      Unix.dup2 previous Unix.stderr;
+      Unix.close previous)
+    (fun () -> Unix.dup2 (Unix.descr_of_out_channel output) Unix.stderr; f ())
+;;
+
+let test_event_capture_preserves_rows_and_diagnostics () =
+  with_goal_events @@ fun config goal ->
+  let open Yojson.Safe.Util in
+  let later = "2026-11-17T03:00:00Z" in
+  let earlier = "2026-11-17T02:00:00Z" in
+  let rows =
+    [ phase_row ~goal_id:goal.id ~ts:later "executing"
+    ; phase_row ~goal_id:"goal-z" ~ts:later "completed"
+    ; phase_row ~goal_id:goal.id ~ts:earlier "verifying"
+    ; phase_row ~goal_id:"goal-a" ~ts:earlier "dropped"
+    ; `Assoc ["event_type", `String "goal_phase"]
+    ]
+  in
+  let path = Goal_store.goal_events_path config in
+  write_events config rows;
+  Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+    (fun output -> output_string output "\n{invalid json\n");
+  let diagnostics = Filename.concat config.base_path "diagnostics.log" in
+  let json = capture_stderr diagnostics (fun () ->
+    Dashboard_goals.dashboard_goals_tree_json ~config) in
+  check (list string) "listed events keep their recorded order" [later; earlier]
+    (listed_timeline json |> List.map (fun row -> row |> member "ts" |> to_string));
+  check (list string) "history excludes listed goals and orders ids"
+    ["goal-a"; "goal-z"]
+    (unlisted_history json |> List.map (fun row -> row |> member "goal_id" |> to_string));
+  let coverage = json |> member "goal_history" |> member "coverage" in
+  check int "malformed rows are counted" 1
+    (coverage |> member "malformed_event_lines" |> to_int);
+  check int "rows without goal identity remain diagnosed" 1
+    (coverage |> member "rows_without_goal_id" |> to_int);
+  let warnings =
+    In_channel.with_open_bin diagnostics In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (String.starts_with ~prefix:("[fs_compat] malformed JSONL (" ^ path ^ ")"))
+  in
+  check int "one malformed row is diagnosed once per tree read" 1 (List.length warnings)
+;;
+
+let test_event_capture_is_fresh_and_preserves_read_failures () =
+  with_goal_events @@ fun config goal ->
+  let open Yojson.Safe.Util in
+  let project phase history_id =
+    write_events config
+      [ phase_row ~goal_id:goal.id ~ts:"2026-11-17T02:00:00Z" phase
+      ; phase_row ~goal_id:history_id ~ts:"2026-11-17T03:00:00Z" "completed"
+      ];
+    let json = Dashboard_goals.dashboard_goals_tree_json ~config in
+    check (list string) "listed timeline reads current bytes"
+      ["phase=" ^ phase ^ " by test"]
+      (listed_timeline json |> List.map (fun row -> row |> member "summary" |> to_string));
+    check (list string) "unlisted history reads current bytes" [history_id]
+      (unlisted_history json |> List.map (fun row -> row |> member "goal_id" |> to_string));
+    let standalone = Dashboard_goals.unlisted_goal_history_json ~config ~goals:[goal] in
+    check bool "standalone history preserves the same projection" true
+      (Yojson.Safe.equal standalone (json |> member "goal_history"));
+    let detail = get_ok Fun.id (Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id) in
+    check bool "detail keeps the same listed events" true
+      (Yojson.Safe.equal (detail |> member "goal" |> member "timeline_events")
+         (`List (listed_timeline json)))
+  in
+  project "executing" "goal-before";
+  project "verifying" "goal-after";
+  let path = Goal_store.goal_events_path config in
+  Sys.remove path;
+  let missing = Dashboard_goals.dashboard_goals_tree_json ~config in
+  check int "missing log has no listed events" 0 (List.length (listed_timeline missing));
+  check int "missing log has no unlisted events" 0 (List.length (unlisted_history missing));
+  check int "missing log has no malformed lines" 0
+    (missing |> member "goal_history" |> member "coverage" |> member "malformed_event_lines" |> to_int);
+  Unix.mkdir path 0o700;
+  match Dashboard_goals.dashboard_goals_tree_json ~config with
+  | exception Sys_error _ -> ()
+  | _ -> fail "an unreadable event log must not become an empty history"
+;;
+
 let () =
   run "dashboard_goals_trust_reads"
     [ ( "build_forest"
       , [ test_case "reads trust once, for assigned Keepers only" `Quick
             test_reads_trust_once_for_assigned_keepers_only
+        ] )
+    ; ( "event_reads"
+      , [ test_case "preserves rows and diagnoses each malformed row once" `Quick
+            test_event_capture_preserves_rows_and_diagnostics
+        ; test_case "rereads current events and preserves missing/error semantics" `Quick
+            test_event_capture_is_fresh_and_preserves_read_failures
         ] )
     ]
 ;;

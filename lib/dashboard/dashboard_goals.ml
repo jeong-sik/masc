@@ -110,14 +110,14 @@ let build_forest =
 
 
 
-let build_goal_events_projection ~(config : Workspace.config) =
-  let goal_events =
-    let path = Goal_store.goal_events_path config in
-    if Workspace.path_exists config path then
-      Fs_compat.load_jsonl path
-    else
-      []
-  in
+let read_goal_events ~(config : Workspace.config) =
+  let path = Goal_store.goal_events_path config in
+  if Workspace.path_exists config path then
+    Fs_compat.load_jsonl_diagnostics path
+  else
+    [], 0
+
+let build_goal_events_projection goal_events =
   let events_by_goal_id =
     let rev_map =
       List.fold_left
@@ -341,12 +341,7 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
 (* The file read kept apart from the counting above, so the counting is testable
    without a workspace on disk. *)
 let unlisted_goal_history_json ~(config : Workspace.config) ~goals =
-  let path = Goal_store.goal_events_path config in
-  let rows, malformed_lines =
-    if Workspace.path_exists config path
-    then Fs_compat.load_jsonl_diagnostics path
-    else ([], 0)
-  in
+  let rows, malformed_lines = read_goal_events ~config in
   unlisted_goal_history_of_rows
     ~listed:(List.map (fun (goal : Goal_store.goal) -> goal.id) goals)
     ~rows
@@ -458,7 +453,8 @@ let goal_detail_json_ready ~(config : Workspace.config)
   | Error detail -> Ok (Goal_unavailable_envelope.to_yojson detail)
   | Ok goals ->
   let tasks = Workspace.get_tasks_safe config in
-  let events_for_goal = build_goal_events_projection ~config in
+  let goal_events, _ = read_goal_events ~config in
+  let events_for_goal = build_goal_events_projection goal_events in
   let verification_for_goal = verification_projection ~config in
   let measurement_for_goal = measurement_projection ~config in
   let criterion_review_for_goal = criterion_review_projection ~config in
@@ -569,7 +565,10 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
   | Error detail -> Goal_unavailable_envelope.to_yojson detail
   | Ok goals ->
   let tasks = Workspace.get_tasks_safe config in
-  let events_for_goal = build_goal_events_projection ~config in
+  (* Both views belong to this read: a second load could include later appends
+     only in the unlisted history, as well as parsing the whole log twice. *)
+  let goal_events, malformed_lines = read_goal_events ~config in
+  let events_for_goal = build_goal_events_projection goal_events in
   let verification_for_goal = verification_projection ~config in
   let measurement_for_goal = measurement_projection ~config in
   let criterion_review_for_goal = criterion_review_projection ~config in
@@ -626,7 +625,10 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
             ("done_tasks", `Int done_tasks);
             ("pending_approvals", `Int pending_approval_total);
           ] );
-      ("goal_history", unlisted_goal_history_json ~config ~goals);
+      ( "goal_history",
+        unlisted_goal_history_of_rows
+          ~listed:(List.map (fun (goal : Goal_store.goal) -> goal.id) goals)
+          ~rows:goal_events ~malformed_lines );
     ]
 
 let dashboard_goals_tree_json_with_pending_reader

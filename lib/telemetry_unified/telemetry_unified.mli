@@ -133,7 +133,10 @@ val observe_summary :
     [None] means no healthy clock wake is needed; displayed ages alone never
     schedule a read. An active Keeper producer suppresses its age transition.
     [read_failed] retains retry debt for a source classified as unreadable;
-    missing and empty stores are successful observations. *)
+    missing and empty stores are successful observations. Trajectory and
+    execution-receipt keeper lists and counts use the same freshly discovered
+    directories within each observation. Directory discovery is repeated on
+    the next observation; this does not make concurrent file reads atomic. *)
 
 val summary_json :
   ?keeper_keepalive_interval_s:float ->

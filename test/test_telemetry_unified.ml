@@ -990,7 +990,30 @@ let test_summary_includes_trajectory_and_execution_receipt_sources () =
     (json_string_field "health" receipt_summary);
   Alcotest.(check string) "execution receipt dashboard surface"
     "/api/v1/dashboard/execution-trust"
-    (json_string_field "dashboard_surface" receipt_summary)
+    (json_string_field "dashboard_surface" receipt_summary);
+  let next_ts = now +. 1.0 in
+  let next_trajectory_dir = Filename.concat root "trajectories/bob" in
+  Fs_compat.mkdir_p next_trajectory_dir;
+  Fs_compat.append_file (Filename.concat next_trajectory_dir "trace-2.jsonl")
+    (Yojson.Safe.to_string
+       (`Assoc ["ts", `Float next_ts; "tool_name", `String "tool_execute"])
+     ^ "\n");
+  let next_receipt_location =
+    Dated_jsonl.Store.keeper
+      (Dated_jsonl.Store.root_of_masc_dir root)
+      ~keeper:"bob" Execution_receipts in
+  Fs_compat.mkdir_p (Dated_jsonl.Store.dir next_receipt_location);
+  write_jsonl next_receipt_location
+    [`Assoc ["recorded_at", `String (Masc_domain.iso8601_of_unix_seconds next_ts);
+             "keeper_name", `String "bob"; "outcome", `String "completed"]];
+  let next = Telemetry_unified.summary_json ~masc_root:root () in
+  List.iter (fun source ->
+    let summary = source_summary source next in
+    Alcotest.(check int) (source ^ " discovers the newly added keeper") 2
+      (json_int_field "keeper_count" summary);
+    Alcotest.(check int) (source ^ " counts that keeper in the same observation") 2
+      (json_int_field "entry_count" summary))
+    ["trajectory_tool_call"; "execution_receipt"]
 
 let test_read_unified_reads_trajectory_and_execution_receipts () =
   Eio_main.run @@ fun env ->

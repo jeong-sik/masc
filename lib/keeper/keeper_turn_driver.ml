@@ -1807,20 +1807,103 @@ let project_input_for_attempt
        ; attempt_replay_prefix_projection = replay_projection
        })
 
+let admit_input_for_attempt ~input_source ?project_media ~media_store
+    ~project_images ~keeper_name ~emit_runtime_manifest ~goal_blocks ~goal_metadata
+    ~initial_messages ~agent_core_checkpoint ~runtime_id
+    (runtime : Runtime_instance.t) =
+  match input_source, runtime.execution with
+  | Keeper_request_source.Keeper_history _, Runtime_execution.Agent_core _ ->
+    { attempt_goal_blocks = goal_blocks
+    ; attempt_initial_messages = initial_messages
+    ; attempt_agent_core_checkpoint = agent_core_checkpoint
+    ; attempt_replay_prefix_projection = Keeper_replay_prefix.unchanged }
+  | Keeper_request_source.Completion_review,
+      (Runtime_execution.Agent_core _ | Codex_app_server _ | Claude_code _
+       | Antigravity_cli _ | Muse_serve _ | Vibe_cli _)
+  | Keeper_request_source.Keeper_history _,
+      (Runtime_execution.Codex_app_server _ | Claude_code _
+       | Antigravity_cli _ | Muse_serve _ | Vibe_cli _) ->
+    project_input_for_attempt ?project_media ~media_store ~project_images
+      ~keeper_name ~emit_runtime_manifest ~goal_blocks ~goal_metadata
+      ~initial_messages ~agent_core_checkpoint ~runtime_id runtime
+
 (* A request can carry media that did not exist at candidate admission: tools
    append their original results to Agent history before the next request.
    Decide against the complete selected bundle each time, so a newly added
    image also changes the treatment of a native document on a runtime that
    cannot accept their mixed bundle. The walk owns both projectors and their
    memo; this view never writes back into canonical history. *)
-let project_request_media ~project_media ~project_images
-    (runtime : Runtime_instance.t) : Keeper_history_projection.t =
+module Request_image_map = Map.Make (struct
+  type t = string * Agent_core.Types.media_source
+  let compare = Stdlib.compare
+end)
+
+let prepare_request_images ~eager_images ~project_images messages =
+  let rec collect_eager keys blocks =
+    List.fold_left (fun keys (block : Agent_core.Types.content_block) ->
+      match block with
+      | Image { media_type; source } -> Request_image_map.add (media_type, source) () keys
+      | ToolResult { content_blocks = Some nested; _ } -> collect_eager keys nested
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+      | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> keys)
+      keys blocks
+  in
+  let eager = collect_eager Request_image_map.empty eager_images in
+  (* One source has one captured result in this request. A selected duplicate
+     of a current-goal image shares its eager reading, including an occurrence
+     in older history. Prefix checks inspect these actual projected bytes. *)
+  let rec capture images blocks =
+    List.fold_left (fun images (block : Agent_core.Types.content_block) ->
+      match block with
+      | Image { media_type; source } ->
+        let key = media_type, source in
+        if Request_image_map.mem key images then images
+        else
+          let mode = if Request_image_map.mem key eager
+            then Keeper_vision_ingest.Eager else Store_only in
+          let projected = project_images ~mode [block] in
+          Request_image_map.add key projected.Keeper_vision_ingest.blocks images
+      | ToolResult { content_blocks = Some nested; _ } -> capture images nested
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+      | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> images)
+      images blocks
+  in
+  List.fold_left (fun images (message : Agent_core.Types.message) ->
+    capture images message.content) Request_image_map.empty messages
+
+let project_prepared_request_images images blocks =
+  let rec project reversed = function
+    | [] -> Ok (List.rev reversed)
+    | (block : Agent_core.Types.content_block) :: rest ->
+      match block with
+      | Image { media_type; source } ->
+        (match Request_image_map.find_opt (media_type, source) images with
+         | Some captured -> project (List.rev_append captured reversed) rest
+         | None -> Error (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig
+               { field = "media.prepared_projection"
+               ; detail = "Image source was not included in this request preparation" })))
+      | ToolResult ({ content_blocks = Some nested; _ } as result) ->
+        (match project [] nested with
+         | Error _ as error -> error
+         | Ok content_blocks ->
+           project (Agent_core.Types.ToolResult
+             { result with content_blocks = Some content_blocks } :: reversed) rest)
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+      | ToolResult { content_blocks = None; _ } | Document _ | Audio _ ->
+        project (block :: reversed) rest
+  in
+  project [] blocks
+
+let prepare_request_media ~eager_images ~on_prepared ~prepare_media ~project_images
+    (runtime : Runtime_instance.t) : Keeper_history_projection.preparation =
   fun messages ->
     match
       Runtime_agent.decide_modality_reroute_for_runtime_candidates
         ~assigned:runtime ~candidates:[] ~initial_messages:messages []
     with
-    | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ -> Ok messages
+    | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
+      Ok (fun messages -> Ok messages)
     | Runtime_agent.No_capable_runtime { required } ->
       let caps = Runtime_agent.input_capabilities_of_runtime runtime in
       let project_all_media =
@@ -1832,19 +1915,30 @@ let project_request_media ~project_media ~project_images
         | Keeper_media_reading.Document ->
           project_all_media || not caps.supports_document_input
       in
-      Ok
-        (List.map
-           (fun (message : Agent_core.Types.message) ->
-             let blocks =
-               if caps.supports_image_input && not project_all_media
-               then message.content
-               else
-                 (project_images ~mode:Keeper_vision_ingest.Store_only
-                    message.content).Keeper_vision_ingest.blocks
+      let images =
+        if caps.supports_image_input && not project_all_media then None
+        else Some (prepare_request_images ~eager_images ~project_images messages)
+      in
+      let prepared = prepare_media ~needs_projection
+          (List.map (fun (message : Agent_core.Types.message) -> message.content) messages) in
+      on_prepared ~required;
+      Ok (fun messages ->
+        let rec project reversed = function
+          | [] -> Ok (List.rev reversed)
+          | (message : Agent_core.Types.message) :: rest ->
+             let open Result.Syntax in
+             let* blocks = match images with
+               | None -> Ok message.content
+               | Some images -> project_prepared_request_images images message.content
              in
-             let content, _ = project_media ~needs_projection blocks in
-             { message with content })
-           messages)
+             (match Keeper_media_reading.project_prepared prepared blocks with
+              | Ok (content, _) -> project ({ message with content } :: reversed) rest
+              | Error error -> Error (Agent_core.Error.Config
+                  (Agent_core.Error.InvalidConfig
+                    { field = "media.prepared_projection"
+                    ; detail = Keeper_media_reading.preparation_error_to_string error })))
+        in
+        project [] messages)
 
 let retained_media_reader ?source_reader ~input_source projector =
   match (input_source : Keeper_request_source.t) with
@@ -2901,6 +2995,12 @@ let run_named
         | (true, (Runtime_execution.Codex_app_server _ | (Runtime_execution.Antigravity_cli _ | (Runtime_execution.Claude_code _ | (Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _)))))
         | (false, _) -> goal_blocks
       in
+      (* Current-goal image identities remain eligible for an eager reading
+         after selection. Other history images stay store-only; a native
+         continuation resumes without admitting an eager current goal. *)
+      let eager_request_images = match native_runtime, goal_blocks with
+        | None, Some blocks -> blocks
+        | None, None | Some _, (Some _ | None) -> [] in
       (* Shadows the caller's inputs with this candidate's dispatch view; the
          originals stay bound above for the next candidate's own projection. *)
       let { attempt_goal_blocks = goal_blocks
@@ -2913,7 +3013,8 @@ let run_named
           {attempt_goal_blocks=goal_blocks;attempt_initial_messages=initial_messages;
            attempt_agent_core_checkpoint=agent_core_checkpoint;
            attempt_replay_prefix_projection=Keeper_replay_prefix.unchanged}
-        | None -> project_input_for_attempt
+        | None -> admit_input_for_attempt
+          ~input_source
           ~project_media:(Keeper_media_reading.project media_projector)
           ~media_store
           ~project_images
@@ -3812,9 +3913,23 @@ let run_named
             ; history_at_start
             ; argument_demotion_seed
             ; argument_replay_prefix = replay_prefix_projection
-            ; project_request_media =
-                project_request_media
-                  ~project_media:(Keeper_media_reading.project media_projector)
+            ; prepare_request_media =
+                prepare_request_media
+                  ~eager_images:eager_request_images
+                  ~on_prepared:(fun ~required ->
+                    emit_runtime_manifest ~status:"prepared"
+                      ~decision:(Keeper_runtime_manifest.with_payload_role
+                        ~payload_role:Keeper_runtime_manifest.Operator_evidence
+                        (`Assoc
+                          [ "routing_action", `String "selected_request_media_prepared"
+                          ; "runtime_id", `String attempt_runtime_id
+                          ; "required_modalities", `List (List.map (fun kind -> `String kind) required) ]))
+                      Keeper_runtime_manifest.Runtime_routed)
+                  ~prepare_media:(Keeper_media_reading.prepare
+                    ?source_reader:(Option.map
+                      (fun (readers : Keeper_media_reading.source_readers) -> readers.read)
+                      media_readers)
+                    media_projector)
                   ~project_images runtime
             ; request_input
             ; (* The range the newest response-observed turn record on this
@@ -3980,7 +4095,8 @@ module For_testing = struct
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
   let project_input_for_attempt = project_input_for_attempt
-  let project_request_media = project_request_media
+  let admit_input_for_attempt = admit_input_for_attempt
+  let prepare_request_media = prepare_request_media
   let retained_media_reader = retained_media_reader
 	  let attempt_inference_policy = attempt_inference_policy
   let attempt_runtime_candidates = attempt_runtime_candidates

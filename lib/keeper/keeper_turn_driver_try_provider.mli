@@ -393,16 +393,17 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection
-  ; project_request_media : Keeper_history_projection.t
-        (** The selected runtime's request-only media view for [Keeper_history],
-            using the lane walk's shared readers. [Completion_review] retains
-            its separate admitted-evidence contract and does not call this.
-            Runs on the owning fiber after canonical
-            range selection and materialization, before media resolution and
-            dialect/prefix inspection. It preserves message order, roles,
-            origins, metadata and ToolResult identity/outcome/JSON, changing
-            only media blocks. Reader failures remain typed errors or explicit
-            unavailable readings; canonical history is unchanged. *)
+  ; prepare_request_media : Keeper_history_projection.preparation
+        (** Prepare the selected runtime's request-only media view for
+            [Keeper_history], using the lane walk's shared readers.
+            [Completion_review] retains its separate admitted-evidence contract
+            and does not call this. Runs once on the owning fiber after the
+            first canonical range selection and materialization. The returned
+            projection reuses frozen results for every dialect/prefix check,
+            including argument-protection fallback. It preserves message order,
+            roles, origins, metadata and ToolResult identity/outcome/JSON,
+            changing only media blocks. Reader failures remain typed errors or
+            explicit unavailable readings; canonical history is unchanged. *)
   ; read_retained_media : Keeper_client_tool_outbox.media_reader option
       (** Shared attachment reader for the retained Text carrier. This does not
           change native history projection. Completion review passes [None]. *)
@@ -1034,15 +1035,18 @@ module For_testing : sig
       (pending:Keeper_model_input_demotion.pending list ->
        Agent_core.Types.message list ->
        Agent_core.Types.message list) ->
-    project_request_media:Keeper_history_projection.t ->
+    prepare_request_media:Keeper_history_projection.preparation ->
     to_wire:
       (Agent_core.Types.message ->
        (Agent_core.Llm_provider.Types.message, Agent_core.History.media_error) result) ->
     Agent_core.Types.message list ->
     (request_view, Agent_core.Error.t) result
-  (** Media projection failures retain their original typed error. Only
-      Stored-to-wire failures become [Agent_core.Error.Media]. The reader
-      callback runs on the owning fiber, outside CPU projection work. *)
+  (** Media preparation and projection failures retain their original typed
+      error. Only Stored-to-wire failures become [Agent_core.Error.Media].
+      Prepare once from the first selected materialization on the owning fiber,
+      outside CPU projection work. Every argument-prefix comparison and fallback
+      reuses its returned projection; a custom materializer cannot authorize
+      another preparation. *)
 
   val current_turn_demotion : refused:composed -> demoted:composed -> int option
   (** Whether [demoted], the refused range composed under

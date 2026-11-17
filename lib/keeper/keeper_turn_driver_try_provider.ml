@@ -440,7 +440,7 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection
-  ; project_request_media : Keeper_history_projection.t
+  ; prepare_request_media : Keeper_history_projection.preparation
   ; read_retained_media : Keeper_client_tool_outbox.media_reader option
   ; model_input_projection : Keeper_history_projection.t option
   ; stream_idle_timeout_s : float
@@ -1526,14 +1526,12 @@ let resolve_carried ~to_wire carried =
   resolve [] carried
 ;;
 
-let unchecked_request_view
-      ~tools
+let materialize_request_history
       ?continuity
       ?completed_arguments
       ?finished_turn_results
       ?history_at_start
       ?same_turn_result_as_pointer
-      ~provider_config
       ~measure_message_bytes
       ~measure_wire_bytes
       ~front
@@ -1543,8 +1541,6 @@ let unchecked_request_view
       ~base_path
       ~turn_boundary
       ~materialize
-      ~project_request_media
-      ~to_wire
       messages
   =
   let composed =
@@ -1567,11 +1563,16 @@ let unchecked_request_view
     | [] -> composed.projection.Runtime_model_input_tail_window.messages
     | pending -> materialize ~pending composed.projection.Runtime_model_input_tail_window.messages
   in
+  composed, carried
+;;
+
+let project_materialized_request
+      ~tools ~provider_config ~completed_arguments
+      ~project_request_media ~to_wire (composed, carried) =
   let open Result.Syntax in
-  (* Readers can perform I/O. Keep them on the owning fiber, after canonical
-     selection/materialization and before either wire or dialect inspection.
-     The conversion memo sees the projected value, so a later mixed-media
-     request cannot reuse an earlier native form of the canonical message. *)
+  (* This request already prepared its media on the owning fiber. Reuse that
+     exact view for wire conversion and every dialect/prefix comparison; no
+     comparison may acquire a reader or observe a newer approval result. *)
   let* projected_carried = project_request_media carried in
   let* carried_wire =
     resolve_carried ~to_wire projected_carried
@@ -1622,17 +1623,27 @@ let request_view
       ?same_turn_result_as_pointer
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
-      ~turn_boundary ~materialize ~project_request_media ~to_wire messages =
+      ~turn_boundary ~materialize ~prepare_request_media ~to_wire messages =
   let open Result.Syntax in
-  let build ?(materialize = materialize) completed_arguments =
-    unchecked_request_view ~tools ?continuity ?completed_arguments ?finished_turn_results
+  let materialized ?(materialize = materialize) completed_arguments =
+    materialize_request_history ?continuity ?completed_arguments ?finished_turn_results
       ?history_at_start ?same_turn_result_as_pointer
-      ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
+      ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
-      ~project_request_media ~to_wire messages
+      messages
   in
-  let* candidate = build completed_arguments in
+  let first = materialized completed_arguments in
+  (* Range selection and storage precede reader effects. The first selected
+     materialization owns preparation; argument-prefix fallback only changes
+     demoted text/arguments and must reuse these captured media results. *)
+  let* project_request_media = prepare_request_media (snd first) in
+  let project completed_arguments selected =
+    project_materialized_request ~tools ~provider_config ~completed_arguments
+      ~project_request_media ~to_wire selected in
+  let build ?materialize completed_arguments =
+    project completed_arguments (materialized ?materialize completed_arguments) in
+  let* candidate = project completed_arguments first in
   match completed_arguments with
   | None -> Ok candidate
   | Some arguments ->
@@ -2070,7 +2081,7 @@ let bounded_model_input_projection
               "model input kept original tool bodies after externalization failure: count=%d"
               outcome.reverted);
           outcome.Keeper_model_input_demotion.messages)
-        ~project_request_media:ctx.project_request_media
+        ~prepare_request_media:ctx.prepare_request_media
         ~to_wire
         messages
     in

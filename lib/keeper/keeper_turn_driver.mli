@@ -767,22 +767,61 @@ module For_testing : sig
       [emit_runtime_manifest]. [Reroute] has no producer here because the
       decision is taken with no reroute candidates. *)
 
-  val project_request_media :
-    project_media:
+  val admit_input_for_attempt :
+    input_source:Keeper_request_source.t ->
+    ?project_media:
       (needs_projection:(Keeper_media_reading.kind -> bool) ->
        Agent_core.Types.content_block list ->
        Agent_core.Types.content_block list * (string * int) list) ->
+    media_store:Agent_core.History.media_store ->
+    project_images:
+      (mode:Keeper_vision_ingest.mode ->
+       Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->
+    keeper_name:string ->
+    emit_runtime_manifest:
+      (?status:string ->
+      ?decision:Yojson.Safe.t ->
+      Keeper_runtime_manifest.event_kind ->
+      unit) ->
+    goal_blocks:Agent_core.Types.content_block list option ->
+    goal_metadata:Agent_core.Types.metadata ->
+    initial_messages:Agent_core.Types.message list ->
+    agent_core_checkpoint:Agent_core.Checkpoint.t option ->
+    runtime_id:string ->
+    Runtime_instance.t ->
+    attempt_input
+  (** Agent Core Keeper history stays canonical until the request selects its
+      range. Official clients and completion review use the immediate attempt
+      projection above. This policy runs before building the agent/checkpoint,
+      so an observational text view cannot replace its Stored sources. *)
+
+  val prepare_request_media :
+    eager_images:Agent_core.Types.content_block list ->
+    on_prepared:(required:string list -> unit) ->
+    prepare_media:
+      (needs_projection:(Keeper_media_reading.kind -> bool) ->
+       Agent_core.Types.content_block list list -> Keeper_media_reading.prepared) ->
     project_images:
       (mode:Keeper_vision_ingest.mode ->
        Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->
     Runtime_instance.t ->
-    Keeper_history_projection.t
-  (** Project the selected request history against the admitted runtime. The
+    Keeper_history_projection.preparation
+  (** Prepare the selected request history against the admitted runtime. The
       whole selected bundle is checked on every request, including newly
-      appended tool results. Reuse the lane walk's media/image projectors;
-      images use [Store_only]. The callback may read attachments on its owning
-      fiber and must run outside CPU sizing/demotion callbacks. Only content
-      blocks change; message occurrences and canonical history stay intact. *)
+      appended tool results. Read selected audio/documents once on the owning
+      fiber, then reuse their captured outcomes for argument-prefix comparison.
+      A later comparison cannot read a source outside that preparation.
+      Native-capable requests prepare no readings. Selected image references
+      are captured through the lane walk's projector and reused without another
+      operation. Only images in [eager_images], the fresh current goal, keep
+      the existing [Eager] mode. Selected duplicates of that same MIME/source
+      share its captured reading, including older history occurrences; other
+      history and new tool images use [Store_only]. This may change historical
+      prefix bytes, which signed-reasoning validation must still inspect.
+      [on_prepared] observes this selection once, after preparation; it does
+      not report a successful reading or provider dispatch.
+      Only content blocks change; message occurrences
+      and canonical history stay intact. *)
 
   val retained_media_reader :
     ?source_reader:Keeper_media_reading.source_reader ->

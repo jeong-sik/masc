@@ -442,7 +442,7 @@ let test_prefit_real_continuity ~base_path () =
     Driver.completed_history_end ~trace_id ~lines ~messages:canonical
     |> Result.map_error Librarian_continuity_snapshot.error_to_string |> get in
   let view = match Driver.For_testing.request_view
-    ~project_request_media:(fun messages -> Ok messages)
+    ~prepare_request_media:(fun _selected -> Ok (fun messages -> Ok messages))
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ~continuity ~provider_config
     ~measure_message_bytes:(fun message -> String.length

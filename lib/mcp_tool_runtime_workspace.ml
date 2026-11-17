@@ -72,6 +72,11 @@ type workspace_setup_error =
   | Workspace_request_rejected of string
   | Workspace_runtime_failed of Mcp_server.workspace_switch_error
 
+let canonical path =
+  try Unix.realpath path with
+  | Unix.Unix_error _ -> path
+;;
+
 let activate_workspace state config =
   match Mcp_server.set_workspace_config state config with
   | Ok () -> Ok config
@@ -110,7 +115,18 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
           match Mcp_server.validate_workspace_config state cfg with
           | Error error -> Error (Workspace_runtime_failed error)
           | Ok () ->
-            if Workspace.is_initialized cfg then
+            let current = Mcp_server.workspace_config state in
+            (* The workspace this server already serves stays in place,
+               whichever directory of it the caller names (a worktree, a
+               trailing slash, a symlinked spelling). A replacement retires
+               every observer and fleet stream of the scope, so a client
+               joining the same workspace closed every open terminal's live
+               stream (2026-11-17: three closes, each in the second a
+               session's masc_start completed). *)
+            if Workspace.is_initialized cfg
+               && String.equal (canonical cfg.base_path) (canonical current.base_path)
+            then Ok current
+            else if Workspace.is_initialized cfg then
               activate_workspace state cfg
             else begin
               let _msg = Workspace.init cfg ~agent_name:None in

@@ -65,6 +65,20 @@ val diagnosis : t -> Yojson.Safe.t option
     A Cut continuation keeps its source unread and its destination blocked;
     a refusal, empty disposition or ACK cannot prove that ancestor was read.
     Every other stop reason keeps its existing release policy. *)
+type abandonment
+val abandonment : store:Lane_addon_store.t ->
+  record:Lane_addon_tool_request_owner.retained ->
+  request:Keeper_librarian_durable_request.t -> (abandonment, string) result
+(** Fresh strict evidence for ordinary refusal settlement. Requires this exact
+    counterpart-only execution refusal's named capacity final and matching
+    actual host terminal/proof (or the existing worker pre-host frame refusal),
+    no Gate/replacement/settlement and no Cut ancestor. Reads neither a mutable
+    history prefix nor range receipts, so receipt-proved partial ACK recovery
+    can use it after pruning. Call under each publication/ACK source lock;
+    retaining this audit value grants no effect authority. *)
+val abandonment_diagnosis : abandonment -> Yojson.Safe.t
+(** The diagnosis derived from that captured request and actual capacity
+    evidence, never supplied by the caller as settlement authority. *)
 val preserves_completed :
   settled:inventory ->
   record:Lane_addon_tool_request_owner.retained ->

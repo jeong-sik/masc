@@ -10,6 +10,7 @@ module Sources = Keeper_librarian_input_sources
 module Edge = Keeper_librarian_durable_edge
 module Current = Keeper_memory_os_current
 module Lineage = Keeper_librarian_history_resolution_lineage
+module Journal = Keeper_librarian_durable_gate
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 type t = {request_id:string;destination:Request.destination;refusal:Consumer.error;
@@ -104,6 +105,21 @@ let preserves_completed ~settled ~(record:Retained.retained) ~request =
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
      | Commit_unknown _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
 
+let capacity_refusal ~store ~request ~evidence =
+  let* exact=Request.request request in
+  let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
+  let* retained=Exact.retained_final_of_json ~schema evidence in
+  let final=Exact.delivered retained in
+  match final with
+  | Exact.Call_final (Input_refused (Input_capacity | Context_overflow | Request_body_refused)) ->
+    let* ()=io (fun () -> Request.confirm_final ~store request final) in
+    let+ evidence=io (fun () -> Request.refusal_evidence ~store request final) in
+    let report=Runtime.not_committed_of_failure ~detail:(detail final) evidence in
+    (match Consumer.refused_original (Request.source request) [report] with
+     | Error refusal -> Some refusal
+     | Ok _ -> None)
+  | Call_final (Answered _ | Invalid_output _ | Input_refused Invalid_request | Output_limit_reached _)
+  | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok None
 let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
   let* original=Option.to_result ~none:"Refused original is absent from the validated inventory"
     (member completed ~record ~request) in
@@ -115,18 +131,9 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
   match Progress.phase record.progress with
   | Rejected {stage=Progress.Execution;evidence} ->
     if not (counterpart_only source) || Option.is_some (Progress.settlement record.progress) then Ok None else
-    let* exact=Request.request request in
-    let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
-    let* retained=Exact.retained_final_of_json ~schema evidence in
-    let final=Exact.delivered retained in
-    (match final with
-     | Exact.Call_final (Input_refused (Input_capacity | Context_overflow | Request_body_refused)) ->
-       (* Unlike a display report, an unreadable proof cannot release this
-          original for another request. Whole-inventory validation precedes us. *)
-       let* evidence=io (fun () -> Request.refusal_evidence ~store request final) in
-       let report=Runtime.not_committed_of_failure ~detail:(detail final) evidence in
-       (match Consumer.refused_original source [report] with
-        | Error (Consumer.Counterpart_input_capacity_refused {counterpart_digest;_} as refusal) ->
+    let* refusal=capacity_refusal ~store ~request ~evidence in
+    (match refusal with
+        | Some (Consumer.Counterpart_input_capacity_refused {counterpart_digest;_} as refusal) ->
           let* stop=make_stop refusal in
           (match stop.obligation with
           | Lineage.Cut_read_required _ -> Ok (Some stop)
@@ -136,7 +143,7 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
             if not past then Ok false else
             Ok (List.exists (completed_covers ~original:request ~original_selection:original.selection) completed)) in
           Ok (if committed then None else Some stop))
-        | Error ((Consumer.Keeper_meta_absent
+        | Some ((Consumer.Keeper_meta_absent
                  | Original_publication_blocked _ | Source_capture_failed _
                  | Keeper_meta_unreadable _ | Boundary_log_unreadable _
                  | Progress_unreadable _ | Checkpoint_unreadable _
@@ -150,9 +157,7 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
                  | Committed_official_range_mismatch | Official_range_stopped _
                  | Fragment_store_unreadable _ | Fragment_line_unreadable _) as refusal) ->
           let+ stop=make_stop refusal in Some stop
-        | Ok _ -> Ok None)
-     | Call_final (Answered _ | Invalid_output _ | Input_refused Invalid_request | Output_limit_reached _)
-     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok None)
+        | None -> Ok None)
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
   | Subdividing _ | Subdivided _ -> Ok None
@@ -160,12 +165,9 @@ let request_id stop=stop.request_id
 let original stop=stop.original
 (* The coordinates a settled refusal keeps: what was abandoned and what the
    settlement applied, so the record alone says why this range was never read. *)
-let diagnosis stop = match stop.obligation with
-  | Lineage.Cut_read_required _ -> None
-  | No_cut_ancestor -> match stop.refusal with
+let diagnosis_of_refusal ~(record:Retained.retained) = function
   | Consumer.Counterpart_input_capacity_refused
       {atom_range;official_range;counterpart_digest;observation_count;observation_bytes;reports;_} ->
-    let ((record:Retained.retained),_)=stop.original in
     let optional encode=Option.fold ~none:`Null ~some:encode in
     Some (`Assoc ["version",`Int 1;"kind",`String "librarian-capacity-refusal-settled";
       "refused_request_id",`String record.request_id;"refused_request_digest",`String record.request_digest;
@@ -194,6 +196,36 @@ let next_read ~(final:Exact.final) =
   | Exact.Not_allowed {reason=Replaced_declaration} -> Whole_again
   | Not_allowed {reason=Permission_refused _}
   | Call_final _ | Outcome_unknown | Request_id_reused -> Narrowed
+let diagnosis stop = match stop.obligation with
+  | Lineage.Cut_read_required _ -> None
+  | No_cut_ancestor -> diagnosis_of_refusal ~record:(fst stop.original) stop.refusal
+type abandonment = Abandonment of Yojson.Safe.t
+let abandonment ~store ~(record:Retained.retained) ~request =
+  let* ()=Request.confirm_record request record in
+  let* ()=if counterpart_only (Request.source request) then Ok ()
+    else Error "Only counterpart-only capacity refusals may abandon original history" in
+  let* ()=if Option.is_none (Progress.preparation record.progress)
+      && Option.is_none (Progress.replacement record.progress)
+      && Option.is_none (Progress.settlement record.progress)
+    then Ok () else Error "Refusal abandonment has a Gate, replacement or settlement" in
+  let* root=io (fun () -> Journal.root ~store ~owner:(Request.physical_owner request) ~capture:request) in
+  let* ()=if Option.is_none root then Ok () else Error "Refusal abandonment has a retained Gate" in
+  let* evidence=match Progress.phase record.progress with
+    | Rejected {stage=Progress.Execution;evidence} -> Ok evidence
+    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+    | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
+    | Subdividing _ | Subdivided _ -> Error "Only a definite execution capacity refusal may abandon original history" in
+  let* refusal=capacity_refusal ~store ~request ~evidence in
+  let* refusal=Option.to_result ~none:"Original history has no confirmed capacity-only refusal" refusal in
+  let* obligation=io (fun () -> Lineage.refusal_obligation ~store request) in
+  let* ()=match obligation with
+    | Lineage.No_cut_ancestor -> Ok ()
+    | Cut_read_required request_id -> Error
+        ("Cut continuation cannot abandon the unread source of fenced original " ^ request_id) in
+  let+ diagnosis=Option.to_result ~none:(Consumer.error_to_string refusal)
+    (diagnosis_of_refusal ~record refusal) in
+  Abandonment diagnosis
+let abandonment_diagnosis (Abandonment diagnosis)=diagnosis
 let blocking_reason stop = match stop.obligation with
   | Lineage.No_cut_ancestor -> stop.refusal
   | Cut_read_required request_id -> Consumer.Original_publication_blocked

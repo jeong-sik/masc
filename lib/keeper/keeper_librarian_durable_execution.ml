@@ -625,9 +625,9 @@ let rec consume_one ~config ~keeper_name ~wake =
     let abandoned,stops=List.fold_left (fun (count,kept) stop ->
       match Refusal.diagnosis stop with
       | None -> count,stop::kept
-      | Some diagnosis ->
+      | Some _ ->
         let record,request=Refusal.original stop in
-        (match io (fun () -> Commit.settle_refused ~store ~request ~record ~diagnosis) with
+        (match io (fun () -> Commit.settle_refused ~store ~request ~record) with
          | Ok _ ->
            Log.Keeper.warn ~keeper_name
              "durable Librarian abandoned a permanently over-capacity counterpart range: request=%s"

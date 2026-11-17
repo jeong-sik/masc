@@ -1957,8 +1957,8 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving ~recove
       let completed=Refusal.inventory [rejected,original] |> get in
       let stop=Refusal.retained_stop ~store:fixture.store ~completed ~record:rejected ~request:original
         |> get |> Option.to_result ~none:"fixture has no actual permanent refusal stop" |> get in
-      let diagnosis=Refusal.diagnosis stop
-        |> Option.to_result ~none:"fixture has no typed permanent refusal diagnosis" |> get in
+      check bool "the ordinary refusal has a typed permanent diagnosis" true
+        (Option.is_some (Refusal.diagnosis stop));
       let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
       let main=Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Main in
       let internal=Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Internal in
@@ -1967,7 +1967,7 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving ~recove
           (Fs_compat.load_file_opt main)));
       let interrupted="fixture interrupted after range receipts and external ACK" in
       let result=memory_action fixture (fun () -> io (fun () ->
-        Commit.For_testing.settle_refused ~store:fixture.store ~request:original ~record:rejected ~diagnosis
+        Commit.For_testing.settle_refused ~store:fixture.store ~request:original ~record:rejected
           ~before_settlement:(fun () ->
             check bool "only actual refusal range receipts permit the partial ACK" true
               (Commit.receipt_state original |> get);
@@ -2882,7 +2882,7 @@ let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () 
     check bool "direct refusal settlement cannot abandon an effect-fenced original" true
       (Result.is_error (memory_action fixture (fun () -> io (fun () ->
         Keeper_librarian_durable_commit.settle_refused ~store:fixture.store ~request
-          ~record:current_parent ~diagnosis:(`Assoc ["kind",`String "must_not_abandon_fenced_source"])))));
+          ~record:current_parent))));
     check bool "the serial consumer refuses Cut as a successor grant" true
       (Result.is_error (memory_action fixture (fun () ->
         Resolution_work.run_serialized ~config:fixture.config ~keeper_name)));
@@ -3082,8 +3082,7 @@ let test_cut_command_recovers_fence_before_grant_after_memory_rebase () =
     run_cut_command fixture |> Result.map_error Resolution_intent.error_to_string |> get;
     check bool "later recovery retains that same child" true
       (Resolution_intent.child (last_cut_intent fixture original)=Some first))
-let test_counterpart_cut_capacity_refusal_preserves_original_obligation () =
-  let before_capture fixture =
+let prepare_counterpart_only_cut (fixture:fixture) =
     let speaker : Keeper_chat_store.speaker =
       {speaker_id=Some "external";speaker_name=Some "External";speaker_authority=External} in
     Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
@@ -3094,8 +3093,41 @@ let test_counterpart_cut_capacity_refusal_preserves_original_obligation () =
       let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
       write (Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Main)
         ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
-      write (Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Internal) "") in
-  with_same_binding_cut ~history_kind:Official ~before_capture (fun fixture original request exact _schema ->
+      write (Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Internal) "")
+let test_root_cut_cannot_use_the_public_refusal_adapter () =
+  with_same_binding_cut ~history_kind:Official ~before_capture:prepare_counterpart_only_cut
+    (fun fixture original request exact schema ->
+      let module Refusal=Keeper_librarian_durable_refusal in
+      let module Lineage=Keeper_librarian_history_resolution_lineage in
+      let input=Source.input (Capture.source request) in
+      check bool "the actual root Cut is counterpart-only" true
+        (input.messages=[] && input.tool_observations=[] && input.counterpart_observations<>[]);
+      check bool "the root Cut has no effect fence yet" true (io (fun () ->
+        Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get)=None);
+      (match io (fun () -> Lineage.refusal_obligation ~store:fixture.store request |> get) with
+       | No_cut_ancestor -> ()
+       | Cut_read_required _ -> fail "fixture unexpectedly has a Cut ancestor");
+      check bool "no Gate, replacement or settlement is present" true
+        (Progress.preparation original.progress=None && Progress.replacement original.progress=None
+         && Progress.settlement original.progress=None);
+      check bool "the actual host still retains terminal Cut" true (io (fun () ->
+        Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian" ~schema exact |> get)
+        = Exact.Retained_terminal (Exact.Retained_unknown Exact.Cut));
+      let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture in
+      let parent=Owner.to_json original and posts=F.post_count fixture.server in
+      check bool "Unknown has no typed capacity abandonment evidence" true
+        (Result.is_error (io (fun () -> Refusal.abandonment ~store:fixture.store ~record:original ~request)));
+      check bool "the public adapter rejects a real unfenced root Unknown" true
+        (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+          Commit.settle_refused ~store:fixture.store ~request ~record:original))));
+      check bool "root Unknown writes no Memory or receipt" true (cut_memory_bytes fixture=memory);
+      check bool "root Unknown moves no source ACK" true (cut_source_positions fixture=positions);
+      check json "root Unknown progress is preserved" parent (io (fun () ->
+        Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id
+        |> owned |> Option.get |> Owner.to_json));
+      check int "the adapter sends no original RPC" posts (F.post_count fixture.server))
+let test_counterpart_cut_capacity_refusal_preserves_original_obligation () =
+  with_same_binding_cut ~history_kind:Official ~before_capture:prepare_counterpart_only_cut (fun fixture original request exact _schema ->
     let module Refusal=Keeper_librarian_durable_refusal in
     let module Lineage=Keeper_librarian_history_resolution_lineage in
     let original_source=Capture.source request in
@@ -3155,9 +3187,9 @@ let test_counterpart_cut_capacity_refusal_preserves_original_obligation () =
     let stop=Refusal.retained_stop ~store:fixture.store ~completed ~record:rejected ~request:child_request
       |> get |> Option.to_result ~none:"actual Cut child refusal has no retained stop" |> get in
     check bool "a Cut refusal has no abandonment diagnosis" true (Refusal.diagnosis stop=None);
-    check bool "the public adapter cannot abandon Cut source even with actual refusal evidence" true
+    check bool "the public adapter cannot abandon the confirmed Cut source" true
       (Result.is_error (memory_action fixture (fun () -> io (fun () -> Commit.settle_refused
-        ~store:fixture.store ~request:child_request ~record:rejected ~diagnosis:evidence))));
+        ~store:fixture.store ~request:child_request ~record:rejected))));
     check bool "direct refusal settlement writes no Memory or receipt" true (cut_memory_bytes fixture=memory);
     check bool "direct refusal settlement ACKs no original frontier" true (cut_source_positions fixture=positions);
     for _=1 to 2 do
@@ -6600,6 +6632,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_cut_command_busy_and_late_proof_keep_requested;
   test_case "counterpart Cut capacity refusal cannot abandon the original read obligation" `Slow
     test_counterpart_cut_capacity_refusal_preserves_original_obligation;
+  test_case "an actual unfenced root Cut cannot use the public refusal adapter" `Slow
+    test_root_cut_cannot_use_the_public_refusal_adapter;
   test_case "a Cut fence without an intent blocks ordinary, direct and queued fresh history" `Quick
     (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:false);
   test_case "a Cut fence still blocks fresh history after its live owner record disappears" `Quick

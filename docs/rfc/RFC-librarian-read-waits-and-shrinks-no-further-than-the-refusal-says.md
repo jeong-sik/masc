@@ -22,7 +22,7 @@ related: ["librarian-lifecycle", "host-cycle-runs-exact-requests-side-by-side", 
 - 이 RFC 는 규칙 하나를 세운다. **읽기를 미루거나 줄일 때는 받는 쪽의 거절이 말한 만큼만 한다.**
 - 규칙에서 결정 둘이 나온다.
   - D1. worker 는 요청 하나가 frame 에 들어가면 받는다. 목록은 frame 만큼씩 여러 장으로 내놓고, host cycle 은 모든 장을 걷는다. `capacity_wait` 는 지운다.
-  - D2. 거절된 회차는 다음에 한 턴이 아니라 절반을 읽는다. 거절된 범위를 다 읽으면 그 거절은 끝난 것으로 본다.
+  - D2. 거절된 회차는 다음에 한 턴이 아니라 절반을 읽는다. 거절된 범위를 다 읽으면 그 거절은 끝난 것으로 본다. 거절 없이 끝난 회차는 폭을 줄이지 않는다.
 - 바꾸지 않는 것: `max_exact_in_flight` 값, exact lane 구성, frame 크기, 어떤 거절이 폭을 줄이는지, 연속성 회차의 좁히기, 기다리는 기록의 스키마.
 - 이 RFC 만으로 밀린 턴이 0 이 된다고 약속하지 않는다. 처리량은 함께 실행하는 수와 모델 응답 시간이 정한다(§4.3). 층마다 재서 운영자가 정한다.
 
@@ -91,7 +91,7 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 - 11-16 15:18~18:5x KST: `record_failed` 14,274번(durable 12,076, admission 2,198)
 - 11-16 21:00:23 KST: worker 가 종료 코드 137 로 끝남
 
-이 구간에 durable 회차는 "원본을 낼 수 없다"(`Original_publication_blocked`)를 이틀 동안 356번 보고했다. 이 오류는 폭을 줄이지 않는다(§1.2).
+이 구간에 durable 회차는 "원본을 낼 수 없다"(`Original_publication_blocked`)를 이틀 동안 356번 보고했다. 이 오류로 끝난 회차는 표식을 남기지 않는다. 이 값을 만드는 자리가 consumer 밖에 있어서다(§1.2).
 
 재는 법과 한계.
 
@@ -115,7 +115,7 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 | `capacity_wait` 는 원본을 끝내지 않는다. 거절 기록만 남기고 기다린다 | `lib/lane_addon/lane_addon_submit_once.ml` 179~182행 |
 | 결과 하나가 전달되면 그 설치의 capacity 대기자를 모두 깨운다 | `lib/keeper/keeper_librarian_queue_refresh.ml` 57행, `lib/server/server_librarian_addon_wake.ml` 172행 |
 | host cycle. 목록의 요청을 cycle 에 한 번씩 시도하고, 전달이 있었으면 목록을 다시 받는다 | `lib/lane_addon/lane_addon_runtime.ml` 1436행, 1443~1453행 |
-| 끝나지 않은 시도는 목록에 남아 다음에 다시 시도된다. 횟수 상한은 없다 | `lib/lane_addon/lane_addon_exact.mli` 168~169행 |
+| 끝나지 않은 시도는 목록에 남아 다음에 다시 시도된다. 횟수 상한을 두는 문장은 없다 | `lib/lane_addon/lane_addon_exact.mli` 168~169행 |
 | 목록의 계약 문장: "the worker lists every request it waits for" | `lib/lane_addon/lane_addon_types.mli` 115행 |
 
 폭.
@@ -126,7 +126,9 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 | 표식을 세우는 자리 ①. 다시 잡은 원본이 거절로 끝났을 때. 거절의 종류는 보지 않는다. counterpart 만 담은 원본은 뺀다 | `lib/keeper/keeper_librarian_durable_execution.ml` 368~376행 |
 | 표식을 세우는 자리 ②. message floor 후보가 있을 때 | 같은 파일 686~691행 |
 | 표식을 세우는 자리 ③. consumer 안의 읽기 오류, 같은 pass 에서 받은 거절, 예외와 취소 | `keeper_librarian_durable_consumer.ml` 1698행, 1709~1738행 |
-| `Original_publication_blocked` 는 consumer 에 들어가기 전에 돌아가거나 `Pending` 이 된다. 표식을 세우지 않는다 | `keeper_librarian_durable_execution.ml` 336행, `keeper_librarian_durable_consumer.ml` 1710~1713행 |
+| ③ 은 pass 를 시작할 때 표식을 세우고, 끝난 모양을 보고 지운다. `Pending`, 읽을 것이 없음, 전부 읽기의 성공에서 지운다. 한 턴 읽기의 성공, 같은 pass 의 거절, 오류 갈래 22개에서는 그대로 둔다. 거절된 원본 없이도 표식이 남는다 | `keeper_librarian_durable_consumer.ml` 1698행, 1709~1738행 |
+| `Original_publication_blocked` 로 끝난 회차는 표식을 남기지 않는다. 이 값을 만드는 자리는 execution 의 도우미 하나뿐이다. consumer 를 부르기 전에 돌아가거나, consumer 가 부른 commit 안에서 `Memory_pending` 이 된다. 그때 consumer 는 `Pending` 을 돌려주며 이번 pass 의 표식을 지우고, 그 뒤에 execution 이 결과를 이 오류로 바꾼다. consumer 의 1726행 갈래는 타입을 다 덮으려고 있고, consumer 안에는 이 값을 만드는 곳이 없다 | `keeper_librarian_durable_execution.ml` 336행, 625~626행, 692~695행, `keeper_librarian_durable_consumer.ml` 1710~1713행 |
+| durable 회차 루프는 커밋 뒤에 바로 다음 범위를 읽는다. 기다리는 unit 이 있으면 양보한다. 거절이나 오류 뒤에는 멈추고 다음 신호를 기다린다 | `keeper_librarian_queue_refresh.ml` 361~372행, 373~382행 |
 | 표식은 읽을 것이 없을 때, baseline 을 옮겼을 때, 전부 읽기가 성공했을 때, official 줄에서 멈췄을 때 풀린다 | `keeper_librarian_durable_consumer.ml` 1718~1723행 |
 | Keeper 의 durable 회차는 끝나지 않은 원본이 있으면 그것만 다시 잡는다 | `keeper_librarian_durable_execution.ml` 592~595행 |
 | 폭의 타입은 `All_unread`, `To_first_cut_point` 둘이다 | `lib/keeper/keeper_librarian_range.mli` 28~29행 |
@@ -184,7 +186,14 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 
 지금은 범위가 얼마든 한 턴으로 떨어지고 밀린 범위가 빌 때까지 그대로다. 거절이 말한 것보다 더 줄이고, 거절이 말하지 않은 범위에까지 적용한다. 규칙에 어긋난다.
 
-폭을 줄이는 계기는 바꾸지 않는다. 지금처럼 원본이 거절로 끝났을 때다(§1.2 의 ①~③). 바뀌는 것은 얼마나 줄이고 언제 푸는가다.
+폭을 줄이는 계기는 거절로 끝난 원본이다. 거절의 종류는 지금처럼 보지 않는다(§9 Q3). 바뀌는 것은 얼마나 줄이고 언제 푸는가다.
+
+- §1.2 의 ①, ②, 그리고 ③ 가운데 같은 pass 에서 받은 거절이 여기에 든다. 셋 다 거절된 원본이 있고 그 원본이 범위를 담고 있다.
+- ③ 의 나머지는 거절된 원본이 없다. consumer 안의 읽기 오류, 예외, 취소다. 받는 쪽이 아무 말도 하지 않았으므로 폭을 줄이지 않는다. 다음 회차의 폭은 그 pass 가 없었을 때와 같다.
+  - 지금은 이 경우에도 한 턴으로 떨어지고 밀린 범위가 빌 때까지 그대로다. 이 RFC 가 계기에서 바꾸는 것은 이 하나다.
+  - 이 오류들 가운데 받는 쪽이 낸 것은 없다. consumer 가 Keeper 의 기록과 읽은 위치를 다루다 낸다. 받는 쪽의 답은 commit 의 결과(`Memory_refused`, `Memory_pending`, `Memory_committed`)로만 들어온다.
+  - 이틀 로그의 "범위를 읽지 못함" 보고 356건에 이 종류는 없었다(§1.1). 예외와 취소는 그 보고에 잡히지 않는다(§9 Q6).
+- 그래서 pass 를 시작할 때 세우는 표식(1698행)이 없어진다. 적어 두는 것은 아래 "풀기"의 수뿐이고, 그 수는 거절된 원본에서만 생긴다.
 
 폭.
 
@@ -198,12 +207,16 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 - w 가 1 이면 지금과 같다. 한 턴 안에서는 message floor 가 메시지 단위로 내려간다(`keeper_librarian_floor_descent.ml`).
 - 절반은 고른 숫자가 아니다. 거절은 그 범위가 많다는 것만 말한다. 더 작은 범위 가운데 아무것도 가정하지 않고 고를 수 있는 걸음이다. Keeper 턴의 이력 줄이기(`keeper_turn_driver_try_provider.ml`), Memory admission 의 나누기(`keeper_memory_admission_queue.mli`), 연속성 폭 모델(`LibrarianContinuityWidth.tla`)이 같은 걸음을 쓴다.
 - 접은 뒤에는 다음 회차를 바로 건다. 연속성 회차가 하는 것과 같다. 턴을 더 끝내지 않는 Keeper 도 내려간다.
+  - 지금 루프는 거절 뒤에 멈추고 다음 신호를 기다린다(§1.2). 폭을 접은 거절에서만 그 Keeper 의 신호를 한 번 넣는다. w 가 1 인 거절과 거절 없는 오류는 지금처럼 멈춘다.
+  - 커밋 뒤에는 지금도 루프가 바로 다음 범위를 읽는다. 이 부분은 바꾸지 않는다.
 
 풀기.
 
 - 거절은 그 범위에 대한 말이다. 그 범위를 다 읽으면 그 거절은 끝났다.
 - 루프는 거절된 범위마다 "그 범위의 끝까지 남은 cut point 수"를 적어 둔다. 여러 번 접었으면 안쪽 범위부터 차례로 쌓인다.
 - k개를 커밋하면 적어 둔 수에서 모두 k 를 뺀다. 0 이 된 것은 지운다.
+  - 지금은 한 턴 읽기가 성공해도 표식을 그대로 둔다(`Ok (Progress_advanced | Official_advanced), To_first_cut_point` 갈래, 1724행). 이 갈래가 수를 빼는 자리로 바뀐다.
+- message floor 후보(②)는 한 턴 원본이 거절됐다는 저장된 증거다. 남은 수 1 로 적는다.
 - 다음 폭은 가장 안쪽에 남은 범위가 정한다. 그 범위에서 아직 아무것도 커밋하지 않았으면 절반이다. 커밋한 것이 있으면 남은 부분 전부다. 남은 부분은 거절된 범위보다 작으니 거절된 적이 없는 범위다.
 - 남은 범위가 없으면 전부 읽는다.
 - message floor 가 한 턴을 넘기면 그 한 턴을 커밋한 것으로 센다.
@@ -237,7 +250,7 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 ### 4.1 불변식
 
 - I1. 접수의 답은 요청 하나의 크기로만 정해진다. 다른 요청이 얼마나 기다리는지는 답을 바꾸지 않는다.
-- I2. 한 cycle 은 worker 가 기다리는 `exact_output` 요청을 모두 한 번씩 시도한다. 다른 요청이 끝났는지와 상관없다.
+- I2. 한 cycle 은 시작할 때 worker 가 기다리던 `exact_output` 요청을 모두 한 번씩 시도한다. 다른 요청이 끝났는지와 상관없다. 걷는 동안 접수된 요청은 늦어도 다음 cycle 에 시도된다.
 - I3. 거절된 범위 안에서 시작하는 회차는 그 범위의 끝을 넘지 않고, 그 범위 전체를 다시 내지도 않는다. 서버가 도는 동안의 일이다.
 - I4. 폭은 한 번의 거절에 절반보다 더 줄지 않는다. 거절된 범위를 벗어난 회차는 전부를 읽는다.
 - I5. 읽은 위치는 Memory 커밋 뒤에만 움직인다. 접은 회차도 가장 오래된 쪽부터 읽으므로 건너뛰는 턴이 없다. 지금과 같다.
@@ -263,7 +276,10 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 
 ### 4.4 대가
 
-- worker 저장소가 받는 양의 상한이 frame 하나에서 디스크로 바뀐다. 지금 원본 기록 27개의 요청은 약 37.7 MB 다. worker 는 처음 불릴 때 기다리는 기록을 하나씩 검증한다. 그 시간이 host 의 호출 한도에 걸리는지는 확인하지 않았다.
+- worker 저장소가 받는 양의 상한이 frame 하나에서 디스크로 바뀐다. 지금 원본 기록 27개의 요청은 약 37.7 MB 다. worker 는 처음 불릴 때 기다리는 기록을 하나씩 검증한다. 그 시간이 host 의 호출 한도에 걸리는지는 확인하지 않았다(§7.2).
+- 접수된 기록이 나중에 혼자서 frame 에 안 들어가게 되는 길은 frame 을 줄인 package 하나다. 그때는 그 기록이 든 장의 목록이 오류로 끝난다. 지금도 같다. #51278 의 설계가 새 package 는 `max_reply_bytes` 를 줄이지 않는다고 요구한다(그 문서 7절).
+- 적어 둔 수는 서버가 재시작하면 사라진다. 재시작 뒤 첫 회차는 전부 읽기라, 이미 거절된 범위를 한 번 더 내 본다. 재시작이 잦으면 그만큼 거절을 더 받는다.
+- 거절 없이 끝난 pass 는 폭을 줄이지 않는다. 넓은 범위에서만 나는 예외나 취소가 있다면 같은 범위에서 되풀이된다. 지금은 한 턴으로 떨어져 가려진다(§9 Q6).
 - 큰 요청이 처음으로 공급자에 닿는다. 시간 초과와 rate limit 은 요청을 끝내지 않는다. 그런 답만 받는 큰 요청은 cycle 마다 다시 시도되고, 그 Keeper 는 새 범위를 고르지 못한다. 지금 접수되지 못하는 것과 그 Keeper 에게는 같은 결과지만, cycle 마다 실행 자리 하나를 쓴다. 빈도는 모른다(§9 Q2).
 - 공용 worker 를 고치므로 네 package 의 revision 이 모두 바뀐다. revision 이 바뀌면 그 설치에서 기다리던 Librarian 원본이 막힌다(#51278).
 - D2 는 거절된 범위를 다 읽을 때마다 더 넓은 범위를 다시 내 본다. 밀린 양이 받는 쪽의 한도보다 계속 큰 Keeper 는 커밋 한 번에 거절을 한 번쯤 받는다. frame 에서 받는 거절은 host 가 본문을 보내지 않고 낸다. 공급자에서 받는 거절은 걸음 한 번의 시간이 든다(§9 Q1).
@@ -303,7 +319,7 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 
 - worker(`addons/tests/test_keeper_librarian.py`, 다른 세 Add-on 의 시험): 기다리는 요청이 frame 을 넘겨도 혼자 들어가는 요청은 접수된다. 장을 이어 받으면 기다리는 요청이 빠짐없이 한 번씩 나온다. 앞 버전이 쓴 기록을 그대로 읽는다. 혼자서도 frame 에 안 들어가는 기록에서는 오류로 답한다.
 - host(`test/test_lane_addon_submit_once.ml`, host cycle 시험): 접수의 답은 받음, 크기 거절, 보내지 못함 셋이다. 끝나지 않는 요청이 첫 장을 채워도 뒤 장의 요청이 같은 cycle 에 시도된다. 함께 실행하는 수가 장의 경계에서 줄지 않는다.
-- 폭(`test/test_keeper_librarian_range.ml`, `test_keeper_librarian_durable_consumer.ml`, `test_keeper_librarian_durable_execution.ml`): atom 과 official 이 섞인 범위에서 n개를 고른다. 저장된 라벨로 같은 범위가 다시 골라진다. §3.2 의 예가 표대로 돈다. 접은 뒤 다음 회차가 걸린다.
+- 폭(`test/test_keeper_librarian_range.ml`, `test_keeper_librarian_durable_consumer.ml`, `test_keeper_librarian_durable_execution.ml`): atom 과 official 이 섞인 범위에서 n개를 고른다. 저장된 라벨로 같은 범위가 다시 골라진다. §3.2 의 예가 표대로 돈다. 접은 뒤 다음 회차가 걸린다. 거절 없이 끝난 pass(읽기 오류, 예외) 뒤의 폭은 그 pass 앞과 같다. `Original_publication_blocked` 로 끝난 pass 뒤에도 같다.
 - TLA+: `LibrarianContinuityWidth.tla` 와 같은 틀로 durable 폭을 모델링한다. 고친 `Next` 는 I3 과 I4 를 지키고, 턴이 더 들어오지 않으면 밀린 범위를 비운다. 버그 모델은 둘이다. 거절에 곧바로 1 로 떨어지고 밀린 범위가 빌 때까지 두는 것(지금의 코드)은 I4 를 어겨야 한다. 커밋마다 전부 읽기로 돌아가는 것은 I3 을 어겨야 한다.
 
 ### 7.2 배포 뒤 측정
@@ -316,13 +332,15 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 | L1 | 접수된 요청의 크기 분포 | frame 까지 고르게. 지금은 16% 이하뿐이다 |
 | L1 | 1 MB 넘는 요청이 받은 결과의 종류와 걸린 시간 | 처음 재는 값이다. §9 Q1, Q2 를 정한다 |
 | L1 | `running_at_start` 가 2 인 시도의 비율 | 줄지 않는다 |
+| L1 | worker 가 목록 한 장을 답하는 데 걸린 시간 | host 의 호출 한도 안이다. 넘으면 L1 을 되돌린다 |
+| L2 | "범위를 읽지 못함" 보고의 종류와, 같은 범위에서 되풀이된 횟수 | 거절 없는 종류가 되풀이되지 않는다(§9 Q6) |
 | L2 | Keeper 별 커밋 하나가 읽은 턴 수 | §4.3 의 Keeper 별 숫자와 비교한다 |
 | L2 | Keeper 별 커밋 하나당 거절 수 | 1 이하. 그 거절이 쓴 시간 |
 | 전부 | 안 읽은 턴의 합과 Keeper 별 가장 오래된 턴 | 줄어든다. 줄지 않으면 §4.3 의 값을 본다 |
 
 ## 8. 바꾸는 문장
 
-- `docs/rfc/RFC-librarian-lifecycle.md`: §4.3 의 "두 턴 이상을 읽다 실패했으면…" 문단(314행), 연속성 문단 안의 durable 설명(315행), "durable 회차는 실패 종류를 보지 않는다. 바닥이 한 턴이라…" 문단(317행), §4.4 표의 3a(434행). 한 턴으로 좁힌다는 설명을 절반 접기와 풀기로 바꾼다. "실패 종류를 보지 않는다"는 그대로다.
+- `docs/rfc/RFC-librarian-lifecycle.md`: §4.3 의 "두 턴 이상을 읽다 실패했으면…" 문단(314행), 연속성 문단 안의 durable 설명(315행), "durable 회차는 실패 종류를 보지 않는다. 바닥이 한 턴이라…" 문단(317행), §4.4 표의 3a(434행). 한 턴으로 좁힌다는 설명을 절반 접기와 풀기로 바꾼다. "실패 종류를 보지 않는다"는 "거절의 종류를 보지 않는다. 거절 없이 끝난 회차는 폭을 바꾸지 않는다"로 바꾼다.
 - `lib/lane_addon/lane_addon_types.mli` 115행: §3.1 의 계약 문장.
 - `docs/rfc/RFC-host-cycle-runs-exact-requests-side-by-side.md` 130행: 접수 조건과 `capacity_wait` 설명.
 - `docs/rfc/RFC-librarian-ends-waiting-requests-of-a-replaced-declaration.md` 3.4: "지금처럼 좁힌다"가 가리키는 폭.
@@ -336,3 +354,4 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 - Q3. 어떤 거절이 폭을 줄여야 하는가. 지금은 종류를 보지 않는다. 연속성 회차는 이름 붙은 크기 거절일 때만 줄인다(2026-10-10). durable 쪽을 맞출지는 거절의 종류별 횟수를 잰 뒤에 정한다. L2 뒤에 폭 라벨이 `first_cut` 이나 n 인 원본의 앞 원본이 어떤 거절로 끝났는지 센다.
 - Q4. L1 의 설치 순서. #51278 구현을 먼저 넣는 쪽을 권한다. 대가는 L1 이 그만큼 늦어지는 것이다. 그 전에 넣으면 설치할 때 기다리던 원본이 pass 마다 거절된다.
 - Q5. worker 가 11-16 21:00:23 KST 에 종료 코드 137 로 끝난 원인은 확인하지 않았다. 선언된 memory 는 134,217,728 B 다. D1 은 목록 한 장이 드는 본문을 frame 하나로 묶지만, 그 종료의 원인이라고 말할 근거는 없다.
+- Q6. 거절 없이 끝난 회차. 본문은 폭을 줄이지 않는 쪽으로 정했다(§3.2). 받는 쪽의 거절이 없으면 줄일 근거가 없어서다. 대가는 넓은 범위에서만 나는 예외나 취소가 같은 범위에서 되풀이되는 것이다. 그런 경우가 있는지는 재지 않았다. L2 뒤에 §7.2 의 값으로 본다. 있으면 그 원인을 고친다. 한 턴으로 되돌려 가리는 것은 권하지 않는다.

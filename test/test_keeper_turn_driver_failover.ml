@@ -1806,7 +1806,7 @@ let test_h5_request_preserves_typed_projection_and_store_failures () =
     Alcotest.(check int) "refusal resolves no wire media" 0 !resolutions;
     let missing = Agent_core.History.stored_of_raw "request-missing-bytes" in
     let source = [message ~role:Agent_core.Types.User
-      [Agent_core.Types.Document {media_type = "application/pdf"; source = Stored missing}]] in
+      [Agent_core.Types.Document {media_type = "application/pdf"; source = Agent_core.Types.Stored missing}]] in
     match h5_request_result ~runtime ~project:(fun messages -> Ok messages) source with
     | Error (Agent_core.Error.Media (Agent_core.History.Missing_bytes actual)) ->
       Alcotest.(check bool) "store error retains missing attachment identity" true (actual = missing)
@@ -1818,7 +1818,7 @@ let test_h5_request_missing_bytes_remain_explicit_without_a_reader_call () =
     let runtime = Option.get (Runtime.get_runtime_by_id "primary.text_model") in
     let missing = Agent_core.History.stored_of_raw "request-unavailable-pdf" in
     let canonical = [message ~role:Agent_core.Types.Tool
-      [h5_nested_media [Agent_core.Types.Document {media_type = "application/pdf"; source = Stored missing}]]] in
+      [h5_nested_media [Agent_core.Types.Document {media_type = "application/pdf"; source = Agent_core.Types.Stored missing}]]] in
     let project = h5_request_projection ~runtime
       ~project_media:(h5_projector ~read:h5_reader_forbidden ()) in
     let view = h5_request_result ~runtime ~project canonical |> h5_request_ok in

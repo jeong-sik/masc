@@ -869,15 +869,40 @@ let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
   check int "no gate record stays for validation" 0 (List.length (gate_records fixture capture));
   check int "already consumed source never creates another provider request" posts (F.post_count fixture.server))
 
-let test_retained_answer_with_invalid_working_context_recovers () = with_fixture (fun ~sw:_ fixture ->
-  let output capture = match answer capture with
+(* The object has the required wire shape, but its source reference is not
+   one of the aliases in the captured input. The domain refuses organization
+   without refusing the Memory answer. Extra fields test the earlier wire
+   boundary separately. *)
+let answer_with_invalid_working_context ~extra_fields capture = match answer capture with
     | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
-      if key="working_contexts" then key,`List [`Assoc [
+      if key="working_contexts" then key,`List [`Assoc ([
         "merge_contexts",`List [];"sources",`List [`String "fixture-source"];
-        "context",`String "original context";"next_steps",`List [];
-        "completeness",`String "current"]]
+        "context",`String "original context";"next_steps",`List []] @ extra_fields)]
       else key,value) fields)
-    | _ -> fail "fixture answer is not an object" in
+    | _ -> fail "fixture answer is not an object"
+let test_working_context_with_an_unallowed_field_is_not_an_answer () = with_fixture (fun ~sw:_ fixture ->
+  let output=answer_with_invalid_working_context
+    ~extra_fields:["completeness",`String "current"] in
+  fixture.set_response (fun capture -> `OK,F.openai_response (output capture));
+  let before=progress fixture and delivered= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:delivered;
+  let _,capture=only_original fixture in
+  (match latest fixture capture with
+   | Exact.Completed_latest {execution={outcome=Call_ended (Invalid_output _);_};_} -> ()
+   | No_completed_latest
+   | Completed_latest {execution={outcome=Call_ended (Answered _ | Input_refused _ | Output_limit_reached _)
+       | Call_refused _;_};_} -> fail "an unallowed nested field must not become an answered original");
+  (match run_worker fixture with
+   | Ok (Consumer.Memory_not_committed [_]) -> ()
+   | Ok (Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending _
+       | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+       fail "the invalid wire answer must end the pass as one refusal"
+   | Error error -> fail (Consumer.error_to_string error));
+  no_memory fixture;
+  check bool "a wire shape refusal consumes no original source" true (progress fixture=before))
+let test_retained_answer_with_invalid_working_context_recovers () = with_fixture (fun ~sw:_ fixture ->
+  let output=answer_with_invalid_working_context ~extra_fields:[] in
   fixture.set_response (fun capture -> `OK,F.openai_response (output capture));
   let before=progress fixture and delivered= !(fixture.deliveries) in
   assert_pending (run_worker fixture);
@@ -889,8 +914,8 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
     | Exact.Completed_latest {execution={outcome=Call_ended (Answered _ as answer);_};_} -> Exact.Call_final answer
     | _ -> fail "actual original answer and proof were not retained" in
   let wire=Exact.final_to_json final in
-  check bool "strict consumer schema rejects the additional nested field" true
-    (Result.is_error (Exact.final_of_json ~schema wire));
+  check bool "the original answer has the required wire shape" true
+    (Result.is_ok (Exact.final_of_json ~schema wire));
   let decoded=io (fun () -> Capture.decode_final ~store:fixture.store capture wire) |> get in
   check json "recovery preserves the exact host answer" wire (Exact.final_to_json decoded);
   let proposal=Capture.validate_proposal capture (output capture) |> get in
@@ -902,7 +927,9 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
         if key="slot" then key,`String "different-slot" else key,value) fields)
     | _ -> fail "final is not an object" in
   check bool "a different worker result cannot borrow the host answer" true
-    (io (fun () -> Result.is_error (Capture.decode_final ~store:fixture.store capture changed)));
+    (io (fun () -> Result.is_error (Result.bind
+      (Capture.decode_final ~store:fixture.store capture changed)
+      (Capture.confirm_final ~store:fixture.store capture))));
   check bool "a different schema cannot observe this original" true
     (io (fun () -> Result.is_error (Exact.observe_retained ~store:fixture.store
       ~declaration_id:"librarian" ~schema:(`Assoc []) exact)));
@@ -919,7 +946,9 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
   io (fun () -> Store.save_exact_request empty_store ~declaration_id:"librarian"
     ~request_id:exact.request_id host |> get);
   check bool "a terminal without its execution proof cannot recover" true
-    (io (fun () -> Result.is_error (Capture.decode_final ~store:empty_store capture wire)));
+    (io (fun () -> Result.is_error (Result.bind
+      (Capture.decode_final ~store:empty_store capture wire)
+      (Capture.confirm_final ~store:empty_store capture))));
   let invalid_memory=match output capture with
     | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
         if key="new_claims" then key,`List [new_claim ""] else key,value) fields)
@@ -4511,6 +4540,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_dispatch_rechecks_owner_without_restoring_the_body;
   test_case "proved original survives invalid working context on resume" `Quick
     test_retained_answer_with_invalid_working_context_recovers;
+  test_case "an unallowed working-context field ends before Memory publication" `Quick
+    test_working_context_with_an_unallowed_field_is_not_an_answer;
   test_case "retained source aliases preserve runtime physical-root checks" `Quick test_retained_source_root_alias;
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;

@@ -115,6 +115,40 @@ let append_failed_request ~base_dir ~keeper_name ~user_content ~user_attachments
     ~route:(Lazy.from_val { K.Row_route.surface; conversation_id = None })
     ?turn_ref () |> Result.get_ok |> ignore
 
+let test_strict_row_from_parsed_json_contract () =
+  let module Rows = Masc.Keeper_chat_store_transcript_rows in
+  let module Decode = Masc.Keeper_chat_store_line_decode in
+  let path = "captured-chat-row.jsonl" in
+  let redaction = Masc.Keeper_secret_redaction.empty in
+  let position = Rows.Byte_offset 17 in
+  let json authority = `Assoc
+    ["id",`String "original-row";"role",`String "user";"content",`String "original text";
+     "ts",`Float 2.0;"speaker_authority",`String authority] in
+  let read json = Rows.parse_transcript_json_strict ~path ~redaction ~position json in
+  (match read (json "owner") with
+   | `Message message ->
+     Alcotest.(check string) "original identity" "original-row" message.K.id;
+     Alcotest.(check string) "original content" "original text" message.content;
+     Alcotest.(check bool) "typed speaker authority survives" true
+       (Option.exists (fun speaker -> speaker.K.speaker_authority = K.Owner) message.speaker)
+   | `Unreadable error -> Alcotest.fail (Decode.strict_decode_error_to_string error));
+  (match read (json "admin") with
+   | `Unreadable {location;cause=Decode.Unknown_speaker_authority "admin"} ->
+     Alcotest.(check string) "byte location is retained" "captured-chat-row.jsonl at byte 17" location
+   | `Unreadable error -> Alcotest.fail (Decode.strict_decode_error_to_string error)
+   | `Message _ -> Alcotest.fail "parsed JSON accepted unknown authority");
+  (match read `Null with
+   | `Unreadable {cause=Decode.Invalid_row_contract _;_} -> ()
+   | `Unreadable error -> Alcotest.fail (Decode.strict_decode_error_to_string error)
+   | `Message _ -> Alcotest.fail "parsed JSON accepted an unreadable row");
+  (match Rows.parse_transcript_row_strict ~path ~redaction ~position " \t " with
+   | `Blank -> ()
+   | `Message _ | `Unreadable _ -> Alcotest.fail "the text reader lost its blank-row behavior");
+  match Rows.parse_transcript_row_strict ~path ~redaction ~position "{invalid-json" with
+  | `Unreadable {cause=Decode.Invalid_row_contract _;_} -> ()
+  | `Unreadable error -> Alcotest.fail (Decode.strict_decode_error_to_string error)
+  | `Message _ | `Blank -> Alcotest.fail "the text reader accepted malformed JSON"
+
 let test_load_records_malformed_row_drops () =
   let base_dir = temp_base_path "keeper-chat-store-drops" in
   Fun.protect
@@ -4040,6 +4074,8 @@ let () =
         ] );
       ( "persistence_read_drops",
         [
+          Alcotest.test_case "parsed JSON retains strict row decoding" `Quick
+            test_strict_row_from_parsed_json_contract;
           Alcotest.test_case "malformed rows increment drop metrics" `Quick
             test_load_records_malformed_row_drops;
           Alcotest.test_case "strict load rejects malformed rows" `Quick

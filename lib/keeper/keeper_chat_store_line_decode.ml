@@ -31,9 +31,15 @@ type parsed_line =
   ; strict_decode_error : strict_decode_cause option
   }
 
-let parse_line_decoded ~file_path (line : string) : parsed_line =
+let json_error_result ~file_path detail =
+  report_persistence_read_drop
+    ~reason:Read_drop_reason.Json_syntax_error
+    ~path:file_path
+    ~detail;
+  { message = None; strict_decode_error = None }
+
+let parse_json_decoded ~file_path json : parsed_line =
   try
-    let json = Yojson.Safe.from_string line in
     let role_label =
       Json_util.get_string_with_default json ~key:"role" ~default:""
     in
@@ -382,12 +388,11 @@ let parse_line_decoded ~file_path (line : string) : parsed_line =
                      delivery_provenance })
     in
     { message; strict_decode_error }
-  with Yojson.Json_error detail ->
-    report_persistence_read_drop
-      ~reason:Read_drop_reason.Json_syntax_error
-      ~path:file_path
-      ~detail;
-    { message = None; strict_decode_error = None }
+  with Yojson.Json_error detail -> json_error_result ~file_path detail
+
+let parse_line_decoded ~file_path (line : string) : parsed_line =
+  try parse_json_decoded ~file_path (Yojson.Safe.from_string line) with
+  | Yojson.Json_error detail -> json_error_result ~file_path detail
 
 let parse_line ~file_path line =
   (parse_line_decoded ~file_path line).message

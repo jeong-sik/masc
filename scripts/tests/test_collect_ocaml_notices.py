@@ -161,6 +161,20 @@ YAML_RULES: Mapping[str, object] = {
 YAML_NESTED: Mapping[tuple[str, str], Mapping[str, object]] = {("yaml", "3.2.0"): YAML_RULES}
 
 
+MATRIX_LICENSE = b"ISC License\n\nCopyright (c) 2026, Matrix contributors\n"
+TERMINFO_LICENSE = b"Compiled terminal descriptions from the ncurses terminal database,\ncopied unchanged as test fixtures.\n"
+TOFFEE_LICENSE = b"ISC License\n\nCopyright (c) 2024, Toffee contributors\n"
+
+
+def matrix_package() -> Package:
+    """The mosaic tarball: one package, a test fixture notice, and a sibling package."""
+    return Package("0.2.0", {"lib/matrix/matrix.cmxa": b"matrix"},
+                   {"LICENSE": MATRIX_LICENSE,
+                    "packages/matrix/lib/matrix.ml": b"let x = 1\n",
+                    "packages/matrix/test/data/terminfo/LICENSE": TERMINFO_LICENSE,
+                    "packages/toffee/LICENSE": TOFFEE_LICENSE})
+
+
 class CollectNotices(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -346,6 +360,20 @@ class CollectNotices(unittest.TestCase):
         nested = {("yaml", "3.2.0"): {**YAML_RULES, "tests/data": notices.Exclude("fixtures")}}
         self.assertIn("yaml.3.2.0: tests/data/COPYING is covered by several NESTED_NOTICES paths: tests, tests/data",
                       self.refusal(nested=nested))
+
+    def test_the_matrix_entry_ships_its_licence_and_excludes_its_siblings(self) -> None:
+        """matrix 0.2.0 shares its tarball: a fixture notice and a package we do not link."""
+        self.switch.packages["matrix"] = matrix_package()
+        self.switch.linked[TARGET].append("lib/matrix/matrix.cmxa")
+        self.assertNotIsInstance(self.produce(nested=notices.NESTED_NOTICES), notices.Refused)
+        matrix = self.manifest()["matrix"]
+        self.assertEqual(["matrix/LICENSE"], [notice["file"] for notice in cast(list[dict[str, str]], matrix["notices"])])
+        self.assertEqual(MATRIX_LICENSE, (self.out / "matrix/LICENSE").read_bytes())
+        self.assertEqual([{"path": "packages/matrix/test/data/terminfo/LICENSE", "why": "test data"},
+                          {"path": "packages/toffee/LICENSE",
+                           "why": "a separate package in the same tarball; the matrix library does not build it"}],
+                         matrix["excluded"])
+        self.assertFalse((self.out / "matrix/packages").exists())
 
     def test_an_existing_output_directory_is_left_alone(self) -> None:
         self.out.mkdir()

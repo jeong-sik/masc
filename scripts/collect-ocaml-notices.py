@@ -109,6 +109,10 @@ DUNE_BUILD_INFO: NestedRules = {
     "vendor": Exclude("libraries vendored into the dune binary; the library is built from otherlibs/build-info/"),
 }
 H2: NestedRules = {"hpack/test": Exclude("test data"), "lib_test": Exclude("test data")}
+MATRIX: NestedRules = {
+    "packages/matrix/test": Exclude("test data"),
+    "packages/toffee": Exclude("a separate package in the same tarball; the matrix library does not build it"),
+}
 MENHIR_LIB: NestedRules = {
     "coq-menhirlib": Exclude("the Coq library; menhirLib is built from lib/"),
     "fix": Exclude("a library of the menhir generator; menhirLib is built from lib/"),
@@ -133,6 +137,7 @@ NESTED_NOTICES: Mapping[tuple[str, str], NestedRules] = {
     ("dune-build-info", "3.24.2"): DUNE_BUILD_INFO,
     ("h2", "0.13.0"): H2,
     ("h2-eio", "0.13.0"): H2,
+    ("matrix", "0.2.0"): MATRIX,
     ("menhirLib", "20250912"): MENHIR_LIB,
     ("piaf", "0.2.0"): PIAF,
     ("ppxlib", "0.38.0"): PPXLIB,

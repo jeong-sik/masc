@@ -1195,6 +1195,19 @@ let test_json_terminal_and_id_boundaries () =
     "miscounted admission did not advance journal"
     before_invalid_response
     (Journal.length journal);
+  (* The same record read back from a journal is refused by the decoder, not
+     only by the writer: a resumed turn must never seal against it. *)
+  (match
+     Event.node_update_of_yojson
+       (`Assoc
+           [ "type", `String "provider_response_snapshot"
+           ; ( "value"
+             , Internal.Execution_provider_response_snapshot.to_yojson
+                 miscounted_admission )
+           ])
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "provider response with a miscounted admission decoded from a journal");
   let before_invalid_updates = Journal.length journal in
   let invalid_json_values = [ `Float nan; `Intlit "not-a-json-integer" ] in
   List.iter

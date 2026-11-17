@@ -144,6 +144,11 @@ let start_memory_action ?(keeper_name=keeper_name) fixture action =
 let memory_action fixture action=
   let result=Eio.Promise.await_exn (start_memory_action fixture action) in
   Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;result
+let advance_original fixture original event=io (fun () ->
+  match Owner.advance ~store:fixture.store ~expected:original ~event with
+  | Ok (Owner.Stored original | Already_stored original) -> original
+  | Ok (Unconfirmed detail) -> fail detail
+  | Error error -> fail (Owner.update_error_to_string error))
 let run_worker fixture=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds
   (fun () -> memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name ~wake:(fun () -> ())))
 let await_delivery fixture ~after=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
@@ -6590,11 +6595,6 @@ let test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending () =
     check bool "rollback does not narrow the next read" true
       (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
     check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture)))
-let advance_original fixture original event=io (fun () ->
-  match Owner.advance ~store:fixture.store ~expected:original ~event with
-  | Ok (Owner.Stored original | Already_stored original) -> original
-  | Ok (Unconfirmed detail) -> fail detail
-  | Error error -> fail (Owner.update_error_to_string error))
 (* Inventory may archive an unlinked Rejected before the Owner's resume path
    runs again. Confirm the actual typed host ending at that earlier boundary,
    including when all unread history makes this original no floor candidate. *)

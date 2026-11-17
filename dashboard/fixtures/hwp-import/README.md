@@ -33,3 +33,9 @@ HWP를 가져온 뒤 편집·게시·HWPX/DOCX 다운로드를 확인한다.
 DOCX 6개는 Linux LibreOffice에서 열어 출력했다.
 실제 한컴·Word 실행과 원본 표 너비 보존은 확인한 범위에 포함하지 않는다.
 자세한 범위는 [검증 기록](../../../docs/evidence/artifact-office-browser-2026-11-16.md)에 있다.
+
+2026-11-17에는 같은 공개 표의 너비도 대조했다. HWPX의 131개 셀 너비와
+DOCX의 누적 경계 반올림을 확인했다. 같은 LibreOffice에서 수정 전후
+DOCX를 PDF로 열고 첫 열의 줄바꿈을 직접 비교했다.
+[표 너비 검증 기록](../../../docs/evidence/artifact-office-fidelity-2026-11-17.md)에
+소스·브라우저·native 소비자·실제 앱의 확인 범위를 나눠 적었다.

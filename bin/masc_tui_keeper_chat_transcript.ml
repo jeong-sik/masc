@@ -505,85 +505,94 @@ let note_priority_unavailable t =
   end
 let current_runtime_id t = t.current_runtime_id
 
-let runtime_identity_text ~keeper_name ~configured_runtime transcript =
-  let configured = "configured: " ^ safe_line configured_runtime in
+(* The configured runtime and what the matching turn's stream named. A model
+   name is not a runtime id and is never reported as one. Another Keeper's
+   transcript supplies neither. *)
+type observed_runtime =
+  | Turn_runtime of string
+  | Stream_model of string
+
+type runtime_identity =
+  { observed : observed_runtime option
+  ; configured : string
+  }
+
+let runtime_identity ~keeper_name ~configured_runtime transcript =
   let named = function
-    | Some value when String.trim value <> "" -> Some value
+    | Some value when String.trim value <> "" -> Some (safe_line value)
     | Some _ | None -> None
   in
-  match transcript with
-  | Some t when String.equal t.keeper_name keeper_name ->
-    (match named t.current_runtime_id, named t.observed_model with
-     | Some runtime, _ -> "turn: " ^ safe_line runtime ^ " · " ^ configured
-     | None, Some model -> "model: " ^ safe_line model ^ " · " ^ configured
-     | None, None -> configured)
-  | Some _ | None -> configured
-
-(* What the request now streaming has spent so far, in the clause shape the
-   rest of this screen uses. It is that request's running total, not the
-   turn's: a turn that calls tools asks several times and each answer counts
-   from zero. Only counters the provider reported appear, and each is written
-   out in full: a reader comparing this against a bill needs the digits, not a
-   rounded stand-in. [None] when nothing was reported, so the row stays as it
-   was instead of gaining an empty label. *)
-let stream_tokens_text ~keeper_name transcript =
-  let tokens_clause usage =
-    match usage with
-    | None -> None
-    | Some usage ->
-       let clause label value =
-         Option.map (fun value -> Printf.sprintf "%s %d" label value) value
-       in
-       let parts =
-         List.filter_map
-           (fun clause -> clause)
-           [ clause "in" usage.Live.input_tokens
-           ; clause "out" usage.Live.output_tokens
-           ; clause "cache read" usage.Live.cache_read_input_tokens
-           ; clause "cache write" usage.Live.cache_creation_input_tokens
-           ]
-       in
-       (match parts with
-        | [] -> None
-        | parts -> Some ("tokens: " ^ String.concat " · " parts))
+  let observed =
+    match transcript with
+    | Some t when String.equal t.keeper_name keeper_name ->
+      (match named t.current_runtime_id, named t.observed_model with
+       | Some runtime, _ -> Some (Turn_runtime runtime)
+       | None, Some model -> Some (Stream_model model)
+       | None, None -> None)
+    | Some _ | None -> None
   in
+  { observed; configured = safe_line configured_runtime }
+
+(* What the request now streaming has spent so far. It is that request's
+   running total, not the turn's: a turn that calls tools asks several times
+   and each answer counts from zero. A counter the provider did not report is
+   [None], never zero. *)
+let stream_usage ~keeper_name transcript =
   match transcript with
-  | Some t when String.equal t.keeper_name keeper_name ->
-    tokens_clause t.observed_usage
+  | Some t when String.equal t.keeper_name keeper_name -> t.observed_usage
   | Some _ | None -> None
 
-(* The counters and why the provider stopped writing, joined the way the row
-   joins clauses. The reason is drawn whenever one was reported, [end_turn]
-   included — the screen keeps no list of "ordinary" reasons to hide, because
-   such a list goes stale the day a provider adds one. The caller draws a
-   clause whole or not at all and the two together do not fit every frame, so
-   the tokens keep their own reading above: a row too narrow for both keeps
-   the counters it was already drawing rather than losing them to the newer
-   fact. *)
-let stream_details_text ~keeper_name transcript =
+(* Why the provider stopped writing, in its own word. Reported whenever the
+   stream gave one, [end_turn] included: the screen keeps no list of ordinary
+   reasons to hide, because such a list goes stale the day a provider adds
+   one. *)
+let stream_stop_reason ~keeper_name transcript =
   match transcript with
   | Some t when String.equal t.keeper_name keeper_name ->
-    let parts =
-      List.filter_map
-        (fun clause -> clause)
-        [ stream_tokens_text ~keeper_name transcript
-        ; Option.map
-            (fun reason -> "stopped: " ^ safe_line (Agent_core.Types.stop_reason_to_string reason))
-            t.observed_stop_reason
-        ]
-    in
-    (match parts with
-     | [] -> None
-     | parts -> Some (String.concat " · " parts))
+    Option.map
+      (fun reason -> safe_line (Agent_core.Types.stop_reason_to_string reason))
+      t.observed_stop_reason
   | Some _ | None -> None
+
+(* The same readings as the clauses the chat's one-row status line draws. *)
+let runtime_identity_text ~keeper_name ~configured_runtime transcript =
+  let identity = runtime_identity ~keeper_name ~configured_runtime transcript in
+  let configured = "configured: " ^ identity.configured in
+  match identity.observed with
+  | Some (Turn_runtime runtime) -> "turn: " ^ runtime ^ " \xc2\xb7 " ^ configured
+  | Some (Stream_model model) -> "model: " ^ model ^ " \xc2\xb7 " ^ configured
+  | None -> configured
+
+let stream_tokens_text ~keeper_name transcript =
+  match stream_usage ~keeper_name transcript with
+  | None -> None
+  | Some usage ->
+    let clause label value = Option.map (Printf.sprintf "%s %d" label) value in
+    (match
+       List.filter_map Fun.id
+         [ clause "in" usage.Live.input_tokens
+         ; clause "out" usage.Live.output_tokens
+         ; clause "cache read" usage.Live.cache_read_input_tokens
+         ; clause "cache write" usage.Live.cache_creation_input_tokens
+         ]
+     with
+     | [] -> None
+     | parts -> Some ("tokens: " ^ String.concat " \xc2\xb7 " parts))
+
+let stream_details_text ~keeper_name transcript =
+  match
+    List.filter_map Fun.id
+      [ stream_tokens_text ~keeper_name transcript
+      ; Option.map (fun reason -> "stopped: " ^ reason)
+          (stream_stop_reason ~keeper_name transcript)
+      ]
+  with
+  | [] -> None
+  | parts -> Some (String.concat " \xc2\xb7 " parts)
 
 (* The clause a row draws beside the runtime id when it has [room] cells left,
-   separator included. A clause is drawn whole or not at all -- a half-written
-   number reads as a smaller bill than the real one, and a cut stop reason
-   reads as another word -- so a row that cannot hold both facts falls back to
-   the counters alone rather than to nothing: the newer fact must not take
-   away the one the screen was already showing. [None] when not even the
-   counters fit, and the row is what it was before any of this was measured. *)
+   separator included. A clause is drawn whole or not at all, so a row that
+   cannot hold both facts falls back to the counters alone. *)
 let stream_details_within ~keeper_name ~room transcript =
   let clause text = " \xc2\xb7 " ^ text in
   List.find_opt

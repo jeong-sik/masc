@@ -562,43 +562,57 @@ val attempt : t -> int
 val current_runtime_id : t -> string option
 (** Current resolved-runtime identity, if observed. *)
 
+type observed_runtime =
+  | Turn_runtime of string  (** The runtime id the attempt named. *)
+  | Stream_model of string
+      (** The model the stream named before any runtime id was announced. A
+          model name is not a runtime id and is never reported as one. *)
+
+type runtime_identity =
+  { observed : observed_runtime option
+        (** What the matching turn's stream named. Another Keeper's
+            transcript cannot supply it. *)
+  ; configured : string
+  }
+
+val runtime_identity :
+  keeper_name:string -> configured_runtime:string -> t option -> runtime_identity
+(** The configured runtime and the matching turn's observed one, as
+    terminal-safe single lines. *)
+
+val stream_usage :
+  keeper_name:string -> t option -> Masc_tui_keeper_chat_live.stream_usage option
+(** What the answer now streaming has spent. It is the running total of the
+    request in flight, not of the turn: a turn that calls tools asks the
+    provider several times and each answer counts from zero. A counter the
+    provider did not report is [None], never zero. Another Keeper's transcript
+    reports nothing. *)
+
+val stream_stop_reason : keeper_name:string -> t option -> string option
+(** The provider's word for why it stopped writing, as the stream reported it
+    while writing. It is reported whenever one arrived, including [end_turn],
+    so the screen never holds a list of reasons worth hiding. This is a
+    different question from the turn outcome masc recorded. *)
+
 val runtime_identity_text :
   keeper_name:string -> configured_runtime:string -> t option -> string
-(** Labels the configured runtime separately from the matching turn's observed
-    runtime ([turn: <runtime id>]). A stream that named its model before any
-    runtime id was announced is labelled [model: <model>]: a model name is not
-    a runtime id and is never shown as one. Another keeper's transcript cannot
-    supply the turn identity. *)
+(** {!runtime_identity} as one clause: [turn: <runtime id> · configured: …],
+    [model: <model> · configured: …], or the configured runtime alone. *)
 
 val stream_tokens_text : keeper_name:string -> t option -> string option
-(** What the answer now streaming has spent, as one clause
-    ([tokens: in 1200 · out 340]). It is the running total of the request in
-    flight, not of the turn: a turn that calls tools asks the provider several
-    times and each answer counts from zero. Counters the provider did not
-    report are left out rather than drawn as zero. A caller with room for one
-    clause and not two draws this one, so a narrow row keeps the counters it
-    was already drawing. [None] means none were reported. *)
+(** {!stream_usage} as one clause ([tokens: in 1200 · out 340]). [None] when
+    no counter was reported. *)
 
 val stream_details_text : keeper_name:string -> t option -> string option
-(** What the request now streaming reported, as clauses
-    ([tokens: in 1200 · out 340 · stopped: max_tokens]). Counters the provider
-    did not report are left out rather than drawn as zero; the stop reason is
-    drawn whenever one was reported, including [end_turn], so the screen never
-    holds a list of reasons worth hiding. It is the provider's word for why it
-    stopped writing, as the stream reported it while writing, which is a
-    different question from the turn outcome masc recorded. [None] means nothing was reported at all, so the row is
-    unchanged from before this was measured. Another keeper's transcript
-    reports nothing. *)
+(** The counters and {!stream_stop_reason} as clauses
+    ([tokens: in 1200 · out 340 · stopped: max_tokens]). [None] when nothing
+    was reported. *)
 
 val stream_details_within :
   keeper_name:string -> room:int -> t option -> string option
 (** The clause a row with [room] cells to spare draws, its leading separator
-    included and measured. A clause is drawn whole or not at all — a
-    half-written number reads as a smaller bill than the real one and a cut
-    stop reason reads as another word — so a row too narrow for both facts
-    draws the counters alone rather than nothing: the stop reason must not
-    take away the counters the screen was already showing. [None] when not
-    even the counters fit. *)
+    included and measured: both facts, or the counters alone, or [None] when
+    not even the counters fit. *)
 
 (** The recorded reply (KEEPER_REPLY_DETAILS): the visible text, the typed
     outcome, and the turn it was recorded under. *)

@@ -55,6 +55,14 @@ val load : store:Lane_addon_store.t -> listed ->
 (** Read and strictly restore one discovered original's body. The record read
     with the body must still hold the discovered index, and
     [Keeper_librarian_durable_request.restore] binds that index to the body. *)
+val load_many : store:Lane_addon_store.t -> listed list ->
+  ((Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t) list, error) result
+(** Read the selected originals in order, stopping at the first failure. Every
+    record and body is read and validated afresh. Within this one call, equal
+    captured owners and complete source text may share an already validated
+    immutable source. Each request's preparation, binding, index and physical
+    source root are still checked. The source-digest index selects a possible
+    previous source only; it is discarded before returning the restored list. *)
 type held =
   | Listed of listed
       (** Its record and index. Its fence and predecessor are checked on them,

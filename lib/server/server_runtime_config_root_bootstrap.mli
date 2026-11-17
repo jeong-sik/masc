@@ -19,6 +19,21 @@ val backfill_startup_required_from_embedded : config_root:string -> int
     {!seed_missing_from_embedded} on purpose: an existing root is operator-owned,
     while the runtime configuration is required for startup. *)
 
+type runtime_toml_placement =
+  | Embedded_written
+      (** Nothing was at the path. It now holds the runtime.toml this binary
+          embeds. *)
+  | Existing_kept
+      (** An entry was at the path, a link whose target is gone included. It
+          is untouched. *)
+
+val place_embedded_runtime_toml : path:string -> (runtime_toml_placement, string) result
+(** Put the runtime.toml this binary embeds at [path] when nothing is there,
+    making its directory. It is the file {!backfill_startup_required_from_embedded}
+    writes at a server start. The file is written beside [path] and renamed,
+    so [path] holds it whole or not at all. [Error] says why the write did not
+    finish. The caller excludes other writers of [path]. *)
+
 val bootstrap_base_path_config_root : base_path:string -> unit
 
 type missing_runtime_toml =

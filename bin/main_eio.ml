@@ -1249,6 +1249,10 @@ let auth_cmd =
            it out of the request URL. Only a digest of the token is written. \
            The invitation works once and expires after 24 hours."
       ; `P
+          "A workspace with no .masc/config/runtime.toml gets the one this \
+           release ships: the account server reads what people may connect \
+           from it. A file that is there is kept."
+      ; `P
           ("Once the command succeeds, "
            ^ Masc_cli_auth.account_server_line
            ^ ". "

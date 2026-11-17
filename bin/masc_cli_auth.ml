@@ -2,6 +2,7 @@
 
 module A = Authz_activation
 module T = Server_startup_takeover
+module Config_root = Server_runtime_config_root_bootstrap
 
 let ( let* ) = Result.bind
 let now_ms () = int_of_float (Unix.gettimeofday () *. 1000.)
@@ -165,33 +166,100 @@ let refused command reason =
   1
 ;;
 
+(* What people may connect is read from runtime.toml
+   ([Server_runtime_setup_actions.config]), and a workspace that has none
+   offers nothing: the integrations route answers 503 and every connection is
+   refused. An activation therefore leaves, at the path the account server
+   reads, the runtime.toml this release ships: the file a single-user server
+   writes at its start for a workspace without one. A file that is there is
+   the operator's and is kept. *)
+type declaration =
+  { path : string
+  ; outcome : (Config_root.runtime_toml_placement, string) result
+  }
+
+let declare_connections ~base_path =
+  let path = Server_runtime_setup_actions.config_path ~base_path in
+  { path; outcome = Config_root.place_embedded_runtime_toml ~path }
+;;
+
+let setup_guide_step_6 = "docs/guides/account-server-setup.md, step 6"
+
+let declaration_line { path; outcome } =
+  match outcome with
+  | Ok Config_root.Embedded_written ->
+    Printf.sprintf
+      "- %s declares what people may connect. The workspace had none, so it is the file \
+       this release ships; an edit of it changes what they connect (%s).\n"
+      path
+      setup_guide_step_6
+  | Ok Config_root.Existing_kept ->
+    Printf.sprintf
+      "- %s declares what people may connect. It was there and is kept as it is (%s).\n"
+      path
+      setup_guide_step_6
+  | Error (_ : string) ->
+    Printf.sprintf
+      "- %s, which declares what people may connect, was not written.\n"
+      path
+;;
+
+let declaration_steps { path; outcome } =
+  match outcome with
+  | Ok (Config_root.Embedded_written | Config_root.Existing_kept) -> []
+  | Error (_ : string) ->
+    [ Printf.sprintf
+        "Write %s: it declares what people may connect, and the account server offers \
+         nothing without it (%s)."
+        path
+        setup_guide_step_6
+    ]
+;;
+
 let bootstrap ~base_path ~external_store =
+  (* The file is placed under the lease and after the activation: no server
+     reads the workspace meanwhile, and a refused activation writes nothing. *)
   let activate ~base_path ~config_dir ~anonymous_mutations ~now_ms =
-    Result.map_error
-      A.error_to_string
-      (A.activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms)
+    let* activated =
+      Result.map_error
+        A.error_to_string
+        (A.activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms)
+    in
+    Ok (activated, declare_connections ~base_path)
   in
   match under_lease ~held:T.base_path_contention_message ~base_path activate with
   | Error reason -> refused "bootstrap" reason
-  | Ok (base_url, { A.workspace_id; invitation }) ->
+  | Ok (base_url, ({ A.workspace_id; invitation }, declaration)) ->
     Printf.printf
       "Multi-account use is on for workspace %s.\n\
        - From now on %s.\n\
        - %s.\n\
        - The external store is %s.\n\
+       %s\
        The first Admin is invited.\n"
       (Authz_types.Workspace_id.to_string workspace_id)
       account_server_line
       (String.capitalize_ascii Authz_boot_mode_read.turn_off_line)
-      external_store;
+      external_store
+      (declaration_line declaration);
+    (match declaration.outcome with
+     | Ok (Config_root.Embedded_written | Config_root.Existing_kept) -> ()
+     | Error reason ->
+       (* The activation is committed and is not run twice, so this is
+          reported on its own and the link is still printed. *)
+       Printf.eprintf
+         "masc auth bootstrap: the workspace is activated, and %s was not written: %s\n"
+         declaration.path
+         reason);
     print_link
       ~command:"bootstrap"
       ~base_url
       ~next:
-        [ start_step ~base_url ~base_path
-        ; "Hand the link to the person who becomes the first Admin. They open it and \
-           sign in."
-        ]
+        (declaration_steps declaration
+         @ [ start_step ~base_url ~base_path
+           ; "Hand the link to the person who becomes the first Admin. They open it and \
+              sign in."
+           ])
       invitation
 ;;
 

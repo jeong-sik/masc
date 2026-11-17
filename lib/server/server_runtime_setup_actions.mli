@@ -45,6 +45,11 @@ val login_target : base_path:string -> integration_id:string -> (login_target, e
 val login_target_of_config : Runtime_schema.config -> integration_id:string -> (login_target, error) result
 (** {!login_target} on a runtime.toml already read with {!config}. *)
 
+val config_path : base_path:string -> string
+(** The runtime.toml {!config} reads, [<base_path>/.masc/config/runtime.toml].
+    A writer of the file for the routes that call {!config} writes this
+    path. *)
+
 val config : base_path:string -> (Runtime_schema.config, error) result
 (** The runtime.toml of the workspace, parsed. A file that cannot be read is
     [Configuration_unavailable (Unreadable _)] and one that does not parse is

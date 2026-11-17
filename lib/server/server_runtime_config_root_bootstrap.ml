@@ -237,6 +237,42 @@ let backfill_startup_required_from_embedded ~config_root =
   [ Config_dir_resolver.runtime_toml_filename ] |> write_missing_embedded ~dst:config_root
 ;;
 
+type runtime_toml_placement =
+  | Embedded_written
+  | Existing_kept
+
+(* [lstat]: a link whose target is gone is still something the operator made,
+   and a write would replace it. *)
+let entry_at path =
+  match Unix.lstat path with
+  | (_ : Unix.stats) -> Ok true
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+;;
+
+(* The same file [backfill_startup_required_from_embedded] writes, for a
+   caller that names the path its reader opens and must say what happened.
+   The file is renamed into place whole, so a run that dies midway leaves no
+   partial runtime.toml for a later run to keep as the operator's. *)
+let place_embedded_runtime_toml ~path =
+  let ( let* ) = Result.bind in
+  let* present = entry_at path in
+  if present
+  then Ok Existing_kept
+  else (
+    match Embedded_config.read Config_dir_resolver.runtime_toml_filename with
+    | None -> Error "this binary carries no runtime.toml"
+    | Some content ->
+      let* () =
+        match Fs_compat.mkdir_p (Filename.dirname path) with
+        | () -> Ok ()
+        | exception ((Unix.Unix_error _ | Sys_error _ | Eio.Io _) as error) ->
+          Error (Printexc.to_string error)
+      in
+      let* () = Fs_compat.save_file_atomic_strict path content in
+      Ok Embedded_written)
+;;
+
 let builtin_skills () =
   Embedded_skills.file_list
   |> List.filter_map (fun path ->

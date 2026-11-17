@@ -95,6 +95,66 @@ let test_backfill_repairs_only_startup_required () =
   check int "second call is a no-op" 0
     (Seed.backfill_startup_required_from_embedded ~config_root)
 
+(* [masc auth bootstrap] places the embedded runtime.toml for an account
+   workspace. The account server reads what people may connect at the path
+   [Server_runtime_setup_actions.config_path] names, so a placement there on
+   an empty base path is read back by that reader, and the file this binary
+   ships offers a person a provider with a model. *)
+let test_placed_runtime_toml_is_what_people_connect () =
+  let base_path = fresh_dst () in
+  let path = Server_runtime_setup_actions.config_path ~base_path in
+  (match Seed.place_embedded_runtime_toml ~path with
+   | Ok Seed.Embedded_written -> ()
+   | Ok Seed.Existing_kept -> fail "an empty base path holds no runtime.toml to keep"
+   | Error reason -> fail reason);
+  match Server_runtime_setup_actions.config ~base_path with
+  | Error error -> fail (Server_runtime_setup_actions.error_message error)
+  | Ok config ->
+    check bool "a person may connect a provider that offers a model" true
+      (List.exists
+         (fun (integration : Server_person_integrations.integration) ->
+            integration.models <> [])
+         (Server_person_integrations.of_config config))
+
+(* What is at the path is the operator's: a file keeps its bytes, and a link
+   whose target is gone stays a link. *)
+let test_placement_keeps_what_is_there () =
+  let base_path = fresh_dst () in
+  let path = Server_runtime_setup_actions.config_path ~base_path in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let operator_runtime = "# operator runtime\n" in
+  Fs_compat.save_file path operator_runtime;
+  let kept what =
+    match Seed.place_embedded_runtime_toml ~path with
+    | Ok Seed.Existing_kept -> ()
+    | Ok Seed.Embedded_written -> fail (what ^ " was replaced")
+    | Error reason -> fail reason
+  in
+  kept "the operator's runtime.toml";
+  check string "operator runtime.toml untouched" operator_runtime (read_file path);
+  Sys.remove path;
+  Unix.symlink (Filename.concat base_path "gone") path;
+  kept "a link whose target is gone";
+  check bool "the link is still a link" true ((Unix.lstat path).st_kind = Unix.S_LNK)
+
+(* A path that cannot be written is an [Error] the command reports, not an
+   exception that ends it before the invitation link is printed. Under a file
+   the path cannot be looked at; under a link whose target is gone it can, and
+   the write is what fails. *)
+let test_placement_reports_a_path_it_cannot_write () =
+  let base_path = fresh_dst () in
+  let refused parent =
+    Result.is_error
+      (Seed.place_embedded_runtime_toml ~path:(Filename.concat parent "runtime.toml"))
+  in
+  let file = Filename.concat base_path "file" in
+  Fs_compat.save_file file "";
+  check bool "under a file" true (refused file);
+  let link = Filename.concat base_path "link" in
+  Unix.symlink (Filename.concat base_path "gone") link;
+  check bool "under a link whose target is gone" true (refused link);
+  check bool "the link is still a link" true ((Unix.lstat link).st_kind = Unix.S_LNK)
+
 (* The packages the binary ships are whatever the embedded listing holds, so
    the expectation is read from that listing rather than typed in: a typed
    count went stale twice as packages were added (#34256 shipped five,
@@ -245,5 +305,12 @@ let () =
     ; ( "backfill_startup_required_from_embedded"
       , [ test_case "repairs only the startup-required files" `Quick
             test_backfill_repairs_only_startup_required
+        ] )
+    ; ( "place_embedded_runtime_toml"
+      , [ test_case "the placed file is what people connect" `Quick
+            test_placed_runtime_toml_is_what_people_connect
+        ; test_case "keeps what is there" `Quick test_placement_keeps_what_is_there
+        ; test_case "reports a path it cannot write" `Quick
+            test_placement_reports_a_path_it_cannot_write
         ] )
     ]

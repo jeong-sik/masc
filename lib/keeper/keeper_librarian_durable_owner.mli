@@ -30,6 +30,10 @@ type outcome =
   | Refused of Lane_addon_exact.final * Lane_addon_tool_request_owner.retained
   | Finished of Lane_addon_tool_request_owner.retained
   | Basis_superseded of Lane_addon_tool_request_owner.retained
+  | Ended_unadmitted of Lane_addon_tool_request_owner.retained
+      (** No worker received the original and its declaration was replaced, so
+          it was ended before dispatch. Nothing was refused by a host or a
+          provider. *)
 type resumed =
   | Waited of wait * Lane_addon_tool_request_owner.Record.t
       (** The original waits for its worker. Its body may not have been read. *)

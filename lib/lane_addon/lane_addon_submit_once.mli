@@ -52,9 +52,32 @@ type 'body source = {
   schema : 'body -> Yojson.Safe.t;
 }
 
+type unadmitted =
+  | Admit  (** Read the worker and admit the original, as before. *)
+  | End_replaced of Yojson.Safe.t
+      (** The declaration the original was captured for was replaced. The
+          value is the owner's evidence, retained with the refusal. *)
+(** What the owner says about an original no worker has received. *)
+
+val destination_relation : config:Workspace.config -> reserved:string list -> label:string ->
+  Lane_addon_captured_destination.t ->
+  (Lane_addon_captured_destination.relation * Lane_addon_captured_destination.t, error) Stdlib.result
+(** How the destination an original was captured for stands to the one the
+    configuration publishes for its tool now, and that destination. A
+    conflicting export is [Rejected]; a missing one is [Unavailable]: the
+    Add-on is off or not ready. [label] names the owner in those errors. Read
+    under the configuration and action serializers. *)
+
+val confirm_destination : config:Workspace.config -> reserved:string list -> label:string ->
+  Lane_addon_captured_destination.t -> (unit, error) Stdlib.result
+(** {!destination_relation} is [Same]. Any other relation is [Rejected]. The
+    completed-history and admission owners' pre-send check is this one
+    function. *)
+
 val resume : store:Lane_addon_store.t -> label:string ->
   original:Lane_addon_tool_request_owner.Record.t -> source:'body source ->
   decode_final:('body -> Yojson.Safe.t -> (Lane_addon_exact.final, string) Stdlib.result) ->
+  unadmitted:(unit -> (unadmitted, error) Stdlib.result) ->
   prepare:(unit -> (unit, error) Stdlib.result) -> call:call ->
   terminal:('body -> Lane_addon_tool_request_owner.Record.t -> Lane_addon_exact.final ->
     ('final, error) Stdlib.result) ->
@@ -66,8 +89,13 @@ val resume : store:Lane_addon_store.t -> label:string ->
     its listing or is Off. This recovery invokes no provider or worker RPC;
     absent/unproven execution remains unresolved and never authorizes submit.
 
-    Captured and Admission_wait read the worker first. Only authoritative
-    absence leads to admission, and [prepare] runs every pre-send check
+    Captured and Admission_wait ask [unadmitted] before anything else.
+    [End_replaced evidence] stores [Refused {stage = Before_dispatch; evidence}]
+    and returns [Settled]; no worker RPC is made and no intent is written. An
+    [Unavailable] answer is [Awaiting Worker_unreachable] with the journal
+    unchanged, and a [Rejected] or [Uncertain] answer is returned as the error.
+    A dispatched original never asks. On [Admit] they read the worker. Only
+    authoritative absence leads to admission, and [prepare] runs every pre-send check
     before Dispatch_intended is written. An [Unavailable] pre-send check or
     [Not_sent (Unavailable _)] read returns [Awaiting Worker_unreachable] in
     either pre-admission phase without changing the journal or sending a
@@ -112,6 +140,7 @@ val resume_retained : store:Lane_addon_store.t -> label:string ->
   original:Lane_addon_tool_request_owner.retained -> request:Lane_addon_exact.request ->
   schema:Yojson.Safe.t ->
   decode_final:(Yojson.Safe.t -> (Lane_addon_exact.final, string) Stdlib.result) ->
+  unadmitted:(unit -> (unadmitted, error) Stdlib.result) ->
   prepare:(unit -> (unit, error) Stdlib.result) -> call:call ->
   terminal:(Lane_addon_tool_request_owner.retained -> Lane_addon_exact.final ->
     ('final, error) Stdlib.result) ->

@@ -107,7 +107,8 @@ let resume_with ~store ~base_path ~request_id ~prepare ~call =
   let* request=rejected (Binding.request capture) in
   let schema=Capture.output_schema capture in
   let* resumed=Submit.resume_retained ~store ~label:"Curator" ~original ~request
-    ~schema ~decode_final:(Exact.final_of_json ~schema) ~prepare ~call
+    ~schema ~decode_final:(Exact.final_of_json ~schema)
+    ~unadmitted:(fun () -> Ok Submit.Admit) ~prepare ~call
     ~terminal:(fun record final -> terminal ~capture ~record final) in
   match resumed with
   | Submit.Awaiting (wait,record) -> Ok (Awaiting (wait,record))

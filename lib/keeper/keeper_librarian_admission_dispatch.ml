@@ -1,8 +1,6 @@
 module Capture = Keeper_librarian_admission_capture
 module Owner = Lane_addon_tool_request_owner
-module Destination = Lane_addon_captured_destination
 module Exact = Lane_addon_exact
-module Runtime = Lane_addon_runtime
 module Submit = Lane_addon_submit_once
 open Result.Syntax
 
@@ -36,28 +34,7 @@ let check_identity ~(destination : Capture.destination) (original : Owner.retain
   else Error (Rejected "Original admission destination or Exact request identity differs")
 
 let confirm_destination ~config ~reserved ~(destination : Capture.destination) =
-  let snapshot = Runtime.tool_export_snapshot ~config
-    ~access:Lane_addon_sources.Operator_configuration ~reserved in
-  let* () =
-    match List.find_opt
-      (fun (conflict : Lane_addon_tool_export.conflict) -> conflict.name = destination.tool)
-      snapshot.conflicts with
-    | Some conflict -> Error (Rejected (Lane_addon_tool_export.conflict_to_string conflict))
-    | None -> Ok () in
-  let* export =
-    match List.find_opt
-      (fun (export : Runtime.tool_export) -> export.tool.name = destination.tool)
-      snapshot.exports with
-    | Some export -> Ok export
-    | None -> Error (Unavailable "Original admission Add-on export is unavailable") in
-  Runtime.with_tool_request_destination ~config
-    ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
-    ~publish:(fun (actual : Runtime.tool_request_destination) ->
-      if Destination.same_semantic (Destination.of_runtime actual) destination
-      then Ok ()
-      else Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected
-        "Fresh admission destination differs from its original semantic configuration")))
-  |> Result.map_error Submit.error_of_runtime
+  Submit.confirm_destination ~config ~reserved ~label:"admission" destination
 
 let resume ~store ~config ~reserved ~destination ~(original : Owner.retained)
     ~capture ~exact ~schema ~validate_answer ~(call : call) =
@@ -89,8 +66,10 @@ let resume ~store ~config ~reserved ~destination ~(original : Owner.retained)
     | Ok () -> call ~expected:destination ~original ~arguments in
   let decode_final json = Systhread_host.run ~label:"librarian-admission-decode-final"
     (fun () -> Capture.decode_final ~store capture json) in
+  (* Nothing re-creates an admission part, so none is ended here. [prepare]
+     refuses a changed destination, as before. *)
   let* resumed = Submit.resume_retained ~store ~label:"Admission" ~original ~request:exact ~schema
-    ~decode_final ~prepare ~call ~terminal in
+    ~decode_final ~unadmitted:(fun () -> Ok Submit.Admit) ~prepare ~call ~terminal in
   match resumed with
   | Submit.Awaiting (wait, record) -> Ok (Pending (wait, record))
   | Submit.Final result -> Ok result

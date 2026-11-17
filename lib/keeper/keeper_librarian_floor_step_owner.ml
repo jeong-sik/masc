@@ -83,7 +83,9 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (Refusal (final,record)) in
   let decode_final json=io (fun () -> Step.decode_final ~store step json) in
-  let* result=Submit.resume_retained ~store ~label:"Floor step" ~original ~request:exact ~schema ~decode_final ~prepare:admit ~call ~terminal in
+  (* A step is not ended here. [prepare] refuses a changed destination. *)
+  let* result=Submit.resume_retained ~store ~label:"Floor step" ~original ~request:exact ~schema ~decode_final
+    ~unadmitted:(fun () -> Ok Submit.Admit) ~prepare:admit ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
   | Final (Answer (answer,record)) -> Ok (Answered (answer,record))

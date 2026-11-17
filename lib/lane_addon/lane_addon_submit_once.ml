@@ -97,8 +97,38 @@ type 'body source = {
   schema : 'body -> Yojson.Safe.t;
 }
 
-let resume ~store ~label ~(original : Owner.Record.t) ~(source : _ source) ~decode_final ~prepare
-    ~(call : call) ~terminal =
+type unadmitted = Admit | End_replaced of Yojson.Safe.t
+
+module Destination = Lane_addon_captured_destination
+let destination_relation ~config ~reserved ~label (captured : Destination.t) =
+  let access = Lane_addon_sources.Operator_configuration in
+  let snapshot = Runtime.tool_export_snapshot ~config ~access ~reserved in
+  let* () =
+    match List.find_opt
+      (fun (conflict : Lane_addon_tool_export.conflict) -> conflict.name = captured.tool)
+      snapshot.conflicts with
+    | Some conflict -> Error (Rejected (Lane_addon_tool_export.conflict_to_string conflict))
+    | None -> Ok () in
+  let* export =
+    match List.find_opt
+      (fun (export : Runtime.tool_export) -> export.tool.name = captured.tool)
+      snapshot.exports with
+    | Some export -> Ok export
+    | None -> Error (Unavailable ("Original " ^ label ^ " Add-on export is unavailable")) in
+  Runtime.with_tool_request_destination ~config ~access ~reserved ~export
+    ~publish:(fun (actual : Runtime.tool_request_destination) ->
+      let current = Destination.of_runtime actual in
+      Ok (Destination.relation ~captured ~current, current))
+  |> Result.map_error error_of_runtime
+let confirm_destination ~config ~reserved ~label captured =
+  let* relation, _ = destination_relation ~config ~reserved ~label captured in
+  match relation with
+  | Destination.Same -> Ok ()
+  | Destination.Replaced | Destination.Other_owner ->
+    Error (Rejected ("Fresh " ^ label ^ " destination differs from its original semantic configuration"))
+
+let resume ~store ~label ~(original : Owner.Record.t) ~(source : _ source) ~decode_final ~unadmitted
+    ~prepare ~(call : call) ~terminal =
   let request_id = Owner.Record.request_id original in
   (* The body is read on entering a branch that needs it, once for the pass.
      A failed read is this pass's error and leaves the journal as it was. *)
@@ -277,12 +307,22 @@ let resume ~store ~label ~(original : Owner.Record.t) ~(source : _ source) ~deco
   | Progress.Subdividing ({stage = Progress.Before_dispatch; _}, _)
   | Progress.Subdivided ({stage = Progress.Before_dispatch; _}, _) -> Ok (Settled original)
   | Progress.Captured | Progress.Admission_wait _ ->
-    (match invoke read with
-     | Error (Unsent error) -> wait_before_send original error
-     | Error (Unknown error) -> Error error
-     | Ok (Absent, _) -> admit original
-     | Ok ((Pending | Capacity_wait | Finished _), _) ->
-       Error (Rejected ("Worker state contradicts original " ^ label ^ " pre-admission progress")))
+    (* No worker has received this original. Its owner says first whether the
+       declaration it was captured for was replaced: the worker of another
+       declaration is not asked about it. *)
+    (match unadmitted () with
+     | Error error -> wait_before_send original error
+     | Ok (End_replaced evidence) ->
+       let* published = publish ~store original
+         (Progress.Refused {stage = Progress.Before_dispatch; evidence}) in
+       Ok (Settled (stored_record published))
+     | Ok Admit ->
+       (match invoke read with
+        | Error (Unsent error) -> wait_before_send original error
+        | Error (Unknown error) -> Error error
+        | Ok (Absent, _) -> admit original
+        | Ok ((Pending | Capacity_wait | Finished _), _) ->
+          Error (Rejected ("Worker state contradicts original " ^ label ^ " pre-admission progress"))))
   | Progress.Dispatch_pending _ ->
     let* observed = observe_open () in
     (match observed with
@@ -298,15 +338,15 @@ let resume ~store ~label ~(original : Owner.Record.t) ~(source : _ source) ~deco
 
 (* For an owner that already holds the body: nothing is read, and each record
    the machine returns is put back beside that body. *)
-let resume_retained ~store ~label ~(original : Owner.retained) ~request ~schema ~decode_final ~prepare
-    ~call ~terminal =
+let resume_retained ~store ~label ~(original : Owner.retained) ~request ~schema ~decode_final
+    ~unadmitted ~prepare ~call ~terminal =
   let rebind record = match Owner.rebind original record with
     | Some retained -> Ok retained
     | None -> Error (Rejected ("Original " ^ label ^ " record names another request")) in
   let source = {identity = Exact.identity request; load = (fun () -> Ok ());
     request = (fun () -> request); schema = (fun () -> schema)} in
   let* result = resume ~store ~label ~original:(Owner.listed original) ~source
-    ~decode_final:(fun () json -> decode_final json) ~prepare ~call
+    ~decode_final:(fun () json -> decode_final json) ~unadmitted ~prepare ~call
     ~terminal:(fun () record final ->
       let* retained = rebind record in
       terminal retained final) in

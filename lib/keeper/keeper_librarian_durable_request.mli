@@ -119,6 +119,15 @@ val body_digest : t -> string
 (** Digest of the verified complete canonical captured request body. *)
 val physical_owner : t -> owner
 val destination : t -> destination
+type replaced = {captured:destination;current:destination}
+(** Why an original no worker received was ended: the destination it was
+    captured for and the one the configuration named then. *)
+val replaced_to_json : replaced -> Yojson.Safe.t
+val confirm_replaced : t -> Yojson.Safe.t -> (replaced, string) result
+(** Field-exact read of {!replaced_to_json}. [captured] must be this request's
+    destination, and the two must differ in the semantic configuration
+    revision only ({!Lane_addon_captured_destination.Replaced}). Anything else
+    is refused. *)
 val source : t -> Keeper_librarian_durable_capture.t
 val preparation : t -> Keeper_librarian_runtime.durable_preparation
 val request : t -> (Lane_addon_exact.request, string) result

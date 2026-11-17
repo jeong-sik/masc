@@ -986,8 +986,10 @@ One installation serves every Keeper, so the change reaches the other Keepers'
 requests too. A history question that its worker already holds, with no
 result and no call under way, ends as not allowed once the replacement worker
 is attached. Its Keeper then reads the same range again under the new
-configuration, whole, without waiting for another turn. A message-floor step
-ends the same way, and its Keeper asks that step again at its next pass.
+configuration, whole, without waiting for another turn. A history question
+that no worker has received yet is ended by its Keeper's next pass and read
+again the same way. A message-floor step that its worker holds ends as not
+allowed too, and its Keeper asks that step again at its next pass.
 Changing only the provider registry, a comment or `enabled` does not authorize
 retry. Returning to an already-refused configuration remains stopped while
 that original range is relevant. A later actual Memory-backed reader frontier

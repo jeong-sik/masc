@@ -162,6 +162,23 @@ let request_id capture=capture.id
 let body_digest capture=capture.digest
 let physical_owner capture=capture.owner
 let destination capture=capture.destination
+type replaced = {captured:destination;current:destination}
+let replaced_to_json {captured;current} =
+  `Assoc ["declaration_replaced",`Assoc
+    ["captured",Destination.to_json captured;"current",Destination.to_json current]]
+let confirm_replaced capture json =
+  let context="History declaration-replaced evidence" in
+  match json with
+  | `Assoc ["declaration_replaced",`Assoc ["captured",captured;"current",current]] ->
+    let* captured=Destination.of_json ~context captured in
+    let* current=Destination.of_json ~context current in
+    let* ()=require (captured=capture.destination) (context ^ " names another captured destination") in
+    (match Destination.relation ~captured ~current with
+     | Destination.Replaced -> Ok {captured;current}
+     | Destination.Same | Destination.Other_owner ->
+       Error (context ^ " does not show a replaced declaration"))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+    Error (context ^ " is not the declaration-replaced object")
 let source capture=capture.source
 let preparation capture=capture.preparation
 let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "completed-history-execution";

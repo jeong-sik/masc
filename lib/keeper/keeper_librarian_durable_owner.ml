@@ -19,6 +19,7 @@ type call = expected:Request.destination -> original:Owner.Record.t -> arguments
 type outcome = Publication_waiting of string
   | Refused of Exact.final * Owner.retained | Finished of Owner.retained
   | Basis_superseded of Owner.retained
+  | Ended_unadmitted of Owner.retained
 type resumed = Waited of wait * Owner.Record.t | Resumed of outcome * Request.t
 type listed = Owner.Record.t * Request.index
 type held = Listed of listed | Read of (Owner.retained * Request.t)
@@ -184,6 +185,20 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
   let prepare () =
     let* ()=confirm_live_owner () in
     Keeper_librarian_durable_edge.confirm_destination ~config ~reserved destination in
+  (* An original no worker has received ends when its declaration was
+     replaced. The worker of the new declaration is never asked about it.
+     Under the same declaration nothing changes: the worker is read, and
+     [prepare] checks the owner before admission. The end is a write, so the
+     owner is checked before it too. *)
+  let unadmitted () =
+    let* relation,current=Submit.destination_relation ~config ~reserved ~label:"history" destination in
+    match relation with
+    | Lane_addon_captured_destination.Same -> Ok Submit.Admit
+    | Replaced ->
+      let* ()=confirm_live_owner () in
+      Ok (Submit.End_replaced (Request.replaced_to_json {Request.captured=destination;current}))
+    | Other_owner ->
+      Error (Rejected "Fresh history destination differs from its original semantic configuration") in
   (* Admission reads the body inside [prepare], where an [Unavailable] check
      is a wait. A body the store cannot give is not one: it ends the pass. *)
   let admit () =
@@ -247,7 +262,8 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     Resumed (outcome,request) in
   let source:body Submit.source={identity;load=read_body;request=(fun body -> body.exact);schema=(fun body -> body.schema)} in
   let decode_final (body:body) json=io (fun () -> Request.decode_final ~store body.request json) in
-  let* result=Submit.resume ~store ~label:"History Memory" ~original:record ~source ~decode_final ~prepare:admit ~call ~terminal in
+  let* result=Submit.resume ~store ~label:"History Memory" ~original:record ~source ~decode_final
+    ~unadmitted ~prepare:admit ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Waited (wait,record))
   | Final (body,Answer (proposal,record)) -> publish_answer body record proposal
@@ -276,7 +292,10 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
      | Conflicted _ ->
        let* _,proposal=restore_answer ~store body.request record in
        publish_answer body record proposal
-     | Rejected _ | Subdividing _ | Subdivided _ ->
+     | Rejected {stage=Progress.Before_dispatch;evidence} ->
+       let* _=rejected (Request.confirm_replaced body.request evidence) in
+       Ok (Resumed (Ended_unadmitted record,body.request))
+     | Rejected {stage=Progress.Execution;_} | Subdividing _ | Subdivided _ ->
        Error (Rejected "Original history request has a terminal host refusal")
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ ->
        Error (Rejected "Original history request unexpectedly settled without terminal progress"))

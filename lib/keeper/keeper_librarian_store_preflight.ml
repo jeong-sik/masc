@@ -230,7 +230,10 @@ let consumer_read ~schema (record:Owner.retained) =
   | Rejected {Progress.stage=Progress.Execution;evidence} ->
     let+ retained=Exact.retained_final_of_json ~schema evidence in
     Some (Confirm_delivered (Exact.delivered retained))
-  (* The validators of the consumers end these phases before any Exact read. *)
+  (* Nothing here needs an Exact read. A request refused before dispatch was
+     never sent: completed history reads it as settled from its own evidence,
+     and the other consumers' validators refuse it, as every validator
+     refuses the subdivision phases. *)
   | Rejected {Progress.stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ -> Ok None
 
 (* What a consumer reads once it confirms the body refusal the worker gives

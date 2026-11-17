@@ -493,8 +493,20 @@ type addressed =
   ; addressed_ref : Tool_output.artifact_ref
   }
 
-let address_with ~operation t ~bytes ~mime =
-  let sha256 = Agent_core_sha256.(digest_string bytes |> to_hex) in
+type prepared_payload =
+  { prepared_bytes : string
+  ; prepared_sha256 : string
+  }
+
+let prepare_payload ~bytes =
+  { prepared_bytes = bytes
+  ; prepared_sha256 = Agent_core_sha256.(digest_string bytes |> to_hex)
+  }
+
+let prepared_bytes payload = payload.prepared_bytes
+let prepared_sha256 payload = payload.prepared_sha256
+
+let address_with_digest ~operation t ~bytes ~mime ~sha256 =
   (* A digestif-produced sha256 and a byte length are always valid; an empty
      [mime] is the only reachable rejection and is a caller bug, raised
      visibly rather than stored. *)
@@ -512,6 +524,14 @@ let address_with ~operation t ~bytes ~mime =
     invalid_arg
       (Printf.sprintf "tool_blob_store.%s: %s" operation
          (Tool_output.make_error_to_string err))
+
+let address_with ~operation t ~bytes ~mime =
+  let sha256 = Agent_core_sha256.(digest_string bytes |> to_hex) in
+  address_with_digest ~operation t ~bytes ~mime ~sha256
+
+let address_prepared_with ~operation t ~payload ~mime =
+  address_with_digest ~operation t ~bytes:payload.prepared_bytes ~mime
+    ~sha256:payload.prepared_sha256
 
 let store_addressed ~rewrite ~durability ~atomic_replace ~operation addressed =
   mark_put addressed.addressed_ref.Tool_output.sha256;
@@ -579,12 +599,13 @@ let record_durable path snapshot =
     if not (Atomic.compare_and_set durable_snapshots current updated) then loop () in
   loop ()
 
-let put_durable_reuse t ~bytes ~mime =
-  let addressed = address_with ~operation:"put_durable_reuse" t ~bytes ~mime in
+let store_durable_reuse ~operation addressed =
+  let bytes = addressed.addressed_bytes in
+  let ownership_root = addressed.addressed_ownership_root in
   mark_put addressed.addressed_ref.Tool_output.sha256;
   let path = addressed.addressed_path in
   let read () = Fs_compat.load_owned_regular_file_with_snapshot
-      ~ownership_root:t.ownership_root path in
+      ~owner_uid:(Unix.geteuid ()) ~ownership_root path in
   let reusable =
     match Validated_file_map.find_opt path (Atomic.get durable_snapshots) with
     | None -> false
@@ -598,15 +619,15 @@ let put_durable_reuse t ~bytes ~mime =
   else
     let written_identity = ref None in
     Eio_guard.run_in_systhread ~label:"tool-blob-put-durable-reuse-parent" (fun () ->
-      prepare_owned_parent ~durability:Durable ~ownership_root:t.ownership_root path);
+      prepare_owned_parent ~durability:Durable ~ownership_root path);
     (match Fs_compat.write_file_atomic_strict_staged path ~write:(fun channel ->
        output_string channel bytes;
        flush channel;
        let stat = Unix.fstat (Unix.descr_of_out_channel channel) in
        written_identity := Some (stat.Unix.st_dev, stat.Unix.st_ino)) with
      | Error error ->
-       raise (Sys_error ("tool_blob_store.put_durable_reuse: "
-         ^ Fs_compat.atomic_replace_failure_to_string error))
+       raise (Sys_error (Printf.sprintf "tool_blob_store.%s: %s" operation
+         (Fs_compat.atomic_replace_failure_to_string error)))
      | Ok () -> ());
     remove_validated_snapshot path;
     (* A concurrent non-strict writer may replace the pathname after our
@@ -619,6 +640,16 @@ let put_durable_reuse t ~bytes ~mime =
      | (Some _ | None), (Ok (Some _) | Ok None | Error _) -> ());
     addressed.addressed_ref
 ;;
+
+let put_durable_reuse t ~bytes ~mime =
+  let operation = "put_durable_reuse" in
+  let addressed = address_with ~operation t ~bytes ~mime in
+  store_durable_reuse ~operation addressed
+
+let put_prepared_durable_reuse t ~payload ~mime =
+  let operation = "put_prepared_durable_reuse" in
+  let addressed = address_prepared_with ~operation t ~payload ~mime in
+  store_durable_reuse ~operation addressed
 
 let scan_file_for_ingest ~buffer ~copy_to channel =
   let preview = Buffer.create preview_max in
@@ -759,6 +790,8 @@ let put_file_durable_blocking =
 let put_file_durable = put_file_durable_with ~after_hash:(fun () -> ())
 
 module For_testing = struct
+  let address_prepared t ~payload ~mime =
+    address_prepared_with ~operation:"put_prepared_durable_reuse" t ~payload ~mime
   let put_file_durable = put_file_durable_with
   let fetch_range = fetch_range_with
 

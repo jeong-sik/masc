@@ -535,7 +535,69 @@ let message_of_contexts = function
       {origin=Agent_instruction;role=System;content=[Text (String.concat "\n\n" contexts)];
        name=None;tool_call_id=None;metadata=["masc_retained_tool_results",`Bool true]}
 
-let context_message snapshot = message_of_contexts (developer_context snapshot)
+type media_reader =
+  Keeper_client_tool_outbox_media.attachment -> (string, string) result
+
+let prepared_context ~read_media snapshot =
+  let context = developer_context snapshot in
+  match read_media with
+  | None -> context
+  | Some read ->
+    let module Media = Keeper_client_tool_outbox_media in
+    let kind_name : Media.retained_kind -> string = function
+      | Audio -> "audio"
+      | Document -> "document" in
+    let readings entry =
+      match entry.json with
+      | `Assoc fields ->
+        (* Snapshot validation established the exact host/vendor envelope.
+           A vendor's arbitrary response cannot grant host media authority. *)
+        (match List.assoc_opt "host_producer_id" fields,
+               List.assoc_opt "response" fields with
+         | Some (`String _), Some response ->
+           let identity slot =
+             [ "receipt_id", `String (id_of_entry entry)
+             ; "slot", `Int slot
+             ] @ List.filter_map (fun key ->
+               Option.map (fun value -> key, `String value) (string_field key fields))
+               ["call_id"; "tool_name"] in
+           List.map (function
+             | Media.Readable attachment ->
+               let reading = match read attachment with
+                 | Ok text ->
+                   `Assoc ["status", `String "read";
+                           "derived_by", `String "automatic_reader";
+                           "text", `String text]
+                 | Error reason ->
+                   `Assoc ["status", `String "unavailable"; "reason", `String reason] in
+               `Assoc (identity attachment.slot @
+                 [ "kind", `String (kind_name attachment.kind)
+                 ; "media_type", `String attachment.media_type
+                 ; "original", Tool_output.normalized_artifact_ref_to_json attachment.original
+                 ; "reading", reading ])
+             | Media.Unavailable {slot; kind; media_type; reason} ->
+               `Assoc (identity slot @
+                 Option.to_list (Option.map (fun kind -> "kind", `String (kind_name kind)) kind) @
+                 Option.to_list (Option.map (fun mime -> "media_type", `String mime) media_type) @
+                 ["reading", `Assoc ["status", `String "unavailable";
+                   "reason", `String (Media.unavailable_reason_to_string reason)]]))
+             (Media.host_attachments response)
+         | (Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+            | None), _
+         | Some (`String _), None -> [])
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> [] in
+    (* The reader can yield: prepare its results on this fiber, before any
+       CPU-only encoding and before caching or measuring the carrier. *)
+    let rows = List.concat_map readings snapshot.entries in
+    match rows with
+    | [] -> context
+    | _ :: _ ->
+      let encoded = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        Yojson.Safe.to_string (`Assoc ["retained_tool_result_readings", `List rows])) in
+      context @ [encoded]
+
+let context_message ~read_media snapshot =
+  message_of_contexts (prepared_context ~read_media snapshot)
 
 type form = Inline | By_address
 
@@ -553,13 +615,16 @@ type carrier =
   ; carried : carried Atomic.t
   }
 
-let carrier ~base_path ~artifact_reader_available snapshot =
+let carrier_with_context ~base_path ~artifact_reader_available snapshot inline_context =
   { carrier_store = Tool_blob_store.create ~base_path
   ; artifact_reader_available
   ; carried_entries = snapshot.entries
-  ; inline_context = developer_context snapshot
+  ; inline_context
   ; carried = Atomic.make Carried_inline
   }
+
+let carrier ~base_path ~artifact_reader_available snapshot =
+  carrier_with_context ~base_path ~artifact_reader_available snapshot (developer_context snapshot)
 
 let carrier_form carrier =
   match Atomic.get carrier.carried with
@@ -663,14 +728,16 @@ type run_carrier =
   ; run_keeper_name : string
   ; run_reader_available : bool
   ; run_viewer : viewer
+  ; run_read_media : media_reader option
   ; run_loaded : (snapshot * carrier) option Atomic.t
   }
 
-let run_carrier ~base_path ~keeper_name ~artifact_reader_available ~viewer =
+let run_carrier ~base_path ~keeper_name ~artifact_reader_available ~viewer ~read_media =
   { run_base_path = base_path
   ; run_keeper_name = keeper_name
   ; run_reader_available = artifact_reader_available
   ; run_viewer = viewer
+  ; run_read_media = read_media
   ; run_loaded = Atomic.make None
   }
 
@@ -680,10 +747,11 @@ let run_carrier_load run =
   | None ->
     let* snapshot =
       load ~base_path:run.run_base_path ~keeper_name:run.run_keeper_name ~viewer:run.run_viewer in
+    let context = prepared_context ~read_media:run.run_read_media snapshot in
     let loaded =
       snapshot,
-      carrier ~base_path:run.run_base_path
-        ~artifact_reader_available:run.run_reader_available snapshot in
+      carrier_with_context ~base_path:run.run_base_path
+        ~artifact_reader_available:run.run_reader_available snapshot context in
     Atomic.set run.run_loaded (Some loaded);
     Ok loaded
 

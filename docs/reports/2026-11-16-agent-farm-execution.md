@@ -7,10 +7,28 @@
 
 초기 조사 기준은 로컬 `85f2823f053a693cecc8b63d6d0cb460dd10f9d0`이며,
 후속 후보의 별도 base와 검토 head는 아래에 적는다.
-다른 세션의 작업은 별도 worktree에서 확인했다. 현재 원격 main 전체와 모든 열린 PR의
-구현을 대조한 기록은 없다. 이 기록의 미확인은 기능 부재 판정이 아니다.
+초기에는 다른 세션의 작업을 별도 worktree에서 확인했으며, 원격 main과 열린 PR의
+구현 대조는 아래 게시 준비 checkpoint에서 이어갔다. 미확인은 기능 부재 판정이 아니다.
 
-## 현재 후보와 담당
+## 2026-11-17 게시 준비 checkpoint
+
+`gh api user`의 계정 조회와 지정된 협업 세션의 읽기·메시지 전달이 다시 성공했다.
+아래의 연결 실패와 게시 위임 실패는 그 이전 관측이며 현재 인증 상태를 뜻하지 않는다.
+Document 9층은 `gh stack rebase`로 전체를 `f9083a9957785a942d71611adb857d8d49a73388`
+위에 올렸다. 23개 커밋의 패치는 이전 후보 `46e09ab0b1e73ce621c65eef75329b1df6475dac`와
+`git range-diff`에서 모두 같았고 충돌은 없었다. 재기반 직후 leaf는
+`bd48b2e74d28653eebf3ba9ee1815e7a5db4709f`이며, 이 문단은 그 뒤의 문서 보완이다.
+
+게시 전 원격 PR의 파일·diff와 변경된 main의 직접 소비자를 별도로 대조한다.
+이 checkpoint에서 실행 시험을 다시 돌린 것은 아니다. 아래의 Core 18개, MCP 8개,
+retained decoder 7개와 타입 검사 결과는 각각 기록된 소스의 증거로 유지한다.
+현재 head의 소스 검토와 Draft 게시 여부는
+[Document 추적 이슈 #52591](https://github.com/jeong-sik/masc/issues/52591) 및
+[Schedule 추적 이슈 #52592](https://github.com/jeong-sik/masc/issues/52592)에 연결된 PR에서 확인한다.
+이번 게시 범위는 Schedule 3층과 Document 9층이다. UID·Librarian·설치·운영 복구와
+원래 25개 요구의 완료는 이 checkpoint로 확인되지 않는다.
+
+## 게시 준비 이전 후보와 담당
 
 | 작업 | 확인한 산출물 | 증거와 남은 일 |
 | --- | --- | --- |
@@ -558,6 +576,51 @@ Agent_core.Agent`의 실제 값 의존성에서 멈췄다. 공개 locator codec�
 기존 ToolBlobStore 시험 변경은 구문 검사·소스 리뷰 범위다. 전체 MASC·설치·장애 복구나
 GC 동작이 검증된 것은 아니다. 실행 준비와 제한된 타입 검사 기록은
 `artifacts/farm-retained-result-ownership-20261117/`에 보존했다.
+
+## 11월 17일: 보관 결과의 문서·오디오 읽기 연결
+
+Document8 `6eee17bae9f09dc05fa9927d9cc6758e6d241e44` 위에 아홉째 층
+`feat/farm-retained-media-reading-20261117`을 만들었다. 실제 host receipt의 정규화된
+Audio/Document 참조를 읽는 경로를 Core·Codex·Claude·Antigravity·Muse에 연결했다.
+carrier 자체가 Text이므로 일반 문서를 직접 받는 모델에도 이 첨부는 읽기가 필요하다.
+일반 native 문서 투영은 그대로이며, 완료 심사에는 새 reader를 전달하지 않는다.
+
+공유 H5 projector는 읽은 원문이나 실패 이유를 기억한다. history와 receipt가 각자의
+출처를 표현하므로 보관 결과에 history의 설명을 잘못 재사용하지 않는다. 원본 context는
+유지하고, receipt 내용 주소와 slot으로 구별한 파생 JSON을 더한다. viewer·생산자 lease
+검사가 먼저이며, vendor response나 임의 중첩 JSON은 첨부를 읽을 권한을 만들지 않는다.
+읽기나 취소는 ACK를 하지 않고, 취소된 준비 결과는 run carrier에 저장하지 않는다.
+
+Core·Codex·Claude의 기존 주소 축소는 원본과 읽기를 합친 실제 글을 저장한다.
+Antigravity·Muse에는 같은 크기 거절·축소 재시도가 없다. 두 경로의 긴 읽기는 요청을
+키울 수 있으며, 입력 크기를 보장했다고 주장하지 않는다. 원본 artifact 보관과 H5
+disk cache 보관도 다르다. 후자는 artifact 참조만으로 유지되지 않아 정리 뒤 다시
+읽을 수 있다. 임시 묶음 주소의 수명, 그림과 일반 비-PDF 해석, 실제 provider·서명
+prefix·재시작·대규모 연속 동작은 계속 열린 범위다.
+
+새 유지 시험은 decoder 7개, 공유 읽기 6개, 실제 host/읽기/carrier 연결 5개다.
+마지막 묶음은 원문 공유와 정확한 주소 blob, vendor 데이터 경계, 완료 심사 제외,
+취소 뒤 재로드, 살아 있는 생산자의 결과 제외를 다룬다. 기존 official-runtime 호출
+시험에는 새 인자를 명시했다. 이 목록은 작성한 검증 조건이며 실행 성공 목록이 아니다.
+검증 기록은 `artifacts/farm-retained-media-reading-20261117/` 아래에 보존한다.
+
+변경한 제품 구현 9개와 공개 인터페이스 9개는 실제 인터페이스로 타입 검사를 통과했다.
+host 결과 시험 모듈 전체 50개와 공유 읽기·정리 시험 모듈 전체 11개도 타입 검사했다.
+처음에는 공식 runtime의 인자 순서 불일치와 새 시험의 `Stored` 생성자 표기 오류가
+검출됐다. 네 공개 인터페이스의 순서와 시험 표기를 고친 뒤 재검사했으며, 실패 원문과
+초기 소스 리뷰가 순서 결함을 놓친 사실도 남겼다.
+
+별도 decoder 시험은 실제로 7개 모두 통과했고 건너뛴 경우는 없다. 필요한 실제
+codec·오류 타입 모듈을 연결한 시험으로, PDF 추출·STT·provider 실행은 아니다.
+새 공유 읽기 6개와 host 연결 5개는 아직 실행하지 않았다. 나머지 official-runtime
+호출 시험의 새 인자 변경은 구문 검사·소스 리뷰 범위다. 전체 MASC 빌드·설치·GC·장시간
+연속 동작이 통과한 것으로 확대하지 않는다.
+
+GitHub 연결 도구와 `gh`의 공개 저장소 조회도 확인했다. 후자는 시스템 설정을 바꾸지
+않고 프로세스의 DNS·인증서 경로를 지정했다. 조회 시점 remote main은
+`f51362a745d9a34680a5a23ed9866acc452730bb`였고 열린 PR 17개에 Farm 브랜치는 없었다.
+이 실행 환경의 CLI는 OAuth 토큰을 찾지 못하므로 인증이 필요한 게시까지 된 것은 아니다.
+현재 PR 전수 diff·최신 base·native stack 확인과 게시·readback은 별도로 남는다.
 
 ## 원래 25개 요구의 현재 위치
 

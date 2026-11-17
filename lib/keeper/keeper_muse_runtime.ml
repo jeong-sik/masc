@@ -940,7 +940,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
-    ~turn_start ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root ~workspace_origin ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
+    ~turn_start ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~workspace_root ~workspace_origin ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input
     ~on_model_input_refused ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
@@ -1231,7 +1231,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     (* Original returned results survive history projection and range shrinking.
        Only their completed consumer, after delivery, may acknowledge them. *)
     let prepared = {prepared with Host.messages = prepared.messages
-      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
+      @ Option.to_list (Keeper_client_tool_outbox.context_message ~read_media:read_retained_media tool_outbox)} in
     (* The prepared attribution, not transmission evidence: the serve client
        calls this only after the complete [turn/start] line is written. *)
     let report_transmitted_input () =
@@ -2064,7 +2064,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
 
 let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~configured_reasoning_effort
-    ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root
+    ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~workspace_root
     ?(workspace_origin = Serve.other_tree) ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
@@ -2112,7 +2112,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~input_source
-        ~outbox_viewer
+        ~outbox_viewer ~read_retained_media
         ~argument_source
         ~official_task_reference
         ~composed_context

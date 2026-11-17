@@ -441,6 +441,7 @@ type try_provider_ctx =
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection
   ; project_request_media : Keeper_history_projection.t
+  ; read_retained_media : Keeper_client_tool_outbox.media_reader option
   ; model_input_projection : Keeper_history_projection.t option
   ; stream_idle_timeout_s : float
     (* Bound on the silent gap between two streamed lines. It re-arms after
@@ -1145,7 +1146,7 @@ let new_attempt_state (ctx : try_provider_ctx) =
         ~keeper_name:ctx.keeper_name
         ~artifact_reader_available:
           (Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
-        ~viewer:ctx.outbox_viewer
+        ~viewer:ctx.outbox_viewer ~read_media:ctx.read_retained_media
   }
 ;;
 

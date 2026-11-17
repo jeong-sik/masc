@@ -369,7 +369,7 @@ let test_receipt_carrier_has_independent_held_identity () =
   with_workspace (fun config _ _ ->
     retain config (receipt "original-result");
     let original = snapshot config in
-    let carried = match Keeper_client_tool_outbox.context_message original with
+    let carried = match Keeper_client_tool_outbox.context_message ~read_media:None original with
       | Some message -> message | None -> fail "retained original has no context message" in
     let ordinary : Agent_core.Types.message =
       {origin=System_context;role=System;content=[Text "ordinary world state"];

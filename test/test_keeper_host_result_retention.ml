@@ -788,7 +788,7 @@ let test_address_form_carries_the_inline_text_by_one_blob () = with_workspace (f
   check (list string) "the inline form is the developer context" inline
     (Outbox.carrier_context carrier);
   check bool "the inline message is the snapshot's context message" true
-    (Outbox.carrier_message carrier = Outbox.context_message snapshot);
+    (Outbox.carrier_message carrier = Outbox.context_message ~read_media:None snapshot);
   let before = receipt_files base_path in
   switch carrier;
   check form "the switched run carries the address form" Outbox.By_address
@@ -1052,7 +1052,7 @@ let test_run_carrier_loads_once () = with_workspace (fun base_path ->
   retain_vendor_receipts base_path (List.init 2 (fun index ->
     vendor_receipt ~call_id:(Printf.sprintf "run-%d" index) ~tool_name:"Read"
       (`String (String.make 2048 'u'))));
-  let retained = Outbox.run_carrier ~base_path ~keeper_name ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
+  let retained = Outbox.run_carrier ~read_media:None ~base_path ~keeper_name ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
   let snapshot, carrier = get (Outbox.run_carrier_load retained) in
   get (Outbox.retain ~base_path ~keeper_name
     (vendor_receipt ~call_id:"run-late" ~tool_name:"Read" (`String "written after the load")));
@@ -1067,7 +1067,7 @@ let test_run_carrier_reprojection_waits_for_the_load () = with_workspace (fun ba
   retain_vendor_receipts base_path (List.init 4 (fun index ->
     vendor_receipt ~call_id:(Printf.sprintf "wait-%d" index) ~tool_name:"Read"
       (`String (String.make 2048 'w'))));
-  let retained = Outbox.run_carrier ~base_path ~keeper_name ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
+  let retained = Outbox.run_carrier ~read_media:None ~base_path ~keeper_name ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
   let calls = ref 0 in
   let memory ~refusal:_ = incr calls; Ok Reprojection.Unchanged in
   check_reduction "before the run loads, the memory hook alone answers" Reprojection.Unchanged
@@ -1248,6 +1248,156 @@ let test_an_appended_block_is_recorded_in_the_raw_trace () = with_workspace (fun
      | rows -> failf "one listed row is expected, got %d" (List.length rows))
   | records -> failf "one projection record is expected, got %d" (List.length records))
 
+let retain_readable_media base_path =
+  let producer = get (Outbox.host_producer ~base_path ~keeper_name
+    ~runtime_label:"retained-reading-fixture" ~turn_count:1) in
+  let document = "original document bytes" and audio = "original audio bytes" in
+  let response = get (Outbox.host_response producer ~min_result_bytes:max_int
+    ~success:false ~content:"returned original, tool reported failure"
+    ~content_blocks:(Some Llm_provider.Types.[
+      Document {media_type="application/pdf";source=Base64 (Base64.encode_string document)};
+      Audio {media_type="audio/wav";source=Base64 (Base64.encode_string audio)}])) in
+  let retain index = get (Outbox.retain_host_result producer ~invocation_index:index
+    ~call_id:"reused-media-call" ~tool_name:"Read"
+    ~arguments:(Outbox.Known (`Assoc [])) ~response) in
+  retain 0;
+  response, retain, document, audio
+
+let retained_reader base_path read =
+  let projector = Keeper_media_reading.projector
+    ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~keeper_name
+    ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.) ~read () in
+  projector, Keeper_turn_driver.For_testing.retained_media_reader
+    ~input_source:(Keeper_request_source.Keeper_history {trace_id="retained-reading"}) projector
+
+let reading_rows contexts =
+  let open Yojson.Safe.Util in
+  match List.rev contexts with
+  | encoded :: _ -> Yojson.Safe.from_string encoded |> member "retained_tool_result_readings" |> to_list
+  | [] -> fail "a retained attachment must carry its reading or unavailable status"
+
+let test_retained_readings_share_raw_reader_and_shrink_exact_text () = with_workspace (fun base_path ->
+  let _, retain, document, audio = retain_readable_media base_path in
+  retain 1;
+  let reads = ref [] in
+  let extracted = String.make 8192 'r' ^ " original-derived fact" in
+  let projector, read_media = retained_reader base_path
+    (fun ~deadline:_ ~kind ~media_type ~bytes ->
+      reads := (kind, media_type, bytes) :: !reads; Ok extracted) in
+  let before = receipt_files base_path in
+  let run = Outbox.run_carrier ~base_path ~keeper_name ~read_media
+    ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
+  let snapshot, carrier = get (Outbox.run_carrier_load run) in
+  let original = Outbox.developer_context snapshot in
+  let contexts = Outbox.carrier_context carrier in
+  check (list string) "original encoded receipt context remains exact" original
+    (List.filteri (fun index _ -> index < List.length original) contexts);
+  let rows = reading_rows contexts in
+  let open Yojson.Safe.Util in
+  check int "each physical receipt keeps both attachment occurrences" 4 (List.length rows);
+  let occurrences = List.map (fun row ->
+    row |> member "receipt_id" |> to_string, row |> member "slot" |> to_int) rows in
+  let expected = List.concat_map (fun id -> [id,0; id,1]) (Outbox.receipt_ids snapshot) in
+  check (list (pair string int)) "occurrence identity is receipt digest and slot" expected occurrences;
+  List.iter (fun row ->
+    check string "each reading is raw, without a history provenance wrapper" extracted
+      (row |> member "reading" |> member "text" |> to_string);
+    check string "provenance names the actual reader" "automatic_reader"
+      (row |> member "reading" |> member "derived_by" |> to_string)) rows;
+  check int "the shared reader reads each original once" 2 (List.length !reads);
+  check bool "PDF reader receives original declared MIME and bytes" true
+    (List.mem (Keeper_media_reading.Document,"application/pdf",document) !reads);
+  check bool "audio reader receives original declared MIME and bytes" true
+    (List.mem (Keeper_media_reading.Audio,"audio/wav",audio) !reads);
+  let stored = Agent_core.History.stored_of_raw document in
+  let native = Agent_core.Types.Document
+    {media_type="application/pdf";source=Agent_core.Types.Stored stored} in
+  let unchanged, _ = Keeper_media_reading.project projector ~needs_projection:(fun _ -> false) [native] in
+  check bool "ordinary native document input stays native" true (unchanged=[native]);
+  let history, _ = Keeper_media_reading.project projector ~needs_projection:(fun _ -> true) [native] in
+  (match history with
+   | [Agent_core.Types.Text text] -> check bool "history adds its own provenance" true
+       (String_util.contains_substring text "conversation history")
+   | _ -> fail "text-only history must carry a reading");
+  check int "history reuses the raw result read for a receipt" 2 (List.length !reads);
+  let inline = String.concat "\n\n" contexts in
+  check_reduction "capacity refusal shrinks the complete prepared carrier" Reprojection.Reprojected
+    (Outbox.run_carrier_reprojection run ~then_:unreached ~refusal);
+  let reference = carried_reference (carried_text carrier) in
+  check (option string) "address blob contains original context and every reading byte"
+    (Some inline) (held (blob_store base_path) reference.Tool_output.sha256);
+  let _, again = get (Outbox.run_carrier_load run) in
+  check bool "retry reuses the exact carrier" true (again == carrier);
+  check int "retry neither rereads nor drops an occurrence" 2 (List.length !reads);
+  check (list (pair string string)) "reading and shrinking leave original receipts unchanged"
+    before (receipt_files base_path))
+
+let test_retained_readings_require_host_lineage () = with_workspace (fun base_path ->
+  let response, _, _, _ = retain_readable_media base_path in
+  get (Outbox.retain ~base_path ~keeper_name
+    (vendor_receipt ~call_id:"opaque-vendor" ~tool_name:"Read" response));
+  let calls = ref 0 in
+  let _, read_media = retained_reader base_path
+    (fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> incr calls; Ok "read from host") in
+  let snapshot = load base_path in
+  let message = match Outbox.context_message ~read_media snapshot with
+    | Some message -> message | None -> fail "direct lanes need their retained context" in
+  let text = message_text message in
+  check int "vendor response JSON never grants host reader authority" 2 !calls;
+  check bool "direct context includes host readings" true
+    (String_util.contains_substring text "retained_tool_result_readings");
+  check bool "the original failure is still present" true
+    (String_util.contains_substring text "returned original, tool reported failure");
+  check int "no reading acknowledges either original" 2
+    (List.length (Outbox.receipt_ids (load base_path))))
+
+let test_completion_review_retained_media_is_not_read () = with_workspace (fun base_path ->
+  ignore (retain_readable_media base_path);
+  let projector, _ = retained_reader base_path
+    (fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> fail "review cannot read retained media") in
+  let read_media = Keeper_turn_driver.For_testing.retained_media_reader
+    ~input_source:Keeper_request_source.Completion_review projector in
+  check bool "review has no retained reader" true (Option.is_none read_media);
+  let snapshot = load base_path in
+  let expected = String.concat "\n\n" (Outbox.developer_context snapshot) in
+  match Outbox.context_message ~read_media snapshot with
+  | Some message -> check string "review retains its original-only representation" expected (message_text message)
+  | None -> fail "the existing original context remains present")
+
+let test_retained_reader_cancellation_does_not_cache_partial_snapshot () = with_workspace (fun base_path ->
+  let _, retain, _, _ = retain_readable_media base_path in
+  let calls = ref 0 and cancelled = Eio.Cancel.Cancelled Exit in
+  let _, read_media = retained_reader base_path
+    (fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ ->
+      incr calls; if !calls=1 then raise cancelled else Ok "resumed original reading") in
+  let run = Outbox.run_carrier ~base_path ~keeper_name ~read_media
+    ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
+  (match Outbox.run_carrier_load run with
+   | Ok _ | Error _ -> fail "cancelled preparation must propagate"
+   | exception (Eio.Cancel.Cancelled _ as observed) ->
+     check bool "the original cancellation escapes" true (observed == cancelled));
+  retain 1;
+  let snapshot, carrier = get (Outbox.run_carrier_load run) in
+  check int "retry reloads after cancelled preparation" 2 (List.length (Outbox.receipt_ids snapshot));
+  check int "no partial reading bundle was cached" 4 (List.length (reading_rows (Outbox.carrier_context carrier)));
+  check int "all original receipts remain pending" 2 (List.length (Outbox.receipt_ids (load base_path))))
+
+let test_held_producer_attachment_is_not_read () = with_workspace (fun base_path ->
+  Eio.Switch.run @@ fun sw ->
+  let producer = get (Outbox.start_host_producer ~sw ~base_path ~keeper_name
+    ~runtime_label:"live-reading-producer" ~turn_count:1) in
+  let response = get (Outbox.host_response producer ~min_result_bytes:max_int ~success:true ~content:"pending"
+    ~content_blocks:(Some [Llm_provider.Types.Document {media_type="application/pdf";
+      source=Base64 (Base64.encode_string "held original")}])) in
+  get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"held-call"
+    ~tool_name:"Read" ~arguments:(Outbox.Known (`Assoc [])) ~response);
+  let read_media = Some (fun _ -> fail "a live producer is not an admitted receipt") in
+  let run = Outbox.run_carrier ~base_path ~keeper_name ~read_media
+    ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
+  let snapshot, carrier = get (Outbox.run_carrier_load run) in
+  check (list string) "held producer remains outside the loaded snapshot" [] (Outbox.receipt_ids snapshot);
+  check bool "no attachment or original is transmitted" true (Option.is_none (Outbox.carrier_message carrier)))
+
 let () = run "Original official-client host result retention"
   ["durable host stop",[
     test_case "typed stop retains original before transport continuation" `Quick test_stop_retains_before_transport_return;
@@ -1315,4 +1465,10 @@ let () = run "Original official-client host result retention"
    "retained-results carrier run",[
     test_case "run carrier loads once" `Quick test_run_carrier_loads_once;
     test_case "run carrier reprojection waits for the load" `Quick
-      test_run_carrier_reprojection_waits_for_the_load]]
+      test_run_carrier_reprojection_waits_for_the_load];
+   "retained media reading",[
+    test_case "shared raw reader and exact address text" `Quick test_retained_readings_share_raw_reader_and_shrink_exact_text;
+    test_case "host lineage and direct context" `Quick test_retained_readings_require_host_lineage;
+    test_case "completion review does not read retained media" `Quick test_completion_review_retained_media_is_not_read;
+    test_case "cancellation leaves no partial cached carrier" `Quick test_retained_reader_cancellation_does_not_cache_partial_snapshot;
+    test_case "held producer attachment is not read" `Quick test_held_producer_attachment_is_not_read]]

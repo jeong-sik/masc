@@ -3509,6 +3509,7 @@
 (include stanzas/test_keeper_execute_background.inc)
 (include stanzas/test_keeper_host_result_retention.inc)
 (include stanzas/test_keeper_retained_media_ownership.inc)
+(include stanzas/test_keeper_client_tool_outbox_media.inc)
 (include stanzas/test_keeper_receipt_ownership_reads.inc)
 (include stanzas/test_keeper_receipt_wait_tool.inc)
 (include stanzas/test_keeper_receipt_wait_resume.inc)

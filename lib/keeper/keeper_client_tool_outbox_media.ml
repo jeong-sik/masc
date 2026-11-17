@@ -140,3 +140,121 @@ let response json =
 ;;
 
 let carrier_row receipt = map_field "response" response receipt
+
+type retained_kind = Audio | Document
+
+type attachment =
+  { slot : int
+  ; kind : retained_kind
+  ; media_type : string
+  ; original : Tool_output.artifact_ref
+  }
+
+type unavailable_reason =
+  | Ambiguous_type
+  | Malformed_attachment
+  | Invalid_artifact_reference
+  | Non_binary_artifact
+  | Undecodable_base64
+  | Reference_not_fetched
+  | Inline_media_not_materialized
+
+let unavailable_reason_to_string = function
+  | Ambiguous_type -> "ambiguous_type"
+  | Malformed_attachment -> "malformed_attachment"
+  | Invalid_artifact_reference -> "invalid_artifact_reference"
+  | Non_binary_artifact -> "non_binary_artifact"
+  | Undecodable_base64 -> "undecodable_base64"
+  | Reference_not_fetched -> "reference_not_fetched"
+  | Inline_media_not_materialized -> "inline_media_not_materialized"
+
+type attachment_view =
+  | Readable of attachment
+  | Unavailable of
+      { slot : int
+      ; kind : retained_kind option
+      ; media_type : string option
+      ; reason : unavailable_reason
+      }
+
+let field_values name fields =
+  List.filter_map
+    (fun (key, value) -> if String.equal key name then Some value else None)
+    fields
+
+let single_string = function
+  | [ `String value ] -> Some value
+  | [] | _ :: _ -> None
+
+let retained_kind_of_json : Yojson.Safe.t -> retained_kind option = function
+  | `String "audio" -> Some Audio
+  | `String "document" -> Some Document
+  | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
+
+let retained_slot ~slot json =
+  match (json : Yojson.Safe.t) with
+  | `Assoc fields ->
+    let types = field_values "type" fields in
+    let media_type = single_string (field_values "media_type" fields) in
+    let unavailable ?(media_type = media_type) kind reason =
+      Some (Unavailable { slot; kind; media_type; reason }) in
+    (match types with
+     | [ value ] ->
+       (match retained_kind_of_json value with
+        | None -> None
+        | Some kind ->
+          (* Exact field sets reject duplicates, extra fields and ambiguous
+             artifact/source combinations before any reference is admitted. *)
+          (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+           | [ "artifact", reference; "media_type", `String media_type; "type", _ ] ->
+             (match Tool_output.normalized_artifact_ref_of_json reference with
+              | Tool_output.Decoded_normalized_artifact_ref original ->
+                if String.equal original.Tool_output.mime "application/octet-stream"
+                then Some (Readable { slot; kind; media_type; original })
+                else unavailable (Some kind) Non_binary_artifact
+              | Tool_output.Not_normalized_artifact_ref
+              | Tool_output.Invalid_normalized_artifact_ref _ ->
+                unavailable (Some kind) Invalid_artifact_reference)
+           | [ "detail", `String _; "media_type", `String _; "type", _;
+               "undecodable_base64", reference ] ->
+             (match Tool_output.normalized_artifact_ref_of_json reference with
+              | Tool_output.Decoded_normalized_artifact_ref original ->
+                unavailable (Some kind)
+                  (if String.equal original.Tool_output.mime "text/plain"
+                   then Undecodable_base64 else Malformed_attachment)
+              | Tool_output.Not_normalized_artifact_ref
+              | Tool_output.Invalid_normalized_artifact_ref _ ->
+                unavailable (Some kind) Invalid_artifact_reference)
+           | [ "source", _; "type", _ ] ->
+             (* Reuse the wire codec for existing nonstored producer forms;
+                decoding a block is not decoding or fetching its payload. *)
+             (match Agent_core.Checkpoint.wire_content_block_of_json json with
+              | Ok (P.Audio { media_type; source } | P.Document { media_type; source }) ->
+                let reason = match source with
+                  | P.Base64 _ -> Inline_media_not_materialized
+                  | P.Url _ | P.File_id _ -> Reference_not_fetched in
+                unavailable ~media_type:(Some media_type) (Some kind) reason
+              | Error _
+              | Ok (P.Image _ | P.Text _ | P.Thinking _ | P.ReasoningDetails _
+                   | P.RedactedThinking _ | P.ToolUse _ | P.ToolResult _) ->
+                unavailable (Some kind) Malformed_attachment)
+           | [] | _ :: _ -> unavailable (Some kind) Malformed_attachment))
+     | [] -> None
+     | first :: rest ->
+       if List.exists (fun value -> Option.is_some (retained_kind_of_json value)) types
+       then
+         let kind =
+           if List.for_all (( = ) first) rest then retained_kind_of_json first else None in
+         unavailable kind Ambiguous_type
+       else None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+
+let host_attachments = function
+  | `Assoc fields ->
+    (match List.sort (fun (a, _) (b, _) -> String.compare a b) fields with
+     | [ "content", `String _; "content_blocks", `List blocks; "success", `Bool _ ] ->
+       List.filter_map (fun (slot, block) -> retained_slot ~slot block)
+         (List.mapi (fun slot block -> slot, block) blocks)
+     | [ "content", `String _; "content_blocks", `Null; "success", `Bool _ ] -> []
+     | [] | _ :: _ -> [])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []

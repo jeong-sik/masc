@@ -18,6 +18,10 @@ related: ["claude-code-context-overflow-bounded-restart", "official-client-conve
 개별 artifact 보관을 추가한다. 여기서 receipt를 지운다는 말은 pending 전달 목록에서
 제거한다는 뜻이다. `By_address` 묶음 blob 자체의 보관은 그 후속 변경에도 포함되지 않는다.
 
+H5 연결 뒤 Core·Codex·Claude의 실제 `Inline`은 원본 `developer_context`와 host 첨부의
+파생 읽기 JSON을 함께 담는다. 크기 거절 시 저장하는 blob도 그 전체 글이다.
+Antigravity·Muse의 직접 context 경로에는 이 RFC의 주소 축소 재시도가 아직 없다.
+
 ## 1. 결정
 
 끝나지 못한 vendor 턴은 도구 결과 기록(receipt)을 outbox에 남긴다. 다음 요청은 receipt 전부를 묶음(carrier) 하나로 싣는다. 이 RFC는 묶음에 꼴(form)을 둘 둔다.

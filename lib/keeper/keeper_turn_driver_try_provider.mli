@@ -403,6 +403,9 @@ type try_provider_ctx =
             origins, metadata and ToolResult identity/outcome/JSON, changing
             only media blocks. Reader failures remain typed errors or explicit
             unavailable readings; canonical history is unchanged. *)
+  ; read_retained_media : Keeper_client_tool_outbox.media_reader option
+      (** Shared attachment reader for the retained Text carrier. This does not
+          change native history projection. Completion review passes [None]. *)
   ; model_input_projection : Keeper_history_projection.t option
   ; stream_idle_timeout_s : float
   ; first_event_timeout_s : float

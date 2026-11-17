@@ -221,10 +221,23 @@ val developer_context : snapshot -> string list
     ({!Keeper_client_tool_outbox_media.carrier_row}); every other receipt value
     is carried losslessly. *)
 
-val context_message : snapshot -> Agent_core.Types.message option
+type media_reader =
+  Keeper_client_tool_outbox_media.attachment -> (string, string) result
+(** Read one validated host attachment. The caller owns the reader, its shared
+    deadline and raw-result memo. An error becomes explicit unavailable data;
+    cancellation propagates. A reading is derived tool data, not evidence that
+    the original tool succeeded or authorization to repeat its effects. *)
+
+val context_message :
+  read_media:media_reader option -> snapshot -> Agent_core.Types.message option
 (** A separately identified result-data carrier for official Start and Resume
     and Agent Core's final model-input projection.
-    It cannot collide with the ordinary composed-context or Librarian carrier. *)
+    It cannot collide with the ordinary composed-context or Librarian carrier.
+    [Some read] reads exact normalized host Audio/Document slots and appends
+    derived data identified by receipt digest and slot, without changing the
+    original receipt. It runs on the caller's fiber. [None] carries only the
+    original context, without invoking a reader. Native document capability
+    does not make this Text carrier a native media input. *)
 val is_context_message : Agent_core.Types.message -> bool
 
 (** [place_carrier carrier messages] removes any result-data carrier from
@@ -248,7 +261,8 @@ val place_carrier :
     run can carry the same text behind one blob address instead. *)
 
 type form =
-  | Inline  (** The {!developer_context} text. *)
+  | Inline
+      (** The original {!developer_context} and any prepared attachment readings. *)
   | By_address
       (** The receipt count, the receipts per tool and the marker of one
           [text/plain] blob holding the [Inline] text, with how to read it.
@@ -301,17 +315,23 @@ type run_carrier
 
 val run_carrier :
   base_path:string -> keeper_name:string -> artifact_reader_available:bool ->
-  viewer:viewer -> run_carrier
+  viewer:viewer -> read_media:media_reader option -> run_carrier
 (** Reads and writes no file. [artifact_reader_available] is as for {!carrier}.
     [viewer] is the run's, for its one load: a run serving a chat execution
-    passes [Owner_and_unowned] with that execution's scope. *)
+    passes [Owner_and_unowned] with that execution's scope. [read_media] has
+    the same meaning as for {!context_message}; preparation is deferred to
+    {!run_carrier_load}. *)
 
 val run_carrier_load : run_carrier -> (snapshot * carrier, string) result
-(** The first successful call loads the outbox and starts its carrier. Every
+(** The first successful call loads the outbox, prepares its attachment
+    readings on the owning fiber and starts its carrier. All original context
+    and derived readings are included in the immutable Inline text, so the
+    size-refusal hook stores and replaces that same complete text. Every
     later call returns that same snapshot and carrier, so a form the hook
     switched stays switched for the rest of the run and the run acknowledges
     exactly the snapshot it carried. A failed load is returned and not kept.
-    A run's attempts call it one after another. *)
+    Cancellation during preparation publishes no cached carrier and performs
+    no ACK. A run's attempts call it one after another. *)
 
 val run_carrier_reprojection :
   run_carrier ->

@@ -70,6 +70,25 @@ val projector :
     reader, and every later reader call of the walk shares that deadline. A
     walk that only meets stored readings never starts it. *)
 
+val read_stored :
+  projector ->
+  kind:kind ->
+  media_type:string ->
+  Agent_core.History.stored ->
+  (string, string) result
+(** Read one stored attachment through the projector's existing reader,
+    successful-reading store and lazy shared deadline. The result is raw
+    reader text or an unavailable reason, with no source-attribution wrapper;
+    each consumer names its own original in the text it presents.
+
+    Calls through this function and {!project} share the same result for a
+    (kind, media type, source digest) during this walk, including errors. Only
+    successful nonempty readings are stored for another walk. A stored reading
+    needs no deadline; otherwise an expired deadline returns [Error
+    "budget_spent"] without reading bytes or calling the reader. Empty reader
+    output returns [Error "empty_reading"]. Cancellation propagates and is not
+    memoized as an unavailable result. *)
+
 val project :
   projector ->
   needs_projection:(kind -> bool) ->

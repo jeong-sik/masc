@@ -26,15 +26,21 @@ let path ~base_path ~keeper_name binding =
     (Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path)
        "keeper_msg_requests") "named_composition_runs") name
 
+let private_content (contents : Fs_compat.owned_regular_file_contents) =
+  if contents.snapshot.permissions land 0o077 = 0 then Ok contents.content
+  else Error "named composition membership record is not private"
+
 let read ~root location =
-  let* contents = Fs_compat.load_owned_regular_file_with_snapshot
+  let* contents = Fs_compat.load_owned_regular_file_with_snapshot_locked
       ~owner_uid:(Unix.getuid ()) ~ownership_root:root location
     |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
   match contents with
   | None -> Ok None
-  | Some contents when contents.snapshot.Fs_compat.permissions land 0o077 = 0 ->
-    Ok (Some contents.content)
-  | Some _ -> Error "named composition membership record is not private"
+  | Some contents -> private_content contents |> Result.map Option.some
+
+let update_error_to_string = function
+  | Fs_compat.Owned_observation_failed error -> Fs_compat.owned_regular_file_read_error_to_string error
+  | Fs_compat.Underlying_update_failed error -> Fs_compat.durable_append_error_to_string error
 
 let equal_record expected bytes =
   try
@@ -73,22 +79,22 @@ let admit ~base_path ~keeper_name binding = protect (fun () ->
     | Ok _ -> Ok () | Error _ -> Error "named composition membership directory preparation failed" in
   let* prior = read ~root location in
   let* () = match prior with None -> Ok () | Some bytes -> equal_record expected bytes in
-  let decide bytes =
+  let decide observed =
     let decision =
-      let* current = read ~root location in
-      if current <> Some bytes then Error "named composition membership path changed during admission"
-      else if bytes = "" && prior = None then Ok true
+      let* bytes = private_content observed in
+      if bytes = "" && prior = None then Ok true
       else let* () = equal_record expected bytes in Ok false in
     match decision with
     | Error detail -> None, Error detail
     | Ok false -> None, Ok ()
     | Ok true -> Some (Yojson.Safe.to_string expected ^ "\n"), Ok () in
-  match Fs_compat.update_private_file_durable_locked_result location decide with
+  match Fs_compat.update_owned_private_file_durable_locked_result
+      ~owner_uid:(Unix.getuid ()) ~ownership_root:root location decide with
   | Fs_compat.Private_file_succeeded result -> result
   | Private_file_succeeded_with_cleanup_failure {value=_;cleanup_failure} ->
     Error ("named composition membership commit is unconfirmed: " ^
       Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
-  | Private_file_failed error -> Error (Fs_compat.durable_append_error_to_string error)
+  | Private_file_failed error -> Error (update_error_to_string error)
   | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
-    Error (Fs_compat.durable_append_error_to_string error ^ "; " ^
+    Error (update_error_to_string error ^ "; " ^
       Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))

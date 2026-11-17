@@ -568,8 +568,7 @@ let validate_root_lineage inventory =
         require (collisions=[] || List.mem other.id prior || List.mem part.id other_prior)
           "Overlapping roots have no original terminal supersession lineage") rest in pairs rest in
   pairs lineage
-let validate_execution_inventory ~store ~owner inventory =
-  let* records=Owner.load_scope ~store ~scope:(Capture.scope owner) |> owner_error in
+let validate_execution_records ~owner inventory records =
   let* captures=traverse (Capture.restore ~owner ~load_parent:(load_parent inventory)) records in
   let parents=List.map Capture.parent_part_id captures in
   require (List.length parents=List.length (List.sort_uniq String.compare parents))
@@ -637,26 +636,35 @@ let check_frontier_evidence ~reads ~owner ~inventory record =
   | None,Some proof ->
     let* inventory=inventory () in
     let+ _=traverse (witnessed_capture ~reads ~owner ~inventory ~committed:proof.committed) proof.frontier in ()
-let validate_forest ~store ~owner inventory =
+let validate_forest ~read_executions ~store ~owner inventory =
   let* ()=validate_forest_structure inventory in
   let reads=store_reads ~store ~owner in
   let* _=traverse (partition_proof ~reads ~owner ~inventory) inventory.partitions in
-  let* ()=validate_execution_inventory ~store ~owner inventory in
+  let* records,observation=read_executions () in
+  let* ()=validate_execution_records ~owner inventory records in
   let+ _=traverse (fun (part:part) -> match part.supersession with
     | None -> Ok ()
-    | Some proof -> validate_replacement ~store ~owner ~inventory proof) (all_roots inventory) in ()
+    | Some proof -> validate_replacement ~store ~owner ~inventory proof) (all_roots inventory) in observation
 let check_current_owner owner =
   let* current=Capture.observe_owner ~base_path:(Capture.base_path owner)
     ~keepers_dir:(Capture.keepers_dir owner) ~keeper_id:(Capture.keeper_id owner) in
   Capture.owner_matches_json current (Capture.owner_to_json owner)
-let discover ~store ~owner =
+let discover_with_executions ~read_executions ~store ~owner =
   let* ()=check_current_owner owner in
   let* raw_parts=Owner.load_scope ~store ~scope:(scope owner) |> owner_error in
   let* parts=List.map (decode_record ~owner) raw_parts |> sequence in
   let* raw_partitions=Owner.load_scope ~store ~scope:(partition_scope owner) |> owner_error in
   let* partitions=List.map (decode_partition ~owner) raw_partitions |> sequence in
   let inventory={parts;partitions} in
-  let+ ()=validate_forest ~store ~owner inventory in inventory
+  let+ observation=validate_forest ~read_executions ~store ~owner inventory in inventory,observation
+let read_executions ~store ~owner () =
+  let+ records=Owner.load_scope ~store ~scope:(Capture.scope owner) |> owner_error in records,()
+let discover ~store ~owner =
+  let+ inventory,()=discover_with_executions ~store ~owner
+    ~read_executions:(read_executions ~store ~owner) in inventory
+let discover_observing_executions ~store ~owner =
+  discover_with_executions ~store ~owner ~read_executions:(fun () ->
+    Owner.observe_scope ~store ~scope:(Capture.scope owner) |> owner_error)
 let retain_part ~store (part:part) = Owner.retain ~store ~scope:(scope part.owner) ~request_id:part.id
   ~installation_id:part.destination.installation_id ~package_id:part.destination.package_id
   ~tool:part.destination.tool ~summary:`Null ~request:(to_json part) |> owner_error
@@ -719,7 +727,7 @@ let retain_root ~store ~owner ?supersession ~part_id ~destination ~batch ~admit 
         require (committed=[]) "Initial pending input already has a commit receipt; finish queue ACK first" in
     let* ()=live () in
     let prospective={inventory with parts=part::inventory.parts} in
-    let* ()=validate_forest ~store ~owner prospective in
+    let* ()=validate_forest ~read_executions:(read_executions ~store ~owner) ~store ~owner prospective in
     let* ()=admitted_publish ~destination ~admit (fun () -> let* ()=live () in retain_part ~store part) in
     let* fresh=discover ~store ~owner in find fresh ~part_id
 let advance ~store record event =

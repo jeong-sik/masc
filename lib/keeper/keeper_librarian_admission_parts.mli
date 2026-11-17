@@ -98,6 +98,17 @@ val discover : store:Lane_addon_store.t ->
     transactions require both. Full replacement validation reads Current
     receipt status and may reconcile its publication state; do not use this
     operation for deploy preflight. Use the pure payload ports above there. *)
+val discover_observing_executions : store:Lane_addon_store.t ->
+  owner:Keeper_librarian_admission_capture.owner ->
+  (inventory * Lane_addon_tool_request_owner.scope_observation, string) result
+(** The same complete discovery and validation order as {!discover}, with a
+    one-reread body hint for its execution scope. Historical replacement
+    checks still run before this returns, so the hint keeps those canonical
+    execution ASTs through that interval. Consume it immediately with
+    [Lane_addon_tool_request_owner.reread_scope] in the same discovery.
+    Existing Current publication reconciliation during validation is unchanged.
+    Do not store the hint in an inventory or carry it between the separate
+    discovery/recovery stages of [run_queue]. *)
 val roots : inventory -> part list
 (** Active roots only. Superseded immutable roots and their acknowledged
     descendants remain available to [find]/[load_parent] for historical reads. *)

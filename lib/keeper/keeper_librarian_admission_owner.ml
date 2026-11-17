@@ -71,8 +71,8 @@ type inventory = {parts:Parts.inventory;executions:original list}
    it may have written since its last read. *)
 type held = Read_after_last_write of inventory | Written_since_read
 let discover ~store ~owner =
-  let* parts=Parts.discover ~store ~owner in
-  let* records=owned (Owner.load_scope ~store ~scope:(Capture.scope owner)) in
+  let* parts,observation=Parts.discover_observing_executions ~store ~owner in
+  let* records=owned (Owner.reread_scope observation) in
   let* executions=List.fold_left (fun result record ->
     let* originals=result in
     let* capture=Capture.restore ~owner ~load_parent:(Parts.load_parent parts) record in

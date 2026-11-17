@@ -91,3 +91,27 @@ The [source review](source-review-r1.json), [response review](response-review-r1
 limits. [Review provenance](review-provenance.json) records the original
 private report digests and any selected derivative changes. These are
 independent session reports, not current-head GitHub account approvals.
+
+## Concurrent append review response
+
+Source `f36e4e5066f6bfb409ff94ff4a3f463b927130d0` responds to review
+5941407704 on PR #52904. Its actual review commit is `8bd79ff3`; the review
+body labels the earlier `65fb3632` snapshot. A same-inode append during a
+bounded scan was incorrectly treated as an error even when all captured bytes
+were readable. The response accepts append-only growth across the captured
+handle, final handle and current path observations. It retains the original
+size and completeness, so the next read still visits the new bytes.
+
+This does not fall back to an old value after arbitrary read errors. Replacement,
+shrinkage and same-size metadata changes remain failures. Two maintained cases
+add controlled callback-time append, replacement and shrink mutations, including
+cold `Some`/`None`, unterminated EOF and a warm suffix followed by another append.
+They check returned values and that unread suffixes are visited on the next read.
+
+[Current source inputs and response](concurrent-append-response.json) bind the
+five current source/test files and [independent delta review](concurrent-append-review-r1.json).
+The review found no new P0–P2 in its stated source scope. These changed bytes and
+new cases have **not been compiled or executed**. Earlier R3/R5 receipts and
+[historical source inputs](source-inputs.json) remain unchanged and apply only
+to their original snapshots. No new native fixture, runtime access, performance
+result, formal GitHub approval or resolved change-request state is claimed.

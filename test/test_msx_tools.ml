@@ -1824,6 +1824,29 @@ let test_load_file_failures_are_typed () =
   check bool "its ledger is unchanged" true (ledger_before = Msx_lane.ledger ())
 ;;
 
+let test_missing_media_path_is_the_callers_argument () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir = Filename.concat base_path "ledger" in
+  let load image = Msx_lane.load ~ledger_dir ~bios:blank_bios ~image in
+  let missing label = function
+    | Error (Msx_lane.Invalid_request _) -> ()
+    | Error _ -> fail (label ^ ": not Invalid_request")
+    | Ok _ -> fail (label ^ ": must not load")
+  in
+  let unreadable label = function
+    | Error (Msx_lane.Unreadable _) -> ()
+    | Error _ -> fail (label ^ ": not Unreadable")
+    | Ok _ -> fail (label ^ ": must not load")
+  in
+  let absent = Filename.concat base_path "not-there.rom" in
+  missing "cartridge that names nothing" (load (Msx_lane.Cartridge_file absent));
+  missing "disk that names nothing" (load (Msx_lane.Disk_file absent));
+  let directory = Filename.concat base_path "a-directory" in
+  Sys.mkdir directory 0o755;
+  unreadable "directory as the cartridge" (load (Msx_lane.Cartridge_file directory));
+  unreadable "directory as the disk" (load (Msx_lane.Disk_file directory));
+;;
+
 let inventory_meta ~base_path =
   dispatch ~base_path "masc_msx_meta" [ ("include_inventory", `Bool true) ]
 ;;
@@ -2079,6 +2102,8 @@ let () =
         ; test_case "peek answers four hex digits" `Quick
             test_peek_address_answer_is_four_hex_digits
         ; test_case "load file failures are typed" `Quick test_load_file_failures_are_typed
+        ; test_case "a media path that names nothing is the caller's argument"
+            `Quick test_missing_media_path_is_the_callers_argument
         ; test_case "inventory with hostile entries" `Quick test_inventory_with_hostile_entries
         ; test_case "inventory that will not list" `Quick test_inventory_that_will_not_list
         ; test_case "core identity matches the pin" `Quick test_core_identity_matches_pin

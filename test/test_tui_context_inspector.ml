@@ -740,6 +740,35 @@ let test_exact_bytes_preserves_distinct_sizes_and_digit_order () =
   check string "nine digits keep group order" "123,456,789 B"
     (Inspector.exact_bytes 123_456_789)
 
+(* The detail pane passes the selected record's usage to this formatter.
+   With identical counts/cache, the original formatter erased the provenance
+   and returned one provider-request claim for all three observations. This
+   checks that semantic distinction without pinning the UI's wording. *)
+let test_provider_usage_summary_keeps_decoded_provenance () =
+  let summarize provenance =
+    let source = record ~trace:"usage-provenance" ~turn:1 () in
+    let source = { source with usage =
+      { source.usage with input_tokens = Some 45_000; input_provenance = provenance } } in
+    let selected = match Inspector.decode_turn_records (envelope [source]) with
+      | Ok selection -> selection.latest
+      | Error detail -> fail detail in
+    let summary = Inspector.provider_usage_summary selected.usage in
+    check (option int) "the detailed consumer preserves the recorded count"
+      (Some 45_000) selected.usage.input_tokens;
+    check bool "the detailed consumer preserves the recorded provenance" true
+      (selected.usage.input_provenance = provenance);
+    summary
+  in
+  let measured = summarize (Some Turn_input_provenance.Measured_request) in
+  let estimate = summarize (Some Turn_input_provenance.Context_estimate) in
+  let unknown = summarize None in
+  check bool "an estimate does not become the same provider-request claim" false
+    (estimate = measured);
+  check bool "unknown provenance does not become the same provider-request claim" false
+    (unknown = measured);
+  check bool "an estimate and unknown provenance retain different diagnostics" false
+    (estimate = unknown)
+
 let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
   let ollama_json =
     {|{"model":"qwen3:8b","done":true,"done_reason":"stop","message":{"role":"assistant","content":"ok"},"prompt_eval_count":100,"eval_count":20}|}
@@ -965,6 +994,8 @@ let () =
             test_late_pending_snapshot_cannot_erase_progress
         ; test_case "exact_bytes preserves distinct sizes and digit order" `Quick
             test_exact_bytes_preserves_distinct_sizes_and_digit_order
+        ; test_case "provider usage summary keeps decoded provenance" `Quick
+            test_provider_usage_summary_keeps_decoded_provenance
         ; test_case "provider usage distinguishes unreported cache from reported zero"
             `Quick
             test_provider_usage_distinguishes_unreported_cache_from_reported_zero

@@ -1265,6 +1265,16 @@ let client_context_tokens ~scope ~provenance ~input_tokens ~output_tokens =
 ;;
 
 let provider_usage_summary (usage : Turn_record.usage) =
+  let count = Option.fold ~none:"unreported" ~some:format_tokens usage.input_tokens in
+  match usage.scope, usage.input_provenance with
+  | Runtime_usage_scope.Per_request, Some Turn_input_provenance.Context_estimate ->
+      Printf.sprintf "Context estimate · %s tokens; not a dispatched request" count
+  | Runtime_usage_scope.Per_request, None ->
+      Printf.sprintf "Input count · %s tokens; provenance unknown, request input not measured" count
+  | Runtime_usage_scope.Per_request, Some Turn_input_provenance.Measured_request
+  | (Runtime_usage_scope.Turn_total | Runtime_usage_scope.Conversation_cumulative
+    | Runtime_usage_scope.Usage_scope_unavailable),
+    (Some (Turn_input_provenance.Measured_request | Turn_input_provenance.Context_estimate) | None) ->
   let scope =
     match usage.scope with
     | Runtime_usage_scope.Per_request -> "last reported request in this turn"

@@ -5885,11 +5885,13 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             | _ ->
                 [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
       in
-      (* Usage belongs to the last reported request in the turn. A retained
-         pre-dispatch snapshot can instead name a later failed attempt; the
+      (* The retained usage can describe a measured request, a context
+         estimate or an aggregate. A pre-dispatch snapshot can instead name
+         a later failed attempt; the
          record has no response-to-capture ID, so do not label this as a hit
-         on the prepared request above. All counts here are provider-reported,
-         independent of the byte-to-token scale used for individual items. *)
+         on the prepared request above. The summary keeps a measured request,
+         a context estimate and unknown provenance distinct, independent of
+         the byte-to-token scale used for individual items. *)
       let cache_lines =
         match response with
         | None -> [ Ansi.dim ^ "  Provider cache usage unavailable" ^ Ansi.reset ]

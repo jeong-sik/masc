@@ -1250,8 +1250,9 @@ let auth_cmd =
            The invitation works once and expires after 24 hours."
       ; `P
           "A workspace with no .masc/config/runtime.toml gets the one this \
-           release ships: the account server reads what people may connect \
-           from it. A file that is there is kept."
+           release ships, before it is activated: the account server reads \
+           what people may connect from it. An entry that is there is kept. \
+           The command activates nothing when it cannot put the file there."
       ; `P
           ("Once the command succeeds, "
            ^ Masc_cli_auth.account_server_line

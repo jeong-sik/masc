@@ -1573,6 +1573,11 @@ class Journey(StepByStep):
             bootstrapped = masc('auth', 'bootstrap', '--external-store', home + '/external/external.jsonl',
                                 MASC_HTTP_BASE_URL='http://127.0.0.1:' + port)
             self.assertEqual(bootstrapped.returncode, 0, 'masc auth bootstrap did not activate the workspace')
+            # What people may connect is where the account server reads it:
+            # the runtime.toml of this build, readable by its owner only.
+            declared = base / '.masc/config/runtime.toml'
+            self.assertEqual(declared.read_bytes(), (ROOT / 'config/runtime.toml').read_bytes())
+            self.assertEqual(declared.stat().st_mode & 0o777, 0o600)
             started = masc('restart', '--port', port, '--host', '127.0.0.1')
             named = re.search(r'^Started pid (\d+)\.', started.stdout, re.MULTILINE)
             self.assertIsNotNone(named, started.stdout + started.stderr)
@@ -1617,6 +1622,43 @@ class Journey(StepByStep):
                     os.kill(server, signal.SIGKILL)  # Started here, in a directory about to go.
             # A lease file nothing holds any more is no account server.
             self.assertNotEqual(json.loads(masc('setup-server', '--port', other).stdout)['status'], 'account_server')
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_bootstrap_places_runtime_toml_before_it_activates(self):
+        # A bootstrap that cannot put runtime.toml in place activates nothing:
+        # the same command goes through once the path is free, which an
+        # activated workspace refuses. It keeps the file that is there by then.
+        with tempfile.TemporaryDirectory() as home:
+            home = str(Path(home).resolve())
+            base = Path(home, 'accounts')
+            (base / '.masc/auth').mkdir(parents=True)
+            (base / '.masc/auth/config.json').write_text(
+                '{"enabled":true,"require_token":true,"account_mode":"Multi_account"}')
+            Path(home, 'external').mkdir()
+            environment = {key: value for key, value in os.environ.items()
+                           if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb',
+                               MASC_HTTP_BASE_URL='http://127.0.0.1:1')
+
+            def bootstrap():
+                # What bootstrap prints is not shown: it names the first invitation.
+                return subprocess.run(
+                    [BINARY, 'auth', 'bootstrap', '--external-store', home + '/external/external.jsonl',
+                     '--base-path', str(base)],
+                    env=environment, capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL)
+
+            config_root = base / '.masc/config'
+            declared = config_root / 'runtime.toml'
+            config_root.write_text('')  # A file where the directory of runtime.toml goes.
+            refused = bootstrap()
+            self.assertNotEqual(refused.returncode, 0, 'bootstrap went on without a runtime.toml')
+            self.assertIn(str(declared), refused.stderr)
+            config_root.unlink()
+            config_root.mkdir()
+            operators = '# the operator wrote this\n'
+            declared.write_text(operators)
+            self.assertEqual(bootstrap().returncode, 0, 'the refused bootstrap had activated the workspace')
+            self.assertEqual(declared.read_text(), operators)
 
     def test_declaration_alone_never_skips_first_preparation(self):
         state = observation('/workspace', [('workspace', 'satisfied'), ('keeper_declaration', 'satisfied')])

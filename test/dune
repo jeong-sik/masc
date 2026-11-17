@@ -6353,7 +6353,8 @@
 (test
  (name test_lane_addon_request_progress)
  (modules test_lane_addon_request_progress)
- (libraries alcotest yojson masc masc.masc_core masc.fs_compat eio eio_main unix))
+ (libraries alcotest yojson masc masc.masc_core masc.fs_compat
+  masc.keeper_contract masc.keeper_runtime eio eio_main unix))
 
 (test
  (name test_lane_addon_captured_destination)

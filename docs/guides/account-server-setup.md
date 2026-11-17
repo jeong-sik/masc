@@ -187,13 +187,15 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   native tools. It leaves out a model whose runtime.toml row declares no
   tool calling, and names it under `withheld` with the reason.
 - A subscription that is left with no model has none to check, so no new
-  Runtime is made on it. The console says so, with the reason, where the
-  subscription is picked and on the card of an account of it. For a provider
-  whose models are called, the account server writes the same to its log
-  once at its start, and `masc auth preview` prints it. The reasons are that
-  runtime.toml binds no model to the provider (`[<provider>."<model>"]`),
-  that the bound model has no row, and that its row does not set
-  `tools-support = true`.
+  Runtime is made on it, and the console does not name it among the
+  subscriptions to connect now for a Keeper. For a provider whose models are
+  called, the console says so, with the reason, where the subscription is
+  picked and on the card of an account of it, and the account server writes
+  the same to its log once at its start, as `masc auth preview` prints it.
+  A provider whose models are refused says that refusal instead. The reasons
+  are that runtime.toml binds no model to the provider
+  (`[<provider>."<model>"]`), that the bound model has no row, and that its
+  row does not set `tools-support = true`.
 - The person makes Keepers on their own Runtimes, from the console or from
   an MCP client. See [The MCP endpoint of a person](account-server-mcp.md).
 - A browser that is signed in and opens `/` goes on to `/accounts/console`.

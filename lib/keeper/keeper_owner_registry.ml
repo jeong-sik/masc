@@ -39,9 +39,14 @@ type pool =
   ; operation_runner : Keeper_owner.operation_runner option
   ; on_turn_slot_released : (keeper_name:string -> unit) option
   ; mutable restart_journal_reader : restart_journal_reader option
+  ; prior_writers : Keeper_owner.prior_writers
   }
 
 let pools : (string, pool) Hashtbl.t = Hashtbl.create 4
+(* Base paths this process image has installed a pool for, under [pools_mu].
+   Never shrinks: a pool installed again in this image may inherit calls that
+   fibers of this image still write. *)
+let installed_base_paths : (string, unit) Hashtbl.t = Hashtbl.create 4
 let pools_mu = Stdlib.Mutex.create ()
 
 let canonical_base_path base_path =
@@ -259,7 +264,7 @@ let settle_restart_owner pool ~journal_terminal ~keeper_name owner =
   if Atomic.get pool.stopping then Error Restart_inventory_stopping
   else
     let session_root = Keeper_fs.session_store_path pool.config in
-    match Keeper_owner.complete_restart_settlement owner
+    match Keeper_owner.complete_restart_settlement owner ~prior_writers:pool.prior_writers
         ~journal_terminal:(journal_terminal ~keeper_name ~session_root) with
     | Ok failed ->
       (match failed with
@@ -361,30 +366,38 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
   match load_all config with
   | Error _ as error -> error
   | Ok (metas, unavailable) ->
-    let pool =
-      { config
-      ; sw
-      ; owners = Hashtbl.create (max 16 (List.length metas))
-      ; unavailable = Hashtbl.of_seq (List.to_seq unavailable)
-      ; owners_mu = Eio.Mutex.create ()
-      ; owner_handles = Atomic.make []
-      ; stopping = Atomic.make false
-      ; operation_runner
-      ; on_turn_slot_released
-      ; restart_journal_reader = None
-      }
-    in
     let installed =
       Stdlib.Mutex.protect pools_mu (fun () ->
         if Hashtbl.mem pools base_path
-        then false
+        then None
         else (
+          let prior_writers =
+            if Hashtbl.mem installed_base_paths base_path
+            then Keeper_owner.Prior_writers_unproven
+            else (
+              Hashtbl.replace installed_base_paths base_path ();
+              Keeper_owner.Prior_writers_exited)
+          in
+          let pool =
+            { config
+            ; sw
+            ; owners = Hashtbl.create (max 16 (List.length metas))
+            ; unavailable = Hashtbl.of_seq (List.to_seq unavailable)
+            ; owners_mu = Eio.Mutex.create ()
+            ; owner_handles = Atomic.make []
+            ; stopping = Atomic.make false
+            ; operation_runner
+            ; on_turn_slot_released
+            ; restart_journal_reader = None
+            ; prior_writers
+            }
+          in
           Hashtbl.add pools base_path pool;
-          true))
+          Some pool))
     in
-    if not installed
-    then Error (Inventory_already_installed base_path)
-    else (
+    match installed with
+    | None -> Error (Inventory_already_installed base_path)
+    | Some pool -> (
       Eio.Switch.on_release sw (fun () ->
         Atomic.set pool.stopping true;
         Stdlib.Mutex.protect pools_mu (fun () ->
@@ -886,6 +899,8 @@ let defer_direct_input_wait ~base_path ~keeper_name ~operation_id ~request =
     Keeper_owner.defer_direct_input_wait owner ~operation_id ~request)
 let direct_native_call ~base_path ~keeper_name ~operation_id =
   with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_native_call owner ~operation_id)
+let native_call_writer ~base_path ~keeper_name ~call_id =
+  with_native_call_receipt_command ~base_path ~keeper_name (fun owner -> Keeper_owner.native_call_writer owner ~call_id)
 (* Binding admits a native call for dispatch, fresh or resumed, so it stays
    behind the stop fence; a stopping Owner refuses it as well. *)
 let current_input_checkpoint ~base_path ~keeper_name =

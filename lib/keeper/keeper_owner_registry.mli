@@ -40,7 +40,14 @@ val install_from_store
     preventing other owners from starting; that name cannot be read, created,
     or mutated until process restart re-audits durable state. Failure to
     enumerate the inventory still fails installation. Returns the installed
-    owner count. *)
+    owner count.
+
+    The caller holds the base path lease
+    ([Server_startup_takeover.acquire_base_path_lock]), which admits a process
+    only after the previous holder exited. The first pool installed for a base
+    path in this process therefore settles restarts with
+    [Keeper_owner.Prior_writers_exited]; any later one in this process, with
+    [Prior_writers_unproven]. *)
 
 val get
   :  base_path:string
@@ -195,6 +202,9 @@ val direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:K
     with [Owner_stopping]. *)
 val direct_native_call : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (Keeper_native_call.state, command_error) result
+(** {!Keeper_owner.native_call_writer} of the installed Owner. *)
+val native_call_writer : base_path:string -> keeper_name:string -> call_id:string ->
+  (Keeper_owner.native_call_writer, command_error) result
 val current_input_checkpoint : base_path:string -> keeper_name:string ->
   (Keeper_owner.current_input_checkpoint, command_error) result
 (** Read the original Owner's current trace/root/input tuple, including while

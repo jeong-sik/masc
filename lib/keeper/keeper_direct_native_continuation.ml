@@ -343,12 +343,19 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
       ~source:input_source
     |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
   let input_producer = ref input_producer in
-  let call_id, api, resume, initial_call = match resumed with
+  let* resume = match resumed with
+    | None -> Ok None
     | Some resumed ->
-      (* A deferred operation resumes its call in this process, and nothing
-         here records whether a restart came between. *)
-      resumed.call.call_id, resumed.call.api,
-      Some (Agent.Resume_writer_exit_unproven resumed.call.locator), Some resumed.call
+      (* Restart settlement knows which calls only exited processes wrote; a
+         deferred operation resumes its call in this process. *)
+      let* writer = Owner.native_call_writer ~base_path:binding.base_path
+          ~keeper_name:binding.keeper_name ~call_id:resumed.call.call_id |> owner in
+      Ok (Some (match writer with
+        | Keeper_owner.Writer_exited -> Agent.Resume_after_writer_exit resumed.call.locator
+        | Keeper_owner.Writer_unproven ->
+          Agent.Resume_writer_exit_unproven resumed.call.locator)) in
+  let call_id, api, initial_call = match resumed with
+    | Some resumed -> resumed.call.call_id, resumed.call.api, Some resumed.call
     | None ->
       let api = match input with
         | Continue_from_checkpoint -> Native.Continue_from_checkpoint
@@ -357,7 +364,7 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
             | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
             | None -> config.initial_messages in
           Native.New_input {seed_message_count=List.length messages} in
-      Random_id.uuid_v7 (), api, None, None in
+      Random_id.uuid_v7 (), api, None in
   let* dir = execution_dir binding call_id in
   let* () = match resumed with
     | Some _ -> Ok ()

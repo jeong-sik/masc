@@ -181,7 +181,7 @@ let observe_async_result_delivery ~config ~keeper_name ~trace_id ~expected_activ
     let* () = List.fold_left (fun result (expected : activation) ->
       let* () = result in
       match List.find_opt (fun (known : activation) -> String.equal expected.skill_tool_use_id known.skill_tool_use_id) current.activations with
-      | Some known when recorded_part known = recorded_part expected -> Ok ()
+      | Some known when recorded_part known = recorded_part {expected with activated_at=known.activated_at} -> Ok ()
       | Some _ | None -> Error (Invocation_id_collision expected.skill_tool_use_id)) (Ok ()) expected_activations in
     match List.find_opt (fun known -> String.equal (Keeper_skill_async_delivery.identity known)
         (Keeper_skill_async_delivery.identity delivery)) current.async_result_deliveries with

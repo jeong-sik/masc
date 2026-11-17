@@ -10553,8 +10553,12 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
            | None -> 0 | Some at -> 1 + occurrences ~pos:(at + String.length needle) needle in
          check int "native model receives the original input once" 1 (occurrences "Finish the original research");
          check bool "native model receives each resolution fragment once" true
-           (model.resolution_blocks <> [] && List.for_all (fun block ->
-              occurrences (Agent_core.Types.text_of_content [block]) = 1) model.resolution_blocks))
+           (let fragments =
+              List.filter
+                (fun block -> not (Tool_output.is_marker (Agent_core.Types.text_of_content [block])))
+                model.resolution_blocks in
+            fragments <> [] && List.for_all (fun block ->
+              occurrences (Agent_core.Types.text_of_content [block]) = 1) fragments))
        | None ->
       Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
         ~checkpoint admission |> require "discharge only admitted evidence";

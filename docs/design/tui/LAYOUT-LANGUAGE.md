@@ -1,8 +1,7 @@
 # MASC TUI layout language
 
 The operator accepted the Keeper navigation treatment in #41527 and asked for
-the same tone across the TUI. On 2026-10-07 the density choice was explicitly
-“지금처럼 여유 있게”: keep the breathing room.
+the same tone across the TUI.
 
 [Compare the seven main surfaces](layout-language-preview.html). The preview
 uses sample data and browser layout; it is a design reference, not a capture
@@ -29,8 +28,8 @@ stay at the bottom. Each area answers one question.
   when the identity's distinguishing end would otherwise be lost.
 - Align the list title on the left and its count on the right. Preserve the
   difference between a loaded page and the whole collection: `3 of 9` is not `3`.
-- Give headings, sections and the composer breathing room. A wider terminal
-  gives the content more space. Every surface, Dashboard included, starts with
+- A wider terminal gives the content more space. Every surface, Dashboard
+  included, starts with
   the narrow Activity pane when the terminal is wide enough for it, so the right
   side of a wide terminal is not left empty. The pane shows the typed reading
   Activity already owns; it is not a place for new metrics.

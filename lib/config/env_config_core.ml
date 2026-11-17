@@ -206,7 +206,10 @@ let expand_home_prefix_under ~home value =
   else
     value
 
-let expand_home_prefix value = expand_home_prefix_under ~home:(home_dir_opt ()) value
+let expand_home_prefix value =
+  if String.length value >= 2 && value.[0] = '~' && value.[1] = '/' then
+    expand_home_prefix_under ~home:(home_dir_opt ()) value
+  else value
 
 type lexical_path_form = Normal_form | Needs_normalization
 

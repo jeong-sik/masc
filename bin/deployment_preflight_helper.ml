@@ -847,6 +847,7 @@ let validate_tool_request () =
          | Tool_request_consumer.Workspace_curator -> decoded (Masc.Workspace_memory_execution_capture.check_retained record)
          | Completion_review -> decoded (Masc.Verifier_review_owner.check_retained record)
          | Goal_proof_review -> decoded (Masc.Goal_verifier_worker.check_retained record)
+         | Media_reading -> decoded (Masc.Keeper_media_reading_owner.check_retained record)
          (* Candle reads its originals back by request ID and decodes nothing
             past the owner and body restoration above. *)
          | Candle_appraisal -> L.Payload_valid)

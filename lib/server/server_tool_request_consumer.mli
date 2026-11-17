@@ -19,6 +19,7 @@ type one_scope =
   | Completion_review
   | Goal_proof_review
   | Candle_appraisal
+  | Media_reading
 [@@deriving enumerate]
 
 type t =

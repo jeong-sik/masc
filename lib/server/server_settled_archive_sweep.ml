@@ -66,6 +66,11 @@ let payload_ids =
       let* owner=Keeper_librarian_admission_capture.owner_of_json owner in
       let+ closure=Keeper_librarian_admission_closure.restore ~owner original in
       Keeper_librarian_admission_closure.named_ids closure)
+  | Consumer.One_scope Consumer.Media_reading ->
+      (* Media originals name no other original request in their body.
+         Preflight and the media owner decode that body; this startup pass
+         checks metadata and the progress references below. *)
+      None
   | Consumer.Librarian
       ( Preflight.Admission_execution | Preflight.Admission_part | Preflight.Admission_partition
       | Preflight.History_execution | Preflight.Floor_execution )

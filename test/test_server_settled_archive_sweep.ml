@@ -139,6 +139,7 @@ let consumer_name = function
   | Consumer.Completion_review -> "Completion_review"
   | Consumer.Goal_proof_review -> "Goal_proof_review"
   | Consumer.Candle_appraisal -> "Candle_appraisal"
+  | Consumer.Media_reading -> "Media_reading"
 
 let found_name scope = match Consumer.of_scope scope with
   | Some (Consumer.One_scope found) -> consumer_name found
@@ -161,6 +162,7 @@ let test_an_owner_scope_has_its_consumer () =
     ; Verifier_review_owner.scope, Consumer.Completion_review
     ; Goal_verifier_worker.scope, Consumer.Goal_proof_review
     ; Server_candle_appraiser.scope, Consumer.Candle_appraisal
+    ; Keeper_media_reading_owner.scope, Consumer.Media_reading
     ]
 
 let test_unclaimed_scope_refuses () = with_store (fun root store ->

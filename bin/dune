@@ -2731,6 +2731,12 @@
  (libraries masc masc.string_util markup angstrom uutf yojson))
 
 (library
+ (name masc_tui_transport_failure)
+ (wrapped false)
+ (modules masc_tui_transport_failure)
+ (libraries masc masc.http_client masc.masc_log))
+
+(library
  (name masc_tui_workspace_precondition)
  (wrapped false)
  (modules masc_tui_workspace_precondition)
@@ -2754,7 +2760,7 @@
  (name masc_tui_loader)
  (wrapped false)
  (modules masc_tui_loader masc_tui_http masc_tui_schedule_decode)
- (libraries masc_tui_preference_writer masc_tui_action_notice masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_transport_failure masc_tui_preference_writer masc_tui_action_notice masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
   masc_tui_chat_call_reader
   masc_tui_task_payloads
   masc

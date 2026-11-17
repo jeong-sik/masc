@@ -21,7 +21,11 @@ val retained_to_json : retained -> Yojson.Safe.t
 val retained_of_json : Yojson.Safe.t -> (retained, string) result
 (** Strict data codec only. Decoding never creates a live settlement proof.
     The complete canonical program, original basis, receipts and actual ACK
-    observation survive later step-body or rolling-receipt cleanup. *)
+    observation survive later step-body or rolling-receipt cleanup. The wire
+    retains the full publication as [publication_bytes] JSON text so outer
+    store canonicalization cannot change fact timestamps or opaque input/gate
+    evidence. Decode that text with the strict publication decoder; an object
+    publication field is not accepted. *)
 
 type t
 val observe : store:Lane_addon_store.t ->

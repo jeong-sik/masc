@@ -3054,11 +3054,13 @@ let test_automatic_cut_continuation_commits_and_retains_compact_proof history_ki
       if Sys.file_exists receipts then Sys.remove receipts);
     check bool "compact completion survives raw body and rolling receipt pruning" true
       (Result.is_ok (io (fun () -> Keeper_librarian_history_resolution_selection.check ~config:fixture.config ~keeper_name))))
-let test_cut_owned_full_source_floor ?(production=false) history_kind ~refuse_message () =
+let test_cut_owned_full_source_floor ?(production=false) ?(change_semantic=false) history_kind ~refuse_message () =
   let module Floor=Keeper_librarian_history_resolution_floor in
   let module Steps=Keeper_librarian_floor_step_owner in
   let module Step=Keeper_librarian_floor_step_request in
+  let module Settled=Keeper_librarian_history_program_settlement in
   with_same_binding_cut ~history_kind (fun fixture original parent_request exact _schema ->
+    Eio.Switch.run (fun sw ->
     let positions=cut_source_positions fixture and parent=Owner.to_json original in
     let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
       ~request_id:exact.Exact.request_id |> get) in
@@ -3093,6 +3095,11 @@ let test_cut_owned_full_source_floor ?(production=false) history_kind ~refuse_me
         leaf,Capture.restore ~owner:(Capture.physical_owner parent_request) leaf |> get) in
       check bool "the definite leaf owns a different sealed template from its Cut parent" true
         ((Capture.preparation request).prompt<>(Capture.preparation parent_request).prompt);
+      if change_semantic then (
+        let changed=fixture.declaration true |> String.split_on_char '\n'
+          |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-fresh-retained-floor\"" | line -> line)
+          |> String.concat "\n" in
+        replace_actual_worker_configuration fixture ~sw changed);
       let selected=Floor.candidate ~store:fixture.store ~record:leaf ~request |> get
         |> Option.to_result ~none:"actual Cut capacity descendant was not a floor candidate" |> get in
       let step_calls=ref 0 in
@@ -3128,13 +3135,18 @@ let test_cut_owned_full_source_floor ?(production=false) history_kind ~refuse_me
           | [first] -> Steps.load ~store:fixture.store first |> Result.map_error Steps.error_to_string |> get
           | [] | _::_ -> fail "actual floor has no unique initial question" in
         let first=Step.restore ~owner record |> get in
+        if change_semantic then check bool "the fresh first question captured the actual changed Runtime configuration" true
+          (match Lane_addon_captured_destination.relation ~captured:(Capture.destination request)
+            ~current:(Step.destination first) with
+           | Lane_addon_captured_destination.Replaced -> true
+           | Same | Other_owner -> false);
         Step.chain_basis first |> Option.get,Step.transaction_id first in
       let posts=F.post_count fixture.server in
       check int "ordinary cleanup cannot archive the retained Cut's in-flight question" 0
         (memory_action fixture (fun () -> Keeper_librarian_floor_cleanup.cleanup ~store:fixture.store
           ~owner:(Capture.physical_owner request) ~candidates:[] ~settled:[]) |> get);
       let unrelated=Types.observed ~claim:"Unrelated concurrent Memory" ~category:Types.Fact
-        ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="cut-floor-concurrent"} in
+        ~now:42. ~origin:{kind=Types.Authored;trace_id="cut-floor-concurrent"} in
       memory_action fixture (fun () -> io (fun () -> Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable
         ~absorbed:[] ~revisions:[] ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
         ~source:{kind=Current.Librarian;trace_id} ~new_claims:[unrelated] () |> get)) |> ignore;
@@ -3206,6 +3218,10 @@ let test_cut_owned_full_source_floor ?(production=false) history_kind ~refuse_me
            && proof.publication.execution.program.sources=first_basis.sources);
         check bool "publication retains concurrent unrelated Memory" true
           (List.mem "Unrelated concurrent Memory" (io (fun () -> claims fixture.keepers_dir)));
+        if not production then
+          check bool "a real canonical program before ACK is not source settlement evidence" true
+            (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+              Settled.observe ~store:fixture.store ~request ~record:leaf ~program:proof))));
         if production then (
           let completed=last_cut_intent fixture original in
           check bool "ordinary Work retains actual program completion for the exact refused child" true
@@ -3222,6 +3238,79 @@ let test_cut_owned_full_source_floor ?(production=false) history_kind ~refuse_me
             let cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
               ~keeper_name |> get in
             Keeper_external_read_cursor.observation_matches_preparation cursor ~after:through ~through ~atom:None ~official:None));
+          let actual=memory_action fixture (fun () -> io (fun () ->
+            Settled.observe ~store:fixture.store ~request ~record:leaf ~program:proof)) |> get in
+          let retained=Settled.retained actual in
+          check bool "integral original fact timestamps remain in the actual proof" true
+            (List.exists (fun (fact:Types.fact) -> fact.first_seen=42. && fact.last_seen=42.)
+              retained.publication.execution.initial_facts);
+          let canonical=Lane_addon_action.canonical (Settled.retained_to_json retained) |> get in
+          let restored=Settled.retained_of_json canonical |> get in
+          check bool "outer intent normalization preserves exact publication evidence" true
+            (restored.publication=retained.publication);
+          let receipt_path=Current.durable_range_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+          let receipt_bytes=io (fun () -> Fs_compat.load_file receipt_path) in
+          let receipts,_=io (fun () -> Keeper_memory_os_current_range_codec.read_durable_range_receipts
+            ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get) in
+          let partial=List.filter (fun receipt -> match Keeper_memory_os_current_receipt_store.receipt_range_id receipt with
+            | Keeper_memory_os_current_types.Atom_range _ -> true
+            | Official_range _ | Explicit_candidate _ | Explicit_candidate_with_recall _ -> false) receipts in
+          Fun.protect ~finally:(fun () -> io (fun () -> write receipt_path receipt_bytes)) (fun () ->
+            io (fun () -> Keeper_memory_os_current_receipt_store.write_durable_range_receipts
+              ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name partial |> get);
+            check bool "post-ACK proof refuses an actual missing Mixed receipt" true
+              (Result.is_error (memory_action fixture (fun () -> io (fun () -> Settled.observe
+                ~store:fixture.store ~request ~record:leaf ~program:proof)))));
+          let first=Steps.discover ~store:fixture.store ~owner:(Capture.physical_owner request)
+            |> Result.map_error Steps.error_to_string |> get
+            |> List.find (fun (_, (index:Step.index)) -> index.header.range.request_id=leaf.request_id
+              && index.header.position=0) in
+          let first_record,_=Steps.load ~store:fixture.store first |> Result.map_error Steps.error_to_string |> get in
+          let first_path=Filename.concat (Store.root fixture.store)
+            (Store.tool_request_body_path ~scope:first_record.scope ~request_digest:first_record.request_digest) in
+          let first_bytes=io (fun () -> Fs_compat.load_file first_path) in
+          Fun.protect ~finally:(fun () -> io (fun () -> write first_path first_bytes)) (fun () ->
+            io (fun () -> Sys.remove first_path);
+            check bool "Memory and ACK alone cannot replace the actual retained first question" true
+              (Result.is_error (memory_action fixture (fun () -> io (fun () -> Settled.observe
+                ~store:fixture.store ~request ~record:leaf ~program:proof)))));
+          let owner=Capture.physical_owner request in
+          let unrelated=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+            ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination ->
+              let request=Capture.create ~request_id:(Capture.fresh_request_id owner) ~owner ~destination
+                ~source:(Capture.source request) ~preparation:(Capture.preparation request) () |> get in
+              Durable_owner.retain ~store:fixture.store request
+                |> Result.map_error Durable_owner.error_to_string) |> get in
+          let honest=io (fun () -> Store.load_history_resolution fixture.store ~scope:original.scope
+            ~request_id:original.request_id |> get |> Option.get) in
+          let publish_intent expected next=io (fun () ->
+            match Store.publish_history_resolution fixture.store ~scope:original.scope
+              ~request_id:original.request_id ~expected:(Some expected) ~next |> get with
+            | Store.History_resolution_stored -> ()
+            | History_resolution_changed | History_resolution_unconfirmed _ -> fail "fixture intent CAS did not commit") in
+          let other=match honest with
+            | `Assoc fields -> `Assoc (List.map (fun (name,value) -> name,
+                if name<>"intents" then value else match value with
+                | `List intents -> `List (List.map (function
+                    | `Assoc fields -> `Assoc (List.map (fun (name,value) -> name,
+                        if name="memory_commit" then `Null else if name="phase" then
+                          `Assoc ["kind",`String "child_confirmed";"child",`Assoc [
+                            "request_id",`String unrelated.request_id;"request_digest",`String unrelated.request_digest]]
+                        else value) fields)
+                    | _ -> fail "fixture intent is not an object") intents)
+                | _ -> fail "fixture intents are not a list") fields)
+            | _ -> fail "fixture intent envelope is not an object" in
+          Fun.protect ~finally:(fun () ->
+            publish_intent other honest;
+            io (fun () -> Owner.settle ~store:fixture.store
+              ~date:(Capture.minted_on unrelated.request_id |> get) (Owner.listed unrelated)
+              |> Result.map_error Owner.settle_error_to_string |> get)) (fun () ->
+            publish_intent honest other;
+            let changed=Resolution_intent.decode_published ~scope:original.scope ~request_id:original.request_id other
+              |> get |> List.rev |> List.hd in
+            check bool "an actual same-source unrelated child cannot borrow a completed descendant proof" true
+              (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+                Resolution_intent.observe_program_commit ~store:fixture.store ~expected:changed ~settled:actual)))));
           let bytes=cut_memory_bytes fixture and positions=cut_source_positions fixture and posts=F.post_count fixture.server in
           for _=1 to 2 do
             (match run_worker fixture with Ok _ -> () | Error error -> fail (Consumer.error_to_string error));
@@ -3246,7 +3335,27 @@ let test_cut_owned_full_source_floor ?(production=false) history_kind ~refuse_me
         Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> owned |> Option.get |> Owner.to_json));
       check bool "no wake replays or changes the original host Cut request" true
         (host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
-          ~request_id:exact.request_id |> get))))
+          ~request_id:exact.request_id |> get));
+      if production then (
+        let completed=last_cut_intent fixture original in
+        let first=List.find (fun (_, (index:Step.index)) -> index.header.range.request_id=leaf.request_id
+          && index.header.position=0) steps |> fst in
+        let first_path=Filename.concat (Store.root fixture.store) (Store.tool_request_body_path
+          ~scope:(Owner.Record.scope first) ~request_digest:(Owner.Record.request_digest first)) in
+        let receipt_path=Current.durable_range_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+        let first_bytes,receipt_bytes=io (fun () -> Fs_compat.load_file first_path,Fs_compat.load_file receipt_path) in
+        Fun.protect ~finally:(fun () -> io (fun () -> write first_path first_bytes;write receipt_path receipt_bytes)) (fun () ->
+          io (fun () -> Sys.remove first_path;
+            Keeper_memory_os_current_receipt_store.write_durable_range_receipts
+              ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name [] |> get);
+          let reread=last_cut_intent fixture original in
+          check json "durable ordered completion survives unavailable step bytes and moving receipts"
+            (Resolution_intent.to_public_json completed) (Resolution_intent.to_public_json reread);
+          check bool "stored completion retains the full canonical program" true
+            (match reread.memory_commit with Some {program=Some _;_} -> true | None | Some {program=None;_} -> false);
+          check bool "selection reads retained completion independently of old storage artifacts" true
+            (Result.is_ok (io (fun () -> Keeper_librarian_history_resolution_selection.check
+              ~config:fixture.config ~keeper_name))))))))
 
 let test_cut_command_recovers_fence_before_grant_after_memory_rebase () =
   with_same_binding_cut (fun fixture original _request _exact _schema ->
@@ -7157,6 +7266,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_cut_owned_full_source_floor Mixed ~refuse_message:true);
   test_case "ordinary Work completes a Cut-owned mixed floor with real full-source ACK and compact proof" `Slow
     (test_cut_owned_full_source_floor ~production:true Mixed ~refuse_message:false);
+  test_case "fresh current configuration completes the retained Cut source without changing pending IDs" `Quick
+    (test_cut_owned_full_source_floor ~production:true ~change_semantic:true Mixed ~refuse_message:false);
   test_case "Cut command recovers fence before grant with rebased Memory" `Slow
     test_cut_command_recovers_fence_before_grant_after_memory_rebase;
   test_case "Cut command busy and late proof stay Requested" `Slow

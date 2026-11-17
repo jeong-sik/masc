@@ -25,6 +25,11 @@ let integer = function
     Error "Invalid program settlement integer"
 let atom_of_json json = Atom.of_json json |> Result.map_error Keeper_memory_os_types.wire_error_to_string
 let official_of_json json = Official.of_json json |> Result.map_error Keeper_memory_os_types.wire_error_to_string
+let publication_of_bytes json =
+  let* bytes=Json.as_string json in
+  let* publication=try Ok (Yojson.Safe.from_string bytes) with
+    | Yojson.Json_error detail -> Error ("Program settlement publication bytes: " ^ detail) in
+  Publication.of_json publication
 
 type retained = {
   request_id:string;request_digest:string;owner:Request.owner;source_basis_digest:string;
@@ -40,7 +45,9 @@ let retained_to_json proof = `Assoc [
   "owner",Request.owner_to_json proof.owner;"source_basis_digest",`String proof.source_basis_digest;
   "first_step_id",`String proof.first_step_id;"first_step_digest",`String proof.first_step_digest;
   "anchor",Current.program_anchor_evidence_to_json proof.anchor;
-  "publication",Publication.to_json proof.publication;
+  (* The store canonicalizes its outer object, including Float to Int. Keep
+     strict program replay facts and opaque input/gate evidence inside text. *)
+  "publication_bytes",`String (Yojson.Safe.to_string (Publication.to_json proof.publication));
   "snapshot_revision",`Int proof.snapshot_revision;"snapshot_sha256",`String proof.snapshot_sha256;
   "receipts",`List (List.map Codec.durable_range_receipt_to_json proof.receipts);
   "external_through",`Int proof.external_through;"external_ack",Cursor.observation_to_json proof.external_ack;
@@ -99,7 +106,7 @@ let retained_of_json json =
   let* first_step_id,fields=Json.field ~context "first_step_id" Json.as_non_blank fields in
   let* first_step_digest,fields=Json.field ~context "first_step_digest" hash fields in
   let* anchor,fields=Json.field ~context "anchor" Current.program_anchor_evidence_of_json fields in
-  let* publication,fields=Json.field ~context "publication" Publication.of_json fields in
+  let* publication,fields=Json.field ~context "publication_bytes" publication_of_bytes fields in
   let* snapshot_revision,fields=Json.field ~context "snapshot_revision" integer fields in
   let* snapshot_sha256,fields=Json.field ~context "snapshot_sha256" hash fields in
   let* receipts,fields=Json.field ~context "receipts" (Json.as_list (fun json ->
@@ -135,8 +142,12 @@ let first_basis ~store request =
     | [] | _::_ -> Error "Program has no unique retained first question" in
   let* record,_=Steps.load ~store selected |> Result.map_error Steps.error_to_string in
   let* step=Step.restore ~owner record in
-  let* ()=require (Step.physical_owner step=owner && Lane_addon_captured_destination.same_semantic
-    (Step.destination step) (Request.destination request)) "Program first question changed its original destination" in
+  let same_owner=match Lane_addon_captured_destination.relation
+      ~captured:(Request.destination request) ~current:(Step.destination step) with
+    | Lane_addon_captured_destination.Same | Replaced -> true
+    | Other_owner -> false in
+  let* ()=require (Step.physical_owner step=owner && same_owner)
+    "Program first question changed its declared installation, package or tool" in
   let* ()=Runtime.validate_retained_durable_step ~source:identity
     ~original:(Request.preparation request) (Step.step step) in
   let+ basis=Option.to_result ~none:"Program first question has no original anchor and full manifest" (Step.chain_basis step) in

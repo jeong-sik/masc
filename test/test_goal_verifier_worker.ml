@@ -1828,6 +1828,181 @@ let test_raised_review_retains_actual_tool_observation () = with_workspace (fun 
        | Ok _ | Error _ -> Alcotest.fail "raised review redispatched its unknown original");
       Alcotest.(check int) "raised reviewer is never replayed" 1 !calls))
 
+let test_subdivided_receiptless_refusals_do_not_block_recovery () =
+  (* 1. Owner_exited subdivided into attempt 1. *)
+  with_workspace (fun config store _ ->
+    let _, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let owner_key = Yojson.Safe.to_string
+      (`List [`String subject.goal_id; `String subject.request_id; `Int 0]) in
+    let record = match Lane_addon_tool_request_owner.load ~store
+        ~scope:"goal-proof-reviews" ~request_id:owner_key with
+      | Ok (Some record) -> record
+      | Ok None -> Alcotest.fail "owner-less fixture record missing"
+      | Error error -> Alcotest.fail (Lane_addon_tool_request_owner.error_to_string error) in
+    ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:record
+      ~event:P.Dispatch_intended
+      |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      (match Agent.process_pending_work config {Agent.goal_id=subject.goal_id} with
+       | Agent.Deferred _ -> ()
+       | Agent.Committed | Agent.Superseded ->
+         Alcotest.fail "owner-less dispatch should defer its first pass");
+      Alcotest.(check int) "owner-less reconciliation calls no reviewer" 0 !calls;
+      transition config subject.goal_id "request_complete";
+      let parent = host_load store original in
+      (match P.phase (W.progress parent) with
+       | P.Subdivided _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ ->
+         Alcotest.fail "explicit retry did not subdivide the owner-less parent");
+      Alcotest.(check bool) "subdivided owner-less parent has no receipt" true
+        (checked (W.restored_receipt parent) = None && checked (W.observed_receipt parent) = None);
+      Alcotest.(check int) "subdivided owner-less parent has no tools" 0
+        (List.length (checked (W.tool_observations parent)));
+      Alcotest.(check bool) "subdivided owner-less parent is already published" false
+        (hosted (H.needs_recovery ~registry:(R.global ()) parent));
+      drain config;
+      Alcotest.(check int) "successor attempt runs once" 1 !calls;
+      Alcotest.(check bool) "successor reaches human confirmation" true
+        (phase config subject.goal_id = Goal_phase.Awaiting_confirmation)));
+  (* 2. Run_ended (with actual tool observation) subdivided into attempt 1. *)
+  with_workspace (fun config store _ ->
+    let exception Escape_after_lookup in
+    let _, retained = host_prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let calls = ref 0 in
+    with_reviewer (reviewer_exit_after_actual_lookup calls) (fun () ->
+      let old_observer = Atomic.get AR.outcome_observer_fn in
+      Fun.protect ~finally:(fun () -> Atomic.set AR.outcome_observer_fn old_observer) (fun () ->
+        Atomic.set AR.outcome_observer_fn (fun ~outcome:_ ~runtime:_ -> raise Escape_after_lookup);
+        (try ignore (Agent.process_pending_work config {Agent.goal_id=subject.goal_id});
+             Alcotest.fail "observer exception was swallowed"
+         with Escape_after_lookup -> ()));
+      Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);
+      transition config subject.goal_id "request_complete";
+      let parent = host_load store original in
+      (match P.phase (W.progress parent) with
+       | P.Subdivided _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ ->
+         Alcotest.fail "explicit retry did not subdivide the raised parent");
+      Alcotest.(check bool) "subdivided run-ended parent has no receipt" true
+        (checked (W.restored_receipt parent) = None && checked (W.observed_receipt parent) = None);
+      let tools = checked (W.tool_observations parent) in
+      Alcotest.(check bool) "subdivided run-ended parent retains its actual tool observation" true
+        (List.exists (fun (tool : Verification_run_registry.tool_observation) ->
+           tool.tool_name = "tool_read_file") tools);
+      Alcotest.(check bool) "subdivided run-ended parent needs no recovery after Raised publication" false
+        (hosted (H.needs_recovery ~registry:(R.global ()) parent));
+      drain config;
+      Alcotest.(check int) "successor attempt runs once after raised parent" 2 !calls;
+      Alcotest.(check bool) "successor reaches human confirmation after raised parent" true
+        (phase config subject.goal_id = Goal_phase.Awaiting_confirmation)));
+  (* 3. Authority_moved subdivided into attempt 1 does not block later requests. *)
+  with_workspace (fun config store _ ->
+    let goal_id = pending config in
+    let authority = get (A.create_goal_review ~config ~goal_id) in
+    let stale = stale_original ~moved:`Authority authority in
+    let first_run : W.run_identity = {run_id="subdivided-stale/" ^ (V.subject stale).request_id;
+      started_at=Time_compat.now ()} in
+    ignore (checked (W.retain ~store ~installation_id:W.host_installation_id
+      ~package_id:W.host_package_id ~run:first_run stale));
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      drain config;
+      Alcotest.(check bool) "first request reaches human confirmation" true
+        (phase config goal_id = Goal_phase.Awaiting_confirmation);
+      let parent = host_load store stale in
+      (match P.phase (W.progress parent) with
+       | P.Subdivided _ -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ ->
+         Alcotest.fail "moved-authority parent was not subdivided");
+      Alcotest.(check bool) "subdivided moved-authority parent has no receipt" true
+        (checked (W.restored_receipt parent) = None && checked (W.observed_receipt parent) = None);
+      Alcotest.(check int) "subdivided moved-authority parent has no tools" 0
+        (List.length (checked (W.tool_observations parent)));
+      Alcotest.(check bool) "subdivided moved-authority parent needs no recovery" false
+        (hosted (H.needs_recovery ~registry:(R.global ()) parent));
+      transition config goal_id "reopen";
+      transition config goal_id "request_complete";
+      drain config;
+      Alcotest.(check int) "later request on the same Goal reviews once" 2 !calls;
+      Alcotest.(check bool) "later request reaches human confirmation without Commit_refused" true
+        (phase config goal_id = Goal_phase.Awaiting_confirmation)));
+  (* 4. Foreign run in Owner_exited and grant-less child under Raised Run_ended are rejected. *)
+  with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let only = function [record] -> record | _ -> Alcotest.fail "fixture needs one owner" in
+    let load_scope store = get (Lane_addon_tool_request_owner.load_scope ~store
+      ~scope:"goal-proof-reviews" |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+    let dispatched = get (Lane_addon_tool_request_owner.advance ~store ~expected:(only (load_scope store))
+      ~event:P.Dispatch_intended |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string) in
+    let expect_stored = function
+      | Lane_addon_tool_request_owner.Stored r | Already_stored r -> r
+      | Unconfirmed detail -> Alcotest.fail detail in
+    ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:(expect_stored dispatched)
+      ~event:(P.Refused {stage=P.Execution;
+        evidence=`Assoc ["run", `Assoc ["run_id", `String "foreign-run"; "started_at", `Float 0.0]]})
+      |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+    let forged = load store original in
+    let assert_invalid label = function
+      | Error (W.Original_invalid _) -> ()
+      | Ok _ | Error _ -> Alcotest.fail (label ^ " accepted foreign owner-less run") in
+    assert_invalid "restored_receipt" (W.restored_receipt forged);
+    assert_invalid "observed_receipt" (W.observed_receipt forged);
+    assert_invalid "frontier" (W.frontier ~authority:(fun () -> Ok authority) ~store
+      ~installation_id ~package_id ~goal_id:subject.goal_id ~request_id:subject.request_id
+      ~new_run:(fun () -> {W.run_id="never"; started_at=0.0}));
+    assert_invalid "request_retry" (W.request_retry ~authority:(fun () -> Ok authority) ~store
+      ~installation_id ~package_id ~goal_id:subject.goal_id ~request_id:subject.request_id
+      ~requested_by:"operator" ~new_run:(fun () -> {W.run_id="never"; started_at=0.0})));
+  with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let original = W.original retained in
+    let subject = V.subject original in
+    let run_id = (W.run_identity retained).run_id in
+    let started_at = (W.run_identity retained).started_at in
+    let only = function [record] -> record | _ -> Alcotest.fail "fixture needs one owner" in
+    let load_scope store = get (Lane_addon_tool_request_owner.load_scope ~store
+      ~scope:"goal-proof-reviews" |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+    let expect_stored = function
+      | Lane_addon_tool_request_owner.Stored r | Already_stored r -> r
+      | Unconfirmed detail -> Alcotest.fail detail in
+    let dispatched = expect_stored (get (Lane_addon_tool_request_owner.advance ~store
+      ~expected:(only (load_scope store)) ~event:P.Dispatch_intended
+      |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string)) in
+    let raised_parent = expect_stored (get (Lane_addon_tool_request_owner.advance ~store
+      ~expected:dispatched
+      ~event:(P.Refused {stage=P.Execution;
+        evidence=`Assoc ["cause", `String "review_raised";
+          "run", `Assoc ["run_id", `String run_id; "started_at", `Float started_at];
+          "tools", `List []; "observations", `List []]})
+      |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string)) in
+    let staged_store = Lane_addon_store.create
+      ~root:(Filename.concat (Workspace.masc_dir config) "staged-raised-child") in
+    let child = next_attempt authority original in
+    ignore (checked (W.retain ~store:staged_store ~installation_id ~package_id
+      ~run:{W.run_id="ungranted/" ^ subject.request_id; started_at=0.0} child));
+    let child_record = only (load_scope staged_store) in
+    let successor = get (Lane_addon_tool_request_owner.prepare_successor ~store
+      ~scope:"goal-proof-reviews" ~request_id:child_record.request_id ~request:child_record.request
+      |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
+    ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:raised_parent
+      ~event:(P.Successor_intended successor)
+      |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+    match W.frontier ~authority:(fun () -> Ok authority) ~store ~installation_id ~package_id
+        ~goal_id:subject.goal_id ~request_id:subject.request_id
+        ~new_run:(fun () -> {W.run_id="never"; started_at=0.0}) with
+    | Error (W.Original_invalid _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "grant-less child under Raised parent was admitted")
+
 let () = match restart_probe with
 | Some probe -> recover_body_fixture probe
 | None -> Alcotest.run "retained Goal worker" ["execution", [
@@ -1878,6 +2053,8 @@ let () = match restart_probe with
   Alcotest.test_case "finished publication survives registry retention" `Quick test_finished_publication_survives_registry_retention;
   Alcotest.test_case "caught reviewer Exit retains its actual refusal receipt" `Quick test_caught_reviewer_exit_retains_actual_refusal_receipt;
   Alcotest.test_case "raised review retains actual tool observation" `Quick test_raised_review_retains_actual_tool_observation;
+  Alcotest.test_case "subdivided receiptless refusals do not block recovery" `Quick
+    test_subdivided_receiptless_refusals_do_not_block_recovery;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
   Alcotest.test_case "actual explicit retry after provider failure" `Quick test_actual_explicit_retry_after_provider_failure;
   Alcotest.test_case "Candle config repair recovers the actual retained judgment" `Quick

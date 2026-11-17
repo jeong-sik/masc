@@ -248,8 +248,8 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 이 보장은 기존 Keeper Memory lane의 Keeper별 직렬화와 workspace lease 안에서 성립한다. owner 갱신은 전체 expected record와 progress를 다시 비교하며 다른 tail을 거절한다.
 
 - history 가 읽는 자리는 둘이다.
-  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다(`keeper_librarian_durable_commit.ml` 252~253행). 운영자 해소 흐름도 같은 검사 함수를 쓴다.
-  - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 문제 확인 당시에는 오류였다(`lib/keeper/keeper_librarian_durable_owner.ml` 216~217행). pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
+  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다(그 자리는 `keeper_librarian_durable_commit.ml` 의 결과 타입 `Settled_if_replaced` 이고, 저장된 종료를 현재 목적지로 다시 추정하지 않고 돌려준다). 운영자 해소 흐름도 같은 검사 함수를 쓴다.
+  - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 문제 확인 당시에는 오류였다(`lib/keeper/keeper_librarian_durable_owner.ml` 가 `Submit.resume` 의 `End_replaced` 를 받는 자리). pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다. 두 이름은 행 번호 대신 쓰는 좌표다 — `Settled_if_replaced` 는 `keeper_librarian_durable_commit.ml` 의 `frontier`, `End_replaced` 는 `lane_addon_submit_once.ml` 의 `unadmitted` 생성자다.
 - 이 갈래는 거절 갈래(`Refused`)를 지나지 않는다. 다음 읽기를 좁히지 않는다.
   - 새 원본을 만든 바로 그 pass 에서 이 갈래가 나와도 같다. 그 자리는 거절을 `Memory_refused` 로 돌려주고, 그 값은 좁히기 표시를 남긴다(`keeper_librarian_durable_execution.ml` 519~530행, `lib/keeper/keeper_librarian_durable_consumer.ml` 1692~1719행). 이 갈래는 그 값으로 돌려주지 않는다.
 - 그다음 pass 는 정리된 원본을 옮기고 같은 범위를 지금 목적지로 새로 만든다. 정리된 거절이 가는 길 그대로다. 그 pass 는 3.6 이 부른다.
@@ -274,6 +274,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 종료 증거를 저장한 뒤에는 현재 worker나 목적지를 읽지 못해도 같은 종료로 읽는다. 선언을 되돌렸다고 일반 거절로 바뀌지 않는다.
 - 다음 pass는 읽은 위치에서 미소비 입력을 다시 고른다. 그 사이 도착한 입력이 함께 포함될 수 있다.
 - `Permission_refused {detail}`는 권한·소유 거절이다. 설명에 교체를 가리키는 글자가 있어도 교체 종료가 아니다. 다음 읽기는 기존처럼 좁힌다.
+- 접수 전 종료(3.3)의 비교는 이 금지에 해당하지 않는다. 그 비교는 정본 journal 의 접수 전 phase 와 원본이 담은 목적지·지금 목적지의 관계를 함께 읽는 판정이고, 거절 글자나 현재 목적지 하나로 사유를 추정하는 것이 아니다. 그래서 3.3 의 경로로 끝난 원본도 `Settled_if_replaced`·`End_replaced` 라는 이름의 같은 증거로 다음 읽기를 좁히지 않는다.
 
 ### 3.5 교체된 선언에서 끊긴 history 원본은 미소비 종료 증거를 남긴다
 
@@ -458,6 +459,28 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 | L4 | admission 미소비 묶음 전체의 새 root, Deferred 후보 보존과 소유권 인계(3.9) | 8절의 admission 시험 |
 | L5 | 받은 답을 보존하고 같은 owner·설치의 미실행 Gate를 이어가는 권한(3.8) | 8절의 Gate 시험 |
 
+### 7.1 절마다 구현됨 / 아직
+
+2026-11-17 main `55c86a8b2e` 를 읽고 적었다. "구현됨"은 그 절이 서술한 코드 경로가 main 에 있다는 뜻이고, 회귀·배포·실제 원본 회복의 완료를 뜻하지 않는다. 근거 PR 은 그 절의 코드를 넣은 병합 PR 이다.
+
+| 절 | 상태 | 근거 |
+|---|---|---|
+| 3.1 교체의 뜻·목적지 관계 타입 | 구현됨 | L0 #52621 |
+| 3.2 host: 결과 없고 실행 중 아닌 요청 종료 | 구현됨 | L1 #52622, CLI 쪽은 L1b #51343 |
+| 3.3 Keeper: 접수되지 않은 원본 종료 (history·owner·inventory) | 구현됨 | L2a #52674 |
+| 3.3 floor step 쪽 종료 | 아직 | L2b. `keeper_librarian_floor_chain.ml` 의 결과는 지금도 `Stopped {position; report}` 하나다 |
+| 3.4 다음 읽기를 좁히지 않는다 | 구현됨 | L0 #52621 (`Refusal.next_read` 가 `Whole_again`) |
+| 3.5 교체된 선언에서 끊긴 history Cut | 부분 구현됨 | L3 #52695. 별도 교체 종료를 저장하지 않고 archive 이동을 종료로 삼는다(3.7 의 차이) |
+| 3.6 끝낸 pass 가 자기 Keeper 를 깨운다 | 구현됨 | L0 #52621 |
+| 3.7 선언을 되돌리면 | 부분 구현됨 | 3.2·3.3 으로 끝난 자식은 저장된 사유가 있어 rollback 으로 뒤집히지 않는다(L1 #52622·L2a #52674). 9.1·9.2 의 별도 종료 기록과 그 복원 정책은 L3 #52695 에 없다(3.7 끝 문단) |
+| 3.8 이미 받은 답과 미실행 Gate | 아직 | L5. `lib/keeper` 에 Gate 인계 경로가 없다 |
+| 3.9 admission 미소비 묶음 전체 재판단 | 아직 | L4. `keeper_librarian_admission_dispatch.ml` 에 교체 판정이 없다 |
+| 4 순서 따라가기 | 문서 | 구현 대상 아님(각 층의 순서 서술) |
+| 5 별도 복구 계약 | 문서 | 구현 대상 아님 |
+| 8 시험 | 층별로 나뉨 | 8절 변이 목록의 PR 번호를 따른다 |
+| 9.1~9.4 정책 | 정책 | 9.2 의 재판단 호출 상한은 열린 질문이다 |
+
+
 - L0 이 L1 보다 먼저다. L1 만 들어가면 선언을 바꿀 때 기다리던 Keeper 가 모두 한 턴씩 읽게 되고, 쉬는 Keeper 는 다음 턴까지 그 범위를 다시 만들지 않는다.
 - L1b 는 다른 층에 기대지 않는다. L1 없이 들어가도 CLI slot 의 guard 거절이 `raised` 대신 미뤄진 시도로 남는다. 그 요청은 선언을 되돌리면 다시 실행된다.
   - CLI walker 는 Librarian 밖의 소비자도 쓴다. 바꾸는 것은 관찰 함수가 거절을 돌려줄 수 있게 하는 것이고, 거절을 돌려주지 않는 소비자의 동작은 그대로다.
@@ -528,14 +551,15 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
   - 새 root 준비 전후·소유권 인계 전후에 멈춰도 같은 묶음을 복원한다. rollback 후에도 후보 누락·중복 소유·반복 root가 없다.
   - admission Cut·Raised·Gate·반영이 남은 `Accepted` 답은 묶음 교체 사유가 아니며 다른 후보의 종료에도 동승하지 않는다. Gate 대상 답은 기존 Gate 경로로 이어간다.
 - 변이
-  - CLI walker 가 guard 거절을 다시 예외로 던지게 하면 CLI 시험이 `raised` 로 실패한다.
-  - `Declaration_replaced` 를 `Not_now` 로 바꾸면 host 시험이 실패한다.
-  - 3.1 의 조건 3 을 빼면 "파일만 고친 때" 시험이 실패한다.
-  - 저장된 종료 대신 현재 관계만 보면 rollback·목적지 조회 실패 시험이 실패해야 한다.
-  - 전송 의도 확정 전에 submit을 보내거나 전송 뒤 Unknown을 접수 전으로 돌리면 대응 경계 시험이 실패해야 한다. Cut claim·Memory receipt 확인을 빼도 해당 시험이 실패해야 한다.
-  - Deferred 후보를 빼거나, 미해소 형제를 다른 후보의 종료에 동승시키거나, 전송된 Gate를 미실행으로 취급하면 각각의 묶음 보존·권한·Gate 재전송 방지 시험이 실패해야 한다.
-  - 좁히기 규칙이 사유를 가리지 않게 하면 일반 `Permission_refused`의 좁히기 시험이 실패해야 한다.
-  - 깨움이 사유를 가리지 않게 하면 일반 거절은 깨우지 않는다는 시험이 실패해야 한다.
+  - 이 목록의 시험은 층을 넣은 PR 이 가진다. 줄 끝의 번호가 그 좌표이고, 번호가 없는 줄은 아직 그 층이 main 에 없다는 뜻이다.
+  - CLI walker 가 guard 거절을 다시 예외로 던지게 하면 CLI 시험이 `raised` 로 실패한다 (#51343, `test_keeper_lane_cli_oneshot.ml`·`test_lane_addon_exact_runner.ml`).
+  - `Declaration_replaced` 를 `Not_now` 로 바꾸면 host 시험이 실패한다 (#52622, `test_lane_addon_exact.ml`·`test_lane_addon_host_cycle.ml`).
+  - 3.1 의 조건 3 을 빼면 "파일만 고친 때" 시험이 실패한다 (#52622).
+  - 저장된 종료 대신 현재 관계만 보면 rollback·목적지 조회 실패 시험이 실패해야 한다 (#52621, `test_keeper_librarian_durable_refusal.ml`·`test_lane_addon_submit_once.ml`).
+  - 전송 의도 확정 전에 submit을 보내거나 전송 뒤 Unknown을 접수 전으로 돌리면 대응 경계 시험이 실패해야 한다. Cut claim·Memory receipt 확인을 빼도 해당 시험이 실패해야 한다 (#52674 접수 전 경계, #52695 Cut·claim).
+  - Deferred 후보를 빼거나, 미해소 형제를 다른 후보의 종료에 동승시키거나, 전송된 Gate를 미실행으로 취급하면 각각의 묶음 보존·권한·Gate 재전송 방지 시험이 실패해야 한다 (아직 어느 PR 도 없다 — L4 admission 과 L5 Gate 는 이 문서가 가리키는 main 에 들어오지 않았다).
+  - 좁히기 규칙이 사유를 가리지 않게 하면 일반 `Permission_refused`의 좁히기 시험이 실패해야 한다 (#52621).
+  - 깨움이 사유를 가리지 않게 하면 일반 거절은 깨우지 않는다는 시험이 실패해야 한다 (#52621).
 
 
 ## 9. 운영자가 정한 정책
@@ -553,6 +577,8 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
 3.5의 Cut 조건과 선언 교체가 확인되면 별도 종료 증거를 남긴다. provider 결과의 불명확성은 그대로 보존한다. 추가 model 요청이 전송될 수 있음을 포함한 선택이다.
 
 이 선택은 같은 선언의 Cut이나 Raised, floor·admission의 결과 불명까지 일반화하지 않는다. 기존 원본의 Memory 반영이나 ACK를 허락하는 선택도 아니다.
+
+**열린 질문 — 재판단 호출 상한은 정해지지 않았다.** 선언 교체로 다시 만든 history 요청이 또 Cut 으로 끝나면 같은 정책이 반복 적용되고, 그때마다 model 호출이 한 번 더 나간다. 지금 이 문서 어디에도 "한 원본에서 몇 번까지 다시 판단하는가"를 정한 곳이 없다. 9.2 의 선택은 그 상한을 정한 것이 아니므로, 병합본만 읽는 사람이 상한이 있는 것으로 읽지 않도록 여기 열린 질문으로 남긴다. 상한·창·계수 단위(원본 ID 인가 읽은 범위 인가)와 상한에 닿았을 때의 표시는 운영자 결정과 별도 구현이 필요하다.
 
 ### 9.3 받은 답은 보존하고 미실행 Gate를 이어간다
 

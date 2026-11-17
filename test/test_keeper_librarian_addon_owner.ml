@@ -2442,19 +2442,40 @@ let test_preflight_reads_a_dispatch_pending_original_as_resume_does ()=with_fixt
     (Result.is_error (preflight_scan fixture));
   restore ())
 
-let test_preflight_takes_a_body_refusal_judgment_without_a_host_record ()=with_fixture (fun ~sw:_ fixture ->
+let test_preflight_requires_actual_absence_for_a_worker_body_refusal ()=with_fixture (fun ~sw:_ fixture ->
   let record,capture,_=retained_answer_before_gate fixture in
   let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
   let record_path,proof_path=exact_files fixture capture in
+  let final=Lane_addon_exact.Call_final (Input_refused Lane_addon_exact.Request_body_refused) in
+  let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let memory_path=Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+  let queue_before,memory_before=io (fun () ->
+    Fs_compat.load_file queue_path,Fs_compat.load_file_opt memory_path) in
+  let posts=F.post_count fixture.server in
   memory_action fixture (fun () -> ignore (retain_judgment fixture record
-    (Lane_addon_exact.Call_final (Input_refused Lane_addon_exact.Request_body_refused))));
+    final));
   check bool "a host terminal that answered does not confirm the worker's refusal" true
     (refuses_owner fixture owner (closure_preflight fixture));
   io (fun () -> Sys.remove record_path);
-  check int "with only a proof link left, the consumer takes the worker's refusal" 0
-    (List.length (closure_preflight fixture).refusals);
+  check bool "an orphan completed proof cannot confirm a pre-host worker refusal" true
+    (io (fun () -> Capture.confirm_final ~store:fixture.store capture final |> Result.is_error));
+  let report=closure_preflight fixture in
+  check bool "the deploy check refuses the original with an orphan completed proof" true
+    (refuses_owner fixture owner report);
+  let refusal=exact_refusal fixture (Capture.scope owner) report in
+  check bool "the scoped refusal includes the original owner scope" true
+    (List.mem (scope_directory fixture (Capture.scope owner)) refusal.delete);
+  check bool "the scoped refusal includes the orphan proof link" true (List.mem proof_path refusal.delete);
+  check int "the refused proof causes no new provider call" posts (F.post_count fixture.server);
+  check string "the refused proof cannot ACK pending inputs" queue_before
+    (io (fun () -> Fs_compat.load_file queue_path));
+  check (option string) "the refused proof cannot publish Memory" memory_before
+    (io (fun () -> Fs_compat.load_file_opt memory_path));
   io (fun () -> Sys.remove proof_path);
-  check int "and with no Exact file at all" 0 (List.length (closure_preflight fixture).refusals))
+  check bool "no host record and no proof permits the pre-host worker refusal" true
+    (io (fun () -> Capture.confirm_final ~store:fixture.store capture final=Ok ()));
+  check int "the deploy check agrees when both Exact files are absent" 0
+    (List.length (closure_preflight fixture).refusals))
 
 let test_preflight_refuses_a_judgment_its_recovered_answer_does_not_match ()=with_fixture (fun ~sw:_ fixture ->
   let record,_,final=retained_answer_before_gate fixture in
@@ -2970,8 +2991,8 @@ let () =
     test_preflight_refuses_a_finished_original_without_its_exact_record;
   test_case "the deploy check reads a Dispatch_pending original as resume does" `Quick
     test_preflight_reads_a_dispatch_pending_original_as_resume_does;
-  test_case "the deploy check takes a body refusal judgment without a host record" `Quick
-    test_preflight_takes_a_body_refusal_judgment_without_a_host_record;
+  test_case "the deploy check requires actual host absence for a worker body refusal" `Quick
+    test_preflight_requires_actual_absence_for_a_worker_body_refusal;
   test_case "the deploy check refuses a judgment its recovered answer does not match" `Quick
     test_preflight_refuses_a_judgment_its_recovered_answer_does_not_match;
   test_case "the deploy check refuses a body refusal whose size evidence goes" `Quick

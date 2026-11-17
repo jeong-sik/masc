@@ -14,6 +14,8 @@ related: ["0489", "0500", "librarian-history-unknown-resolution", "librarian-his
 
 이슈 #51278 의 설계 문서다. 코드 위치는 main `3c876bd23e9d` 기준이다. 시작 표시를 저장하는 때와 guard 를 부르는 순서(1.3, 3.2, 3.5, 4.1)는 #51269 가 들어간 main `b6fb3b3ee07e` 기준이고, 그 대목은 줄 번호 대신 함수 이름으로 가리킨다.
 
+인용 규칙: 이 문서의 `N행` 표기는 작성 시점 커밋 기준이다. 줄 번호는 그 뒤 커밋에서 밀리므로, 같은 것을 가리키는 심볼 이름(`Module.value`, `type` 생성자)이 함께 적혀 있으면 심볼을 먼저 믿는다. 2026-11-17 main `81cf30f3de` 에서 표본을 다시 열어 보니 3.3 의 두 인용은 어긋나 있었고(고쳤다), `lane_addon_config.ml` 174~180행·`keeper_librarian_durable_edge.ml` 51행도 그 사이 다른 줄을 가리켰다. 남은 행 번호 인용은 같은 rot 를 가질 수 있으므로, 그 자리를 고칠 때 심볼로 바꾸는 것을 함께 한다.
+
 운영자는 2026-11-16에 9절의 네 정책을 선택했다. 이 문서의 정책은 합의됐으며 구현은 진행 중이다.
 정책 선택과 소스 변경만으로 회귀 실행·배포·실제 Memory 반영과 ACK가 끝났다고 판정하지 않는다.
 
@@ -260,10 +262,11 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
   - admission 은 `Other_owner` 를 거절하며 `Replaced` 는 3.9절의 묶음 교체로 처리한다.
 - floor step 은 같은 규칙을 따로 옮긴다(7절의 L2b).
   - floor step owner 는 `Settled` 로 돌아온 이 phase 를 지금 오류로 본다(`lib/keeper/keeper_librarian_floor_step_owner.ml` 95행). 결과에 갈래 하나를 더한다. "접수 전에 끝났다"이다.
-  - chain 의 결과에도 갈래 하나를 더한다. "교체된 선언에서 멈췄다"이다. 지금 `Stopped` 는 자리와 report 만 담아서 같은 선언의 거절과 가를 수 없다(`lib/keeper/keeper_librarian_floor_chain.ml` 131~145행).
+  - chain 의 결과에도 갈래 하나를 더한다. "교체된 선언에서 멈췄다"이다. 지금 `Stopped` 는 자리와 report 만 담아서 같은 선언의 거절과 가를 수 없다(`keeper_librarian_floor_chain.ml` 의 `type outcome`, `Stopped of {position; report}`).
+  - chain 의 `outcome` 은 지금 `Finished`·`Pending`·`Stopped`·`Superseded` 넷이다. 교체 종료를 새 갈래로 세우면 나머지 셋의 뜻은 그대로다. `Stopped`(같은 선언의 거절), `Pending`(다음 pass 가 이어감), `Superseded`(다른 후보가 대신함)는 교체 종료와 갈리고, `Finished` 는 정상 종료다.
     - chain 은 두 경우에 이 갈래를 돌려준다. step owner 가 검증된 "접수 전에 끝났다"를 줬을 때와, host 가 남긴 `Not_allowed {reason=Replaced_declaration}` 를 복원했을 때다. 일반 `Not_allowed`와 현재 목적지 비교만으로 이 갈래를 만들지 않는다.
     - 이 갈래는 report 를 만들지 않는다. 읽을 범위를 줄일 근거가 없다.
-  - pass 는 그 step 을 `Stopped` 와 같은 길로 정리하고 `wake` 를 부른다(3.6). 다음 pass 가 같은 자리를 새 id 로 묻는다(`keeper_librarian_durable_execution.ml` 550~555행).
+  - pass 는 그 step 을 `Stopped` 와 같은 길로 정리하고 `wake` 를 부른다(3.6). 다음 pass 가 같은 자리를 새 id 로 묻는다(`keeper_librarian_durable_execution.ml` 의 `Floor_chain.Stopped {position;report}` 갈래 — `Floor_cleanup.settle_step` 을 거쳐 `Consumer.Memory_refused [report]` 로 돌려준다).
 
 ### 3.4 선언 교체 종료는 다음 읽기를 좁히지 않는다
 

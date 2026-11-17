@@ -25,8 +25,11 @@ let exact ?(base_path="/workspace") ?(input=input) ?(origin=origin 1) () =
 let matches ?(base_path="/workspace") ?(keeper_name="fixture") ?(operation="media_read")
     ?(input=input) ?(origin=origin 1) ?(task_id=Some "task-a") ?(goal_id=Some "goal-a")
     ?(continuation_channel=channel) ?input_hash request =
+  let input_hash = match input_hash with
+    | Some hash -> hash
+    | None -> Fingerprint.request_fingerprint input in
   Fingerprint.matches_entry request ~base_path ~keeper_name ~operation ~input
-    ~input_hash:(Option.value input_hash ~default:(Fingerprint.request_fingerprint input))
+    ~input_hash
     ~origin ~task_id ~goal_id ~continuation_channel
 
 let object_fields = function

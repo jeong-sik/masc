@@ -2201,7 +2201,7 @@ let test_resolution_is_durable_and_origin_scoped () =
          (String_util.contains_substring
             retry_text
             "Do not request the approved operation again");
-       let projected_text =
+       let projected_blocks =
          match retry_message.replay_evidence with
          | [] | _ :: _ :: _ -> Alcotest.fail "retry requires one replay evidence projection"
          | [ evidence ] ->
@@ -2212,40 +2212,55 @@ let test_resolution_is_durable_and_origin_scoped () =
                 [ Agent_core.Types.user_msg retry_text ]
             with
             | Ok [ _canonical; projected ] ->
-              Agent_core.Types.text_of_content projected.content
+              projected.content
             | Ok _ ->
               Alcotest.fail "replay projection did not append exact evidence"
             | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
        in
-       let replay_evidence =
-         projected_text
-         |> String.split_on_char '\n'
-         |> List.rev
-         |> List.find_opt (fun line ->
-            not (String.equal (String.trim line) "")
-            && not (Tool_output.is_marker line))
-         |> (function
-            | Some line -> line
-            | None -> Alcotest.fail "no JSON line in the replay projection")
-         |> Yojson.Safe.from_string
+       let projected_text = Agent_core.Types.text_of_content projected_blocks in
+       let replay_references =
+         List.filter_map
+           (function
+             | Agent_core.Types.Text text ->
+               (match Tool_output.decode_from_agent_core text with
+                | Tool_output.Decoded reference -> Some reference
+                | Tool_output.Not_marker -> None
+                | Tool_output.Invalid_marker { detail } -> Alcotest.fail detail)
+             | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+             | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+             | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+             | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
+           projected_blocks
+       in
+       let replay_reference =
+         match replay_references with
+         | [ reference ] -> reference
+         | [] | _ :: _ :: _ ->
+           Alcotest.fail "provider replay must carry exactly one artifact reference"
        in
        List.iter (fun private_value ->
          Alcotest.(check bool) "private roots and bytes never reach model replay"
            false (String_util.contains_substring projected_text private_value))
          [ private_ref.sha256; private_output ];
-       Alcotest.(check string)
+       Alcotest.(check yojson)
          "provider-only projection preserves the exact replay artifact identity"
-         replay_output_ref.sha256
-         (match
-            replay_evidence
-            |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
-            |> Tool_output.normalized_artifact_ref_of_json
-          with
-          | Tool_output.Decoded_normalized_artifact_ref decoded -> decoded.sha256
-          | Tool_output.Not_normalized_artifact_ref ->
-            Alcotest.fail "provider replay evidence lost its artifact reference"
-          | Tool_output.Invalid_normalized_artifact_ref { detail } ->
-            Alcotest.fail detail);
+         (Tool_output.normalized_artifact_ref_to_json
+            (Tool_output.with_preview replay_output_ref ""))
+         (Tool_output.normalized_artifact_ref_to_json replay_reference);
+       Alcotest.(check string)
+         "provider-only replay reference carries no payload preview"
+         ""
+         replay_reference.preview;
+       (match
+          Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+            ~sha256:replay_reference.sha256
+        with
+        | Ok (Some bytes) ->
+          Alcotest.(check string)
+            "provider replay reference resolves to the exact retained result"
+            replay_output bytes
+        | Ok None -> Alcotest.fail "provider replay reference lost its retained body"
+        | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 

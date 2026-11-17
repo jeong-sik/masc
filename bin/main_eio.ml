@@ -2758,12 +2758,21 @@ let exact_addon_setup_cmd =
              "A declaration uses one of these packages with package = \"<name>\". This \
               writes no declaration and starts nothing. A package that fails does not \
               stop the others, and the exit status is 1 when any failed."
+         ; `P
+             "--declared installs only the packages the workspace's Lane declarations \
+              name with package. The release installer runs it so on every install."
          ])
     Term.(
-      const (fun base_path ->
+      const (fun base_path declared ->
         Masc_cli_exact_addon_setup.run
-          ~base_path:(Env_config.normalize_masc_base_path_input base_path))
-      $ base_path)
+          ~base_path:(Env_config.normalize_masc_base_path_input base_path)
+          ~declared)
+      $ base_path
+      $ Arg.(
+          value
+          & flag
+          & info [ "declared" ]
+              ~doc:"Install only the packages the workspace's Lane declarations name with package."))
 
 let voice_local_setup_cmd =
   let voice =

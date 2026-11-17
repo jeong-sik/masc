@@ -11,6 +11,13 @@
     It writes no declaration and starts nothing. A declaration uses a package
     with [package = "<name>"]. A package that fails does not stop the others. *)
 
+type scope =
+  | Every_carried
+  | Declared
+      (** Only the packages the workspace's Lane declarations name with
+          [package] ({!Lane_addon_config.declared_carried}). A workspace
+          without a config root declares none. *)
+
 type image_outcome =
   | Built
   | Already_built  (** The image already held the label of these inputs. *)
@@ -29,13 +36,22 @@ type failure =
 
 type report = { package : Lane_addon_carried.id; result : (installed, failure) result }
 
-type error = Base_path_not_absolute of string
+type outcome = {
+  reports : report list;  (** One per package [scope] selects, in {!Lane_addon_carried.all} order. *)
+  unread : Lane_addon_config.issue list;
+      (** With [Declared], the declarations whose package choice was not read. *)
+}
 
-val run : base_path:string -> docker:string -> (report list, error) result
-(** One report per package, in {!Lane_addon_carried.all} order. [docker] is
-    the Docker command; a name without [/] is looked up on [PATH]. *)
+type error =
+  | Base_path_not_absolute of string
+  | Config_root_invalid of string
+
+val run : base_path:string -> docker:string -> scope:scope -> (outcome, error) result
+(** [docker] is the Docker command; a name without [/] is looked up on [PATH]. *)
 
 val error_message : error -> string
 
 val report_line : report -> string
 (** One line naming the package and what happened to it. *)
+
+val unread_line : Lane_addon_config.issue -> string

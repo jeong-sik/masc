@@ -45,9 +45,15 @@ let with_workspace f =
     f ~base_path:root ~docker ~state)
 
 let reports ~base_path ~docker =
-  match Setup.run ~base_path ~docker with
-  | Ok reports -> reports
+  match Setup.run ~base_path ~docker ~scope:Setup.Every_carried with
+  | Ok outcome -> outcome.Setup.reports
   | Error error -> fail (Setup.error_message error)
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> Unix.putenv name value | None -> Unix.unsetenv name) f
 
 let installed (report : Setup.report) =
   match report.result with
@@ -115,10 +121,33 @@ let without_docker_the_folders_are_still_written () = with_workspace (fun ~base_
         (Result.is_ok (Carried.installed_manifest ~packages report.package)))
     (reports ~base_path ~docker:(Filename.concat base_path "no-docker-here")))
 
+let declared_installs_only_what_the_declarations_name () =
+  with_workspace (fun ~base_path ~docker ~state:_ ->
+  let config_root = Filename.concat base_path "configuration" in
+  let directory = Lane_addon_config.directory ~config_root in
+  Fs_compat.mkdir_p directory;
+  let declare file keys =
+    write (Filename.concat directory file)
+      (Printf.sprintf "id = %S\nrun_id = \"memory\"\n%s[binding]\nsources = []\n" file keys) in
+  declare "librarian.toml" "package = \"keeper-librarian\"\n";
+  declare "placed.toml" "manifest_path = \"../elsewhere/lane.toml\"\n";
+  declare "broken.toml" "package = 1\n";
+  with_env "MASC_CONFIG_DIR" config_root (fun () ->
+    match Setup.run ~base_path ~docker ~scope:Setup.Declared with
+    | Error error -> fail (Setup.error_message error)
+    | Ok { Setup.reports; unread } ->
+        check (list string) "only the carried package a declaration names"
+          [Carried.name Carried.Keeper_librarian]
+          (List.map (fun (report : Setup.report) -> Carried.name report.package) reports);
+        List.iter (fun report -> ignore (installed report)) reports;
+        check (list string) "a declaration whose package choice does not read is named"
+          [Filename.concat directory "broken.toml"]
+          (List.map (fun (issue : Lane_addon_config.issue) -> issue.source_path) unread)))
+
 let a_relative_base_path_is_refused () =
-  match Setup.run ~base_path:"relative/workspace" ~docker:"docker" with
+  match Setup.run ~base_path:"relative/workspace" ~docker:"docker" ~scope:Setup.Every_carried with
   | Error (Setup.Base_path_not_absolute _) -> ()
-  | Ok _ -> fail "a relative base path was used"
+  | Error (Setup.Config_root_invalid _) | Ok _ -> fail "a relative base path was used"
 
 let () =
   run "Exact_addon_setup"
@@ -127,4 +156,6 @@ let () =
           test_case "a changed folder is left as it is" `Quick a_changed_folder_is_left_as_it_is;
           test_case "without docker the folders are still written" `Quick
             without_docker_the_folders_are_still_written;
+          test_case "declared installs only what the declarations name" `Quick
+            declared_installs_only_what_the_declarations_name;
           test_case "a relative base path is refused" `Quick a_relative_base_path_is_refused ] ) ]

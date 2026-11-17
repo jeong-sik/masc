@@ -1,5 +1,7 @@
 open Result.Syntax
 
+type scope = Every_carried | Declared
+
 type image_outcome = Built | Already_built
 
 type installed = {
@@ -16,7 +18,11 @@ type failure =
 
 type report = { package : Lane_addon_carried.id; result : (installed, failure) result }
 
-type error = Base_path_not_absolute of string
+type outcome = { reports : report list; unread : Lane_addon_config.issue list }
+
+type error =
+  | Base_path_not_absolute of string
+  | Config_root_invalid of string
 
 let io_detail = function
   | Unix.Unix_error (error, call, arg) -> call ^ " " ^ arg ^ ": " ^ Unix.error_message error
@@ -97,13 +103,30 @@ let install ~docker ~packages id =
       Error (Image_not_built { image; reason = "the package runs on Apple container; this setup builds Docker images" }) in
   Ok { manifest_path; folder; image; image_outcome }
 
-let run ~base_path ~docker =
+(* The declarations are read where the server reads them. *)
+let selected ~base_path = function
+  | Every_carried -> Ok (Lane_addon_carried.all, [])
+  | Declared ->
+    let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
+    (match resolution.Config_dir_resolver.status with
+     | Config_dir_resolver.Invalid_env_status ->
+       Error (Config_root_invalid (String.concat "; " resolution.warnings))
+     | Config_dir_resolver.Missing_status -> Ok ([], [])
+     | Config_dir_resolver.Ready | Config_dir_resolver.Warn ->
+       Ok (Lane_addon_config.declared_carried
+             ~directory:(Lane_addon_config.directory ~config_root:resolution.config_root.path)))
+
+let run ~base_path ~docker ~scope =
   if Filename.is_relative base_path then Error (Base_path_not_absolute base_path)
   else
+    let* chosen, unread = selected ~base_path scope in
     let packages = Config_dir_resolver.packages_dir ~base_path in
-    Ok (List.map (fun id -> { package = id; result = install ~docker ~packages id }) Lane_addon_carried.all)
+    Ok { reports = List.map (fun id -> { package = id; result = install ~docker ~packages id }) chosen;
+         unread }
 
-let error_message (Base_path_not_absolute path) = "the base path is not absolute: " ^ path
+let error_message = function
+  | Base_path_not_absolute path -> "the base path is not absolute: " ^ path
+  | Config_root_invalid detail -> "the workspace's config root is invalid: " ^ detail
 
 let folder_word = function
   | Lane_addon_carried.Written -> "written"
@@ -123,3 +146,6 @@ let report_line { package; result } =
     Printf.sprintf "%s: %s %s, image %s %s" name (Filename.dirname manifest_path)
       (folder_word folder) image (image_word image_outcome)
   | Error failure -> Printf.sprintf "%s: %s" name (failure_message package failure)
+
+let unread_line (issue : Lane_addon_config.issue) =
+  Printf.sprintf "%s was not read: %s" issue.source_path issue.message

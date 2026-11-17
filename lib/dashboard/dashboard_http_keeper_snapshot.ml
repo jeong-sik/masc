@@ -83,7 +83,7 @@ type system_prompt_preview_error =
    (RFC-0504 §2.4). Read separately from the prompt build: an unreadable
    answer here is this read's, not the prompt's. *)
 let constitution_ledger_json = function
-  | Ok (ledger : World_constitution_store.ledger) ->
+  | Ok (ledger : World_constitution_store.diagnostics) ->
     `Assoc
       [ "state", `String "read"
       ; ( "rejected_lines"
@@ -321,7 +321,7 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
                 (lazy
                   (Result.bind (Keeper_constitution_roster.read ~config)
                      (fun resolve_subject ->
-                       World_constitution_store.load ~base_path:config.base_path
+                       World_constitution_store.load_diagnostics ~base_path:config.base_path
                          ~resolve_subject)))
               effective_system_prompt );
           ("unified_user_message_preview", `String unified_user_message_preview);

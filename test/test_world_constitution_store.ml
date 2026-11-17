@@ -426,6 +426,41 @@ let test_a_line_from_outside_the_roster_is_isolated_not_dropped () =
       | others ->
         Alcotest.failf "expected one isolated line, got %d" (List.length others)))
 
+let test_diagnostics_read_preserves_errors_and_source () =
+  with_world (fun base_path ->
+      let resolve_subject name = not (String.equal name "outside-roster") in
+      let read () = match Store.load_diagnostics ~base_path ~resolve_subject with
+        | Ok diagnostics -> diagnostics
+        | Error error -> Alcotest.fail (Store.read_error_to_string error) in
+      let missing = read () in
+      Alcotest.(check int) "missing ledger has no rejections" 0 (List.length missing.rejected);
+      Alcotest.(check int) "missing ledger has no isolated lines" 0 (List.length missing.isolated);
+      let retired = article "a retired norm" in
+      add ~base_path retired;
+      remove ~base_path retired;
+      add ~base_path (article ~author:"outside-roster" "unresolved norm");
+      let path = Store.ledger_path ~base_path in
+      Fs_compat.append_file path "\n{broken}\n{unfinished";
+      let bytes = Fs_compat.load_file path in
+      let diagnostics = read () in
+      Alcotest.(check (list int)) "rejected physical line numbers include blanks"
+        [5; 6] (List.map (fun (line : Store.rejected_line) -> line.line_number) diagnostics.rejected);
+      Alcotest.(check bool) "complete and unfinished errors remain distinct" true
+        (List.map (fun (line : Store.rejected_line) -> line.line_end) diagnostics.rejected
+         = [Store.Newline_terminated; Store.Unterminated_final_line]);
+      Alcotest.(check (list (pair int string))) "isolated subject stays visible"
+        [3, "outside-roster"]
+        (List.map (fun (line : Store.isolated_line) -> line.line_number, line.subject) diagnostics.isolated);
+      Alcotest.(check string) "diagnostics do not repair or truncate the ledger"
+        bytes (Fs_compat.load_file path);
+      Alcotest.(check int) "full history remains available to its reader" 3
+        (List.length (load_or_fail ~base_path ~resolve_subject ()).entries);
+      Sys.remove path;
+      Unix.mkdir path 0o700;
+      match Store.load_diagnostics ~base_path ~resolve_subject with
+      | Error (Store.Unreadable _) -> ()
+      | Ok _ -> Alcotest.fail "an unreadable ledger became empty diagnostics")
+
 let test_an_unresolved_removal_withholds_without_erasing_history () =
   with_world (fun base_path ->
       let withdrawn = article "a norm taken back by a former keeper" in
@@ -580,7 +615,9 @@ let () =
             test_replacing_keeps_unrelated_norms_in_place;
         ] );
       ( "isolation",
-        [ Alcotest.test_case "a line from outside the roster is isolated, not dropped"
+        [ Alcotest.test_case "diagnostics preserve errors and source bytes" `Quick
+            test_diagnostics_read_preserves_errors_and_source;
+          Alcotest.test_case "a line from outside the roster is isolated, not dropped"
             `Quick test_a_line_from_outside_the_roster_is_isolated_not_dropped;
           Alcotest.test_case "an unresolved removal withholds without erasing history" `Quick
             test_an_unresolved_removal_withholds_without_erasing_history;

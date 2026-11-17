@@ -74,4 +74,6 @@ val with_projection_diagnostics :
     only to the original read: metadata [extra] cannot replace or invent
     them. Other metadata keys take precedence over an existing value. Emits
     one [projection_diagnostics] member with unique field names; does not
-    infer an absent read outcome. *)
+    infer an absent read outcome. [payload_bytes] is the compact serialized
+    byte length of the input JSON before refreshed diagnostics are attached,
+    with the ordinary Yojson writer's rejection behavior. *)

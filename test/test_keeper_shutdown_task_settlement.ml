@@ -173,10 +173,11 @@ let stopped_operation ~config ~stage operation =
 let check_receipt config operation id =
   check_todo config id;
   match (task config id).handoff_context with
-  | Some context ->
+  | Some (Masc_domain.Handoff_decoded context) ->
     check bool "release belongs to this operation" true
       (List.mem (receipt_ref operation) context.evidence_refs)
-  | None -> fail "released Task lost its durable receipt"
+  | Some (Masc_domain.Handoff_unreadable _) | None ->
+    fail "released Task lost its durable receipt"
 ;;
 
 let test_typed_cas_and_authoritative_reobservation () = with_workspace (fun config ->

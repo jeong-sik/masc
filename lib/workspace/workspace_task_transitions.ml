@@ -270,7 +270,12 @@ let perform_task_transition
            incoming owner can read it (RFC-0365); resolving from it would put
            that owner's sentence forward as this owner's reason. *)
         let stated_reason =
-          Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context
+          Masc_domain.stated_reason
+            ~reason:(Some reason)
+            ~handoff_context:
+              (Option.map
+                 (fun context -> Masc_domain.Handoff_decoded context)
+                 handoff_context)
         in
         let action_s = Masc_domain.task_action_to_string action in
         let* decision =
@@ -385,8 +390,14 @@ let perform_task_transition
           match backlog_update.transitioned_task.task_status with
           | Masc_domain.AwaitingVerification
               { assignee; verification_id; _ } ->
+            (* The handoff this submission authored, not the stored field:
+               an exit-class submit replaces the stored value with exactly this
+               argument, and the argument is typed readable. *)
+            let submitted_handoff =
+              backlog_update.persisted_handoff_context
+            in
             let has_summary =
-              match backlog_update.transitioned_task.handoff_context with
+              match submitted_handoff with
               | Some context -> String.trim context.Masc_domain.summary <> ""
               | None -> false
             in
@@ -406,7 +417,7 @@ let perform_task_transition
                        { evidence_refs =
                            Workspace_task_verification
                            .verification_submission_evidence_refs
-                             backlog_update.transitioned_task
+                             ~handoff:submitted_handoff
                              ~notes
                        } ))
           | Masc_domain.Todo
@@ -996,14 +1007,15 @@ let commit_verdict_r
              | Masc_domain.Verdict_approved -> task.handoff_context
              | Masc_domain.Verdict_rejected { reason } ->
                Some
-                 { Masc_domain.summary = reason
-                 ; reason = Some reason
-                 ; next_step = None
-                 ; failure_mode = None
-                 ; evidence_refs = []
-                 ; updated_at = Some now
-                 ; updated_by = Some authority_actor
-                 }
+                 (Masc_domain.Handoff_decoded
+                    { Masc_domain.summary = reason
+                    ; reason = Some reason
+                    ; next_step = None
+                    ; failure_mode = None
+                    ; evidence_refs = []
+                    ; updated_at = Some now
+                    ; updated_by = Some authority_actor
+                    })
            in
            let pending_completion_rejections =
              List.filter

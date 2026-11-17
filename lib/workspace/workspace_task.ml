@@ -491,7 +491,8 @@ let release_unroutable_rejected_task_r
                    then
                      { candidate with
                        task_status = Masc_domain.Todo
-                     ; handoff_context = Some handoff_context
+                     ; handoff_context =
+                         Some (Masc_domain.Handoff_decoded handoff_context)
                      }
                    else candidate)
                 backlog.tasks

@@ -1988,7 +1988,7 @@ let test_rejected_verdict_audit_preserves_reason () =
      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
      | Ok _ -> ());
     (match W.get_tasks_raw config with
-     | [ { handoff_context = Some handoff; _ } ] ->
+     | [ { handoff_context = Some (Masc_domain.Handoff_decoded handoff); _ } ] ->
        Alcotest.(check string)
          "task keeps the exact rejection reason"
          "required deployment evidence is missing"
@@ -2422,9 +2422,10 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
   accepted (W.commit_verdict_r config ~task_id:"task-001" ~verification_id:first_id
     ~authority ~verdict:(Masc_domain.Verdict_rejected {reason="keep beta and gamma false"}) ());
   (match (receipt_task config).handoff_context with
-   | Some handoff -> Alcotest.(check (list string))
+   | Some (Masc_domain.Handoff_decoded handoff) -> Alcotest.(check (list string))
        "rejection correlation does not become an evidence reference" [] handoff.evidence_refs
-   | None -> Alcotest.fail "rejection must retain its correction handoff");
+   | Some (Masc_domain.Handoff_unreadable _) | None ->
+     Alcotest.fail "rejection must retain its correction handoff");
   Fs_compat.save_file artifact corrected_body;
   let retry_id = submit "first-retry" in
   Alcotest.(check bool) "the first retry has a fresh request" true (first_id <> retry_id);

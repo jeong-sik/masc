@@ -111,10 +111,13 @@ let operation_evidence_ref operation =
 
 let task_has_operation_receipt operation (task : Masc_domain.task) =
   match task.task_status, task.handoff_context with
-  | Masc_domain.Todo, Some handoff ->
+  | Masc_domain.Todo, Some (Masc_domain.Handoff_decoded handoff) ->
     List.exists
       (String.equal (operation_evidence_ref operation))
       handoff.evidence_refs
+  (* The shutdown release writes its receipt as a readable handoff, so an
+     unreadable one was not written by this operation. *)
+  | Masc_domain.Todo, Some (Masc_domain.Handoff_unreadable _)
   | Masc_domain.Claimed _, _
   | Masc_domain.InProgress _, _
   | Masc_domain.AwaitingVerification _, _
@@ -170,15 +173,21 @@ let append_unique_evidence_ref (refs : string list) (receipt_ref : string)
   else non_empty @ [ receipt_ref ]
 ;;
 
+(* The release keeps the previous owner's summary and next step. An unreadable
+   stored handoff cannot be merged, and replacing it would erase the stored
+   value (#38219), so the release is refused for an operator to repair it. *)
 let release_handoff_context
       ~now
       operation
-      (previous : Masc_domain.task_handoff_context option)
-  : Masc_domain.task_handoff_context
+      (previous : Masc_domain.stored_handoff_context option)
+  : (Masc_domain.task_handoff_context, string) result
   =
   let receipt_ref = operation_evidence_ref operation in
   match previous with
+  | Some (Masc_domain.Handoff_unreadable { reason; raw = _ }) ->
+    Error ("stored handoff_context is unreadable: " ^ reason)
   | None ->
+    Ok
     { summary = shutdown_release_summary
     ; reason = Some shutdown_release_reason
     ; next_step = Some shutdown_release_next_step
@@ -187,7 +196,7 @@ let release_handoff_context
     ; updated_at = Some now
     ; updated_by = Some operation.actor
     }
-  | Some prev ->
+  | Some (Masc_domain.Handoff_decoded prev) ->
     let summary =
       match non_empty_trimmed prev.summary with
       | Some preserved -> preserved
@@ -198,6 +207,7 @@ let release_handoff_context
       | Some _ as preserved -> preserved
       | None -> Some shutdown_release_next_step
     in
+    Ok
     { summary
     ; reason = Some shutdown_release_reason
     ; next_step
@@ -261,8 +271,10 @@ let shutdown_release_plan ~config ~(meta : Keeper_meta_contract.keeper_meta)
   match receipted with
   | [id] -> Ok (Workspace.Already_receipted (Keeper_id.Task_id.to_string id))
   | [] ->
-    if owned task then Ok (Workspace.Release_with_handoff
-      (release_handoff_context ~now:updated_at operation task.handoff_context))
+    if owned task then
+      (match release_handoff_context ~now:updated_at operation task.handoff_context with
+       | Ok handoff -> Ok (Workspace.Release_with_handoff handoff)
+       | Error detail -> refused detail)
     else refused "snapshotted task changed without shutdown receipt"
   | _ :: _ :: _ -> refused "multiple uncommitted shutdown receipts require operator reconciliation"
 ;;

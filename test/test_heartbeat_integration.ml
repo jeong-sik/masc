@@ -5472,8 +5472,9 @@ let test_keeper_shutdown_release_preserves_task_handoff () =
       check bool "task returned to Todo" true
         (released_task.task_status = Masc_domain.Todo);
       match released_task.handoff_context with
-      | None -> fail "expected handoff_context on released task"
-      | Some handoff ->
+      | Some (Masc_domain.Handoff_unreadable _) | None ->
+        fail "expected handoff_context on released task"
+      | Some (Masc_domain.Handoff_decoded handoff) ->
         check string "preserves task-specific summary"
           "Halfway through migration; schema v2 applied"
           handoff.summary;

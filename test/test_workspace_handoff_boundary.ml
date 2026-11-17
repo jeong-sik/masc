@@ -28,7 +28,13 @@ let handoff ?(summary = "prior owner note") ?(updated_by = "keeper-a") () :
   }
 ;;
 
-let task ?handoff_context ~status id : Domain.task =
+let task ?handoff_context ?stored ~status id : Domain.task =
+  let handoff_context =
+    match stored, handoff_context with
+    | Some stored, _ -> Some stored
+    | None, Some note -> Some (Domain.Handoff_decoded note)
+    | None, None -> None
+  in
   { id
   ; title = "probe"
   ; description = "probe"
@@ -64,8 +70,22 @@ let apply ~action ~new_status ~handoff_context task =
   | tasks -> Alcotest.failf "expected one task back, got %d" (List.length tasks)
 ;;
 
+let decoded_of (t : Domain.task) =
+  match t.handoff_context with
+  | None -> None
+  | Some (Domain.Handoff_decoded note) -> Some note
+  | Some (Domain.Handoff_unreadable { reason; raw = _ }) ->
+    Alcotest.failf "expected a readable note, got an unreadable one: %s" reason
+;;
+
 let summary_of (t : Domain.task) =
-  Option.map (fun (h : Domain.task_handoff_context) -> h.summary) t.handoff_context
+  Option.map (fun (h : Domain.task_handoff_context) -> h.summary) (decoded_of t)
+;;
+
+(* A stored value the decoder refuses: [summary] is not a string. *)
+let unreadable_note () : Domain.stored_handoff_context =
+  Domain.stored_handoff_context_of_yojson
+    (`Assoc [ "summary", `Int 7; "updated_by", `String "keeper-a" ])
 ;;
 
 let claimed assignee : Domain.task_status =
@@ -107,7 +127,7 @@ let claim_preserves_the_previous_owners_note () =
   Alcotest.(check (option string))
     "attribution still points at the author, not the claimant"
     (Some "keeper-a")
-    (Option.bind after_start.handoff_context (fun h ->
+    (Option.bind (decoded_of after_start) (fun h ->
        h.Domain.updated_by))
 ;;
 
@@ -168,7 +188,7 @@ let release_replaces_the_note () =
   Alcotest.(check (option string))
     "and attribution moves with it"
     (Some "keeper-b")
-    (Option.bind after_release.handoff_context (fun h -> h.Domain.updated_by))
+    (Option.bind (decoded_of after_release) (fun h -> h.Domain.updated_by))
 ;;
 
 (* An exit with nothing to say clears the field: the closing owner is the
@@ -257,6 +277,43 @@ let render_marks_an_unattributed_note () =
   Alcotest.(check bool) "absence of an author is stated" true (contains "unattributed")
 ;;
 
+(* #38219: an entry-class transition keeps a stored note it cannot read, raw
+   JSON included, so the backlog write that follows does not erase it. *)
+let claim_keeps_an_unreadable_note () =
+  let stored = unreadable_note () in
+  (match stored with
+   | Domain.Handoff_unreadable _ -> ()
+   | Domain.Handoff_decoded _ -> Alcotest.fail "fixture must be unreadable");
+  let released = task ~stored ~status:Domain.Todo "task-1" in
+  let after_claim =
+    apply
+      ~action:Domain.Claim
+      ~new_status:(claimed "keeper-b")
+      ~handoff_context:None
+      released
+  in
+  Alcotest.(check bool)
+    "the claim keeps the unreadable value unchanged"
+    true
+    (Option.equal Domain.equal_stored_handoff_context
+       (Some stored) after_claim.handoff_context)
+;;
+
+(* The keeper prompt names an unreadable note instead of rendering the task as
+   one nobody left a note on. *)
+let render_names_an_unreadable_note () =
+  let stored = unreadable_note () in
+  let reason =
+    match stored with
+    | Domain.Handoff_unreadable { reason; raw = _ } -> reason
+    | Domain.Handoff_decoded _ -> Alcotest.fail "fixture must be unreadable"
+  in
+  let held = task ~stored ~status:(in_progress "keeper-b") "task-1" in
+  let rendered = Masc.Keeper_unified_prompt.format_current_task held in
+  Alcotest.(check bool) "the decoder refusal reaches the model" true
+    (String_util.contains_substring rendered reason)
+;;
+
 let render_keeps_next_step_without_summary () =
   let note = { (handoff ~summary:"" ()) with
     next_step = Some "capture the corrected screen";
@@ -311,6 +368,16 @@ let () =
             "an unattributed note says so"
             `Quick
             render_marks_an_unattributed_note
+        ; Alcotest.test_case
+            "an unreadable note is named with its refusal"
+            `Quick
+            render_names_an_unreadable_note
+        ] )
+    ; ( "unreadable stored note (#38219)"
+      , [ Alcotest.test_case
+            "a claim keeps the unreadable value unchanged"
+            `Quick
+            claim_keeps_an_unreadable_note
         ] )
     ]
 ;;

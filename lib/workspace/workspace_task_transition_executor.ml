@@ -30,13 +30,19 @@ type transition_backlog_update =
 
    Staleness does not need erasure to be expressible: [updated_by] and
    [updated_at] are populated on every record, and the renderer already labels
-   the line "Prior handoff". *)
+   the line "Prior handoff".
+
+   An exit-class argument replaces a stored [Handoff_unreadable] the same way
+   it replaces a readable note: the closing owner authors the field. An
+   entry-class action keeps it, raw JSON included, so it is written back
+   unchanged (#38219). *)
 let handoff_context_after ~action ~previous ~argument =
   match action with
   | Masc_domain.Release
   | Masc_domain.Done_action
   | Masc_domain.Submit_for_verification
-  | Masc_domain.Cancel -> argument
+  | Masc_domain.Cancel ->
+    Option.map (fun context -> Masc_domain.Handoff_decoded context) argument
   | Masc_domain.Claim | Masc_domain.Start -> previous
 ;;
 

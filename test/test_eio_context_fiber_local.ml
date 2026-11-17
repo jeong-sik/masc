@@ -287,7 +287,7 @@ let test_joined_owner_cancellation_before_entry_and_during_wait () =
               Atomic.incr entries;
               Fun.protect ~finally:(fun () -> Atomic.set released true) (fun () ->
                 Eio.Promise.resolve entered_u (Domain.self ());
-                Eio.Promise.await never)));
+                (Eio.Promise.await never : unit))));
           false
         with Eio.Cancel.Cancelled _ -> true) in
       let context = Eio.Promise.await context in
@@ -302,7 +302,7 @@ let test_joined_owner_cancellation_before_entry_and_during_wait () =
     Alcotest.(check int) "cancelled local publication is entered once" 1 (Atomic.get entries);
     let propagated =
       try
-        Eio_context.run_on_owner_domain_joined (fun () -> raise Exit);
+        Eio_context.run_on_owner_domain_joined (fun () -> (raise Exit : unit));
         false
       with Exit -> true in
     Alcotest.(check bool) "actual owner exception is returned to the caller" true propagated;

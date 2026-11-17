@@ -45,6 +45,13 @@ type program_source =
       { range : official_range_id
       ; selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list
       }
+  | Mixed_program_source of
+      { atom_range : durable_range_id
+      ; checkpoint : Agent_core.Types.message list
+      ; official_range : official_range_id
+      ; selected_turns : (int * Ids.Turn_ref.t * Agent_core.Types.message list) list
+      ; ordered_sources : Keeper_librarian_unread.source list
+      }
 
 type program_commit =
   { snapshot : t
@@ -54,27 +61,28 @@ type program_commit =
 let messages_sha256 messages =
   sha256 (Yojson.Safe.to_string (`List (List.map Agent_core.Checkpoint.message_to_json messages)))
 
-let prepare_program_source source (program : Keeper_memory_os_program.t) =
-  let module P = Keeper_memory_os_program_types in
-  let module Unread = Keeper_librarian_unread in
-  match source with
-  | Atom_program_source {range;checkpoint} ->
+module Program_types = Keeper_memory_os_program_types
+module Unread = Keeper_librarian_unread
+module Source_map = Map.Make (Unread.Source_key)
+
+let prepare_atom_source ~(range : durable_range_id) ~checkpoint ~unread =
     let* _ = durable_range_id_of_json (durable_range_id_to_json range)
       |> Result.map_error wire_error_to_string in
     let* sources = Unread.sources_for_atom_range ~trace_id:range.trace_id
       ~history_start_boundary_line:range.history_start_boundary_line ~start_atom:range.start_atom
       ~end_atom:range.end_atom ~messages:checkpoint in
-    if sources <> program.sources || range.unread_messages <> program.unread
+    if range.unread_messages <> unread
        || Runtime_model_input_tail_window.atom_opening_digest checkpoint (range.end_atom-1)
           <> Some range.last_atom_digest
     then Error "ordered program does not cover its exact original atom boundary"
-    else Ok (Some range,None,
-      P.Atom_boundary {receipt_scope=range.receipt_scope;trace_id=range.trace_id;
+    else Ok (sources,
+      ({receipt_scope=range.receipt_scope;trace_id=range.trace_id;
         history_start_boundary_line=range.history_start_boundary_line;start_atom=range.start_atom;
         end_atom=range.end_atom;last_atom_digest=range.last_atom_digest;
         end_boundary_line=range.end_boundary_line;boundary_lines_seen=range.boundary_lines_seen;
-        checkpoint_sha256=messages_sha256 checkpoint})
-  | Official_program_source {range;selected_turns} ->
+        checkpoint_sha256=messages_sha256 checkpoint} : Program_types.atom_boundary))
+
+let prepare_official_source ~(range : official_range_id) ~selected_turns ~unread =
     let* _ = official_range_id_of_json (official_range_id_to_json range)
       |> Result.map_error wire_error_to_string in
     let selected = List.map (fun (line,turn_ref,_) -> line,turn_ref) selected_turns in
@@ -82,11 +90,43 @@ let prepare_program_source source (program : Keeper_memory_os_program.t) =
       List.mapi (fun message_in_turn message ->
         Unread.Official_turn {turn_ref;boundary_line;message_in_turn;
           message_sha256=Unread.message_digest message}) messages) selected_turns in
-    if selected <> range.turns || sources <> program.sources || range.unread_messages <> program.unread
+    if selected <> range.turns || range.unread_messages <> unread
     then Error "ordered program does not cover its exact original official-turn boundary"
-    else Ok (None,Some range,P.Official_boundary {receipt_scope=range.receipt_scope;
+    else Ok (sources,({receipt_scope=range.receipt_scope;
       after_boundary_line=range.after_boundary_line;
-      turns=List.map (fun (line,turn_ref,messages) -> line,turn_ref,messages_sha256 messages) selected_turns})
+      turns=List.map (fun (line,turn_ref,messages) -> line,turn_ref,messages_sha256 messages) selected_turns}
+      : Program_types.official_boundary))
+
+let index_sources sources =
+  List.fold_left (fun result source ->
+    let* indexed=result in
+    let key=Unread.Source_key.of_source source in
+    if Source_map.mem key indexed then Error "Mixed program repeats an original message coordinate"
+    else Ok (Source_map.add key source indexed)) (Ok Source_map.empty) sources
+
+let prepare_program_source source (program : Keeper_memory_os_program.t) =
+  let module P = Program_types in
+  match source with
+  | Atom_program_source {range;checkpoint} ->
+    let* sources,boundary=prepare_atom_source ~range ~checkpoint ~unread:program.unread in
+    if sources<>program.sources then Error "ordered program changed its original atom manifest"
+    else Ok (Some range,None,P.Atom_boundary boundary)
+  | Official_program_source {range;selected_turns} ->
+    let* sources,boundary=prepare_official_source ~range ~selected_turns ~unread:program.unread in
+    if sources<>program.sources then Error "ordered program changed its original official manifest"
+    else Ok (None,Some range,P.Official_boundary boundary)
+  | Mixed_program_source {atom_range;checkpoint;official_range;selected_turns;ordered_sources} ->
+    let atom_unread,official_unread=List.partition (fun (hole : Unread.t) ->
+      match hole.source with Unread.Atom _ -> true | Official_turn _ -> false) program.unread in
+    let* atom_sources,atom=prepare_atom_source ~range:atom_range ~checkpoint ~unread:atom_unread in
+    let* official_sources,official=prepare_official_source ~range:official_range ~selected_turns
+      ~unread:official_unread in
+    let* expected=index_sources (atom_sources @ official_sources) in
+    let* actual=index_sources ordered_sources in
+    if atom_range.receipt_scope<>official_range.receipt_scope || ordered_sources<>program.sources
+       || not (Source_map.equal ( = ) expected actual)
+    then Error "Mixed program changed its complete original source manifest"
+    else Ok (Some atom_range,Some official_range,P.Mixed_boundary {atom;official})
 
 let apply_program_with_io ?write_snapshot ?sync_snapshot ?finalize_journal ?on_committed ?clock ~pass ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
   let module P = Keeper_memory_os_program_types in

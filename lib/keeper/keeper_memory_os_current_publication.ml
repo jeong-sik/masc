@@ -267,25 +267,11 @@ let check_publication_companions ~keepers_dir ~keeper_id receipt =
   let* entry = Journal_codec.journal_entry_of_json receipt.journal in
   let* () = match entry with
     | Journal_committed {program=Some publication;_} ->
-      let matches range = match publication.boundary, range with
-        | Keeper_memory_os_program_types.Atom_boundary boundary,Atom_range range ->
-          boundary.receipt_scope=range.receipt_scope && boundary.trace_id=range.trace_id
-          && boundary.history_start_boundary_line=range.history_start_boundary_line
-          && boundary.start_atom=range.start_atom && boundary.end_atom=range.end_atom
-          && boundary.last_atom_digest=range.last_atom_digest
-          && boundary.end_boundary_line=range.end_boundary_line
-          && boundary.boundary_lines_seen=range.boundary_lines_seen
-          && range.unread_messages=publication.execution.program.unread
-        | Keeper_memory_os_program_types.Official_boundary boundary,Official_range range ->
-          boundary.receipt_scope=range.receipt_scope && boundary.after_boundary_line=range.after_boundary_line
-          && List.map (fun (line,turn_ref,_) -> line,turn_ref) boundary.turns=range.turns
-          && range.unread_messages=publication.execution.program.unread
-        | (Atom_boundary _|Official_boundary _),(Atom_range _|Official_range _|Explicit_candidate _|Explicit_candidate_with_recall _) -> false in
       let target_ranges=List.filter (function
         | Prepared {snapshot_revision;snapshot_sha256;_}|Committed {snapshot_revision;snapshot_sha256;_} ->
           snapshot_revision=receipt.target_revision && snapshot_sha256=receipt.target_sha256) ranges in
-      if target_ranges<>[] && List.for_all (fun row -> matches (receipt_range_id row)) target_ranges
-      then Ok () else Error "ordered publication and original-boundary receipt conflict; stores preserved"
+      Keeper_memory_os_program_publication.require_receipt_ranges publication
+        (List.map receipt_range_id target_ranges)
     | Journal_committed {program=None;_}|Journal_failed _|Journal_quarantined _ -> Ok () in
   List.fold_left (fun result row ->
     let* () = result in

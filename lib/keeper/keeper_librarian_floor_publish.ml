@@ -37,7 +37,8 @@ let prepare_cursor ~candidate ~(program_source : Current.program_source) =
     "External admission cursor moved since the original read it" in
   let atom, official = match program_source with
     | Current.Atom_program_source {range; _} -> Some range, None
-    | Current.Official_program_source {range; _} -> None, Some range in
+    | Current.Official_program_source {range; _} -> None, Some range
+    | Current.Mixed_program_source {atom_range;official_range;_} -> Some atom_range,Some official_range in
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name token
     ~through:(Keeper_librarian_input_sources.external_through (Capture.counterparts source)) ~atom ~official
 

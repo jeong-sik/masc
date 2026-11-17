@@ -1191,14 +1191,21 @@ let project_settled_after_recovery t settled =
 ;;
 
 (* Recovery runs before the command it guards touches the store, so whatever
-   recovery meets, that command wrote nothing: a store failure here is
-   [Store_fenced], never [Store_unavailable], whose commit may have landed
-   (#36205). *)
-let fenced_by_recovery t error =
-  match record_operation_error t error with
-  | Store_unavailable detail -> Store_fenced detail
-  | (Reducer_rejected _ | Operation_rejected _ | Store_fenced _ | Owner_stopping
-    | Owner_closed) as error -> error
+   recovery meets, that command wrote nothing and the fence still stands:
+   every recovery failure is [Store_fenced], never [Store_unavailable], whose
+   commit may have landed, and never [Operation_rejected], which a client
+   reads as an answer about its own request (#36205). An integrity failure
+   names itself as [operation_fault_detail] does, so this refusal and every
+   later one read the same. *)
+let fenced_by_recovery t (error : Chat_operation_store.error) =
+  let (_ : error) = record_operation_error t error in
+  match error with
+  | Chat_operation_store.Store_unavailable detail -> Store_fenced detail
+  | Integrity_error detail ->
+    Store_fenced (operation_fault_detail (Operation_integrity_failure detail))
+  | Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+  | Idempotency_conflict _ | Native_call_unsettled ->
+    Store_fenced (Chat_operation_store.error_to_string error)
 ;;
 
 let recover_operation_availability t =

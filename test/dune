@@ -5813,6 +5813,9 @@
 (test
  (name test_exec_shim_standard_descriptors)
  (modules test_exec_shim_standard_descriptors)
+ (foreign_stubs
+  (language c)
+  (names shim_socketpair_fault_stubs))
  (libraries alcotest exec_ssh_protocol exec_shim unix)
  (deps ../bin/masc_exec_shim.exe)
  (action (run %{test} %{dep:../bin/masc_exec_shim.exe})))
@@ -5820,9 +5823,11 @@
 (rule
  (alias runtest-test_shim_execution_receipts)
  (enabled_if (= %{system} linux))
- (deps test_shim_execution_receipts.py ../bin/masc_exec_shim.exe)
+ (deps test_shim_execution_receipts.py ../bin/masc_exec_shim.exe
+       test_exec_shim_standard_descriptors.exe)
  (action
-  (run python3 %{dep:test_shim_execution_receipts.py} %{dep:../bin/masc_exec_shim.exe})))
+  (run python3 %{dep:test_shim_execution_receipts.py} %{dep:../bin/masc_exec_shim.exe}
+       %{dep:test_exec_shim_standard_descriptors.exe})))
 
 (alias
  (name runtest)

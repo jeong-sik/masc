@@ -28,6 +28,11 @@
     interruption retain the listener. A response only denies that received
     notification id and never inspects target memory.
 
+    When Observe selects user notifications, failure to prepare the listener
+    transfer socket refuses the request before the payload is forked. Scratch
+    is removed and the trailer reports [Refused]; the static socket filter
+    must never be omitted without installing its notification replacement.
+
     Design notes:
 
     - {b No eio.}  The shim is statically linked for Linux (musl); it is a
@@ -363,18 +368,11 @@ val observe_supported : unit -> bool
 
 val user_notif_supported : unit -> bool
 (** Whether this kernel accepts [SECCOMP_FILTER_FLAG_NEW_LISTENER] (Linux
-    >= 5.0). A capability probe only (task-1568, follow-up to PR #36032
-    review 5192723206): the observation path a refused-observe shortcut
-    would need — recording the payload's actual attempt after the "A"
-    acknowledgement, rather than only that the box applied — requires a
-    listener fd carried from the child to the parent (a new SCM_RIGHTS
-    stub; a plain pipe cannot carry a file descriptor) and a supervisor
-    loop that reads, decodes and responds to notifications. Neither exists
-    yet: {!probe} reports this as
-    {!Exec_ssh_protocol.user_notif_capability} so the value is read on the
-    wire, but nothing decodes a notify-fd attempt from it and
-    {!Keeper_gate.decide_after_observation} does not consult it. It probes
-    by forking a throwaway child that tries
+    >= 5.0). Observe uses a listener installed in the payload child and
+    transferred to the supervisor, which records attempts it denies. This
+    probe does not establish that the transfer channel can be prepared: its
+    failure refuses the request before payload fork. The probe forks a
+    throwaway child that tries
     to install an allow-all listener filter and exits without running a
     payload; the calling thread's own seccomp state is never touched
     (installing a filter can only add restrictions, so the flag cannot be

@@ -20,16 +20,22 @@ import time
 
 
 def call(binary: Path, root: Path, config: Path, major: int, mode: str, argv: list[str],
-         acceptance_frame: bool = False, framed_stdin: bytes = b""):
+         acceptance_frame: bool = False, framed_stdin: bytes = b"", *,
+         launcher: tuple[str, ...] = (), interactive_stdin: bool = False):
     encode = lambda value: base64.b64encode(value.encode()).decode()
     request = {"v": major, "argv": [encode(arg) for arg in argv], "env": [],
                "cwd": encode(str(root)), "remote_root": encode(str(root)),
                "timeout_sec": 10, "stdin_len": len(framed_stdin), "mode": mode}
+    if interactive_stdin:
+        if framed_stdin:
+            raise AssertionError("interactive request must have an empty initial payload")
+        del request["stdin_len"]
+        request["stdin_stream"] = True
     if acceptance_frame:
         request["acceptance_frame"] = True
     payload = json.dumps(request).encode() + framed_stdin
     environment = dict(os.environ, MASC_EXEC_SHIM_CONFIG=str(config))
-    with subprocess.Popen([str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+    with subprocess.Popen([*launcher, str(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, env=environment) as process:
         assert process.stdin and process.stdout and process.stderr
         process.stdin.write(struct.pack(">Q", len(payload)) + payload)
@@ -60,6 +66,52 @@ def result_trailer(stderr: bytes):
     if len(parts) != 3 or parts[-1] != b"":
         raise AssertionError(f"no complete result trailer: {stderr!r}")
     return json.loads(parts[1])["masc_exec_result"]
+
+
+def observe_channel_refusals(binary, helper, root, config, major):
+    records = []
+    for fault_errno in ("EPERM", "EAFNOSUPPORT"):
+        launcher = (str(helper), "--standard-descriptor-fixture",
+                    "deny-socketpair", fault_errno)
+        # The same outer filter must leave the actual feature probe working:
+        # otherwise this would only test the unsupported-host branch.
+        filtered_probe = json.loads(subprocess.check_output(
+            [*launcher, str(binary), "--probe"], timeout=20))
+        if (int(filtered_probe["version"].split(".")[0]) != major
+                or not {"observe", "user_notif", "interactive_stdin"}.issubset(
+                    filtered_probe["capabilities"])):
+            raise AssertionError(f"fault filter disabled the real Observe probe: {filtered_probe!r}")
+        for interactive_stdin in (False, True):
+            before = set(root.iterdir())
+            # stdout is writable under Observe. An outside-scratch file would
+            # remain absent even if the vulnerable payload actually started.
+            marker = b"OBSERVE-PAYLOAD-MUST-NOT-START"
+            argv = ["/bin/sh", "-c", "printf OBSERVE-PAYLOAD-MUST-NOT-START"]
+            status, stdout, trailer, stderr = call(
+                binary, root, config, major, "observe", argv,
+                acceptance_frame=True, launcher=launcher,
+                interactive_stdin=interactive_stdin)
+            expected_receipt = {"mode": "observe", "plan": "filesystem_and_network_box",
+                                "boundary": "refused"}
+            if status != 1 or trailer["execution_receipt"] != expected_receipt:
+                raise AssertionError(f"channel failure was not refused before spawn: {status}, {trailer!r}")
+            if (stdout or marker in stderr or b"masc_request_accepted" in stderr
+                    or trailer["exit"] is not None or trailer["signal"] is not None
+                    or trailer["timed_out"]):
+                raise AssertionError(f"channel refusal emitted payload/acceptance/exit: {stdout!r}, {stderr!r}")
+            if not isinstance(trailer["shim_error"], str) or not trailer["shim_error"].startswith(
+                    "remote_ssh_shim_error: cannot prepare Observe notification channel: "):
+                raise AssertionError(f"fixture missed the channel preparation boundary: {trailer!r}")
+            after = set(root.iterdir())
+            if after != before:
+                raise AssertionError(f"channel refusal leaked scratch: before={before!r}, after={after!r}")
+            records.append({"case": "Observe channel preparation refused before payload",
+                            "socketpair_errno": fault_errno,
+                            "stdin": "interactive" if interactive_stdin else "framed",
+                            "filtered_probe": filtered_probe, "transport_exit": status,
+                            "stdout_bytes": len(stdout), "scratch_cleaned": True,
+                            "trailer": trailer})
+    return records
 
 
 class InteractiveRun:
@@ -368,6 +420,7 @@ def interactive_cases(binary, root, config):
 
 def main():
     binary = Path(sys.argv[1]).resolve()
+    fault_helper = Path(sys.argv[2]).resolve()
     probe = json.loads(subprocess.check_output([str(binary), "--probe"]))
     if "observe" not in probe["capabilities"]:
         raise AssertionError("Linux feature fixture requires actual Observe support")
@@ -436,8 +489,10 @@ def main():
             raise AssertionError("real shim must advertise V3 interactive_stdin before interactive requests")
         records.extend(interactive_cases(binary, root, config))
         records.append(interactive_observe_case(binary, root, config))
+        records.extend(observe_channel_refusals(binary, fault_helper, root, config, major))
     print(json.dumps({"kind": "actual-shim-execution-receipts",
                       "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                      "fault_helper_sha256": hashlib.sha256(fault_helper.read_bytes()).hexdigest(),
                       "records": records}, indent=2))
 
 

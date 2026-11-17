@@ -576,8 +576,9 @@ let structured_bodies_leave_every_provider_wire () = with_demotion_store @@ fun 
 (* 433 Korean syllables, 1,299 bytes. [%S] writes the preview's 198 bytes as
    [\ddd], so the marker is 1,116 bytes under one JSON escape, shorter than
    the body's 1,301, and 1,514 under two, longer than the body's 1,299. The
-   lanes that send the blocks as one JSON string keep the body; Anthropic,
-   which escapes once, takes the marker; Gemini sends [content] only. *)
+   lanes that send the blocks as one JSON string keep the body. Anthropic
+   and Gemini's structured function response escape the blocks once and
+   take the marker. *)
 let a_short_korean_block_stays_on_lanes_that_escape_twice () = with_demotion_store @@ fun store ->
   let korean = String.concat "" (List.init 433 (fun _ -> "\234\176\128")) in
   Alcotest.(check int) "the body is 1,299 bytes" 1_299 (String.length korean);
@@ -591,14 +592,22 @@ let a_short_korean_block_stays_on_lanes_that_escape_twice () = with_demotion_sto
     (fun (lane, measure_wire_bytes, encode) ->
        let expected =
          List.assoc lane
-           [ "openai chat", 0; "responses", 0; "anthropic", 1; "gemini", 0; "ollama", 0; "glm", 0 ]
+           [ "openai chat", 0; "responses", 0; "anthropic", 1; "gemini", 1; "ollama", 0; "glm", 0 ]
        in
+       let source = encode messages in
+       Alcotest.(check bool) (lane ^ ": the structured Text reaches the wire") true
+         (String_util.contains_substring source korean);
        Alcotest.(check int) (lane ^ ": bodies chosen") expected (chosen measure_wire_bytes);
        let planned = Demotion.plan ~measure_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
        let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
            ~pending:planned.Demotion.pending planned.Demotion.messages in
+       let sent = encode outcome.Demotion.messages in
+       Alcotest.(check bool) (lane ^ ": only a selected body leaves the wire") (expected = 0)
+         (String_util.contains_substring sent korean);
        Alcotest.(check bool) (lane ^ ": the request does not grow") true
-         (String.length (encode outcome.Demotion.messages) <= String.length (encode messages)))
+         (String.length sent <= String.length source);
+       Alcotest.(check bool) (lane ^ ": the canonical structured Text is unchanged") true
+         (result_parts (List.nth messages 1) = ("", [Types.Text korean])))
     structured_lanes
 ;;
 

@@ -1744,9 +1744,29 @@ let test_h5_request_selected_and_new_tool_media_preserve_canonical_history () =
       (resolved = Ok view.carried_wire);
     Alcotest.(check bool) "request did not rewrite canonical checkpoint bytes" true
       (checkpoint_json = Agent_core.Checkpoint.to_json saved);
+    let rec media_at reversed_path blocks =
+      List.mapi (fun index (block : Agent_core.Types.content_block) ->
+        let reversed_path = index :: reversed_path in
+        match block with
+        | Agent_core.Types.Image _ | Document _ | Audio _ ->
+          [List.rev reversed_path, block]
+        | ToolResult {content_blocks = Some nested; _} -> media_at reversed_path nested
+        | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+        | ToolResult {content_blocks = None; _} -> []) blocks
+      |> List.concat in
+    let media_by_message messages =
+      List.map (fun (message : Agent_core.Types.message) -> media_at [] message.content) messages in
     match Agent_core.Checkpoint.of_json checkpoint_json with
-    | Ok restored -> Alcotest.(check bool) "checkpoint codec retains original selected and appended media" true
-        (restored.messages = canonical)
+    | Ok restored ->
+      (* History does not persist the parsed ToolResult.json field. Compare
+         the durable document, then independently keep every envelope and
+         typed media source at its original message and nested block path. *)
+      Alcotest.(check bool) "checkpoint codec keeps the exact durable document" true
+        (Agent_core.Checkpoint.to_json restored = checkpoint_json);
+      Alcotest.(check bool) "checkpoint codec keeps every message envelope" true
+        (shape restored.messages = shape canonical);
+      Alcotest.(check bool) "checkpoint codec retains original selected and appended media" true
+        (media_by_message restored.messages = media_by_message canonical)
     | Error error -> Alcotest.fail (Agent_core.Error.to_string error))
 
 let test_h5_request_recomputes_mixed_bundle_and_reuses_reading () =

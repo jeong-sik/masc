@@ -45,11 +45,23 @@ commit of that binary.
 The file is staged beside the path, synced, and published by a rename that
 replaces nothing (`Fs_compat.rename_noreplace`), with mode 0600.
 
+- The directory of the path, and each directory the placement made, is
+  synced before the command goes on, also when an entry was there and is
+  kept. A run after one that could not sync syncs again.
+- A placement that makes no file removes the directories it made.
+
 ## The order of the command
 
-The candidate asks whether a boot asks for the activation, places the file,
-and activates last. A placement that fails refuses the command before the
-activation.
+The candidate runs the checks of the activation, places the file, and writes
+the records of the activation last.
+
+- The checks are `Authz_activation.prepare`: whether a boot asks for the
+  activation, and every check of the bootstrap (`Authz_bootstrap.prepare`),
+  the path of the external store among them. A command that a check refuses
+  makes no file and no directory for runtime.toml.
+- A placement that fails refuses the command before a record is written.
+- The writes are `Authz_activation.complete`. It takes what `prepare` gave,
+  so no command writes the records without the checks.
 
 - With the measured binary, which places nothing, `masc auth bootstrap` of a
   workspace whose `.masc/config` is a regular file ended with exit 0. No
@@ -72,9 +84,9 @@ sources.
   - Control: the three importing interfaces of `lib/server` that the change
     does not reach compiled to the interface digests of that build.
   - Negative control: a copy with two breaks failed for both, a
-    `declare_connections` without the outcome `Published_unsynced` (the match
-    is not exhaustive) and an activation interface without `asked` (unbound
-    value).
+    `declare_connections` without the outcome `Not_synced` (the match is not
+    exhaustive) and a `complete` that is given no prepared activation (the
+    types differ).
 - The reader and the writer share one path by construction:
   `Server_runtime_setup_actions.config` and `masc auth bootstrap` both take
   it from `Server_runtime_setup_actions.config_path`.
@@ -112,8 +124,13 @@ gh workflow run test.yml --ref feat/bootstrap-writes-runtime-toml \
 
 ## Unverified
 
-- The outcome `Published_unsynced`. No test makes the sync of the published
-  file fail.
+- The placement on macOS. The test workflow builds and runs on Linux, and no
+  build ran on this machine.
+- The outcome `Not_synced`. No test makes the sync of a directory fail.
+- A file system without a rename that replaces nothing. By the source, the
+  placement stops there on every run with the reason of the operating
+  system.
+- The sentences the command prints. No test reads them.
 - A sign-in, a model verification and a Keeper turn with the ids of the
   shipped file. Earlier on the same day they ran with a hand-written
   runtime.toml of other ids, up to the model verification, which the limit of

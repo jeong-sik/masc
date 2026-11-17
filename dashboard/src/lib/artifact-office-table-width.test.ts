@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { officeTableWidthStyle, parseOfficeTableWidth, resolveOfficeTableWidths, type OfficeTableWidth, type OfficeTableWidthCell } from './artifact-office-table-width'
+import { officeTableFixedLayout, officeTableHtmlStyle, officeTableWidthStyle, parseOfficeTableWidth, resolveOfficeTableWidths, type OfficeTableWidth, type OfficeTableWidthCell } from './artifact-office-table-width'
 
 const absolute = (hwpUnits: number): OfficeTableWidth => ({ kind: 'absolute', hwpUnits })
 const cell = (column: number, columns: number, hwpUnits: number): OfficeTableWidthCell => ({ column, columns, width: absolute(hwpUnits) })
@@ -52,4 +52,24 @@ it('uses memory proportional to declared boundaries and cell intervals rather th
   expect(resolveOfficeTableWidths(1000, Array.from({ length: 4001 }, () => cell(0, 1000, 42000))).kind).toBe('partial')
   expect(() => resolveOfficeTableWidths(2, [cell(1, 2, 100)])).toThrow('구간')
   expect(() => resolveOfficeTableWidths(2, [], { columns: [absolute(1)] })).toThrow('개수')
+})
+
+it('fixes browser tracks only when positive absolute source constraints determine every boundary', () => {
+  const cells = [cell(0, 1, 14774), cell(1, 1, 1539)]
+  expect(officeTableFixedLayout(2, cells)).toEqual({ width: 16313, widths: [14774, 1539] })
+  expect(officeTableHtmlStyle({ kind: 'absent' }, officeTableFixedLayout(2, cells))).toBe('width:163.13pt;table-layout:fixed;border-collapse:collapse;border-spacing:0')
+  expect(officeTableFixedLayout(1, [cell(0, 1, 1001), cell(0, 1, 1001)])).toEqual({ width: 1001, widths: [1001] })
+  expect(officeTableFixedLayout(3, [cell(0, 3, 9000)])).toBeNull()
+  expect(officeTableFixedLayout(2, [cell(0, 1, 3000), cell(0, 1, 3100), cell(1, 1, 7000)])).toBeNull()
+  expect(officeTableFixedLayout(2, [cell(0, 1, 0), cell(1, 1, 3000)])).toBeNull()
+})
+it.each<OfficeTableWidth>([{ kind: 'auto' }, { kind: 'percent', value: 100 }, { kind: 'unsupported', value: 'var(--width)' }])('keeps $kind preferences automatic even when other constraints identify the grid', preference => {
+  const cells = [cell(0, 1, 1000), cell(1, 1, 2000)], columns = [absolute(1000), absolute(2000)]
+  expect(officeTableFixedLayout(2, cells, { table: preference, columns })).toBeNull()
+  expect(officeTableFixedLayout(2, [...cells, { column: 0, columns: 1, width: preference }], { table: absolute(3000), columns })).toBeNull()
+  expect(officeTableFixedLayout(2, cells, { table: absolute(3000), columns: [preference, absolute(2000)] })).toBeNull()
+  expect(officeTableHtmlStyle(preference, null)).toBe(officeTableWidthStyle(preference))
+})
+it('does not allocate a logical-column array for a sparse, huge merged interval', () => {
+  expect(officeTableFixedLayout(4294967295, [cell(0, 4294967295, 3000)], { table: absolute(3000), columns: [] })).toBeNull()
 })

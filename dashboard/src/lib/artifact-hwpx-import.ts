@@ -4,7 +4,7 @@ import { readOfficeChart } from './artifact-office-chart-read'
 import { fromByteArray } from 'base64-js'
 import { officeImageDimensions } from './artifact-office-image'
 import { checkOfficeTableGrid, type OfficeTableCellBounds } from './artifact-office-table-grid'
-import { officeTableWidthStyle, resolveOfficeTableWidths, type OfficeTableWidth } from './artifact-office-table-width'
+import { officeTableFixedLayout, officeTableHtmlStyle, officeTableWidthStyle, resolveOfficeTableWidths, type OfficeTableWidth } from './artifact-office-table-width'
 import { loadOfficeArchive, readOfficeBytes, readOfficeXml, resolveOfficePart, xmlChild, xmlChildren, xmlDescendants, type OfficeXmlElement } from './artifact-office-xml'
 import { hwpUnitsPerCssPixel, hwpxTableLimits, hwpxNs } from './artifact-hwpx-template'
 
@@ -138,8 +138,14 @@ export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array, source:
       if (item.row !== rowIndex || item.row + item.rows > rows || item.column + item.columns > columns) throw new Error('HWPX 표의 셀 범위가 올바르지 않습니다.')
       return item
     }))
-    checkOfficeTableGrid(rows, columns, cellsByRow.flat(), 'HWPX 표')
-    const geometry = resolveOfficeTableWidths(columns, cellsByRow.flat(), { table: width })
+    const cells = cellsByRow.flat()
+    checkOfficeTableGrid(rows, columns, cells, 'HWPX 표')
+    const geometry = resolveOfficeTableWidths(columns, cells, { table: width })
+    // Relative native references have no absolute CSS interpretation. Keep
+    // their existing display preference while excluding them from fixed layout.
+    const reference = size?.getAttribute('widthRelTo') ?? 'ABSOLUTE'
+    const layoutWidth: OfficeTableWidth = reference === 'ABSOLUTE' ? width : { kind: 'unsupported', value: reference }
+    const fixedLayout = officeTableFixedLayout(columns, cells, { table: layoutWidth }, geometry)
     if (geometry.kind !== 'unique') notices.add(geometry.kind === 'conflicting'
       ? '표의 선호 너비가 서로 다릅니다. 셀 너비를 보존하고 출력에서 다시 배치합니다.'
       : '병합 셀 안쪽의 열 너비는 원본만으로 알 수 없습니다. 셀의 합계 너비를 보존합니다.')
@@ -155,7 +161,8 @@ export async function importArtifactHwpx(data: ArrayBuffer | Uint8Array, source:
       output.push(`<tr>${row.join('')}</tr>`)
     }
     const grid = geometry.kind === 'unique' ? `<colgroup>${geometry.widths.map(hwpUnits => `<col${style({ kind: 'absolute', hwpUnits })}>`).join('')}</colgroup>` : ''
-    return `<table${style(width)}>${grid}<tbody>${output.join('')}</tbody></table>`
+    const css = officeTableHtmlStyle(width, fixedLayout)
+    return `<table${css ? ` style="${officeHtmlText(css)}"` : ''}>${grid}<tbody>${output.join('')}</tbody></table>`
   }
 
   async function withCaption(element: OfficeXmlElement, object: Fragment): Promise<Fragment[]> {

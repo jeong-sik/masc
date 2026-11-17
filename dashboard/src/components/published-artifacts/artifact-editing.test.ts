@@ -10,11 +10,14 @@ import { route, navigate } from '../../router'
 import { ArtifactsSurface } from './artifacts-surface'
 
 const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<ExecutionWorkspaceAuthority | null> }))
-vi.mock('../../store', async () => {
+vi.mock('../../execution-workspace-authority', async () => {
   const { signal } = await import('@preact/signals')
   workspace.current = signal<ExecutionWorkspaceAuthority | null>(null)
   return { executionWorkspaceAuthority: workspace.current }
 })
+vi.mock('../../store', async () => ({
+  executionWorkspaceAuthority: (await import('../../execution-workspace-authority')).executionWorkspaceAuthority,
+}))
 vi.mock('../../router', async () => {
   const { signal } = await import('@preact/signals')
   const route = signal({ tab: 'workspace', params: {} as Record<string, string>, postId: null })
@@ -24,6 +27,7 @@ vi.mock('../../api/core', async original => ({ ...await original<typeof import('
 vi.mock('../common/markdown', () => ({ Markdown: ({ text }: { text: string }) => html`<div>${text}</div>` }))
 
 const id = `artifact-${'a'.repeat(32)}`
+const observerInstanceId = 'fixture-observer'
 const artifact = { id, revision: 2, title: '원래 제목', summary: '원래 요약', format: 'markdown', author: 'keeper-a',
   created_at: '2026-10-25T00:00:00Z', task_id: 'task-1', goal_id: null, url: '/dashboard', body: { _blob: { sha256: 'a'.repeat(64) } } }
 const original = { artifact, content: '# 원고\r\n한글 😀', revisions: [artifact] }
@@ -50,12 +54,18 @@ async function edit(waitForWorkspace = true) {
   if (waitForWorkspace) await waitFor(() => expect((reader.getByRole('button', { name: '새 버전 저장' }) as HTMLButtonElement).disabled).toBe(false))
   return reader
 }
+async function importedSource() {
+  await screen.findByRole('region', { name: '아티팩트 편집' })
+  const sourceMode = screen.queryByRole('button', { name: 'HTML 원본 편집' })
+  if (sourceMode) fireEvent.click(sourceMode)
+  return screen.findByLabelText('문서 본문')
+}
 
 beforeEach(() => {
   artifactPublicationOutcomes.clear()
   vi.mocked(get).mockReset(); vi.mocked(getPublic).mockReset(); vi.mocked(post).mockReset()
   setStoredToken('credential-a')
-  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1, observerInstanceId: null }
+  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1, observerInstanceId }
   route.value = { tab: 'workspace', params: { section: 'artifacts' }, postId: null }
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1' ? health : path === list ? { artifacts: [artifact], diagnostics: [] }
     : path === '/api/v1/published-artifact-checks' ? { checks: [], diagnostics: [] } : original)
@@ -81,7 +91,7 @@ it.each(['same', 'replacement'] as const)('retains unsent file bytes through a s
   const file = new File([imported], 'report.HTML', { type: 'text/html' })
   Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(imported).buffer })
   fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
-  const body = await screen.findByLabelText('문서 본문')
+  const body = await importedSource()
   const edited = '\uFEFF<!doctype html>\n<main>아직 보내지 않은 수정 😀</main>'
   fireEvent.input(body, { target: { value: edited } })
   await waitFor(() => expect(observed.current?.drafts).toHaveLength(1))
@@ -94,7 +104,7 @@ it.each(['same', 'replacement'] as const)('retains unsent file bytes through a s
   expect(navigate).toHaveBeenLastCalledWith('workspace', { section: 'repositories' })
   if (authority === 'replacement') await act(() => {
     setStoredToken('credential-b')
-    workspace.current.value = { epoch: 'replacement', workspaceRoot: '/workspace-b', connectionGeneration: 2, observerInstanceId: null }
+    workspace.current.value = { epoch: 'replacement', workspaceRoot: '/workspace-b', connectionGeneration: 2, observerInstanceId }
   })
   await act(() => navigate('workspace', { section: 'artifacts' }))
   await screen.findByRole('button', { name: '파일 가져오기' })
@@ -455,7 +465,7 @@ it('reads an explicitly selected UTF-8 HTML file without running it or publishin
   const file = new File([content], 'report.html', { type: 'text/html' })
   Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(content).buffer })
   fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
-  const body = await screen.findByLabelText('문서 본문') as HTMLTextAreaElement
+  const body = await importedSource() as HTMLTextAreaElement
   expect(body.value).toContain('\uFEFF<!doctype html>')
   expect(body.value).toContain('window.shouldNotRun')
   expect(document.querySelector('script')).toBeNull()
@@ -487,7 +497,7 @@ it.each(['credential', 'workspace', 'withdrawal', 'same-root'] as const)('recove
   await act(() => {
     if (change === 'credential') setStoredToken('credential-b')
     else if (change === 'withdrawal') workspace.current.value = null
-    else workspace.current.value = { epoch: 'replacement', workspaceRoot: change === 'workspace' ? '/workspace-b' : '/workspace-a', connectionGeneration: 2, observerInstanceId: null }
+    else workspace.current.value = { epoch: 'replacement', workspaceRoot: change === 'workspace' ? '/workspace-b' : '/workspace-a', connectionGeneration: 2, observerInstanceId }
   })
   const recovery = within(await screen.findByRole('region', { name: '이전 접근 상태의 원고' }))
   expect(recovery.getByText('보존할 제목')).toBeTruthy()
@@ -516,7 +526,7 @@ it('recovers imported source before allowing another import after an authority c
     const file = new File([content], name)
     Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(content).buffer })
     fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
-    await screen.findByLabelText('문서 본문')
+    await importedSource()
   }
   await importFile('first.md', '# first\r\n😀')
   await act(() => setStoredToken('credential-b'))
@@ -552,5 +562,50 @@ it('removes an explicitly discarded active draft instead of recovering it after 
   fireEvent.click(reader.getByRole('button', { name: '편집 닫기' }))
   await act(() => setStoredToken('credential-b'))
   expect(screen.queryByRole('region', { name: '이전 접근 상태의 원고' })).toBeNull()
+  expect(post).not.toHaveBeenCalled()
+})
+
+it.each(['workspace', 'credential'] as const)('recovers unapplied cell input under its original owner after %s retirement', async change => {
+  const observed = { current: null as ArtifactDraftSession | null }
+  render(html`<${ArtifactDraftSessionProvider}><${DraftSessionProbe} observe=${(session: ArtifactDraftSession) => { observed.current = session }} /><${ArtifactsSurface} /><//>`)
+  fireEvent.click(screen.getByRole('button', { name: '파일 가져오기' }))
+  const source = '<table style="width:200pt"><tr><td rowspan="2">계약</td><td><p></p></td></tr><tr><td>25</td></tr></table>'
+  const file = new File([source], 'contract.html')
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => new TextEncoder().encode(source).buffer })
+  fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [file] } })
+  const frame = await screen.findByTitle('글과 셀을 눌러 편집하는 미리보기') as HTMLIFrameElement
+  const originalOwner = observed.current!.drafts[0]!.owner
+  const projection = new DOMParser().parseFromString(frame.srcdoc, 'text/html')
+  const blank = projection.querySelector('[aria-label="빈 셀 편집"]')!
+  fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data: { type: 'masc.artifact.text.selected.v1',
+    token: projection.querySelector('script')!.getAttribute('nonce'), id: Number(blank.getAttribute('data-masc-artifact-text')) } }))
+  const input = '<보관할 금액> & 😀'
+  fireEvent.input(await screen.findByLabelText('선택한 글 또는 셀 값'), { target: { value: input } })
+  expect(observed.current!.drafts[0]!.snapshot.value.content).toBe(source)
+  expect(observed.current!.drafts[0]!.snapshot.pendingText!.input).toBe(input)
+  fireEvent.click(screen.getByRole('button', { name: 'HTML 원본 편집' }))
+  expect((screen.getByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe(source)
+  fireEvent.click(screen.getByRole('button', { name: '글·셀 편집' }))
+  vi.stubGlobal('confirm', vi.fn(() => false))
+  fireEvent.click(screen.getByRole('button', { name: '편집 닫기' }))
+  expect((screen.getByLabelText('선택한 글 또는 셀 값') as HTMLTextAreaElement).value).toBe(input)
+  await act(() => {
+    if (change === 'credential') setStoredToken('replacement-credential')
+    else workspace.current.value = { epoch: 'replacement', workspaceRoot: '/workspace-b', connectionGeneration: 2, observerInstanceId }
+  })
+  const recovery = within(await screen.findByRole('region', { name: '이전 접근 상태의 원고' }))
+  const saved = observed.current!.drafts[0]!
+  expect(saved.owner).toBe(originalOwner)
+  expect(saved.snapshot.value.content).toBe(source)
+  expect(saved.snapshot.pendingText!.input).toBe(input)
+  expect(recovery.getByRole('complementary', { name: '보관한 미반영 입력' }).textContent).toContain(input)
+  expect(recovery.queryByRole('textbox')).toBeNull()
+  expect((screen.getByRole('button', { name: '파일 가져오기' }) as HTMLButtonElement).disabled).toBe(true)
+  const blobs: Blob[] = []
+  vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => { blobs.push(blob as Blob); return 'blob:unapplied' })
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  fireEvent.click(recovery.getByRole('button', { name: '미반영 입력 다운로드' }))
+  expect(await blobs[0]!.text()).toBe(input)
   expect(post).not.toHaveBeenCalled()
 })

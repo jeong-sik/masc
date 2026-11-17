@@ -4327,8 +4327,8 @@ type planning_goal = Tui_decode.planning_goal
   pg_phase: Goal_phase.t;
   pg_priority: int;
   pg_due_date: string option;
-  pg_metric: string option;
-  pg_target_value: string option;
+  pg_measure: Goal_measure.t;
+  pg_procedure: string;
   pg_proof: Tui_decode.goal_proof;
   pg_criterion_review: Tui_decode.goal_criterion_review;
   pg_retry_binding: Tui_decode.goal_retry_binding option;

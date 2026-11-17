@@ -222,11 +222,14 @@ val developer_context : snapshot -> string list
     is carried losslessly. *)
 
 type media_reader =
-  Keeper_client_tool_outbox_media.attachment -> (string, string) result
+  Keeper_client_tool_outbox_media.attachment ->
+  (Keeper_media_reading.reading, Keeper_media_reading.failure) result
 (** Read one validated host attachment. The caller owns the reader and its
     raw-result memo. Each reader owns its per-call resource limits.
     An error becomes explicit unavailable data;
-    cancellation propagates. A reading is derived tool data, not evidence that
+    cancellation propagates. Success carries the selected reader's identity
+    beside its text. Failure is rendered only when constructing the carrier.
+    A reading is derived tool data, not evidence that
     the original tool succeeded or authorization to repeat its effects. *)
 
 val context_message :

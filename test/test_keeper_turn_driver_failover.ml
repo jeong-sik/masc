@@ -1080,12 +1080,26 @@ let h5_text_of_blocks blocks =
   |> String.concat "\n"
 
 (* One projector is one lane walk; a test that wants two walks builds two. *)
+let h5_reader_identity =
+  match Masc.Keeper_media_reading.reader_identity ~id:"h5-fixture-reader" ~revision:"1" with
+  | Ok identity -> identity
+  | Error Masc.Keeper_media_reading.Empty_id -> Alcotest.fail "fixture reader id must be nonempty"
+  | Error Masc.Keeper_media_reading.Empty_revision -> Alcotest.fail "fixture reader revision must be nonempty"
+
+let h5_resolve read ~kind ~media_type =
+  Ok (Masc.Keeper_media_reading.reader ~identity:h5_reader_identity
+    ~read:(fun ~bytes -> read ~kind ~media_type ~bytes))
+
+let h5_stt_failure =
+  Masc.Keeper_media_reading.Stt_failed
+    (Masc.Voice_bridge.Endpoints_failed ["fixture-stt", "endpoint unavailable"])
+
 let h5_projector ?base_path ~read () =
   Masc.Keeper_media_reading.project
     (Masc.Keeper_media_reading.projector ~media_store:test_media_store
        ?base_path
        ~keeper_name:"h5-media-fallback"
-       ~read
+       ~resolve:(h5_resolve read)
        ())
 
 let h5_project_for_text_only ?project_media ~goal_blocks () =
@@ -1201,7 +1215,7 @@ let test_h5_s2_document_fact_reaches_text_only_fallback () =
 let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
   let dir = h5_fresh_dir () in
   let goal = [ Agent_core.Types.Text "what is the vault code?"; h5_audio_block () ] in
-  let failing = h5_reader_counting (ref 0) ~answer:(Error "stt_failed: endpoint down") in
+  let failing = h5_reader_counting (ref 0) ~answer:(Error h5_stt_failure) in
   let text =
     h5_project_for_text_only
       ~project_media:(h5_projector ~base_path:dir ~read:failing ())
@@ -1230,10 +1244,13 @@ let test_h5_s3_unreadable_attachment_is_marked_unavailable () =
 
 (* The walk shares attachment results, while each reader owns its own operation.
    A failed read cannot stop a different original from reaching its reader. *)
-let h5_project_direct ?base_path ~read blocks =
+let h5_project_resolved ?base_path ~resolve blocks =
   Masc.Keeper_media_reading.project_blocks ~media_store:test_media_store
     ?base_path ~keeper_name:"h5-media-fallback"
-    ~needs_projection:(fun _ -> true) ~read blocks
+    ~needs_projection:(fun _ -> true) ~resolve blocks
+
+let h5_project_direct ?base_path ~read blocks =
+  h5_project_resolved ?base_path ~resolve:(h5_resolve read) blocks
 
 let h5_texts blocks =
   List.filter_map (function Agent_core.Types.Text t -> Some t | _ -> None) blocks
@@ -1243,7 +1260,7 @@ let test_h5_reader_failure_does_not_suppress_another_attachment () =
   let read ~kind ~media_type:_ ~bytes:_ =
     calls := kind :: !calls;
     match kind with
-    | Masc.Keeper_media_reading.Audio -> Error "stt_failed"
+    | Masc.Keeper_media_reading.Audio -> Error h5_stt_failure
     | Masc.Keeper_media_reading.Document -> Ok "document-only fact"
   in
   let blocks, _ = h5_project_direct ~read
@@ -1275,7 +1292,7 @@ let test_h5_later_projection_reads_new_attachment () =
   let read ~kind:_ ~media_type:_ ~bytes =
     calls := bytes :: !calls; Ok ("reading: " ^ bytes) in
   let walk = Masc.Keeper_media_reading.projector ~media_store:test_media_store
-    ~keeper_name:"h5-media-fallback" ~read () in
+    ~keeper_name:"h5-media-fallback" ~resolve:(h5_resolve read) () in
   let project blocks = Masc.Keeper_media_reading.project walk
     ~needs_projection:(fun _ -> true) blocks in
   ignore (project [ h5_audio_block () ]);
@@ -1295,23 +1312,24 @@ let h5_doc_block ~media_type =
     ~media_type
     ~source:((stored_source ~media_type:media_type h5_fact_document))
 
-let h5_reader_only_pdf calls ~kind:_ ~media_type ~bytes:_ =
-  incr calls;
-  if media_type = "application/pdf" then Ok ("pdf-reading: " ^ h5_fact_document)
-  else Error "no_document_reader"
+let h5_pdf_resolver calls ~kind ~media_type =
+  if media_type = "application/pdf" then
+    h5_resolve (fun ~kind:_ ~media_type:_ ~bytes:_ ->
+      incr calls; Ok ("pdf-reading: " ^ h5_fact_document)) ~kind ~media_type
+  else Error Masc.Keeper_media_reading.No_matching_reader
 
 let h5_same_bytes_two_types ?base_path ~first ~second () =
   let calls = ref 0 in
   let blocks, _ =
-    h5_project_direct ?base_path
-      ~read:(h5_reader_only_pdf calls)
+    h5_project_resolved ?base_path
+      ~resolve:(h5_pdf_resolver calls)
       [ h5_doc_block ~media_type:first; h5_doc_block ~media_type:second ]
   in
   h5_texts blocks, !calls
 
 let test_h5_same_bytes_other_type_is_not_a_memo_hit () =
   let texts, calls = h5_same_bytes_two_types ~first:"application/pdf" ~second:"text/plain" () in
-  Alcotest.(check int) "the reader ran for each type" 2 calls;
+  Alcotest.(check int) "only the matching PDF reader runs" 1 calls;
   Alcotest.(check bool) "the pdf was read" true
     (contains ~needle:"status=read" (List.nth texts 0));
   Alcotest.(check bool) "the other type is unavailable, not a copy of the pdf reading" true
@@ -1321,7 +1339,7 @@ let test_h5_same_bytes_other_type_is_not_a_memo_hit () =
 
 let test_h5_same_bytes_other_type_reverse_order () =
   let texts, calls = h5_same_bytes_two_types ~first:"text/plain" ~second:"application/pdf" () in
-  Alcotest.(check int) "the reader ran for each type" 2 calls;
+  Alcotest.(check int) "the unavailable type does not suppress the PDF reader" 1 calls;
   Alcotest.(check bool) "the first stays unavailable" true
     (contains ~needle:"status=unavailable" (List.nth texts 0));
   Alcotest.(check bool) "the pdf is still read, not a copy of the failure" true
@@ -1332,12 +1350,12 @@ let test_h5_durable_reading_is_keyed_by_media_type () =
   ignore (h5_same_bytes_two_types ~base_path:dir ~first:"application/pdf" ~second:"text/plain" ());
   let calls = ref 0 in
   let blocks, _ =
-    h5_project_direct ~base_path:dir
-      ~read:(h5_reader_only_pdf calls)
+    h5_project_resolved ~base_path:dir
+      ~resolve:(h5_pdf_resolver calls)
       [ h5_doc_block ~media_type:"text/plain"; h5_doc_block ~media_type:"application/pdf" ]
   in
   let texts = h5_texts blocks in
-  Alcotest.(check int) "only the type with no stored reading is read again" 1 !calls;
+  Alcotest.(check int) "the PDF cache is reused and no reader accepts the other type" 0 !calls;
   Alcotest.(check bool) "the stored pdf reading is reused after a restart" true
     (contains ~needle:"pdf-reading" (List.nth texts 1));
   Alcotest.(check bool) "the other type was not served the pdf reading" false
@@ -1365,7 +1383,7 @@ let test_h5_store_lives_under_masc_dir () =
 let test_h5_walk_reads_a_failing_attachment_once () =
   let dir = h5_fresh_dir () in
   let calls = ref 0 in
-  let failing = h5_reader_counting calls ~answer:(Error "stt_failed") in
+  let failing = h5_reader_counting calls ~answer:(Error h5_stt_failure) in
   let goal =
     [ Agent_core.Types.Text "what is the vault code?"; h5_audio_block (); h5_audio_block () ]
   in
@@ -1389,7 +1407,7 @@ let test_h5_native_projection_keeps_later_reading_available () =
   let calls = ref 0 in
   let walk = Masc.Keeper_media_reading.projector ~media_store:test_media_store
     ~keeper_name:"h5-media-fallback"
-    ~read:(h5_reader_counting calls ~answer:(Ok "fallback reading")) () in
+    ~resolve:(h5_resolve (h5_reader_counting calls ~answer:(Ok "fallback reading"))) () in
   let original = h5_audio_block () in
   let native, _ = Masc.Keeper_media_reading.project walk
     ~needs_projection:(fun _ -> false) [original] in

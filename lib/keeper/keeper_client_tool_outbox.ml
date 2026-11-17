@@ -536,7 +536,8 @@ let message_of_contexts = function
        name=None;tool_call_id=None;metadata=["masc_retained_tool_results",`Bool true]}
 
 type media_reader =
-  Keeper_client_tool_outbox_media.attachment -> (string, string) result
+  Keeper_client_tool_outbox_media.attachment ->
+  (Keeper_media_reading.reading, Keeper_media_reading.failure) result
 
 let prepared_context ~read_media snapshot =
   let context = developer_context snapshot in
@@ -564,12 +565,15 @@ let prepared_context ~read_media snapshot =
            List.map (function
              | Media.Readable attachment ->
                let reading = match read attachment with
-                 | Ok text ->
+                 | Ok reading ->
                    `Assoc ["status", `String "read";
                            "derived_by", `String "automatic_reader";
-                           "text", `String text]
-                 | Error reason ->
-                   `Assoc ["status", `String "unavailable"; "reason", `String reason] in
+                           "reader", `Assoc ["id", `String reading.reader.id;
+                                             "revision", `String reading.reader.revision];
+                           "text", `String reading.text]
+                 | Error failure ->
+                   `Assoc ["status", `String "unavailable";
+                           "reason", `String (Keeper_media_reading.failure_to_string failure)] in
                `Assoc (identity attachment.slot @
                  [ "kind", `String (kind_name attachment.kind)
                  ; "media_type", `String attachment.media_type

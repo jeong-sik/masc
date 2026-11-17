@@ -64,21 +64,31 @@ The observation to make, with real readers:
    fails; the walk reaches the text-only candidate; its model input must contain
    the `status=read` block with the fact. Record the manifest rows
    (`media_degraded_to_text`, `media_projected_*`) and the model's answer.
-3. Next turn on the same keeper: the stored reading under
-   `<base_path>/.masc/media-readings/<keeper>/` is reused, with no reader call
-   (observe by making the reader unavailable, e.g. PATH without Poppler).
+3. Next turn on the same keeper: keep the same reader declaration, kind, exact
+   MIME, source digest and byte length. The stored reading under
+   `<base_path>/.masc/media-readings/<keeper>/` is reused without executing the
+   reader. Record its reader id/revision. For PDF, removing Poppler from the
+   fixture's PATH can check that extraction is not invoked; the built-in PDF
+   reader remains selectable. For STT, keep the configuration unchanged and
+   observe that no endpoint request is sent.
 4. Restart the keeper process and repeat (3).
-5. Negative (H5-S3), kept apart from 2-4. A stored reading is looked up before
-   any reader runs, so for the same keeper, bytes and MIME that already have a
-   stored reading, hiding Poppler or the STT endpoint yields a normal `read`
-   reuse. That is the behaviour 3-4 observe, not a failure. The negative run
-   therefore uses a new keeper/base path, or new source bytes (a corrupt or
+5. Negative (H5-S3), kept apart from 2-4. Reader selection happens before cache
+   lookup, while reader execution happens only on a miss. With a matching
+   selected declaration, an existing reading can be reused even if its external
+   process or endpoint could not execute now. To observe an execution failure,
+   use a new keeper/base path, or new source bytes (a corrupt or
    different PDF has another sha256), and records at its start that no durable
    reading exists for that key. Keep the earlier successful readings; do not
    delete them. Then, with the reader failing (Poppler absent, or a corrupt
    PDF, or the STT endpoint stopped), the block must say `status=unavailable`,
    name the reason, keep the original in history, and contain no text derived
    from the PDF or audio.
+6. Selection failure is separate: after a successful audio reading, disable
+   STT in the isolated fixture configuration and start a new walk. With no
+   selected reader, the result must be unavailable even though the earlier
+   cache file still exists. Changing the configured endpoint/model instead
+   selects a new revision and must obtain its own reading. Preserve the old
+   cache and record both declarations; do not delete data to force a miss.
 The same sequence applies to the audio fixture, with the STT endpoint stopped
 for (5) on a new key. Do not count (5) as a substitute for (2).
 

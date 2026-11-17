@@ -1263,10 +1263,18 @@ let retain_readable_media base_path =
   retain 0;
   response, retain, document, audio
 
+let retained_reader_identity =
+  match Keeper_media_reading.reader_identity ~id:"retained-fixture-reader" ~revision:"fixture-v1" with
+  | Ok identity -> identity
+  | Error Keeper_media_reading.Empty_id -> fail "fixture reader id must be nonempty"
+  | Error Keeper_media_reading.Empty_revision -> fail "fixture reader revision must be nonempty"
+
 let retained_reader base_path read =
   let projector = Keeper_media_reading.projector
     ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~keeper_name
-    ~read () in
+    ~resolve:(fun ~kind ~media_type ->
+      Ok (Keeper_media_reading.reader ~identity:retained_reader_identity
+        ~read:(fun ~bytes -> read ~kind ~media_type ~bytes))) () in
   projector, Keeper_turn_driver.For_testing.retained_media_reader
     ~input_source:(Keeper_request_source.Keeper_history {trace_id="retained-reading"}) projector
 
@@ -1303,21 +1311,36 @@ let test_retained_readings_share_raw_reader_and_shrink_exact_text () = with_work
     check string "each reading is raw, without a history provenance wrapper" extracted
       (row |> member "reading" |> member "text" |> to_string);
     check string "provenance names the actual reader" "automatic_reader"
-      (row |> member "reading" |> member "derived_by" |> to_string)) rows;
+      (row |> member "reading" |> member "derived_by" |> to_string);
+    check string "host provenance names the selected reader" retained_reader_identity.id
+      (row |> member "reading" |> member "reader" |> member "id" |> to_string);
+    check string "host provenance names the selected revision" retained_reader_identity.revision
+      (row |> member "reading" |> member "reader" |> member "revision" |> to_string)) rows;
   check int "the shared reader reads each original once" 2 (List.length !reads);
   check bool "PDF reader receives original declared MIME and bytes" true
     (List.mem (Keeper_media_reading.Document,"application/pdf",document) !reads);
   check bool "audio reader receives original declared MIME and bytes" true
     (List.mem (Keeper_media_reading.Audio,"audio/wav",audio) !reads);
   let stored = Agent_core.History.stored_of_raw document in
+  (match Keeper_media_reading.read_stored projector ~kind:Keeper_media_reading.Document
+      ~media_type:"application/pdf" stored with
+   | Error error -> fail (Keeper_media_reading.failure_to_string error)
+   | Ok reading ->
+     check string "raw consumer shares host reader identity" retained_reader_identity.id reading.reader.id;
+     check string "raw consumer shares host reader revision" retained_reader_identity.revision reading.reader.revision;
+     check string "raw consumer shares the exact host reading" extracted reading.text);
   let native = Agent_core.Types.Document
     {media_type="application/pdf";source=Agent_core.Types.Stored stored} in
   let unchanged, _ = Keeper_media_reading.project projector ~needs_projection:(fun _ -> false) [native] in
   check bool "ordinary native document input stays native" true (unchanged=[native]);
   let history, _ = Keeper_media_reading.project projector ~needs_projection:(fun _ -> true) [native] in
   (match history with
-   | [Agent_core.Types.Text text] -> check bool "history adds its own provenance" true
-       (String_util.contains_substring text "conversation history")
+   | [Agent_core.Types.Text text] ->
+     check bool "history adds its own provenance" true
+       (String_util.contains_substring text "conversation history");
+     check bool "history shares the raw and host reader declaration" true
+       (String_util.contains_substring text retained_reader_identity.id
+        && String_util.contains_substring text retained_reader_identity.revision)
    | _ -> fail "text-only history must carry a reading");
   check int "history reuses the raw result read for a receipt" 2 (List.length !reads);
   let inline = String.concat "\n\n" contexts in
@@ -1339,10 +1362,12 @@ let test_later_host_attachments_are_read_after_a_history_timeout () = with_works
     | Ok stored -> stored
     | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
   let calls = ref [] in
+  let timeout = Keeper_media_reading.Pdf_failed
+    (Verification_pdf_inspection.Poppler_budget_spent { program="pdftotext"; budget_sec=60. }) in
   let projector, read_media = retained_reader base_path
     (fun ~kind:_ ~media_type:_ ~bytes ->
       calls := bytes :: !calls;
-      if String.equal bytes earlier_bytes then Error "budget_spent"
+      if String.equal bytes earlier_bytes then Error timeout
       else Ok ("retained reading: " ^ bytes)) in
   let history, _ = Keeper_media_reading.project projector ~needs_projection:(fun _ -> true)
     [Agent_core.Types.Document {media_type="application/pdf";source=Agent_core.Types.Stored earlier}] in
@@ -1363,10 +1388,12 @@ let test_later_host_attachments_are_read_after_a_history_timeout () = with_works
   check bool "the new audio reached its reader" true (List.mem audio !calls);
   check int "only the three distinct originals were read" 3 (List.length !calls);
   ignore (get (Outbox.run_carrier_load run));
-  check (result string string) "the earlier failed original still shares its own memo"
-    (Error "budget_spent")
-    (Keeper_media_reading.read_stored projector ~kind:Keeper_media_reading.Document
-       ~media_type:"application/pdf" earlier);
+  (match Keeper_media_reading.read_stored projector ~kind:Keeper_media_reading.Document
+       ~media_type:"application/pdf" earlier with
+   | Error error ->
+     check bool "the earlier failure retains its selected reader and typed reason" true
+       (error = Keeper_media_reading.Reader_failed { reader=retained_reader_identity; reason=timeout })
+   | Ok _ -> fail "a later attachment must not overwrite the earlier failure");
   check int "carrier retry and the old failure do not read again" 3 (List.length !calls);
   check int "reading leaves the original result pending" 1 (List.length (Outbox.receipt_ids snapshot)))
 

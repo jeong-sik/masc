@@ -48,7 +48,7 @@ type report =
   }
 
 val is_record_name : string -> bool
-(** [<audio|document>-<64 lowercase hex>-<media type>.json], the names
+(** [<audio|document>-<64 lowercase hex>-<reading key>.json], the names
     {!Keeper_media_reading} writes. Other entries are left alone. *)
 
 val keeper_dirs : masc_dir:string -> (string list, error) result

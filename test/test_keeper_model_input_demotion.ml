@@ -1179,17 +1179,23 @@ let signed_request_media_uses_the_exact_reading_prefix () =
   let pdf = Types.document_block ~media_type:"application/pdf"
       ~source:(stored_source ~media_type:"application/pdf" "signed-request-pdf") in
   let canonical_prefix = [{ (signed_user "read the attached report") with content = [pdf] }] in
-  let make_projection reading calls =
+  let make_projection ~revision reading calls =
+    let identity = match Masc.Keeper_media_reading.reader_identity
+        ~id:"signed-request-fixture" ~revision with
+      | Ok identity -> identity
+      | Error Masc.Keeper_media_reading.Empty_id -> Alcotest.fail "fixture reader id must be nonempty"
+      | Error Masc.Keeper_media_reading.Empty_revision -> Alcotest.fail "fixture reader revision must be nonempty" in
     let projector = Masc.Keeper_media_reading.projector ~media_store:test_media_store
       ~keeper_name:"signed-request-media"
-      ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ -> incr calls; Ok reading) () in
+      ~resolve:(fun ~kind:_ ~media_type:_ -> Ok (Masc.Keeper_media_reading.reader ~identity
+        ~read:(fun ~bytes:_ -> incr calls; Ok reading))) () in
     fun messages -> Ok (List.map (fun (message : Types.message) ->
       let content, _ = Masc.Keeper_media_reading.project projector
         ~needs_projection:(function Masc.Keeper_media_reading.Document -> true | Audio -> false)
         message.content in
       { message with content }) messages) in
   let calls = ref 0 in
-  let project_request_media = make_projection "recorded PDF reading" calls in
+  let project_request_media = make_projection ~revision:"recorded" "recorded PDF reading" calls in
   let projected_prefix = match project_request_media canonical_prefix with
     | Ok messages -> messages
     | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
@@ -1209,7 +1215,7 @@ let signed_request_media_uses_the_exact_reading_prefix () =
        (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error));
   let changed_calls = ref 0 in
   let changed = signed_argument_view
-      ~project_request_media:(make_projection "different PDF reading" changed_calls)
+      ~project_request_media:(make_projection ~revision:"changed" "different PDF reading" changed_calls)
       ~base_path ~store ~config canonical in
   Alcotest.(check int) "changed request reading is evaluated once" 1 !changed_calls;
   (match Agent_core.Llm_provider.Backend_anthropic.retained_prefix_reasoning_indices

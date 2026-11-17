@@ -46,6 +46,22 @@ type capture_status = Voice_probe.capture_status =
 
 let capture_status_to_string = Voice_probe.capture_status_to_string
 let capture_status_of_string = Voice_probe.capture_status_of_string
+type prepared_transcription = Voice_probe.prepared_transcription
+type transcription = Voice_probe.transcription =
+  { text : string
+  ; endpoint_id : string
+  ; language_code : string option
+  }
+type transcription_error = Voice_probe.transcription_error =
+  | Configuration_invalid of string
+  | Not_configured
+  | Stt_not_configured
+  | No_enabled_endpoints
+  | Endpoints_failed of (string * string) list
+let transcription_error_to_string = Voice_probe.transcription_error_to_string
+let prepare_transcription = Voice_probe.prepare_transcription
+let transcription_identity = Voice_probe.transcription_identity
+let transcribe_prepared = Voice_probe.transcribe_prepared
 let transcribe_audio = Voice_probe.transcribe_audio
 type probe_outcome = Voice_probe.probe_outcome =
   | Answered of string

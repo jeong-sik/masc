@@ -50,28 +50,49 @@ verify the concrete model and request wire before enabling it.
 
 ## Readings and their identity
 
-`Keeper_media_reading` keys a reading by media kind, source SHA-256 and MIME type.
-It uses the supplied media store to load stored attachment bytes. A successful
-reading carries its source identity, reader version, text and observation time
-under `<base-path>/.masc/media-readings/<keeper>/`.
+`Keeper_media_reading` resolves a reader before looking up a cached reading.
+Reuse requires the same media kind, full MIME string, source SHA-256 and byte
+length, and selected reader's `id` and `revision`. A successful record stores
+those values and the exact reader text under
+`<base-path>/.masc/media-readings/<keeper>/`. Changing the reader or its revision
+requires a fresh reading; an unavailable selection cannot borrow an earlier
+reader's result.
 
-A successful stored reading is reusable when its source and reader version match.
-One lane walk owns one projector and memo, shared by candidates and messages.
-A repeated attachment is read at most once during that walk, including when the
-reader fails. A later walk can retry an unavailable attachment. Failure is never
-stored as a successful reading.
+One lane walk owns a mutable projector and memo on its owning fiber, shared by
+candidates and messages. It freezes reader selection on the first use of each
+(kind, MIME) pair. Repeated attachments share their result, including failures;
+a new walk resolves again. Only nonempty successful readings are stored for
+reuse after a restart. Cancellation propagates without becoming a cached failure.
+
+Raw results carry typed reader provenance and failures. History and retained
+host-result projections include the selected reader's id/revision, and render
+unavailable reasons at their output boundary. These identifiers describe the
+host's reader declaration; they do not authenticate a remote implementation or
+pin credential values, executable bytes or model-file contents.
 
 URL and provider file-ID references are not fetched by this reader. They become
 explicit unread references. A missing source, absent dependency, reader error or
 empty result produces an unavailable marker without invented media content.
 The original attachment remains available for another capable candidate.
 
-## Existing external readers
+## Built-in readers
 
-- Audio uses `Voice_bridge.transcribe_audio` and the configured STT endpoint chain.
+- Audio uses `Voice_bridge.prepare_transcription` to capture the enabled STT
+  endpoint order and each resolved model before cache lookup. Its `builtin.stt`
+  revision hashes that effective declaration, including addresses, commands,
+  credential references and the existing process limit. A cache miss executes
+  the same snapshot through `transcribe_prepared`. HTTP dispatch still checks
+  current account access and resolves credentials immediately before sending.
 - PDF uses `Verification_pdf_inspection.extract_text`, which runs the existing
   Poppler text extraction path. It does not render every page to images or take
-  a verifier review slot. Other document MIME types report `no_document_reader`.
+  a verifier review slot. Its reader is `builtin.pdf_text`, revision `1`.
+  Other document MIME types report `no_matching_reader`.
+
+The STT identity excludes credential values and unrelated voice settings.
+Equal identity does not prove that a remote service, local executable, model
+file or account behind a credential is unchanged. This layer adds no external
+service reader declaration, MCP-reader execution or new durable request owner
+and consumer path.
 
 One walk reuses attachment results. A new attachment reaches its
 reader even if earlier reads or provider requests took a long time. An operation
@@ -174,7 +195,8 @@ unreadable slots produce an explicit unavailable reason without invalidating
 the original receipt; URLs and file IDs are not fetched.
 
 The carrier keeps the original encoded context and appends derived JSON keyed
-by physical receipt digest and attachment slot. Reused call IDs do not collapse
+by physical receipt digest and attachment slot. Successful readings include
+`reader: {id, revision}` beside their text. Reused call IDs do not collapse
 occurrences. `read_stored` shares raw results, not history-formatted prose, so a
 receipt reading does not falsely say that its original is in conversation
 history. The existing viewer and active-producer filters run before reading.
@@ -200,6 +222,12 @@ The focused behavior fixtures are in `test_keeper_turn_driver_failover`,
 `test_runtime_provider_auth_headers` and `test_model_capability_presence`.
 The failover suite also exercises the selected request projection and its media
 reading and wire memos.
+`test_keeper_media_reading_maintenance` covers reader/revision changes, matching
+restart reuse, unavailable-selection isolation and selection frozen within a
+walk. `test_keeper_host_result_retention` checks shared reader provenance across
+raw, history and host results. `test_voice_runtime_overlay` includes captured
+STT command/model declarations. These added cases are not execution results;
+the reader identity/cache layer has no behavior-run evidence recorded here.
 Agent Core's `test_media_document_admission` covers request serialization;
 `test_provider_agnostic_reasoning_replay` covers the signed-prefix boundary.
 

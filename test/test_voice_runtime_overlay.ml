@@ -684,13 +684,15 @@ let stt_chain_fixture ~first ~second f =
          {"id":"second","kind":"whisper_cli","command":"%s","model":"fake.bin","enabled":true}]}}|}
       first_cmd second_cmd
   in
-  with_voice_config_file config (fun () ->
-    f ~audio ~first_marker ~second_marker)
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
+    without_env "MASC_CONFIG_DIR" @@ fun () ->
+    with_voice_config_file config (fun () ->
+      f ~audio ~first_marker ~second_marker ~first_cmd ~second_cmd))
 ;;
 
 let test_stt_chain_fails_over_after_an_endpoint_error () =
   stt_chain_fixture ~first:"exit 3" ~second:"printf second-heard"
-    (fun ~audio ~first_marker ~second_marker ->
+    (fun ~audio ~first_marker ~second_marker ~first_cmd:_ ~second_cmd:_ ->
       Eio_main.run @@ fun _env ->
       match Masc.Voice_bridge.transcribe_audio ~audio_file:audio () with
       | Error msg -> failf "the second endpoint must answer: %s" msg
@@ -699,6 +701,81 @@ let test_stt_chain_fails_over_after_an_endpoint_error () =
         check bool "the second endpoint ran" true (Sys.file_exists second_marker);
         check string "the second endpoint's transcript" "second-heard"
           (Option.value ~default:"" (Json_util.get_string json "text")))
+;;
+
+let prepare_stt_exn () =
+  match Masc.Voice_bridge.prepare_transcription () with
+  | Ok prepared -> prepared
+  | Error error -> fail (Masc.Voice_bridge.transcription_error_to_string error)
+;;
+
+let transcribe_prepared_exn prepared ~audio =
+  match Masc.Voice_bridge.transcribe_prepared prepared ~audio_file:audio () with
+  | Ok transcript -> transcript
+  | Error error -> fail (Masc.Voice_bridge.transcription_error_to_string error)
+;;
+
+let test_prepared_stt_keeps_its_configuration () =
+  stt_chain_fixture
+    ~first:{|printf 'first-%s' "$2"|}
+    ~second:{|printf 'second-%s' "$2"|}
+    (fun ~audio ~first_marker ~second_marker ~first_cmd ~second_cmd ->
+      Eio_main.run @@ fun _env ->
+      let first = prepare_stt_exn () in
+      let first_identity = Masc.Voice_bridge.transcription_identity first in
+      check string "same configuration has the same identity" first_identity
+        (Masc.Voice_bridge.transcription_identity (prepare_stt_exn ()));
+      let endpoint ~id ~command ~model =
+        `Assoc [ "id", `String id; "kind", `String "whisper_cli"
+               ; "command", `String command; "model", `String model
+               ; "enabled", `Bool true ] in
+      let set_endpoints endpoints =
+        write_file (Voice_config.config_path ())
+          (Yojson.Safe.to_string (`Assoc [ "stt", `Assoc [ "endpoints", `List endpoints ] ])) in
+      let a = endpoint ~id:"first" ~command:first_cmd ~model:"fake.bin" in
+      let b = endpoint ~id:"second" ~command:second_cmd ~model:"fake.bin" in
+      List.iter (fun (label, endpoints) ->
+        set_endpoints endpoints;
+        check bool (label ^ " changes the reading identity") false
+          (String.equal first_identity
+             (Masc.Voice_bridge.transcription_identity (prepare_stt_exn ()))))
+        [ "endpoint", [endpoint ~id:"renamed" ~command:first_cmd ~model:"fake.bin"; b]
+        ; "model", [endpoint ~id:"first" ~command:first_cmd ~model:"changed.bin"; b]
+        ; "command", [endpoint ~id:"first" ~command:second_cmd ~model:"fake.bin"; b]
+        ; "order", [b; a]
+        ];
+      set_endpoints [endpoint ~id:"second" ~command:second_cmd ~model:"next.bin"; a];
+      let next = prepare_stt_exn () in
+      let heard_first = transcribe_prepared_exn first ~audio in
+      check string "prepared A keeps its command and model" "first-fake.bin" heard_first.text;
+      check string "prepared A keeps its endpoint" "first" heard_first.endpoint_id;
+      check (option string) "command reported no language" None heard_first.language_code;
+      check bool "only A started before its answer" true (Sys.file_exists first_marker);
+      check bool "new configuration did not redirect A" false (Sys.file_exists second_marker);
+      let heard_next = transcribe_prepared_exn next ~audio in
+      check string "fresh B runs its command and model" "second-next.bin" heard_next.text;
+      check string "fresh B uses its first endpoint" "second" heard_next.endpoint_id;
+      check bool "B actually started" true (Sys.file_exists second_marker))
+;;
+
+let test_prepared_stt_preserves_empty_and_language_results () =
+  stt_chain_fixture ~first:"exit 0" ~second:"printf must-not-run"
+    (fun ~audio ~first_marker:_ ~second_marker ~first_cmd:_ ~second_cmd:_ ->
+      Eio_main.run @@ fun _env ->
+      let transcript = transcribe_prepared_exn (prepare_stt_exn ()) ~audio in
+      check string "successful empty command output stays empty" "" transcript.text;
+      check (option string) "no reported language remains absent" None transcript.language_code;
+      let legacy ?language_code () =
+        match Masc.Voice_bridge.transcribe_audio ~audio_file:audio ?language_code () with
+        | Ok json -> json
+        | Error message -> fail message in
+      let json = legacy () in
+      check (option string) "JSON keeps empty text" (Some "") (Json_util.get_string json "text");
+      check (option string) "JSON names an unreported language" (Some "unknown")
+        (Json_util.get_string json "language_code");
+      check (option string) "explicit empty language is preserved" (Some "")
+        (Json_util.get_string (legacy ~language_code:"" ()) "language_code");
+      check bool "empty success does not try another endpoint" false (Sys.file_exists second_marker))
 ;;
 
 let test_agent_speak_invalid_config_surfaces_load_failure () =
@@ -933,6 +1010,14 @@ let () =
             "STT chain fails over after an endpoint error"
             `Quick
             test_stt_chain_fails_over_after_an_endpoint_error
+        ; test_case
+            "prepared STT keeps its configuration"
+            `Quick
+            test_prepared_stt_keeps_its_configuration
+        ; test_case
+            "prepared STT preserves empty and language results"
+            `Quick
+            test_prepared_stt_preserves_empty_and_language_results
         ; test_case
             "agent_speak invalid config surfaces load failure"
             `Quick

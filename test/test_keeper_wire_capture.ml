@@ -439,6 +439,37 @@ let tools_blob_is_repaired_before_new_rows () =
     Alcotest.(check int) "failed repair publishes no dangling request row" 4
       (List.length (request_rows base)))
 
+let tools_blob_reuse_rechecks_parent_permissions () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_parent_permissions" "" in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
+    let capture turn_id =
+      Wire.capture_request ~base_path:base ~keeper_name:"alpha" ~turn_id
+        ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
+        ~user_message:"u" ~history_messages:[] ~tools:[] ()
+    in
+    capture 1;
+    let reference, expected = fetch_tools_blob ~base (read_single_json_record base) in
+    let path = tools_blob_path ~base reference in
+    let leaf_inode = (Unix.stat path).Unix.st_ino in
+    let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base) in
+    List.iteri (fun index directory ->
+      let permissions = (Unix.stat directory).Unix.st_perm in
+      Fun.protect ~finally:(fun () -> Unix.chmod directory permissions) (fun () ->
+        Unix.chmod directory 0o777;
+        capture (index + 2);
+        Alcotest.(check int) "unsafe parent cannot publish another request row" 1
+          (List.length (request_rows base));
+        Alcotest.(check int) "parent permission change leaves the cached leaf intact"
+          leaf_inode (Unix.stat path).Unix.st_ino))
+      [root; Filename.dirname path];
+    capture 4;
+    let rows = request_rows base in
+    Alcotest.(check int) "capture resumes after parent permissions are restored" 2 (List.length rows);
+    let current = List.find (fun row -> json_member "turn_id" row = `Int 4) rows in
+    let _, bytes = fetch_tools_blob ~base current in
+    Alcotest.(check string) "restored owned path retains the schema bytes" expected bytes)
+
 let tools_blob_uses_each_capture_redaction () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_redaction_refresh" "" in
@@ -913,6 +944,8 @@ let () =
             tools_blob_is_shared_across_requests;
           Alcotest.test_case "tools blob repairs precede new request rows" `Quick
             tools_blob_is_repaired_before_new_rows;
+          Alcotest.test_case "tools blob reuse rechecks parent permissions" `Quick
+            tools_blob_reuse_rechecks_parent_permissions;
           Alcotest.test_case "tools blob uses each capture's redaction" `Quick
             tools_blob_uses_each_capture_redaction;
           Alcotest.test_case "write failure is best effort" `Quick

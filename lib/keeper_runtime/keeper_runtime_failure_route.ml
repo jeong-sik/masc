@@ -443,9 +443,14 @@ let route_of_error_family (err : Agent_core.Error.t) : route =
   | Agent_core.Error.Agent _
   | Agent_core.Error.Serialization _
   | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
-  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ ->
     exhaust Internal_opaque
+  | (Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _) as internal ->
+    (* Unresolved Task Skill pins wait on the operator's Skill configuration,
+       as the turn's terminal reason says (#31131). *)
+    (match Keeper_task_skill_resolution_error.of_core_error internal with
+     | Some (_ : Keeper_task_skill_resolution_error.t) -> exhaust Config_mismatch
+     | None -> exhaust Internal_opaque)
 ;;
 
 let route_of_error ~boundary (err : Agent_core.Error.t) : route =

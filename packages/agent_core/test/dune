@@ -779,3 +779,8 @@
  (name test_history)
  (modules test_history)
  (libraries agent_core agent_core_base llm_provider alcotest yojson base64))
+
+(test
+ (name test_http_request_stream)
+ (modules test_http_request_stream)
+ (libraries llm_provider yojson alcotest))

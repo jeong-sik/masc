@@ -693,11 +693,12 @@ let add_routes ~sw ~clock router =
            Http.Response.json_value ~status ~request:req json reqd)
   |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/workspace-memory-inventory" (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
-           match Workspace_memory_ledger.observe ~base_path with
-           | Workspace_memory_ledger.Unavailable detail ->
+           match Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+             Workspace_memory_ledger.check_readable ~base_path) with
+           | Error detail ->
              Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc [ "error", `String detail ]) reqd
-           | Workspace_memory_ledger.Missing | Workspace_memory_ledger.Available _ ->
+           | Ok () ->
              let cache_key =
                Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path in
              respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s

@@ -667,6 +667,58 @@ let test_memprof_numeric_routes_preserve_operator_read_authority () =
       check int "workspace precondition is still enforced" 409 mismatch.status) paths)
 ;;
 
+let test_world_export_authority_and_documents ~strict () =
+  let keys = ["MASC_CONFIG_DIR"; "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"] in
+  let previous = List.map (fun key -> key, Sys.getenv_opt key) keys in
+  Fun.protect ~finally:(fun () ->
+    List.iter (fun (key, value) -> match value with
+      | None -> Unix.unsetenv key | Some value -> Unix.putenv key value) previous)
+  @@ fun () ->
+  Unix.unsetenv "MASC_CONFIG_DIR";
+  Unix.putenv "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" "true";
+  with_authentication ~strict @@ fun ~base_path ~worker ~admin ~clock:_ ->
+  let config_root = Config_dir_resolver.base_path_config_root ~cwd:base_path base_path in
+  let keepers = Filename.concat config_root Common.keepers_runtime_dirname in
+  Fs_compat.mkdir_p keepers;
+  let declaration = "[keeper]\ninstructions = \"Private authored world text\"\nalways_allow = false\n" in
+  let write name content =
+    match Fs_compat.save_file_atomic (Filename.concat keepers name) content with
+    | Ok () -> () | Error detail -> fail detail in
+  write "alpha.toml" declaration;
+  let router = Server_routes_http_routes_world_configuration.add_routes (Router.create ()) in
+  let export_path = "/api/v1/world/configuration/export" in
+  check int "no credential" 401 (dispatch router export_path).status;
+  check int "invalid credential" 401 (dispatch ~token:"invalid-world-token" router export_path).status;
+  check int "Worker cannot read confidential documents" 403 (dispatch ~token:worker router export_path).status;
+  let guarded base = Uri.to_string (Uri.make ~path:export_path ~query:
+    ["expected_base_path", [base];
+     "expected_masc_root", [Filename.concat base Common.masc_dirname]] ()) in
+  let response = dispatch ~token:admin router (guarded base_path) in
+  check int "Admin export" 200 response.status;
+  check bool "confidential response is uncached" true
+    (List.mem ("cache-control", "no-store") response.headers);
+  check bool "workspace admission header survives the response scope" true
+    (List.mem Workspace.read_precondition_admission_header response.headers);
+  let open Yojson.Safe.Util in
+  let body = Yojson.Safe.from_string response.body in
+  check string "document-only scope is explicit" "authored_configuration_documents"
+    (body |> member "scope" |> to_string);
+  let bundle = match World_configuration_bundle.of_yojson (body |> member "bundle") with
+    | Ok bundle -> bundle
+    | Error error -> fail (World_configuration_bundle.error_to_string error) in
+  check (list (pair string string)) "complete authored declaration crosses the actual route"
+    ["alpha", declaration]
+    (List.map (fun (keeper : World_configuration_bundle.keeper) ->
+      keeper.name, keeper.declaration.content) bundle.keepers);
+  check int "another workspace is refused" 409
+    (dispatch ~token:admin router (guarded "/other-world")).status;
+  write "broken.toml" "[keeper]\ninstructions = [\n";
+  let failed = dispatch ~token:admin router export_path in
+  check int "a broken declaration is not omitted" 422 failed.status;
+  check bool "capture errors are uncached" true
+    (List.mem ("cache-control", "no-store") failed.headers)
+;;
+
 (* The status each kind answers with no credential, with a Worker token and with
    an Admin token. Both routers must agree, and these are what they agree on.
    Only a public read that asks for a credential under strict auth changes with
@@ -1063,6 +1115,10 @@ let () =
             test_memprof_numeric_routes_preserve_operator_read_authority
         ; test_case "numeric memprof wire and selective stacks" `Quick test_memprof_counter_wire_and_selective_stacks
         ; test_case "numeric memprof query and identity refusals" `Quick test_memprof_query_identity_refusals
+        ; test_case "world export requires Admin and preserves full documents under strict auth" `Quick
+            (test_world_export_authority_and_documents ~strict:true)
+        ; test_case "world export requires Admin even with strict auth off" `Quick
+            (test_world_export_authority_and_documents ~strict:false)
         ] )
     ; ( "canonical host"
       , [ test_case

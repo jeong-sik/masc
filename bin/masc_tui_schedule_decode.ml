@@ -38,27 +38,27 @@ let optional_nested_string_field json object_field field =
         (Printf.sprintf "schedule %s must be an object or null: %s"
            object_field (Yojson.Safe.to_string value))
 
-(* Whether a step of the wake actually happened, as the reaction ledger
-   recorded it. Absent reads as [None] and not as [false]: "the ledger did not
-   say" and "the ledger said no" are different answers, and only one of them
-   means something went wrong. *)
-(* [null] inside the evidence object is "no turn this wake started has
-   finished"; an absent evidence object is "the ledger did not say". The
-   disposition token is read with the ledger's closed decoder. *)
+(* The server attaches the evidence fields only when it read the reaction
+   ledger; a read error or an invalid stimulus id carries none. So an absent
+   [turn_finished_disposition] is "the ledger did not say", while a present
+   [null] is "no turn this wake started has finished". [member] cannot tell
+   the two apart, so the key is looked up directly. The disposition token is
+   read with the ledger's closed decoder. *)
 let turn_finish_field json =
   match Yojson.Safe.Util.member "keeper_reaction_evidence" json with
   | `Null -> Ok None
-  | `Assoc _ as nested -> (
-      match Yojson.Safe.Util.member "turn_finished_disposition" nested with
-      | `Null -> Ok (Some Masc_tui_types.Schedule_turn_open)
-      | `String token -> (
+  | `Assoc fields -> (
+      match List.assoc_opt "turn_finished_disposition" fields with
+      | None -> Ok None
+      | Some `Null -> Ok (Some Masc_tui_types.Schedule_turn_open)
+      | Some (`String token) -> (
           match Masc.Keeper_reaction_ledger.Turn_disposition.of_string token with
           | Some disposition -> Ok (Some (Masc_tui_types.Schedule_turn_finished disposition))
           | None ->
               Error
                 ("schedule keeper_reaction_evidence.turn_finished_disposition is unknown: "
                  ^ token))
-      | value ->
+      | Some value ->
           Error
             (Printf.sprintf
                "schedule keeper_reaction_evidence.turn_finished_disposition must be a string or null: %s"
@@ -68,6 +68,10 @@ let turn_finish_field json =
         (Printf.sprintf "schedule keeper_reaction_evidence must be an object or null: %s"
            (Yojson.Safe.to_string value))
 
+(* Whether a step of the wake actually happened, as the reaction ledger
+   recorded it. Absent reads as [None] and not as [false]: "the ledger did not
+   say" and "the ledger said no" are different answers, and only one of them
+   means something went wrong. *)
 let optional_nested_bool_field json object_field field =
   match Yojson.Safe.Util.member object_field json with
   | `Null -> Ok None

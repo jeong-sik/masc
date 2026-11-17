@@ -687,6 +687,42 @@ let test_decode_keeps_a_row_whose_recurrence_it_cannot_read () =
   | _ -> Alcotest.fail "a 600 s interval did not decode as itself"
 ;;
 
+(* #32468: the server sends no evidence fields when it could not read the
+   reaction ledger, so an absent disposition is "not said" ([None]); only a
+   present [null] is "the turn has not finished". *)
+let test_absent_turn_disposition_is_not_an_open_turn () =
+  let finish evidence =
+    let json =
+      match
+        agenda_json
+          (Schedule_domain.recurrence_to_yojson
+             (Schedule_domain.Interval { interval_sec = 600 }))
+      with
+      | `Assoc fields ->
+        `Assoc
+          (List.map
+             (function
+               | "requests", `List [ `Assoc row ] ->
+                 "requests", `List [ `Assoc (("keeper_reaction_evidence", evidence) :: row) ]
+               | field -> field)
+             fields)
+      | json -> json
+    in
+    match Masc_tui_schedule_decode.snapshot_of_json json with
+    | Ok { Masc_tui_types.scs_rows = [ row ]; _ } -> row.Masc_tui_types.sch_turn_finished
+    | Ok snapshot -> Alcotest.failf "the page kept %d rows, not 1" (List.length snapshot.scs_rows)
+    | Error reason -> Alcotest.fail reason
+  in
+  (match finish (`Assoc [ "projection_status", `String "read_error" ]) with
+   | None -> ()
+   | Some _ -> Alcotest.fail "a ledger read error decoded as a turn finish state");
+  match finish (`Assoc [ "projection_status", `String "matched_turn_started"
+                       ; "turn_finished_disposition", `Null ]) with
+  | Some Masc_tui_types.Schedule_turn_open -> ()
+  | Some (Masc_tui_types.Schedule_turn_finished _) | None ->
+    Alcotest.fail "a present null did not decode as an open turn"
+;;
+
 let test_failed_or_missing_agenda_is_unknown () =
   let unknown = every Masc_tui_keeper_next_run.Wakes_unknown in
   Alcotest.check strip "a failed read"
@@ -773,6 +809,8 @@ let () =
         ; Alcotest.test_case "unreadable status" `Quick test_unreadable_status_is_unknown
         ; Alcotest.test_case "unread recurrence" `Quick
             test_unread_recurrence_knows_only_the_first_wake
+        ; Alcotest.test_case "absent turn disposition is not an open turn" `Quick
+            test_absent_turn_disposition_is_not_an_open_turn
         ; Alcotest.test_case "decode keeps an unread recurrence" `Quick
             test_decode_keeps_a_row_whose_recurrence_it_cannot_read
         ; Alcotest.test_case "failed or missing agenda" `Quick

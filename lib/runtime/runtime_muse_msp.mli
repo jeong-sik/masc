@@ -178,7 +178,25 @@ type mcp_server =
             [false] lets the session run without it. *)
       }
 
-type session_config = { mcp_servers : (string * mcp_server) list }
+type developer_prompt =
+  | Inherit_host
+      (** Omit the override and keep the host's full Developer context. *)
+  | Developer_text of string
+      (** Send the text unchanged. The host trims it: nonblank text overrides
+          settings-derived Developer instructions; blank text has the same
+          clearing semantics as {!Clear_suppressible_context}. *)
+  | Clear_suppressible_context
+      (** Send explicit null. On hosts serving Developer instructions this
+          clears the override and disables suppressible context, including
+          the agent catalog and memory snapshot. *)
+(** Native [SessionConfig.developerPrompt], used during session construction.
+    A host may ignore a valid member. Neither an RPC success nor a completed
+    turn confirms its application; a warm resume may keep existing context. *)
+
+type session_config =
+  { mcp_servers : (string * mcp_server) list
+  ; developer_prompt : developer_prompt
+  }
 
 val session_start_request
   :  id:int

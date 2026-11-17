@@ -145,7 +145,7 @@ let test_client_frames_match_corpus () =
        ~workspace_root:"/home/me/src/proj"
        ~model_id:None
        ~approval_mode:None
-       ~config:{ mcp_servers = [] });
+       ~config:{ mcp_servers = []; developer_prompt = Msp.Inherit_host });
   check
     json
     "turn/start"
@@ -556,6 +556,7 @@ let test_session_config_carries_bridge () =
                   ; required = true
                   } )
             ]
+        ; developer_prompt = Msp.Inherit_host
         }
   in
   check
@@ -566,6 +567,48 @@ let test_session_config_carries_bridge () =
     (match frame with
      | `Assoc fields -> List.assoc "params" fields
      | _ -> fail "frame is not an object")
+;;
+
+let test_developer_prompt_wire_contract () =
+  let servers =
+    [ "masc", Msp.Streamable_http
+        { url = "http://127.0.0.1:4100/mcp"; headers = []; required = true } ]
+  in
+  List.iter
+    (fun mcp_servers ->
+      List.iter
+        (fun (developer_prompt, expected) ->
+          let config = { Msp.mcp_servers; developer_prompt } in
+          let frames =
+            [ Msp.session_start_request ~id:2 ~command_id:"c" ~workspace_root:"/w"
+                ~model_id:None ~approval_mode:None ~config
+            ; Msp.session_resume_request ~id:2 ~command_id:"c" ~session_id:"s" ~config
+            ]
+          in
+          List.iter
+            (fun frame ->
+              let params = Yojson.Safe.Util.member "params" frame in
+              let fields = Yojson.Safe.Util.to_assoc params in
+              check bool "empty config is omitted"
+                (mcp_servers <> [] || expected <> None) (List.mem_assoc "config" fields);
+              match Yojson.Safe.Util.member "config" params with
+              | `Null ->
+                check bool "no config only when both fields are omitted" true
+                  (mcp_servers = [] && expected = None)
+              | `Assoc fields ->
+                check (option json) "omission differs from explicit null"
+                  expected (List.assoc_opt "developerPrompt" fields);
+                check bool "MCP and Developer fields coexist"
+                  (mcp_servers <> []) (List.mem_assoc "mcpServers" fields)
+              | _ -> fail "config must be an object")
+            frames)
+        [ Msp.Inherit_host, None
+        ; Msp.Developer_text "  개발자 지침\n", Some (`String "  개발자 지침\n")
+        ; Msp.Developer_text "", Some (`String "")
+        ; Msp.Developer_text "\xc2\xa0\xe3\x80\x80", Some (`String "\xc2\xa0\xe3\x80\x80")
+        ; Msp.Clear_suppressible_context, Some `Null
+        ])
+    [ []; servers ]
 ;;
 
 let test_reasoning_effort_round_trip () =
@@ -816,6 +859,8 @@ let () =
         ; test_case "message phase is decoded" `Quick test_message_phase_is_decoded
         ; test_case "usage read" `Quick test_usage_read
         ; test_case "session config carries bridge" `Quick test_session_config_carries_bridge
+        ; test_case "Developer prompt preserves native wire semantics" `Quick
+            test_developer_prompt_wire_contract
         ; test_case "reasoning effort round trip" `Quick test_reasoning_effort_round_trip
         ; test_case "effective approval mode wire contract" `Quick test_effective_approval_mode_wire_contract
         ; test_case "session model selection wire contract" `Quick test_session_model_selection_wire_contract

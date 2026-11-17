@@ -478,9 +478,15 @@ let validate_process_config config =
 (* Every string MASC puts on the wire is checked here: the host exits on an
    invalid UTF-8 line, and a refused write would otherwise surface only as a
    request that never gets an answer. *)
-let validate_turn ?(session_mode = Start) config ~workspace_root ~prompt ~images =
+let validate_turn ?(session_mode = Start) ?(developer_prompt = Msp.Inherit_host)
+      config ~workspace_root ~prompt ~images =
   let* () = validate_process_config config in
   let* _ = approval_mode_of_posture config.native in
+  let* () =
+    match developer_prompt with
+    | Msp.Inherit_host | Msp.Clear_suppressible_context -> Ok ()
+    | Msp.Developer_text text -> valid_utf8 "developer_prompt" text
+  in
   let* () = valid_utf8 "workspace_root" workspace_root in
   let* () = valid_utf8 "prompt" prompt in
   let* () =
@@ -1820,6 +1826,7 @@ let run_protocol
       ~approval_mode
       ~session_mode
       ~mcp_servers
+      ~developer_prompt
       ~reasoning_effort
       ~workspace_root
       ~prompt
@@ -1845,7 +1852,10 @@ let run_protocol
       ~approval_mode
       ~session_mode
       ~workspace_root
-      ~session_config:{ Msp.mcp_servers = List.map (fun server -> server.name, server.server) mcp_servers }
+      ~session_config:
+        { Msp.mcp_servers = List.map (fun server -> server.name, server.server) mcp_servers
+        ; developer_prompt
+        }
   in
   let session_id = session.Msp.session_id in
   let* () =
@@ -2014,6 +2024,7 @@ let run_turn
       ~storage
       ?(session_mode = Start)
       ?(mcp_servers = [])
+      ?(developer_prompt = Msp.Inherit_host)
       ?(workspace_origin = other_tree)
       ?reasoning_effort
       ?(on_session_ready = fun ~session_id:_ ~last_turn:_ -> Ok ())
@@ -2046,7 +2057,7 @@ let run_turn
       | Stateless _, Resume _ -> Error (Invalid_config "isolated stateless storage cannot resume")
       | Stateless _, Start | Keeper_owned _, (Start | Resume _) -> Ok ()
   in
-  let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
+  let* () = validate_turn ~session_mode ~developer_prompt config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
   let* config = prepare_account_config ~account_home config in
   let* approval_mode = approval_mode_of_posture config.native in
@@ -2064,6 +2075,7 @@ let run_turn
         ~approval_mode
         ~session_mode
         ~mcp_servers
+        ~developer_prompt
         ~reasoning_effort
         ~workspace_root
         ~prompt

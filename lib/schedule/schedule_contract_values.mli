@@ -70,6 +70,60 @@ val wake_status_to_string : wake_status -> string
 val wake_status_of_string : string -> (wake_status, decode_error) result
 val wake_status_strings : string list
 
+(** [keeper_queue_evidence.projection_status] of a dashboard schedule row:
+    what the woken Keeper's durable event queue holds for the wake. *)
+type queue_projection_status =
+  | Queue_matched_pending  (** The wake is still in the owner's queue. *)
+  | Queue_retained_terminal_wake
+      (** Still queued, but the schedule was cancelled: a withdrawn leftover. *)
+  | Queue_withdrawn_at_cancel
+      (** Absent from the queue, and the schedule was cancelled. *)
+  | Queue_not_found  (** Absent from the queue. *)
+  | Queue_matched_terminal_completed  (** The queue recorded completion. *)
+  | Queue_matched_terminal_cancelled  (** The queue recorded cancellation. *)
+  | Queue_terminal_projection_pending
+      (** A terminal transition is written but not yet projected. *)
+  | Queue_transfer_projection_pending
+      (** The wake is moving to another owner. *)
+  | Queue_evidence_invalid
+      (** The durable source does not match this occurrence. *)
+  | Queue_read_error  (** The queue could not be read. *)
+  | Queue_unrecognized_receipt
+      (** The dispatch receipt cannot name the queued occurrence. *)
+
+val queue_projection_status_to_string : queue_projection_status -> string
+
+val queue_projection_status_of_string
+  :  string
+  -> (queue_projection_status, decode_error) result
+
+val queue_projection_status_strings : string list
+
+(** [keeper_reaction_evidence.projection_status] of a dashboard schedule row:
+    the furthest step the woken Keeper's reaction ledger recorded. *)
+type reaction_projection_status =
+  | Reaction_conflicting_terminal_evidence
+      (** Both an ack and a cancellation were recorded. *)
+  | Reaction_matched_terminal_cancelled
+  | Reaction_matched_consumed_ack
+  | Reaction_matched_turn_finished
+  | Reaction_matched_turn_started
+  | Reaction_matched_stimulus  (** Only the stimulus arrival was recorded. *)
+  | Reaction_not_found  (** The ledger has no row for the stimulus. *)
+  | Reaction_quarantined  (** A matching row failed to decode. *)
+  | Reaction_read_error
+  | Reaction_missing_stimulus_id
+  | Reaction_invalid_stimulus_id
+  | Reaction_unrecognized_receipt
+
+val reaction_projection_status_to_string : reaction_projection_status -> string
+
+val reaction_projection_status_of_string
+  :  string
+  -> (reaction_projection_status, decode_error) result
+
+val reaction_projection_status_strings : string list
+
 (** The schedule runner's own [status], as [/health] reports it under
     [schedule_runner] and the schedule list reports it beside its rows. The
     runner re-reads what it holds only on a tick that succeeds, so a reader of

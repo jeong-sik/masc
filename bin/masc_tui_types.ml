@@ -2981,9 +2981,10 @@ type schedule_row = {
   sch_last_wake_status: Schedule_contract_values.wake_status option;
   sch_last_wake_started_at_iso: string option;
   sch_last_wake_error: string option;
-  sch_queue_projection_status: string option;
+  sch_queue_projection_status: Schedule_contract_values.queue_projection_status option;
   sch_queue_pending_count: int option;
-  sch_reaction_projection_status: string option;
+  sch_reaction_projection_status:
+    Schedule_contract_values.reaction_projection_status option;
   sch_reaction_latest_at_iso: string option;
   sch_reaction_kind: string option;
   sch_reaction_keeper_name: string option;

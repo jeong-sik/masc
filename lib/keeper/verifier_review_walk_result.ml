@@ -132,6 +132,7 @@ let read progress =
              | Typed (candidates, result), No_walk_result -> Ok (Walk_result { candidates; result })
              | Typed _, Walk_result _ -> Error "attempt holds more than one walk result")
          | P.Execution_observed (P.Waiting _ | P.Absent _)
+         | P.Approval_intended _ | P.Approval_wait_retained _
          | P.Dispatch_intended | P.Admission_declined _ | P.Judgment_retained _
          | P.Preparation_intended _ | P.Preparation_observed _ | P.Replacement_intended _
          | P.Replacement_observed _ | P.Commit_intended _ | P.Commit_uncertain _

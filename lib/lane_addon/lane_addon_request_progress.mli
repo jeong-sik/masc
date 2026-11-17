@@ -12,7 +12,12 @@ type successor = { request_id : string; request_digest : string }
     record names it by; the child's body is stored once, by its own record. *)
 type preparation_intent = { request_id : string; request : Yojson.Safe.t }
 type preparation = Preparation_pending of preparation_intent | Preparation_confirmed of preparation_intent
+type approval =
+  | Intent_pending of Lane_addon_request_approval.intent
+  | Waiting_for_approval of Lane_addon_request_approval.intent * Lane_addon_request_approval.wait
 type event =
+  | Approval_intended of Lane_addon_request_approval.intent
+  | Approval_wait_retained of Lane_addon_request_approval.wait
   | Dispatch_intended
   | Admission_declined of Yojson.Safe.t
   | Execution_observed of observation
@@ -40,6 +45,16 @@ type t
 val captured : t
 val phase : t -> phase
 val events : t -> event list
+val approval : t -> approval option
+(** Optional immutable approval facts, independent of the execution phase.
+    [None] means no approval intent was recorded, not that an approval is
+    absent from its queue. One intent and its exact wait link may be appended
+    only while [Captured]; neither changes that phase. The wait must match
+    the intent digest and complete request input hash. Duplicate or rebound
+    intents/links are rejected, and every later phase preserves these facts.
+    No intent is required for generic dispatch: each domain owner validates
+    its own original binding and authorization. A retained wait is not Allow,
+    an execution observation, or the [Admission_wait] refusal phase. *)
 val preparation : t -> preparation option
 (** Optional immutable prerequisite-publication fact. Its intent and exact ID
     acknowledgement preserve Judged; they perform no child publication or

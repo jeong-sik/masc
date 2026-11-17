@@ -40,6 +40,8 @@ let progress_ids progress =
       | Progress.Preparation_observed request_id
       | Progress.Replacement_observed request_id
       | Progress.Successor_observed request_id -> [ request_id ]
+      (* An approval ID names the approval queue, not another original. *)
+      | Progress.Approval_intended _ | Progress.Approval_wait_retained _
       | Progress.Dispatch_intended | Progress.Admission_declined _
       | Progress.Execution_observed _ | Progress.Judgment_retained _
       | Progress.Commit_intended _ | Progress.Commit_uncertain _

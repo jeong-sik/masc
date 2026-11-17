@@ -1,4 +1,5 @@
 open Result.Syntax
+module Approval = Lane_addon_request_approval
 type observation = Waiting of Yojson.Safe.t | Outcome_unknown of Yojson.Safe.t
   | Absent of Yojson.Safe.t
 type refusal_stage = Before_dispatch | Execution
@@ -8,7 +9,9 @@ type commit = { judgment : Yojson.Safe.t; change : change }
 type successor = { request_id : string; request_digest : string }
 type preparation_intent = { request_id : string; request : Yojson.Safe.t }
 type preparation = Preparation_pending of preparation_intent | Preparation_confirmed of preparation_intent
-type event = Dispatch_intended | Admission_declined of Yojson.Safe.t | Execution_observed of observation
+type approval = Intent_pending of Approval.intent | Waiting_for_approval of Approval.intent * Approval.wait
+type event = Approval_intended of Approval.intent | Approval_wait_retained of Approval.wait
+  | Dispatch_intended | Admission_declined of Yojson.Safe.t | Execution_observed of observation
   | Judgment_retained of Yojson.Safe.t | Preparation_intended of preparation_intent
   | Preparation_observed of string | Replacement_intended of preparation_intent
   | Replacement_observed of string | Commit_intended of change
@@ -21,12 +24,13 @@ type phase = Captured | Admission_wait of Yojson.Safe.t | Dispatch_pending of ob
   | Commit_unknown of commit * Yojson.Safe.t | Finished of commit
   | Conflicted of commit * Yojson.Safe.t | Rejected of refusal
   | Subdividing of refusal * successor | Subdivided of refusal * successor
-type t = { events_rev : event list; phase : phase; preparation:preparation option;
+type t = { events_rev : event list; phase : phase; approval:approval option; preparation:preparation option;
   replacement:preparation option; settlement:Yojson.Safe.t option;
   observer:Lane_addon_request_receipt.t }
-let captured = {events_rev=[];phase=Captured;preparation=None;replacement=None;settlement=None;observer=Lane_addon_request_receipt.empty}
+let captured = {events_rev=[];phase=Captured;approval=None;preparation=None;replacement=None;settlement=None;observer=Lane_addon_request_receipt.empty}
 let phase t = t.phase
 let events t = List.rev t.events_rev
+let approval t = t.approval
 let preparation t = t.preparation
 let replacement t = t.replacement
 let settlement t = t.settlement
@@ -38,6 +42,8 @@ let object_fields names = function
 let envelope kind fields = `Assoc (("event", `String kind) :: fields)
 let evidence_event kind evidence = envelope kind ["evidence",evidence]
 let event_to_json = function
+  | Approval_intended intent -> envelope "approval_intended" ["intent",Approval.intent_to_json intent]
+  | Approval_wait_retained wait -> envelope "approval_wait_retained" ["wait",Approval.wait_to_json wait]
   | Observer event -> Lane_addon_request_receipt.event_to_json event
   | Dispatch_intended -> envelope "dispatch_intended" []
   | Admission_declined evidence -> evidence_event "admission_declined" evidence
@@ -73,6 +79,14 @@ let event_of_json json =
   let evidence ctor = let* fields = fields ["evidence"] in Ok (ctor (List.assoc "evidence" fields)) in
   let value key ctor = let* fields = fields [key] in Ok (ctor (List.assoc key fields)) in
   match kind with
+  | "approval_intended" ->
+    let* fields = fields ["intent"] in
+    let+ intent = Approval.intent_of_json (List.assoc "intent" fields) in
+    Approval_intended intent
+  | "approval_wait_retained" ->
+    let* fields = fields ["wait"] in
+    let+ wait = Approval.wait_of_json (List.assoc "wait" fields) in
+    Approval_wait_retained wait
   | "observer_registration_intended" | "observer_registration_recorded"
   | "observer_completion_intended" | "observer_completion_recorded" ->
     let* event = Lane_addon_request_receipt.event_of_json json in Ok (Observer event)
@@ -132,6 +146,11 @@ let event_of_json json =
   | _ -> Error "unknown request progress event"
 let invalid () = Error "event does not follow the original request progress"
 let step phase = function
+  | Approval_intended _ | Approval_wait_retained _ -> (match phase with
+      | Captured -> Ok phase
+      | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
+      | Subdividing _ | Subdivided _ -> invalid ())
   | Replacement_intended _ | Replacement_observed _ -> (match phase with
       | Conflicted _ | Rejected _ -> Ok phase
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
@@ -212,6 +231,20 @@ let step phase = function
 (* Private fold boundary. Callers below have either decoded the wire event or
    validated a public event; repeating its wire codec here rehashes receipts. *)
 let append_validated t event =
+  let* approval = match event,t.approval with
+    | Approval_intended intent,None -> Ok (Some (Intent_pending intent))
+    | Approval_wait_retained wait,Some (Intent_pending intent)
+        when Approval.wait_matches_intent intent wait ->
+      Ok (Some (Waiting_for_approval (intent,wait)))
+    | Approval_intended _,Some (Intent_pending _ | Waiting_for_approval _)
+    | Approval_wait_retained _,(None | Some (Intent_pending _ | Waiting_for_approval _)) ->
+      Error "approval wait does not follow its exact immutable intent, or approval fact is duplicated"
+    | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+      | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
+      | Replacement_observed _ | Commit_intended _ | Commit_uncertain _
+      | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
+      | Refusal_settled _ | Successor_intended _ | Successor_observed _ | Observer _),
+      (None | Some (Intent_pending _ | Waiting_for_approval _)) -> Ok t.approval in
   let* preparation = match event,t.preparation with
     | Preparation_intended successor,None -> Ok (Some (Preparation_pending successor))
     | Preparation_observed request_id,Some (Preparation_pending successor)
@@ -221,7 +254,8 @@ let append_validated t event =
       Error "preparation acknowledgement does not follow its exact immutable intent"
     | Commit_intended _,Some (Preparation_pending _) ->
       Error "domain commit cannot precede original prerequisite publication acknowledgement"
-    | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | (Approval_intended _ | Approval_wait_retained _
+      | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
       | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
       | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_intended _
       | Successor_observed _ | Observer _ | Replacement_intended _ | Replacement_observed _),
@@ -236,7 +270,8 @@ let append_validated t event =
     | (Successor_intended _ | Refusal_settled _),Some (Preparation_pending _ | Preparation_confirmed _) ->
       Error "a replacement publication cannot acquire another refusal disposition"
     | (Successor_intended _ | Refusal_settled _),None -> Ok None
-    | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | (Approval_intended _ | Approval_wait_retained _
+      | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
       | Preparation_intended _ | Preparation_observed _ | Commit_intended _ | Commit_uncertain _
       | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
       | Successor_observed _ | Observer _),
@@ -245,7 +280,8 @@ let append_validated t event =
     | Refusal_settled evidence,None -> Ok (Some evidence)
     | Refusal_settled _,Some _ -> Error "a refusal can be settled only once"
     | Successor_intended _,Some _ -> Error "a settled refusal cannot be subdivided"
-    | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | (Approval_intended _ | Approval_wait_retained _
+      | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
       | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
       | Replacement_observed _ | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _
       | Commit_observed _ | Commit_conflicted _ | Refused _ | Successor_intended _
@@ -253,17 +289,18 @@ let append_validated t event =
   let* phase = step t.phase event in
   let* observer = match event with
     | Observer event -> Lane_addon_request_receipt.append t.observer event
+    | Approval_intended _ | Approval_wait_retained _
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
     | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_intended _
     | Successor_observed _ -> Ok t.observer in
-  Ok {events_rev=event :: t.events_rev;phase;preparation;replacement;settlement;observer}
+  Ok {events_rev=event :: t.events_rev;phase;approval;preparation;replacement;settlement;observer}
 let append t event =
   let* event = match event with
-    (* Receipt construction is opaque. Its append checks ACK text and ordering;
-       the complete public payload codecs remain necessary for other events. *)
-    | Observer _ -> Ok event
+    (* Receipt and approval construction are opaque. Their append boundaries
+       check linkage and ordering; other public payloads still need codecs. *)
+    | Observer _ | Approval_intended _ | Approval_wait_retained _ -> Ok event
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _

@@ -237,7 +237,8 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
            | Ok receipt -> [event;Progress.Observer
                (Lane_addon_request_receipt.Intended (Registration,receipt))]
            | Error detail -> raise (Retention_failed (Original_corrupt detail)))
-        | _,None | (Dispatch_intended | Admission_declined _ | Execution_observed _
+        | _,None | (Approval_intended _ | Approval_wait_retained _
+          | Dispatch_intended | Admission_declined _ | Execution_observed _
           | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
           | Replacement_observed _ | Commit_intended _ | Commit_uncertain _
           | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _

@@ -128,16 +128,20 @@ let entry_is_skipped entry =
 ;;
 
 let key_of_callstack callstack =
-  let entries =
-    Array.to_list (Printexc.raw_backtrace_entries callstack)
-    |> List.filteri (fun index _ -> index < callstack_frames)
+  let entries = Printexc.raw_backtrace_entries callstack in
+  let limit = min callstack_frames (Array.length entries) in
+  let rec choose index count kept =
+    if index = limit || count = frames_per_key then List.rev kept
+    else
+      let entry = entries.(index) in
+      if entry_is_skipped entry then choose (index + 1) count kept
+      else choose (index + 1) (count + 1) (entry :: kept)
   in
-  let attributed, kept =
-    match List.filter (fun entry -> not (entry_is_skipped entry)) entries with
-    | [] -> false, entries
-    | _ :: _ as kept -> true, kept
+  let attributed, chosen =
+    match choose 0 0 [] with
+    | [] -> false, List.init (min frames_per_key limit) (Array.get entries)
+    | _ :: _ as chosen -> true, chosen
   in
-  let chosen = List.filteri (fun index _ -> index < frames_per_key) kept in
   let body = String.concat "\n" (List.concat_map frame_lines chosen) ^ "\n" in
   if attributed then body else unattributed_marker ^ body
 ;;

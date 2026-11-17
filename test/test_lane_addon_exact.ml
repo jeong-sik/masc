@@ -491,6 +491,7 @@ let test_original_consumer_recovers_proof_without_worker_rpc () =
     let calls=ref 0 in
     let result=Submit.resume_retained ~store ~label:"Proven original" ~original:retained
       ~request:original ~schema ~decode_final:(Exact.final_of_json ~schema)
+      ~unadmitted:(fun () -> fail "recovery asked about admission")
       ~prepare:(fun () -> fail "recovery requested fresh admission")
       ~call:(fun ~arguments:_ -> incr calls; fail "recovery contacted the worker")
       ~terminal:(fun _ final ->

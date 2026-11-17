@@ -39,9 +39,9 @@ let event_names store = match events store with
 let reply state = Ok { (Mcp_protocol.Mcp_types.tool_result_of_text "fixture worker state") with
   structured_content = Some (`Assoc ["request_id",`String request_id;"state",`String state]) }
 let kind arguments = Yojson.Safe.Util.(member "kind" arguments |> to_string)
-let resume ?(prepare = fun () -> Ok ()) store call =
+let resume ?(unadmitted = fun () -> Ok Submit.Admit) ?(prepare = fun () -> Ok ()) store call =
   Submit.resume_retained ~store ~label:"Fixture" ~original:(load store) ~request ~schema
-    ~decode_final:(Exact.final_of_json ~schema) ~prepare ~call
+    ~decode_final:(Exact.final_of_json ~schema) ~unadmitted ~prepare ~call
     ~terminal:(fun _ final -> Ok final)
 let names = Alcotest.(list string)
 
@@ -214,6 +214,79 @@ let test_pre_admission_nonavailability_errors_are_not_waits () = with_store (fun
       (Fs_compat.load_file (journal_path store)))
     [Submit.Rejected "original owner changed";Submit.Uncertain "authority check is unconfirmed"])
 
+(* An original no worker has received ends when its owner says its
+   declaration was replaced. No worker is asked and no intent is written. *)
+let replaced_evidence = `Assoc ["declaration_replaced",`String "fixture evidence"]
+let no_worker ~arguments = Alcotest.fail ("an ended original reached its worker: " ^ kind arguments)
+let ended_before_dispatch (record : Owner.retained) =
+  match Progress.phase record.progress with
+  | Progress.Rejected {stage=Progress.Before_dispatch;evidence} ->
+    Alcotest.check json "the owner's evidence is retained" replaced_evidence evidence
+  | Progress.Rejected {stage=Progress.Execution;_} | Progress.Captured | Progress.Admission_wait _
+  | Progress.Dispatch_pending _ | Progress.Judged _ | Progress.Committing _ | Progress.Commit_unknown _
+  | Progress.Finished _ | Progress.Conflicted _ | Progress.Subdividing _ | Progress.Subdivided _ ->
+    Alcotest.fail "the original must be refused before dispatch"
+let settled = function
+  | Ok (Submit.Settled record) -> record
+  | Ok (Submit.Awaiting _ | Submit.Final _ | Submit.Commit_pending _) | Error _ ->
+    Alcotest.fail "an original ended before dispatch is settled"
+let test_a_replaced_declaration_ends_a_captured_original () = with_store (fun store ->
+  let asked = ref 0 in
+  let unadmitted () = incr asked; Ok (Submit.End_replaced replaced_evidence) in
+  (* The record the pass is given back is the stored one, with the end. *)
+  ended_before_dispatch
+    (settled (resume ~unadmitted ~prepare:(fun () -> Alcotest.fail "an ended original was prepared") store no_worker));
+  ended_before_dispatch (load store);
+  Alcotest.check names "one refusal and no dispatch intent" ["refused"] (event_names store);
+  ended_before_dispatch
+    (settled (resume ~unadmitted:(fun () -> Alcotest.fail "an ended original asked its owner again") store no_worker));
+  Alcotest.check names "the second pass writes nothing" ["refused"] (event_names store);
+  Alcotest.(check int) "the owner was asked once" 1 !asked)
+let test_a_replaced_declaration_ends_a_declined_original () = with_store (fun store ->
+  let restarting ~arguments = match kind arguments with
+    | "read" -> reply "absent"
+    | "submit" -> Error (Submit.Not_sent (Submit.Unavailable "Add-on tool connection is unavailable"))
+    | other -> Alcotest.fail ("unexpected worker command " ^ other) in
+  (match resume store restarting with
+   | Error (Submit.Unavailable _) -> ()
+   | Error (Submit.Rejected _ | Submit.Uncertain _) | Ok _ ->
+     Alcotest.fail "the fixture submit must be refused before sending");
+  ended_before_dispatch
+    (settled (resume ~unadmitted:(fun () -> Ok (Submit.End_replaced replaced_evidence)) store no_worker));
+  ended_before_dispatch (load store);
+  Alcotest.check names "the declined admission ends in one refusal"
+    ["dispatch_intended";"admission_declined";"refused"] (event_names store))
+let test_a_dispatched_original_does_not_ask_its_owner () = with_store (fun store ->
+  let admitted ~arguments = match kind arguments with
+    | "read" -> reply "absent"
+    | "submit" -> reply "pending"
+    | other -> Alcotest.fail ("unexpected worker command " ^ other) in
+  (match resume store admitted with
+   | Ok (Submit.Awaiting (Submit.Worker_pending, _)) -> ()
+   | Ok (Submit.Awaiting _ | Submit.Final _ | Submit.Commit_pending _ | Submit.Settled _) | Error _ ->
+     Alcotest.fail "the fixture original must be admitted");
+  let pending ~arguments = match kind arguments with
+    | "read" -> reply "pending"
+    | other -> Alcotest.fail ("a dispatched original reached " ^ other) in
+  (match resume ~unadmitted:(fun () -> Alcotest.fail "a dispatched original asked its owner") store pending with
+   | Ok (Submit.Awaiting (Submit.Worker_pending, _)) -> ()
+   | Ok (Submit.Awaiting _ | Submit.Final _ | Submit.Commit_pending _ | Submit.Settled _) | Error _ ->
+     Alcotest.fail "a dispatched original keeps waiting for its worker"))
+let test_an_owner_that_cannot_answer_ends_nothing () = with_store (fun store ->
+  (match resume ~unadmitted:(fun () -> Error (Submit.Unavailable "the Add-on is off")) store no_worker with
+   | Ok (Submit.Awaiting (Submit.Worker_unreachable, _)) -> ()
+   | Ok (Submit.Awaiting _ | Submit.Final _ | Submit.Commit_pending _ | Submit.Settled _) | Error _ ->
+     Alcotest.fail "an owner that cannot answer now is a wait");
+  (match resume ~unadmitted:(fun () -> Error (Submit.Rejected "another installation")) store no_worker with
+   | Error (Submit.Rejected _) -> ()
+   | Error (Submit.Unavailable _ | Submit.Uncertain _) | Ok _ ->
+     Alcotest.fail "an owner's refusal is returned as its error");
+  (match resume ~unadmitted:(fun () -> Error (Submit.Uncertain "the owner check is unconfirmed")) store no_worker with
+   | Error (Submit.Uncertain _) -> ()
+   | Error (Submit.Unavailable _ | Submit.Rejected _) | Ok _ ->
+     Alcotest.fail "an owner's unconfirmed check is returned as its error");
+  Alcotest.check names "no answer writes progress" [] (event_names store))
+
 let worker_finished final = Ok {
   (Mcp_protocol.Mcp_types.tool_result_of_text "retained worker terminal") with
   structured_content = Some (`Assoc ["request_id",`String request_id;
@@ -327,8 +400,8 @@ let resume_record ?unreadable store call =
       | None -> Ok ());
     request = (fun () -> request); schema = (fun () -> schema)} in
   let result = Submit.resume ~store ~label:"Fixture" ~original:(Owner.listed (load store)) ~source
-    ~decode_final:(fun () -> Exact.final_of_json ~schema) ~prepare:(fun () -> Ok ()) ~call
-    ~terminal:(fun () _ final -> Ok final) in
+    ~decode_final:(fun () -> Exact.final_of_json ~schema) ~unadmitted:(fun () -> Ok Submit.Admit)
+    ~prepare:(fun () -> Ok ()) ~call ~terminal:(fun () _ final -> Ok final) in
   result, !loads
 let admitting ~arguments = match kind arguments with
   | "read" -> reply "absent"
@@ -411,7 +484,8 @@ let test_a_dispatched_schema_mismatch_is_refused_before_publication () = with_st
     request = (fun () -> request);
     schema = (fun () -> `Assoc ["type",`String "object";"title",`String "another schema"])} in
   (match Submit.resume ~store ~label:"Fixture" ~original:(Owner.listed (load store)) ~source
-      ~decode_final:(fun () -> Exact.final_of_json ~schema) ~prepare:(fun () -> Ok ())
+      ~decode_final:(fun () -> Exact.final_of_json ~schema) ~unadmitted:(fun () -> Ok Submit.Admit)
+      ~prepare:(fun () -> Ok ())
       ~call:(answering (fun () -> worker_finished denied)) ~terminal:(fun () _ final -> Ok final) with
    | Error (Submit.Rejected _) -> ()
    | Error (Submit.Unavailable _ | Submit.Uncertain _) | Ok _ ->
@@ -505,6 +579,14 @@ let () =
   Alcotest.run "Lane_addon_submit_once" [
     "record", [
       Alcotest.test_case "a waiting original reads no body" `Quick test_a_waiting_original_reads_no_body;
+      Alcotest.test_case "a replaced declaration ends a captured original without a worker call" `Quick
+        test_a_replaced_declaration_ends_a_captured_original;
+      Alcotest.test_case "a replaced declaration ends a declined original without a worker call" `Quick
+        test_a_replaced_declaration_ends_a_declined_original;
+      Alcotest.test_case "a dispatched original does not ask its owner" `Quick
+        test_a_dispatched_original_does_not_ask_its_owner;
+      Alcotest.test_case "an owner that cannot answer ends nothing" `Quick
+        test_an_owner_that_cannot_answer_ends_nothing;
       Alcotest.test_case "admission stores no intent for an unreadable body" `Quick
         test_admission_stores_no_intent_for_an_unreadable_body;
       Alcotest.test_case "a finished reply is read after the body" `Quick

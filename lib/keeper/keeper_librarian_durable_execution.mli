@@ -41,7 +41,10 @@ val consume_one : config:Workspace.config -> keeper_name:string ->
     ended unrun with the stored [Replaced_declaration] reason. It says
     nothing about the size of the input, so the next read stays whole and the
     pass asks [wake] for it; no host event follows that refusal. This does not
-    depend on the current declaration or worker being available. This grants
+    depend on the current declaration or worker being available. An original
+    no worker has received whose declaration was replaced ends in the pass that
+    resumes it: nothing was refused, so the next read is not narrowed, and that
+    pass asks [wake] too. This grants
     no consumption, capacity or skip authority beyond that. Original
     completed local publication may still recover while the Addon is Off.
     [wake] schedules the same Memory lane after a newly observed Finished fact;

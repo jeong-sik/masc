@@ -351,6 +351,18 @@ let rec consume_one ~config ~keeper_name ~wake =
       Keeper_librarian_pending.Publication
         {request_id=Record.request_id record;
          detail="History resolution advanced; the next Memory unit will read its continuation"} in
+  (* No worker received this original and its declaration was replaced, so
+     the pass ended it. Nothing was refused: the next read is not narrowed.
+     The next pass moves the original and selects its range for the
+     declaration of then, and no host event would start that pass. *)
+  let ended_unadmitted request_id =
+    Log.Keeper.info ~keeper_name
+      "durable Librarian ended an original no worker received because its declaration was replaced: request=%s"
+      request_id;
+    wake ();
+    Consumer.Memory_not_committed [Keeper_librarian_runtime.not_committed_of_failure
+      ~detail:"Original history request ended before any worker received it: its declaration was replaced"
+      Keeper_exact_walk_failure.empty] in
   let resume_original original =
     match resume ~store ~config ~reserved ~wake original with
     | Error detail -> error detail
@@ -365,6 +377,7 @@ let rec consume_one ~config ~keeper_name ~wake =
     | Ok (Resumed (Publication_waiting detail,request)) ->
       Ok (Consumer.Pending (pending_publication request detail))
     | Ok (Resumed (Basis_superseded _,request)) -> Ok (Consumer.Pending (pending_basis request))
+    | Ok (Resumed (Ended_unadmitted (record:Retained.retained),_)) -> Ok (ended_unadmitted record.request_id)
     | Ok (Resumed (Refused (final,_),request)) ->
       (* Only a non-counterpart refusal marks a smaller next read. A capacity-
          only counterpart original has no message-floor coordinate; narrowing
@@ -629,6 +642,7 @@ let rec consume_one ~config ~keeper_name ~wake =
       | Ok (Some _) ->
         let failure=ref None in
         let capacity_stop=ref None in
+        let ended=ref None in
         let stop detail =
           failure := Some detail;
           Consumer.Memory_pending (Keeper_librarian_pending.Local_failure detail) in
@@ -652,6 +666,12 @@ let rec consume_one ~config ~keeper_name ~wake =
             | Ok (Resumed (Publication_waiting detail,request)) ->
               Consumer.Memory_pending (pending_publication request detail)
             | Ok (Resumed (Basis_superseded _,request)) -> Consumer.Memory_pending (pending_basis request)
+            | Ok (Resumed (Ended_unadmitted (record:Retained.retained),request)) ->
+              (* Not [Memory_refused]: the Consumer would keep its narrowing
+                 mark for that value. The pass result is set below. *)
+              ended := Some record.request_id;
+              Consumer.Memory_pending (pending_publication request
+                "The original ended before any worker received it")
             | Ok (Resumed (Refused (final,_),request)) -> Consumer.Memory_refused [Refusal.report ~store request final] in
         (* A refused one-turn original covers the range this pass selected. The
            pass reads that range message by message under the original, not as
@@ -697,7 +717,8 @@ let rec consume_one ~config ~keeper_name ~wake =
          | [] -> ()
          | _::_ -> Consumer.mark_range_failed ~config ~keeper_name);
         let result=Consumer.consume_one ~config ~keeper_name ~commit in
-        match !capacity_stop,!failure with
-        | Some refusal,_ -> Error refusal
-        | None,Some detail -> error detail
-        | None,None -> result)
+        match !capacity_stop,!failure,!ended with
+        | Some refusal,_,_ -> Error refusal
+        | None,Some detail,_ -> error detail
+        | None,None,Some request_id -> Ok (ended_unadmitted request_id)
+        | None,None,None -> result)

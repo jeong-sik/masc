@@ -968,7 +968,7 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
       ~wake:(fun () -> ())) in
   (match hold with
    | Ok (Durable_owner.Resumed (Publication_waiting _,_)) -> ()
-   | Ok (Waited _ | Resumed ((Refused _ | Finished _ | Basis_superseded _),_)) -> fail "original did not retain its judgment"
+   | Ok (Waited _ | Resumed ((Refused _ | Finished _ | Basis_superseded _ | Ended_unadmitted _),_)) -> fail "original did not retain its judgment"
    | Error error -> fail (Durable_owner.error_to_string error));
   let judged,_=only_original fixture in
   (match Progress.phase judged.Owner.progress with
@@ -1695,7 +1695,7 @@ let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixtur
       injected:=true;write cursor_path "{invalid cursor after actual Memory receipt}\n") in
     (match result with
      | Ok (Durable_owner.Resumed (Publication_waiting _,_)) -> ()
-     | Ok (Waited _ | Resumed ((Refused _ | Finished _ | Basis_superseded _),_)) ->
+     | Ok (Waited _ | Resumed ((Refused _ | Finished _ | Basis_superseded _ | Ended_unadmitted _),_)) ->
        fail "actual post-Memory cursor failure was not retained Pending"
      | Error error -> fail (Durable_owner.error_to_string error));
     check int "the original has nonempty admitted external evidence to acknowledge" 1
@@ -2961,7 +2961,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   (match resume_descendant () with
    | Ok (Durable_owner.Resumed (Finished _,_)) -> ()
    | Error error -> fail (Durable_owner.error_to_string error)
-   | Ok (Waited _ | Resumed ((Publication_waiting _ | Refused _ | Basis_superseded _),_)) ->
+   | Ok (Waited _ | Resumed ((Publication_waiting _ | Refused _ | Basis_superseded _ | Ended_unadmitted _),_)) ->
      fail "descendant did not finish its actual Memory publication");
   check bool "the crash cut precedes durable completion observation" true
     ((observe ()).completion=Resolution_work.Not_observed);
@@ -4060,6 +4060,136 @@ let test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending () =
     check bool "rollback does not narrow the next read" true
       (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
     check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture)))
+let advance_original fixture original event=io (fun () ->
+  match Owner.advance ~store:fixture.store ~expected:original ~event with
+  | Ok (Owner.Stored original | Already_stored original) -> original
+  | Ok (Unconfirmed detail) -> fail detail
+  | Error error -> fail (Owner.update_error_to_string error))
+(* A history original captured for the declaration of now that no worker has
+   received. The pass that takes its source ends Pending, so it leaves no
+   narrowing mark. [declined] is the same original after a submit the host
+   refused before sending. *)
+let retain_unadmitted_history_original fixture ~declined =
+  let captured=ref None in
+  (match memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
+    ~commit:(fun source -> captured:=Some source;
+      Consumer.Memory_pending (Keeper_librarian_pending.Local_failure "the fixture takes the source only"))) with
+   | Ok (Consumer.Pending _) -> ()
+   | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _)
+   | Error _ -> fail "the fixture did not take an unread history source");
+  let source=Option.to_result ~none:"missing fixture source" !captured |> get in
+  let owner=io (fun () ->
+    ignore (Current.capture_program_anchor ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get);
+    Capture.observe_owner ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get) in
+  let preparation=Keeper_librarian_runtime.prepare_durable ~source_lines:[] ~now:(Time_compat.now ())
+    (Source.input source) |> get in
+  let destination=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+    ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination -> Ok destination) |> get in
+  let request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+    ~owner ~destination ~source ~preparation ()) |> get in
+  let original=memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store request)
+    |> Result.map_error Durable_owner.error_to_string |> get in
+  if declined then
+    advance_original fixture (advance_original fixture original Progress.Dispatch_intended)
+      (Progress.Admission_declined (`Assoc ["not_sent",`String "fixture: the Add-on was restarting"]))
+  else original
+(* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.3 and 3.6.
+   No worker received the original, so the host never sees it: the Keeper's
+   pass ends it, asks for the next pass, and that pass reads the same range
+   whole under the declaration of then. *)
+let a_replaced_declaration_ends_an_original_no_worker_received ~declined () =
+  with_fixture (fun ~sw fixture ->
+    let unadmitted=retain_unadmitted_history_original fixture ~declined in
+    replace_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
+    let wakes=ref 0 in
+    ended_by_one_refusal (run_worker_waking fixture wakes);
+    check int "the pass that ended it asks for the next pass itself" 1 !wakes;
+    let ended,ended_capture=only_original fixture in
+    check string "the same original ended" unadmitted.Owner.request_id ended.Owner.request_id;
+    let evidence=match Progress.phase ended.Owner.progress with
+      | Rejected {stage=Progress.Before_dispatch;evidence} -> evidence
+      | Rejected {stage=Progress.Execution;_} | Captured | Admission_wait _ | Dispatch_pending _
+      | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+      | Subdividing _ | Subdivided _ -> fail "the original did not end before dispatch" in
+    (* The end holds the destination the original was captured for and the
+       one the configuration named when it ended. Nothing else reads as it. *)
+    let captured : Capture.destination=Capture.destination ended_capture in
+    let replaced : Capture.replaced=Capture.confirm_replaced ended_capture evidence |> get in
+    check bool "the end names the original's destination and another revision of it" true
+      (replaced.captured=captured
+       && replaced.current.configuration_revision<>captured.configuration_revision);
+    let refused evidence=Result.is_error (Capture.confirm_replaced ended_capture evidence) in
+    check bool "the same destination twice is not a replaced declaration" true
+      (refused (Capture.replaced_to_json {Capture.captured;current=captured}));
+    check bool "another installation is not a replaced declaration" true
+      (refused (Capture.replaced_to_json {Capture.captured;
+        current={replaced.current with installation_id="another-installation"}}));
+    check bool "an end captured for another destination is not this original's" true
+      (refused (Capture.replaced_to_json {Capture.captured=replaced.current;current=captured}));
+    check bool "evidence of another shape is refused" true
+      (refused (`Assoc ["declaration_replaced",`String "not two destinations"]));
+    (* The woken pass moves the ended original and reads the range again. *)
+    assert_pending (run_worker_waking fixture wakes);
+    check int "the pass that moved it and read again asks for no pass" 1 !wakes;
+    check bool "the ended original moved to the settled archive" true
+      (settled_on fixture ~date:(day_of unadmitted.request_id) unadmitted);
+    let fresh,fresh_capture=only_original fixture in
+    check bool "a new original read the range" true (fresh.Owner.request_id<>unadmitted.request_id);
+    check bool "and it read everything unread, not up to the first cut point" true
+      (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
+    check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture));
+    check int "one provider call judged the range" 1 (F.post_count fixture.server);
+    check (list string) "the new original's answer reached Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
+(* Only the Librarian's own evidence ends an original before dispatch. A
+   record that holds the phase with anything else stops the pass. *)
+let test_a_pre_dispatch_refusal_with_other_evidence_stops_the_pass () =
+  with_fixture (fun ~sw:_ fixture ->
+    let unadmitted=retain_unadmitted_history_original fixture ~declined:false in
+    let refused=advance_original fixture unadmitted (Progress.Refused {stage=Progress.Before_dispatch;
+      evidence=`Assoc ["declaration_replaced",`String "not two destinations"]}) in
+    let wakes=ref 0 in
+    (match run_worker_waking fixture wakes with
+     | Error _ -> ()
+     | Ok _ -> fail "a pre-dispatch refusal with other evidence was read as an end");
+    check int "the pass asks for no other pass" 0 !wakes;
+    check bool "the record is not archived" false
+      (settled_on fixture ~date:(day_of refused.Owner.request_id) refused);
+    check int "no provider was asked" 0 (F.post_count fixture.server))
+(* The same original under the declaration it was captured for is admitted. *)
+let an_unadmitted_original_of_the_same_declaration_is_admitted ~declined () =
+  with_fixture (fun ~sw:_ fixture ->
+    let unadmitted=retain_unadmitted_history_original fixture ~declined in
+    let wakes=ref 0 in
+    check bool "the passes admit it and commit it" true (advanced (run_until_done ~wakes fixture));
+    check bool "the same original holds the answer" true
+      (settled_on fixture ~date:(day_of unadmitted.Owner.request_id) unadmitted
+       || (match observed_originals fixture with
+           | [(record:Owner.retained),_] ->
+             record.request_id=unadmitted.Owner.request_id
+             && (match Progress.phase record.progress with
+                 | Finished _ -> true
+                 | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+                 | Commit_unknown _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
+           | [] | _::_::_ -> false));
+    check int "one provider call judged the range" 1 (F.post_count fixture.server))
+(* The Add-on is off, so the destination of now cannot be read. Nothing says
+   the declaration was replaced: the original waits as it did. *)
+let test_an_unadmitted_original_waits_while_the_addon_is_off () =
+  with_fixture (fun ~sw:_ fixture ->
+    let unadmitted=retain_unadmitted_history_original fixture ~declined:false in
+    set_enabled fixture false;
+    let wakes=ref 0 in
+    assert_pending (run_worker_waking fixture wakes);
+    check int "a wait asks for no pass" 0 !wakes;
+    let waiting,_=only_original fixture in
+    check bool "the original is still the one no worker received" true
+      (waiting.Owner.request_id=unadmitted.Owner.request_id
+       && (match Progress.phase waiting.Owner.progress with
+           | Captured -> true
+           | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+           | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false));
+    check int "no provider was asked" 0 (F.post_count fixture.server))
 (* A pass reads and sends its range, and the provider's refusal reaches the
    next pass. *)
 let provider_refuses_the_read fixture =
@@ -4651,6 +4781,18 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again;
   test_case "a declaration put back before the end is read preserves the recorded ending" `Quick
     test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending;
+  test_case "a replaced declaration ends a captured original no worker received" `Quick
+    (a_replaced_declaration_ends_an_original_no_worker_received ~declined:false);
+  test_case "a replaced declaration ends a declined original no worker received" `Quick
+    (a_replaced_declaration_ends_an_original_no_worker_received ~declined:true);
+  test_case "a pre-dispatch refusal with other evidence stops the pass" `Quick
+    test_a_pre_dispatch_refusal_with_other_evidence_stops_the_pass;
+  test_case "an unadmitted original of the same declaration is admitted" `Quick
+    (an_unadmitted_original_of_the_same_declaration_is_admitted ~declined:false);
+  test_case "a declined original of the same declaration is admitted" `Quick
+    (an_unadmitted_original_of_the_same_declaration_is_admitted ~declined:true);
+  test_case "an unadmitted original waits while the Add-on is off" `Quick
+    test_an_unadmitted_original_waits_while_the_addon_is_off;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
   test_case "a missing history original automatically continues and commits its exact source" `Quick
     (test_missing_history_recovers_without_operator_submission Atoms);

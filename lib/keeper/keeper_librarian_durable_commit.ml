@@ -249,7 +249,12 @@ let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_re
      | Retained_unknown Exact.Interrupted
      | Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
      | Retained_not_allowed _ | Retained_request_id_reused -> Ok Settled)
-  | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+  | Rejected {stage=Progress.Before_dispatch;evidence} ->
+    (* Its declaration was replaced before any worker received it. The
+       original settles and the next pass selects its range again. *)
+    let* _=Request.confirm_replaced request evidence in
+    Ok Settled
+  | Subdividing _ | Subdivided _ ->
     Error "Original history record has an unsupported domain phase"
 let validate ~store ~request ~record =
   let owner=Request.physical_owner request in

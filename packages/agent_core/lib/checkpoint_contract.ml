@@ -156,16 +156,6 @@ let validate_unique_object ~scope = function
   | _ -> scope_errorf scope " must be a JSON object"
 ;;
 
-let validate_env_pair ~scope json =
-  let* fields =
-    validate_object_shape ~scope ~required:[ "key"; "value" ] ~optional:[] json
-  in
-  let* key = required_field ~scope "key" fields in
-  let* value = required_field ~scope "value" fields in
-  let* () = validate_string ~scope:(Suffix (scope, ".key")) key in
-  validate_string ~scope:(Suffix (scope, ".value")) value
-;;
-
 let validate_tool_param ~scope json =
   let* fields =
     validate_object_shape
@@ -293,7 +283,6 @@ let current_checkpoint_fields =
   ; "disable_parallel_tool_use"
   ; "cache_system_prompt"
   ; "context"
-  ; "mcp_sessions"
   ; "working_context"
   ; "pending_input"
   ]
@@ -392,68 +381,6 @@ let validate_current_usage json =
   | _, _ -> scope_errorf scope " response coverage counts must be integers"
 ;;
 
-let mcp_session_common_fields =
-  [ "server_name"; "command"; "args"; "env"; "tool_schemas"; "transport_kind" ]
-;;
-
-let mcp_session_http_fields =
-  "http_base_url" :: "http_headers" :: mcp_session_common_fields
-;;
-
-let transport_kind_of_json ~scope = function
-  | `String "stdio" -> Ok `Stdio
-  | `String "http" -> Ok `Http
-  | `String value -> scope_errorf scope " has unsupported value %S" value
-  | _ -> scope_errorf scope " must be a string"
-;;
-
-let validate_mcp_session ~scope json =
-  let* fields =
-    validate_object_shape ~scope ~required:mcp_session_http_fields ~optional:[] json
-  in
-  let* server_name = required_field ~scope "server_name" fields in
-  let* command = required_field ~scope "command" fields in
-  let* args = required_field ~scope "args" fields in
-  let* env = required_field ~scope "env" fields in
-  let* tool_schemas = required_field ~scope "tool_schemas" fields in
-  let* transport_kind = required_field ~scope "transport_kind" fields in
-  let* () = validate_string ~scope:(Suffix (scope, ".server_name")) server_name in
-  let* () = validate_string ~scope:(Suffix (scope, ".command")) command in
-  let* () = validate_list ~scope:(Suffix (scope, ".args")) validate_string args in
-  let* () = validate_list ~scope:(Suffix (scope, ".env")) validate_env_pair env in
-  let* () =
-    validate_list
-      ~scope:(Suffix (scope, ".tool_schemas"))
-      validate_tool_schema tool_schemas
-  in
-  let* transport_kind =
-    transport_kind_of_json ~scope:(Suffix (scope, ".transport_kind")) transport_kind
-  in
-  let* http_base_url = required_field ~scope "http_base_url" fields in
-  let* http_headers = required_field ~scope "http_headers" fields in
-  let* () =
-    validate_optional
-      ~scope:(Suffix (scope, ".http_base_url"))
-      validate_string http_base_url
-  in
-  let* () =
-    validate_list ~scope:(Suffix (scope, ".http_headers")) validate_env_pair http_headers
-  in
-  match transport_kind, http_base_url with
-  | `Http, `Null -> scope_errorf scope " HTTP transport requires http_base_url"
-  | (`Http | `Stdio), _ -> Ok json
-;;
-
-let validate_mcp_sessions = function
-  | `List sessions ->
-    validate_each
-      ~scope:checkpoint_scope
-      ~label:" mcp_sessions"
-      validate_mcp_session
-      sessions
-  | _ -> scope_errorf checkpoint_scope " mcp_sessions must be an array"
-;;
-
 let validate_common_checkpoint_fields ~scope fields =
   let* session_id = required_field ~scope "session_id" fields in
   let* agent_name = required_field ~scope "agent_name" fields in
@@ -541,8 +468,6 @@ let validate_json json =
   let* () = validate_common_checkpoint_fields ~scope fields in
   let* usage = required_field ~scope "usage" fields in
   let* () = validate_current_usage usage in
-  let* mcp_sessions = required_field ~scope "mcp_sessions" fields in
-  let* _ = validate_mcp_sessions mcp_sessions in
   let* pending_input = required_field ~scope "pending_input" fields in
   let* () = match pending_input with
     | `Null -> Ok ()

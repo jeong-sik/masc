@@ -42,7 +42,6 @@ let make_checkpoint
       ?(enable_thinking = None)
       ?(preserve_thinking = None)
       ?(reasoning_effort = None)
-      ?(mcp_sessions = [])
       ()
   : Checkpoint.t
   =
@@ -69,7 +68,6 @@ let make_checkpoint
   ; cache_system_prompt = false
   ; context
   ; pending_input = None
-  ; mcp_sessions
   ; working_context = None
   }
 ;;
@@ -818,14 +816,14 @@ let test_a_failure_deep_in_nested_lists_names_its_element () =
    | Error error -> Alcotest.failf "a valid checkpoint was refused: %s" (Error.to_string error));
   Alcotest.(check string)
     "a duplicated detail field names message, block and detail"
-    "Checkpoint v18 message[1]: $.content[0].details[2] has field text twice"
+    "Checkpoint v19 message[1]: $.content[0].details[2] has field text twice"
     (decode_detail (checkpoint_json_with_raw_messages [ valid; damaged ]));
   let unknown_field =
     `Assoc [ "origin", `String "conversation";  "role", `String "user"; "content", `List []; "extra", `Bool true ]
   in
   Alcotest.(check string)
     "an unknown message field names the message"
-    "Checkpoint v18 message[2]: $ has unknown field extra"
+    "Checkpoint v19 message[2]: $ has unknown field extra"
     (decode_detail (checkpoint_json_with_raw_messages [ valid; valid; unknown_field ]))
 ;;
 
@@ -859,20 +857,39 @@ let test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path () =
   Alcotest.(check string)
     "the error names every level down to the leaf"
     (Printf.sprintf
-       "Checkpoint v18 message[0]: $.content[0]%s.text must be a string"
+       "Checkpoint v19 message[0]: $.content[0]%s.text must be a string"
        path)
     (decode_detail (checkpoint_json_with_raw_messages [ message ]))
 ;;
 
-(* Hard cut: v17 bytes are not read, whatever their messages hold. *)
-let test_a_v17_checkpoint_is_refused () =
+(* Hard cut: v18 bytes are not read. A v18 checkpoint carried the
+   required [mcp_sessions] array; the version gate refuses it before any
+   field is looked at, so no v18 reader exists. *)
+let test_a_v18_checkpoint_is_refused () =
   match Checkpoint.to_json (make_checkpoint ()) with
   | `Assoc fields ->
-    let v17 = `Assoc (("version", `Int 17) :: List.remove_assoc "version" fields) in
-    (match Checkpoint.of_json v17 with
-     | Error (Error.Serialization (Error.VersionMismatch { expected = 18; got = 17 })) -> ()
+    let v18 =
+      `Assoc
+        (("version", `Int 18)
+         :: ("mcp_sessions", `List [])
+         :: List.remove_assoc "version" fields)
+    in
+    (match Checkpoint.of_json v18 with
+     | Error (Error.Serialization (Error.VersionMismatch { expected = 19; got = 18 })) -> ()
      | Error error -> Alcotest.failf "expected a version mismatch, got %s" (Error.to_string error)
-     | Ok _ -> Alcotest.fail "a v17 checkpoint was read")
+     | Ok _ -> Alcotest.fail "a v18 checkpoint was read")
+  | json -> Alcotest.failf "checkpoint must serialize to an object, got %s" (Yojson.Safe.to_string json)
+;;
+
+(* v19 has no [mcp_sessions] field. A current-version object that still
+   carries one is an unknown field, not a field to ignore. *)
+let test_a_v19_checkpoint_with_mcp_sessions_is_refused () =
+  match Checkpoint.to_json (make_checkpoint ()) with
+  | `Assoc fields ->
+    (match Checkpoint.of_json (`Assoc (("mcp_sessions", `List []) :: fields)) with
+     | Error (Error.Serialization _) -> ()
+     | Error error -> Alcotest.failf "expected a serialization error, got %s" (Error.to_string error)
+     | Ok _ -> Alcotest.fail "a v19 checkpoint with mcp_sessions was read")
   | json -> Alcotest.failf "checkpoint must serialize to an object, got %s" (Yojson.Safe.to_string json)
 ;;
 
@@ -901,7 +918,7 @@ let test_a_base64_media_source_is_refused () =
    | Error error -> Alcotest.failf "a stored reference was refused: %s" (Error.to_string error));
   Alcotest.(check string)
     "the base64 source is named"
-    "Checkpoint v18 message[0]: $.content[0].source is a base64 source; history holds media by reference"
+    "Checkpoint v19 message[0]: $.content[0].source is a base64 source; history holds media by reference"
     (decode_detail (checkpoint_json_with_raw_messages [ image_message base64 ]))
 ;;
 
@@ -920,7 +937,7 @@ let test_a_tool_result_outside_a_tool_message_is_refused () =
   in
   Alcotest.(check string)
     "the role rule is kept"
-    "Checkpoint v18 message[0]: ToolResult requires role tool"
+    "Checkpoint v19 message[0]: ToolResult requires role tool"
     (decode_detail (checkpoint_json_with_raw_messages [ message ]))
 ;;
 
@@ -1065,19 +1082,19 @@ let () =
             test_image_carriers_remain_canonical
         ; test_case "tool PNG reaches provider after checkpoint" `Quick
             test_tool_image_survives_dispatch_and_checkpoint ] )
-    ; ( "v18 contract"
+    ; ( "v19 contract"
       , [ test_case "a failure deep in nested lists names its element" `Quick
             test_a_failure_deep_in_nested_lists_names_its_element
         ; test_case "a bad leaf under nested tool results fails once with its path" `Quick
             test_a_bad_leaf_under_nested_tool_results_fails_once_with_its_path ] )
     ; ( "version"
-      , [ test_case "checkpoint_version is 18" `Quick (fun () ->
-            check int "version" 18 Checkpoint.checkpoint_version)
+      , [ test_case "checkpoint_version is 19" `Quick (fun () ->
+            check int "version" 19 Checkpoint.checkpoint_version)
         ; test_case "version field in to_json" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
             let v = Yojson.Safe.Util.(json |> member "version" |> to_int) in
-            check int "version" 18 v)
+            check int "version" 19 v)
         ; test_case "wrong version returns Error" `Quick (fun () ->
             let cp = make_checkpoint () in
             let json = Checkpoint.to_json cp in
@@ -1091,7 +1108,9 @@ let () =
               | other -> other
             in
             check bool "is error" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "a v17 checkpoint is refused" `Quick test_a_v17_checkpoint_is_refused
+        ; test_case "a v18 checkpoint is refused" `Quick test_a_v18_checkpoint_is_refused
+        ; test_case "a v19 checkpoint with mcp_sessions is refused" `Quick
+            test_a_v19_checkpoint_with_mcp_sessions_is_refused
         ; test_case "a base64 media source is refused" `Quick
             test_a_base64_media_source_is_refused
         ; test_case "a ToolResult outside a tool message is refused" `Quick
@@ -1987,7 +2006,7 @@ let () =
               check
                 string
                 "schema mismatch detail"
-                "Checkpoint v18 usage schema mismatch (missing=[], unknown=[extra], \
+                "Checkpoint v19 usage schema mismatch (missing=[], unknown=[extra], \
                  duplicate=[])"
                 detail
             | Error _ -> fail "expected a JsonParseError"
@@ -2005,7 +2024,7 @@ let () =
             let p1 = List.hd t.parameters in
             check string "param name" "city" p1.name;
             check bool "required" true p1.required)
-        ; test_case "authoritative schema is a v18 wire" `Quick (fun () ->
+        ; test_case "authoritative schema is a v19 wire" `Quick (fun () ->
             let input_schema : Yojson.Safe.t =
               `Assoc
                 [ "type", `String "object"
@@ -2025,7 +2044,7 @@ let () =
             in
             let json = Checkpoint.to_json (make_checkpoint ~tools:[ tool ] ()) in
             let open Yojson.Safe.Util in
-            check int "new wire version" 18 (json |> member "version" |> to_int);
+            check int "new wire version" 19 (json |> member "version" |> to_int);
             check
               string
               "authoritative schema persisted"
@@ -2586,19 +2605,6 @@ let () =
               | other -> other
             in
             check bool "error" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "malformed mcp_sessions returns Error" `Quick (fun () ->
-            let cp = make_checkpoint () in
-            let json = Checkpoint.to_json cp in
-            let bad =
-              match json with
-              | `Assoc pairs ->
-                `Assoc
-                  (List.map
-                     (fun (k, v) -> if k = "mcp_sessions" then k, `Int 42 else k, v)
-                     pairs)
-              | other -> other
-            in
-            check bool "error" true (Result.is_error (Checkpoint.of_json bad)))
         ; test_case "message metadata must be object" `Quick (fun () ->
             let cp =
               make_checkpoint
@@ -2633,7 +2639,7 @@ let () =
               | other -> other
             in
             check bool "error" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v18 rejects unknown nested message field" `Quick (fun () ->
+        ; test_case "current v19 rejects unknown nested message field" `Quick (fun () ->
             let message : Types.message =
               { origin = Llm_provider.Types.Conversation;  role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2654,7 +2660,7 @@ let () =
               "unknown message field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v18 rejects normalized empty metadata" `Quick (fun () ->
+        ; test_case "current v19 rejects normalized empty metadata" `Quick (fun () ->
             let message : Types.message =
               { origin = Llm_provider.Types.Conversation;  role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2671,7 +2677,7 @@ let () =
                    (update_first_json (append_json_field "metadata" (`Assoc [])))
             in
             check bool "empty metadata" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v18 preserves blank reasoning content" `Quick (fun () ->
+        ; test_case "current v19 preserves blank reasoning content" `Quick (fun () ->
             let message : Types.message =
               { origin = Llm_provider.Types.Conversation;  role = Types.Assistant
               ; content =
@@ -2718,7 +2724,7 @@ let () =
                |> index 0
                |> member "reasoning_content"
                |> to_string))
-        ; test_case "current v18 rejects duplicate nested content field" `Quick (fun () ->
+        ; test_case "current v19 rejects duplicate nested content field" `Quick (fun () ->
             let message : Types.message =
               { origin = Llm_provider.Types.Conversation;  role = Types.User
               ; content = [ Types.Text "hello" ]
@@ -2744,7 +2750,7 @@ let () =
               "duplicate content field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v18 rejects unknown nested tool field" `Quick (fun () ->
+        ; test_case "current v19 rejects unknown nested tool field" `Quick (fun () ->
             let bad =
               make_checkpoint ~tools:[ sample_tool_schema ] ()
               |> Checkpoint.to_json
@@ -2757,7 +2763,7 @@ let () =
               "unknown tool field"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v18 rejects noncanonical response format" `Quick (fun () ->
+        ; test_case "current v19 rejects noncanonical response format" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -2768,27 +2774,7 @@ let () =
               "legacy response format"
               true
               (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v18 rejects malformed nested MCP headers" `Quick (fun () ->
-            let session : Mcp_session.info =
-              { server_name = "http-tools"
-              ; command = "http"
-              ; args = []
-              ; env = []
-              ; http_base_url = Some "https://mcp.example.test"
-              ; http_headers = [ "Authorization", "redacted" ]
-              ; tool_schemas = []
-              ; transport_kind = Http
-              }
-            in
-            let bad =
-              make_checkpoint ~mcp_sessions:[ session ] ()
-              |> Checkpoint.to_json
-              |> update_json_field
-                   "mcp_sessions"
-                   (update_first_json (replace_json_field "http_headers" (`Assoc [])))
-            in
-            check bool "malformed headers" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v18 rejects duplicate context keys" `Quick (fun () ->
+        ; test_case "current v19 rejects duplicate context keys" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -2797,7 +2783,7 @@ let () =
                    (`Assoc [ "channel", `String "one"; "channel", `String "two" ])
             in
             check bool "duplicate context" true (Result.is_error (Checkpoint.of_json bad)))
-        ; test_case "current v18 rejects normalized reasoning effort" `Quick (fun () ->
+        ; test_case "current v19 rejects normalized reasoning effort" `Quick (fun () ->
             let bad =
               make_checkpoint ()
               |> Checkpoint.to_json
@@ -2832,78 +2818,8 @@ let () =
               (Some working_context)
               decoded.working_context)
         ] )
-    ; ( "mcp_sessions"
-      , [ test_case "empty mcp_sessions roundtrip" `Quick (fun () ->
-            let cp = make_checkpoint ~mcp_sessions:[] () in
-            let cp2 = Result.get_ok (Checkpoint.of_json (Checkpoint.to_json cp)) in
-            check int "no sessions" 0 (List.length cp2.mcp_sessions))
-        ; test_case "mcp_sessions with tools roundtrip" `Quick (fun () ->
-            let info : Mcp_session.info =
-              { server_name = "test-server"
-              ; command = "/usr/bin/mcp-server"
-              ; args = [ "--port"; "8080" ]
-              ; env = [ "API_KEY", "secret123" ]
-              ; http_base_url = None
-              ; http_headers = []
-              ; tool_schemas = [ sample_tool_schema ]
-              ; transport_kind = Stdio
-              }
-            in
-            let cp = make_checkpoint ~mcp_sessions:[ info ] () in
-            let cp2 = Result.get_ok (Checkpoint.of_json (Checkpoint.to_json cp)) in
-            check int "1 session" 1 (List.length cp2.mcp_sessions);
-            let s = List.hd cp2.mcp_sessions in
-            check string "server_name" "test-server" s.server_name;
-            check string "command" "/usr/bin/mcp-server" s.command;
-            check int "args count" 2 (List.length s.args);
-            check int "env count" 1 (List.length s.env);
-            check int "tools count" 1 (List.length s.tool_schemas);
-            let t = List.hd s.tool_schemas in
-            check string "tool name" "get_weather" t.name)
-        ; test_case "multiple mcp_sessions roundtrip" `Quick (fun () ->
-            let info1 : Mcp_session.info =
-              { server_name = "server-a"
-              ; command = "mcp-a"
-              ; args = []
-              ; env = []
-              ; http_base_url = None
-              ; http_headers = []
-              ; tool_schemas = []
-              ; transport_kind = Stdio
-              }
-            in
-            let info2 : Mcp_session.info =
-              { server_name = "server-b"
-              ; command = "mcp-b"
-              ; args = [ "--verbose" ]
-              ; env = [ "X", "1" ]
-              ; http_base_url = None
-              ; http_headers = []
-              ; tool_schemas = [ sample_tool_schema ]
-              ; transport_kind = Stdio
-              }
-            in
-            let cp = make_checkpoint ~mcp_sessions:[ info1; info2 ] () in
-            let cp2 = Result.get_ok (Checkpoint.of_json (Checkpoint.to_json cp)) in
-            check int "2 sessions" 2 (List.length cp2.mcp_sessions);
-            let s1 = List.hd cp2.mcp_sessions in
-            let s2 = List.nth cp2.mcp_sessions 1 in
-            check string "first" "server-a" s1.server_name;
-            check string "second" "server-b" s2.server_name)
-        ; test_case "Agent.checkpoint has empty mcp_sessions" `Quick (fun () ->
-            Eio_main.run
-            @@ fun env ->
-            let net = Eio.Stdenv.net env in
-            let agent =
-              Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
-                ~net
-                ~config:
-                  { (Types.default_config ~model:"test-model") with name = "mcp-test" }
-                ()
-            in
-            let cp = Agent.checkpoint agent in
-            check int "no mcp sessions" 0 (List.length cp.mcp_sessions))
-        ; test_case "Agent.checkpoint passes working_context" `Quick (fun () ->
+    ; ( "Agent.checkpoint"
+      , [ test_case "Agent.checkpoint passes working_context" `Quick (fun () ->
             Eio_main.run
             @@ fun env ->
             let net = Eio.Stdenv.net env in

@@ -128,7 +128,6 @@
   test_mcp_coverage
   test_mcp_deep
   test_mcp_integration
-  test_mcp_session
   test_metrics
   test_model_catalog_default
   test_model_catalog_composition
@@ -251,7 +250,6 @@
   test_mcp_coverage
   test_mcp_deep
   test_mcp_integration
-  test_mcp_session
   test_metrics
   test_model_catalog_default
   test_model_catalog_composition

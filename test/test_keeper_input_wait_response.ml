@@ -29,11 +29,6 @@ let source_checkpoint pending =
     ; enable_thinking = Some true; preserve_thinking = Some true
     ; response_format = Core.Types.Off; reasoning_effort = None
     ; cache_system_prompt = true; context
-    ; mcp_sessions =
-        [ Core.Mcp_session.
-            { server_name="retained-server"; command="retained-command"
-            ; args=["retained-argument"]; env=[]; http_base_url=None
-            ; http_headers=[]; tool_schemas=[tool]; transport_kind=Stdio } ]
     ; working_context = Some (`Assoc ["retained", `Bool true])
     ; pending_input = Some pending }
 
@@ -277,7 +272,6 @@ let test_install_refuses_stale_nonhistory () =
        Core.Context.delete context "retained-entry"; {checkpoint with context})
     ; {checkpoint with working_context=None}
     ; {checkpoint with tools=[]}
-    ; {checkpoint with mcp_sessions=[]}
     ; {checkpoint with turn_count=checkpoint.turn_count+1} ] in
   List.iter (fun stale ->
     let canonical=Store.agent_core_checkpoint_path ~session_dir ~session_id:checkpoint.session_id in
@@ -320,9 +314,8 @@ let test_install_refuses_stale_nonhistory () =
   check int "physical Answer adds only canonical response" 2 (List.length consumed.messages);
   check bool "consumed derived count agrees with new history" true
     (Core.Context.get_scoped consumed.context Session "message_count"=Some (`Int 2));
-  check bool "physical Answer keeps original working context tools and MCP" true
-    (consumed.working_context=checkpoint.working_context && consumed.tools=checkpoint.tools
-      && consumed.mcp_sessions=checkpoint.mcp_sessions);
+  check bool "physical Answer keeps original working context and tools" true
+    (consumed.working_context=checkpoint.working_context && consumed.tools=checkpoint.tools);
   let fresh=Response.authorize ~session_root:root ~operation_id ~waiting ~destination:Keeper_semantic_execution.Canonical_input ~recorded:(Some intent) in
   check bool "old receipt cannot become fresh authority" false (Response.belongs_to receipt fresh);
   (match Response.prepare_installation ~net:env#net ~authority:fresh ~response:Core.Hooks.Timeout with

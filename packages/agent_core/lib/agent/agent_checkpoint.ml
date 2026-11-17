@@ -156,7 +156,6 @@ let build_checkpoint
   ; reasoning_effort = state.config.reasoning_effort
   ; cache_system_prompt = state.config.cache_system_prompt
   ; context = Context.copy context
-  ; mcp_sessions = []
   ; working_context
   ; pending_input
   }

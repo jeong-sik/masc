@@ -238,7 +238,7 @@ let input_checkpoint pending =
      temperature=Some 0.5;top_p=Some 0.8;top_k=Some 20;min_p=Some 0.1;
      enable_thinking=Some true;preserve_thinking=Some true;
      response_format=Core.Types.Off;reasoning_effort=None;cache_system_prompt=true;
-     context;mcp_sessions=[];working_context=Some (`Assoc ["retained",`Bool true]);
+     context;working_context=Some (`Assoc ["retained",`Bool true]);
      pending_input=(if pending then Some Core.Agent_input_request.
        {run_id="original-run";request={request_id="original-request";
         participant_name=Some "operator";question="Original question?";

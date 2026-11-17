@@ -195,7 +195,7 @@ let checkpoint ~trace_id messages turn_count : Agent_core.Checkpoint.t =
   ; response_format = Agent_core.Types.Off
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create_sync ()
-  ; pending_input = None; mcp_sessions = []
+  ; pending_input = None
   ; working_context = None
   }
 ;;

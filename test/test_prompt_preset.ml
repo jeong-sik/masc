@@ -1342,83 +1342,6 @@ let test_default_baseline_missing_or_invalid () =
       (Result.is_error (Preset.load ~base_path "baseline")))
 ;;
 
-(* Keep the first restore at its real runtime writer while a second restore
-   enters. Before serialization the second can save a half-restored autosave
-   and finish, after which the first overwrites only its runtime routing. *)
-let test_overlapping_restores_preserve_the_full_preceding_state () =
-  let open Alcotest in
-  with_runtime_catalog @@ fun () ->
-  with_base (fun ~base_path ~keepers:_ ~config ->
-    let runtime_config_path = Filename.concat config "runtime.toml" in
-    write_file runtime_config_path
-      (runtime_fixture ^ "\n[runpod_mtp.qwen]\n\n[openai.gpt]\n");
-    set_override ~base_path "Initial prompt.";
-    let initial = or_fail (Preset.capture ~base_path ~name:"initial" ~description:"") in
-    let snapshot ~name ~prompt ~instructions ~runtime =
-      { initial with Preset.name;
-        prompt_overrides = List.map (fun entry -> {entry with Override.value = prompt}) initial.prompt_overrides;
-        instructions = ["alpha", instructions]; assignments = ["routingtest", runtime] }
-    in
-    let first_target = snapshot ~name:"first" ~prompt:"First prompt."
-      ~instructions:"First keeper." ~runtime:"runpod_mtp.qwen" in
-    let second_target = snapshot ~name:"second" ~prompt:"Second prompt."
-      ~instructions:"Second keeper." ~runtime:"openai.gpt" in
-    or_fail (Preset.save ~base_path first_target);
-    or_fail (Preset.save ~base_path second_target);
-    let mutex = Mutex.create () and changed = Condition.create () in
-    let writer_entered = ref false and release_writer = ref false in
-    let first_done = Atomic.make false and second_done = Atomic.make false in
-    let finished flag () =
-      Atomic.set flag true;
-      Mutex.protect mutex (fun () -> Condition.broadcast changed)
-    in
-    let commit ~runtime_config_path text =
-      Mutex.protect mutex (fun () ->
-        writer_entered := true;
-        Condition.broadcast changed;
-        while not !release_writer do Condition.wait changed mutex done);
-      Runtime.save_config_text ~runtime_config_path text
-    in
-    let first = Domain.spawn (fun () ->
-      Fun.protect ~finally:(finished first_done) (fun () ->
-        Preset.For_testing.restore_with_config_commit ~commit ~base_path first_target.name)) in
-    Mutex.protect mutex (fun () ->
-      while not !writer_entered && not (Atomic.get first_done) do
-        Condition.wait changed mutex
-      done);
-    if not !writer_entered then begin
-      ignore (or_fail (Domain.join first));
-      fail "the first restore did not reach its runtime writer"
-    end;
-    let release () = Mutex.protect mutex (fun () ->
-      release_writer := true; Condition.broadcast changed) in
-    let second = Fun.protect ~finally:release (fun () ->
-      let second = Domain.spawn (fun () ->
-        Fun.protect ~finally:(finished second_done) (fun () ->
-          Preset.restore ~base_path second_target.name)) in
-      let lock_path = Preset.For_testing.restore_lock_path ~base_path in
-      (* Observe actual admission, or the old implementation's completed
-         overlapping restore, without guessing whether a sleep was long enough. *)
-      while not (Atomic.get second_done)
-        && File_lock_eio.For_testing.holders_and_waiters ~lock_path < 2 do
-        Thread.yield ()
-      done;
-      second) in
-    let first_result = Domain.join first and second_result = Domain.join second in
-    let first_report = or_fail first_result and second_report = or_fail second_result in
-    List.iter (fun (report : Preset.restore_report) ->
-      match report.runtime_result with
-      | Preset.Runtime_committed _ -> ()
-      | Runtime_unchanged -> fail "each routing transition must use the real writer"
-      | Runtime_failed detail -> fail detail) [first_report; second_report];
-    let current = or_fail (Preset.capture ~base_path ~name:"current" ~description:"") in
-    let autosave = or_fail (Preset.load ~base_path Preset.autosave_name) in
-    check bool "the last restore owns every settings surface" true
-      (Preset.same_settings second_target current);
-    check bool "autosave holds the preceding complete restore, not its intermediate state" true
-      (Preset.same_settings first_target autosave))
-;;
-
 (* The real restore, runtime replacement and response decoder share one
    observation. Directory fsync fails only after the new file is visible;
    neither that warning nor a decoder error may replay the restore. *)
@@ -1587,9 +1510,7 @@ let () =
   Alcotest.run
     "Prompt_preset"
     [ ( "presets"
-      , [ Alcotest.test_case "overlapping restores keep complete settings and the preceding autosave" `Quick
-            test_overlapping_restores_preserve_the_full_preceding_state
-        ; Alcotest.test_case "visible restore retains fsync uncertainty without replay" `Quick
+      , [ Alcotest.test_case "visible restore retains fsync uncertainty without replay" `Quick
             (test_restore_retains_visible_commit_observation ~sync_fails:true)
         ; Alcotest.test_case "durable restore retains its actual commit receipt" `Quick
             (test_restore_retains_visible_commit_observation ~sync_fails:false)

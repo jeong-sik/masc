@@ -280,6 +280,42 @@ let test_with_lock_symlink_convergence_and_cancelled_release () =
        check string "lock reusable immediately after cancellation"
          "reacquired" acquired_after_cancel)
 
+let test_durable_lock_contended_wait_cooperates_until_release () =
+  with_temp_path @@ fun path ->
+  let lock_path = path ^ ".lock" in
+  with_external_lock_holder lock_path @@ fun release_holder ->
+  let observed_retries = ref None in
+  let prev_hook = Atomic.get File_lock_eio.on_lock_attempt_fn in
+  Atomic.set File_lock_eio.on_lock_attempt_fn
+    (fun ~caller ~retries ~elapsed_s:_ ~outcome ->
+      if String.equal caller "File_lock_eio.durable" && String.equal outcome "acquired"
+      then observed_retries := Some retries);
+  Fun.protect
+    ~finally:(fun () -> Atomic.set File_lock_eio.on_lock_attempt_fn prev_hook)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let waiting, resolve_waiting = Eio.Promise.create () in
+      let body_ran = ref false in
+      Eio.Fiber.both
+        (fun () ->
+          Eio.Promise.resolve resolve_waiting ();
+          match
+            File_lock_eio.with_durable_lock ~lock_path (fun () ->
+              body_ran := true;
+              "acquired")
+          with
+          | Ok v -> check string "acquired after external release" "acquired" v
+          | Error error -> fail (File_lock_eio.durable_lock_error_to_string error))
+        (fun () ->
+          Eio.Promise.await waiting;
+          Eio.Time.sleep clock 0.025;
+          release_holder ());
+      check bool "durable lock body ran after release" true !body_ran;
+      match !observed_retries with
+      | Some r -> check bool "observed at least one paced retry" true (r >= 1)
+      | None -> fail "durable lock attempt hook did not fire")
+
 let () =
   run "file_lock_eio"
     [
@@ -301,5 +337,7 @@ let () =
             test_try_durable_lock_held_by_another_process;
           test_case "with_lock symlink convergence and cancelled release" `Quick
             test_with_lock_symlink_convergence_and_cancelled_release;
+          test_case "durable cross-process wait cooperates until release" `Quick
+            test_durable_lock_contended_wait_cooperates_until_release;
         ] );
     ]

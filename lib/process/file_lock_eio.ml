@@ -131,8 +131,9 @@ let publish_entries state entries =
 
 (* Canonicalize the nearest existing ancestor directory and reattach any
    not-yet-created segments plus the leaf basename. Never call [realpath]
-   on the target file itself so nonexistent paths and leaf symlinks do not
-   fail or diverge, while symlinked parent directories share one entry. *)
+   on the target file itself so nonexistent paths do not fail and symlinked
+   parent directories share one entry; leaf symlinks intentionally lock their
+   own logical path (<leaf>.lock) rather than dereferencing the link target. *)
 let canonical_table_key path =
   let rec strip_trailing_slashes s =
     let len = String.length s in
@@ -160,9 +161,9 @@ let canonical_table_key path =
         (resolve_dir (Filename.dirname trimmed) [])
         (Filename.basename trimmed))
 
-(** Reserve the lock entry for [raw_path] via a pure CAS increment of [active]. *)
-let get_entry raw_path =
-  let path = canonical_table_key raw_path in
+(** Reserve the lock entry for an already-canonicalized [path] via a pure CAS
+    increment of [active]. *)
+let get_entry_canonical path =
   let lock =
     atomic_update_with_result table (fun state ->
       match SMap.find_opt path state.entries with
@@ -180,6 +181,10 @@ let get_entry raw_path =
         (publish_entries state entries, entry.lock))
   in
   (path, lock)
+
+(** Reserve the lock entry for [raw_path] via a pure CAS increment of [active]. *)
+let get_entry raw_path =
+  get_entry_canonical (canonical_table_key raw_path)
 
 (** Release a reservation on [path], evicting the entry when [active] reaches 0. *)
 let release_entry path =
@@ -300,14 +305,17 @@ let release_flock_fd fd =
   (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
   Unix.close fd
 
+let with_mutex_canonical canonical f =
+  let key, lock = get_entry_canonical canonical in
+  Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
+    ~finally:(fun () -> release_entry key)
+    (fun () -> Cross_context_mutex.with_lock lock f)
+
 (** Run [f] while holding only the cross-context per-path mutex.
     Use this for in-memory backends that need single-process fiber
     serialization but do not have a real filesystem artifact to flock. *)
 let with_mutex path f =
-  let key, lock = get_entry path in
-  Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
-    ~finally:(fun () -> release_entry key)
-    (fun () -> Cross_context_mutex.with_lock lock f)
+  with_mutex_canonical (canonical_table_key path) f
 
 let try_with_mutex path f =
   let key, lock = get_entry path in
@@ -337,7 +345,7 @@ let with_lock ?clock path f =
       ~finally:(fun () -> release_flock_fd fd)
       f
   in
-  with_mutex canonical (fun () -> run_with_flock ())
+  with_mutex_canonical canonical (fun () -> run_with_flock ())
 
 let unix_failure (error, operation, argument) =
   { error; operation; argument }
@@ -452,10 +460,13 @@ let acquire_durable_flock ~execution_context lock_path =
           ~started_at ~outcome:"acquired";
         Ok ()
       | Ok false ->
-        (* POSIX record locks expose no readiness source to Eio. An unbounded
-           F_TLOCK/yield loop is the portable cancellable admission: no
-           timeout, attempt cap, sleep, or backoff policy is invented. *)
-        Eio.Fiber.yield ();
+        (* POSIX record locks expose no readiness source to Eio. Pace unbounded
+           cancellable F_TLOCK retries with [retry_sleep_sec] on Eio Unix (falling
+           back to [Fiber.yield] on non-Unix mock schedulers) so cross-process
+           contention never spins a domain at 100% CPU while imposing no attempt
+           cap or wall-clock timeout. *)
+        (try Eio_unix.sleep retry_sleep_sec with
+         | Effect.Unhandled _ -> Eio.Fiber.yield ());
         acquire_eio (retries + 1)
       | Error _ as error -> error
     in

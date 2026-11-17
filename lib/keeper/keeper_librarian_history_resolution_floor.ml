@@ -3,6 +3,7 @@ module Capture = Keeper_librarian_durable_capture
 module Lock = Keeper_librarian_durable_source_lock
 module Lineage = Keeper_librarian_history_resolution_lineage
 module State = Keeper_librarian_history_resolution_state
+module Journal = Keeper_librarian_durable_gate
 module Chain = Keeper_librarian_floor_chain
 module Step = Keeper_librarian_floor_step_request
 module Steps = Keeper_librarian_floor_step_owner
@@ -35,12 +36,16 @@ let execution_final request (record:Owner.retained) =
     let+ retained=Exact.retained_final_of_json ~schema evidence in Some (Exact.delivered retained)
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok None
+let no_gate ~store request =
+  let* root=Journal.root ~store ~owner:(Request.physical_owner request) ~capture:request in
+  require (Option.is_none root) "Cut floor leaf already owns an actual absorption Gate"
 let confirm t =
   let* ()=Request.confirm_owner t.request in
   let* record=Owner.reload ~store:t.store t.record |> owned in
   let* record=Option.to_result ~none:"Cut floor original disappeared" record in
   let* ()=Request.confirm_record t.request record in
   let* ()=State.check_unfenced ~store:t.store ~request:t.request ~original:record in
+  let* ()=no_gate ~store:t.store t.request in
   let* final=execution_final t.request record in
   let* ()=require (final=Some t.final) "Cut floor leaf changed its definite refusal or acquired other work" in
   let* ()=Request.confirm_final ~store:t.store t.request t.final in
@@ -54,6 +59,7 @@ let candidate ~store ~record ~request = io (fun () ->
   | Some (Exact.Call_final (Exact.Input_refused _) as final) ->
     let* ()=Request.confirm_owner request in
     let* ()=State.check_unfenced ~store ~request ~original:record in
+    let* ()=no_gate ~store request in
     let* ()=Request.confirm_final ~store request final in
     let* evidence=Request.refusal_evidence ~store request final in
     let report=Runtime.not_committed_of_failure ~detail:"Cut descendant input was refused" evidence in
@@ -201,11 +207,21 @@ let recover_committed t =
      | Some proof -> let+ ()=confirm_program_basis t basis transaction_id proof in Some proof)
 let publish t prepared =
   let* ()=require (prepared.request_id=Request.request_id t.request
-    && prepared.request_digest=Request.body_digest t.request && prepared.finished.program.unread=[])
+    && prepared.request_digest=Request.body_digest t.request && prepared.finished.program.unread=[]
+    && prepared.transaction_id=prepared.finished.program.transaction_id)
     "Cut floor prepared program belongs to another original or has unread holes" in
   let keepers_dir,keeper_id=keepers t in
   let outcome=io (fun () -> Lock.with_original_manifest ~request:t.request (fun manifest ->
     let* ()=confirm t in
+    let* retained=retained_basis t in
+    let* basis,transaction_id=Option.to_result ~none:"Cut floor publication lost its retained first question" retained in
+    let* expected_anchor=Lane_addon_action.canonical
+      (Current.program_anchor_evidence_to_json prepared.basis.anchor) in
+    let* actual_anchor=Lane_addon_action.canonical
+      (Current.program_anchor_evidence_to_json basis.anchor) in
+    let* ()=require (transaction_id=prepared.transaction_id && basis.sources=prepared.basis.sources
+      && Yojson.Safe.equal expected_anchor actual_anchor)
+      "Cut floor publication changed its persisted original transaction, anchor or manifest" in
     let* ()=same_manifest prepared.basis manifest in
     let* anchor=Current.resume_program_anchor ~keepers_dir ~keeper_id prepared.basis.anchor in
     let* source=program_source t manifest in

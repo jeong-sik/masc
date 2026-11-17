@@ -224,11 +224,21 @@ val segment_of_string : digest:digest -> string -> (segment, load_error) result
     such object, or why it could not be read. Every object is checked against
     its digest, every bundle against its turn's count and chain, the segments
     against the count and chain the head names. [memo] then holds the loaded
-    messages, so a save that follows writes none of them; a save of them
-    through another memo encodes none of them either. *)
+    messages, so a save through that memo writes none of them. Another memo
+    encodes the loaded records once, since only a save's encoding validation
+    can publish their encoding to the process's identity tables. *)
 val load
   :  memo
   -> read_object:(digest -> (string option, string) result)
+  -> head
+  -> (Checkpoint_types.t, load_error) result
+
+(** Read the complete checkpoint with the same object, message, count and
+    chain checks as {!load}, without retaining encoded message bytes in an
+    encoding memo. This is for a snapshot that will not be saved through that
+    memo. A later save must use its ordinary encoding validation. *)
+val load_read_only
+  :  read_object:(digest -> (string option, string) result)
   -> head
   -> (Checkpoint_types.t, load_error) result
 

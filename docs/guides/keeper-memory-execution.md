@@ -124,22 +124,24 @@ only to installations that still have those records.
 
 A package path, revision or image change also changes the semantic configuration
 revision. Preserving the volume does not reauthorize a captured original under
-the new configuration. A completed-history original with no answer is ended
-under the new configuration and its Keeper reads the same range again, whole:
-the host ends one its worker holds with no call under way, the Keeper's next
-pass ends one no worker received, and the Keeper's next pass ends one whose
-call the change cut off. That last read asks the model once more.
+the new configuration. A known unstarted declaration ending leaves the
+original input unread. A history Cut can also retain a separate ending after
+its actual host result, execution proof and ready same-owner replacement are
+verified. A later pass reads the complete unread range under a new ID. The
+old provider call may have finished; a new ID alone is not proof that effects
+cannot repeat. Preserve the actual result, ending, source guards and receipts.
 
-These still wait under the new configuration and are not read again: an
-original or message-floor step whose answer arrived and whose gate has not
-started, a message-floor step no worker received or whose call was cut off,
-an admission request, an attempt the host ended with a raised error, and a
-`Dispatch_pending` original its worker has no record of. Before switching,
-inspect retained host originals, worker records, Exact outcomes and proofs
-for these. Finish outstanding work through its existing owner, or use a
-separately reviewed, explicitly authorized plan to set aside the affected
-original chains and make their preserved inputs eligible again. For these,
-missing or unknown results do not authorize replay. See
+An ending already stored survives rollback. Linked work keeps its original
+source and fence, publishes a complete child intent, and recovers that same
+child after interruption. An ending or child publication does not complete
+Memory publication or acknowledge its source.
+
+Known answers continue through their actual Gate under the same owner. Unknown
+floor calls, raised attempts, missing dispatch records and unready or different
+owners do not gain replay authority from a configuration edit. Same-binding
+history Cut recovery has a separate fenced continuation; it is not a declaration
+replacement. Inspect retained originals, worker records, Exact outcomes and
+proofs before switching. Follow
 [the original-inventory requirements](EXACT-WORKER-STATE-HARD-CUT.md#deploy-with-a-stopped-writer).
 
 An approved fresh-state operation stops writers and holds the workspace lease

@@ -128,10 +128,6 @@ type fixture = {
   clock:float Eio.Time.clock_ty Eio.Resource.t;
 }
 let observed_originals fixture=originals fixture.base_path fixture.keepers_dir fixture.store
-(* [Durable_owner.resume] reads the destination of now only to judge a cut
-   original. The resumes that pass this hold none. *)
-let no_destination_read () : Capture.destination option =
-  fail "a resume that holds no cut original read the destination of now"
 let start_memory_action ?(keeper_name=keeper_name) fixture action =
   let completed,resolve=Eio.Promise.create () in
   let outcome=Memory_lane.submit ~base_path:fixture.base_path ~keeper_name (fun () ->
@@ -965,7 +961,7 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
   check bool "invalid Memory is still rejected by its domain" true
     (Result.is_error (Capture.validate_proposal capture invalid_memory));
   let hold=memory_action fixture (fun () ->
-    Durable_owner.resume ~current:no_destination_read ~store:fixture.store ~config:fixture.config ~reserved:[]
+    Durable_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[]
       ~original:(Durable_owner.Read (record,capture))
       ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "proved host answer must not call the worker")
       ~publish:(fun ~original:_ ~request:_ ~proposal:_ ->
@@ -1562,7 +1558,7 @@ let resume_with_settlement_fault fixture before_settlement = memory_action fixtu
         Keeper_librarian_worker_request.prepare ~max_reply_bytes
           ~request_id:(Owner.Record.request_id original) ~tool:expected.tool ~arguments)
     |> Result.map_error Lane_addon_submit_once.call_error_of_runtime in
-  Durable_owner.resume ~current:no_destination_read ~store:fixture.store ~config:fixture.config ~reserved:[]
+  Durable_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[]
     ~original:(Durable_owner.Read (original,request)) ~call
     ~wake:(fun () -> ()) ~publish:(fun ~original ~request ~proposal ->
       Keeper_librarian_durable_commit.For_testing.publish ~before_settlement ~store:fixture.store
@@ -2702,7 +2698,7 @@ let fence_preview fixture request = io (fun () ->
   |> Result.map_error Resolution.error_to_string |> get)
 let refuse_fenced_resume fixture original request =
   let before = io (fun () -> current fixture.keepers_dir), progress fixture in
-  let result = memory_action fixture (fun () -> Durable_owner.resume ~current:no_destination_read ~store:fixture.store
+  let result = memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store
     ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ())
     ~original:(Durable_owner.Read (original,request))
     ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "fenced original reached its worker")
@@ -3556,7 +3552,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   io (fun () -> Sys.remove stray);
   let resume_descendant ()=
     let original,request=load_child descendant_id in
-    memory_action fixture (fun () -> Durable_owner.resume ~current:no_destination_read ~store:fixture.store ~config:fixture.config
+    memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
       ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original:(Durable_owner.Read (original,request))
       ~wake:(fun () -> ())
       ~call:(Keeper_librarian_durable_edge.call ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ()))
@@ -4993,100 +4989,97 @@ let a_replaced_declaration_cuts_the_running_original fixture ~sw =
          | Retained_not_allowed _ | Retained_request_id_reused) ->
        fail "the host did not end the attempt as cut off in this process");
     record,capture)
-let cut_refusal_retained fixture (cut:Owner.retained) =
+(* Read only the actual owner here. The production pass has a separate
+   same-binding Cut continuation through exclusion, fence and child intent. *)
+let resume_cut_owner fixture wakes =
+  let record,request=only_original fixture in
+  memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store
+    ~config:fixture.config ~reserved:[] ~original:(Durable_owner.Read (record,request))
+    ~wake:(fun () -> incr wakes)
+    ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "a retained Cut must not dispatch its original")
+    ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "a retained Cut has no answer to publish"))
+  |> Result.map_error Durable_owner.error_to_string |> get
+let cut_release_observed fixture =
+  let record,request=only_original fixture in
+  let exact=Capture.request request |> get in
+  io (fun () -> Keeper_librarian_declaration_replacement.released_cut ~store:fixture.store
+    ~original:(Owner.listed record) ~exact ~captured:(Capture.destination request)) |> get
+let require_cut_wait fixture (cut:Owner.retained) wakes =
+  (match resume_cut_owner fixture wakes with
+   | Durable_owner.Waited (wait,record) ->
+     check string "the owner still holds its original" cut.Owner.request_id (Owner.Record.request_id record);
+     check bool "the owner preserves execution uncertainty" true (wait=Durable_owner.Worker_unknown)
+   | Resumed _ | Original_replaced _ -> fail "an unreleased Cut must remain unknown at its owner");
+  check bool "no declaration release was stored" false (cut_release_observed fixture)
+let require_cut_release fixture (cut:Owner.retained) wakes =
+  let positions=progress fixture and posts=F.post_count fixture.server in
+  (match run_worker_waking fixture wakes with
+   | Ok (Consumer.Memory_not_committed _) -> ()
+   | Ok (Nothing_to_read | Pending _ | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) -> fail "the replaced Cut must retain its ending first"
+   | Error error -> fail (Consumer.error_to_string error));
   let record,_=only_original fixture in
-  check string "the cut original is still the one retained" cut.request_id record.Owner.request_id;
-  match Progress.phase record.Owner.progress with
-  | Rejected {stage=Progress.Execution;_} -> ()
-  | Rejected {stage=Progress.Before_dispatch;_} | Captured | Admission_wait _ | Dispatch_pending _
-  | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
-  | Subdividing _ | Subdivided _ -> fail "the pass did not retain the cut refusal on its original"
+  check string "the ending stays on its original" cut.Owner.request_id record.Owner.request_id;
+  check bool "the strict durable Cut ending is observable" true (cut_release_observed fixture);
+  check bool "ending alone moves no read position" true (progress fixture=positions);
+  check int "ending alone makes no provider call" posts (F.post_count fixture.server);
+  no_memory fixture
 let test_a_replaced_declaration_settles_a_cut_original_and_its_range_is_read_whole_again () =
   with_fixture (fun ~sw fixture ->
-    let cut,capture=a_replaced_declaration_cuts_the_running_original fixture ~sw in
-    let captured : Capture.destination=Capture.destination capture in
-    check bool "without a destination of now nothing is known" false
-      (Capture.replaced_since ~current:None capture);
-    check bool "the captured destination itself is not a replacement" false
-      (Capture.replaced_since ~current:(Some captured) capture);
-    let revised={captured with configuration_revision=captured.configuration_revision ^ "-revised"} in
-    check bool "another configuration revision of the same destination is a replacement" true
-      (Capture.replaced_since ~current:(Some revised) capture);
-    check bool "another installation is not a replacement" false
-      (Capture.replaced_since ~current:(Some {revised with installation_id="another-installation"}) capture);
-    check bool "another package is not a replacement" false
-      (Capture.replaced_since ~current:(Some {revised with package_id="another-package"}) capture);
-    check bool "another tool is not a replacement" false
-      (Capture.replaced_since ~current:(Some {revised with tool="another-tool"}) capture);
-    let posts=F.post_count fixture.server in
-    let wakes=ref 0 in
+    let cut,_=a_replaced_declaration_cuts_the_running_original fixture ~sw in
+    let posts=F.post_count fixture.server and wakes=ref 0 in
+    require_cut_release fixture cut wakes;
+    check int "the newly retained ending asks for the next pass" 1 !wakes;
     assert_pending (run_worker_waking fixture wakes);
-    cut_refusal_retained fixture cut;
-    check int "the pass that read the cut asks for the next pass itself" 1 !wakes;
-    (* The woken pass moves the cut original and reads the range again. *)
-    assert_pending (run_worker_waking fixture wakes);
-    check int "the pass that moved it and read again asks for no pass" 1 !wakes;
-    check bool "the cut original moved to the settled archive" true
+    check bool "the ended original moves to the settled archive" true
       (settled_on fixture ~date:(day_of cut.request_id) cut);
     let fresh,fresh_capture=only_original fixture in
     check bool "a new original read the range" true (fresh.Owner.request_id<>cut.request_id);
-    check bool "and it read everything unread, not up to the first cut point" true
+    check bool "the complete unread range is preserved" true
       (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
-    check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture));
+    check bool "the next passes commit the range" true (advanced (run_until_done ~wakes fixture));
     check bool "a new provider call judged the range" true (F.post_count fixture.server>posts);
     check (list string) "the new original's answer reached Memory"
       ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
-(* RFC 3.7. Put back before its Keeper reads the cut, the declaration is the
-   original's again: the original waits as a cut original does. *)
 let test_a_cut_original_waits_when_its_declaration_is_put_back () =
   with_fixture (fun ~sw fixture ->
     let cut,_=a_replaced_declaration_cuts_the_running_original fixture ~sw in
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
-    let posts=F.post_count fixture.server in
-    let wakes=ref 0 in
-    assert_pending (run_worker_waking fixture wakes);
-    cut_refusal_retained fixture cut;
-    assert_pending (run_worker_waking fixture wakes);
-    cut_refusal_retained fixture cut;
-    check int "under its own declaration a cut original asks for no pass" 0 !wakes;
-    check bool "and it is not archived" false (settled_on fixture ~date:(day_of cut.request_id) cut);
-    check int "no provider was asked again" posts (F.post_count fixture.server))
-(* RFC 3.7. The end of a cut original is its move to the archive. Put back
-   after the pass that read the cut and before the pass that moves it, the
-   declaration is the original's again and the original waits. *)
-let test_a_cut_original_waits_when_its_declaration_is_put_back_before_it_is_moved () =
+    let posts=F.post_count fixture.server and wakes=ref 0 in
+    require_cut_wait fixture cut wakes;
+    require_cut_wait fixture cut wakes;
+    check int "the unchanged declaration grants no replacement wake" 0 !wakes;
+    check bool "the owner does not archive an unreleased Cut" false
+      (settled_on fixture ~date:(day_of cut.request_id) cut);
+    check int "the owner does not send the original again" posts (F.post_count fixture.server))
+(* Once stored, the ending is historical authority. Rollback cannot revive
+   the old unknown request or replace that ending with today's configuration. *)
+let test_a_cut_original_keeps_its_ending_when_its_declaration_is_put_back_before_it_is_moved () =
   with_fixture (fun ~sw fixture ->
     let cut,_=a_replaced_declaration_cuts_the_running_original fixture ~sw in
     let wakes=ref 0 in
-    assert_pending (run_worker_waking fixture wakes);
-    cut_refusal_retained fixture cut;
-    check int "the pass that read the cut under the replaced declaration asks for a pass" 1 !wakes;
+    require_cut_release fixture cut wakes;
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
-    let posts=F.post_count fixture.server in
-    assert_pending (run_worker_waking fixture wakes);
-    cut_refusal_retained fixture cut;
-    check int "the pass under the declaration put back asks for none" 1 !wakes;
-    check bool "and the original is not archived" false (settled_on fixture ~date:(day_of cut.request_id) cut);
-    check int "no provider was asked again" posts (F.post_count fixture.server))
-(* RFC 3.5. While no destination of now can be read, the inventory check
-   and the owner read the same nothing: the original stays unfinished and no
-   pass is asked for. Once the replaced declaration is on again both read the
-   replacement. *)
+    check bool "rollback retains the actual original-bound ending" true (cut_release_observed fixture);
+    check bool "ordinary passes complete the preserved range after rollback" true
+      (advanced (run_until_done ~wakes fixture));
+    check bool "rollback cannot revive the old original" true
+      (settled_on fixture ~date:(day_of cut.request_id) cut);
+    check (list string) "only the new original answer is in Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
 let test_a_cut_original_waits_while_the_destination_of_now_is_unknown () =
   with_fixture (fun ~sw fixture ->
     let cut,_=a_replaced_declaration_cuts_the_running_original fixture ~sw in
     io (fun () -> write fixture.source (replaced_declaration ~enabled:false fixture));reconcile fixture;
     let wakes=ref 0 in
-    assert_pending (run_worker_waking fixture wakes);
-    cut_refusal_retained fixture cut;
-    assert_pending (run_worker_waking fixture wakes);
-    cut_refusal_retained fixture cut;
-    check int "with no destination of now neither pass asks for another" 0 !wakes;
-    check bool "and the original is not archived" false (settled_on fixture ~date:(day_of cut.request_id) cut);
+    require_cut_wait fixture cut wakes;
+    require_cut_wait fixture cut wakes;
+    check int "an unavailable destination grants no replacement wake" 0 !wakes;
+    check bool "no release archives the original" false (settled_on fixture ~date:(day_of cut.request_id) cut);
     attach_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
-    check bool "with the replaced declaration on again the passes commit the range" true
+    require_cut_release fixture cut wakes;
+    check bool "ready replacement allows ordinary passes to commit" true
       (advanced (run_until_done ~wakes fixture));
-    check bool "the cut original moved to the settled archive" true
+    check bool "the ended original moves to the settled archive" true
       (settled_on fixture ~date:(day_of cut.request_id) cut))
 (* A pass reads and sends its range, and the provider's refusal reaches the
    next pass. *)
@@ -5612,7 +5605,7 @@ let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
      | Ok _ -> fail "direct publication admitted an omitted retained question");
     check int "no new Gate original is created" 0 (List.length (gate_records fixture request));
     let check_owner_phase original =
-      let result=memory_action fixture (fun () -> Durable_owner.resume ~current:no_destination_read ~store:fixture.store ~config:fixture.config
+      let result=memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
         ~reserved:[] ~original:(Durable_owner.Read (original,request))
         ~wake:(fun () -> fail "unsafe publication cannot wake completion")
         ~call:(Keeper_librarian_durable_edge.call ~config:fixture.config ~reserved:[])
@@ -5760,8 +5753,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_replaced_declaration_settles_a_cut_original_and_its_range_is_read_whole_again;
   test_case "a cut original waits when its declaration is put back" `Quick
     test_a_cut_original_waits_when_its_declaration_is_put_back;
-  test_case "a cut original waits when its declaration is put back before it is moved" `Quick
-    test_a_cut_original_waits_when_its_declaration_is_put_back_before_it_is_moved;
+  test_case "a cut original keeps its ending after rollback before archive" `Quick
+    test_a_cut_original_keeps_its_ending_when_its_declaration_is_put_back_before_it_is_moved;
   test_case "a cut original waits while the destination of now is unknown" `Quick
     test_a_cut_original_waits_while_the_destination_of_now_is_unknown;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;

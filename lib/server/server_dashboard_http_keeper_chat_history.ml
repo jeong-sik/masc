@@ -4,6 +4,13 @@ module Http = Http_server_eio
 module Limits = Server_dashboard_http_keeper_read_limits
 module Types = Server_dashboard_http_keeper_api_types
 module String_map = Map.Make (String)
+module Chat_turn_map = Map.Make (struct
+  type t = Ids.Turn_ref.t
+  let compare left right =
+    match String.compare (Ids.Turn_ref.trace_id left) (Ids.Turn_ref.trace_id right) with
+    | 0 -> Int.compare (Ids.Turn_ref.absolute_turn left) (Ids.Turn_ref.absolute_turn right)
+    | order -> order
+end)
 
 let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   [ Keeper_id.Trace_id.to_string m.runtime.trace_id ]
@@ -140,14 +147,58 @@ let keeper_chat_skill_activations_json ~status ?detail
      @ Json_util.string_field_if_present "detail" detail)
 ;;
 
+let requested_chat_turns = function
+  | `List rows ->
+    List.fold_left (fun requested -> function
+      | `Assoc fields when List.assoc_opt "role" fields = Some (`String "assistant") ->
+        (match Option.bind (chat_row_turn_ref fields) Ids.Turn_ref.of_string with
+         | None -> requested
+         | Some turn_ref ->
+           String_map.update (Ids.Turn_ref.trace_id turn_ref)
+             (fun previous -> Some (Chat_turn_map.add turn_ref ()
+               (Option.value previous ~default:Chat_turn_map.empty))) requested)
+      | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        requested) String_map.empty rows
+  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ ->
+    String_map.empty
+;;
+
+let chat_activations_by_turn requested activations =
+  match Chat_turn_map.bindings requested with
+  | [] -> Chat_turn_map.empty
+  | [turn_ref, ()] ->
+    (* One selected turn needs only one filter, without
+       allocating a buffer for every matching activation. *)
+    Chat_turn_map.singleton turn_ref
+      (List.filter (fun (activation : Keeper_skill_activation_ledger.activation) ->
+         Ids.Turn_ref.equal activation.turn_ref turn_ref) activations)
+  | _ :: _ ->
+    (* These accumulators belong only to this preparation. Reversing each
+       selected group restores ledger order without retaining other turns. *)
+    let groups = Chat_turn_map.map (fun () -> ref []) requested in
+    List.iter (fun (activation : Keeper_skill_activation_ledger.activation) ->
+      match Chat_turn_map.find_opt activation.turn_ref groups with
+      | None -> ()
+      | Some group -> group := activation :: !group) activations;
+    Chat_turn_map.map (fun group -> List.rev !group) groups
+;;
+
 let attach_keeper_chat_skill_activations ~config ~keeper_name rows =
+  let requested = requested_chat_turns rows in
   let resolved_by_trace = ref String_map.empty in
   let resolve_trace trace_id =
     match String_map.find_opt trace_id !resolved_by_trace with
     | Some outcome -> outcome
     | None ->
       let outcome =
-        Keeper_skill_activation_projection.resolve_trace_string ~config trace_id
+        match Keeper_skill_activation_projection.resolve_trace_string ~config trace_id with
+        | Error detail -> Error detail
+        | Ok (Keeper_skill_activation_projection.Trace_available { ledger; _ }) ->
+          Ok (Some (chat_activations_by_turn (String_map.find trace_id requested)
+            (Keeper_skill_activation_ledger.activations ledger)))
+        | Ok (Keeper_skill_activation_projection.Trace_not_recorded _) -> Ok None
+        | Ok (Keeper_skill_activation_projection.Trace_unavailable { reason; detail; _ }) ->
+          Error (reason ^ ": " ^ detail)
       in
       resolved_by_trace := String_map.add trace_id outcome !resolved_by_trace;
       outcome
@@ -176,17 +227,8 @@ let attach_keeper_chat_skill_activations ~config ~keeper_name rows =
                      (keeper_chat_skill_activations_json ~status:"unavailable"
                         ~detail:detail [])
                  else None
-               | Ok
-                   (Keeper_skill_activation_projection.Trace_available
-                      { ledger; _ }) ->
-                 let activations =
-                   Keeper_skill_activation_ledger.activations ledger
-                   |> List.filter
-                        (fun
-                          (activation :
-                            Keeper_skill_activation_ledger.activation)
-                        -> Ids.Turn_ref.equal activation.turn_ref turn_ref)
-                 in
+               | Ok (Some by_turn) ->
+                 let activations = Chat_turn_map.find turn_ref by_turn in
                  (match activations, reports_skill with
                   | _ :: _, _ ->
                     Some
@@ -200,22 +242,13 @@ let attach_keeper_chat_skill_activations ~config ~keeper_name rows =
                            "The exact turn ledger contains no activation for the recorded Skill call"
                          [])
                   | [], false -> None)
-               | Ok
-                   (Keeper_skill_activation_projection.Trace_not_recorded _) ->
+               | Ok None ->
                  if reports_skill then
                    Some
                      (keeper_chat_skill_activations_json ~status:"not_recorded"
                         ~detail:
                           "No retained Skill activation ledger exists for this exact trace"
                         [])
-                 else None
-               | Ok
-                   (Keeper_skill_activation_projection.Trace_unavailable
-                      { reason; detail; _ }) ->
-                 if reports_skill then
-                   Some
-                     (keeper_chat_skill_activations_json ~status:"unavailable"
-                        ~detail:(reason ^ ": " ^ detail) [])
                  else None)
           in
           (match projection with

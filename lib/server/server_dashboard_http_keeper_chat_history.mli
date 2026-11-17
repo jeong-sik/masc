@@ -6,7 +6,10 @@ val attach_keeper_chat_skill_activations :
 (** Attach the exact-turn Skill activation projection to assistant chat rows.
     A row that reports [keeper_skill] but has no matching retained activation
     receives an explicit missing/unavailable status; no timestamp or row-order
-    inference is used. Exposed so the server JSON contract can be tested
+    inference is used. Each trace is read through the read-only ledger path
+    once per call, then grouped only for the requested assistant turns. Row and
+    activation order are preserved; nothing is cached across calls.
+    Exposed so the server JSON contract can be tested
     without opening an HTTP listener. *)
 
 val keeper_chat_history_json :

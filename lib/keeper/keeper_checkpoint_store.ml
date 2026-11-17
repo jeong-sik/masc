@@ -25,6 +25,8 @@ include Keeper_checkpoint_store_retained
 include Keeper_checkpoint_store_export
 include Keeper_checkpoint_store_save
 
+module Read_observation = Keeper_checkpoint_read_observation
+
 module For_testing = struct
   module Inode_set = Set.Make (struct
     type t = int * int

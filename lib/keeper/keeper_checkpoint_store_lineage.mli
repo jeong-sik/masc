@@ -62,6 +62,11 @@ val reusable_written_value :
   identity:canonical_identity ->
   Agent_core.Checkpoint.t option
 
+val written_lineage_is_reusable :
+  canonical_path:string -> identity:canonical_identity -> bool
+(** The same eligibility and access update as [reusable_written_value],
+    without copying or handing out the checkpoint's mutable context. *)
+
 val keep_read_lineage :
   canonical_path:string ->
   identity_before:canonical_identity

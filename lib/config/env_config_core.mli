@@ -102,7 +102,9 @@ val strip_path_trailing_slashes : string -> string
 val expand_home_prefix : string -> string
 (** A value that starts with ["~/"] with that prefix replaced by [HOME]; any
     other value, and a value with no [HOME] to read, unchanged. The one rule
-    every config path that names a file under the operator's home shares. *)
+    every config path that names a file under the operator's home shares.
+    Read [HOME] only for that prefix; absolute and other unchanged paths
+    perform no environment lookup. *)
 
 val home_dir_opt : unit -> string option
 (** [HOME] as {!expand_home_prefix} reads it: trimmed, [None] when unset or

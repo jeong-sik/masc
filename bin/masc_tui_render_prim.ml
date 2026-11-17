@@ -6519,7 +6519,7 @@ let answering_lines (state : state) =
     ~width:(max 0 (framed_inner_width cols - 2))
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name
-    ~error:(keeper_turns_poll_error state)
+    ~error:(keeper_turns_read_error state)
     ~observed_at:state.keeper_turns_observed_at
     ~finishes:state.keeper_turn_finishes
     state.keeper_turns

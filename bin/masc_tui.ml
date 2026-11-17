@@ -1849,8 +1849,8 @@ let approval_decision_unverified = function
 
 open Masc_tui_async_protocol
 
-let msx_poll_view = ref (ref ())
-let invalidate_msx_poll () = msx_poll_view := ref ()
+let machine_view = ref (ref ())
+let retire_machine_view () = machine_view := ref ()
 type pending_msx_checkpoint = {
   checkpoint_operation_id : string;
   checkpoint_restore : bool;
@@ -2103,12 +2103,12 @@ let capture_workspace_admission state ~mailbox =
    refusal, apart from [deliver]'s refusals and unknown outcomes (RFC §2). *)
 let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unknown ~withdrawn ~deliver write =
   let authority = state.workspace_authority in
-  let view = ref !msx_poll_view in
+  let view = ref !machine_view in
   let port = state.port in
   let identity = state.server_identity in
   let check = capture_workspace_admission state ~mailbox in
   let current () =
-    authority = state.workspace_authority && !view == !msx_poll_view && port = state.port
+    authority = state.workspace_authority && !view == !machine_view && port = state.port
   in
   (* The identity the check confirmed is the one the request carries, so the
      server compares it again at the moment it applies the change. *)
@@ -2136,8 +2136,8 @@ let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unk
       let result =
         try
             if checkpoint_boundary then begin
-              invalidate_msx_poll ();
-              view := !msx_poll_view;
+              retire_machine_view ();
+              view := !machine_view;
               state.msx_live_in_flight <- None
             end;
             (* No yield separates retirement from the checkpoint callback,
@@ -3801,7 +3801,7 @@ let launch_voice_config_load state ~mailbox =
 
 let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
   if not (server_authority_ready state) || Option.is_some (checkpoint_for_workspace state) then () else
-  let current_view = !msx_poll_view in
+  let current_view = !machine_view in
   match state.msx_live_in_flight with
   | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
   | Some _ | None ->
@@ -3821,13 +3821,13 @@ let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
 ;;
 
 
-let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
+let launch_dos_live_read (state : Masc_tui_types.state) ~mailbox =
   if server_authority_ready state then begin
-  let current_view = !msx_poll_view in
+  let current_view = !machine_view in
   match state.dos_live_in_flight with
   | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
   | Some _ | None ->
-    let request = { live_view = !msx_poll_view; live_port = state.port } in
+    let request = { live_view = !machine_view; live_port = state.port } in
     state.dos_live_owed <- Masc_tui_owed_read.started state.dos_live_owed;
     state.dos_live_in_flight <- Some request;
     let since = Masc_tui_machine_live.since state.dos_live in
@@ -9064,7 +9064,7 @@ let launch_owed_machine_live state ~mailbox =
     state.msx_live_owed state.msx_live_in_flight
     (fun owed -> state.msx_live_owed <- owed) launch_msx_live_read;
   launch Masc.Machine_lane.Dos state.msx_open state.dos_live_owed state.dos_live_in_flight
-    (fun owed -> state.dos_live_owed <- owed) launch_dos_live_poll
+    (fun owed -> state.dos_live_owed <- owed) launch_dos_live_read
 
 let launch_owed_browser_observation state ~mailbox =
   match browser_lane_on_screen state with
@@ -13944,7 +13944,7 @@ let observe_msx_carts state ~mailbox =
 let observe_msx_frame ?expected_workspace
     ?(current = fun () -> true) (state : Masc_tui_types.state) ~mailbox =
   if Option.is_some (checkpoint_for_workspace state) then () else
-  let captured_view = !msx_poll_view in
+  let captured_view = !machine_view in
   (* The read that follows a change the server admitted for [expected_workspace]
      carries that workspace, and the server that answers it compares it with
      its own. A server swapped in at any point, including A -> B -> A, answers
@@ -13957,7 +13957,7 @@ let observe_msx_frame ?expected_workspace
          ~port:state.port Masc.Machine_lane.Msx
          ~since:(Masc_tui_machine_live.since state.msx_live)))
     (fun result ->
-  if current () && captured_view == !msx_poll_view
+  if current () && captured_view == !machine_view
      && Option.is_none (checkpoint_for_workspace state) then begin
   (match Masc_tui_machine_live.advance state.msx_live result with
    | None -> ()
@@ -13975,8 +13975,8 @@ let observe_msx_frame ?expected_workspace
 (* The response binds workspace and operation together; health samples around
    an unrelated live read cannot establish either completion or pixel identity. *)
 let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
-  let authority = state.workspace_authority and view = !msx_poll_view and port = state.port in
-  let current () = authority=state.workspace_authority && view == !msx_poll_view && port=state.port in
+  let authority = state.workspace_authority and view = !machine_view and port = state.port in
+  let current () = authority=state.workspace_authority && view == !machine_view && port=state.port in
   let result = Masc_tui_http.inspect_msx_checkpoint
     ~expected_workspace:pending.checkpoint_workspace
     ~operation_id:pending.checkpoint_operation_id ~host:server_peer_host ~port
@@ -14022,7 +14022,7 @@ let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
    [&] opens Collab, whose watch actions go directly to observation. *)
 let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   withdraw_resource_diagram_pending state;
-  invalidate_msx_poll ();
+  retire_machine_view ();
   state.machine_interaction <- Observe_machine;
   (* The spectator takes ownership from any image preview. A pending async
      preview must not keep its old surface alive underneath the game. *)
@@ -14041,13 +14041,13 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   Masc_tui_msx.open_menu ~write:write_to_terminal state;
   (* A first DOS read may carry a full screen. Let the menu accept keys while
      the read is in flight, and redraw its watch row when it arrives. *)
-  launch_dos_live_poll state ~mailbox
+  launch_dos_live_read state ~mailbox
 
 (* An inventory row names the shared machine itself. Opening it observes the
    current screen; Collab's [g] action opens the separate media selection menu. *)
 let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   withdraw_resource_diagram_pending state;
-  invalidate_msx_poll ();
+  retire_machine_view ();
   state.machine_interaction <- Observe_machine;
   state.image_request_generation <- state.image_request_generation + 1;
   state.browser_viewport <- None;
@@ -14074,7 +14074,7 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
    forwarded to DOS, whose input and controller remain server-owned. *)
 let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   withdraw_resource_diagram_pending state;
-  invalidate_msx_poll ();
+  retire_machine_view ();
   state.image_request_generation <- state.image_request_generation + 1;
   state.browser_viewport <- None;
   if state.image_open then begin
@@ -14090,7 +14090,7 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   state.msx_menu_open <- false;
   state.dos_live <- Masc_tui_machine_live.Unread;
   render_spectator state;
-  launch_dos_live_poll state ~mailbox
+  launch_dos_live_read state ~mailbox
 
 let handle_collab_action state ~mailbox view action =
   let owner = Masc_tui_collab.owner view in
@@ -18432,7 +18432,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      cards; only a confirmed different workspace discards them. Old replies
      are independently rejected by Workspace_scoped. *)
   state.collab <- None;
-  invalidate_msx_poll ();
+  retire_machine_view ();
   Masc_tui_msx.close ~write:write_to_terminal state;
   msx_surface_frame := None;
   Masc_tui_types.withdraw_machine_control state;
@@ -21459,7 +21459,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
        && Option.is_none state.msx_live_in_flight then
       launch_msx_live_read state ~mailbox;
     if state.msx_open && state.msx_menu_open then
-      launch_dos_live_poll state ~mailbox;
+      launch_dos_live_read state ~mailbox;
     (* The surface on view asks again from the list it reads on arrival.
        Its request went out under the old authority, and a surface outside
        the bundle has no tick of its own to recover it. *)
@@ -28892,7 +28892,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match state.msx_live_in_flight with
        | Some pending when pending == request ->
            state.msx_live_in_flight <- None;
-           if request.live_view == !msx_poll_view && request.live_port = state.port
+           if request.live_view == !machine_view && request.live_port = state.port
               && state.msx_open && not state.msx_menu_open
               && state.machine_source = Masc.Machine_lane.Msx then begin
              state.msx_live_owed <- (match result with
@@ -28926,7 +28926,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Masc.Machine_lane.Dos -> true
              | Masc.Machine_lane.Msx -> false
            in
-           if request.live_view == !msx_poll_view && request.live_port = state.port
+           if request.live_view == !machine_view && request.live_port = state.port
               && state.msx_open && (state.msx_menu_open || watching_dos) then begin
              let result =
                match result with
@@ -28965,7 +28965,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   else render_spectator state)
            end
            else if state.msx_open && state.msx_menu_open then
-             launch_dos_live_poll state ~mailbox
+             launch_dos_live_read state ~mailbox
        | Some _ | None -> ())
   | Keeper_msg (Keeper_chat_control_received (keeper_name, generation, token)) ->
       if generation = keeper_chat_control_generation state keeper_name then begin
@@ -35055,16 +35055,16 @@ Use relative paths for resources already held in the package. -->
       (match msx_key, state.machine_source with
        | Some _, _ when room_focused -> ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
-         when state.msx_menu_open -> invalidate_msx_poll ()
+         when state.msx_menu_open -> retire_machine_view ()
        | Some "esc", (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) ->
-           invalidate_msx_poll ()
-       | Some "f5", Masc.Machine_lane.Msx -> invalidate_msx_poll ()
+           retire_machine_view ()
+       | Some "f5", Masc.Machine_lane.Msx -> retire_machine_view ()
        | Some ("f6" | "f7" | "f8"), Masc.Machine_lane.Msx
-         when state.machine_interaction = Control_machine -> invalidate_msx_poll ()
+         when state.machine_interaction = Control_machine -> retire_machine_view ()
        | Some name, Masc.Machine_lane.Msx
          when state.machine_interaction = Control_machine
               && Option.is_some (Masc_tui_msx.server_key name) ->
-           invalidate_msx_poll ()
+           retire_machine_view ()
        | Some _, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos)
        | None, (Masc.Machine_lane.Msx | Masc.Machine_lane.Dos) -> ());
       (match msx_key with

@@ -9,6 +9,7 @@ type t =
           (** The start the access allowed when the login home was prepared. *)
       }
 type observation = Authenticated | Login_completed | Credential_captured
+type browser = Host_browser | No_host_browser
 open Result.Syntax
 
 let filesystem action =
@@ -108,7 +109,7 @@ let argv ~cli_path = function
   | Native {client=Muse_home; _} -> Runtime_muse_serve.login_argv ~cli_path
   | Antigravity_home _ -> [cli_path]
 
-let environment = function
+let client_environment = function
   | Native {client=Codex_home; account_home} ->
     Runtime_codex_app_server.login_environment ~account_home
     |> Result.map_error Runtime_codex_app_server.error_to_string
@@ -118,6 +119,47 @@ let environment = function
   | Native {client=Muse_home; account_home} ->
     Ok (Runtime_muse_serve.login_environment ~account_home)
   | Antigravity_home {home; _} -> Ok (Runtime_antigravity_setup.environment home)
+
+(* The variable that names the command an official client runs to open a
+   link. Claude Code 2.1.326 runs the file it names, with the link as its one
+   operand, in place of the opener of the system; the variables its
+   documentation lists do not include it. The device-code sign-ins of Codex
+   0.169.0 and Muse Code 1.4.20 print their link and started neither. *)
+let browser_variable = "BROWSER"
+
+(* POSIX [true] takes any operands, does nothing and exits 0. *)
+let idle_command = "true"
+
+(* HIGH-RISK-UNREVIEWED: the link Claude Code hands to the opener returns the
+   approval to a port of this machine, so whoever approves it in a browser of
+   this machine signs their own account in to the home of this login, whoever
+   started the login. A child handed a command that opens nothing shows this
+   machine nothing: the one who signs in opens the link the child prints,
+   whose approval gives a code to paste back. *)
+let without_host_browser environment =
+  let binding = browser_variable ^ "=" in
+  match
+    Eio_guard.run_in_systhread ~label:"setup-login-browser-command" (fun () ->
+      Executable_path.absolute_on_path idle_command)
+  with
+  | None ->
+    Error
+      (Printf.sprintf
+         "PATH holds no %s utility in an absolute directory, so this sign-in has no \
+          command to give the official client in place of the browser of this machine."
+         idle_command)
+  | Some command ->
+    let others =
+      Array.to_list environment
+      |> List.filter (fun entry -> not (String.starts_with ~prefix:binding entry))
+    in
+    Ok (Array.of_list ((binding ^ command) :: others))
+
+let environment ~browser login =
+  let* environment = client_environment login in
+  match browser with
+  | Host_browser -> Ok environment
+  | No_host_browser -> without_host_browser environment
 
 let is_pty = function Native _ -> false | Antigravity_home _ -> true
 

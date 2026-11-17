@@ -217,6 +217,11 @@ let terminal_reason_code_of_core_error = function
     match Keeper_internal_error.agent_error_of_carried_terminal_effect_failure err with
     | Some agent_error -> agent_error_terminal_reason_code agent_error
     | None ->
+    (* A turn whose Task Skill pins could not be resolved ends with that
+       reason, not as an internal error (#31131). *)
+    match Keeper_task_skill_resolution_error.of_core_error err with
+    | Some error -> Keeper_task_skill_resolution_error.code error
+    | None ->
       (* Typed carrier first; the string parse survives inside
          classify_masc_internal_error for pre-carrier producers
          (RFC-0371 B12). *)

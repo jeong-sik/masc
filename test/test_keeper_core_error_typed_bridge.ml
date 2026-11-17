@@ -195,6 +195,11 @@ let core_error_cases : (string * CoreError.t * string) list =
     , CoreError.Orchestration (CoreError.UnknownAgent { name = "ghost" })
     , "orchestration_error" )
   ; "Internal", CoreError.Internal "internal issue", "internal_error"
+  ; ( "Internal_carried task skill resolution"
+    , Keeper_task_skill_resolution_error.core_error
+        (Keeper_task_skill_resolution_error.Skill_config_unreadable
+           { detail = "config.toml: permission denied" })
+    , "task_skill_config_unreadable" )
   ]
 ;;
 

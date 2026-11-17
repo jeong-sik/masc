@@ -2975,11 +2975,22 @@ let test_absorbed_chain_prefers_current_and_stops_before_a_loop () =
        found)
 ;;
 
+(* A line no decoder reads, appended to the memory journal after the seed
+   commit: a lineage scan stops on it with an error. *)
+let break_journal ~keepers_dir ~keeper_id =
+  let oc =
+    open_out_gen [ Open_append; Open_wronly ] 0o600
+      (Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id)
+  in
+  output_string oc "not json\n";
+  close_out oc
+;;
+
 (* A claim the librarian absorbed into can later be replaced: the keeper
-   writes a new claim with [supersedes], and the old one is dropped with a
-   [Revised] event naming the new one. The absorbed row still names the
-   dropped claim, so the search follows the [Revised] event from there and
-   lands on the claim that is current now (#38543). *)
+   writes a new claim with [supersedes], and the commit's journal row links
+   the old claim to the new one. The absorbed row still names the dropped
+   claim, so the search follows the journal link from there and lands on the
+   claim that is current now (#38543, #37433). *)
 let test_absorbed_chain_follows_a_revised_claim () =
   with_temp_dir
   @@ fun base_path ->
@@ -2990,9 +3001,9 @@ let test_absorbed_chain_follows_a_revised_claim () =
   in
   let id = Masc.Keeper_memory_os_types.memory_id in
   let replacement = fact "foxtrot holds the release notes now" in
-  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ replacement ];
   let absorbed = fact "golf deploys on monday" in
   let replaced = fact "foxtrot holds the release notes" in
+  replace_current_facts ~keepers_dir ~keeper_id:meta.name [ replaced ];
   (match
      Masc.Keeper_memory_absorbed.append_all
        ~keepers_dir
@@ -3008,17 +3019,17 @@ let test_absorbed_chain_follows_a_revised_claim () =
    | Ok () -> ()
    | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
   (match
-     Masc.Keeper_memory_os_events.append
+     Current.supersede_fact
+       ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir
        ~keeper_id:meta.name
-       { Masc.Keeper_memory_os_events.recorded_at = Time_compat.now ()
-       ; memory_id = id replaced
-       ; trace_id = "revising-turn"
-       ; kind = Revised { superseded_by = id replacement }
-       }
+       ~now:(Time_compat.now ())
+       ~source:{ Current.kind = Current.Explicit_write; trace_id = "revising-turn" }
+       ~superseded_memory_id:(id replaced)
+       replacement
    with
-   | Ok () -> ()
-   | Error error -> Alcotest.fail (Masc.Keeper_memory_os_events.append_error_to_string error));
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "the supersede did not commit");
   let found =
     match
       Runtime.keeper_memory_search_json
@@ -3045,9 +3056,9 @@ let test_absorbed_chain_follows_a_revised_claim () =
        found)
 ;;
 
-(* The events sidecar grows with every search, so a search whose absorbed rows
-   all reach a current claim does not read it. A sidecar that cannot be read
-   then costs that search nothing. *)
+(* The journal holds every commit, so a search whose absorbed rows all reach a
+   current claim does not read it. A journal that cannot be read then costs
+   that search nothing. *)
 let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
   with_temp_dir
   @@ fun base_path ->
@@ -3074,10 +3085,7 @@ let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
    with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
-  (* A directory where the sidecar file should be: reading it fails. *)
-  Unix.mkdir
-    (Masc.Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
-    0o755;
+  break_journal ~keepers_dir ~keeper_id:meta.name;
   let search () =
     Runtime.keeper_memory_search_json
       ~config
@@ -3094,7 +3102,7 @@ let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
     | _ -> Alcotest.fail "matches is a list"
   in
   Alcotest.(check (list (pair string bool)))
-    "a chain that reaches a current claim does not need the events sidecar"
+    "a chain that reaches a current claim does not need the journal"
     [ "india deploys on monday", true ]
     (List.map
        (fun matched ->
@@ -3104,9 +3112,9 @@ let test_absorbed_search_reads_events_only_for_a_stopped_chain () =
 
 (* A chain that stops short of a current claim only matters in a row the query
    answers, because only those rows reach the results. A stopped chain in a row
-   the query does not answer must not open the events sidecar (#38617). Where
-   the query does answer the stopped row, the sidecar is read again, and a
-   sidecar that cannot be read fails the search. *)
+   the query does not answer must not open the journal (#38617). Where the
+   query does answer the stopped row, the journal is read, and a journal that
+   cannot be read fails the search. *)
 let test_absorbed_search_reads_events_only_for_an_answered_stopped_chain () =
   with_temp_dir
   @@ fun base_path ->
@@ -3137,10 +3145,7 @@ let test_absorbed_search_reads_events_only_for_an_answered_stopped_chain () =
    with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Masc.Keeper_memory_absorbed.append_error_to_string error));
-  (* A directory where the sidecar file should be: reading it fails. *)
-  Unix.mkdir
-    (Masc.Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:meta.name)
-    0o755;
+  break_journal ~keepers_dir ~keeper_id:meta.name;
   let search query =
     Runtime.keeper_memory_search_json
       ~config
@@ -3153,7 +3158,7 @@ let test_absorbed_search_reads_events_only_for_an_answered_stopped_chain () =
   (match search "deploys" |> json_field "matches" with
    | `List items ->
      Alcotest.(check (list (pair string bool)))
-       "a stopped chain in a row the query does not answer does not need the sidecar"
+       "a stopped chain in a row the query does not answer does not need the journal"
        [ "india deploys on monday", true ]
        (List.map
           (fun matched ->
@@ -3163,12 +3168,12 @@ let test_absorbed_search_reads_events_only_for_an_answered_stopped_chain () =
   match search "schedule" with
   | `Assoc fields ->
     Alcotest.(check bool)
-      "a stopped chain in a row the query answers reads the sidecar, and the search fails"
+      "a stopped chain in a row the query answers reads the journal, and the search fails"
       false
       (List.mem_assoc "matches" fields);
     Alcotest.(check string)
-      "the search fails because the sidecar could not be read"
-      "events_read_failed"
+      "the search fails because the journal lineage could not be read"
+      "lineage_read_failed"
       (string_field "error_kind" (`Assoc fields))
   | _ -> Alcotest.fail "the search result is an object"
 ;;
@@ -3787,9 +3792,7 @@ let test_search_records_a_retrieval_per_ordinary_match () =
     (fun (e : Events.event) ->
        (match e.kind with
         | Events.Retrieved { query } ->
-          Alcotest.(check string) "the query is recorded" "alpha beta" query
-        | Events.Retracted | Events.Revised _ ->
-          Alcotest.fail "a search records retrievals only");
+          Alcotest.(check string) "the query is recorded" "alpha beta" query);
        Alcotest.(check string)
          "the turn is recorded"
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -3827,8 +3830,9 @@ let test_search_records_a_retrieval_per_ordinary_match () =
   | _ -> Alcotest.fail "expected one decision-log line per search"
 ;;
 
-(* A successful retract records removal; the event outlives the fact.
-   A retract of an id no fact has records nothing. *)
+(* A successful retract records removal in its own journal row, which
+   outlives the fact; it writes no sidecar event (#37433). A retract of an id
+   no fact has records nothing. *)
 let test_retract_records_a_retraction () =
   with_temp_dir
   @@ fun base_path ->
@@ -3848,18 +3852,19 @@ let test_retract_records_a_retraction () =
     Yojson.Safe.from_string (retract written_id).Masc.Keeper_tool_execution.raw_output
   in
   Alcotest.(check bool) "retraction succeeds" true (json_field "ok" response = `Bool true);
-  (match events_for ~keepers_dir ~keeper_id:meta.name with
-   | [ e ] ->
-     Alcotest.(check string) "the event names the retracted id" written_id e.memory_id;
-     (match e.kind with
-      | Events.Retracted -> ()
-      | Events.Retrieved _ | Events.Revised _ -> Alcotest.fail "a retract records removal")
-   | events -> Alcotest.failf "expected one event, got %d" (List.length events));
-  ignore (retract (memory_id 'f'));
+  let retractions () =
+    match Current.read_commit_lineage ~keepers_dir ~keeper_id:meta.name with
+    | Ok lineage -> lineage.Current.retractions
+    | Error detail -> Alcotest.fail ("memory lineage unreadable: " ^ detail)
+  in
+  Alcotest.(check (list string))
+    "the journal names the retracted id" [ written_id ] (retractions ());
   Alcotest.(check int)
-    "a retract of an unknown id records nothing"
-    1
+    "a retract writes no sidecar event" 0
     (List.length (events_for ~keepers_dir ~keeper_id:meta.name));
+  ignore (retract (memory_id 'f'));
+  Alcotest.(check (list string))
+    "a retract of an unknown id records nothing" [ written_id ] (retractions ());
   Alcotest.(check int) "the retracted fact is no longer current" 0
     (List.length (current_facts ~keepers_dir ~keeper_id:meta.name));
   let restored_id = seed_current ~config ~meta "the deploy needs assets" in
@@ -3868,7 +3873,9 @@ let test_retract_records_a_retraction () =
    | [ current ] ->
        let current_id = Masc.Keeper_memory_os_types.memory_id current in
        Alcotest.(check string) "the current fact reuses that identity" written_id current_id;
-       let history = Events.summaries_for ~memory_ids:[current_id]
+       let history =
+         Events.summaries_for ~memory_ids:[current_id] ~revisions:[]
+           ~retractions:(retractions ())
            (events_for ~keepers_dir ~keeper_id:meta.name) |> List.hd in
        Alcotest.(check int) "current fact retains the previous retraction" 1 history.retracted_count;
        Alcotest.(check int) "re-adding is not a retrieval" 0 history.retrieved_count

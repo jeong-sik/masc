@@ -1160,7 +1160,7 @@ let test_preflight_reads_memory_sidecars_where_memory_writes_them () =
   (match
      Events.append_all ~keepers_dir ~keeper_id
        [ { Events.recorded_at = 20.; memory_id = Types.memory_id kept; trace_id = "sidecar-preflight"
-         ; kind = Events.Retracted } ]
+         ; kind = Events.Retrieved { query = "sidecar preflight" } } ]
    with
    | [] -> ()
    | error :: _ -> fail (Events.append_error_to_string error));

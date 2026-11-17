@@ -1152,7 +1152,7 @@ module Stdio_request = struct
           Error (Response_mismatch "execution receipt mode differs from the prepared request")
         | Ok (Some _) | Ok None -> Ok trailer
 
-  let complete prepared ~terminal ~raw_stderr ~prior =
+  let complete (prepared : t) ~terminal ~raw_stderr ~prior =
     let failed failure detail =
       Dispatch_failed { at = Unix.gettimeofday (); failure; detail }
     in

@@ -442,14 +442,12 @@ let rec consume_one ~config ~keeper_name ~wake =
     let waiting=List.filter waits listed in
     let is_waiting (record,_)=List.exists (fun (waiting,_) ->
       Record.request_id waiting=Record.request_id record) waiting in
-    let read=List.fold_left (fun result original ->
-      let* read=result in
-      if unread original || is_waiting original then Ok read else
-      let+ original=Owner.load ~store original in original::read) (Ok []) listed in
+    let read=List.filter (fun original -> not (unread original || is_waiting original)) listed
+      |> Owner.load_many ~store in
     match read with
     | Error failure -> error (Owner.error_to_string failure)
     | Ok read ->
-    let originals=List.rev read in
+    let originals=read in
     (* From here an original the pass read is its record as read with the
        body, so progress means one thing for the rest of the pass and a
        settle compares the record the pass judged. *)

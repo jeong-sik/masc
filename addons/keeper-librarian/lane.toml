@@ -5,6 +5,9 @@ contributions = ["derive"]
 image = "masc-lane-keeper-librarian:0.2.6"
 command = ["python3", "server.py", "--state", "/state"]
 
+[world]
+host_request_pages = true
+
 [world.state]
 mode = "persistent"
 

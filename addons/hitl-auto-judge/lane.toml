@@ -6,6 +6,9 @@ contributions = ["derive"]
 image = "masc-lane-hitl-auto-judge:0.1.2"
 command = ["python3", "server.py", "--state", "/state"]
 
+[world]
+host_request_pages = true
+
 [world.state]
 mode = "persistent"
 

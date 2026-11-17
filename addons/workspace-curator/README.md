@@ -43,11 +43,12 @@ Version 2 stores drop the original input body when retaining any terminal,
 keeping its request ID, digest and result. Deploy this revision with the
 [worker state hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md).
 
-`lane_host_requests` answers in pages. Each page carries as many pending requests
-as fit one reply frame, and while more remain it carries `next`, the record name
-the host passes back as `after` to get the following page. A request is saved
-when a page that carries it alone, `next` included, fits the manifest's actual
-reply frame; other pending requests do not change that answer. A request that
+`lane_host_requests` answers in pages (`[world] host_request_pages = true`). A
+page carries pending requests in rising request id order, as many as fit one
+reply frame, and nothing beside them. The host passes the last id of a page back
+as `after` to get the next page; an empty page ends the listing. A request is
+saved when a page that carries it alone fits the manifest's actual reply frame;
+other pending requests do not change that answer. A request that
 cannot fit such a page ends as the body-free `request_body_refused` result. A
 pending request that no page can carry makes its page an error; the listing
 never omits pending work silently. Observation exposes pending and finished

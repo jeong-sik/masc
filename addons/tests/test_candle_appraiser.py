@@ -197,21 +197,20 @@ class CandleWorker(unittest.TestCase):
         spec.loader.exec_module(module)
         with tempfile.TemporaryDirectory() as directory:
             worker = exact_worker.Worker(Path(directory), 4194304, module.CONTRACT)
-            name = lambda original: worker.store.path(original["request_id"]).name
-            first, second = sorted((request("one"), request("two")), key=name)
-            page = lambda original, **more: {"requests": [worker.host_request(original)], **more}
-            envelope = {"jsonrpc": "2.0", "id": 2 ** 53,
-                        "result": exact_worker.tool_result(page(first, next=name(first)))}
-            # Both ids have one length, so this frame holds either intent with next and never both.
+            first, second = sorted((request("one"), request("two")), key=lambda x: x["request_id"])
+            page = lambda *originals: {"requests": [worker.host_request(x) for x in originals]}
+            envelope = {"jsonrpc": "2.0", "id": 2 ** 53, "result": exact_worker.tool_result(page(first))}
+            # Both ids have one length, so this frame holds either intent alone and never both.
             worker.max_reply_bytes = len((exact_worker.encode_output(envelope) + "\n").encode("utf-8"))
-            self.assertFalse(worker.fits({"requests": [worker.host_request(x) for x in (first, second)]}))
+            self.assertFalse(worker.fits(page(first, second)))
             for original in (second, first):
                 admitted = worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"})
                 self.assertEqual(admitted, {"request_id": original["request_id"], "state": "pending"})
-            self.assertEqual(worker.host_requests({}), page(first, next=name(first)))
-            self.assertEqual(worker.host_requests({"after": name(first)}), page(second))
+            self.assertEqual(worker.host_requests({}), page(first))
+            self.assertEqual(worker.host_requests({"after": first["request_id"]}), page(second))
+            self.assertEqual(worker.host_requests({"after": second["request_id"]}), page())
             reopened = exact_worker.Worker(Path(directory), worker.max_reply_bytes, module.CONTRACT)
-            self.assertEqual(reopened.host_requests({}), page(first, next=name(first)))
+            self.assertEqual(reopened.host_requests({}), page(first))
             reopened.host_result({"request_id": first["request_id"], "result": {"status": "outcome_unknown"}})
             self.assertEqual(reopened.host_requests({}), page(second))
 

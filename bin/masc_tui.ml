@@ -20643,15 +20643,50 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                   instance_id := Option.map (fun handshake -> handshake.Sse_wire.instance_id) handshake;
                   enqueue_async mailbox (Observer_msg (Observer_opened (owner, session_id, handshake)))
                 in
+                (* The socket is read without waiting on the UI. Handing each
+                   chunk to the mailbox stopped this reader whenever the UI was
+                   behind; the server's queue for the session then filled and
+                   it closed the stream (four closes in 15 minutes,
+                   2026-11-17). Deliveries collect in [received], and the
+                   forwarder hands all collected so far to the UI as one
+                   batch, which the UI already reads as one. *)
+                let received = Eio.Stream.create max_int in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
-                  | decoded -> enqueue_async mailbox (Observer_msg (Observer_received (owner, (!instance_id, decoded))))
+                  | decoded -> Eio.Stream.add received (Some (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events_with_scopes ?play ~machine ~browser ~clock
-                  ~expected_base_path:expected_workspace.sid_base_path
-                  ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
-                  ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk ())
+                let rec collected acc =
+                  match Eio.Stream.take_nonblocking received with
+                  | Some (Some batch) -> collected (batch :: acc)
+                  | Some None -> List.rev acc, `Ended
+                  | None -> List.rev acc, `Open
+                in
+                let rec forward () =
+                  let first = Eio.Stream.take received in
+                  let batches, stream =
+                    match first with
+                    | None -> [], `Ended
+                    | Some batch -> collected [ batch ]
+                  in
+                  List.iter (fun batch ->
+                      enqueue_async mailbox (Observer_msg (Observer_received (owner, batch))))
+                    (Masc_tui_observer.merge_batches batches);
+                  match stream with
+                  | `Ended -> ()
+                  | `Open -> forward ()
+                in
+                let observed = ref (Ok ()) in
+                Eio.Fiber.both
+                  (fun () ->
+                    observed :=
+                      Masc_tui_http.observe_runtime_events_with_scopes ?play ~machine ~browser ~clock
+                        ~expected_base_path:expected_workspace.sid_base_path
+                        ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
+                        ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk ();
+                    Eio.Stream.add received None)
+                  forward;
+                !observed)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))

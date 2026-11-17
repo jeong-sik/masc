@@ -1281,3 +1281,14 @@ let feed_line t raw_line =
    end a network chunk. A disconnect before the blank line must replay it. *)
 let feed t chunk =
   Masc_tui_sse_lines.feed t.lines chunk |> List.concat_map (feed_line t)
+
+let merge_batches batches =
+  let same = Option.equal String.equal in
+  List.fold_left
+    (fun merged (instance, deliveries) ->
+      match merged with
+      | (last_instance, last) :: rest when same instance last_instance ->
+          (last_instance, last @ deliveries) :: rest
+      | [] | _ :: _ -> (instance, deliveries) :: merged)
+    [] batches
+  |> List.rev

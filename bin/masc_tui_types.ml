@@ -28045,11 +28045,11 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + composer_extra_rows state
 
 (* [status_block_rows] is how many rows the Keeper status block takes at this
-   width when nothing caps it, and [progress_rows] answers the same for the
+   width when nothing caps it, and [progress_rows_of] answers the same for the
    turn's progress row of a frame, 0 when the frame draws none. The caller
    measures both because the facts are the renderer's; this decides how many
    of those rows the viewport grants. *)
-let keeper_message_frame_for_viewport ?scroll ~status_block_rows ~progress_rows state ~now
+let keeper_message_frame_for_viewport ?scroll ~status_block_rows ~progress_rows_of state ~now
     ~terminal_rows ~terminal_cols =
   let frame = keeper_message_status_frame ~schedule_budget:0 ~terminal_cols state ~now in
   let status_rows = keeper_message_status_rows ~status_frame:frame ?scroll state
@@ -28064,7 +28064,7 @@ let keeper_message_frame_for_viewport ?scroll ~status_block_rows ~progress_rows 
   let spare = max 0
       (Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows - 3) in
   let block_extra = min spare (max 0 (status_block_rows - 1)) in
-  let progress_extra = min (spare - block_extra) (max 0 (progress_rows frame - 1)) in
+  let progress_extra = min (spare - block_extra) (max 0 (progress_rows_of frame - 1)) in
   { frame with
     kmsf_status_block_rows = 1 + block_extra
   ; kmsf_progress_rows = 1 + progress_extra

@@ -1176,7 +1176,7 @@ let keeper_message_viewport_frame ?scroll ?status_facts state ~now ~terminal_row
   keeper_message_frame_for_viewport ?scroll
     ~status_block_rows:
       (Chat_facts.rows_wanted ~max_cells:(keeper_status_cells ~cols:terminal_cols) facts)
-    ~progress_rows:(keeper_turn_rows_wanted state ~terminal_cols)
+    ~progress_rows_of:(keeper_turn_rows_wanted state ~terminal_cols)
     state ~now ~terminal_rows ~terminal_cols
 ;;
 

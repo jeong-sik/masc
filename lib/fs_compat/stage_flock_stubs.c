@@ -13,6 +13,7 @@
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
 #include <caml/signals.h>
+#include <caml/unixsupport.h>
 
 /* flock(2) is tied to the open-file description, never the process inode table,
    so probing from a fresh descriptor cannot drop a live writer's stage lock. */
@@ -25,6 +26,20 @@ CAMLprim value caml_masc_stage_flock_try_lock_ex(value v_fd)
     rc = flock(fd, LOCK_EX | LOCK_NB);
   } while (rc < 0 && errno == EINTR);
   CAMLreturn(Val_bool(rc == 0));
+}
+
+CAMLprim value caml_masc_stage_flock_lock_ex(value v_fd, value v_path)
+{
+  CAMLparam2(v_fd, v_path);
+  int fd = Int_val(v_fd);
+  int rc;
+  do {
+    rc = flock(fd, LOCK_EX | LOCK_NB);
+  } while (rc < 0 && errno == EINTR);
+  if (rc < 0) {
+    uerror("flock", v_path);
+  }
+  CAMLreturn(Val_unit);
 }
 
 CAMLprim value caml_masc_stage_flock_is_held(value v_path)

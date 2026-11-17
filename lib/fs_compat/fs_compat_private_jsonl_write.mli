@@ -128,3 +128,13 @@ val rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->
   string -> expected:private_jsonl_snapshot -> string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+val rewrite_private_jsonl_durable_locked_at_snapshot_with_stage_hooks_for_testing :
+  ?before_lock_stage:(string -> unit) ->
+  ?after_promote_stage:(string -> unit) ->
+  ?lock_stage_fd:(Unix.file_descr -> path:string -> unit) ->
+  ?dup_stage_fd:(Unix.file_descr -> Unix.file_descr) ->
+  ?before_sync_rewrite_parent:(string -> unit) ->
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> expected:private_jsonl_snapshot -> string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result

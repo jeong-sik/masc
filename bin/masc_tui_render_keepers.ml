@@ -1897,6 +1897,21 @@ let keeper_waiting_refresh_slow state =
   | Some age when past_pending_display_bar age -> Some age
   | Some _ | None -> None
 
+(* The line a slow waiting refresh is said on. Its slot is drawn on every
+   frame, blank while the read keeps up: a line that came and went with each
+   slow read moved every Keeper row below it (60 moves in 180s on a live
+   list, 2026-11-17). *)
+let keeper_waiting_refresh_line state =
+  match keeper_waiting_refresh_slow state with
+  | None -> ""
+  | Some age ->
+      let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
+      Theme.warn ()
+      ^ ui_text state
+          ~ko:("  대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed ^ "초")
+          ~en:("  waiting refresh pending · showing last observation · " ^ elapsed ^ "s")
+      ^ Ansi.reset
+
 (* The operator roster uses the same row readings as the axis views. These
    sentences do not turn missing observations into idle work or no requests. *)
 let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
@@ -2268,19 +2283,13 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
         [warning "" (Message_layout.fit_width
            (failure ^ text " · 대기 목록이 업무 차단을 뜻하지는 않습니다"
               " · inventory is not a work blocker") cells)]
-    | None ->
-        (match keeper_waiting_refresh_slow state with
-         | Some age ->
-             let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
-             [warning "" (text
-                ("대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed ^ "초")
-                ("waiting refresh pending · showing last observation · " ^ elapsed ^ "s"))]
-         | None -> [])
+    | None -> [ keeper_waiting_refresh_line state ]
   in
+  let waiting_failed = Option.is_some state.keeper_waiting_failure in
   [ here_row ~cols state
       ~path:[ text "일과 도움" "work and help" ]
       ~readings:
-        (if errors <> [] || roster <> [] || waiting <> [] then
+        (if errors <> [] || roster <> [] || waiting_failed then
            [ Theme.warn () ^ text "일부 관측 미확인" "some observations unknown" ^ Ansi.reset ]
          else [])
       ~position:
@@ -2805,15 +2814,7 @@ let render_keeper_axes (state : state) =
          (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
    | Some (Request_withdrawn refusal) ->
        kept_back Kept_request.Waiting_list_read refusal
-   | None ->
-       (match keeper_waiting_refresh_slow state with
-        | Some age ->
-            let detail = if Keeper_waiting_read.in_flight state.keeper_waiting_read
-              then "refreshing" else "refresh pending" in
-            let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
-            box_line buf cols
-              (Theme.warn () ^ "  waiting inventory: " ^ detail ^ " · " ^ elapsed ^ "s" ^ Ansi.reset)
-        | None -> ()));
+   | None -> box_line buf cols (keeper_waiting_refresh_line state));
   (match state.keeper_waiting_failure with
    | None -> ()
    | Some failure ->

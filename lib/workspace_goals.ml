@@ -420,20 +420,32 @@ let handle_goal_upsert_validated ~tool_name ~start_time (ctx : context) args : T
   match parse_optional_priority args "priority" with
   | Error err -> validation_error_result ~tool_name ~start_time [ err ]
   | Ok priority ->
+  (* RFC a-goal-states-its-measure-as-a-typed-value §2.1: a supplied measure
+     is read through Goal_measure's constructors; a malformed one is refused
+     here, never defaulted. *)
+  match
+    (match args with
+     | `Assoc fields ->
+       (match List.assoc_opt "measure" fields with
+        | None | Some `Null -> Ok None
+        | Some measure_json -> Result.map Option.some (Goal_measure.of_yojson measure_json))
+     | _ -> Ok None)
+  with
+  | Error detail -> error_result_typed ~tool_name ~start_time ~code:Validation_error detail
+  | Ok measure ->
     let id = get_string_opt args "id" in
     (* Explicit empty criterion fields are input, not omission. The store
        validates the merged condition under its authoritative write lock. *)
     let title = Safe_ops.json_string_opt "title" args in
-    let metric = Safe_ops.json_string_opt "metric" args in
-    let target_value = Safe_ops.json_string_opt "target_value" args in
+    let procedure = Safe_ops.json_string_opt "procedure" args in
     let due_date = get_string_opt args "due_date" in
     (match
           Goal_store.upsert_goal_with_events
             ctx.config ~actor:ctx.agent_name ~precondition
             ?id
             ?title
-            ?metric
-            ?target_value
+            ?measure
+            ?procedure
             ?due_date
             ?priority
             ()

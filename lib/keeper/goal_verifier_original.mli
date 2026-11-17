@@ -12,7 +12,7 @@ val schema : string
 val prepare :
   attempt:int -> authority:Verification_authority_tools.goal_review ->
   (t, string) result
-(** Render the Goal's own metric/target question, current-revision reported
+(** Render the Goal's own measure/procedure question, current-revision reported
     measurement and evidence locator, shared-root layout and submitted-source
     metadata using the current prompt templates. The measurement is untrusted
     context, not a lookup grant or a substitute for reading the declared

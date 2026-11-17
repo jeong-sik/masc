@@ -845,14 +845,13 @@ let append_audit_event_after_pending config json =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 
-let goal_with_fields ~now ?title ?metric ?target_value ?due_date ?priority
+let goal_with_fields ~now ?title ?measure ?procedure ?due_date ?priority
     (existing : goal) =
   let updated =
     { existing with
       title = Option.value title ~default:existing.title;
-      metric = (match metric with Some _ -> metric | None -> existing.metric);
-      target_value =
-        (match target_value with Some _ -> target_value | None -> existing.target_value);
+      measure = Option.value measure ~default:existing.measure;
+      procedure = Option.value procedure ~default:existing.procedure;
       due_date = (match due_date with Some _ -> due_date | None -> existing.due_date);
       priority = clamp_priority (Option.value priority ~default:existing.priority);
       updated_at = now;
@@ -860,16 +859,15 @@ let goal_with_fields ~now ?title ?metric ?target_value ?due_date ?priority
   in
   let criterion_changed =
     not (String.equal existing.title updated.title)
-    || not (Option.equal String.equal existing.metric updated.metric)
-    || not (Option.equal String.equal existing.target_value updated.target_value)
+    || not (Goal_measure.equal existing.measure updated.measure)
+    || not (String.equal existing.procedure updated.procedure)
   in
   updated, criterion_changed
 
 let validate_changed_criterion (goal : goal) : (unit, write_error) result =
-  if blank_opt (Some goal.title) || blank_opt goal.metric
-     || blank_opt goal.target_value then
+  if blank_opt (Some goal.title) || blank_opt (Some goal.procedure) then
     Error (Rejected
-      "a changed goal criterion requires non-blank title, metric and target_value; \
+      "a changed goal criterion requires a non-blank title and procedure; \
        omitted fields retain their stored values")
   else Ok ()
 
@@ -877,9 +875,9 @@ let goal_with_new_criterion ~criterion_revision (goal : goal) =
   { goal with criterion_revision; phase = Goal_phase.criterion_changed goal.phase;
     last_review_note = None; last_review_at = None }
 
-let new_goal ~now ~id ~criterion_revision ~title ~metric ~target_value ~due_date
+let new_goal ~now ~id ~criterion_revision ~title ~measure ~procedure ~due_date
     ~priority : goal =
-  { id; criterion_revision; title; metric; target_value; due_date;
+  { id; criterion_revision; title; measure; procedure; due_date;
     priority = clamp_priority (Option.value priority ~default:3);
     phase = Goal_phase.Executing;
     last_review_note = None; last_review_at = None;
@@ -908,7 +906,7 @@ let resolve_goal_id = function
 
 type upsert_precondition = Unconditional | Require_absent
 
-let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_date
+let upsert_goal_with_events config ~actor ?id ?title ?measure ?procedure ?due_date
     ?priority ?(precondition = Unconditional) () =
   let is_new_goal = id = None in
   if is_new_goal && blank_opt title then
@@ -933,7 +931,7 @@ let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_
             match existing_goal with
             | Some existing ->
                 let updated, criterion_changed =
-                  goal_with_fields ~now ?title ?metric ?target_value ?due_date
+                  goal_with_fields ~now ?title ?measure ?procedure ?due_date
                     ?priority existing in
                 let* () =
                   if criterion_changed then validate_changed_criterion updated
@@ -956,16 +954,17 @@ let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_
                         "a non-blank title is required for a new goal \
                          (a goal without a name states no success condition \
                          to hold it to)") in
-                if blank_opt metric || blank_opt target_value then
-                  Error (Rejected
-                    "metric and target_value are required for a new goal \
-                     (RFC-0387 B1: a goal must declare a measurable \
-                     success condition)")
-                else
+                match measure, procedure with
+                | Some measure, Some procedure when String.trim procedure <> "" ->
                   let criterion_revision = Random_id.hex ~bytes:16 in
                   let goal = new_goal ~now ~id:resolved_id ~criterion_revision
-                      ~title ~metric ~target_value ~due_date ~priority in
+                      ~title ~measure ~procedure ~due_date ~priority in
                   Ok (goal, `created)
+                | None, _ | Some _, (None | Some _) ->
+                  Error (Rejected
+                    "measure and a non-blank procedure are required for a new goal \
+                     (RFC-0387 B1: a goal must declare a measurable \
+                     success condition)")
           in
           let revision = state.version + 1 in
           let goals = match action with

@@ -2740,6 +2740,31 @@ let browser_lane_setup_cmd =
       $ ego_command
       $ ego_space)
 
+let exact_addon_setup_cmd =
+  Cmd.v
+    (Cmd.info
+       "exact-addon-setup"
+       ~doc:"Install the Exact worker packages this masc carries."
+       ~man:
+         [ `S Manpage.s_description
+         ; `P
+             "For keeper-librarian, workspace-curator, candle-appraiser and \
+              hitl-auto-judge, it writes the package this masc carries to \
+              .masc/packages/<name>-<revision> when that folder does not exist, and \
+              builds the Docker image the package names. An existing folder is never \
+              rewritten; one that holds other files is reported. An image that already \
+              has the label of these files is not built again."
+         ; `P
+             "A declaration uses one of these packages with package = \"<name>\". This \
+              writes no declaration and starts nothing. A package that fails does not \
+              stop the others, and the exit status is 1 when any failed."
+         ])
+    Term.(
+      const (fun base_path ->
+        Masc_cli_exact_addon_setup.run
+          ~base_path:(Env_config.normalize_masc_base_path_input base_path))
+      $ base_path)
+
 let voice_local_setup_cmd =
   let voice =
     Arg.(
@@ -5071,6 +5096,7 @@ let cmd =
     ; runtime_verify_cmd
     ; voice_verify_cmd
     ; browser_lane_setup_cmd
+    ; exact_addon_setup_cmd
     ; voice_local_setup_cmd
     ; web_search_setup_cmd
     ; config_cmd

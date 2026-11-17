@@ -66,3 +66,21 @@ share, a performance baseline or exclusive causality. This unit collected no new
 live sample, runtime request, provider call, restart or GC. Total CPU, RSS,
 throughput and live response recovery remain unmeasured. Moving work off the
 caller does not itself reduce the amount of serialization or hashing performed.
+
+## Final message-only capture
+
+The final source at `9e0e688da2e6d29707e7a9c3850ddd209f73fc39` additionally
+projects `checkpoint.messages` before constructing the unread CPU closure.
+The earlier computation read only those messages, but its closure referenced
+the full checkpoint record, including its unused Context. The original source
+review's blanket statement about capturing no additional capabilities was too
+broad. Its original bytes are preserved; the separate correction record narrows
+that claim. This is a source-level ownership correction, not measured GC/RSS
+savings or a claim about the compiler's closure layout.
+
+The complete final Consumer MLI/ML, complete actual TestDeps, unchanged selected
+test source and real C stub were all compiled again. All seven compile/link/run
+commands succeeded and all twelve selected context cases passed again. The
+final-native-r3 source map pins the new source head and hashes. Earlier records
+remain historical evidence for their named source bytes; final validation is
+recorded separately rather than assigned to the old run.

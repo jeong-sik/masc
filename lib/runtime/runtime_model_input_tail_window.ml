@@ -145,32 +145,33 @@ type label =
    orphan run (possible only on a history that was already cut upstream of
    AGENT_CORE) becomes atom 0 so it is dropped with the first cut rather than
    transmitted headless. *)
-let annotate (messages : Agent_core.Types.message list) :
-  (Agent_core.Types.message * label) list * int
-  =
+let annotate_by message_of values =
   let labelled_rev, atom_count =
     List.fold_left
-      (fun (acc, count) (msg : Agent_core.Types.message) ->
+      (fun (acc, count) value ->
+         let msg = message_of value in
          if is_pinned msg
-         then ((msg, Pinned) :: acc, count)
+         then ((value, Pinned) :: acc, count)
          else (
            match msg.role, msg.origin with
            | Agent_core.Types.Tool, _
            | (User | Assistant | System), Llm_provider.Types.Historical_system_context ->
              if count = 0
-             then ((msg, Atom 0) :: acc, 1)
-             else ((msg, Atom (count - 1)) :: acc, count)
+             then ((value, Atom 0) :: acc, 1)
+             else ((value, Atom (count - 1)) :: acc, count)
            | System, (System_context | Conversation | Recovery_instruction
                      | Tool_result_followup | Agent_instruction) ->
-             ((msg, Pinned) :: acc, count)
+             ((value, Pinned) :: acc, count)
            | (User | Assistant), (System_context | Conversation | Recovery_instruction
                                  | Tool_result_followup | Agent_instruction) ->
-             ((msg, Atom count) :: acc, count + 1)))
+             ((value, Atom count) :: acc, count + 1)))
       ([], 0)
-      messages
+      values
   in
   (List.rev labelled_rev, atom_count)
 ;;
+
+let annotate messages = annotate_by Fun.id messages
 
 (* The atom's position is its index plus the message that opens it: the
    first message [annotate] labels with that index, a [User] or [Assistant]
@@ -243,41 +244,57 @@ let atom_suffix_bytes ~measure_message_bytes ~atom_count labelled =
   (per_atom, suffix)
 ;;
 
-let next_shrink_capacity_bytes
-    ?(allow_empty_history = false)
-    ~measure_message_bytes
-    ~target_capacity_bytes
-    messages =
-  let rejected_window_bytes =
+type measured_history =
+  | No_atoms of int
+  | Atom_sizes of
+      { rejected_bytes : int
+      ; floor_bytes : int
+      ; suffix_bytes : int array
+      }
+
+let measure_history ~measure_message_bytes messages =
+  let rejected_bytes, measured_rev =
     List.fold_left
-      (fun total message -> total + measure_message_bytes message)
-      0
+      (fun (total, measured) message ->
+         let bytes = measure_message_bytes message in
+         ( total + bytes
+         , if is_synthetic_preamble message then measured
+           else (message, bytes) :: measured ))
+      (0, [])
       messages
   in
-  (* A provider-bound list may already contain the preamble materialized by a
-     previous cut. It is generated framing, not a durable conversation atom;
-     never let it become the oldest removable atom of the next retry. *)
-  let shrinkable_messages =
-    List.filter (fun message -> not (is_synthetic_preamble message)) messages
-  in
-  let labelled, atom_count = annotate shrinkable_messages in
+  let labelled, atom_count = annotate_by fst (List.rev measured_rev) in
   if atom_count = 0
-  then None
+  then No_atoms rejected_bytes
   else (
     let pinned_bytes =
       List.fold_left
-        (fun total (message, label) ->
+        (fun total ((_, bytes), label) ->
            match label with
-           | Pinned -> total + measure_message_bytes message
+           | Pinned -> total + bytes
            | Atom _ -> total)
         0
         labelled
     in
-    let preamble_bytes = measure_message_bytes preamble_message in
-    let undroppable_bytes = pinned_bytes + preamble_bytes in
     let _, suffix =
-      atom_suffix_bytes ~measure_message_bytes ~atom_count labelled
+      atom_suffix_bytes ~measure_message_bytes:snd ~atom_count labelled
     in
+    let preamble_bytes = measure_message_bytes preamble_message in
+    Atom_sizes
+      { rejected_bytes; floor_bytes = pinned_bytes + preamble_bytes; suffix_bytes = suffix })
+;;
+
+let measured_bytes = function
+  | No_atoms bytes -> bytes
+  | Atom_sizes { rejected_bytes; _ } -> rejected_bytes
+;;
+
+let next_shrink_capacity_bytes ?(allow_empty_history = false)
+    ~target_capacity_bytes = function
+  | No_atoms _ -> None
+  | Atom_sizes { rejected_bytes = rejected_window_bytes
+               ; floor_bytes = undroppable_bytes; suffix_bytes = suffix } ->
+    let atom_count = Array.length suffix - 1 in
     let full_atom_bytes = suffix.(0) in
     let target_atom_bytes = target_capacity_bytes - undroppable_bytes in
     let required_atom_capacity bytes = max 1 bytes in
@@ -321,38 +338,13 @@ let next_shrink_capacity_bytes
          if framed_capacity < rejected_window_bytes
          then Some framed_capacity
          else None)
-      candidates)
+      candidates
 ;;
 
-let minimum_capacity_bytes ~measure_message_bytes messages =
-  let rejected_window_bytes =
-    List.fold_left
-      (fun total message -> total + measure_message_bytes message)
-      0
-      messages
-  in
-  let shrinkable_messages =
-    List.filter (fun message -> not (is_synthetic_preamble message)) messages
-  in
-  let labelled, atom_count = annotate shrinkable_messages in
-  if atom_count = 0
-  then None
-  else (
-    let pinned_bytes =
-      List.fold_left
-        (fun total (message, label) ->
-           match label with
-           | Pinned -> total + measure_message_bytes message
-           | Atom _ -> total)
-        0
-        labelled
-    in
-    let floor_capacity_bytes =
-      pinned_bytes + measure_message_bytes preamble_message
-    in
-    if floor_capacity_bytes < rejected_window_bytes
-    then Some floor_capacity_bytes
-    else None)
+let minimum_capacity_bytes = function
+  | No_atoms _ -> None
+  | Atom_sizes { rejected_bytes; floor_bytes; _ } ->
+    if floor_bytes < rejected_bytes then Some floor_bytes else None
 ;;
 
 (* Smallest multiple of [atoms_per_window] whose remaining suffix fits

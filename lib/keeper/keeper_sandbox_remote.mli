@@ -347,7 +347,6 @@ module Stdio_request : sig
   type t
 
   type refusal =
-    | Guest_agent_unavailable
     | Docker_unavailable
     | Mode_unavailable of string
     | Invalid_request of string
@@ -360,12 +359,24 @@ module Stdio_request : sig
     argv:string list -> env:string array -> cwd:string option ->
     (t, refusal) result
   (** Pure capture and protocol validation, including a finite positive timeout.
-      Unsupported guest-agent and Docker
-      carriers are refused before probing or spawning. No carrier fallback. *)
+      Docker is refused before probing or spawning. Guest socket identity
+      and process launch inputs are frozen here; no carrier fallback. *)
+
+  type carrier =
+    | Process of { argv : string list; env : string array }
+    | Guest of
+        { socket : string
+        ; expected : Keeper_guest_socket.expected
+        ; connect_budget_sec : float
+        }
+
+  type runtime = Process_runtime | Guest_runtime
+  val runtime : t -> runtime
+  (** Runtime required by the frozen carrier. Allows a caller to obtain its
+      context before acquiring the lease or starting even a control probe. *)
 
   type launch = private
-    { argv : string list
-    ; env : string array
+    { carrier : carrier
     ; frame : string
     ; budget_sec : float
     ; acceptance_frame : bool
@@ -373,7 +384,7 @@ module Stdio_request : sig
 
   val with_lease : t -> (launch -> 'a) -> ('a, refusal) result
   (** Holds this endpoint's shared session lease through callback completion
-      and its process cleanup. Requires a decoded V3 probe with the exact
+      and its carrier cleanup. Requires a decoded V3 probe with the exact
       interactive-stdin capability; a failed probe never assumes a version.
       The launch environment is a fresh copy of the prepared snapshot. *)
 
@@ -382,10 +393,16 @@ module Stdio_request : sig
     ; execution : execution_observation
     }
 
+  type terminal =
+    | Local_status of Unix.process_status
+    | Guest_exit of Exec_ssh_protocol.Relay.exit_status
+
   val complete :
-    t -> status:Unix.process_status -> raw_stderr:string ->
+    t -> terminal:terminal -> raw_stderr:string ->
     prior:execution_observation -> completion
   (** Settle this invocation's actual carrier status and final shim trailer.
+      A guest exit is the relay's actual shim status, never a local process.
+      A terminal from the wrong carrier is an invalid receipt.
       The trailer major and any execution receipt mode must match the captured
       request. A mismatch leaves execution unavailable and records a trailer
       disagreement, never evidence that the requested sandbox was applied. *)

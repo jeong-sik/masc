@@ -52,34 +52,7 @@ let original_answer ~store request record =
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
   | Outcome_unknown | Not_allowed _ | Request_id_reused ->
     Error "History publication requires its actual answered original host result"
-(* A range the message floor published carries the messages it could not read
-   in its receipt identity; the original names none. The range is the same. *)
-let same_atom_range (expected : Current.durable_range_id) (actual : Current.durable_range_id) =
-  Yojson.Safe.equal (Current.durable_range_id_to_json {expected with unread_messages=[]})
-    (Current.durable_range_id_to_json {actual with unread_messages=[]})
-let same_official_range (expected : Current.official_range_id) (actual : Current.official_range_id) =
-  Yojson.Safe.equal (Current.official_range_id_to_json {expected with unread_messages=[]})
-    (Current.official_range_id_to_json {actual with unread_messages=[]})
-let receipt_state request =
-  let source=Request.source request and owner=Request.physical_owner request in
-  let keepers_dir=Request.keepers_dir owner and keeper_id=Request.keeper_id owner in
-  let* atom=match Source.range_id source with
-    | None -> Ok None
-    | Some expected ->
-      let* actual=Current.committed_durable_coverage ~keepers_dir ~keeper_id
-        ~receipt_scope:expected.receipt_scope in
-      Ok (Some (Option.fold ~none:false ~some:(fun actual -> same_atom_range expected actual) actual)) in
-  let* official=match Source.official_range_id source with
-    | None -> Ok None
-    | Some expected ->
-      let* actual=Current.committed_official_coverage ~keepers_dir ~keeper_id
-        ~receipt_scope:expected.receipt_scope in
-      Ok (Some (Option.fold ~none:false ~some:(fun actual -> same_official_range expected actual) actual)) in
-  let proofs=Option.to_list atom @ Option.to_list official in
-  let* ()=require (proofs<>[]) "Original history has no Memory range receipts" in
-  if List.for_all Fun.id proofs then Ok true
-  else if List.exists Fun.id proofs then Error "Original history has only a partial committed range receipt set"
-  else Ok false
+let receipt_state = Keeper_librarian_durable_receipts.state
 let marker request (record : Owner.retained) ~root ~committed =
   let source=Request.source request in
   let optional encode=Option.fold ~none:`Null ~some:encode in
@@ -163,15 +136,30 @@ let official_target source = Option.map (fun (range : Current.official_range_id)
     range.after_boundary_line range.turns}) (Source.official_range_id source)
 let require_refusal_abandonment ~store ~record request =
   let+ _=Refusal.abandonment ~store ~record ~request in ()
-let settle_positions ~store ~record request =
+type position_authority =
+  | Original_publication
+  | Cut_program of {
+      floor : Keeper_librarian_history_resolution_floor.t;
+      program : Current.committed_program;
+    }
+let settle_positions_with ~authority ~store ~record request =
   Keeper_librarian_durable_source_lock.with_original_settlement ~request (fun () ->
-  let* ()=Keeper_librarian_history_resolution_state.check_unfenced
-    ~store ~request ~original:record in
-  let* ()=match Progress.phase record.Owner.progress with
-    | Progress.Rejected {stage=Progress.Execution;_} -> require_refusal_abandonment ~store ~record request
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-    | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
-    | Subdividing _ | Subdivided _ -> Ok () in
+  let confirm () =
+    let* actual=reload ~store ~previous:record request in
+    let* ()=Keeper_librarian_history_resolution_state.check_unfenced
+      ~store ~request ~original:actual in
+    match authority with
+    | Cut_program {floor;program} ->
+      let* ()=require (Keeper_librarian_history_resolution_floor.request floor==request)
+        "Cut program settlement belongs to another restored request" in
+      Keeper_librarian_history_resolution_floor.confirm_program floor program
+    | Original_publication ->
+      (match Progress.phase actual.Owner.progress with
+       | Progress.Rejected {stage=Progress.Execution;_} -> require_refusal_abandonment ~store ~record:actual request
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
+       | Subdividing _ | Subdivided _ -> Ok ()) in
+  let* ()=confirm () in
   let source=Request.source request and owner=Request.physical_owner request in
   let keeper_id=Request.keeper_id owner and runtime_keepers_dir=Source.runtime_keepers_dir source in
   let* ()=Request.confirm_owner request in
@@ -196,6 +184,7 @@ let settle_positions ~store ~record request =
     ~atom:None ~official:None in
   let* ()=require (already || Yojson.Safe.equal (Cursor.observation_to_json external_cursor)
     (Cursor.observation_to_json prepared)) "Original history external cursor differs from its prepared or settled state" in
+  let* ()=confirm () in
   let* ()=if already then Ok () else Cursor.acknowledge ~runtime_keepers_dir ~keeper_name:keeper_id in
   let* ()=match atom_next with
     | None -> Ok ()
@@ -213,6 +202,18 @@ let settle_positions ~store ~record request =
   require (atom=Option.fold ~none:positions.current ~some:(fun value -> Some value) atom_next
     && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
     "Original history read-position settlement remains unconfirmed")
+let settle_positions ~store ~record request =
+  settle_positions_with ~authority:Original_publication ~store ~record request
+
+let settle_program ~store ~floor ~program =
+  let request=Keeper_librarian_history_resolution_floor.request floor in
+  let owner=Request.physical_owner request in
+  let* record=Owner.load ~store ~scope:(Request.scope owner) ~request_id:(Request.request_id request) |> owned in
+  let* record=Option.to_result ~none:"Cut program leaf is absent before settlement" record in
+  let* ()=Request.confirm_record request record in
+  let* ()=settle_positions_with ~authority:(Cut_program {floor;program}) ~store ~record request in
+  Keeper_librarian_history_program_settlement.observe ~store ~request ~record ~program
+
 type frontier = Unfinished | Settled
 let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_result
     ~store ~request ~(record : Owner.retained) =

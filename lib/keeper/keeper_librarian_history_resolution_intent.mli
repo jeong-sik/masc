@@ -15,6 +15,7 @@ type phase = Requested | Refused of refusal | Fenced
 type memory_commit = private {
   request_id:string;
   receipts:Keeper_memory_os_current_types.durable_range_receipt list;
+  program:Keeper_librarian_history_program_settlement.retained option;
 }
 type t = private {
   intent_id:string;
@@ -98,6 +99,15 @@ val observe_memory_commit : store:Lane_addon_store.t -> expected:t ->
     When [request] is a replacement that descends from the resolution child,
     the child is read as its record and index, not its body: the caller has
     confirmed [request]'s lineage, which restores that child. *)
+val observe_program_commit : store:Lane_addon_store.t -> expected:t ->
+  settled:Keeper_librarian_history_program_settlement.t -> (t, error) result
+(** Consume an actual fully-read original program and exact post-ACK proof.
+    Require this command's contextual durable fence and acknowledged child, verify
+    every confirmed descendant link and owner/source basis, reobserve the
+    opaque proof, then retain the full canonical program and receipts before
+    step or rolling-receipt cleanup. No new Finished fact or ACK is created.
+    Caller owns the serialized Memory lane/purge exclusion and holds no
+    source or Memory locks. Existing receipt-only completions are unchanged. *)
 val child : t -> child option
 (** The child a [Child_intended] or [Child_confirmed] intent names by ID and
     digest. [Child_prepared] does not grant a child: its complete request stays

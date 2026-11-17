@@ -36,6 +36,12 @@ val read : config:Workspace.config -> keeper_name:string -> request_id:string ->
   (observation, error) result
 (** Read-only exact-original observation. HTTP may use Intent.to_public_json,
     and explicitly select safe fence fields; never State.to_json/preimage. *)
+val run_pending_serialized : config:Workspace.config -> keeper_name:string ->
+  (Keeper_librarian_pending.t option, error) result
+(** Process the same durable resolutions and preserve the actual Cut-floor
+    pending/attention observation. Some blocks ordinary history selection; it
+    is never a replay, source receipt or ACK grant. None means no resolution
+    currently waits on its retained floor, not global Memory completion. *)
 val run_serialized : config:Workspace.config -> keeper_name:string ->
   (unit, error) result
 (** Process every active intent before ordinary history discovery. Caller is

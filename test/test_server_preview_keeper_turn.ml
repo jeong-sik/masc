@@ -296,7 +296,10 @@ let login_home ~base_path ~namespace ~account_id ~client =
   let private_dir path = try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> () in
   private_dir (Filename.dirname runtime_root);
   private_dir runtime_root;
-  match Runtime_setup_login_client.prepare ~runtime_root ~account_id ~client ~existing:None with
+  match
+    Runtime_setup_login_client.prepare ~browser:Runtime_setup_login_client.host_browser
+      ~runtime_root ~account_id ~client ~existing:None
+  with
   | Ok (_ : Runtime_setup_login_client.t) -> ()
   | Error detail -> Alcotest.failf "the login home was not made: %s" detail
 ;;
@@ -532,6 +535,22 @@ let test_turn () =
           (List.assoc_opt
              "access-control-allow-origin"
              (Login.stream_cors_headers (Login.Operator { actor = "operator" }) from_elsewhere));
+        (* A person signs in from another machine, so their client is handed
+           a command in place of the browser of this one (issue #52675); the
+           operator's client keeps the browser. *)
+        let browser_command owner =
+          match Login.sign_in_browser owner with
+          | Ok browser -> Runtime_setup_login_client.browser_command browser
+          | Error detail -> Alcotest.fail detail
+        in
+        Alcotest.(check bool)
+          "a person's sign-in is handed a command in place of the browser"
+          true
+          (Option.is_some (browser_command (Login.Person alice.person)));
+        Alcotest.(check (option string))
+          "the operator's sign-in keeps the browser of this machine"
+          None
+          (browser_command (Login.Operator { actor = "operator" }));
         let bob, bob_runtime =
           join zone ~base_path ~name:"bob" ~hex:'b' ~integration:"claude_code"
             ~client:Runtime_setup_login_client.Claude ~model:"claude-sonnet-5"

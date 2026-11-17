@@ -17,17 +17,17 @@ let while_client_runs action =
   Fun.protect ~finally:(fun () -> Sys.set_signal Sys.sigint previous) action
 
 let run ~client ~cli_path ~account_home =
-  match Runtime_setup_login_client.selected_native client ~account_home with
+  (* The installer signs in at a terminal of this machine, so the client may
+     open its browser. *)
+  match
+    Runtime_setup_login_client.selected_native
+      ~browser:Runtime_setup_login_client.host_browser client ~account_home
+  with
   | Error detail ->
     prerr_endline ("Account home: " ^ detail);
     1
   | Ok login ->
-    (* The installer signs in at a terminal of this machine, so the client may
-       open its browser. *)
-    (match
-       Runtime_setup_login_client.environment
-         ~browser:Runtime_setup_login_client.Host_browser login
-     with
+    (match Runtime_setup_login_client.environment login with
      | Error detail ->
        prerr_endline ("Sign-in environment: " ^ detail);
        1

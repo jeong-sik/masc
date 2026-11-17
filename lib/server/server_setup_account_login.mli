@@ -1,5 +1,6 @@
 (** Official-client login of a provider account. Session control also checks
-    the caller and the canonical workspace. No browser paths or commands. *)
+    the caller and the canonical workspace. A request names no browser path
+    or command; {!sign_in_browser} decides what the client is handed. *)
 
 (** Who connects the account. It decides where the account home lies and
     what a confirmed login leaves behind. *)
@@ -30,6 +31,15 @@ type owner =
     credentials. The operator's stream allows the [Origin] of the request,
     as the single-user server does ({!Server_auth.cors_headers}). *)
 val stream_cors_headers : owner -> Httpun.Request.t -> (string * string) list
+
+(** What the sign-in child of [owner] is handed for the browser it would
+    start. A person signs in from another machine, so their client gets a
+    command that does nothing ({!Runtime_setup_login_client.no_host_browser}),
+    and the sign-in is refused on a machine that has none. The operator's
+    client gets {!Runtime_setup_login_client.host_browser}. {!start} hands the
+    answer to {!Runtime_setup_login_client.prepare}, which makes the home of
+    the login, so a refused sign-in has no directory made for it. *)
+val sign_in_browser : owner -> (Runtime_setup_login_client.browser, string) result
 
 (** Why a person may not log in to an integration. *)
 type person_refusal =

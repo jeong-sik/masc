@@ -1,6 +1,7 @@
 type client = Codex | Claude | Antigravity | Muse
 type native = Runtime_account_home_layout.client = Codex_home | Claude_home | Muse_home
-type t =
+type browser = Host_browser | Idle_command of string
+type login =
   | Native of { client : native; account_home : string }
   | Antigravity_home of
       { home : Runtime_antigravity_setup.t
@@ -8,8 +9,11 @@ type t =
       ; host : Runtime_account_access.host_account
           (** The start the access allowed when the login home was prepared. *)
       }
+(* A login and the browser decided for its sign-in. Whatever makes a login
+   takes the browser, so a sign-in that was refused one has no home made for
+   it, and the child is handed the browser that was decided. *)
+type t = { login : login; browser : browser }
 type observation = Authenticated | Login_completed | Credential_captured
-type browser = Host_browser | No_host_browser
 open Result.Syntax
 
 let filesystem action =
@@ -65,13 +69,13 @@ let native_home ~runtime_root ~account_id ~client existing =
       Error "The selected account belongs to another client transport."
   in Ok (Native {client; account_home})
 
-let selected_native client ~account_home =
+let selected_native ~browser client ~account_home =
   filesystem (fun () ->
     let* account_home = Runtime_account_home.of_string account_home in
     let* () = directory ~private_:false (Unix.realpath account_home) in
-    Ok (Native {client; account_home}))
+    Ok { login = Native {client; account_home}; browser })
 
-let prepare ~runtime_root ~account_id ~client ~existing =
+let login_of ~runtime_root ~account_id ~client ~existing =
   match client with
   | Codex -> native_home ~runtime_root ~account_id ~client:Codex_home existing
   | Claude -> native_home ~runtime_root ~account_id ~client:Claude_home existing
@@ -99,11 +103,15 @@ let prepare ~runtime_root ~account_id ~client ~existing =
         Error "The selected account belongs to another client transport."
     in Ok (Antigravity_home {home; timeout_s; host})
 
-let home_dir = function
+let prepare ~browser ~runtime_root ~account_id ~client ~existing =
+  Result.map (fun login -> { login; browser })
+    (login_of ~runtime_root ~account_id ~client ~existing)
+
+let home_dir t = match t.login with
   | Native {account_home; _} -> account_home
   | Antigravity_home {home; _} -> Runtime_antigravity_setup.home_dir home
 
-let argv ~cli_path = function
+let argv ~cli_path t = match t.login with
   | Native {client=Codex_home; _} -> [cli_path; "login"; "--device-auth"]
   | Native {client=Claude_home; _} -> [cli_path; "auth"; "login"]
   | Native {client=Muse_home; _} -> Runtime_muse_serve.login_argv ~cli_path
@@ -130,17 +138,22 @@ let browser_variable = "BROWSER"
 (* POSIX [true] takes any operands, does nothing and exits 0. *)
 let idle_command = "true"
 
+let host_browser = Host_browser
+
 (* HIGH-RISK-UNREVIEWED: the link Claude Code hands to the opener returns the
    approval to a port of this machine, so whoever approves it in a browser of
    this machine signs their own account in to the home of this login, whoever
    started the login. A child handed a command that opens nothing shows this
-   machine nothing: the one who signs in opens the link the child prints,
-   whose approval gives a code to paste back. *)
-let without_host_browser environment =
-  let binding = browser_variable ^ "=" in
+   machine nothing: the one who signs in opens the link the child prints and
+   ends the sign-in as that client asks. Claude Code reads a code from its
+   input; Codex and Muse Code take theirs on the page the link opens.
+
+   A machine that has no such command refuses the sign-in here, and a login
+   is made only with the answer ([prepare]). *)
+let no_host_browser ?(getenv = Sys.getenv_opt) () =
   match
     Eio_guard.run_in_systhread ~label:"setup-login-browser-command" (fun () ->
-      Executable_path.absolute_on_path idle_command)
+      Executable_path.absolute_on_path ~getenv idle_command)
   with
   | None ->
     Error
@@ -148,22 +161,30 @@ let without_host_browser environment =
          "PATH holds no %s utility in an absolute directory, so this sign-in has no \
           command to give the official client in place of the browser of this machine."
          idle_command)
-  | Some command ->
+  | Some command -> Ok (Idle_command command)
+
+let browser_command = function
+  | Host_browser -> None
+  | Idle_command command -> Some command
+
+(* One binding, whatever the client's own environment carries: a client that
+   reads the last of two would run the other one. *)
+let handed browser environment =
+  match browser with
+  | Host_browser -> environment
+  | Idle_command command ->
+    let binding = browser_variable ^ "=" in
     let others =
       Array.to_list environment
       |> List.filter (fun entry -> not (String.starts_with ~prefix:binding entry))
     in
-    Ok (Array.of_list ((binding ^ command) :: others))
+    Array.of_list ((binding ^ command) :: others)
 
-let environment ~browser login =
-  let* environment = client_environment login in
-  match browser with
-  | Host_browser -> Ok environment
-  | No_host_browser -> without_host_browser environment
+let environment t = Result.map (handed t.browser) (client_environment t.login)
 
-let is_pty = function Native _ -> false | Antigravity_home _ -> true
+let is_pty t = match t.login with Native _ -> false | Antigravity_home _ -> true
 
-let saved_login_check = function
+let saved_login_check t = match t.login with
   | Native _ -> None
   | Antigravity_home {home; _} -> Some (fun () ->
       match Runtime_antigravity_setup.login_saved home with
@@ -182,7 +203,7 @@ let authorize ~account_request ~client ~account_home =
   Runtime_account_access.authorize account_request (Runtime_account_access.seal captured)
   |> Result.map_error Runtime_account_access.refusal_to_string
 
-let observe ~mgr ~clock ~cwd ~cli_path ~account_request = function
+let observe ~mgr ~clock ~cwd ~cli_path ~account_request t = match t.login with
   | Native {client=Codex_home; account_home} ->
     let* account = authorize ~account_request ~client:Codex ~account_home in
     let config = { (Runtime_codex_app_server.default_config ()) with cli_path } in
@@ -209,7 +230,7 @@ let observe ~mgr ~clock ~cwd ~cli_path ~account_request = function
     |> Result.map (fun () -> Credential_captured)
     |> Result.map_error Runtime_antigravity_setup.error_message
 
-let publish ~workspace ~integration_id ~cli_path = function
+let publish ~workspace ~integration_id ~cli_path t = match t.login with
   | Native {account_home; _} ->
     Runtime_setup_accounts.register_home ~workspace ~integration_id ~cli_path ~account_home
     |> Result.map_error Runtime_setup_accounts.error_message

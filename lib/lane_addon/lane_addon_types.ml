@@ -83,6 +83,7 @@ type package = {
 let host_requests_tool = "lane_host_requests"
 let operator_tool = "lane_operator"
 let host_result_tool = "lane_host_result"
+let exact_protocol = 1
 let uses_host_requests package = package.exact_outputs <> [] || package.operator_asks
   || package.web_search
 let max_reply_bytes (package : package) = match package.execution with

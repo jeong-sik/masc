@@ -23,5 +23,9 @@ original ID, digest and result. Existing worker state needs the
 the host dispatch is not connected. Build its image from the repository root:
 
 ```sh
-docker build -f addons/hitl-auto-judge/Dockerfile -t masc-lane-hitl-auto-judge:0.1.3 addons
+docker build -f addons/hitl-auto-judge/Dockerfile -t masc-lane-hitl-auto-judge:0.1.4 addons
 ```
+
+Revision 0.1.4 names `[world] exact_protocol = 1`.
+A server that knows `exact_protocol` refuses a manifest that does not name the
+protocol it speaks, and a server that does not know the key refuses this one.

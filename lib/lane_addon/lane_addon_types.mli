@@ -139,6 +139,16 @@ val uses_host_requests : package -> bool
     declares [world.web_search] waits on the host, so its worker must
     advertise both host request tools. *)
 
+val exact_protocol : int
+(** The Exact protocol this server speaks with a worker whose manifest
+    declares exact outputs: the host request listing and result delivery, and
+    the answers to Exact submit and status calls. Such a manifest names the
+    protocol it was written for in [[world] exact_protocol], and
+    {!Lane_addon_manifest.load} refuses any other value, so no server attaches
+    a worker that speaks another protocol (RFC
+    server-carries-its-exact-worker-packages 3.4). Raise it with any change to
+    those messages. *)
+
 val max_reply_bytes : package -> int
 (** Transport/data envelope, independent of execution isolation. *)
 val container : package -> (container, string) result

@@ -2221,10 +2221,16 @@ let test_refusal_does_not_accept_a_different_equal_chat_row () =
 let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind () =
   with_fixture ~history_kind (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  let child_arrived,child_signal=Eio.Promise.create () and child_release,unblock_child=Eio.Promise.create () in
+  let provider_ids=ref [] in
   fixture.set_response (fun capture ->
-    ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
+    let first=match !provider_ids with [] -> true | _::_ -> false in
+    provider_ids:=Capture.request_id capture :: !provider_ids;
+    if first then (ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release)
+    else (ignore (Eio.Promise.try_resolve child_signal ());Eio.Promise.await child_release);
     `OK,F.openai_response (answer capture));
-  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+  Fun.protect ~finally:(fun () ->
+    ignore (Eio.Promise.try_resolve unblock ());ignore (Eio.Promise.try_resolve unblock_child ())) (fun () ->
     assert_pending (run_worker fixture);Eio.Promise.await arrived;
     let record,capture=only_original fixture in
     let original=Capture.to_json capture and before=progress fixture in
@@ -2271,12 +2277,20 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
       | Retained_terminal (Retained_call _ | Retained_not_allowed _ | Retained_request_id_reused) ->
         fail "the actual host must retain terminal Outcome_unknown before testing later wakes" in
     let original_host_final=actual_unknown () in
+    (match original_host_final with
+     | Exact.Retained_unknown Cut -> ()
+     | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed _ | Retained_request_id_reused ->
+       fail "the joined same-incarnation purge did not retain its actual Cut");
     let assert_actual_unknown ()=check json "the host's unknown cause stays original"
       (Exact.retained_final_to_json original_host_final) (Exact.retained_final_to_json (actual_unknown ())) in
-    (* First observe the actual terminal through the ordinary owner. The old
-       behavior returned Memory_not_committed here, then selected a fresh ID. *)
+    let load_original request_id=io (fun () ->
+      let retained=Owner.load ~store:fixture.store ~scope:record.scope ~request_id |> owned
+        |> Option.to_result ~none:"the exact retained history request disappeared" |> get in
+      retained,Capture.restore ~owner:(Capture.physical_owner capture) retained |> get) in
+    (* The ordinary owner retains the root Cut and prepares its authorized
+       continuation. It does not recursively dispatch that child here. *)
     assert_pending (run_worker fixture);
-    let retained_unknown,_=only_original fixture in
+    let retained_unknown,_=load_original record.request_id in
     (match Progress.phase retained_unknown.Owner.progress with
      | Rejected {stage=Execution;evidence} ->
        check json "original refusal retains the actual host unknown terminal"
@@ -2285,22 +2299,51 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
      | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
        fail "the actual terminal was not retained on its original execution");
     let unknown_progress=Progress.to_json retained_unknown.progress in
-    let assert_preserved ()=
+    let read_intent ()=match io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+      ~request_id:record.request_id |> Result.map_error Resolution_intent.error_to_string |> get) with
+      | [intent] -> intent
+      | [] | _::_::_ -> fail "the Cut does not retain exactly one resolution command" in
+    let intent=read_intent () in
+    let child=match intent.phase with
+      | Resolution_intent.Child_confirmed child -> child
+      | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ ->
+        fail "the actual Cut has no confirmed continuation" in
+    (match intent.origin with Same_binding_cut _ -> () | Worker_absence -> fail "the Cut acquired absence authority");
+    let child_record,child_request=load_original child.request_id in
+    let child_body=Capture.to_json child_request in
+    check bool "the continuation waits for a later unit before dispatch" true (Progress.phase child_record.progress=Captured);
+    check bool "the continuation names the actual Cut predecessor" true
+      (Capture.predecessor child_request=Some {Capture.request_id=record.request_id;request_digest=record.request_digest});
+    check json "the continuation keeps the complete original source basis"
+      (Source.basis_json source) (Source.basis_json (Capture.source child_request));
+    io (fun () -> Keeper_librarian_history_resolution_lineage.confirm_predecessor_by_body
+      ~store:fixture.store ~require_confirmed:true child_request) |> get;
+    let assert_preserved ~child_started ()=
       assert_actual_unknown ();
-      let reopened,restored=only_original fixture in
+      let reopened,restored=load_original record.request_id in
       check string "all wakes keep the original unknown ID" record.request_id reopened.Owner.request_id;
       check json "all wakes keep its complete input and preparation" original (Capture.to_json restored);
       check json "later wakes never rewrite the terminal original" unknown_progress (Progress.to_json reopened.progress);
-      check bool "unknown never acknowledges checkpoint history" true (progress fixture=before);
-      check (list (pair string (option string))) "unknown keeps Memory, WAL and both source preparations exact"
+      check bool "the pending continuation never acknowledges checkpoint history" true (progress fixture=before);
+      check (list (pair string (option string))) "the pending continuation keeps Memory, WAL and source preparations exact"
         before_state (state ());
       check bool "unknown grants no absorption judgment" true
         (io (fun () -> Keeper_librarian_durable_gate.root ~store:fixture.store
           ~owner:(Capture.physical_owner capture) ~capture |> get |> Option.is_none));
-      check int "unknown never authorizes another provider call" posts (F.post_count fixture.server);
-      check bool "a retained host unknown never starts automatic history resolution" true
-        (io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
-          ~request_id:record.request_id |> Result.map_error Resolution_intent.error_to_string |> get)=[]);
+      let current=read_intent () in
+      check string "all wakes reuse the same Cut command" intent.intent_id current.intent_id;
+      check bool "all wakes reuse its one confirmed child without completion" true
+        (Resolution_intent.child current=Some child && current.memory_commit=None);
+      let current_child,restored_child=load_original child.request_id in
+      check string "the child body keeps its retained digest" child.request_digest current_child.request_digest;
+      check json "all wakes keep the complete child question" child_body (Capture.to_json restored_child);
+      check int "only the root and its authorized continuation remain" 2 (List.length (observed_originals fixture));
+      check int "no wake replays the original provider request" 1
+        (List.length (List.filter (String.equal record.request_id) !provider_ids));
+      check int "the same child is sent only after its next unit" (if child_started then 1 else 0)
+        (List.length (List.filter (String.equal child.request_id) !provider_ids));
+      check int "no unrelated provider request is introduced" (posts+(if child_started then 1 else 0))
+        (F.post_count fixture.server);
       no_memory fixture in
     let ordinary_wake ()=
       ignore (Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name);
@@ -2311,18 +2354,25 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
           | Refresh.Pending _ -> true
           | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
           | Not_committed | Stopped _ | Raised _ -> false)
-       | None -> fail "production wake did not report its durable result");
-      assert_preserved () in
-    assert_preserved ();
-    ordinary_wake ();
-    ordinary_wake ();
-    (* Restart again after Rejected/Outcome_unknown is durable, so this is
-       recovery of that phase, not only a Dispatch_pending transport observation. *)
+       | None -> fail "production wake did not report its durable result") in
+    assert_preserved ~child_started:false ();
+    (* Restart after both the root Cut and child publication are durable,
+       before the child's first dispatch. Recovery must reuse that exact ID. *)
     restart_actual_worker fixture ~sw;
+    assert_preserved ~child_started:false ();
+    ordinary_wake ();Eio.Promise.await child_arrived;
+    assert_preserved ~child_started:true ();
     ordinary_wake ();
+    assert_preserved ~child_started:true ();
+    ordinary_wake ();
+    assert_preserved ~child_started:true ();
     set_enabled fixture false;
-    assert_pending (run_worker fixture);
-    assert_preserved ()))
+    (match run_worker fixture with
+     | Ok (Consumer.Pending _) | Error (Original_publication_blocked _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
+       fail "a disabled pending continuation released its source");
+    assert_preserved ~child_started:true ()))
 (* Observe the actual retained host ending through its owner, before the
    execution consumer's separate automatic continuation ingress. *)
 let observe_retained_cut fixture =

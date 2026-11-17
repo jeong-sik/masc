@@ -1493,13 +1493,15 @@ let test_remote_read_classifies_only_the_declared_exit_codes () =
   in
   List.iter
     (fun start_line ->
-      (match read ~start_line Keeper_sandbox_read_backend.read_window_missing_exit with
+      (match read ~start_line
+               (Keeper_sandbox_read_backend.confined_open_exit Keeper_sandbox_read_backend.Path_missing) with
        | Error (Keeper_sandbox_read_backend.Missing_file detail) ->
          Alcotest.(check bool) "missing path stays typed" true
            (String_util.contains_substring detail "path_not_found")
        | Error error -> Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
        | Ok _ -> Alcotest.fail "missing path read as success");
-      (match read ~start_line Keeper_sandbox_read_backend.read_window_not_a_file_exit with
+      (match read ~start_line
+               (Keeper_sandbox_read_backend.confined_open_exit Keeper_sandbox_read_backend.Not_a_regular_file) with
        | Error (Keeper_sandbox_read_backend.Not_a_file detail) ->
          Alcotest.(check bool) "directory stays typed" true
            (String_util.contains_substring detail "path_is_not_a_file")
@@ -1528,7 +1530,19 @@ let test_declared_endpoint_root_maps_as_itself () =
     (fun host_path ->
        Alcotest.(check bool) (host_path ^ " stays refused") true
          (Result.is_error (map host_path)))
-    [ "/app/../etc/passwd"; "/application/x"; "/etc/passwd" ]
+    [ "/app/../etc/passwd"; "/application/x"; "/etc/passwd" ];
+  (* The root an opened file is checked against is the one that admitted
+     its path: the declared root for a declared path, the keeper's endpoint
+     workspace for its own (#35934). *)
+  let root_of host_path =
+    Result.map
+      (fun (c : Keeper_sandbox_read_backend.confined_path) -> c.root)
+      (Keeper_sandbox_read_backend.confined_path_of_host ~config ~meta ~host_path)
+  in
+  Alcotest.(check (result string string)) "a declared path is confined to its declared root"
+    (Ok "/app") (root_of "/app/drift_monitor/windowing.py");
+  Alcotest.(check (result string string)) "the keeper's own path is confined to its workspace"
+    (Ok "/srv/masc/playground/remote-reader") (root_of own)
 
 (* A declared root may cover the keeper's own bookkeeping tree. The tree
    keeps its meaning: its names still translate to the keeper's endpoint
@@ -2754,13 +2768,15 @@ let test_read_asks_the_sandbox_for_a_bounded_prefix () =
   let host_path = Filename.concat host_root "scratch/oversize.bin" in
   ensure_dir (Filename.dirname host_path);
   write_file host_path (String.make 8192 'x');
-  let container_path =
+  let confined =
     match
-      Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
+      Keeper_sandbox_read_backend.confined_path_of_host ~config ~meta ~host_path
     with
     | Ok mapped -> mapped
     | Error detail -> Alcotest.fail detail
   in
+  Alcotest.(check string) "a shared-mount path is confined to the container root"
+    (Keeper_sandbox.container_root meta.name) confined.root;
   match
     Keeper_sandbox_read_backend.read_file ~config ~meta ~host_path
       ~max_bytes:4096 ~timeout_sec:5.0 ()
@@ -2770,8 +2786,8 @@ let test_read_asks_the_sandbox_for_a_bounded_prefix () =
   | Ok echoed_command ->
       Alcotest.(check string) "the sandbox is asked for the prefix, not the file"
         (String.concat " "
-           (Keeper_sandbox_read_backend.read_window_argv ~start_line:1 ~max_bytes:4096
-              ~path:container_path)
+           (Keeper_sandbox_read_backend.confined_read_argv ~confined
+              (Keeper_sandbox_read_backend.Line_window { start_line = 1; max_bytes = 4096 }))
          ^ "\n")
         echoed_command
 
@@ -3624,9 +3640,9 @@ case "$1" in
   info|image) printf '[]\n'; exit 0;;
   run)
     while [ "$#" -gt 0 ] && [ "$1" != -c ]; do shift; done
-    [ "$#" -eq 5 ] || exit 2
+    [ "$#" -eq 6 ] || exit 2
     case "$2" in *'head -c '*) ;; *) exit 2;; esac
-    [ "$5" = 4 ] || exit 2
+    [ "$6" = 4 ] || exit 2
     printf '\377PNG'
     exit 0;;
   *) exit 2;;
@@ -3646,15 +3662,112 @@ esac
       | Error detail ->
         Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string detail)))
 
-(* The read window command runs as-is inside the backend. Running the same
+(* The confined read command runs as-is inside the backend. Running the same
    argv here checks the shell text itself: the line a window starts at, the
-   byte bound, and that a missing file or a directory exits non-zero even
-   though the pipeline's own status is [head]'s. *)
-let run_read_window ~start_line ~max_bytes path =
-  let argv = Keeper_sandbox_read_backend.read_window_argv ~start_line ~max_bytes ~path in
+   byte bound, that a missing file or a directory exits non-zero even though
+   the pipeline's own status is [head]'s, and that the opened file is held to
+   its root. The check asks [/proc/self/fd/0] which file was opened, as every
+   backend (a Linux guest) can; a host without [/proc] skips. *)
+let require_proc_fd () =
+  if not (Sys.file_exists "/proc/self/fd") then Alcotest.skip ()
+
+let run_confined_read ~root ~path read =
+  require_proc_fd ();
+  let argv =
+    Keeper_sandbox_read_backend.confined_read_argv
+      ~confined:{ Keeper_sandbox_read_backend.root; path } read
+  in
   let ic = Unix.open_process_args_in (List.hd argv) (Array.of_list argv) in
   let out = In_channel.input_all ic in
   (Unix.close_process_in ic, out)
+
+let run_read_window ~start_line ~max_bytes path =
+  run_confined_read ~root:(Filename.dirname path) ~path
+    (Keeper_sandbox_read_backend.Line_window { start_line; max_bytes })
+
+let refusal_exit refusal =
+  Unix.WEXITED (Keeper_sandbox_read_backend.confined_open_exit refusal)
+
+(* #35934: a sandbox root, a file inside it, and a file outside it. *)
+let with_symlink_sandbox f =
+  let sandbox = temp_dir () in
+  let outside = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir sandbox; cleanup_dir outside)
+    (fun () ->
+      write_file (Filename.concat sandbox "inside.txt") "inside-plain";
+      write_file (Filename.concat outside "secret.txt") "outside-secret";
+      f ~sandbox ~outside)
+
+let read_in_sandbox ~sandbox name =
+  run_confined_read ~root:sandbox ~path:(Filename.concat sandbox name)
+    (Keeper_sandbox_read_backend.Line_window { start_line = 1; max_bytes = 4096 })
+
+let test_symlink_to_outside_is_refused () =
+  with_symlink_sandbox (fun ~sandbox ~outside ->
+    Unix.symlink (Filename.concat outside "secret.txt") (Filename.concat sandbox "link-out");
+    let status, out = read_in_sandbox ~sandbox "link-out" in
+    Alcotest.(check bool) "the outside-root exit" true
+      (status = refusal_exit Keeper_sandbox_read_backend.Outside_root);
+    Alcotest.(check string) "no outside byte" "" out)
+
+let test_symlink_inside_is_read () =
+  with_symlink_sandbox (fun ~sandbox ~outside:_ ->
+    Unix.symlink "inside.txt" (Filename.concat sandbox "link-in");
+    match read_in_sandbox ~sandbox "link-in" with
+    | Unix.WEXITED 0, out -> Alcotest.(check string) "the inside file" "inside-plain" out
+    | _, out -> Alcotest.fail ("inside link read failed: " ^ out))
+
+let test_dangling_symlink_is_missing () =
+  with_symlink_sandbox (fun ~sandbox ~outside ->
+    Unix.symlink (Filename.concat outside "absent.txt") (Filename.concat sandbox "link-dangling");
+    let status, out = read_in_sandbox ~sandbox "link-dangling" in
+    Alcotest.(check bool) "the missing exit" true
+      (status = refusal_exit Keeper_sandbox_read_backend.Path_missing);
+    Alcotest.(check string) "no bytes" "" out)
+
+let test_symlinked_directory_component () =
+  with_symlink_sandbox (fun ~sandbox ~outside ->
+    Unix.symlink outside (Filename.concat sandbox "dir-out");
+    let status, out = read_in_sandbox ~sandbox "dir-out/secret.txt" in
+    Alcotest.(check bool) "a directory link out of the root is refused" true
+      (status = refusal_exit Keeper_sandbox_read_backend.Outside_root);
+    Alcotest.(check string) "no outside byte" "" out;
+    Unix.mkdir (Filename.concat sandbox "real") 0o755;
+    write_file (Filename.concat sandbox "real/nested.txt") "nested";
+    Unix.symlink "real" (Filename.concat sandbox "dir-in");
+    match read_in_sandbox ~sandbox "dir-in/nested.txt" with
+    | Unix.WEXITED 0, out -> Alcotest.(check string) "a directory link inside is read" "nested" out
+    | _, out -> Alcotest.fail ("inside directory link read failed: " ^ out))
+
+(* The root is resolved in the same view as the opened file, so a root
+   spelled through a symlink still admits its own files. *)
+let test_root_spelled_through_a_symlink_admits_its_files () =
+  with_symlink_sandbox (fun ~sandbox ~outside ->
+    let alias = Filename.concat outside "sandbox-alias" in
+    Unix.symlink sandbox alias;
+    match
+      run_confined_read ~root:alias ~path:(Filename.concat alias "inside.txt")
+        Keeper_sandbox_read_backend.Whole_file
+    with
+    | Unix.WEXITED 0, out -> Alcotest.(check string) "the file under the aliased root" "inside-plain" out
+    | _, out -> Alcotest.fail ("aliased root read failed: " ^ out))
+
+(* Every reader shares the open: the byte prefix and the whole-file read
+   refuse the same link. *)
+let test_every_reader_refuses_the_outside_link () =
+  with_symlink_sandbox (fun ~sandbox ~outside ->
+    let link = Filename.concat sandbox "link-out" in
+    Unix.symlink (Filename.concat outside "secret.txt") link;
+    List.iter
+      (fun read ->
+        let status, out = run_confined_read ~root:sandbox ~path:link read in
+        Alcotest.(check bool) "the outside-root exit" true
+          (status = refusal_exit Keeper_sandbox_read_backend.Outside_root);
+        Alcotest.(check string) "no outside byte" "" out)
+      [ Keeper_sandbox_read_backend.Byte_prefix { max_bytes = 4096 }
+      ; Keeper_sandbox_read_backend.Whole_file
+      ])
 
 let with_numbered_lines count f =
   let path = Filename.temp_file "read-window-" ".txt" in
@@ -3693,7 +3806,8 @@ let test_read_window_missing_file_fails () =
       match run_read_window ~start_line ~max_bytes:64 path with
       | Unix.WEXITED code, out ->
         Alcotest.(check int) "the missing-file exit"
-          Keeper_sandbox_read_backend.read_window_missing_exit code;
+          (Keeper_sandbox_read_backend.confined_open_exit Keeper_sandbox_read_backend.Path_missing)
+          code;
         Alcotest.(check string) "no bytes" "" out
       | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
     [ 1; 10 ]
@@ -3701,10 +3815,16 @@ let test_read_window_missing_file_fails () =
 let test_read_window_directory_fails () =
   List.iter
     (fun start_line ->
-      match run_read_window ~start_line ~max_bytes:64 (Filename.get_temp_dir_name ()) with
+      let dir = Filename.get_temp_dir_name () in
+      match
+        run_confined_read ~root:dir ~path:dir
+          (Keeper_sandbox_read_backend.Line_window { start_line; max_bytes = 64 })
+      with
       | Unix.WEXITED code, out ->
         Alcotest.(check int) "the not-a-file exit"
-          Keeper_sandbox_read_backend.read_window_not_a_file_exit code;
+          (Keeper_sandbox_read_backend.confined_open_exit
+             Keeper_sandbox_read_backend.Not_a_regular_file)
+          code;
         Alcotest.(check string) "no bytes" "" out
       | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
     [ 1; 10 ]
@@ -3750,8 +3870,20 @@ let run_tests ~clock ~fs ~net () =
           Alcotest.test_case "finds only what exists" `Quick
             test_path_probe_finds_only_what_exists;
         ] );
-      ( "read_window_argv",
+      ( "confined_read_argv",
         [
+          Alcotest.test_case "a symlink to a file outside the root is refused" `Quick
+            test_symlink_to_outside_is_refused;
+          Alcotest.test_case "a symlink to a file inside the root is read" `Quick
+            test_symlink_inside_is_read;
+          Alcotest.test_case "a dangling symlink is a missing path" `Quick
+            test_dangling_symlink_is_missing;
+          Alcotest.test_case "a symlinked directory is held to the root" `Quick
+            test_symlinked_directory_component;
+          Alcotest.test_case "a root spelled through a symlink admits its files" `Quick
+            test_root_spelled_through_a_symlink_admits_its_files;
+          Alcotest.test_case "every reader refuses the outside link" `Quick
+            test_every_reader_refuses_the_outside_link;
           Alcotest.test_case "reaches lines past the old 200,000-byte prefix" `Quick
             test_read_window_reaches_lines_past_the_prefix;
           Alcotest.test_case "line 1 stays a byte prefix" `Quick

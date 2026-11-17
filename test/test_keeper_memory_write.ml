@@ -1509,8 +1509,15 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
    the endpoint. Running it here checks the shell text: the bytes, the byte
    bound, and that absence and a non-file come back as exit statuses rather
    than as stderr text to parse. *)
-let run_endpoint_source path ~max_bytes =
-  let argv = Masc.Keeper_memory_source_current.endpoint_source_argv ~path ~max_bytes in
+let run_endpoint_source ?root path ~max_bytes =
+  (* The script asks [/proc/self/fd/0] which file it opened, as every
+     endpoint (a Linux guest) can; a host without [/proc] skips. *)
+  if not (Sys.file_exists "/proc/self/fd") then Alcotest.skip ();
+  let root = Option.value root ~default:(Filename.dirname path) in
+  let argv =
+    Masc.Keeper_memory_source_current.endpoint_source_argv
+      ~confined:{ Masc.Keeper_sandbox_read_backend.root; path } ~max_bytes
+  in
   let ic = Unix.open_process_args_in (List.hd argv) (Array.of_list argv) in
   let out = In_channel.input_all ic in
   (Unix.close_process_in ic, out)
@@ -1522,7 +1529,7 @@ let test_endpoint_source_read_reports_by_exit_status () =
   let file = Filename.concat dir "source.txt" in
   Out_channel.with_open_bin file (fun oc -> output_string oc "authoritative value\n");
   let exit_of code = Unix.WEXITED code in
-  let module S = Masc.Keeper_memory_source_current in
+  let module B = Masc.Keeper_sandbox_read_backend in
   (match run_endpoint_source file ~max_bytes:64 with
    | Unix.WEXITED 0, out -> Alcotest.(check string) "file bytes" "authoritative value\n" out
    | _, out -> Alcotest.fail ("file read failed: " ^ out));
@@ -1531,9 +1538,20 @@ let test_endpoint_source_read_reports_by_exit_status () =
    | _, out -> Alcotest.fail ("bounded read failed: " ^ out));
   Alcotest.(check bool) "missing path exits with the missing status" true
     (fst (run_endpoint_source (Filename.concat dir "absent.txt") ~max_bytes:64)
-     = exit_of S.endpoint_source_missing_exit);
+     = exit_of (B.confined_open_exit B.Path_missing));
   Alcotest.(check bool) "a directory exits with the not-regular status" true
-    (fst (run_endpoint_source dir ~max_bytes:64) = exit_of S.endpoint_source_not_regular_exit);
+    (fst (run_endpoint_source ~root:dir dir ~max_bytes:64)
+     = exit_of (B.confined_open_exit B.Not_a_regular_file));
+  (* #35934: a link inside the tree to a file outside it is not read. *)
+  let outside = Filename.temp_file "endpoint-source-outside-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove outside) (fun () ->
+    Out_channel.with_open_bin outside (fun oc -> output_string oc "outside-secret\n");
+    let link = Filename.concat dir "link-out" in
+    Unix.symlink outside link;
+    let status, out = run_endpoint_source ~root:dir link ~max_bytes:64 in
+    Alcotest.(check bool) "a link out of the tree exits with the outside-root status" true
+      (status = exit_of (B.confined_open_exit B.Outside_root));
+    Alcotest.(check string) "no outside byte" "" out);
   if Unix.geteuid () <> 0
   then (
     let unreadable = Filename.concat dir "unreadable.txt" in
@@ -1545,7 +1563,7 @@ let test_endpoint_source_read_reports_by_exit_status () =
         (fun () -> fst (run_endpoint_source unreadable ~max_bytes:64))
     in
     Alcotest.(check bool) "an unreadable file exits with the unreadable status" true
-      (status = exit_of S.endpoint_source_unreadable_exit))
+      (status = exit_of (B.confined_open_exit B.Open_failed)))
 ;;
 
 (* A source the store cannot read this time is not an answer about the
@@ -1742,6 +1760,7 @@ let test_one_unreadable_source_does_not_stop_the_pass () =
    not answer cannot be produced in this test without a new test hook. *)
 let test_endpoint_source_outcome_separates_endpoint_from_file () =
   let module S = Masc.Keeper_memory_source_current in
+  let module B = Masc.Keeper_sandbox_read_backend in
   let describe = function
     | Ok content -> "ok:" ^ content
     | Error (S.Source_endpoint_unanswered _) -> "endpoint_unanswered"
@@ -1764,11 +1783,13 @@ let test_endpoint_source_outcome_separates_endpoint_from_file () =
     (Error "microvm_remote_read_signaled: endpoint=guest signal=9 stderr=");
   check "an undeclared exit (no head on the endpoint) is the endpoint" "endpoint_unanswered"
     (Error "microvm_remote_read_failed: endpoint=guest exit=127 stderr=head: not found");
-  check "the unreadable exit is the file" "file_unreadable"
-    (Ok (Unix.WEXITED S.endpoint_source_unreadable_exit, ""));
-  check "the missing exit" "missing" (Ok (Unix.WEXITED S.endpoint_source_missing_exit, ""));
-  check "the not-regular exit" "not_regular"
-    (Ok (Unix.WEXITED S.endpoint_source_not_regular_exit, ""));
+  let exit_of refusal = Ok (Unix.WEXITED (B.confined_open_exit refusal), "") in
+  check "the unreadable exit is the file" "file_unreadable" (exit_of B.Open_failed);
+  check "the missing exit" "missing" (exit_of B.Path_missing);
+  check "the not-regular exit" "not_regular" (exit_of B.Not_a_regular_file);
+  check "the outside-root exit rejects the path" "path_rejected" (exit_of B.Outside_root);
+  check "an unresolvable open is the endpoint" "endpoint_unanswered"
+    (exit_of B.Opened_file_unresolved);
   check "exit 0 carries the bytes" "ok:value\n" (Ok (Unix.WEXITED 0, "value\n"))
 ;;
 

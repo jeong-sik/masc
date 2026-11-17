@@ -7,6 +7,16 @@ val is_within_dir : dir:string -> string -> bool
     arguments must already have come through {!resolve_path}: this compares
     text, so an unresolved [..] or a symlink would walk out of [dir] without
     the comparison noticing. *)
+type extra_root_match = { root : string; path : string }
+(** A path admitted by a declared endpoint root: [root] is that root and
+    [path] the admitted path, both in lexical normal form. *)
+
+val extra_root_match :
+  ?workdir:string -> extra_roots:string list -> string -> extra_root_match option
+(** {!extra_root_path} that also names the first root in [extra_roots] the
+    path lies within. A reader that opens the path on the endpoint checks
+    what it opened against that root. *)
+
 val extra_root_path :
   ?workdir:string -> extra_roots:string list -> string -> string option
 (** [Some p] when [path] lies within one of [extra_roots] (endpoint-side

@@ -29,17 +29,22 @@ let is_within_dir ~dir path =
     (an ssh endpoint's [allowed_paths]) that may not exist on this host, so
     both sides are normalized lexically: resolving them with the host's
     [Unix.realpath] would judge another machine's filesystem by this one. *)
-let extra_root_path ?workdir ~extra_roots path =
+type extra_root_match = { root : string; path : string }
+
+let extra_root_match ?workdir ~extra_roots path =
   match extra_roots with
   | [] -> None
   | _ :: _ ->
       let lexical = normalize_path ?base_dir:workdir path in
-      if
-        List.exists
-          (fun root -> is_within_dir ~dir:(normalize_path root) lexical)
-          extra_roots
-      then Some lexical
-      else None
+      List.find_map
+        (fun root ->
+          let root = normalize_path root in
+          if is_within_dir ~dir:root lexical then Some { root; path = lexical }
+          else None)
+        extra_roots
+
+let extra_root_path ?workdir ~extra_roots path =
+  Option.map (fun m -> m.path) (extra_root_match ?workdir ~extra_roots path)
 
 let is_within_extra_root ?workdir ~extra_roots path =
   Option.is_some (extra_root_path ?workdir ~extra_roots path)

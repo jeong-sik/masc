@@ -43,7 +43,7 @@ let path_missing_exit = 1
 let path_probe_max_bytes = 1_024
 
 (* The path is a positional argument of [sh], never spliced into the script, as
-   in [Keeper_sandbox_read_backend.read_window_argv]. *)
+   in [Keeper_sandbox_read_backend.confined_read_argv]. *)
 let path_probe_argv path = [ "sh"; "-c"; {|[ -e "$1" ]|}; "sh"; path ]
 
 (* Only the exit status of the probe proves a path missing. A probe that failed

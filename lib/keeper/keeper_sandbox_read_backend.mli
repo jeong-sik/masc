@@ -52,16 +52,55 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
-(** The program and arguments [read_file] runs inside the backend for a window
-    starting at [start_line] of [path], producing at most [max_bytes]: one
-    [sh] script that takes the window with [head -c], through [tail -n +N]
-    after line 1. The script exits {!read_window_missing_exit} when [path]
-    does not exist and {!read_window_not_a_file_exit} when it is not a
-    regular file; [read_file] classifies by those codes, never by stderr. *)
-val read_window_argv : start_line:int -> max_bytes:int -> path:string -> string list
+(** A backend path and the backend-side root it was admitted under: the
+    keeper's tree on the backend, or the declared endpoint root that
+    admitted it. *)
+type confined_path = { path : string; root : string }
 
-val read_window_missing_exit : int
-val read_window_not_a_file_exit : int
+(** [container_path_of_host] with the root that admitted the path. *)
+val confined_path_of_host :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  host_path:string ->
+  (confined_path, string) result
+
+(** Why a confined read read nothing, each with its own exit code. *)
+type confined_open_refusal =
+  | Path_missing  (** Nothing at the path. *)
+  | Not_a_regular_file  (** The path names something other than a regular file. *)
+  | Open_failed  (** The open itself failed (permission, I/O). *)
+  | Outside_root
+      (** The file the open reached lies outside the admitting root: a
+          symlink on the way led out of the sandbox (#35934). *)
+  | Opened_file_unresolved
+      (** The backend could not resolve the opened descriptor or the root,
+          so containment was not proven. *)
+
+val confined_open_exit : confined_open_refusal -> int
+val confined_open_refusal_of_exit : int -> confined_open_refusal option
+
+(** Every refusal exit, for a caller's [ok_exit_codes]. *)
+val confined_open_exits : int list
+
+(** The script text that opens [$2] onto stdin and proves the opened file
+    lies under root [$1], exiting with {!confined_open_exit} otherwise. The
+    decision is made on the opened descriptor ([/proc/self/fd/0]) in the
+    backend's own view, and the reader that follows consumes that same
+    descriptor, so a symlink cannot be swapped in between check and read.
+    A caller appends its reader (reading stdin) and passes the root, the
+    path and its own operands ([$3] onward) as positional arguments. *)
+val confined_open_prelude : string
+
+(** What a confined read takes from the opened file. *)
+type confined_read =
+  | Line_window of { start_line : int; max_bytes : int }
+      (** At most [max_bytes] from line [start_line] on. *)
+  | Byte_prefix of { max_bytes : int }
+  | Whole_file
+
+(** The [sh] argv that runs {!confined_open_prelude} on [confined] and then
+    [read] on the opened descriptor. *)
+val confined_read_argv : confined:confined_path -> confined_read -> string list
 
 (** [read_file ~config ~meta ~host_path ~max_bytes ~timeout_sec ()] reads
     [host_path] through the selected sandbox backend and returns the captured

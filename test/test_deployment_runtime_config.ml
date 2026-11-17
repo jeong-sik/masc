@@ -69,9 +69,27 @@ let refuses label (status, output) =
 
 let test_seed_passes exe () = with_workspace (fun root ->
   write_runtime_config root (seed ());
-  let output = passes "the shipped seed passes" (run_helper exe root []) in
-  reports output "runtime.toml accepted path=";
-  reports output ".masc/config/runtime.toml")
+  let ambient = Filename.concat root "ambient-workspace" in
+  write_runtime_config ambient (seed ());
+  (* An ambient selection would still validate the CLI's runtime.toml, but
+     would read this invalid Lane directory for its Memory preflight. *)
+  let ambient_lanes = Filename.concat ambient ".masc/config/lane-addons" in
+  let ambient_bytes = "not a Lane declaration directory\n" in
+  write ambient_lanes ambient_bytes;
+  List.iter (fun (label, ambient_base_path) ->
+    with_env
+      [ Env_config_core.base_path_env_key, ambient_base_path
+      ; Env_config_keeper.KeeperMemoryOs.librarian_env_key, Some "true" ]
+      (fun () ->
+        let output = passes label (run_helper exe root []) in
+        reports output
+          ("runtime.toml accepted path="
+           ^ Filename.concat (Unix.realpath root) ".masc/config/runtime.toml");
+        reports output "\"state\":\"addon_unattached\"";
+        check string "the conflicting workspace is unchanged" ambient_bytes
+          (read ambient_lanes)))
+    [ "the shipped seed passes without an ambient workspace", None
+    ; "the CLI workspace wins over a conflicting ambient workspace", Some ambient ])
 
 (* A persistently invalid source, independent of the retired read-bound
    key. The valid shipped seed is otherwise unchanged. *)

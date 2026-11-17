@@ -317,6 +317,7 @@ type resume_delivery =
 val start_held_context :
   turn_observation:turn_observation option ->
   ?composed_context:composed_context ->
+  ?system_observations_in_developer:Keeper_context_assembly.system_observation list ->
   Agent_core.Types.message list ->
   Keeper_official_client_session_store.held_context list
 (** What a start leaves the new vendor session holding: every context
@@ -356,6 +357,10 @@ val resume_prompt :
 (** The user prompt a lane sends when it resumes a vendor session that already
     holds the conversation and the system prompt it recorded at its first
     launch, and what that session holds once the prompt is delivered.
+    [system_observations_in_developer] names exact current issued observations
+    carried by a separate Developer packet. They are excluded from this User
+    packet without claiming they were already held. The adapter must obtain
+    that packet's ACK before turn/start and separately settle its receipts.
 
     The messages {!is_carried_on_resume} selects are carried contexts: the
     historical task reference, the Librarian working state, and the context

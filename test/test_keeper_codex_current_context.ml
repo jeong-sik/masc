@@ -68,7 +68,7 @@ for line in sys.stdin:
             turn_id = 'resumed-turn'
         emit({'id':ident,'result':{'thread':{'id':'context-thread'},'model':'context-fixture'}})
     elif method == 'thread/inject_items':
-        if reject_context:
+        if reject_context or os.path.exists(capture+'.reject-context'):
             emit({'id':ident,'error':{'code':-32602,'message':'fixture rejected current context'}})
         else:
             injected_bytes += len(json.dumps(request['params']['items']))
@@ -185,6 +185,7 @@ default = "codex.%s"
     Runtime.init_default ~config_path |> require);
   let reports = ref [] in
   let run ?argument_source ?official_task_reference ?model_input_projection ?prompt_blocks
+      ?system_observations
       ?(tools=[]) ?tool_choice ?hook_reasoning_effort
       ?(input_source = Keeper_request_source.Keeper_history {trace_id="context-fixture"})
       ?carried_front_seed ?librarian_front ?on_model_input_window_observation
@@ -197,11 +198,25 @@ default = "codex.%s"
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         (* Production records the block witness in this hook. Reading it before
            preparation would observe None and silently resend the carrier. *)
-        composed_context := Option.map (fun blocks ->
-          (Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks)) prompt_blocks;
+        let assembly = match prompt_blocks, system_observations with
+          | None, None -> None
+          | Some blocks, _ -> Some (Keeper_context_assembly.assemble
+              ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks)
+          | None, Some _ -> Some (Keeper_context_assembly.assemble
+              ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]) in
+        composed_context := Option.map (fun assembly ->
+          match system_observations with
+          | None -> assembly
+          | Some observations -> Keeper_context_assembly.with_system_observations
+              ~base_text:instructions ~observations assembly) assembly;
+        let system_prompt_override = match !composed_context with
+          | None -> current_params.system_prompt_override
+          | Some assembly -> Keeper_context_assembly.system_prompt_override
+              ~previous:current_params.system_prompt_override assembly in
         let reasoning_effort = Option.value hook_reasoning_effort
             ~default:current_params.reasoning_effort in
-        Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;tool_choice;reasoning_effort}
+        Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;
+          system_prompt_override;tool_choice;reasoning_effort}
       | _ -> Agent_core.Hooks.Continue) } in
     Keeper_codex_runtime.run ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source
       ?argument_source
@@ -596,6 +611,96 @@ let test_resume_deduplicates_context_blocks () =
   check_resume third [ "RECALL_A", false; "RECALL_B", true; "WORLD_2", false; "CLOCK_3", true ];
   let fourth = send ~memory:"RECALL_B" ~world:"WORLD_3" ~clock:"CLOCK_4" in
   check_resume fourth [ "RECALL_B", false; "WORLD_3", true; "CLOCK_4", true ]
+
+let injected_developer_text rows =
+  rows
+  |> List.filter (fun row -> member "method" row = `String "thread/inject_items")
+  |> List.concat_map (fun row -> row |> member "params" |> member "items" |> items)
+  |> List.filter (fun item -> member "role" item = `String "developer")
+  |> List.concat_map (fun item -> item |> member "content" |> items)
+  |> List.map (fun part -> part |> member "text" |> text)
+  |> String.concat "\n\n"
+
+let test_issued_system_updates_do_not_reinject_standing_base () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let instructions = "STANDING_KEEPER_BASE: preserve the host authority." in
+  let send observations =
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions ~system_observations:observations
+      ~world:"Current independent world context" ());
+    read_requests capture |> List.filteri (fun i _ -> i >= before) in
+  ignore (send Keeper_context_assembly.[Active_goals "GOAL_FIRST"; Direct_input_source "SOURCE_FIRST"]);
+  let changed = send Keeper_context_assembly.[Active_goals "GOAL_NEXT"; Direct_input_source "SOURCE_NEXT"] in
+  let injected = injected_developer_text changed in
+  check bool "new Goal reaches acknowledged Developer injection" true
+    (String_util.contains_substring injected "GOAL_NEXT");
+  check bool "new operation source reaches Developer injection" true
+    (String_util.contains_substring injected "SOURCE_NEXT");
+  check bool "standing base is not another Developer history copy" false
+    (String_util.contains_substring injected "STANDING_KEEPER_BASE");
+  List.iter (fun marker -> check bool "updated observation has no duplicate User copy" false
+    (String_util.contains_substring (turn_text changed) marker)) ["GOAL_NEXT"; "SOURCE_NEXT"];
+  let removed = send [] in
+  let clear = injected_developer_text removed in
+  check bool "removal sends an explicit System snapshot" true (String.length clear > 0);
+  check bool "removed Goal is absent from its replacement" false
+    (String_util.contains_substring clear "GOAL_NEXT");
+  check bool "removed source is absent from its replacement" false
+    (String_util.contains_substring clear "SOURCE_NEXT");
+  let returned = send Keeper_context_assembly.[Active_goals "GOAL_NEXT"] in
+  check bool "removed then returned Goal is delivered again" true
+    (String_util.contains_substring (injected_developer_text returned) "GOAL_NEXT");
+  let unchanged = send Keeper_context_assembly.[Active_goals "GOAL_NEXT"] in
+  check string "settled unchanged observations need no injection" ""
+    (injected_developer_text unchanged)
+
+let test_native_compaction_keeps_issued_system_components () =
+  with_fixture ~compact_resume:true ~compact_item:true @@ fun ~run ~capture ~reports:_ ->
+  let observations = Keeper_context_assembly.[Active_goals "COMPACTED_GOAL";
+    Direct_input_source "COMPACTED_SOURCE"] in
+  let send tick =
+    let before = List.length (read_requests capture) in
+    successful (run ~instructions:"COMPACTION_STANDING_BASE"
+      ~system_observations:observations ~world:tick ());
+    read_requests capture |> List.filteri (fun i _ -> i >= before) in
+  ignore (send "before compaction");
+  ignore (send "native compaction");
+  let after = send "after compaction" in
+  check string "native rebuild retains the System components" "" (injected_developer_text after);
+  check bool "Goal in rebuilt native System has no duplicate User copy" false
+    (String_util.contains_substring (turn_text after) "COMPACTED_GOAL")
+
+let test_rejected_system_snapshot_is_not_settled () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  let instructions = "ACK_FAILURE_STANDING_BASE" in
+  successful (run ~instructions
+    ~system_observations:Keeper_context_assembly.[Direct_input_source "ACKED_SOURCE"]
+    ~world:"First world" ());
+  let before = List.length (read_requests capture) in
+  write (capture ^ ".reject-context") "refuse the next injection";
+  let attempt = run ~instructions
+    ~system_observations:Keeper_context_assembly.[Direct_input_source "UNACKED_SOURCE"]
+    ~world:"Next world" () in
+  check bool "injection rejection fails the attempt" true
+    (Result.is_error attempt.Keeper_codex_runtime.result);
+  let rows = read_requests capture |> List.filteri (fun i _ -> i >= before) in
+  check bool "no model turn after rejected System snapshot" false
+    (List.exists (fun row -> member "method" row = `String "turn/start") rows);
+  let module Store = Keeper_official_client_session_store in
+  let expected = match Store.load ~base_path:(Filename.dirname capture)
+      ~keeper_name:"context-fixture" with
+    | Ok expected -> expected
+    | Error error -> fail (Store.read_error_to_string error) in
+  let plan = match Store.plan_claim ~expected ~client_kind:Store.Codex
+      ~runtime_id:"codex.context" with
+    | Ok plan -> plan
+    | Error error -> fail (Agent_core.Error.to_string (Store.core_error_of_claim_error error)) in
+  let held = Store.held_context_for_resume plan ~expected in
+  let unacked = Agent_core_sha256.(digest_string "UNACKED_SOURCE" |> to_hex) in
+  check bool "unacknowledged source never becomes resume evidence" false
+    (List.exists (fun (receipt : Store.held_context) ->
+      receipt.context = Store.Context_block Prompt_block_id.Direct_input_source
+      && receipt.sha256 = unacked) held)
 
 let test_context_blocks_survive_fresh_retry () =
   with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
@@ -1724,6 +1829,12 @@ let () =
   test_case "compaction item invalidates recall without usage estimate" `Quick test_compaction_item_invalidates_recall_without_usage_estimate;
   test_case "compaction invalidates recall despite later request usage" `Quick test_compaction_receipt_survives_later_request_usage;
   test_case "resume delivers only changed blocks and pending operator note" `Quick test_resume_deduplicates_context_blocks;
+  test_case "issued System updates retain the base and replace observations once" `Quick
+    test_issued_system_updates_do_not_reinject_standing_base;
+  test_case "native compaction keeps issued System components" `Quick
+    test_native_compaction_keeps_issued_system_components;
+  test_case "rejected System snapshot is not settled or dispatched" `Quick
+    test_rejected_system_snapshot_is_not_settled;
   test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;
   test_case "frozen unread changes, clears and stays held across native requests" `Quick
     test_frozen_unread_changes_and_clears_across_native_requests;

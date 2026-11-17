@@ -1177,8 +1177,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        scheduler. Vendor-session frontier provenance needs only its message
        count, not an encoding or digest of the canonical conversation. *)
     let started_at = Time_compat.now () in
-    let* history, context_frontier, composed_developer_instructions,
-        (system_projection, system_receipt) =
+    let* history, context_frontier, composed_developer_instructions, system_projection =
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let* developer_messages, history =
           project_messages ~assembly:composed_context ~started_at
@@ -1218,19 +1217,18 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
           compose_developer_instructions developer_messages
         in
         let system_projection = compose_developer_instructions [] in
-        let system_receipt : Keeper_official_client_session_store.held_context =
-          { context = Codex_system_prompt
-          ; sha256 = Agent_core_sha256.(
-              digest_string (Keeper_context_submission_link.text system_projection) |> to_hex)
-          } in
-        Ok (history, context_frontier, composed_developer_instructions,
-            (system_projection, system_receipt)))
+        Ok (history, context_frontier, composed_developer_instructions, system_projection))
     in
     let previously_held = Keeper_official_client_session_store.held_context_for_resume
       claim_plan ~expected:stored_session in
-    let refresh_system = match thread_mode with
-      | Runtime_codex_app_server.Start -> false
-      | Runtime_codex_app_server.Resume _ -> not (List.mem system_receipt previously_held) in
+    let system_plan = Keeper_codex_system_context.prepare
+      ~full_system:(Keeper_context_submission_link.text system_projection)
+      ~system_prompt:prepared.system_prompt ~posture_notes
+      ~assembly:composed_context
+      ~previously_held:(match thread_mode with
+        | Runtime_codex_app_server.Start -> None
+        | Runtime_codex_app_server.Resume _ -> Some previously_held) in
+    let system_receipt = system_plan.full_receipt in
     let prompt, held_context, prompt_projection =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
@@ -1241,12 +1239,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       | Runtime_codex_app_server.Resume _ ->
         let delivery = Host.resume_prompt ~goal:prompt
           ~turn_observation:prepared.turn_observation ?composed_context
+          ~system_observations_in_developer:system_plan.observations_in_developer
           ~held:previously_held prepared.messages in
         delivery.prompt, delivery.held_context, delivery.context_projection
     in
-    let held_context = system_receipt :: List.filter
-      (fun (held : Keeper_official_client_session_store.held_context) ->
-         held.context <> Codex_system_prompt) held_context in
+    let held_context = Keeper_codex_system_context.with_carried_context system_plan held_context in
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
     let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
@@ -1263,16 +1260,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let* tool_outbox, retained_carrier =
       Keeper_client_tool_outbox.run_carrier_load retained_results
       |> Result.map_error internal_error in
-    (* Resume configuration alone does not update the model-visible history.
-       The runtime waits for this injection's ACK before [turn/start]. The
-       existing frontier acknowledges it only after a completed vendor turn.
-       A compaction drops the other held context, but rebuilds the thread's
-       initial context from this turn's [developerInstructions]
-       (build_initial_context_with_world_state, codex rust-v0.166.0), which
-       begin with [system_projection]: the standing System stays held, and
-       injecting it again would put a second copy in the thread (#47644). *)
+    (* Resume configuration seeds native compaction but does not update the
+       current model request. The runtime ACKs the System plan's Developer
+       packet before turn/start; only completed settlement retains its basis.
+       A changed operation/Goal with the same exact issued base sends the
+       observation snapshot, not another whole copy of the base. *)
     let developer_context =
-      (if refresh_system then [Keeper_context_submission_link.text system_projection] else [])
+      system_plan.developer_context
       @ Keeper_client_tool_outbox.carrier_context retained_carrier in
     let terminal_error = ref None in
     (* Reported only after the complete turn/start write. A Resume sent none of
@@ -1575,7 +1569,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
               an unobserved copy as held. The standing System is held either
               way: a compaction re-renders it from [developerInstructions]. *)
            Keeper_official_client_session_store.settle_holding
-             ~held_context:[ system_receipt ]
+             ~held_context:system_plan.persistent_context
              ~base_path
              ~keeper_name
              ~expected:!session_state
@@ -1638,7 +1632,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
            | Runtime_codex_app_server.Native_tool_started _
            | Native_tool_finished _ -> observe_effect_attempted ()
            | Tool_delivery_closed _ -> close_delivery_frontier ()
-           | Compaction_observed -> settled_held_context := [ system_receipt ]
+           | Compaction_observed -> settled_held_context := system_plan.persistent_context
            | Usage_reported { frame; _ } ->
              (* The final usage keeps only the newest request. A compaction
                 earlier in this turn still invalidates its other context

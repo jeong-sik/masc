@@ -89,6 +89,7 @@ let set ~base_path ~actor request =
   set_with_rewrite ~rewrite:Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result ~base_path ~actor request
 module For_testing = struct
   let set_with_rewrite_io ~io ~base_path ~actor request =
-    set_with_rewrite ~rewrite:(Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing ~io)
+    set_with_rewrite ~rewrite:(Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+      ?before_sync_rewrite_parent:None ~io)
       ~base_path ~actor request
 end

@@ -246,7 +246,7 @@ let header_of_fields ~owner f =
     | Some json,None -> let* basis=basis_of_json json in basis_sha256 basis
     | None,Some `Null -> Ok None
     | None,Some (`String digest) when String_util.is_lowercase_sha256_hex digest -> Ok (Some digest)
-    | (None|Some _),(None|Some _) -> Error "Retained floor anchor digest is invalid" in
+    | None,Some _ | Some _,Some _ -> Error "Retained floor anchor digest is invalid" in
   let* ()=match retained_source with
     | None -> require (basis_sha256=None) "Ordinary floor index has a retained Memory anchor"
     | Some source -> require (source.request_id=range.request_id && source.request_digest=range.request_digest

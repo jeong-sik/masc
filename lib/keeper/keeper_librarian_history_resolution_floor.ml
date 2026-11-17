@@ -35,7 +35,8 @@ let execution_final request (record:Owner.retained) =
     let* schema=Option.to_result ~none:"Cut descendant refusal has no schema" exact.Exact.schema in
     let+ retained=Exact.retained_final_of_json ~schema evidence in Some (Exact.delivered retained)
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-  | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok None
+  | Finished _ | Conflicted _ | Rejected {stage=(Progress.Before_dispatch | Execution);_}
+  | Subdividing _ | Subdivided _ -> Ok None
 let no_gate ~store request =
   let* root=Journal.root ~store ~owner:(Request.physical_owner request) ~capture:request in
   require (Option.is_none root) "Cut floor leaf already owns an actual absorption Gate"

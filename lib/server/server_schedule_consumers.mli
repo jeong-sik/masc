@@ -1,14 +1,14 @@
 
-type keeper_wake_reaction_ledger_status =
+type keeper_wake_reaction_ledger_status = Schedule_dispatch_receipt.keeper_wake_reaction_ledger_status =
   | Keeper_wake_reaction_ledger_recorded
   | Keeper_wake_reaction_ledger_record_failed of string
 
-type keeper_wake_occurrence_status =
+type keeper_wake_occurrence_status = Schedule_dispatch_receipt.keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
   | Keeper_wake_already_cancelled
 
-type keeper_wake_result_delivery_policy =
+type keeper_wake_result_delivery_policy = Schedule_dispatch_receipt.keeper_wake_result_delivery_policy =
   | Keeper_wake_result_delivery_none
   | Keeper_wake_result_delivery_reply_to_origin
 
@@ -16,7 +16,7 @@ type keeper_wake_result_delivery_policy =
     the metadata store does not hold is not a deferral: [consumer] rejects
     that occurrence terminally before anything is enqueued and the schedule
     fails with the reason. *)
-type keeper_wake_activation_deferred_reason =
+type keeper_wake_activation_deferred_reason = Schedule_dispatch_receipt.keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_lifecycle_denied of string
   | Keeper_wake_activation_autoboot_disabled
   | Keeper_wake_activation_proactive_disabled
@@ -32,12 +32,12 @@ type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_unregistered
   | Keeper_wake_activation_not_running of Keeper_state_machine.phase
 
-type keeper_wake_activation_outcome =
+type keeper_wake_activation_outcome = Schedule_dispatch_receipt.keeper_wake_activation_outcome =
   | Keeper_wake_activation_signaled
   | Keeper_wake_activation_deferred of keeper_wake_activation_deferred_reason
   | Keeper_wake_activation_not_required
 
-type dispatch_receipt =
+type dispatch_receipt = Schedule_dispatch_receipt.dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
       ; schedule_instance_id : string

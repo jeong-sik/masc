@@ -28,6 +28,17 @@ type style =
   ; reset : string
   }
 
+type chrome =
+  { hotkey : (string * string) option
+      (** Optional [(tag, style)] drawn immediately before the title in the top
+          border (e.g. [("¹", accent)]). *)
+  ; badge : (string * string) option
+      (** Optional [(text, style)] right-aligned inside the top border when the
+          card is wide enough to hold both the title and the badge. *)
+  }
+
+val empty_chrome : chrome
+
 val more_text : int -> string
 (** What a card says in place of the rows it leaves out, given how many:
     ["+3 more"]. A screen that cuts a list short without a card says it the
@@ -42,7 +53,14 @@ val min_height : int
 val content_cells : width:int -> int
 (** The width of a card's content for a card [width] cells wide. *)
 
-val render : ?rounded:bool -> style:style -> width:int -> height:int -> t -> string list
+val render :
+  ?rounded:bool ->
+  ?chrome:chrome ->
+  style:style ->
+  width:int ->
+  height:int ->
+  t ->
+  string list
 (** [render ~style ~width ~height card] is [height] rows of [width] cells each,
     the body stretched to the height with blank rows. Below {!min_width} or
     {!min_height} it returns that many blank rows rather than a box with no
@@ -61,6 +79,7 @@ val column_widths : inner_width:int -> gap:int -> columns:int -> int list
     up to [inner_width]. *)
 
 val grid :
+  ?rounded:bool ->
   style:style ->
   inner_width:int ->
   gap:int ->
@@ -73,4 +92,16 @@ val grid :
     cells wide, and the rows are those of the tallest column at its cards'
     natural heights. [None] when that is more than [max_rows], so a caller
     falls back to something shorter before anything is drawn. Each body is
-    asked once per card. *)
+    asked once per card. [rounded] defaults to [false]. *)
+
+val grid_with_chrome :
+  ?rounded:bool ->
+  style:style ->
+  inner_width:int ->
+  gap:int ->
+  row_gap:int ->
+  max_rows:int ->
+  (t * chrome) list list ->
+  string list option
+(** {!grid} with per-card border-embedded {!chrome} (hotkey tag and right
+    badge). *)

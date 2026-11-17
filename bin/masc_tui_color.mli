@@ -54,3 +54,15 @@ val recede_toward
     whichever binds first. [None] where the colour does not clear the floor
     even before moving, because a row with no room to give away cannot recede
     and still be read. *)
+
+val lerp_oklab
+  :  background:Masc_tui_terminal_palette.rgb
+  -> floor:float
+  -> t:float
+  -> Masc_tui_terminal_palette.rgb
+  -> Masc_tui_terminal_palette.rgb
+  -> Masc_tui_terminal_palette.rgb
+(** Perceptually uniform Oklab interpolation from the first colour ([t = 0.0])
+    to the second ([t = 1.0]), with both endpoints and the interpolated stop
+    lifted in Oklab lightness to clear [floor] against [background]. [t] is
+    clamped to [[0.0, 1.0]] ([nan] maps to [0.0]). *)

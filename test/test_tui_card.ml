@@ -216,6 +216,37 @@ let test_a_cut_body_with_styled_rows_keeps_the_width () =
     (fun row -> check int "row width" 30 (Layout.display_width row))
     rows
 
+let test_rounded_chrome_with_hotkey_and_badge_keeps_exact_width () =
+  let chrome =
+    { Card.hotkey = Some ("\xc2\xb9", "\027[1;36m")
+    ; badge = Some ("27/27 \xec\xa0\x95\xec\x83\x81", "\027[32m")
+    }
+  in
+  List.iter
+    (fun width ->
+       let rows =
+         Card.render ~rounded:true ~chrome ~style:styled ~width ~height:4
+           (card ~title:"\xed\x99\x95\xec\x9d\xb8\xed\x95\xa0 \xec\x9d\xbc \xeb\xb0\x8f \xec\x8b\xa4\xed\x96\x89 \xec\x97\xac\xeb\xa0\xa5"
+              [ "alpha"; "beta" ])
+       in
+       check int "height" 4 (List.length rows);
+       List.iter
+         (fun row ->
+            check int (Printf.sprintf "width at %d" width) width
+              (Layout.display_width row))
+         rows)
+    [ 5; 8; 14; 22; 32; 48; 80 ];
+  match
+    Card.grid_with_chrome ~rounded:true ~style:styled ~inner_width:82 ~gap:2
+      ~row_gap:1 ~max_rows:max_int
+      [ [ (card [ "a"; "b" ], chrome) ]; [ (card [ "c" ], Card.empty_chrome) ] ]
+  with
+  | None -> fail "grid_with_chrome drew nothing"
+  | Some rows ->
+    List.iter
+      (fun row -> check int "grid row width" 82 (Layout.display_width row))
+      rows
+
 let () =
   run "tui card"
     [ ( "geometry"
@@ -229,6 +260,8 @@ let () =
             test_an_overflowing_body_says_how_many_rows_it_left_out
         ; test_case "a card with no room is blank rows" `Quick
             test_a_card_with_no_room_is_blank_rows_of_its_width
+        ; test_case "rounded chrome with hotkey and badge keeps exact width" `Quick
+            test_rounded_chrome_with_hotkey_and_badge_keeps_exact_width
         ] )
     ; ( "columns"
       , [ test_case "columns and gaps add up to the screen" `Quick

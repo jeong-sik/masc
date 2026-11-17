@@ -49,6 +49,10 @@ module Ansi = struct
   let box_tr = Masc_tui_theme.Box.tr
   let box_bl = Masc_tui_theme.Box.bl
   let box_br = Masc_tui_theme.Box.br
+  let box_tl_round = Masc_tui_theme.Box.tl_round
+  let box_tr_round = Masc_tui_theme.Box.tr_round
+  let box_bl_round = Masc_tui_theme.Box.bl_round
+  let box_br_round = Masc_tui_theme.Box.br_round
   let box_l = Masc_tui_theme.Box.l
   let box_r = Masc_tui_theme.Box.r
 end
@@ -265,6 +269,17 @@ module Theme = struct
 
   let recede () = (resolved ()).recede
 
+  let ramp_on surface ramp ~t =
+    let palette =
+      Masc_tui_terminal_palette.snapshot ()
+      |> Masc_tui_terminal_palette.snapshot_palette
+    in
+    Masc_tui_theme.ramp_readable ~surface palette ramp ~t
+
+  let ramp ramp ~t = ramp_on Masc_tui_theme.Page ramp ~t
+  let pressure ~t = ramp Masc_tui_theme.Pressure ~t
+  let progress ~t = ramp Masc_tui_theme.Progress ~t
+
   (* The Activity pane's ground, rebuilt only when the palette changes, for
      the same reason [recede] is: it is read once per drawn pane row. *)
   let side_pane_background_cache : (int * string) option Atomic.t =
@@ -306,6 +321,8 @@ module Theme = struct
        through their own names rather than borrowing [ok] and [bad]. *)
     let action_probe () = (resolved ()).probe
     let action_message () = (resolved ()).message
+    let pressure ~t = ramp_on Masc_tui_theme.Side_pane Masc_tui_theme.Pressure ~t
+    let progress ~t = ramp_on Masc_tui_theme.Side_pane Masc_tui_theme.Progress ~t
   end
 
   module Syntax = struct

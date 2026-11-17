@@ -77,6 +77,17 @@ let bar_filled_cells () =
   Alcotest.(check int) "a bar with no cells fills none" 0
     (Chart.bar_filled_cells ~width:0 ~value:5 ~max_value:10)
 
+let braille_levels () =
+  let check = Alcotest.(check (list int)) in
+  check "zero stays zero while small positive lights one dot" [0; 1; 2; 4]
+    (Chart.braille_levels ~min:0 ~max:100 [0; 1; 50; 100]);
+  check "extreme integer range does not overflow" [0; 2; 4]
+    (Chart.braille_levels [min_int; 0; max_int]);
+  check "constant zero series stays empty" [0; 0]
+    (Chart.braille_levels [0; 0]);
+  check "constant positive series uses middle dot level" [2; 2]
+    (Chart.braille_levels [7; 7])
+
 let () =
   Alcotest.run "Chart numeric decisions"
     [ "numeric decisions",
@@ -84,6 +95,7 @@ let () =
       ; Alcotest.test_case "large totals and products" `Quick large_counts
       ; Alcotest.test_case "empty and negative inputs" `Quick empty_and_negative_inputs
       ; Alcotest.test_case "sparkline scale and integer limits" `Quick sparkline_levels
+      ; Alcotest.test_case "braille scale and integer limits" `Quick braille_levels
       ; Alcotest.test_case "compact number boundaries" `Quick compact_number_boundaries
       ; Alcotest.test_case "bar fill" `Quick bar_filled_cells
       ]

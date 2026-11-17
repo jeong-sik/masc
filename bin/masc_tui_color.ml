@@ -196,3 +196,25 @@ let recede_toward ~background ~floor ~max_ratio color =
   else
     Some (stepped (largest_clearing ~clears ~low:0. ~high:max_ratio search_steps))
 ;;
+
+let lerp_oklab ~background ~floor ~t first second =
+  let t =
+    if Float.is_nan t then 0.
+    else Float.max 0. (Float.min 1. t)
+  in
+  let first = lift_for_contrast ~background ~floor first in
+  let second = lift_for_contrast ~background ~floor second in
+  if t <= 0. then first
+  else if t >= 1. then second
+  else begin
+    let l1, a1, b1 = to_oklab first in
+    let l2, a2, b2 = to_oklab second in
+    let lerped =
+      of_oklab
+        ( l1 +. ((l2 -. l1) *. t)
+        , a1 +. ((a2 -. a1) *. t)
+        , b1 +. ((b2 -. b1) *. t) )
+    in
+    lift_for_contrast ~background ~floor lerped
+  end
+;;

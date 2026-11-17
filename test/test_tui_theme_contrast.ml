@@ -756,6 +756,54 @@ let test_side_pane_recede_reads_on_every_scheme () =
   check bool "some scheme recedes on the side pane" true (receded <> [])
 ;;
 
+let test_oklab_ramps_clear_floor_on_every_scheme_and_surface () =
+  let stops = [ 0.0; 0.25; 0.5; 0.75; 1.0 ] in
+  let ramps =
+    [ "Pressure", Masc_tui_theme.Pressure
+    ; "Progress", Masc_tui_theme.Progress
+    ]
+  in
+  with_lift true (fun () ->
+      List.iter
+        (fun scheme ->
+          let surfaces =
+            [ "page", Masc_tui_theme.Page, background scheme
+            ; "side_pane", side_pane, side_pane_ground scheme.palette
+            ]
+          in
+          List.iter
+            (fun (surface_name, surface, ground) ->
+              List.iter
+                (fun (ramp_name, ramp) ->
+                  List.iter
+                    (fun t ->
+                      let drawn =
+                        Masc_tui_theme.For_testing.ramp_readable
+                          ~colors_enabled:true ~project:truecolor ~surface
+                          (Some scheme.palette) ramp ~t
+                      in
+                      match truecolor_rgb ~prefix:truecolor_prefix drawn with
+                      | None ->
+                        Alcotest.failf
+                          "%s/%s %s@%.2f drew non-truecolor sequence %S"
+                          scheme.name surface_name ramp_name t drawn
+                      | Some color ->
+                        let ratio = Color.contrast_ratio color ground in
+                        check bool
+                          (Printf.sprintf "%s/%s: %s@%.2f reads at %.2f"
+                             scheme.name surface_name ramp_name t ratio)
+                          true
+                          (ratio >= text_floor -. 0.01))
+                    stops)
+                ramps)
+            surfaces;
+          check string "NO_COLOR suppresses ramp output" ""
+            (Masc_tui_theme.For_testing.ramp_readable ~colors_enabled:false
+               ~project:truecolor ~surface:Masc_tui_theme.Page
+               (Some scheme.palette) Masc_tui_theme.Pressure ~t:0.5))
+        schemes)
+;;
+
 (* The fallbacks on the side pane are the page's, decided per ground. *)
 let test_side_pane_limited_capability_paths () =
   let palette = issue_47503_palette () in
@@ -1020,6 +1068,8 @@ let () =
             `Quick test_every_side_pane_token_reads_on_every_scheme
         ; Alcotest.test_case "side pane recede reads on every scheme" `Quick
             test_side_pane_recede_reads_on_every_scheme
+        ; Alcotest.test_case "oklab ramps clear floor on every scheme and surface"
+            `Quick test_oklab_ramps_clear_floor_on_every_scheme_and_surface
 
         ] )
     ; ( "toml theme loading"

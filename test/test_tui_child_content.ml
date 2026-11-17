@@ -10,9 +10,9 @@ let envelope schema fields=`Assoc (("schema",`String schema)::coverage @ fields)
 let receipt kind store through=`Assoc ["kind",`String kind;"store_id",`String store;"through_sequence",`Int through]
 let inventory mode entries =
   let schema,key,kind=match mode with
-    | Consumer.Poll -> "masc.child_content.hints.v1","hints","unchecked"
+    | Consumer.Suffix -> "masc.child_content.hints.v1","hints","unchecked"
     | Audit -> "masc.child_content.receivers.v1","receivers","audited" in
-  let field=match mode with Consumer.Poll -> "hint" | Audit -> "storage" in
+  let field=match mode with Consumer.Suffix -> "hint" | Audit -> "storage" in
   envelope schema ["keeper_name",`String keeper;"cleanup_failures",`List [];
     key,`List (List.map (fun (receiver,status) -> `Assoc ["receiver",receiver_json receiver;
       field,(match status with Ok (store,through) -> receipt kind store through
@@ -45,7 +45,7 @@ let read mode previous entries serve =
   let reads=ref [] in
   let fetch path =
     let uri=Uri.of_string path in
-    let endpoint=match mode with Consumer.Poll -> "/api/v1/keepers/alpha/child-content/hints"
+    let endpoint=match mode with Consumer.Suffix -> "/api/v1/keepers/alpha/child-content/hints"
       | Audit -> "/api/v1/keepers/alpha/child-content/receivers" in
     if Uri.path uri=endpoint then Ok (200,json (inventory mode entries))
     else if Uri.path uri="/api/v1/keepers/alpha/child-content/records" then begin
@@ -57,14 +57,14 @@ let one state=match Consumer.stores state with [store] -> store | _ -> fail "one
 let after uri=Uri.get_query_param uri "after_sequence"
 let records_count state=List.fold_left (fun count (store:Consumer.store) -> count+List.length (Consumer.records store)) 0 (Consumer.stores state)
 let initial () =
-  fst (read Consumer.Poll Consumer.empty [receiver,Ok ("store /&+%",1)]
+  fst (read Consumer.Suffix Consumer.empty [receiver,Ok ("store /&+%",1)]
     (fun uri -> check (option string) "new store begins without cursor" None (after uri);
       Ok (200,json (page "store /&+%" 1 [row 1 (observation "first")]))))
 
 let test_snapshots_suffix_identity_and_idle () =
   let first=initial () in
   let store="store /&+%" in
-  let second,requests=read Consumer.Poll first [receiver,Ok (store,3)] (fun uri ->
+  let second,requests=read Consumer.Suffix first [receiver,Ok (store,3)] (fun uri ->
     check (option string) "exact suffix begins after committed1" (Some "1") (after uri);
     check (option string) "opaque generation survives URI" (Some receiver.receiver_generation) (Uri.get_query_param uri "receiver_generation");
     check (option string) "opaque session survives URI" (Some receiver.session_id) (Uri.get_query_param uri "session_id");
@@ -82,8 +82,8 @@ let test_snapshots_suffix_identity_and_idle () =
     (List.map (fun (row:Read.record) -> row.observation.observation_id) rows);
   check (option string) "empty reported message ID distinct from absence" (Some "") (List.hd rows).observation.message_id;
   check string "empty supplied thinking retained" "" (List.nth rows 1).observation.text;
-  let idle,requests=read Consumer.Poll second [receiver,Ok (store,3)] (fun _ -> fail "unchanged Poll performed full read") in
-  check int "unchanged Poll only hints" 0 (List.length requests);
+  let idle,requests=read Consumer.Suffix second [receiver,Ok (store,3)] (fun _ -> fail "unchanged Suffix performed full read") in
+  check int "unchanged Suffix only hints" 0 (List.length requests);
   check bool "idle keeps actual immutable state identity" true (idle==second);
   check bool "idle keeps exact rows list" true (Consumer.records (one idle)==Consumer.records (one second));
   check bool "coverage is explicitly unavailable" true ((one idle).coverage=Read.Unavailable);
@@ -92,25 +92,25 @@ let test_snapshots_suffix_identity_and_idle () =
 
 let test_newer_receipt_does_not_repeat_full_reads () =
   let first=initial () in
-  let advanced,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)] (fun _ ->
+  let advanced,_=read Consumer.Suffix first [receiver,Ok ("store /&+%",2)] (fun _ ->
     Ok (200,json (page "store /&+%" 3 [row 2 (observation "second");row 3 (observation "third")]))) in
   check (option int) "concurrent append actual audited receipt may exceed hint" (Some 3)
     (Option.map (fun (c:Read.cursor) -> c.after_sequence) (one advanced).cursor);
-  let fresh,requests=read Consumer.Poll advanced [receiver,Ok ("store /&+%",3)] (fun _ -> fail "already audited tail repeated full read") in
+  let fresh,requests=read Consumer.Suffix advanced [receiver,Ok ("store /&+%",3)] (fun _ -> fail "already audited tail repeated full read") in
   check int "new hint already covered by actual receipt" 0 (List.length requests);
-  let _,requests=read Consumer.Poll fresh [receiver,Ok ("store /&+%",2)] (fun _ -> fail "same attempted stale hint repeated full read") in
+  let _,requests=read Consumer.Suffix fresh [receiver,Ok ("store /&+%",2)] (fun _ -> fail "same attempted stale hint repeated full read") in
   check int "same original trigger hint does not repeat scan" 0 (List.length requests)
 
 let test_cross_page_duplicate_and_receiver_failure () =
   let first=initial () in
-  let bad,requests=read Consumer.Poll first [receiver,Ok ("store /&+%",2)] (fun _ ->
+  let bad,requests=read Consumer.Suffix first [receiver,Ok ("store /&+%",2)] (fun _ ->
     Ok (200,json (page "store /&+%" 2 [row 2 (observation "first")]))) in
   check int "duplicate candidate actually fetched" 1 (List.length requests);
   check int "cross-page composite replay does not create second sequence" 1 (records_count bad);
   check (option int) "failure does not advance audited cursor" (Some 1) (Option.map (fun (c:Read.cursor) -> c.after_sequence) (one bad).cursor);
   (match (one bad).error with Some (Consumer.Invalid_response Read.Duplicate_observation) -> () | _ -> fail "duplicate not typed");
   let other:Read.receiver={receiver with client_uuid="other /&+%"} in
-  let mixed,requests=read Consumer.Poll bad [receiver,Ok ("store /&+%",2);other,Ok ("other",1)] (fun uri ->
+  let mixed,requests=read Consumer.Suffix bad [receiver,Ok ("store /&+%",2);other,Ok ("other",1)] (fun uri ->
     check (option string) "failed same hint not retried while other client advances" (Some other.client_uuid) (Uri.get_query_param uri "client_uuid");
     Ok (200,json (page ~receiver:other "other" 1 [row 1 (observation ~receiver:other "other-observation")]))) in
   check int "one healthy receiver read" 1 (List.length requests);
@@ -121,10 +121,10 @@ let test_audited_failure_sticky_until_full_success () =
   let first=initial () in
   let failed,_=read Consumer.Audit first [receiver,Error "store_corrupt"] (fun _ -> fail "failed audited inventory must not read records") in
   check int "one audited receiver failure is published once" 1 (List.length (Consumer.errors failed));
-  let distinct,_=read Consumer.Poll failed [receiver,Error "store_unavailable"]
+  let distinct,_=read Consumer.Suffix failed [receiver,Error "store_unavailable"]
       (fun _ -> fail "failed inventory must not read records") in
   check int "distinct scoped failure codes are retained" 2 (List.length (Consumer.errors distinct));
-  let hinted,requests=read Consumer.Poll failed [receiver,Ok ("store /&+%",1)] (fun _ -> fail "same hint retried full history") in
+  let hinted,requests=read Consumer.Suffix failed [receiver,Ok ("store /&+%",1)] (fun _ -> fail "same hint retried full history") in
   check int "same hint no repeated corrupt full scan" 0 (List.length requests);
   check bool "unchecked inventory cannot clear audited failure" true (Consumer.errors hinted<>[]);
   let repaired,requests=read Consumer.Audit hinted [receiver,Ok ("store /&+%",1)] (fun uri ->
@@ -132,9 +132,9 @@ let test_audited_failure_sticky_until_full_success () =
     Ok (200,json (page "store /&+%" 1 [row 1 (observation "first")]))) in
   check int "Audit retries full records even unchanged tail" 1 (List.length requests);
   check int "actual full success clears current audited failure" 0 (List.length (Consumer.errors repaired));
-  let failed_read,_=read Consumer.Poll repaired [receiver,Ok ("store /&+%",2)] (fun _ ->
+  let failed_read,_=read Consumer.Suffix repaired [receiver,Ok ("store /&+%",2)] (fun _ ->
     Ok (503,json (Read.to_json (Read.failure Read.Store_corrupt)))) in
-  let no_retry,requests=read Consumer.Poll failed_read [receiver,Ok ("store /&+%",2)] (fun _ -> fail "same failed hint repeated") in
+  let no_retry,requests=read Consumer.Suffix failed_read [receiver,Ok ("store /&+%",2)] (fun _ -> fail "same failed hint repeated") in
   check int "failed full read attempt is throttled by exact hint" 0 (List.length requests);
   check bool "same failed attempt remains visibly failed" true (Consumer.errors no_retry<>[])
 
@@ -145,7 +145,7 @@ let test_audit_redaction_disappearance_and_replacement () =
     Ok (200,json (page "store /&+%" 1 [row 1 (observation ~body:"[redacted]" ~model:"[redacted-model]" "first")]))) in
   check string "current full response replaces cached text" "[redacted]" (List.hd (Consumer.records (one fresh))).observation.text;
   check string "current full response replaces cached model only" "[redacted-model]" (List.hd (Consumer.records (one fresh))).observation.model;
-  let absent,_=read Consumer.Poll fresh [] (fun _ -> fail "absent inventory must not invent store") in
+  let absent,_=read Consumer.Suffix fresh [] (fun _ -> fail "absent inventory must not invent store") in
   check int "disappeared history retained" 1 (records_count absent);
   check bool "last-observed absent body not claimed currently redacted" true (Consumer.diagnostics absent<>Consumer.diagnostics fresh);
   check int "collector-lifetime caveat accompanies a real diagnostic" 2
@@ -159,7 +159,7 @@ let test_audit_redaction_disappearance_and_replacement () =
     (List.length (Consumer.diagnostics service));
   let unreadable=Consumer.failed fresh (Consumer.Transport "refused") in
   check (list string) "unreadable server answer gets no caveat" [] (Consumer.diagnostics unreadable);
-  let replacement,_=read Consumer.Poll absent [receiver,Ok ("replacement",1)] (fun uri ->
+  let replacement,_=read Consumer.Suffix absent [receiver,Ok ("replacement",1)] (fun uri ->
     check (option string) "new incarnation begins without old cursor" None (after uri);
     Ok (200,json (page "replacement" 1 [row 1 (observation "first")]))) in
   check int "new incarnation cannot collapse old observations" 2 (records_count replacement);
@@ -168,7 +168,7 @@ let test_audit_redaction_disappearance_and_replacement () =
 
 let test_audit_refuses_rollback_and_identity_rewrite () =
   let rows=List.init 4 (fun index -> row (index+1) (observation (string_of_int (index+1)))) in
-  let initial,_=read Consumer.Poll Consumer.empty [receiver,Ok ("stable",4)] (fun _ -> Ok (200,json (page "stable" 4 rows))) in
+  let initial,_=read Consumer.Suffix Consumer.empty [receiver,Ok ("stable",4)] (fun _ -> Ok (200,json (page "stable" 4 rows))) in
   let rollback,_=read Consumer.Audit initial [receiver,Ok ("stable",2)] (fun _ ->
     Ok (200,json (page "stable" 2 [List.nth rows 0;List.nth rows 1]))) in
   check int "same-incarnation rollback retains all known rows" 4 (records_count rollback);
@@ -181,24 +181,24 @@ let test_audit_refuses_rollback_and_identity_rewrite () =
 
 let test_changed_hint_cannot_clear_known_rewrite_with_suffix () =
   let rows=List.init 4 (fun i -> row (i+1) (observation (string_of_int (i+1)))) in
-  let first,_=read Consumer.Poll Consumer.empty [receiver,Ok ("stable",4)]
+  let first,_=read Consumer.Suffix Consumer.empty [receiver,Ok ("stable",4)]
     (fun _ -> Ok (200,json (page "stable" 4 rows))) in
   let broken=row 1 (observation ~provider:"changed" "1")::List.tl rows in
   let refused,_=read Consumer.Audit first [receiver,Ok ("stable",4)]
     (fun _ -> Ok (200,json (page "stable" 4 broken))) in
-  let failed,_=read Consumer.Poll refused [receiver,Ok ("stable",5)] (fun uri ->
+  let failed,_=read Consumer.Suffix refused [receiver,Ok ("stable",5)] (fun uri ->
     check (option string) "known rewrite requires full request" None (after uri);
     Error (Consumer.Transport "temporary transport failure")) in
   (match (one failed).error with Some (Consumer.History_rewritten _) -> ()
    | _ -> fail "temporary failure erased known prefix rewrite");
-  let suffix,_=read Consumer.Poll failed [receiver,Ok ("stable",6)] (fun uri ->
+  let suffix,_=read Consumer.Suffix failed [receiver,Ok ("stable",6)] (fun uri ->
     check (option string) "transient failure keeps full-recheck requirement" None (after uri);
     Ok (200,json (page "stable" 6 [row 5 (observation "5");row 6 (observation "6")]))) in
   check int "internally valid suffix cannot replace retained prefix" 4 (records_count suffix);
   (match (one suffix).error with Some (Consumer.History_rewritten _) -> ()
    | _ -> fail "suffix cleared known rewrite");
   let fresh=rows @ [row 5 (observation "5");row 6 (observation "6");row 7 (observation "7")] in
-  let repaired,_=read Consumer.Poll suffix [receiver,Ok ("stable",7)] (fun uri ->
+  let repaired,_=read Consumer.Suffix suffix [receiver,Ok ("stable",7)] (fun uri ->
     check (option string) "changed hint retries complete prefix" None (after uri);
     Ok (200,json (page "stable" 7 fresh))) in
   check int "matching full prefix repairs and advances history" 7 (records_count repaired);
@@ -210,21 +210,21 @@ let test_bad_pages_and_guarded_fetch_keep_cache () =
     200,json (page "store /&+%" 3 [row 3 (observation "third")]);
     200,json (page "store /&+%" 2 [row 2 (observation ~receiver:{receiver with client_uuid="foreign"} "second")])] in
   List.iter (fun (status,body) ->
-    let failed,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)] (fun _ -> Ok (status,body)) in
+    let failed,_=read Consumer.Suffix first [receiver,Ok ("store /&+%",2)] (fun _ -> Ok (status,body)) in
     check int "malformed/refused/foreign/gapped read retains old rows" 1 (records_count failed);
     check bool "failed read is visible" true (Consumer.errors failed<>[])) variants;
-  let withdrawn,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)] (fun _ -> Error (Consumer.Kept_back "workspace authority withdrawn")) in
+  let withdrawn,_=read Consumer.Suffix first [receiver,Ok ("store /&+%",2)] (fun _ -> Error (Consumer.Kept_back "workspace authority withdrawn")) in
   check int "guarded fetch refuses before cache replacement" 1 (records_count withdrawn);
   check bool "guarded transport refusal visible" true (Consumer.errors withdrawn<>[]);
-  (match Consumer.read ~mode:Consumer.Poll ~keeper_name:"beta" ~previous:first
+  (match Consumer.read ~mode:Consumer.Suffix ~keeper_name:"beta" ~previous:first
     ~fetch:(fun _ -> fail "foreign Keeper request must refuse before fetch") with
    | Error (Consumer.Invalid_response Read.Scope_mismatch) -> () | _ -> fail "foreign Keeper cache reused")
 
 let test_failed_store_incarnations_remain_distinct () =
   let first=initial () in
-  let old_failed,_=read Consumer.Poll first [receiver,Ok ("store /&+%",2)]
+  let old_failed,_=read Consumer.Suffix first [receiver,Ok ("store /&+%",2)]
     (fun _ -> Error (Consumer.Transport "read unavailable")) in
-  let both_failed,_=read Consumer.Poll old_failed [receiver,Ok ("replacement",1)]
+  let both_failed,_=read Consumer.Suffix old_failed [receiver,Ok ("replacement",1)]
     (fun _ -> Error (Consumer.Transport "read unavailable")) in
   let incarnations=List.map (function
     | Consumer.Receiver_read (owner,store_id,Consumer.Transport _) ->
@@ -243,7 +243,7 @@ let test_failed_store_incarnations_remain_distinct () =
   check int "both received histories preserved" 2 (records_count recovered)
 
 let test_rejected_page_cleanup_evidence () =
-  let rejected,_=read Consumer.Poll Consumer.empty [receiver,Ok ("stable",2)]
+  let rejected,_=read Consumer.Suffix Consumer.empty [receiver,Ok ("stable",2)]
     (fun _ -> Ok (200,json (page ~cleanup:["remove stale journal"] "stable" 1
       [row 1 (observation "first")]))) in
   check int "behind-frontier page does not admit content" 0 (records_count rejected);

@@ -3303,7 +3303,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
 (* Fetch the held tool calls for the Approvals surface. Its own fiber for the
    same reason every loader runs on one: a slow server costs the refresh, not
    the keypress. *)
-let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Join) state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if state.workspace_identity <> Workspace_identity_match then ()
@@ -3944,7 +3944,7 @@ let retains_receipt_workspace state expected_workspace =
       Option.exists (same_server_workspace expected_workspace) state.server_identity
   | Workspace_identity_unread | Workspace_identity_mismatch _ -> false
 
-let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+let launch_gate_snapshot_load ?(intent = Snapshot_read.Join) state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   if state.workspace_identity <> Workspace_identity_match then ()
@@ -3963,7 +3963,7 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   let port = state.port in
   Log.Transport.debug "started Gate snapshot request=%d intent=%s"
     (Snapshot_read.request_id request)
-    (match intent with Snapshot_read.Poll -> "poll" | Snapshot_read.Refresh -> "refresh");
+    (match intent with Snapshot_read.Join -> "join" | Snapshot_read.Refresh -> "refresh");
   launch_workspace_async_read state ~mailbox
     ~deliver:(fun result ->
       enqueue_async mailbox (Gate_msg (Gate_snapshot_loaded (request, expected_workspace, result))))
@@ -4246,7 +4246,7 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
         (Keeper_msg (Keeper_chat_approval_answered
            (request, tool_call_id, allow, Error (Request_failed "Eio switch is unavailable"))))
 
-(* Automatic polling shares a pending reading for the same Keeper. Explicit
+(* An owed read shares a pending reading for the same Keeper. Explicit
    refresh and selection changes supersede it, retaining the generation guard. *)
 let close_tools_async_task state =
   Option.iter (fun request -> Masc_tui_workspace_job.cancel_observation state ~key:request.atr_job)
@@ -4670,7 +4670,7 @@ let launch_keeper_chat_schedules_load state ~mailbox ~keeper_name =
 let note_schedule_agenda_read_started state =
   state.schedules_agenda_owed <- Masc_tui_owed_read.started state.schedules_agenda_owed
 
-let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
+let launch_schedules_load ?(intent = Snapshot_read.Join) ?page state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
   let navigating = Option.is_some page in
@@ -4706,7 +4706,7 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
 
   end
 
-let launch_schedule_agenda_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+let launch_schedule_agenda_load ?(intent = Snapshot_read.Join) state ~mailbox =
   if server_authority_ready state then begin
     let enqueue_async = workspace_enqueue state in
     let read, request = Snapshot_read.start ~intent state.schedules_agenda_read in
@@ -6976,14 +6976,14 @@ let launch_browser_lane state ~mailbox operation =
        | Read_refresh | Discover _ | Screenshot _
        | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
        | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-       | Viewport_cadence _ | Viewport_pointer _ -> ())
+       | Viewport_observed _ | Viewport_pointer _ -> ())
   | None -> ()
   | Some view when busy view -> ()
   | Some view when (match operation with
     | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _
     | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _
     | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-    | Viewport_cadence _ | Viewport_pointer _ -> true
+    | Viewport_observed _ | Viewport_pointer _ -> true
     | Discover _ -> false)
       && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
@@ -7006,7 +7006,7 @@ let launch_browser_lane state ~mailbox operation =
          result; effects still use the observed document/URL checks. Failed
          refreshes withdraw that scene. *)
       let view = match operation with
-        | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
+        | Discover _ | Read_refresh | Scene_refresh _ | Viewport_observed _ -> view
         | Read | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None }
@@ -7022,7 +7022,7 @@ let launch_browser_lane state ~mailbox operation =
           | Discover _ | Screenshot _ | Read_refresh
           | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
           | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-          | Viewport_cadence _ | Viewport_pointer _ -> view.read_continuation);
+          | Viewport_observed _ | Viewport_pointer _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
         refresh_pending =
           if operation_is_refresh operation then Some generation else view.refresh_pending } in
@@ -7034,7 +7034,7 @@ let launch_browser_lane state ~mailbox operation =
         | Discover Read_after_discovery | Read | Read_refresh
         | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _
         | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
-        | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> launched);
+        | Viewport_refresh _ | Viewport_observed _ | Viewport_pointer _ -> launched);
       let host = server_peer_host and port = state.port in
       (* The mailbox is the effect boundary. Cancellation still belongs to
          the switch; unexpected transport failures become visible errors. *)
@@ -7092,7 +7092,7 @@ let launch_browser_lane state ~mailbox operation =
               ~expected_url:guard.expected_url
               ~navigation_source:guard.navigation_source
               ~host ~port ~view ~tab_id ())))
-        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_msg (Browser_lane_screenshot_ready {
+        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_observed tab_id -> Browser_msg (Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
@@ -9114,7 +9114,7 @@ let launch_owed_browser_observation state ~mailbox =
          && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed
          && Option.is_none !browser_pointer_press then begin
         let viewport = if state.image_open then Option.map fst state.browser_viewport else None in
-        match Browser_lane_view.cadence_operation ?viewport view with
+        match Browser_lane_view.observation_operation ?viewport view with
         | Some operation ->
             state.browser_observation_owed <- Masc_tui_owed_read.started owed;
             launch_browser_lane state ~mailbox operation
@@ -9391,9 +9391,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
-   a load the other performs. Surfaces not listed refresh on the periodic
-   cadence ([surface_needs]); the ones here are snapshots that would
-   otherwise read as empty until the next tick. *)
+   a load the other performs. Surfaces not listed read through their owed
+   reads ([surface_needs]); the ones here are snapshots that would otherwise
+   read as empty until their next change. *)
 (* Leaving the Browser lane returns to the surface it was opened from. That is
    an arrival: while the lane covered the surface, the surface was off screen
    and dropped what it owed, so it reads the way it reads on arrival. *)
@@ -9556,7 +9556,7 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~cursor =
            (generation, keeper_name, cursor, Error (Keeper_chat_history.Page_read_failed "Eio switch is unavailable"))))
   end
 
-let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~mailbox ~keeper_name =
+let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Suffix) state ~mailbox ~keeper_name =
   let eligible = server_authority_ready state in
   if mode=Masc_tui_native_tasks.Audit
      && not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
@@ -9600,7 +9600,7 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
           result))
   end
 
-let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~mailbox ~keeper_name =
+let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Suffix) state ~mailbox ~keeper_name =
   (* Reading retained server observations does not submit a message or use
      local attachment paths. Remote/missing roster rows are not a refusal. *)
   let eligible = server_authority_ready state in
@@ -9608,7 +9608,7 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
      it does not authorize an HTTP request. Workspace withdrawal clears it. *)
   let audit_running = match List.assoc_opt keeper_name state.msg_child_content_inflight with
     | Some Masc_tui_child_content.Audit -> true
-    | None | Some Masc_tui_child_content.Poll -> false in
+    | None | Some Masc_tui_child_content.Suffix -> false in
   if mode=Masc_tui_child_content.Audit && not audit_running
      && not (List.mem keeper_name state.msg_child_content_audit_pending) then
     state.msg_child_content_audit_pending <- keeper_name :: state.msg_child_content_audit_pending;
@@ -9692,10 +9692,10 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
   if force then state.msg_preparation_details <-
     Masc_tui_preparation_details.refresh ~keeper_name state.msg_preparation_details;
   launch_keeper_child_content_load
-    ~mode:(if force then Masc_tui_child_content.Audit else Masc_tui_child_content.Poll)
+    ~mode:(if force then Masc_tui_child_content.Audit else Masc_tui_child_content.Suffix)
     state ~mailbox ~keeper_name;
   launch_keeper_native_tasks_load
-    ~mode:(if force then Masc_tui_native_tasks.Audit else Masc_tui_native_tasks.Poll)
+    ~mode:(if force then Masc_tui_native_tasks.Audit else Masc_tui_native_tasks.Suffix)
     state ~mailbox ~keeper_name;
   if server_authority_ready state then begin
   let identity = state.server_identity in
@@ -11280,7 +11280,7 @@ let launch_current_autonomous_journals state ~mailbox ~keeper_name =
       | Follow_read {started_at; since_seq} ->
           launch_keeper_chat_journal_loads state ~mailbox ~keeper_name [source, started_at, since_seq])
 
-let launch_runtime_catalog_load ?(intent=Snapshot_read.Poll) state ~mailbox =
+let launch_runtime_catalog_load ?(intent=Snapshot_read.Join) state ~mailbox =
   match begin_runtime_catalog_read state ~intent ~started_ns:(Mtime_clock.elapsed_ns ()) with
   | None ->
       Log.Transport.info "tui_runtime_catalog phase=shared_or_deferred followup=%b resume=%b"
@@ -13997,7 +13997,7 @@ let observe_msx_frame ?(clear_notice = false) ?expected_workspace
        state.msx_live <- view;
        state.msx_frame <- frame;
        msx_surface_frame := frame);
-  (* An explicit fresh observation can rearm polling after a lost tick reply.
+  (* An explicit fresh observation can rearm machine ticks after a lost tick reply.
      It cannot settle an outstanding request whose result has yet to arrive. *)
   match !msx_pending_poll with
   | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame ->
@@ -14074,7 +14074,6 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
   end;
   observe_msx_frame ~clear_notice:true state ~mailbox;
   observe_msx_carts state ~mailbox;
-  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
   Masc_tui_msx.open_menu ~write:write_to_terminal state;
   (* A first DOS read may carry a full screen. Let the menu accept keys while
      the read is in flight, and redraw its watch row when it arrives. *)
@@ -14104,7 +14103,6 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   msx_surface_frame := None;
   state.msx_notice <- None;
   state.msx_worker_down_notice <- None;
-  state.msx_last_poll_ns <- 0L;
   render_spectator state;
   launch_msx_live_read state ~mailbox
 
@@ -14128,7 +14126,6 @@ let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
   state.msx_open <- true;
   state.msx_menu_open <- false;
   state.dos_live <- Masc_tui_machine_live.Unread;
-  state.msx_last_poll_ns <- 0L;
   render_spectator state;
   launch_dos_live_poll state ~mailbox
 
@@ -17884,7 +17881,7 @@ let launch_approvals_summary_load state ~mailbox =
         | None -> ()
         | Some listing_ticket ->
             let read, request =
-              Snapshot_read.start ~intent:Snapshot_read.Poll
+              Snapshot_read.start ~intent:Snapshot_read.Join
                 state.approvals_summary_read
             in
             state.approvals_summary_read <- read;
@@ -18976,7 +18973,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
 (* Required metadata and optional work are separate jobs, slots and cache
    resources. Both retain the workspace observation cancellation owner. *)
 let local_read_intent_name = function
-  | Snapshot_read.Poll -> "poll"
+  | Snapshot_read.Join -> "join"
   | Snapshot_read.Refresh -> "refresh"
 
 let launch_local_source state ~mailbox ~intent ~source ~read ~prepare ~message base_path =
@@ -19071,7 +19068,7 @@ let launch_local_workspace_read state ~mailbox ~intent base_path =
 let launch_local_source_followup state ~mailbox source =
   if Local_read_order.has_followup (local_source_order state source) then
     match source with
-    | Local_keepers -> launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
+    | Local_keepers -> launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Join state.local_base_path
     | Local_work ->
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh
           state.local_base_path
@@ -19392,7 +19389,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
      | Masc_tui_types.Workspace_identity_mismatch _ ->
          state.local_workspace <- Local_workspace_unread;
          state.local_keepers <- Local_workspace_unread;
-         launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path);
+         launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Join state.local_base_path);
     let input_workspace = workspace_input_identity_of_server state.server_identity in
     (match List.assoc_opt input_workspace state.suspended_keeper_inputs with
      | None -> ()
@@ -19890,7 +19887,7 @@ let launch_owed_keeper_logs state ~mailbox =
       then
         match keeper_log_target state with
         | Some keeper when String.equal keeper.k_name owed.klgo_keeper ->
-            ignore (launch_keeper_log_read state ~mailbox ~intent:Snapshot_read.Poll keeper)
+            ignore (launch_keeper_log_read state ~mailbox ~intent:Snapshot_read.Join keeper)
         | Some _ | None -> ()
 
 let owe_keeper_logs_read state ~mailbox ~keeper_name =
@@ -19907,7 +19904,7 @@ let reconcile_keeper_logs state ~mailbox =
       (match state.keeper_log_read with
        | Some request when request.klr_reading == state.workspace_read_authority
            && keeper_log_equal_key key (Masc_tui_fetched.request_key request.klr_request) -> false
-       | Some _ | None -> launch_keeper_log_read state ~mailbox ~intent:Snapshot_read.Poll keeper)
+       | Some _ | None -> launch_keeper_log_read state ~mailbox ~intent:Snapshot_read.Join keeper)
   | (Some _ | None), (Workspace_identity_unread | Workspace_identity_mismatch _
       | Workspace_identity_match_unconfirmed _ | Workspace_identity_match) ->
       let held = Option.is_some state.keeper_log_read in
@@ -20253,7 +20250,7 @@ let open_keeper_detail state ~mailbox (keeper : keeper) =
   select_keeper_name state keeper.k_name;
   state.keeper_detail_focus <- Right_pane;
   state.detail_scroll <- 0;
-  ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll);
+  ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Join);
   (* A sticky non-Info tab re-reads for the keeper the cursor now names;
      without this the pane shows "(loading)" forever after a cursor move,
      because the stamped answer names the previous keeper. *)
@@ -21361,9 +21358,10 @@ let read_authority state =
 (* A read sent under an authority that a refresh then withdrew never lands:
    its completion carries the old authority and is dropped. A full or scoped
    refresh ends here once it is applied, so each read the move withdrew is
-   sent again in one place instead of waiting a tick (2026-10-07: after boot
-   the Answering surface said "not loaded yet", an open chat showed no
-   running turn, and Home showed no decision cards until the next tick). It
+   sent again in one place; no periodic read would send it later (2026-10-07,
+   under the old 2s cadence: after boot the Answering surface said "not
+   loaded yet", an open chat showed no running turn, and Home showed no
+   decision cards until the next tick). It
    also runs after an admitted cold probe. Roster-dependent presentation still
    waits for its separately owned roster observation. *)
 let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
@@ -28958,8 +28956,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                      | Some _, None | None, Some _ ->
                        Masc_tui_machine_live.Failed "MSX tick mark and picture disagree");
                   msx_surface_frame := frame;
-                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  render_spectator state
+                                  render_spectator state
                 end)
        | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
   | Msx_msg (Msx_activity_loaded (request, result)) ->
@@ -29001,8 +28998,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                           | Advancing -> None
                           | Observing refusal -> Some (Masc_tui_msx_tick.refusal_notice refusal)
                           | Outcome_unknown -> state.msx_notice))));
-             state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-             render_spectator state
+                        render_spectator state
            end
        | Poll_observing _ | Poll_pending _ | Poll_ready _ -> ())
   | Msx_msg (Msx_live_loaded (request, result)) ->
@@ -29018,7 +29014,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (* [advance] answers [None] when the read changes nothing on
                 screen, and MSX carries no activity feed beside the picture,
                 so an unchanged read repaints nothing -- the DOS branch below
-                already reads it that way. Poll bookkeeping still runs:
+                already reads it that way. Owed-read bookkeeping still runs:
                 liveness is not paint. *)
              let picture_changed =
                match advance_machine_live state ~request:Kept_request.Msx_screen_read
@@ -29035,8 +29031,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame -> msx_pending_poll := Poll_ready Advancing
               | Poll_ready (Advancing | Observing _ | Outcome_unknown)
               | Poll_pending _ | Poll_observing _ -> ());
-             state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-             if picture_changed then render_spectator state
+                        if picture_changed then render_spectator state
            end
        | Some _ | None -> ())
   | Dos_live_loaded (request, result) ->
@@ -30105,7 +30100,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Loading (_, (Read | Screenshot _ | Read_refresh
                  | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
                  | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
-                 | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _)) | Failed _ ->
+                 | Viewport_refresh _ | Viewport_observed _ | Viewport_pointer _)) | Failed _ ->
                (if generation=state.browser_lane_generation
                 then Browser_lane_view.accept_activity result view else view),false in
            state.browser_lane <- Some next;
@@ -30916,7 +30911,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Option.iter (fun admitted ->
         let _, cols = Masc_tui_render_prim.get_terminal_size () in
         state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1));
-        if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Poll)) admission;
+        if admitted.kla_followup then ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Join)) admission;
       launch_owed_keeper_logs state ~mailbox
   | Keeper_msg (Keeper_execute_streamed (stream, event)) ->
       ignore (take_keeper_execute_stream state stream event)
@@ -34923,7 +34918,7 @@ Use relative paths for resources already held in the package. -->
         if Option.is_none state.browser_viewport then
           state.image_request_generation <- state.image_request_generation + 1
         else match state.browser_lane with
-          | Some ({load = Browser_lane_view.Loading (_, Viewport_cadence _);_} as view) ->
+          | Some ({load = Browser_lane_view.Loading (_, Viewport_observed _);_} as view) ->
               (* A background image read yields to the gesture on the image
                  already displayed. Its late response cannot redraw between
                  press and release or reopen a dismissed viewport. *)
@@ -35224,10 +35219,8 @@ Use relative paths for resources already held in the package. -->
                   | Masc_tui_machine_live.Failed _ | Masc_tui_machine_live.Kept_back _) -> false
               in
               if loaded then begin
-                (* A game is loaded underneath: fall back to watching it, and
-                   poll at once so the next tick refreshes it (parity with the
-                   Watch arm). *)
-                state.msx_last_poll_ns <- 0L;
+                (* A game is loaded underneath: fall back to watching it
+                   (parity with the Watch arm). *)
                 render_spectator state
               end
               else begin
@@ -35238,8 +35231,6 @@ Use relative paths for resources already held in the package. -->
               state.msx_menu_open <- false;
               state.machine_interaction <- Observe_machine;
               state.machine_source <- source;
-              (* Poll at once so the spectator opens on a fresh frame. *)
-              state.msx_last_poll_ns <- 0L;
               render_spectator state
           | (Load cart | Swap_disk cart) as choice ->
               let swapping = match choice with
@@ -35259,8 +35250,7 @@ Use relative paths for resources already held in the package. -->
                       state.msx_menu_open <- false;
                       state.machine_source <- Masc.Machine_lane.Msx;
                       observe_msx_frame ?expected_workspace state ~mailbox:async_messages;
-                      state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                      render_spectator state
+                                          render_spectator state
                   | Error message ->
                       Masc_tui_msx.render_menu ~write:write_to_terminal
                         ~status:((if swapping then "disk change failed: " else "load failed: ")
@@ -35302,20 +35292,17 @@ Use relative paths for resources already held in the package. -->
           (match state.machine_interaction with
            | Control_machine ->
                state.machine_interaction <- Observe_machine;
-               state.msx_last_poll_ns <- 0L;
                render_spectator state
            | Observe_machine ->
                run_machine_change state ~mailbox:async_messages ~refused:Fun.id ~unknown:Fun.id
                  ~withdrawn:(fun refusal ->
                    state.msx_notice <- Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                      ~request:Kept_request.Msx_control refusal);
-                   state.msx_last_poll_ns <- 0L;
                    render_spectator state)
                  ~deliver:(fun _expected_workspace result ->
                    (match result with
                     | Ok () -> state.machine_interaction <- Control_machine
                     | Error detail -> state.msx_notice <- Some detail);
-                   state.msx_last_poll_ns <- 0L;
                    render_spectator state)
                  (fun ~port:_ ~expected_workspace:_ -> Ok ()))
       | Some "f8" ->
@@ -35344,8 +35331,7 @@ Use relative paths for resources already held in the package. -->
                    state.msx_notice <- Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                      ~request:(if restore then Kept_request.Msx_restore else Kept_request.Msx_checkpoint)
                      refusal);
-                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                   render_spectator state)
+                                    render_spectator state)
                  ~deliver:(fun _expected_workspace result ->
                    state.msx_notice <- Some (match result with
                      | Ok () -> if restore then "Restore completed; inspecting current workspace screen." else "Saved quick checkpoint."
@@ -35360,8 +35346,7 @@ Use relative paths for resources already held in the package. -->
                          | Ok () | Error (Checkpoint_outcome_unknown _) ->
                              state.machine_interaction <- Observe_machine;
                              inspect_pending_msx_checkpoint state pending));
-                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                   render_spectator state)
+                                    render_spectator state)
                  (fun ~port ~expected_workspace ->
                    let pending = {checkpoint_operation_id=Random_id.uuid_v7 ();
                      checkpoint_restore=restore;checkpoint_slot="quick";
@@ -35403,14 +35388,12 @@ Use relative paths for resources already held in the package. -->
                 ~withdrawn:(fun refusal ->
                   state.msx_notice <- Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                     ~request:Kept_request.Msx_key refusal);
-                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  render_spectator state)
+                                  render_spectator state)
                 ~deliver:(fun expected_workspace result ->
                   (match result with
                    | Ok _ -> observe_msx_frame ~clear_notice:true ?expected_workspace state ~mailbox:async_messages
                    | Error detail -> state.msx_notice <- Some detail);
-                  state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
-                  render_spectator state)
+                                  render_spectator state)
                 (fun ~port ~expected_workspace -> Masc_tui_http.post_msx_press
                   ~expected_workspace ~host:server_peer_host ~port ~keys:[ server_key ])
           | None -> render_spectator state));
@@ -39460,7 +39443,7 @@ Use relative paths for resources already held in the package. -->
                                     | Read_refresh | Scene_read _ | Scene_regions _
                                     | Scene_refresh _ | Scene_scroll _ | Scene_focus _
                                     | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
-                                    | Viewport_refresh _ | Viewport_cadence _
+                                    | Viewport_refresh _ | Viewport_observed _
                                     | Viewport_pointer _ ))) as other -> other) }
                  | "r" when not (busy view) ->
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
@@ -44193,7 +44176,7 @@ Use relative paths for resources already held in the package. -->
             | Some _ ->
                 state.log_scroll <- 0;
                 transition_keeper_view state (Keepers Keeper_logs);
-                ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Poll)
+                ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Join)
             | None -> ())
 | Some "c" | Some "C"
          when state.view = Runtime

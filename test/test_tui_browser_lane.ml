@@ -170,7 +170,7 @@ let test_unserved_gesture () =
   let refused = refuse_gesture unserved ready in
   expect "a refused gesture is not a failed read"
     (refused.load = ready.load && read_status refused = Read_ok && not (busy refused));
-  expect "the background refresh keeps running" (cadence_operation refused = Some Read_refresh);
+  expect "the background refresh keeps running" (observation_operation refused = Some Read_refresh);
   let refreshed = accept ~generation:5 (decode (response ()))
       { refused with load = Loading (5, Read_refresh) } in
   expect "a refresh that lands keeps the refusal"
@@ -211,14 +211,14 @@ let test_screenshot_ownership () =
 (* The predicate called by [Masc_tui] decides whether the accepted image can
    stay on screen. Exercise the same decision without driving a terminal. *)
 let test_viewport_cadence_skip_inputs () =
-  let pending = { (loaded ()) with load = Loading (9, Viewport_cadence 2);
+  let pending = { (loaded ()) with load = Loading (9, Viewport_observed 2);
                                   refresh_pending = Some 9 } in
   let settle ~generation response view =
     let settled, shot = accept_screenshot ~generation (decode_screenshot response) view in
     (settled, Option.get shot) in
   let rearm generation view shot =
-    match cadence_operation ~viewport:shot view with
-    | Some (Viewport_cadence 2 as operation) ->
+    match observation_operation ~viewport:shot view with
+    | Some (Viewport_observed 2 as operation) ->
         { view with load = Loading (generation, operation); refresh_pending = Some generation }
     | _ -> failwith "viewport cadence did not re-arm" in
   let settled, shot = settle ~generation:9 (screenshot_response ()) pending in
@@ -265,11 +265,11 @@ let test_viewport_cadence_skip_inputs () =
       "height", {shot with viewport = {shot.viewport with height = shot.viewport.height +. 1.}};
       "scroll Y", {shot with viewport = {shot.viewport with scroll_y = shot.viewport.scroll_y +. 1.}} ];
   expect "the armed cadence keeps naming the settled viewport tab"
-    (cadence_operation ~viewport:shot settled = Some (Viewport_cadence 2));
+    (observation_operation ~viewport:shot settled = Some (Viewport_observed 2));
   expect "a busy view arms no cadence, so no skip input is produced at all"
-    (cadence_operation ~viewport:shot {(loaded ()) with load = Loading (9, Viewport_cadence 2)} = None);
+    (observation_operation ~viewport:shot {(loaded ()) with load = Loading (9, Viewport_observed 2)} = None);
   List.iter (fun (owner, view) ->
-    expect (owner ^ " blocks cadence") (cadence_operation ~viewport:shot view = None))
+    expect (owner ^ " blocks cadence") (observation_operation ~viewport:shot view = None))
     [ "pending refresh", {settled with refresh_pending = Some 9};
       "client picker", {settled with client_picker = Some 0} ]
 
@@ -348,7 +348,7 @@ let test_client_activity_preserves_connection () =
       (next.selected_tab=selected.selected_tab && next.scroll=selected.scroll
        && next.reading=selected.reading && next.selection=selected.selection);
     expect "cadence and requests retain their exact owner"
-      (cadence_operation next=Some Read_refresh && request_body next=request_body initial);
+      (observation_operation next=Some Read_refresh && request_body next=request_body initial);
     expect "current browser picker uses immutable connection identity"
       (browser_choice_selected selected (Connected_browser current));
     let pinned = choose_browser (Connected_browser current) {selected with client_picker=Some 0} in
@@ -584,26 +584,26 @@ let test_scoped_refresh_failure_retains_read_intent () =
     {initial with load=Loading (80,focus);read_view=read_view_for_operation focus initial.read_view} in
   expect "focused decoded scene accepted" (focused.scene=Some scoped);
   let refresh = Scene_refresh {tab_id=2;scene_view=Browser_lane.Content;scope=Some target} in
-  expect "focused cadence retains exact region" (cadence_operation focused=Some refresh);
+  expect "focused cadence retains exact region" (observation_operation focused=Some refresh);
   let pending = {focused with load=Loading (81,refresh);
     read_view=read_view_for_operation refresh focused.read_view;refresh_pending=Some 81} in
-  expect "busy refresh cannot launch another cadence" (cadence_operation pending=None);
+  expect "busy refresh cannot launch another cadence" (observation_operation pending=None);
   let operator_owned = yield_refresh_to_input pending in
   expect "operator input can proceed while the read is pending" (not (busy operator_owned));
-  expect "superseding a result does not stack periodic reads" (cadence_operation operator_owned=None);
+  expect "superseding a result does not stack periodic reads" (observation_operation operator_owned=None);
   let superseded = accept_scene ~generation:81 (Error "late background failure") operator_owned in
   expect "late result keeps the operator observation" (superseded.scene=focused.scene && superseded.load=Idle);
-  expect "actual completion releases cadence slot" (superseded.refresh_pending=None && cadence_operation superseded=Some refresh);
+  expect "actual completion releases cadence slot" (superseded.refresh_pending=None && observation_operation superseded=Some refresh);
   let failed = accept_scene ~generation:81 (Error "transport unavailable") pending in
   expect "failed refresh withdraws stale action references" (failed.scene=None && selected_scene_target failed=None);
-  expect "retry retains original scoped scene intent" (cadence_operation failed=Some refresh);
-  expect "picker owns cadence" (cadence_operation {failed with client_picker=Some 0}=None);
+  expect "retry retains original scoped scene intent" (observation_operation failed=Some refresh);
+  expect "picker owns cadence" (observation_operation {failed with client_picker=Some 0}=None);
   let new_map = success (decode_scene (scene_json ~document_id:"replacement-document" ~view:"regions" ~scope:`Null)) in
   let retry = {failed with load=Loading (82,refresh)} in
   let resolved = accept_scene ~generation:82 (Ok new_map) retry in
   expect "replacement document returns an observed region map" (resolved.scene=Some new_map);
   expect "next cadence follows resolved map instead of expired scope"
-    (cadence_operation resolved=Some (Scene_refresh {tab_id=2;scene_view=Browser_lane.Regions;scope=None}))
+    (observation_operation resolved=Some (Scene_refresh {tab_id=2;scene_view=Browser_lane.Regions;scope=None}))
 
 let test_unified_browser_picker () =
   expect "Automatic stays selectable without native clients"
@@ -737,10 +737,10 @@ let test_operation_is_refresh () =
                     expected_url="https://example.org/"}
     ; Scene_follow_refresh {tab_id=2;guard;scene_view=Browser_lane.Content}
     ; Viewport_refresh {tab_id=2;expected_url="https://example.org/"}
-    ; Viewport_cadence 2
+    ; Viewport_observed 2
     ; Viewport_pointer {tab_id=2;expected_url="https://example.org/";action=Browser_lane.Activate_tab} ] in
   let expected_refresh = function
-    | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> true
+    | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_observed _ -> true
     | Discover _ | Read | Screenshot _
     | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _
     | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ -> false in
@@ -832,7 +832,7 @@ let test_automatic_refusals () =
   let prompt, read = automatic_discover (create ()) (automatic_answer ~listed:[] unavailable) in
   expect "with no browser available the reader asks for a choice and reads nothing"
     (not read && prompt.load=Failed "No connected browser" && prompt.client_picker=Some 0
-     && prompt.reading=None && cadence_operation prompt=None);
+     && prompt.reading=None && observation_operation prompt=None);
   let without_client = recommended "live" None "existing_login" in
   let unknown_reason = recommended "live" (Some other.client_id) "unknown_reason" in
   let unknown_lane = recommended "unknown" None "existing_login" in

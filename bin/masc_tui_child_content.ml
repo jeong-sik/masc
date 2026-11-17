@@ -5,7 +5,7 @@ type error = Transport of string | Kept_back of string | Http_refused of int | I
   | Invalid_response of Read.decode_error | Service of Read.failure
   | Persistence of Read.receiver * Read.error_code | Receiver_read of Read.receiver * string * error
   | History_rewritten of Read.receiver * string
-type read_mode = Poll | Audit
+type read_mode = Suffix | Audit
 module Keys = Set.Make (struct
   type t = string * int * Runtime_claude_code.content_channel
   let compare (left_id,left_ordinal,left_channel) (right_id,right_ordinal,right_channel) =
@@ -166,7 +166,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
   let* ()=match previous.keeper_name with None -> Ok ()
     | Some owner when owner=keeper_name -> Ok () | Some _ -> Error (Invalid_response Read.Scope_mismatch) in
   let* inventory=match mode with
-    | Poll ->
+    | Suffix ->
         let* response=decode ~fetch (prefix keeper_name ^ "hints") in
         let* page=Read.hints_of_response ~keeper_name response |> Result.map_error (fun error -> Invalid_response error) in
         Ok {receivers=List.map (fun (entry:Read.hint_entry) -> entry.receiver,
@@ -179,7 +179,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
             match entry.storage with Read.Audited cursor -> Ok cursor | Failed code -> Error code) page.receivers;
           cleanup_failures=page.cleanup_failures;coverage=page.coverage} in
   let audit_failures=ref previous.audit_failures in
-  (match mode with Poll -> () | Audit ->
+  (match mode with Suffix -> () | Audit ->
     List.iter (fun (receiver,status) -> match status with
       | Ok _ -> ()
       | Error code -> audit_failures := (receiver,code)::List.remove_assoc receiver !audit_failures)
@@ -189,7 +189,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
     | Ok (advertised:Read.cursor) ->
         let same (store:store)=store.receiver=receiver && store.store_id=advertised.store_id in
         let old=List.find_opt same stores in
-        if mode=Poll && Option.exists (fun (store:store) ->
+        if mode=Suffix && Option.exists (fun (store:store) ->
           store.attempted=Some advertised || (store.error=None && store.cursor=Some advertised)) old
         then stores else
         (* A suffix cannot repair evidence that the retained prefix changed.

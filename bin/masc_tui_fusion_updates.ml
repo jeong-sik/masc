@@ -406,8 +406,8 @@ let launch_options_loaded state ~generation ~report result =
             state.fusion_launch <- None;
             (* [fusion_launch_error] draws the reason now and the event
                keeps it: a successful list load clears that line, and the
-               cadence issues one every two seconds, so the line alone
-               would show the reason for less time than it takes to read. *)
+               next fusion change brings one, so the line alone could show
+               the reason for less time than it takes to read. *)
             state.fusion_launch_error <- Some detail;
             report ("Fusion launch: " ^ detail)
         | Ok options ->

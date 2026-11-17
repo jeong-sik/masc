@@ -188,7 +188,7 @@ let test_change_hint_poll () =
     | "/api/v1/keepers/alpha/native-tasks/hints" -> Ok (200,Yojson.Safe.to_string (hints !through))
     | "/api/v1/keepers/alpha/native-tasks/records" -> incr records; Error (Native.Transport "audit unavailable")
     | _ -> fail "poll requested full audited discovery" in
-  let poll previous = match Native.read ~mode:Native.Poll ~keeper_name:keeper ~fetch ~previous with
+  let poll previous = match Native.read ~mode:Native.Suffix ~keeper_name:keeper ~fetch ~previous with
     | Ok value -> value | Error error -> fail (Native.error_text error) in
   let unchanged=poll state in
   check int "unchanged hint performs no full read" 0 !records;
@@ -220,7 +220,7 @@ let test_change_hint_poll () =
   let has_corruption state = List.exists (function
     | Native.Persistence (_,Read.Store_corrupt) -> true | _ -> false) (Native.errors state) in
   check bool "full audit exposes corruption" true (has_corruption corrupt);
-  let hinted=read Native.Poll corrupt in
+  let hinted=read Native.Suffix corrupt in
   check bool "equal unchecked hint cannot clear audited corruption" true (has_corruption hinted);
   check int "corruption retains original observations" 1 (List.length (Native.tasks hinted));
   audit_body:=inventory "store" 1;

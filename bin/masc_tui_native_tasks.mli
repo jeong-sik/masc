@@ -33,7 +33,7 @@ type task = private
   ; boundary : Task.boundary
   }
 
-type read_mode = Audit | Poll
+type read_mode = Audit | Suffix
 type t
 val empty : t
 val failed : t -> error -> t
@@ -55,7 +55,7 @@ val read : mode:read_mode -> keeper_name:string ->
     Disappearance never deletes retained history. The caller supplies and
     checks workspace authority before each HTTP read and at mailbox delivery. *)
 
-(** [Poll] reads unchecked metadata hints and fully audits changed stores only.
+(** [Suffix] reads unchecked metadata hints and fully audits changed stores only.
     Same-tail historical tampering is not detected by hints. A failed audited read
     is retained without repeating full scans until the hint changes or [Audit].
     [Audit] always runs fully audited discovery and retries failed record reads. *)

@@ -17,7 +17,7 @@ type task =
   ; last_tool_name : string option; skip_transcript : bool option; ambient : bool option
   ; is_backgrounded : bool option; end_time : int option; total_paused_ms : int option
   ; reason : Task.reason option; boundary : Task.boundary }
-type read_mode = Audit | Poll
+type read_mode = Audit | Suffix
 type inventory =
   { receivers : (Read.receiver * (Read.cursor, Read.error_code) result) list
   ; health : Read.health; cleanup_failures : string list }
@@ -165,7 +165,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
         Ok {receivers=List.map (fun (entry:Read.entry) -> entry.receiver,
           match entry.storage with Read.Audited cursor -> Ok cursor | Read.Failed code -> Error code)
             page.receivers;health=page.health;cleanup_failures=page.cleanup_failures}
-    | Poll ->
+    | Suffix ->
         let* response=decode ~fetch (prefix keeper_name ^ "hints") in
         let* page=Read.hints_of_response ~keeper_name response
           |> Result.map_error (fun error -> Invalid_response error) in
@@ -175,7 +175,7 @@ let read ~mode ~keeper_name ~fetch ~previous =
   (* An unchecked hint cannot erase an audited failure, even when the last
      successful cursor has the same tail. Only a new full read can clear it. *)
   let audit_failures = ref (match mode with
-    | Poll -> previous.audit_failures
+    | Suffix -> previous.audit_failures
     | Audit -> List.fold_left (fun failures (receiver,storage) ->
         match storage with
         | Error code -> (receiver,code) :: List.remove_assoc receiver failures
@@ -188,12 +188,12 @@ let read ~mode ~keeper_name ~fetch ~previous =
         let same (store:store) = store.receiver=receiver
           && store.store_id=advertised.store_id in
         let old=List.find_opt same stores in
-        (* Poll hints are change triggers, never fresh historical audit receipts.
+        (* Suffix hints are change triggers, never fresh historical audit receipts.
            Retain a failed audit until the hint changes or Audit is requested;
            otherwise the failure path would restore full-history cadence scans. *)
         if Option.exists (fun (store:store) -> match mode with
           | Audit -> store.cursor=Some advertised && store.error=None
-          | Poll -> store.attempted=Some advertised) old then stores else
+          | Suffix -> store.attempted=Some advertised) old then stores else
         let after=Option.bind old (fun (store:store) -> store.cursor) in
         let request:Read.records_request={scope={keeper_name;receiver};after} in
         let page = let* response=decode ~fetch (records_path keeper_name receiver after) in

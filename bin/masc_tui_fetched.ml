@@ -89,7 +89,7 @@ let in_flight state = match state.status with
   | Status_loading _ | Status_retrying _ | Status_refreshing _ -> true
   | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> false
 
-type intent = Poll | Refresh
+type intent = Join | Refresh
 
 let start_with intent ~equal state ~key =
   let fresh status =
@@ -98,25 +98,25 @@ let start_with intent ~equal state ~key =
     Started ({ latest_generation = generation; status = status request }, request)
   in
   match intent, state.status with
-  | Poll, Status_loading request when equal request.key key -> Already_loading
-  | Poll, Status_retrying (request, _) when equal request.key key -> Already_loading
-  | Poll, Status_refreshing (request, _, _) when equal request.key key -> Already_loading
+  | Join, Status_loading request when equal request.key key -> Already_loading
+  | Join, Status_retrying (request, _) when equal request.key key -> Already_loading
+  | Join, Status_refreshing (request, _, _) when equal request.key key -> Already_loading
   | Refresh, Status_refreshing (current, value, error) when equal current.key key ->
     fresh (fun request -> Status_refreshing (request, value, error))
   | Refresh, (Status_failed (current, error) | Status_retrying (current, error))
       when equal current.key key ->
     fresh (fun request -> Status_retrying (request, error))
-  | (Poll | Refresh), Status_ready (current, value) when equal current.key key ->
+  | (Join | Refresh), Status_ready (current, value) when equal current.key key ->
     (* Revalidating what is already shown: keep the last good value on screen
        under a fresh generation. *)
     fresh (fun request -> Status_refreshing (request, value, None))
-  | (Poll | Refresh), Status_stale (current, value, error) when equal current.key key ->
+  | (Join | Refresh), Status_stale (current, value, error) when equal current.key key ->
     fresh (fun request -> Status_refreshing (request, value, Some error))
-  | (Poll | Refresh), (Status_absent | Status_loading _ | Status_retrying _ | Status_ready _ | Status_refreshing _
+  | (Join | Refresh), (Status_absent | Status_loading _ | Status_retrying _ | Status_ready _ | Status_refreshing _
        | Status_stale _ | Status_failed _) -> fresh (fun request -> Status_loading request)
 ;;
 
-let start ~equal state ~key = start_with Poll ~equal state ~key
+let start ~equal state ~key = start_with Join ~equal state ~key
 let refresh ~equal state ~key = start_with Refresh ~equal state ~key
 
 let clear state = { state with status = Status_absent }

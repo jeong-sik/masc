@@ -10,7 +10,7 @@ let () =
   expect "a deferred read is pending even without a selected tab"
     (Masc_tui_types.Browser_lane_view.pending_read deferred = Some Read);
   expect "ordinary cadence cannot replace the pending deferred read"
-    (Masc_tui_types.Browser_lane_view.cadence_operation deferred = None);
+    (Masc_tui_types.Browser_lane_view.observation_operation deferred = None);
   expect "choosing the lane again cannot inherit the previous route's deferred read"
     (Masc_tui_types.Browser_lane_view.pending_read
        (Masc_tui_types.Browser_lane_view.switch_source Live deferred) = None);

@@ -1045,7 +1045,7 @@ let test_nested_read_owners_retire_without_losing_selection () =
       ~provider:Voice_wizard.Elevenlabs ~revision:"saved" in
   state.voice_wizard <- Some {opened with vws_save=Wizard.Save_probing 7};
   state.runtime_catalog_reading <- Runtime_catalog_loading;
-  let order,owner = Local_read_order.start ~intent:Snapshot_read.Poll state.runtime_catalog_order in
+  let order,owner = Local_read_order.start ~intent:Snapshot_read.Join state.runtime_catalog_order in
   state.runtime_catalog_order <- order;
   let owner = match owner with Some (owner,_) -> owner | None -> Alcotest.fail "catalogue owner did not start" in
   state.context_inspector_open <- true;
@@ -1406,7 +1406,7 @@ let test_child_read_epoch_retains_running_audit () =
   let cached=["alpha",Masc_tui_child_content.empty] in
   state.msg_child_content <- cached;
   state.msg_child_content_inflight <-
-    ["alpha",Masc_tui_child_content.Audit;"beta",Masc_tui_child_content.Poll];
+    ["alpha",Masc_tui_child_content.Audit;"beta",Masc_tui_child_content.Suffix];
   state.msg_child_content_audit_pending <- ["alpha";"gamma"];
   suspend_workspace_readings state;
   Alcotest.(check bool) "all retired Child slots released" true
@@ -1453,7 +1453,7 @@ let test_native_task_read_epoch_retirement () =
   suspend_workspace_readings state;
   Alcotest.(check (list string)) "repeated retirement retains restored audit"
     ["alpha"] state.msg_native_tasks_audit_pending;
-  state.msg_native_tasks_inflight <- ["beta",Masc_tui_native_tasks.Poll];
+  state.msg_native_tasks_inflight <- ["beta",Masc_tui_native_tasks.Suffix];
   suspend_workspace_readings state;
   Alcotest.(check (list string)) "poll is never promoted to audit"
     ["alpha"] state.msg_native_tasks_audit_pending;
@@ -2012,7 +2012,7 @@ let test_early_roster_preserves_read_ownership () =
     (take_early_keeper_roster_observation state early=None)
 
 let local_workspace_request_exn state source at =
-  match Masc_tui_types.begin_local_workspace_read state ~intent:Masc_tui_types.Snapshot_read.Poll ~source
+  match Masc_tui_types.begin_local_workspace_read state ~intent:Masc_tui_types.Snapshot_read.Join ~source
           ~base_path:state.Masc_tui_types.local_base_path ~started_ns:at with
   | Some request -> request
   | None -> Alcotest.fail "local workspace read did not start"
@@ -2022,7 +2022,7 @@ let test_local_read_and_http_sources_progress_independently () =
   let state, early = early_roster_fixture () in
   let request = local_workspace_request_exn state Local_work 5L in
   Alcotest.(check bool) "cadence cannot duplicate the local worker" true
-    (begin_local_workspace_read state ~intent:Snapshot_read.Poll ~source:Local_work ~base_path:state.local_base_path ~started_ns:6L = None);
+    (begin_local_workspace_read state ~intent:Snapshot_read.Join ~source:Local_work ~base_path:state.local_base_path ~started_ns:6L = None);
   Alcotest.(check bool) "local pending does not gate HTTP source admission" true
     (Option.is_some (take_early_keeper_roster_observation state early)
      && Local_read_order.in_flight state.local_workspace_read_order);
@@ -2322,7 +2322,7 @@ let test_observer_resume_reads_a_cold_current_source_once () =
     let request = local_workspace_request_exn state source 1L in
     Alcotest.(check bool) "cold resume starts one fresh read and shares it" true
       (request.lwr_intent = Snapshot_read.Refresh
-       && begin_local_workspace_read state ~intent:Snapshot_read.Poll ~source
+       && begin_local_workspace_read state ~intent:Snapshot_read.Join ~source
             ~base_path:state.local_base_path ~started_ns:2L = None);
     ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source request
       (if succeeds then Ok () else Error "initial source failure"));
@@ -4104,13 +4104,13 @@ let test_keeper_log_selection_and_late_cleanup_keep_original_owner () =
   let state, first = keeper_log_fixture () in
   let second = { first with k_name = "beta" } in
   state.keepers <- [first; second];
-  let initial = keeper_log_request state first Snapshot_read.Poll in
+  let initial = keeper_log_request state first Snapshot_read.Join in
   let cancelled = ref 0 in
   supersede_keeper_log_read state (Some (initial.klr_owner, fun () -> incr cancelled));
   state.keeper_cursor <- 1;
   Alcotest.(check bool) "new selection cannot borrow another Keeper's observation" true
     (keeper_logs_view state = Masc_tui_fetched.Absent);
-  let successor = keeper_log_request state second Snapshot_read.Poll in
+  let successor = keeper_log_request state second Snapshot_read.Join in
   supersede_keeper_log_read state (Some (successor.klr_owner, fun () -> ()));
   Alcotest.(check int) "selection change cancels the prior read once" 1 !cancelled;
   finish_keeper_log_read state initial;
@@ -4126,7 +4126,7 @@ let test_keeper_log_selection_and_late_cleanup_keep_original_owner () =
     (List.map (fun (entry : Tui_decode.log_entry) -> entry.le_message_count)
        (keeper_log_snapshot state).entries);
   state.keeper_cursor <- 0;
-  let returned = keeper_log_request state first Snapshot_read.Poll in
+  let returned = keeper_log_request state first Snapshot_read.Join in
   Alcotest.(check bool) "returning to a Keeper does not restore the earlier ticket" true
     (Option.is_none (take_keeper_log_read state initial (Error "late original failure")));
   Alcotest.(check bool) "returned Keeper owns a new request" true
@@ -4138,19 +4138,19 @@ let test_keeper_log_refresh_coalesces_and_failed_revalidation_keeps_partial_rows
   state.view <- Keepers Keeper_detail;
   state.detail_tab <- Detail_secrets;
   Alcotest.(check bool) "a detail tab without metrics admits no disk request" true
-    (Option.is_none (begin_keeper_log_read state ~intent:Snapshot_read.Poll ~limit:4 ~started_ns:0L keeper));
+    (Option.is_none (begin_keeper_log_read state ~intent:Snapshot_read.Join ~limit:4 ~started_ns:0L keeper));
   state.detail_tab <- Detail_info;
-  let active = keeper_log_request state keeper Snapshot_read.Poll in
+  let active = keeper_log_request state keeper Snapshot_read.Join in
   List.iter (fun intent ->
     Alcotest.(check bool) "same source shares the active read" true
       (Option.is_none (begin_keeper_log_read state ~intent ~limit:4 ~started_ns:1L keeper)))
-    [Snapshot_read.Poll; Refresh; Refresh; Poll];
+    [Snapshot_read.Join; Refresh; Refresh; Join];
   let partial = keeper_log_snapshot_fixture ~partial:true keeper.k_name 3 in
   let admission = take_keeper_log_read state active (Ok partial) in
   Alcotest.(check bool) "refresh burst requests one followup at settlement" true
     (Option.exists (fun admitted -> admitted.kla_followup) admission);
   Alcotest.(check bool) "settlement consumes queued demand once" false state.keeper_log_refresh_pending;
-  let followup = keeper_log_request state keeper Snapshot_read.Poll in
+  let followup = keeper_log_request state keeper Snapshot_read.Join in
   Alcotest.(check bool) "same-source refresh retains the observed partial snapshot" true
     (List.length (keeper_log_snapshot state).entries = 1
      && Option.is_some (keeper_log_snapshot state).error);
@@ -4171,7 +4171,7 @@ let test_keeper_log_refresh_coalesces_and_failed_revalidation_keeps_partial_rows
 let test_keeper_log_suspension_preserves_snapshot_without_old_authority () =
   let open Masc_tui_types in
   let state, keeper = keeper_log_fixture () in
-  let initial = keeper_log_request state keeper Snapshot_read.Poll in
+  let initial = keeper_log_request state keeper Snapshot_read.Join in
   ignore (take_keeper_log_read state initial (Ok (keeper_log_snapshot_fixture keeper.k_name 4)));
   let old = keeper_log_request state keeper Snapshot_read.Refresh in
   let cancelled = ref 0 in
@@ -4185,7 +4185,7 @@ let test_keeper_log_suspension_preserves_snapshot_without_old_authority () =
   Alcotest.(check bool) "retired read cannot consume its successor epoch" true
     (Option.is_none (take_keeper_log_read state old (Error "old scope failed")));
   state.workspace_identity <- Workspace_identity_match;
-  let fresh = keeper_log_request state keeper Snapshot_read.Poll in
+  let fresh = keeper_log_request state keeper Snapshot_read.Join in
   Alcotest.(check bool) "same workspace can revalidate its retained rows" true
     (List.length (keeper_log_snapshot state).entries = 1);
   Alcotest.(check bool) "new read scope admits its own result" true
@@ -4197,7 +4197,7 @@ let test_keeper_log_suspension_preserves_snapshot_without_old_authority () =
   clear_keeper_logs state;
   state.keepers <- [];
   Alcotest.(check bool) "missing selection admits no filesystem request" true
-    (Option.is_none (begin_keeper_log_read state ~intent:Snapshot_read.Poll ~limit:4 ~started_ns:2L keeper))
+    (Option.is_none (begin_keeper_log_read state ~intent:Snapshot_read.Join ~limit:4 ~started_ns:2L keeper))
 
 let keeper_settings_fixture () =
   let open Masc_tui_types in
@@ -4663,9 +4663,9 @@ let catalog_request state intent started_ns =
 let test_catalog_demands_share_and_refresh_after_current_read () =
   let open Masc_tui_types in
   let state,_ = keeper_settings_fixture () in
-  let first = catalog_request state Snapshot_read.Poll 40L in
+  let first = catalog_request state Snapshot_read.Join 40L in
   Alcotest.(check bool) "another consumer shares the in-flight catalogue owner" true
-    (Option.is_none (begin_runtime_catalog_read state ~intent:Snapshot_read.Poll ~started_ns:41L));
+    (Option.is_none (begin_runtime_catalog_read state ~intent:Snapshot_read.Join ~started_ns:41L));
   List.iter (fun started_ns ->
     Alcotest.(check bool) "refresh demand queues without dispatching a parallel read" true
       (Option.is_none (begin_runtime_catalog_read state ~intent:Snapshot_read.Refresh ~started_ns))) [42L;43L;44L];
@@ -4673,7 +4673,7 @@ let test_catalog_demands_share_and_refresh_after_current_read () =
     (take_runtime_catalog_read state first (Ok ([],[],[],Some "old"))
      && Local_read_order.has_followup state.runtime_catalog_order
      && state.runtime_catalog_reading=Runtime_catalog_refreshing None);
-  let followup = catalog_request state Snapshot_read.Poll 45L in
+  let followup = catalog_request state Snapshot_read.Join 45L in
   Alcotest.(check bool) "one successor covers accumulated demand and rejects late original result" true
     (not (Local_read_order.has_followup state.runtime_catalog_order)
      && not (take_runtime_catalog_read state first (Ok ([],[],[],Some "late")))
@@ -4685,7 +4685,7 @@ let test_catalog_demands_share_and_refresh_after_current_read () =
 let test_catalog_refresh_retains_observation_and_empty_success () =
   let open Masc_tui_types in
   let state,_ = keeper_settings_fixture () in
-  let opening = catalog_request state Snapshot_read.Poll 40L in
+  let opening = catalog_request state Snapshot_read.Join 40L in
   ignore (take_runtime_catalog_read state opening (Ok ([],[],[],Some "original")));
   let refresh = catalog_request state Snapshot_read.Refresh 41L in
   Alcotest.(check bool) "refresh keeps the prior observation" true
@@ -4706,7 +4706,7 @@ let test_catalog_refresh_retains_observation_and_empty_success () =
 let test_catalog_withdrawal_folds_demand_into_reconfirmation () =
   let open Masc_tui_types in
   let state,_ = keeper_settings_fixture () in
-  let original = catalog_request state Snapshot_read.Poll 40L in
+  let original = catalog_request state Snapshot_read.Join 40L in
   ignore (begin_runtime_catalog_read state ~intent:Snapshot_read.Refresh ~started_ns:41L);
   state.workspace_read_authority <- ref ();
   state.workspace_identity <- Workspace_identity_match_unconfirmed "disconnected";
@@ -4716,17 +4716,17 @@ let test_catalog_withdrawal_folds_demand_into_reconfirmation () =
      && not (take_runtime_catalog_read state original (Ok ([],[],[],Some "old")))
      && Option.is_none (begin_runtime_catalog_read state ~intent:Snapshot_read.Refresh ~started_ns:42L));
   state.workspace_identity <- Workspace_identity_match;
-  let resumed = catalog_request state Snapshot_read.Poll 43L in
+  let resumed = catalog_request state Snapshot_read.Join 43L in
   Alcotest.(check bool) "one fresh owner replaces both retired read and queued demand" true
     (not state.runtime_catalog_resume && not (Local_read_order.has_followup state.runtime_catalog_order)
      && not (take_runtime_catalog_read state original (Ok ([],[],[],Some "late")))
      && take_runtime_catalog_read state resumed (Ok ([],[],[],Some "current")));
-  let pending = catalog_request state Snapshot_read.Poll 44L in
+  let pending = catalog_request state Snapshot_read.Join 44L in
   clear_runtime_catalog_read state;
   Alcotest.(check bool) "a changed workspace cannot reuse the old catalogue or completion" true
     (not (take_runtime_catalog_read state pending (Ok ([],[],[],Some "foreign")))
      && state.runtime_catalog_reading=Runtime_catalog_unread && state.runtime_catalog_default_route=None);
-  let nested = catalog_request state Snapshot_read.Poll 45L in
+  let nested = catalog_request state Snapshot_read.Join 45L in
   ignore (take_runtime_catalog_read state nested (Ok ([],[],[],Some "observed")));
   state.context_inspector_open <- true;
   state.context_inspector_target <- Masc_tui_context_inspector.Recent 0;

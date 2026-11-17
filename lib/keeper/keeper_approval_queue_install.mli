@@ -21,7 +21,12 @@
     [gate_references_of_operations] the approvals that the operations name.
     [delivery_is_spent] says whether a delivery may leave the store.
     [spent_deliveries] collects those deliveries, reading the readers of a
-    keeper once. Before releasing a living Keeper's replay result, it commits
+    keeper once. One shared generic-original metadata inventory also protects
+    every live exact approval intent (including before its ID is linked) and
+    every linked approval ID. This protection precedes Keeper_gone; unreadable
+    original metadata preserves deliveries and reports a retirement error.
+    Only metadata/progress are read, not media payloads or execution authority.
+    Before releasing a living Keeper's replay result, it commits
     or validates the exact public artifact root in the canonical chat ledger.
     This runs outside the pending-store lock; failures retain the sidecar and
     appear in [delivery_retirement_error]. [retire_spent_deliveries] removes

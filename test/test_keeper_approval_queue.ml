@@ -3115,6 +3115,238 @@ let test_consumed_delivery_named_by_a_gate_wait_survives () =
     | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.storage_error_to_string error))
 ;;
 
+module Exact_request = Masc.Keeper_approval_request_fingerprint
+module Original_owner = Masc.Lane_addon_tool_request_owner
+module Original_progress = Masc.Lane_addon_request_progress
+module Original_approval = Masc.Lane_addon_request_approval
+module Original_store = Masc.Lane_addon_store
+module Queue_result = Masc.Keeper_approval_queue_result
+
+let exact_request_of_entry (entry : Rule_types.pending_approval) =
+  match Exact_request.exact_request ~base_path:entry.audit_base_path
+      ~keeper_name:entry.keeper_name ~operation:entry.tool_name ~input:entry.input
+      ~origin:entry.origin ~task_id:entry.task_id ~goal_id:entry.goal_id
+      ~continuation_channel:entry.continuation_channel with
+  | Ok request -> request
+  | Error detail -> Alcotest.fail detail
+;;
+
+let exact_lookup ?approval_id request =
+  match AQ.observe_exact_request ?approval_id request with
+  | Ok result -> result
+  | Error error -> Alcotest.fail (Queue_result.storage_error_to_string error)
+;;
+
+let exact_found request =
+  match exact_lookup request with
+  | Queue_result.Exact_found observation -> observation
+  | Queue_result.Exact_absent | Queue_result.Exact_ambiguous _
+  | Queue_result.Known_approval_missing _ | Queue_result.Known_approval_mismatch _ ->
+    Alcotest.fail "expected one exact queue observation"
+;;
+
+let check_exact_state label expected request =
+  let observed = exact_found request in
+  Alcotest.(check bool) label true (observed.exact_state = expected);
+  Alcotest.(check string) "original complete input hash is preserved"
+    (Exact_request.input_hash request) observed.exact_request.input_hash
+;;
+
+let test_exact_lookup_preserves_all_states_and_known_identity () =
+  with_spent_fixture "queue-exact-state" (fun ~base_path ~keeper_name ->
+    let input = `Assoc ["target", `String "exact-state"] in
+    let approval_id = submit ~base_path ~keeper_name ~input in
+    let request = exact_request_of_entry (pending_entry_exn approval_id) in
+    check_exact_state "pending observed" Queue_result.Exact_pending request;
+    (match aq_resolve ~base_path ~id:approval_id ~decision:Rule_types.Decision.Approve with
+     | Ok () -> () | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+    check_exact_state "approval is still unconsumed"
+      Queue_result.Exact_approved_unconsumed request;
+    consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+    check_exact_state "consumed without result remains unknown"
+      (Queue_result.Exact_approved_consumed None) request;
+    let artifact = store_replay_artifact ~base_path "exact durable replay evidence" in
+    let outcome = Queue_result.Replay_indeterminate (replay_evidence artifact) in
+    (match AQ.record_consumed_resolution_replay ~base_path ~id:approval_id ~outcome with
+     | Ok result -> Alcotest.(check bool) "actual replay result recorded" true
+         (result = Queue_result.Replay_recorded)
+     | Error error -> Alcotest.fail (Queue_result.grant_error_to_string error));
+    check_exact_state "complete consumed outcome preserved"
+      (Queue_result.Exact_approved_consumed (Some outcome)) request;
+    let rejected_id = submit ~base_path ~keeper_name
+        ~input:(`Assoc ["target", `String "rejected"]) in
+    let rejected_request = exact_request_of_entry (pending_entry_exn rejected_id) in
+    (match aq_resolve ~base_path ~id:rejected_id ~decision:(Rule_types.Decision.Reject "declined") with
+     | Ok () -> () | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+    check_exact_state "rejection stays a rejection"
+      (Queue_result.Exact_rejected "declined") rejected_request;
+    (* A real new submit after consumption creates another exact row. Lookup
+       must retain that ambiguity rather than silently picking the pending one. *)
+    let next_id = submit ~base_path ~keeper_name ~input in
+    let ids = List.sort String.compare [approval_id; next_id] in
+    Alcotest.(check bool) "unlinked lookup sees both exact rows" true
+      (exact_lookup request = Queue_result.Exact_ambiguous ids);
+    Alcotest.(check bool) "known exact ID does not hide duplicate row" true
+      (exact_lookup ~approval_id request = Queue_result.Exact_ambiguous ids);
+    Alcotest.(check bool) "known foreign request retains matching evidence" true
+      (exact_lookup ~approval_id:rejected_id request =
+        Queue_result.Known_approval_mismatch
+          {approval_id = rejected_id; matching_approval_ids = ids});
+    Alcotest.(check bool) "known missing ID does not choose another row" true
+      (exact_lookup ~approval_id:"appr_missing_exact_fixture" request =
+        Queue_result.Known_approval_missing
+          {approval_id = "appr_missing_exact_fixture"; matching_approval_ids = ids});
+    let before = durable_delivery_ids ~base_path in
+    ignore (exact_lookup request);
+    Alcotest.(check (list string)) "lookup does not replace resolved requests"
+      before (durable_delivery_ids ~base_path))
+;;
+
+let test_exact_lookup_requires_healthy_installed_store () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> AQ.For_testing.reset_runtime_state (); cleanup_dir base_path)
+    (fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      let request = match Exact_request.exact_request ~base_path ~keeper_name:"exact-health"
+          ~operation:"external-effect" ~input:(`Assoc [])
+          ~origin:Keeper_approval_origin.unavailable ~task_id:None ~goal_id:None
+          ~continuation_channel:(Keeper_continuation_channel.unrouted "no originating connector") with
+        | Ok value -> value | Error detail -> Alcotest.fail detail in
+      let unavailable label = match AQ.observe_exact_request request with
+        | Error _ -> () | Ok _ -> Alcotest.fail label in
+      unavailable "uninstalled store became authoritative absence";
+      ignore (install_exn ~base_path);
+      Alcotest.(check bool) "installed empty store establishes absence" true
+        (exact_lookup request = Queue_result.Exact_absent);
+      AQ.For_testing.with_unavailable_workspace ~base_path (fun () ->
+        unavailable "unavailable store became absence");
+      let path = AQ.For_testing.replay_results_store_path ~base_path in
+      ensure_dir (Filename.dirname path);
+      Out_channel.with_open_text path (fun channel -> output_string channel "{");
+      let report = reinstall_exn ~base_path in
+      Alcotest.(check bool) "actual replay sidecar corruption was observed" true
+        (Option.is_some report.replay_projection_error);
+      unavailable "unreadable replay evidence became absence")
+;;
+
+let original_store ~base_path =
+  Original_store.create ~root:(Original_store.directory
+    ~masc_dir:(Config_dir_resolver.masc_root ~base_path))
+;;
+
+let owner_result = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (Original_owner.error_to_string error)
+;;
+
+let owner_advance ~store ~expected event =
+  match Original_owner.advance ~store ~expected ~event with
+  | Ok (Original_owner.Stored value | Original_owner.Already_stored value) -> value
+  | Ok (Original_owner.Unconfirmed detail) -> Alcotest.fail detail
+  | Error error -> Alcotest.fail (Original_owner.update_error_to_string error)
+;;
+
+let retain_approval_reader ~base_path ~request_id ~request ~approval_id =
+  let store = original_store ~base_path in
+  let scope = "queue-approval-reference-fixture" in
+  Original_owner.retain ~store ~scope ~request_id
+    ~installation_id:(Original_owner.installation_id (Original_owner.Manual "queue-fixture"))
+    ~package_id:"queue-fixture" ~tool:"read" ~summary:(`Assoc [])
+    ~request:(`Assoc ["fixture", `String request_id]) |> owner_result;
+  let retained = Original_owner.load ~store ~scope ~request_id |> owner_result
+      |> require_some "retained original is absent" in
+  let intent = match Original_approval.intent ~request_id
+      ~request_digest:retained.request_digest ~request with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let retained = owner_advance ~store ~expected:retained
+      (Original_progress.Approval_intended intent) in
+  let retained = match approval_id with
+    | None -> retained
+    | Some id ->
+      let waiting = match Original_approval.wait intent ~approval_id:id
+          ~input_hash:(Exact_request.input_hash request) with
+        | Ok value -> value | Error detail -> Alcotest.fail detail in
+      owner_advance ~store ~expected:retained (Original_progress.Approval_wait_retained waiting)
+  in
+  store, retained
+;;
+
+let archive_refused_original ~store retained =
+  let retained = owner_advance ~store ~expected:retained
+      (Original_progress.Refused {stage = Original_progress.Before_dispatch;
+        evidence = `Assoc ["reason", `String "fixture settled without dispatch"]}) in
+  let record = Original_owner.load_record ~store ~scope:retained.scope
+      ~request_id:retained.request_id |> owner_result |> require_some "original record vanished" in
+  match Original_owner.settle ~store ~date:"2026-11-17" record with
+  | Ok () -> () | Error error -> Alcotest.fail (Original_owner.settle_error_to_string error)
+;;
+
+let test_unlinked_original_intent_keeps_rejected_delivery () =
+  with_spent_fixture "queue-unlinked-original" (fun ~base_path ~keeper_name ->
+    let input = `Assoc ["target", `String "unlinked-original"] in
+    let approval_id = submit ~base_path ~keeper_name ~input in
+    let request = exact_request_of_entry (pending_entry_exn approval_id) in
+    let store, retained = retain_approval_reader ~base_path
+        ~request_id:"unlinked-original" ~request ~approval_id:None in
+    (match aq_resolve ~base_path ~id:approval_id ~decision:(Rule_types.Decision.Reject "declined") with
+     | Ok () -> () | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+    acknowledge_wake ~base_path ~keeper_name;
+    let kept = reinstall_exn ~base_path in
+    Alcotest.(check int) "intent before wait link preserves rejection" 0 kept.retired_deliveries;
+    check_delivery_kept ~base_path approval_id;
+    check_exact_state "lost link recovers original rejected decision"
+      (Queue_result.Exact_rejected "declined") request;
+    archive_refused_original ~store retained;
+    let retired = reinstall_exn ~base_path in
+    Alcotest.(check int) "archiving actual original releases reader" 1 retired.retired_deliveries;
+    check_delivery_retired ~base_path approval_id;
+    Alcotest.(check bool) "known retired approval remains missing, not new intent" true
+      (exact_lookup ~approval_id request = Queue_result.Known_approval_missing
+        {approval_id; matching_approval_ids = []}))
+;;
+
+let test_linked_original_keeps_consumed_delivery_for_gone_keeper () =
+  with_spent_fixture "queue-linked-original" (fun ~base_path ~keeper_name ->
+    let input = `Assoc ["target", `String "linked-original"] in
+    let approval_id = submit ~base_path ~keeper_name ~input in
+    let request = exact_request_of_entry (pending_entry_exn approval_id) in
+    let store, retained = retain_approval_reader ~base_path
+        ~request_id:"linked-original" ~request ~approval_id:(Some approval_id) in
+    (match aq_resolve ~base_path ~id:approval_id ~decision:Rule_types.Decision.Approve with
+     | Ok () -> () | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+    consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+    acknowledge_wake ~base_path ~keeper_name;
+    (match Masc.Keeper_meta_store.remove_snapshot (Masc.Workspace.default_config base_path)
+        ~name:keeper_name with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    let kept = reinstall_exn ~base_path in
+    Alcotest.(check int) "live original precedes Keeper_gone" 0 kept.retired_deliveries;
+    check_delivery_kept ~base_path approval_id;
+    check_exact_state "consumed without outcome is not replayable"
+      (Queue_result.Exact_approved_consumed None) request;
+    archive_refused_original ~store retained;
+    let retired = reinstall_exn ~base_path in
+    Alcotest.(check int) "gone Keeper delivery retires after original leaves" 1 retired.retired_deliveries;
+    check_delivery_retired ~base_path approval_id)
+;;
+
+let test_unreadable_original_inventory_keeps_spent_deliveries () =
+  with_spent_fixture "queue-original-unavailable" (fun ~base_path ~keeper_name ->
+    let input = `Assoc ["target", `String "unreadable-original"] in
+    let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+    consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+    acknowledge_wake ~base_path ~keeper_name;
+    let store = original_store ~base_path in
+    (match Original_store.save_tool_request_owner store ~scope:"unreadable-fixture"
+        ~request_id:"broken-original" (`Assoc []) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    let report = reinstall_exn ~base_path in
+    Alcotest.(check int) "malformed original cannot prove no readers" 0 report.retired_deliveries;
+    Alcotest.(check bool) "retirement reports original inventory failure" true
+      (Option.is_some report.delivery_retirement_error);
+    check_delivery_kept ~base_path approval_id)
+;;
+
 (* A Keeper whose meta exists but whose queue has no durable state cannot say
    whether a wake is queued, so the row is kept. Once the meta is gone too the
    delivery has no reader, the same rule [Hitl_recipient_absent] applies. *)
@@ -7630,6 +7862,16 @@ let () =
             "consumed delivery named by a Gate wait survives"
             `Quick
             test_consumed_delivery_named_by_a_gate_wait_survives
+        ; Alcotest.test_case "exact lookup preserves all states and known identity" `Quick
+            test_exact_lookup_preserves_all_states_and_known_identity
+        ; Alcotest.test_case "exact lookup requires healthy installed store" `Quick
+            test_exact_lookup_requires_healthy_installed_store
+        ; Alcotest.test_case "unlinked original intent keeps rejected delivery" `Quick
+            test_unlinked_original_intent_keeps_rejected_delivery
+        ; Alcotest.test_case "linked original precedes gone Keeper retirement" `Quick
+            test_linked_original_keeps_consumed_delivery_for_gone_keeper
+        ; Alcotest.test_case "unreadable original inventory keeps spent deliveries" `Quick
+            test_unreadable_original_inventory_keeps_spent_deliveries
         ; Alcotest.test_case
             "absent queue keeps the delivery until the Keeper is gone"
             `Quick

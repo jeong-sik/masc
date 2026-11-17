@@ -50,3 +50,15 @@ type waiting_observation =
 
 val observe_waiting_request : base_path:string -> id:string ->
   (waiting_observation option, storage_error) result
+
+val observe_exact_request :
+  ?approval_id:string ->
+  Keeper_approval_request_fingerprint.exact_request ->
+  (exact_request_lookup, storage_error) result
+(** Observe pending and every resolved state under one store lock. Only an
+    installed, healthy store can establish [Exact_absent]. Unreadable pending
+    entries or replay evidence remain errors. A known ID is checked against
+    the same exact request; missing/mismatched IDs retain the IDs of other
+    matches instead of selecting a replacement. Multiple exact rows are
+    ambiguous, including when the supplied ID names one of them.
+    This read neither submits, decides, consumes a grant nor authorizes replay. *)

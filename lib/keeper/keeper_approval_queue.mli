@@ -25,8 +25,13 @@ open Keeper_approval_queue_result
     is no longer in its Keeper's event queue, no unsettled execution of that
     Keeper names the approval, and an approval's grant is consumed; or when its
     Keeper's meta file is gone: deleting a Keeper drops its approvals and
-    rejections, used or not, at the next install, so a Keeper created again
-    under the same name starts without them. A delivery whose Keeper meta,
+    rejections, used or not, at the next install, unless a live original still
+    holds its exact approval intent or linked ID. Live original references
+    protect both consumed and rejected decisions, even before the wait link
+    was stored. One shared metadata scan observes these references per install;
+    it reads no media payload and confers no execution authority. An unreadable
+    original inventory preserves deliveries and reports a retirement error.
+    A delivery whose Keeper meta,
     queue, or operation store cannot be read, whose Keeper meta does not decode
     as the current schema, or whose Keeper has meta but no queue, is kept. The removal is skipped while the store or the replay projection is
     unavailable, and a failed write is reported in
@@ -526,3 +531,15 @@ type waiting_observation = private
   { waiting_request : pending_approval; waiting_decision : decision option }
 val observe_waiting_request : base_path:string -> id:string ->
   (waiting_observation option, storage_error) result
+
+val observe_exact_request :
+  ?approval_id:string ->
+  Keeper_approval_request_fingerprint.exact_request ->
+  (exact_request_lookup, storage_error) result
+(** Observe pending and every resolved state under one store lock. Only an
+    installed, healthy store can establish [Exact_absent]. Unreadable pending
+    entries or replay evidence remain errors. A known ID is checked against
+    the same exact request; missing/mismatched IDs retain the IDs of other
+    matches instead of selecting a replacement. Multiple exact rows are
+    ambiguous, including when the supplied ID names one of them.
+    This read neither submits, decides, consumes a grant nor authorizes replay. *)

@@ -40,6 +40,8 @@ let identity_call_gate_operation = "identity_call"
    by test_speak_replays_while_listen_never_reaches_the_gate. *)
 let voice_speak_gate_operation = "keeper_voice_speak"
 
+let media_read_gate_operation = "media_read"
+
 type replayable =
   | Replay_write
   | Replay_execute

@@ -24,7 +24,10 @@ open Keeper_approval_queue_resolve
    - no unsettled execution of the Keeper names the approval; and
    - an approval's one-shot grant is consumed (an unconsumed one can still be
      spent by the Keeper; a rejection grants nothing).
-   A delivery addressed to a Keeper whose meta is gone is spent too: that is
+   A live original approval intent or linked ID retains its delivery even
+   before a wait acknowledgement is durable. This reader is checked before
+   Keeper_gone, from one shared metadata scan per install.
+   Otherwise a delivery addressed to a Keeper whose meta is gone is spent too: that is
    the rule [Hitl_recipient_absent] already applies, since nobody can read it.
    The operator's decision and the consumption stay on the audit ledger.
    Without this every approval left a permanent row (2,131 consumed approvals,
@@ -129,7 +132,31 @@ let delivery_is_spent readers delivery =
     && delivery_wake_was_observed delivery
 ;;
 
+let original_reads_delivery references (delivery : persisted_delivery) =
+  let entry = delivery.entry in
+  Keeper_approval_original_references.protects references ~approval_id:entry.id
+    ~matches:(fun request -> Keeper_approval_request_fingerprint.matches_entry request
+      ~base_path:entry.audit_base_path ~keeper_name:entry.keeper_name
+      ~operation:entry.tool_name ~input:entry.input ~input_hash:entry.input_hash
+      ~origin:entry.origin ~task_id:entry.task_id ~goal_id:entry.goal_id
+      ~continuation_channel:entry.continuation_channel)
+;;
+
 let spent_deliveries ~replay_projection ~base_path loaded_deliveries =
+  (* One inventory for this install, shared across all Keepers and deliveries.
+     The scan stays outside the pending-store lock, during the existing install
+     before Keeper startup. It is a conservative observation, not a cross-store
+     transaction or execution authority. *)
+  match loaded_deliveries with
+  | [] -> [], None
+  | _ :: _ ->
+  match Keeper_approval_original_references.read ~base_path with
+  | Error reason ->
+    let path = Lane_addon_store.directory
+        ~masc_dir:(Config_dir_resolver.masc_root ~base_path) in
+    Log.Keeper.warn "approval_queue: original readers unavailable; deliveries kept: %s" reason;
+    [], Some { path; reason }
+  | Ok original_references ->
   let readers_by_keeper = Hashtbl.create 8 in
   let readers_of keeper_name =
     match Hashtbl.find_opt readers_by_keeper keeper_name with
@@ -149,6 +176,8 @@ let spent_deliveries ~replay_projection ~base_path loaded_deliveries =
   let candidates, first_error = List.fold_left
     (fun (candidates, first_error) delivery ->
        let keeper_name = delivery.entry.keeper_name in
+       if original_reads_delivery original_references delivery then candidates, first_error
+       else
        let readers = readers_of keeper_name in
        if not (delivery_is_spent readers delivery) then candidates, first_error
        else

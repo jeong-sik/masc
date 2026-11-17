@@ -17,8 +17,10 @@ val original : retained -> Keeper_media_reading_original.t
 val check_retained :
   Lane_addon_tool_request_owner.retained -> (unit, string) result
 (** Pure preflight check of the fixed host header and complete semantic body,
-    request ID, digest and summary. It does not observe the current workspace
-    or interpret an execution result as a reading. *)
+    request ID, digest, summary and original-bound approval facts. A dispatch
+    fact requires its captured intent; a wait link is never an Allow. This does
+    not observe the current workspace/queue or interpret an execution result
+    as a reading. *)
 
 val retain :
   store:Lane_addon_store.t -> Keeper_media_reading_original.t ->

@@ -101,9 +101,9 @@ let decode_memory_fact_events json =
   let* retrieved_count = required_int_field json "retrieved_count" in
   let* retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in
   let* last_retrieved_at = optional_float_field json "last_retrieved_at" in
-  (* The server derives all three from one list of retrieval times
-     ([Keeper_memory_os_events.summary_for]): an empty list gives 0, 0 and
-     null, and a non-empty one gives a positive count, at least one day and
+  (* The server derives all three from the fact's retrieval events
+     ([Keeper_memory_os_events.summaries_for]): no retrievals give 0, 0 and
+     null, and one or more give a positive count, at least one day and
      a clock. Any other combination is not a record this decoder knows, so it
      is rejected here once instead of every reader drawing it. *)
   let* mfe_retrieval =

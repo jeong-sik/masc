@@ -117,9 +117,11 @@ type summary =
       successor, sorted, without repeats. *)
   }
 
-(** What the events say about one fact. Events about other facts are ignored
-    except [Revised] events that point at [memory_id]. *)
-val summary_for : memory_id:string -> event list -> summary
+val summaries_for : memory_ids:string list -> event list -> summary list
+(** Analyze one captured event list for only the requested ids. Results have
+    exactly the requested order and length, including duplicate ids. A requested
+    id with no events has an empty summary. Incoming revisions from unrequested
+    predecessors still count; self-revisions do not. No state crosses calls. *)
 
 (** The summary on the wire: the five fields by name, [last_retrieved_at]
     null when the fact was never retrieved. *)

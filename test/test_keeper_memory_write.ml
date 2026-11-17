@@ -3868,8 +3868,8 @@ let test_retract_records_a_retraction () =
    | [ current ] ->
        let current_id = Masc.Keeper_memory_os_types.memory_id current in
        Alcotest.(check string) "the current fact reuses that identity" written_id current_id;
-       let history = Events.summary_for ~memory_id:current_id
-           (events_for ~keepers_dir ~keeper_id:meta.name) in
+       let history = Events.summaries_for ~memory_ids:[current_id]
+           (events_for ~keepers_dir ~keeper_id:meta.name) |> List.hd in
        Alcotest.(check int) "current fact retains the previous retraction" 1 history.retracted_count;
        Alcotest.(check int) "re-adding is not a retrieval" 0 history.retrieved_count
    | _ -> Alcotest.fail "expected only the re-added fact")

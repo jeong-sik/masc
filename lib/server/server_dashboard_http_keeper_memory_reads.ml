@@ -194,7 +194,7 @@ let handle_facts_get state req reqd name =
               | Error _ -> true)
            event_rows)
     in
-    let fact_json (fact : Keeper_memory_os_types.fact) =
+    let fact_json (memory_id, (fact : Keeper_memory_os_types.fact)) event_summary =
       `Assoc
         [ "claim", `String fact.claim
         ; ( "category"
@@ -206,13 +206,10 @@ let handle_facts_get state req reqd name =
           )
         ; "first_seen", `Float fact.first_seen
         ; "last_seen", `Float fact.last_seen
-        ; "memory_id", `String (Keeper_memory_os_types.memory_id fact)
+        ; "memory_id", `String memory_id
         ; "basis", Keeper_memory_os_types.basis_to_json fact.basis
         ; ( "events"
-          , Keeper_memory_os_events.summary_to_json
-              (Keeper_memory_os_events.summary_for
-                 ~memory_id:(Keeper_memory_os_types.memory_id fact)
-                 events) )
+          , Keeper_memory_os_events.summary_to_json event_summary )
         ]
     in
     let support_invalidation_json
@@ -238,12 +235,21 @@ let handle_facts_get state req reqd name =
       | Error detail -> `Assoc [ "read_error", `String detail ]
       | Ok None -> `Assoc [ "present", `Bool false ]
       | Ok (Some (snapshot, snapshot_sha256)) ->
+        let facts =
+          match snapshot.Keeper_memory_os_current.facts with
+          | [] -> []
+          | facts ->
+            let facts = List.map (fun fact -> Keeper_memory_os_types.memory_id fact, fact) facts in
+            let summaries = Keeper_memory_os_events.summaries_for
+                ~memory_ids:(List.map fst facts) events in
+            List.map2 fact_json facts summaries
+        in
         `Assoc
           [ "present", `Bool true
           ; "revision", `Int snapshot.Keeper_memory_os_current.revision
           ; "snapshot_sha256", `String snapshot_sha256
           ; "updated_at", `Float snapshot.Keeper_memory_os_current.updated_at
-          ; "facts", `List (List.map fact_json snapshot.facts)
+          ; "facts", `List facts
           ; ( "support_invalidations"
             , `List
                 (List.map

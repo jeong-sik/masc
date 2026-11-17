@@ -237,51 +237,69 @@ type summary =
 let seconds_per_day = 86_400.
 let utc_day recorded_at = int_of_float (Float.floor (recorded_at /. seconds_per_day))
 
-let summary_for ~memory_id (events : event list) : summary =
-  let about_this, about_others =
-    List.partition (fun (e : event) -> String.equal e.memory_id memory_id) events
-  in
-  let retrieved_at =
-    List.filter_map
-      (fun (e : event) ->
-         match e.kind with
-         | Retrieved _ -> Some e.recorded_at
-         | Retracted | Revised _ -> None)
-      about_this
-  in
-  let retracted_count =
-    List.length
-      (List.filter
-         (fun (e : event) ->
-            match e.kind with
-            | Retracted -> true
-            | Retrieved _ | Revised _ -> false)
-         about_this)
-  in
-  let revised_from =
-    List.filter_map
-      (fun (e : event) ->
-         match e.kind with
-         | Revised { superseded_by } when String.equal superseded_by memory_id ->
-           Some e.memory_id
-         | Revised _ | Retrieved _ | Retracted -> None)
-      about_others
-    |> List.sort_uniq String.compare
-  in
-  { retrieved_count = List.length retrieved_at
-  ; retrieved_distinct_days =
-      List.map utc_day retrieved_at |> List.sort_uniq Int.compare |> List.length
-  ; last_retrieved_at =
-      List.fold_left
-        (fun latest at ->
-           match latest with
-           | None -> Some at
-           | Some seen -> Some (Float.max seen at))
-        None
-        retrieved_at
-  ; retracted_count
-  ; revised_from
+module Memory_id_map = Map.Make (String)
+module Memory_id_set = Set.Make (String)
+module Day_set = Set.Make (Int)
+
+type summary_accumulator =
+  { retrievals : int
+  ; days : Day_set.t
+  ; latest : float option
+  ; retractions : int
+  ; predecessors : Memory_id_set.t
   }
+
+let empty_accumulator =
+  { retrievals = 0; days = Day_set.empty; latest = None
+  ; retractions = 0; predecessors = Memory_id_set.empty }
+
+let summaries_for ~memory_ids (events : event list) : summary list =
+  match memory_ids with
+  | [] -> []
+  | _ :: _ ->
+  let requested = List.fold_left (fun summaries memory_id ->
+    Memory_id_map.add memory_id empty_accumulator summaries)
+      Memory_id_map.empty memory_ids in
+  let summaries =
+    List.fold_left
+      (fun summaries (event : event) ->
+         let target_id = match event.kind with
+           | Retrieved _ | Retracted -> event.memory_id
+           | Revised { superseded_by } -> superseded_by
+         in
+         match Memory_id_map.find_opt target_id summaries with
+         | None -> summaries
+         | Some current ->
+           match event.kind with
+           | Retrieved _ ->
+             Memory_id_map.add target_id
+               { current with
+                 retrievals = current.retrievals + 1
+               ; days = Day_set.add (utc_day event.recorded_at) current.days
+               ; latest = Some (match current.latest with
+                   | None -> event.recorded_at
+                   | Some seen -> Float.max seen event.recorded_at)
+               } summaries
+           | Retracted ->
+             Memory_id_map.add target_id
+               { current with retractions = current.retractions + 1 } summaries
+           | Revised _ ->
+             if String.equal event.memory_id target_id then summaries
+             else
+               Memory_id_map.add target_id
+                 { current with
+                   predecessors = Memory_id_set.add event.memory_id current.predecessors
+                 } summaries)
+      requested events
+    |> Memory_id_map.map (fun current ->
+         { retrieved_count = current.retrievals
+         ; retrieved_distinct_days = Day_set.cardinal current.days
+         ; last_retrieved_at = current.latest
+         ; retracted_count = current.retractions
+         ; revised_from = Memory_id_set.elements current.predecessors
+         })
+  in
+  List.map (fun memory_id -> Memory_id_map.find memory_id summaries) memory_ids
 ;;
 
 let summary_to_json (s : summary) : Yojson.Safe.t =

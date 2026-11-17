@@ -82,8 +82,9 @@ let test_actual_handler_provenance () =
   let invalid = settled ~sequence:2 ~outcome:(failed T.Validation_error) "schema invalid" in
   let handled = settled ~sequence:3 ~outcome:(failed T.Recoverable_tool_error) "handler failed" in
   let nonretryable = settled ~sequence:4 ~outcome:(failed T.Non_retryable_tool_error) "handler raised" in
+  let cut = settled ~sequence:5 ~outcome:(failed T.Writer_exited_tool_error) "cut off" in
   let recovered = reconcile ~seed:empty ~checkpoint:empty
-      [blocked; invalid; handled; nonretryable] |> recover in
+      [blocked; invalid; handled; nonretryable; cut] |> recover in
   same "only admitted handler outcomes become observations"
     (record (record empty handled) nonretryable) recovered;
   List.iter (fun kind ->

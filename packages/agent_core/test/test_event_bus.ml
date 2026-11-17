@@ -799,6 +799,8 @@ let test_unknown_tool_reports_available_tools_and_retries () =
        Some "reported"
      | Types.Tool_failed { failure_kind = Agent_tools.Unattributed_tool_error; _ } ->
        Some "unattributed"
+     | Types.Tool_failed { failure_kind = Agent_tools.Writer_exited_tool_error; _ } ->
+       Some "writer_exited"
      | Types.Tool_succeeded -> None);
   check
     bool

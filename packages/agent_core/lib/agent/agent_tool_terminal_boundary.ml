@@ -71,6 +71,25 @@ let completed_dispatch completion (dispatch : tool_dispatch option) =
           effect_disposition) ->
        Terminal_failed { invocation; effect_disposition; detail = content }
      | Tool_contract.Continue_after_success -> Continue_after_batch)
+  | Some
+      { result =
+          { outcome = Tool_failed { failure_kind = Writer_exited_tool_error; _ }
+          ; invocation
+          ; content
+          ; _
+          }
+      ; _
+      } ->
+    (* The handler never returned, so its own effect declaration says nothing
+       about this failure. *)
+    (match completion with
+     | Tool_contract.Terminal_after_success _ ->
+       Terminal_failed
+         { invocation
+         ; effect_disposition = Tool_contract.Effect_outcome_unknown
+         ; detail = content
+         }
+     | Tool_contract.Continue_after_success -> Continue_after_batch)
   | None -> Continue_after_batch
 ;;
 
@@ -177,6 +196,18 @@ let recovered_batch_completion ~invocations tool_results =
              ((Tool_contract.Proven_post_effect | Tool_contract.Effect_outcome_unknown) as
               effect_disposition) ->
            Ok (Terminal_failed { invocation; effect_disposition; detail })
+         | Tool_contract.Continue_after_success ->
+           Error
+             (Error.Internal "persisted terminal invocation lost its terminal completion"))
+      | Some (detail, Tool_failed { failure_kind = Writer_exited_tool_error; _ }) ->
+        (match Tool_contract.Invocation.completion invocation with
+         | Tool_contract.Terminal_after_success _ ->
+           Ok
+             (Terminal_failed
+                { invocation
+                ; effect_disposition = Tool_contract.Effect_outcome_unknown
+                ; detail
+                })
          | Tool_contract.Continue_after_success ->
            Error
              (Error.Internal "persisted terminal invocation lost its terminal completion")))

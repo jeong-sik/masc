@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parse, defaultTreeAdapter as tree, type DefaultTreeAdapterTypes as Nodes } from 'parse5'
 import { selectedArtifactText } from './artifact-text-frame'
 import { artifactHtmlTextEditor, escapeArtifactHtmlText } from './artifact-html-text'
+import { officeChartFigure } from './artifact-office-chart'
 import { replaceSharedSelection, seedSharedDocument, selectSharedSource, sharedSource } from './artifact-shared-document'
 
 function elements(source: string): Nodes.Element[] {
@@ -12,6 +13,20 @@ function elements(source: string): Nodes.Element[] {
   visit(parse(source)); return result
 }
 describe('HTML sentence editing source spans', () => {
+  for (const type of ['column', 'bar', 'line', 'pie'] as const) it(`binds the original empty ${type} caption without binding its SVG projection`, () => {
+    const source = officeChartFigure({ type, title: '', categories: ['서울'], series: [{ name: '값', values: [12.5] }] })
+    const editor = artifactHtmlTextEditor(source), start = source.indexOf('</figcaption>')
+    const caption = editor.parts.find(part => part.start === start)
+    expect(caption).toEqual({ id: caption?.id, start, end: start, raw: '', text: '' })
+    const projected = elements(editor.document).find(node => node.attrs.some(attr => attr.name === 'aria-label' && attr.value === '빈 차트 제목 편집'))!
+    expect(projected.tagName).toBe('span')
+    expect(projected.childNodes.map(node => tree.isTextNode(node) ? node.value : '').join('')).toBe('제목 추가')
+    expect(editor.parts.filter(part => part.start === start)).toHaveLength(1)
+    expect(editor.parts.filter(part => part.text === '서울')).toHaveLength(1)
+    expect(editor.parts.filter(part => part.text === '값')).toHaveLength(1)
+    for (const part of editor.parts) expect(source.slice(part.start, part.end)).toBe(part.raw)
+  })
+
   it('locates repeated text, entities, CRLF and emoji without normalizing the source', () => {
     const source = '<!doctype html>\r\n<p>한글 😀 &amp; 친구</p>\r\n<p>한글 😀 &amp; 친구</p>'
     const editor = artifactHtmlTextEditor(source)

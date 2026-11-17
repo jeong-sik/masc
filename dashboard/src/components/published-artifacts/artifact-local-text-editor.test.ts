@@ -1,10 +1,13 @@
 import { html } from 'htm/preact'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { publishArtifact, type ArtifactDraft } from '../../api/published-artifacts'
+import JSZip from 'jszip'
+import { publishArtifact, type ArtifactDocument, type ArtifactDraft } from '../../api/published-artifacts'
 import { artifactHtmlTextEditor } from '../../lib/artifact-html-text'
 import { replaceLocalArtifactText, selectLocalArtifactText, type ArtifactLocalTextInput } from '../../lib/artifact-local-text'
 import { officeChartFigure, type OfficeChartType } from '../../lib/artifact-office-chart'
+import { artifactWordFile } from '../../lib/artifact-word-export'
+import { artifactHwpxFile } from '../../lib/artifact-hwpx-export'
 import { ArtifactComposer } from './artifact-composer'
 
 vi.mock('../../api/published-artifacts', async original => ({ ...await original<typeof import('../../api/published-artifacts')>(), publishArtifact: vi.fn() }))
@@ -56,6 +59,41 @@ for (const kind of ['column', 'bar', 'line', 'pie'] as const) it(`edits ${kind} 
   fireEvent.input(await choose('', 0), { target: { value: '0' } })
   fireEvent.click(screen.getByRole('button', { name: '원고에 반영' }))
   expect(view.changed.mock.lastCall![0].content).toBe(expected.replace('<td></td>', '<td>0</td>'))
+})
+
+for (const kind of ['column', 'bar', 'line', 'pie'] as const) it(`reselects a cleared ${kind} title and enters a new title at its original source position`, async () => {
+  const source = figure(kind), view = open(source)
+  fireEvent.input(await choose('실적'), { target: { value: '' } })
+  fireEvent.click(screen.getByRole('button', { name: '원고에 반영' }))
+  const cleared = source.replace('<figcaption>실적</figcaption>', '<figcaption></figcaption>')
+  expect(view.changed.mock.lastCall![0].content).toBe(cleared)
+  const frame = screen.getByTitle('글과 셀을 눌러 편집하는 미리보기') as HTMLIFrameElement
+  const projected = new DOMParser().parseFromString(frame.srcdoc, 'text/html')
+  expect(projected.querySelector('figcaption [aria-label="빈 차트 제목 편집"]')?.textContent).toBe('제목 추가')
+  const input = await choose('제목 추가')
+  expect(input.value).toBe('')
+  fireEvent.input(input, { target: { value: '새 제목 <& 😀' } })
+  fireEvent.click(screen.getByRole('button', { name: '원고에 반영' }))
+  expect(view.changed.mock.lastCall![0].content).toBe(cleared.replace('<figcaption></figcaption>', '<figcaption>새 제목 &lt;&amp; 😀</figcaption>'))
+})
+
+for (const kind of ['column', 'bar', 'line', 'pie'] as const) it(`shows an empty ${kind} title prompt without adding it to the input or native exports`, async () => {
+  const source = figure(kind).replace('<figcaption>실적</figcaption>', '<figcaption></figcaption>'), view = open(source)
+  expect((await choose('제목 추가')).value).toBe('')
+  expect((screen.getByRole('button', { name: '원고에 반영' }) as HTMLButtonElement).disabled).toBe(true)
+  const draft = view.changed.mock.lastCall![0]
+  expect(draft.content).toBe(source)
+  expect(draft.content).not.toContain('제목 추가')
+  const doc: ArtifactDocument = { content: draft.content, revisions: [], artifact: { id: `artifact-${'a'.repeat(32)}`,
+    revision: 1, title: draft.title, summary: draft.summary, format: draft.format, author: 'human',
+    created_at: '2026-11-17T03:00:00Z', task_id: null, goal_id: null, url: '/', body: { _blob: { sha256: 'b'.repeat(64) } } } }
+  for (const format of ['docx', 'hwpx'] as const) {
+    const file = await (format === 'docx' ? artifactWordFile : artifactHwpxFile)(doc), zip = await JSZip.loadAsync(file.data)
+    const path = format === 'docx' ? 'word/charts/chart1.xml' : 'Chart/chart1.xml'
+    const xml = new DOMParser().parseFromString(await zip.file(path)!.async('string'), 'application/xml')
+    const title = xml.getElementsByTagNameNS('http://schemas.openxmlformats.org/drawingml/2006/chart', 'title')[0]
+    expect(title?.textContent ?? '').toBe('')
+  }
 })
 
 it.each(['abc', '0.10000000000000001', '1e-324'])('keeps invalid chart input %s unapplied and downloadable', async value => {

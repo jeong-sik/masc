@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-12T10:16:11Z (HEAD: cb332f65830e)
+Generated: 2026-11-16T15:40:54Z (HEAD: bfe5dc065b84)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -17,8 +17,8 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Manual specs | 39 |
 | TTrace (auto-generated) | 0 |
 | Directories | 9 |
-| Total .cfg files | 139 |
-| Buggy .cfg (bug-model pair) | 94 |
+| Total .cfg files | 140 |
+| Buggy .cfg (bug-model pair) | 95 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -28,7 +28,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| AuthIdentityFSM.tla | AuthIdentityFSM | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 929be520c8ba |
+| AuthIdentityFSM.tla | AuthIdentityFSM | manual | 3 | 2 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} reread-buggy={inv:TypeOK, inv:OneIdentityPerRequest} | 42c796b8e5f3 |
 
 ### specs/boundary (6 specs)
 

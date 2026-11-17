@@ -63,8 +63,9 @@ HWPX 내보내기 전체를 쟀으며 DOCX 생성·ZIP 변환을 포함한다.
 ## 화면과 남은 범위
 
 같은 LibreOffice·글꼴 환경에서 첫 열의 과도한 줄바꿈이 줄었다.
-한글용 글꼴 대체는 WenQuanYi Zen Hei였다. 원본 한글 글꼴과 같다는
-판정이 아니다. 행 높이·셀 여백·글꼴·머리말·페이지 전체는 복원하지 않는다.
+PDF의 실제 글꼴은 NotoSansCJKsc-Bold/Regular와
+LiberationSans-Bold/Regular였다. 원본 글꼴과 같다는 판정이 아니다.
+행 높이·셀 여백·글꼴·머리말·페이지 전체는 복원하지 않는다.
 한글과 Microsoft Word 앱의 화면·인쇄는 이번에 직접 실행하지 않았다.
 한 twip보다 좁아 반올림하면 0이 되는 양의 열은 HWPX도 출력할 수 없다.
 

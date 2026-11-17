@@ -49,6 +49,8 @@ type tool_request_reader = scope:string -> request_id:string ->
 type request_body_reader = scope:string -> request_digest:string -> (Yojson.Safe.t, string) result
 type tool_request_scope_reader = scope:string ->
   (Lane_addon_tool_request_owner.retained list, string) result
+type tool_request_records_reader = scope:string ->
+  (Lane_addon_tool_request_owner.Record.t list, string) result
 type tool_request_archive_reader = scope:string -> date:string -> request_id:string ->
   (Lane_addon_tool_request_owner.Record.t option, string) result
 type history_resolution_reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
@@ -61,16 +63,23 @@ type exact_files =
   ; proof : exact_proof
   ; store : Lane_addon_store.t
   }
-type exact_reader = declaration_id:string -> Lane_addon_exact.request -> (exact_files, string) result
+type exact_reader = declaration_id:string -> Lane_addon_exact.identity -> (exact_files, string) result
 type payload_verdict =
   | Payload_valid
+  | Body_unreadable of string
   | Payload_invalid of string
   | Consumer_stops_on_exact of { detail : string; scopes : string list; paths : string list }
   | Exact_root_differs of string
-type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader -> read_body:request_body_reader ->
+type original = {
+  record : Lane_addon_tool_request_owner.Record.t;
+  restore : unit -> (Lane_addon_tool_request_owner.retained, string) result;
+}
+
+type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader ->
+  read_records:tool_request_records_reader -> read_body:request_body_reader ->
   read_archive:tool_request_archive_reader ->
   read_fence:history_resolution_reader -> read_resolution:history_resolution_reader ->
-  read_exact:exact_reader -> Lane_addon_tool_request_owner.retained -> payload_verdict
+  read_exact:exact_reader -> original -> payload_verdict
 
 type refusal =
   { path : string
@@ -524,8 +533,8 @@ let deleted_state ~key ~found first =
    kept record names it: whether the Exact scan finds such a link depends on
    the other records of the declaration. A link that names another store root
    stops the check. *)
-let read_exact ~after_read store ~root ~declaration_id request =
-  let key = Exact.Retained_key.of_request ~declaration_id request in
+let read_exact ~after_read store ~root ~declaration_id identity =
+  let key = Exact.Retained_key.of_identity ~declaration_id identity in
   let stored = Lane_addon_store.exact_request_path ~declaration_id ~request_id:key.Exact.Retained_key.request_id in
   let group = Filename.basename (Filename.dirname stored) and name = Filename.basename stored in
   let record_path = Filename.concat root stored in
@@ -697,7 +706,9 @@ let scope_store_directories ~root scope =
   scope_group_directories ~root ~group:(Lane_addon_store.digest scope)
     (scope_namespaces @ [ Lane_addon_store.tool_request_archive_directory ])
 
-let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_ ~read_exact:_ _ -> Payload_valid))
+let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_records:_ ~read_body:_ ~read_archive:_
+    ~read_fence:_ ~read_resolution:_ ~read_exact:_ original ->
+      match original.restore () with Ok _ -> Payload_valid | Error detail -> Body_unreadable detail))
     ?(validate_history_resolution=(fun ~group:_ ~name:_ _ -> Ok ())) ~after_read store ~base_path =
   let root = Lane_addon_store.directory ~masc_dir:(Common.masc_dir_from_base_path ~base_path) in
   let report =
@@ -811,16 +822,39 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
               | Refused (_,detail) -> Error (Filename.concat directory name ^ ": " ^ detail)
               | Record -> let* record=read_name ~scope ~name in
                 Ok (Option.fold ~none:rest ~some:(fun record -> record::rest) record)) names (Ok []) in
+          let read_records ~scope =
+            let group=Lane_addon_store.digest scope in
+            let directory=Filename.concat root (Filename.concat Lane_addon_store.tool_request_owners_directory group) in
+            let* names=entries directory in
+            List.fold_right (fun name rest ->
+              let* rest=rest in
+              let path=Filename.concat directory name in
+              match tool_request_owner_entry name with
+              | Skipped -> Ok rest
+              | Refused (_,detail) -> Error (path ^ ": " ^ detail)
+              | Record ->
+                let* bytes=read_text path in
+                match bytes with
+                | None -> Ok rest
+                | Some bytes ->
+                  let* json=try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error (path ^ ": " ^ detail) in
+                  let* record=Lane_addon_tool_request_owner.decode_published ~directory_name:group ~file_name:name json
+                    |> Result.map_error (fun detail -> path ^ ": " ^ detail) in
+                  if Lane_addon_tool_request_owner.Record.scope record=scope then Ok (record::rest)
+                  else Error (path ^ ": original metadata belongs to another scope")) names (Ok []) in
           fold_entries ~delete report ~dir:group_dir ~entry:tool_request_owner_entry names
             ~record:(fun report ~name ~path ->
               match
                 read_file ~after_read ~delete ~path (fun json ->
-                  Reader.read reader ~directory_name:group ~file_name:name json
-                  |> decoded Tool_request_owner)
+                  let+ record=Lane_addon_tool_request_owner.decode_published ~directory_name:group ~file_name:name json
+                    |> decoded Tool_request_owner in
+                  {record;restore=(fun () -> Reader.read reader ~directory_name:group ~file_name:name json)})
               with
               | Gone -> Ok report
               | Unreadable refusal -> Ok (refused report refusal)
-              | Read record ->
+              | Read original ->
+                let record=original.record in
+                let module Record=Lane_addon_tool_request_owner.Record in
                 (* A record settled while its consumer check read it is gone,
                    as [read_file] finds a record removed while it was decoded. *)
                 let refuse decoder detail delete =
@@ -829,12 +863,13 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
                     refused report
                       { path; decoder; delete
                       ; detail = Printf.sprintf "scope=%S request_id=%S request_digest=%s: %s"
-                          record.scope record.request_id record.request_digest detail } in
+                          (Record.scope record) (Record.request_id record) (Record.request_digest record) detail } in
                 (match
-                   validate_tool_request ~read ~read_scope ~read_body ~read_archive ~read_fence
-                     ~read_resolution ~read_exact record
+                   validate_tool_request ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence
+                     ~read_resolution ~read_exact original
                  with
                  | Payload_valid -> Ok (counted report)
+                 | Body_unreadable detail -> Ok (refuse Tool_request_owner detail (delete path))
                  | Payload_invalid detail -> Ok (refuse Tool_request_payload detail (delete path))
                  | Consumer_stops_on_exact { detail; scopes; paths } ->
                    Ok (refuse Tool_request_exact_reads detail

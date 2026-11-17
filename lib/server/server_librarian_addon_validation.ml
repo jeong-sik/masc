@@ -139,16 +139,12 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
             let* actual=Capture.observe_record_owner ~base_path ~keepers_dir fresh in
             Capture.owner_matches_json actual (Capture.owner_to_json owner))
             |> Result.map_error not_now in
-          (* An admission part carries its destination, so nothing re-creates
-             a part the host ends. It waits under a replaced declaration, as
-             it did before the veto had two cases. *)
-          match Lane_addon_runtime.authorize_captured_exact_dispatch
+          (* The owner reconstructs the retained uncommitted frontier after
+             this exact typed declaration ending. *)
+          Lane_addon_runtime.authorize_captured_exact_dispatch
             ~store ~declaration_id ~package_id:destination.package_id
-            ~configuration_revision:destination.configuration_revision with
-          | Ok () -> Ok ()
-          | Error (Exact.Not_now _ as veto) -> Error veto
-          | Error Exact.Declaration_replaced ->
-            Error (not_now Exact.(dispatch_veto_detail Declaration_replaced)));
+            ~configuration_revision:destination.configuration_revision);
+
         with_execution=(fun run ->
           match Keeper_memory_lane.with_external_effect ~base_path ~keeper_name:(Capture.keeper_id owner) run with
           | Ok result -> result

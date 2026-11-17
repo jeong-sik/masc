@@ -12,6 +12,7 @@ type commit_result =
   | Memory_committed
   | Memory_pending of Keeper_librarian_pending.t
   | Memory_refused of Keeper_librarian_runtime.not_committed list
+  | Memory_replaced of Keeper_librarian_runtime.not_committed list
 
 type outcome =
   | Nothing_to_read
@@ -1663,11 +1664,12 @@ let consume_one_with_extent
              checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
                ~selection_progress ~messages ~selected_range ~range ~external_cursor ~external_through reports input
            | (None | Some _), (None | Some _), ([] | _::_), (None | Some _), ([] | _::_) -> result)
-        | (Memory_committed | Memory_pending _ | Memory_refused _),
+        | (Memory_committed | Memory_pending _ | Memory_refused _ | Memory_replaced _),
           (No_message_floor | Runtime_message_floor _) -> result in
       match result with
       | Memory_pending pending -> Ok (Pending pending)
       | Memory_refused reports -> refused_original original reports
+      | Memory_replaced reports -> Ok (Memory_not_committed reports)
       | Memory_committed ->
         let* _ = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Keeper_memory_os_current.committed_unread_messages
@@ -1690,6 +1692,10 @@ let consume_one_with_progress_writer_and_floor
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let key = range_key ~runtime_keepers_dir ~keeper_name in
   let had_failed_range = failed_before key in
+  let replaced=ref false in
+  let commit original = match commit original with
+    | Memory_replaced _ as result -> replaced:=true;result
+    | (Memory_committed | Memory_pending _ | Memory_refused _) as result -> result in
   let extent = if had_failed_range then R.To_first_cut_point else R.All_unread in
   (* Leave the marker set across exceptions and cancellation. After a failed
      wide range, keep taking one cut point until a later pass proves that the
@@ -1707,6 +1713,8 @@ let consume_one_with_progress_writer_and_floor
       ~commit
   in
   (match result, extent with
+   | Ok (Memory_not_committed _), _ when !replaced ->
+     if not had_failed_range then clear_failed key
    | Ok (Pending _), _ ->
      (* Pending is not a failed attempt: retain an earlier failure marker, but
         undo the provisional marker this wrapper installs for exceptions. *)

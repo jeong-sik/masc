@@ -47,18 +47,23 @@ val preparation : t -> preparation option
     the complete original child, parent and physical owner. Pending preparation
     prevents Commit_intended; consumers without one keep their original policy. *)
 val replacement : t -> preparation option
-(** Orthogonal immutable replacement-publication fact, allowed only while the
-    original remains Conflicted. One complete successor intent and its exact ID
+(** Orthogonal immutable replacement-publication fact, allowed while the
+    original remains Conflicted or Rejected. One complete successor intent and its exact ID
     acknowledgement survive restart without altering the original phase, Gate
     preparation or observer. The host must authenticate the full derivation and
-    confirm the retained child before ACK; neither event grants RPC permission. *)
+    confirm the retained child before ACK; neither event grants RPC permission.
+    A refusal needs consumer-owned proof that replacement is permitted. A
+    replacement intent prevents later subdivision or refusal settlement. *)
 val settlement : t -> Yojson.Safe.t option
 (** Orthogonal immutable fact, allowed only on an execution refusal: the host
-    abandoned that exact input range after retaining its diagnosis. Phase stays
+    completed its consumer-owned disposition and retained the evidence. This
+    may abandon a refused range or release a stopped original for a new
+    request while keeping its source unread. Phase stays
     [Rejected]; the refusal evidence is not rewritten. Once present, the
     original can no longer be subdivided, and a second settlement is an error.
-    The event grants no effect: the host owns the ranges it moves and must have
-    applied them before recording this fact. *)
+    The event grants no effect. Each consumer validates the exact disposition;
+    if it moves ranges, it must apply them before recording the fact. A release
+    without consumption grants no range, Memory or cursor acknowledgement. *)
 val observer : t -> Lane_addon_request_receipt.t
 (** Orthogonal immutable observer intents/acknowledgements. Execution and commit
     transitions preserve them. Completion intent requires an original Finished,

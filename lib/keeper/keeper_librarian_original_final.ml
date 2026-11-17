@@ -51,6 +51,33 @@ type unconfirmed = Terminal_absent | Terminal_unresolved | Terminal_differs
   | Latest_incomplete | Latest_ordinal_invalid | Latest_differs | Latest_refused
 type verdict = Confirmed | Unconfirmed of unconfirmed
 
+let require_declaration_ending_latest = function
+  | Exact.No_completed_latest
+  | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} -> Ok ()
+  | Completed_latest {execution={outcome=Exact.Call_ended _;_};_} ->
+    Error "Original declaration replacement has a completed host call result"
+
+let declaration_replaced ~store {exact;schema;declaration_id} (record:Owner.retained) =
+  match Lane_addon_request_progress.phase record.progress with
+  | Rejected {stage=Execution;evidence} ->
+    let* retained=Exact.retained_final_of_json ~schema evidence in
+    (match retained with
+     | Exact.Retained_not_allowed {reason=Replaced_declaration} ->
+       let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
+       (match observed with
+        | Exact.Retained_terminal (Exact.Retained_not_allowed {reason=Replaced_declaration}) ->
+          let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in
+          let+ ()=require_declaration_ending_latest latest in true
+        | Retained_absent | Retained_open
+        | Retained_terminal (Retained_call _ | Retained_unknown _ | Retained_not_allowed {reason=Permission_refused _}
+          | Retained_request_id_reused) ->
+          Error "Original declaration replacement differs from its host cause")
+     | Retained_call _ | Retained_unknown _ | Retained_not_allowed {reason=Permission_refused _}
+     | Retained_request_id_reused -> Ok false)
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_}
+  | Subdividing _ | Subdivided _ -> Ok false
+
 let confirm ~(observe : unit -> (Exact.retained_observation, string) result)
     ~(latest : unit -> (Exact.latest_original_execution, string) result) final =
   let* observed=observe () in
@@ -65,6 +92,14 @@ let confirm ~(observe : unit -> (Exact.retained_observation, string) result)
   | Retained_terminal actual ->
   let* delivered=same (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final) in
   if not delivered then Ok (Unconfirmed Terminal_differs) else
+  (* Worker Not_allowed JSON need not retain the host's typed ending cause.
+     Every consumer, including retained-inventory settlement, checks the
+     actual original terminal before it can release that source for reread. *)
+  let* ()=match actual with
+    | Exact.Retained_not_allowed {reason=Replaced_declaration} ->
+      let* latest=latest () in require_declaration_ending_latest latest
+    | Retained_call _ | Retained_unknown _ | Retained_not_allowed {reason=Permission_refused _}
+    | Retained_request_id_reused -> Ok () in
   match final with
   | Exact.Call_final expected ->
     let* latest=latest () in

@@ -866,6 +866,8 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
      Alcotest.fail "the failed walk claimed Memory committed"
    | Memory_pending _ ->
      Alcotest.fail "the synchronous failed walk claimed an unfinished owner commit"
+   | Memory_replaced _ ->
+     Alcotest.fail "the synchronous failed walk claimed a declaration replacement"
    | Memory_refused reports ->
      Alcotest.(check bool) "the adapter retains classified reports" true (reports <> []);
      Alcotest.(check bool) "provider size refusal and later quota both reach the durable edge" true

@@ -24,6 +24,9 @@ type outcome =
   | Pending of wait * Lane_addon_tool_request_owner.retained
   | Answered of answer * Lane_addon_tool_request_owner.retained
   | Refused of Lane_addon_exact.final * Lane_addon_tool_request_owner.retained
+  | Before_dispatch_replaced of Lane_addon_tool_request_owner.retained
+      (** An unadmitted step ended with bound before-dispatch evidence. Its
+          source stays unread; this supplies no hole or smaller-input evidence. *)
 (** [Pending] covers a host terminal [Outcome_unknown] as {!Keeper_librarian_durable_owner}
     does: it is never a refusal and never permits another submission. [Refused]
     holds a terminal host refusal whose final the host's records confirm. *)
@@ -33,10 +36,21 @@ val retain : store:Lane_addon_store.t -> Keeper_librarian_floor_step_request.t -
     The caller must retain new work under Runtime's fresh configured-destination
     serializer. A write failure never proves absence or permits another ID. *)
 val discover : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner ->
-  ((Lane_addon_tool_request_owner.retained * Keeper_librarian_floor_step_request.header) list, error) result
-(** Strictly read every record of the owner's step scope, with the header of
-    each. Any malformed record refuses the inventory. Steps of every chain of the
-    owner are listed, in scope order; the chain's own check picks its steps. *)
+  ((Lane_addon_tool_request_owner.Record.t * Keeper_librarian_floor_step_request.index) list, error) result
+(** Strictly decode the whole owner's published record inventory and indexes,
+    without reading bodies. Any malformed metadata refuses the inventory.
+    Select a range from this observation, then {!load} every original it needs.
+    Discovery alone grants no execution, answer, settlement or ACK authority. *)
+val load : store:Lane_addon_store.t ->
+  Lane_addon_tool_request_owner.Record.t * Keeper_librarian_floor_step_request.index ->
+  (Lane_addon_tool_request_owner.retained * Keeper_librarian_floor_step_request.header, error) result
+(** Restore one selected original's canonical body and confirm its discovered
+    immutable binding and header. Its progress is read now. The complete
+    preparation and Exact digest are checked by
+    {!Keeper_librarian_floor_step_request.restore}
+    where a consumer needs the step, as before.
+    A missing/changed record or unreadable body is an error, never permission
+    to create another original. Blocking store work is offloaded as a whole. *)
 val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
   original:Lane_addon_tool_request_owner.retained -> step:Keeper_librarian_floor_step_request.t ->
   call:call -> (outcome, error) result

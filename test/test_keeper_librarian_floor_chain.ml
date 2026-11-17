@@ -72,14 +72,39 @@ let finished = function
   | Ok (Chain.Finished finished) -> finished
   | Ok (Chain.Pending pending) -> failf "the chain was still pending: %s" (Pending.description pending)
   | Ok (Chain.Stopped { position; report }) -> failf "the chain stopped at %d: %s" position report.detail
+  | Ok (Chain.Declaration_replaced {position;request_id}) ->
+    failf "the declaration of step %d was replaced: %s" position request_id
   | Ok Chain.Superseded -> fail "the chain's initial facts were superseded"
   | Error detail -> failf "the chain refused: %s" detail
 
 let steps_of fixture ~owner =
   Step_owner.discover ~store:fixture.store ~owner |> Result.map_error Step_owner.error_to_string |> get
+  |> List.map (fun listed -> Step_owner.load ~store:fixture.store listed
+      |> Result.map_error Step_owner.error_to_string |> get)
 
 let in_position_order steps =
   List.sort (fun (_, (a : Step.header)) (_, (b : Step.header)) -> Int.compare a.position b.position) steps
+
+let test_unadmitted_replacement_returns_a_restart_without_a_hole () = with_fixture (fun fixture ->
+  let owner=owner fixture in
+  let range=range_link owner in
+  let step=new_step fixture ~owner ~range ~previous:None (ask (machine ())) in
+  let record=retain fixture step in
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-floor-step\"" -> "run_id=\"librarian-floor-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_configuration fixture replacement;
+  let assert_restart ()=match run_once fixture ~owner ~range () with
+    | Ok (Chain.Declaration_replaced {position;request_id}) ->
+      check int "the original first step ends" 0 position;
+      check string "the restart names the ended original" record.request_id request_id
+    | Ok (Finished _ | Pending _ | Stopped _ | Superseded) -> fail "replacement became a Memory decision or input failure"
+    | Error detail -> fail detail in
+  assert_restart ();
+  check int "a replaced declaration cannot make a later message into a hole" 1 (List.length (steps_of fixture ~owner));
+  replace_configuration fixture (fixture.declaration true);
+  assert_restart ();
+  check int "neither replacement nor rollback calls a provider" 0 (F.post_count fixture.server))
 
 (* The directory a scope's records sit in: one directory per scope, named by the
    scope's digest. *)
@@ -104,7 +129,7 @@ let retained_answer fixture ~owner (record : Owner.retained) =
   match Step_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ())
           ~original:record ~step ~call with
   | Ok (Step_owner.Answered (answer, record)) -> step, record, answer
-  | Ok (Step_owner.Pending _ | Step_owner.Refused _) -> fail "a finished step has its answer"
+  | Ok (Step_owner.Pending _ | Step_owner.Refused _ | Step_owner.Before_dispatch_replaced _) -> fail "a finished step has its answer"
   | Error error -> failf "the finished step did not restore: %s" (Step_owner.error_to_string error)
 
 let judge_from fixture ~owner ~inventory (record, (_ : Step.header)) =
@@ -217,13 +242,13 @@ let test_a_refusal_that_shows_nothing_about_reading_less_stops_the_chain () = wi
      check int "at the first message" 0 position;
      check bool "its report does not let the floor read less" true
        (report.message_descent <> Memory_runtime.Smaller_input_may_help && report.provider_input_refusals = [])
-   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Superseded) -> fail "the chain went past a message no slot could answer"
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "the chain went past a message no slot could answer"
    | Error detail -> fail detail);
   check int "no second message was asked" 1 (List.length (steps_of fixture ~owner));
   let calls = F.post_count fixture.server in
   (match drive fixture ~owner ~range () with
    | Ok (Chain.Stopped { position; _ }) -> check int "a restart stops at the same message" 0 position
-   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Superseded) | Error _ -> fail "a restart did not stop at the same message");
+   | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Declaration_replaced _ | Chain.Superseded) | Error _ -> fail "a restart did not stop at the same message");
   check int "without asking the provider again" calls (F.post_count fixture.server))
 
 let stale_fact = Types.observed ~claim:"a fact from the Memory of another moment" ~category:Types.Fact
@@ -255,14 +280,16 @@ let replace_field name value = function
 let retain_copy ~store ~owner (record : Owner.retained) ~edit =
   let request_id = Step.fresh_request_id owner in
   let request = edit (replace_field "request_id" (`String request_id) record.request) in
+  let step = Step.of_json ~owner request |> get in
+  let summary = Step.index step |> get |> Step.index_to_json in
   match Owner.retain ~store ~scope:record.scope ~request_id ~installation_id:record.installation_id
-          ~package_id:record.package_id ~tool:record.tool ~summary:`Null ~request with
+          ~package_id:record.package_id ~tool:record.tool ~summary ~request with
   | Ok () -> ()
   | Error error -> fail (Owner.error_to_string error)
 
 let expect_refused label ~mentioning = function
   | Error detail -> check bool (Printf.sprintf "%s (%s)" label detail) true (contains detail mentioning)
-  | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _ | Chain.Superseded) -> failf "%s was accepted" label
+  | Ok (Chain.Finished _ | Chain.Pending _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> failf "%s was accepted" label
 
 let test_a_chain_that_disagrees_with_itself_is_refused () = with_fixture (fun fixture ->
   fixture.respond := answering ();
@@ -300,6 +327,32 @@ let test_chains_of_other_ranges_do_not_mix () = with_fixture (fun fixture ->
   check string "the first chain keeps its transaction" fresh.transaction_id a.program.transaction_id;
   check string "the second has its own" "the other chain" b.program.transaction_id;
   check (list string) "both read the same turn the same way" (claims a.program) (claims b.program))
+
+let test_another_ranges_damaged_body_does_not_stop_a_chain () = with_fixture (fun fixture ->
+  fixture.respond := answering ();
+  let owner = owner fixture in
+  let range_a = range_link owner and range_b = range_link owner in
+  let first = finished (drive fixture ~owner ~range:range_a ()) in
+  let other = new_step fixture ~owner ~range:range_b ~previous:None (ask (machine ())) in
+  let record = retain fixture other in
+  let body = Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:record.scope ~request_digest:record.request_digest) in
+  io (fun () -> write body "damaged floor capture");
+  let again = finished (drive fixture ~owner ~range:range_a ()) in
+  check bool "the selected range reconstructs its same program" true
+    (Yojson.Safe.equal (Program.to_json first.program) (Program.to_json again.program));
+  expect_refused "the damaged range still requires its body" ~mentioning:"body does not match"
+    (run_once fixture ~owner ~range:range_b ());
+  let metadata () = Step_owner.discover ~store:fixture.store ~owner
+    |> Result.map_error Step_owner.error_to_string |> get in
+  check int "all three original records remain discoverable" 3 (List.length (metadata ()));
+  let path = Filename.concat (scope_directory fixture ~scope:record.scope)
+    (Store.digest record.request_id ^ ".json") in
+  let malformed = replace_field "summary" `Null (Owner.to_json record) in
+  io (fun () -> write path (Yojson.Safe.to_string malformed));
+  expect_refused "unselected malformed metadata refuses the whole inventory" ~mentioning:"Original floor step is not an object"
+    (run_once fixture ~owner ~range:range_a ());
+  check int "neither the damaged body nor metadata caused another inference" 2 (F.post_count fixture.server))
 
 (* The facts a chain starts from are part of its first question. A restart that
    names no facts, or other facts, gets the ones the first step retained. *)
@@ -369,7 +422,7 @@ let test_a_retained_chain_revalidates_current_facts_before_resuming () = with_fi
    | Ok _ -> fail "a failed authority read was accepted");
   (match resume (fun () -> Ok (Some { Keeper_librarian.facts = [ stale_fact ] })) with
    | Ok Chain.Superseded -> ()
-   | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _) | Error _ ->
+   | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _) | Error _ ->
      fail "changed Memory did not supersede the chain");
   check (list string) "neither outcome settles records on the caller's behalf" before (records ());
   check int "neither resumes a model step" calls (F.post_count fixture.server);
@@ -476,12 +529,12 @@ let test_a_pass_with_no_answered_step_does_not_read_the_gate_scope () = with_fix
      check string "the leaf worker request survives the floor" record.request_id waiting.request_id;
      check bool "the actual worker is processing" true (waiting.wait = Pending.Processing)
    | Ok (Chain.Pending _) -> fail "the pending worker was replaced by a floor diagnostic"
-   | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "the chain went past a step nothing had answered"
+   | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "the chain went past a step nothing had answered"
    | Error detail -> failf "a pass with no answered step read the gate scope: %s" detail);
   await_delivery fixture ~after:before;
   match run_once fixture ~owner ~range () with
   | Error _ -> ()
-  | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "an answered step was judged without the gate scope")
+  | Ok (Chain.Pending _ | Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "an answered step was judged without the gate scope")
 
 let absorbing_answer = `Assoc
   [ "new_claims", `List [ `Assoc [ "claim", `String "a claim that absorbs the stale fact"; "category", `String "fact";
@@ -505,7 +558,7 @@ let test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_in
     (match run_through_workers fixture ~owner ~range ~fresh:starting () with
      | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
      | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
-     | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+     | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
      | Error detail -> failf "the chain refused: %s" detail);
     let failed = Gate.Inventory.read ~store:fixture.store ~owner |> get in
     check bool "the failed journal is in the inventory" true (Gate.Inventory.record_count failed > 0);
@@ -552,7 +605,7 @@ let test_a_journal_read_restores_each_attempt_once () = with_fixture (fun fixtur
       match run_through_workers fixture ~owner ~range ~fresh:starting () with
       | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
       | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
-      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Declaration_replaced _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
       | Error detail -> failf "the chain refused: %s" detail in
     let first_step () = match in_position_order (steps_of fixture ~owner) with
       | (record, (_ : Step.header)) :: _ -> Some record
@@ -605,7 +658,8 @@ let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture 
       match run_through_workers fixture ~owner ~range ~fresh:starting () with
       | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
       | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
-      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded | Chain.Declaration_replaced _) ->
+        fail "a gate that failed was taken for a decision"
       | Error detail -> failf "the chain refused: %s" detail in
     let attempts () = match in_position_order (steps_of fixture ~owner) with
       | [] -> 0
@@ -624,15 +678,19 @@ let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture 
       let reads = ref 0 in
       let counting () =
         let validate = Keeper_librarian_store_preflight.validator () in
-        fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_ record ->
+        fun ~read ~read_scope ~read_records:_ ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_
+          (original:Lane_addon_store_preflight.original) ->
           let read ~scope ~request_id =
             if String.equal scope gate_scope then incr reads;
             if read_anew then
               Owner.load ~store:fixture.store ~scope ~request_id |> Result.map_error Owner.error_to_string
             else read ~scope ~request_id in
-          match validate ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record with
-          | Ok () -> Lane_addon_store_preflight.Payload_valid
-          | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
+          match original.restore () with
+          | Error detail -> Lane_addon_store_preflight.Body_unreadable detail
+          | Ok record ->
+            match validate ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record with
+            | Ok () -> Lane_addon_store_preflight.Payload_valid
+            | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
       let report = io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
         Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
       check (list string) "the deploy check refuses no record" []
@@ -674,7 +732,8 @@ let test_a_deploy_check_judges_a_steps_exact_files_once_for_its_journal () = wit
       match run_through_workers fixture ~owner ~range ~fresh:starting () with
       | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
       | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
-      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded | Chain.Declaration_replaced _) ->
+        fail "a gate that failed was taken for a decision"
       | Error detail -> failf "the chain refused: %s" detail in
     let first_step () = match in_position_order (steps_of fixture ~owner) with
       | ((step : Owner.retained), (_ : Step.header)) :: _ -> Some step
@@ -694,11 +753,11 @@ let test_a_deploy_check_judges_a_steps_exact_files_once_for_its_journal () = wit
       let reads = ref 0 in
       let counting () =
         let check = Keeper_librarian_store_preflight.preflight () in
-        fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact record ->
-          let read_exact ~declaration_id (request : Exact.request) =
-            if String.equal request.request_id step.request_id then incr reads;
-            read_exact ~declaration_id request in
-          check ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact record in
+        fun ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact original ->
+          let read_exact ~declaration_id (identity : Exact.identity) =
+            if String.equal identity.identity_request_id step.request_id then incr reads;
+            read_exact ~declaration_id identity in
+          check ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact original in
       let report = io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
         Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
       check (list string) "the deploy check refuses no record" []
@@ -717,6 +776,8 @@ let () =
     [ ( "chain"
       , [ test_case "each step runs once and a restart replays it" `Slow
             test_a_chain_runs_each_step_once_and_a_restart_replays_it
+        ; test_case "an unadmitted replacement restarts the chain without a hole" `Slow
+            test_unadmitted_replacement_returns_a_restart_without_a_hole
         ; test_case "a message every slot refuses as too large becomes a hole" `Slow
             test_a_message_every_slot_refuses_as_too_large_becomes_a_hole
         ; test_case "a refusal that shows nothing about reading less stops it" `Slow
@@ -730,6 +791,8 @@ let () =
         ; test_case "a step the floor never asked about is refused" `Slow
             test_a_step_the_floor_never_asked_about_is_refused
         ; test_case "chains of other ranges do not mix" `Slow test_chains_of_other_ranges_do_not_mix
+        ; test_case "another range's damaged body does not stop a chain" `Slow
+            test_another_ranges_damaged_body_does_not_stop_a_chain
         ; test_case "a chain asks for its start only while it has no step" `Slow
             test_a_chain_asks_for_its_start_only_while_it_has_no_step
         ; test_case "a retained chain revalidates current facts before resuming" `Slow

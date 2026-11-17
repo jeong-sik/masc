@@ -1254,7 +1254,7 @@ let test_memory_attention_snapshot_joins_both_original_lanes () =
       (Fs_compat.load_file memory_path))
 ;;
 
-let test_pending_preserves_selection_and_memory ~after_failure () =
+let test_unconsumed_original_preserves_selection_and_memory ~replacement ~after_failure () =
   with_workspace @@ fun config ->
   let trace_id = "trace-pending-selection" in
   prepare_three_unread_turns config ~trace_id;
@@ -1276,10 +1276,13 @@ let test_pending_preserves_selection_and_memory ~after_failure () =
     check bool "real selected range has an atom receipt" true (Option.is_some range_id);
     check (list string) "Pending does not change the prior selection mode"
       selected (text_markers input);
-    Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }) in
+    if replacement then Consumer.Memory_replaced []
+    else Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication
+      { request_id = "fixture-original"; detail = "publication is unfinished" }) in
   List.iter (fun () ->
     (match consume config pending with
-     | Consumer.Pending _ -> ()
+     | Consumer.Pending _ when not replacement -> ()
+     | Consumer.Memory_not_committed [] when replacement -> ()
      | _ -> fail "an unfinished commit did not suspend the durable pass");
     check bool "Pending preserves the actual atom position" true
       (read_progress config=progress_before);
@@ -5391,9 +5394,13 @@ let () =
         ; test_case "retained and worsening count excess does not spin" `Quick
             test_memory_count_cleanup_does_not_spin
         ; test_case "Pending preserves all-unread selection and Memory" `Quick
-            (test_pending_preserves_selection_and_memory ~after_failure:false)
+            (test_unconsumed_original_preserves_selection_and_memory ~replacement:false ~after_failure:false)
         ; test_case "Pending preserves the earlier narrow retry marker" `Quick
-            (test_pending_preserves_selection_and_memory ~after_failure:true)
+            (test_unconsumed_original_preserves_selection_and_memory ~replacement:false ~after_failure:true)
+        ; test_case "declaration replacement preserves unread input and Memory" `Quick
+            (test_unconsumed_original_preserves_selection_and_memory ~replacement:true ~after_failure:false)
+        ; test_case "declaration replacement preserves an earlier actual failure selection" `Quick
+            (test_unconsumed_original_preserves_selection_and_memory ~replacement:true ~after_failure:true)
         ; test_case "blocked originals suspend following effects while ordinary failures keep their policy" `Quick
             test_blocked_original_suspends_following_phases
         ; test_case "cursor failure suspends the same wake and a healthy wake resumes" `Quick

@@ -111,7 +111,9 @@ val confirm_predecessor : store:Lane_addon_store.t -> require_confirmed:bool -> 
 val validate_predecessor_link_payload :
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   require_confirmed:bool -> t -> (unit, string) result
-(** One existing known-basis link, without traversing ancestors. The history
+(** One known-basis or declaration-ended link, without traversing ancestors.
+    A declaration-ended parent requires strict bound ending evidence and the
+    same immutable source, with only current Memory rebased. The history
     resolution lineage reader composes this with its fenced-parent link and
     applies one cycle/ancestry check across both kinds. No effect authority. *)
 val validate_predecessor_payload :
@@ -126,7 +128,9 @@ val body_digest : t -> string
 (** Digest of the verified complete canonical captured request body. *)
 val physical_owner : t -> owner
 val destination : t -> destination
-type replaced = {captured:destination;current:destination}
+type replaced = Keeper_librarian_declaration_replacement.replaced = {
+  captured:destination;current:destination
+}
 (** Why an original no worker received was ended: the destination it was
     captured for and the one the configuration named then. *)
 val replaced_to_json : replaced -> Yojson.Safe.t
@@ -135,12 +139,6 @@ val confirm_replaced : t -> Yojson.Safe.t -> (replaced, string) result
     destination, and the two must differ in the semantic configuration
     revision only ({!Lane_addon_captured_destination.Replaced}). Anything else
     is refused. *)
-val replaced_since : current:destination option -> t -> bool
-(** Whether the declaration this request was captured for was replaced: the
-    destination the configuration names now differs from the captured one in
-    the semantic configuration revision only. [current] is [None] when no
-    destination of now could be read; nothing is known then and the answer is
-    [false]. *)
 val source : t -> Keeper_librarian_durable_capture.t
 val preparation : t -> Keeper_librarian_runtime.durable_preparation
 val request : t -> (Lane_addon_exact.request, string) result

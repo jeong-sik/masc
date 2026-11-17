@@ -16,6 +16,7 @@ module Floor_cleanup = Keeper_librarian_floor_cleanup
 module Floor_publish = Keeper_librarian_floor_publish
 module Resolution_lineage = Keeper_librarian_history_resolution_lineage
 module Resolution_work = Keeper_librarian_history_resolution_work
+module Declaration_replacement = Keeper_librarian_declaration_replacement
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
@@ -28,11 +29,11 @@ let reserved = Edge.reserved
 let resolve = Edge.resolve
 let with_destination = Edge.with_destination
 let fresh_authority ~config ~reserved request () =
-  Edge.fresh_authority ~config ~reserved ~owner:(Request.physical_owner request)
+  Edge.fresh_gate_authority ~config ~reserved ~owner:(Request.physical_owner request)
     ~expected:(Request.destination request) ()
 let call = Edge.call
-let resume ~store ~config ~reserved ~wake ~current original =
-  Owner.resume ~store ~config ~reserved ~original ~wake ~current ~call:(call ~config ~reserved)
+let resume ~store ~config ~reserved ~wake original =
+  Owner.resume ~store ~config ~reserved ~original ~wake ~call:(call ~config ~reserved)
     ~publish:(fun ~original ~request ~proposal ->
       Keeper_librarian_durable_commit.publish ~store ~config ~original ~request ~proposal
         ~fresh_authority:(fresh_authority ~config ~reserved request)
@@ -46,11 +47,24 @@ let pending_publication request detail =
   Keeper_librarian_pending.Publication { request_id = Request.request_id request; detail }
 let pending_basis request =
   Keeper_librarian_pending.Basis_changed { request_id = Request.request_id request }
+let replacement_report_id request_id = Keeper_librarian_runtime.not_committed_of_failure
+  ~detail:("Original Librarian declaration replaced; source remains unread: " ^ request_id)
+  Keeper_exact_walk_failure.empty
+let replacement_report record = replacement_report_id (Record.request_id record)
 let advance_original ~store record event =
   io (fun () -> match Retained.advance ~store ~expected:record ~event with
     | Ok (Retained.Stored record | Already_stored record) -> Ok record
     | Ok (Unconfirmed detail) -> Error detail
     | Error error -> Error (Retained.update_error_to_string error))
+let can_replace ~store ~(record:Retained.retained) ~request =
+  let* superseded=Commit.is_superseded ~request ~record in
+  if superseded then Ok true else
+  match Request.predecessor request with
+  | None -> Ok false
+  | Some _ -> io (fun () ->
+    let* exact=Request.request request in
+    Declaration_replacement.ended ~store ~original:(Retained.listed record)
+      ~exact ~captured:(Request.destination request))
 let replacement_request (parent:Retained.retained) parent_request (intended:Progress.preparation_intent) =
   let* child=Request.of_json ~owner:(Request.physical_owner parent_request) intended.request in
   let* ()=require (Request.request_id child=intended.request_id)
@@ -68,6 +82,8 @@ let replacement_request (parent:Retained.retained) parent_request (intended:Prog
     "Original history replacement intent changed its immutable source" in
   Ok child
 let recover_replacement ~store ((parent:Retained.retained),parent_request) =
+  let* allowed=can_replace ~store ~record:parent ~request:parent_request in
+  let* ()=require allowed "Original history has no confirmed replacement authority" in
   let* intended,pending=match Progress.replacement parent.progress with
     | Some (Preparation_pending intended) -> Ok (intended,true)
     | Some (Preparation_confirmed intended) -> Ok (intended,false)
@@ -119,6 +135,8 @@ let capture ?replacement_parent ?(before_retain=fun _ -> Ok ())
       let* original=Owner.retain ~store request |> Result.map_error Owner.error_to_string in
       Ok (original,request)
     | Some (parent,parent_request) ->
+      let* allowed=can_replace ~store ~record:parent ~request:parent_request in
+      let* ()=require allowed "Original history has no confirmed replacement authority" in
       let intended:Progress.preparation_intent={request_id;request=Request.to_json request} in
       let* parent=advance_original ~store parent (Progress.Replacement_intended intended) in
       recover_replacement ~store (parent,parent_request))
@@ -164,8 +182,8 @@ let validate_lineage ~store ~fenced ~read listed =
       else
       let* child,request=body (Record.request_id child_record) in
       let* parent,parent_request=body (Record.request_id parent_record) in
-      let* superseded=Keeper_librarian_durable_commit.is_superseded ~request:parent_request ~record:parent in
-      let* ()=require superseded "Original history successor has no known superseded basis" in
+      let* allowed=can_replace ~store ~request:parent_request ~record:parent in
+      let* ()=require allowed "Original history successor has no confirmed replacement authority" in
       let* intended,pending=match Progress.replacement parent.progress with
         | Some (Preparation_pending intended) -> Ok (intended,true)
         | Some (Preparation_confirmed intended) -> Ok (intended,false)
@@ -192,8 +210,8 @@ let validate_lineage ~store ~fenced ~read listed =
       let* intended=match Progress.replacement parent.progress with
         | Some (Preparation_pending intended | Preparation_confirmed intended) -> Ok intended
         | None -> Error "Original history replacement intent disappeared" in
-      let* superseded=Keeper_librarian_durable_commit.is_superseded ~request ~record:parent in
-      let* ()=require superseded "Original history replacement intent has no superseded basis" in
+      let* allowed=can_replace ~store ~request ~record:parent in
+      let* ()=require allowed "Original history replacement intent has no confirmed authority" in
       let* _=replacement_request parent request intended in
       (match find intended.request_id,Progress.replacement parent.progress with
        | None,Some (Preparation_confirmed _) -> Error "Acknowledged original history replacement is missing"
@@ -210,11 +228,12 @@ let validate_lineage ~store ~fenced ~read listed =
       ancestry (predecessor.request_id::seen) parent in
   let* ()=List.fold_left (fun result (record,index) ->
     let* ()=result in ancestry [Record.request_id record] index) (Ok ()) listed in
-  Ok (List.filter (fun ((record:Retained.retained),_) ->
-    match Progress.phase record.progress with
-    | Progress.Conflicted _ -> not (List.mem record.request_id parent_ids) && not (fenced record.request_id)
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-    | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> false) read)
+  let+ candidates=List.fold_left (fun result (((record:Retained.retained),request) as original) ->
+    let* candidates=result in
+    if List.mem record.request_id parent_ids || fenced record.request_id then Ok candidates else
+    let+ allowed=can_replace ~store ~record ~request in
+    if allowed then original::candidates else candidates) (Ok []) read in
+  List.rev candidates
 (* RFC-librarian-history-settles-finished-originals. A chain settles leaf
    first under the day its root was minted, as Workspace Curator chains do:
    each history record, then the gate records of that execution. Every body
@@ -277,6 +296,19 @@ let finish_settling ~store listed =
   (* [original] and its ancestors as the root ID and the chain leaf first.
      Each ancestor must hold the one below it as its acknowledged replacement. *)
   let rec upward above ((record,(index:Request.index)) as original) =
+    let* ()=match Progress.phase (Record.progress record) with
+      | Rejected _ ->
+        let* parent,request=io (fun () ->
+          let* parent=Retained.load_listed ~store record |> Result.map_error Retained.error_to_string in
+          let+ request=Request.restore ~owner:index.owner parent in parent,request) in
+        let* allowed=can_replace ~store ~record:parent ~request in
+        let* ()=require allowed "Archived replacement has no confirmed declaration ending" in
+        let* intended=match Progress.replacement parent.progress with
+          | Some (Preparation_confirmed intended) -> Ok intended
+          | None | Some (Preparation_pending _) -> Error "Archived replacement has no exact publication ACK" in
+        let+ _=replacement_request parent request intended in ()
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok () in
     let above=original::above in
     match index.predecessor with
     | None -> Ok (Record.request_id record,List.rev above)
@@ -333,27 +365,6 @@ let rec consume_one ~config ~keeper_name ~wake =
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let store=Lane_addon_store.of_config config in
   let reserved=reserved () in
-  (* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.5. The
-     destination the configuration names now, as this call of the pass judges
-     a cut original by it: read on the first cut original met and not again.
-     The inventory check and the owner both use this one reading; two
-     readings could disagree and keep the pass waking itself. [None] when no
-     destination could be read: the configuration names none, or reading it
-     failed. A cut original waits then, and the reason is logged, because
-     the log is what tells that wait from one under its own declaration. *)
-  let current =
-    let read=ref None in
-    fun () -> match !read with
-      | Some destination -> destination
-      | None ->
-        let destination=match with_destination ~config ~reserved (fun destination -> Ok destination) with
-          | Ok destination -> Some destination
-          | Error detail ->
-            Log.Keeper.info ~keeper_name
-              "durable Librarian read no destination to judge a cut original by, so it waits: %s" detail;
-            None in
-        read:=Some destination;
-        destination in
   let error detail=Error (Consumer.Original_publication_blocked detail) in
   let wait_for_original wait record =
     let+ resolution=match wait with
@@ -385,12 +396,14 @@ let rec consume_one ~config ~keeper_name ~wake =
       ~detail:"Original history request ended before any worker received it: its declaration was replaced"
       Keeper_exact_walk_failure.empty] in
   let resume_original original =
-    match resume ~store ~config ~reserved ~wake ~current original with
+    match resume ~store ~config ~reserved ~wake original with
     | Error detail -> error detail
     | Ok (Owner.Waited (wait, record)) ->
       (match wait_for_original wait record with
        | Ok pending -> Ok (Consumer.Pending pending)
        | Error detail -> error detail)
+    | Ok (Owner.Original_replaced record) ->
+      Ok (Consumer.Memory_not_committed [replacement_report record])
     | Ok (Resumed (Finished completed,request)) ->
       (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
        | Ok () -> Ok (completed_outcome request)
@@ -468,11 +481,28 @@ let rec consume_one ~config ~keeper_name ~wake =
       Keeper_librarian_durable_gate.Inventory.executions inventory) gates in
     let parents=List.filter_map (fun (_,(index:Request.index)) -> Option.map
       (fun (predecessor:Request.predecessor) -> predecessor.request_id) index.predecessor) listed in
+    let isolated (record,(index:Request.index)) =
+      let id=Record.request_id record and progress=Record.progress record in
+      not (fenced id) && Option.is_none index.predecessor
+      && Option.is_none (Progress.preparation progress)
+      && Option.is_none (Progress.replacement progress)
+      && not (List.mem id parents) && not (List.mem id executions) in
+    let ended=List.fold_left (fun result ((record,(index:Request.index)) as original) ->
+      let* ended=result in
+      if not (isolated original) then Ok ended else
+      let+ replaced=Declaration_replacement.retained ~original:record ~captured:index.destination in
+      if replaced then original::ended else ended) (Ok []) listed in
+    match ended with
+    | Error detail -> error detail
+    | Ok ended ->
+    let is_ended (record,_)=List.exists (fun (ended,_) ->
+      Record.request_id ended=Record.request_id record) ended in
     let waits (record,(index:Request.index)) =
       let id=Record.request_id record and progress=Record.progress record in
       (match Progress.phase progress with
        | Progress.Dispatch_pending _ -> true
-       | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
+       | Captured | Admission_wait _ -> isolated (record,index)
+       | Judged _ | Committing _ | Commit_unknown _ | Finished _
        | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
       && not (fenced id)
       && Option.is_none (Progress.preparation progress)
@@ -485,7 +515,8 @@ let rec consume_one ~config ~keeper_name ~wake =
     let waiting=List.filter waits listed in
     let is_waiting (record,_)=List.exists (fun (waiting,_) ->
       Record.request_id waiting=Record.request_id record) waiting in
-    let read=List.filter (fun original -> not (unread original || is_waiting original)) listed
+    let read=List.filter (fun original ->
+      not (unread original || is_waiting original || is_ended original)) listed
       |> Owner.load_many ~store in
     match read with
     | Error failure -> error (Owner.error_to_string failure)
@@ -516,11 +547,7 @@ let rec consume_one ~config ~keeper_name ~wake =
           let* frontier=io (fun () -> Commit.validate_inventory ~inventory ~store ~request ~record) in
           match frontier with
           | Commit.Unfinished -> Ok (Owner.Read original::unfinished,settled,fenced_read)
-          | Commit.Settled -> Ok (unfinished,original::settled,fenced_read)
-          | Commit.Settled_if_replaced ->
-            if Request.replaced_since ~current:(current ()) request
-            then Ok (unfinished,original::settled,fenced_read)
-            else Ok (Owner.Read original::unfinished,settled,fenced_read)) (Ok ([],[],[])) originals in
+          | Commit.Settled -> Ok (unfinished,original::settled,fenced_read)) (Ok ([],[],[])) originals in
         (* A waiting original's fence is read again here, as the fold above
            reads it for every original it holds with its body. *)
         let* unfinished,fenced_read=List.fold_left (fun result ((record,index) as original) ->
@@ -549,6 +576,21 @@ let rec consume_one ~config ~keeper_name ~wake =
     match validate_lineage ~store ~fenced ~read:originals listed with
     | Error detail -> error detail
     | Ok superseded ->
+    let moved=List.fold_left (fun result (record,(index:Request.index)) ->
+      let* moved=result in
+      let* ()=io (fun () ->
+        let* _=Request.observe_index_owner ~base_path ~keepers_dir index in
+        let* fence=Resolution_lineage.fenced_record ~store ~record ~index in
+        let* ()=require (Option.is_none fence) "Replaced history original acquired an operator fence" in
+        let* ()=Declaration_replacement.confirm_no_execution ~store ~original:record
+          ~exact_digest:index.exact_digest in
+        let* date=Request.minted_on (Record.request_id record) in
+        Retained.settle ~store ~date record |> Result.map_error Retained.settle_error_to_string) in
+      Ok (moved+1)) (Ok 0) ended in
+    match moved with
+    | Error detail -> error ("Before-admission replacement did not settle: " ^ detail)
+    | Ok moved when moved>0 -> consume_one ~config ~keeper_name ~wake
+    | Ok _ ->
     match io (fun () -> Refusal.inventory (match observed with
       | None -> [] | Some (_,_,_,settled) -> settled)) with
     | Error detail -> error ("Original history refusal inventory did not resolve: " ^ detail)
@@ -678,12 +720,14 @@ let rec consume_one ~config ~keeper_name ~wake =
           match capture ~before_retain ~store ~config ~reserved ~keeper_name source with
           | Error detail -> stop detail
           | Ok original ->
-            match resume ~store ~config ~reserved ~wake ~current (Owner.Read original) with
+            match resume ~store ~config ~reserved ~wake (Owner.Read original) with
             | Error detail -> stop detail
             | Ok (Owner.Waited (wait, record)) ->
               (match wait_for_original wait record with
                | Ok pending -> Consumer.Memory_pending pending
                | Error detail -> stop detail)
+            | Ok (Owner.Original_replaced record) ->
+              Consumer.Memory_replaced [replacement_report record]
             | Ok (Resumed (Finished completed,request)) ->
               (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
                | Ok () -> Consumer.Memory_committed
@@ -717,6 +761,10 @@ let rec consume_one ~config ~keeper_name ~wake =
               (Keeper_librarian_pending.description pending);
             Consumer.Memory_pending pending
           | Ok Floor_chain.Superseded -> superseded ()
+          | Ok (Floor_chain.Declaration_replaced {position;request_id}) ->
+            (match Floor_cleanup.settle_step ~store ~owner candidate ~position with
+             | Error detail -> stop detail
+             | Ok _ -> wake ();Consumer.Memory_replaced [replacement_report_id request_id])
           | Ok (Floor_chain.Stopped {position;report}) ->
             (* The host ended this step's ID. The steps before it stay, and the
                next pass asks the same position under a new ID. *)

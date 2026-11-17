@@ -1,4 +1,4 @@
-(** The existing known-basis link or one explicit fenced-original link, with
+(** Known-basis, declaration-ended, or explicit fenced-original links, with
     a shared cycle check. Read ports grant no dispatch/publication authority. *)
 type reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
 type payload_indexes
@@ -40,7 +40,8 @@ val confirm_predecessor : store:Lane_addon_store.t -> require_confirmed:bool ->
 (** The Keeper pass's check. A predecessor is read as its record and the index
     in that record's summary, without its body; a fenced link compares the two
     indexes, the fence and the resolution record. A known-basis link reads both
-    requests as before. The index is bound to the body where the body is read:
+    requests as before. A declaration-ended link also confirms the parent's
+    original host ending and proofs. The index is bound to the body where the body is read:
     [Keeper_librarian_durable_request.restore_payload], {!fenced_original} and
     {!confirm_predecessor_by_body}. *)
 val confirm_predecessor_record : store:Lane_addon_store.t -> require_confirmed:bool ->

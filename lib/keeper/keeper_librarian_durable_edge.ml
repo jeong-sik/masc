@@ -4,8 +4,8 @@ module Destination = Lane_addon_captured_destination
 module Runtime = Lane_addon_runtime
 module Submit = Lane_addon_submit_once
 let ( let* ) = Result.bind
+let ( let+ ) result f = Result.map f result
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
-let require condition detail = if condition then Ok () else Error detail
 let runtime_error = function
   | Runtime.Unavailable detail | Outcome_unknown detail -> detail
   | Host_refusal refusal -> match refusal with
@@ -29,15 +29,16 @@ let with_destination ~config ~reserved publish =
         "Completed-history Librarian requires its configured package/tool"))
       else match publish actual with Ok value -> Ok value | Error detail -> Error (Runtime.Unavailable detail))
   |> Result.map_error runtime_error
-let fresh_authority ~config ~reserved ~owner ~expected () =
+let fresh_gate_authority ~config ~reserved ~owner ~expected () =
   let* ()=io (fun () ->
     let base_path=config.Workspace.base_path in
     let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let* current=Request.observe_owner ~base_path ~keepers_dir ~keeper_id:(Request.keeper_id owner) in
     Request.owner_matches_json current (Request.owner_to_json owner)) in
   with_destination ~config ~reserved (fun actual ->
-    require (Destination.same_semantic actual expected)
-      "Original completed-history Librarian semantic configuration changed")
+    match Destination.relation ~captured:expected ~current:actual with
+    | Destination.Same | Replaced -> Ok ()
+    | Other_owner -> Error "Original completed-history Librarian Gate belongs to another destination owner")
 let call ~config ~reserved ~(expected : Request.destination) ~(original : Retained.Record.t) ~arguments =
   match resolve ~config ~reserved with
   | Error detail -> Error (Submit.Not_sent (Submit.Rejected detail))
@@ -53,3 +54,11 @@ let call ~config ~reserved ~(expected : Request.destination) ~(original : Retain
     |> Result.map_error Submit.call_error_of_runtime
 let confirm_destination ~config ~reserved (destination:Request.destination) =
   Submit.confirm_destination ~config ~reserved ~label:"history" destination
+
+let observe_destination ~config ~reserved destination =
+  let+ _,current=Submit.destination_relation ~config ~reserved ~label:"history" destination in
+  current
+
+let observe_relation ~config ~reserved destination =
+  let+ relation,_=Submit.destination_relation ~config ~reserved ~label:"history" destination in
+  relation

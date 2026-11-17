@@ -281,15 +281,18 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 실행 중이던 요청은 선언 교체 때 취소되어 host에 `cut`이 남을 수 있다. provider에서 실제로 끝났는지는 여전히 알 수 없다.
 - 운영자는 이 경우도 종료 증거를 남긴 뒤 미소비 입력으로 새 요청을 만드는 쪽을 선택했다(9.2).
 - 허용 조건은 실행 단계의 history 원본, 엄격하게 결속된 원래 Exact request·schema·digest·attempt·proof, 그리고 3.1의 `Replaced`다.
+- 저장 전과 복구 때 원래 Exact request와 schema로 실제 host Cut를 확인하고 실행 proof를 별도로 읽는다. Cut 해소에는 `No_completed_latest`가 필요하다. 손상·읽기 오류·다른 원본의 proof는 종료 권한이 아니다. 일반 typed 선언 교체의 과거 `Call_refused` 허용을 여기로 넓히지 않는다.
 - 원래 거절과 결과 불명은 보존한다. `cut`을 `interrupted`나 성공으로 다시 쓰지 않는다. 별도 종료 증거가 원본 binding과 새로 준비된 목적지를 가리킨다.
 - 저장한 종료 증거는 현재 선언을 다시 빌려 권한으로 삼지 않고 검증한다. owner와 inventory는 같은 증거를 읽는다.
 - 종료 자체는 Memory 반영, source 소비나 외부 ACK가 아니다. linked 원본은 기존 후속 요청의 durable intent와 부모 확인 절차를 따른다.
+- predecessor가 있는 원본은 기존 fence와 해소 intent 아래에서 이어간다. 새 자식의 전체 본문과 ID를 먼저 저장하고, 실제 자식 저장을 확인한 뒤 부모 ACK를 남긴다. 중단 뒤에는 같은 intent의 같은 자식을 복구하며 별도의 fresh root로 빠지지 않는다. 실제 새 자식의 Memory 반영과 원래 source ACK를 확인하기 전에는 해소 완료가 아니다.
 - host의 Cut 기록은 provider의 종료나 옛 실행의 배타성을 증명하지 않는다. 후속 반영과 ACK는 원본의 실행 claim과 효과 차단을 실제로 확인하는 경계를 따로 거쳐야 한다.
 - 같은 종료 사실로 새 root를 반복해서 만들지 않는다. 새 원본을 이 정책으로 다시 끝내려면 그 원본의 선언이 또 교체돼야 한다.
 - 끊긴 원인이 선언 교체였다고 단정하지 않는다. 준비된 새 선언을 적용한 운영자의 선택이 새 시도를 허용한다.
 - 다시 만든 요청은 model을 한 번 더 부를 수 있다. 정상 결과·Gate·Memory·ACK 검사는 새 요청에서도 모두 필요하다.
 - 이 정책은 같은 선언의 Cut, `raised`, floor Cut, admission Cut를 허용하지 않는다. 같은 선언에서의 복구 계약은 #50828에서 따로 다룬다.
 - 첫 생성 요청의 허가를 기다리다 취소되어 시작 표시가 없는 원본은 3.2의 실행 전 경로를 따른다. 시작 표시를 가진 Cut과 섞지 않는다.
+- 첫 생성 요청 전에 guard가 거절된 요청은 typed `Replaced_declaration` 종료를 따른다. 앞서 완료된 deferral의 실제 bound proof가 남을 수 있으며, 이를 Cut 결과와 혼동하지 않는다.
 
 main `cd28f2ac4174`의 L3(#52695)는 다음 경로로 Cut 원본을 정리한다.
 
@@ -324,6 +327,7 @@ main `cd28f2ac4174`의 L3(#52695)는 다음 경로로 Cut 원본을 정리한다
 
 - 저장된 선언 교체 종료는 유지된다. 선언을 되돌려도 끝난 ID를 다시 실행하지 않는다.
 - 다음 읽기는 당시 준비된 선언으로 새 원본을 만든다. 그 원본도 나중에 실제 선언 교체가 확인되면 같은 종료 정책을 따른다.
+- 종료만 저장되고 새 자식 intent를 만들기 전에 rollback하면 당시 준비된 목적지로 새 자식을 만들 수 있다. intent가 이미 저장됐다면 목적지와 본문을 바꾸지 않고 같은 자식을 복구한다.
 - 새 worker가 준비되기 전에 되돌렸다면 3.1의 교체 조건이 성립하지 않으므로 종료 증거를 만들지 않는다.
 - host가 끝낸 뒤 Keeper가 읽기 전에 되돌려도, 저장된 명시적인 종료 사유를 복원한다. 현재 관계가 `Same`이라는 이유로 좁히거나 실행을 재개하지 않는다.
 
@@ -338,7 +342,7 @@ main `cd28f2ac4174`의 L3(#52695)는 다음 경로로 Cut 원본을 정리한다
 
 - 운영자는 답을 보존하고 Gate를 이어가는 쪽을 선택했다(9.3). history·floor step·admission에 같은 정책을 적용한다.
 - 이 절의 Gate 재개는 흡수 판정이나 반영이 남은 답에 적용한다. admission의 `Deferred` 판정은 보존하되 Gate·Memory 반영을 기다리는 답으로 취급하지 않는다. 그 미소비 후보는 3.9의 전체 재판단에 포함한다.
-- 원래 host 답과 proof를 먼저 확인한다. 받은 답을 새 Librarian 요청의 결과로 바꾸거나 다시 묻지 않는다.
+- 원래 답의 host terminal·최신 실행 proof·원본 입력을 먼저 확인한다. 받은 답을 새 Librarian 요청의 결과로 바꾸거나 다시 묻지 않는다.
 - 새 Gate 실행 전에는 같은 물리 Keeper·Memory epoch·설치·package·tool이며, 현재 선언으로 준비된 worker인지 확인한다.
 - 선언 revision만 달라졌다는 이유로 Gate를 막지 않는다. 다른 owner·설치·package·tool이나 준비되지 않은 worker는 권한을 주지 않는다.
 - 이미 저장한 Gate의 질문, 판정 목적지와 원래 답의 결속은 계속 검증한다. 이미 받은 판정은 복원한다.

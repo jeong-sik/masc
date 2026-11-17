@@ -10,9 +10,12 @@
     It performs no Memory commit, source lock, position move or settlement: the
     finished machine hands the ordered program to whoever publishes it. A restart
     runs the same function again. While the initial facts remain current,
-    every step the first run retained is restored,
+    every step of that range the first run retained is restored,
     not asked again, and every gate judgment replays from the journal. A run
-    reads the owner's gate scope once, when its first answered step needs
+    reads the whole owner's strict metadata inventory, but restores bodies
+    only for its own range. An unrelated body's failure grants no authority
+    over that other range and does not prevent this range from being read.
+    A run reads the owner's gate scope once, when its first answered step needs
     judging, and answers the judgments of the steps an earlier run finished from
     that read; only the step it judges for the first time reads the scope
     again. A run with no answered step does not read it. A run then costs time
@@ -41,6 +44,10 @@ type outcome =
       (** The step at [position] ended in a refusal that does not show reading
           less could help, or the question is a host observation that cannot become
           a hole. The chain does not advance. [report] is the host's own evidence. *)
+  | Declaration_replaced of {position : int; request_id : string}
+      (** The host did not execute this step under its replaced declaration.
+          The caller settles this step and schedules a new pass without
+          treating it as evidence that a smaller source input is needed. *)
   | Superseded
       (** The retained first step began from different Memory facts. No step is
           resumed; the caller settles the chain before beginning from current

@@ -202,7 +202,7 @@ let settle_positions request =
   require (atom=Option.fold ~none:positions.current ~some:(fun value -> Some value) atom_next
     && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
     "Original history read-position settlement remains unconfirmed"
-type frontier = Unfinished | Settled | Settled_if_replaced
+type frontier = Unfinished | Settled
 let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_result
     ~store ~request ~(record : Owner.retained) =
   let* ()=Request.confirm_record request record in
@@ -243,22 +243,21 @@ let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_re
     let* ()=Request.confirm_final ~store request (Exact.delivered retained) in
     (match retained with
      | Exact.Retained_call (Answered _) -> Error "History refusal contains an answered host result"
+     | Retained_unknown Exact.Cut ->
+       let+ released=Keeper_librarian_declaration_replacement.released_cut ~store
+         ~original:(Owner.listed record) ~exact ~captured:(Request.destination request) in
+       if released then Settled else Unfinished
      | Retained_unknown Exact.Raised -> Ok Unfinished
-     (* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.5.
-        The attempt was cut off in this process. Under the declaration it
-        was captured for it stays unfinished; under a replaced one it settles
-        as an interrupted attempt does. The pass reads the declaration. *)
-     | Retained_unknown Exact.Cut -> Ok Settled_if_replaced
      (* RFC-0500. The process that started the attempt stopped before it
         ended. The original settles and the next pass selects its range. *)
      | Retained_unknown Exact.Interrupted
      | Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
      | Retained_not_allowed _ | Retained_request_id_reused -> Ok Settled)
-  | Rejected {stage=Progress.Before_dispatch;evidence} ->
-    (* Its declaration was replaced before any worker received it. The
-       original settles and the next pass selects its range again. *)
-    let* _=Request.confirm_replaced request evidence in
-    Ok Settled
+  | Rejected {stage=Progress.Before_dispatch;_} ->
+    let* exact=Request.request request in
+    let* ended=Keeper_librarian_declaration_replacement.ended ~store
+      ~original:(Owner.listed record) ~exact ~captured:(Request.destination request) in
+    if ended then Ok Settled else Error "Original history has no declaration replacement ending"
   | Subdividing _ | Subdivided _ ->
     Error "Original history record has an unsupported domain phase"
 let validate ~store ~request ~record =

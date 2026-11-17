@@ -27,6 +27,25 @@ type unconfirmed = Terminal_absent | Terminal_unresolved | Terminal_differs
     own error for it. *)
 type verdict = Confirmed | Unconfirmed of unconfirmed
 
+val require_declaration_ending_latest : Lane_addon_exact.latest_original_execution -> (unit, string) result
+(** Pure closed check after an actual typed declaration-ending terminal and
+    a strict latest-execution read. No completed latest attempt or a bound
+    [Call_refused] from an earlier closed deferral is compatible with that
+    ending. A [Call_ended] is not. This grants no live ending, retry or effect
+    authority and must not be used for Cut release. *)
+
+val declaration_replaced : store:Lane_addon_store.t -> target -> Lane_addon_tool_request_owner.retained ->
+  (bool, string) result
+(** Bind an execution refusal's typed cause to the original host Exact record.
+    Current worker availability cannot revoke this past no-send verdict.
+    Independently read the actual latest execution, validating all retained
+    proofs even when a retained Rejected skips submit recovery. An earlier
+    bound [Call_refused] deferral is compatible with the ending; a completed
+    call result, malformed, unreadable or contradictory proof is not. This
+    does not claim that no earlier provider attempt occurred. The caller must first bind the
+    original and confirm its final. Blocking Store reads must be offloaded
+    from Eio. *)
+
 val confirm : observe:(unit -> (Lane_addon_exact.retained_observation, string) result) ->
   latest:(unit -> (Lane_addon_exact.latest_original_execution, string) result) ->
   Lane_addon_exact.final -> (verdict, string) result
@@ -36,8 +55,12 @@ val confirm : observe:(unit -> (Lane_addon_exact.retained_observation, string) r
     {!Lane_addon_exact.refused_before_host} holds is confirmed. An open record
     confirms nothing. A terminal must deliver this final, and a [Call_final]
     then also needs the latest completed execution to have ended in it:
-    [latest] reads that execution and is called for nothing else. [Error] is
-    a read or canonical JSON failure. Reads only through [observe] and
+    [latest] reads that execution. Independently, an actual retained typed
+    declaration-ending cause requires the strict latest read and
+    {!require_declaration_ending_latest}, even when the worker's delivered
+    Not_allowed JSON carries only its public detail. Worker wording does not
+    establish that typed cause. [Error] is
+    a failed read, an incompatible proof or a canonical JSON failure. Reads only through [observe] and
     [latest]. *)
 
 val unconfirmed_detail : unconfirmed -> string
@@ -47,6 +70,8 @@ val confirm_final : store:Lane_addon_store.t -> target -> Lane_addon_exact.final
   (unit, string) result
 (** Require the original retained host terminal. Each Call_final additionally
     requires the matching latest completed original execution proof and outcome.
+    An actual typed declaration ending also requires the strict latest-proof
+    check above before any consumer may treat its original as settled.
     Worker Finished JSON grants nothing, except a final where
     {!Lane_addon_exact.refused_before_host} holds, for a request the host never
     retained: the worker refuses a request no listing reply can carry before the

@@ -2,8 +2,12 @@
     Memory lane/purge fence. No explicit-candidate generation or admission
     receipt is used. The full original host answer and original Gate journal
     are revalidated before any Memory effect. New Gate questions require
-    [fresh_authority]; already-completed original evaluations and a committed
-    Memory receipt can settle locally while the Addon is Off, provided the
+    [fresh_authority], which confirms the physical Keeper/epoch and a ready
+    configured destination with the original installation/package/tool. Its
+    semantic revision may change after the answer; this never resubmits the
+    parent or replaces its proposal. The Gate still requires its own captured
+    authority for a new question. Already-completed original evaluations and
+    a committed Memory receipt can settle locally while the Addon is Off, provided the
     original question passes the live counterpart-template policy. An unsafe
     legacy question cannot use that receipt to publish a new external ACK.
 
@@ -22,19 +26,16 @@ val publish : store:Lane_addon_store.t -> config:Workspace.config ->
   fresh_authority:(unit -> (unit, string) result) ->
   (Keeper_librarian_durable_owner.publication, string) result
 
-type frontier = Unfinished | Settled | Settled_if_replaced
+type frontier = Unfinished | Settled
 val validate : store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->
   record:Lane_addon_tool_request_owner.retained -> (frontier, string) result
 (** Blocking strict full-inventory validation. Original host proof, preparation,
     complete Gate lineage, terminal and immutable commit markers are checked.
-    An actual host terminal [Outcome_unknown] is read by its cause. An attempt
-    that raised is [Unfinished]: its source remains owned by this original and
-    cannot be freshly selected. An attempt a stopped process interrupted is
-    [Settled] (RFC-0500). An attempt cut off in this process is
-    [Settled_if_replaced]: settled when
-    {!Keeper_librarian_durable_request.replaced_since} holds for the
-    destination the caller's pass read, unfinished otherwise (RFC
-    librarian-ends-waiting-requests-of-a-replaced-declaration 3.5). Definite
+    [Unfinished] includes an actual host terminal [Outcome_unknown], except an
+    [interrupted] cause or a host-confirmed [cut] with a strict stored
+    declaration-replacement disposition. The latter releases source for fresh
+    selection without a Memory or input acknowledgement. Other unknown source
+    remains owned by this original and cannot be freshly selected. Definite
     terminal refusals are [Settled]; a known basis conflict is also [Settled]
     here and must separately pass the existing strict successor-lineage policy.
     Historical Finished and known typed-basis conflicts do not require today's

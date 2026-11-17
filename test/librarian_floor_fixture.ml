@@ -125,6 +125,7 @@ type fixture = {
   deliveries : int ref;
   delivery_changed : Eio.Condition.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
+  sw : Eio.Switch.t;
 }
 
 let reconcile fixture =
@@ -191,7 +192,7 @@ let with_fixture f =
       let delivery_observed () = incr deliveries; Eio.Condition.broadcast delivery_changed in
       let transform_reply = ref (fun _ response -> response) in
       let fixture = { base_path; config; keepers_dir; store; source; declaration; server; respond;
-                      transform_reply; deliveries; delivery_changed; clock = Eio.Stdenv.clock env } in
+                      transform_reply; deliveries; delivery_changed; clock = Eio.Stdenv.clock env; sw } in
       Addon_runtime.For_testing.with_backend
         (backend env base_path delivery_observed (fun arguments response -> !transform_reply arguments response))
         (fun () ->
@@ -207,6 +208,26 @@ let with_fixture f =
         reconcile fixture;
         Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> f fixture);
         set_enabled fixture false)))))))))))
+
+let replace_configuration fixture source =
+  let snapshot ()=Addon_runtime.tool_export_snapshot ~config:fixture.config ~reserved:[]
+    ~access:Lane_addon_sources.Operator_configuration in
+  let exported ()=List.find_opt (fun (export:Addon_runtime.tool_export) -> export.tool.name=Durable.tool)
+    (snapshot ()).exports in
+  let old=match exported () with Some export -> export.instance_id
+    | None -> fail "the fixture has no configured durable worker" in
+  let changed=Eio.Condition.create () in
+  let stop=Addon_runtime.subscribe_owner_events ~config:fixture.config ~package_id:Durable.package_id
+    (fun (Configuration_observed | Export_inventory_changed | Exact_result_delivered _) ->
+      Eio.Condition.broadcast changed) in
+  Fun.protect ~finally:stop (fun () ->
+    Addon_runtime.start_configuration_service ~config:fixture.config ~sw:fixture.sw ~clock:fixture.clock;
+    io (fun () -> write fixture.source source);reconcile fixture;
+    Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+      Eio.Condition.loop_no_mutex changed (fun () -> match exported () with
+        | Some export when export.instance_id<>old -> Some ()
+        | None | Some _ -> None));
+    reconcile fixture)
 
 (* A turn of two messages, and the question the floor asks about each. *)
 let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:4
@@ -280,7 +301,7 @@ let run_step fixture record step =
   | Step_owner.Pending (_, record) ->
     await_delivery fixture ~after:before;
     resume fixture record step
-  | (Step_owner.Answered _ | Step_owner.Refused _) as outcome -> outcome
+  | (Step_owner.Answered _ | Step_owner.Refused _ | Step_owner.Before_dispatch_replaced _) as outcome -> outcome
 
 let claim_of text = `Assoc [ "claim", `String text; "category", `String "fact"; "board_post_id", `Null;
                               "board_comment_id", `Null; "supersedes", `Null; "absorbs", `List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false] ]

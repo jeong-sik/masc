@@ -38,7 +38,13 @@ val validator : unit ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
 
 val preflight : unit -> Lane_addon_store_preflight.payload_validator
-(** The deploy check of a Librarian original: {!validator}, then the reads its
+(** An isolated, unfenced history original with a strict before-dispatch
+    declaration ending is checked from its record, index and positive absence
+    of both original host record and proof, as runtime recovery checks it.
+    Whole history metadata and strict Gate discovery must show no predecessor,
+    child, Gate reference, preparation or replacement intent. Its body is not
+    needed to check that retained ending. All other originals restore their
+    complete bodies and use {!validator}, then the reads their
     consumer makes of Exact files, on the files the Exact check leaves (RFC
     exact-request-skips-a-slot-that-refused-its-input 3.3, item 5). An
     original whose consumer stops on those files is refused with every scope
@@ -46,7 +52,11 @@ val preflight : unit -> Lane_addon_store_preflight.payload_validator
     consumer's own rules decide: a Dispatch_pending original recovers its
     record and confirms the final it finishes with, a phase that holds a
     judgment decodes and confirms it, and an execution refusal confirms the
-    final its evidence names. Admission then reads the size evidence of a body
+    final its evidence names. A declaration-replacement ending additionally
+    confirms its strict bound cause: a before-dispatch ending requires no
+    host record or proof, and a host ending requires the same typed terminal
+    with no completed execution proof. A record the Exact scan removes cannot
+    become absence evidence for a before-dispatch ending. Admission then reads the size evidence of a body
     refusal ([Request_body_refused]) through the original's record, so an
     admission original whose record the Exact check deletes is refused for
     that final too; history and floor build its evidence from the final

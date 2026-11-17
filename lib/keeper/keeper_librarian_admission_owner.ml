@@ -47,18 +47,16 @@ let with_destination ~config ~reserved publish =
       then Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected "Librarian requires its configured package/tool"))
       else match publish actual with Ok value -> Ok value | Error detail -> Error (Runtime.Unavailable detail))
   |> Result.map_error runtime_error
-let admit ~config ~reserved ~destination:expected ~publish =
-  with_destination ~config ~reserved (fun actual ->
-    let* ()=require (Destination.same_semantic actual expected) "Original Librarian semantic configuration changed" in
-    Pool_work.submit publish)
 let check_owner owner = Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
   let* actual=Capture.observe_owner ~base_path:(Capture.base_path owner)
     ~keepers_dir:(Capture.keepers_dir owner) ~keeper_id:(Capture.keeper_id owner) in
   Capture.owner_matches_json actual (Capture.owner_to_json owner)))
-let fresh_authority ~config ~reserved owner capture =
+let fresh_gate_authority ~config ~reserved owner capture =
   let* ()=check_owner owner in
-  admit ~config ~reserved ~destination:(Capture.destination capture)
-    ~publish:(Pool_work.io ~name:__FUNCTION__ (fun () -> Ok ()))
+  with_destination ~config ~reserved (fun actual ->
+    match Destination.relation ~captured:(Capture.destination capture) ~current:actual with
+    | Destination.Same | Replaced -> Ok ()
+    | Other_owner -> Error "Original admission Gate belongs to another destination owner")
 
 type outcome = Disabled | Idle | Recheck_new_input | Settled of {has_more:bool}
   | Pending of string | Awaiting_worker of Keeper_librarian_pending.worker
@@ -237,12 +235,12 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
          let* record=Option.to_result ~none:"Original gate root publication disappeared" record in
          Ok ({original with record=parent},record))
     | Some record -> Ok (original,record) in
-  let live=match fresh_authority ~config ~reserved owner capture with
+  let live=match fresh_gate_authority ~config ~reserved owner capture with
     | Ok () -> Some (Gate.resolve ~keeper_id:(Capture.keeper_id owner))
     | Error _ -> None in
   let resume record=Gate_journal.resume ~request_clock:Eio_context.get_clock
     ~store ~owner ~capture ~record ~live_authority:live
-    ~before_dispatch:(fun () -> fresh_authority ~config ~reserved owner capture) in
+    ~before_dispatch:(fun () -> fresh_gate_authority ~config ~reserved owner capture) in
   let* completed=resume record in
   let apply gate record =
     match Gate.failure_detail ~absorbed:accepted.Keeper_librarian_runtime.selection.absorbed gate with
@@ -306,6 +304,14 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
      original still takes submit-once's actual wait/terminal observation, even
      before admission; Off must not erase its identity or retained progress. *)
   if Option.is_none existing && unattached ~config ~reserved then Ok Addon_off else
+  let* unexecuted_replacement=match existing with
+    | Some _ -> Ok false
+    | None -> with_destination ~config ~reserved (fun current ->
+      match Destination.relation ~captured:(Parts.destination part) ~current with
+      | Same -> Ok false
+      | Replaced -> Ok true
+      | Other_owner -> Error "Fresh admission destination belongs to another original part owner") in
+  if unexecuted_replacement then Ok (Terminal (Parts.Unexecuted_part (Parts.part_id part),false)) else
   let* original=match existing with
     | Some original -> Ok original
     | None -> new_capture ~config ~reserved ~owner part in
@@ -316,11 +322,21 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
     ~original:original.record ~exact ~schema
     ~validate_answer:(fun proposal -> Capture.validate_proposal original.capture proposal |> Result.map (fun _ -> ()))
     ~call:(call ~config ~reserved) |> Result.map_error Dispatch.error_to_string in
+  let ended record =
+    let* confirmed=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+      Capture.declaration_ended ~store original.capture record)) in
+    if not confirmed then Ok None else (
+      if not (Yojson.Safe.equal (Progress.to_json original.record.progress) (Progress.to_json record.Owner.progress))
+      then Keeper_librarian_queue_signal.changed ~base_path:(Capture.base_path owner)
+        ~keeper_name:(Capture.keeper_id owner);
+      Ok (Some (Terminal (source {original with record} part,false)))) in
   match state with
   | Dispatch.Pending (wait, record) ->
     Ok (Worker_wait (Keeper_librarian_pending.of_worker_wait
       ~installation_id:record.installation_id ~request_id:record.request_id wait))
   | Refused (_,record) ->
+    let* ending=ended record in
+    (match ending with Some ending -> Ok ending | None ->
     let original={original with record} in
     let* refusal=execution_refusal original in
     (match refusal with
@@ -328,7 +344,10 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
      | Some (Exact.Retained_unknown (Exact.Cut | Exact.Raised)
          | Retained_call (Answered _ | Invalid_output _ | Input_refused _ | Output_limit_reached _)
          | Retained_not_allowed _ | Retained_request_id_reused)
-     | None -> size_refused ~store ~config ~reserved ~owner ~inventory ~refusal part original)
+     | None -> size_refused ~store ~config ~reserved ~owner ~inventory ~refusal part original))
+  | Before_dispatch_replaced record ->
+    let* ending=ended record in
+    Option.to_result ~none:"Original admission ending was not confirmed" ending
   | Answered (_,record) | Commit_pending record ->
     answered ~store ~config ~reserved ~owner ~inventory part {original with record}
   | Settled record ->
@@ -342,7 +361,7 @@ let frontier ~store ~owner inventory =
     | [] -> Ok (Some (List.rev accumulated))
     | part::rest ->
       match for_part inventory part with
-      | None -> Ok None
+      | None -> all (Parts.Unexecuted_part (Parts.part_id part)::accumulated) rest
       | Some original ->
         let continue terminal=all (terminal::accumulated) rest in
         (match Progress.phase original.record.progress with
@@ -354,6 +373,9 @@ let frontier ~store ~owner inventory =
             | Keeper_librarian_runtime.Deferred -> continue (source original part)
             | Accepted _ -> Ok None)
          | Rejected _ ->
+           let* ended=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+             Capture.declaration_ended ~store original.capture original.record)) in
+           if ended then continue (source original part) else
            (match Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
                ~parent:part ~execution_id:original.record.request_id)),Queue.split (Parts.batch part) with
@@ -422,9 +444,11 @@ let completed_forest ~store ~owner inventory =
         let+ proposal=Capture.validate_proposal original.capture proposal in
         (match proposal with Keeper_librarian_runtime.Deferred -> true | Accepted _ -> false)
       | Rejected _ ->
-        let* parent=Parts.find inventory.parts ~part_id:(Capture.parent_part_id original.capture) in
-        Ok (Result.is_ok (Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
-          ~parent ~execution_id:original.record.request_id))
+        let* ended=Capture.declaration_ended ~store original.capture original.record in
+        if ended then Ok true else
+          let* parent=Parts.find inventory.parts ~part_id:(Capture.parent_part_id original.capture) in
+          Ok (Result.is_ok (Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
+            ~parent ~execution_id:original.record.request_id))
       (* Every runnable leaf is Finished here and a part has one execution,
          so this conflict is on no runnable leaf: a replacement root took its
          candidates over. The receipt and ACK check below covers every one of
@@ -549,8 +573,10 @@ let run_queue ~after_settle ~base_path ~keeper_name =
       (match frontier with
        | None -> Ok existing
        | Some frontier ->
-         let* supersession=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-           Parts.prove_supersession ~store ~owner ~inventory:inventory.parts ~batch ~frontier)) in
+         if unattached ~config ~reserved then Ok existing else
+         let* supersession=with_destination ~config ~reserved (fun destination ->
+           Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+             Parts.prove_supersession ~store ~owner ~destination ~inventory:inventory.parts ~batch ~frontier))) in
          match supersession with
          | None -> Ok existing
          | Some supersession -> root ~supersession batch) in

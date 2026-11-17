@@ -21,7 +21,10 @@ val judge : store:Lane_addon_store.t -> step:Keeper_librarian_floor_step_request
     evaluation as a new attempt. A completed journal replays from the
     evaluations the host retained: a restart never asks the model again and never
     judges again with the Memory of the moment. [fresh_authority] checks the
-    owner and the configured destination before anything is created or sent.
+    original physical owner and the same configured installation, package and
+    tool before anything is created or sent. A changed Librarian semantic
+    revision does not invalidate the proved answer. The Gate's own captured
+    authority and uncertain evaluations remain bound to their original journal.
     The frozen step's counterpart-template policy is checked before either a
     new gate effect or replay into the chain's Memory program.
 

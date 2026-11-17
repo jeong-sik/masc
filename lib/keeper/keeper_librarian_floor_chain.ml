@@ -25,6 +25,7 @@ type outcome =
   | Finished of Machine.finished
   | Pending of Keeper_librarian_pending.t
   | Stopped of {position : int; report : Memory_runtime.not_committed}
+  | Declaration_replaced of {position : int; request_id : string}
   | Superseded
 
 module Positions = Map.Make (Int)
@@ -53,7 +54,11 @@ let hole_reasons report =
 let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~unread_message =
   let keeper_name = Durable.keeper_id owner in
   let* found = Step_owner.discover ~store ~owner |> Result.map_error owner_error in
-  let mine = List.filter (fun (_, (header : Step.header)) -> header.range = range) found in
+  let selected = List.filter (fun (_, (index : Step.index)) -> index.header.range = range) found in
+  let* mine = List.fold_left (fun result listed ->
+    let* loaded = result in
+    let* original = Step_owner.load ~store listed |> Result.map_error owner_error in
+    Ok (original :: loaded)) (Ok []) selected |> Result.map List.rev in
   let* retained = index mine in
   (* The gate scope is read once for the pass, when the first answered step
      needs judging. The judgments of the steps that earlier passes finished are
@@ -115,7 +120,7 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~
         let* record = Step_owner.retain ~store step |> Result.map_error owner_error in
         Ok (record, step)) in
   let fresh_authority step () =
-    Edge.fresh_authority ~config ~reserved ~owner ~expected:(Step.destination step) () in
+    Edge.fresh_gate_authority ~config ~reserved ~owner ~expected:(Step.destination step) () in
   let rec go machine ~previous =
     let* next = Machine.next machine in
     match next with
@@ -132,7 +137,19 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~
          Ok (Pending (Keeper_librarian_pending.Worker
            (Keeper_librarian_pending.of_worker_wait ~installation_id:record.installation_id
               ~request_id:record.request_id wait)))
+       | Step_owner.Before_dispatch_replaced record ->
+         Ok (Declaration_replaced {position=question.position;request_id=record.request_id})
        | Step_owner.Refused (final, record) ->
+         let* replacement=match final with
+           | Exact.Not_allowed _ ->
+             io (fun () ->
+               let* exact=Step.request step in
+               let* target=Keeper_librarian_original_final.target
+                 ~installation_id:(Step.destination step).installation_id exact in
+               Keeper_librarian_original_final.declaration_replaced ~store target record)
+           | Call_final _ | Outcome_unknown | Request_id_reused -> Ok false in
+         if replacement then Ok (Declaration_replaced
+           {position=question.position;request_id=record.request_id}) else
          let* ()=Memory_runtime.require_counterpart_template (Step.step step).preparation in
          let detail = Printf.sprintf "Floor step %d was refused: %s" question.position
            (Yojson.Safe.to_string (Exact.final_to_json final)) in

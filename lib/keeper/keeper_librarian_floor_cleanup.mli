@@ -5,7 +5,10 @@
     same day. A stop between the two leaves gate records of an archived step,
     which a later call settles. Steps settle from the highest position down, so
     a stop part way leaves the steps from position 0 up: the ones a chain
-    resumes from. A chain refuses any other leftover.
+    resumes from. A chain refuses any other leftover. Discovery validates the
+    whole metadata inventory; only the originals selected for settlement read
+    their bodies. Live metadata still protects a step's Gate records from
+    orphan cleanup even when that step's body was not needed by this call.
 
     Caller holds the Memory lane and purge fence and serializes this owner. An
     Eio entry point, called where the history settle is called: offload no part

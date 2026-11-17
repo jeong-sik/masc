@@ -13,12 +13,17 @@ val with_destination : config:Workspace.config -> reserved:string list ->
 (** Run [publish] with the destination the configuration names now, under the
     configuration and action serializers. The destination must be this
     feature's package and tool. *)
-val fresh_authority : config:Workspace.config -> reserved:string list ->
+val fresh_gate_authority : config:Workspace.config -> reserved:string list ->
   owner:Keeper_librarian_durable_request.owner ->
   expected:Keeper_librarian_durable_request.destination -> unit -> (unit, string) result
-(** The physical owner and Memory epoch are still [owner]'s, and the configured
-    destination still has [expected]'s installation, package, tool and semantic
-    configuration revision. Blocking read; offload it in an Eio caller. *)
+(** For the Gate of an already proved original answer: the physical owner and
+    Memory epoch are still [owner]'s, and the complete ready configured
+    destination still has [expected]'s installation, package and tool.
+    A new semantic revision may continue that Gate without changing or
+    resubmitting its parent answer. This grants no original Add-on dispatch
+    authority. The Gate separately requires its own captured authority before
+    a new evaluation; completed and uncertain evaluations retain their evidence.
+    An Eio entry point; its blocking owner reads offload themselves. *)
 val call : config:Workspace.config -> reserved:string list ->
   expected:Keeper_librarian_durable_request.destination ->
   original:Lane_addon_tool_request_owner.Record.t -> arguments:Yojson.Safe.t ->
@@ -31,3 +36,16 @@ val confirm_destination : config:Workspace.config -> reserved:string list ->
 (** The configuration still publishes [destination]'s installation, package,
     tool and semantic revision. A missing export is [Unavailable]: the Add-on is
     off or not ready. A conflicting export or a changed configuration is [Rejected]. *)
+
+val observe_relation : config:Workspace.config -> reserved:string list ->
+  Keeper_librarian_durable_request.destination ->
+  (Lane_addon_captured_destination.relation, Lane_addon_submit_once.error) result
+(** Compare the original with a fresh complete configured destination and its
+    ready worker. A changed file without that worker remains unavailable,
+    never [Replaced]. This observation alone neither dispatches nor settles. *)
+
+val observe_destination : config:Workspace.config -> reserved:string list ->
+  Keeper_librarian_durable_request.destination ->
+  (Keeper_librarian_durable_request.destination, Lane_addon_submit_once.error) result
+(** The same complete fresh check as {!observe_relation}, retaining the actual
+    ready destination for a bound before-admission replacement refusal. *)

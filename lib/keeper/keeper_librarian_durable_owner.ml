@@ -21,6 +21,7 @@ type outcome = Publication_waiting of string
   | Basis_superseded of Owner.retained
   | Ended_unadmitted of Owner.retained
 type resumed = Waited of wait * Owner.Record.t | Resumed of outcome * Request.t
+  | Original_replaced of Owner.Record.t
 type listed = Owner.Record.t * Request.index
 type held = Listed of listed | Read of (Owner.retained * Request.t)
 let io work = Systhread_host.run work
@@ -101,23 +102,19 @@ let restore_answer ~store request record =
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
   | Outcome_unknown | Not_allowed _ | Request_id_reused ->
     Error (Rejected "Original history publication requires an actual answered host result")
-(* Whether inventory validation reads this unknown outcome as settled: an
-   attempt a stopped process interrupted (RFC-0500), or one cut off in this
-   process whose declaration was since replaced. [current] is the pass's one
-   reading of the destination of now, the same one its inventory check used. *)
-let settles ~current request ~schema (record:Owner.retained) =
+(* RFC-0500. Whether the retained refusal says the process that started the
+   attempt stopped before it ended. *)
+let unknown_cause ~schema (record:Owner.retained) =
   match Progress.phase record.progress with
   | Progress.Rejected {stage=Progress.Execution;evidence} ->
     let* retained=rejected (Exact.retained_final_of_json ~schema evidence) in
     Ok (match retained with
-      | Exact.Retained_unknown Exact.Interrupted -> true
-      | Retained_unknown Exact.Cut -> Request.replaced_since ~current:(current ()) request
-      | Retained_unknown Exact.Raised
+      | Exact.Retained_unknown cause -> Some cause
       | Retained_call (Answered _ | Invalid_output _ | Input_refused _ | Output_limit_reached _)
-      | Retained_not_allowed _ | Retained_request_id_reused -> false)
+      | Retained_not_allowed _ | Retained_request_id_reused -> None)
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
-  | Subdividing _ | Subdivided _ -> Ok false
+  | Subdividing _ | Subdivided _ -> Ok None
 let check_completed ~store ~superseded request ~original completed =
   let* ()=check_request request completed in
   let* ()=require (completed.Owner.request_digest=original.Owner.request_digest)
@@ -154,7 +151,9 @@ let body_of (retained,request) =
   {retained;request;exact;schema}
 type terminal = Answer of Memory_runtime.durable_proposal * Owner.retained
   | Refusal of Exact.final * Owner.retained
-let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publish) ~wake ~current =
+type admission_check = Admission_continues | Admission_unavailable
+  | Admission_replaced of Owner.Record.t
+let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publish) ~wake =
   let record,owner,destination=match original with
     | Listed (record,index) -> record,index.owner,index.destination
     | Read (retained,request) ->
@@ -164,6 +163,9 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let* actual=io (fun () -> Request.observe_owner ~base_path ~keepers_dir ~keeper_id:(Request.keeper_id owner)) |> rejected in
     rejected (Request.owner_matches_json actual (Request.owner_to_json owner)) in
+  let finish_replacement record =
+    let* ()=confirm_live_owner () in
+    wake ();Ok (Original_replaced record) in
   (* A listed original is checked on its record and index here. Its body is
      read in the branches that need it, and [load] binds that index to it. *)
   let* ()=match original with
@@ -181,6 +183,33 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     | Listed (record,index) ->
       io (fun () -> Keeper_librarian_history_resolution_lineage.confirm_predecessor_record
         ~store ~require_confirmed:true record index) |> rejected in
+  let* index=match original with
+    | Listed (_,index) -> Ok index
+    | Read (_,request) -> Request.index request |> rejected in
+  let* admission=match Progress.phase (Owner.Record.progress record) with
+    | Progress.Captured | Admission_wait _ ->
+      (match Keeper_librarian_durable_edge.observe_destination ~config ~reserved destination with
+       | Error (Submit.Unavailable _ | Rejected _ | Uncertain _) -> Ok Admission_unavailable
+       | Ok current ->
+         match Lane_addon_captured_destination.relation ~captured:destination ~current with
+         | Same -> Ok Admission_continues
+         | Other_owner -> Error (Rejected "Fresh history destination belongs to another original owner")
+         | Replaced ->
+           let+ record=io (fun () -> Keeper_librarian_declaration_replacement.refuse ~store
+             ~original:record ~exact_digest:index.exact_digest ~captured:destination ~current) in
+           Admission_replaced record)
+    | Rejected {stage=Before_dispatch;_} ->
+      let* replaced=Keeper_librarian_declaration_replacement.retained
+        ~original:record ~captured:destination |> rejected in
+      let* ()=io (fun () -> Keeper_librarian_declaration_replacement.confirm_no_execution
+        ~store ~original:record ~exact_digest:index.exact_digest) |> rejected in
+      if replaced then Ok (Admission_replaced record) else Ok Admission_continues
+    | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+    | Rejected {stage=Execution;_} | Subdividing _ | Subdivided _ -> Ok Admission_continues in
+  match admission with
+  | Admission_unavailable -> Ok (Waited (Worker_unreachable,record))
+  | Admission_replaced record -> finish_replacement record
+  | Admission_continues ->
   let* identity,read_body=match original with
     | Read read ->
       let+ body=body_of read in Exact.identity body.exact,(fun () -> Ok body)
@@ -283,16 +312,36 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
   | Submit.Awaiting (wait,record) -> Ok (Waited (wait,record))
   | Final (body,Answer (proposal,record)) -> publish_answer body record proposal
   | Final (body,Refusal (Exact.Outcome_unknown,record)) ->
-    (* Inventory validation reads an interrupted refusal, and a cut one
-       whose declaration was replaced, as settled, so the next pass moves the
-       original and selects its range again. Wake it: no host event follows
-       this refusal. Any other cut or raised original stays unfinished and
-       every pass resumes it, so waking it would never end. *)
-    let* settles=settles ~current body.request ~schema:body.schema record in
-    if settles then wake ();
-    Ok (Waited (Worker_unknown,Owner.listed record))
+    let original=Owner.listed record in
+    let wait ()=Ok (Waited (Worker_unknown,original)) in
+    let* cause=unknown_cause ~schema:body.schema record in
+    (match cause with
+     | Some Exact.Interrupted -> wake ();wait ()
+     | None | Some Exact.Raised -> wait ()
+     | Some Exact.Cut ->
+       let* released=io (fun () -> Keeper_librarian_declaration_replacement.released_cut
+         ~store ~original ~exact:body.exact ~captured:destination) |> rejected in
+       if released then finish_replacement original else
+       match Keeper_librarian_durable_edge.observe_destination ~config ~reserved destination with
+       | Error (Unavailable _ | Rejected _ | Uncertain _) -> wait ()
+       | Ok current ->
+         match Lane_addon_captured_destination.relation ~captured:destination ~current with
+         | Same | Other_owner -> wait ()
+         | Replaced ->
+           let* ()=confirm_live_owner () in
+           let* released=io (fun () -> Keeper_librarian_declaration_replacement.release_cut
+             ~store ~original ~exact:body.exact ~captured:destination ~current) in
+           finish_replacement released)
   | Final (body,Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
-    Ok (Resumed (Refused (final,record),body.request))
+    let* replacement = match final with
+      | Exact.Not_allowed _ ->
+        io (fun () ->
+          let* target=Keeper_librarian_original_final.target
+            ~installation_id:destination.installation_id body.exact in
+          Keeper_librarian_original_final.declaration_replaced ~store target record) |> rejected
+      | Call_final _ | Outcome_unknown | Request_id_reused -> Ok false in
+    if replacement then finish_replacement (Owner.listed record)
+    else Ok (Resumed (Refused (final,record),body.request))
   | Commit_pending record ->
     let* body=read_body () in
     let* record=rebind body record in

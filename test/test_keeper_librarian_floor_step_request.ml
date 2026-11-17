@@ -169,8 +169,13 @@ let retain ?request_id ~store step json =
   let scope = Step.scope (Step.physical_owner step) in
   let request_id = Option.value request_id ~default:(Step.request_id step) in
   let destination = Step.destination step in
+  (* Valid edited captures keep a matching index; deliberately broken captures
+     keep the original index so their body validation remains the subject. *)
+  let indexed = match Step.of_json ~owner:(Step.physical_owner step) json with
+    | Ok captured -> captured | Error _ -> step in
+  let summary = Step.index indexed |> ok |> Step.index_to_json in
   (match Owner.retain ~store ~scope ~request_id ~installation_id:destination.installation_id
-           ~package_id:destination.package_id ~tool:destination.tool ~summary:`Null ~request:json with
+           ~package_id:destination.package_id ~tool:destination.tool ~summary ~request:json with
    | Ok () -> ()
    | Error error -> fail (Owner.error_to_string error));
   match Owner.load ~store ~scope ~request_id with

@@ -442,12 +442,33 @@ let test_progress_rewrites_only_the_record_and_its_size_ignores_the_request () =
 let test_an_interrupted_retain_is_completed_by_the_next_retain () = with_store (fun root store ->
   let bytes = Yojson.Safe.to_string (get (Lane_addon_action.canonical request)) in
   get (Store.save_tool_request_body store ~scope ~request_digest:(Store.digest bytes) bytes);
+  let body = body_path root in
+  let identity = Unix.stat body in
   Alcotest.(check bool) "a body no record names is not an original request" true
     (owned (Owner.load ~store ~scope ~request_id) = None);
   Alcotest.(check int) "and discovery does not list it" 0 (List.length (owned (Owner.discover ~store ~scope)));
-  save (body_path root) "changed before any record named it";
   owned (retain store);
-  Alcotest.check json "the next retain publishes the body its record names" request (load store).request)
+  Alcotest.check json "the next retain publishes the body its record names" request (load store).request;
+  Alcotest.(check string) "the next retain preserves the existing body bytes" bytes (Fs_compat.load_file body);
+  Alcotest.(check bool) "the next retain reuses the existing body file" true (same_file identity (Unix.stat body)))
+
+let test_a_corrupted_orphan_body_cannot_be_published_by_retain () = with_store (fun root store ->
+  let bytes = Yojson.Safe.to_string (get (Lane_addon_action.canonical request)) in
+  get (Store.save_tool_request_body store ~scope ~request_digest:(Store.digest bytes) bytes);
+  let body = body_path root in
+  let corrupted = "changed before any record named it" in
+  save body corrupted;
+  let identity = Unix.stat body in
+  (match retain store with
+   | Error (Owner.Store_unavailable _) -> ()
+   | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _)
+   | Ok () -> Alcotest.fail "retain did not refuse the conflicting orphan body as unavailable");
+  Alcotest.(check string) "a refused retain preserves the conflicting evidence" corrupted (Fs_compat.load_file body);
+  Alcotest.(check bool) "a refused retain never rewrites the orphan body" true (same_file identity (Unix.stat body));
+  Alcotest.(check bool) "a corrupted orphan publishes no owner record" true
+    (owned (Owner.load_record ~store ~scope ~request_id) = None);
+  Alcotest.(check int) "a corrupted orphan stays absent from discovery" 0
+    (List.length (owned (Owner.discover ~store ~scope))))
 
 let test_a_record_without_its_body_is_an_error_not_absence () = with_store (fun root store ->
   let pending = dispatch store in
@@ -592,14 +613,39 @@ let test_replacement_cannot_infer_away_unknown_or_other_phases () =
   let invalid_histories=[[];dispatch;
     dispatch@[Progress.Execution_observed (Progress.Outcome_unknown (evidence "accepted but reply lost"))];
     judged;committing;committing@[Progress.Commit_uncertain (evidence "Memory effect unknown")];
-    committing@[Progress.Commit_observed after];refused;
+    committing@[Progress.Commit_observed after];
     refused@[Progress.Successor_intended successor];
     refused@[Progress.Successor_intended successor;Progress.Successor_observed child.request_id]] in
   List.iter (fun history ->
     let state=fold history in
     List.iter (fun event -> match Progress.append state event with
-      | Error _ -> () | Ok _ -> Alcotest.fail "a non-conflicted original acquired replacement authority")
+      | Error _ -> () | Ok _ -> Alcotest.fail "a nonterminal original acquired a replacement publication")
       [Progress.Replacement_intended child;Progress.Replacement_observed child.request_id]) invalid_histories
+
+let test_rejected_replacement_preserves_one_publication_without_subdivision () =
+  let fold events=get (List.fold_left (fun result event ->
+    Result.bind result (fun state -> Progress.append state event)) (Ok Progress.captured) events) in
+  let child:Progress.preparation_intent={request_id="one-replacement";request} in
+  let successor:Progress.successor={request_id="another-subdivision";request_digest=get (Owner.request_digest request)} in
+  List.iter (fun events ->
+    let rejected=fold events in
+    let intended=get (Progress.append rejected (Progress.Replacement_intended child)) in
+    let reopened=get (Progress.of_json (Progress.to_json intended)) in
+    Alcotest.(check bool) "a replacement intent preserves the exact refusal" true
+      (Progress.phase reopened=Progress.phase rejected);
+    List.iter (fun event -> match Progress.append reopened event with
+      | Error _ -> () | Ok _ -> Alcotest.fail "one refusal acquired conflicting publication histories")
+      [Progress.Successor_intended successor;Progress.Refusal_settled (evidence "late settlement");
+       Progress.Replacement_intended child;Progress.Replacement_observed "different-child"];
+    let confirmed=get (Progress.append reopened (Progress.Replacement_observed child.request_id)) in
+    Alcotest.(check bool) "the exact replacement ACK survives a strict roundtrip" true
+      (Progress.replacement (get (Progress.of_json (Progress.to_json confirmed)))
+        =Some (Progress.Preparation_confirmed child));
+    let subdividing=get (Progress.append rejected (Progress.Successor_intended successor)) in
+    match Progress.append subdividing (Progress.Replacement_intended child) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "a subdivision also acquired a replacement")
+    [[Progress.Refused {stage=Before_dispatch;evidence=evidence "consumer-owned ending"}];
+     [Progress.Dispatch_intended;Progress.Refused {stage=Execution;evidence=evidence "consumer-owned ending"}]]
 
 let test_replacement_strict_codec_rejects_malformed_and_changed_intents () =
   let state=get (Progress.append Progress.captured Progress.Dispatch_intended) in
@@ -714,8 +760,10 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
     test_staged_successor_input_survives_publication_cuts;
   Alcotest.test_case "conflicted replacement survives actual partial child publication and lost ACK" `Quick
     test_conflicted_replacement_survives_partial_child_publication;
-  Alcotest.test_case "replacement cannot infer away unknown or non-conflicted work" `Quick
+  Alcotest.test_case "replacement cannot infer away unknown or nonterminal work" `Quick
     test_replacement_cannot_infer_away_unknown_or_other_phases;
+  Alcotest.test_case "a refused original preserves one replacement without subdivision" `Quick
+    test_rejected_replacement_preserves_one_publication_without_subdivision;
   Alcotest.test_case "refusal settlement is one orthogonal fact on an execution refusal" `Quick
     test_refusal_settlement_is_one_orthogonal_fact_on_an_execution_refusal;
   Alcotest.test_case "a successor intent follows either refusal stage" `Quick
@@ -750,5 +798,7 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
     test_progress_rewrites_only_the_record_and_its_size_ignores_the_request;
   Alcotest.test_case "the next retain completes an interrupted one" `Quick
     test_an_interrupted_retain_is_completed_by_the_next_retain;
+  Alcotest.test_case "a corrupted orphan body cannot be published by retain" `Quick
+    test_a_corrupted_orphan_body_cannot_be_published_by_retain;
   Alcotest.test_case "a record without its body is an error, not absence" `Quick
     test_a_record_without_its_body_is_an_error_not_absence]]

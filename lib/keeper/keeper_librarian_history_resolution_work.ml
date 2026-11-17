@@ -172,10 +172,7 @@ let find_completed ~config ~keeper_name ~store ~child_id =
       let* next=io (fun () -> Lineage.confirmed_resolution_child ~store ~record ~index) in
       (match next with None -> Ok None | Some next -> descend (id::seen) next)
     | None ->
-    match Progress.phase (Owner.Record.progress record) with
-    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-    | Rejected _ | Subdividing _ | Subdivided _ -> let+ ()=by_record () in None
-    | Finished _ | Conflicted _ ->
+    let follow_settled () =
     let* original,request=io (fun () ->
       let* original=Owner.load_listed ~store record |> Result.map_error Owner.error_to_string in
       let+ request=Request.restore ~owner:index.owner original in original,request) in
@@ -184,13 +181,21 @@ let find_completed ~config ~keeper_name ~store ~child_id =
       Keeper_librarian_durable_commit.validate ~store ~request ~record:original) in
     match Progress.phase original.progress,frontier with
     | Progress.Finished _,Keeper_librarian_durable_commit.Settled -> Ok (Some (original,request))
-    | Conflicted _,Settled ->
+    | (Conflicted _ | Rejected _),Settled ->
       (match Progress.replacement original.progress with
        | Some (Preparation_confirmed next) -> descend (id::seen) next.request_id
        | None | Some (Preparation_pending _) -> Ok None)
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _),
-      (Keeper_librarian_durable_commit.Unfinished | Settled | Settled_if_replaced) -> Ok None in
+      (Keeper_librarian_durable_commit.Unfinished | Settled) -> Ok None in
+    match Progress.phase (Owner.Record.progress record) with
+    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+    | Subdividing _ | Subdivided _ -> let+ ()=by_record () in None
+    | Rejected _ ->
+      (match Progress.replacement (Owner.Record.progress record) with
+       | None -> let+ ()=by_record () in None
+       | Some (Preparation_pending _ | Preparation_confirmed _) -> follow_settled ())
+    | Finished _ | Conflicted _ -> follow_settled () in
   descend [] child_id
 let retain_completion ~config ~keeper_name ~store intent =
   match intent.Intent.phase with

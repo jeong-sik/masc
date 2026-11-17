@@ -395,3 +395,26 @@ let confirm_final ~store (capture:t) (final:Lane_addon_exact.final) =
   match verdict with
   | Final.Confirmed -> Ok ()
   | Unconfirmed reason -> Error (unconfirmed_detail reason)
+
+let check_declaration_ending confirm capture (record:Owner.retained) =
+  let module Progress = Lane_addon_request_progress in
+  let module Exact = Lane_addon_exact in
+  let* same=same_json record.request (to_json capture) in
+  let* ()=if same then Ok () else Error "Declaration ending differs from its admission capture" in
+  let* exact=request capture in
+  let check ()=confirm ~original:(Owner.listed record) ~exact ~captured:capture.destination in
+  match Progress.phase record.progress with
+  | Progress.Rejected {stage=Before_dispatch;_} -> check ()
+  | Rejected {stage=Execution;evidence} ->
+    let* schema=Option.to_result ~none:"Original admission ending lacks its schema" exact.schema in
+    let* retained=Exact.retained_final_of_json ~schema evidence in
+    (match retained with
+     | Exact.Retained_not_allowed {reason=Replaced_declaration} -> check ()
+     | Retained_unknown (Interrupted | Cut | Raised) | Retained_call _
+     | Retained_not_allowed {reason=Permission_refused _} | Retained_request_id_reused -> Ok false)
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false
+let declaration_ended_with ~reads =
+  check_declaration_ending (Keeper_librarian_declaration_replacement.ended_with ~reads)
+let declaration_ended ~store =
+  check_declaration_ending (Keeper_librarian_declaration_replacement.ended ~store)

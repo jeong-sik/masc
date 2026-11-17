@@ -5,7 +5,10 @@ module Memory_runtime = Keeper_librarian_runtime
 module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
 module Submit = Lane_addon_submit_once
+module Progress = Lane_addon_request_progress
+module Replacement = Keeper_librarian_declaration_replacement
 let ( let* ) = Result.bind
+let ( let+ ) result f = Result.map f result
 type error = Submit.error = Unavailable of string | Rejected of string | Uncertain of string
 let error_to_string = Submit.error_to_string
 type wait = Submit.wait = Worker_pending | Worker_unknown | Worker_unreachable
@@ -16,6 +19,7 @@ type answer = {raw:Yojson.Safe.t;proposal:Memory_runtime.durable_step_proposal}
 type outcome = Pending of wait * Owner.retained
   | Answered of answer * Owner.retained
   | Refused of Exact.final * Owner.retained
+  | Before_dispatch_replaced of Owner.retained
 let io work = Systhread_host.run work
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
 let owned value = Result.map_error (fun error -> Unavailable (Owner.error_to_string error)) value
@@ -24,21 +28,29 @@ let retain ~store step =
   let* ()=io (fun () -> Step.confirm_owner step) |> rejected in
   let destination=Step.destination step in
   let scope=Step.scope (Step.physical_owner step) and request_id=Step.request_id step in
+  let* index=io (fun () -> Step.index step) |> rejected in
   let* ()=io (fun () -> Owner.retain ~store ~scope ~request_id
     ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
-    ~summary:`Null ~request:(Step.to_json step)) |> owned in
+    ~summary:(Step.index_to_json index) ~request:(Step.to_json step)) |> owned in
   let* record=io (fun () -> Owner.load ~store ~scope ~request_id) |> owned in
   let* record=match record with Some record -> Ok record
     | None -> Error (Uncertain "Retained original floor step is not observable") in
   let* ()=check_record step record in Ok record
 let discover ~store ~owner =
-  let* records=io (fun () -> Owner.load_scope ~store ~scope:(Step.scope owner)) |> owned in
-  let rec headers found = function
+  let* records=io (fun () -> Owner.discover ~store ~scope:(Step.scope owner)) |> owned in
+  let rec indexes found = function
     | [] -> Ok (List.rev found)
     | record::rest ->
-      let* header=io (fun () -> Step.header ~owner record) |> rejected in
-      headers ((record,header)::found) rest in
-  headers [] records
+      let* index=rejected (Step.index_of_summary record) in
+      let* ()=rejected (Durable.owner_matches_json owner (Durable.owner_to_json index.owner)) in
+      indexes ((record,index)::found) rest in
+  indexes [] records
+let load ~store (record,(index:Step.index)) =
+  let* observed=rejected (Step.index_of_summary record) in
+  let* ()=if observed=index then Ok () else Error (Rejected "Selected floor index belongs to another record") in
+  let* original=io (fun () -> Owner.load_listed ~store record) |> owned in
+  let* header=io (fun () -> Step.header ~owner:index.owner original) |> rejected in
+  Ok (original,header)
 let schema_of step =
   let* exact=rejected (Step.request step) in
   match exact.Exact.schema with
@@ -49,6 +61,8 @@ type terminal = Answer of answer * Owner.retained
 let refused final record = match final with
   | Exact.Outcome_unknown -> Pending (Worker_unknown,record)
   | Call_final _ | Not_allowed _ | Request_id_reused -> Refused (final,record)
+type admission_check = Admission_continues | Admission_unavailable
+  | Admission_replaced of Owner.retained
 let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call) =
   let owner=Step.physical_owner step in
   let confirm_live_owner () =
@@ -62,6 +76,34 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
   let* exact=rejected (Step.request step) in
   let* schema=schema_of step in
   let destination=Step.destination step in
+  let* admission=match Progress.phase original.progress with
+    | Progress.Captured | Admission_wait _ ->
+      (match Edge.observe_destination ~config ~reserved destination with
+       | Error (Submit.Unavailable _ | Rejected _ | Uncertain _) -> Ok Admission_unavailable
+       | Ok current ->
+         match Lane_addon_captured_destination.relation ~captured:destination ~current with
+         | Same -> Ok Admission_continues
+         | Other_owner -> Error (Rejected "Fresh floor destination belongs to another original owner")
+         | Replaced ->
+           let* record=io (fun () -> Replacement.refuse ~store ~original:(Owner.listed original)
+             ~exact_digest:(Exact.digest exact) ~captured:destination ~current) in
+           let+ original=match Owner.rebind original record with
+             | Some original -> Ok original
+             | None -> Error (Rejected "Replaced floor step changed its original binding") in
+           Admission_replaced original)
+    | Rejected {stage=Before_dispatch;_} ->
+      let* replaced=Replacement.retained ~original:(Owner.listed original) ~captured:destination |> rejected in
+      let* ()=io (fun () -> Replacement.confirm_no_execution ~store ~original:(Owner.listed original)
+        ~exact_digest:(Exact.digest exact)) |> rejected in
+      if replaced then Ok (Admission_replaced original) else Ok Admission_continues
+    | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+    | Rejected {stage=Execution;_} | Subdividing _ | Subdivided _ -> Ok Admission_continues in
+  match admission with
+  | Admission_unavailable -> Ok (Pending (Worker_unreachable,original))
+  | Admission_replaced original ->
+    let* ()=confirm_live_owner () in
+    Ok (Before_dispatch_replaced original)
+  | Admission_continues ->
   let prepare () =
     let* ()=confirm_live_owner () in
     Edge.confirm_destination ~config ~reserved destination in
@@ -92,6 +134,6 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
   | Final (Refusal (final,record)) -> Ok (refused final record)
   (* A retained answer ([Judged]) or refusal ([Rejected]) runs [terminal] again
      above, so what is left here are the phases no step writes: its Memory
-     commit belongs to the chain, and a refusal before dispatch or a split
-     into successors is not a step's. *)
+     commit belongs to the chain and no step writes a split into successors.
+     A declaration replacement before dispatch was handled above. *)
   | Commit_pending _ | Settled _ -> Error (Rejected "Original floor step is in a phase no step writes")

@@ -12,8 +12,10 @@ type size_evidence
 type supersession_proof
 type terminal_source =
   | Original_execution of { part_id : string; execution_id : string }
-(** References only, never caller grants. Every referenced execution is
-    independently restored and checked against its complete original part. *)
+  | Unexecuted_part of string
+(** References only, never caller grants. Every execution is independently
+    restored against its complete original part. An unexecuted part requires
+    a complete valid execution inventory with no capture naming that part. *)
 
 type admit =
   destination:Keeper_librarian_admission_capture.destination ->
@@ -64,12 +66,17 @@ type execution_reads = {
   load : request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result;
       (** The original execution record of this ID in the owner's execution
           scope. *)
+  load_scope : unit -> (Lane_addon_tool_request_owner.retained list, string) result;
+      (** Complete authoritative original execution scope, including malformed
+          records as errors. Absence requires restoring every record. *)
   read_latest : declaration_id:string -> schema:Yojson.Safe.t -> Lane_addon_exact.request ->
     (Lane_addon_exact.latest_original_execution, string) result;
       (** The latest attempt the execution's host evidence shows, as
           {!Lane_addon_exact.read_latest_original_execution} answers. *)
   confirm : Keeper_librarian_admission_capture.t -> Lane_addon_exact.final -> (unit, string) result;
       (** {!Keeper_librarian_admission_capture.confirm_final} of the final. *)
+  declaration_ended : Keeper_librarian_admission_capture.t ->
+    Lane_addon_tool_request_owner.retained -> (bool, string) result;
 }
 val check_partition_proof : reads:execution_reads ->
   owner:Keeper_librarian_admission_capture.owner ->
@@ -131,17 +138,23 @@ val load_parent : inventory -> request_id:string ->
 
 val prove_supersession : store:Lane_addon_store.t ->
   owner:Keeper_librarian_admission_capture.owner ->
+  destination:Keeper_librarian_admission_capture.destination ->
   inventory:inventory -> batch:Keeper_memory_admission_queue.batch ->
   frontier:terminal_source list -> (supersession_proof option, string) result
 (** Read actual complete pending input and current Memory revision/hash/facts.
     The references must cover every active acknowledged leaf exactly once.
     Completed semantic Deferred, singleton positively size-refused terminals,
-    and Finished accepted work with exact committed candidate receipts qualify.
+    Finished accepted work with exact committed candidate receipts, strict
+    declaration endings and positively unexecuted parts qualify.
     Uncommitted old gaps must remain in the new complete pending batch; lost,
     unknown, malformed or ordinary failed work never grants a replacement.
-    An actual new tail or materially changed original fact/provenance context
-    is required for every remaining old gap. A revision/timestamp change alone
-    is not new context. The proof retains original frontier/receipt/source
+    A fresh semantic declaration replacement or stored strict ending permits
+    the whole pending frontier to be reconsidered, including Deferred gaps.
+    [destination] must come from fresh configured Runtime authority; publication
+    checks that authority again. Without declaration permission, every gap
+    requires an actual new tail or changed original facts/provenance; an
+    unexecuted part stays with its original root. A revision/timestamp change
+    alone is not new context. The proof retains original frontier/receipt/source
     identities, not a mutable pointer to the current queue or Memory. [None]
     means the complete original frontier is valid but unchanged, so no fresh
     root is authorized. Corrupt/unreadable/unknown/ordinary failure stays Error. *)

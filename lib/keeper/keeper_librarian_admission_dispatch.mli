@@ -13,6 +13,7 @@ type result =
   | Refused of Lane_addon_exact.final * Lane_addon_tool_request_owner.retained
   | Commit_pending of Lane_addon_tool_request_owner.retained
   | Settled of Lane_addon_tool_request_owner.retained
+  | Before_dispatch_replaced of Lane_addon_tool_request_owner.retained
 
 type call =
   expected:Keeper_librarian_admission_capture.destination ->
@@ -48,4 +49,7 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config ->
     refused before sending declines the intent and permits a later admission.
     Equal
     execution observations reuse the retained record. This helper performs no
-    Memory mutation, queue ACK, domain commit, successor or scheduler action. *)
+    Memory mutation, queue ACK, domain commit, successor or scheduler action.
+    Captured/Admission_wait can end under a ready replacement declaration only
+    after positive host record/proof absence. The bound ending is retained and
+    returned as [Before_dispatch_replaced], including after rollback. *)

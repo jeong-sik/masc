@@ -989,9 +989,12 @@ is attached. Its Keeper then reads the same range again under the new
 configuration, whole, without waiting for another turn. A history question
 that no worker has received yet is ended by its Keeper's next pass and read
 again the same way. A history question whose model call was under way at the
-change is cut off; its Keeper's next pass ends it and reads the range again
-the same way, with one more model request. No answer of the cut call was
-received, so none is applied twice. A message-floor step that its worker
+change is cut off. After confirming the original host outcome, execution
+proofs and ready replacement, its Keeper stores an ending that leaves the
+input unread. A later pass reads the range again with a new model request.
+Putting the old configuration back preserves an ending already stored;
+linked work follows its saved child intent. Memory publication and source
+acknowledgement are verified separately. A message-floor step that its worker
 holds ends as not allowed too, and its Keeper asks that step again at its
 next pass.
 Changing only the provider registry, a comment or `enabled` does not authorize

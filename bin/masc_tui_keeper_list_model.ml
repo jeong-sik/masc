@@ -402,14 +402,19 @@ let attention_rank = function
 let compare_name left right =
   String.compare left.keeper.Masc.Tui_decode.k_name right.keeper.Masc.Tui_decode.k_name
 
-let compare_recent left right =
-  match left.last_activity_at, right.last_activity_at with
+let compare_newest_first ~at left right =
+  match at left, at right with
   | Some left_at, Some right_at ->
       let order = Float.compare right_at left_at in
       if order = 0 then compare_name left right else order
   | Some _, None -> -1
   | None, Some _ -> 1
   | None, None -> compare_name left right
+
+let last_activity_at row = row.last_activity_at
+
+(* Recent and Oldest follow the age column, which shows the freshest event. *)
+let compare_recent = compare_newest_first ~at:last_activity_at
 
 let compare_oldest left right =
   match left.last_activity_at, right.last_activity_at with
@@ -419,6 +424,15 @@ let compare_oldest left right =
   | Some _, None -> -1
   | None, Some _ -> 1
   | None, None -> compare_name left right
+
+(* Where Priority places a row inside its rank. A running turn is placed by
+   when it started: its preview time moves with every streamed event, and
+   ordering by it swapped running Keepers on each event (2026-11-17). *)
+let placed_at row =
+  match row.turn with
+  | Some (Masc.Tui_decode.Keeper_turn_running { started_at_unix; _ }) -> Some started_at_unix
+  | Some (Masc.Tui_decode.Keeper_turn_idle | Masc.Tui_decode.Keeper_turn_unavailable _)
+  | None -> row.last_activity_at
 
 let activity_rank = function
   | Held_call -> 0 | Question -> 1 | Confirmation -> 2 | Attempt_failed -> 3
@@ -598,6 +612,22 @@ let compare_view_key (left_rank, left_name) (right_rank, right_name) =
   let order = Int.compare left_rank right_rank in
   if order <> 0 then order else String.compare left_name right_name
 
+(* Where Priority ranks a row. A tool or model wait is a phase of a running
+   turn, which alternates with streaming several times a turn; ranked by its
+   group, the row jumped between the active and waiting rows on each phase
+   (40 of 51 swaps on a live list, 2026-11-17). Priority ranks it with the
+   active rows. A failed attempt inside a turn still ranks as Failing: a
+   failure is for a person to see, so that row is meant to rise. The group
+   itself is unchanged: the state view's headings and the waiting summary
+   still read these phases as waits. *)
+let priority_rank ranked =
+  match ranked.group, ranked.activity with
+  | Waiting, (Tool_waiting | Model_waiting) -> attention_rank Active
+  | Waiting, ( Held_call | Question | Confirmation | Attempt_failed | Preparing | Streaming
+             | Running | Async_working _ | Deferred | Delegate_result | Verifying
+             | External_waiting | Idle | Paused | Offline | Unknown )
+  | (Attention | Failing | Active | Inactive | Unobserved), _ -> attention_rank ranked.group
+
 let compare_sorted sort left right =
   match sort with
   | Name -> compare_name left.row right.row
@@ -607,8 +637,8 @@ let compare_sorted sort left right =
       let order = Int.compare (activity_rank left.activity) (activity_rank right.activity) in
       if order = 0 then compare_recent left.row right.row else order
   | Priority ->
-      let order = Int.compare (attention_rank left.group) (attention_rank right.group) in
-      if order = 0 then compare_recent left.row right.row else order
+      let order = Int.compare (priority_rank left) (priority_rank right) in
+      if order = 0 then compare_newest_first ~at:placed_at left.row right.row else order
 
 let order_rows ~view ~sort ~now ~outside rows =
   let rows = match view with

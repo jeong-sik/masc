@@ -109,6 +109,14 @@ val observe : base_path:string -> observation
     base is unavailable. [Missing] means the ledger is absent in an existing
     workspace, consistently with [load]. *)
 
+val check_readable : base_path:string -> (unit, string) result
+(** Fresh regular-file, payload-read and strict decoding checks used by
+    {!observe}. An absent ledger in an existing workspace succeeds; an invalid
+    base, nonregular file or unreadable/corrupt ledger fails. Does not compute
+    the ledger digest, resolve the briefing prompt or read the briefing.
+    This is a read-only availability check, not a retained snapshot or write
+    authorization. *)
+
 (** A fact the stores hold that the ledger has no disposition for. *)
 type pending_fact =
   { fact : fact_ref

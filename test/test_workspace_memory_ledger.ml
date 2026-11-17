@@ -80,7 +80,8 @@ let test_ordinary_identity_is_the_memory_id () =
   | [ { fact = Ledger.Ordinary { claim_sha256; _ }; claim = pending_claim } ] ->
     Alcotest.(check string) "the store's memory_id hash" (Os_types.memory_id fact) ("sha256:" ^ claim_sha256);
     Alcotest.(check string) "claim text travels with the fact" claim pending_claim
-  | _ -> Alcotest.fail "expected one ordinary fact"
+  | [] | [ { fact = Ledger.Source_bound _; _ } ] | _ :: _ :: _ ->
+    Alcotest.fail "expected one ordinary fact"
 
 let test_codec_round_trip_is_canonical () =
   let input =
@@ -163,7 +164,10 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
     Ledger.save ~base_path ledger |> require;
     (match Ledger.observe ~base_path with
      | Ledger.Available { briefing = Ok Briefing.Missing; _ } -> ()
-     | _ -> Alcotest.fail "classified evidence without a summary was hidden or called summarized");
+     | Ledger.Missing | Ledger.Unavailable _
+     | Ledger.Available { briefing = Error _; _ }
+     | Ledger.Available { briefing = Ok (Briefing.Current _ | Briefing.Stale _); _ } ->
+       Alcotest.fail "classified evidence without a summary was hidden or called summarized");
     let directory = Ledger.directory ~base_path in
     let template = (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective in
     let contract = Briefing.contract ~template in
@@ -176,18 +180,28 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
      | Ledger.Available { building = Ok (Some pass); _ } ->
        Alcotest.(check int) "building pass target matches" 1 pass.target;
        Alcotest.(check int) "building pass remaining matches" 1 pass.remaining
-     | _ -> Alcotest.fail "active briefing pass was not observed");
+     | Ledger.Missing | Ledger.Unavailable _
+     | Ledger.Available { building = Error _; _ }
+     | Ledger.Available { building = Ok None; _ } ->
+       Alcotest.fail "active briefing pass was not observed");
     let text = "Owner review is pending; completion has not been confirmed." in
     let accepted = Briefing.accept batch ~text |> require in
     Briefing.save ~directory accepted |> require;
     (match Ledger.observe ~base_path with
      | Ledger.Available { building = Ok None; _ } -> ()
-     | _ -> Alcotest.fail "completed pass still observed as building");
+     | Ledger.Missing | Ledger.Unavailable _
+     | Ledger.Available { building = Error _; _ }
+     | Ledger.Available { building = Ok (Some _); _ } ->
+       Alcotest.fail "completed pass still observed as building");
     let observe_current () = match Ledger.observe ~base_path with
-      | Ledger.Available { briefing = Ok (Briefing.Current summary); claim_count = 1; _ } ->
+      | Ledger.Available { briefing = Ok (Briefing.Current summary); claim_count; _ } ->
+        Alcotest.(check int) "the current briefing has one claim" 1 claim_count;
         Alcotest.(check string) "actual saved semantic text reaches the observation" text summary.text;
         Alcotest.(check (list string)) "publication names the supporting claim" ["claim:c1"] summary.source_ids
-      | _ -> Alcotest.fail "saved briefing was not observed as current" in
+      | Ledger.Missing | Ledger.Unavailable _
+      | Ledger.Available { briefing = Error _; _ }
+      | Ledger.Available { briefing = Ok (Briefing.Missing | Briefing.Stale _); _ } ->
+        Alcotest.fail "saved briefing was not observed as current" in
     observe_current (); observe_current ();
     let superseded = match Briefing.prepare ~sources:(Ledger.briefing_sources ledger)
         ~contract:(Briefing.contract ~template:(template ^ "\nPrior synthesis contract"))
@@ -198,7 +212,10 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
     (match Ledger.observe ~base_path with
      | Ledger.Available { briefing = Ok (Briefing.Stale summary); _ } ->
        Alcotest.(check string) "superseded prompt is stale even before the worker starts" text summary.text
-     | _ -> Alcotest.fail "same sources hid a synthesis contract mismatch");
+     | Ledger.Missing | Ledger.Unavailable _
+     | Ledger.Available { briefing = Error _; _ }
+     | Ledger.Available { briefing = Ok (Briefing.Missing | Briefing.Current _); _ } ->
+       Alcotest.fail "same sources hid a synthesis contract mismatch");
     Briefing.save ~directory accepted |> require;
     let changed = decode (ledger_json ~claims:["c1", "Owner review has completed"]
       [ordinary_ref "writer" "Owner review has completed", claim_member "c1"]) in
@@ -206,12 +223,18 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
     (match Ledger.observe ~base_path with
      | Ledger.Available { briefing = Ok (Briefing.Stale summary); _ } ->
        Alcotest.(check string) "changed source text retains the prior summary as stale" text summary.text
-     | _ -> Alcotest.fail "changed source content reused an allegedly current summary");
+     | Ledger.Missing | Ledger.Unavailable _
+     | Ledger.Available { briefing = Error _; _ }
+     | Ledger.Available { briefing = Ok (Briefing.Missing | Briefing.Current _); _ } ->
+       Alcotest.fail "changed source content reused an allegedly current summary");
     Out_channel.with_open_bin (Briefing.path ~directory)
       (fun channel -> output_string channel "{broken");
     match Ledger.observe ~base_path with
-    | Ledger.Available { briefing = Error _; claim_count = 1; _ } -> ()
-    | _ -> Alcotest.fail "briefing corruption hid the readable ledger or claimed a summary")
+    | Ledger.Available { briefing = Error _; claim_count; _ } ->
+      Alcotest.(check int) "corrupt briefing leaves the ledger's one claim readable" 1 claim_count
+    | Ledger.Missing | Ledger.Unavailable _
+    | Ledger.Available { briefing = Ok (Briefing.Missing | Briefing.Current _ | Briefing.Stale _); _ } ->
+      Alcotest.fail "briefing corruption hid the readable ledger or claimed a summary")
 
 let test_briefing_keeps_claim_and_conflict_namespaces_distinct () =
   let module Briefing = Masc.Workspace_memory_briefing in
@@ -248,10 +271,14 @@ let test_observe_empty_ledger_needs_no_briefing () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     (match Ledger.save ~base_path Ledger.empty with Ok () -> () | Error detail -> Alcotest.fail detail);
     match Ledger.observe ~base_path with
-    | Ledger.Available { briefing = Ok (Briefing.Current summary); claim_count = 0; _ } ->
+    | Ledger.Available { briefing = Ok (Briefing.Current summary); claim_count; _ } ->
+      Alcotest.(check int) "the empty ledger has no claims" 0 claim_count;
       Alcotest.(check string) "no evidence needs no generated prose" "" summary.text;
       Alcotest.(check (list string)) "empty evidence has no source references" [] summary.source_ids
-    | _ -> Alcotest.fail "empty ledger fabricated a pending or unavailable briefing")
+    | Ledger.Missing | Ledger.Unavailable _
+    | Ledger.Available { briefing = Error _; _ }
+    | Ledger.Available { briefing = Ok (Briefing.Missing | Briefing.Stale _); _ } ->
+      Alcotest.fail "empty ledger fabricated a pending or unavailable briefing")
 
 let test_store_missing_corrupt_and_round_trip () =
   let base_path = Filename.temp_dir "workspace-ledger" "" in
@@ -282,6 +309,45 @@ let test_store_missing_corrupt_and_round_trip () =
   match Ledger.save ~base_path:missing_base Ledger.empty with
   | Ok () -> Alcotest.fail "save created a missing base"
   | Error _ -> Alcotest.(check bool) "missing base stays missing" false (Sys.file_exists missing_base)
+
+let test_readability_checks_current_ledger_without_briefing () =
+  let module Briefing = Masc.Workspace_memory_briefing in
+  let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let base_path = Filename.temp_dir "workspace-ledger-readable" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let readable label expected =
+      Alcotest.(check bool) label expected
+        (Result.is_ok (Ledger.check_readable ~base_path)) in
+    readable "an absent ledger in an existing workspace is readable" true;
+    let ledger = decode (ledger_json ~claims:["c1", "Retained observation"]
+      [ordinary_ref "writer" "Retained observation", claim_member "c1"]) in
+    Ledger.save ~base_path ledger |> require;
+    readable "a saved ledger is readable" true;
+    let directory = Ledger.directory ~base_path in
+    let path = Filename.concat directory "ledger.json" in
+    Fs_compat.save_file (Briefing.path ~directory) "{broken";
+    readable "briefing corruption does not hide the readable ledger" true;
+    Fs_compat.save_file path "{broken";
+    readable "a successful earlier read does not hide current corruption" false;
+    Fs_compat.save_file path
+      "{\"schema\":\"workspace.memory.ledger.v1\",\"claims\":[{\"claim_id\":\"c1\",\"claim\":\"orphan\"}],\"conflicts\":[],\"facts\":[]}";
+    readable "valid JSON with invalid ledger references is refused" false;
+    Ledger.save ~base_path ledger |> require;
+    let held = path ^ ".held" in
+    Unix.rename path held;
+    Unix.symlink held path;
+    readable "a symlink to valid ledger bytes is refused" false;
+    Unix.unlink path;
+    Unix.symlink (path ^ ".absent") path;
+    readable "a dangling symlink is not an absent ledger" false;
+    Unix.unlink path;
+    Unix.mkdir path 0o700;
+    readable "a directory is refused" false;
+    Unix.rmdir path;
+    readable "removing the ledger is a current absence" true;
+    let missing_base = Filename.concat base_path "absent" in
+    Alcotest.(check bool) "a missing workspace is not a readable empty ledger" true
+      (Result.is_error (Ledger.check_readable ~base_path:missing_base)))
 
 let ordinary_seen facts : Os_current.t =
   let origin : Os_types.origin = { kind = Os_types.Authored; trace_id = "trace" } in
@@ -567,6 +633,8 @@ let () =
     ; ( "observation"
       , [ Alcotest.test_case "durable briefing is current, stale or explicitly unavailable" `Quick
             test_observe_reads_published_briefing_and_reports_staleness
+        ; Alcotest.test_case "current ledger readability is independent of briefing" `Quick
+            test_readability_checks_current_ledger_without_briefing
         ; Alcotest.test_case "empty ledger needs no generated briefing" `Quick
             test_observe_empty_ledger_needs_no_briefing
         ; Alcotest.test_case "claim and conflict IDs remain separate" `Quick

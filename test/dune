@@ -6299,7 +6299,7 @@
 (test
  (name test_workspace_memory_ledger)
  (modules test_workspace_memory_ledger)
- (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry))
+ (libraries alcotest unix masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry))
 
 (test
  (name test_workspace_memory_revision)

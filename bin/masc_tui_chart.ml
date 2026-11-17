@@ -93,7 +93,15 @@ let format_compact_num n =
 
 let bar_filled_cells ~width ~value ~max_value =
   if width <= 0 || max_value <= 0 || value <= 0 then 0
-  else Stdlib.max 1 (Stdlib.min width (Stdlib.min value max_value * width / max_value))
+  else
+    let clamped = Stdlib.min value max_value in
+    let scaled =
+      Z.to_int
+        (Z.div
+           (Z.mul (Z.of_int clamped) (Z.of_int width))
+           (Z.of_int max_value))
+    in
+    Stdlib.max 1 (Stdlib.min width scaled)
 ;;
 
 (* A gauge states a proportion and nothing else. It used to colour the bar
@@ -159,7 +167,7 @@ let gauge ~width ~value ~max_value ?label () =
 ;;
 
 let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
-    ?(reset = "") () =
+    ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
   else
     let filled = bar_filled_cells ~width ~value ~max_value in
@@ -183,7 +191,8 @@ let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
 ;;
 
 let meter ~width ~value ~max_value ?label ?suffix ?cell_style
-    ?(track_style = "") ?(suffix_style = "") ?(reset = "") () =
+    ?(track_style = "") ?(suffix_style = "")
+    ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
   else
     let clamped_val =
@@ -191,7 +200,14 @@ let meter ~width ~value ~max_value ?label ?suffix ?cell_style
     in
     let pct =
       if max_value <= 0 then 0
-      else Stdlib.min 100 ((clamped_val * 100) / max_value)
+      else
+        let scaled =
+          Z.to_int
+            (Z.div
+               (Z.mul (Z.of_int clamped_val) (Z.of_int 100))
+               (Z.of_int max_value))
+        in
+        Stdlib.min 100 scaled
     in
     let prefix =
       match label with
@@ -332,13 +348,11 @@ let braille_levels ?min ?max values =
           if v_min <= 0 then 0 else braille_top / 2
         else
           let clamped_v = Stdlib.max v_min (Stdlib.min v_max v) in
-          if v_min <= 0 && clamped_v <= 0 then 0
-          else
-            let offset = Z.sub (Z.of_int clamped_v) lower in
-            let scaled =
-              Z.to_int (Z.div (Z.mul offset (Z.of_int braille_top)) range)
-            in
-            if v_min <= 0 && clamped_v > 0 then Stdlib.max 1 scaled else scaled)
+          let offset = Z.sub (Z.of_int clamped_v) lower in
+          let scaled =
+            Z.to_int (Z.div (Z.mul offset (Z.of_int braille_top)) range)
+          in
+          if v_min = 0 && clamped_v > 0 then Stdlib.max 1 scaled else scaled)
       values
 ;;
 

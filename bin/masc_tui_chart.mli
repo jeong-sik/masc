@@ -109,8 +109,8 @@ val braille_cell : mask:int -> string
 
 val braille_levels : ?min:int -> ?max:int -> int list -> int list
 (** Maps each input onto the 5-step Braille subcolumn scale ([0..4]) without
-    integer overflow. When the lower bound is zero or negative, strictly
-    positive values map to at least [1] so non-zero activity never disappears. *)
+    integer overflow. When the lower bound is zero, strictly positive values
+    map to at least [1] so non-zero activity never disappears. *)
 
 val braille_pair : left:int -> right:int -> string
 (** One 2x4 Braille cell pairing two bottom-up dot heights ([0..4]) into the

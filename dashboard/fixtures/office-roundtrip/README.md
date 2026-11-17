@@ -19,5 +19,7 @@ node --import tsx fixtures/office-roundtrip/browser.mjs
 실행 결과·파일·화면·trace는 `artifacts/dashboard/office-roundtrip/run-*/`에 남는다.
 
 이 검사는 실제 MASC 서버의 저장이나 한컴·Microsoft Word 실행을 대신하지 않는다.
-2026-11-16 작업 환경에서는 Chromium이 `MachPortRendezvousServer` 시작 단계에서
-종료돼 브라우저 동작을 확인하지 못했다. 이 fixture를 성공 증거로 기록하지 않았다.
+2026-11-16 macOS 직접 실행은 시작 단계에서 실패했다.
+공식 Playwright 1.61.1 Linux arm64 컨테이너에서는 실제 컴포넌트·worker·WASM으로
+HWP와 두 Office 형식을 검사했다. 12개 흐름과 다운로드 14개의 데이터를 대조했다.
+범위와 외부 Office 출력은 [검증 기록](../../../docs/evidence/artifact-office-browser-2026-11-16.md)을 따른다.

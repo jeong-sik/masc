@@ -134,6 +134,33 @@ type owned_regular_file_contents =
   ; snapshot : owned_regular_file_snapshot
   }
 
+type owned_file_path_observation
+type owned_file_descriptor_observation
+
+val observe_owned_file_path :
+  ?owner_uid:int -> ?single_link:bool ->
+  ?parent_lstat:(string -> Unix.stats) -> ownership_root:string -> string ->
+  (owned_file_path_observation option, owned_regular_file_read_error) result
+(** Metadata-only admission. [None] means a parent is absent; an observed
+    parent with an absent leaf is represented by [owned_file_leaf_is_missing].
+    No descriptor is opened and no path is created. *)
+
+val owned_file_leaf_is_missing : owned_file_path_observation -> bool
+
+val admit_owned_file_descriptor :
+  owned_file_path_observation -> Unix.file_descr ->
+  (owned_file_descriptor_observation, owned_regular_file_read_error) result
+(** Bind an existing descriptor to the admitted parent/leaf, without opening
+    or closing it. An admitted missing leaf may have been created by the
+    descriptor's transaction owner. *)
+
+val owned_file_descriptor_snapshot :
+  owned_file_descriptor_observation -> owned_regular_file_snapshot
+
+val revalidate_owned_file_descriptor :
+  owned_file_descriptor_observation -> Unix.file_descr ->
+  (unit, owned_regular_file_read_error) result
+
 val load_owned_regular_file_with_snapshot :
   ?owner_uid:int ->
   ?single_link:bool ->
@@ -156,6 +183,16 @@ val observe_owned_regular_file_blocking :
   (owned_regular_file_snapshot option, owned_regular_file_read_error) result
 (** Filesystem worker only. No dispatch while a transaction mutex is held. *)
 
+val load_owned_regular_file_with_snapshot_locked :
+  ?owner_uid:int -> ?single_link:bool -> ownership_root:string -> string ->
+  (owned_regular_file_contents option, owned_regular_file_read_error) result
+(** The same read with its complete descriptor lifetime under the canonical
+    append-path mutex. No files/directories/sidecars are created. This does
+    not add an OS read lock or write-access requirement. Do not call from a
+    transaction holding that non-reentrant mutex; use its supplied observation.
+    Serialization covers cooperating canonical paths, not arbitrary inode
+    aliases created outside the writer's unique-leaf protocol. *)
+
 module Owned_read_for_testing :
   sig
     val load_with_snapshot :
@@ -172,6 +209,10 @@ module Owned_read_for_testing :
       ownership_root:string ->
       string ->
       (owned_regular_file_snapshot option, owned_regular_file_read_error) result
+    val load_with_snapshot_locked :
+      ?single_link:bool -> parent_lstat:(string -> Unix.stats) ->
+      owner_uid:int -> ownership_root:string -> string ->
+      (owned_regular_file_contents option, owned_regular_file_read_error) result
   end
 
 val load_owned_regular_file :

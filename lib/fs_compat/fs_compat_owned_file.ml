@@ -256,8 +256,29 @@ let read_exact_file_descriptor ~path fd length =
   | cause -> owned_file_operation_error ~path Read_contents cause
 ;;
 
-let load_owned_regular_file_blocking_with ?owner_uid ?(single_link = false) ?(parent_lstat = Unix.lstat)
-    ~ownership_root ~read_descriptor path =
+type owned_file_policy =
+  { path : string
+  ; owner_uid : int option
+  ; single_link : bool
+  ; inspect_parent : unit -> (Unix.stats list option, owned_regular_file_read_error) result
+  ; check_file : Unix.stats -> (unit, owned_regular_file_read_error) result
+  ; inspect_current : Unix.stats list -> Unix.file_descr -> Unix.stats ->
+      (bool, owned_regular_file_read_error) result
+  }
+
+type owned_file_path_observation =
+  { policy : owned_file_policy
+  ; parents : Unix.stats list
+  ; leaf : Unix.stats option
+  }
+
+type owned_file_descriptor_observation =
+  { admitted_path : owned_file_path_observation
+  ; descriptor : Unix.stats
+  }
+
+let make_owned_file_policy ?owner_uid ?(single_link = false) ?(parent_lstat = Unix.lstat)
+    ~ownership_root path =
   let parent = Filename.dirname path in
   let check_owner path (stat : Unix.stats) =
     match owner_uid with
@@ -327,87 +348,116 @@ let load_owned_regular_file_blocking_with ?owner_uid ?(single_link = false) ?(pa
          | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
          | cause -> owned_file_operation_error ~path Inspect_path cause)
   in
-  match inspect_parent () with
+  { path; owner_uid; single_link; inspect_parent; check_file; inspect_current }
+;;
+
+let observe_owned_file_path ?owner_uid ?single_link ?parent_lstat ~ownership_root path =
+  let policy = make_owned_file_policy ?owner_uid ?single_link ?parent_lstat ~ownership_root path in
+  match policy.inspect_parent () with
   | Error _ as error -> error
   | Ok None -> Ok None
-  | Ok (Some parent_before) ->
-    let before_open =
+  | Ok (Some parents) ->
+    let inspected =
       try Ok (Some (Unix.lstat path)) with
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
       | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
       | cause -> owned_file_operation_error ~path Inspect_path cause
     in
-    (match before_open with
+    (match inspected with
      | Error _ as error -> error
-     | Ok None -> Ok None
      | Ok (Some stat) when stat.st_kind <> Unix.S_REG ->
        owned_file_error (Path_is_not_regular_file { path; kind = stat.st_kind })
-     | Ok (Some stat) when single_link && stat.st_nlink<>1 -> link_error ()
-     | Ok (Some before_open) ->
-       let opened =
-         try
-           Ok
-             (Unix.openfile
-                path
-                [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ]
-                0)
-         with
-         | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
-         | cause -> owned_file_operation_error ~path Open_path cause
+     | Ok (Some stat) when policy.single_link && stat.st_nlink <> 1 ->
+       owned_file_error (Owned_file_operation_failed
+         { path; operation = Inspect_descriptor
+         ; cause = Sys_error "owned record has multiple hard links" })
+     | Ok leaf -> Ok (Some { policy; parents; leaf }))
+;;
+
+let owned_file_leaf_is_missing observed = Option.is_none observed.leaf
+
+let admit_owned_file_descriptor admitted_path fd =
+  let { policy; parents; leaf } = admitted_path in
+  let path = policy.path in
+  match Unix.fstat fd with
+  | exception cause -> (* cancel-guard-ok: Unix.fstat performs no Eio operation. *)
+    owned_file_operation_error ~path Inspect_descriptor cause
+  | descriptor when descriptor.st_kind <> Unix.S_REG
+      || Option.exists (fun before -> not (same_file_identity before descriptor)) leaf ->
+    owned_file_error (Filesystem_identity_changed { path })
+  | descriptor ->
+    (match policy.check_file descriptor with
+     | Error _ as error -> error
+     | Ok () ->
+       match policy.inspect_current parents fd descriptor with
+       | Error _ as error -> error
+       | Ok false -> owned_file_error (Filesystem_identity_changed { path })
+       | Ok true -> Ok { admitted_path; descriptor })
+;;
+
+let owned_file_descriptor_snapshot observed =
+  owned_regular_file_snapshot_of_stats observed.descriptor
+
+let revalidate_owned_file_descriptor observed fd =
+  let { admitted_path = { policy; parents; _ }; descriptor } = observed in
+  let path = policy.path in
+  match Unix.fstat fd with
+  | after_read when same_file_snapshot descriptor after_read
+      && (not policy.single_link || after_read.st_nlink = 1)
+      && (match policy.owner_uid with None -> true | Some uid -> after_read.st_uid = uid) ->
+    (match policy.inspect_current parents fd descriptor with
+     | Error _ as error -> error
+     | Ok true -> Ok ()
+     | Ok false -> owned_file_error (Filesystem_identity_changed { path }))
+  | _ -> owned_file_error (Filesystem_identity_changed { path })
+  | exception cause -> (* cancel-guard-ok: Unix.fstat performs no Eio operation. *)
+    owned_file_operation_error ~path Inspect_descriptor cause
+;;
+
+let load_owned_regular_file_blocking_with ?owner_uid ?single_link ?parent_lstat
+    ~ownership_root ~read_descriptor path =
+  match observe_owned_file_path ?owner_uid ?single_link ?parent_lstat ~ownership_root path with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some admitted_path) when owned_file_leaf_is_missing admitted_path -> Ok None
+  | Ok (Some admitted_path) ->
+    let opened =
+      try Ok (Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0) with
+      | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+      | cause -> owned_file_operation_error ~path Open_path cause
+    in
+    (match opened with
+     | Error _ as error -> error
+     | Ok fd ->
+       let read () =
+         match admit_owned_file_descriptor admitted_path fd with
+         | Error _ as error -> error
+         | Ok observed ->
+           match read_descriptor ~path fd observed.descriptor with
+           | Error _ as error -> error
+           | Ok content ->
+             Result.map (fun () -> Some content) (revalidate_owned_file_descriptor observed fd)
        in
-       (match opened with
-        | Error _ as error -> error
-        | Ok fd ->
-          let result =
-            match Unix.fstat fd with
-            | exception cause -> (* cancel-guard-ok: Unix.fstat performs no Eio operation. *)
-              owned_file_operation_error ~path Inspect_descriptor cause
-            | descriptor
-              when descriptor.st_kind <> Unix.S_REG
-                   || not (same_file_identity before_open descriptor) ->
-              owned_file_error (Filesystem_identity_changed { path })
-            | descriptor ->
-              (match check_file descriptor with
-               | Error _ as error -> error
-               | Ok () ->
-              (match inspect_current parent_before fd descriptor with
-               | Error _ as error -> error
-               | Ok false ->
-                 owned_file_error (Filesystem_identity_changed { path })
-               | Ok true ->
-                 (match read_descriptor ~path fd descriptor with
-                  | Error _ as error -> error
-                  | Ok content ->
-                    (match Unix.fstat fd with
-                     | after_read when same_file_snapshot descriptor after_read
-                         && (not single_link || after_read.st_nlink=1)
-                         && (match owner_uid with None -> true | Some uid -> after_read.st_uid = uid) ->
-                       (match inspect_current parent_before fd descriptor with
-                        | Error _ as error -> error
-                        | Ok true -> Ok (Some content)
-                        | Ok false ->
-                          owned_file_error
-                            (Filesystem_identity_changed { path }))
-                     | _ ->
-                       owned_file_error (Filesystem_identity_changed { path })
-                     | exception cause -> (* cancel-guard-ok: Unix.fstat performs no Eio operation. *)
-                       owned_file_operation_error
-                         ~path
-                         Inspect_descriptor
-                         cause))))
-          in
-          let close_result =
-            try Unix.close fd; Ok () with
-            | Eio.Cancel.Cancelled _ as cancellation ->
-              reraise_current cancellation
-            | cause -> Error cause
-          in
-          (match close_result, result with
-           | Ok (), result -> result
-           | Error cause, Ok _ ->
-             owned_file_operation_error ~path Close_descriptor cause
-           | Error cause, Error error ->
-             Error { error with close_failure = Some cause })))
+       let result = match read () with
+         | result -> result
+         | exception exception_ ->
+           let backtrace = Printexc.get_raw_backtrace () in
+           (match Unix.close fd with
+            | () -> Printexc.raise_with_backtrace exception_ backtrace
+            | exception close_failure ->
+              let combined, combined_backtrace = Eio.Exn.combine
+                  (exception_, backtrace) (close_failure, Printexc.get_raw_backtrace ()) in
+              Printexc.raise_with_backtrace combined combined_backtrace)
+       in
+       let close_result =
+         try Unix.close fd; Ok () with
+         | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+         | cause -> Error cause
+       in
+       match close_result, result with
+       | Ok (), result -> result
+       | Error cause, Ok _ -> owned_file_operation_error ~path Close_descriptor cause
+       | Error cause, Error error -> Error { error with close_failure = Some cause })
 ;;
 
 type owned_regular_file_contents =
@@ -466,11 +516,33 @@ let observe_owned_regular_file ~owner_uid ~ownership_root path =
        result)
 ;;
 
+
+let load_owned_regular_file_with_snapshot_locked_with ?parent_lstat ?owner_uid ?single_link
+    ~ownership_root path =
+  let read () =
+    with_append_path_mutex path (fun () ->
+      load_owned_regular_file_with_snapshot_blocking ?parent_lstat ?owner_uid ?single_link
+        ~ownership_root path)
+  in
+  match execution_context () with
+  | Non_eio -> read ()
+  | Eio_fiber ->
+    let result = Systhread_host.run ~label:(labelled "fs-compat-load-owned-file-locked" path) read in
+    Eio.Fiber.check ();
+    result
+;;
+
+let load_owned_regular_file_with_snapshot_locked ?owner_uid ?single_link ~ownership_root path =
+  load_owned_regular_file_with_snapshot_locked_with ?owner_uid ?single_link ~ownership_root path
+;;
+
 module Owned_read_for_testing = struct
   let load_with_snapshot ?single_link ~parent_lstat ~owner_uid ~ownership_root path =
     load_owned_regular_file_with_snapshot_blocking ?single_link ~parent_lstat ~owner_uid ~ownership_root path
   let observe ~parent_lstat ~owner_uid ~ownership_root path =
     observe_owned_regular_file_blocking ~parent_lstat ~owner_uid ~ownership_root path
+  let load_with_snapshot_locked ?single_link ~parent_lstat ~owner_uid ~ownership_root path =
+    load_owned_regular_file_with_snapshot_locked_with ?single_link ~parent_lstat ~owner_uid ~ownership_root path
 end
 
 let load_owned_regular_file ~ownership_root path =

@@ -3420,7 +3420,28 @@ let settle_direct_semantic store current command =
         Semantic.update_native_call ~now ~expected:expected.native_call
           ~replacement:Keeper_native_call.No_native_call expected
         |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error))
-      | Keeper_native_call.No_native_call | Keeper_native_call.Active _
+      | Keeper_native_call.Active call ->
+        (match terminal with
+         | Semantic.Cancelled ->
+           (* Only cancelling a Queued operation settles as Cancelled. A
+              Queued operation holds an Active call only after a restart
+              settlement requeued it, and no executor holds that call. The
+              cancel closes it in this transaction as an unknown effect: the
+              call was cut off and nothing has read what it did. *)
+           let* replacement =
+             Keeper_native_call.transition expected.native_call
+               (Keeper_native_call.Terminal
+                  { call_id = call.Keeper_native_call.call_id
+                  ; disposition = Keeper_native_call.unknown_effect_disposition
+                  })
+             |> Result.map_error (fun detail -> Integrity_error detail) in
+           Semantic.update_native_call ~now ~expected:expected.native_call ~replacement expected
+           |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error))
+         | Semantic.Completed | Semantic.Failed _ ->
+           (* The Owner closes a running call before the operation's terminal.
+              The transition below refuses one that is still Active. *)
+           Ok expected)
+      | Keeper_native_call.No_native_call
       | Keeper_native_call.Terminal_unacknowledged (_, {Agent_core.Agent.recovery=Agent_core.Agent.Operator_repair_required _; _}) -> Ok expected in
     let* next = semantic_transition ~now (Semantic.Settle terminal) acknowledged in
     update_semantic store ~expected next

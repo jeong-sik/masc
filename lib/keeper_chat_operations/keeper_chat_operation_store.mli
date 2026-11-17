@@ -344,6 +344,11 @@ val cancel_queued
   -> now:float
   -> operation_id:Operation.Operation_id.t
   -> (Operation.t, error) result
+(** Cancel a [Queued] operation and settle its execution in one transaction.
+    An operation a restart settlement requeued still holds its Active native
+    call, and no executor holds that call. The cancel closes it with
+    {!Keeper_native_call.unknown_effect_disposition} and the settled execution
+    keeps that receipt. *)
 
 val succeed_running
   :  t

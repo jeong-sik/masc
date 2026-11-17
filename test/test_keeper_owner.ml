@@ -3968,6 +3968,32 @@ let test_a_call_bound_before_settlement_stays_unproven () =
     "a call this process bound before settlement was admitted as exited" Owner.Writer_unproven
 ;;
 
+(* The operator cancels an operation restart settlement put back in the queue.
+   Its call is still Active and no child holds it. *)
+let test_cancel_ends_an_operation_restart_settlement_requeued () =
+  with_native_restart_store "cancel-requeued" @@ fun path ->
+  let operation, call = seed_active_native_call ~path ~name:"cancel-requeued"
+      ~call_id:"019a0010-1000-7000-8000-000000000015" ~requeued:false in
+  Eio.Switch.run @@ fun sw ->
+  let owner = start_restart_owner ~sw ~path ~name:"cancel-requeued" in
+  check int "a journal without a terminal interrupts nothing" 0
+    (List.length (Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_exited
+       ~journal_terminal:(fun _ -> Ok None) |> owner_ok));
+  (match Owner.cancel_queued_operation owner operation.operation_id |> owner_ok with
+   | { Chat_operation.state = Chat_operation.Cancelled _; _ } -> ()
+   | cancelled ->
+     fail ("the requeued operation is " ^ Chat_operation.state_to_string cancelled.state));
+  (match Owner.direct_native_call owner ~operation_id:operation.operation_id |> owner_ok with
+   | Keeper_native_call.Terminal_unacknowledged (closed, disposition) ->
+     check bool "the receipt names the cut-off call" true (Keeper_native_call.equal closed call);
+     check bool "the call is closed as an unknown effect" true
+       (disposition = Keeper_native_call.unknown_effect_disposition)
+   | Keeper_native_call.No_native_call | Keeper_native_call.Active _ ->
+     fail "the cancel left the call open or dropped its receipt");
+  check bool "the cancelled operation is never claimed" true
+    (Option.is_none (Owner.claim_next_operation owner |> owner_ok))
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -7509,6 +7535,8 @@ let () =
             test_startup_keeps_an_earlier_requeued_call_unproven_without_writer_evidence
         ; test_case "a call bound before restart settlement stays unproven" `Quick
             test_a_call_bound_before_settlement_stays_unproven
+        ; test_case "cancel ends an operation restart settlement requeued" `Quick
+            test_cancel_ends_an_operation_restart_settlement_requeued
         ; test_case "operation id stop leaves an autonomous slot holder alone" `Quick
             test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone
         ; test_case

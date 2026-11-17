@@ -75,7 +75,7 @@ let eligible ~kind ~request ~(original:Owner.retained) =
          require (Option.is_none (Progress.settlement original.progress))
            (Ineligible "Cut original already has a source disposition")
        | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed _
-       | Retained_declaration_replaced | Retained_request_id_reused ->
+       | Retained_request_id_reused ->
          Error (Ineligible "Original is not a retained execution-stage Cut"))
     | Absent_original,(Captured | Admission_wait _ | Dispatch_pending (None | Some (Waiting _ | Outcome_unknown _))
       | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _

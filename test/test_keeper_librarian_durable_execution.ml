@@ -1756,7 +1756,7 @@ let test_receipt_proved_partial_ack_keeps_source_locks_without_rereading_prefix 
     (match result with
      | Ok (Durable_owner.Resumed (Finished completed,_)) ->
        check string "the same original finishes the partial settlement" original.request_id completed.Owner.request_id
-     | Ok (Waited _ | Original_replaced _ | Resumed ((Refused _ | Publication_waiting _ | Basis_superseded _),_)) ->
+     | Ok (Waited _ | Original_replaced _ | Resumed ((Refused _ | Publication_waiting _ | Basis_superseded _ | Ended_unadmitted _),_)) ->
        fail "receipt-proved partial ACK did not finish under the source locks"
      | Error error -> fail (Durable_owner.error_to_string error));
     check bool "partial settlement advances the original atom frontier" true (progress fixture<>positions);
@@ -2796,8 +2796,9 @@ let refuse_fenced_resume fixture original request =
     (before = (io (fun () -> current fixture.keepers_dir), progress fixture))
 (* Actual host cancellation/join and worker restoration. Observe through the
    owner so each test can choose its consumer/continuation entry afterward. *)
-let with_same_binding_cut ?(history_kind=Atoms) use =
+let with_same_binding_cut ?(history_kind=Atoms) ?(before_capture=(fun _ -> ())) use =
   with_fixture ~history_kind (fun ~sw fixture ->
+    before_capture fixture;
     let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
     fixture.set_response (fun capture ->
       ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
@@ -3081,6 +3082,110 @@ let test_cut_command_recovers_fence_before_grant_after_memory_rebase () =
     run_cut_command fixture |> Result.map_error Resolution_intent.error_to_string |> get;
     check bool "later recovery retains that same child" true
       (Resolution_intent.child (last_cut_intent fixture original)=Some first))
+let test_counterpart_cut_capacity_refusal_preserves_original_obligation () =
+  let before_capture fixture =
+    let speaker : Keeper_chat_store.speaker =
+      {speaker_id=Some "external";speaker_name=Some "External";speaker_authority=External} in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~conversation_id:"agent:cut-counterpart" ~external_message_id:"cut-counterpart-message"
+      ~content:("Retained Cut counterpart " ^ String.make 65536 'x') ~speaker ();
+    io (fun () ->
+      official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      write (Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Main)
+        ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+      write (Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Internal) "") in
+  with_same_binding_cut ~history_kind:Official ~before_capture (fun fixture original request exact _schema ->
+    let module Refusal=Keeper_librarian_durable_refusal in
+    let module Lineage=Keeper_librarian_history_resolution_lineage in
+    let original_source=Capture.source request in
+    let input=Source.input original_source in
+    check bool "the actual Cut owns counterpart-only input" true
+      (input.messages=[] && input.tool_observations=[] && input.counterpart_observations<>[]);
+    let parent=Owner.to_json original in
+    let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+      ~request_id:exact.Exact.request_id |> get) in
+    let fact=Types.observed ~claim:("Unrelated Memory growth " ^ String.make 1024 'm')
+      ~category:Types.Fact ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="unrelated-writer"} in
+    memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+      ~pass:Keeper_memory_commit_pass.Durable ~absorbed:[] ~revisions:[]
+      ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+      ~source:{kind=Current.Librarian;trace_id} ~new_claims:[fact] () |> get)) |> ignore;
+    assert_pending (run_worker fixture);
+    let child=Resolution_intent.child (last_cut_intent fixture original) |> Option.get in
+    let load_child ()=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+      ~request_id:child.request_id |> owned |> Option.get) in
+    let captured=load_child () in
+    let child_request=io (fun () -> Capture.restore ~owner:(Capture.physical_owner request) captured |> get) in
+    let child_source=Capture.source child_request in
+    check bool "the child rebased only its actual current Memory" true
+      (Source.expected_revision child_source<>Source.expected_revision original_source
+       && (Source.input child_source).current<>input.current);
+    check json "the child retains every original source byte and counterpart" (Source.basis_json original_source)
+      (Source.basis_json child_source);
+    let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture in
+    let posts=F.post_count fixture.server and deliveries= !(fixture.deliveries) in
+    fixture.set_response (fun capture ->
+      check string "only the confirmed Cut child reaches the provider" child.request_id (Capture.request_id capture);
+      `Request_entity_too_large,
+        {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+    assert_pending (run_worker fixture);
+    await_delivery fixture ~after:deliveries;
+    (match run_worker fixture with
+     | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "the actual child capacity refusal was not retained");
+    let rejected=load_child () in
+    let evidence=match Progress.phase rejected.progress with
+      | Rejected {stage=Execution;evidence} -> evidence
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+        fail "child has no actual execution refusal" in
+    let child_exact=Capture.request child_request |> get in
+    let schema=Option.to_result ~none:"child schema" child_exact.schema |> get in
+    check bool "the actual host proof confirms a provider capacity refusal" true
+      (Exact.delivered (Exact.retained_final_of_json ~schema evidence |> get)
+       = Exact.Call_final (Input_refused Request_body_refused));
+    check bool "the child itself has no effect fence" true (io (fun () ->
+      Fence.read ~store:fixture.store ~scope:original.scope ~request_id:child.request_id |> get)=None);
+    (match io (fun () -> Lineage.refusal_obligation ~store:fixture.store child_request |> get) with
+     | Lineage.Cut_read_required id -> check string "the read obligation names the actual Cut" original.request_id id
+     | No_cut_ancestor -> fail "the confirmed Cut ancestry disappeared");
+    let completed=Refusal.inventory [rejected,child_request] |> get in
+    let stop=Refusal.retained_stop ~store:fixture.store ~completed ~record:rejected ~request:child_request
+      |> get |> Option.to_result ~none:"actual Cut child refusal has no retained stop" |> get in
+    check bool "a Cut refusal has no abandonment diagnosis" true (Refusal.diagnosis stop=None);
+    check bool "the public adapter cannot abandon Cut source even with actual refusal evidence" true
+      (Result.is_error (memory_action fixture (fun () -> io (fun () -> Commit.settle_refused
+        ~store:fixture.store ~request:child_request ~record:rejected ~diagnosis:evidence))));
+    check bool "direct refusal settlement writes no Memory or receipt" true (cut_memory_bytes fixture=memory);
+    check bool "direct refusal settlement ACKs no original frontier" true (cut_source_positions fixture=positions);
+    for _=1 to 2 do
+      (match run_worker fixture with
+       | Error (Consumer.Original_publication_blocked _) -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "an unresolved Cut source was released as completed");
+      check bool "automatic refusal settlement writes no Memory or receipt" true (cut_memory_bytes fixture=memory);
+      check bool "automatic refusal settlement ACKs no original frontier" true (cut_source_positions fixture=positions)
+    done;
+    check bool "the actual Cut source still lacks committed range receipts" true
+      (not (io (fun () -> Commit.receipt_state child_request |> get)));
+    check bool "a rejected child supplies no compact completion proof" true
+      ((last_cut_intent fixture original).memory_commit=None);
+    check bool "fresh selection stays blocked by the Cut obligation" true
+      (Result.is_error (io (fun () -> Keeper_librarian_history_resolution_selection.check
+        ~config:fixture.config ~keeper_name)));
+    check int "the refusal retries neither parent nor child RPC" (posts+1) (F.post_count fixture.server);
+    check bool "the same confirmed child remains the only continuation" true
+      (Resolution_intent.child (last_cut_intent fixture original)=Some child
+       && List.length (observed_originals fixture)=2);
+    check bool "the child records no abandonment settlement" true
+      (Progress.settlement (load_child ()).progress=None);
+    check json "the original Cut record remains byte-equivalent" parent (io (fun () ->
+      Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> owned |> Option.get |> Owner.to_json));
+    check bool "the original host Unknown evidence is preserved" true
+      (host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+        ~request_id:exact.request_id |> get)))
 let test_cut_command_busy_and_late_proof_keep_requested () =
   with_same_binding_cut (fun fixture original _request exact schema ->
     let accepted=submit_cut_command fixture original and before=cut_source_positions fixture in
@@ -6493,6 +6598,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_cut_command_recovers_fence_before_grant_after_memory_rebase;
   test_case "Cut command busy and late proof stay Requested" `Slow
     test_cut_command_busy_and_late_proof_keep_requested;
+  test_case "counterpart Cut capacity refusal cannot abandon the original read obligation" `Slow
+    test_counterpart_cut_capacity_refusal_preserves_original_obligation;
   test_case "a Cut fence without an intent blocks ordinary, direct and queued fresh history" `Quick
     (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:false);
   test_case "a Cut fence still blocks fresh history after its live owner record disappears" `Quick

@@ -11,6 +11,7 @@ module Cursor = Keeper_external_read_cursor
 module Atom = Keeper_librarian_progress
 module Official = Keeper_librarian_official_progress
 module Publication = Keeper_librarian_durable_owner
+module Lineage = Keeper_librarian_history_resolution_lineage
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
@@ -160,10 +161,21 @@ let atom_target source = Option.map (fun (range : Current.durable_range_id) : At
 let official_target source = Option.map (fun (range : Current.official_range_id) : Official.t ->
   {boundary_line=List.fold_left (fun line (next,_) -> max line next)
     range.after_boundary_line range.turns}) (Source.official_range_id source)
+let require_refusal_abandonment ~store request =
+  let* obligation=Lineage.refusal_obligation ~store request in
+  match obligation with
+  | Lineage.No_cut_ancestor -> Ok ()
+  | Cut_read_required request_id -> Error
+      ("Cut continuation cannot abandon the unread source of fenced original " ^ request_id)
 let settle_positions ~store ~record request =
   Keeper_librarian_durable_source_lock.with_original_settlement ~request (fun () ->
   let* ()=Keeper_librarian_history_resolution_state.check_unfenced
     ~store ~request ~original:record in
+  let* ()=match Progress.phase record.Owner.progress with
+    | Progress.Rejected {stage=Progress.Execution;_} -> require_refusal_abandonment ~store request
+    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+    | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
+    | Subdividing _ | Subdivided _ -> Ok () in
   let source=Request.source request and owner=Request.physical_owner request in
   let keeper_id=Request.keeper_id owner and runtime_keepers_dir=Source.runtime_keepers_dir source in
   let* ()=Request.confirm_owner request in
@@ -503,10 +515,10 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
 
 let publish = publish_with ~before_settlement:(fun () -> ())
 
-(* An execution refusal that can never be answered (counterpart-only input that
-   is over capacity, which has no smaller form to retry). The operator chose to
-   end it by abandoning that exact range rather than block its destination for
-   ever. The range's own Memory receipts are written with no claim, so the
+(* The operator chose to end ordinary counterpart-only capacity refusals by
+   abandoning their exact range. A Cut descendant has an earlier obligation
+   to read that shared source and cannot use this abandonment policy.
+   The range's own Memory receipts are written with no claim, so the
    settlement below finds the receipts it always requires; then the external
    ACK and read positions move past the range, and only then is the fact
    recorded. A cut at any point re-enters here: receipts already proved are not
@@ -525,6 +537,7 @@ let settle_refused_with ~before_settlement ~store ~request ~(record : Owner.reta
       let* actual=reload ~store ~previous:record request in
       let* ()=Keeper_librarian_history_resolution_state.check_unfenced
         ~store ~request ~original:actual in
+      let* ()=require_refusal_abandonment ~store request in
       let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
       receipt_state request in
   (* Receipt lookup can reconcile an earlier Memory publication, so inspect

@@ -5,6 +5,7 @@ module Intent = Keeper_librarian_history_resolution_intent
 module Store = Lane_addon_store
 open Result.Syntax
 type reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
+type refusal_obligation = No_cut_ancestor | Cut_read_required of string
 let require condition message = if condition then Ok () else Error message
 (* One original as lineage reads it: its record, the index of its request, and
    its request when a link needs the whole of it. *)
@@ -42,7 +43,7 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
   let rec visit seen ~require_confirmed ~id ~digest ~owner ~destination ~predecessor ~basis ~body =
     let* ()=require (not (List.mem id seen)) "History resolution ancestry contains a cycle" in
     match predecessor with
-    | None -> Ok ()
+    | None -> Ok No_cut_ancestor
     | Some (predecessor:Request.predecessor) ->
       let scope=Request.scope owner in
       let* parent=read_node ~owner ~request_id:predecessor.request_id in
@@ -51,11 +52,11 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
       let* ()=require (Owner.Record.scope parent.record=scope && parent_id=predecessor.request_id
         && Owner.Record.request_digest parent.record=predecessor.request_digest) "History predecessor digest differs" in
       let* fence=read_fence ~scope ~request_id:parent_id in
-      let* ()=match fence with
+      let* obligation=match fence with
         | None ->
           let* request=body () in
           let* ()=Request.validate_predecessor_link_payload ~read ~require_confirmed request in
-          confirm_ending parent
+          let+ ()=confirm_ending parent in No_cut_ancestor
         | Some json ->
           let* fence=Fence.of_json json in
           let* ()=Fence.confirm_binding_index ~index:parent.index ~original:parent.record fence in
@@ -68,10 +69,12 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
               | Child_intended child -> not require_confirmed && child.request_id=id
               | Requested | Refused _ | Fenced | Child_prepared _ -> false) intents) in
           let* ()=Intent.require_successor_authority intent fence in
-          let* ()=match intent.origin with
-            | Intent.Worker_absence -> Ok ()
-            | Same_binding_cut _ -> require (Lane_addon_captured_destination.same_semantic
+          let* obligation=match intent.origin with
+            | Intent.Worker_absence -> Ok No_cut_ancestor
+            | Same_binding_cut _ ->
+              let+ ()=require (Lane_addon_captured_destination.same_semantic
                 destination parent.index.destination) "Cut lineage changed its semantic destination" in
+              Cut_read_required parent_id in
           (* The intent names its child by digest, and equal digests are
              equal requests. *)
           let* intended=Option.to_result ~none:"Resolution child intent is absent" (Intent.child intent) in
@@ -79,17 +82,22 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
           (* Equal basis: the child's source is the parent's with another
              current Memory, which is all [Source.with_current] changes. *)
           let* basis=basis () in
-          require (basis=parent.index.source_basis_digest && owner=parent.index.owner)
-            "History resolution child changed its original source or owner" in
-      visit (id::seen) ~require_confirmed:true ~id:parent_id ~digest:(Owner.Record.request_digest parent.record)
+          let+ ()=require (basis=parent.index.source_basis_digest && owner=parent.index.owner)
+            "History resolution child changed its original source or owner" in obligation in
+      let+ ancestor=visit (id::seen) ~require_confirmed:true ~id:parent_id ~digest:(Owner.Record.request_digest parent.record)
         ~owner:parent.index.owner ~destination:parent.index.destination ~predecessor:parent.index.predecessor
         ~basis:(fun () -> Ok parent.index.source_basis_digest) ~body:parent.body in
+      match obligation with
+      | Cut_read_required _ -> obligation
+      | No_cut_ancestor -> ancestor in
   visit [] ~require_confirmed ~id ~digest ~owner ~destination ~predecessor ~basis ~body
-let validate ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed request =
+let validate_ancestry ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed request =
   validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed
     ~id:(Request.request_id request) ~digest:(Request.body_digest request)
     ~owner:(Request.physical_owner request) ~destination:(Request.destination request) ~predecessor:(Request.predecessor request)
     ~basis:(fun () -> Request.source_basis_digest request) ~body:(fun () -> Ok request)
+let validate ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed request =
+  let+ _=validate_ancestry ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed request in ()
 (* A reader that has the body: the index it hands on is made from the request
    it restored, and the record's summary must be that index. *)
 let body_node ~restore ~read ~verified ~owner ~request_id =
@@ -213,13 +221,17 @@ let confirm_predecessor ~store ~require_confirmed request =
   let read,read_fence,read_resolution=store_readers ~store in
   validate ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution
     ~confirm_ending:(confirm_ending ~store) ~require_confirmed request
+let refusal_obligation ~store request =
+  let read,read_fence,read_resolution=store_readers ~store in
+  validate_ancestry ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution
+    ~confirm_ending:(confirm_ending ~store) ~require_confirmed:true request
 let confirm_predecessor_record ~store ~require_confirmed record (index:Request.index) =
   let read,read_fence,read_resolution=store_readers ~store in
-  validate_node ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution
+  let+ _=validate_node ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution
     ~confirm_ending:(confirm_ending ~store) ~require_confirmed
     ~id:(Owner.Record.request_id record) ~digest:(Owner.Record.request_digest record)
     ~owner:index.owner ~destination:index.destination ~predecessor:index.predecessor
-    ~basis:(fun () -> Ok index.source_basis_digest) ~body:(record_body ~store record index)
+    ~basis:(fun () -> Ok index.source_basis_digest) ~body:(record_body ~store record index) in ()
 (* Names the acknowledged child only. Its lineage is confirmed by whoever
    reads that child next. *)
 let confirmed_resolution_child ~store ~record ~index =

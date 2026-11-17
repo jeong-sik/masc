@@ -44,6 +44,13 @@ val confirm_predecessor : store:Lane_addon_store.t -> require_confirmed:bool ->
     original host ending and proofs. The index is bound to the body where the body is read:
     [Keeper_librarian_durable_request.restore_payload], {!fenced_original} and
     {!confirm_predecessor_by_body}. *)
+type refusal_obligation = No_cut_ancestor | Cut_read_required of string
+val refusal_obligation : store:Lane_addon_store.t ->
+  Keeper_librarian_durable_request.t -> (refusal_obligation, string) result
+(** The same strict confirmed predecessor walk. [Cut_read_required id] names
+    a validated fenced Cut ancestor whose source this descendant must read.
+    A capacity refusal cannot abandon that shared source. [No_cut_ancestor]
+    supplies only this ancestry check, not permission to settle a refusal. *)
 val confirm_predecessor_record : store:Lane_addon_store.t -> require_confirmed:bool ->
   Lane_addon_tool_request_owner.Record.t -> Keeper_librarian_durable_request.index -> (unit, string) result
 (** {!confirm_predecessor} for an original the caller holds as its record and

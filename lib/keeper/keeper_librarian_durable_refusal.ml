@@ -9,10 +9,11 @@ module Source = Keeper_librarian_durable_capture
 module Sources = Keeper_librarian_input_sources
 module Edge = Keeper_librarian_durable_edge
 module Current = Keeper_memory_os_current
+module Lineage = Keeper_librarian_history_resolution_lineage
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 type t = {request_id:string;destination:Request.destination;refusal:Consumer.error;
-  original:Retained.retained*Request.t}
+  original:Retained.retained*Request.t;obligation:Lineage.refusal_obligation}
 type retained = {record:Retained.retained;request:Request.t;
   selection:Sources.counterpart_selection Lazy.Mutexed.t}
 type inventory = retained list
@@ -107,6 +108,10 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
   let* original=Option.to_result ~none:"Refused original is absent from the validated inventory"
     (member completed ~record ~request) in
   let source=Request.source request in
+  let make_stop refusal =
+    let+ obligation=io (fun () -> Lineage.refusal_obligation ~store request) in
+    {request_id=record.request_id;destination=Request.destination request;
+      refusal;original=(record,request);obligation} in
   match Progress.phase record.progress with
   | Rejected {stage=Progress.Execution;evidence} ->
     if not (counterpart_only source) || Option.is_some (Progress.settlement record.progress) then Ok None else
@@ -122,12 +127,15 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
        let report=Runtime.not_committed_of_failure ~detail:(detail final) evidence in
        (match Consumer.refused_original source [report] with
         | Error (Consumer.Counterpart_input_capacity_refused {counterpart_digest;_} as refusal) ->
+          let* stop=make_stop refusal in
+          (match stop.obligation with
+          | Lineage.Cut_read_required _ -> Ok (Some stop)
+          | No_cut_ancestor ->
           let* committed=io (fun () ->
             let* past=Keeper_librarian_refusal_frontier.past_original ~counterpart_digest request in
             if not past then Ok false else
             Ok (List.exists (completed_covers ~original:request ~original_selection:original.selection) completed)) in
-          Ok (if committed then None else Some {request_id=record.request_id;
-            destination=Request.destination request;refusal;original=(record,request)})
+          Ok (if committed then None else Some stop))
         | Error ((Consumer.Keeper_meta_absent
                  | Original_publication_blocked _ | Source_capture_failed _
                  | Keeper_meta_unreadable _ | Boundary_log_unreadable _
@@ -141,7 +149,7 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
                  | Official_progress_boundary_missing _
                  | Committed_official_range_mismatch | Official_range_stopped _
                  | Fragment_store_unreadable _ | Fragment_line_unreadable _) as refusal) ->
-          Ok (Some {request_id=record.request_id;destination=Request.destination request;refusal;original=(record,request)})
+          let+ stop=make_stop refusal in Some stop
         | Ok _ -> Ok None)
      | Call_final (Answered _ | Invalid_output _ | Input_refused Invalid_request | Output_limit_reached _)
      | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok None)
@@ -152,7 +160,9 @@ let request_id stop=stop.request_id
 let original stop=stop.original
 (* The coordinates a settled refusal keeps: what was abandoned and what the
    settlement applied, so the record alone says why this range was never read. *)
-let diagnosis stop = match stop.refusal with
+let diagnosis stop = match stop.obligation with
+  | Lineage.Cut_read_required _ -> None
+  | No_cut_ancestor -> match stop.refusal with
   | Consumer.Counterpart_input_capacity_refused
       {atom_range;official_range;counterpart_digest;observation_count;observation_bytes;reports;_} ->
     let ((record:Retained.retained),_)=stop.original in
@@ -184,12 +194,17 @@ let next_read ~(final:Exact.final) =
   | Exact.Not_allowed {reason=Replaced_declaration} -> Whole_again
   | Not_allowed {reason=Permission_refused _}
   | Call_final _ | Outcome_unknown | Request_id_reused -> Narrowed
+let blocking_reason stop = match stop.obligation with
+  | Lineage.No_cut_ancestor -> stop.refusal
+  | Cut_read_required request_id -> Consumer.Original_publication_blocked
+      ("Cut continuation remains unread; capacity refusal cannot abandon fenced original "
+       ^ request_id ^ ": " ^ Consumer.error_to_string stop.refusal)
 let blocks_destination stops current =
   List.find_map (fun stop -> if Destination.same_semantic current stop.destination
-    then Some stop.refusal else None) stops
+    then Some (blocking_reason stop) else None) stops
 let blocked ~config ~reserved = function
   | [] -> None
   | (first::_ as stops) ->
     match Edge.with_destination ~config ~reserved (fun current -> Ok (blocks_destination stops current)) with
     | Ok refusal -> refusal
-    | Error _ -> Some first.refusal
+    | Error _ -> Some (blocking_reason first)

@@ -3,11 +3,12 @@ import { officeImageDimensions } from './artifact-office-image'
 import { officeChartFigure } from './artifact-office-chart'
 import { officeHtmlText } from './artifact-office-text'
 import { readOfficeChart } from './artifact-office-chart-read'
+import { officeTableWidthStyle, parseOfficeTableWidth, type OfficeTableWidth } from './artifact-office-table-width'
 import { loadOfficeArchive, officeNs as ns, readOfficeBytes, readOfficeRelationships, readOfficeXml, resolveOfficePart,
   xmlChild, xmlChildren, xmlDescendants, type OfficeXmlElement as Element } from './artifact-office-xml'
 
 type Segment = { readonly kind: 'inline' | 'block'; readonly html: string }
-type Cell = { readonly start: number; span: number; rowSpan: number; readonly html: string; readonly header: boolean }
+type Cell = { readonly start: number; span: number; rowSpan: number; readonly html: string; readonly header: boolean; readonly width: OfficeTableWidth }
 const wordDrawing = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
 const extendedChart = 'http://schemas.microsoft.com/office/drawing/2014/chartex'
 const htmlMaxColspan = 1000, htmlMaxRowspan = 65534
@@ -20,6 +21,37 @@ function integer(value: string | null, allowZero = false): number {
 function propertyNumber(node: Element | undefined, name: string, absent: number, allowZero = false): number {
   const property = node && xmlChild(node, ns.word, name)
   return property ? integer(wordValue(property), allowZero) : absent
+}
+function tableWidth(node: Element | undefined, grid = false): OfficeTableWidth {
+  if (!node) return { kind: 'absent' }
+  const value = node.getAttributeNS(ns.word, 'w')
+  if (grid && value === null) return { kind: 'absent' }
+  switch (grid ? 'dxa' : node.getAttributeNS(ns.word, 'type') ?? 'dxa') {
+    case 'auto': return { kind: 'auto' }
+    case 'nil': return { kind: 'auto' }
+    case 'pct': {
+      if (value?.endsWith('%')) {
+        const width = parseOfficeTableWidth(`width:${value}`)
+        if (width.kind !== 'percent') throw new Error('지원하지 않는 Word 표의 백분율 너비입니다.')
+        return width
+      }
+      return { kind: 'percent', value: integer(value, true) / 50 }
+    }
+    case 'dxa': {
+      if (value !== null && !/^\d+$/.test(value)) return parseOfficeTableWidth(`width:${value}`)
+      const hwpUnits = integer(value, true) * 5
+      if (!Number.isSafeInteger(hwpUnits)) throw new Error('Word 표 너비를 정확히 표현할 수 없습니다.')
+      // A zero default grid track supplies no positive layout measurement.
+      // Keep it automatic rather than claiming a fixed zero-width column.
+      if (grid && hwpUnits === 0) return { kind: 'auto' }
+      return { kind: 'absolute', hwpUnits }
+    }
+    default: throw new Error('지원하지 않는 Word 표의 너비 형식입니다.')
+  }
+}
+function tableStyle(width: OfficeTableWidth): string {
+  const css = officeTableWidthStyle(width)
+  return css ? ` style="${officeHtmlText(css)}"` : ''
 }
 function enabled(node: Element | undefined): boolean {
   if (!node) return false
@@ -168,8 +200,11 @@ export async function importArtifactDocx(data: ArrayBuffer | Uint8Array): Promis
   }
   async function table(node: Element): Promise<string> {
     const rows = tableEntries(node, 'tr', ['tblPr', 'tblGrid']), output: Cell[][] = []
+    const grid = xmlChild(node, ns.word, 'tblGrid'), properties = xmlChild(node, ns.word, 'tblPr')
+    const preferred = tableWidth(properties && xmlChild(properties, ns.word, 'tblW'))
+    const columns = grid ? xmlChildren(grid, ns.word, 'gridCol').map(column => tableWidth(column, true)) : []
     if (rows.length === 0) throw new Error('가져올 수 있는 Word 표 행이 없습니다.')
-    let active = new Map<number, Cell>(), width = xmlChildren(xmlChild(node, ns.word, 'tblGrid') ?? node, ns.word, 'gridCol').length
+    let active = new Map<number, Cell>(), width = columns.length
     for (const row of rows) {
       const rowProperties = xmlChild(row, ns.word, 'trPr'), cells: Cell[] = [], next = new Map<number, Cell>()
       let column = propertyNumber(rowProperties, 'gridBefore', 0, true)
@@ -187,15 +222,17 @@ export async function importArtifactDocx(data: ArrayBuffer | Uint8Array): Promis
           if (xmlDescendants(element, ns.word, 't').some(text => text.textContent?.trim()) || xmlDescendants(element, ns.word, 'drawing').length) throw new Error('Word 표의 병합된 숨김 셀에 내용이 있습니다.')
           previous.rowSpan++; next.set(column, previous)
         } else {
-          const cell: Cell = { start: column, span, rowSpan: 1, html: await blocks(element), header: enabled(rowProperties && xmlChild(rowProperties, ns.word, 'tblHeader')) }
+          const cell: Cell = { start: column, span, rowSpan: 1, html: await blocks(element), width: tableWidth(properties && xmlChild(properties, ns.word, 'tcW')), header: enabled(rowProperties && xmlChild(rowProperties, ns.word, 'tblHeader')) }
           cells.push(cell); if (merge) next.set(column, cell)
         }
         column += span
       }
       width = Math.max(width, column + propertyNumber(rowProperties, 'gridAfter', 0, true)); active = next; output.push(cells)
     }
-    return '<table><tbody>' + output.map((cells, row) => {
-      const intervals = [...cells.map(cell => ({ start: cell.start, end: cell.start + cell.span, cell })), ...output.slice(0, row).flatMap((previous, at) => previous.filter(cell => at + cell.rowSpan > row).map(cell => ({ start: cell.start, end: cell.start + cell.span, cell: null })))]
+    const merged = new Map<number, { readonly end: number; readonly until: number }>()
+    return `<table${tableStyle(preferred)}>${columns.length ? `<colgroup>${columns.map(width => `<col${tableStyle(width)}>`).join('')}</colgroup>` : ''}<tbody>` + output.map((cells, row) => {
+      for (const [start, range] of merged) if (range.until <= row) merged.delete(start)
+      const intervals = [...cells.map(cell => ({ start: cell.start, end: cell.start + cell.span, cell })), ...Array.from(merged, ([start, range]) => ({ start, end: range.end, cell: null }))]
         .sort((a, b) => a.start - b.start)
       let column = 0, html = ''
       const gap = (span: number) => { if (span > htmlMaxColspan) throw new Error('HTML로 보존할 수 없는 Word 표의 빈 열 범위입니다.'); return `<td${span > 1 ? ` colspan="${span}"` : ''}></td>` }
@@ -203,7 +240,11 @@ export async function importArtifactDocx(data: ArrayBuffer | Uint8Array): Promis
         if (interval.start < column) throw new Error('Word 표의 병합 셀이 겹칩니다.')
         if (interval.start > column) html += gap(interval.start - column)
         const cell = interval.cell
-        if (cell) { const tag = cell.header ? 'th' : 'td'; html += `<${tag}${cell.span > 1 ? ` colspan="${cell.span}"` : ''}${cell.rowSpan > 1 ? ` rowspan="${cell.rowSpan}"` : ''}>${cell.html}</${tag}>` }
+        if (cell) {
+          const tag = cell.header ? 'th' : 'td'
+          html += `<${tag}${cell.span > 1 ? ` colspan="${cell.span}"` : ''}${cell.rowSpan > 1 ? ` rowspan="${cell.rowSpan}"` : ''}${tableStyle(cell.width)}>${cell.html}</${tag}>`
+          if (cell.rowSpan > 1) merged.set(cell.start, { end: cell.start + cell.span, until: row + cell.rowSpan })
+        }
         column = interval.end
       }
       if (column < width) html += gap(width - column)

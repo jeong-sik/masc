@@ -168,3 +168,18 @@ it('refuses unrepresentable percentage preferences and nested derived grids befo
     '<table style="width:50000000000000pt"><tr><td style="width:50000000000000pt"><table style="width:1000%"><tr><td>A</td></tr></table></td></tr></table>',
   ]) await expect(artifactWordFile(artifact(content))).rejects.toThrow('DOCX 너비 단위')
 })
+
+it('keeps a Word automatic table with zero default grid tracks editable and exportable', async () => {
+  const source = await artifactWordFile(artifact('<table><tr><td>A</td><td>B</td></tr></table>'))
+  const zip = await JSZip.loadAsync(source.data), xml = await readOfficeXml(zip, 'word/document.xml')
+  for (const grid of xmlDescendants(xml, word, 'gridCol')) grid.setAttributeNS(word, 'w:w', '0')
+  for (const width of [...xmlDescendants(xml, word, 'tblW'), ...xmlDescendants(xml, word, 'tcW')]) {
+    width.setAttributeNS(word, 'w:w', '0'); width.setAttributeNS(word, 'w:type', 'auto')
+  }
+  zip.file('word/document.xml', new XMLSerializer().serializeToString(xml))
+  const imported = await importArtifactDocx(await zip.generateAsync({ type: 'uint8array' }))
+  const again = await artifactWordFile(artifact(imported.content)), body = await readOfficeXml(await JSZip.loadAsync(again.data), 'word/document.xml')
+  expect(xmlDescendants(body, word, 'gridCol').every(col => Number(col.getAttributeNS(word, 'w')) > 0)).toBe(true)
+  const hwpx = await nativeHwpx((await artifactHwpxFile(artifact(imported.content))).data)
+  expect(hwpx[0]!.cells.every(cell => Number(cell.width) > 0)).toBe(true)
+})

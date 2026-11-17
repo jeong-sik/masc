@@ -62,6 +62,28 @@ val on_systhread : label:string -> (unit -> 'a) -> 'a
 
 val load_file : string -> string
 
+val load_file_locked : string -> string
+val load_lines_rev_locked : string -> string list
+(** Plain reads whose descriptor lifetime is protected by the canonical append
+    path mutex. The contents reader retains [load_file]'s text opener and
+    captured length; the line reader uses a binary channel and reads to EOF,
+    retaining an unterminated final line in reverse physical-line order.
+    Both close with [close_in_noerr]. Neither adds file ownership or kind
+    checks. Eio dispatch happens before mutex acquisition, with or without a
+    global filesystem; cancellation is checked after descriptor settlement.
+    Coordination is by canonical path, not across distinct leaf-symlink or
+    hardlink names for one inode. *)
+
+module Locked_read_for_testing : sig
+  val load_file : before_read:(Unix.file_descr -> unit) -> string -> string
+  val load_lines_rev :
+    before_read:(Unix.file_descr -> unit) -> string -> string list
+  val path_mutex_available : string -> bool
+  (** Hooks run on the blocking reader after open (and after length capture
+      for [load_file]); they must not perform Eio effects or close the file.
+      The nonblocking probe uses the actual canonical append path mutex. *)
+end
+
 val save_file : string -> string -> unit
 
 val save_file_atomic : string -> string -> (unit, string) Result.t

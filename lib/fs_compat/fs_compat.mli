@@ -463,6 +463,33 @@ val remove_owned_tree : cleanup_directory list -> (unit, string) result
 (** Load entire file as string. *)
 val load_file : string -> string
 
+(** Like {!load_file}, with descriptor open/read/close protected by the same
+    canonical data-path mutex as appenders. The text opener, captured length,
+    [close_in_noerr] and I/O exceptions are unchanged. This follows symlinks
+    and adds no ownership or file-kind policy. Inside Eio, dispatch precedes
+    the blocking mutex even when no global filesystem is installed; pending
+    cancellation is checked after cleanup. Coordination is by canonical path,
+    including normalized ancestor aliases; distinct leaf-symlink or hardlink
+    names for one inode do not share a mutex. *)
+val load_file_locked : string -> string
+
+(** Read binary physical lines to EOF under that same mutex, in reverse file
+    order. The final unterminated line is included; no JSON parsing, blank-line
+    filtering, history cap or missing-file default is applied. Uses
+    [open_in_bin], [input_line] and [close_in_noerr], preserving their errors.
+    Dispatch and cancellation follow {!load_file_locked}. *)
+val load_lines_rev_locked : string -> string list
+
+module Locked_read_for_testing : sig
+  val load_file : before_read:(Unix.file_descr -> unit) -> string -> string
+  val load_lines_rev :
+    before_read:(Unix.file_descr -> unit) -> string -> string list
+  val path_mutex_available : string -> bool
+  (** Hooks run in the blocking reader after open (and after length capture
+      for [load_file]); do not perform Eio effects or close the descriptor.
+      The nonblocking probe uses the actual canonical append path mutex. *)
+end
+
 (** Load entire file as string, or [None] when the file is missing.
     A file that vanishes before it is opened is also absent. Other I/O
     failures, including denied or non-directory parents and a directory used

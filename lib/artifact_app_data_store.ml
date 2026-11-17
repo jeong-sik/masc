@@ -40,11 +40,11 @@ let authorize ~base_path ~actor target =
 let load ~base_path empty =
   let file = Filename.concat (root ~base_path) (filename ~actor:empty.Data.actor empty.target) in
   let check file =
-    let* observed = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+    let* observed = Fs_compat.observe_owned_regular_file ~owner_uid:(Unix.geteuid ())
       ~ownership_root:base_path file
       |> Result.map_error (fun _ -> Unavailable "application input path is not an owned regular file") in
     match observed with
-    | Some observed when observed.snapshot.permissions <> 0o600 ->
+    | Some observed when observed.permissions <> 0o600 ->
       Error (Unavailable "application input files must have private 0600 permissions")
     | None | Some _ -> Ok () in
   let* _ = check file in let* _ = check (Fs_compat.private_jsonl_lock_path file) in

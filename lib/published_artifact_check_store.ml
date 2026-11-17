@@ -37,14 +37,15 @@ let directory_entries ~base_path =
 
 let read_snapshot ~base_path name =
   let file = Filename.concat (root ~base_path) name in
-  (* Validate the owned parent and data leaf before entering the shared stable
-     transaction protocol. Its lock is created exclusively and an existing
+  (* Observe the owned parent and data leaf before entering the shared stable
+     transaction protocol; only that transaction reads the body. Its lock is
+     created exclusively and an existing
      leaf is bound to its regular descriptor before any marker write. *)
-  match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+  match Fs_compat.observe_owned_regular_file ~owner_uid:(Unix.geteuid ())
     ~ownership_root:base_path file with
   | Error _ -> Error (Unavailable "artifact check could not be read")
   | Ok (None | Some _) ->
-    let* _ = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+    let* _ = Fs_compat.observe_owned_regular_file ~owner_uid:(Unix.geteuid ())
       ~ownership_root:base_path (Fs_compat.private_jsonl_lock_path file)
       |> Result.map_error (fun _ -> Unavailable "artifact check lock is not an owned regular file") in
     Fs_compat.read_private_jsonl_durable_locked_result file ~after:None

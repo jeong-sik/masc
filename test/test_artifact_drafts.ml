@@ -23,7 +23,54 @@ let revise ~base_path ~id ~expected_revision ~author ?(format = "markdown") cont
      "title", `String "shared draft fixture"; "summary", `String "native integration";
      "format", `String format; "content", `String content]) |> ok in
   Publications.publish ~base_path ~author request |> Result.map_error Publications.error_message |> ok
+
+let test_owned_draft_preflight () = with_base (fun base_path ->
+  let workspace = Common.masc_dir_from_base_path ~base_path in
+  let directory = Filename.concat workspace Store.dirname in
+  Unix.mkdir workspace 0o700; Unix.mkdir directory 0o700;
+  let file = Filename.concat directory (target.artifact_id ^ ".json") in
+  let draft = Draft.create ~target ~base_revision:1 ~base_sha256:(String.make 64 'a')
+      ~state:"AAA=" ~actor:"fixture" ~at:"2026-11-17T00:00:00Z" |> ok in
+  Fs_compat.save_file file (Yojson.Safe.to_string (Draft.to_json draft) ^ "\n");
+  Unix.chmod file 0o600;
+  let rendered = ref 0 in
+  let runner _ = incr rendered; Error "fixture renderer reached" in
+  let read () = Store.read ~runner ~base_path ~artifact_id:target.artifact_id () in
+  let reaches_renderer () =
+    rendered := 0;
+    (match read () with
+     | Error (Store.Transform_error {kind = Engine.Unavailable; message}) ->
+       Alcotest.(check string) "valid stored state reached the supplied runner" "fixture renderer reached" message
+     | Error error -> Alcotest.fail (Store.error_message error)
+     | Ok _ -> Alcotest.fail "fixture renderer did not run");
+    Alcotest.(check int) "one render after authoritative read" 1 !rendered in
+  reaches_renderer ();
+  let refuse () =
+    rendered := 0;
+    (match read () with
+     | Error (Store.Unavailable _) -> ()
+     | Error error -> Alcotest.fail (Store.error_message error)
+     | Ok _ -> Alcotest.fail "unsafe draft was accepted");
+    Alcotest.(check int) "unsafe metadata never reaches the transformer" 0 !rendered in
+  let outside = Filename.concat base_path "outside-record" in
+  Fs_compat.save_file outside "external sentinel";
+  List.iter (fun leaf ->
+    let held = leaf ^ ".held" in
+    let before = Fs_compat.load_file leaf in
+    Unix.rename leaf held;
+    Unix.symlink outside leaf;
+    Fun.protect ~finally:(fun () -> Unix.unlink leaf; Unix.rename held leaf) (fun () ->
+      refuse ();
+      Alcotest.(check string) "external target is unchanged" "external sentinel" (Fs_compat.load_file outside);
+      Alcotest.(check string) "held draft or lock is unchanged" before (Fs_compat.load_file held));
+    reaches_renderer ()) [file; Fs_compat.private_jsonl_lock_path file];
+  let permissions = (Unix.stat directory).Unix.st_perm land 0o7777 in
+  Unix.chmod directory 0o777;
+  Fun.protect ~finally:(fun () -> Unix.chmod directory permissions) refuse;
+  reaches_renderer ())
+
 let boundary_tests = [
+  "owned draft data and lock preflights run without a transformer", `Quick, test_owned_draft_preflight;
   "strict request actor and target boundaries", `Quick, (fun () ->
     let good = ["action", `String "select"; "target", Draft.target_to_json target; "anchor", `Int 0; "head", `Int 0] in
     ignore (Draft.command_of_json (`Assoc good) |> ok);

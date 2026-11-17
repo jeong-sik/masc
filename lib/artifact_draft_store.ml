@@ -55,7 +55,7 @@ let prepare ~base_path =
   let* _ = directory ~base_path in Ok ()
 let load ~base_path artifact_id =
   let file = path ~base_path artifact_id in
-  let check file = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.geteuid ())
+  let check file = Fs_compat.observe_owned_regular_file ~owner_uid:(Unix.geteuid ())
       ~ownership_root:base_path file |> Result.map_error (fun _ -> Unavailable "shared draft path is not an owned regular file") in
   let* _ = check file in let* _ = check (Fs_compat.private_jsonl_lock_path file) in
   let* snapshot = Fs_compat.read_private_jsonl_durable_locked_result file ~after:None

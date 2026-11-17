@@ -249,9 +249,15 @@ let test_event_capture_is_fresh_and_preserves_read_failures () =
   check int "missing log has no malformed lines" 0
     (missing |> member "goal_history" |> member "coverage" |> member "malformed_event_lines" |> to_int);
   Unix.mkdir path 0o700;
-  match Dashboard_goals.dashboard_goals_tree_json ~config with
-  | exception Sys_error _ -> ()
-  | _ -> fail "an unreadable event log must not become an empty history"
+  (* Directory reads can fail while converting the descriptor on Linux or
+     while reading it on other platforms. Preserve the reader's own error. *)
+  let read_failure =
+    match Fs_compat.load_jsonl_diagnostics path with
+    | exception ((Sys_error _ | Unix.Unix_error _) as error) -> error
+    | _ -> fail "the unreadable log fixture must fail in the underlying reader"
+  in
+  check_raises "the tree preserves the underlying event-reader failure" read_failure
+    (fun () -> ignore (Dashboard_goals.dashboard_goals_tree_json ~config))
 ;;
 
 let () =

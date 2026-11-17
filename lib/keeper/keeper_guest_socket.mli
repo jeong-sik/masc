@@ -107,3 +107,67 @@ val run :
     shim's stdout and stderr bytes as they arrive; the outcome keeps them
     bounded as above. [accept] is {!refusal} with the Keeper's [expected] ids
     in production. *)
+
+type stdio_error =
+  | Invalid_request of string
+      (** The supplied frame is not one complete V3 Interactive request with
+          no initial payload. No connection is opened. *)
+  | Not_connected of not_sent
+  | Ended_before_exit
+  | Invalid_chunk of Exec_ssh_protocol.Relay.decode_error
+  | Unexpected_hello
+  | Read_failed of string
+  | Write_failed of string
+  | Shutdown_failed of string
+  | Budget_spent
+      (** The whole-call budget expired after [on_request_write] began.
+          The request may have been partially or fully sent. Before that
+          boundary expiry is [Not_connected (Unreachable _)]. *)
+
+val stdio_error_to_string : stdio_error -> string
+(** Diagnostic rendering only; callers classify the constructors. *)
+
+type 'e stdio_failure =
+  | Dispatch_declined of 'e
+  | Transport_failed of stdio_error
+
+val with_stdio :
+  net:[> 'tag Eio.Net.ty ] Eio.Net.t ->
+  clock:_ Eio.Time.clock ->
+  expected:expected ->
+  socket:string ->
+  connect_budget_sec:float ->
+  budget_sec:float ->
+  frame:string ->
+  on_dispatch:(unit -> (unit, 'e) result) ->
+  on_request_write:(unit -> unit) ->
+  on_stderr_chunk:(string -> unit) ->
+  on_stdout_tail:(string -> unit) ->
+  (input:Eio.Flow.source_ty Eio.Resource.t ->
+   output:Eio.Flow.sink_ty Eio.Resource.t -> 'a) ->
+  ('a * Exec_ssh_protocol.Relay.exit_status, 'e stdio_failure) result
+(** Own a duplex connection to a v2 guest relay. Validate [frame] before any
+    connection, and validate the actual hello with {!refusal} and [expected]
+    before [on_dispatch]. Only after that callback accepts does
+    [on_request_write] run, immediately before attempting the first [I] and
+    frame bytes. An attempted write can be partial; no subsequent failure
+    proves it was unsent. Connections are retried only before an accepted
+    hello, never after dispatch or request writing begins.
+
+    One decoder reads the socket. The callback borrows unchanged stdout as
+    [input] and raw payload stdin as [output]; stderr goes to its callback.
+    Stdout backpressure is bounded by relay chunk size, with no preview
+    truncation. The callback must serialize writes and finish every user of
+    both flows before returning.
+
+    On normal return, half-close the socket's send side, deliberately asking
+    the interactive relay to cancel its shim. Drain remaining stdout through
+    [on_stdout_tail] and stderr through [on_stderr_chunk] until an actual
+    [Exit] chunk, then close the connection. The return value and the actual
+    shim exit are separate facts. EOF without [Exit] is incomplete transport.
+
+    The existing whole-call budget includes connection, callback and drain.
+    Cancellation or callback failure closes this exact connection and
+    propagates the original exception; this host owns no guest PID or process
+    handle. Stream callback failures propagate as well. The producer retains
+    any MCP result inside the callback before channel close. *)

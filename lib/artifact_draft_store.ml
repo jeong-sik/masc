@@ -55,11 +55,14 @@ let prepare ~base_path =
   let* _ = directory ~base_path in Ok ()
 let load ~base_path artifact_id =
   let file = path ~base_path artifact_id in
-  let check file = Fs_compat.observe_owned_regular_file ~owner_uid:(Unix.geteuid ())
-      ~ownership_root:base_path file |> Result.map_error (fun _ -> Unavailable "shared draft path is not an owned regular file") in
-  let* _ = check file in let* _ = check (Fs_compat.private_jsonl_lock_path file) in
-  let* snapshot = Fs_compat.read_private_jsonl_durable_locked_result file ~after:None
-    |> Result.map_error (fun error -> Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in
+  let* snapshot = Fs_compat.read_owned_private_jsonl_durable_locked_result
+    ~owner_uid:(Unix.geteuid ()) ~ownership_root:base_path
+    ~permissions:Fs_compat.Owned_regular file ~after:None
+    |> Result.map_error (function
+      | Fs_compat.Owned_admission_failed _ | Owned_private_permissions_required _ ->
+        Unavailable "shared draft path is not an owned regular file"
+      | Owned_transaction_failed error ->
+        Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in
   let* draft = if Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor then Ok None
     else if not (String.is_valid_utf_8 snapshot.bytes) then Error (Unavailable "draft metadata is not UTF-8")
     else match Yojson.Safe.from_string snapshot.bytes with

@@ -37,20 +37,17 @@ let directory_entries ~base_path =
 
 let read_snapshot ~base_path name =
   let file = Filename.concat (root ~base_path) name in
-  (* Observe the owned parent and data leaf before entering the shared stable
-     transaction protocol; only that transaction reads the body. Its lock is
-     created exclusively and an existing
-     leaf is bound to its regular descriptor before any marker write. *)
-  match Fs_compat.observe_owned_regular_file ~owner_uid:(Unix.geteuid ())
-    ~ownership_root:base_path file with
-  | Error _ -> Error (Unavailable "artifact check could not be read")
-  | Ok (None | Some _) ->
-    let* _ = Fs_compat.observe_owned_regular_file ~owner_uid:(Unix.geteuid ())
-      ~ownership_root:base_path (Fs_compat.private_jsonl_lock_path file)
-      |> Result.map_error (fun _ -> Unavailable "artifact check lock is not an owned regular file") in
-    Fs_compat.read_private_jsonl_durable_locked_result file ~after:None
-    |> Result.map_error (fun error -> Unavailable
-      (Fs_compat.private_jsonl_transaction_error_to_string error))
+  Fs_compat.read_owned_private_jsonl_durable_locked_result
+    ~owner_uid:(Unix.geteuid ()) ~ownership_root:base_path
+    ~permissions:Fs_compat.Owned_regular file ~after:None
+  |> Result.map_error (function
+    | Fs_compat.Owned_admission_failed {role; _}
+    | Owned_private_permissions_required {role; _} ->
+      (match role with
+       | Fs_compat.Owned_data -> Unavailable "artifact check could not be read"
+       | Owned_stable_lock -> Unavailable "artifact check lock is not an owned regular file")
+    | Owned_transaction_failed error ->
+      Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error))
 
 let decode_snapshot name (snapshot : Fs_compat.private_jsonl_snapshot) =
   if Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor then Ok None
@@ -141,8 +138,9 @@ let set ~base_path ~actor request =
     ~base_path ~actor request
 
 module For_testing = struct
-  let set_with_rewrite_io ~io ~base_path ~actor request =
+  let set_with_rewrite_io ?before_sync_rewrite_parent ~io ~base_path ~actor request =
     set_with_rewrite
-      ~rewrite:(Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing ~io)
+      ~rewrite:(Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+        ?before_sync_rewrite_parent ~io)
       ~base_path ~actor request
 end

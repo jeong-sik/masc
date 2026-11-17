@@ -24,10 +24,13 @@ val set : base_path:string -> actor:string -> Published_artifact_check.request -
     settlement, preserving successful and uncertain operation results. *)
 
 module For_testing : sig
-  val set_with_rewrite_io : io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  val set_with_rewrite_io :
+    ?before_sync_rewrite_parent:(string -> unit) ->
+    io:Fs_compat.private_jsonl_transaction_io_for_testing ->
     base_path:string -> actor:string -> Published_artifact_check.request ->
     (Published_artifact_check.t, error) result
-  (** The production transaction with injected rewrite descriptor settlement. *)
+  (** The production transaction with injected rewrite descriptor settlement or
+      post-publication parent-directory sync failure. *)
 end
 
 val dirname : string

@@ -39,17 +39,16 @@ let authorize ~base_path ~actor target =
   | Markdown -> Error (Invalid "application inputs require a published HTML revision")
 let load ~base_path empty =
   let file = Filename.concat (root ~base_path) (filename ~actor:empty.Data.actor empty.target) in
-  let check file =
-    let* observed = Fs_compat.observe_owned_regular_file ~owner_uid:(Unix.geteuid ())
-      ~ownership_root:base_path file
-      |> Result.map_error (fun _ -> Unavailable "application input path is not an owned regular file") in
-    match observed with
-    | Some observed when observed.permissions <> 0o600 ->
-      Error (Unavailable "application input files must have private 0600 permissions")
-    | None | Some _ -> Ok () in
-  let* _ = check file in let* _ = check (Fs_compat.private_jsonl_lock_path file) in
-  let* snapshot = Fs_compat.read_private_jsonl_durable_locked_result file ~after:None
-    |> Result.map_error (fun error -> Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in
+  let* snapshot = Fs_compat.read_owned_private_jsonl_durable_locked_result
+    ~owner_uid:(Unix.geteuid ()) ~ownership_root:base_path
+    ~permissions:Fs_compat.Private_0600 file ~after:None
+    |> Result.map_error (function
+      | Fs_compat.Owned_admission_failed _ ->
+        Unavailable "application input path is not an owned regular file"
+      | Owned_private_permissions_required _ ->
+        Unavailable "application input files must have private 0600 permissions"
+      | Owned_transaction_failed error ->
+        Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in
   let* state = if Fs_compat.Private_jsonl_cursor.is_missing snapshot.cursor then Ok empty
     else if not (String.is_valid_utf_8 snapshot.bytes) then Error (Unavailable "application input state is not UTF-8")
     else match Yojson.Safe.from_string snapshot.bytes with

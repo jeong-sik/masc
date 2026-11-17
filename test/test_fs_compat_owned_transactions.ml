@@ -76,6 +76,11 @@ let lock_probe_child path =
     | exception End_of_file -> () in
   loop ()
 
+let rec wait_for_child pid =
+  match Unix.waitpid [] pid with
+  | status -> status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child pid
+
 let with_probe path f =
   let child_input, parent_output = Unix.pipe ~cloexec:true () in
   let parent_input, child_output = Unix.pipe ~cloexec:true () in
@@ -87,7 +92,7 @@ let with_probe path f =
   let probe () = output_char output 'p'; flush output; input_char input in
   Fun.protect ~finally:(fun () ->
     output_char output 'q'; flush output; close_out output; close_in input;
-    match Unix.waitpid [] pid with
+    match wait_for_child pid with
     | _, Unix.WEXITED 0 -> ()
     | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
       fail "lock probe did not exit successfully") (fun () -> f probe)

@@ -193,17 +193,20 @@ let ended_with ~reads ~original ~exact ~captured =
     let* schema=Option.to_result ~none:"Declaration ending lacks its original schema" exact.Exact.schema in
     let* final=Exact.retained_final_of_json ~schema evidence in
     let* observed=reads.observe () in
-    let expected=host_ending final in
+    let* expected=Option.to_result ~none:"Declaration ending has no typed host cause" (host_ending final) in
     let actual=match observed with
       | Exact.Retained_terminal retained -> host_ending retained
       | Retained_absent | Retained_open -> None in
-    let* ()=if Option.is_some expected && expected=actual then Ok ()
+    let* ()=if Some expected=actual then Ok ()
       else Error "Declaration ending differs from its original host record" in
     (* This read is independent of record recovery, including a busy claim. *)
     let* latest=reads.latest () in
-    (match latest with
-     | Exact.No_completed_latest -> Ok true
-     | Completed_latest _ -> Error "Declaration ending has a completed original execution")
+    let+ ()=match expected with
+      | Declaration_ending -> Keeper_librarian_original_final.require_declaration_ending_latest latest
+      | Cut_ending ->
+        (match latest with
+         | Exact.No_completed_latest -> Ok ()
+         | Completed_latest _ -> Error "Cut declaration ending has a completed original execution") in true
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false
 

@@ -66,7 +66,10 @@ val ended_with : reads:ending_reads -> original:Lane_addon_tool_request_owner.Re
 (** The consumer's strict ending check through explicit read ports. Before
     dispatch, require absence of both host record and execution proof. For
     a host ending, confirm its exact typed cause and independently read the
-    bound latest proof even when a claim prevents record recovery. The live
+    bound latest proof even when a claim prevents record recovery. A typed
+    declaration ending may retain an earlier closed [Call_refused] deferral;
+    it never accepts a completed call result. Cut release still requires
+    [No_completed_latest]. The live
     consumer and deploy preflight use this same check; the supplied ports
     grant no publication, consumption or dispatch authority. *)
 
@@ -74,5 +77,6 @@ val ended : store:Lane_addon_store.t -> original:Lane_addon_tool_request_owner.R
   exact:Lane_addon_exact.request -> captured:Lane_addon_captured_destination.t -> (bool, string) result
 (** Confirm {!ended_payload} against the original host record and execution
     proofs. A pre-admission ending requires both to be absent. A host ending
-    must retain its exact typed cause with no completed execution proof.
+    must retain its exact typed cause and pass the strict latest-proof check
+    above; retained earlier deferral proofs are not a current call result.
     The caller binds [exact] to the complete original. Offload the whole call. *)

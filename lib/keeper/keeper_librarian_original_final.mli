@@ -27,12 +27,24 @@ type unconfirmed = Terminal_absent | Terminal_unresolved | Terminal_differs
     own error for it. *)
 type verdict = Confirmed | Unconfirmed of unconfirmed
 
+val require_declaration_ending_latest : Lane_addon_exact.latest_original_execution -> (unit, string) result
+(** Pure closed check after an actual typed declaration-ending terminal and
+    a strict latest-execution read. No completed latest attempt or a bound
+    [Call_refused] from an earlier closed deferral is compatible with that
+    ending. A [Call_ended] is not. This grants no live ending, retry or effect
+    authority and must not be used for Cut release. *)
+
 val declaration_replaced : store:Lane_addon_store.t -> target -> Lane_addon_tool_request_owner.retained ->
   (bool, string) result
 (** Bind an execution refusal's typed cause to the original host Exact record.
     Current worker availability cannot revoke this past no-send verdict.
-    The caller must first bind the original and confirm its final. Blocking
-    Store reads must be offloaded from Eio. *)
+    Independently read the actual latest execution, validating all retained
+    proofs even when a retained Rejected skips submit recovery. An earlier
+    bound [Call_refused] deferral is compatible with the ending; a completed
+    call result, malformed, unreadable or contradictory proof is not. This
+    does not claim that no earlier provider attempt occurred. The caller must first bind the
+    original and confirm its final. Blocking Store reads must be offloaded
+    from Eio. *)
 
 val confirm : observe:(unit -> (Lane_addon_exact.retained_observation, string) result) ->
   latest:(unit -> (Lane_addon_exact.latest_original_execution, string) result) ->

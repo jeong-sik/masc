@@ -2662,6 +2662,11 @@ let test_replacement_terminal_survives_worker_gap ~rollback () = with_fixture (f
     ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path) exact) |> get in
   (match result with Exact.Final (Not_allowed _) -> ()
    | Final _ | Not_final _ -> fail "fresh replacement did not end the unstarted original");
+  let schema=Option.to_result ~none:"unstarted replacement fixture has no schema" exact.Exact.schema |> get in
+  (match io (fun () -> Exact.read_latest_original_execution ~store:fixture.store
+    ~declaration_id:"librarian" ~schema exact) |> get with
+   | No_completed_latest -> ()
+   | Completed_latest _ -> fail "an unstarted replacement cannot have a completed latest attempt");
   check int "the actual host replacement sends no model request" 0 (F.post_count fixture.server);
   if rollback then replace_actual_worker_configuration fixture ~sw (fixture.declaration true)
   else set_enabled fixture false;
@@ -4705,6 +4710,116 @@ let test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_wh
     check int "one more provider call judged the range" 2 (F.post_count fixture.server);
     check (list string) "the new original's answer reached Memory"
       ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
+(* A real host no-send ending can already be retained as Rejected. Submit
+   recovery is then skipped, so the chain's recreation decision must read the
+   actual proof link independently before cleanup can move that step. *)
+let test_a_retained_replaced_floor_step_requires_its_actual_proof_link () =
+  with_fixture (fun ~sw fixture ->
+    let module Step=Keeper_librarian_floor_step_request in
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate,request=candidate_and_request fixture in
+    let original_exact=Capture.request request |> get in
+    let original_schema=Option.to_result ~none:"original fixture has no schema" original_exact.Exact.schema |> get in
+    (match io (fun () -> Exact.read_latest_original_execution ~store:fixture.store
+      ~declaration_id:"librarian" ~schema:original_schema original_exact) |> get with
+     | Exact.Completed_latest _ -> ()
+     | No_completed_latest -> fail "the provider's actual size refusal must retain its completed proof");
+    let foreign_completed_proof=io (fun () -> Fs_compat.load_file (proof_path fixture original_exact)) in
+    fixture.set_step_response (fun _ ->
+      `Too_many_requests,{|{"error":{"message":"fixture refusal","type":"rate_limit_error"}}|});
+    let chain ()=memory_action fixture (fun () -> Descent.descend ~store:fixture.store
+      ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ()) candidate) in
+    (match chain () with
+     | Ok (Chain.Pending _) -> ()
+     | Error detail -> fail detail
+     | Ok (Finished _ | Stopped _ | Declaration_replaced _ | Superseded) ->
+       fail "the busy provider must leave one actual pending floor step");
+    let waiting,step=first_step fixture request in
+    let exact=Step.request step |> get in
+    await_deferral fixture exact.request_id;
+    let deliveries= !(fixture.deliveries) in
+    replace_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
+    await_delivery fixture ~after:deliveries;
+    let replacement ()=match chain () with
+      | Ok (Chain.Declaration_replaced {position=0;request_id}) ->
+        check string "replacement names the same first step" waiting.Owner.request_id request_id
+      | Error detail -> fail detail
+      | Ok (Declaration_replaced _ | Finished _ | Pending _ | Stopped _ | Superseded) ->
+        fail "the actual no-send ending must permit this step's recreation" in
+    replacement ();
+    let ended,_=first_step fixture request in
+    let schema=Option.to_result ~none:"step fixture has no schema" exact.Exact.schema |> get in
+    (match Progress.phase ended.progress with
+     | Rejected {stage=Execution;evidence} ->
+       (match Exact.retained_final_of_json ~schema evidence |> get with
+        | Retained_not_allowed {reason=Replaced_declaration} -> ()
+        | Retained_call _ | Retained_unknown _ | Retained_not_allowed {reason=Permission_refused _}
+        | Retained_request_id_reused -> fail "the actual host did not retain a typed replacement ending")
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+       fail "the step must already hold its execution refusal before the proof is damaged");
+    let path=proof_path fixture exact in
+    (match io (fun () -> Exact.read_latest_original_execution ~store:fixture.store
+      ~declaration_id:"librarian" ~schema exact) |> get with
+     | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} -> ()
+     | No_completed_latest | Completed_latest {execution={outcome=Exact.Call_ended _;_};_} ->
+       fail "the actual 429 must leave a bound closed-deferral proof before the replacement ending");
+    let lineage_ending ()=io (fun () -> Keeper_librarian_declaration_replacement.ended
+      ~store:fixture.store ~original:(Owner.listed ended) ~exact ~captured:(Step.destination step)) in
+    check bool "the actual lineage ending preserves the earlier closed deferral" true (lineage_ending () |> get);
+    (* Replacement adds no attempt ordinal: its latest proof is the previous
+       actual Call_refused deferral, not a result of the replacement ending. *)
+    let original_proof=io (fun () -> Fs_compat.load_file_opt path) in
+    let restore_proof ()=match original_proof with
+      | Some bytes -> write path bytes
+      | None -> if Sys.file_exists path then Sys.remove path in
+    let posts=F.post_count fixture.server and positions=progress fixture and wakes=ref 0 in
+    let runtime_keepers_dir=Workspace.keepers_runtime_dir fixture.config in
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name |> get)
+      |> Keeper_external_read_cursor.observation_to_json in
+    let official ()=io (fun () -> Keeper_librarian_official_progress.read ~keepers_dir:runtime_keepers_dir
+      ~keeper_id:keeper_name |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+    let before_cursor=cursor () and before_official=official () in
+    let snapshot ()=io (fun () -> Fs_compat.load_file_opt
+      (Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)) in
+    let original_ids ()=List.map (fun ((record:Owner.retained),_) -> record.request_id) (observed_originals fixture) in
+    let before_snapshot=snapshot () and before_ids=original_ids () in
+    let before=Owner.record_to_json (Owner.listed ended) in
+    let date=Step.minted_on ended.request_id |> get in
+    let damages=[
+      (fun () -> write path "{malformed actual execution proof"),restore_proof;
+      (fun () -> write path foreign_completed_proof),restore_proof;
+      (fun () -> if Sys.file_exists path then Sys.remove path; Unix.mkdir path 0o700),
+        (fun () -> Unix.rmdir path; restore_proof ())] in
+    List.iter (fun (damage,restore) ->
+      io damage;
+      check bool "the actual latest-proof reader refuses the damaged link" true
+        (Result.is_error (io (fun () -> Exact.read_latest_original_execution ~store:fixture.store
+          ~declaration_id:"librarian" ~schema exact)));
+      (match chain () with
+       | Error _ -> ()
+       | Ok _ -> fail "a retained replacement bypassed its actual malformed or contradictory proof");
+      check bool "the actual replacement lineage refuses the same damaged proof" true
+        (Result.is_error (lineage_ending ()));
+      (match run_worker_waking fixture wakes with
+       | Error (Consumer.Original_publication_blocked _) -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "invalid replacement proof reached cleanup or fresh selection");
+      check bool "the refused step is not archived" false (settled_on fixture ~date ended);
+      let observed,_=first_step fixture request in
+      check json "the same rejected original and its progress remain" before (Owner.record_to_json (Owner.listed observed));
+      check int "no replacement step ID is created" 1 (List.length (steps_of fixture request));
+      check (list string) "no new history original is retained" before_ids (original_ids ());
+      check int "the blocked pass requests no new pass" 0 !wakes;
+      check int "proof refusal calls no provider" posts (F.post_count fixture.server);
+      check bool "proof refusal moves no atom position" true (progress fixture=positions);
+      check bool "proof refusal moves no official position" true (official ()=before_official);
+      check json "proof refusal leaves the complete external ACK unchanged" before_cursor (cursor ());
+      check bool "proof refusal preserves the exact Memory snapshot" true (snapshot ()=before_snapshot);
+      no_memory fixture;
+      io restore;
+      replacement ();
+      check bool "restoring the exact prior proof also restores lineage confirmation" true (lineage_ending () |> get)) damages)
 (* RFC 3.4. A stored replacement ending remains that ending even when the
    original declaration is restored before its Keeper reads it. *)
 let test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending () =
@@ -5625,6 +5740,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_floor_step_guard_tells_a_replaced_declaration_from_a_failed_read;
   test_case "a replaced declaration ends a waiting original and its range is read whole again" `Quick
     test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again;
+  test_case "a retained replaced floor step checks its actual proof before recreation" `Quick
+    test_a_retained_replaced_floor_step_requires_its_actual_proof_link;
   test_case "a declaration put back before the end is read preserves the recorded ending" `Quick
     test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending;
   test_case "a replaced declaration ends a captured original no worker received" `Quick

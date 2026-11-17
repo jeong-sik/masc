@@ -617,6 +617,45 @@ let test_pretty_json_persistence_preserves_bytes () =
             (Workspace_utils.encode_json_pretty json :> string))
         [ Float.nan; Float.infinity; Float.neg_infinity ])
 
+let test_compact_encoding_returns_the_repaired_writer_value () =
+  let input =
+    `Assoc
+      [ "\255key", `List [`String "\001bad\255"; `String "한글 🙂\n\t"]
+      ; "duplicate", `Int 1
+      ; "duplicate", `Int 2
+      ; "zero", `Float (-0.0)
+      ]
+  in
+  let expected =
+    `Assoc
+      [ "\239\191\189key", `List [`String " bad\239\191\189"; `String "한글 🙂\n\t"]
+      ; "duplicate", `Int 1
+      ; "duplicate", `Int 2
+      ; "zero", `Float (-0.0)
+      ]
+  in
+  match Workspace_utils.encode_json_compact_with_value input with
+  | Error message -> fail message
+  | Ok (encoded, value) ->
+    let expected_bytes = Yojson.Safe.to_string expected in
+    check string "the repaired value preserves field order and duplicates"
+      expected_bytes (Yojson.Safe.to_string value);
+    check string "bytes encode the returned repaired value" expected_bytes (encoded :> string);
+    check string "decoding the bytes yields that value"
+      expected_bytes (Yojson.Safe.to_string (Yojson.Safe.from_string (encoded :> string)))
+
+let test_compact_encoding_keeps_non_finite_errors () =
+  List.iter
+    (fun value ->
+       let input = `Assoc ["value", `Float value] in
+       match Workspace_utils.encode_json_compact input,
+         Workspace_utils.encode_json_compact_with_value input with
+       | Error original, Error current ->
+         check string "same encoding error" original current
+       | Ok _, Ok _ | Error _, Ok _ | Ok _, Error _ ->
+         fail "non-finite compact encoding must return an error")
+    [Float.nan; Float.infinity; Float.neg_infinity]
+
 let test_default_config_memory_fallback_isolated_by_base_path () =
   let first = Filename.temp_dir "workspace-utils-memory-first" "" in
   let second = Filename.temp_dir "workspace-utils-memory-second" "" in
@@ -674,7 +713,7 @@ let test_memory_backend_fallback_keys_by_backend_base_path () =
            | Ok value ->
                fail
                  ("second fallback backend leaked raw key with value: " ^ value)
-           | Error err ->
+           | Error ((Backend_types.AlreadyExists _ | IOError _ | InvalidKey _) as err) ->
                fail
                  ("second memory get failed: " ^ Backend_types.show_error err))
       | FileSystem _, _ | _, FileSystem _ ->
@@ -820,6 +859,10 @@ let () =
         test_memory_commit_distinguishes_local_mirror_failure;
       test_case "pretty JSON persistence preserves exact bytes" `Quick
         test_pretty_json_persistence_preserves_bytes;
+      test_case "compact encoding returns the repaired writer value" `Quick
+        test_compact_encoding_returns_the_repaired_writer_value;
+      test_case "compact encoding keeps non-finite errors" `Quick
+        test_compact_encoding_keeps_non_finite_errors;
       test_case "memory fallback isolated by base path" `Quick
         test_default_config_memory_fallback_isolated_by_base_path;
       test_case "memory fallback keys by backend base path" `Quick

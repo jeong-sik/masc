@@ -130,10 +130,17 @@ let encode_json_pretty json =
       Yojson.Safe.pretty_print formatter value)
     json
 
-let encode_json_compact json =
-  match json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.to_string with
+let encode_repaired_json_compact json =
+  match Yojson.Safe.to_string json with
   | text -> Ok text
   | exception Yojson.Json_error message -> Error message
+
+let encode_json_compact json =
+  encode_repaired_json_compact (Safe_ops.sanitize_json_utf8 json)
+
+let encode_json_compact_with_value json =
+  let repaired = Safe_ops.sanitize_json_utf8 json in
+  Result.map (fun encoded -> encoded, repaired) (encode_repaired_json_compact repaired)
 
 let write_encoded_json_local path (content : encoded_json) =
   try

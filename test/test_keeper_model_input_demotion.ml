@@ -2349,6 +2349,7 @@ let rec shared_prefix first second =
    their bodies into the next request. This turn's calls stay verbatim. *)
 let finished_turn_results_leave_as_markers () =
   let big_input = `Assoc [ "command", `String (String.make 4_000 'h') ] in
+  let current_input = `Assoc [ "command", `String (String.make 4_000 'n') ] in
   let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
   let earlier =
     List.concat
@@ -2359,7 +2360,13 @@ let finished_turn_results_leave_as_markers () =
             ])
          earlier_bodies)
   in
-  let messages = earlier @ current_batch ~id_prefix:"search" ~fill:letter newest_bodies in
+  let current =
+    List.concat (List.mapi (fun i size ->
+      let id = Printf.sprintf "current-%d" i in
+      [ call_with_input ~id current_input
+      ; tool_message ~id (String.make size (letter i)) ]) newest_bodies)
+  in
+  let messages = earlier @ current in
   let turn_start =
     Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
   in
@@ -2424,10 +2431,15 @@ let finished_turn_results_leave_as_markers () =
        | Tool_output.Invalid_normalized_artifact_ref _ ->
          Alcotest.fail "ended call still carries its full arguments")
     (List.take (List.length earlier_bodies) inputs);
+  let current_inputs = List.drop (List.length earlier_bodies) inputs in
+  Alcotest.(check int) "all current calls remain in the request"
+    (List.length newest_bodies) (List.length current_inputs);
   Alcotest.(check bool) "this turn's arguments stay verbatim" true
-    (List.for_all (( = ) big_input) (List.drop (List.length earlier_bodies) inputs));
+    (List.for_all (( = ) current_input) current_inputs);
   Alcotest.(check bool) "durable arguments stay verbatim" true
-    (List.for_all (( = ) big_input) (argument_inputs messages));
+    (argument_inputs messages =
+       List.map (fun _ -> big_input) earlier_bodies
+       @ List.map (fun _ -> current_input) newest_bodies);
   let later_messages = messages @ [ assistant "later request in this turn" ] in
   let later =
     compose_from_the_oldest_atom ~completed_arguments ~finished_turn_results:as_markers

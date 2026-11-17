@@ -198,10 +198,9 @@ class CuratorWorker(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             contract = self.module().CONTRACT
             small, large = request("original-small"), {**request("original-large"), "system": "x" * 4096}
-            # The longest page that carries only the small request: it also names that record as next.
+            # The page that carries only the small request.
             envelope = {"jsonrpc": "2.0", "id": 2 ** 53, "result": exact_worker.tool_result(
-                {"requests": [contract.host_request(small)],
-                 "next": exact_worker.digest(small["request_id"]) + ".json"})}
+                {"requests": [contract.host_request(small)]})}
             frame = len((exact_worker.encode_output(envelope) + "\n").encode("utf-8"))
             worker = exact_worker.Worker(Path(directory), frame, contract)
             refused = {"request_id": large["request_id"], "state": "finished",

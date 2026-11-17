@@ -36,7 +36,7 @@ TOOL_OUTPUT = {"type": "object", "oneOf": [
     closed({"request_id": TEXT, "state": {"type": "string", "enum": ["absent", "pending"]}}),
     closed({"request_id": TEXT, "state": {"type": "string", "const": "finished"}, "result": OBJECT}),
 ]}
-# A listing page starts at the first pending record, or after the named one.
+# A listing page starts at the lowest pending request id, or above the given one.
 HOST_REQUESTS = {"type": "object", "properties": {"after": TEXT}, "additionalProperties": False}
 HOST_RESULT = closed({"request_id": TEXT, "result": OBJECT})
 CONTROL = closed({"tool": TEXT, "arguments": OBJECT, "caller": OBJECT})
@@ -300,12 +300,14 @@ class Store:
             self.check_directory()
         return sorted(self.index.items())
 
-    def pending_names(self, after: str | None) -> list[str]:
-        """The pending records' file names in name order: all of them, or only
-        those sorting after [after]. [after] is compared with names and never
-        opened, so it does not have to name a record."""
-        return [name for name, retained in self.inventory()
-                if retained.pending and (after is None or name > after)]
+    def pending_after(self, after: str | None) -> list[tuple[str, str]]:
+        """The pending records as (request id, file name) in rising request id
+        order: all of them, or only those whose id is above [after]. Python
+        orders strings by code point, which is the byte order of their UTF-8
+        form, the order the host checks. [after] is only compared, so it does
+        not have to name a record."""
+        return sorted((retained.request_id, name) for name, retained in self.inventory()
+                      if retained.pending and (after is None or retained.request_id > after))
 
     def pending_record(self, name: str, directory_fd: int) -> dict:
         """One pending record, read and checked again. A pending record that is
@@ -406,12 +408,11 @@ class Worker:
                     if self.retained_tool(old) != tool_name:
                         raise InvalidInput("retained Exact request belongs to another tool")
                     return self.status(request_id, old)
-                # Admission measures this request alone, on the longest page
-                # that can carry only it: the one that also names its record
-                # as `next` because other requests wait behind it. A request
-                # that fits there is listed however much else is pending.
-                if not self.fits({"requests": [self.host_request(request)],
-                                  "next": self.store.path(request_id).name}):
+                # Admission measures this request alone, on the page that
+                # carries only it. A page holds nothing beside its requests,
+                # so a request that fits there is listed however much else is
+                # pending.
+                if not self.fits({"requests": [self.host_request(request)]}):
                     # No listing page is sure to carry this request, so it
                     # never becomes an intent. The refusal is kept without the
                     # body: a read after a lost reply gives this answer, not
@@ -467,45 +468,43 @@ class Worker:
         return self.contract.host_request(request)
 
     def host_requests(self, args) -> dict:
-        """One page of the pending requests, in record name order.
+        """One page of the pending requests, in rising request id order.
 
-        Without arguments the page starts at the first pending record. With
-        `after` it starts at the first one whose name sorts after that value.
-        A page carries as many records as its reply can hold in the declared
-        frame. While pending records remain behind it, the reply also carries
-        `next`, the name of the last record on the page, and the host passes
-        that value back as `after`. A first record that no page can carry is
-        an error, so the listing never passes over a pending request."""
+        Without arguments the page starts at the lowest pending id. With
+        `after` it starts at the first id above that value; the host passes
+        the last id of the page before. A page carries as many requests as one
+        reply holds in the declared frame and nothing beside them, so a page
+        of one request is the reply admission measured. An empty page ends the
+        listing. A first request that no page can carry is an error, so the
+        listing never passes over a pending request."""
         args = object_value(args, "host listing")
         if set(args) - {"after"}:
             raise InvalidInput("host listing accepts only the after field")
         after = args.get("after")
         if "after" in args and (not isinstance(after, str) or not after):
             raise InvalidInput("host listing after must be a non-empty string")
-        names = self.store.pending_names(after)
+        pending = self.store.pending_after(after)
         # A reply is longer than the request bodies it carries, so reading
         # stops at the first record whose body no longer fits the frame beside
         # the ones already read. One page's bodies and that record are the most
         # this call holds.
         requests, room = [], self.max_reply_bytes
         with self.store.open_directory() as directory_fd:
-            for name in names:
+            for _, name in pending:
                 request = self.host_request(self.store.pending_record(name, directory_fd)["request"])
                 room -= len(encode_output(request).encode("utf-8"))
                 if room < 0:
                     break
                 requests.append(request)
-        # The longest run of those records whose actual reply fits: with
-        # `next` unless the run reaches the last pending record.
+        # The longest run of those requests whose actual reply fits.
         for count in range(len(requests), 0, -1):
             page = {"requests": requests[:count]}
-            if count < len(names):
-                page["next"] = names[count - 1]
             if self.fits(page):
                 return page
-        if names:
-            raise InvalidInput(f"pending Exact request record {names[0]!r} does not fit a listing page "
-                               "in the current declared reply frame")
+        if pending:
+            request_id, name = pending[0]
+            raise InvalidInput(f"pending Exact request {request_id!r} (record {name!r}) does not fit "
+                               "a listing page in the current declared reply frame")
         return {"requests": []}
 
     def host_result(self, args) -> dict:

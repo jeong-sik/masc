@@ -7,8 +7,8 @@ type 'halt step =
   | Beside of 'halt run
 
 type ('request, 'halt) listing =
-  | Last of 'request list
-  | More of 'request list * (unit -> (('request, 'halt) listing, 'halt) result)
+  | Done
+  | Page of 'request * 'request list * (unit -> (('request, 'halt) listing, 'halt) result)
 
 let walk ~max_in_flight ~propagates ~step listing =
   let max_in_flight = (max_in_flight : Lane_addon_config.exact_in_flight :> int) in
@@ -70,9 +70,9 @@ let walk ~max_in_flight ~propagates ~step listing =
     (* The requests of the pages before keep running while the next page is
        read, so the count of running requests does not fall at a page end. *)
     let rec pages index = function
-      | Last requests -> ignore (each index requests)
-      | More (requests, next) ->
-          let index = each index requests in
+      | Done -> ()
+      | Page (first, rest, next) ->
+          let index = each index (first :: rest) in
           if not (stopped ()) then (
             match read next with
             | Some (Ok listing) -> pages index listing

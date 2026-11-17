@@ -42,7 +42,7 @@ parser messages and source paths remain in the authenticated Lane inventory.
 to establish completed work. Full health aggregates actionable missing
 dependencies as degraded while intentional Off remains explicit in each row.
 
-## Prepare package version 0.2.6
+## Prepare package version 0.2.7
 
 Use the repository version containing
 [`addons/keeper-librarian/lane.toml`](../../addons/keeper-librarian/lane.toml),
@@ -50,7 +50,7 @@ its `server.py` and both bundled schemas. Prepare this image through the package
 image workflow, then load it into the container engine used by MASC:
 
 ```sh
-docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.6 addons
+docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.7 addons
 ```
 
 The build context is `addons`, because the image contains the shared
@@ -64,7 +64,7 @@ host-created empty state under its declared owner identity. For another
 configured engine, import the same image into that engine before attaching.
 
 Place the complete package in an operator-managed, versioned location readable
-by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.6/` works
+by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.7/` works
 with this declaration when the resolved config root is
 `<base-path>/.masc/config`:
 
@@ -72,7 +72,7 @@ with this declaration when the resolved config root is
 id = "keeper-librarian"
 run_id = "keeper-librarian"
 enabled = true
-manifest_path = "../../packages/keeper-librarian-0.2.6/lane.toml"
+manifest_path = "../../packages/keeper-librarian-0.2.7/lane.toml"
 
 [binding]
 sources = []
@@ -90,33 +90,43 @@ or manual attachment by inventing a second installation.
 
 ### Upgrade an existing installation
 
-Version 0.2.6 lists its waiting requests in pages, each as large as one reply
-frame, and admits a request when a page carrying only that request fits the
-frame. Other waiting requests no longer hold a new one back
+Version 0.2.7 lists its waiting requests in pages that carry nothing but the
+requests: in rising request id order above the `after` cursor, as many as fit
+one reply frame. It admits a request when the page carrying only that request
+fits the frame. Other waiting requests no longer hold a new one back, and every
+waiting request, including one an earlier version kept, fits a page of its own
 ([RFC](../rfc/RFC-librarian-read-waits-and-shrinks-no-further-than-the-refusal-says.md)
-3.1).
+3.1 and 4.5). Its manifest declares `[world] host_request_pages = true`, which a
+server that does not know the key refuses. Version 0.2.6 named the next page
+with `next` instead. That key made a page 81 bytes longer than the page an
+earlier version measured at admission, so a record kept within those 81 bytes
+of the frame could not be listed while another request waited behind it.
 
-Select 0.2.6 before a server that includes
-[#52731](https://github.com/jeong-sik/masc/pull/52731) runs the installation.
-An earlier version answers a submission with `capacity_wait` when its waiting
-requests fill the frame, and that server no longer reads the answer. The
-original stays `Dispatch_pending`, its worker has no record of it, and nothing
-sends it again; selecting 0.2.6 afterwards leaves it among the originals below
-that still wait. The other order loses nothing: a server from before
-[#52728](https://github.com/jeong-sik/masc/pull/52728) refuses a 0.2.6 listing
-that names `next`, and those requests wait in the worker until the server is
-updated. With the server stopped, change the declaration's `manifest_path` to
-the 0.2.6 package before starting the updated server, which reads the
-[declaration file](lane-declaration-editor.md) as it starts. With the server
-running, save the 0.2.6 declaration first and update the server after it.
+Stop the server, change the declaration's `manifest_path` to the 0.2.7 package,
+then start the updated server, which reads the
+[declaration file](lane-declaration-editor.md) as it starts. This order loses
+nothing from any earlier version. With the server running, the order depends on
+the version it runs:
 
-Version 0.2.6 also accepts the ending the host delivers for a request whose
+- From 0.2.6, update the server first and select 0.2.7 after it. The updated
+  server asks a worker that does not declare pages once and refuses its answer
+  while that answer names `next`; those requests wait in the worker until 0.2.7
+  is selected. A server that does not know `host_request_pages` refuses the
+  0.2.7 manifest, so 0.2.7 cannot go first.
+- From a version before 0.2.6, stop the server as above. Such a version answers
+  a submission with `capacity_wait` when its waiting requests fill the frame,
+  and a server that includes [#52731](https://github.com/jeong-sik/masc/pull/52731)
+  no longer reads that answer. The original stays `Dispatch_pending`, its worker
+  has no record of it, and nothing sends it again; selecting 0.2.7 afterwards
+  leaves it among the originals below that still wait.
+
+Version 0.2.7 also accepts the ending the host delivers for a request whose
 declaration was replaced: `{"status":"not_allowed","cause":"declaration_replaced"}`
 ([#52621](https://github.com/jeong-sik/masc/pull/52621),
 [#52622](https://github.com/jeong-sik/masc/pull/52622)); 0.2.5 was the first
 version to accept it. The `exact_worker.py` in an installed 0.2.4 image answers
-that delivery with an error and keeps the request pending. Selecting 0.2.6 is
-itself a declaration change, and its replacement worker is the 0.2.6 worker, so
+that delivery with an error and keeps the request pending. Selecting 0.2.7 is
+itself a declaration change, and its replacement worker is the 0.2.7 worker, so
 that worker receives those endings. A declaration change that keeps the 0.2.4
 image, such as a new `run_id`, does not deliver them.
 

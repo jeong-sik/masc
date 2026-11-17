@@ -58,6 +58,7 @@ type tool_hook = Validate_input | Validate_output
 type worker_service = Mcp_tools | Browser_service of Browser_lane.Backend.t
 type request_schema_policy = Package_schema_only | Consumer_request_schema
 type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : request_schema_policy }
+type host_request_listing = One_answer | Pages
 type package = {
   id : string; revision : string; title : string;
   ui_category : Lane_addon_category.t option;
@@ -77,6 +78,7 @@ type package = {
   presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option;
   exact_outputs : exact_output list; operator_asks : bool; web_search : bool;
+  host_request_listing : host_request_listing;
 }
 let host_requests_tool = "lane_host_requests"
 let operator_tool = "lane_operator"
@@ -238,9 +240,11 @@ let package_to_json (p : package) =
          worker_service = _; command = _; directory = _; action_tool = _; state_storage = _;
          tool_invocation = _; exported_tools = _; tool_hooks = _; outputs = _;
          refresh_policy = _; model_access = _; binding_schema = _; presentation = _;
-         skills_directory = _; exact_outputs = _; operator_asks = _; web_search = _ } : package) = p in
-  (* runtime, exact_outputs and operator_asks are written only when they differ from what a
-     package without the key means, so such a package keeps its revision. *)
+         skills_directory = _; exact_outputs = _; operator_asks = _; web_search = _;
+         host_request_listing = _ } : package) = p in
+  (* runtime, exact_outputs, operator_asks and host_request_pages are written only when
+     they differ from what a package without the key means, so such a package keeps its
+     revision. *)
   let runtime, image, resources = match p.execution with
     | Container container ->
         (match container.runtime with Docker -> []
@@ -268,6 +272,9 @@ let package_to_json (p : package) =
             | Package_schema_only -> false | Consumer_request_schema -> true)]) outputs)])
     @ (if p.operator_asks then ["operator_asks", `Bool true] else [])
     @ (if p.web_search then ["web_search", `Bool true] else [])
+    @ (match p.host_request_listing with
+       | One_answer -> []
+       | Pages -> ["host_request_pages", `Bool true])
     @ ["id", string p.id; "revision", string p.revision; "title", string p.title;
     "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive" | Act -> "act") p.contributions);
     ] @ image @ ["command", strings p.command; "directory", string p.directory;

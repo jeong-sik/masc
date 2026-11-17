@@ -43,11 +43,12 @@ Version 2 stores drop the original input body when retaining any terminal,
 keeping its request ID, digest and result. Deploy this revision with the
 [worker state hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md).
 
-`lane_host_requests` answers in pages. Each page carries as many pending requests
-as fit one reply frame, and while more remain it carries `next`, the record name
-the host passes back as `after` to get the following page. A request is saved
-when a page that carries it alone, `next` included, fits the manifest's actual
-reply frame; other pending requests do not change that answer. A request that
+`lane_host_requests` answers in pages (`[world] host_request_pages = true`). A
+page carries pending requests in rising request id order, as many as fit one
+reply frame, and nothing beside them. The host passes the last id of a page back
+as `after` to get the next page; an empty page ends the listing. A request is
+saved when a page that carries it alone fits the manifest's actual reply frame;
+other pending requests do not change that answer. A request that
 cannot fit such a page ends as the body-free `request_body_refused` result. A
 pending request that no page can carry makes its page an error; the listing
 never omits pending work silently. Observation exposes pending and finished
@@ -58,14 +59,14 @@ mean the host committed its ledger or published a complete briefing.
 Build the optional image from the repository root:
 
 ```sh
-docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.5 addons
+docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.6 addons
 ```
 
-Select this revision before a server that includes
-[#52731](https://github.com/jeong-sik/masc/pull/52731) runs the installation.
-Earlier revisions answer `capacity_wait`, which that server no longer reads; the
+Select this revision with the server stopped, in the order the
 [Keeper Librarian upgrade](../../docs/guides/keeper-memory-execution.md#upgrade-an-existing-installation)
-gives the order.
+gives. A server that does not know `host_request_pages` refuses this manifest.
+A revision before 0.1.5 answers `capacity_wait`, which a server that
+includes [#52731](https://github.com/jeong-sik/masc/pull/52731) no longer reads.
 
 The image includes `exact_worker.py` and `protocol.py` outside the read-only
 `/addon` package mount. The normal Runtime owns the worker and `/state` mount.

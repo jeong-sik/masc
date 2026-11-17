@@ -1015,6 +1015,7 @@ let host_answer ~base ~(declared:Lane_addon_types.exact_output) request answer =
     ; worker_service = Lane_addon_types.Mcp_tools; exported_tools = []; outputs = []
     ; refresh_policy = Lane_addon_types.Every_hint; model_access = Lane_addon_types.Model_disabled
     ; exact_outputs = [ declared ]; operator_asks = false; web_search = false
+    ; host_request_listing = Lane_addon_types.One_answer
     ; binding_schema = None; presentation = Lane_addon_presentation.empty
     ; execution = Lane_addon_types.Container { runtime = Lane_addon_types.Docker; image = "unused"
         ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } } in

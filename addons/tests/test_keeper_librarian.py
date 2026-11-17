@@ -332,7 +332,7 @@ class LibrarianWorker(unittest.TestCase):
             worker = Worker(Path(directory), FRAME, contract)
             name = lambda x: worker.store.path(x["request_id"]).name
             # A frame that holds either request on a page of its own, never both.
-            frame = max(self.reply_bytes({"requests": [x], "next": name(x)}) for x in (first, second))
+            frame = max(self.reply_bytes({"requests": [x]}) for x in (first, second))
             self.assertGreater(self.reply_bytes({"requests": [first, second]}), frame)
             worker.max_reply_bytes = frame
             self.assertEqual(self.admit(worker, first)["state"], "pending")
@@ -340,8 +340,8 @@ class LibrarianWorker(unittest.TestCase):
             with patch.object(worker.store, "read_path", wraps=worker.store.read_path) as read_path:
                 self.assertEqual(self.admit(worker, second)["state"], "pending")
             self.assertEqual([read.args[0] for read in read_path.call_args_list], [name(second)])
-            head, tail = sorted((first, second), key=name)
-            walk = [{"requests": [head], "next": name(head)}, {"requests": [tail]}]
+            head, tail = sorted((first, second), key=lambda x: x["request_id"])
+            walk = [{"requests": [head]}, {"requests": [tail]}, {"requests": []}]
             self.assertEqual(self.pages(worker), walk)
             reopened = Worker(Path(directory), frame, contract)
             for original in (first, second):
@@ -353,44 +353,61 @@ class LibrarianWorker(unittest.TestCase):
             with self.assertRaises(InvalidInput):
                 self.admit(reopened, {**second, "system": "different frozen input"})
             self.finish(reopened, head)
-            self.assertEqual(self.pages(reopened), [{"requests": [tail]}])
+            self.assertEqual(self.pages(reopened), [{"requests": [tail]}, {"requests": []}])
 
-    def test_admission_measures_the_page_that_names_the_request_as_next(self):
+    def test_a_request_that_fills_the_frame_alone_is_listed_while_another_waits_behind_it(self):
         contract = runpy.run_path(str(SERVER))["CONTRACT"]
         from exact_worker import REQUEST_BODY_REFUSED, Worker
         with tempfile.TemporaryDirectory() as directory:
             worker = Worker(Path(directory), FRAME, contract)
-            name = lambda x: worker.store.path(x["request_id"]).name
             # Ids of one length give each of these requests the same reply length.
-            head, tail, *edge = sorted((request("durable", f"original-edge-{index}") for index in range(4)), key=name)
+            head, tail, refused = (request("durable", f"original-edge-{index}") for index in range(3))
             alone = self.reply_bytes({"requests": [head]})
-            followed = self.reply_bytes({"requests": [head], "next": name(head)})
-            self.assertLess(alone, followed)
-            # A frame that holds the request alone only on a page without next.
-            for frame, original in zip((alone, followed - 1), edge):
-                worker.max_reply_bytes = frame
-                self.assertEqual(self.admit(worker, original),
-                                 {"request_id": original["request_id"], "state": "finished",
-                                  "result": REQUEST_BODY_REFUSED})
-                self.assertNotIn("request", json.loads(worker.store.path(original["request_id"]).read_text()))
-            # One byte more holds that page, so the request is listed while another waits behind it.
-            worker.max_reply_bytes = followed
+            # One byte short of its own page: the request ends without a body.
+            worker.max_reply_bytes = alone - 1
+            self.assertEqual(self.admit(worker, refused),
+                             {"request_id": refused["request_id"], "state": "finished",
+                              "result": REQUEST_BODY_REFUSED})
+            self.assertNotIn("request", json.loads(worker.store.path(refused["request_id"]).read_text()))
+            # Exactly its own page: the request is kept and listed while another waits behind it.
+            worker.max_reply_bytes = alone
             for original in (tail, head):
                 self.assertEqual(self.admit(worker, original)["state"], "pending")
-            self.assertEqual(self.pages(worker), [{"requests": [head], "next": name(head)}, {"requests": [tail]}])
+            self.assertEqual(self.pages(worker), [{"requests": [head]}, {"requests": [tail]}, {"requests": []}])
+
+    def test_a_frame_filling_record_of_an_earlier_revision_is_paged_like_any_other(self):
+        # Revision 0.2.5 kept a request when the page that carries it alone fit
+        # the frame. That page is still the reply that lists it, so such a
+        # record is listed while a request kept after it waits behind it.
+        contract = runpy.run_path(str(SERVER))["CONTRACT"]
+        from exact_worker import Worker
+        compact = lambda value: json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                           allow_nan=False, separators=(",", ":"))
+        sha256 = lambda value: hashlib.sha256(compact(value).encode("utf-8")).hexdigest()
+        earlier, later = (request("durable", f"original-earlier-{index}") for index in range(2))
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory) / "keeper-librarian"
+            store.mkdir()
+            (store / (sha256(earlier["request_id"]) + ".json")).write_text(
+                compact({"version": 2, "request": earlier, "digest": sha256(earlier), "result": None}) + "\n",
+                encoding="utf-8")
+            worker = Worker(Path(directory), self.reply_bytes({"requests": [earlier]}), contract)
+            self.assertEqual(self.admit(worker, later)["state"], "pending")
+            self.assertEqual(self.pages(worker),
+                             [{"requests": [earlier]}, {"requests": [later]}, {"requests": []}])
 
     def test_requests_beyond_one_frame_are_admitted_and_paged_by_the_real_worker(self):
         # Each body is over half the manifest frame, so no page carries two.
         body = "큰" * (FRAME // 2 // len("큰".encode("utf-8")) + 1)
         originals = [{**request(output), "system": body} for output in ("admission", "durable")]
-        name = lambda x: hashlib.sha256(json.dumps(x["request_id"]).encode("utf-8")).hexdigest() + ".json"
-        head, tail = sorted(originals, key=name)
+        head, tail = sorted(originals, key=lambda x: x["request_id"])
         with tempfile.TemporaryDirectory() as directory:
             replies = self.run_worker(directory, list(map(submit, originals)))
             self.assertEqual([self.output(reply)["state"] for reply in replies], ["pending"] * 2)
-            walked = self.run_worker(directory, [listing(), listing(name(head)), listing(name(tail))])
+            walked = self.run_worker(directory, [listing(), listing(head["request_id"]),
+                                                 listing(tail["request_id"])])
             self.assertEqual([self.output(reply) for reply in walked],
-                             [{"requests": [head], "next": name(head)}, {"requests": [tail]}, {"requests": []}])
+                             [{"requests": [head]}, {"requests": [tail]}, {"requests": []}])
 
     def admit(self, worker, original):
         return worker.invoke({"kind": "submit", "request": original}, {"kind": "operator"},
@@ -406,14 +423,14 @@ class LibrarianWorker(unittest.TestCase):
         return len((encode_output(envelope) + "\n").encode("utf-8"))
 
     def pages(self, worker):
-        """Every listing page, obtained the way the host does: by following next."""
+        """Every listing page, read the way the host does: after the last id
+        of each page, up to the empty page that ends the listing."""
         pages = [worker.host_requests({})]
-        while "next" in pages[-1]:
-            after = pages[-1]["next"]
+        while pages[-1]["requests"]:
+            after = pages[-1]["requests"][-1]["request_id"]
             pages.append(worker.host_requests({"after": after}))
-            # A walk ends because every page starts after the one before it.
-            if "next" in pages[-1]:
-                self.assertGreater(pages[-1]["next"], after)
+            # Ids rise above the cursor, so the walk ends.
+            self.assertTrue(all(x["request_id"] > after for x in pages[-1]["requests"]))
         return pages
 
     def test_listing_pages_carry_every_pending_request_exactly_once(self):
@@ -423,31 +440,27 @@ class LibrarianWorker(unittest.TestCase):
             wide = Worker(Path(directory), FRAME, contract)
             originals = [request(output, f"original-paged-{index}")
                          for index, output in enumerate(("admission", "durable") * 3)]
-            for original in originals:
+            for original in reversed(originals):
                 self.assertEqual(self.admit(wide, original)["state"], "pending")
-            ordered = sorted(originals, key=lambda x: wide.store.path(x["request_id"]).name)
+            ordered = sorted(originals, key=lambda x: x["request_id"])
             names = [wide.store.path(x["request_id"]).name for x in ordered]
-            # Everything fits one frame: one page, and it carries no next.
-            self.assertEqual(wide.host_requests({}), {"requests": ordered})
+            # Everything fits one frame: one page, then the empty one.
+            self.assertEqual(self.pages(wide), [{"requests": ordered}, {"requests": []}])
             # The same store under a frame that holds two of these records.
-            frame = self.reply_bytes({"requests": ordered[:2], "next": names[1]})
+            frame = self.reply_bytes({"requests": ordered[:2]})
             narrow = Worker(Path(directory), frame, contract)
-            pages = self.pages(narrow)
+            *pages, empty = self.pages(narrow)
+            self.assertEqual(empty, {"requests": []})
             self.assertGreater(len(pages), 2)
             self.assertEqual([x for page in pages for x in page["requests"]], ordered)
             start = 0
             for page in pages:
                 end = start + len(page["requests"])
+                self.assertEqual(page, {"requests": ordered[start:end]})
                 self.assertLessEqual(self.reply_bytes(page), frame)
-                if end == len(ordered):
-                    self.assertEqual(page, {"requests": ordered[start:]})
-                else:
-                    self.assertEqual(page, {"requests": ordered[start:end], "next": names[end - 1]})
-                    # The page is full: the record after it would not fit.
-                    longer = {"requests": ordered[start:end + 1]}
-                    if end + 1 < len(ordered):
-                        longer["next"] = names[end]
-                    self.assertGreater(self.reply_bytes(longer), frame)
+                # The page is full: the request after it would not fit.
+                if end < len(ordered):
+                    self.assertGreater(self.reply_bytes({"requests": ordered[start:end + 1]}), frame)
                 start = end
             # A page reads the records it carries and the one that no longer fits.
             with patch.object(narrow.store, "read_path", wraps=narrow.store.read_path) as read_path:
@@ -456,29 +469,26 @@ class LibrarianWorker(unittest.TestCase):
                              names[:len(pages[0]["requests"]) + 1])
             # A restart in the middle of a walk does not change the pages.
             reopened = Worker(Path(directory), frame, contract)
-            self.assertEqual(reopened.host_requests({"after": pages[0]["next"]}), pages[1])
+            self.assertEqual(reopened.host_requests({"after": pages[0]["requests"][-1]["request_id"]}), pages[1])
 
     def test_listing_stops_at_a_pending_record_no_page_can_carry(self):
         contract = runpy.run_path(str(SERVER))["CONTRACT"]
         from exact_worker import InvalidInput, Worker
         with tempfile.TemporaryDirectory() as directory:
             wide = Worker(Path(directory), FRAME, contract)
-            name = lambda x: wide.store.path(x["request_id"]).name
-            ids = sorted((f"original-frame-{index}" for index in range(3)),
-                         key=lambda x: wide.store.path(x).name)
-            first, last = request("admission", ids[0]), request("admission", ids[2])
-            large = {**request("durable", ids[1]), "system": "x" * 8192}
+            first, last = request("admission", "original-frame-0"), request("admission", "original-frame-2")
+            large = {**request("durable", "original-frame-1"), "system": "x" * 8192}
             for original in (last, large, first):
                 self.assertEqual(self.admit(wide, original)["state"], "pending")
             # A later frame that holds either small record, but not the large one.
-            frame = self.reply_bytes({"requests": [first], "next": name(first)})
+            frame = self.reply_bytes({"requests": [first]})
             narrow = Worker(Path(directory), frame, contract)
-            opening = {"requests": [first], "next": name(first)}
+            opening = {"requests": [first]}
             self.assertEqual(narrow.host_requests({}), opening)
             for _ in range(2):
                 with self.assertRaises(InvalidInput) as refused:
-                    narrow.host_requests({"after": name(first)})
-                self.assertIn(name(large), str(refused.exception))
+                    narrow.host_requests({"after": first["request_id"]})
+                self.assertIn(large["request_id"], str(refused.exception))
             # The refusal belongs to that page; the worker keeps answering.
             self.assertEqual(narrow.host_requests({}), opening)
             self.assertEqual(self.admit(narrow, large)["state"], "pending")
@@ -486,53 +496,37 @@ class LibrarianWorker(unittest.TestCase):
             self.finish(narrow, first)
             with self.assertRaises(InvalidInput) as refused:
                 narrow.host_requests({})
-            self.assertIn(name(large), str(refused.exception))
+            self.assertIn(large["request_id"], str(refused.exception))
             # Once it ends, the request behind it is listed.
             self.finish(narrow, large)
             self.assertEqual(narrow.host_requests({}), {"requests": [last]})
 
-    def test_a_listing_page_needs_room_for_next_only_while_requests_wait_behind_it(self):
-        contract = runpy.run_path(str(SERVER))["CONTRACT"]
-        from exact_worker import InvalidInput, Worker
-        with tempfile.TemporaryDirectory() as directory:
-            wide = Worker(Path(directory), FRAME, contract)
-            ids = sorted(("original-edge-0", "original-edge-1"), key=lambda x: wide.store.path(x).name)
-            head, tail = request("admission", ids[0]), request("durable", ids[1])
-            for original in (head, tail):
-                self.admit(wide, original)
-            # The head fits this frame alone only when the reply has no next.
-            frame = self.reply_bytes({"requests": [head]})
-            narrow = Worker(Path(directory), frame, contract)
-            with self.assertRaises(InvalidInput) as refused:
-                narrow.host_requests({})
-            self.assertIn(wide.store.path(head["request_id"]).name, str(refused.exception))
-            self.finish(narrow, tail)
-            self.assertEqual(narrow.host_requests({}), {"requests": [head]})
-
-    def test_listing_after_is_only_compared_with_record_names(self):
+    def test_listing_after_is_only_compared_with_request_ids(self):
         contract = runpy.run_path(str(SERVER))["CONTRACT"]
         from exact_worker import Worker
         with tempfile.TemporaryDirectory() as directory:
             worker = Worker(Path(directory), FRAME, contract)
-            originals = [request("durable", f"original-after-{index}") for index in range(4)]
-            for original in originals:
+            ordered = [request("durable", f"original-after-{index}") for index in range(4)]
+            for original in ordered:
                 self.admit(worker, original)
-            ordered = sorted(originals, key=lambda x: worker.store.path(x["request_id"]).name)
-            names = [worker.store.path(x["request_id"]).name for x in ordered]
+            ids = [x["request_id"] for x in ordered]
+            names = {worker.store.path(x).name for x in ids}
             self.finish(worker, ordered[1])
             pending = [ordered[0], ordered[2], ordered[3]]
             with patch.object(worker.store, "read_path", wraps=worker.store.read_path) as read_path:
-                for after, expected in (("-", pending),                  # sorts before every name
-                                        ("../" + names[2], pending),     # a path is not followed
-                                        (names[0], pending[1:]),
-                                        (names[0] + "x", pending[1:]),   # between two records
-                                        (names[1], pending[1:]),         # a finished record
-                                        (names[2], pending[2:]),
-                                        (names[3], []),
-                                        ("g", [])):                      # sorts after every name
+                for after, expected in (("-", pending),                     # below every id
+                                        ("../" + ids[2], pending),          # a path is only compared
+                                        (ids[0], pending[1:]),
+                                        (ids[0] + "x", pending[1:]),        # between two ids
+                                        (ids[1], pending[1:]),              # a finished request
+                                        (ids[2], pending[2:]),
+                                        (ids[3], []),
+                                        ("original-after-10", pending[1:]), # byte order, not length
+                                        ("original-after-é", []),      # above "3" by code point
+                                        ("~", [])):                         # above every id
                     with self.subTest(after=after):
                         self.assertEqual(worker.host_requests({"after": after}), {"requests": expected})
-                self.assertLessEqual({read.args[0] for read in read_path.call_args_list}, set(names))
+                self.assertLessEqual({read.args[0] for read in read_path.call_args_list}, names)
 
     def test_listing_arguments_are_nothing_or_one_non_empty_after(self):
         original = request("durable")
@@ -541,7 +535,7 @@ class LibrarianWorker(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             replies = self.run_worker(directory, [submit(original),
                                                   *[call("lane_host_requests", x) for x in malformed],
-                                                  listing(), listing("-"), listing("g")])
+                                                  listing(), listing("-"), listing("~")])
             self.assertTrue(all(reply["isError"] for reply in replies[1:-3]))
             self.assertEqual([self.output(reply) for reply in replies[-3:]],
                              [{"requests": [original]}, {"requests": [original]}, {"requests": []}])
@@ -558,7 +552,8 @@ class LibrarianWorker(unittest.TestCase):
             (store / name).write_text(compact({"version": 2, "request": original,
                                                "digest": sha256(original), "result": None}) + "\n",
                                       encoding="utf-8")
-            replies = self.run_worker(directory, [listing(), read(original), submit(original), listing(name)])
+            replies = self.run_worker(directory, [listing(), read(original), submit(original),
+                                                  listing(original["request_id"])])
             self.assertEqual(self.output(replies[0]), {"requests": [original]})
             pending = {"request_id": original["request_id"], "state": "pending"}
             self.assertEqual([self.output(reply) for reply in replies[1:3]], [pending, pending])
@@ -567,6 +562,7 @@ class LibrarianWorker(unittest.TestCase):
     def test_manifest_and_discovery_expose_two_purpose_specific_tools(self):
         manifest = tomllib.loads((SERVER.parent / "lane.toml").read_text())
         self.assertEqual(manifest["world"]["tools"]["export"], ["admit_memory", "derive_memory"])
+        self.assertIs(manifest["world"]["host_request_pages"], True)
         self.assertEqual(set(manifest["world"]["exact_outputs"]), {"admission", "durable"})
         for output, declaration in manifest["world"]["exact_outputs"].items():
             self.assertTrue(declaration["request_schema"])

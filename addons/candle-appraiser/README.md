@@ -52,11 +52,12 @@ Missing or replaced storage is an error, including individual reads.
 Directory sync failure makes that running worker refuse further reads/listings;
 it cannot advertise an unconfirmed write as a completed judgment.
 
-`lane_host_requests` answers in pages. Each page carries as many pending requests
-as fit one reply frame, and while more remain it carries `next`, the record name
-the host passes back as `after` to get the following page. An intent is stored
-when a page that carries it alone, `next` included, fits the manifest's actual
-reply frame; other pending intents do not change that answer. An intent that
+`lane_host_requests` answers in pages (`[world] host_request_pages = true`). A
+page carries pending requests in rising request id order, as many as fit one
+reply frame, and nothing beside them. The host passes the last id of a page back
+as `after` to get the next page; an empty page ends the listing. An intent is
+stored when a page that carries it alone fits the manifest's actual reply frame;
+other pending intents do not change that answer. An intent that
 cannot fit such a page ends as the body-free `request_body_refused` result. A
 reduced frame that cannot carry a retained request refuses that page explicitly
 instead of silently hiding pending requests.
@@ -81,14 +82,14 @@ the input body. Deploy this revision with the
 Build the optional container from the repository root:
 
 ```sh
-docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.6 addons
+docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.7 addons
 ```
 
-Select this revision before a server that includes
-[#52731](https://github.com/jeong-sik/masc/pull/52731) runs the installation.
-Earlier revisions answer `capacity_wait`, which that server no longer reads; the
+Select this revision with the server stopped, in the order the
 [Keeper Librarian upgrade](../../docs/guides/keeper-memory-execution.md#upgrade-an-existing-installation)
-gives the order.
+gives. A server that does not know `host_request_pages` refuses this manifest.
+A revision before 0.1.6 answers `capacity_wait`, which a server that
+includes [#52731](https://github.com/jeong-sik/masc/pull/52731) no longer reads.
 
 The host mounts the package at `/addon` and its installation-owned persistent
 state at `/state`, using the existing container/engine ownership contract.

@@ -363,6 +363,7 @@ let package directory mode : Types.package = {
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled; exact_outputs = []; tool_hooks = []; operator_asks = false; web_search = false; worker_service=Types.Mcp_tools;
+  host_request_listing = Types.One_answer;
 }
 
 let container package = match Types.container package with Ok value -> value | Error detail -> fail detail
@@ -560,7 +561,7 @@ let test_host_result_continuations_cross_the_real_worker_port () = with_fixture 
     write (Filename.concat dir "host-listing.json")
       (Yojson.Safe.to_string (`Assoc ["requests", `List [Host.to_json request]]));
     match unwrap (Worker.host_requests worker ~after:None) |> Host.listing_of_json with
-    | Ok {requests = [request]; next = None} -> request
+    | Ok [request] -> request
     | Ok _ | Error _ -> fail "worker did not return the exact host request" in
   let request = listing request in
   let result = `Assoc ["status", `String "records"; "source_id", `String "board";

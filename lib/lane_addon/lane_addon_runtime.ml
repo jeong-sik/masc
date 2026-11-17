@@ -1453,27 +1453,33 @@ let run_host_cycle m e (port : host_port) =
           Lane_addon_host_walk.Here (run_request ~position request) in
   let rec pass () =
     check_live ();
-    (* One listing is every page the worker answers, read as the walk
-       reaches each (RFC
+    (* One listing is what the worker answers in the package's
+       host_request_listing (RFC
        librarian-read-waits-and-shrinks-no-further-than-the-refusal-says
-       3.1). A request id a page repeats from an earlier page of the same
-       listing would be started twice, so the listing ends there. *)
-    let listed = Hashtbl.create 16 in
-    let rec page ~after =
+       3.1). A Pages worker is read one page at a time, as the walk reaches
+       each. Every page lists ids above the last id of the page before it, so
+       the listing starts no request twice; an empty page ends it. *)
+    let read ~after =
       check_live ();
-      let* answer = port.list_requests ~after |> Result.map_error (fun detail -> Listing_failed detail) in
-      let* {Lane_addon_host_request.requests; next} = Lane_addon_host_request.listing_of_json answer
-        |> Result.map_error (fun detail -> Listing_refused detail) in
-      let* () = List.fold_left (fun checked request ->
-        let* () = checked in
-        let request_id = Lane_addon_host_request.request_id request in
-        if Hashtbl.mem listed request_id
-        then Error (Listing_refused ("a later page lists request " ^ request_id ^ " again"))
-        else (Hashtbl.replace listed request_id (); Ok ())) (Ok ()) requests in
-      Ok (match next with
-        | None -> Lane_addon_host_walk.Last requests
-        | Some name -> Lane_addon_host_walk.More (requests, fun () -> page ~after:(Some name))) in
-    let* listing = page ~after:None in
+      port.list_requests ~after |> Result.map_error (fun detail -> Listing_failed detail) in
+    let refused result = Result.map_error (fun detail -> Listing_refused detail) result in
+    let rec page ~after =
+      let* answer = read ~after in
+      let* requests = Lane_addon_host_request.page_of_json ~after answer |> refused in
+      Ok (match requests with
+        | [] -> Lane_addon_host_walk.Done
+        | first :: rest ->
+            let last = List.fold_left (fun _ request -> request) first rest in
+            Lane_addon_host_walk.Page (first, rest, fun () ->
+              page ~after:(Some (Lane_addon_host_request.request_id last)))) in
+    let* listing = match e.package.host_request_listing with
+      | Lane_addon_types.Pages -> page ~after:None
+      | Lane_addon_types.One_answer ->
+          let* answer = read ~after:None in
+          let* requests = Lane_addon_host_request.listing_of_json answer |> refused in
+          Ok (match requests with
+            | [] -> Lane_addon_host_walk.Done
+            | first :: rest -> Lane_addon_host_walk.Page (first, rest, fun () -> Ok Lane_addon_host_walk.Done)) in
     let delivered_before = Hashtbl.length delivered in
     (* The pass keeps the count it started with (RFC 3.2). *)
     match Lane_addon_host_walk.walk ~max_in_flight:e.max_exact_in_flight

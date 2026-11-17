@@ -26,6 +26,7 @@ let package dir max_bytes : Types.package = {
   ui_category=None;contributions=[Types.Observe];command=["unused"];
   directory=dir;skills_directory=None;action_tool=None;state_storage=Types.Ephemeral;tool_invocation=Types.Direct;exported_tools=[];outputs=[];refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled;exact_outputs=[];tool_hooks=[];operator_asks=false; web_search=false; worker_service=Types.Mcp_tools;
+  host_request_listing=Types.One_answer;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
   execution=Types.Host_process {max_reply_bytes=max_bytes}}
 let no_browser ~installation_id:_ ~route:_ ~tab_id:_ = Error "no browser owner in this fixture"

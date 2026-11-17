@@ -81,23 +81,20 @@ let runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lan
         | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None }))
         | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output { detail })))
 
-(* A worker that lists everything in one answer. *)
-let one_page ~after:(_ : string option) requests = `Assoc [ "requests", `List requests ]
+(* A worker that answers once with everything it waits for. *)
+let one_answer ~after:(_ : string option) requests = `Assoc [ "requests", `List requests ]
 
-(* A worker that lists one request a page, in id order. A page is named by
-   the id of its request, and the page after a name starts at the first id
-   above it, as the Exact worker pages its records by file name. *)
-let a_request_a_page ~after requests =
-  let waiting = List.filter (fun request ->
-    match after with
+(* A worker that answers in pages of [size]: the requests it waits for in
+   rising id order, after the cursor it is asked with. *)
+let pages_of size ~after requests =
+  let id = text "request_id" in
+  let rising = List.sort (fun left right -> String.compare (id left) (id right)) requests in
+  let waiting = List.filter (fun request -> match after with
     | None -> true
-    | Some name -> String.compare (text "request_id" request) name > 0) requests in
-  match waiting with
-  | [] -> `Assoc [ "requests", `List [] ]
-  | [ last ] -> `Assoc [ "requests", `List [ last ] ]
-  | first :: _ :: _ -> `Assoc [ "requests", `List [ first ]; "next", `String (text "request_id" first) ]
+    | Some cursor -> String.compare (id request) cursor > 0) rising in
+  `Assoc [ "requests", `List (List.filteri (fun index _ -> index < size) waiting) ]
 
-let port ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) ?(page = one_page) worker : Runtime.For_testing.host_port = {
+let port ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) ?(page = one_answer) worker : Runtime.For_testing.host_port = {
   list_requests = (fun ~after ->
     let requests= !(worker.listing) in
     before_listing requests;
@@ -918,17 +915,45 @@ let test_a_request_listed_again_after_delivery_ends_the_cycle () =
 
 (* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1:
    one pass walks every page of the listing. *)
+let paged_manifest = manifest ^ "\n[world]\nhost_request_pages=true\n"
+
 let answered ~validate =
   match validate (`Assoc [ "question", `String "Q?" ]) with
   | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None }))
   | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output { detail }))
+
+(* Every request stays not final, so a cycle is one pass. *)
+let not_final state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+  incr state.resolutions;
+  Error Exact.Lane_off
+
+let test_a_paged_listing_is_read_to_an_empty_page () =
+  let asked = ref [] in
+  let page ~after requests = asked := after :: !asked; pages_of 1 ~after requests in
+  with_installation ~make_runner:not_final ~manifest:paged_manifest ~page
+    ~listing:[ exact "b"; exact "c"; exact "a" ]
+    (fun clock config _worker state _root ->
+      await clock (fun () -> cycles config >= 1);
+      check (list (option string)) "each page after the last id of the page before, to an empty one"
+        [ None; Some "a"; Some "b"; Some "c" ] (List.filteri (fun index _ -> index < 4) (List.rev !asked));
+      check int "each request was asked once" 3 !(state.resolutions))
+
+let test_a_one_answer_worker_is_asked_without_a_cursor () =
+  let asked = ref [] in
+  let page ~after requests = asked := after :: !asked; one_answer ~after requests in
+  with_installation ~make_runner:not_final ~page ~listing:[ exact "b"; exact "a" ]
+    (fun clock config _worker state _root ->
+      await clock (fun () -> cycles config >= 1);
+      check bool "no cursor is sent" true (List.for_all Option.is_none !asked);
+      check int "each request was asked once" 2 !(state.resolutions))
 
 let test_a_waiting_request_does_not_take_the_turn_of_the_next_page () =
   (* The request of the first page is asked first and stays not final. *)
   let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
     incr state.resolutions;
     if !(state.resolutions) = 1 then Error Exact.Lane_off else Ok answered in
-  with_installation ~make_runner ~page:a_request_a_page ~listing:[ exact "page-1"; exact "page-2" ]
+  with_installation ~make_runner ~manifest:paged_manifest ~page:(pages_of 1)
+    ~listing:[ exact "page-1"; exact "page-2" ]
     (fun clock config worker state _root ->
       await clock (fun () -> cycles config >= 1);
       check (list string) "the request of the second page is delivered in the same cycle" [ "page-2" ]
@@ -949,8 +974,8 @@ let test_requests_of_two_pages_run_side_by_side () =
       if !entered = 2 then Eio.Promise.resolve reached ();
       Eio.Promise.await released;
       answered ~validate) in
-  with_installation ~make_runner ~page:a_request_a_page ~declaration:side_by_side_declaration
-    ~listing:[ exact "page-1"; exact "page-2"; exact "page-3" ]
+  with_installation ~make_runner ~manifest:paged_manifest ~page:(pages_of 1)
+    ~declaration:side_by_side_declaration ~listing:[ exact "page-1"; exact "page-2"; exact "page-3" ]
     (fun clock _config worker state _root ->
       (* Two calls are under way at once only when the walk read the second
          page while the request of the first was still running. *)
@@ -959,7 +984,7 @@ let test_requests_of_two_pages_run_side_by_side () =
       Eio.Promise.resolve release ();
       await clock (fun () -> List.length !(worker.delivered) = 3))
 
-let test_a_request_a_later_page_lists_again_ends_the_cycle () =
+let test_a_page_that_does_not_rise_above_its_cursor_ends_the_cycle () =
   let listings = ref 0 in
   let released, release = Eio.Promise.create () in
   (* The call is still under way when the next page is read, so a walk that
@@ -968,13 +993,10 @@ let test_a_request_a_later_page_lists_again_ends_the_cycle () =
     incr state.resolutions;
     Eio.Promise.await released;
     Error Exact.Lane_off in
-  (* Both pages carry the one request. *)
-  let page ~after requests =
-    incr listings;
-    match after with
-    | None -> `Assoc [ "requests", `List requests; "next", `String "again" ]
-    | Some (_ : string) -> `Assoc [ "requests", `List requests ] in
-  with_installation ~make_runner ~page ~declaration:side_by_side_declaration ~listing:[ exact "twice" ]
+  (* Every page carries the one request, whatever the cursor. *)
+  let page ~after requests = incr listings; one_answer ~after requests in
+  with_installation ~make_runner ~manifest:paged_manifest ~page ~declaration:side_by_side_declaration
+    ~listing:[ exact "twice" ]
     (fun clock config _worker state _root ->
       await clock (fun () -> !listings = 2);
       Eio.Promise.resolve release ();
@@ -982,7 +1004,7 @@ let test_a_request_a_later_page_lists_again_ends_the_cycle () =
       check int "the request started once" 1 !(state.resolutions);
       match member "issue" (host_requests config) with
       | `Assoc _ as issue -> check string "the instance shows it" "listing_refused" (text "kind" issue)
-      | _ -> fail "a request listed again by a later page must end the cycle with an issue")
+      | _ -> fail "a page that repeats a request must end the cycle with an issue")
 
 let test_a_result_larger_than_the_frame_is_delivered_as_its_size () =
   let long = `Assoc [ "question", `String (String.make 5000 'q') ] in
@@ -1916,12 +1938,16 @@ let () =
             test_export_reading_retains_typed_provider_wait_without_dispatch
         ; test_case "a request listed again after delivery ends the cycle" `Quick
             test_a_request_listed_again_after_delivery_ends_the_cycle
+        ; test_case "a paged listing is read to an empty page" `Quick
+            test_a_paged_listing_is_read_to_an_empty_page
+        ; test_case "a one-answer worker is asked without a cursor" `Quick
+            test_a_one_answer_worker_is_asked_without_a_cursor
         ; test_case "a waiting request does not take the turn of the next page" `Quick
             test_a_waiting_request_does_not_take_the_turn_of_the_next_page
         ; test_case "requests of two pages run side by side" `Quick
             test_requests_of_two_pages_run_side_by_side
-        ; test_case "a request a later page lists again ends the cycle" `Quick
-            test_a_request_a_later_page_lists_again_ends_the_cycle
+        ; test_case "a page that does not rise above its cursor ends the cycle" `Quick
+            test_a_page_that_does_not_rise_above_its_cursor_ends_the_cycle
         ; test_case "a result larger than the frame is delivered as its size" `Quick
             test_a_result_larger_than_the_frame_is_delivered_as_its_size
         ; test_case "a listing with an unknown kind is refused whole" `Quick

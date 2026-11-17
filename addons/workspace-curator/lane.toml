@@ -1,10 +1,13 @@
 id = "workspace-curator"
-revision = "0.1.5"
+revision = "0.1.6"
 title = "Workspace Curator worker"
 ui_category = "memory_judgment"
 contributions = ["derive"]
-image = "masc-lane-workspace-curator:0.1.5"
+image = "masc-lane-workspace-curator:0.1.6"
 command = ["python3", "server.py", "--state", "/state"]
+
+[world]
+host_request_pages = true
 
 [world.state]
 mode = "persistent"

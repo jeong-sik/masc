@@ -174,8 +174,8 @@ let load ~path =
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
           let names = List.map fst fields in
           if List.length names <> List.length (List.sort_uniq String.compare names)
-             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"; "asks"; "web_search"])) names
-          then Error "world accepts skills, actions, outputs, tools, state, exact_outputs, asks and web_search" else Ok fields
+             || List.exists (fun key -> not (List.mem key ["skills"; "actions"; "outputs"; "tools"; "state"; "exact_outputs"; "asks"; "web_search"; "host_request_pages"])) names
+          then Error "world accepts skills, actions, outputs, tools, state, exact_outputs, asks, web_search and host_request_pages" else Ok fields
       | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
       | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
       | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _)
@@ -270,6 +270,14 @@ let load ~path =
              | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
              | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
              | Otoml.TomlTableArray _ ) -> Error "world.web_search requires true or false" in
+    let* host_request_listing = match List.assoc_opt "host_request_pages" world with
+      | None | Some (Otoml.TomlBoolean false) -> Ok One_answer
+      | Some (Otoml.TomlBoolean true) -> Ok Pages
+      | Some ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+             | Otoml.TomlOffsetDateTime _
+             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+             | Otoml.TomlArray _ | Otoml.TomlTable _ | Otoml.TomlInlineTable _
+             | Otoml.TomlTableArray _ ) -> Error "world.host_request_pages requires true or false" in
     let* operator_asks = match List.assoc_opt "asks" world with
       | None -> Ok false
       | Some (Otoml.TomlTable [("operator", Otoml.TomlBoolean operator)]
@@ -402,10 +410,15 @@ let load ~path =
     if command = [] || List.exists (fun arg -> String.trim arg = "" || String.contains arg '\000') command
     then Error "command requires non-blank argv entries without NUL"
     else if contributions = [] then Error "at least one contribution is required"
-    else Ok { id; revision; title; ui_category; contributions = List.rev contributions; execution; worker_service; command;
-      directory = Filename.dirname path; skills_directory; action_tool; state_storage;
-      tool_invocation; exported_tools; tool_hooks; outputs; refresh_policy; model_access;
-      binding_schema; presentation; exact_outputs; operator_asks; web_search }
+    else
+      let package = { id; revision; title; ui_category; contributions = List.rev contributions; execution; worker_service; command;
+        directory = Filename.dirname path; skills_directory; action_tool; state_storage;
+        tool_invocation; exported_tools; tool_hooks; outputs; refresh_policy; model_access;
+        binding_schema; presentation; exact_outputs; operator_asks; web_search; host_request_listing } in
+      match host_request_listing with
+      | Pages when not (uses_host_requests package) ->
+          Error "world.host_request_pages requires exact_outputs, asks or web_search"
+      | One_answer | Pages -> Ok package
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with
   | Sys_error message -> Error (Io_failure message)

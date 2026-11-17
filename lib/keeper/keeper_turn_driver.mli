@@ -411,6 +411,7 @@ val run_named :
   ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
   media_store:Agent_core.History.media_store ->
+  ?media_readers:Keeper_media_reading.source_readers ->
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->
   ?goal_metadata:Agent_core.Types.metadata ->
@@ -784,6 +785,7 @@ module For_testing : sig
       blocks change; message occurrences and canonical history stay intact. *)
 
   val retained_media_reader :
+    ?source_reader:Keeper_media_reading.source_reader ->
     input_source:Keeper_request_source.t ->
     Keeper_media_reading.projector ->
     Keeper_client_tool_outbox.media_reader option

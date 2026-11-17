@@ -204,6 +204,7 @@ let identity_operation = Keeper_gate.identity_call_gate_operation
    opposite: its microphone window expires while the judge runs, so it never
    enters the Gate (see keeper_tool_voice_runtime.ml). *)
 let voice_speak_operation = Keeper_gate.voice_speak_gate_operation
+let media_read_operation = Keeper_gate.media_read_gate_operation
 ;;
 
 (* The producer owns both the argument schema and the effect encoding, so it
@@ -1112,6 +1113,7 @@ let terminal_effect_receipt_of_durable_replay request replay_outcome =
       | Some Replay_network_read
       | Some Replay_identity
       | Some Replay_voice_speak
+      | Some Replay_media_read
       | None )
     , _ )
   | Some Replay_connector_post,
@@ -1120,7 +1122,8 @@ let terminal_effect_receipt_of_durable_replay request replay_outcome =
     Ok None
 ;;
 
-let replay_approved_effect_with_receipt
+let replay_approved_effect_with_receipt_using
+      ~media_replayer
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -1209,15 +1212,40 @@ let replay_approved_effect_with_receipt
          ?model_artifact
          replay_effect
      | None ->
-       replayed_outcome
-         ~base_path:config.base_path
-         ~approval_id
-         ~operation:request.tool_name
-         (Effect_indeterminate
-            (render_gate_replay_prompt
-               Prompt_names.keeper_gate_replay_replay_outcome_missing_after_restart
-               []
-               ~fallback:"replay_outcome_missing_after_restart")))
+       let unknown () =
+         replayed_outcome
+           ~base_path:config.base_path
+           ~approval_id
+           ~operation:request.tool_name
+           (Effect_indeterminate
+              (render_gate_replay_prompt
+                 Prompt_names.keeper_gate_replay_replay_outcome_missing_after_restart
+                 []
+                 ~fallback:"replay_outcome_missing_after_restart"))
+       in
+       (match replayable_of_operation request.tool_name with
+        | Some Replay_media_read ->
+          (* The grant was already spent. Only original-owned reply/transport
+             evidence may repair this result; no factory or invocation port
+             is supplied to this observation. *)
+          (match Keeper_media_reading_producer.recover_reply
+              ~config ~meta ~approval_id ~input:request.input with
+           | Error error ->
+             replay_execution
+               (Repair_required
+                  { operation = media_read_operation
+                  ; stage = Evidence_retrieval
+                  ; detail = Keeper_media_reading_producer.error_to_string error
+                  })
+           | Ok None -> unknown ()
+           | Ok (Some execution) ->
+             replayed_outcome ~base_path:config.base_path ~approval_id
+               ~operation:media_read_operation
+               ~retained_artifacts:execution.Keeper_tool_execution.retained_artifacts
+               (summarize_execution ~operation:media_read_operation execution))
+        | Some (Replay_write | Replay_execute | Replay_network_read
+          | Replay_connector_post | Replay_identity | Replay_voice_speak)
+        | None -> unknown ()))
   | Ok
       { request
       ; state = Keeper_approval_queue_result.Resolution_unconsumed
@@ -1372,6 +1400,20 @@ let replay_approved_effect_with_receipt
            ?gate_context
            ~gate_grant:grant
            call)
+     | Some Replay_media_read ->
+       let repair detail = replay_execution
+           (Repair_required {operation=media_read_operation;stage=Evidence_storage;detail}) in
+       (* A received reply can already be durable when its publication ACK or
+          later receipt retention fails. Do not replace that recoverable
+          original with a terminal indeterminate Gate result. *)
+       (match media_replayer ~grant ~approval_id ~input:request.input with
+        | Error error -> repair (Keeper_media_reading_producer.error_to_string error)
+        | Ok execution ->
+          settle_effect ~operation:media_read_operation
+            ~retained_artifacts:execution.Keeper_tool_execution.retained_artifacts
+            (summarize_execution ~operation:media_read_operation execution)
+        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+        | exception exn -> repair (Printexc.to_string exn))
      | Some Replay_voice_speak ->
        (* The approved input is the tool call verbatim — speak takes the
           descriptor JSON itself, so replay passes it through unchanged and
@@ -1387,6 +1429,15 @@ let replay_approved_effect_with_receipt
            ~name:voice_speak_operation
            ~args
            ())))
+;;
+
+let replay_approved_effect_with_receipt
+    ~config ~meta ~publication_recovery ~turn_sandbox_factory
+    ?continuation_channel ?gate_context ?identity_transports ~grant ~approval_id () =
+  replay_approved_effect_with_receipt_using
+    ~media_replayer:(Keeper_media_reading_producer.replay ~config ~meta ~turn_sandbox_factory)
+    ~config ~meta ~publication_recovery ~turn_sandbox_factory
+    ?continuation_channel ?gate_context ?identity_transports ~grant ~approval_id ()
 ;;
 
 let replay_approved_effect
@@ -1483,6 +1534,11 @@ let replay_resolution_inputs ~config ~meta ~publication_recovery
 ;;
 
 module For_testing = struct
+  let replay_media_with_receipt ~media_replayer ~config ~meta ~publication_recovery
+      ~turn_sandbox_factory ~grant ~approval_id () =
+    replay_approved_effect_with_receipt_using ~media_replayer ~config ~meta
+      ~publication_recovery ~turn_sandbox_factory ~grant ~approval_id ()
+
   let persist_replay_artifact = persist_replay_artifact
 
   let settle_pre_effect_failure ~base_path ~approval_id ~operation ~detail =

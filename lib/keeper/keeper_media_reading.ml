@@ -34,12 +34,114 @@ type resolution_failure =
 type resolver =
   kind:kind -> media_type:string -> (reader, resolution_failure) result
 
-type reading = { reader : reader_identity; text : string }
+type original_reference =
+  { request_id : string; original_digest : string; execution_id : string }
+
+let original_reference original =
+  { request_id = Keeper_media_reading_original.request_id original
+  ; original_digest = Keeper_media_reading_original.original_digest original
+  ; execution_id = Keeper_media_reading_original.execution_id original }
+;;
+
+type reading =
+  { reader : reader_identity; text : string; original : original_reference option }
+
+let reading_of_original ~original ~text =
+  if String.trim text = "" then Error Empty_reading
+  else
+    let declaration = Keeper_media_reading_original.declaration original in
+    Ok { reader = { id = declaration.id; revision = declaration.revision }
+       ; text; original = Some (original_reference original) }
+;;
+
+type dispatch_failure =
+  | Dispatch_owner_failed of Keeper_media_reading_owner.error
+  | Dispatch_progress_failed of Lane_addon_tool_request_owner.update_error
+  | Dispatch_unconfirmed of string
+type external_failure =
+  | Declarations_unavailable
+  | Declaration_ambiguous of string list
+  | Declaration_changed of string
+  | Reader_not_started
+  | Original_failed of Keeper_media_reading_original.error
+  | Owner_failed of Keeper_media_reading_owner.error
+  | Queue_failed of Keeper_approval_queue_result.storage_error
+  | Gate_failed of Keeper_gate.unavailable_reason
+  | Approval_mismatch of Keeper_approval_queue_result.exact_request_lookup
+  | Invalid_approval of string
+  | Approval_rejected of string
+  | Progress_failed of Lane_addon_tool_request_owner.update_error
+  | Progress_unconfirmed of string
+  | Endpoint_unavailable of string
+  | Request_refused of Keeper_sandbox_remote.Stdio_request.refusal
+  | Binding_refused of Keeper_sandbox_remote.Stdio_request.binding_error
+  | Binding_changed
+  | Transport_failed of dispatch_failure Keeper_sandbox_remote_stdio.failure
+  | Mcp_failed of Agent_core.Error.t
+  | Channel_unavailable of string
+  | Catalog_failed of Keeper_media_markitdown.catalog_error
+  | Conversion_failed of Keeper_media_markitdown.reply_error
+  | Reply_capture_failed of string
+
 type failure =
   | Resolution_failed of resolution_failure
   | Invalid_source_reference of Agent_core.History.stored_error
   | Source_unavailable of Agent_core.History.media_error
   | Reader_failed of { reader : reader_identity; reason : reader_failure }
+  | External_failed of external_failure
+
+type pending_disposition =
+  | Awaiting_approval of string
+  | Awaiting_host_replay of string
+  | Approval_consumed of string
+  | Rejected_approval of { approval_id : string; reason : string }
+  | Execution_pending
+  | Request_not_sent
+  | Outcome_unknown
+  | Reconciliation_required
+  | Ambiguous_approvals of string list
+  | Known_approval_missing of
+      { approval_id : string; matching_approval_ids : string list }
+  | Known_approval_mismatch of
+      { approval_id : string; matching_approval_ids : string list }
+type pending_observation =
+  { original : original_reference; disposition : pending_disposition }
+type outcome =
+  | Read of reading
+  | Unavailable of failure
+  | Pending of pending_observation * pending_observation list
+
+type source_route = Use_builtin | Owned of outcome
+type source_reader =
+  kind:kind -> media_type:string -> Agent_core.History.stored -> source_route
+type source_readers = { observe : source_reader; read : source_reader }
+
+let external_failure_to_string = function
+  | Declarations_unavailable -> "reader_declarations_unavailable"
+  | Declaration_ambiguous _ -> "reader_declaration_ambiguous"
+  | Declaration_changed _ -> "reader_declaration_changed"
+  | Reader_not_started -> "reader_not_started"
+  | Original_failed _ -> "reader_original_unavailable"
+  | Owner_failed _ -> "reader_owner_unavailable"
+  | Queue_failed _ -> "reader_approval_queue_unavailable"
+  | Gate_failed _ -> "reader_gate_unavailable"
+  | Approval_mismatch _ -> "reader_approval_mismatch"
+  | Invalid_approval _ -> "reader_approval_invalid"
+  | Approval_rejected _ -> "reader_approval_rejected"
+  | Progress_failed _ -> "reader_progress_unavailable"
+  | Progress_unconfirmed _ -> "reader_progress_unconfirmed"
+  | Endpoint_unavailable _ -> "reader_endpoint_unavailable"
+  | Request_refused _ -> "reader_request_refused"
+  | Binding_refused _ -> "reader_binding_refused"
+  | Binding_changed -> "reader_binding_changed"
+  | Transport_failed _ -> "reader_transport_failed"
+  | Mcp_failed _ -> "reader_mcp_failed"
+  | Channel_unavailable _ -> "reader_channel_unavailable"
+  | Catalog_failed _ -> "reader_catalog_invalid"
+  | Conversion_failed _ -> "reader_conversion_failed"
+  | Reply_capture_failed _ -> "reader_reply_capture_failed"
+;;
+
 
 let kind_to_string = function
   | Audio -> "audio"
@@ -151,6 +253,7 @@ let stt_unavailable_reason : Voice_bridge.transcription_error -> string = functi
 ;;
 
 let failure_to_string = function
+  | External_failed reason -> external_failure_to_string reason
   | Resolution_failed No_matching_reader -> "no_matching_reader"
   | Resolution_failed (Stt_unavailable error) -> stt_unavailable_reason error
   | Invalid_source_reference _ -> "invalid_source_reference"
@@ -174,6 +277,55 @@ let safe_segment value =
 
 let identity_json (identity : reader_identity) =
   `Assoc [ "id", `String identity.id; "revision", `String identity.revision ]
+;;
+
+let original_reference_json (original : original_reference) =
+  `Assoc [ "request_id", `String original.request_id
+         ; "original_digest", `String original.original_digest
+         ; "execution_id", `String original.execution_id ]
+;;
+
+let pending_json { original; disposition } =
+  let ids values = `List (List.map (fun id -> `String id) values) in
+  let state, details = match disposition with
+    | Awaiting_approval id -> "awaiting_approval", ["approval_id", `String id]
+    | Awaiting_host_replay id -> "awaiting_host_replay", ["approval_id", `String id]
+    | Approval_consumed id -> "approval_consumed", ["approval_id", `String id]
+    | Rejected_approval {approval_id;reason} ->
+      "approval_rejected", ["approval_id", `String approval_id; "reason", `String reason]
+    | Execution_pending -> "execution_pending", []
+    | Request_not_sent -> "request_not_sent", []
+    | Outcome_unknown -> "outcome_unknown", []
+    | Reconciliation_required -> "reconciliation_required", []
+    | Ambiguous_approvals matching_approval_ids ->
+      "reconciliation_required", ["reason", `String "ambiguous_approvals";
+        "matching_approval_ids", ids matching_approval_ids]
+    | Known_approval_missing {approval_id; matching_approval_ids} ->
+      "reconciliation_required", ["reason", `String "known_approval_missing";
+        "approval_id", `String approval_id; "matching_approval_ids", ids matching_approval_ids]
+    | Known_approval_mismatch {approval_id; matching_approval_ids} ->
+      "reconciliation_required", ["reason", `String "known_approval_mismatch";
+        "approval_id", `String approval_id; "matching_approval_ids", ids matching_approval_ids]
+  in
+  `Assoc ([ "original", original_reference_json original
+          ; "state", `String state ] @ details)
+;;
+
+let outcome_to_json = function
+  | Read reading ->
+    `Assoc ([ "status", `String "read"
+            ; "derived_by", `String "automatic_reader"
+            ; "reader", identity_json reading.reader
+            ; "text", `String reading.text ]
+            @ Option.to_list (Option.map
+                (fun original -> "original_request", original_reference_json original)
+                reading.original))
+  | Unavailable failure ->
+    `Assoc [ "status", `String "unavailable"
+           ; "reason", `String (failure_to_string failure) ]
+  | Pending (first, rest) ->
+    `Assoc [ "status", `String "pending"
+           ; "observations", `List (List.map pending_json (first :: rest)) ]
 ;;
 
 (* A stored reading lives while a durable consumer still holds its
@@ -240,7 +392,7 @@ let load_reading ~base_path ~keeper_name ~kind ~media_type ~source ~reader =
            | Some recorded_reader, Some (`String text)
              when same_identity_json reader recorded_reader
                && List.for_all (fun (key, value) -> List.assoc_opt key fields = Some value) expected
-               && String.trim text <> "" -> Some { reader; text }
+               && String.trim text <> "" -> Some { reader; text; original = None }
            | Some _, Some (`String _) -> None
            | None, _ | Some _, None -> None
            | Some _, Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null) -> None)
@@ -329,15 +481,18 @@ type projector =
   ; media_store : Agent_core.History.media_store
   ; keeper_name : string
   ; resolve : resolver
+  ; source_reader : source_reader
   ; selections : (kind * string, (reader, resolution_failure) result) Hashtbl.t
   ; memo : (kind * string * string * int * reader_identity, (reading, failure) result) Hashtbl.t
   }
 
-let projector ?base_path ~media_store ~keeper_name ~resolve () =
+let projector ?base_path ?(source_reader = fun ~kind:_ ~media_type:_ _ -> Use_builtin)
+    ~media_store ~keeper_name ~resolve () =
   { base_path
   ; media_store
   ; keeper_name
   ; resolve
+  ; source_reader
   ; selections = Hashtbl.create 2
   ; memo = Hashtbl.create 4
   }
@@ -353,8 +508,9 @@ let selected_reader projector ~kind ~media_type =
     selected
 ;;
 
-let read_stored projector ~kind ~media_type source =
-  let { base_path; media_store; keeper_name; resolve = _; selections = _; memo } = projector in
+let read_builtin projector ~kind ~media_type source =
+  let { base_path; media_store; keeper_name; resolve = _; source_reader = _;
+        selections = _; memo } = projector in
   (* The digest names the reading, so the bytes are read from the store only
      when no reading exists. Memoize the raw result: its consumer owns the
      attribution to history, a retained receipt, or another original. *)
@@ -378,7 +534,7 @@ let read_stored projector ~kind ~media_type source =
            | Error error -> Error (Source_unavailable error)
          with
          | Ok text when String.trim text <> "" ->
-           let reading = { reader = selected.identity; text } in
+           let reading = { reader = selected.identity; text; original = None } in
            store_reading ~base_path ~keeper_name ~kind ~media_type ~source reading;
            Ok reading
          | Ok _ -> Error (Reader_failed {reader = selected.identity; reason = Empty_reading})
@@ -386,6 +542,20 @@ let read_stored projector ~kind ~media_type source =
     in
     Hashtbl.replace memo key result;
     result
+;;
+
+let read_stored ?source_reader projector ~kind ~media_type source =
+  let observe = match source_reader with
+    | Some reader -> reader
+    | None -> projector.source_reader in
+  (* Even an existing built-in memo cannot hide a newly retained request,
+     approval, reply, or unknown dispatch for this attachment. *)
+  match observe ~kind ~media_type source with
+  | Owned outcome -> outcome
+  | Use_builtin ->
+    match read_builtin projector ~kind ~media_type source with
+    | Ok reading -> Read reading
+    | Error failure -> Unavailable failure
 ;;
 
 let project projector ~needs_projection blocks =
@@ -405,8 +575,11 @@ let project projector ~needs_projection blocks =
         let sha = stored.Agent_core.History.sha256 in
         let text =
           match read_stored projector ~kind ~media_type stored with
-          | Ok reading -> read_text ~kind ~media_type ~sha reading
-          | Error failure -> unavailable_text ~kind ~media_type ~sha ~reason:(failure_to_string failure)
+          | Read reading -> read_text ~kind ~media_type ~sha reading
+          | Unavailable failure -> unavailable_text ~kind ~media_type ~sha ~reason:(failure_to_string failure)
+          | Pending _ as pending ->
+            header ~kind ~media_type ~sha ~status:"pending"
+            ^ "\n" ^ Yojson.Safe.to_string (outcome_to_json pending)
         in
         Agent_core.Types.text_block text)
   in

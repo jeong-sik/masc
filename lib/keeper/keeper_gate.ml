@@ -166,7 +166,8 @@ let classify_before_judge ?shell_ir (request : request) =
       | Replay_execute
       | Replay_network_read
       | Replay_connector_post
-      | Replay_identity )
+      | Replay_identity
+      | Replay_media_read )
   | None ->
     Observation
       (Keeper_gate_readonly.classify_request_with_shell_ir

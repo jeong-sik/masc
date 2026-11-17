@@ -43,8 +43,7 @@ val connector_post_gate_operation : string
 val identity_call_gate_operation : string
 val voice_speak_gate_operation : string
 val media_read_gate_operation : string
-(** Identity for a retained media-reader intent. No host replay is advertised
-    until its actual producer and replay continuation are connected. *)
+(** Identity for a retained media-reader intent and its exact host replay. *)
 
 type replayable =
   | Replay_write
@@ -53,6 +52,7 @@ type replayable =
   | Replay_connector_post
   | Replay_identity
   | Replay_voice_speak
+  | Replay_media_read
 
 val replayable_operation : string -> replayable option
 (** Whether an approved operation is executed by the host replay engine

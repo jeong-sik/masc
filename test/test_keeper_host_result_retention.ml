@@ -1324,8 +1324,9 @@ let test_retained_readings_share_raw_reader_and_shrink_exact_text () = with_work
   let stored = Agent_core.History.stored_of_raw document in
   (match Keeper_media_reading.read_stored projector ~kind:Keeper_media_reading.Document
       ~media_type:"application/pdf" stored with
-   | Error error -> fail (Keeper_media_reading.failure_to_string error)
-   | Ok reading ->
+   | Keeper_media_reading.Unavailable error -> fail (Keeper_media_reading.failure_to_string error)
+   | Keeper_media_reading.Pending _ -> fail "built-in fixture cannot be pending"
+   | Keeper_media_reading.Read reading ->
      check string "raw consumer shares host reader identity" retained_reader_identity.id reading.reader.id;
      check string "raw consumer shares host reader revision" retained_reader_identity.revision reading.reader.revision;
      check string "raw consumer shares the exact host reading" extracted reading.text);
@@ -1390,10 +1391,10 @@ let test_later_host_attachments_are_read_after_a_history_timeout () = with_works
   ignore (get (Outbox.run_carrier_load run));
   (match Keeper_media_reading.read_stored projector ~kind:Keeper_media_reading.Document
        ~media_type:"application/pdf" earlier with
-   | Error error ->
+   | Keeper_media_reading.Unavailable error ->
      check bool "the earlier failure retains its selected reader and typed reason" true
        (error = Keeper_media_reading.Reader_failed { reader=retained_reader_identity; reason=timeout })
-   | Ok _ -> fail "a later attachment must not overwrite the earlier failure");
+   | Keeper_media_reading.Read _ | Keeper_media_reading.Pending _ -> fail "a later attachment must not overwrite the earlier failure");
   check int "carrier retry and the old failure do not read again" 3 (List.length !calls);
   check int "reading leaves the original result pending" 1 (List.length (Outbox.receipt_ids snapshot)))
 

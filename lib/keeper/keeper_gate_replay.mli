@@ -282,6 +282,17 @@ val replay_resolution_inputs :
     acquire a terminal connector receipt. Cancellation propagates unchanged. *)
 
 module For_testing : sig
+  val replay_media_with_receipt :
+    media_replayer:(grant:Keeper_gate.cycle_grant -> approval_id:string -> input:Yojson.Safe.t ->
+      (Keeper_tool_execution.t, Keeper_media_reading_producer.error) result) ->
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    publication_recovery:Keeper_publication_recovery_availability.turn_context ->
+    turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+    grant:Keeper_gate.cycle_grant -> approval_id:string -> unit -> replay_execution
+  (** The same replay path with an explicit media invocation port for this
+      call only. Actual queue lookup, consumed recovery and Gate result
+      persistence still run; no process-global override is installed. *)
+
   val persist_replay_artifact :
     base_path:string ->
     string ->

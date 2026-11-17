@@ -675,8 +675,7 @@ let operator_quiz_worker_speaks_the_host_contract () = with_directory (fun _root
   (match unwrap (Lane_addon_host_request.listing_of_json (structured 4)) with
    (* No session has asked yet, so the first read starts at the time the
       quiz began, not at the start of the Board (#44537). *)
-   | {requests = [Lane_addon_host_request.Read_records {source_id = "board"; start = Lane_addon_records.Since _; _}];
-      next = None} -> ()
+   | [Lane_addon_host_request.Read_records {source_id = "board"; start = Lane_addon_records.Since _; _}] -> ()
    | _ -> fail "the first request of a session reads the granted Board since the quiz began"))
 
 let tool_hooks_are_selected_and_revisioned () = with_directory (fun _root packages directory ->

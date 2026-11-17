@@ -165,7 +165,10 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 `capacity_wait` 는 frame 이 거절하지 않은 요청을 미룬다. 규칙에 어긋난다.
 
 - 접수는 요청 하나가 frame 에 들어가는지만 본다. 들어가면 받는다. 안 들어가면 지금처럼 본문 없는 `request_body_refused` 로 끝낸다.
-- 목록은 여러 장이다. 한 장은 지금 순서(파일 이름 순서)로 frame 에 들어가는 만큼 싣는다. 뒤가 남으면 답에 `next` 를 싣는다. 값은 마지막으로 실은 기록의 이름이다. host 는 그 값을 `after` 인자로 넘겨 다음 장을 받는다. `next` 가 없으면 마지막 장이다.
+- 목록은 여러 장이다. 그렇게 답하는 package 는 manifest 에 `[world] host_request_pages = true` 를 적는다.
+- 한 장은 기다리는 요청을 request id 가 커지는 순서로, frame 에 들어가는 만큼 싣는다. 순서는 바이트 순서다. 답은 지금과 같은 `{"requests": [...]}` 이고, 키를 더하지 않는다(§4.5).
+- host 는 장의 마지막 request id 를 `after` 인자로 넘겨 다음 장을 받는다. 빈 장이 오면 목록이 끝난다.
+- host 는 장마다 id 가 `after` 보다 크고 바로 앞 id 보다 큰지 본다. 어긋난 장이 오면 그 목록을 거절한다.
 - 혼자서도 지금 frame 에 안 들어가는 기록을 만나면 지금처럼 오류로 답한다. 접수한 뒤에 frame 이 줄어든 경우다. 말없이 건너뛰지 않는다.
 - host cycle 의 pass 는 모든 장을 걷는다. walk 는 다음 장을 필요할 때 받는다. 그래서 함께 실행하는 수가 장의 경계에서 줄지 않는다.
 - worker 는 장 하나를 만들 때 frame 하나 분량의 본문만 든다. 지금은 기다리는 본문 전체를 한꺼번에 읽는다(`Store.pending`).
@@ -180,7 +183,7 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 - capacity 대기자를 깨우는 장치(`capacity_released`, `recheck_capacity_release`, `server_librarian_addon_wake.ml` 의 호출)
 - `server_candle_appraiser.ml` 의 `Capacity_wait` 와 두 Add-on README 의 문장
 
-목록의 계약 문장은 이렇게 바꾼다. worker 는 기다리는 요청을 모두 내놓는다. 답 하나에 다 싣지 못하면 다음 장이 시작하는 자리를 알린다. `next` 를 내지 않는 worker 는 지금과 똑같이 동작한다. operator-quiz 계열 worker 는 고치지 않는다.
+목록의 계약 문장은 이렇게 바꾼다. worker 는 기다리는 요청을 모두 내놓는다. `host_request_pages` 를 선언한 worker 는 여러 장으로 내놓는다. 선언하지 않은 worker 는 지금처럼 답 하나로 내놓고, host 는 그 worker 에게 `after` 를 보내지 않는다. operator-quiz 계열 worker 는 고치지 않는다.
 
 ### 3.2 D2. 거절된 회차는 다음에 절반을 읽고, 거절된 범위를 다 읽으면 그 거절은 끝난다
 
@@ -284,6 +287,21 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 - 공용 worker 를 고치므로 네 package 의 revision 이 모두 바뀐다. revision 이 바뀌면 그 설치에서 기다리던 Librarian 원본이 막힌다(#51278).
 - D2 는 거절된 범위를 다 읽을 때마다 더 넓은 범위를 다시 내 본다. 밀린 양이 받는 쪽의 한도보다 계속 큰 Keeper 는 커밋 한 번에 거절을 한 번쯤 받는다. frame 에서 받는 거절은 host 가 본문을 보내지 않고 낸다. 공급자에서 받는 거절은 걸음 한 번의 시간이 든다(§9 Q1).
 - 새 폭 라벨이 생긴 뒤 이전 빌드로 돌아가면, 그 라벨을 가진 원본에서 그 Keeper 의 pass 가 막힌다.
+- 여러 장 worker 는 기다리는 요청이 있는 pass 마다 빈 장을 한 번 더 읽는다. 목록 호출이 하나 는다.
+- 앞 서버는 `host_request_pages` 가 든 manifest 를 읽지 못한다. 서버를 먼저 올리고 package 를 올린다.
+
+### 4.5 여러 장 목록이 닫히는 이유
+
+P(r) 를 "기록 r 하나만 실은 장 `{"requests": [r]}` 이 frame 에 들어간다"로 둔다.
+
+- 기다리는 기록은 모두 P 를 지킨다. 새 접수가 P 를 그대로 잰다. 앞 worker 의 접수도 첫 검사가 같은 식이었다. 그래서 설치할 때 남아 있던 기록도 P 를 지킨다.
+- 장에 키를 더하지 않는 이유가 이것이다. `next` 같은 키를 더하면 장이 P 가 잰 것보다 길어진다. 그러면 frame 에 바짝 붙은 앞 기록 하나가, 그 뒤에 기록이 들어온 순간 장을 만들지 못한다.
+- 장 i 는 커서 a(i-1) 위의 첫 기록부터 싣는다. 그 기록이 P 를 지키므로 장은 비지 않는다.
+- 다음 커서 a(i) 는 장 i 의 마지막 id 다. 그래서 a(i-1) < a(i) 다. 커서가 커지기만 하므로 두 장이 같은 요청을 싣지 않는다. host 가 장마다 이것을 확인한다.
+- 기록은 유한하고 커서는 커지기만 한다. 그래서 목록은 빈 장에서 끝난다. 걷는 동안 새 기록이 계속 들어오면 그만큼 늦게 끝난다.
+- 걷는 동안 계속 기다린 요청은 빠지지 않는다. 마지막 빈 장은 마지막 커서 위에 기다리는 요청이 없다는 답이다. 그러니 그 요청의 id 는 어떤 장 i 의 구간 (a(i-1), a(i)] 에 든다. worker 는 장을 앞에서부터 잘라 내므로, 장 i 는 그 구간에서 기다리던 요청을 모두 실었다.
+- 같은 입력에는 같은 답이 나온다. 장은 기다리는 기록, `after`, frame 셋으로만 정해진다. 접수의 답은 요청 하나와 frame 으로만 정해진다(I1).
+- host 가 혼자 확인하는 것은 겹치지 않음까지다. 빠짐없음은 worker 가 장을 앞에서부터 잘라 낸다는 계약에 기댄다.
 
 ## 5. 고르지 않은 길
 
@@ -294,6 +312,8 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 | worker 기록에 받은 순서를 적는다 | 기다리는 기록의 필드가 바뀌어 새 worker 가 앞 기록을 읽지 못한다. 모든 요청을 cycle 마다 시도하면 순서가 필요 없다 |
 | frame(`max_reply_bytes`)을 키운다 | 숫자를 고르는 일이다. 기다리는 양은 frame 9.0개였고, 요청 하나가 frame 을 넘는 Keeper 도 있다 |
 | `max_exact_in_flight` 를 올린다 | 접수되지 못한 요청은 목록에 없어서 실행되지 않는다. 값은 운영자가 전후를 재고 정하기로 했다 |
+| 답에 `next` 를 실어 다음 장을 알린다 | 장이 `{"requests": [r]}` 보다 81바이트(기록 이름 69자를 담은 키) 길어진다. 앞 worker 는 짧은 장으로 접수했다. 그래서 frame 에 그만큼 붙은 기록이 남아 있으면, 그 뒤에 기록이 들어온 순간 장을 만들지 못한다 |
+| 모든 worker 를 여러 장으로 답하게 한다 | operator-quiz 계열은 ask 를 만들 때 frame 에 재지 않는다. 여러 장 규약에서는 혼자 frame 을 넘는 ask 하나가 그 설치의 목록을 막는다 |
 | 요청이 frame 에 맞도록 미리 잘라 보낸다 | 바이트 숫자로 미리 자르는 기준을 두지 않는다(2026-10-06 운영자 결정). 받는 쪽의 이름 붙은 거절에 반응한다 |
 | 접은 폭을 밀린 범위가 빌 때까지 유지한다 | 가장 오래된 턴 하나가 혼자서도 거절되면 반드시 한 턴까지 내려가고, 그 뒤 남은 턴을 모두 한 턴씩 읽는다(§3.2 의 예) |
 | 커밋할 때마다 전부 읽기로 돌아간다 | 커밋마다 맨 위에서 다시 내려간다. `LibrarianContinuityWidth.tla` 의 `release-on-commit` 버그 모델이다 |
@@ -306,11 +326,12 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 
 | 층 | 내용 | 닿는 곳 |
 |---|---|---|
-| L1 | D1. 접수, 여러 장 목록, 모든 장을 걷는 pass, `capacity_wait` 삭제, 네 package revision | `addons/exact_worker.py`, 네 Add-on package, `lib/lane_addon/lane_addon_runtime.ml`, `lane_addon_host_walk.ml`, `lane_addon_host_request.ml`, `lane_addon_submit_once.ml`, `lane_addon_types.mli`, §3.1 "지우는 것"의 파일 |
+| L1 | D1. 접수, 여러 장 목록과 그 manifest 선언, 모든 장을 걷는 pass, `capacity_wait` 삭제, 네 package revision | `addons/exact_worker.py`, 네 Add-on package, `lib/lane_addon/lane_addon_manifest.ml`, `lane_addon_types.ml`, `lib/lane_addon/lane_addon_runtime.ml`, `lane_addon_host_walk.ml`, `lane_addon_host_request.ml`, `lane_addon_submit_once.ml`, `lane_addon_types.mli`, §3.1 "지우는 것"의 파일 |
 | L2 | D2. 폭 타입, 합쳐 고르는 함수, 절반 접기와 풀기, 접은 뒤 다음 회차 걸기 | `lib/keeper/keeper_librarian_range.ml`, `keeper_librarian_durable_consumer.ml`, `keeper_librarian_durable_execution.ml`, `keeper_librarian_durable_capture.ml`, `keeper_librarian_floor_descent.ml`, `bin/masc_librarian_replay.ml` |
 
 - L1 은 package 를 올린다. 기다리던 원본이 막히는 문제(#51278)가 먼저 풀려야 한다. 설계는 `RFC-librarian-ends-waiting-requests-of-a-replaced-declaration` 에 있고, 구현은 `lib/` 에서 찾지 못했다(11-17).
 - L2 는 host 코드만 바꾼다. package 를 올리지 않는다.
+- L1 은 서버를 먼저 올린다. 앞 서버는 `host_request_pages` 를 읽지 못한다(§4.4).
 - L1 을 설치한 뒤 §7.2 를 재고 L2 를 넣는다.
 
 ## 7. 검증
@@ -341,7 +362,8 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 ## 8. 바꾸는 문장
 
 - `docs/rfc/RFC-librarian-lifecycle.md`: §4.3 의 "두 턴 이상을 읽다 실패했으면…" 문단(314행), 연속성 문단 안의 durable 설명(315행), "durable 회차는 실패 종류를 보지 않는다. 바닥이 한 턴이라…" 문단(317행), §4.4 표의 3a(434행). 한 턴으로 좁힌다는 설명을 절반 접기와 풀기로 바꾼다. "실패 종류를 보지 않는다"는 "거절의 종류를 보지 않는다. 거절 없이 끝난 회차는 폭을 바꾸지 않는다"로 바꾼다.
-- `lib/lane_addon/lane_addon_types.mli` 115행: §3.1 의 계약 문장.
+- `lib/lane_addon/lane_addon_types.mli` 의 `host_requests_tool` 설명: §3.1 의 계약 문장.
+- `docs/guides/lane-addon-toml.md` 의 `[world]` 키 목록과 `lane_host_requests` 문단.
 - `docs/rfc/RFC-host-cycle-runs-exact-requests-side-by-side.md` 130행: 접수 조건과 `capacity_wait` 설명.
 - `docs/rfc/RFC-librarian-ends-waiting-requests-of-a-replaced-declaration.md` 3.4: "지금처럼 좁힌다"가 가리키는 폭.
 - `addons/workspace-curator/README.md`, `addons/candle-appraiser/README.md` 의 `capacity_wait` 문장.

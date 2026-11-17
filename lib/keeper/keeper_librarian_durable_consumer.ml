@@ -1116,7 +1116,6 @@ let unread_turns_as ~read_use ~on_checkpoint_load ~config ~keeper_name =
           | Some key, Observe (Some previous) ->
             Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Unread_observation.reuse key previous)
-            |> Option.map (fun atoms -> atoms, previous)
           | None, (Count_only | Observe _) | Some _, (Count_only | Observe None) -> None in
         match reused with
         | Some (atoms, observation) -> Ok (Some atoms, Some observation)
@@ -1880,6 +1879,8 @@ let consume_one_with_runtime ?cli_runner ~config ~keeper_name () =
 
 module For_testing = struct
   let unread_turns_observed_with_load_observer = unread_turns_observed_with_load_observer
+  let revalidate_unread_observation_after_object_read =
+    Unread_observation.For_testing.revalidate_after_object_read
   let consume_one_with_progress_writer = consume_one_with_progress_writer
   let consume_one_with_runtime_and_progress_writers = consume_one_with_runtime_and_progress_writers
 

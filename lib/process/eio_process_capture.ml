@@ -277,6 +277,65 @@ let child_input ~sw = function
     Eio.Flow.close writer;
     (reader :> Eio.Flow.source_ty Eio.Resource.t)
 
+(* Protocol consumers must see callback failures. The preview drain deliberately
+   logs and continues on ordinary callback errors, which would hide a failed
+   receipt consumer here. Keep only one read-sized buffer and forward every byte. *)
+let drain_stdio source on_chunk =
+  let chunk = Cstruct.create drain_chunk_size in
+  let rec loop () =
+    match Eio.Flow.single_read source chunk with
+    | 0 -> Eio.Flow.close source
+    | count ->
+      on_chunk (Cstruct.to_string (Cstruct.sub chunk 0 count));
+      loop ()
+    | exception End_of_file -> Eio.Flow.close source
+  in
+  loop ()
+
+let with_stdio ~phase_ref ~sw pm ~cwd ?env ~clock
+    ~on_stderr_chunk ~on_stdout_tail argv callback =
+  let stdin_r, stdin_w = Eio.Process.pipe ~sw pm in
+  let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
+  let stderr_r, stderr_w = Eio.Process.pipe ~sw pm in
+  let proc = Eio.Process.spawn ~sw
+      (Posix_spawn_process_mgr.foreground_mgr ~clock
+         ~grace_seconds:child_exit_grace_seconds)
+      ~cwd ?env ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w argv in
+  phase_ref := Timeout_origin.Command;
+  let status = ref None in
+  (* The I/O scope finishes before the process scope. On ordinary callback
+     failure this closes stdin and reaps while the process owner is still
+     active; outer cancellation leaves final group ownership with that owner. *)
+  Eio.Switch.run (fun io_sw ->
+    Eio.Switch.on_release io_sw (fun () ->
+      finalize_spawned_proc ~sw ~clock proc status
+        ~sinks:[ "stdin", stdin_w ]
+        ~sources:[ "stdout", stdout_r; "stderr", stderr_r ]);
+    Eio.Flow.close stdin_r;
+    Eio.Flow.close stdout_w;
+    Eio.Flow.close stderr_w;
+    let value, resolve_value = Eio.Promise.create () in
+    (* [Fiber.pair] keeps a failure of its first callback in a promise while
+       waiting for its second callback. Here stderr may stay open until stdin
+       is closed, so either callback must cancel its sibling immediately. *)
+    Eio.Fiber.both
+        (fun () ->
+          let value = callback
+              ~input:(stdout_r :> Eio.Flow.source_ty Eio.Resource.t)
+              ~output:(stdin_w :> Eio.Flow.sink_ty Eio.Resource.t) in
+          Eio.Flow.close stdin_w;
+          drain_stdio stdout_r on_stdout_tail;
+          observe proc Stdout_closed;
+          Eio.Promise.resolve resolve_value value)
+        (fun () ->
+          drain_stdio stderr_r on_stderr_chunk;
+          observe proc Stderr_closed);
+    observe proc Awaiting_exit;
+    let child_status = Eio.Process.await proc in
+    status := Some child_status;
+    observe proc Exit_observed;
+    Eio.Promise.await value, unix_status_of_eio_status child_status)
+
 (** Spawn a process with explicit pipes and drain stdout into [stdout_buf]
     before returning.  Draining inline (rather than handing the pipe to a
     background copier) avoids a race where [Eio.Process.await] returns —

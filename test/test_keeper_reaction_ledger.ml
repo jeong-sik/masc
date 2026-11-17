@@ -1442,11 +1442,16 @@ let test_repeated_turn_reactions_advance_recorded_at_timestamps () =
         ; "stimulus_id", `String stimulus_id
         ; ( "reaction"
           , `Assoc
-              [ "kind", `String kind
-              ; "source", `String "keeper_event_queue"
-              ; "post_id", `String stimulus.post_id
-              ; "stimulus_kind", `String "board_signal"
-              ] )
+              ([ "kind", `String kind
+               ; "source", `String "keeper_event_queue"
+               ; "post_id", `String stimulus.post_id
+               ; "stimulus_kind", `String "board_signal"
+               ]
+               (* The producer writes a disposition on every turn_finished
+                  row; a row without one is quarantined. *)
+               @ if String.equal kind "turn_finished"
+                 then [ "disposition", `String "completed" ]
+                 else []) )
         ])
   in
   append_reaction ~recorded_at:1000.0 "turn_started";

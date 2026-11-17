@@ -516,12 +516,12 @@ let test_message_payload_matches_the_serialised_message () =
     Keeper_context_core_message_json.message_to_json message |> Yojson.Safe.to_string
   in
   let payload = Snapshot.message_payload message in
-  check string "bytes are the serialised message" bytes payload.Snapshot.payload_bytes;
+  check string "bytes are the serialised message" bytes (Snapshot.payload_bytes payload);
   check
     string
     "digest is the sha256 of those bytes"
     Agent_core_sha256.(digest_string bytes |> to_hex)
-    payload.Snapshot.payload_sha256
+    (Snapshot.payload_sha256 payload)
 ;;
 
 let test_continuity_export_keeps_every_attributed_request_and_exact_boundary () =

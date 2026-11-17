@@ -111,7 +111,8 @@ val write_best_effort :
   unit
 (** Persist one immutable snapshot. Payload preparation uses the shared CPU
     pool; each artifact reuse miss uses the shared IO pool for its content
-    addressing and strict durable reuse. A cold, changed or evicted blob still
+    addressing and strict durable reuse, using the already prepared digest.
+    A cold, changed or evicted blob still
     requires strict payload and parent sync; concurrent cold misses may each
     publish. Reuse lookup, map updates and the
     snapshot append remain on the caller. The pool adapters retain their
@@ -152,11 +153,12 @@ val part_content_to_json : part_content -> Yojson.Safe.t
 
 (** The bytes of one artifact and their SHA-256 hex digest: what the domain
     pool computes for every message and tool schema of a snapshot before the
-    writer looks up reuse and stores what is new. *)
-type payload =
-  { payload_bytes : string
-  ; payload_sha256 : string
-  }
+    writer looks up reuse and stores what is new. The blob owner computes
+    the digest once; this alias adds no wrapper or filesystem authority. *)
+type payload = Tool_blob_store.prepared_payload
+
+val payload_bytes : payload -> string
+val payload_sha256 : payload -> string
 
 (** The canonical message encoding as the snapshot stores it, with its
     digest. Pure; safe on any domain. *)

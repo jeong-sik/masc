@@ -253,7 +253,8 @@ streaming = false
        List.iter (fun message ->
          let payload = Keeper_provider_input_snapshot.message_payload message in
          check bool "final projection contains the result observed on the wire" true
-           (contains marker payload.payload_bytes && contains marker body)) retained)
+           (contains marker (Keeper_provider_input_snapshot.payload_bytes payload)
+            && contains marker body)) retained)
        !projections !requests;
      check int "one HTTP response per expected boundary"
        (match scenario with Deferred -> 2

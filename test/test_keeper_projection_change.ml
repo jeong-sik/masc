@@ -31,7 +31,7 @@ let numbered label count =
 let render change = Yojson.Safe.to_string (Change.change_to_json change)
 
 let payload_bytes message =
-  String.length (Snapshot.message_payload message).Snapshot.payload_bytes
+  String.length (Snapshot.payload_bytes (Snapshot.message_payload message))
 ;;
 
 (* Compares two message lists under the fixture tools, and checks the whole

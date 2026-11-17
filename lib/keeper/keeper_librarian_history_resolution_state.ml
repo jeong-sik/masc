@@ -21,8 +21,8 @@ type authority = Worker_absent | Excluded_cut of cut_basis
 type t = {
   scope : string; request_id : string; request_digest : string;
   physical_owner : Yojson.Safe.t; source_sha256 : string;
-  original_record : Yojson.Safe.t; expected : guard;
-  authority : authority;
+  original_record : Yojson.Safe.t; authority : authority;
+  expected : guard;
   actor : string; reason : string; fenced_at : float;
 }
 let require condition message = if condition then Ok () else Error message

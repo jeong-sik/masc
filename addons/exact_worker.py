@@ -24,7 +24,6 @@ import uuid
 from protocol import INPUT_SCHEMA, InvalidInput, OUTPUT_SCHEMA, encode_output, object_value, reply_id
 
 TEXT = {"type": "string", "minLength": 1}
-EMPTY = {"type": "object", "properties": {}, "additionalProperties": False}
 OBJECT = {"type": "object", "properties": {}, "additionalProperties": True}
 
 
@@ -38,6 +37,8 @@ TOOL_OUTPUT = {"type": "object", "oneOf": [
             "state": {"type": "string", "enum": ["absent", "pending", "capacity_wait"]}}),
     closed({"request_id": TEXT, "state": {"type": "string", "const": "finished"}, "result": OBJECT}),
 ]}
+# A listing page starts at the first pending record, or after the named one.
+HOST_REQUESTS = {"type": "object", "properties": {"after": TEXT}, "additionalProperties": False}
 HOST_RESULT = closed({"request_id": TEXT, "result": OBJECT})
 CONTROL = closed({"tool": TEXT, "arguments": OBJECT, "caller": OBJECT})
 # The typed result for a request this worker could never list to the host.
@@ -300,22 +301,30 @@ class Store:
             self.check_directory()
         return sorted(self.index.items())
 
+    def pending_names(self, after: str | None) -> list[str]:
+        """The pending records' file names in name order: all of them, or only
+        those sorting after [after]. [after] is compared with names and never
+        opened, so it does not have to name a record."""
+        return [name for name, retained in self.inventory()
+                if retained.pending and (after is None or name > after)]
+
+    def pending_record(self, name: str, directory_fd: int) -> dict:
+        """One pending record, read and checked again. A pending record that is
+        gone, invalid or finished changed outside this worker, which stops it.
+        Transient I/O errors fail only the call."""
+        try:
+            record = self.read_path(name, directory_fd)
+        except (FileNotFoundError, ValueError) as error:
+            raise self.stop(f"Exact request record {name!r} changed outside this worker: {error}") from error
+        if record["result"] is not None:
+            raise self.stop(f"Exact request record {name!r} was finished outside this worker")
+        return record
+
     def pending(self) -> list[dict]:
-        """The pending records in name order, read and checked again. A pending
-        record that is gone, invalid or finished changed outside this worker,
-        which stops it. Transient I/O errors fail only the call."""
-        names = [name for name, retained in self.inventory() if retained.pending]
-        records = []
+        """Every pending record in name order, each read and checked again."""
+        names = self.pending_names(None)
         with self.open_directory() as directory_fd:
-            for name in names:
-                try:
-                    record = self.read_path(name, directory_fd)
-                except (FileNotFoundError, ValueError) as error:
-                    raise self.stop(f"Exact request record {name!r} changed outside this worker: {error}") from error
-                if record["result"] is not None:
-                    raise self.stop(f"Exact request record {name!r} was finished outside this worker")
-                records.append(record)
-        return records
+            return [self.pending_record(name, directory_fd) for name in names]
 
     def write(self, record: dict) -> None:
         self.trusted()
@@ -463,11 +472,46 @@ class Worker:
         return self.contract.host_request(request)
 
     def host_requests(self, args) -> dict:
-        exact(args, set(), "host listing")
-        requests = [self.host_request(record["request"]) for record in self.store.pending()]
-        if not self.fits({"requests": requests}):
-            raise InvalidInput("retained pending requests exceed the current declared reply frame")
-        return {"requests": requests}
+        """One page of the pending requests, in record name order.
+
+        Without arguments the page starts at the first pending record. With
+        `after` it starts at the first one whose name sorts after that value.
+        A page carries as many records as its reply can hold in the declared
+        frame. While pending records remain behind it, the reply also carries
+        `next`, the name of the last record on the page, and the host passes
+        that value back as `after`. A first record that no page can carry is
+        an error, so the listing never passes over a pending request."""
+        args = object_value(args, "host listing")
+        if set(args) - {"after"}:
+            raise InvalidInput("host listing accepts only the after field")
+        after = args.get("after")
+        if "after" in args and (not isinstance(after, str) or not after):
+            raise InvalidInput("host listing after must be a non-empty string")
+        names = self.store.pending_names(after)
+        # A reply is longer than the request bodies it carries, so reading
+        # stops at the first record whose body no longer fits the frame beside
+        # the ones already read. One page's bodies and that record are the most
+        # this call holds.
+        requests, room = [], self.max_reply_bytes
+        with self.store.open_directory() as directory_fd:
+            for name in names:
+                request = self.host_request(self.store.pending_record(name, directory_fd)["request"])
+                room -= len(encode_output(request).encode("utf-8"))
+                if room < 0:
+                    break
+                requests.append(request)
+        # The longest run of those records whose actual reply fits: with
+        # `next` unless the run reaches the last pending record.
+        for count in range(len(requests), 0, -1):
+            page = {"requests": requests[:count]}
+            if count < len(names):
+                page["next"] = names[count - 1]
+            if self.fits(page):
+                return page
+        if names:
+            raise InvalidInput(f"pending Exact request record {names[0]!r} does not fit a listing page "
+                               "in the current declared reply frame")
+        return {"requests": []}
 
     def host_result(self, args) -> dict:
         args = exact(args, {"request_id", "result"}, "host result arguments")
@@ -518,7 +562,8 @@ def tools(contract: Contract) -> list[dict]:
         *contract.additional_tools,
         {"name": "lane_call", "description": "Host-admitted caller envelope; never export this control port.",
          "inputSchema": CONTROL},
-        {"name": "lane_host_requests", "description": "List retained pending Exact requests.", "inputSchema": EMPTY},
+        {"name": "lane_host_requests", "description": "List retained pending Exact requests, one reply frame per page.",
+         "inputSchema": HOST_REQUESTS},
         {"name": "lane_host_result", "description": "Retain an original host Exact terminal result.", "inputSchema": HOST_RESULT},
     ]
 

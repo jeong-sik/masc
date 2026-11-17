@@ -624,7 +624,7 @@ let project projector ~needs_projection blocks =
     Ok (read_stored projector ~kind ~media_type source) in
   match project_with ~read_stored:read ~needs_projection blocks with
   | Ok projected -> projected
-  | Error error -> (match error with _ -> .)
+  | Error _ -> .
 ;;
 
 module Prepared_sources = Map.Make (struct

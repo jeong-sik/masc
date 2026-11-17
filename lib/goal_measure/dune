@@ -1,0 +1,11 @@
+(include_subdirs no)
+
+;; A Goal's typed success condition and measurement (RFC
+;; a-goal-states-its-measure-as-a-typed-value §2). Kept apart from masc_goal
+;; so the Candle ledger can carry the same values without depending on the
+;; Goal store.
+
+(library
+ (name goal_measure)
+ (public_name masc.goal_measure)
+ (libraries yojson))

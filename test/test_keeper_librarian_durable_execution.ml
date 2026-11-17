@@ -4140,9 +4140,12 @@ let test_counterpart_cut_capacity_refusal_preserves_original_obligation () =
     check bool "direct refusal settlement ACKs no original frontier" true (cut_source_positions fixture=positions);
     for _=1 to 2 do
       (match run_worker fixture with
-       | Error (Consumer.Original_publication_blocked _) -> ()
+       | Ok (Consumer.Pending (Keeper_librarian_pending.Message_floor pending)) ->
+         check string "the pending floor retains the same refused Cut child" child.request_id pending.request_id
+       | Ok (Pending pending) -> fail ("expected the Cut message floor: " ^ Keeper_librarian_pending.description pending)
        | Error error -> fail (Consumer.error_to_string error)
-       | Ok _ -> fail "an unresolved Cut source was released as completed");
+       | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
+         fail "an unresolved Cut source was released as completed");
       check bool "automatic refusal settlement writes no Memory or receipt" true (cut_memory_bytes fixture=memory);
       check bool "automatic refusal settlement ACKs no original frontier" true (cut_source_positions fixture=positions)
     done;

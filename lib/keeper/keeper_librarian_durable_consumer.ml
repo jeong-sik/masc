@@ -1142,13 +1142,14 @@ let unread_turns_as ~read_use ~on_checkpoint_load ~config ~keeper_name =
                 | History.Objects_invalid _ ) as error) ->
             Error (Checkpoint_unreadable { trace_id = current_trace_id; error })
           | Ok (History.Read (checkpoint, witness)) ->
+            let messages = checkpoint.Agent_core.Checkpoint.messages in
             let atoms =
               Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
                 R.unread_turns
                   ~trace_id:current_trace_id
                   ~lines:positions.lines
                   ~progress:positions.progress
-                  ~messages:checkpoint.Agent_core.Checkpoint.messages)
+                  ~messages)
             in
             let observation = match atoms, key, witness with
               | Some atoms, Some key, Some witness ->

@@ -13,6 +13,14 @@ val with_destination : config:Workspace.config -> reserved:string list ->
 (** Run [publish] with the destination the configuration names now, under the
     configuration and action serializers. The destination must be this
     feature's package and tool. *)
+val relation_to_current : config:Workspace.config -> reserved:string list ->
+  Keeper_librarian_durable_request.destination ->
+  (Lane_addon_captured_destination.relation, string) result
+(** How the destination an original was captured for stands to the one the
+    configuration names now. [Error] when the configuration names none: the
+    Add-on is off, unattached, unready or foreign, or its declaration cannot be
+    read. The relation is then not known. Blocking read, as
+    {!with_destination}. *)
 val fresh_authority : config:Workspace.config -> reserved:string list ->
   owner:Keeper_librarian_durable_request.owner ->
   expected:Keeper_librarian_durable_request.destination -> unit -> (unit, string) result

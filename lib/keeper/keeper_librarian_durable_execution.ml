@@ -368,11 +368,28 @@ let rec consume_one ~config ~keeper_name ~wake =
     | Ok (Resumed (Refused (final,_),request)) ->
       (* Only a non-counterpart refusal marks a smaller next read. A capacity-
          only counterpart original has no message-floor coordinate; narrowing
-         would change its chat window instead of splitting its model input. *)
+         would change its chat window instead of splitting its model input.
+         A request the host ended unrun because its declaration was replaced
+         marks nothing: the next pass selects the same range for the
+         declaration of then, and no host event would start that pass. *)
       let refused=Consumer.refused_original (Request.source request) [Refusal.report ~store request final] in
       (match refused with
        | Error _ -> ()
-       | Ok _ -> Consumer.mark_range_failed ~config ~keeper_name);
+       | Ok _ ->
+         match Refusal.next_read ~final ~relation:(fun () ->
+           let relation=Edge.relation_to_current ~config ~reserved (Request.destination request) in
+           (match relation with
+            | Ok (Lane_addon_captured_destination.Same | Replaced | Other_owner) -> ()
+            | Error detail ->
+              Log.Keeper.info ~keeper_name
+                "durable Librarian original was ended unrun and the current destination is not known, so the next read narrows: %s"
+                detail);
+           relation) with
+         | Refusal.Narrowed -> Consumer.mark_range_failed ~config ~keeper_name
+         | Whole_again ->
+           Log.Keeper.info ~keeper_name
+             "durable Librarian original was ended unrun under a replaced declaration: the next pass reads the same range whole";
+           wake ());
       refused in
   match Resolution_work.run_serialized ~config ~keeper_name with
   | Error failure -> error (Keeper_librarian_history_resolution_intent.error_to_string failure)

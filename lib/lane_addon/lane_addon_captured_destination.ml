@@ -17,11 +17,21 @@ let of_runtime (value : Lane_addon_runtime.tool_request_destination) =
     configuration_revision = value.configuration_revision;
   }
 
+type relation = Same | Replaced | Other_owner
+
+let relation ~captured ~current =
+  if captured.installation_id <> current.installation_id
+     || captured.package_id <> current.package_id
+     || captured.tool <> current.tool
+  then Other_owner
+  else if captured.configuration_revision = current.configuration_revision
+  then Same
+  else Replaced
+
 let same_semantic left right =
-  left.installation_id = right.installation_id
-  && left.package_id = right.package_id
-  && left.tool = right.tool
-  && left.configuration_revision = right.configuration_revision
+  match relation ~captured:left ~current:right with
+  | Same -> true
+  | Replaced | Other_owner -> false
 
 let members =
   [ "installation_id"; "package_id"; "tool"; "source_revision"; "configuration_revision" ]

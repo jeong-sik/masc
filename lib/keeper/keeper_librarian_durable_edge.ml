@@ -29,6 +29,8 @@ let with_destination ~config ~reserved publish =
         "Completed-history Librarian requires its configured package/tool"))
       else match publish actual with Ok value -> Ok value | Error detail -> Error (Runtime.Unavailable detail))
   |> Result.map_error runtime_error
+let relation_to_current ~config ~reserved captured =
+  with_destination ~config ~reserved (fun current -> Ok (Destination.relation ~captured ~current))
 let fresh_authority ~config ~reserved ~owner ~expected () =
   let* ()=io (fun () ->
     let base_path=config.Workspace.base_path in

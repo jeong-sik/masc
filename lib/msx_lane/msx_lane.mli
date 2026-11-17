@@ -82,16 +82,21 @@ type error =
   | Activity_unobserved
   | No_machine  (** nothing loaded — [masc_msx_load] first *)
   | Invalid_request of string
-      (** the caller's arguments. A path the caller named that does not resolve
-          inside the allowed roots -- it may not exist, sit outside the roots, or
-          escape through a symlink -- is [Invalid_request]: the caller can fix it
-          by naming another path. Named bytes that come off the file but do not
+      (** the caller's arguments. A path the caller named that names
+          nothing -- it may not exist, or a non-directory sits in its way
+          -- is [Invalid_request]: the caller can fix it by naming another
+          path. A path that resolves but sits outside the allowed roots,
+          or escapes them through a symlink, is [Invalid_request] for the
+          same reason. Named bytes that come off the file but do not
           decode as what the request asked for are [Invalid_request] too.
-          [Unreadable] stays reserved for a path that resolves inside the allowed
-          roots and will not read. Files the lane looks for inside a directory the
-          caller named follow that directory's own contract, not this one -- an
-          absent ROM inside a resolved BIOS directory is [Unreadable]
-          ([read_bios]), because the caller named the directory, not the file. *)
+          [Unreadable] stays reserved for a path that is there but will
+          not read -- the lookup is refused (a permission, a loop), or it
+          resolves inside the allowed roots and the read itself fails.
+          Files the lane looks for inside a directory the caller named
+          follow that directory's own contract, not this one -- an absent
+          ROM inside a resolved BIOS directory is [Unreadable]
+          ([read_bios]), because the caller named the directory, not the
+          file. *)
   | Effect_unknown of string  (** replacement happened; durable effect is unknown *)
   | Unreadable of string
       (** a file that is there and will not read: a ROM, a cartridge, a

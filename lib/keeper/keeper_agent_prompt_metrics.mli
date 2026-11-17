@@ -110,12 +110,13 @@ type ctx_attribution =
       }
   | Not_measured of attribution_gap
 
-(** Per-bucket attribution of an Agent.run input window.
-    [actual_input_tokens] is provider-reported and only known after a response;
-    it is not attributed to byte segments and is recorded whether or not the
-    byte attribution succeeded. *)
+(** Per-bucket attribution of an Agent.run input window. The runtime's
+    input count keeps its provenance apart from byte attribution. Only
+    [Some Measured_request] may become [actual_input_tokens] on the wire;
+    estimates and an absent provenance never claim a dispatched request. *)
 type ctx_composition_metrics =
-  { actual_input_tokens : int option
+  { input_tokens : int option
+  ; input_provenance : Turn_input_provenance.t option
   ; attribution : ctx_attribution
   }
 
@@ -190,7 +191,10 @@ val build_ctx_segments :
   (Turn_record.input_component_id * prompt_segment_metrics) list
 
 val ctx_composition_to_json : ctx_composition_metrics -> Yojson.Safe.t
-(** Emit the record as ["actual_input_tokens"] plus an ["attribution"] object.
+(** Emit a measured request count as ["actual_input_tokens"] plus an
+    ["attribution"] object and ["input_provenance"]. The count is null for
+    estimates or unknown provenance. A consumer must not trust an old bare
+    ["actual_input_tokens"] value without the measured-request provenance.
 
     [Attributed] emits ["status": "attributed"] with ["runtime_profile"],
     ["attributed_bytes"] and ["segments"]. [Not_measured] emits

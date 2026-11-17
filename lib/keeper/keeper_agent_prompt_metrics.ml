@@ -124,7 +124,8 @@ type ctx_attribution =
   | Not_measured of attribution_gap
 
 type ctx_composition_metrics =
-  { actual_input_tokens : int option
+  { input_tokens : int option
+  ; input_provenance : Turn_input_provenance.t option
   ; attribution : ctx_attribution
   }
 
@@ -475,8 +476,16 @@ let ctx_attribution_to_json (attribution : ctx_attribution) : Yojson.Safe.t =
       ]
 
 let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t =
+  let actual_input_tokens =
+    match metrics.input_provenance with
+    | Some Turn_input_provenance.Measured_request -> metrics.input_tokens
+    | Some Turn_input_provenance.Context_estimate | None -> None
+  in
   `Assoc
     [
-      ("actual_input_tokens", Json_util.int_opt_to_json metrics.actual_input_tokens);
+      ("actual_input_tokens", Json_util.int_opt_to_json actual_input_tokens);
+      ("input_provenance",
+       Json_util.string_opt_to_json
+         (Option.map Turn_input_provenance.to_string metrics.input_provenance));
       ("attribution", ctx_attribution_to_json metrics.attribution);
     ]

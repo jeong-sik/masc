@@ -4936,6 +4936,11 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     | Runtime_usage_scope.Usage_scope_unavailable ->
         non_request_token_lines "tokens reported with unknown scope"
     | Runtime_usage_scope.Per_request -> (
+        match record.usage.input_provenance with
+        | Some Turn_input_provenance.Context_estimate ->
+            non_request_token_lines "estimated context tokens, not dispatched input"
+        | None -> non_request_token_lines "tokens with unknown input provenance"
+        | Some Turn_input_provenance.Measured_request -> (
         match record.usage.input_tokens, record.context_window with
         (* A figure above MASC's effective shaping ceiling cannot become a
            percentage of that ceiling. The client may report a different
@@ -4962,11 +4967,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
         | Some tokens, (None | Some _) ->
             [ Printf.sprintf "  %s input tokens; window not observed"
                 (Inspector.format_tokens tokens) ]
-        | None, _ -> [ "  Context usage was not reported for this turn" ])
+        | None, _ -> [ "  Context usage was not reported for this turn" ]))
   in
   let provider_context_lines =
     let occupied =
       Inspector.client_context_tokens ~scope:record.usage.scope
+        ~provenance:record.usage.input_provenance
         ~input_tokens:record.usage.input_tokens
         ~output_tokens:record.usage.output_tokens
     in
@@ -5313,7 +5319,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                     recent.turn ts (Inspector.format_tokens input)
                 ^ Ansi.reset
               ]
-          | Some Turn_input_provenance.Measured_request | None -> (
+          | None ->
+              [ marker ^ Ansi.dim
+                ^ Printf.sprintf " #%-4d %s  count %s; input provenance unknown"
+                    recent.turn ts (Inspector.format_tokens input)
+                ^ Ansi.reset ]
+          | Some Turn_input_provenance.Measured_request -> (
           fact
             (* fit_width, not %-7s: the cells hold the no-value mark, which is
                three bytes and one column, and byte padding would end the row
@@ -5346,6 +5357,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
       usage_lines
       @ (match
            Inspector.client_context_tokens ~scope:recent.scope
+             ~provenance:recent.input_provenance
              ~input_tokens:recent.input_tokens ~output_tokens:recent.output_tokens,
            recent.provider_context_window
          with
@@ -5863,11 +5875,13 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             | _ ->
                 [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
       in
-      (* Usage belongs to the last reported request in the turn. A retained
-         pre-dispatch snapshot can instead name a later failed attempt; the
+      (* The retained usage can describe a measured request, a context
+         estimate or an aggregate. A pre-dispatch snapshot can instead name
+         a later failed attempt; the
          record has no response-to-capture ID, so do not label this as a hit
-         on the prepared request above. All counts here are provider-reported,
-         independent of the byte-to-token scale used for individual items. *)
+         on the prepared request above. The summary keeps a measured request,
+         a context estimate and unknown provenance distinct, independent of
+         the byte-to-token scale used for individual items. *)
       let cache_lines =
         match response with
         | None -> [ Ansi.dim ^ "  Provider cache usage unavailable" ^ Ansi.reset ]

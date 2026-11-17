@@ -522,6 +522,14 @@ type context_unavailable_reason =
       { raw_input_tokens : int option
       ; context_window : int option
       }
+  | Context_input_estimate of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_input_provenance_unavailable of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
   | Context_tokens_exceed_window of
       { raw_input_tokens : int
       ; context_window : int
@@ -906,6 +914,16 @@ let context_unavailable_reason_of_json json raw =
     Ok (Context_usage_scope_unavailable { raw_input_tokens; context_window })
   | "turn_total_usage" when usage_scope = Some "turn_total" ->
     Ok (Context_turn_total_usage { raw_input_tokens; context_window })
+  | "context_input_estimate"
+    when usage_scope = Some "per_request"
+         && Option.for_all (fun count -> count >= 0) raw_input_tokens
+         && Option.for_all (fun count -> count >= 0) context_window ->
+    Ok (Context_input_estimate { raw_input_tokens; context_window })
+  | "input_provenance_unavailable"
+    when usage_scope = Some "per_request"
+         && Option.for_all (fun count -> count >= 0) raw_input_tokens
+         && Option.for_all (fun count -> count >= 0) context_window ->
+    Ok (Context_input_provenance_unavailable { raw_input_tokens; context_window })
   | "context_tokens_exceed_window" ->
     (match usage_scope, raw_input_tokens, context_window with
      | Some "per_request", Some raw_input_tokens, Some context_window ->
@@ -938,6 +956,16 @@ let context_unavailable_reason_to_string = function
   | Context_turn_total_usage { raw_input_tokens; context_window } ->
     Printf.sprintf
       "client turn total %s tokens (window %s); occupancy not observed"
+      (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
+      (Option.fold ~none:"unknown" ~some:string_of_int context_window)
+  | Context_input_estimate { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "estimated context %s tokens (window %s); request input not measured"
+      (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
+      (Option.fold ~none:"unknown" ~some:string_of_int context_window)
+  | Context_input_provenance_unavailable { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "input provenance unavailable (count %s, window %s); request input not measured"
       (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
       (Option.fold ~none:"unknown" ~some:string_of_int context_window)
   | Context_tokens_exceed_window { raw_input_tokens; context_window } ->

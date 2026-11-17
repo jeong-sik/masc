@@ -27,6 +27,7 @@ let sample_record
       ?(context_window = Some 131_072)
       ?(provider_context_window = None)
       ?(usage_scope = Runtime_usage_scope.Per_request)
+      ?(input_provenance = Some Turn_input_provenance.Measured_request)
       ()
   : Turn_record.t
   =
@@ -72,7 +73,7 @@ let sample_record
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = Some 15_000
       ; scope = usage_scope
-      ; input_provenance = None
+      ; input_provenance
       }
   ; turn_output_tokens = None
   ; ts = 1_781_200_000.5
@@ -115,6 +116,7 @@ let check_not_observed fields ~reason =
         | Some (`String value) -> value
         | _ -> "<missing>")
    | _ -> fail "context_metrics_unavailable is not an object");
+  check bool "context_ratio is null" true (field fields "context_ratio" = `Null);
   check bool "context_tokens is null" true (field fields "context_tokens" = `Null);
   check bool "context_max is null" true (field fields "context_max" = `Null);
   check bool "context_source is null" true (field fields "context_source" = `Null)
@@ -286,7 +288,7 @@ let test_missing_window_keeps_tokens_without_ratio () =
 let decodes fields =
   Masc.Tui_decode.decode_context_observation
     ~expected_trace_id:sample_trace
-    (`Assoc fields)
+    (Yojson.Safe.from_string (Yojson.Safe.to_string (`Assoc fields)))
 ;;
 
 let test_cumulative_usage_is_diagnostic_not_occupancy () =
@@ -375,6 +377,57 @@ let test_per_request_overflow_is_unavailable_not_clamped () =
     | Error detail -> fail detail)
 ;;
 
+(* A newer compaction estimate or a count with no provenance must not
+   expose the earlier measured row, nor become a measured overflow when its
+   value is above the provider window. The raw durable row stays unchanged. *)
+let test_newest_unmeasured_input_stays_diagnostic () =
+  List.iter
+    (fun provenance ->
+       List.iter
+         (fun tokens ->
+            with_temp_workspace (fun config ->
+              append_record config (sample_record ~absolute_turn:1 ());
+              append_record config
+                (sample_record ~absolute_turn:2 ~input_tokens:(Some tokens)
+                   ~context_window:(Some 1_000_000)
+                   ~provider_context_window:(Some 272_000)
+                   ~input_provenance:provenance ());
+              let store = Masc.Keeper_types_support.keeper_turn_record_store config "beta" in
+              (match Dated_jsonl.read_recent_result store 1 with
+               | Ok [Dated_jsonl.Parsed json] ->
+                 (match Turn_record.of_json json with
+                  | Ok record ->
+                    check int "newest durable row is retained" 2 record.absolute_turn;
+                    check (option int) "raw count is retained" (Some tokens) record.usage.input_tokens;
+                    check bool "raw provenance is retained" true
+                      (record.usage.input_provenance = provenance)
+                  | Error detail -> fail detail)
+               | Ok _ -> fail "expected the exact newest durable row"
+               | Error error -> fail (Dated_jsonl.read_error_to_string error));
+              let fields = Projection.context_fields ~config ~keeper_name:"beta"
+                  ~current_trace_id:sample_trace in
+              let reason = match provenance with
+                | Some Turn_input_provenance.Context_estimate -> "context_input_estimate"
+                | None -> "input_provenance_unavailable"
+                | Some Turn_input_provenance.Measured_request -> fail "fixture must be unmeasured" in
+              check_not_observed fields ~reason;
+              match decodes fields with
+              | Ok (Masc.Tui_decode.Context_unavailable
+                      (Context_input_estimate evidence))
+                when provenance = Some Turn_input_provenance.Context_estimate ->
+                check (option int) "estimate diagnostic retains its value" (Some tokens) evidence.raw_input_tokens;
+                check (option int) "estimate retains the same window" (Some 272_000) evidence.context_window
+              | Ok (Masc.Tui_decode.Context_unavailable
+                      (Context_input_provenance_unavailable evidence))
+                when provenance = None ->
+                check (option int) "unknown diagnostic retains its value" (Some tokens) evidence.raw_input_tokens;
+                check (option int) "unknown retains the same window" (Some 272_000) evidence.context_window
+              | Ok _ -> fail "unmeasured newest input became an observed request or measured overflow"
+              | Error detail -> fail detail))
+         [45_000; 310_209])
+    [Some Turn_input_provenance.Context_estimate; None]
+;;
+
 (* The projection writes these fields and Tui_decode reads them, but each side
    had only its own tests: the producer checked what it emitted and the decoder
    checked hand-written JSON. A field the producer stopped emitting therefore
@@ -395,7 +448,12 @@ let test_every_projected_shape_decodes () =
       Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
     in
     (match decodes measured with
-     | Ok _ -> ()
+     | Ok (Masc.Tui_decode.Context_observed { tokens; maximum; ratio; _ }) ->
+       check int "measured input does not include the output" 18_000 tokens;
+       check (option int) "measured window survives" (Some 131_072) maximum;
+       check (option (float 1e-9)) "measured ratio survives"
+         (Some (18_000.0 /. 131_072.0)) ratio
+     | Ok _ -> fail "an explicit measured request became unavailable"
      | Error detail -> failf "measured observation must decode: %s" detail);
     (* the two shapes are distinguishable, or decoding both proves nothing *)
     check
@@ -434,6 +492,8 @@ let () =
             test_provider_window_is_used_for_occupancy
         ; test_case "per-request overflow is unavailable, not clamped" `Quick
             test_per_request_overflow_is_unavailable_not_clamped
+        ; test_case "newest estimate and unknown input retain diagnostics" `Quick
+            test_newest_unmeasured_input_stays_diagnostic
         ; test_case "every projected shape decodes" `Quick
             test_every_projected_shape_decodes
         ] )

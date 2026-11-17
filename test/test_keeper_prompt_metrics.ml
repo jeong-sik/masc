@@ -284,7 +284,8 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
       ~input_messages
   in
   let metrics : KAPM.ctx_composition_metrics =
-    { KAPM.actual_input_tokens = Some 1000
+    { KAPM.input_tokens = Some 1000
+    ; input_provenance = Some Turn_input_provenance.Measured_request
     ; attribution =
         KAPM.Attributed { runtime_profile = "probe.runtime"; segments }
     }
@@ -320,7 +321,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
   check bool "history tool result bucket present" true
     (segment_bytes Turn_record.Message_tool_result > 0);
   check (option int) "provider token observation remains separate" (Some 1000)
-    metrics.actual_input_tokens;
+    metrics.input_tokens;
   check bool "the tool bucket carries a fingerprint" true
     (Option.is_some (segment_fingerprint Turn_record.Tool_schemas));
   check (option int) "total bytes equal segment sum"
@@ -589,7 +590,8 @@ let test_tool_schema_fingerprint_follows_the_order_sent () =
 let test_not_measured_omits_the_byte_total () =
   let json =
     KAPM.ctx_composition_to_json
-      { KAPM.actual_input_tokens = None
+      { KAPM.input_tokens = None
+      ; input_provenance = None
       ; attribution = KAPM.Not_measured KAPM.Dispatch_not_reached
       }
   in
@@ -609,14 +611,16 @@ let test_not_measured_omits_the_byte_total () =
 let test_attributed_zero_differs_from_not_measured () =
   let measured_at_zero =
     KAPM.ctx_composition_to_json
-      { KAPM.actual_input_tokens = None
+      { KAPM.input_tokens = None
+      ; input_provenance = None
       ; attribution =
           KAPM.Attributed { runtime_profile = "probe.runtime"; segments = [] }
       }
   in
   let never_measured =
     KAPM.ctx_composition_to_json
-      { KAPM.actual_input_tokens = None
+      { KAPM.input_tokens = None
+      ; input_provenance = None
       ; attribution = KAPM.Not_measured KAPM.Dispatch_not_reached
       }
   in
@@ -637,7 +641,8 @@ let test_provenance_failure_reaches_the_record () =
   in
   let json =
     KAPM.ctx_composition_to_json
-      { KAPM.actual_input_tokens = Some 12
+      { KAPM.input_tokens = Some 12
+      ; input_provenance = Some Turn_input_provenance.Measured_request
       ; attribution =
           KAPM.Not_measured (KAPM.Input_provenance_unresolved failure)
       }
@@ -706,7 +711,9 @@ let test_transmitted_carrier_removal_ignores_a_prefix_cut () =
 let test_client_session_gap_is_its_own_reason () =
   let gap_json gap =
     KAPM.ctx_composition_to_json
-      { KAPM.actual_input_tokens = Some 4_211; attribution = KAPM.Not_measured gap }
+      { KAPM.input_tokens = Some 4_211
+      ; input_provenance = Some Turn_input_provenance.Measured_request
+      ; attribution = KAPM.Not_measured gap }
     |> Yojson.Safe.Util.member "attribution"
   in
   let held = gap_json KAPM.Client_session_holds_input in
@@ -732,15 +739,43 @@ let test_client_session_gap_is_its_own_reason () =
   check bool "the provider token count survives the gap" true
     (Yojson.Safe.Util.member "actual_input_tokens"
        (KAPM.ctx_composition_to_json
-          { KAPM.actual_input_tokens = Some 4_211
+          { KAPM.input_tokens = Some 4_211
+          ; input_provenance = Some Turn_input_provenance.Measured_request
           ; attribution = KAPM.Not_measured KAPM.Client_session_holds_input
           })
      = `Int 4_211)
 ;;
 
+(* The actual wire field is the boundary: a context estimate may carry a
+   real number while describing no dispatched request at that size. *)
+let test_ctx_composition_preserves_input_measurement_boundary () =
+  let estimate =
+    Masc.Keeper_codex_runtime.request_context_of_last_usage
+      (Runtime_codex_app_server.Context_estimate { estimated_tokens = 45_000 }) in
+  List.iter
+    (fun (provenance, expected) ->
+       List.iter
+         (fun attribution ->
+            let metrics : KAPM.ctx_composition_metrics =
+              { input_tokens = Some estimate.input_tokens; input_provenance = provenance; attribution } in
+            let json = KAPM.ctx_composition_to_json metrics in
+            check bool "wire actual count requires measured request provenance" true
+              (Yojson.Safe.Util.member "actual_input_tokens" json = expected);
+            check bool "wire retains the producer's typed provenance" true
+              (Yojson.Safe.Util.member "input_provenance" json =
+                 Json_util.string_opt_to_json (Option.map Turn_input_provenance.to_string provenance));
+            check (option int) "original count is not rewritten" (Some 45_000) metrics.input_tokens)
+         [ KAPM.Not_measured KAPM.Client_session_holds_input
+         ; KAPM.Attributed { runtime_profile = "probe.runtime"; segments = [] } ])
+    [Some estimate.provenance, `Null; None, `Null;
+     Some Turn_input_provenance.Measured_request, `Int 45_000]
+;;
+
 let () =
   run "keeper_prompt_metrics"
     [
+      ( "input_measurement", [test_case "actual input excludes estimates and unknown provenance" `Quick
+          test_ctx_composition_preserves_input_measurement_boundary] );
       ( "byte_measurement",
         [
           test_case "system_prompt shorter than combined" `Quick

@@ -82,14 +82,14 @@ the input body. Deploy this revision with the
 Build the optional container from the repository root:
 
 ```sh
-docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.6 addons
+docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.7 addons
 ```
 
-Select this revision before a server that includes
-[#52731](https://github.com/jeong-sik/masc/pull/52731) runs the installation.
-Earlier revisions answer `capacity_wait`, which that server no longer reads; the
+Select this revision with the server stopped, in the order the
 [Keeper Librarian upgrade](../../docs/guides/keeper-memory-execution.md#upgrade-an-existing-installation)
-gives the order.
+gives. A server that does not know `host_request_pages` refuses this manifest.
+A revision before 0.1.6 answers `capacity_wait`, which a server that
+includes [#52731](https://github.com/jeong-sik/masc/pull/52731) no longer reads.
 
 The host mounts the package at `/addon` and its installation-owned persistent
 state at `/state`, using the existing container/engine ownership contract.

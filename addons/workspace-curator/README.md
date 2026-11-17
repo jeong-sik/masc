@@ -59,14 +59,14 @@ mean the host committed its ledger or published a complete briefing.
 Build the optional image from the repository root:
 
 ```sh
-docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.5 addons
+docker build -f addons/workspace-curator/Dockerfile -t masc-lane-workspace-curator:0.1.6 addons
 ```
 
-Select this revision before a server that includes
-[#52731](https://github.com/jeong-sik/masc/pull/52731) runs the installation.
-Earlier revisions answer `capacity_wait`, which that server no longer reads; the
+Select this revision with the server stopped, in the order the
 [Keeper Librarian upgrade](../../docs/guides/keeper-memory-execution.md#upgrade-an-existing-installation)
-gives the order.
+gives. A server that does not know `host_request_pages` refuses this manifest.
+A revision before 0.1.5 answers `capacity_wait`, which a server that
+includes [#52731](https://github.com/jeong-sik/masc/pull/52731) no longer reads.
 
 The image includes `exact_worker.py` and `protocol.py` outside the read-only
 `/addon` package mount. The normal Runtime owns the worker and `/state` mount.

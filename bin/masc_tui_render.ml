@@ -781,6 +781,7 @@ let render ~home ~compact_recovery_notice (state : state) =
   frame_acting_pane := Masc_tui_acting_pane.empty_frame;
   frame_tools_task := None;
   reset_chat_row_actions ();
+  Masc_tui_types.keeper_message_rows_begin_frame ();
   (* And the candle, and any placed picture, is on this frame only if this
      frame draws it. *)
   Render_schedule.Activity_tick.begin_frame ();

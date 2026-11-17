@@ -2778,8 +2778,7 @@ status: reference
 : 다른 에이전트가 내 글이나 댓글에 준 upvote 한 번마다 생기는 `karma_event`의 합.
   Board 안의 개념이고 별도 도메인이 아니다. 자기 upvote, downvote, 지워진 대상에 준
   투표는 이벤트를 만들지 않는다. 이벤트는 `delta`를 직접 적어 두고, 원장은 vote log에서
-  다시 만든다([board_types.mli](../../lib/board_types/board_types.mli)의 `karma_event`,
-  [board_votes.ml](../../lib/board/board_votes.ml)).
+  다시 만든다([board_votes.ml](../../lib/board/board_votes.ml)의 `karma_event`·`build_karma_ledger`).
 
 **Flair (표시 태그)**
 : 글쓴이가 본문에 `[flair:<name>]` 꼴로 적는 표시 태그. 이름은 소문자이고
@@ -4800,18 +4799,21 @@ status: reference
   성공과 그 뒤의 최신 실패를 독립적으로 읽는다. 따라서 키퍼가 `keeper_memory_write`나
   철회(`retraction`)로 Fact를 직접 기록해도 Librarian의 성공을 지우거나 직전 실패를
   가리지 않는다(#38049).
-  TUI(`lib/tui_decode.mli`, `bin/masc_tui_render_memory.ml`)는 회차 종결 상태와 실패
+  TUI(`lib/tui_decode_memory_health.ml`, `bin/masc_tui_render_memory.ml`)는 회차 종결 상태와 실패
   종류를 닫힌 타입으로 디코드하고 wire 단어 대신 일상 단어로 그린다:
-  - 닫힌 여섯 종결 상태(`memory_librarian_pass_end`):
-    `Pass_off`(\"switched off\"), `Pass_lane_unconfigured`(\"no model lane set up\"),
-    `Pass_drained`(\"caught up\"), `Pass_not_committed`(\"last pass saved nothing\"),
-    `Pass_stopped`(\"stopped on an error\"), `Pass_raised`(\"crashed\").
-  - 닫힌 아홉 실패 종류(`memory_librarian_failure_kind`):
+  - 닫힌 여덟 종결 상태(`memory_librarian_pass_end`):
+    `Pass_off`(\"switched off\"), `Pass_lane_unconfigured`(\"no lane set\"),
+    `Pass_drained`(\"caught up\"), `Pass_yielded_to_waiting_unit`(\"yielded\"),
+    `Pass_pending`(대기 관측별 단어 — \"queue full\"·\"processing\"·\"check outcome\"·\"worker offline\"·\"rechecking\"·\"settling\"·\"source changed\"·\"reading parts\"·\"recovery failed\"),
+    `Pass_not_committed`(\"saved none\"),
+    `Pass_stopped`(\"stopped\"), `Pass_raised`(\"crashed\").
+  - 닫힌 열 실패 종류(`memory_librarian_failure_kind`):
     `Failure_prompt_render`(\"prompt could not be built\"),
     `Failure_execution_clock_unavailable`(\"no clock to run on\"),
     `Failure_exact_setup`(\"model call could not be set up\"),
     `Failure_exact_execution`(\"model call failed\"),
     `Failure_domain_output_invalid`(\"model answer was not usable\"),
+    `Failure_absorb_judgment`(\"copy check failed; nothing saved\"),
     `Failure_memory_snapshot_write`(\"Memory could not be saved\"),
     `Failure_runtime_context_unavailable`(\"no runtime context\"),
     `Failure_lane_cancelled`(\"cancelled before saving\"),
@@ -4820,7 +4822,7 @@ status: reference
     별도 행에 그린다.
   - 행 격리: 서버가 보낸 값을 TUI가 알지 못하면 전체 Memory 화면을 깨뜨리지 않고 해당
     키퍼 행만 이름과 거절 사유 한 줄(`refusal`)로 격리하며 다른 행들은 정상 표시한다.
-  → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml) · [tui_decode](../../lib/tui_decode.mli) · [masc_tui_render_memory](../../bin/masc_tui_render_memory.ml)
+  → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml) · [tui_decode_memory_health](../../lib/tui_decode_memory_health.ml) · [masc_tui_render_memory](../../bin/masc_tui_render_memory.ml)
 
 **JEV / Noul**
 : JEV는 TypeSafe AI System One의 모델이다. Noul은 명시한 질문에 대한 답이

@@ -65,6 +65,11 @@ val classify_core_error : Agent_core_base.Error.t -> checkpoint_load_error
 
 val classify_objects_error : Agent_core.Checkpoint_objects.load_error -> checkpoint_load_error
 
+val classify_owned_read_error :
+  Fs_compat.owned_regular_file_read_error -> checkpoint_load_error
+(** Preserve the checkpoint reader's distinction between a rejected owned
+    path, a file changed during its read and an operating-system failure. *)
+
 val read_checkpoint_bytes :
   session_dir:string -> string -> (string, checkpoint_load_error) result
 

@@ -112,6 +112,19 @@ let classify_objects_error : Objects.load_error -> checkpoint_load_error = funct
     | Objects.Segment_invalid _
     | Objects.Header_object_invalid _ ) as error -> Objects_invalid error
 
+let classify_owned_read_error (error : Fs_compat.owned_regular_file_read_error) =
+  let detail = Fs_compat.owned_regular_file_read_error_to_string error in
+  match error.failure with
+  | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _
+  | Fs_compat.Owned_path_owner_mismatch _ | Fs_compat.Owned_path_writable_by_others _ ->
+    Io_error detail
+  | Fs_compat.Filesystem_identity_changed _ ->
+    Read_failed { cause = Changed_while_read; detail }
+  | Fs_compat.Owned_file_operation_failed { cause = Unix.Unix_error (errno, _, _); _ } ->
+    Read_failed { cause = Os_error errno; detail }
+  | Fs_compat.Owned_file_operation_failed _ ->
+    Read_failed { cause = Read_raised; detail }
+
 (* Both checkpoint reads take their bytes through
    [Fs_compat.load_owned_regular_file]: the read runs on a system thread when
    the Eio filesystem is active, and the file must sit inside the owned chain
@@ -129,19 +142,7 @@ let read_checkpoint_bytes ~(session_dir : string) path : (string, checkpoint_loa
   with
   | Ok (Some bytes) -> Ok bytes
   | Ok None -> Error Not_found
-  | Error error ->
-    let detail = Fs_compat.owned_regular_file_read_error_to_string error in
-    (match error.failure with
-     | Fs_compat.Ownership_boundary_rejected _ | Fs_compat.Path_is_not_regular_file _
-     | Fs_compat.Owned_path_owner_mismatch _
-     | Fs_compat.Owned_path_writable_by_others _ ->
-       Error (Io_error detail)
-     | Fs_compat.Filesystem_identity_changed _ ->
-       Error (Read_failed { cause = Changed_while_read; detail })
-     | Fs_compat.Owned_file_operation_failed { cause = Unix.Unix_error (errno, _, _); _ } ->
-       Error (Read_failed { cause = Os_error errno; detail })
-     | Fs_compat.Owned_file_operation_failed _ ->
-       Error (Read_failed { cause = Read_raised; detail }))
+  | Error error -> Error (classify_owned_read_error error)
 
 let load_agent_core_history_file ~(session_dir : string) ~(snapshot_id : string) :
     (Agent_core.Checkpoint.t, checkpoint_load_error) result =

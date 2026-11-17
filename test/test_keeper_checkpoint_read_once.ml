@@ -7,6 +7,7 @@
 open Alcotest
 open Masc
 module Store = Keeper_checkpoint_store
+module Observation = Store.Read_observation
 
 let history_retained () =
   Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained
@@ -348,6 +349,170 @@ let test_a_repointed_root_moves_lookups_with_the_save () = with_session (fun ses
     | Error _ -> ()
     | Ok _ -> fail "the forget left the value kept under the new target"))
 
+let observed_load session_dir =
+  match Observation.load ~session_dir ~session_id:"session" with
+  | Ok observed -> observed
+  | Error error -> fail (Store.checkpoint_load_error_to_string error)
+
+let expect_unchanged label witness =
+  match Observation.revalidate witness with
+  | Observation.Unchanged -> ()
+  | Changed -> fail (label ^ ": changed")
+  | Unavailable error -> failf "%s: %s" label (Store.checkpoint_load_error_to_string error)
+
+let expect_not_reusable label witness =
+  match Observation.revalidate witness with
+  | Observation.Changed | Unavailable _ -> ()
+  | Unchanged -> fail (label ^ ": reused a changed or unreadable source")
+
+let bundle_path session_dir =
+  match Agent_core.Checkpoint_objects.head_of_string (read_file (canonical_path session_dir)) with
+  | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error)
+  | Ok head ->
+    match head.history.turns with
+    | turn :: _ -> Keeper_checkpoint_object_store.path ~session_dir turn.bundle, turn.bundle
+    | [] -> fail "fixture has no closed turn"
+
+let test_observation_reads_and_revalidates_without_retaining_a_lineage () = with_session (fun session_dir ->
+  save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:several_reads_marker);
+  let loaded, witness = observed_load session_dir in
+  check int "observed the complete checkpoint" 2 (List.length loaded.messages);
+  expect_unchanged "unchanged source" witness;
+  let path, _digest = bundle_path session_dir in
+  let bytes = read_file path in
+  (match Fs_compat.save_file_atomic path bytes with Ok () -> () | Error detail -> fail detail);
+  expect_not_reusable "identical bytes under a replacement identity" witness;
+  let again, refreshed = observed_load session_dir in
+  check bool "a full reread preserves the messages" true (loaded.messages = again.messages);
+  expect_unchanged "replacement was verified by a fresh read" refreshed)
+
+let test_observation_invalidates_every_named_object () =
+  with_session (fun session_dir ->
+    let module Objects = Agent_core.Checkpoint_objects in
+    let memo = Objects.create_memo () in
+    let objects_dir = Filename.concat session_dir "objects" in
+    Unix.mkdir objects_dir 0o700;
+    let install ?previous boundary checkpoint =
+      let plan = match Objects.plan_save memo ?previous boundary checkpoint with
+        | Ok plan -> plan | Error error -> fail (Agent_core.Error.to_string error) in
+      List.iter (fun (digest, bytes) ->
+        let path = Keeper_checkpoint_object_store.path ~session_dir digest in
+        let directory = Filename.dirname path in
+        if not (Sys.file_exists directory) then Unix.mkdir directory 0o700;
+        write_file path bytes) plan.objects;
+      write_file (canonical_path session_dir) plan.head_bytes;
+      plan
+    in
+    let rec close index previous messages =
+      let turn = make_checkpoint ~session_id:"session" ~turn_count:index
+        ~marker:(string_of_int index) in
+      let plan = install ?previous Objects.Turn_closes
+        { turn with messages = messages @ turn.messages } in
+      if index = (2 * Objects.turns_per_segment) + 1 then plan
+      else close (index + 1) (Some plan.head) plan.decoded.messages
+    in
+    let closed = close 1 None [] in
+    let continued = install ~previous:closed.head Objects.Turn_continues
+      { closed.decoded with messages = closed.decoded.messages @
+          (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"open").messages } in
+    let head = continued.head in
+    let segment = match head.history.segment with
+      | Some segment -> segment.segment | None -> fail "fixture has no segment" in
+    let load_segment digest =
+      match Objects.segment_of_string ~digest
+          (read_file (Keeper_checkpoint_object_store.path ~session_dir digest)) with
+      | Ok segment -> segment | Error error -> fail (Objects.load_error_to_string error) in
+    let previous_segment = match (load_segment segment).previous with
+      | Some digest -> digest | None -> fail "fixture has no transitive segment" in
+    let transitive_bundle = match (load_segment previous_segment).segment_turns with
+      | turn :: _ -> turn.bundle | [] -> fail "fixture has no transitive bundle" in
+    let direct_bundle = match head.history.turns with
+      | turn :: _ -> turn.bundle | [] -> fail "fixture has no direct bundle" in
+    let open_message = match head.history.open_messages with
+      | digest :: _ -> digest | [] -> fail "fixture has no open message" in
+    List.iter (fun (label, digest) ->
+    let _checkpoint, witness = observed_load session_dir in
+    let path = Keeper_checkpoint_object_store.path ~session_dir digest in
+    let bytes = read_file path in
+    write_file path "corrupted object";
+    expect_not_reusable label witness;
+    (match Observation.load ~session_dir ~session_id:"session" with
+     | Error (Store.Objects_invalid (Objects.Object_digest_mismatch _)) -> ()
+     | Error error -> failf "%s: wrong error %s" label (Store.checkpoint_load_error_to_string error)
+     | Ok _ -> fail (label ^ ": returned a witness for a corrupt object"));
+    write_file path bytes)
+    [ "system prompt", head.header_objects.system_prompt
+    ; "tool schemas", head.header_objects.tools
+    ; "direct segment", segment
+    ; "transitive segment", previous_segment
+    ; "transitive turn bundle", transitive_bundle
+    ; "direct turn bundle", direct_bundle
+    ; "open message", open_message ])
+
+let test_observation_refuses_missing_linked_and_unreadable_objects () =
+  List.iter (fun (label, mutate) -> with_session (fun session_dir ->
+    save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"body");
+    let _checkpoint, witness = observed_load session_dir in
+    let path, _digest = bundle_path session_dir in
+    mutate session_dir path;
+    expect_not_reusable label witness;
+    match Observation.load ~session_dir ~session_id:"session" with
+    | Error (Store.Objects_invalid _) -> ()
+    | Error error -> failf "%s: wrong error %s" label (Store.checkpoint_load_error_to_string error)
+    | Ok _ -> fail (label ^ ": returned an unavailable object's witness")))
+    [ "missing", (fun _session_dir path -> Unix.unlink path)
+    ; "truncated", (fun _session_dir path -> write_file path "")
+    ; "symlink", (fun session_dir path ->
+        let outside = Filename.concat (Filename.dirname session_dir) "outside-object" in
+        write_file outside (read_file path); Unix.unlink path; Unix.symlink outside path)
+    ; "permission changed", (fun _session_dir path -> Unix.chmod path 0o000) ]
+
+let test_observation_refuses_a_changed_or_truncated_head () = with_session (fun session_dir ->
+  save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"first");
+  let _checkpoint, witness = observed_load session_dir in
+  save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:2 ~marker:"second");
+  expect_not_reusable "new canonical" witness;
+  let checkpoint, witness = observed_load session_dir in
+  check int "new load names the new turn" 2 checkpoint.turn_count;
+  write_file (canonical_path session_dir) "{";
+  expect_not_reusable "truncated canonical" witness;
+  (match Observation.load ~session_dir ~session_id:"session" with
+   | Error (Store.Parse_error _) -> ()
+   | Error error -> fail (Store.checkpoint_load_error_to_string error)
+   | Ok _ -> fail "a truncated head produced a witness");
+  Unix.unlink (canonical_path session_dir);
+  match Observation.load ~session_dir ~session_id:"session" with
+  | Error Store.Not_found -> ()
+  | Error error -> fail (Store.checkpoint_load_error_to_string error)
+  | Ok _ -> fail "an absent head produced a witness")
+
+let test_observation_uses_the_snapshot_of_the_bytes_actually_read () = with_session (fun session_dir ->
+  save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"read before change");
+  let path, bundle = bundle_path session_dir in
+  let mutated = ref false in
+  let after_object_read (digest : Agent_core.Checkpoint_objects.digest) =
+    if not !mutated && String.equal (digest :> string) (bundle :> string) then (
+      mutated := true;
+      write_file path "changed after the owned read") in
+  match Observation.For_testing.load_after_object_read ~after_object_read
+      ~session_dir ~session_id:"session" with
+  | Error error -> fail (Store.checkpoint_load_error_to_string error)
+  | Ok (checkpoint, witness) ->
+    check bool "the race occurred at the bundle" true !mutated;
+    check int "the value is the checkpoint actually read" 1 checkpoint.turn_count;
+    expect_not_reusable "later bytes cannot inherit the earlier digest proof" witness)
+
+let test_observation_reuses_only_an_eligible_written_lineage () = with_session (fun session_dir ->
+  save_for_keeper ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"kept");
+  let kept = load_value ~session_dir "kept value unavailable" in
+  let loaded, witness = observed_load session_dir in
+  check bool "observed reader keeps the existing fast path" true (loaded.messages == kept.messages);
+  expect_unchanged "eligible lineage" witness;
+  Store.forget_written_lineages ~session_root:(Filename.dirname session_dir) ~keeper_name:keeper;
+  expect_not_reusable "evicted lineage no longer grants reuse" witness;
+  let _checkpoint, cold = observed_load session_dir in
+  expect_unchanged "cold reread verified every object" cold)
+
 let () =
   run "keeper checkpoint read once"
     [ ( "locked read"
@@ -368,6 +533,20 @@ let () =
             test_a_cold_count_keeps_only_the_same_head
         ; test_case "a re-pointed root moves lookups with the save" `Quick
             test_a_repointed_root_moves_lookups_with_the_save
+        ] )
+    ; ( "read observation"
+      , [ test_case "cold read and replacement revalidation" `Quick
+            test_observation_reads_and_revalidates_without_retaining_a_lineage
+        ; test_case "every named object invalidates the witness" `Quick
+            test_observation_invalidates_every_named_object
+        ; test_case "missing, truncated, linked and unreadable objects refuse reuse" `Quick
+            test_observation_refuses_missing_linked_and_unreadable_objects
+        ; test_case "changed, truncated and absent heads refuse reuse" `Quick
+            test_observation_refuses_a_changed_or_truncated_head
+        ; test_case "witness belongs to the bytes read before a race" `Quick
+            test_observation_uses_the_snapshot_of_the_bytes_actually_read
+        ; test_case "lineage witness expires with its existing eligibility" `Quick
+            test_observation_reuses_only_an_eligible_written_lineage
         ] )
     ; ( "exact snapshot"
       , [ test_case "a keeper snapshot uses the kept decode" `Quick

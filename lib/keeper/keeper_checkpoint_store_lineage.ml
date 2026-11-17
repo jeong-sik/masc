@@ -248,7 +248,7 @@ let handed_out (checkpoint : Agent_core.Checkpoint.t) =
    identity before a concurrent save's rename would otherwise drop the value
    that save just kept. The next save or save-bound load replaces a value
    whose file changed. *)
-let reusable_written_value ~canonical_path ~identity =
+let find_reusable_written_value ~canonical_path ~identity =
   match summary_key canonical_path with
   | None -> None
   | Some key ->
@@ -264,7 +264,12 @@ let reusable_written_value ~canonical_path ~identity =
           in
           { state with entries; next_seq = seq }, Some written.written_checkpoint)
         else state, None)
-    |> Option.map handed_out
+
+let reusable_written_value ~canonical_path ~identity =
+  find_reusable_written_value ~canonical_path ~identity |> Option.map handed_out
+
+let written_lineage_is_reusable ~canonical_path ~identity =
+  find_reusable_written_value ~canonical_path ~identity |> Option.is_some
 
 (* After a save-bound read: the lineage describes the bytes read only if the
    file identity is the same before and after the read, as for the summary. *)

@@ -248,8 +248,8 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 이 보장은 기존 Keeper Memory lane의 Keeper별 직렬화와 workspace lease 안에서 성립한다. owner 갱신은 전체 expected record와 progress를 다시 비교하며 다른 tail을 거절한다.
 
 - history 가 읽는 자리는 둘이다.
-  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다(`keeper_librarian_durable_commit.ml` 252~253행). 운영자 해소 흐름도 같은 검사 함수를 쓴다.
-  - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 문제 확인 당시에는 오류였다(`lib/keeper/keeper_librarian_durable_owner.ml` 216~217행). pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
+  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다. 지금은 `keeper_librarian_durable_commit.ml` 의 `frontier` 가 `Settled_if_replaced` 로 읽는다. 운영자 해소 흐름도 같은 검사 함수를 쓴다.
+  - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 문제 확인 당시에는 오류였다. 지금은 `lib/keeper/keeper_librarian_durable_owner.ml` 이 `Submit.End_replaced` 로 끝낸다. pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
 - 이 갈래는 거절 갈래(`Refused`)를 지나지 않는다. 다음 읽기를 좁히지 않는다.
   - 새 원본을 만든 바로 그 pass 에서 이 갈래가 나와도 같다. 그 자리는 거절을 `Memory_refused` 로 돌려주고, 그 값은 좁히기 표시를 남긴다(`keeper_librarian_durable_execution.ml` 519~530행, `lib/keeper/keeper_librarian_durable_consumer.ml` 1692~1719행). 이 갈래는 그 값으로 돌려주지 않는다.
 - 그다음 pass 는 정리된 원본을 옮기고 같은 범위를 지금 목적지로 새로 만든다. 정리된 거절이 가는 길 그대로다. 그 pass 는 3.6 이 부른다.
@@ -270,6 +270,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 선언 교체 종료는 요청을 실행하지 않았거나, 결과를 모르는 옛 요청을 미소비 상태로 끝냈다는 사실이다. 입력이 크다는 판정이 아니다.
 - host가 저장한 `Replaced_declaration` 사유 또는 소비자가 검증한 종료 증거가 있을 때만 다음 읽기를 좁히지 않는다.
 - 일반 `Not_allowed`와 설명 글자가 같다는 이유로 교체 종료를 만들지 않는다. 지금 목적지와의 비교만으로 사유를 추정하지도 않는다.
+  3.3의 접수 전 종료는 이 금지에 해당하지 않는다. 그 비교는 사유를 추정하지 않고, 종료를 만들기 전에 교체를 확인하는 조건이다.
 - 교체 전에 실제로 받은 입력 크기 거절과 이미 좁힌 범위는 보존한다. 새 선언은 그 증거를 없애지 않는다.
 - 종료 증거를 저장한 뒤에는 현재 worker나 목적지를 읽지 못해도 같은 종료로 읽는다. 선언을 되돌렸다고 일반 거절로 바뀌지 않는다.
 - 다음 pass는 읽은 위치에서 미소비 입력을 다시 고른다. 그 사이 도착한 입력이 함께 포함될 수 있다.
@@ -446,17 +447,18 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 ## 7. 층
 
 아래는 구현을 나누는 단위다. 층 목록은 현재 head의 구현·회귀·배포 판정을 대신하지 않는다.
+마지막 칸은 그 층을 main 에 넣은 PR 이다. 병합은 배포나 실제 원본 회복을 뜻하지 않는다.
 
-| 층 | 바꾸는 것 | 확인 |
-|---|---|---|
-| L0 | 목적지 관계 타입(3.1). `Not_allowed` 사유 타입과 worker wire, 명시적인 교체 종료의 저장·복원, 좁히기(3.4), 깨움(3.6)의 공통 계약 | 8절의 종료 증거·좁히기·깨움 시험 |
-| L1 | guard 결과 타입, `run`의 갈래, Runtime 판정과 host의 종료 사유(3.2). Exact·Runtime의 계약과 설명서. keeper-librarian package 0.2.5 | 8절의 host 시험 |
-| L1b | CLI walker가 전송 전 guard 거절을 값으로 받아 멈추고 receipt를 남긴다(3.2). #51343으로 main에 병합됐다 | 8절의 CLI 시험. 이 병합은 다른 층의 완료 증거가 아니다 |
-| L2a | 목적지 확인 통합, 정본 접수 phase·전송 의도에 결속한 종료, history owner·inventory의 같은 종료 판정(3.3) | 8절의 Keeper 시험 |
-| L2b | floor step owner·chain의 실행 전 교체 종료와 후속 pass(3.3) | 8절의 floor 시험 |
-| L3 | history Cut의 별도 미소비 종료, 후속 요청 결속과 옛 실행의 효과 차단(3.5). 현재 archive 방식과 정책 차이는 3.5·3.7에 구분한다 | 8절의 Cut·재시작·Memory·ACK 시험 |
-| L4 | admission 미소비 묶음 전체의 새 root, Deferred 후보 보존과 소유권 인계(3.9) | 8절의 admission 시험 |
-| L5 | 받은 답을 보존하고 같은 owner·설치의 미실행 Gate를 이어가는 권한(3.8) | 8절의 Gate 시험 |
+| 층 | 바꾸는 것 | 확인 | main 반영(2026-11-17) |
+|---|---|---|---|
+| L0 | 목적지 관계 타입(3.1). `Not_allowed` 사유 타입과 worker wire, 명시적인 교체 종료의 저장·복원, 좁히기(3.4), 깨움(3.6)의 공통 계약 | 8절의 종료 증거·좁히기·깨움 시험 | #52621 |
+| L1 | guard 결과 타입, `run`의 갈래, Runtime 판정과 host의 종료 사유(3.2). Exact·Runtime의 계약과 설명서. keeper-librarian package 0.2.5 | 8절의 host 시험 | #52622 |
+| L1b | CLI walker가 전송 전 guard 거절을 값으로 받아 멈추고 receipt를 남긴다(3.2). #51343으로 main에 병합됐다 | 8절의 CLI 시험. 이 병합은 다른 층의 완료 증거가 아니다 | #51343 |
+| L2a | 목적지 확인 통합, 정본 접수 phase·전송 의도에 결속한 종료, history owner·inventory의 같은 종료 판정(3.3) | 8절의 Keeper 시험 | #52674 |
+| L2b | floor step owner·chain의 실행 전 교체 종료와 후속 pass(3.3) | 8절의 floor 시험 | 없음 |
+| L3 | history Cut의 별도 미소비 종료, 후속 요청 결속과 옛 실행의 효과 차단(3.5). 현재 archive 방식과 정책 차이는 3.5·3.7에 구분한다 | 8절의 Cut·재시작·Memory·ACK 시험 | #52695 |
+| L4 | admission 미소비 묶음 전체의 새 root, Deferred 후보 보존과 소유권 인계(3.9) | 8절의 admission 시험 | 없음 |
+| L5 | 받은 답을 보존하고 같은 owner·설치의 미실행 Gate를 이어가는 권한(3.8) | 8절의 Gate 시험 | 없음 |
 
 - L0 이 L1 보다 먼저다. L1 만 들어가면 선언을 바꿀 때 기다리던 Keeper 가 모두 한 턴씩 읽게 되고, 쉬는 Keeper 는 다음 턴까지 그 범위를 다시 만들지 않는다.
 - L1b 는 다른 층에 기대지 않는다. L1 없이 들어가도 CLI slot 의 guard 거절이 `raised` 대신 미뤄진 시도로 남는다. 그 요청은 선언을 되돌리면 다시 실행된다.
@@ -531,7 +533,8 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
   - CLI walker 가 guard 거절을 다시 예외로 던지게 하면 CLI 시험이 `raised` 로 실패한다.
   - `Declaration_replaced` 를 `Not_now` 로 바꾸면 host 시험이 실패한다.
   - 3.1 의 조건 3 을 빼면 "파일만 고친 때" 시험이 실패한다.
-  - 저장된 종료 대신 현재 관계만 보면 rollback·목적지 조회 실패 시험이 실패해야 한다.
+  - 저장된 종료 대신 현재 관계만 보면 rollback·목적지 조회 실패 시험이 실패해야 한다. rollback 시험은
+    `test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending`(#52622)이다. 목적지 조회 실패 시험은 2026-11-17 main 에 없다.
   - 전송 의도 확정 전에 submit을 보내거나 전송 뒤 Unknown을 접수 전으로 돌리면 대응 경계 시험이 실패해야 한다. Cut claim·Memory receipt 확인을 빼도 해당 시험이 실패해야 한다.
   - Deferred 후보를 빼거나, 미해소 형제를 다른 후보의 종료에 동승시키거나, 전송된 Gate를 미실행으로 취급하면 각각의 묶음 보존·권한·Gate 재전송 방지 시험이 실패해야 한다.
   - 좁히기 규칙이 사유를 가리지 않게 하면 일반 `Permission_refused`의 좁히기 시험이 실패해야 한다.
@@ -551,6 +554,8 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
 ### 9.2 결과가 불명확한 history Cut도 미소비 종료 후 다시 판단한다
 
 3.5의 Cut 조건과 선언 교체가 확인되면 별도 종료 증거를 남긴다. provider 결과의 불명확성은 그대로 보존한다. 추가 model 요청이 전송될 수 있음을 포함한 선택이다.
+
+재판단 한 번이 보낼 수 있는 model 요청 수의 상한은 정하지 않았다. 9.4는 같은 종료로 root를 반복 만들지 않는다고 보장하지만, 전체 호출량은 막지 않는다. 상한을 둘지는 열린 질문이다.
 
 이 선택은 같은 선언의 Cut이나 Raised, floor·admission의 결과 불명까지 일반화하지 않는다. 기존 원본의 Memory 반영이나 ACK를 허락하는 선택도 아니다.
 

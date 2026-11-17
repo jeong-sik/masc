@@ -472,6 +472,93 @@ let test_gemini_image_and_audio_unchanged () =
     [ image_block, "image/png", "SU1H"; audio_block, "wav", "QVVE" ]
 ;;
 
+let test_request_builders_honor_frozen_document_capability () =
+  let rec has_part part (value : Yojson.Safe.t) = match value with
+    | `Assoc fields ->
+      List.assoc_opt "type" fields = Some (`String part)
+      || List.exists (fun (_, value) -> has_part part value) fields
+    | `List values -> List.exists (has_part part) values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> false
+  in
+  List.iter (fun supported ->
+    List.iter (fun (kind, model_id, build, project, native_part) ->
+      let caps =
+        { (Capabilities.capabilities_of_kind kind) with
+          supports_document_input = supported }
+      in
+      let config = Provider_config.make ~kind ~model_id
+        ~base_url:"http://127.0.0.1:0" ~max_tokens:1024
+        ~model_capabilities_override:caps () in
+      let check_body ~nested messages =
+        let body = build ~config ~messages () in
+        let parsed = Yojson.Safe.from_string body in
+        let projected = match project config messages with
+          | Ok (projection : _ Reasoning_history_projection.projection) -> projection.messages
+          | Error error -> fail (Reasoning_history_projection.error_to_string error) in
+        let projected_bytes = Yojson.Safe.to_string (`List
+          (List.concat_map (fun (message : Types.message) ->
+             List.map Api_common.content_block_to_json message.content) projected)) in
+        check bool "sizing projection honors the same document capability" supported
+          (contains ~needle:"UERG" projected_bytes);
+        (* Responses tool output documents are JSON text, not input_file
+           parts. This checks the false-capability boundary there, not native
+           document support for that existing tool-output representation. *)
+        if not nested || kind = Provider_config.Anthropic then
+          check bool "native document follows frozen capability" supported
+            (has_part native_part parsed);
+        check bool "unsupported document has an explicit omission" (not supported)
+          (contains ~needle:"document omitted" body);
+        check bool "document bytes are sent only when supported" supported
+          (contains ~needle:"UERG" body)
+      in
+      check_body ~nested:false [user_message [Types.Text "read this"; document_block]];
+      let call = { (user_message []) with role = Types.Assistant;
+        content = [Types.ToolUse { id = "read-doc"; name = "reader"; input = `Assoc [] }] } in
+      let result = { (user_message [Types.ToolResult
+        { tool_use_id = "read-doc"; content = "reader result";
+          outcome = Types.Tool_succeeded; json = None;
+          content_blocks = Some [Types.Text "reader caption"; document_block] }])
+        with role = Types.Tool } in
+      check_body ~nested:true [user_message [Types.Text "read a document"]; call; result])
+      [Provider_config.Anthropic, "claude-test",
+        (fun ~config ~messages () -> Backend_anthropic.build_request ~config ~messages ()),
+        (fun config messages -> Backend_anthropic.project_history config messages), "document";
+       Provider_config.OpenAI_compat, "gpt-test",
+        (fun ~config ~messages () -> Backend_openai_responses.build_request ~config ~messages ()),
+        (fun config messages -> Backend_openai_responses.project_history config messages), "input_file"])
+    [false; true]
+;;
+
+let test_document_degradation_descends_nested_tool_results () =
+  let wrap id content blocks = Types.ToolResult
+    { tool_use_id=id; content; outcome=Types.Tool_succeeded;
+      json=Some (`Assoc ["source", `String id]); content_blocks=Some blocks } in
+  let original = [user_message [wrap "outer" "outer result"
+    [wrap "inner" "inner result" [document_block]]]] in
+  let project = Api_common.degrade_document_messages
+    ~wire_form:Api_common.Document_source_block ~supports_document_input:false in
+  let projected, count = project original in
+  check int "one original document counted" 1 count;
+  let bytes messages = Yojson.Safe.to_string (`List (List.concat_map
+    (fun (message : Types.message) -> List.map Api_common.content_block_to_json message.content)
+    messages)) in
+  check bool "nested bytes not sent" false (contains ~needle:"UERG" (bytes projected));
+  check bool "original bytes retained" true (contains ~needle:"UERG" (bytes original));
+  let again, repeated = project projected in
+  check int "a second projection introduces no omission" 0 repeated;
+  check string "projection is stable" (bytes projected) (bytes again);
+  match projected with
+  | [{Types.content=[Types.ToolResult outer]; _}] ->
+    check string "outer operation identity" "outer" outer.tool_use_id;
+    check (option json) "outer structured result" (Some (`Assoc ["source", `String "outer"])) outer.json;
+    (match outer.content_blocks with
+     | Some [Types.ToolResult inner] ->
+       check string "inner operation identity" "inner" inner.tool_use_id;
+       check bool "inner result text retained" true (contains ~needle:"inner result" inner.content)
+     | _ -> fail "nested tool result identity lost")
+  | _ -> fail "outer tool result identity lost"
+;;
+
 let () =
   run
     "media_document_admission"
@@ -500,6 +587,10 @@ let () =
             "history document does not sink a later turn"
             `Quick
             test_history_document_does_not_sink_later_turn
+        ; test_case "request builders honor document capability for user and tool input"
+            `Quick test_request_builders_honor_frozen_document_capability
+        ; test_case "document degradation descends through nested tool results"
+            `Quick test_document_degradation_descends_nested_tool_results
         ] )
     ; ( "wires that carry documents keep their native form"
       , [ test_case

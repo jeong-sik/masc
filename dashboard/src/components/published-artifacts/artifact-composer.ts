@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { ApiRequestError } from '../../api/core'
+import { downloadArtifactTextInput, type ArtifactLocalTextInput } from '../../lib/artifact-local-text'
+import { ArtifactLocalTextEditor } from './artifact-local-text-editor'
 import {
   publishArtifact, readPublishedDraft, fetchWorkspacePublishedArtifact, captureArtifactWorkspace,
   type ArtifactDocument, type ArtifactDraft, type ArtifactPublication, type ArtifactPublicationRequest, type ArtifactWorkspace,
@@ -16,6 +18,7 @@ export type ArtifactDraftSnapshot = {
   readonly identity: object;
   readonly value: ArtifactDraft;
   readonly base?: { readonly id: string; readonly revision: number };
+  readonly pendingText?: ArtifactLocalTextInput;
 }
 export type ArtifactDraftRetention = {
   remember: (snapshot: ArtifactDraftSnapshot) => void;
@@ -42,19 +45,29 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
   initial: ArtifactDraft; base?: ArtifactDocument; capturedWorkspace?: ArtifactWorkspace; isCurrent: () => boolean;
   captureAttempt?: () => () => boolean;
   workspaceRoot: string;
-  onDraftChange: (draft: ArtifactDraft) => void;
+  onDraftChange: (draft: ArtifactDraft, pendingText: ArtifactLocalTextInput | null) => void;
   onRelease: () => void;
   onMutation: (outcome: ArtifactPublicationOutcome) => void;
   onSaved: (publication: ArtifactPublication, workspace: ArtifactWorkspace) => void; onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(initial)
   const latestDraft = useRef(initial)
-  const updateDraft = (change: Partial<ArtifactDraft>) => {
+  const projection = useRef<object>({})
+  const [mode, setMode] = useState<'visual' | 'source'>('visual')
+  const [pendingText, setPendingText] = useState<ArtifactLocalTextInput | null>(null)
+  const pending = useRef<ArtifactLocalTextInput | null>(null)
+  const updateDraft = (change: Partial<ArtifactDraft>, input = pending.current) => {
     const next = { ...latestDraft.current, ...change }
+    if (next.content !== latestDraft.current.content || next.format !== latestDraft.current.format) projection.current = {}
     latestDraft.current = next
+    pending.current = input; setPendingText(input)
     setDraft(next)
     // Capture synchronously: retirement may unmount us before an effect runs.
-    onDraftChange(next)
+    onDraftChange(next, input)
+  }
+  const selectText = (input: ArtifactLocalTextInput | null) => {
+    pending.current = input; setPendingText(input)
+    onDraftChange(latestDraft.current, input)
   }
   const [state, setState] = useState<SaveState>({ kind: 'ready' })
   const [latestError, setLatestError] = useState('')
@@ -76,7 +89,8 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
   }, [])
   const ready = state.kind === 'ready' || state.kind === 'conflict'
   const save = async () => {
-    if (sending.current || state.kind !== 'ready' || workspace.kind !== 'ready' || !current()) return
+    if (sending.current || state.kind !== 'ready' || workspace.kind !== 'ready' || !current()
+      || (pending.current && pending.current.input !== pending.current.original)) return
     const attemptCurrent = captureAttempt?.() ?? (() => true)
     if (!attemptCurrent()) return
     sending.current = true
@@ -158,11 +172,23 @@ export function ArtifactComposer({ initial, base, workspaceRoot, isCurrent, onDr
     <label class="block text-sm">형식 <select aria-label="문서 형식" disabled=${!ready} value=${draft.format}
       onChange=${(event: Event) => updateDraft({ format: (event.target as HTMLSelectElement).value as ArtifactDraft['format'] })}>
       <option value="markdown">Markdown</option><option value="html">HTML</option></select></label>
-    <label class="block text-sm">본문<textarea aria-label="문서 본문" spellcheck=${false}
+    ${draft.format === 'html' ? html`<div class="flex gap-4" aria-label="본문 편집 방식">
+      <button type="button" aria-pressed=${mode === 'visual'} onClick=${() => setMode('visual')}>글·셀 편집</button>
+      <button type="button" aria-pressed=${mode === 'source'} onClick=${() => setMode('source')}>HTML 원본 편집</button>
+    </div>` : null}
+    ${draft.format === 'html' && mode === 'visual' ? html`<${ArtifactLocalTextEditor} content=${draft.content} projection=${projection.current}
+      selection=${pendingText} disabled=${!ready} isCurrent=${current} onSelection=${selectText}
+      onApply=${(content: string) => { if (ready && current()) updateDraft({ content }, null) }} />`
+      : html`<label class="block text-sm">본문<textarea aria-label="문서 본문" spellcheck=${false}
       class="mt-1 block min-h-80 w-full resize-y rounded border p-3 font-mono text-sm bg-[var(--color-bg-base)]"
-      disabled=${!ready} value=${draft.content} onInput=${(event: Event) => field('content', (event.target as HTMLTextAreaElement).value)} /></label>
+      disabled=${!ready} value=${draft.content} onInput=${(event: Event) => field('content', (event.target as HTMLTextAreaElement).value)} /></label>`}
+    ${pendingText && (mode === 'source' || draft.format !== 'html') ? html`<aside aria-label="미반영 입력" class="border p-3">
+      <p>화면 편집에서 입력한 글을 아직 반영하지 않았습니다.</p><pre class="whitespace-pre-wrap">${pendingText.input}</pre>
+      <button type="button" onClick=${() => downloadArtifactTextInput(pendingText)}>미반영 입력 다운로드</button>
+    </aside>` : null}
     <div class="flex flex-wrap gap-4 text-sm">
-      <button type="button" onClick=${save} disabled=${workspace.kind !== 'ready' || state.kind !== 'ready' || !draft.title.trim() || !draft.summary.trim() || !draft.content.trim()}>
+      <button type="button" onClick=${save} disabled=${workspace.kind !== 'ready' || state.kind !== 'ready' || !draft.title.trim() || !draft.summary.trim() || !draft.content.trim()
+        || (pendingText !== null && pendingText.input !== pendingText.original)}>
         ${state.kind === 'saving' ? '저장 중…' : base ? '새 버전 저장' : '아티팩트 등록'}</button>
       <button type="button" onClick=${() => downloadArtifactDraft(draft)}>원고 다운로드</button>
     </div>

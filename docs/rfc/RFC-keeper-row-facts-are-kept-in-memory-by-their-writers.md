@@ -1,9 +1,9 @@
 ---
 rfc: "keeper-row-facts-are-kept-in-memory-by-their-writers"
-title: "Keeper 행이 보여 주는 사실은 쓰는 곳이 메모리에도 고치고, 읽는 쪽은 파일을 열지 않는다"
+title: "Keeper 행이 보여 주는 사실은 쓰는 곳이 메모리에도 고치고, 읽는 쪽은 그 사실 때문에 파일을 열지 않는다"
 status: Draft
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 author: vincent + claude
 related: ["0477", "0474", "0204", "http-transport-runs-on-its-own-domain-and-each-route-names-where-it-runs"]
 ---
@@ -12,21 +12,23 @@ related: ["0477", "0474", "0204", "http-transport-runs-on-its-own-domain-and-eac
 
 ## 0. 요약
 
-주기 루프 셋이 Keeper 31개의 행을 1~2분마다 따로 다시 만든다. 행 하나를 만들 때마다 meta 파일과 Keeper 기록 다섯 묶음의 끝을 다시 읽고, 날짜 파일을 목록으로 훑고 stat 한다. 2026-11-17 22:22~22:56(34분)에 300 ms 를 넘긴 Keeper 행이 867개 쌓였다. 근거는 연구 노트 [2026-11-17-read-path-inventory](../research/2026-11-17-read-path-inventory.md)(PR #52888)에 있다.
+주기 루프 셋이 Keeper 31개의 행을 따로 다시 만든다. 행 하나마다 meta 파일과 Keeper 기록 다섯 묶음의 끝을 다시 읽고, 날짜 파일을 목록으로 훑고 stat 한다. 2026-11-17 22:22~22:56(34분)에 300 ms 를 넘긴 Keeper 행이 867개 쌓였다. 근거는 연구 노트 `docs/research/2026-11-17-read-path-inventory.md` 에 있다. 그 노트는 PR #52888 에 있고 아직 main 에 없다.
 
 이 RFC 는 규칙 하나를 세운다.
 
-> 화면이 보는 Keeper 사실은 그 사실을 쓰는 함수가 메모리 값도 고친다. 읽는 쪽은 메모리 값만 읽고 파일을 열지 않는다.
+> 화면이 보는 Keeper 사실은 그 사실을 쓰는 함수가 메모리 값도 고친다. 읽는 쪽은 그 사실 때문에 파일을 열지 않는다.
 
 결정은 다섯 가지다.
 
-1. 사실 다섯(결정 기록의 끝, 최근 도구 호출 6건, 최근 execution receipt, 최근 TurnRecord, 최근 metrics 120행)은 쓰는 함수가 메모리 값도 고친다. meta 는 이미 있는 Owner projection 을 읽는다(§3.1).
-2. 파일 쓰기와 메모리 고치기는 Keeper·사실마다 잠금 하나 안에서 한다. 그래야 메모리 순서가 파일 순서와 같다(§3.3).
-3. 비어 있는 값은 첫 읽기가 파일에서 한 번 채운다. 쓰는 쪽이 먼저 넣은 값은 덮지 않는다(§3.4).
-4. 메모리 값은 디스크에 저장하지 않는 파생 값이다. 권위는 파일에 있다. 메모리 값은 그 순간 파일에서 다시 계산한 값과 같아야 하고, 차분 시험과 TLA+ 로 이를 지킨다(§5).
-5. 다 옮기면 `read_policy` 의 Current/Reuse 구분, 10초 캐시 둘, Keeper 세마포어, `Tool_audit_cache` 를 지운다(§4 L4).
+1. 메모리에 두는 값은 행이 실제로 쓰는 값만이다(§1.1). 결정 기록의 마지막 행, 도구 호출 원장의 마지막 16줄, 최근 execution receipt, 최근 TurnRecord, metrics 끝 120행과 가장 최근 Turn tool audit 행이다. meta 는 Owner 가 이미 메모리에 든 값을 읽는다(§3.1).
+2. 파일 쓰기, 메모리 고치기, 메모리 채우기, 메모리 지우기는 모두 그 저장소가 이미 쓰는 잠금 안에서 한다(§3.3, §3.4). 그래서 잠금이 풀려 있을 때 메모리 값은 파일에서 다시 계산한 값과 같다.
+3. 쓰는 쪽은 빈 값을 채우지 않는다. 빈 값은 읽는 쪽이 잠금 안에서 파일로 채운다.
+4. 메모리 값은 디스크에 저장하지 않는 파생 값이다. 값은 쓰는 쪽이 넘긴 JSON 그대로다. 차분 시험과 TLA+ 로 "메모리 값 = 파일에서 다시 계산한 값"을 지킨다(§5).
+5. 다 옮기면 이 값들을 읽는 행 helper 의 Current/Reuse 구분, 10초 캐시 둘, `Tool_audit_cache` 를 지운다. Keeper 세마포어는 남은 행 일을 잰 뒤 정한다(§4 L4).
 
-고치지 않는 것: `Systhread_host` 와 풀(다른 RFC), `schedules.json` 쓰기, 서버 밖에서도 고치는 profile TOML, Keeper 행을 SSE 로 나르는 일(RFC-0477 다음 층), serving domain.
+보이는 동작은 바꾸지 않는다. 행이 보여 주는 값은 지금 파일에서 읽는 값과 같다.
+
+고치지 않는 것: `Systhread_host` 와 풀(다른 RFC), `schedules.json` 쓰기, 서버 밖에서도 고치는 profile TOML, 승인 audit 와 quarantine 원장(§8.1), Keeper 행을 SSE 로 나르는 일(RFC-0477), serving domain.
 
 ## 1. 지금 상태 (origin/main `bf7d4b468b7a6`)
 
@@ -34,32 +36,41 @@ related: ["0477", "0474", "0204", "http-transport-runs-on-its-own-domain-and-eac
 
 `Operator_control_snapshot.keepers_json` 은 `snapshot_read` 한 곳에서만 불린다(`operator_control_snapshot.ml:710`). 행 하나는 이렇게 만든다.
 
-| 묶음 | 읽는 것 | 어디서 | 이미 메모리에 있나 |
+| 묶음 | 실제로 쓰는 값 | 어디서 | 이미 메모리에 있나 |
 |---|---|---|---|
-| meta | Keeper meta 파일 통째 | `Keeper_meta_store.read_meta` | 있다. Owner 가 커밋 뒤 `Atomic` 에 둔다(`keeper_owner.ml:936`). 행은 그 값을 안 읽는다 |
-| phase·진단 | registry | `Keeper_registry.get_phase`, 행 하나에서 두 번 | 있다 |
-| 승인 대기 | 승인 큐 | `keeper_approval_queue_rules.ml:35` 의 `Atomic` map, 행 하나에서 두 번 | 있다 |
-| trust | 결정 기록 끝 40 KB·20줄, 최근 도구 호출 6건, 최근 receipt, 승인 audit 최근 행 | `keeper_runtime_trust_snapshot.ml:686-713`, `:896` | 없다 |
-| tool audit | metrics 최근 120행과 최근 tool audit | `operator_control_snapshot_tool_audit.ml:14-38` | 일부. `Tool_audit_cache` 가 있지만 읽을 때마다 날짜 파일을 모두 stat 한다(`keeper_status_metrics.ml:240-275`, `dated_jsonl.ml:1600-1609`) |
-| 최근 활동 | metrics 최근 5행 | `operator_control_snapshot.ml:428` | 없다 |
-| context | 최근 TurnRecord 1행 | `keeper_context_observation_projection.ml:85` | 없다 |
-| blocker | registry 와 최근 receipt | `Keeper_status_bridge.runtime_blocker_fields_json` | receipt 는 없다. 행 하나에서 receipt 를 세 번까지 읽는다 |
+| meta | Keeper meta 통째 | `Keeper_meta_store.read_meta` | 있다. Owner 가 커밋 뒤 `Atomic` 에 둔다(`keeper_owner.ml:936`). 행은 그 값을 안 읽는다 |
+| phase·진단 | registry | `Keeper_registry.get_phase`. 행 하나에서 여러 번 부른다 | 있다 |
+| 승인 대기 | 승인 큐 | `keeper_approval_queue_rules.ml:35` 의 `Atomic` map | 있다 |
+| trust | 결정 기록의 마지막 object 행 | `latest_decision_json`(`keeper_runtime_trust_snapshot.ml:320-366`). 끝 20줄·40 KB 는 그 행을 찾는 창이다 | 없다 |
+| trust | 이 Keeper 의 최근 도구 호출 | `Keeper_tool_call_log.read_latest ~keeper_name`(`keeper_tool_call_log.ml:1558-1587`). workspace 원장의 마지막 16줄에서 이 Keeper 의 최신 행을 찾고, 없으면 `None` | 없다 |
+| trust | 최근 receipt, 승인 audit, workspace 의 대기 승인 | `keeper_runtime_trust_snapshot.ml:686-729` | receipt·audit 는 없다 |
+| tool audit | metrics 끝 120행, 저장소 전체에서 가장 최근 Turn 행 | `operator_control_snapshot_tool_audit.ml:14-38`, `keeper_status_metrics.ml:190-275`. heartbeat 행이 많아 Turn 행은 120행 밖에 있을 수 있다 | 일부. `Tool_audit_cache` 가 있지만 읽을 때마다 날짜 파일을 모두 stat 한다(`dated_jsonl.ml:1600-1609`) |
+| 최근 활동 | metrics 끝 5행 | `operator_control_snapshot.ml:428-436` | 없다 |
+| context | 최근 TurnRecord 1행 | `keeper_context_observation_projection.ml:73-117` | 없다 |
+| blocker | registry 와 최근 receipt | `Keeper_status_bridge.runtime_blocker_fields_json` | receipt 는 없다 |
 
-응답마다 더하는 관측도 있다. `with_current_keeper_observations` 는 응답 하나에 candle ledger 를 한 번 읽고, Keeper 마다 meta 파일을 한 번 더 읽는다(board address, `dashboard_projection_cache.ml:113-135`, `keeper_board_address.ml:14-24`). health-line, execution, briefing 응답이 모두 이 길을 지난다.
+행 하나에서 registry phase 와 receipt 를 여러 번 읽는다. 승인 audit 와 quarantine 원장(`operator_control_snapshot.ml:669-690`)도 읽는다. 이 둘은 이 RFC 밖이다.
+
+응답마다 더하는 관측도 있다. `with_current_keeper_observations` 는 응답 하나에 candle ledger 를 한 번 읽고, Keeper 마다 meta 파일을 한 번 더 읽는다(board address, `dashboard_projection_cache.ml:113-135`, `keeper_board_address.ml:14-24`).
+
+`/gate/keepers?detailed=true` 는 다른 몸체(`masc_keeper_list`, `server_routes_http_routes_channel_gate.ml:567-569`)로 Keeper 행을 만든다. 그 행도 meta 와 최근 receipt 를 읽는다(연구 노트 5절).
 
 ### 1.2 누가 행을 만드나
 
-| 부르는 곳 | 읽기 방식 | 무엇이 부르나 |
+| 부르는 곳 | 읽기 방식 | 언제 |
 |---|---|---|
-| operator snapshot 루프 | Current | `MASC_OPERATOR_REFRESH_INTERVAL_S`(기본 60초, `server_dashboard_http_core_snapshot_refresh.ml:55`) |
-| execution 루프 | Current | 60초(`server_dashboard_http_execution_surfaces.ml:1576`). `GET /api/v1/dashboard/execution` 도 |
-| mission 루프 | Current | 120초(`server_dashboard_http_core_mission.ml:80`). `GET /api/v1/dashboard/briefing` 도 |
+| operator snapshot 루프 | Current | 바뀐 것이 올 때. 두 번 사이를 `MASC_OPERATOR_REFRESH_INTERVAL_S`(기본 60초) 이상 띄운다 |
+| execution 루프 | Current | 같다. 간격 60초(`server_dashboard_http_execution_surfaces.ml:1576`) |
+| mission 루프 | Current | 같다. 간격 120초(`server_dashboard_http_core_mission.ml:80`) |
+| `GET /api/v1/dashboard/execution` | Reuse(`dashboard_execution.ml:976`) | 요청 |
 | MCP 도구 `masc_operator_snapshot` | Reuse | 도구 호출 |
 | `GET /api/v1/dashboard/briefing/sections` | Reuse | 요청 |
 
-세 루프는 보는 사람이 없어도 돈다. 바뀐 것이 와도 직전 변경 읽기에서 간격이 지나야 다시 읽는다(`proactive_refresh.mli:37-41`). 그래서 Keeper 가 바쁘면 루프마다 간격에 한 번 돈다.
+루프는 정해진 주기로 돌지 않는다. 처음 한 번 읽은 뒤에는 바뀐 것이 올 때 읽는다(`proactive_refresh.mli:90-92`). 간격은 바뀐 것 때문에 읽는 두 번 사이의 최소 시간이다(`:37-41`). Keeper 가 바쁘면 바뀐 것이 늘 와서 간격마다 한 번씩 돈다. 보는 사람이 없어도 돈다.
 
-Current 는 10초 캐시(trust `operator_control_snapshot_trust.ml:5`, audit `operator_control_snapshot_tool_audit.ml:157`)를 일부러 건너뛴다. 10초 안에 들어온 커밋도 봐야 해서다(`operator_control_snapshot_tool_audit.ml:155-156`). 세 루프와 요청은 16칸짜리 세마포어 하나를 나눠 쓴다(`operator_control_snapshot.ml:41`).
+Current 는 10초 캐시(trust `operator_control_snapshot_trust.ml:5`, audit `operator_control_snapshot_tool_audit.ml:157`)를 일부러 건너뛴다. 10초 안에 들어온 커밋도 봐야 해서다(`operator_control_snapshot_tool_audit.ml:155-156`). 루프와 요청은 16칸 세마포어 하나를 나눠 쓴다(`operator_control_snapshot.ml:41`).
+
+이 계산은 모두 풀 작업으로 돈다(연구 노트 4절). 계산 하나의 Keeper fiber 는 그 계산을 맡은 풀 worker domain 하나에서 돈다.
 
 ### 1.3 이미 있는 두 모양
 
@@ -67,7 +78,7 @@ Current 는 10초 캐시(trust `operator_control_snapshot_trust.ml:5`, audit `op
 
 | 무엇 | 쓰는 곳 | 읽는 곳 |
 |---|---|---|
-| Owner meta projection | 커밋 뒤 `Atomic.set`(`keeper_owner.ml:936`) | `Keeper_owner_projection.lookup`. `/keepers/turns` 가 이미 쓴다(`server_keeper_waiting_inventory.ml:1273`) |
+| Owner meta projection | 커밋 뒤 `Atomic.set`(`keeper_owner.ml:936`) | `Keeper_owner.projection`. `/keepers/turns` 가 `Keeper_owner_registry.get` 으로 Owner 를 찾아 이미 쓴다(`server_keeper_waiting_inventory.ml:1270-1273`) |
 | `Keeper_turn_pulse` | 기동 때 결정 기록으로 채우고(`server_bootstrap_maintenance.ml:741`), 턴이 끝나면 `record`(`keeper_heartbeat_loop_cycle.ml:121`) | `get`(`keeper_tool_surface_ops.ml:438`) |
 | 승인 큐 | 바꾸는 함수가 저장 잠금 안에서 `Atomic` map 을 바꾼다(`keeper_approval_queue_rules.ml:35`) | 메모리만 읽는다 |
 
@@ -82,91 +93,118 @@ Current 는 10초 캐시(trust `operator_control_snapshot_trust.ml:5`, audit `op
 
 두 번째 모양은 서버 밖에서 고친 파일도 본다. 그 대신 읽을 때마다 목록과 stat 이 남는다. `dated_jsonl.ml:1605-1608` 은 TTL 캐시를 지운 이유를 "바깥 쓰기를 숨긴다"고 적었다.
 
-### 1.4 쓰는 곳
+### 1.4 쓰는 곳과 지우는 곳
 
-| 사실 | 쓰는 함수 | 부르는 곳 | 서버 밖에서 쓰나 |
+| 사실 | 쓰는 함수 | 부르는 곳 | 잠금 |
 |---|---|---|---|
-| 결정 기록 | `Keeper_types_support.append_decision_record`(`keeper_types_support.ml:292`). 크기가 차면 `.1` 로 돌린다(`:250`) | 4곳 | 없다 |
-| 도구 호출 기록 | `Keeper_tool_call_log.log_call` → `Dated_jsonl.append_rotating`(`keeper_tool_call_log.ml:639`) | `mcp_server_eio_call_tool.ml:459` | 없다 |
-| execution receipt | `Keeper_execution_receipt.append` → `Dated_jsonl.append`(`keeper_execution_receipt.ml:554`) | 2곳 | 없다 |
-| TurnRecord | `Keeper_turn_record_writer.write` → `Dated_jsonl.append`(`keeper_turn_record_writer.ml:71`) | 1곳 | 없다 |
-| metrics | `Keeper_types_support.append_keeper_metrics`(`keeper_types_support.ml:48`) | 2곳 | 없다 |
-| meta | Owner 커밋이 메모리의 meta 를 통째로 쓴다(`keeper_meta_store.ml:726-729`) | Owner 하나 | `scripts/migrate-keeper-meta-sandbox.sh` 가 파일을 바꾼다 |
-| profile TOML | 여러 곳 | — | `masc init`, `masc setup`, 운영자 편집 |
+| 결정 기록 | `Keeper_types_support.append_decision_record`(`keeper_types_support.ml:292`). 크기가 차면 `.1` 로 돌린다(`:250-283`) | 4곳. 넘기는 JSON 모양이 저마다 다르다 | 쓰기만 경로 append mutex 안에서 한다(`fs_compat_base_io.ml:302-307`). 돌리기는 그 밖에서 먼저 한다(`keeper_types_support.ml:285`) |
+| 도구 호출 원장 | `Keeper_tool_call_log.log_call` → `Dated_jsonl.append_rotating`(`keeper_tool_call_log.ml:639-645`). commit 이 필요 없는 행은 비동기 큐로 가고, 큐가 차면 버린다(`:761-805`) | 6곳 | workspace 에 저장소 하나다(`:473-474`). 모든 Keeper 가 같은 잠금을 쓴다 |
+| execution receipt | `Keeper_execution_receipt.append` → `Dated_jsonl.append`(`keeper_execution_receipt.ml:554`) | 2곳 | 저장소 잠금(`dated_jsonl.ml:874`). `open_store` 는 같은 디렉터리에 같은 mutex 를 준다(`:156-171`) |
+| TurnRecord | `Keeper_turn_record_writer.write` → `Dated_jsonl.append`(`keeper_turn_record_writer.ml:71`) | 1곳 | 같다 |
+| metrics | `Keeper_types_support.append_keeper_metrics`(`keeper_types_support.ml:48`) | 2곳 | 같다 |
+| meta | Owner 커밋이 메모리의 meta 를 통째로 쓴다(`keeper_meta_store.ml:726-729`) | Owner 하나 | Owner |
 
-다섯 사실은 쓰는 함수가 하나씩이고 모두 서버 안에서 돈다. 지우는 일도 서버 안이다. 날짜 파일은 `prune_shared_jsonl_stores` 가 지우고(`server_runtime_startup_maintenance.ml:73`), 대시보드 purge 가 Keeper 저장소를 지운다(`server_dashboard_http_delete_actions.ml:672`, `:805`).
+지우는 곳:
+
+- 날짜 파일 prune: 기동 때(`server_runtime_startup_maintenance.ml:73`)와 24시간마다(`server_bootstrap_maintenance.ml:936-947`). `on_pruned` 는 저장소 잠금을 푼 뒤 돈다(`dated_jsonl.ml:2169-2172`).
+- append 뒤 바이트 prune: `on_committed` 다음에 같은 잠금 안에서 돈다(`dated_jsonl.ml:874-878`). metrics 저장소에는 `max_bytes` 가 있다(`keeper_metrics_storage.ml:6-11`). 설정 `metrics.store_max_bytes` 의 기본값은 0 이라 지금은 돌지 않는다.
+- 대시보드 purge(`server_dashboard_http_delete_actions.ml:672`, `:805`)와 runtime 디렉터리 지우기(`:865-870`). 뒤의 것은 receipt 와 TurnRecord 를 지운다.
+
+서버 밖에서 이 저장소에 쓰는 곳은 없다. `masc-stdio` 와 HTTP 런타임은 base path lease 를 같이 잡는다(`main_stdio_eio.ml:54`, `main_eio.ml:273`). `seed_telemetry_store.py` 는 자기 `--root` 에만 쓴다. 다만 `scripts/migrate-keeper-meta-sandbox.sh` 는 meta 파일을 고친다. 스크립트 머리에는 서버를 멈추라는 말이 없다. 서버가 돌 때 고치면 Owner 의 다음 커밋이 메모리 값으로 파일을 덮는다. 지금도 그렇다.
 
 ### 1.5 측정
 
-연구 노트 6절의 숫자다. 서버 로그는 Keeper 하나의 일이 300 ms 를 넘을 때만 남는다.
+연구 노트 1절·6절의 숫자다. 서버 로그는 Keeper 하나의 일이 300 ms 를 넘을 때만 sub-op 를 남기고, 세마포어 대기나 일이 500 ms 를 넘을 때만 wait 를 남긴다.
 
 - 22:22~22:56: 300 ms 넘는 Keeper 행 867개, 35번 몰림, 몰림 하나에 중앙값 25행.
-- 느린 행의 중앙값: trust 186 ms, audit 164 ms, meta 23 ms.
-- 세마포어 대기: p90 4.5 s.
-- TUI 1초 넘는 요청: `/keepers/turns` 16번(1,011~3,081 ms), `/gate/keepers` 3번.
+- 느린 행의 sub-op 중앙값: trust 186 ms, audit 164 ms, meta 23 ms.
+- 세마포어 대기: wait 나 work 가 500 ms 를 넘긴 547행에서 중앙값 593 ms, p90 4.5 s.
+- 같은 창의 TUI 1초 넘는 요청: `/keepers/turns` 15번(1,011~3,081 ms), `/gate/keepers` 3번, `/dashboard/health-line` 1번.
 
 ## 2. 규칙에서 나오는 것
 
-> 화면이 보는 Keeper 사실은 그 사실을 쓰는 함수가 메모리 값도 고친다. 읽는 쪽은 메모리 값만 읽고 파일을 열지 않는다.
+> 화면이 보는 Keeper 사실은 그 사실을 쓰는 함수가 메모리 값도 고친다. 읽는 쪽은 그 사실 때문에 파일을 열지 않는다.
 
-1. 값 하나는 (base path, Keeper, 사실) 하나다. 사실은 닫힌 합타입이다. 모든 `match` 가 모든 사실을 적는다.
-2. 쓰는 함수가 파일에 쓰고, 같은 잠금 안에서 메모리 값을 고친다(§3.3).
-3. 쓰기가 실패했거나 됐는지 모르면 메모리 값을 지운다. 다음 읽기가 파일에서 다시 채운다.
-4. 지우기(prune, purge)도 쓰기다. 지우는 함수가 메모리 값을 지운다.
-5. 비어 있는 값은 첫 읽기가 파일에서 채운다. 쓰는 쪽이 이미 넣은 값은 덮지 않는다.
-6. 메모리 값은 디스크에 저장하지 않는다. 권위는 파일이고, 메모리 값은 그 파일에서 다시 계산한 값과 같아야 한다.
-7. 서버 밖에서도 고치는 파일(profile TOML)은 이 규칙에 넣지 않는다. 지금처럼 내용 키 캐시로 읽는다.
+1. 값 하나는 (저장소, 사실) 하나다. Keeper 저장소의 key 는 (정규화한 base path, Keeper)이고, 도구 호출 원장의 key 는 정규화한 masc root 다. 정규화는 `Keeper_owner_projection.key` 가 쓰는 `Keeper_registry_types.canonical_base_path_exn` 하나로 한다. 사실은 닫힌 합타입이다.
+2. 값은 `Unfilled` 거나 `Filled v` 다. `Filled v` 의 뜻은 "잠금이 풀려 있으면 v 는 파일에서 다시 계산한 값과 같다"이다. `Unfilled` 는 아무것도 주장하지 않는다.
+3. 쓰기, 채우기, 지우기는 모두 그 저장소의 잠금 안에서 한다.
+4. 쓰는 쪽은 `Filled` 값만 고친다. `Unfilled` 는 그대로 둔다. 쓰는 쪽은 자기 행만 알아서 목록 전체를 만들 수 없다.
+5. 쓰기가 실패했거나 됐는지 모르면 값을 `Unfilled` 로 지운다. 쓰지 않은 것이 확실하면(큐가 차서 버림, append guard 가 건너뜀) 값을 그대로 둔다. 파일이 그대로라서다.
+6. 지우기(prune, purge, runtime 디렉터리 지우기)도 쓰기다. 같은 잠금 안에서 값을 `Unfilled` 로 지운다.
+7. 메모리 값은 디스크에 저장하지 않는다. 권위는 파일이다.
+8. 서버 밖에서도 고치는 파일(profile TOML)은 이 규칙에 넣지 않는다. 지금처럼 내용 키 캐시로 읽는다.
 
 ## 3. 설계
 
 ### 3.1 meta 는 Owner 를 읽는다
 
-`keepers_json` 과 board address 는 meta 파일 대신 `Keeper_owner_projection.lookup` 을 읽는다. Owner 는 커밋할 때 메모리의 meta 를 파일에 통째로 쓰고, 쓰기가 성공했을 때만 메모리 값을 바꾼다(`keeper_owner.ml:916-936`). 그래서 둘은 같은 값이다. 쓰기가 실패하면 Owner 는 이전 값을 두고 metadata fault 를 남긴다. 새 상태는 없다.
+`keepers_json`, board address, `masc_keeper_list` 는 meta 파일 대신 Owner 의 projection 을 읽는다(`Keeper_owner_registry.get` → `Keeper_owner.projection`). 기동 때 읽을 수 있는 meta 마다 Owner 가 하나씩 생긴다(`keeper_owner_registry.ml:364`). Owner 는 커밋할 때 메모리의 meta 를 파일에 통째로 쓰고, 쓰기가 성공했을 때만 메모리 값을 바꾼다(`keeper_owner.ml:916-936`). 새 상태는 없다.
 
-`Owner_absent` 는 기본값으로 바꾸지 않는다. 지금 meta 를 못 읽을 때와 같이 그 이름을 `Keeper_unread` 로 낸다. 이유는 `Owner_absent` 로 적는다.
+| Owner 결과 | 행 |
+|---|---|
+| `Ok owner`, `meta = Some m` | `m` 으로 만든다 |
+| `Ok owner`, `meta = None` | `Keeper_unread`, 이유 `owner_holds_no_meta` |
+| `Error (Owner_unavailable _)` | `Keeper_unread`, 이유 `owner_meta_unreadable`. 기동 때 meta 를 못 읽은 경우다(`keeper_owner_registry.ml:464-477`) |
+| `Error (Owner_not_found _)`, 풀 없음 | `Keeper_unread`, 이유 `no_owner`. 이름 목록이 파일에서 와서(§8.3) 생길 수 있다 |
 
-`migrate-keeper-meta-sandbox.sh` 는 서버를 멈추고 돌린다고 스크립트 머리에 적는다. 지금도 서버가 돌 때 파일을 고치면 Owner 의 다음 커밋이 덮는다.
+`Keeper_unread` 행은 지금처럼 snapshot 을 Partial 로 만들고, 루프는 다시 읽는다. 지금도 meta 파일이 계속 안 읽히면 같다. 이유 셋은 따로 보인다.
+
+한계가 하나 있다. Owner 의 `store.replace` 가 됐는지 모르게 끝나면, Owner 는 메모리 값을 바꾸지 않고 예외를 다시 던진다(`keeper_owner.ml:873-882`). 그때 파일은 바뀌었을 수 있고 metadata fault 가 남는다(`:844-855`). 그 fault 가 풀릴 때까지 행은 Owner 의 이전 값을 보인다. 지금은 파일 값을 보인다. fault 는 재시작까지 남을 수 있다.
 
 ### 3.2 새 모듈 `Keeper_row_facts`
 
-모양 예시다. 행 타입 이름은 구현 때 정한다.
+모양 예시다. 이름은 구현 때 정한다.
 
 ```ocaml
-type fact = Decision_tail | Recent_tool_calls | Latest_receipt | Latest_turn_record | Recent_metrics
+type 'a slot = Unfilled | Filled of 'a
 
-type view =
-  { decision_tail : Decision_row.t list      (* 최근 20행 *)
-  ; recent_tool_calls : Tool_call_row.t list (* 최근 6건 *)
-  ; latest_receipt : Keeper_execution_receipt.t option
-  ; latest_turn_record : Turn_record.t option
-  ; recent_metrics : Metrics_row.t list      (* 최근 120행 *)
+type latest = No_row | Row of Yojson.Safe.t
+
+type metrics_tail =
+  { recent : Yojson.Safe.t list            (* 끝 120행 *)
+  ; latest_turn_audit : latest              (* 저장소 전체에서 가장 최근 Turn 행 *)
   }
+
+(* Keeper 저장소마다. 칸 하나는 저장소 잠금 하나만 고친다. *)
+type keeper_cells =
+  { decision : latest slot Atomic.t         (* 결정 기록의 마지막 object 행 *)
+  ; receipt : latest slot Atomic.t
+  ; turn_record : latest slot Atomic.t
+  ; metrics : metrics_tail slot Atomic.t
+  }
+
+(* workspace 마다. 원장의 마지막 16줄 *)
+type workspace_cells = { tool_calls : Yojson.Safe.t list slot Atomic.t }
 ```
 
-- 저장은 `Keeper_turn_pulse` 와 같다. 불변 map 하나를 `Atomic` 에 두고, 고칠 때는 compare-and-set 으로 바꾼다.
-- 값은 타입이 있는 행이다. JSON 을 들고 다니지 않는다. 행은 쓰는 쪽이 이미 들고 있는 값이라 다시 풀지 않는다.
-- 행 수(20, 6, 1, 1, 120)는 지금 읽는 쪽이 쓰는 수다. 읽는 쪽 상수를 이 모듈로 옮기고, 두 곳에 두지 않는다.
+- 칸 하나는 `Atomic` 하나다. 칸 하나를 고치는 잠금은 그 저장소의 잠금 하나뿐이다. 그래서 잠금 안의 `Atomic.set` 이 서로 덮지 않는다. 읽는 쪽은 `Atomic.get` 한 번이다.
+- 칸을 담는 map 은 `Keeper_owner_projection` 처럼 mutex 하나로 처음 만들 때만 고친다.
+- 값은 쓰는 쪽이 넘긴 JSON 그대로다. 결정 기록 4곳, 도구 호출 6곳, metrics 2곳이 넘기는 모양이 저마다 달라서 행 타입으로 묶지 않는다(`keeper_tool_memory_runtime.ml:1332`, `keeper_unified_metrics_decision.ml:401` 등). 읽는 쪽은 지금 쓰는 decoder 를 그대로 쓴다. 그래서 `Undecodable_turn_record` 같은 구분도 지금처럼 나온다.
+- 채우다 파일을 못 읽으면 값을 넣지 않는다. 그 읽기의 오류는 지금처럼 돌려준다(`Turn_record_read_failed` 등). 다음 읽기가 다시 채운다.
+- 행 수(16, 120)와 결정 기록의 찾는 창(20줄·40 KB)은 지금 읽는 쪽이 쓰는 수다. 읽는 쪽 상수를 이 모듈로 옮겨 한 곳에 둔다.
+- 도구 호출은 workspace 원장의 마지막 16줄을 그대로 든다. Keeper 의 최근 호출은 그 16줄에서 찾는다. 지금 `read_latest ~keeper_name` 과 같은 뜻이다. 16줄 밖으로 밀려난 Keeper 는 지금처럼 `None` 이다.
 
-### 3.3 순서: 쓰기와 고치기를 한 잠금 안에서
+### 3.3 순서
 
-`Fs_compat.append_file` 은 systhread 로 넘길 뿐 경로 잠금이 없다(`fs_compat_owned_file.ml:9-18`). 쓰기 syscall 동안 domain 잠금이 풀리므로 두 쓰기가 엇갈릴 수 있다. 메모리 값을 잠금 밖에서 고치면, 파일의 마지막 줄은 B 인데 메모리는 A 를 가리킬 수 있다.
+쓰는 함수는 그 저장소가 이미 잡는 잠금 안에서 [쓰기 → append 뒤 prune → 메모리 고치기]를 한다. 메모리 고치기는 변경 알림(`Dashboard_observation_commit.written`, `Keeper_row_broadcast.changed`)보다 먼저다. 알림을 받고 읽는 쪽이 새 값을 보게 하려는 것이다.
 
-그래서 쓰는 함수는 (Keeper, 사실)마다 잠금 하나를 잡고 [돌리기 → 쓰기 → 메모리 고치기]를 한다. `Dated_jsonl` 에는 커밋 뒤 부르는 훅 `append_notifying_commit ~on_committed`(`dated_jsonl.ml:887`)가 이미 있다. 메모리 고치기는 그 훅에 둔다. 결정 기록은 `append_jsonl_line`(`keeper_types_support.ml:285`)이 같은 잠금을 잡는다.
+- `Dated_jsonl`: `append_unlocked` 는 `on_committed` 를 부른 뒤 같은 잠금 안에서 prune 한다(`dated_jsonl.ml:874-878`). 메모리 고치기는 prune 뒤에 와야 한다. L2 는 prune 뒤에 부르는 hook 을 `Dated_jsonl` 에 더한다.
+- 도구 호출 원장은 workspace 저장소 하나를 모든 Keeper 가 같이 쓴다. 잠금도 하나다. 지금도 모든 Keeper 의 쓰기가 그 잠금을 기다린다. 더하는 일은 메모리 고치기 하나다. 비동기 큐로 간 행은 나중에 쓰일 때 같은 hook 을 지난다. 큐가 차서 버린 행은 파일에도 메모리에도 없다.
+- 결정 기록은 지금 돌리기와 쓰기가 다른 잠금에 있다(§1.4). L2 는 [돌리기 → 쓰기 → 메모리 고치기]를 그 경로의 append mutex 하나로 묶는다. 쓰는 쪽이 object 가 아닌 행을 쓰면 값을 지운다. 읽는 쪽은 마지막 object 행만 보기 때문이다.
+- `Dated_jsonl.append` 는 append guard 가 막으면 조용히 건너뛴다. `append_notifying_commit` 은 그때 `Append_guard_skipped` 를 던진다(`dated_jsonl.ml:882-895`). L2 는 새 hook 을 써도 부르는 쪽의 동작을 지금과 같게 둔다. 건너뛴 쓰기는 파일을 안 바꾸므로 메모리도 그대로 둔다.
 
-잠금을 기다리는 쪽은 같은 Keeper 의 같은 사실을 쓰는 쪽뿐이다. 턴 하나에서 쓰는 횟수만큼이다.
+### 3.4 채우기와 지우기
 
-### 3.4 채우기
-
-- 값이 없으면 읽는 쪽이 지금의 파일 읽기로 채우고, 없을 때만 넣는다(`Keeper_turn_pulse.seed` 와 같다).
-- 채우는 동안 쓰기가 끝나면 쓰는 쪽 값이 먼저 들어간다. 채우는 쪽은 넣지 않고 그 값을 쓴다.
-- 기동 직후 첫 루프는 지금처럼 파일을 읽는다. 그 뒤로는 읽지 않는다.
-- 같은 값을 두 루프가 동시에 채울 수 있다. 결과가 같으니 막지 않는다.
+- 값이 `Unfilled` 면 읽는 쪽이 그 저장소의 잠금을 잡고 파일에서 값을 계산해 넣는다. 잠금 안이라 그 사이에 쓰기나 지우기가 끼지 않는다.
+- 채우는 동안 그 저장소의 쓰는 쪽은 기다린다. 채우기는 칸 하나에 재시작 뒤 한 번, 지우기 뒤 한 번이다. 끝 몇 줄을 읽는 시간이다. 도구 호출 원장을 채우는 동안에는 모든 Keeper 의 도구 호출 기록이 기다린다.
+- 쓰는 쪽은 `Unfilled` 를 채우지 않는다(§2.4). 재시작 직후 첫 쓰기가 한 행짜리 목록을 넣으면, 그 뒤 채우기가 막혀 목록이 틀린 채로 남는다. `Keeper_turn_pulse` 는 같은 경우를 `known_since` 로 표시한다(`keeper_turn_pulse.mli:33`, `48`). 이 RFC 는 표시 대신 쓰는 쪽이 빈 칸을 건드리지 않게 한다.
+- 지우기는 값을 `Unfilled` 로 바꾼다. 실패하거나 됐는지 모르는 쓰기, prune, purge, runtime 디렉터리 지우기가 그 저장소의 잠금 안에서 지운다. `on_pruned` 는 지금 잠금 밖에서 돈다(`dated_jsonl.ml:2169-2172`). L2 는 prune 이 잠금 안에서 부르는 hook 을 더한다. 도구 호출 원장의 prune(`Root.Tool_calls`)은 그 workspace 의 값을 지운다.
 
 ### 3.5 행과 루프에서 바뀌는 것
 
-- trust, tool audit, 최근 활동, context, blocker 는 `Keeper_row_facts` 를 읽는다.
+- trust, tool audit, 최근 활동, context, blocker 와 `masc_keeper_list` 의 receipt 는 `Keeper_row_facts` 를 읽는다.
 - 행 하나에서 registry, 승인 큐, receipt 를 한 번씩만 읽는다.
-- `read_policy` 는 이 사실들에서 뜻이 없어진다. 메모리 값이 늘 새 값이라서다. Current/Reuse 구분, 10초 캐시 둘(`kta:*`, `operator:keeper-runtime-trust:compact:v1:*`), 세마포어 `_keeper_sem` 을 지운다.
+- 이 값들을 읽는 행 helper 에서는 `read_policy` 의 뜻이 없어진다. 메모리 값이 늘 새 값이라서다. 그 helper 의 Current/Reuse 구분과 10초 캐시 둘(`kta:*`, `operator:keeper-runtime-trust:compact:v1:*`)을 지운다. quarantine inventory(`operator_control_snapshot.ml:675-690`), snapshot 캐시(`:790-794`), briefing, execution 의 `read_policy` 는 그대로 둔다.
 - `dt_profile` 은 값이 들어가지 않는다(`operator_control_snapshot.ml:187`). 같이 지운다.
 
 ## 4. 층
@@ -175,51 +213,57 @@ type view =
 
 | 층 | 무엇 | 확인 |
 |---|---|---|
-| L1 | meta 를 Owner 에서 읽는다(§3.1). 새 상태 없음 | 같은 Keeper 에서 파일 meta 로 만든 행과 Owner meta 로 만든 행이 같다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
-| L2 | `Keeper_row_facts` 와 사실 넷(결정 기록 끝, 최근 도구 호출, 최근 receipt, 최근 TurnRecord). trust·context·blocker 가 이것을 읽는다 | 차분 시험, 동시 쓰기 시험, TLA+ 정상·버그 cfg(§5). 운영: trust 가 300 ms 넘는 행 0 |
-| L3 | 최근 metrics 120행. tool audit 와 최근 활동이 이것을 읽는다. `keeper_metrics_store` 를 숨기고 쓰기 함수만 내보낸다 | 차분 시험. 운영: audit 가 300 ms 넘는 행 0 |
-| L4 | 지우기: Current/Reuse 구분(이 사실들), 10초 캐시 둘, `_keeper_sem`, `Tool_audit_cache`, `dt_profile`, 행 안의 중복 읽기 | 같은 34분 창에서 300 ms 넘는 Keeper 행 0. 지운 이름을 `rg` 로 찾으면 0 |
+| L1 | meta 를 Owner 에서 읽는다(§3.1). `keepers_json`, board address, `masc_keeper_list` | 같은 Keeper 에서 파일 meta 로 만든 행과 Owner meta 로 만든 행이 같다. Owner 결과 넷이 이유 셋으로 나온다. 운영: 느린 행 로그의 `meta` 가 0 ms 다 |
+| L2 | `Keeper_row_facts` 와 값 넷(결정 기록 마지막 행, 도구 호출 16줄, 최근 receipt, 최근 TurnRecord). `Dated_jsonl` 의 prune 뒤 hook 과 잠금 안 지우기 hook. 결정 기록의 돌리기·쓰기 잠금 하나. 읽는 쪽 trust·context·blocker·`masc_keeper_list` | 차분 시험, 동시 쓰기 시험, 파일을 지운 뒤 두 번째 읽기 시험, TLA+ 정상·버그 cfg(§5). 운영: 느린 행 로그의 `trust` 가 0 ms 근처다 |
+| L3 | metrics 끝 120행과 가장 최근 Turn tool audit 행. 읽는 쪽 tool audit·최근 활동. `Tool_audit_cache` 를 지운다 | 차분 시험(`max_bytes` 를 켠 prune 포함). 운영: 느린 행 로그의 `audit` 가 0 ms 근처다 |
+| L4 | 지우기: 행 helper 의 Current/Reuse 구분, 10초 캐시 둘, `dt_profile`, 행 안의 중복 읽기. 그 뒤 남은 행 일(승인 audit, quarantine 원장)을 잰다 | 지운 이름을 `rg` 로 찾으면 0. 남은 행 일의 sub-op 를 로그로 센다 |
 
-L3 이 `keeper_metrics_store` 를 숨기는 까닭: 지금은 raw `Dated_jsonl.t` 를 돌려줘서, 새 코드가 쓰기 함수를 건너뛰고 바로 써도 타입이 막지 못한다. 쓰기 함수만 남기면 메모리를 건너뛰는 쓰기를 컴파일러가 막는다.
-
-측정 뒤 정하는 것: 승인 audit 최근 행, 응답마다 읽는 candle ledger, `/keepers/turns` 의 event queue 읽기. L2·L3 뒤에도 느린 요청이 남으면 같은 규칙으로 다음 RFC 를 쓴다.
+`_keeper_sem` 과 `MASC_KEEPER_SNAPSHOT_CONCURRENCY` 는 L4 의 측정 뒤 정한다. 행마다 승인 audit 일이 남아 있는 동안 세마포어를 지우면 그 일이 한꺼번에 몰린다.
 
 ## 5. 검증
 
-**차분 시험.** 사실마다 실제 쓰기 함수(`append_decision_record`, `log_call`, receipt `append`, TurnRecord `write`, `append_keeper_metrics`)와 돌리기, prune, purge 를 무작위 순서로 부른다. 한 걸음마다 메모리 값과 파일에서 다시 계산한 값이 같은지 본다. 시험마다 base path 를 새로 만들어서 `reset_for_tests` 를 쓰지 않는다.
+**차분 시험.** 실제 쓰기 함수(`append_decision_record`, `log_call`, receipt `append`, TurnRecord `write`, `append_keeper_metrics`)와 돌리기, prune, purge, runtime 디렉터리 지우기, 채우기, 지우기를 무작위 순서로 부른다. 한 걸음마다 `Filled` 값이 파일에서 다시 계산한 값과 같은지 본다. 다시 계산은 지금의 읽는 함수(`latest_decision_json`, `read_latest ~keeper_name`, receipt·TurnRecord 최근 읽기, tool audit 읽기)로 한다. 시험마다 base path 를 새로 만들어서 `reset_for_tests` 를 쓰지 않는다.
 
-**동시 쓰기 시험.** domain 둘에서 같은 Keeper 의 결정 기록에 N 줄씩 쓴다. 끝나면 메모리의 마지막 줄이 파일의 마지막 줄과 같다.
+**동시 시험.** domain 둘이 같은 저장소에 N 줄씩 쓰는 동안 셋째 domain 이 채우기와 지우기를 되풀이한다. 끝나면 `Filled` 값이 파일에서 다시 계산한 값과 같다. 목록 값에 같은 행이 두 번 들어가지 않는다.
 
-**TLA+.** `KeeperRowFacts.tla` 에 쓰는 쪽 둘과 채우는 쪽 하나를 둔다. 불변식은 "쓰는 중이 아니면 메모리 값은 파일 끝과 같다"이다. `Next` 는 잠금 안에서 고치고 불변식을 지킨다. `BugAction` 은 잠금을 푼 뒤 고친다. `NextBuggy == Next \/ BugAction` 은 불변식을 어겨야 spec 이 맞다. 정상 cfg 와 버그 cfg 를 둘 다 돌린다.
+**파일을 열지 않는다는 시험.** 값을 채운 뒤 그 파일을 지우고 행을 다시 만든다. 두 번째 행이 첫 번째와 같으면 읽는 쪽이 파일을 열지 않은 것이다. 이 시험은 §7 의 한계(서버가 돌 때 손으로 지운 파일은 재시작까지 안 보인다)도 그대로 보여 준다.
 
-**운영 측정.** 재시작 뒤 같은 34분 창에서 센다.
+**TLA+.** `KeeperRowFacts.tla` 에 쓰는 쪽 둘, 채우는 쪽 하나, 지우는 쪽(prune·purge) 하나를 둔다. 파일은 행의 열, 값은 `Unfilled` 나 `Filled(목록)`이다. 불변식은 "잠금이 풀려 있고 값이 `Filled(v)` 면 v 는 파일 끝에서 계산한 값과 같다"이다. `Next` 는 모든 동작을 잠금 안에서 하고 불변식을 지킨다. `BugAction` 은 셋이다. (a) 잠금 밖에서 채운다. 이 RFC 의 첫 안이다. (b) 쓰는 쪽이 `Unfilled` 에 자기 행을 넣는다. (c) prune 앞에서 메모리를 고친다. `NextBuggy == Next \/ BugAction` 이 셋 모두 불변식을 어겨야 spec 이 맞다. 정상 cfg 와 버그 cfg 를 둘 다 돌린다.
+
+**운영 측정.** 재시작 뒤 34분 창에서 센다. 창 안의 TurnRecord 쓰기 수를 같이 적어 Keeper 활동량이 비슷한 창끼리 비교한다.
 
 | 무엇 | 지금 | 목표 |
 |---|---|---|
-| 300 ms 넘는 Keeper 행 | 867 | 0 |
-| `/gate/keepers`·`/dashboard/health-line` 1초 넘는 TUI 요청 | 3·1(TUI 로그 `masc-tui-28494.log`) | 0 |
-| 주기 루프 한 번이 여는 Keeper 파일 수 | Keeper 수에 비례 | 기동 직후 첫 번 말고 0 |
+| 느린 행 로그의 sub-op 중앙값 trust·audit·meta | 186·164·23 ms | L1~L3 뒤 0 ms 근처 |
+| 300 ms 넘는 Keeper 행 | 867 | 준다. 승인 audit·quarantine·candle 이 남아 0 을 목표로 두지 않는다 |
+| Keeper 화면 TUI 요청의 1초 넘음 | `/keepers/turns` 15, `/gate/keepers` 3, `/dashboard/health-line` 1 | 관찰만 한다. 이 요청들은 다른 원인도 있어 이 RFC 의 결과로 세지 않는다 |
 
-마지막 줄은 L2 에서 셀 방법을 정한다. 서버 로그 sub-op 가 0 이 되는 것만으로는 부족하다. 로그가 300 ms 아래를 안 찍기 때문이다.
+세마포어 대기의 p90(4.5 s)은 wait 나 work 가 500 ms 를 넘긴 행만 센 값이다. 같은 기준으로만 비교한다.
+
+**증거.** 헌법 `<evidence>` 대로 층마다 PR 에 로그(바뀌기 전후 느린 행 sub-op), 측정, Keeper 화면(TUI 와 대시보드) 캡처를 붙인다.
 
 ## 6. 고르지 않은 길
 
 1. **TTL 을 늘린다.** Current 는 10초 안의 커밋도 봐야 한다. TTL 은 그 커밋을 숨긴다.
 2. **루프 셋을 하나로 합친다.** 일은 1/3 로 줄지만 행 하나가 여전히 파일을 읽는다. health-line·gate/keepers 요청 경로는 그대로다.
 3. **보는 사람이 있을 때만 루프를 돌린다.** 볼 때 비용이 그대로 돌아오고, 요청이 루프를 기다린다.
-4. **읽는 쪽 증분 캐시를 더 만든다.** 읽을 때마다 목록과 stat 이 남는다. 서버 밖에서 쓰는 파일에는 맞는 모양이다. 여기 다섯 사실은 쓰는 곳이 모두 서버 안의 함수 하나다.
-5. **SQLite 로 옮긴다.** 저장소 모양을 바꾸는 하드컷이다. 읽기는 여전히 부른 domain 을 막는다.
+4. **읽는 쪽 증분 캐시를 더 만든다.** 읽을 때마다 목록과 stat 이 남는다. 서버 밖에서 쓰는 파일에는 맞는 모양이다. 여기 저장소들은 쓰는 곳이 모두 서버 안이다.
+5. **SQLite 로 옮긴다.** 저장소 모양을 바꾸는 하드컷이다. 읽기는 여전히 부른 fiber 를 막는다.
+6. **잠금 없이 세대 번호로 채운다.** 쓰는 쪽과 지우는 쪽이 세대를 올리고, 채우는 쪽은 세대가 그대로일 때만 넣는다. 채우는 쪽이 쓰기 뒤의 파일을 읽고 쓰는 쪽 hook 보다 먼저 넣으면 같은 행이 두 번 들어간다. 막으려면 파일 위치까지 들어야 한다. 채우기는 드물어서 잠금으로 줄 세우는 편이 단순하다.
 
 ## 7. 대가와 한계
 
-- 메모리: Keeper 마다 최근 행 수십~120개를 든다.
-- 쓰는 쪽이 조금 길어진다. (Keeper, 사실) 잠금을 잡고 메모리를 고친다.
-- 재시작 직후 첫 루프는 지금처럼 파일을 읽는다.
-- 서버 밖에서 다섯 사실의 파일을 고치면 메모리 값이 틀린다. 지금 그런 쓰는 곳은 없다(§1.4). 손으로 고치려면 서버를 멈춘다.
-- 이 RFC 는 화면 경로 밖의 읽기를 줄이지 않는다. `Systhread_host` 를 지나는 읽기 299곳 가운데 화면 경로에서 빠지는 것만 줄어든다.
+- 메모리: Keeper 마다 결정 기록 1행, receipt 1행, TurnRecord 1행, metrics 121행이고, workspace 마다 도구 호출 16행이다. 행 크기는 재지 않았다. L3 에서 Keeper 하나의 metrics 값 크기(`Obj.reachable_words`)를 재서 PR 에 적는다.
+- 쓰는 쪽이 조금 길어진다. 잠금 안에서 메모리를 고친다. 채우는 동안에는 그 저장소의 쓰는 쪽이 기다린다.
+- 재시작 직후 첫 읽기는 지금처럼 파일을 읽는다.
+- 서버가 도는 동안 이 저장소를 손으로 지우면, 메모리 값은 재시작까지 옛 행을 보인다. 헌법 `runtime_data` 의 "지우고 새로 한다"는 멈추고 지우고 다시 띄우는 것이고, 이 RFC 는 그 순서를 그대로 지원한다. 서버가 돌 때는 대시보드 purge 로 지운다. purge 는 값을 지운다.
+- 다른 코드가 이 저장소를 열어 바로 쓸 수 있다. `Dated_jsonl.open_store`·`append` 와 `Store.keeper` 는 공개다(`dated_jsonl.mli:66`, `:93`, `dated_jsonl_store.mli:76`). 그러면 메모리 값이 틀린다. 차분 시험은 이름 붙인 쓰는 함수만 부른다. §8.4 가 이 구멍을 다룬다.
+- 이 RFC 는 이 값들 밖의 읽기를 줄이지 않는다.
 
 ## 8. 정할 것
 
-1. **승인 audit 최근 행을 이 스택에 넣을지.** 권장: L2·L3 를 잰 뒤 정한다. 이미 증분 색인(RFC-0474 L4f)이 있어서 남은 비용이 목록 읽기뿐일 수 있다.
-2. **Keeper 행을 SSE 로 나르는 일.** 권장: RFC-0477 §3.6 의 다음 층으로 둔다. 이 RFC 는 값을 만들고, RFC-0477 이 나른다.
-3. **이름 목록.** `keepers_json` 은 이름을 meta 파일 목록에서 얻는다. 권장: L1 에서는 그대로 두고 meta 값만 Owner 에서 읽는다. 이름 목록은 L4 뒤에 잰다.
+1. **승인 audit 와 quarantine 원장을 이 스택에 넣을지.** 권장: L2·L3 뒤에 잰 뒤 정한다. 승인 audit 에는 이미 증분 색인(RFC-0474 L4f)이 있어서 남은 비용이 목록 읽기뿐일 수 있다.
+2. **Keeper 행을 SSE 로 나르는 일.** RFC-0477 §3.6 의 행 topic 은 `/gate/keepers?detailed=true`, 곧 `masc_keeper_list` 다. 이 RFC 는 L1·L2 에서 `masc_keeper_list` 도 같은 값(meta, 최근 receipt)을 읽게 한다. 권장: 이 RFC 는 값을 만들고, RFC-0477 이 나른다.
+3. **이름 목록.** `keepers_json` 은 이름을 meta 파일 목록에서 얻는다. 권장: L1 에서는 그대로 두고 meta 값만 Owner 에서 읽는다. 이름 목록을 Owner registry 로 옮기는 일은 L4 뒤에 잰다.
+4. **쓰기 권한을 타입으로 나눌지.** 지금은 아무 코드나 이 저장소에 쓸 수 있다. 권장: 저장소마다 그 층이 들어갈 때, 읽는 쪽에는 읽기 전용 handle 만 주고 쓰기 handle 은 쓰는 모듈만 갖게 한다. 대가: metrics 를 읽는 곳(`server_dashboard_http_keeper_api.ml:72`, `dashboard_http_keeper_feeds.ml:194`, `keeper_status_detail.ml:460`, `bin/masc_tui_metrics_tail.ml:170-173`)과 receipt·TurnRecord 를 읽는 곳을 고친다. 하지 않으면 "쓰는 곳이 하나"라는 전제를 리뷰로만 지킨다.
+5. **서버가 돌 때 손으로 지우는 일.** 권장: §7 대로 받아들이고 운영 문서에 적는다. 막는 장치는 더하지 않는다.

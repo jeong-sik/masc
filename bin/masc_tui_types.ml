@@ -27959,13 +27959,13 @@ let keeper_message_evidence_layout state ~terminal_cols =
     | Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
               | Keeper_message | Keeper_runtime_pick)), (Some _ | None) -> [], ""
 
-(* These are the same original rows used by the budget and the draw. The
-   frame is local to that synchronous call, never a state or worker cache. *)
 let keeper_message_schedule_cells state ~terminal_cols =
   Masc_tui_frame.inner_width
     ~cols:(Masc_tui_roster_pane.content_cols ~hidden:(roster_pane_hidden state)
              ~cols:terminal_cols)
 
+(* These are the same original rows used by the budget and the draw. The
+   frame is local to that synchronous call, never a state or worker cache. *)
 let keeper_message_status_frame ?(schedule_budget = 1) ?(terminal_cols = max_int) state ~now =
   let evidence_rows, title_suffix = keeper_message_evidence_layout state ~terminal_cols in
   { kmsf_source = keeper_message_status_source state ~now

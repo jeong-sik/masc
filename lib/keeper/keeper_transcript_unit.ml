@@ -167,7 +167,14 @@ let stop_with_units ~units_rev ~open_cycle ~message ~rest =
     ; protected_suffix = open_prefix @ (message :: rest)
     }
 
-let partition ?(quarantine = false) messages =
+type scan_kind = Partition of { quarantine : bool } | Validation
+
+let scan kind messages =
+  let quarantine, retain_messages = match kind with
+    | Partition { quarantine } -> quarantine, true
+    | Validation -> false, false in
+  let retain_message message reversed =
+    if retain_messages then message :: reversed else reversed in
   let rec loop index units_rev seen_tools seen_results open_cycle = function
     | [] ->
         let protected_suffix =
@@ -215,7 +222,7 @@ let partition ?(quarantine = false) messages =
                                         { message_index = index; tool_use_id })
                              | [], [] ->
                                  loop (index + 1)
-                                   (Ordinary_message message :: units_rev)
+                                   (if retain_messages then Ordinary_message message :: units_rev else units_rev)
                                    seen_tools seen_results None rest
                              | tool_use_id :: _, _ :: _ ->
                                  if quarantine then
@@ -230,12 +237,13 @@ let partition ?(quarantine = false) messages =
                                    (Some
                                       { expected
                                       ; pending = expected
-                                      ; messages_rev = [ message ]
+                                      ; messages_rev = retain_message message []
                                       })
                                    rest))
                    | Some cycle, [], [] ->
                        loop (index + 1) units_rev seen_tools seen_results
-                         (Some { cycle with messages_rev = message :: cycle.messages_rev })
+                         (if retain_messages then Some { cycle with messages_rev = message :: cycle.messages_rev }
+                          else open_cycle)
                          rest
                    | Some _, [], tool_use_id :: _ when not (is_result_role message.role) ->
                        if quarantine then
@@ -251,10 +259,10 @@ let partition ?(quarantine = false) messages =
                             stop_with_units ~units_rev ~open_cycle ~message ~rest
                         | Error _ as error -> error
                         | Ok (pending, seen_results) ->
-                            let messages_rev = message :: cycle.messages_rev in
+                            let messages_rev = retain_message message cycle.messages_rev in
                             if Id_set.is_empty pending then
                               loop (index + 1)
-                                (Closed_tool_cycle (List.rev messages_rev) :: units_rev)
+                                (if retain_messages then Closed_tool_cycle (List.rev messages_rev) :: units_rev else units_rev)
                                 Id_set.empty Id_set.empty None rest
                             else
                               loop (index + 1) units_rev seen_tools seen_results
@@ -263,7 +271,10 @@ let partition ?(quarantine = false) messages =
   in
   loop 0 [] Id_set.empty Id_set.empty None messages
 
-let validate messages = Result.map (fun _partition -> ()) (partition messages)
+let partition ?(quarantine = false) messages =
+  scan (Partition { quarantine }) messages
+
+let validate messages = Result.map (fun _partition -> ()) (scan Validation messages)
 
 (* The ids [message] requests, newest first onto [requested_rev], and the ids
    its results answer, into [completed]. *)

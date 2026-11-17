@@ -124,7 +124,7 @@ let backend env base_path delivery delivery_observed observation_observed after_
         deliver=(fun ~arguments ->
           let result=if !delivery then Error "controlled reply loss before worker delivery"
             else Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in
-          delivery_observed ();result)}} in
+          delivery_observed ~request_id:(Yojson.Safe.Util.to_string (member "request_id" arguments));result)}} in
     on_created connection;Ok connection);
   package_ready=(fun ~package:_ -> Ok ());
   acquire=(fun ~access:_ ~store:_ ~package:_ ~resolve_machine_output:_ ~resolve_lane_output:_ ~read_browser_document:_ ~binding:_ -> Ok (`List []));
@@ -143,6 +143,7 @@ type fixture = {
   source:string; declaration:bool -> string; server:F.test_server;
   set_response:(Capture.t -> Cohttp.Code.status_code * string) -> unit;
   delivery_loss:bool ref; deliveries:int ref; delivery_changed:Eio.Condition.t;
+  delivery_request_ids:string list ref;
   clock:float Eio.Time.clock_ty Eio.Resource.t;
   observations:int ref; observation_changed:Eio.Condition.t; response_checkpoint:int ref;
   extra_server:(Capture.t -> Cohttp.Code.status_code * string) -> F.test_server;
@@ -176,6 +177,13 @@ let run_worker fixture=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_se
 let await_delivery fixture ~after=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
   Eio.Condition.loop_no_mutex fixture.delivery_changed (fun () ->
     if !(fixture.deliveries)>after then Some () else None))
+(* A sibling/root redelivery cannot establish another original's completed
+   host proof. The actual deliver arguments name the original whose host
+   execution ended before this callback, even when worker delivery fails. *)
+let await_request_delivery fixture ~request_id=
+  Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+    Eio.Condition.loop_no_mutex fixture.delivery_changed (fun () ->
+      if List.mem request_id !(fixture.delivery_request_ids) then Some () else None))
 let await_host_cycle fixture =
   Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
     Eio.Condition.loop_no_mutex fixture.observation_changed (fun () ->
@@ -313,12 +321,15 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) ?(one_worker_pool=
       Runtime.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
         (Server_lane_addon_exact.runner ~base_path);
       let deliveries=ref 0 and delivery_changed=Eio.Condition.create () and delivery_loss=ref false in
-      let delivery_observed ()=incr deliveries;Eio.Condition.broadcast delivery_changed in
+      let delivery_request_ids=ref [] in
+      let delivery_observed ~request_id=
+        incr deliveries;delivery_request_ids:=request_id :: !delivery_request_ids;
+        Eio.Condition.broadcast delivery_changed in
       let submit_barrier=ref (fun () -> ()) in
       let transform_reply=ref (fun _ response -> response) in
       let host_listings=ref [] in
       let fixture={base_path;config;keepers_dir;store;source;declaration;server;
-        set_response=(fun callback -> response:=callback);delivery_loss;deliveries;delivery_changed;
+        set_response=(fun callback -> response:=callback);delivery_loss;deliveries;delivery_changed;delivery_request_ids;
         clock=Eio.Stdenv.clock env;observations;observation_changed;response_checkpoint;
         extra_server=start_server;submit_barrier;transform_reply;host_listings} in
       Runtime.For_testing.with_backend
@@ -1861,10 +1872,10 @@ let test_admitted_unstarted_host_ending_survives_rollback ()=with_fixture (fun ~
 let test_deferred_and_ended_siblings_rejudge_the_full_batch_after_rollback ()=with_fixture (fun ~sw fixture ->
   fixture.delivery_loss:=true;
   fixture.set_response (fun _ -> `Request_entity_too_large,refusal "invalid_request_error");
-  let before= !(fixture.deliveries) in
-  ignore (run_worker fixture);await_delivery fixture ~after:before;
+  ignore (run_worker fixture);
   let root_record,root_capture=match observed_originals fixture with [original] -> original
     | [] | _::_::_ -> fail "one actual capacity-refused root expected" in
+  await_request_delivery fixture ~request_id:root_record.request_id;
   let final=match (latest_execution fixture root_capture).Exact.outcome with
     | Exact.Call_ended (Input_refused _ as final) -> Exact.Call_final final
     | Call_ended (Answered _ | Invalid_output _ | Output_limit_reached _) | Call_refused _ ->
@@ -1895,10 +1906,10 @@ let test_deferred_and_ended_siblings_rejudge_the_full_batch_after_rollback ()=wi
     |> Result.map_error (fun error -> Lane_addon_submit_once.error_of_runtime error
       |> Lane_addon_submit_once.error_to_string) |> get) in
   fixture.set_response (fun capture -> `OK,F.openai_response (answer (fun _ -> false) capture));
-  let before= !(fixture.deliveries) in
-  ignore (run_worker fixture);await_delivery fixture ~after:before;
+  ignore (run_worker fixture);
   let left_record,left_capture=List.find (fun (_,capture) -> Capture.parent_part_id capture=Parts.part_id left)
     (observed_originals fixture) in
+  await_request_delivery fixture ~request_id:left_record.request_id;
   let final=match (latest_execution fixture left_capture).Exact.outcome with
     | Exact.Call_ended (Answered _ as final) -> Exact.Call_final final
     | Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Call_refused _ ->

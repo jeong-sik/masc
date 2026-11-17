@@ -445,9 +445,32 @@ let load_owned_regular_file_with_snapshot ?owner_uid ?single_link ~ownership_roo
        result)
 ;;
 
+let observe_owned_regular_file_blocking ?parent_lstat ~owner_uid ~ownership_root path =
+  load_owned_regular_file_blocking_with ~owner_uid ?parent_lstat ~ownership_root
+    ~read_descriptor:(fun ~path:_ _ descriptor ->
+      Ok (owned_regular_file_snapshot_of_stats descriptor))
+    path
+;;
+
+let observe_owned_regular_file ~owner_uid ~ownership_root path =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> observe_owned_regular_file_blocking ~owner_uid ~ownership_root path)
+    (fun _fs ->
+       let result =
+         Fs_compat_internal.Systhread_host.run
+           ~label:(labelled "fs-compat-observe-owned-file" path)
+           (fun () -> observe_owned_regular_file_blocking ~owner_uid ~ownership_root path)
+       in
+       Eio.Fiber.check ();
+       result)
+;;
+
 module Owned_read_for_testing = struct
   let load_with_snapshot ?single_link ~parent_lstat ~owner_uid ~ownership_root path =
     load_owned_regular_file_with_snapshot_blocking ?single_link ~parent_lstat ~owner_uid ~ownership_root path
+  let observe ~parent_lstat ~owner_uid ~ownership_root path =
+    observe_owned_regular_file_blocking ~parent_lstat ~owner_uid ~ownership_root path
 end
 
 let load_owned_regular_file ~ownership_root path =

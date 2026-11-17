@@ -3150,6 +3150,7 @@
 (include stanzas/test_fs_compat_update_after_cursor.inc)
 (include stanzas/test_fs_compat_unique_fold.inc)
 (include stanzas/test_fs_compat_missing_binding.inc)
+(include stanzas/test_fs_compat_owned_observation.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_retention_directory.inc)

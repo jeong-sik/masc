@@ -174,9 +174,24 @@ val load_owned_regular_file_with_snapshot
     policy is independent of [owner_uid]. Only initial absence returns None;
     a lost or changed observed file remains an error, never fresh authority. *)
 
+val observe_owned_regular_file
+  :  owner_uid:int
+  -> ownership_root:string
+  -> string
+  -> (owned_regular_file_snapshot option, owned_regular_file_read_error) result
+(** Observe descriptor metadata without reading or allocating file contents.
+    The required [owner_uid] enforces the same parent/leaf ownership and
+    parent-permission checks as {!load_owned_regular_file_with_snapshot} with
+    that UID. No-follow, before/after identity and descriptor-close checks,
+    initial absence, and Eio/system-thread cancellation behavior are preserved.
+    This is a point-in-time observation, not authority for a later read or
+    write. Callers must still use their authoritative transaction protocol. *)
+
 module Owned_read_for_testing : sig
   val load_with_snapshot : ?single_link:bool -> parent_lstat:(string -> Unix.stats) -> owner_uid:int ->
     ownership_root:string -> string -> (owned_regular_file_contents option, owned_regular_file_read_error) result
+  val observe : parent_lstat:(string -> Unix.stats) -> owner_uid:int ->
+    ownership_root:string -> string -> (owned_regular_file_snapshot option, owned_regular_file_read_error) result
 end
 
 val sha256_owned_regular_file

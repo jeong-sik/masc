@@ -27886,7 +27886,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
               let remaining = List.length entries - shown in
               if remaining > 0 && rows_left > 0
               then rows @ lines ~lead:"    " ~rows_left
-                  [ fact Facts.Plain (Printf.sprintf "+%d개" remaining)
+                  [ fact Facts.Plain (Printf.sprintf "외 %d개" remaining)
                   ; fact Facts.Plain "Keeper Automation에서 전체 확인" ]
               else rows
 

@@ -12,26 +12,38 @@ module Codec = Keeper_memory_os_current_range_codec
 open Result.Syntax
 
 type refusal = Observation_changed | No_longer_eligible of string
+type origin = Worker_absence | Same_binding_cut of Fence.cut_basis
 type child = {request_id:string;request_digest:string}
 type prepared_child = {child:child;request:Request.t}
 type phase = Requested | Refused of refusal | Fenced
   | Child_prepared of prepared_child | Child_intended of child | Child_confirmed of child
 type memory_commit = {request_id:string;receipts:Memory.durable_range_receipt list}
 type t = {
-  intent_id:string;scope:string;original_request_id:string;expected:Fence.guard;
+  intent_id:string;scope:string;original_request_id:string;expected:Fence.guard;origin:origin;
   actor:string;reason:string;submitted_at:float;phase:phase;
   memory_commit:memory_commit option;
 }
 type error = Invalid of string | Conflict of string | Unavailable of string
-  | Publication_uncertain of string
+  | Publication_uncertain of string | Host_claim_busy
 let error_to_string = function
+  | Host_claim_busy -> "Original history execution claim is busy"
   | Invalid detail | Conflict detail | Unavailable detail | Publication_uncertain detail -> detail
 let require condition message = if condition then Ok () else Error message
 let unavailable result = Result.map_error (fun detail -> Unavailable detail) result
 let digest json = let+ value=Lane_addon_action.canonical json in Store.digest (Yojson.Safe.to_string value)
-let payload ~scope ~request_id ~expected ~actor ~reason = `Assoc [
+let origin_fields = function
+  | Worker_absence -> []
+  | Same_binding_cut basis -> ["origin",`Assoc ["kind",`String "same_binding_cut";"basis",Fence.cut_to_json basis]]
+let origin_of_json json =
+  let context="history resolution origin" in
+  let* fields=Json.object_fields ~context json in
+  let* kind,fields=Json.field ~context "kind" Json.as_string fields in
+  let* ()=require (kind="same_binding_cut") "Unknown history resolution origin" in
+  let* basis,fields=Json.field ~context "basis" Fence.cut_of_json fields in
+  let+ ()=Json.finish ~context fields in Same_binding_cut basis
+let payload ~origin ~scope ~request_id ~expected ~actor ~reason = `Assoc (origin_fields origin @ [
   "scope",`String scope;"original_request_id",`String request_id;
-  "expected",Fence.guard_to_json expected;"actor",`String actor;"reason",`String reason]
+  "expected",Fence.guard_to_json expected;"actor",`String actor;"reason",`String reason])
 let child_json (child : child) = `Assoc ["request_id",`String child.request_id;"request_digest",`String child.request_digest]
 let phase_json = function
   | Requested -> `Assoc ["kind",`String "requested"]
@@ -45,7 +57,7 @@ let phase_json = function
 let public_phase_json = function
   | Child_prepared prepared -> `Assoc ["kind",`String "child_prepared";"child",child_json prepared.child]
   | (Requested | Refused _ | Fenced | Child_intended _ | Child_confirmed _) as phase -> phase_json phase
-let public_fields ~phase intent = [
+let public_fields ~phase intent = origin_fields intent.origin @ [
   "intent_id",`String intent.intent_id;"original_request_id",`String intent.original_request_id;
   "expected",Fence.guard_to_json intent.expected;"actor",`String intent.actor;
   "reason",`String intent.reason;"submitted_at",`Float intent.submitted_at;"phase",phase]
@@ -147,8 +159,14 @@ let of_json json =
   let* submitted_at,fields=Json.field ~context "submitted_at" clock fields in
   let* phase,fields=Json.field ~context "phase" phase_of_json fields in
   let* memory_commit,fields=Json.field ~context "memory_commit" (Json.as_nullable memory_commit_of_json) fields in
+  let* origin,fields=match List.assoc_opt "origin" fields with
+    | None -> Ok (Worker_absence,fields)
+    | Some _ -> Json.field ~context "origin" origin_of_json fields in
   let* ()=Json.finish ~context fields in
-  let* expected_id=digest (payload ~scope ~request_id:original_request_id ~expected ~actor ~reason) in
+  let* ()=match origin with
+    | Worker_absence -> Ok ()
+    | Same_binding_cut basis -> require (basis.request_id=original_request_id) "Cut command names another original" in
+  let* expected_id=digest (payload ~origin ~scope ~request_id:original_request_id ~expected ~actor ~reason) in
   let* id_scope=Request.scope_of_request_id original_request_id in
   let* ()=require (intent_id=expected_id && id_scope=scope) "Resolution intent identity differs" in
   (* The child is named by ID and digest. Its request is the body file that
@@ -177,7 +195,7 @@ let of_json json =
       require (proof_scope=scope) "Resolution completion belongs to another scope"
     | Some _,(Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _) ->
       Error "Resolution completion precedes its child acknowledgement" in
-  Ok {intent_id;scope;original_request_id;expected;actor;reason;submitted_at;phase;memory_commit}
+  Ok {intent_id;scope;original_request_id;expected;origin;actor;reason;submitted_at;phase;memory_commit}
 let envelope ~scope ~request_id intents = `Assoc ["schema",`String "keeper.librarian.history-resolution.v2";
   "scope",`String scope;"request_id",`String request_id;"intents",`List (List.map to_json intents)]
 let decode ~scope ~request_id json =
@@ -228,11 +246,11 @@ let persist ~store ~scope ~request_id ~previous values =
 let read ~config ~keeper_name ~request_id =
   let* scope=scope ~config ~keeper_name ~request_id in
   let+ _,values=load ~store:(Store.of_config config) ~scope ~request_id in values
-let submit ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
+let submit_origin ~origin ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
   let* scope=scope ~config ~keeper_name ~request_id in
   let store=Store.of_config config in
-  let* intent_id=digest (payload ~scope ~request_id ~expected ~actor ~reason) |> Result.map_error (fun detail -> Invalid detail) in
-  let* candidate=of_json (to_json {intent_id;scope;original_request_id=request_id;expected;actor;reason;
+  let* intent_id=digest (payload ~origin ~scope ~request_id ~expected ~actor ~reason) |> Result.map_error (fun detail -> Invalid detail) in
+  let* candidate=of_json (to_json {intent_id;scope;original_request_id=request_id;expected;origin;actor;reason;
     submitted_at=now;phase=Requested;memory_commit=None}) |> Result.map_error (fun detail -> Invalid detail) in
   let* previous,values=load ~store ~scope ~request_id in
   match List.find_opt (fun intent -> intent.intent_id=intent_id) values with
@@ -248,6 +266,10 @@ let submit ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
     let* fence=Fence.read ~store ~scope ~request_id |> unavailable in
     let* ()=match fence with None -> Ok () | Some _ -> Error (Conflict "Original is already fenced") in
     let+ ()=persist ~store ~scope ~request_id ~previous (values@[candidate]) in candidate,false
+let submit ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
+  submit_origin ~origin:Worker_absence ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now
+let submit_cut ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now =
+  submit_origin ~origin:(Same_binding_cut basis) ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now
 (* One file of a scope's resolution directory: the record names its own
    original, the file is named by that original, and the envelope decodes. *)
 let decode_inventory_row ~scope ~name json =
@@ -295,20 +317,51 @@ let update ~store ~expected change =
   let* next=change actual |> Result.map_error (fun detail -> Conflict detail) in
   let values=List.map (fun intent -> if intent.intent_id=next.intent_id then next else intent) values in
   let+ ()=persist ~store ~scope:expected.scope ~request_id:expected.original_request_id ~previous values in next
+let matches_fence intent (fence:Fence.t) =
+  let* ()=require (fence.scope=intent.scope && fence.request_id=intent.original_request_id
+    && fence.actor=intent.actor && fence.reason=intent.reason)
+    "History fence belongs to another resolution command" in
+  match intent.origin,fence.authority with
+  | Worker_absence,Fence.Worker_absent -> require (intent.expected=fence.expected) "Absence fence guard differs"
+  | Same_binding_cut expected,Excluded_cut actual ->
+    require (expected=actual
+      && intent.expected.owner_record_sha256=fence.expected.owner_record_sha256
+      && intent.expected.cursors_sha256=fence.expected.cursors_sha256) "Cut fence command basis differs"
+  | Worker_absence,Excluded_cut _ | Same_binding_cut _,Worker_absent -> Error "History fence and command origins differ"
+let require_successor_authority intent fence =
+  let* ()=matches_fence intent fence in
+  match intent.origin with
+  | Worker_absence -> Fence.require_resolution_successor_authority fence
+  | Same_binding_cut _ ->
+    match intent.phase with
+    | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _ -> Ok ()
+    | Requested | Refused _ -> Error "Cut command has no durable successor grant"
 let refuse ~store ~expected refusal = update ~store ~expected (fun actual ->
   let+ ()=match actual.phase,refusal with
     | Requested,(Observation_changed | No_longer_eligible _) -> Ok ()
     | Fenced,No_longer_eligible _ ->
       let* fence=Fence.read ~store ~scope:actual.scope ~request_id:actual.original_request_id in
       let* fence=Option.to_result ~none:"Resolution fence is absent" fence in
-      require (fence.expected=actual.expected && fence.actor=actual.actor && fence.reason=actual.reason)
-        "Resolution refusal has another immutable fence"
+      require_successor_authority actual fence
     | Fenced,Observation_changed
     | (Refused _ | Child_prepared _ | Child_intended _ | Child_confirmed _),(Observation_changed | No_longer_eligible _) ->
       Error "Only a resolution without a child intent can be refused" in
   {actual with phase=Refused refusal})
+let confirm_cut_fence ~store ~expected grant =
+  let* fence=Keeper_librarian_history_resolution.confirm_cut_grant ~store grant |> unavailable in
+  let* ()=(match expected.origin with
+    | Same_binding_cut _ -> matches_fence expected fence
+    | Worker_absence -> Error "An absence command cannot receive a Cut grant") |> unavailable in
+  let* next=update ~store ~expected (fun actual ->
+    let* ()=matches_fence actual fence in
+    match actual.phase with
+    | Requested -> Ok {actual with phase=Fenced}
+    | Refused _ | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _ ->
+      Error "Resolution command no longer awaits its Cut grant") in
+  let+ _=Keeper_librarian_history_resolution.confirm_cut_grant ~store grant |> unavailable in next
 let confirm_fence ~store ~expected fence = update ~store ~expected (fun actual ->
   let* ()=Fence.require_resolution_successor_authority fence in
+  let* ()=matches_fence actual fence in
   let* ()=require (actual.phase=Requested && fence.Fence.scope=actual.scope
     && fence.request_id=actual.original_request_id && fence.expected=actual.expected
     && fence.actor=actual.actor && fence.reason=actual.reason) "Resolution fence binding differs" in
@@ -318,15 +371,17 @@ let confirm_fence ~store ~expected fence = update ~store ~expected (fun actual -
 let validate_child ~store actual request =
   let* fence=Fence.read ~store ~scope:actual.scope ~request_id:actual.original_request_id in
   let* fence=Option.to_result ~none:"Resolution fence is absent" fence in
-  let* ()=Fence.require_resolution_successor_authority fence in
-  let* ()=require (fence.scope=actual.scope && fence.request_id=actual.original_request_id
-    && fence.expected=actual.expected && fence.actor=actual.actor && fence.reason=actual.reason)
-    "Resolution child preparation has another immutable fence" in
+  let* ()=require_successor_authority actual fence in
   let* parent=Owner.load ~store ~scope:actual.scope ~request_id:actual.original_request_id |> Result.map_error Owner.error_to_string in
   let* parent=Option.to_result ~none:"Resolution original is absent" parent in
   let* owner=Request.owner_of_json fence.physical_owner in
   let* parent_request=Request.restore_payload ~owner parent in
   let* ()=Fence.confirm_binding ~request:parent_request ~original:parent fence in
+  let* ()=match actual.origin with
+    | Worker_absence -> Ok ()
+    | Same_binding_cut _ -> require (Lane_addon_captured_destination.same_semantic
+        (Request.destination request) (Request.destination parent_request))
+        "Cut continuation changed its original semantic destination" in
   let* ()=require (Request.physical_owner request=owner && Request.scope owner=actual.scope
     && Request.request_id request<>parent.request_id)
     "Resolution child changed its original owner or identity" in
@@ -380,6 +435,25 @@ let confirm_child ~store ~expected child = update ~store ~expected (fun actual -
     && Record.request_digest child=expected_child.request_digest
     && Progress.phase (Record.progress child)=Progress.Captured) "Unacknowledged resolution child differs or has execution progress" in
   {actual with phase=Child_confirmed expected_child})
+let confirm_source_ack request =
+  let source=Request.source request and owner=Request.physical_owner request in
+  let keepers_dir=Source.runtime_keepers_dir source and keeper_name=Request.keeper_id owner in
+  let* cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir:keepers_dir ~keeper_name in
+  let through=Keeper_librarian_input_sources.external_through (Source.counterparts source) in
+  let* ()=require (Keeper_external_read_cursor.observation_matches_preparation cursor
+    ~after:through ~through ~atom:None ~official:None) "Resolution original external ACK is unconfirmed" in
+  let* atom=Keeper_librarian_progress.read ~keepers_dir ~keeper_id:keeper_name
+    |> Result.map_error Keeper_librarian_progress.read_error_to_string in
+  let* official=Keeper_librarian_official_progress.read ~keepers_dir ~keeper_id:keeper_name
+    |> Result.map_error Keeper_librarian_official_progress.read_error_to_string in
+  let positions=Source.positions source in
+  let atom_target=Option.fold ~none:positions.current ~some:(fun (range:Current.durable_range_id) ->
+    Some {Keeper_librarian_progress.position={trace_id=range.trace_id;end_atom=range.end_atom;
+      last_atom_digest=range.last_atom_digest};boundary_lines_seen=range.boundary_lines_seen}) (Source.range_id source) in
+  let official_target=Option.fold ~none:positions.official ~some:(fun (range:Current.official_range_id) ->
+    Some {Keeper_librarian_official_progress.boundary_line=List.fold_left (fun last (line,_) -> max last line)
+      range.after_boundary_line range.turns}) (Source.official_range_id source) in
+  require (atom=atom_target && official=official_target) "Resolution original read positions are unconfirmed"
 let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) =
   update ~store ~expected (fun actual ->
     let* child=match actual.phase with Child_confirmed child -> Ok child
@@ -412,6 +486,7 @@ let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) 
     let* receipts=Keeper_memory_os_aggregate_lock.with_lock ~keepers_dir ~keeper_id (fun () ->
       File_lock_eio.with_lock (Current.path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
         let* ()=Request.confirm_owner request in
+        let* ()=confirm_source_ack request in
         let* snapshot=Current.read_locked_for_keepers_dir ~keepers_dir ~keeper_id in
         let* snapshot=Option.to_result ~none:"Resolution Memory snapshot is absent" snapshot in
         let* bytes=Option.to_result ~none:"Resolution Memory snapshot disappeared"

@@ -37,7 +37,9 @@ val retained_stop : store:Lane_addon_store.t ->
     later range receipts can replace those receipts. Range coverage and an
     external ACK alone do not establish what another request actually read. This does
     not promote accounted unread holes to read content. Changed positions alone
-    do not release it.
+    do not release it. A validated Cut ancestor retains its continuation's read
+    obligation even when an independent completed request covers the range;
+    only the existing resolution protocol can prove descendant completion.
     A different configured installation/package/tool/semantic configuration
     revision can authorize fresh selection under the existing authority and
     source-publication fences, while retaining the earlier refusal. Returning
@@ -59,8 +61,24 @@ val request_id : t -> string
 val original : t -> Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t
 val diagnosis : t -> Yojson.Safe.t option
 (** The typed record of what settling this stop abandons and applies. [Some] only
-    for a permanent counterpart-input capacity refusal; every other stop reason
-    keeps blocking its destination until its own policy releases it. *)
+    for a permanent counterpart-input capacity refusal without a Cut ancestor.
+    A Cut continuation keeps its source unread and its destination blocked;
+    a refusal, empty disposition or ACK cannot prove that ancestor was read.
+    Every other stop reason keeps its existing release policy. *)
+type abandonment
+val abandonment : store:Lane_addon_store.t ->
+  record:Lane_addon_tool_request_owner.retained ->
+  request:Keeper_librarian_durable_request.t -> (abandonment, string) result
+(** Fresh strict evidence for ordinary refusal settlement. Requires this exact
+    counterpart-only execution refusal's named capacity final and matching
+    actual host terminal/proof (or the existing worker pre-host frame refusal),
+    no Gate/replacement/settlement and no Cut ancestor. Reads neither a mutable
+    history prefix nor range receipts, so receipt-proved partial ACK recovery
+    can use it after pruning. Call under each publication/ACK source lock;
+    retaining this audit value grants no effect authority. *)
+val abandonment_diagnosis : abandonment -> Yojson.Safe.t
+(** The diagnosis derived from that captured request and actual capacity
+    evidence, never supplied by the caller as settlement authority. *)
 val preserves_completed :
   settled:inventory ->
   record:Lane_addon_tool_request_owner.retained ->

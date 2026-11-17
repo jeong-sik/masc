@@ -164,7 +164,7 @@ let make ~authority ~request ~(original:Owner.retained) ~expected ~actor ~reason
     source_sha256;original_record=Owner.to_json original;authority;expected;actor;reason;fenced_at=now})
 let create ~request ~original ~expected ~actor ~reason ~now =
   make ~authority:Worker_absent ~request ~original ~expected ~actor ~reason ~now
-let create_cut ~store ~request ~original ~expected ~exclusion ~actor ~reason ~now =
+let observe_cut_basis ~store ~request ~exclusion =
   let* exact=Request.request request in
   let* schema=Option.to_result ~none:"Cut original has no captured schema" exact.Exact.schema in
   let* installation=Owner.installation_of_id (Request.destination request).installation_id in
@@ -172,10 +172,12 @@ let create_cut ~store ~request ~original ~expected ~exclusion ~actor ~reason ~no
     | Manual _ -> Error "Cut original is not configured" in
   let* evidence=Exact.confirm_cut_exclusion ~store ~declaration_id ~schema exact exclusion
     |> Result.map_error Exact.describe_recovery_error in
-  let cut={declaration_id=evidence.key.declaration_id;request_id=evidence.key.request_id;
+  Ok {declaration_id=evidence.key.declaration_id;request_id=evidence.key.request_id;
     exact_digest=evidence.key.digest;
     attempt_ordinal=evidence.attempt_ordinal;record_sha256=evidence.record_sha256;
-    proof_sha256=evidence.proof_sha256} in
+    proof_sha256=evidence.proof_sha256}
+let create_cut ~store ~request ~original ~expected ~exclusion ~actor ~reason ~now =
+  let* cut=observe_cut_basis ~store ~request ~exclusion in
   make ~authority:(Excluded_cut cut) ~request ~original ~expected ~actor ~reason ~now
 let read ~store ~scope ~request_id =
   let* stored = Store.load_history_fence store ~scope ~request_id in
@@ -197,11 +199,15 @@ let confirm_binding ~request ~(original:Owner.retained) fence =
     && fence.source_sha256 = source_sha256
     && fence.physical_owner = Request.owner_to_json (Request.physical_owner request))
     "History fence immutable binding differs; publication remains blocked"
-(* The same binding from the record and its index, without the body. Whoever
-   reads the body binds the index to it. *)
+(* The fence retains the immutable index checked with the original body.
+   Reusing it keeps the predecessor bound even after that body is pruned. *)
 let confirm_binding_index ~(index:Request.index) ~original fence =
   let module Record=Owner.Record in
-  require (fence.scope=Record.scope original && fence.request_id=Record.request_id original
+  let* captured=Owner.decode_published ~directory_name:(sha fence.scope)
+    ~file_name:(sha fence.request_id ^ ".json") fence.original_record in
+  let* captured_index=Request.index_of_summary captured in
+  require (index=captured_index
+    && fence.scope=Record.scope original && fence.request_id=Record.request_id original
     && fence.request_digest=Record.request_digest original
     && fence.source_sha256=index.source_digest
     && fence.physical_owner=Request.owner_to_json index.owner)

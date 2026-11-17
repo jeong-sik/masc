@@ -258,6 +258,86 @@ let test_set_switch_clears_on_release () =
   Alcotest.(check bool) "root switch cleared after switch released" true
     (Option.is_none (Eio_context.get_root_switch_opt ()))
 
+let test_joined_owner_cancellation_before_entry_and_during_wait () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun root_sw ->
+  Eio_context.set_switch root_sw;
+  let owner_domain = Domain.self () in
+  Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+    let entries = Atomic.make 0 in
+    let cancelled_before_entry =
+      try
+        Eio.Cancel.sub (fun context ->
+          Eio.Cancel.cancel context Exit;
+          Eio_context.run_on_owner_domain_joined (fun () -> Atomic.incr entries));
+        false
+      with Eio.Cancel.Cancelled _ -> true in
+    Alcotest.(check bool) "pre-cancelled caller propagates cancellation" true cancelled_before_entry;
+    Alcotest.(check int) "pre-cancelled caller enqueues no publication" 0 (Atomic.get entries);
+    Eio.Switch.run (fun worker_sw ->
+      let context, context_u = Eio.Promise.create () in
+      let entered, entered_u = Eio.Promise.create () in
+      let never, _ = Eio.Promise.create () in
+      let released = Atomic.make false in
+      let caller = Eio.Fiber.fork_promise ~sw:worker_sw (fun () ->
+        try
+          Eio.Cancel.sub (fun context ->
+            Eio.Promise.resolve context_u context;
+            Eio_context.run_on_owner_domain_joined (fun () ->
+              Atomic.incr entries;
+              Fun.protect ~finally:(fun () -> Atomic.set released true) (fun () ->
+                Eio.Promise.resolve entered_u (Domain.self ());
+                (Eio.Promise.await never : unit))));
+          false
+        with Eio.Cancel.Cancelled _ -> true) in
+      let context = Eio.Promise.await context in
+      let executed_domain = Eio.Promise.await entered in
+      Eio.Cancel.cancel context Exit;
+      let cancelled = Eio.Promise.await_exn caller in
+      Alcotest.(check bool) "publication executed on the actual owner domain" true
+        (executed_domain = owner_domain);
+      Alcotest.(check bool) "owner wait remains cancellable" true cancelled;
+      Alcotest.(check bool) "actual owner cleanup precedes caller cancellation return" true
+        (Atomic.get released));
+    Alcotest.(check int) "cancelled local publication is entered once" 1 (Atomic.get entries);
+    let propagated =
+      try
+        Eio_context.run_on_owner_domain_joined (fun () -> (raise Exit : unit));
+        false
+      with Exit -> true in
+    Alcotest.(check bool) "actual owner exception is returned to the caller" true propagated;
+    Alcotest.(check bool) "owner remains usable after joined cancellation" true
+      (Eio_context.run_on_owner_domain_joined Domain.self = owner_domain))
+
+let test_joined_owner_queued_cancellation_does_not_need_dispatcher () =
+  Eio_main.run @@ fun _env ->
+  let entries = Atomic.make 0 and finished = Atomic.make false in
+  let worker = ref None in
+  Eio.Switch.run (fun root_sw ->
+    Eio_context.set_switch root_sw;
+    worker := Some (Domain.spawn (fun () ->
+      Fun.protect ~finally:(fun () -> Atomic.set finished true) (fun () ->
+        Eio_main.run (fun _env -> Eio.Switch.run (fun worker_sw ->
+          let context, context_u = Eio.Promise.create () in
+          (* Fork runs immediately until the joined dispatch suspends. The
+             owner below never yields, so this task remains queued. *)
+          let caller = Eio.Fiber.fork_promise ~sw:worker_sw (fun () ->
+            try
+              Eio.Cancel.sub (fun context ->
+                Eio.Promise.resolve context_u context;
+                Eio_context.run_on_owner_domain_joined (fun () -> Atomic.incr entries));
+              false
+            with Eio.Cancel.Cancelled _ -> true) in
+          Eio.Cancel.cancel (Eio.Promise.await context) Exit;
+          Eio.Promise.await_exn caller)))));
+    while not (Atomic.get finished) do Domain.cpu_relax () done;
+    Alcotest.(check int) "cancelled queued publication never entered" 0 (Atomic.get entries));
+  let cancelled = match !worker with
+    | Some worker -> Domain.join worker
+    | None -> Alcotest.fail "queued cancellation worker was not started" in
+  Alcotest.(check bool) "queued cancellation finishes before owner release" true cancelled;
+  Alcotest.(check int) "release-time drain cannot enter the retired queued callback" 0 (Atomic.get entries)
+
 (* Another domain posts three tasks while the owner domain does not pass
    through its run queue, so its dispatcher starts none of them before the
    root switch ends. The release hook cannot be cancelled and runs after
@@ -365,6 +445,12 @@ let () =
           Alcotest.test_case "run_on_owner_domain cross-domain dispatch"
             `Quick
             test_run_on_owner_domain_cross_domain_dispatch;
+          Alcotest.test_case "joined owner cancels before entry and joins a cancelled wait"
+            `Quick
+            test_joined_owner_cancellation_before_entry_and_during_wait;
+          Alcotest.test_case "joined queued cancellation does not wait for owner dispatch"
+            `Quick
+            test_joined_owner_queued_cancellation_does_not_need_dispatcher;
           Alcotest.test_case "set_switch clears on release"
             `Quick
             test_set_switch_clears_on_release;

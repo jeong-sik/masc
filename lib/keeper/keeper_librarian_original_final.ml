@@ -10,6 +10,12 @@ let same left right =
 let equal left right detail =
   let* same=same left right in
   require same detail
+let confirm_frame_refusal ~latest final =
+  if not (Exact.refused_before_host final) then Ok false else
+  let+ observed=latest () in
+  match observed with
+  | Exact.No_completed_latest -> true
+  | Completed_latest _ -> false
 
 type target = {exact:Exact.request;schema:Yojson.Safe.t;declaration_id:string}
 let target ~installation_id exact =
@@ -25,11 +31,11 @@ let refusal_evidence ~store ~target final =
     let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
     (match observed with
      | Exact.Retained_absent ->
-       (* The worker's frame refusal: no provider or slot ran, so the final
-          alone is the whole evidence. *)
-       Ok (if Exact.refused_before_host final
+       let+ refused=confirm_frame_refusal
+         ~latest:(fun () -> Exact.read_latest_original_execution ~store ~declaration_id ~schema exact) final in
+       if refused
            then Keeper_exact_walk_failure.of_input_refusal Keeper_librarian_input_refusal.Request_body_refused
-           else Keeper_exact_walk_failure.empty)
+           else Keeper_exact_walk_failure.empty
      | Retained_open -> Ok Keeper_exact_walk_failure.empty
      | Retained_terminal _ ->
        let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in
@@ -85,9 +91,10 @@ let confirm ~(observe : unit -> (Exact.retained_observation, string) result)
   | Exact.Retained_absent ->
     (* addons/exact_worker.py [submit] writes the refusal before the
        [store.write accepted] line, so the host never retains this request.
-       The worker's deployed behavior is what makes this final the only one
-       taken without a host terminal. *)
-    Ok (if Exact.refused_before_host final then Confirmed else Unconfirmed Terminal_absent)
+       Its actual proof must also be absent; a retained or unreadable proof
+       contradicts this exception. *)
+    let+ refused=confirm_frame_refusal ~latest final in
+    if refused then Confirmed else Unconfirmed Terminal_absent
   | Retained_open -> Ok (Unconfirmed Terminal_unresolved)
   | Retained_terminal actual ->
   let* delivered=same (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final) in

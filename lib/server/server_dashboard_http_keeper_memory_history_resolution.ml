@@ -75,6 +75,8 @@ let respond_work_error request reqd target error =
     | Conflict detail ->
       `Conflict, "resolution_conflict", "History resolution observation conflicts",
       private_failure ~keeper_name:target.keeper_name ~code:"resolution_conflict" detail
+    | Host_claim_busy ->
+      `Service_unavailable, "resolution_claim_busy", "Original history execution claim is busy", []
     | Unavailable detail ->
       `Service_unavailable, "resolution_unavailable", "History resolution is unavailable",
       private_failure ~keeper_name:target.keeper_name ~code:"resolution_unavailable" detail
@@ -130,6 +132,7 @@ let refused_preview ~keeper_name error =
     | Observation_changed -> "observation_changed", `Bool false, []
     | Range_already_recorded -> "range_already_recorded", `Bool false, []
     | Already_fenced _ -> "already_fenced", `Bool false, []
+    | Host_claim_busy -> "claim_busy", `Null, []
     | Unavailable detail -> "unavailable", `Null,
       private_failure ~keeper_name ~code:"resolution_preview_unavailable" detail
     | Publication_uncertain detail -> "publication_unconfirmed", `Null,
@@ -161,7 +164,8 @@ let handle_get state request reqd target =
         | Error (Resolution.Already_fenced fence as error) ->
           Some fence, refused_preview ~keeper_name:target.keeper_name error
         | Error ((Original_absent | Ineligible _ | Observation_changed
-                 | Range_already_recorded | Unavailable _ | Publication_uncertain _) as error) ->
+                 | Range_already_recorded | Unavailable _ | Publication_uncertain _
+                 | Host_claim_busy) as error) ->
           observation.fence, refused_preview ~keeper_name:target.keeper_name error
       in
       respond request reqd (`Assoc [ "schema", `String response_schema;

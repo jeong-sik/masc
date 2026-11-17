@@ -13,8 +13,14 @@ module Cursor = Keeper_external_read_cursor
 module Exact = Lane_addon_exact
 open Result.Syntax
 
-type error = Original_absent | Ineligible of string | Observation_changed
-  | Range_already_recorded | Already_fenced of State.t | Unavailable of string
+type error =
+  | Original_absent
+  | Ineligible of string
+  | Observation_changed
+  | Range_already_recorded
+  | Already_fenced of State.t
+  | Host_claim_busy
+  | Unavailable of string
   | Publication_uncertain of string
 type preview = { expected:State.guard; scope:string; request_id:string; request_digest:string }
 let error_to_string = function
@@ -23,6 +29,7 @@ let error_to_string = function
   | Observation_changed -> "Original, Memory or cursor observation changed"
   | Range_already_recorded -> "Original range has a prepared or committed Memory receipt"
   | Already_fenced _ -> "Original history result is already fenced"
+  | Host_claim_busy -> "Original history execution claim is busy"
   | Unavailable detail -> "History fence observation unavailable: " ^ detail
   | Publication_uncertain detail -> "History fence publication is unconfirmed: " ^ detail
 let unavailable result = Result.map_error (fun detail -> Unavailable detail) result
@@ -40,11 +47,9 @@ let scope ~config ~keeper_name ~request_id =
 let read ~config ~keeper_name ~request_id =
   let* scope = scope ~config ~keeper_name ~request_id in
   unavailable (State.read ~store:(Store.of_config config) ~scope ~request_id)
-let load ~config ~keeper_name ~request_id =
+let load_original ~config ~keeper_name ~request_id =
   let store = Store.of_config config in
   let* scope = scope ~config ~keeper_name ~request_id in
-  let* fence = unavailable (State.read ~store ~scope ~request_id) in
-  let* () = match fence with None -> Ok () | Some fence -> Error (Already_fenced fence) in
   let* original = Owner.load ~store ~scope ~request_id |> Result.map_error (fun error ->
     Unavailable (Owner.error_to_string error)) in
   let* original = match original with None -> Error Original_absent | Some value -> Ok value in
@@ -52,6 +57,11 @@ let load ~config ~keeper_name ~request_id =
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path) original) in
   let* request = unavailable (Request.restore ~owner original) in
   Ok (store, original, request)
+let load ~config ~keeper_name ~request_id =
+  let* scope=scope ~config ~keeper_name ~request_id in
+  let* fence=unavailable (State.read ~store:(Store.of_config config) ~scope ~request_id) in
+  let* ()=match fence with None -> Ok () | Some fence -> Error (Already_fenced fence) in
+  load_original ~config ~keeper_name ~request_id
 type original_kind = Absent_original | Cut_original
 let eligible ~kind ~request ~(original:Owner.retained) =
   let* () = match kind,Progress.phase original.progress with
@@ -65,7 +75,7 @@ let eligible ~kind ~request ~(original:Owner.retained) =
          require (Option.is_none (Progress.settlement original.progress))
            (Ineligible "Cut original already has a source disposition")
        | Retained_unknown (Interrupted | Raised) | Retained_call _ | Retained_not_allowed _
-       | Retained_declaration_replaced | Retained_request_id_reused ->
+       | Retained_request_id_reused ->
          Error (Ineligible "Original is not a retained execution-stage Cut"))
     | Absent_original,(Captured | Admission_wait _ | Dispatch_pending (None | Some (Waiting _ | Outcome_unknown _))
       | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
@@ -106,7 +116,7 @@ let with_host_exclusion ~kind ~store ~request consume = match kind with
       ~use:(fun exclusion -> consume (Some exclusion))
       |> Result.map_error (fun error -> Unavailable (Exact.describe_recovery_error error)) in
     match outcome with
-    | Exact.Cut_busy -> Error (Ineligible "Original host execution claim is busy")
+    | Exact.Cut_busy -> Error Host_claim_busy
     | Cut_not_retained _ -> Error (Ineligible "Original host no longer retains a terminal Cut")
     | Cut_excluded result -> result
 let no_range_receipt request =
@@ -141,7 +151,7 @@ let cursors request =
   let* external_cursor = unavailable (Cursor.observe ~runtime_keepers_dir:keepers_dir ~keeper_name:keeper_id) in
   digest (`Assoc ["atom",optional Atom.to_json atom;"official",optional Official.to_json official;
     "external",Cursor.observation_to_json external_cursor])
-let with_observation ~kind ~store ~(original:Owner.retained) ~request consume =
+let with_observation ~check_fence ~kind ~store ~(original:Owner.retained) ~request consume =
   Keeper_librarian_durable_source_lock.with_original_snapshot ~request (fun ~messages:_ ->
     let owner = Request.physical_owner request in
     let keepers_dir = Request.keepers_dir owner and keeper_id = Request.keeper_id owner in
@@ -155,7 +165,7 @@ let with_observation ~kind ~store ~(original:Owner.retained) ~request consume =
         let* record_sha256 = digest (Owner.to_json current) in
         let* original_sha256 = digest (Owner.to_json original) in
         let* () = require (record_sha256=original_sha256) Observation_changed in
-        let* () = unavailable (State.check_unfenced ~store ~request ~original:current) in
+        let* () = check_fence current in
         with_host_exclusion ~kind ~store ~request (fun exclusion ->
         let* snapshot = unavailable (Current.read_locked_for_keepers_dir ~keepers_dir ~keeper_id) in
         let* memory_sha256 = match snapshot with
@@ -172,6 +182,7 @@ let with_observation ~kind ~store ~(original:Owner.retained) ~request consume =
 let observe ~kind ~config ~keeper_name ~request_id consume =
   let* store, original, request = load ~config ~keeper_name ~request_id in
   with_observation ~kind ~store ~original ~request
+    ~check_fence:(fun current -> unavailable (State.check_unfenced ~store ~request ~original:current))
     (fun current expected exclusion -> consume store request current expected exclusion)
 let preview_kind ~kind ~config ~keeper_name ~request_id =
   try observe ~kind ~config ~keeper_name ~request_id (fun _store _request original expected _exclusion ->
@@ -210,3 +221,83 @@ let fence_serialized ~config ~keeper_name ~request_id ~expected ~actor ~reason ~
   fence_kind ~kind:Absent_original ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now
 let fence_cut_serialized ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
   fence_kind ~kind:Cut_original ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now
+
+let same_binding ~config request =
+  Keeper_librarian_durable_edge.confirm_destination ~config
+    ~reserved:(Keeper_librarian_durable_edge.reserved ()) (Request.destination request)
+  |> Result.map_error (function
+    | Lane_addon_submit_once.Unavailable detail | Rejected detail -> Ineligible detail
+    | Uncertain detail -> Unavailable detail)
+let preview_cut_command ~config ~keeper_name ~request_id =
+  try
+    let* store,original,request=load ~config ~keeper_name ~request_id in
+    let* ()=same_binding ~config request in
+    with_observation ~kind:Cut_original ~store ~original ~request
+      ~check_fence:(fun current -> unavailable (State.check_unfenced ~store ~request ~original:current))
+      (fun current expected exclusion ->
+        let* exclusion=Option.to_result ~none:(Unavailable "Cut observation has no held claim") exclusion in
+        let+ basis=unavailable (State.observe_cut_basis ~store ~request ~exclusion) in
+        {expected;scope=current.Owner.scope;request_id;request_digest=current.request_digest},basis)
+  with Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Unavailable (Printexc.to_string exn))
+type cut_grant = {
+  store:Store.t; request:Request.t; original:Owner.retained;
+  exclusion:Exact.cut_exclusion; fence:State.t;
+}
+let confirm_cut_grant ~store grant =
+  let* ()=Request.confirm_owner grant.request in
+  let* ()=State.confirm_binding ~request:grant.request ~original:grant.original grant.fence in
+  let* basis=State.observe_cut_basis ~store ~request:grant.request ~exclusion:grant.exclusion in
+  let* ()=match grant.fence.authority with
+    | State.Excluded_cut expected -> if basis=expected then Ok () else Error "Cut claim evidence changed"
+    | Worker_absent -> Error "Cut grant cannot use a worker-absence fence" in
+  let* stored=State.read ~store ~scope:grant.fence.scope ~request_id:grant.fence.request_id in
+  let* stored=Option.to_result ~none:"Cut grant fence disappeared" stored in
+  let* expected=Lane_addon_action.canonical (State.to_json grant.fence) in
+  let* actual=Lane_addon_action.canonical (State.to_json stored) in
+  let+ ()=if expected=actual then Ok () else Error "Cut grant fence changed" in stored
+let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use =
+  try
+    let* store,original,request=load_original ~config ~keeper_name ~request_id in
+    let run () =
+    let* previous=unavailable (State.read ~store ~scope:original.scope ~request_id) in
+    let check_fence current = match previous with
+      | None -> unavailable (State.check_unfenced ~store ~request ~original:current)
+      | Some fence ->
+        let* ()=unavailable (State.confirm_binding ~request ~original:current fence) in
+        let* ()=require (fence.expected.owner_record_sha256=expected.State.owner_record_sha256
+          && fence.expected.cursors_sha256=expected.cursors_sha256
+          && fence.actor=actor && fence.reason=reason) Observation_changed in
+        (match fence.authority with
+         | State.Excluded_cut actual -> require (actual=basis) Observation_changed
+         | Worker_absent -> Error (Ineligible "Cut command cannot adopt an absence fence")) in
+    with_observation ~kind:Cut_original ~check_fence ~store ~original ~request
+      (fun current actual exclusion ->
+        (* Memory may advance independently. Source progress, owner and this
+           original's retained host evidence may not. *)
+        let* ()=require (actual.State.owner_record_sha256=expected.State.owner_record_sha256
+          && actual.cursors_sha256=expected.cursors_sha256) Observation_changed in
+        let* exclusion=Option.to_result ~none:(Unavailable "Cut command has no actual claim") exclusion in
+        let* observed=unavailable (State.observe_cut_basis ~store ~request ~exclusion) in
+        let* ()=require (observed=basis) Observation_changed in
+        let* fence=match previous with
+          | Some fence -> Ok fence
+          | None ->
+            let* fence=unavailable (State.create_cut ~store ~request ~original:current ~expected:actual
+              ~exclusion ~actor ~reason ~now) in
+            let* published=unavailable (State.publish ~store fence) in
+            (match published with
+             | Store.History_fence_stored | History_fence_already_stored -> Ok fence
+             | History_fence_owner_changed -> Error Observation_changed
+             | History_fence_unconfirmed detail -> Error (Publication_uncertain detail)) in
+        let grant={store;request;original=current;exclusion;fence} in
+        let* _=confirm_cut_grant ~store:grant.store grant |> Result.map_error (fun detail -> Publication_uncertain detail) in
+        Ok (use grant)) in
+    Keeper_librarian_durable_edge.with_destination ~config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun current ->
+        if Lane_addon_captured_destination.same_semantic current (Request.destination request)
+        then Ok (run ())
+        else Error "Cut command no longer has its same semantic destination")
+    |> unavailable |> Result.join
+  with Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Publication_uncertain (Printexc.to_string exn))

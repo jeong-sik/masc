@@ -8,6 +8,7 @@ type error =
   | Observation_changed
   | Range_already_recorded
   | Already_fenced of Keeper_librarian_history_resolution_state.t
+  | Host_claim_busy
   | Unavailable of string
   | Publication_uncertain of string
 
@@ -28,8 +29,27 @@ val preview_cut : config:Workspace.config -> keeper_name:string -> request_id:st
 (** A separate observation of a terminal execution-stage Cut. Acquires and
     releases the real Exact claim during observation, but retains no grant.
     No completed latest execution, gate or replacement preparation, settlement,
-    prior range receipt or changed source position is allowed. This API is
-    not connected to HTTP submission or automatic successor preparation. *)
+    prior range receipt or changed source position is allowed. This is a
+    fence observation only; automatic ingress uses the separately bound
+    command preview below. *)
+val preview_cut_command : config:Workspace.config -> keeper_name:string -> request_id:string ->
+  (preview * Keeper_librarian_history_resolution_state.cut_basis, error) result
+(** The same strict observation, binding a command to the actual latest Cut.
+    A busy claim is retryable; no command or grant is retained by this read. *)
+type cut_grant
+val with_cut_fence_serialized : config:Workspace.config -> keeper_name:string ->
+  request_id:string -> expected:Keeper_librarian_history_resolution_state.guard ->
+  basis:Keeper_librarian_history_resolution_state.cut_basis -> actor:string ->
+  reason:string -> now:float -> use:(cut_grant -> 'a) -> ('a, error) result
+(** Reacquire the actual Cut claim, source and Memory locks, revalidate its
+    unchanged owner/source/cursors and absent receipts, then publish/read back
+    the matching fence. Current Memory may rebase. An existing fence is adopted
+    only for this exact command. [use] must retain/read back its Fenced intent
+    here; all work is joined before return. No original RPC or ACK is sent. *)
+val confirm_cut_grant : store:Lane_addon_store.t -> cut_grant ->
+  (Keeper_librarian_history_resolution_state.t, string) result
+(** Recheck the bound fence and actual live claim. Expired/foreign/changed
+    evidence refuses; the value is not usable outside [use]. *)
 val read : config:Workspace.config -> keeper_name:string -> request_id:string ->
   (Keeper_librarian_history_resolution_state.t option, error) result
 val fence_serialized : config:Workspace.config -> keeper_name:string -> request_id:string ->
@@ -49,5 +69,5 @@ val fence_cut_serialized : config:Workspace.config -> keeper_name:string -> requ
 (** The Cut counterpart of [fence_serialized]. Holds the real original
     claim through publication and strict readback within the same source and
     Memory critical section. Preserves the original Unknown and its source;
-    grants no successor, Memory write or ACK. The existing continuation worker
-    refuses this new authority until its Cut recovery contract is implemented. *)
+    grants no successor, Memory write or ACK. Only an explicitly bound command
+    confirmed through [with_cut_fence_serialized] may prepare a child. *)

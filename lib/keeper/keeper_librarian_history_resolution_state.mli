@@ -35,6 +35,11 @@ type t = private {
 
 val guard_to_json : guard -> Yojson.Safe.t
 val guard_of_json : Yojson.Safe.t -> (guard, string) result
+val cut_to_json : cut_basis -> Yojson.Safe.t
+val cut_of_json : Yojson.Safe.t -> (cut_basis, string) result
+val observe_cut_basis : store:Lane_addon_store.t ->
+  request:Keeper_librarian_durable_request.t ->
+  exclusion:Lane_addon_exact.cut_exclusion -> (cut_basis, string) result
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val create : request:Keeper_librarian_durable_request.t ->
@@ -60,7 +65,9 @@ val confirm_binding : request:Keeper_librarian_durable_request.t ->
 val confirm_binding_index : index:Keeper_librarian_durable_request.index ->
   original:Lane_addon_tool_request_owner.Record.t -> t -> (unit, string) result
 (** {!confirm_binding} from the record and its index: the fence's source
-    digest is the index's, its owner the index's. Reads no body. *)
+    digest is the index's, its owner the index's. The whole immutable index,
+    including its predecessor, must equal the one in the fence's hashed
+    original record. Current progress may have changed. Reads no body. *)
 val check_unfenced : store:Lane_addon_store.t ->
   request:Keeper_librarian_durable_request.t ->
   original:Lane_addon_tool_request_owner.retained -> (unit, string) result

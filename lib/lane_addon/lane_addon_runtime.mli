@@ -179,7 +179,9 @@ val with_tool_request_destination : config:Workspace.config -> access:Lane_addon
     reconciliation. The callback may yield only for local original journal
     publication/recovery, never call Runtime or execute a worker/model/domain
     effect. It runs cancellation-protected after lock acquisition; exceptions
-    release the locks without poisoning the shared action serializer. An error
+    release the locks without poisoning the shared action serializer. Caller
+    cancellation joins the actual owner task through local publication and
+    lock release before returning, including calls from a pool worker. An error
     may follow publication, requiring strict original recovery. The destination
     is not authority for an effect after the callback returns. *)
 val capture_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->

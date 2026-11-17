@@ -8,6 +8,10 @@ type submission = {
 val submit : config:Workspace.config -> keeper_name:string -> request_id:string ->
   expected:Keeper_librarian_history_resolution_state.guard -> actor:string ->
   reason:string -> now:float -> (submission, error) result
+val submit_cut : config:Workspace.config -> keeper_name:string -> request_id:string ->
+  expected:Keeper_librarian_history_resolution_state.guard ->
+  basis:Keeper_librarian_history_resolution_state.cut_basis -> actor:string ->
+  reason:string -> now:float -> (submission, error) result
 (** Durable acceptance only. Callers check the existing initialized/enabled/
     workspace/readiness contracts before requesting ordinary lane scheduling.
     Scheduling failure does not remove this intent. *)
@@ -43,6 +47,11 @@ val run_serialized : config:Workspace.config -> keeper_name:string ->
     preparation retains the complete request before its body is written;
     recovery never rerenders that preparation from changed Memory or clock. *)
 type automatic_resolution = Original_waiting | Reobserve_original | Resume_history
+val resolve_cut_serialized : config:Workspace.config -> keeper_name:string ->
+  request_id:string -> (automatic_resolution, error) result
+(** Only after fresh retained execution Cut at the same actual destination.
+    A missing or wrong-origin intent behind an existing Cut fence grants
+    nothing. Busy claims leave the same Requested command retryable. *)
 val resolve_missing_serialized : config:Workspace.config -> keeper_name:string ->
   request_id:string -> (automatic_resolution, error) result
 (** After the original owner freshly observes [Missing_after_dispatch], reuse

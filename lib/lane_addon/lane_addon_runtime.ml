@@ -2521,7 +2521,7 @@ let with_tool_request_destination_on_owner ~config ~access ~reserved ~(export : 
     Eio.Fiber.check ();
     use prepared))
 let with_tool_request_destination ~config ~access ~reserved ~export ~publish =
-  with_tool_call_owner (fun () ->
+  Eio_context.run_on_owner_domain_joined (fun () ->
     with_tool_request_destination_on_owner ~config ~access ~reserved ~export
       ~prepare:publish ~use:(fun value -> Ok value))
 let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request_id ~capture =

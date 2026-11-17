@@ -371,7 +371,10 @@ let rec consume_one ~config ~keeper_name ~wake =
       | Owner.Missing_after_dispatch ->
         Resolution_work.resolve_missing_serialized ~config ~keeper_name ~request_id:(Record.request_id record)
         |> Result.map_error Keeper_librarian_history_resolution_intent.error_to_string
-      | Worker_pending | Worker_unknown | Worker_unreachable | Journal_recheck ->
+      | Worker_unknown ->
+        Resolution_work.resolve_cut_serialized ~config ~keeper_name ~request_id:(Record.request_id record)
+        |> Result.map_error Keeper_librarian_history_resolution_intent.error_to_string
+      | Worker_pending | Worker_unreachable | Journal_recheck ->
         Ok Resolution_work.Original_waiting in
     match resolution with
     | Resolution_work.Original_waiting -> pending_worker wait record
@@ -622,9 +625,9 @@ let rec consume_one ~config ~keeper_name ~wake =
     let abandoned,stops=List.fold_left (fun (count,kept) stop ->
       match Refusal.diagnosis stop with
       | None -> count,stop::kept
-      | Some diagnosis ->
+      | Some _ ->
         let record,request=Refusal.original stop in
-        (match io (fun () -> Commit.settle_refused ~store ~request ~record ~diagnosis) with
+        (match io (fun () -> Commit.settle_refused ~store ~request ~record) with
          | Ok _ ->
            Log.Keeper.warn ~keeper_name
              "durable Librarian abandoned a permanently over-capacity counterpart range: request=%s"

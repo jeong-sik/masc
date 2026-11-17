@@ -79,7 +79,7 @@ module For_testing : sig
       fault the real filesystem without fabricating domain success. *)
   val settle_refused : before_settlement:(unit -> (unit, string) result) ->
     store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->
-    record:Lane_addon_tool_request_owner.retained -> diagnosis:Yojson.Safe.t ->
+    record:Lane_addon_tool_request_owner.retained ->
     (Lane_addon_tool_request_owner.retained, string) result
   (** Same refusal path. The hook runs after actual range receipts and before
       ACK/read-position settlement. Returning an error preserves the refusal
@@ -88,7 +88,7 @@ module For_testing : sig
 end
 
 val settle_refused : store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->
-  record:Lane_addon_tool_request_owner.retained -> diagnosis:Yojson.Safe.t ->
+  record:Lane_addon_tool_request_owner.retained ->
   (Lane_addon_tool_request_owner.retained, string) result
 (** End a permanent execution refusal by abandoning its exact range, then record
     [Progress.Refusal_settled diagnosis] on the original. Writes the range's
@@ -96,8 +96,13 @@ val settle_refused : store:Lane_addon_store.t -> request:Keeper_librarian_durabl
     runs the same unread archive, external ACK and atom/official position
     settlement a finished original uses, and only then appends the fact. Refuses
     any record that is not an unsettled execution refusal, and refuses if the
-    original is effect-fenced or the read positions moved outside this
-    original's settlement. Fence checks and ACK/write hold the original source
-    locks, including when recovering a partial previous settlement. A cut
-    re-enters safely. This relaxes fail-closed on purpose: the refused input is never
-    read. Blocking; offload it in an Eio caller. *)
+    original is effect-fenced, has a confirmed Cut ancestor, or the read positions
+    moved outside this original's settlement. Fence checks and ACK/write hold
+    the original source locks, including fresh strict ancestry checks and
+    recovery of a partial previous settlement. A Cut descendant remains
+    unresolved without new receipts or source ACK; a refusal is not descendant
+    reading. Each locked inspection strictly confirms the actual capacity final
+    and proof and excludes Gate/replacement/settlement. The audit diagnosis is
+    derived from that evidence. Interrupted ordinary refusal settlement
+    re-enters safely. This relaxes fail-closed on purpose: the refused input is
+    never read. Blocking; offload it in an Eio caller. *)

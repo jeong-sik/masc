@@ -193,6 +193,56 @@ let run_on_owner_domain (type a) (f : unit -> a) : a =
     | Ok res -> res
     | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
 
+type joined_owner_entry = Awaiting_owner | Entered_owner | Cancelled_before_entry
+
+let run_on_owner_domain_joined (type a) (f : unit -> a) : a =
+  match Atomic.get current_sw with
+  | None -> f ()
+  | Some binding when binding.owner_domain = Domain.self () -> f ()
+  | Some binding ->
+    let p, r = Eio.Promise.create () in
+    let cancelled, signal_cancelled = Eio.Promise.create () in
+    let entry = Atomic.make Awaiting_owner in
+    let await_cancellation () =
+      let exn, bt = Eio.Promise.await cancelled in
+      Printexc.raise_with_backtrace exn bt
+    in
+    let task () =
+      if Atomic.compare_and_set entry Awaiting_owner Entered_owner then begin
+        try
+          let res = match Eio.Promise.peek cancelled with
+            | Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
+            | None -> Eio.Fiber.first f await_cancellation in
+          Eio.Promise.resolve_ok r res
+        with exn -> (* Resolved back to the caller, including cancellation. *)
+          Eio.Promise.resolve_error r (exn, Printexc.get_raw_backtrace ())
+      end
+    in
+    Eio.Fiber.check ();
+    Eio.Cancel.protect (fun () -> Eio.Stream.add binding.dispatch_stream (Awaited task));
+    let result =
+      try
+        let result = Eio.Promise.await p in
+        Eio.Fiber.check ();
+        result
+      with Eio.Cancel.Cancelled _ as exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Cancel.protect (fun () ->
+          ignore (Eio.Promise.try_resolve signal_cancelled (exn, bt));
+          if Atomic.compare_and_set entry Awaiting_owner Cancelled_before_entry
+          then Eio.Promise.resolve_error r (exn, bt)
+          else begin
+            (* [first] joins the real owner task, including protected local
+               publication and finalizers. A never-entered task has nothing
+               to join and must not depend on the shutdown dispatcher. *)
+            ignore (Eio.Promise.await p)
+          end);
+        Printexc.raise_with_backtrace exn bt
+    in
+    match result with
+    | Ok res -> res
+    | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
+
 let set_env env =
   Atomic.set current_env (Some env)
 

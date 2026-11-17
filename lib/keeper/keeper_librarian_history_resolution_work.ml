@@ -28,6 +28,11 @@ let submit ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
     {intent;reobserved}
   with Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error (Intent.Publication_uncertain (Printexc.to_string exn))
+let submit_cut ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now =
+  try let+ intent,reobserved=Intent.submit_cut ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now in
+    {intent;reobserved}
+  with Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Intent.Publication_uncertain (Printexc.to_string exn))
 let original ~config ~keeper_name ~store intent =
   let* parent=Owner.load ~store ~scope:intent.Intent.scope ~request_id:intent.original_request_id
     |> Result.map_error Owner.error_to_string in
@@ -36,11 +41,7 @@ let original ~config ~keeper_name ~store intent =
   let* owner=Request.observe_record_owner ~base_path:config.base_path ~keepers_dir parent in
   let* ()=require (Request.keeper_id owner=keeper_name) "Resolution original belongs to another Keeper" in
   let+ request=Request.restore ~owner parent in parent,request
-let fence_matches intent fence =
-  let* ()=Fence.require_resolution_successor_authority fence in
-  require (fence.Fence.scope=intent.Intent.scope && fence.request_id=intent.original_request_id
-    && fence.expected=intent.expected && fence.actor=intent.actor && fence.reason=intent.reason)
-    "Existing history fence belongs to another resolution"
+let fence_matches intent fence = Intent.require_successor_authority intent fence
 type child_source = Replayable of Source.t | Unreplayable of string
 let prepare_child ~config ~keeper_name ~store intent =
   let* parent,request=io (fun () -> original ~config ~keeper_name ~store intent) |> unavailable in
@@ -208,6 +209,8 @@ let retain_completion ~config ~keeper_name ~store intent =
 let rec process ~config ~keeper_name ~store intent = match intent.Intent.phase with
   | Refused _ -> Ok ()
   | Requested ->
+    (match intent.origin with
+    | Intent.Worker_absence ->
     let* stored=io (fun () -> Resolution.read ~config ~keeper_name ~request_id:intent.original_request_id)
       |> Result.map_error (fun error -> Intent.Unavailable (Resolution.error_to_string error)) in
     let observed=match stored with Some fence -> Ok fence | None ->
@@ -224,7 +227,20 @@ let rec process ~config ~keeper_name ~store intent = match intent.Intent.phase w
        io (fun () -> Intent.refuse ~store ~expected:intent (Intent.No_longer_eligible (Resolution.error_to_string error)))
        |> Result.map (fun _ -> ())
      | Error (Unavailable detail) -> Error (Intent.Unavailable detail)
-     | Error (Publication_uncertain detail) -> Error (Intent.Publication_uncertain detail))
+     | Error (Publication_uncertain detail) -> Error (Intent.Publication_uncertain detail)
+     | Error Host_claim_busy -> Error Intent.Host_claim_busy)
+    | Same_binding_cut basis ->
+      let* granted=io (fun () -> Resolution.with_cut_fence_serialized ~config ~keeper_name
+        ~request_id:intent.original_request_id ~expected:intent.expected ~basis
+        ~actor:intent.actor ~reason:intent.reason ~now:(Time_compat.now ())
+        ~use:(fun grant -> Intent.confirm_cut_fence ~store ~expected:intent grant))
+        |> Result.map_error (function
+          | Resolution.Host_claim_busy -> Intent.Host_claim_busy
+          | Publication_uncertain detail -> Intent.Publication_uncertain detail
+          | (Original_absent | Ineligible _ | Observation_changed | Range_already_recorded
+            | Already_fenced _ | Unavailable _) as error -> Intent.Unavailable (Resolution.error_to_string error)) in
+      let* next=granted in
+      process ~config ~keeper_name ~store next)
   | Fenced ->
     let* next=prepare_child ~config ~keeper_name ~store intent in
     process ~config ~keeper_name ~store next
@@ -272,6 +288,7 @@ let resolve_missing_serialized ~config ~keeper_name ~request_id =
       | Error (Resolution.Already_fenced _) -> Ok Resume_history
       | Error (Original_absent | Ineligible _ | Observation_changed | Range_already_recorded) ->
         Ok Original_waiting
+      | Error Host_claim_busy -> Error Intent.Host_claim_busy
       | Error (Unavailable detail) -> Error (Intent.Unavailable detail)
       | Error (Publication_uncertain detail) -> Error (Intent.Publication_uncertain detail)
       | Ok preview ->
@@ -290,9 +307,34 @@ let resolve_missing_serialized ~config ~keeper_name ~request_id =
              | ({Intent.phase=(Requested | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _);_} as intent)::_ ->
                continue intent
              | [] | {phase=Refused _;_}::_ -> Error conflict)
-          | Error ((Invalid _ | Unavailable _ | Publication_uncertain _) as error) -> Error error
+          | Error ((Invalid _ | Unavailable _ | Publication_uncertain _ | Host_claim_busy) as error) -> Error error
   with Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error (Intent.Publication_uncertain (Printexc.to_string exn))
+let resolve_cut_serialized ~config ~keeper_name ~request_id =
+  let store=Store.of_config config in
+  let* intents=io (fun () -> Intent.read ~config ~keeper_name ~request_id) in
+  let continue intent =
+    let* ()=process ~config ~keeper_name ~store intent in
+    let+ current=io (fun () -> Intent.reload ~store intent) in
+    match current.phase with
+    | Intent.Requested | Refused _ -> Original_waiting
+    | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _ -> Resume_history in
+  match List.rev intents with
+  | ({Intent.origin=Same_binding_cut _;phase=(Requested | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _);_} as intent)::_ ->
+    continue intent
+  | {origin=Worker_absence;_}::_ -> Ok Original_waiting
+  | [] | {origin=Same_binding_cut _;phase=Refused _;_}::_ ->
+    match io (fun () -> Resolution.preview_cut_command ~config ~keeper_name ~request_id) with
+    | Error (Resolution.Already_fenced _ | Original_absent | Ineligible _ | Observation_changed | Range_already_recorded) ->
+      Ok Original_waiting
+    | Error Host_claim_busy -> Error Intent.Host_claim_busy
+    | Error (Unavailable detail) -> Error (Intent.Unavailable detail)
+    | Error (Publication_uncertain detail) -> Error (Intent.Publication_uncertain detail)
+    | Ok (preview,basis) ->
+      let* accepted=io (fun () -> submit_cut ~config ~keeper_name ~request_id ~expected:preview.expected ~basis
+        ~actor:"librarian" ~reason:"Continue retained history after the original execution Cut without replay"
+        ~now:(Time_compat.now ())) in
+      continue accepted.intent
 let record_completed_serialized ~config ~keeper_name ~request ~completed =
   let store=Store.of_config config in
   let* intents=io (fun () -> Intent.active_for_keeper ~config ~keeper_name) in

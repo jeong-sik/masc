@@ -190,7 +190,9 @@ val progress : retained -> Lane_addon_request_progress.t
 val restored_receipt : retained -> (receipt option, error) result
 (** A retained judgment/terminal refusal and all actual tool observations, independent
     of today's lookup availability. Captured/admission/pending returns None,
-    and so does a before-dispatch refusal: it reached no reviewer. *)
+    and so do a before-dispatch refusal and an execution run that ended without
+    a reviewer receipt ([Run_ended] / [Owner_exited]), after authenticating
+    their origin against this retained attempt. *)
 
 val retained_judgment : retained -> (Yojson.Safe.t, error) result
 (** Complete validated stored judgment for the host's commit payload. Returns
@@ -205,8 +207,9 @@ val observed_receipt : retained -> (receipt option, error) result
 (** Passive receipt restoration including admission and unknown outcomes.
     Unlike [restored_receipt], a returned value need not be a settled review;
     the caller must use progress for dispatch/commit authority. A
-    before-dispatch refusal returns [None], also after an admission wait; that
-    wait stays in the progress events. *)
+    before-dispatch refusal or an execution run that ended without a reviewer
+    receipt ([Run_ended] / [Owner_exited]) returns [None], also after an
+    admission wait; that wait stays in the progress events. *)
 
 val record_observer :
   store:Lane_addon_store.t -> retained:retained ->

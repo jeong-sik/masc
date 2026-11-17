@@ -10,6 +10,12 @@ module type Backend = sig
     host_path:string ->
     (string, string) result
 
+  val confined_path_of_host :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    (Keeper_sandbox_read_backend.confined_path, string) result
+
   val read_complete_file :
     config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
     host_path:string -> timeout_sec:float -> unit -> (string, string) result
@@ -56,6 +62,12 @@ module type S = sig
     meta:Keeper_meta_contract.keeper_meta ->
     host_path:string ->
     (string, string) result
+
+  val confined_path_of_host :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    (Keeper_sandbox_read_backend.confined_path, string) result
 
   val read_complete_file :
     config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->

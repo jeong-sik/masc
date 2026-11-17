@@ -525,10 +525,26 @@ let read_error_to_string = function
    on the object the open returned, where it was opened: the script opens
    the path once onto stdin, asks the kernel which file that descriptor is
    ([/proc/self/fd/0], a Linux guest -- every backend here is one), and
-   refuses it unless it lies under the root that admitted the path, itself
-   resolved in the same view. The reader then consumes that same descriptor.
-   Nothing is opened twice, so there is no window between the check and the
-   read for a link to be swapped in.
+   refuses it unless it lies under the root. The reader then consumes that
+   same descriptor. Nothing is opened twice, so there is no window between
+   the check and the read for a link to be swapped in.
+
+   The root the opened file is compared with is the root as configured (the
+   container mount target, the endpoint's workspace or declared root), never
+   one resolved in the backend at read time. A keeper that can write the
+   root's parent could replace the root with a symlink to [/]; a root
+   resolved per read would then admit every file. No lane resolves its root
+   once when it is bound, so the configured spelling is the trusted value,
+   and the script refuses with [Root_moved] unless the root still resolves
+   to exactly that spelling. A root configured through a symlink is refused
+   the same way: it has to name its resolved directory.
+
+   The open is [command exec <]: a plain [exec <] that fails makes dash
+   exit 2 before [|| exit] runs. After the open the descriptor must still be
+   a regular file, so a FIFO or device swapped in after the [-f] test is
+   refused instead of read. A FIFO swapped in between that test and the open
+   blocks the open itself until the read timeout ends the run: sh has no
+   non-blocking open.
 
    The script says why it read nothing with exit codes it chooses; the
    reader classifies by them, never by stderr. The root, the path and the
@@ -541,6 +557,7 @@ type confined_open_refusal =
   | Open_failed
   | Outside_root
   | Opened_file_unresolved
+  | Root_moved
 
 let confined_open_exit = function
   | Path_missing -> 3
@@ -548,26 +565,29 @@ let confined_open_exit = function
   | Open_failed -> 5
   | Outside_root -> 6
   | Opened_file_unresolved -> 7
+  | Root_moved -> 8
 
 let confined_open_refusals =
-  [ Path_missing; Not_a_regular_file; Open_failed; Outside_root; Opened_file_unresolved ]
+  [ Path_missing; Not_a_regular_file; Open_failed; Outside_root; Opened_file_unresolved; Root_moved ]
 
 let confined_open_refusal_of_exit code =
   List.find_opt (fun refusal -> confined_open_exit refusal = code) confined_open_refusals
 
 let confined_open_exits = List.map confined_open_exit confined_open_refusals
 
-(* [$1] is the root, [$2] the path. A root of [/] admits every file; any
-   other root admits itself and what lies below it. [cd -P] and [pwd -P]
-   are shell builtins, so resolving the root needs no program. *)
+(* [$1] is the root as configured, [$2] the path. A root of [/] admits every
+   file; any other root admits itself and what lies below it. [cd -P] and
+   [pwd -P] are shell builtins, so resolving the root needs no program. *)
 let confined_open_prelude =
   Printf.sprintf
-    {|if [ ! -e "$2" ]; then exit %d; fi; if [ ! -f "$2" ]; then exit %d; fi; exec < "$2" || exit %d; r=$(cd -P -- "$1" && pwd -P) || exit %d; o=$(readlink /proc/self/fd/0) || exit %d; case "$r" in /) ;; *) case "$o" in "$r"|"$r"/*) ;; *) exit %d;; esac;; esac; |}
+    {|if [ ! -e "$2" ]; then exit %d; fi; if [ ! -f "$2" ]; then exit %d; fi; command exec < "$2" || exit %d; o=$(readlink /proc/self/fd/0) || exit %d; [ -f /proc/self/fd/0 ] || exit %d; r=$(cd -P -- "$1" && pwd -P) || exit %d; [ "$r" = "$1" ] || exit %d; case "$1" in /) ;; *) case "$o" in "$1"|"$1"/*) ;; *) exit %d;; esac;; esac; |}
     (confined_open_exit Path_missing)
     (confined_open_exit Not_a_regular_file)
     (confined_open_exit Open_failed)
     (confined_open_exit Opened_file_unresolved)
+    (confined_open_exit Not_a_regular_file)
     (confined_open_exit Opened_file_unresolved)
+    (confined_open_exit Root_moved)
     (confined_open_exit Outside_root)
 
 type confined_read =
@@ -620,6 +640,13 @@ let read_error_of_refusal ~profile_label ~host_path = function
          "%s_read_failed: opened_file_unresolved: %s (the backend could not \
           resolve the opened file or the sandbox root, so containment was \
           not proven)"
+         profile_label host_path)
+  | Root_moved ->
+    Read_refused
+      (Printf.sprintf
+         "%s_read_refused: sandbox_root_moved: %s (the sandbox root no longer \
+          resolves to the directory it was configured as; a configured root \
+          must name its resolved directory)"
          profile_label host_path)
 
 (* One run of a confined read, classified. [capture] picks text ([Some n])

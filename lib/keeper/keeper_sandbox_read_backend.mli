@@ -75,6 +75,11 @@ type confined_open_refusal =
   | Opened_file_unresolved
       (** The backend could not resolve the opened descriptor or the root,
           so containment was not proven. *)
+  | Root_moved
+      (** The root no longer resolves to the directory it was configured as:
+          a component of it was replaced by a symlink, or the root was
+          configured through one. The check is against the configured
+          spelling, never a root resolved at read time. *)
 
 val confined_open_exit : confined_open_refusal -> int
 val confined_open_refusal_of_exit : int -> confined_open_refusal option
@@ -83,13 +88,20 @@ val confined_open_refusal_of_exit : int -> confined_open_refusal option
 val confined_open_exits : int list
 
 (** The script text that opens [$2] onto stdin and proves the opened file
-    lies under root [$1], exiting with {!confined_open_exit} otherwise. The
-    decision is made on the opened descriptor ([/proc/self/fd/0]) in the
-    backend's own view, and the reader that follows consumes that same
-    descriptor, so a symlink cannot be swapped in between check and read.
+    is a regular file under root [$1], exiting with {!confined_open_exit}
+    otherwise. [$1] is the root as configured; it must still resolve to
+    exactly that spelling ({!Root_moved}). The decision is made on the
+    opened descriptor ([/proc/self/fd/0]) in the backend's own view, and the
+    reader that follows consumes that same descriptor, so a symlink cannot be
+    swapped in between check and read.
     A caller appends its reader (reading stdin) and passes the root, the
     path and its own operands ([$3] onward) as positional arguments. *)
 val confined_open_prelude : string
+
+(** The [read_error] a refusal of a read of [host_path] reports, worded
+    with the keeper's [profile_label]. *)
+val read_error_of_refusal :
+  profile_label:string -> host_path:string -> confined_open_refusal -> read_error
 
 (** What a confined read takes from the opened file. *)
 type confined_read =

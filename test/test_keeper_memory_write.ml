@@ -1513,7 +1513,9 @@ let run_endpoint_source ?root path ~max_bytes =
   (* The script asks [/proc/self/fd/0] which file it opened, as every
      endpoint (a Linux guest) can; a host without [/proc] skips. *)
   if not (Sys.file_exists "/proc/self/fd") then Alcotest.skip ();
-  let root = Option.value root ~default:(Filename.dirname path) in
+  (* The root is checked against its own resolved spelling, so a temporary
+     directory reached through a symlink is spelled resolved here. *)
+  let root = Unix.realpath (Option.value root ~default:(Filename.dirname path)) in
   let argv =
     Masc.Keeper_memory_source_current.endpoint_source_argv
       ~confined:{ Masc.Keeper_sandbox_read_backend.root; path } ~max_bytes
@@ -1790,6 +1792,7 @@ let test_endpoint_source_outcome_separates_endpoint_from_file () =
   check "the outside-root exit rejects the path" "path_rejected" (exit_of B.Outside_root);
   check "an unresolvable open is the endpoint" "endpoint_unanswered"
     (exit_of B.Opened_file_unresolved);
+  check "a moved sandbox root rejects the path" "path_rejected" (exit_of B.Root_moved);
   check "exit 0 carries the bytes" "ok:value\n" (Ok (Unix.WEXITED 0, "value\n"))
 ;;
 

@@ -401,6 +401,8 @@ let source_failure_of_refusal = function
     Source_io_failed "the endpoint could not read source_path"
   | Keeper_sandbox_read_backend.Outside_root ->
     Source_path_rejected "source_path resolves outside the sandbox through a symlink"
+  | Keeper_sandbox_read_backend.Root_moved ->
+    Source_path_rejected "the sandbox root no longer resolves to its configured directory"
   (* The endpoint cannot say which file it opened: that holds for every
      source it would read, so it is the endpoint's answer, not this file's. *)
   | Keeper_sandbox_read_backend.Opened_file_unresolved ->

@@ -3681,8 +3681,10 @@ let run_confined_read ~root ~path read =
   let out = In_channel.input_all ic in
   (Unix.close_process_in ic, out)
 
+(* A root must resolve to its own spelling, so a temporary directory reached
+   through a symlink is given resolved. *)
 let run_read_window ~start_line ~max_bytes path =
-  run_confined_read ~root:(Filename.dirname path) ~path
+  run_confined_read ~root:(Unix.realpath (Filename.dirname path)) ~path
     (Keeper_sandbox_read_backend.Line_window { start_line; max_bytes })
 
 let refusal_exit refusal =
@@ -3690,8 +3692,8 @@ let refusal_exit refusal =
 
 (* #35934: a sandbox root, a file inside it, and a file outside it. *)
 let with_symlink_sandbox f =
-  let sandbox = temp_dir () in
-  let outside = temp_dir () in
+  let sandbox = Unix.realpath (temp_dir ()) in
+  let outside = Unix.realpath (temp_dir ()) in
   Fun.protect
     ~finally:(fun () -> cleanup_dir sandbox; cleanup_dir outside)
     (fun () ->
@@ -3740,18 +3742,108 @@ let test_symlinked_directory_component () =
     | Unix.WEXITED 0, out -> Alcotest.(check string) "a directory link inside is read" "nested" out
     | _, out -> Alcotest.fail ("inside directory link read failed: " ^ out))
 
-(* The root is resolved in the same view as the opened file, so a root
-   spelled through a symlink still admits its own files. *)
-let test_root_spelled_through_a_symlink_admits_its_files () =
+(* The root is compared with its configured spelling, never one resolved at
+   read time (#35934). A keeper that can write the root's parent may swap
+   the root for a symlink; the read is then refused, whatever the open
+   reached. *)
+let test_root_swapped_for_a_link_to_slash_is_refused () =
+  with_symlink_sandbox (fun ~sandbox ~outside ->
+    let root = Filename.concat sandbox "ws" in
+    Unix.symlink "/" root;
+    (* [<root>/<outside>/secret.txt] is the outside file once [root] is [/]. *)
+    let path = root ^ Filename.concat outside "secret.txt" in
+    let status, out = run_confined_read ~root ~path Keeper_sandbox_read_backend.Whole_file in
+    Alcotest.(check bool) "the root-moved exit" true
+      (status = refusal_exit Keeper_sandbox_read_backend.Root_moved);
+    Alcotest.(check string) "no outside byte" "" out)
+
+let test_root_swapped_for_a_link_elsewhere_is_refused () =
+  with_symlink_sandbox (fun ~sandbox ~outside ->
+    let root = Filename.concat sandbox "ws" in
+    Unix.symlink outside root;
+    let status, out =
+      run_confined_read ~root ~path:(Filename.concat root "secret.txt")
+        Keeper_sandbox_read_backend.Whole_file
+    in
+    Alcotest.(check bool) "the root-moved exit" true
+      (status = refusal_exit Keeper_sandbox_read_backend.Root_moved);
+    Alcotest.(check string) "no outside byte" "" out)
+
+(* A root configured through a symlink is refused the same way: no lane
+   resolves its root once when it is bound, so the configured spelling has
+   to be the resolved directory. *)
+let test_root_spelled_through_a_symlink_is_refused () =
   with_symlink_sandbox (fun ~sandbox ~outside ->
     let alias = Filename.concat outside "sandbox-alias" in
     Unix.symlink sandbox alias;
-    match
+    let status, out =
       run_confined_read ~root:alias ~path:(Filename.concat alias "inside.txt")
         Keeper_sandbox_read_backend.Whole_file
-    with
-    | Unix.WEXITED 0, out -> Alcotest.(check string) "the file under the aliased root" "inside-plain" out
-    | _, out -> Alcotest.fail ("aliased root read failed: " ^ out))
+    in
+    Alcotest.(check bool) "the root-moved exit" true
+      (status = refusal_exit Keeper_sandbox_read_backend.Root_moved);
+    Alcotest.(check string) "no byte" "" out)
+
+(* dash exits 2 when a plain [exec <] fails; the open must end with the
+   open-failed exit instead. Root reads everything, so only a non-root run
+   can make the open fail. *)
+let test_open_failure_is_open_failed () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  with_symlink_sandbox (fun ~sandbox ~outside:_ ->
+    let path = Filename.concat sandbox "inside.txt" in
+    Unix.chmod path 0o000;
+    let status, out =
+      Fun.protect ~finally:(fun () -> Unix.chmod path 0o600) (fun () ->
+        run_confined_read ~root:sandbox ~path Keeper_sandbox_read_backend.Whole_file)
+    in
+    Alcotest.(check bool) "the open-failed exit" true
+      (status = refusal_exit Keeper_sandbox_read_backend.Open_failed);
+    Alcotest.(check string) "no byte" "" out)
+
+(* A FIFO is refused before anything opens it, so the read does not wait for
+   a writer. *)
+let test_fifo_is_refused_without_blocking () =
+  with_symlink_sandbox (fun ~sandbox ~outside:_ ->
+    let fifo = Filename.concat sandbox "pipe" in
+    Unix.mkfifo fifo 0o600;
+    let link = Filename.concat sandbox "link-pipe" in
+    Unix.symlink "pipe" link;
+    List.iter
+      (fun path ->
+        let status, out =
+          run_confined_read ~root:sandbox ~path Keeper_sandbox_read_backend.Whole_file
+        in
+        Alcotest.(check bool) "the not-a-regular-file exit" true
+          (status = refusal_exit Keeper_sandbox_read_backend.Not_a_regular_file);
+        Alcotest.(check string) "no byte" "" out)
+      [ fifo; link ])
+
+(* A browser upload reads its file in [od] chunks through the same confined
+   open, so a link out of the tree uploads nothing. *)
+let test_browser_upload_chunk_refuses_the_outside_link () =
+  require_proc_fd ();
+  with_symlink_sandbox (fun ~sandbox ~outside ->
+    let link = Filename.concat sandbox "link-out" in
+    Unix.symlink (Filename.concat outside "secret.txt") link;
+    let run path =
+      let argv =
+        Masc.Keeper_browser_upload.chunk_argv
+          ~confined:{ Keeper_sandbox_read_backend.root = sandbox; path }
+          ~offset:0 ~count:64
+      in
+      let ic = Unix.open_process_args_in (List.hd argv) (Array.of_list argv) in
+      let out = In_channel.input_all ic in
+      (Unix.close_process_in ic, out)
+    in
+    let status, out = run link in
+    Alcotest.(check bool) "the outside-root exit" true
+      (status = refusal_exit Keeper_sandbox_read_backend.Outside_root);
+    Alcotest.(check string) "no outside byte" "" out;
+    match run (Filename.concat sandbox "inside.txt") with
+    | Unix.WEXITED 0, out ->
+      Alcotest.(check bool) "the inside file is read as hex" true
+        (String_util.contains_substring out "69 6e")
+    | _, out -> Alcotest.fail ("inside upload chunk failed: " ^ out))
 
 (* Every reader shares the open: the byte prefix and the whole-file read
    refuse the same link. *)
@@ -3815,7 +3907,7 @@ let test_read_window_missing_file_fails () =
 let test_read_window_directory_fails () =
   List.iter
     (fun start_line ->
-      let dir = Filename.get_temp_dir_name () in
+      let dir = Unix.realpath (Filename.get_temp_dir_name ()) in
       match
         run_confined_read ~root:dir ~path:dir
           (Keeper_sandbox_read_backend.Line_window { start_line; max_bytes = 64 })
@@ -3880,8 +3972,18 @@ let run_tests ~clock ~fs ~net () =
             test_dangling_symlink_is_missing;
           Alcotest.test_case "a symlinked directory is held to the root" `Quick
             test_symlinked_directory_component;
-          Alcotest.test_case "a root spelled through a symlink admits its files" `Quick
-            test_root_spelled_through_a_symlink_admits_its_files;
+          Alcotest.test_case "a root swapped for a link to / is refused" `Quick
+            test_root_swapped_for_a_link_to_slash_is_refused;
+          Alcotest.test_case "a root swapped for a link elsewhere is refused" `Quick
+            test_root_swapped_for_a_link_elsewhere_is_refused;
+          Alcotest.test_case "a root spelled through a symlink is refused" `Quick
+            test_root_spelled_through_a_symlink_is_refused;
+          Alcotest.test_case "an open that fails is open_failed" `Quick
+            test_open_failure_is_open_failed;
+          Alcotest.test_case "a FIFO is refused without blocking" `Quick
+            test_fifo_is_refused_without_blocking;
+          Alcotest.test_case "a browser upload chunk refuses the outside link" `Quick
+            test_browser_upload_chunk_refuses_the_outside_link;
           Alcotest.test_case "every reader refuses the outside link" `Quick
             test_every_reader_refuses_the_outside_link;
           Alcotest.test_case "reaches lines past the old 200,000-byte prefix" `Quick

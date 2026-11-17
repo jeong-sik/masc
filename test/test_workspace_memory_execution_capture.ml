@@ -350,7 +350,8 @@ let test_settled_chains_are_the_ones_no_pass_reads () = with_workspace (fun root
   let finished = [P.Dispatch_intended;P.Judgment_retained `Null;P.Commit_intended change;P.Commit_observed change.after] in
   let refused = [P.Dispatch_intended;P.Refused {stage=P.Execution;
     evidence=Lane_addon_exact.retained_final_to_json
-      (Lane_addon_exact.Retained_not_allowed {reason="original fixture refusal"})}] in
+      (Lane_addon_exact.Retained_not_allowed
+        {reason=Permission_refused {detail="original fixture refusal"}})}] in
   let unknown cause = [P.Dispatch_intended;P.Refused {stage=P.Execution;
     evidence=Lane_addon_exact.retained_final_to_json (Lane_addon_exact.Retained_unknown cause)}] in
   (* Minted in this order, so [latest] is the last answered classification. *)

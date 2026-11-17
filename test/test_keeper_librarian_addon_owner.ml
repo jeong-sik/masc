@@ -829,7 +829,8 @@ let test_retained_host_terminal_commits_off ()=with_fixture (fun ~sw:_ fixture -
   io (fun () ->
     let stored=Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id |> get
       |> Option.value ~default:`Null in
-    let denial=Lane_addon_exact.final_to_json (Not_allowed {reason="legacy delivery refusal"}) in
+    let denial=Lane_addon_exact.final_to_json
+      (Not_allowed {reason=Permission_refused {detail="legacy delivery refusal"}}) in
     let with_denial=match stored with
       | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
           if key="attempts" then (match value with `List entries -> `List (entries @ [denial])

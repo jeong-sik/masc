@@ -3,7 +3,6 @@
 open Alcotest
 open Masc
 module Refusal = Keeper_librarian_durable_refusal
-module Destination = Lane_addon_captured_destination
 module Exact = Lane_addon_exact
 
 let next_read =
@@ -13,27 +12,27 @@ let next_read =
         (match value with Refusal.Narrowed -> "narrowed" | Whole_again -> "whole again"))
     ( = )
 
-let not_allowed = Exact.Not_allowed { reason = "fixture reason" }
-let known relation () = Ok relation
-
 let test_a_request_the_host_ended_unrun () =
-  check next_read "under a replaced declaration the next read stays whole" Refusal.Whole_again
-    (Refusal.next_read ~final:not_allowed ~relation:(known Destination.Replaced));
-  check next_read "under the same declaration the next read narrows" Refusal.Narrowed
-    (Refusal.next_read ~final:not_allowed ~relation:(known Destination.Same));
-  check next_read "under another owner's destination the next read narrows" Refusal.Narrowed
-    (Refusal.next_read ~final:not_allowed ~relation:(known Destination.Other_owner));
-  check next_read "without a current destination the next read narrows" Refusal.Narrowed
-    (Refusal.next_read ~final:not_allowed ~relation:(fun () -> Error "fixture: no destination"))
+  let retained=Exact.Retained_not_allowed {reason=Replaced_declaration} in
+  let evidence=Exact.retained_final_to_json retained in
+  let restored=match Exact.retained_final_of_json ~schema:(`Assoc []) evidence with
+    | Ok value -> value | Error detail -> fail detail in
+  check next_read "the stored replacement reason keeps the read whole without configuration"
+    Refusal.Whole_again (Refusal.next_read ~final:(Exact.delivered restored));
+  let text=Exact.not_allowed_reason_detail Exact.Replaced_declaration in
+  check next_read "ordinary refusal text cannot establish declaration replacement"
+    Refusal.Narrowed
+    (Refusal.next_read ~final:(Exact.Not_allowed {reason=Permission_refused {detail=text}}));
+  List.iter (fun invalid ->
+    check bool "unknown or contradictory replacement evidence is refused" true
+      (Result.is_error (Exact.final_of_json ~schema:(`Assoc []) invalid)))
+    [`Assoc ["status",`String "not_allowed";"cause",`String "unknown"];
+     `Assoc ["status",`String "not_allowed";"cause",`String "declaration_replaced";
+       "reason",`String text]]
 
 let test_a_refusal_that_came_from_a_call () =
-  let asked = ref 0 in
-  let relation () =
-    incr asked;
-    Ok Destination.Replaced
-  in
   List.iter
-    (fun (label, final) -> check next_read label Refusal.Narrowed (Refusal.next_read ~final ~relation))
+    (fun (label, final) -> check next_read label Refusal.Narrowed (Refusal.next_read ~final))
     [
       ("a size refusal narrows under a replaced declaration", Exact.Call_final (Input_refused Input_capacity));
       ("a context overflow narrows", Exact.Call_final (Input_refused Context_overflow));
@@ -41,8 +40,7 @@ let test_a_refusal_that_came_from_a_call () =
       ("an invalid request narrows", Exact.Call_final (Input_refused Invalid_request));
       ("an output no slot could give narrows", Exact.Call_final (Invalid_output { detail = "fixture" }));
       ("a reused request ID narrows", Exact.Request_id_reused);
-    ];
-  check int "the declaration is not read for a refusal that came from a call" 0 !asked
+    ]
 
 let () =
   run "Librarian durable refusal"

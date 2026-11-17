@@ -1351,6 +1351,7 @@ let test_pending_settlements_replay_only_original_store_decision () =
          | Schedule_store.Running_attempt_superseded _
          | Schedule_store.Running_attempt_unavailable _
          | Schedule_store.Stale_instance _
+         | Schedule_store.Primary_ledger_unavailable _
          | Schedule_store.Corrupt_ledger _ ) ->
        fail "fixture did not reach a real primary settlement write failure");
     Unix.rmdir staging;
@@ -1489,6 +1490,7 @@ let test_pending_read_error_does_not_block_unrelated_due_work () =
        | Schedule_store.Running_attempt_superseded _
        | Schedule_store.Stale_instance _
        | Schedule_store.Persistence_failed _
+       | Schedule_store.Primary_ledger_unavailable _
        | Schedule_store.Corrupt_ledger _ ) ->
      fail "legacy authority failure was hidden or cleared");
   Schedule_runner_status.reset_for_test ();
@@ -1545,6 +1547,56 @@ let test_pending_finish_clock_propagates_actual_cancellation () =
     ((pending_request config request).status = Running)
 ;;
 
+let test_tick_refuses_stale_mirror_after_terminal_primary () =
+  List.iter (fun completed ->
+    List.iter (fun cause ->
+      with_workspace @@ fun config ->
+      let request = create_ok ~schedule_id:"terminal-primary" config in
+      let primary_path = Filename.concat (Workspace_utils.masc_dir config) "schedules.json" in
+      let mirror_path = primary_path ^ Common.recovery_mirror_suffix in
+      let stale_mirror = Workspace_core.read_text config mirror_path in
+      let calls = ref [] in
+      if completed then (
+        ignore (tick_ok config ~now:201.0 ~consumer:(accepting_consumer calls));
+        check (list string) "fixture executes once" [request.schedule_id] !calls)
+      else (
+        match cancel config ~authority:Schedule_store.Operator_authority
+          ~schedule_id:request.schedule_id ~cancelled_by:(human "operator")
+          ~reason:"cancel before wake" ~withdraw_queued_wakes:(fun _ _ -> Ok ()) with
+        | Ok _ -> ()
+        | Error error -> fail (service_error_to_string error));
+      let authoritative = Workspace_core.read_text config primary_path in
+      let signal_count = List.length (read_recent_signal_rows config 10) in
+      calls := [];
+      Workspace_core.write_text config mirror_path stale_mirror;
+      let broken = "{broken primary" in
+      (match cause with
+       | Schedule_store.Primary_missing -> Workspace_core.delete_path config primary_path
+       | Schedule_store.Primary_unusable -> Workspace_core.write_text config primary_path broken);
+      (match tick config ~consumer:(accepting_consumer calls) ~pending_settlements:[]
+               ~now:202.0 ~retention_days:Schedule_store.terminal_schedule_retention_days with
+       | Error { error = Service_error (Store_error
+           (Schedule_store.Primary_ledger_unavailable observed)); _ } ->
+         check bool "tick preserves primary failure kind" true (observed = cause)
+       | Error failure -> fail (tick_failure_to_string failure)
+       | Ok _ -> fail "tick promoted stale scheduled mirror over a terminal primary");
+      check (list string) "no consumer execution from mirror" [] !calls;
+      check int "no new wake signal" signal_count
+        (List.length (read_recent_signal_rows config 10));
+      check string "stale mirror preserved" stale_mirror
+        (Workspace_core.read_text config mirror_path);
+      (match cause with
+       | Schedule_store.Primary_missing -> check bool "primary stays absent" false
+           (Workspace_utils.path_exists config primary_path)
+       | Schedule_store.Primary_unusable -> check string "broken primary preserved" broken
+           (Workspace_core.read_text config primary_path));
+      Workspace_core.write_text config primary_path authoritative;
+      ignore (tick_ok config ~now:203.0 ~consumer:(accepting_consumer calls));
+      check (list string) "restored terminal authority still prevents another execution" [] !calls)
+      [Schedule_store.Primary_missing; Schedule_store.Primary_unusable])
+    [false; true]
+;;
+
 let () =
   run "Schedule_runner"
     [ ( "tick",
@@ -1564,6 +1616,8 @@ let () =
             test_tick_reports_failure_when_the_seen_keys_write_cannot_commit
         ; test_case "dispatches due candidate to success" `Quick
             test_tick_dispatches_due_candidate_to_success
+        ; test_case "stale mirror cannot revive cancelled or completed work" `Quick
+            test_tick_refuses_stale_mirror_after_terminal_primary
         ; test_case "stale snapshot cannot start a replacement" `Quick
             test_tick_does_not_start_a_replaced_candidate
         ; test_case "stale snapshot rejection cannot fail a replacement" `Quick

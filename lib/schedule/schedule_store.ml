@@ -20,6 +20,8 @@ type mutation_authority =
       ; wake_keeper_name : Schedule_domain.schedule_request -> string option
       }
 
+type recovery_cause = Primary_missing | Primary_unusable
+
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
@@ -60,6 +62,7 @@ type store_error =
       ; found : string
       }
   | Persistence_failed of string
+  | Primary_ledger_unavailable of recovery_cause
   | Corrupt_ledger of
       { primary_err : string
       ; recovery_err : string option
@@ -95,8 +98,6 @@ type read_error =
       ; recovery_err : string option
       }
 
-type recovery_cause = Primary_missing | Primary_unusable
-
 type read_source =
   | Uninitialized
   | Primary_ledger
@@ -105,19 +106,18 @@ type read_source =
 (* RFC-0234: a parsed-or-absent ledger load.
 
    [Fresh] = neither the primary ledger nor its [.last-good] mirror exists, so
-   [default_state] is correct. [write_state] commits both files together, so an
-   absent primary next to a parseable mirror means the primary was removed
-   out-of-band rather than never written; that case yields [Loaded] from the
-   mirror (and logs a warning) instead of [Fresh], because collapsing it to
-   [default_state] lets the next [write_state] mirror an empty state over the
-   only surviving copy.
+   [default_state] is correct. [write_state] commits the primary before its
+   mirror, so the mirror can lag an acknowledged write. A parseable mirror
+   beside an absent or broken primary yields [Recovered] for observation only;
+   [load_for_mutation] refuses that source and preserves the surviving bytes.
 
    [Corrupt] = at least one of the two files exists and no state can be parsed
    from either; callers must NOT collapse this to [default_state] and must NOT
    overwrite the on-disk files, because the bytes may still hold schedule intent
    worth manual recovery. *)
 type load_outcome =
-  | Loaded of state * read_source
+  | Loaded of state
+  | Recovered of state * recovery_cause
   | Fresh
   | Corrupt of
       { primary_err : string
@@ -225,6 +225,14 @@ let store_error_to_string = function
       found
       expected
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
+  | Primary_ledger_unavailable cause ->
+    let reason = match cause with
+      | Primary_missing -> "missing"
+      | Primary_unusable -> "unreadable"
+    in
+    Printf.sprintf
+      "schedule primary ledger is %s; the .last-good recovery mirror is read-only"
+      reason
   | Corrupt_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
 ;;
@@ -451,9 +459,8 @@ let primary_failure_message ~path = function
 let load config : load_outcome =
   ensure_dirs config;
   let path = schedules_path config in
-  (* The next [write_state] rewrites the primary from this state. The warning
-     records that the state came from the mirror, so the repair is visible
-     rather than silent — for either reason the primary was unusable. *)
+  (* A mirror may lag an acknowledged primary write. Keep it available for
+     observation, with its provenance, but never authorize mutations from it. *)
   let recovered_from_mirror ~primary_err ~cause state =
     Log.Misc.warn
       "schedule_store: %s; loaded %d schedules and %d wakes from recovery \
@@ -462,10 +469,10 @@ let load config : load_outcome =
       (List.length state.schedules)
       (List.length state.wakes)
       (recovery_path config);
-    Loaded (state, Recovery_mirror cause)
+    Recovered (state, cause)
   in
   match load_primary config with
-  | Ok state -> Loaded (state, Primary_ledger)
+  | Ok state -> Loaded state
   | Error primary ->
     let primary_err = primary_failure_message ~path primary in
     (* The outcome depends on both probes, so both are matched together. The
@@ -490,13 +497,14 @@ let load config : load_outcome =
 
 (* Read-only accessor used by [get_schedule]. [Fresh] yields the empty default,
    and [load] narrows [Fresh] to "neither the primary nor the [.last-good] mirror
-   exists"; a primary removed out-of-band arrives here as [Loaded] from the
+   exists"; a primary removed out-of-band arrives here as [Recovered] from the
    mirror instead of as an empty state. [Corrupt] errors rather than returning an
    empty list, so a ledger that cannot be parsed is operator-visible instead of
    masquerading as "no schedules". Does not write to disk. *)
 let read_state_observed config =
   match load config with
-  | Loaded (state, source) -> Ok (state, source)
+  | Loaded state -> Ok (state, Primary_ledger)
+  | Recovered (state, cause) -> Ok (state, Recovery_mirror cause)
   | Fresh -> Ok (default_state (), Uninitialized)
   | Corrupt { primary_err; recovery_err } ->
     Error (Corrupt_read_ledger { primary_err; recovery_err })
@@ -513,16 +521,13 @@ let read_state config =
     raise (Corrupt_ledger_exn { primary_err; recovery_err })
 ;;
 
-(* Resolve the current state for a mutation. [Corrupt] is refused as a typed
-   [Corrupt_ledger] error so the mutating function aborts BEFORE calling
-   [write_state]; this is what prevents an unparseable ledger from being
-   overwritten with an empty default on the next write. [Fresh] means [load]
-   found neither the primary nor the [.last-good] mirror, so [default_state] adds
-   no data loss; a primary removed while the mirror survives arrives as [Loaded],
-   and the write that follows restores the primary. *)
+(* The primary is the mutation authority. Recovery mirrors can lag successful
+   commits, so promoting one would lose accepted work or revive settled wakes.
+   [Fresh] means neither file exists and may initialize a new ledger. *)
 let load_for_mutation config : (state, store_error) result =
   match load config with
-  | Loaded (state, _) -> Ok state
+  | Loaded state -> Ok state
+  | Recovered (_, cause) -> Error (Primary_ledger_unavailable cause)
   | Fresh -> Ok (default_state ())
   | Corrupt { primary_err; recovery_err } ->
     Error (Corrupt_ledger { primary_err; recovery_err })

@@ -783,4 +783,4 @@
 (test
  (name test_http_request_stream)
  (modules test_http_request_stream)
- (libraries llm_provider alcotest))
+ (libraries llm_provider yojson alcotest))

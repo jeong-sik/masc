@@ -1,7 +1,7 @@
 (** Keeper_msg_async — Fire-and-forget keeper message execution.
 
     Background fibers run [keeper_msg] turns. MCP tool returns
-    immediately with a [request_id]; clients poll via
+    immediately with a [request_id]; clients read
     [masc_keeper_delegate_status] for completion. Process memory owns only active
     [Queued]/[Running]/[Cancelling] workers. Terminal state is removed from memory after its
     durable record moves into the terminal partition and remains queryable by

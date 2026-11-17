@@ -279,7 +279,7 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
    chance for them to drift, so the cache lives with the projection and both
    routes call this.
 
-   The route was offloaded but uncached, so a polling dashboard re-ran the
+   The route was offloaded but uncached, so every dashboard read re-ran the
    schedule scan every time: measured 272 ms cold and 204 ms warm for a 96 KB
    response, the second pass no cheaper than the first. Its siblings
    (briefing/sections, tool-quality) already pair the offload with the cache;

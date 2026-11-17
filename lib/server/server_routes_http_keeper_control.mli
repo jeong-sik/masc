@@ -30,7 +30,7 @@ val handle_keeper_turns_list :
     ([turn] is [null] or [{lane; started_at_unix; interrupt_token; preview}]).
     Live Owner projection,
     not a store read: the durable keeper meta cannot answer this, which is
-    why the TUI keeper list polls this route for its "answering now" badge.
+    why the TUI keeper list reads this route for its "answering now" badge.
     A failed keeper-name census is a 500, never an empty fleet.
     [preparation_details_for=<name>] includes only that current owner's scope
     history; other previews carry an unrequested [null] timeline. This query

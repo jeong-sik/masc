@@ -2,7 +2,7 @@
 
     Manages background fibers for keeper_msg turns.
     MCP tool returns immediately with a request_id;
-    clients poll keeper_msg_result for completion.
+    clients read [masc_keeper_delegate_status] for completion.
 
     Process memory owns active request workers only. Terminal entries leave the
     active index after a durable namespace move into the terminal partition and

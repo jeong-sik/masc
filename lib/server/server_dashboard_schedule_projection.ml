@@ -912,7 +912,7 @@ let schedule_request_dashboard_json
     ; ( "payload_dispatch_tool"
         (* Display getter: use the non-logging result variant. The logging
            [dispatch_tool_for_request] emits a WARN per unsupported row on every
-           dashboard poll (terminal accept-then-die rows → ~600 WARN/5000 log
+           dashboard read (terminal accept-then-die rows → ~600 WARN/5000 log
            lines); the genuine dispatch failure is logged once by the scheduler
            runner, not here. *)
       , match Schedule_payload_projection.dispatch_tool_for_request_result request with

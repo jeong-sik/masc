@@ -669,7 +669,7 @@ let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
            freeze cost, since [read_trajectory_tool_calls] ignored its [n] and
            full-parsed every trace. Read only the newest [max_lines] from the
            tail; trajectories are append-ordered so the tail is the recent
-           window the dashboard polls. *)
+           window the dashboard reads. *)
         Dated_jsonl.load_tail_lines path ~max_lines
         |> List.filter_map (fun line ->
              let line = String.trim line in

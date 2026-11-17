@@ -797,7 +797,6 @@ let cached_surface_cache_json
     ; "stale_reason", diagnostic_field "stale_reason"
     ; "stale_age_ms", diagnostic_field "stale_age_ms"
     ; "request_cache_key", Json_util.string_opt_to_json cache_key
-    ; "background_refresh_interval_s", `Null
     ; "policy", `String "original changes, semantic deadlines and failed-read recovery"
     ]
 ;;
@@ -835,7 +834,6 @@ let with_cached_dashboard_surface_metadata
             ; "workspace_path", `String config.workspace_path
             ; "producer", `String producer
             ; "store_kind", `String store_kind
-            ; "background_refresh_interval_s", `Null
             ; ( "cache_policy"
               , `String
                   "source-driven cached surface; parameterized HTTP stale-while-revalidate"

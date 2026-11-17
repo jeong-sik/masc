@@ -11,7 +11,7 @@
     - Returns [[]] when [specs_dir] is missing (runtime deployment without the
       repo checked out); {!specs_json} then reports [count = 0] and
       [specs_dir = null].
-    - Entries sorted by [(category, name)] for stable dashboard polling.
+    - Entries sorted by [(category, name)] so repeated dashboard reads compare equal.
 
     @since 0.9.6 *)
 

@@ -117,8 +117,6 @@ let test_actual_initial_source_change_and_semantic_deadline () =
       Yojson.Safe.Util.(initial |> member "observer_instance_id" |> to_string);
     check (float 0.0) "canonical deadline is the original hidden confirmation expiry" expires
       Yojson.Safe.Util.(initial |> member "snapshot_fresh_until_unix" |> to_number);
-    check bool "no healthy refresh interval is advertised" true
-      Yojson.Safe.Util.(initial |> member "retention" |> member "background_refresh_interval_s" = `Null);
     let before_count = Yojson.Safe.Util.(initial |> member "workspace" |> member "agent_count" |> to_int) in
     ignore (Workspace.bind_session scope.config ~agent_name:"actual-snapshot-source-agent" ~capabilities:[] ());
     let changed = frame_after frames initial (fun payload -> ready payload

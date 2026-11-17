@@ -664,7 +664,7 @@ let schedule_request_json ?last_wake (request : Schedule_domain.schedule_request
                 |> Schedule_payload_projection.support_status_to_string) )
          ; ( "payload_dispatch_tool"
              (* Display getter: non-logging result variant (see
-                server_dashboard_http_runtime_info). Avoids a per-poll WARN on
+                server_dashboard_http_runtime_info). Avoids a per-read WARN on
                 terminal unsupported-kind rows. *)
            , match Schedule_payload_projection.dispatch_tool_for_request_result request with
              | Ok tool_name -> `String tool_name

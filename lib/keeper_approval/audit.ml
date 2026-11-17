@@ -44,7 +44,7 @@ let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
 let recent_resolved_history_limit = 20
 (* Resolved-history bounds. The wall-clock window is what an operator reasons
-   about ("the last day"); the row cap is what keeps one dashboard poll from
+   about ("the last day"); the row cap is what keeps one dashboard read from
    parsing the whole audit store. The two are independent because the store
    interleaves [resolved] rows with far more numerous [summary_updated] and
    [pending] rows, so a row cap alone silently returns fewer decisions as

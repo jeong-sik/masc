@@ -1290,7 +1290,7 @@ let run_operation_command t ~label f =
    [retain_operation_fault] lets a new availability failure replace an older
    one -- so the reopen's real reason (the file gone, permission withdrawn, the
    disk full) was overwritten by its own consequence the first time a dashboard
-   poll or a TUI refresh read the store. The operator was left with a sentence
+   read or a TUI refresh read the store. The operator was left with a sentence
    that says only that the handle is shut.
 
    These reads run while the fence is up -- unlike a child, which

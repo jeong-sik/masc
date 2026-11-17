@@ -87,3 +87,31 @@ its separate results are [replay-observed.json](replay-observed.json). The first
 curated replay refused a temporary fixture directory under HOME before running
 source cases. The corrected script uses the system temporary directory without
 bypassing the isolation guard; the failed run's digests remain in the receipt.
+
+## Declared dependency correction
+
+The original broad native include paths did not verify Dune dependency
+declarations. CI type-check run `44015974590`, job `133813948816`, on upper
+head `76713ba09c39add7b9f5f68fa56e1d6908333d42` failed at the new `Unix`
+calls because the test stanza did not declare `unix`. The stanza now declares
+it directly; the test body and production files are unchanged.
+
+[dependency-visibility-verification.json](dependency-visibility-verification.json)
+records a second focused check. Only the frozen test's declared libraries and
+the fresh candidate alias are directly visible; other dependency directories
+use OCaml's `-H` hidden includes. The actual maintained suite fails with
+`Unbound module Unix` when Unix is hidden, compiles when it is declared, and
+passes all 19 cases. An empty test interface also checks for unused helpers.
+This remains a compatible-prebuilt native check, not a local Dune build.
+
+```sh
+python3 docs/evidence/workspace-ledger-readable-20261117/check-declared-dependencies.py \
+  --repo "$CANDIDATE_CHECKOUT" --build-repo "$COMPATIBLE_BUILD_CHECKOUT" \
+  --opam-prefix "$OCAML_552_PREFIX" \
+  --out "$OUTPUT_REPO/artifacts/workspace-ledger-declared-deps-new"
+```
+
+The checker verifies the frozen source and Dune-file hashes in
+[dependency-visibility.json](dependency-visibility.json). Its seven commands
+include one expected hidden-Unix failure. Original captures, recipes and
+provenance remain unchanged; this additional check covers the declaration gap.

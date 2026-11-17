@@ -609,6 +609,74 @@ let test_scroll_anchor_round_trip_after_revisiting_history () =
       else entry) entries in
   revisit changed Layout.Origin_row 27
 
+(* Who keeps a row when the blocks around the composer want more than the
+   transcript can spare. *)
+let block_rows = Layout.chat_block_rows
+
+let test_block_rows_leave_the_transcript_and_the_menu () =
+  (* Every combination of wants over a range of heights: what the blocks are
+     granted never reaches into the transcript's floor or an open menu. *)
+  List.iter
+    (fun history_rows ->
+      List.iter
+        (fun menu_rows ->
+          List.iter
+            (fun (status_block_wanted, progress_wanted, schedule_draws) ->
+              let granted =
+                block_rows ~history_rows ~menu_rows ~status_block_wanted ~progress_wanted
+                  ~schedule_draws
+              in
+              let taken =
+                granted.Layout.status_block_extra + granted.Layout.progress_extra
+                + granted.Layout.schedule
+              in
+              let at =
+                Printf.sprintf "history %d, menu %d, wants %d/%d/%b" history_rows menu_rows
+                  status_block_wanted progress_wanted schedule_draws
+              in
+              check bool ("nothing granted is negative at " ^ at) true
+                (granted.Layout.status_block_extra >= 0
+                 && granted.Layout.progress_extra >= 0
+                 && granted.Layout.schedule >= 0);
+              check bool ("the floor and the menu are left at " ^ at) true
+                (taken = 0
+                 || history_rows - taken >= Layout.chat_min_history_rows + menu_rows))
+            [ 1, 0, false; 6, 0, true; 6, 7, true; 2, 3, false; 0, 0, true ])
+        [ 0; Layout.command_menu_rows ~candidates:3; Layout.command_menu_rows ~candidates:40 ])
+    [ 0; 2; 3; 4; 9; 15; 40 ]
+
+let test_every_block_has_a_first_row_before_any_has_a_second () =
+  let granted =
+    block_rows ~history_rows:(Layout.chat_min_history_rows + 1) ~menu_rows:0
+      ~status_block_wanted:6 ~progress_wanted:4 ~schedule_draws:true
+  in
+  check int "the one spare row is the schedule's" 1 granted.Layout.schedule;
+  check int "the status block has no second row" 0 granted.Layout.status_block_extra;
+  check int "the turn has no second row" 0 granted.Layout.progress_extra;
+  let granted =
+    block_rows ~history_rows:(Layout.chat_min_history_rows + 1) ~menu_rows:0
+      ~status_block_wanted:6 ~progress_wanted:4 ~schedule_draws:false
+  in
+  check int "a schedule that draws nothing holds no row" 0 granted.Layout.schedule;
+  check int "and the status block takes it" 1 granted.Layout.status_block_extra
+
+let test_spare_rows_go_status_block_then_turn_then_schedule () =
+  let spare rows =
+    block_rows ~history_rows:(Layout.chat_min_history_rows + rows) ~menu_rows:0
+      ~status_block_wanted:4 ~progress_wanted:3 ~schedule_draws:true
+  in
+  let shares granted =
+    [ granted.Layout.status_block_extra; granted.Layout.progress_extra; granted.Layout.schedule ]
+  in
+  check (list int) "three rows: the status block is not yet whole" [ 2; 0; 1 ] (shares (spare 3));
+  check (list int) "five rows: the turn starts after the status block" [ 3; 1; 1 ] (shares (spare 5));
+  check (list int) "nine rows: the schedule has what is left" [ 3; 2; 4 ] (shares (spare 9));
+  let menu = Layout.command_menu_rows ~candidates:2 in
+  check (list int) "an open menu's rows come off before any of that" [ 3; 1; 1 ]
+    (shares
+       (block_rows ~history_rows:(Layout.chat_min_history_rows + 5 + menu) ~menu_rows:menu
+          ~status_block_wanted:4 ~progress_wanted:3 ~schedule_draws:true))
+
 let () =
   run "tui_message_layout"
     [
@@ -663,6 +731,14 @@ let () =
         ;] )
     ; ( "composer"
       , [] )
+    ; ( "rows around the composer"
+      , [ test_case "the transcript keeps its floor and an open menu's rows" `Quick
+            test_block_rows_leave_the_transcript_and_the_menu
+        ; test_case "every block has a first row before any has a second" `Quick
+            test_every_block_has_a_first_row_before_any_has_a_second
+        ; test_case "spare rows go to the status block, the turn, then the schedule" `Quick
+            test_spare_rows_go_status_block_then_turn_then_schedule
+        ] )
     ; ( "scrollback"
       , [ test_case "scroll anchors survive history revisit and input changes" `Quick
             test_scroll_anchor_round_trip_after_revisiting_history

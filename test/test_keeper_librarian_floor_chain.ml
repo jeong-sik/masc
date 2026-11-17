@@ -350,7 +350,7 @@ let test_another_ranges_damaged_body_does_not_stop_a_chain () = with_fixture (fu
     (Store.digest record.request_id ^ ".json") in
   let malformed = replace_field "summary" `Null (Owner.to_json record) in
   io (fun () -> write path (Yojson.Safe.to_string malformed));
-  expect_refused "unselected malformed metadata refuses the whole inventory" ~mentioning:"unknown, duplicate or missing fields"
+  expect_refused "unselected malformed metadata refuses the whole inventory" ~mentioning:"Original floor step is not an object"
     (run_once fixture ~owner ~range:range_a ());
   check int "neither the damaged body nor metadata caused another inference" 2 (F.post_count fixture.server))
 

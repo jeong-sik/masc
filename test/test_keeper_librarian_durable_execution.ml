@@ -3162,7 +3162,38 @@ let test_cut_owned_full_source_floor ?(production=false) history_kind ~refuse_me
           (F.post_count fixture.server))
       else (
         let proof=match result with
-          | `Prepared prepared -> memory_action fixture (fun () -> Floor.publish selected prepared) |> get
+          | `Prepared prepared ->
+            let publish ()=memory_action fixture (fun () -> Floor.publish selected prepared) in
+            let proof=publish () |> get in
+            let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture in
+            let replay=publish () |> get in
+            check bool "repeated direct publication returns the same canonical proof" true
+              (replay.publication=proof.publication);
+            check bool "repeated direct publication never automatically ACKs receipts" true
+              (cut_source_positions fixture=positions && cut_memory_bytes fixture=memory);
+            let journal=Current.journal_path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+            let original_journal=io (fun () -> Fs_compat.load_file_opt journal |> Option.get) in
+            let removed=ref 0 in
+            let unmarked=String.split_on_char '\n' original_journal |> List.map (function
+              | "" -> ""
+              | line ->
+                let json=Yojson.Safe.from_string line in
+                (match Keeper_memory_os_journal_codec.journal_entry_of_json json |> get with
+                 | Keeper_memory_os_current_types.Journal_committed {program=Some publication;_}
+                     when publication.execution.program.transaction_id=transaction_id ->
+                   incr removed;
+                   (match json with
+                    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (List.remove_assoc "ordered_program" fields))
+                    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+                      fail "actual program journal is not an object")
+                 | Journal_committed _ | Journal_failed _ | Journal_quarantined _ -> line))
+              |> String.concat "\n" in
+            check int "the negative fixture removes exactly the actual canonical transaction marker" 1 !removed;
+            Fun.protect ~finally:(fun () -> io (fun () -> write journal original_journal)) (fun () ->
+              io (fun () -> write journal unmarked);
+              check bool "range receipts without the canonical program cannot republish" true (Result.is_error (publish ()));
+              check bool "failed canonical readback never prematurely ACKs a receipt" true (cut_source_positions fixture=positions));
+            proof
           | `Completed when production -> memory_action fixture (fun () -> io (fun () ->
               Keeper_librarian_durable_source_lock.with_original_settlement ~request (fun () ->
                 Current.read_committed_program ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name

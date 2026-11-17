@@ -155,14 +155,17 @@ let program_source t (manifest:Capture.message_manifest) =
   | (Some _),(None|Some _),None | None,None,(None|Some _) -> Error "Cut floor lacks its full original source"
 let prepare_cursor t =
   let source=Request.source t.request and owner=Request.physical_owner t.request in
-  let memory_keepers_dir=Request.keepers_dir owner and keeper_name=Request.keeper_id owner in
+  let keeper_name=Request.keeper_id owner in
   let runtime_keepers_dir=Capture.runtime_keepers_dir source in
-  let* token=Cursor.read ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name in
-  let* ()=require (Cursor.offset token=Cursor.observation_offset (Capture.external_before source))
+  let* expected=Cursor.observe ~runtime_keepers_dir ~keeper_name in
+  let after=Cursor.observation_offset (Capture.external_before source) in
+  let original=Capture.external_prepared source in
+  let* ()=require (Cursor.observation_offset expected=after
+    && Cursor.observation_matches_preparation original ~after
+      ~through:(Keeper_librarian_input_sources.external_through (Capture.counterparts source))
+      ~atom:(Capture.range_id source) ~official:(Capture.official_range_id source))
     "Cut floor external cursor changed before publication" in
-  Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name token
-    ~through:(Keeper_librarian_input_sources.external_through (Capture.counterparts source))
-    ~atom:(Capture.range_id source) ~official:(Capture.official_range_id source)
+  Cursor.restore_original_preparation ~runtime_keepers_dir ~keeper_name ~expected ~original
 let exact_ranges t (proof:Current.committed_program) =
   let source=Request.source t.request in
   let expected=Option.fold ~none:[] ~some:(fun range -> [Memory.Atom_range range]) (Capture.range_id source)
@@ -206,6 +209,10 @@ let recover_committed t =
      | None -> Ok None
      | Some proof -> let+ ()=confirm_program_basis t basis transaction_id proof in Some proof)
 let publish t prepared =
+  let* prior=recover_committed t in
+  match prior with
+  | Some proof -> Ok proof
+  | None ->
   let* ()=require (prepared.request_id=Request.request_id t.request
     && prepared.request_digest=Request.body_digest t.request && prepared.finished.program.unread=[]
     && prepared.transaction_id=prepared.finished.program.transaction_id)
@@ -223,6 +230,8 @@ let publish t prepared =
       && Yojson.Safe.equal expected_anchor actual_anchor)
       "Cut floor publication changed its persisted original transaction, anchor or manifest" in
     let* ()=same_manifest prepared.basis manifest in
+    let* recorded=Keeper_librarian_durable_receipts.state t.request in
+    let* ()=require (not recorded) "Cut floor publication found range receipts without its canonical program" in
     let* anchor=Current.resume_program_anchor ~keepers_dir ~keeper_id prepared.basis.anchor in
     let* source=program_source t manifest in
     let* ()=prepare_cursor t in

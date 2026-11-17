@@ -3,7 +3,7 @@ rfc: "0486"
 title: "브라우저 lane 미러링과 MSX·DOS 관전은 TUI 가 당겨 오지 않고 서버가 프레임을 보낸다"
 status: Draft
 created: 2026-11-04
-updated: 2026-11-07
+updated: 2026-11-17
 author: vincent + claude
 supersedes: []
 superseded_by: null
@@ -14,10 +14,17 @@ related: ["0480", "msx-surface-focus-mode"]
 
 ## 0. 요약
 
-RFC-0480 은 TUI 의 주기 읽기를 모두 없앤다. 그중 두 화면은 "바뀌었다고 알리면 다시 읽는다"로 옮길 수 없다. 보여 주는 것이 계속 바뀌는 화면이라, 알림이 곧 프레임이기 때문이다.
+RFC-0480은 TUI의 주기 읽기를 없앤다. 브라우저 lane 미러링과 MSX·DOS 관전은 화면을 열거나 서버의 변경 알림을 받으면 현재 프레임을 읽는다.
 
-- 브라우저 lane 미러링: Connectors 화면에 브라우저 lane 을 열면 2초 tick 마다 viewport 나 scene 을 다시 읽는다(`Browser_lane_view.cadence_operation`, `bin/masc_tui_types.ml`).
-- MSX·DOS 화면: 관전(`Observe_machine`)은 읽기뿐이다. MSX 는 `launch_msx_live_read`, DOS 는 `launch_dos_live_poll` 이 2초 tick 마다 `Masc_tui_http.fetch_machine_live` 로 `since` 이후 프레임을 당겨 온다. 머신을 진행시키는 tick POST(`Masc_tui_msx_tick` 의 단일 진행 POST)는 명시적으로 제어하는 화면(`Control_machine`)에서만 나가고, 관전 화면에서는 철회된다(`Msx_tick_withdrawn`). DOS 에서 tick POST 를 보내는 곳은 찾지 못했다.
+- 브라우저 lane 미러링: 보이는 브라우저 lane의 viewport나 scene을 읽는다.
+  `launch_owed_browser_observation`이 `Browser_lane_view.observation_operation`으로
+  화면 진입·변경 알림·읽기 실패 뒤 관측을 시작한다.
+- MSX·DOS 화면: 관전(`Observe_machine`)은 읽기뿐이다.
+  MSX 는 `launch_msx_live_read`, DOS 는 `launch_dos_live_poll` 이
+  `Masc_tui_http.fetch_machine_live` 로 `since` 이후 프레임을 읽는다.
+  화면 진입·변경 알림·읽기 실패 뒤 다시 요청한다.
+  MSX 저장·복원은 `run_machine_change ~checkpoint_boundary:true`에서
+  기존 관측을 철회한 뒤 `post_msx_checkpoint`로 요청한다.
 
 이 RFC 는 두 화면을 서버가 보내는 프레임 스트림으로 바꾸는 방향을 정한다. 운영자 결정(2026-11-04)으로 RFC-0480 의 층에서 빼서 따로 다룬다.
 
@@ -25,23 +32,23 @@ RFC-0480 은 TUI 의 주기 읽기를 모두 없앤다. 그중 두 화면은 "�
 
 | 화면 | TUI 가 하는 일 | 문제 |
 |---|---|---|
-| 브라우저 lane | 2초 tick 에 viewport 스크린샷이나 scene 을 다시 읽는다. 사용자가 누르는 중이거나 다른 요청이 진행 중이면 건너뛴다 | 브라우저가 안 바뀌어도 2초마다 이미지를 받는다. 2초 사이의 변화는 보이지 않는다 |
-| MSX·DOS 관전 | 관전 화면은 2초 tick 마다 `since` 이후 프레임을 읽기만 한다. 머신을 진행시키지 않는다 | 관전자가 없어도 2초마다 읽기 요청이 나간다. 2초 사이의 프레임 변화는 보이지 않는다 |
-| MSX 제어 | 제어 화면이 하나일 때만 tick POST 로 머신을 진행시키고 입력을 보낸다 | 진행은 제어 화면 하나에 묶여 있다. 제어 화면이 둘일 때 진행이 두 배가 되는지는 확인하지 못했다 |
+| 브라우저 lane | 보이는 화면의 viewport나 scene을 화면 진입·변경 알림·읽기 실패 뒤 읽는다 | 알림 뒤 프레임을 별도로 읽는다. 알림 자체에는 프레임이 없다 |
+| MSX·DOS 관전 | 화면 진입·변경 알림·읽기 실패 뒤 `since` 이후 프레임을 읽는다. 머신을 진행시키지 않는다 | 알림 뒤 프레임을 별도로 읽는다. 알림 자체에는 프레임이 없다 |
+| MSX 저장·복원 | F6·F7 요청은 기존 관측을 철회하고, 저장한 요청 ID로 체크포인트를 보낸다 | 저장·복원 결과와 프레임 관측은 따로 확인한다 |
 
-두 화면 모두 TUI 를 닫으면 멈춘다. 서버에는 "누가 보고 있다"는 사실이 TUI 요청의 형태로만 남는다.
+TUI 를 닫으면 프레임 읽기도 멈춘다. 서버에는 "누가 보고 있다"는 사실이 TUI 요청의 형태로만 남는다.
 
 ## 2. 방향
 
 1. 서버가 화면 단위의 스트림을 연다. 보는 사람은 구독만 하고, 진행이나 캡처를 일으키지 않는다.
 2. 프레임은 바뀌었을 때만 보낸다. 같은 프레임을 반복해서 보내지 않는다.
-3. 머신 진행(MSX)은 서버의 실행 주체가 정한다. 관전자는 지금도 진행을 일으키지 않고, 이 방향은 제어 화면의 tick POST 가 진행 속도를 정하는 것도 서버로 옮길지의 결정(아래 2번)에 달려 있다.
+3. 머신 진행(MSX)은 서버의 실행 주체가 정한다. 관전자는 진행을 일으키지 않는다. 제어 화면이 없을 때도 진행할지는 아래 2번에서 정한다.
 4. 스트림이 끊기면 TUI 는 마지막 프레임을 "끊김"으로 표시하고, 다시 열리면 최신 프레임 하나부터 받는다. 놓친 프레임을 채우지 않는다.
 
 ## 3. 결정이 필요한 것
 
 1. 브라우저 lane 의 "바뀜" 기준. DOM 변화, 화면 픽셀 변화, 탐색 이벤트 중 무엇으로 프레임을 낼지.
-2. MSX 머신을 제어 화면이 없을 때도 진행시킬지, 제어 화면이 있을 때만 진행시킬지(지금은 제어 화면의 tick POST 만 진행시킨다). DOS 는 관전 화면이 읽기뿐이므로 이 결정의 대상이 아니다.
+2. MSX 머신을 제어 화면이 없을 때도 진행시킬지, 제어 화면이 있을 때만 진행시킬지. DOS 는 관전 화면이 읽기뿐이므로 이 결정의 대상이 아니다.
 3. 프레임 전송 형식. 지금 응답 형식을 SSE 이벤트에 그대로 싣는지, 이미지 바이트를 따로 받는 주소만 알리는지.
 4. 스트림 하나에 몇 명까지 붙일지와, 느린 구독자를 어떻게 다룰지.
 

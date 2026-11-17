@@ -946,7 +946,15 @@ module Ring = struct
          the previous directory A is no longer an authorized destination. *)
       file_base_dir := "";
       file_current_date := "";
+      let not_a_directory =
+        Sys.file_exists dir
+        && (match Sys.is_directory dir with
+            | is_dir -> not is_dir
+            | exception Sys_error _ -> false)
+      in
       let restored =
+        if not_a_directory then Ok (Ok 0)
+        else
         sink_io (fun () ->
           match load_from_file dir with
           | loaded -> Ok loaded

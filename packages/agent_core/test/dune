@@ -56,13 +56,13 @@
 
 ; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
 ; ---- (1) compile failures — not wired until bodies are fixed ----
-; The following files are NOT wired here because they fail to compile
-; against current main.  Bodies untouched per fix scope.  Tracked separately:
-;
+; No files are listed here; files that fail to compile against current main
+; are simply not added to the stanzas below.  Bodies untouched per fix scope.
 ; ---- (2) pre-existing runtime failures — compile OK, runtest fails ----
-; The following suites compile but have pre-existing test failures.
-; They are excluded until the failures are fixed in separate PRs:
-;
+; The suites below this header ARE wired and DO run in `dune runtest`.
+; Some of them fail on today's main for reasons older than any single change.
+; A failure in one of them is not evidence about the change under test; a full
+; regression run cannot be green until they are fixed or moved out of `names`.
 
 (tests
  (names

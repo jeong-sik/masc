@@ -39,7 +39,7 @@ let prompt_key = function
   | A.Relation _ -> Prompt_names.candle_appraiser_relation
   | A.Weights _ -> Prompt_names.candle_appraiser_weights
 
-type state = Absent | Pending | Capacity_wait | Finished of Exact.final
+type state = Absent | Pending | Finished of Exact.final
 let state_of_json intent json =
   let context = "Candle Add-on reply" in
   let* fields = Candle_json.object_fields ~context json in
@@ -50,7 +50,6 @@ let state_of_json intent json =
   let* state, fields = match state with
     | "absent" -> Ok (Absent, fields)
     | "pending" -> Ok (Pending, fields)
-    | "capacity_wait" -> Ok (Capacity_wait, fields)
     | "finished" ->
       let* result, fields = Candle_json.field ~context "result"
         (Exact.final_of_json ~schema:(A.schema (Intent.request intent))) fields in
@@ -115,7 +114,7 @@ let run_with ~registry ~base_path ~retain ~call ?(observe_slots=(fun _ -> None))
   let* state = invoke (Intent.read_arguments intent) in
   let* state = match state with
     | Absent -> invoke (Intent.submit_arguments intent)
-    | Pending | Capacity_wait | Finished _ -> Ok state in
+    | Pending | Finished _ -> Ok state in
   let complete ?usage ~slot outcome result =
     let output = `Assoc ["result", result; "semantic_verification", `String "not_performed"] in
     let same_receipt ~recorded_outcome ~recorded_output ~recorded_slot ~recorded_usage =
@@ -167,7 +166,6 @@ let run_with ~registry ~base_path ~retain ~call ?(observe_slots=(fun _ -> None))
   match state with
   | Absent -> Error (A.Invalid_response "Candle Add-on did not retain the submitted intent")
   | Pending -> Error (A.Transport_unavailable "Candle appraisal is retained and awaiting its original host result")
-  | Capacity_wait -> Error (A.Transport_unavailable "Candle Add-on is awaiting capacity to retain this intent")
   | Finished final ->
     match final with
     | Exact.Call_final (Exact.Answered {output;slot;usage=reported_usage}) ->

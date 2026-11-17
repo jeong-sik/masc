@@ -1686,7 +1686,7 @@ let test_attention_retains_originals_and_clears_on_observation () =
         (int_field "librarian_attention_required_keepers" (alert_summary json));
       Alcotest.(check int) "attention does not imply stopped" 0
         (int_field "librarian_stopped_keepers" (alert_summary json)))
-      [ Pending.Capacity, false; Processing, false; Outcome_unknown, true;
+      [ Pending.Processing, false; Outcome_unknown, true;
         Unreachable, false; Missing_after_dispatch, true; Journal_recheck, false ];
     Alcotest.(check bool) "both observations derive one requirement" true
       (Pending.attention_required

@@ -1150,56 +1150,12 @@ let commit_pending_memory config ~expected_revision:_ ~range_id ~official_range_
   | Error detail -> fail detail
 ;;
 
-let test_capacity_release_wakes_only_proven_pre_admission_waits () =
-  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
-  with_workspace @@ fun config ->
-  let trace_id = "trace-capacity-release" in
-  prepare_three_unread_turns config ~trace_id;
-  let memory_path = seed_pending_memory config ~trace_id in
-  let memory_before = Fs_compat.load_file memory_path in
-  let progress_before = read_progress config in
-  let installation_id = "[\"configuration\",\"keeper-librarian\"]" in
-  let wakes = ref [] in
-  Masc.Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
-    wakes := (base_path, keeper_name) :: !wakes);
-  Fun.protect ~finally:(fun () ->
-    Queue_refresh.forget_measurement ~config ~keeper_name;
-    Queue_refresh.install ()) (fun () ->
-    let run ?(during = fun () -> ()) wait =
-      ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
-        ~commit:(fun _source ->
-          during ();
-          Consumer.Memory_pending (Masc.Keeper_librarian_pending.Worker
-            { installation_id; request_id = "original-capacity-request"; wait }))) in
-    let released ?(config = config) ?(installation_id = installation_id) () =
-      Queue_refresh.capacity_released ~config ~installation_id in
-    run Masc.Keeper_librarian_pending.Capacity;
-    check int "no completion has arrived" 0 (List.length !wakes);
-    released ~installation_id:"another-installation" ();
-    released ~config:(Workspace.default_config (config.base_path ^ "-other-workspace")) ();
-    check int "another installation or workspace grants no wake" 0 (List.length !wakes);
-    released ();
-    check (list (pair string string)) "a released frame wakes its waiting Keeper"
-      [config.base_path, keeper_name] !wakes;
-    wakes := [];
-    run Masc.Keeper_librarian_pending.Missing_after_dispatch;
-    released ();
-    check int "a missing dispatched request is not a capacity waiter" 0 (List.length !wakes);
-    run ~during:(fun () -> released ()) Masc.Keeper_librarian_pending.Capacity;
-    check (list (pair string string)) "completion before measurement publication is retained"
-      [config.base_path, keeper_name] !wakes;
-    check bool "wake scheduling does not advance the source cursor" true
-      (read_progress config = progress_before);
-    check string "wake scheduling does not publish Memory" memory_before
-      (Fs_compat.load_file memory_path))
-;;
-
-let test_admission_wait_survives_durable_measurement_and_release_race () =
+let test_admission_wait_survives_durable_measurement () =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
   with_workspace @@ fun config ->
   let module Pending = Masc.Keeper_librarian_pending in
   let module Worker = Masc.Keeper_memory_admission_worker in
-  let trace_id = "trace-admission-capacity-release" in
+  let trace_id = "trace-admission-wait" in
   prepare_three_unread_turns config ~trace_id;
   let memory_path = seed_pending_memory config ~trace_id in
   let memory_before = Fs_compat.load_file memory_path in
@@ -1207,57 +1163,22 @@ let test_admission_wait_survives_durable_measurement_and_release_race () =
   let installation_id = "[\"configuration\",\"keeper-librarian\"]" in
   let waiting wait : Pending.worker =
     {installation_id; request_id="admission-original"; wait} in
-  let wakes = ref [] in
-  Masc.Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
-    wakes := (base_path, keeper_name) :: !wakes);
-  Fun.protect ~finally:(fun () ->
-    Queue_refresh.forget_measurement ~config ~keeper_name;
-    Queue_refresh.install ()) (fun () ->
-    let released ?(config = config) ?(installation_id = installation_id) () =
-      Queue_refresh.capacity_released ~config ~installation_id in
-    let admission ?(during = fun () -> ()) wait =
-      Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
-        ~keeper_name ~run:(fun () -> during (); Worker.Awaiting_worker (waiting wait)) in
-    let durable wait =
-      ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
-        ~commit:(fun _source -> Consumer.Memory_pending (Pending.Worker
-          {installation_id; request_id="durable-original"; wait}))) in
-    admission Pending.Capacity;
-    durable Pending.Missing_after_dispatch;
+  Fun.protect ~finally:(fun () -> Queue_refresh.forget_measurement ~config ~keeper_name) (fun () ->
+    Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
+      ~keeper_name ~run:(fun () -> Worker.Awaiting_worker (waiting Pending.Processing));
+    ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+      ~commit:(fun _source -> Consumer.Memory_pending (Pending.Worker
+        {installation_id; request_id="durable-original"; wait=Pending.Missing_after_dispatch})));
     check bool "durable observation preserves the separate original admission wait" true
       (Queue_refresh.last_admission_wait ~config ~keeper_name
-       = Some (Pending.Admission_waiting (waiting Pending.Capacity)));
-    released ~installation_id:"another-installation" ();
-    released ~config:(Workspace.default_config (config.base_path ^ "-other-workspace")) ();
-    check int "another workspace or installation cannot wake admission" 0 (List.length !wakes);
-    released ();
-    check (list (pair string string)) "capacity completion wakes the explicit admission waiter"
-      [config.base_path, keeper_name] !wakes;
-    wakes := [];
-    durable Pending.Capacity;
-    released ();
-    check (list (pair string string)) "one completion deduplicates both lanes of the same Keeper"
-      [config.base_path, keeper_name] !wakes;
-    wakes := [];
-    durable Pending.Missing_after_dispatch;
-    List.iter (fun wait ->
-      admission wait;
-      released ();
-      check int "a capacity release grants no wake for another admission wait" 0 (List.length !wakes))
-      Pending.[Processing; Outcome_unknown; Unreachable; Missing_after_dispatch; Journal_recheck];
-    admission ~during:(fun () -> released ()) Pending.Capacity;
-    check (list (pair string string)) "completion before admission observation is retained"
-      [config.base_path, keeper_name] !wakes;
-    wakes := [];
+       = Some (Pending.Admission_waiting (waiting Pending.Processing)));
     Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
       ~keeper_name ~run:(fun () -> Worker.Idle);
     check bool "a finished admission pass clears its previous wait" true
       (Queue_refresh.last_admission_wait ~config ~keeper_name = None);
-    released ();
-    check int "an old admission observation grants no later wake" 0 (List.length !wakes);
-    check bool "admission wake scheduling never advances the history cursor" true
+    check bool "observing waits never advances the history cursor" true
       (read_progress config = progress_before);
-    check string "admission wake scheduling never publishes Memory" memory_before
+    check string "observing waits never publishes Memory" memory_before
       (Fs_compat.load_file memory_path))
 ;;
 
@@ -5459,10 +5380,8 @@ let () =
             test_official_cursor_above_the_range_end_refuses_the_hand_off
         ] )
     ; ( "production wake"
-      , [ test_case "capacity release wakes proven waiters before or after registration" `Quick
-            test_capacity_release_wakes_only_proven_pre_admission_waits
-        ; test_case "admission wait survives history observations and result-before-registration" `Quick
-            test_admission_wait_survives_durable_measurement_and_release_race
+      , [ test_case "admission wait survives history observations" `Quick
+            test_admission_wait_survives_durable_measurement
         ; test_case "Memory attention joins both original lanes without consuming input" `Quick
             test_memory_attention_snapshot_joins_both_original_lanes
         ; test_case "count overflow is reviewed without unread history" `Quick

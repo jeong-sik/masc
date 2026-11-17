@@ -437,8 +437,7 @@ let test_memory_keeper_search_accepts_display_words () =
   let worker wait : P.worker =
     { installation_id = "librarian"; request_id = "original-request"; wait } in
   let pending =
-    [ "capacity", P.Worker (worker P.Capacity)
-    ; "processing", P.Worker (worker P.Processing)
+    [ "processing", P.Worker (worker P.Processing)
     ; "unknown", P.Worker (worker P.Outcome_unknown)
     ; "missing", P.Worker (worker P.Missing_after_dispatch)
     ; "offline", P.Worker (worker P.Unreachable)
@@ -449,7 +448,7 @@ let test_memory_keeper_search_accepts_display_words () =
     ; "recovery", P.Local_failure "read failed"
     ] in
   let admission = { ready with mkh_keeper_id = "admission";
-    mkh_librarian = { ready.mkh_librarian with mlh_admission_wait = Some (P.Admission_waiting (worker P.Capacity)) } } in
+    mkh_librarian = { ready.mkh_librarian with mlh_admission_wait = Some (P.Admission_waiting (worker P.Processing)) } } in
   let refused = { ready with mkh_keeper_id = "refused-pass";
     mkh_librarian = { ready.mkh_librarian with
       mlh_admission_wait = Some (P.Admission_failed "pass refused") } } in
@@ -460,8 +459,7 @@ let test_memory_keeper_search_accepts_display_words () =
     state.ui_language <- language;
     List.iter (fun typing ->
       List.iter (fun (query, wanted) -> verify ~typing query wanted)
-        [ "대기열 가득 참", ["admission"; "capacity"]; "queue full", ["admission"; "capacity"]
-        ; "처리 중", ["processing"]; "processing", ["processing"]
+        [ "처리 중", ["admission"; "processing"]; "processing", ["admission"; "processing"]
         ; "결과 확인 필요", ["missing"; "unknown"]; "check outcome", ["missing"; "unknown"]
         ; "작업자 연결 안 됨", ["offline"]; "worker offline", ["offline"]
         ; "다시 확인 중", ["recheck"]; "rechecking", ["recheck"]

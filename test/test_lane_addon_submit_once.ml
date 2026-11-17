@@ -124,7 +124,7 @@ let test_unsent_read_leaves_a_pending_dispatch_unchanged () = with_store (fun st
      Alcotest.fail "a refused destination must be returned, not waited on");
   Alcotest.check json "a refused read writes nothing either" before (events store))
 
-type original_phase = Fresh_capture | Capacity_declined
+type original_phase = Fresh_capture | Unsent_declined
 type unavailable_boundary = Worker_read | Admission_preparation
 let journal_path store = Filename.concat (Store.root store)
   (Filename.concat Store.tool_request_owners_directory
@@ -132,15 +132,15 @@ let journal_path store = Filename.concat (Store.root store)
 let test_pre_admission_unavailable_preserves_and_resumes_original phase boundary () = with_store (fun store ->
   (match phase with
    | Fresh_capture -> ()
-   | Capacity_declined ->
-     let capacity ~arguments = match kind arguments with
+   | Unsent_declined ->
+     let unsent ~arguments = match kind arguments with
        | "read" -> reply "absent"
-       | "submit" -> reply "capacity_wait"
-       | other -> Alcotest.fail ("unexpected capacity setup command " ^ other) in
-     (match resume store capacity with
-      | Ok (Submit.Awaiting (Submit.Capacity, _)) -> ()
-      | Error _ | Ok (Submit.Awaiting _ | Submit.Final _ | Submit.Commit_pending _ | Submit.Settled _) ->
-        Alcotest.fail "actual pre-admission capacity reply was not retained"));
+       | "submit" -> Error (Submit.Not_sent (Submit.Unavailable "the host refused before sending"))
+       | other -> Alcotest.fail ("unexpected setup command " ^ other) in
+     (match resume store unsent with
+      | Error (Submit.Unavailable _) -> ()
+      | Error (Submit.Rejected _ | Submit.Uncertain _) | Ok _ ->
+        Alcotest.fail "a submit refused before sending was not declined"));
   let original=load store in
   let path=journal_path store in
   let bytes=Fs_compat.load_file path and identity=Unix.stat path in
@@ -624,12 +624,12 @@ let () =
         test_unknown_refusal_without_a_host_cause_is_not_replayed;
       Alcotest.test_case "Captured Off read waits unchanged then resumes the exact original" `Quick
         (test_pre_admission_unavailable_preserves_and_resumes_original Fresh_capture Worker_read);
-      Alcotest.test_case "Capacity-declined Off read waits unchanged then resumes the exact original" `Quick
-        (test_pre_admission_unavailable_preserves_and_resumes_original Capacity_declined Worker_read);
+      Alcotest.test_case "Unsent-declined Off read waits unchanged then resumes the exact original" `Quick
+        (test_pre_admission_unavailable_preserves_and_resumes_original Unsent_declined Worker_read);
       Alcotest.test_case "Captured prepare unavailability after absence waits without dispatch" `Quick
         (test_pre_admission_unavailable_preserves_and_resumes_original Fresh_capture Admission_preparation);
-      Alcotest.test_case "Capacity-declined prepare unavailability waits without dispatch" `Quick
-        (test_pre_admission_unavailable_preserves_and_resumes_original Capacity_declined Admission_preparation);
+      Alcotest.test_case "Unsent-declined prepare unavailability waits without dispatch" `Quick
+        (test_pre_admission_unavailable_preserves_and_resumes_original Unsent_declined Admission_preparation);
       Alcotest.test_case "nonavailability read and prepare refusals preserve typed errors" `Quick
         test_pre_admission_nonavailability_errors_are_not_waits;
       Alcotest.test_case "unsent submit is declined and submitted on the next pass" `Quick

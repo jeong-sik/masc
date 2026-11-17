@@ -311,7 +311,6 @@ let test_the_pass_cell_tone_follows_how_the_pass_ended () =
     let state = Health.Pass_pending pending in
     check "worker wait attention follows its execution evidence" tone (Some state))
     Masc.Keeper_librarian_pending.[
-      Capacity, Cell.Quiet;
       Processing, Cell.Quiet;
       Outcome_unknown, Cell.Attention;
       Unreachable, Cell.Quiet;
@@ -362,7 +361,6 @@ let test_admission_wait_is_independent_of_a_drained_durable_pass () =
     let cell = Reading.pass_cell reading in
     Alcotest.(check bool) "execution uncertainty requests attention" true (cell.tone = tone))
     Masc.Keeper_librarian_pending.[
-      Capacity, Cell.Quiet;
       Missing_after_dispatch, Cell.Attention];
   let failed = Masc.Keeper_librarian_pending.Admission_failed "pass refused" in
   let cell = Reading.pass_cell (reading_of [make_keeper_health

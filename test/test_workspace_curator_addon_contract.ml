@@ -236,7 +236,7 @@ let with_original_consumer f =
             "attempts",`List [cause];"final",Exact.final_to_json Exact.Outcome_unknown])) in
       f ~resume ~reply ~request_id ~good ~bad ~journal_snapshot ~retain_host_unknown))
 
-let test_capacity_retries_original_but_lost_admission_never_submits_again () =
+let test_lost_admission_never_submits_again () =
   with_original_consumer (fun ~resume ~reply ~request_id ~good ~bad ~journal_snapshot:_ ~retain_host_unknown:_ ->
     let submitted=ref [] and reads=ref 0 in
     let call ~arguments =
@@ -244,23 +244,19 @@ let test_capacity_retries_original_but_lost_admission_never_submits_again () =
       | `String "read" -> incr reads;reply "absent" []
       | `String "submit" ->
         submitted:=member "request" arguments :: !submitted;
-        if List.length !submitted=1 then reply "capacity_wait" []
-        else Error (Lane_addon_submit_once.Sent_unknown "original admission reply was lost")
+        Error (Lane_addon_submit_once.Sent_unknown "original admission reply was lost")
       | _ -> fail "unexpected worker command" in
     let accepted value=get (Result.map_error Consumer.error_to_string value) in
-    (match accepted (resume call) with
-     | Consumer.Awaiting (Consumer.Capacity,_) -> () | _ -> fail "explicit pre-admission capacity must wait");
     (match accepted (resume call) with
      | Consumer.Awaiting (Consumer.Worker_unknown,_) -> () | _ -> fail "lost admission must remain uncertain");
     (match accepted (resume call) with
      | Consumer.Awaiting (Consumer.Missing_after_dispatch,_) -> () | _ -> fail "absence cannot clear dispatch uncertainty");
-    check int "uncertain and absent restart never sends a third admission" 2 (List.length !submitted);
-    check int "every restart read the original before considering admission" 3 !reads;
+    check int "uncertain and absent restart never sends a second admission" 1 (List.length !submitted);
+    check int "every restart read the original before considering admission" 2 !reads;
     (match !submitted with
-     | [second;first] ->
-       check bool "capacity admission keeps the full original input" true (first=second);
-       check string "capacity admission keeps the same original ID" request_id (member "request_id" second |> Json.to_string)
-     | _ -> fail "expected exactly two admission attempts");
+     | [only] ->
+       check string "the admission carries the original ID" request_id (member "request_id" only |> Json.to_string)
+     | _ -> fail "expected exactly one admission attempt");
     let final output=`Assoc ["status",`String "answered";"slot",`String "original";"output",output] in
     let returned output ~arguments:_=reply "finished" ["result",final output] in
     check bool "schema-valid but domain-invalid late answer cannot become a judgment" true
@@ -441,7 +437,7 @@ let () = run "Workspace Curator actual worker and common Exact contract" ["origi
   test_case "classification survives worker restart and full semantic HTTP acceptance" `Quick (scenario Classification);
   test_case "briefing retains its original partial pass across worker and host reads" `Quick (scenario Briefing);
   test_case "only explicit capacity retries original admission; late result survives uncertainty" `Quick
-    test_capacity_retries_original_but_lost_admission_never_submits_again;
+    test_lost_admission_never_submits_again;
   test_case "terminal unknown survives host restart without worker or replacement" `Quick
     test_terminal_unknown_survives_host_restart_without_worker_or_replacement;
   test_case "original output limit survives without worker replay or a domain judgment" `Quick

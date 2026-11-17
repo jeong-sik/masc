@@ -24,7 +24,7 @@ val call_error_of_runtime : Lane_addon_runtime.tool_call_error -> call_error
     [call_captured_tool_request]): Runtime [Unavailable] and host refusals
     happen before the worker RPC, and only [Outcome_unknown] follows it. *)
 
-type wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+type wait = Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
 type ('original, 'final) result =
   | Awaiting of wait * 'original
@@ -105,8 +105,7 @@ val resume : store:Lane_addon_store.t -> label:string ->
     call reports [Not_sent], the intent admitted nothing, so it is declined in
     place and the next pass may submit the same request again. [Sent_unknown],
     a lost or malformed reply and absence after dispatch never permit another
-    submission; an explicit capacity reply to the submission is the only
-    other admission retry. A [Not_sent] read leaves the journal unchanged:
+    submission. A [Not_sent] read leaves the journal unchanged:
     an [Unavailable] one is [Awaiting Worker_unreachable], a refused one is
     returned as its error.
     Consecutive equal observations reuse the record without another write.

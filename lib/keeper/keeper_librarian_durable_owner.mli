@@ -4,7 +4,7 @@ type error = Lane_addon_submit_once.error =
   | Unavailable of string | Rejected of string | Uncertain of string
 val error_to_string : error -> string
 type wait = Lane_addon_submit_once.wait =
-  | Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+  | Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
 type publication =
   | Publication_pending of string

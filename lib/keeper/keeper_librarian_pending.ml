@@ -1,7 +1,6 @@
 open Result.Syntax
 
 type worker_wait =
-  | Capacity
   | Processing
   | Outcome_unknown
   | Unreachable
@@ -33,8 +32,7 @@ let admission_of_pending = function
 
 let of_worker_wait ~installation_id ~request_id wait =
   let wait = match wait with
-    | Lane_addon_submit_once.Capacity -> Capacity
-    | Worker_pending -> Processing
+    | Lane_addon_submit_once.Worker_pending -> Processing
     | Worker_unknown -> Outcome_unknown
     | Worker_unreachable -> Unreachable
     | Missing_after_dispatch -> Missing_after_dispatch
@@ -42,7 +40,6 @@ let of_worker_wait ~installation_id ~request_id wait =
   { installation_id; request_id; wait }
 
 let worker_word = function
-  | Capacity -> "capacity"
   | Processing -> "processing"
   | Outcome_unknown -> "outcome_unknown"
   | Unreachable -> "unreachable"
@@ -50,7 +47,6 @@ let worker_word = function
   | Journal_recheck -> "journal_recheck"
 
 let worker_of_word = function
-  | "capacity" -> Ok Capacity
   | "processing" -> Ok Processing
   | "outcome_unknown" -> Ok Outcome_unknown
   | "unreachable" -> Ok Unreachable
@@ -100,8 +96,6 @@ let of_json json =
   let+ () = Candle_json.finish ~context fields in value
 
 let description = function
-  | Worker { wait = Capacity; _ } ->
-    "Worker request listing is full; waiting for admitted requests to finish"
   | Worker { wait = Processing; _ } -> "Waiting for the original worker result"
   | Worker { wait = Outcome_unknown; _ } ->
     "Original dispatch outcome is unconfirmed; reobserve the same request"
@@ -117,7 +111,7 @@ let description = function
 let needs_attention = function
   | Worker { wait = (Outcome_unknown | Missing_after_dispatch); _ }
   | Local_failure _ -> true
-  | Worker { wait = (Capacity | Processing | Unreachable | Journal_recheck); _ }
+  | Worker { wait = (Processing | Unreachable | Journal_recheck); _ }
   | Publication _ | Basis_changed _ | Message_floor _ -> false
 
 let admission_description = function

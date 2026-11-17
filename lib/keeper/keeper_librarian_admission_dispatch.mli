@@ -5,7 +5,7 @@ type error = Lane_addon_submit_once.error =
   | Unavailable of string | Rejected of string | Uncertain of string
 val error_to_string : error -> string
 
-type wait = Lane_addon_submit_once.wait = Capacity | Worker_pending | Worker_unknown
+type wait = Lane_addon_submit_once.wait = Worker_pending | Worker_unknown
   | Worker_unreachable | Missing_after_dispatch | Journal_recheck
 type result =
   | Pending of wait * Lane_addon_tool_request_owner.retained
@@ -44,8 +44,8 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config ->
     The shared {!Lane_addon_submit_once.resume} owns the journal: the fresh
     destination check runs before Dispatch_intended, only a newly Stored intent
     and authoritative pre-admission absence can submit, and Already_stored,
-    Unconfirmed, a lost reply or absence after dispatch cannot. A submission
-    capacity refusal or a submit refused before sending declines the intent
-    and permits a later admission. Equal
+    Unconfirmed, a lost reply or absence after dispatch cannot. A submit
+    refused before sending declines the intent and permits a later admission.
+    Equal
     execution observations reuse the retained record. This helper performs no
     Memory mutation, queue ACK, domain commit, successor or scheduler action. *)

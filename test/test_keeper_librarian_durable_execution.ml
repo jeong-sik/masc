@@ -9,12 +9,12 @@ module Consumer = Keeper_librarian_durable_consumer
 module Refresh = Keeper_librarian_queue_refresh
 module Source = Keeper_librarian_durable_capture
 module Durable_owner = Keeper_librarian_durable_owner
+module Commit = Keeper_librarian_durable_commit
 module Boundary = Keeper_turn_boundaries
 module Position = Keeper_librarian_progress
 module Checkpoint = Keeper_checkpoint_store
 module Memory_lane = Keeper_memory_lane
 module Current = Keeper_memory_os_current
-module Commit = Keeper_librarian_durable_commit
 module Types = Keeper_memory_os_types
 module Capture = Keeper_librarian_durable_request
 module Owner = Lane_addon_tool_request_owner
@@ -4291,7 +4291,6 @@ let test_the_descent_reads_on_while_the_external_cursor_moves () = with_fixture 
    check, the cursor's acknowledgement and the move of the position are the
    consumer's own tail, which these tests run through the consumer. *)
 module Publish = Keeper_librarian_floor_publish
-module Commit = Keeper_librarian_durable_commit
 let publish fixture candidate finished =
   Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
     memory_action fixture (fun () -> Publish.publish ~candidate ~finished))

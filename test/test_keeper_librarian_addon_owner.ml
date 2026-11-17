@@ -1618,7 +1618,7 @@ let replace_admission_configuration fixture ~sw source =
     Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
       Eio.Condition.loop_no_mutex changed (fun () ->
         let snapshot=Runtime.tool_export_snapshot ~config:fixture.config
-          ~reserved:Keeper_librarian_addon.reserved ~access:Lane_addon_sources.Operator_configuration in
+          ~reserved:(Keeper_librarian_addon.reserved ()) ~access:Lane_addon_sources.Operator_configuration in
         List.find_opt (fun (candidate:Runtime.tool_export) ->
           candidate.tool.name=Capture.tool && candidate.instance_id<>old) snapshot.exports)) |> ignore;
     reconcile fixture)
@@ -1880,9 +1880,9 @@ let test_deferred_and_ended_siblings_rejudge_the_full_batch_after_rollback ()=wi
   let evidence=io (fun () -> Parts.execution_size_evidence ~store:fixture.store ~owner ~inventory
     ~parent:root ~execution_id:root_record.request_id |> get) in
   let left,right=memory_action fixture (fun () ->
-    let export=Keeper_librarian_addon.resolve ~config:fixture.config ~reserved:Keeper_librarian_addon.reserved
+    let export=Keeper_librarian_addon.resolve ~config:fixture.config ~reserved:(Keeper_librarian_addon.reserved ())
       Keeper_librarian_addon.Admission |> Result.map_error Keeper_librarian_addon.unavailable_to_string |> get in
-    Runtime.with_tool_request_destination ~config:fixture.config ~reserved:Keeper_librarian_addon.reserved ~export
+    Runtime.with_tool_request_destination ~config:fixture.config ~reserved:(Keeper_librarian_addon.reserved ()) ~export
       ~access:Lane_addon_sources.Operator_configuration ~publish:(fun actual ->
         let actual=Lane_addon_captured_destination.of_runtime actual in
         io (fun () -> Parts.partition ~store:fixture.store ~owner ~parent:root ~evidence

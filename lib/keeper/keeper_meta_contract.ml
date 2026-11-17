@@ -44,71 +44,12 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | Session_conflict
   | Other_detail of string
 
-type runtime_attempt_record =
-  { provider_id : string
-  ; http_status : int option
-  ; outcome : [ `Success | `Failure of string ]
-  ; timestamp : float
-  }
-
-let runtime_attempt_outcome_to_json = function
-  | `Success -> `Assoc [ "kind", `String "success" ]
-  | `Failure message ->
-    `Assoc [ "kind", `String "failure"; "message", `String message ]
-;;
-
-let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Safe.t =
-  `Assoc
-    [ "provider_id", `String record.provider_id
-    ; ( "http_status"
-      , match record.http_status with
-        | Some status -> `Int status
-        | None -> `Null )
-    ; "outcome", runtime_attempt_outcome_to_json record.outcome
-    ; "timestamp", `Float record.timestamp
-    ]
-;;
-
-type usage_metrics =
-  { total_turns : int
-  ; total_input_tokens : int
-  ; total_output_tokens : int
-  ; total_tokens : int
-  ; total_cost_usd : Keeper_cost_coverage.t
-  ; last_turn_ts : float
-  ; last_input_tokens : int
-  ; last_output_tokens : int
-  ; last_total_tokens : int
-  ; last_usage_reported_at : float option
-  ; last_latency_ms : int
-  }
-
-let with_last_reported_usage
-      (metrics : usage_metrics)
-      ~(usage_reported : bool)
-      ~(input_tokens : int)
-      ~(output_tokens : int)
-      ~(total_tokens : int)
-      ~(observed_at : float)
-  =
-  if usage_reported then
-    {
-      metrics with
-      last_input_tokens = input_tokens;
-      last_output_tokens = output_tokens;
-      last_total_tokens = total_tokens;
-      last_usage_reported_at = Some observed_at;
-    }
-  else metrics
-;;
-
 type agent_runtime_state =
   { usage : usage_metrics
   ; usage_cursor : Keeper_usage_resolution.cursor option
   ; last_usage_resolution : Keeper_usage_resolution.t option
   ; proactive_rt : proactive_runtime
   ; trace_id : Keeper_id.Trace_id.t
-  ; last_runtime_attempt : runtime_attempt_record option
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
         into a completed Keeper turn. Rows after this id remain pending. *)

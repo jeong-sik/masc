@@ -185,7 +185,6 @@ let create_keeper ~expected_config_revision (ctx : _ context)
           };
           trace_id = trace_id_t;
           message_scope_ack_id = None;
-	          last_runtime_attempt = None;
 	        };
       keeper_id = Some (Keeper_input_birth.keeper_uid creation);
       agent_core_env = p.profile_defaults.agent_core_env;

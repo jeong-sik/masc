@@ -1188,8 +1188,6 @@ let all ?base_path () =
     []
 ;;
 
-(* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
-
 let record_restart ~base_path name =
   Error_tracking.record_restart ~base_path name ~update_entry:update_entry_unit
 ;;

@@ -368,21 +368,6 @@ let test_historical_runtime_observation_projections () =
               { Evidence.failures=[failure]; terminal=Evidence.Terminal_not_observed })) cases)
 ;;
 
-let test_active_model_missing_attempt_is_unknown () =
-  let meta = make_meta "status-runtime-missing-attempt" in
-  let unknown_model_label =
-    Boundary_redaction.to_string Boundary_redaction.unknown_model_label
-  in
-  Alcotest.(check string)
-    "missing runtime attempt is explicit unknown"
-    unknown_model_label
-    (Masc.Keeper_status_runtime.active_model_of_meta meta);
-  Alcotest.(check string)
-    "missing runtime attempt label is explicit unknown"
-    unknown_model_label
-    (Masc.Keeper_status_runtime.active_model_label_of_meta meta)
-;;
-
 let drop_value reason =
   P.metric_value_or_zero
     P.metric_persistence_read_drops
@@ -1387,10 +1372,6 @@ let () =
             "degraded dashboard trust reports no operator disposition"
             `Quick
             test_degraded_dashboard_trust_reports_no_operator_disposition
-        ; Alcotest.test_case
-            "missing runtime attempt does not fabricate active_model"
-            `Quick
-            test_active_model_missing_attempt_is_unknown
         ] )
     ; ( "decision_log_read_drops"
       , [ Alcotest.test_case

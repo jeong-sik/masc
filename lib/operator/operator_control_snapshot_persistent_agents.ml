@@ -39,9 +39,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "goal", field_or_null "goal"
                  ; "status", field_or_null "status"
                  ; "turn_count", field_or_null "turn_count"
-                 ; "last_model_used", field_or_null "last_model_used"
-                 ; "active_model", field_or_null "active_model"
-                 ; "active_model_label", field_or_null "active_model_label"
                  ; "runtime_id", field_or_null "runtime_id"
                  ; "runtime_canonical", field_or_null "runtime_canonical"
                  ; ( "selected_runtime_canonical"
@@ -108,8 +105,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                       , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
                     ; "status", `String status
                     ; "turn_count", `Int meta.runtime.usage.total_turns
-                    ; "last_model_used", `Null
-                    ; "active_model", `Null
                     ; "next_model_hint", `Null
                     ; "updated_at", `String meta.updated_at
                     ; "created_at", `String meta.created_at

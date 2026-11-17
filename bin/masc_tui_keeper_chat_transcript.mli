@@ -833,6 +833,15 @@ val preparation_timeline_rows :
     These remain details, never a replacement for current provider activity.
     Archived unfinished scopes describe the capture, not current execution. *)
 
+val progress_facts :
+  ?preparation:Masc.Keeper_turn_preview.preparation ->
+  compact:bool -> show_timing:bool -> ko:bool -> now:float -> t ->
+  'reading Masc_tui_chat_facts.t list option
+(** The clauses of the [Progress] row {!status_rows} leads with for the same
+    arguments, terminal-safe, or [None] when it leads with no progress row.
+    Joined with {!Masc_tui_chat_facts.line} they are that row's text. A pane
+    lays them out itself so the row wraps between two clauses. *)
+
 val status_rows :
   ?preparation:Masc.Keeper_turn_preview.preparation ->
   ?compact:bool -> ?show_timing:bool -> ko:bool -> now:float -> t -> (status_kind * string) list

@@ -27279,7 +27279,7 @@ let keeper_observed_interrupt_rows (state : state) =
    arm for arm, what the live progress row already says from the same
    admission ("WAITING TO START · queued · 2 messages in the keeper's
    queue", "sent; not accepted yet", "accepted; the run is starting",
-   "accepted; replaying …", [Masc_tui_keeper_chat_transcript.phase_text]).
+   "accepted; replaying …", [Masc_tui_keeper_chat_transcript.phase_facts]).
    "Current direct conversation · … · in progress" said what that row's
    "IN PROGRESS" says whenever the row is drawing the same request; it
    stays only for a working request the live row is not drawing, because a

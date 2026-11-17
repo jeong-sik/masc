@@ -98,14 +98,17 @@ let fill ~max_cells items =
   in
   List.fold_left place ([], [], 0) items |> close |> List.rev
 
-let facts_as_items facts = List.map (fun fact -> Fact fact) facts
-
 (* A fact with no text has nothing to draw. Left in, it would still take a
    separator, and a row could begin with one. *)
 let said facts =
   List.filter
     (fun fact -> not (String.equal fact.label "" && String.equal fact.value ""))
     facts
+
+let line facts =
+  String.concat separator (List.map (fun fact -> fact.label ^ fact.value) (said facts))
+
+let facts_as_items facts = List.map (fun fact -> Fact fact) facts
 
 let rows_wanted ~max_cells facts =
   List.length (fill ~max_cells:(Int.max 1 max_cells) (facts_as_items (said facts)))

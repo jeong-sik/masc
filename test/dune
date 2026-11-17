@@ -132,6 +132,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_declaration_import)
+ (modules test_keeper_declaration_import)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_turn_source_outcomes)
  (modules test_keeper_turn_source_outcomes)
  (libraries masc_test_deps))

@@ -1,8 +1,9 @@
-(** Declarative TOML persistence for [masc_keeper_up].
+(** Declarative TOML persistence for Keeper configuration.
 
     Runtime metadata deliberately scrubs TOML-owned policy fields. This module
     makes the tool contract durable by creating a complete manifest for a new
-    Keeper, or patching only explicitly supplied fields on an existing one. *)
+    Keeper, patching only explicitly supplied fields on an existing one, or
+    committing a complete authored declaration without reconstructing it. *)
 
 type outcome =
   { path : string
@@ -69,6 +70,13 @@ type 'a publication =
   | Commit_then_publish of warning list * (unit -> 'a)
   | Rollback of 'a
 
+type declaration_error =
+  | Invalid_keeper_name of string
+  | Invalid_declaration of Keeper_types_profile.keeper_toml_load_error
+  | Configuration_error of error
+
+val declaration_error_to_string : declaration_error -> string
+
 val revision_to_yojson : revision -> Yojson.Safe.t
 
 val config_revision_to_yojson : config_revision -> Yojson.Safe.t
@@ -116,6 +124,31 @@ val commit_configuration :
     same configuration locks still prevent another edit overtaking publication.
     A later actor failure must report this committed revision without rolling
     back concurrent actor-owned state. *)
+
+val commit_declaration :
+  expected_revision:config_revision ->
+  config:Workspace.config ->
+  keeper_name:string ->
+  content:string ->
+  publish:(outcome -> config_revision -> 'a) ->
+  unit ->
+  ('a receipt, declaration_error) result
+(** Create or replace the complete declaration at the receiver's resolved
+    Keeper path, preserving [content] byte for byte. Validate its schema,
+    instructions and filename/name agreement before staging any write.
+    This validation does not establish receiver asset or runtime readiness.
+
+    Compare both the manifest and Runtime source/assignment revisions under
+    the existing manifest-then-Runtime locks and before-image journal. Leave
+    Runtime source bytes and assignments unchanged. As with
+    {!commit_configuration}, [publish] runs only after recovery authority is
+    durably cleared, with both configuration locks still held; it must not
+    reacquire them. A later publication failure cannot roll configuration back.
+
+    This operation does not resume a paused Keeper, materialize a new Owner,
+    restart a lane, or settle an admitted request. Callers retain those owners
+    and distinguish durable configuration from runtime application. This is
+    one Keeper declaration commit, not an atomic fleet import. *)
 
 val persist :
   expected_revision:config_revision ->

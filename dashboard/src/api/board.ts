@@ -800,20 +800,15 @@ function normalizeBoardCurationSnapshot(raw: unknown): BoardCurationSnapshot | n
   const ordering = asStrictStringArray(raw.ordering)
   const highlights = asStrictStringArray(raw.highlights)
   const rationale = asString(raw.rationale, '')
-  const model = asNullableString(raw.model)
-  const healthScore = asNumber(raw.health_score)
   return {
     id,
     generated_at,
     submitted_by,
-    model,
     summary: asNullableString(raw.summary),
     ordering,
     highlights,
     tag_suggestions: normalizeBoardCurationTagSuggestions(raw.tag_suggestions),
     answer_matches: normalizeBoardCurationAnswerMatches(raw.answer_matches),
-    health_score: healthScore ?? null,
-    health_components: normalizeBoardCurationHealthComponents(raw.health_components),
     rationale,
     provenance: raw.provenance,
   }
@@ -844,21 +839,6 @@ function normalizeBoardCurationAnswerMatches(raw: unknown): BoardCurationSnapsho
       question_post_id,
       answer_post_id,
       score: asNumber(item.score, 0),
-      rationale: asString(item.rationale, ''),
-    }]
-  })
-}
-
-function normalizeBoardCurationHealthComponents(raw: unknown): BoardCurationSnapshot['health_components'] {
-  if (!Array.isArray(raw)) return []
-  return raw.flatMap((item) => {
-    if (!isRecord(item)) return []
-    const name = asString(item.name, '').trim()
-    if (!name) return []
-    return [{
-      name,
-      score: asNumber(item.score, 0),
-      weight: asNumber(item.weight, 0),
       rationale: asString(item.rationale, ''),
     }]
   })

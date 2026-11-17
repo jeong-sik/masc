@@ -307,7 +307,7 @@ let project_pdf ~base_path =
   let media_store = Agent_core.History.Memory_store.create () in
   Masc.Keeper_media_reading.project_blocks ~media_store
     ~base_path ~keeper_name:"h5-pdf" ~needs_projection:(fun _ -> true)
-    ~read:(Masc.Keeper_media_reading.production_reader ~base_path)
+    ~resolve:(Masc.Keeper_media_reading.production_readers ~base_path)
     [ stored_pdf_block media_store two_page_pdf ]
 
 let text_of = function
@@ -395,7 +395,7 @@ let test_h5_real_poppler_reaches_the_projection () =
       let blocks =
         Masc.Keeper_media_reading.project_blocks ~media_store
           ~base_path ~keeper_name:"h5-real-pdf" ~needs_projection:(fun _ -> true)
-          ~read:(Masc.Keeper_media_reading.production_reader ~base_path)
+          ~resolve:(Masc.Keeper_media_reading.production_readers ~base_path)
           [ stored_pdf_block media_store h5_ledger_pdf ]
       in
       let text = text_of blocks in

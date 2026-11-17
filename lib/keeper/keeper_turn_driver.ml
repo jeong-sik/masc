@@ -1623,7 +1623,7 @@ let project_input_for_attempt
           Keeper_media_reading.projector
             ~media_store
             ~keeper_name
-            ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ -> Error "no_reader")
+            ~resolve:(fun ~kind:_ ~media_type:_ -> Error Keeper_media_reading.No_matching_reader)
             ()
         in
         Keeper_media_reading.project projector
@@ -1827,7 +1827,7 @@ let retained_media_reader ~input_source projector =
       Result.bind
         (Agent_core.History.stored
            ~sha256:attachment.original.sha256 ~bytes:attachment.original.bytes
-         |> Result.map_error Agent_core.History.stored_error_to_string)
+         |> Result.map_error (fun error -> Keeper_media_reading.Invalid_source_reference error))
         (Keeper_media_reading.read_stored projector ~kind
            ~media_type:attachment.media_type))
 
@@ -2657,7 +2657,7 @@ let run_named
       ~base_path
       ~media_store
       ~keeper_name
-      ~read:(Keeper_media_reading.production_reader ~base_path)
+      ~resolve:(Keeper_media_reading.production_readers ~base_path)
       ()
   in
   let read_retained_media = retained_media_reader ~input_source media_projector in

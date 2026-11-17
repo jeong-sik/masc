@@ -80,29 +80,82 @@ let available_stt_endpoints (stt : Voice_config.stt_config) =
   stt.Voice_config.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
 ;;
 
-let transcribe_audio ~audio_file ?language_code () =
+type prepared_stt_endpoint =
+  { endpoint : Voice_config.endpoint
+  ; model : string option
+  }
+
+type prepared_transcription =
+  { endpoints : prepared_stt_endpoint list
+  ; identity : string
+  }
+
+type transcription =
+  { text : string
+  ; endpoint_id : string
+  ; language_code : string option
+  }
+
+type transcription_error =
+  | Configuration_invalid of string
+  | Not_configured
+  | Stt_not_configured
+  | No_enabled_endpoints
+  | Endpoints_failed of (string * string) list
+
+let transcription_error_to_string = function
+  | Configuration_invalid message -> "voice config load failed: " ^ message
+  | Not_configured | No_enabled_endpoints -> "no enabled STT endpoints configured"
+  | Stt_not_configured -> "voice config has no [stt] section, so STT is not set up"
+  | Endpoints_failed attempts ->
+    "all enabled STT endpoints failed: "
+    ^ String.concat " | " (List.map (fun (id, error) -> id ^ ": " ^ error) attempts)
+;;
+
+let stt_configuration_identity endpoints =
+  let optional_string = function None -> `Null | Some value -> `String value in
+  let endpoint_json { endpoint; model } =
+    `Assoc
+      [ "id", `String endpoint.Voice_config.id
+      ; "kind", `String (Voice_config.string_of_endpoint_kind endpoint.kind)
+      ; "address", optional_string (Voice_runtime_overlay.endpoint_address endpoint)
+      ; "credential_reference", optional_string (Voice_runtime_overlay.endpoint_auth_env_name endpoint)
+      ; "command", optional_string (Option.map String.trim endpoint.command)
+      ; "model", optional_string model
+      ]
+  in
+  let json =
+    `Assoc
+      [ "semantics", `String "voice-stt-v1"
+      ; "process_timeout_sec", `Float Env_config_runtime.Voice.http_request_timeout_sec
+      ; "endpoints", `List (List.map endpoint_json endpoints)
+      ]
+  in
+  Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string json)))
+;;
+
+let prepare_transcription () =
   match Voice_config.load_detailed () with
-  | Error (Voice_config.Invalid msg) ->
-    (* An explicit voice config exists but is broken: surface the
-       load failure instead of substituting a hardcoded model. *)
-    Error (Printf.sprintf "voice config load failed: %s" msg)
-  | Error Voice_config.Not_configured ->
-    (* Voice is not set up in this environment: STT is explicitly
-       disabled, which is not an error of the config itself. *)
-    Error "no enabled STT endpoints configured"
-  | Ok { Voice_config.stt = None; _ } ->
-    (* The config loaded and has no [stt] section. Typed absence: there is no
-       model to send, so nothing is sent. *)
-    Error "voice config has no [stt] section, so STT is not set up"
+  | Error (Voice_config.Invalid message) -> Error (Configuration_invalid message)
+  | Error Voice_config.Not_configured -> Error Not_configured
+  | Ok { Voice_config.stt = None; _ } -> Error Stt_not_configured
   | Ok { Voice_config.stt = Some stt; _ } ->
-    let endpoints = available_stt_endpoints stt in
+    let endpoints = List.map (fun endpoint ->
+      { endpoint
+      ; model = Voice_config.model_at_endpoint ~default_model:stt.default_model endpoint
+      }) (available_stt_endpoints stt) in
+    (match endpoints with
+     | [] -> Error No_enabled_endpoints
+     | _ :: _ -> Ok { endpoints; identity = stt_configuration_identity endpoints })
+;;
+
+let transcription_identity prepared = prepared.identity
+;;
+
+let transcribe_prepared prepared ~audio_file ?language_code () =
     let rec try_endpoints attempted = function
-      | [] ->
-        Error
-          (Printf.sprintf
-             "all enabled STT endpoints failed: %s"
-             (String.concat " | " (List.rev attempted)))
-      | endpoint :: rest ->
+      | [] -> Error (Endpoints_failed (List.rev attempted))
+      | { endpoint; model } :: rest ->
         (* Asked the way this endpoint answers. The command kinds were wired
            into the probe and not into this loop, so a configured whisper_cli
            endpoint -- the only kind that transcribes without a server -- was
@@ -116,7 +169,7 @@ let transcribe_audio ~audio_file ?language_code () =
            section that leaves a transcriber without one; [None] here is said,
            not sent as a blank. *)
         let with_model f =
-          match Voice_config.model_at_endpoint ~default_model:stt.default_model endpoint with
+          match model with
           | Some model -> f model
           | None -> Error "this endpoint has no model and [voice.stt] names none"
         in
@@ -145,27 +198,14 @@ let transcribe_audio ~audio_file ?language_code () =
         in
         (match heard with
          | Ok (text, reported_language) ->
-           let lang =
+           let language_code =
              match language_code with
-             | Some lc -> lc
-             | None ->
-               (* The endpoint says which language it heard, or does not. A
-                  command answers with its transcript and no such field, so
-                  "unknown" here is the endpoint having been silent about it
-                  -- the same word this loop has always used. *)
-               (match reported_language with
-                | Some lc -> lc
-                | None -> "unknown")
+             | Some _ as supplied -> supplied
+             | None -> reported_language
            in
-           Ok
-             (`Assoc
-                 [ "status", `String (capture_status_to_string Transcribed)
-                 ; "text", `String text
-                 ; "language_code", `String lang
-                 ; "endpoint_id", `String endpoint.id
-                 ])
+           Ok { text; endpoint_id = endpoint.id; language_code }
          | Error error ->
-           let attempt = Printf.sprintf "%s: %s" endpoint.id error in
+           let attempt = endpoint.id, error in
            (if rest <> []
             then
               log_error
@@ -175,9 +215,21 @@ let transcribe_audio ~audio_file ?language_code () =
                    error));
            try_endpoints (attempt :: attempted) rest)
     in
-    if endpoints = []
-    then Error "no enabled STT endpoints configured"
-    else try_endpoints [] endpoints
+    try_endpoints [] prepared.endpoints
+;;
+
+let transcribe_audio ~audio_file ?language_code () =
+  let result =
+    let* prepared = prepare_transcription () in
+    let* transcript = transcribe_prepared prepared ~audio_file ?language_code () in
+    Ok (`Assoc
+      [ "status", `String (capture_status_to_string Transcribed)
+      ; "text", `String transcript.text
+      ; "language_code", `String (Option.value ~default:"unknown" transcript.language_code)
+      ; "endpoint_id", `String transcript.endpoint_id
+      ])
+  in
+  Result.map_error transcription_error_to_string result
 ;;
 
 (* ── endpoint probes ───────────────────────────────────────────────────── *)

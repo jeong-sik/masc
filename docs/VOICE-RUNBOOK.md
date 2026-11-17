@@ -667,6 +667,14 @@ intuition from one to the other.
 Advancing is refused for `Outcome_unknown`: a TTS call whose result is unknown
 may already have played audio, and retrying would speak twice.
 
+Each transcription captures the enabled STT endpoint order and resolved models
+once, then executes that snapshot. Keeper's attachment reader captures it before
+checking its reading cache: a changed endpoint/model declaration gets a different
+reader revision, and missing STT configuration cannot reuse an earlier reading.
+HTTP requests still check account access and resolve credentials when sent.
+See [attachment reading identity](KEEPER-MEDIA-FALLBACK-H5.md#readings-and-their-identity)
+for cache matching and the limits of that declaration identity.
+
 ### There is no retry count
 
 No reader consumes one. `call_voice_mcp_endpoint` runs a single attempt, and

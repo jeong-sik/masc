@@ -67,8 +67,8 @@ let is_lower_hex = function
   | _ -> false
 ;;
 
-(* Mirrors Keeper_media_reading.record_path: "<kind>-<sha>-<media>.json",
-   where <media> is the already-sanitised media type segment. The digest is
+(* Mirrors Keeper_media_reading.record_path: "<kind>-<sha>-<reading-key>.json".
+   The suffix binds the MIME, source length and reader identity. The digest is
    the attachment's, as its history [Stored] source names it. *)
 let record_digest name =
   let strip_prefix prefix value =

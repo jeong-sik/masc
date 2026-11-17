@@ -234,12 +234,61 @@ type capture_status =
 val capture_status_to_string : capture_status -> string
 val capture_status_of_string : string -> capture_status option
 
+type prepared_transcription
+(** The enabled STT endpoints, in order, and each endpoint's resolved model,
+    captured by {!prepare_transcription}. Execution does not reread voice
+    configuration. This is not a credential, an execution authorization, or a
+    pin of the executable/model file bytes or a remote implementation. *)
+
+type transcription = private
+  { text : string
+  ; endpoint_id : string
+  ; language_code : string option
+  }
+(** [language_code] is the caller's value when supplied, otherwise the
+    endpoint's report. [None] means neither named a language. *)
+
+type transcription_error =
+  | Configuration_invalid of string
+  | Not_configured
+  | Stt_not_configured
+  | No_enabled_endpoints
+  | Endpoints_failed of (string * string) list
+(** Endpoint failures retain the endpoint IDs and reasons in attempt order.
+    Cancellation propagates instead of becoming an endpoint failure. *)
+
+val transcription_error_to_string : transcription_error -> string
+
+val prepare_transcription :
+  unit -> (prepared_transcription, transcription_error) result
+(** Read voice configuration once, before a consumer looks up a reading.
+    No endpoint is contacted and no credential value is read. *)
+
+val transcription_identity : prepared_transcription -> string
+(** SHA-256 of the ordered, nonsecret STT configuration and this reader's
+    semantics revision. Endpoint, model, command and credential-reference
+    changes alter it; unrelated voice settings do not. Credential values are
+    never included. Equal identity does not prove unchanged files, remote
+    implementations, environment, or the account behind a credential. *)
+
+val transcribe_prepared :
+  prepared_transcription ->
+  audio_file:string ->
+  ?language_code:string ->
+  unit ->
+  (transcription, transcription_error) result
+(** Execute the captured endpoint/model chain. HTTP calls still recheck host
+    account access and resolve the captured credential reference immediately
+    before sending; preparation grants neither. The existing transport and
+    process resource bounds still apply. *)
+
 val transcribe_audio :
   audio_file:string ->
   ?language_code:string ->
   unit ->
   (Yojson.Safe.t, string) result
-(** Transcribe [audio_file] through the enabled STT endpoint chain.
+(** Prepare and transcribe [audio_file], rendering the typed result as the
+    existing JSON response. The enabled STT endpoint chain is read once.
     A broken explicit voice config surfaces its load error; when no
     voice config exists, STT is reported as explicitly disabled
     ([Error "no enabled STT endpoints configured"]), and a config with

@@ -1,107 +1,104 @@
-(** H5 (task-2187) — attachment-bound readings of audio and documents for a
-    text-only fallback candidate. Design: docs/KEEPER-MEDIA-FALLBACK-H5.md.
+(** Attachment-bound readings for a candidate that cannot receive the original
+    audio or document. Canonical history is never rewritten. A walk shares one
+    projector across history and retained host-result consumers. *)
 
-    When a failover lands on a runtime that cannot take an [Audio] or
-    [Document] block, the per-attempt projection used to drop the block and say
-    only that media was omitted. This module replaces such an inline block with
-    a text block that names the attachment by the sha256 of its payload and
-    carries either a reading or an explicit "unavailable" reason. The canonical
-    history is never rewritten; only the dispatch view changes.
+type kind = Audio | Document
 
-    A reading is stored per keeper under [base_path] keyed by
-    (kind, source sha256, media type) and reused, after a restart too, while its
-    reader version is unchanged. {!Keeper_media_reading_maintenance} removes a
-    stored reading once no durable record carries its attachment. An
-    unavailable result is never stored as a reading, so a later turn retries
-    it; within one lane walk it is not retried (see {!projector}). A reader
-    error, an absent reader, a
-    reference source ([Url]/[File_id], which is not fetched) or an empty reading
-    produces text that says so and contains nothing derived from the media. *)
+type reader_identity = private { id : string; revision : string }
+type identity_error = Empty_id | Empty_revision
 
-type kind =
-  | Audio
-  | Document
+val reader_identity :
+  id:string -> revision:string -> (reader_identity, identity_error) result
+(** A declared reader and the revision of its interpretation. Neither may be
+    blank. This identifies the host's declaration, not authenticated remote
+    code, account identity or executable bytes. *)
 
-type reader =
-  kind:kind ->
-  media_type:string ->
-  bytes:string ->
-  (string, string) result
-(** [Error reason] is a short unavailable reason shown to the model. Each
-    reader owns its transport or subprocess resource limits; time spent on
-    earlier attachments or provider calls never prevents a later read. *)
+type reader_failure =
+  | Temporary_file_failed
+  | Temporary_write_failed
+  | Stt_failed of Voice_bridge.transcription_error
+  | Empty_transcript
+  | Pdf_failed of Verification_pdf_inspection.error
+  | Empty_extraction
+  | Empty_reading
 
-val reader_version : string
-(** Part of the stored record; bump when reading semantics change. *)
+type reader
+val reader :
+  identity:reader_identity ->
+  read:(bytes:string -> (string, reader_failure) result) -> reader
+(** Bind identity and execution before reading a cache. The callback owns one
+    reader's transport or subprocess limits. It must use the same declaration
+    snapshot its identity names. Cancellation propagates. *)
 
-val production_reader : base_path:string -> reader
-(** Audio goes through {!Voice_bridge.transcribe_audio} (the configured STT
-    endpoint chain) from a temporary file. The STT transport retains its
-    configured per-call limits and cancellation handling.
+type resolution_failure =
+  | No_matching_reader
+  | Stt_unavailable of Voice_bridge.transcription_error
 
-    A PDF goes through {!Verification_pdf_inspection.extract_text}, whose
-    subprocess limit belongs to that one document extraction. Other
-    document types answer [Error "no_document_reader"]. *)
+type resolver =
+  kind:kind -> media_type:string -> (reader, resolution_failure) result
+
+val production_readers : base_path:string -> resolver
+(** Resolves the current built-in STT or PDF reader. STT captures its endpoint
+    and model declaration before cache lookup and executes that same snapshot.
+    Its identity does not pin credential values, remote implementations or
+    local executable/model file contents. Other document formats have no
+    matching reader. This is not the external-service reader registry. *)
+
+type reading = private { reader : reader_identity; text : string }
+type failure =
+  | Resolution_failed of resolution_failure
+  | Invalid_source_reference of Agent_core.History.stored_error
+  | Source_unavailable of Agent_core.History.media_error
+  | Reader_failed of { reader : reader_identity; reason : reader_failure }
+
+val failure_to_string : failure -> string
+(** Model-facing reason, rendered only at the final projection boundary.
+    Detailed transport/configuration failures remain typed and are not used
+    as string control signals. *)
 
 val store_dirname : string
-(** Directory under the MASC dir that holds one sub-directory of stored
-    readings per keeper. It is outside the durable-consumer trees
-    {!Tool_blob_maintenance} scans. *)
+(** Success-cache directory below the workspace's MASC root. A reading belongs
+    to its original attachment and reader identity; it owns no execution or
+    approval state. {!Keeper_media_reading_maintenance} removes a cached
+    reading only after no durable consumer retains its original attachment. *)
 
 type projector
-(** The projection state of one lane walk. Every candidate and every message
-    projected through one projector share its results, so an attachment is
-    read at most once per walk, whether the reading succeeded or not. A new
-    turn makes a new projector; an attachment that was unavailable is read
-    again there. *)
-
 val projector :
   ?base_path:string ->
   media_store:Agent_core.History.media_store ->
   keeper_name:string ->
-  read:reader ->
-  unit ->
-  projector
-(** Construct the memo shared by this walk's consumers. The walk owns no
-    elapsed-time allowance for reads. *)
+  resolve:resolver ->
+  unit -> projector
+(** A walk-owned mutable memo, used on its owning fiber. Reader selection is
+    frozen for each (kind, media type) on its first use in the walk. Successful
+    readings and failures are shared across consumers in that walk; another
+    walk resolves again. No aggregate elapsed-time allowance is imposed. *)
 
 val read_stored :
-  projector ->
-  kind:kind ->
-  media_type:string ->
-  Agent_core.History.stored ->
-  (string, string) result
-(** Read one stored attachment through the projector's existing reader,
-    successful-reading store. The result is raw
-    reader text or an unavailable reason, with no source-attribution wrapper;
-    each consumer names its own original in the text it presents.
-
-    Calls through this function and {!project} share the same result for a
-    (kind, media type, source digest) during this walk, including errors. Only
-    successful nonempty readings are stored for another walk. An attachment
-    without a reading reaches its reader regardless of earlier work. Empty reader
-    output returns [Error "empty_reading"]. Cancellation propagates and is not
-    memoized as an unavailable result. *)
+  projector -> kind:kind -> media_type:string -> Agent_core.History.stored ->
+  (reading, failure) result
+(** Resolve the reader before cache lookup. A durable cache hit must match kind,
+    media type, source digest/length and the selected reader's id/revision.
+    Only nonempty successes are stored. A different reader or declaration
+    cannot reuse the old reader's result. A failure is retried in a new walk;
+    cancellation is neither caught nor memoized. *)
 
 val project :
   projector ->
   needs_projection:(kind -> bool) ->
   Agent_core.Types.content_block list ->
   Agent_core.Types.content_block list * (string * int) list
-(** Replace every [Audio]/[Document] block whose kind
-    [needs_projection] returns [true] for. Returns the projected list and the
-    count of blocks replaced per modality name (audio, document), including
-    nested tool-result blocks. Tool-result identity, outcome, JSON and original
-    text are preserved; only the attached blocks are projected. Other block
-    kinds are unchanged. A stored reading is reused without calling the
-    reader. *)
+(** Replace selected Audio/Document blocks, including nested ToolResult media,
+    with an attributed reading or explicit unavailable data. URL/file-id
+    sources are not fetched. Tool identity, outcome, JSON and original text
+    remain unchanged. Returns replaced counts by modality. *)
 
 val project_blocks :
   ?base_path:string ->
   media_store:Agent_core.History.media_store ->
   keeper_name:string ->
   needs_projection:(kind -> bool) ->
-  read:reader ->
+  resolve:resolver ->
   Agent_core.Types.content_block list ->
   Agent_core.Types.content_block list * (string * int) list
-(** {!project} through a projector of its own: one call is one walk. *)
+(** One call through a projector of its own. *)

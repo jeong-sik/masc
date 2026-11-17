@@ -245,6 +245,13 @@ val caps_admit_required_modalities :
     media-capable runtimes must use this instead of re-deriving checks from
     individual capability booleans. *)
 
+val requires_text_media_projection :
+  Llm_provider.Capabilities.capabilities -> required:string list -> bool
+(** A turn requiring several media kinds needs a text projection when the
+    runtime does not declare support for their combination. [required] is the
+    distinct media list returned by the modality scan. Supporting each kind
+    separately does not grant support for a mixed request. *)
+
 val media_candidates_of :
   runtimes:Runtime_instance.t list ->
   media_failover:string list ->

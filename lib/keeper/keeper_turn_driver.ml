@@ -1568,8 +1568,9 @@ let project_input_for_attempt
   | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ -> unchanged
   | Runtime_agent.No_capable_runtime { required } ->
     let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+    let project_all_media = Runtime_agent.requires_text_media_projection caps ~required in
     let project ~mode blocks =
-      if caps.supports_image_input
+      if caps.supports_image_input && not project_all_media
       then { Keeper_vision_ingest.blocks; delegated_images = 0 }
       else project_images ~mode blocks
     in
@@ -1617,8 +1618,8 @@ let project_input_for_attempt
        attachment-bound readings (or an explicit unavailable marker) before the
        generic strip, so a text fallback keeps the fact and its provenance. *)
     let needs_media_projection = function
-      | Keeper_media_reading.Audio -> not caps.supports_audio_input
-      | Keeper_media_reading.Document -> not caps.supports_multimodal_inputs
+      | Keeper_media_reading.Audio -> project_all_media || not caps.supports_audio_input
+      | Keeper_media_reading.Document -> project_all_media || not caps.supports_document_input
     in
     let project_media =
       match project_media with
@@ -1697,17 +1698,9 @@ let project_input_for_attempt
           text-only turn to offer and the provider capability floor will reject
           this attempt. Say so here. Falling through in silence is what left the
           operator with a bare provider capability error and no record that
-          RFC-0265 had run and given up. While the scan, the image projection
-          and the strip cover the same blocks, this arm is not reached: a
-          runtime that takes two modalities one at a time also takes them
-          together in [Runtime_agent.caps_admit_required_modalities], because
-          document admission reads [supports_multimodal_inputs], the flag
-          that also grants the bundle. So a refused turn holds a block of a
-          refused modality, and either the projection counts it or the strip
-          removes it. Admitting documents on [supports_document_input] instead
-          would make an image plus document turn on a non-multimodal runtime
-          land here. Today this row is what the operator reads when one of the
-          three stops covering a block the scan reported. *)
+          RFC-0265 had run and given up. Unsupported mixed bundles project
+          every media kind; this arm therefore signals that a projector did
+          not cover a block reported by the capability scan. *)
        Log.Keeper.warn
          "%s: RFC-0265 media degrade unavailable on %s -- required %s, nothing \
           strippable; the capability floor rejects this attempt"

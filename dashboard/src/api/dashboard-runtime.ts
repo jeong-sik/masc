@@ -90,6 +90,7 @@ export interface DashboardRuntimeDeclaredModelCapabilities {
   supports_parallel_tool_calls?: boolean
   thinking_control_format?: string | null
   supports_image_input?: boolean
+  supports_document_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
   supports_multimodal_inputs?: boolean
@@ -166,6 +167,7 @@ export interface DashboardRuntimeEffectiveCapabilities {
   supports_structured_output?: boolean
   supports_multimodal_inputs?: boolean
   supports_image_input?: boolean
+  supports_document_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
   modality_priority?: string | null
@@ -217,6 +219,7 @@ export interface DashboardRuntimeProviderSnapshot {
   supports_parallel_tool_calls?: boolean
   supports_multimodal_inputs?: boolean
   supports_image_input?: boolean
+  supports_document_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
   thinking_control_format?: string | null
@@ -545,6 +548,7 @@ function decodeRuntimeDeclaredModelCapabilities(
     supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
     thinking_control_format: asNullableString(raw.thinking_control_format),
     supports_image_input: asBoolean(raw.supports_image_input),
+    supports_document_input: asBoolean(raw.supports_document_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
@@ -645,6 +649,7 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_structured_output: asBoolean(raw.supports_structured_output),
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
     supports_image_input: asBoolean(raw.supports_image_input),
+    supports_document_input: asBoolean(raw.supports_document_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
     modality_priority: asNullableString(raw.modality_priority),
@@ -698,6 +703,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
     supports_image_input: asBoolean(raw.supports_image_input),
+    supports_document_input: asBoolean(raw.supports_document_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
     thinking_control_format: asNullableString(raw.thinking_control_format),

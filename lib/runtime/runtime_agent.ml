@@ -383,7 +383,7 @@ let supported_modalities_of_capabilities
     (caps : Llm_provider.Capabilities.capabilities) =
   [ "text" ]
   @ (if caps.supports_image_input then [ "image" ] else [])
-  @ (if caps.supports_multimodal_inputs then [ "document" ] else [])
+  @ (if caps.supports_document_input then [ "document" ] else [])
   @ (if caps.supports_audio_input then [ "audio" ] else [])
 
 (* The modality a content block demands of a runtime. The producers
@@ -418,23 +418,18 @@ let supports_required_modality
   match required_modality_of_string modality with
   | Some Modality_text -> true
   | Some Modality_image -> caps.supports_image_input
-  | Some Modality_document -> caps.supports_multimodal_inputs
+  | Some Modality_document -> caps.supports_document_input
   | Some Modality_audio -> caps.supports_audio_input
   | None -> false
 
-let supported_non_text_capability_count
-    (caps : Llm_provider.Capabilities.capabilities) =
-  List.fold_left
-    (fun count supported -> if supported then count + 1 else count)
-    0
-    [ caps.supports_image_input
-    ; caps.supports_audio_input
-    ; caps.supports_video_input
-    ]
-
 let supports_multimodal_bundle
     (caps : Llm_provider.Capabilities.capabilities) =
-  caps.supports_multimodal_inputs || supported_non_text_capability_count caps > 1
+  caps.supports_multimodal_inputs
+
+let requires_text_media_projection caps ~required =
+  match required with
+  | [] | [ _ ] -> false
+  | _ :: _ :: _ -> not (supports_multimodal_bundle caps)
 
 let multimodal_capability_error ~provider_label ~required ~supported ~reason =
   let render = function
@@ -463,7 +458,7 @@ let multimodal_capability_error ~provider_label ~required ~supported ~reason =
 let caps_admit_required_modalities
     (caps : Llm_provider.Capabilities.capabilities) (required : string list) =
   List.for_all (supports_required_modality caps) required
-  && (List.length required <= 1 || supports_multimodal_bundle caps)
+  && not (requires_text_media_projection caps ~required)
 
 (* RFC-0265 follow-up — graceful media degrade. When no configured runtime can
    accept a turn's input modality (the reroute floor [No_capable_runtime]),
@@ -645,6 +640,10 @@ let apply_runtime_model_input_capabilities
     supports_image_input = declared model_caps.supports_image_input;
     supports_audio_input = declared model_caps.supports_audio_input;
     supports_video_input = declared model_caps.supports_video_input;
+    (* The adapter freezes the document declaration with the wire's floor.
+       Reapplying TOML here must not re-enable an unrepresentable document. *)
+    supports_document_input =
+      caps.supports_document_input && declared model_caps.supports_document_input;
   }
 
 (* A model declaration cannot make its host transport carry a media block.

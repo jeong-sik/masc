@@ -438,6 +438,7 @@ let stated_capabilities_over
   ; supports_structured_output = stated caps.supports_structured_output ~default:base.supports_structured_output
   ; supports_multimodal_inputs = media caps.supports_multimodal_inputs
   ; supports_image_input = media caps.supports_image_input
+  ; supports_document_input = media caps.supports_document_input
   ; supports_audio_input = media caps.supports_audio_input
   ; supports_video_input = media caps.supports_video_input
   ; supports_native_streaming = spec.streaming
@@ -456,15 +457,16 @@ let stated_capabilities_over
     pair, project the complete typed runtime declaration into the
     Provider_config override that AGENT_CORE exposes for concrete endpoint
     contracts. Catalogued models preserve the row except for explicit output
-    ceilings and thinking transport declarations. An absent runtime capability
-    block remains absent: a provider preset then answers alone, and with no
-    catalog answer at all the normal startup gate rejects the binding. *)
+    ceilings, thinking transport declarations and document admission. Document
+    admission also reaches the serializer, rather than being a second decision
+    made only by the Keeper. With no declaration and no catalog answer the
+    normal startup gate still rejects the binding. *)
 let declared_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
       ~(catalog_answer : Llm_provider.Capabilities.catalog_answer)
       (spec : Runtime_schema.model_spec)
   =
-  match catalog_answer with
+  let declared = match catalog_answer with
   | Llm_provider.Capabilities.Model_row catalog_caps ->
     (match spec.capabilities with
      | None -> None
@@ -536,6 +538,31 @@ let declared_capabilities_override_of_model_spec
              agent_core_thinking_control_format caps.thinking_control_format
          })
       spec.capabilities
+  in
+  (* These are the native document forms described by Api_common. A model
+     declaration cannot give Ollama's scalar content/images wire a file part. *)
+  let supports_document_input =
+    match wire with
+    | Llm_provider.Provider_kind.Ollama -> false
+    | Llm_provider.Provider_kind.Anthropic
+    | Llm_provider.Provider_kind.Kimi
+    | Llm_provider.Provider_kind.OpenAI_compat
+    | Llm_provider.Provider_kind.Gemini
+    | Llm_provider.Provider_kind.Glm ->
+      (* DET-OK: absent media declarations withhold the modality. *)
+      Option.bind spec.capabilities (fun caps -> caps.Runtime_schema.supports_document_input)
+      |> Option.value ~default:false
+  in
+  match declared, catalog_answer with
+  | Some caps, (Llm_provider.Capabilities.Model_row _
+               | Llm_provider.Capabilities.Provider_preset _
+               | Llm_provider.Capabilities.No_catalog_answer) ->
+    Some { caps with supports_document_input }
+  | None, (Llm_provider.Capabilities.Model_row caps
+          | Llm_provider.Capabilities.Provider_preset caps) ->
+    if Bool.equal supports_document_input caps.supports_document_input then None
+    else Some { caps with supports_document_input }
+  | None, Llm_provider.Capabilities.No_catalog_answer -> None
 ;;
 
 (* A signed Anthropic thinking block stays valid only while the system prompt,

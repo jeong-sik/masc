@@ -1826,14 +1826,14 @@ let test_kimi_for_coding_declares_the_reasoning_it_returns () =
     check bool "declares reasoning" true
       caps.Llm_provider.Capabilities.supports_reasoning
 
-(* For a model the catalog names, [Runtime_adapter] forwards only
-   max-output-tokens, thinking-control-format and reasoning-streaming-format out
-   of [models.<id>.capabilities]; the media four travel their own path through
-   [Runtime_agent.apply_runtime_model_input_capabilities]. The twelve paired
-   below reach nothing at all (#37435).
+(* For a model the catalog names, [Runtime_adapter] forwards output/reasoning
+   controls and native document admission from [models.<id>.capabilities].
+   The other media flags travel through
+   [Runtime_agent.apply_runtime_model_input_capabilities]. The flags paired
+   below remain catalog decisions (#37435).
 
    Every field of [Runtime_schema.model_capabilities] is bound by name so that a
-   twenty-first field cannot join the record without this list being read again.
+   new field cannot join the record without this list being read again.
    Declared and resolved are spelled on one line each, because a pair that reads
    one field and compares another is the defect this case exists to find. *)
 let catalog_decided_capability_pairs
@@ -1852,6 +1852,7 @@ let catalog_decided_capability_pairs
       ; anthropic_thinking_control = _
       ; reasoning_streaming_format = _
       ; supports_image_input = _
+      ; supports_document_input = _
       ; supports_audio_input = _
       ; supports_video_input = _
       ; supports_multimodal_inputs = _

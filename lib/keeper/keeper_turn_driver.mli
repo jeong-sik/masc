@@ -758,8 +758,11 @@ module For_testing : sig
     Runtime_instance.t ->
     attempt_input
   (** The per-attempt RFC-0265 decision for one resolved candidate: unchanged
-      when the runtime admits the turn's modalities, otherwise image readings/references
-      precede the strip of other unsupported media, with manifest rows through
+      when the runtime admits the turn's modalities. Otherwise unsupported
+      media become readings/references before any remaining unsupported blocks
+      are stripped. A runtime that refuses the mixed bundle receives readings
+      for every media kind, even if it accepts each kind separately. Canonical
+      goal, history and checkpoint blocks remain intact. Manifest rows use
       [emit_runtime_manifest]. [Reroute] has no producer here because the
       decision is taken with no reroute candidates. *)
 

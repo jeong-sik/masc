@@ -259,6 +259,7 @@ type model_capabilities =
   ; anthropic_thinking_control : anthropic_thinking_control option
   ; reasoning_streaming_format : reasoning_streaming_format option
   ; supports_image_input : bool option
+  ; supports_document_input : bool option
   ; supports_audio_input : bool option
   ; supports_video_input : bool option
   ; supports_multimodal_inputs : bool option
@@ -286,6 +287,7 @@ let model_capabilities_default =
   ; anthropic_thinking_control = None
   ; reasoning_streaming_format = None
   ; supports_image_input = None
+  ; supports_document_input = None
   ; supports_audio_input = None
   ; supports_video_input = None
   ; supports_multimodal_inputs = None

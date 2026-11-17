@@ -83,6 +83,11 @@ val materialize_provider_binding
     or provider-base ceiling. An absent declaration preserves the catalog;
     neither ceiling becomes a request-side [max_tokens] default.
 
+    Document input is frozen from [supports-document-input] for catalogued and
+    uncatalogued models alike. An absent declaration withholds it; a native
+    wire without document representation (Ollama) cannot enable it. The same
+    frozen capability reaches admission and request serialization.
+
     The binding's [disable_parallel_tool_use] is request policy. It reaches
     [Provider_config] without replacing the model's catalog capability.
     The canonical provider must declare suppression support in its catalog;

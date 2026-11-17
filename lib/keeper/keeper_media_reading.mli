@@ -75,10 +75,12 @@ val project :
   needs_projection:(kind -> bool) ->
   Agent_core.Types.content_block list ->
   Agent_core.Types.content_block list * (string * int) list
-(** Replace every top-level [Audio]/[Document] block whose kind
+(** Replace every [Audio]/[Document] block whose kind
     [needs_projection] returns [true] for. Returns the projected list and the
-    count of blocks replaced per modality name (audio, document). Blocks of
-    other kinds, and nested tool-result content, are returned unchanged. A
+    count of blocks replaced per modality name (audio, document), including
+    nested tool-result blocks. Tool-result identity, outcome, JSON and original
+    text are preserved; only the attached blocks are projected. Other block
+    kinds are unchanged. A
     stored reading is used without consulting the deadline; when the reader
     would have to run and the deadline has passed, the reader is not called
     and the attachment is marked unavailable with reason [budget_spent]. *)

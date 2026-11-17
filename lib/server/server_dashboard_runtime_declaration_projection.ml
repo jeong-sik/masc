@@ -254,6 +254,7 @@ let runtime_declared_model_capabilities_json
       ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
       ; "anthropic_thinking_control", anthropic_thinking_control_json caps.anthropic_thinking_control
       ; "supports_image_input", Json_util.bool_opt_to_json caps.supports_image_input
+      ; "supports_document_input", Json_util.bool_opt_to_json caps.supports_document_input
       ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
       ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input
       ; "supports_multimodal_inputs", Json_util.bool_opt_to_json caps.supports_multimodal_inputs

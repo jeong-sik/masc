@@ -648,6 +648,31 @@ let test_an_unknown_effect_failure_releases_its_checkpoints () = with_store @@ f
   check bool "the failed execution keeps the unknown-effect receipt" true
     (Native.equal_state receipt (read store))
 
+(* A restart requeues an operation with its call still Active. No executor
+   holds that call, so the operator's cancel closes it. *)
+let test_cancel_closes_the_active_call_of_a_requeued_operation () = with_store @@ fun path store operation ->
+  bind store operation (make_call operation);
+  advance store operation ~observed:1 ~next:2;
+  check int "a restart without a journal terminal interrupts nothing" 0
+    (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> ok));
+  released "the requeue released nothing" [] store;
+  (match Store.cancel_queued store ~now:5. ~operation_id |> ok with
+   | {Operation.state=Operation.Cancelled _; _} -> ()
+   | {Operation.state=(Operation.Queued | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _); _} ->
+     fail "the requeued operation was not cancelled");
+  let receipt = read store in
+  (match receipt with
+   | Native.Terminal_unacknowledged (closed, disposition) ->
+     check string "the receipt names the cut-off call" call_id closed.call_id;
+     check bool "the call is closed as an unknown effect" true
+       (disposition = Native.unknown_effect_disposition)
+   | Native.No_native_call | Native.Active _ -> fail "the cancel left the call open or dropped its receipt");
+  released "the cancel releases the call's seed and latest checkpoint" [checkpoint 1; checkpoint 2] store;
+  check bool "the cancelled operation is never claimed" true
+    (Option.is_none (Store.claim_next store ~now:6. |> ok));
+  with_reopened path store @@ fun reopened ->
+  check bool "the receipt survives a reopen" true (Native.equal_state receipt (read reopened))
+
 (* The release reads only the rows SQL lets through. On a store holding every
    kind of row, that selection is exactly what the startup sweep's inspection
    keeps after decoding everything. *)
@@ -1026,6 +1051,8 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "unknown effect survives settlement and rejects retry" `Quick test_unknown_effect_survives_failure_and_rejects_retry;
   test_case "settling an active call is a precondition, not corruption" `Quick test_settling_an_active_call_is_a_precondition_not_corruption;
   test_case "unknown-effect receipt lets the operation fail but not complete" `Quick test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete;
+  test_case "cancelling a requeued operation closes its Active call" `Quick
+    test_cancel_closes_the_active_call_of_a_requeued_operation;
   test_case "retired call replacement and Owner acknowledgement" `Quick test_retired_replacement_is_atomic_and_normal_receipt_acknowledges;
   test_case "checkpoint deferral acknowledges only committed retirement" `Quick test_checkpoint_deferral_acknowledges_only_committed_retirement;
   test_case "checkpoint CAS, digest and commit readback" `Quick test_stale_checkpoint_digest_and_commit_readback];

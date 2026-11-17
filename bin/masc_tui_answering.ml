@@ -101,10 +101,10 @@ type chat_activity_row =
 
 let chat_activity_row_text row = row.lead ^ row.rest ^ row.keys
 
-(* Why the turn rows are not current: the poll failed, or the workspace guard
-   stopped the poll before it left, which the caller has worded as a
+(* Why the turn rows are not current: the read failed, or the workspace guard
+   stopped the read before it left, which the caller has worded as a
    kept-back notice and which is drawn as it is (RFC §2). *)
-type poll_error = Poll_failed of string | Poll_kept_back of string
+type read_error = Read_failed of string | Read_kept_back of string
 
 (* The same running turn must remain visible while a submitted chat waits
    behind it. No ETA can be inferred from the turn's elapsed age.
@@ -119,8 +119,8 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
   let plain text = { lead = text; motion = Still; rest = ""; keys = "" } in
   let stale = match error with
     | None -> []
-    | Some (Poll_failed detail) -> [plain (say "활동 조회 실패: " "Activity unavailable: " ^ detail)]
-    | Some (Poll_kept_back notice) -> [plain notice] in
+    | Some (Read_failed detail) -> [plain (say "활동 조회 실패: " "Activity unavailable: " ^ detail)]
+    | Some (Read_kept_back notice) -> [plain notice] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
     String.equal row.ktr_keeper_name keeper_name) rows with
   | None -> stale
@@ -139,7 +139,7 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
     (* "Current chat_operation turn · 14m43s · …" went: the mark says a turn
        is running, and the lane and the age are the facts; "current" and
        "turn" were the sentence around them. A stale reading keeps its word,
-       because a number from a poll that is failing is a different fact. *)
+       because a number from a read that is failing is a different fact. *)
     let mark, observed =
       match error with
       | None -> running_glyph ~frame, ""
@@ -215,7 +215,7 @@ let newly_finished ~previous ~current =
     previous
 ;;
 
-(** Carry the finish glow forward across one poll: drop entries older than
+(** Carry the finish glow forward across one read: drop entries older than
     the TTL, drop a keeper that started running again (the badge takes over),
     and put the turns that just finished in front. *)
 let advance_finishes ~now ~previous_rows ~current_rows finishes =
@@ -241,13 +241,13 @@ let advance_finishes ~now ~previous_rows ~current_rows finishes =
 ;;
 
 let overlay ?(frame = -1) ?width ~ko ~(now : float) ~(chat_target : string option)
-    ~(error : poll_error option) ~(observed_at : float option)
+    ~(error : read_error option) ~(observed_at : float option)
     ~(finishes : (string * float) list)
     (rows : Tui_decode.keeper_turn_row list) : line list =
   let say korean english = if ko then korean else english in
   let poll_error_text = function
-    | Poll_failed detail -> Printf.sprintf (if ko then "조회 실패: %s" else "poll failed: %s") detail
-    | Poll_kept_back notice -> notice in
+    | Read_failed detail -> Printf.sprintf (if ko then "조회 실패: %s" else "read failed: %s") detail
+    | Read_kept_back notice -> notice in
   let answered elapsed =
     if ko then elapsed ^ " 전에 끝남" else "answered " ^ elapsed ^ " ago" in
   let running, unavailable, idle_count =
@@ -314,10 +314,10 @@ let overlay ?(frame = -1) ?width ~ko ~(now : float) ~(chat_target : string optio
     Masc_tui_message_layout.fit_width
       (Masc.Tui_terminal_text.sanitize_terminal_text name) name_width
   in
-  (* What the rows below are a reading of. [observed_at] is when a poll last
+  (* What the rows below are a reading of. [observed_at] is when a read last
      answered; without one there are no rows at all, so "showing the last rows
      that arrived" and "nobody is answering right now" were both said about a
-     list no poll had brought back. *)
+     list no read had brought back. *)
   let error_lines =
     match error, observed_at with
     | None, _ -> []
@@ -352,7 +352,7 @@ let overlay ?(frame = -1) ?width ~ko ~(now : float) ~(chat_target : string optio
         else []
     | [], None, None ->
         [ { text = say "미조회" "not loaded yet"; tone = Quiet; target = None } ]
-    (* The failed poll above is the whole answer; there is no list to
+    (* The failed read above is the whole answer; there is no list to
        describe. *)
     | [], None, Some _ -> []
     | _ :: _, _, _ ->

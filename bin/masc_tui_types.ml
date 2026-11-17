@@ -13822,11 +13822,11 @@ let refuse_keeper_turn_observation state failure =
 (* The turn poll's failure as the answering rows say it: the poll's own
    failure, or the kept-back notice alone for a poll the workspace guard
    stopped before it left (RFC §2). *)
-let keeper_turns_poll_error (state : state) =
+let keeper_turns_read_error (state : state) =
   Option.map (function
-    | Request_failed detail -> Masc_tui_answering.Poll_failed detail
+    | Request_failed detail -> Masc_tui_answering.Read_failed detail
     | Request_withdrawn refusal ->
-        Masc_tui_answering.Poll_kept_back
+        Masc_tui_answering.Read_kept_back
           (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
              ~request:Masc_tui_words.Kept_request.Turn_observation_read refusal))
     state.keeper_turns_error
@@ -27330,7 +27330,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
           ~ko:(state.ui_language = Lang_ko)
           ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
-          ~now:(Unix.gettimeofday ()) ~keeper_name ~error:(keeper_turns_poll_error state)
+          ~now:(Unix.gettimeofday ()) ~keeper_name ~error:(keeper_turns_read_error state)
           state.keeper_turns
     in
     let waiting_items = keeper_message_waiting_requests state ~keeper_name in

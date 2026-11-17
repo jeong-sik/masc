@@ -18,8 +18,10 @@ val project_history
   -> Provider_config.t
   -> 'source Types.message_with list
   -> ('source Reasoning_history_projection.projection, Reasoning_history_projection.error) result
-(** The history this codec will actually serialize: reasoning blocks it cannot
-    carry, and blocks the config's replay policy excludes, are already gone.
+(** The history after document admission and reasoning replay policy:
+    documents the model cannot receive are replaced with explicit omission
+    text, and reasoning blocks the codec or replay policy excludes are gone.
+    Image and audio capability projection still belongs to request building.
 
     Exported so a caller that must size a request before building it asks the
     same function the wire does, rather than keeping a second opinion about

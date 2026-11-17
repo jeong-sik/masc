@@ -223,8 +223,9 @@ val developer_context : snapshot -> string list
 
 type media_reader =
   Keeper_client_tool_outbox_media.attachment -> (string, string) result
-(** Read one validated host attachment. The caller owns the reader, its shared
-    deadline and raw-result memo. An error becomes explicit unavailable data;
+(** Read one validated host attachment. The caller owns the reader and its
+    raw-result memo. Each reader owns its per-call resource limits.
+    An error becomes explicit unavailable data;
     cancellation propagates. A reading is derived tool data, not evidence that
     the original tool succeeded or authorization to repeat its effects. *)
 

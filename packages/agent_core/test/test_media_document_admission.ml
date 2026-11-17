@@ -480,8 +480,21 @@ let test_request_builders_honor_frozen_document_capability () =
     | `List values -> List.exists (has_part part) values
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> false
   in
+  let rec has_inline_document (value : Yojson.Safe.t) = match value with
+    | `Assoc fields ->
+      let is_document = match List.assoc_opt "inlineData" fields with
+        | Some (`Assoc data) ->
+          List.assoc_opt "mimeType" data = Some (`String "application/pdf")
+          && List.assoc_opt "data" data = Some (`String "UERG")
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+        | None -> false
+      in
+      is_document || List.exists (fun (_, value) -> has_inline_document value) fields
+    | `List values -> List.exists has_inline_document values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> false
+  in
   List.iter (fun supported ->
-    List.iter (fun (kind, model_id, build, project, native_part) ->
+    List.iter (fun (kind, model_id, build, project, has_native_document) ->
       let caps =
         { (Capabilities.capabilities_of_kind kind) with
           supports_document_input = supported }
@@ -503,13 +516,18 @@ let test_request_builders_honor_frozen_document_capability () =
         (* Responses tool output documents are JSON text, not input_file
            parts. This checks the false-capability boundary there, not native
            document support for that existing tool-output representation. *)
-        if not nested || kind = Provider_config.Anthropic then
+        if not nested || kind = Provider_config.Anthropic || kind = Provider_config.Gemini then
           check bool "native document follows frozen capability" supported
-            (has_part native_part parsed);
+            (has_native_document parsed);
         check bool "unsupported document has an explicit omission" (not supported)
           (contains ~needle:"document omitted" body);
         check bool "document bytes are sent only when supported" supported
-          (contains ~needle:"UERG" body)
+          (contains ~needle:"UERG" body);
+        let original_bytes = Yojson.Safe.to_string (`List
+          (List.concat_map (fun (message : Types.message) ->
+             List.map Api_common.content_block_to_json message.content) messages)) in
+        check bool "canonical document survives projection" true
+          (contains ~needle:"UERG" original_bytes)
       in
       check_body ~nested:false [user_message [Types.Text "read this"; document_block]];
       let call = { (user_message []) with role = Types.Assistant;
@@ -522,10 +540,13 @@ let test_request_builders_honor_frozen_document_capability () =
       check_body ~nested:true [user_message [Types.Text "read a document"]; call; result])
       [Provider_config.Anthropic, "claude-test",
         (fun ~config ~messages () -> Backend_anthropic.build_request ~config ~messages ()),
-        (fun config messages -> Backend_anthropic.project_history config messages), "document";
+        (fun config messages -> Backend_anthropic.project_history config messages), has_part "document";
        Provider_config.OpenAI_compat, "gpt-test",
         (fun ~config ~messages () -> Backend_openai_responses.build_request ~config ~messages ()),
-        (fun config messages -> Backend_openai_responses.project_history config messages), "input_file"])
+        (fun config messages -> Backend_openai_responses.project_history config messages), has_part "input_file";
+       Provider_config.Gemini, "gemini-test",
+        (fun ~config ~messages () -> Backend_gemini.build_request ~config ~messages ()),
+        (fun config messages -> Backend_gemini.project_history config messages), has_inline_document])
     [false; true]
 ;;
 

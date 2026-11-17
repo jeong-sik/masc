@@ -1,6 +1,6 @@
 ---
 rfc: "uncollected-provider-turn-is-not-resumed"
-title: "Close the turn cut before collection at restart settlement instead of resuming it"
+title: "After a restart, the claim closes a turn cut before collection instead of resuming it"
 status: Draft
 created: 2026-11-16
 updated: 2026-11-17
@@ -8,7 +8,7 @@ author: claude-main
 related: ["restart-resumes-running-chat-operations"]
 ---
 
-# RFC: 응답을 모으기 전에 끊긴 턴은 재시작 정리에서 닫는다
+# RFC: 응답을 모으기 전에 끊긴 턴은 재기동 뒤 그 작업을 집은 claim 이 닫는다
 
 - 관련: #52341, #42073, #47059
 - 결정(운영자, 2026-11-16): 끊긴 메시지는 이어 한다. 닫은 뒤 호출 전 체크포인트에서 새 호출로 잇는다. 두 재시작 경로를 함께 바꾸는 일은 `restart-resumes-running-chat-operations` 가 다룬다.
@@ -129,16 +129,16 @@ val retire_uncollected_turn :
 - provider 시도, 턴, root 를 `Cancelled` 로 닫는다. runner 를 거치지 않는다. `abort` 가 열린 아래 노드를 한 번에 닫는다(`execution_journal.ml:1881-1930`).
 - recovery 는 기록에서 나온다. invocation 이 없으니 `Retire` 다.
 - 닫은 뒤의 terminal 증거를 돌려준다. `read_execution_terminal` 이 같은 값을 읽는다.
-- `on_terminal_disposition` callback, bus 발행, raw trace 는 없다. 「terminal 을 기록한 뒤 callback 전에 죽은 경우」와 같은 모양이라 agent.mli 가 이미 다룬다. 기동 때는 구독자도 없다.
+- `on_terminal_disposition` callback, bus 발행, raw trace 는 없다. 「terminal 을 기록한 뒤 callback 전에 죽은 경우」와 같은 모양이라 agent.mli 가 이미 다룬다.
 
 그 밖의 모든 경우는 `Not_uncollected` 이고 기록된(commit 된) 사건을 더하지 않는다. 모은 체크포인트(`턴 번호 + 1`), 어긋난 번호, 열린 시도 없음, invocation 있음이 여기에 든다. 이 경우들은 지금처럼 resume 이 판정한다.
-- writer 를 열면 commit 되지 않은 WAL 꼬리를 잘라 내고 fsync 한다(`execution_event_store.ml:2005-2014`). 그래서 지금 읽기만 하던 기동 정리가, terminal 이 없는 기록에 한해 쓰는 단계가 된다.
+- writer 를 열면 commit 되지 않은 WAL 꼬리를 잘라 내고 fsync 한다(`execution_event_store.ml:2005-2014`). 그래서 retire 를 부르는 단계는 terminal 이 없는 기록에 한해 쓰는 단계다. 이 단계는 claim 의 준비에 있다(4.2). 기동 정리는 지금처럼 읽기만 한다.
 
 기록된 응답(3 과 4 사이)은 쓰지 않는다.
 - 응답만으로는 모은 메시지를 다시 만들 수 없다.
 - 받아들이지 못한 tool 호출은 응답에서 빠지고 따로 답한다(`pipeline.ml:283-287`). 그 답은 응답에 없다.
 
-`Pipeline_execution_resume.resolve` 는 바꾸지 않는다. 기동 정리가 이 모양을 먼저 닫으므로, `Agent.run` 에서 같은 모양을 만나면 기동 정리가 돌지 않은 것이다. `Error.Internal` 이 그대로 맞다.
+`Pipeline_execution_resume.resolve` 는 바꾸지 않는다. writer 종료가 증명된 호출은 claim 의 준비가 이 모양을 먼저 닫는다(4.2). 증명되지 않은 호출은 닫지 않는다. 그 호출은 `Agent.run` 에서 같은 모양을 만나고 지금처럼 `Error.Internal` 로 실패한다.
 
 ### 4.2 masc: 그 작업을 집은 claim 이 닫는다
 
@@ -152,9 +152,9 @@ claim 이 native 호출을 열기 직전의 준비(`Keeper_direct_native_continu
 4. `Not_uncollected` 면 지금처럼 같은 호출을 이어 한다.
 5. 오류면 `read_execution_terminal` 로 기록을 한 번 더 읽는다.
    - 닫기는 commit 됐는데 writer 닫기가 실패했을 수 있다(`execution_lane_writer.ml:870-877`).
-   - terminal 이 있으면 3 으로 간다. 없으면 그 claim 은 실패하고 호출은 `Active` 로 남는다.
+   - terminal 이 있으면 3 으로 간다. 없으면 그 claim 은 실패하고 호출은 `Active` 로 남는다. 행은 `running` 으로 남고 다음 기동이 다시 판정한다(`restart-resumes-running-chat-operations` §4.4).
 
-- 실패는 그 작업 하나에서 끝난다. 기동 정리 안에서 닫지 않으므로, 닫다가 난 실패가 그 Keeper 의 Owner 를 멈추지 않는다.
+- 기동 정리 안에서 닫지 않으므로, 닫다가 난 실패가 그 Keeper 의 Owner 를 멈추지 않는다. 다만 호출이 `Active` 로 남으면 그 Keeper 는 다음 기동까지 다른 채팅 작업을 집지 않는다.
 - 새 실패 종류가 필요 없다.
 - 기록을 두 번 읽는다(terminal 읽기, 잠금 아래 다시 읽기). Owner 의 자식 fiber 에서 읽으므로 그동안에도 Owner 는 다른 명령을 받는다.
 
@@ -185,7 +185,7 @@ Keeper 하나가 채팅 작업 하나를 돌리는 동안의 틱이다.
 | N+3 | 작업이 끝난다 | `failed / Turn_exception` | 새 호출의 결과로 끝난다 |
 
 - 다른 Keeper 가 그 메시지를 보냈다면 실패 대신 답을 받는다.
-- 기록을 닫은 뒤 새 호출을 묶기 전에 다시 죽으면, 다음 기동은 terminal 을 읽고 3.4 의 기존 경로로 `Interrupted_by_restart` 를 남긴다. terminal 이 있는 호출에는 retire 를 부르지 않는다.
+- 기록을 닫은 뒤 새 호출을 묶기 전에 다시 죽으면, 다음 기동은 3.4 의 기존 경로로 `Interrupted_by_restart` 를 남긴다. 호출에 terminal 을 적기 전이면 기록의 terminal 을 읽어서, 적은 뒤면 호출의 영수증으로 판정한다. terminal 이 있는 호출에는 retire 를 부르지 않는다.
 - 재시도 횟수나 시간 한도가 없다. 재기동 한 번에 새 호출 하나다. 연속 재기동은 `restart-resumes-running-chat-operations` §5.3 이 다룬다.
 - 종료 절차를 거친 재시작이 같은 기록을 남기게 하는 일도 `restart-resumes-running-chat-operations` 가 다룬다.
 
@@ -200,7 +200,7 @@ Keeper 하나가 채팅 작업 하나를 돌리는 동안의 틱이다.
 
 ## 7. 하지 않는 것
 
-- `Agent.run` 안(`resolve`)에 갈래를 더하지 않는다. 그 자리에서는 재큐와 입력 조립을 건너뛸 수 없다. 또 결과가 재시도·미루기 갈래로 가면 다음 후보가 새 native 호출로 메시지를 다시 돌린다.
+- `Agent.run` 안(`resolve`)에 갈래를 더하지 않는다. 같은 실행은 그 턴을 이을 수 없고(4.3), 새 호출을 여는 일은 host 가 한다. `resolve` 의 결과가 재시도·미루기 갈래로 가면 다음 후보가 새 native 호출로 메시지를 다시 돌린다.
 - 같은 턴에서 provider 를 다시 부르지 않는다. 턴마다 provider 시도가 하나라는 기록 규칙을 그대로 둔다.
 - 기록된 응답으로 메시지를 다시 만들지 않는다(4.1).
 - `validate_collected_counter` 를 지우지 않는다. 어긋난 기록은 그대로 막는다.
@@ -232,7 +232,7 @@ masc: `restart-resumes-running-chat-operations` §8 의 4.4 시험이 맡는다.
 
 ## 10. 정할 것
 
-- 닫힌 기록에 「재시작 정리에서 모으기 전이라 닫음」이라는 원인을 남길지.
+- 닫힌 기록에 「재기동 뒤 모으기 전이라 닫음」이라는 원인을 남길지.
   - 기록은 이미 `Event.Cancelled {reason; data}` 로 원인을 담을 수 있다(`execution_agent_scope.ml:65-70`).
   - 공개 terminal 증거는 outcome 과 recovery 만 내보내서, 종료 절차의 멈춤·운영자 중단과 같은 모양이다. 남기려면 공개 증거 타입에 필드가 하나 생긴다.
 - 모은 체크포인트가 있는데 `Agent.run` 전에 거절되는 `Active` 호출(7 절)을 어떻게 끝낼지.

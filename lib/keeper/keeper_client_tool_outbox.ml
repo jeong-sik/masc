@@ -539,7 +539,7 @@ type media_reader =
   Keeper_client_tool_outbox_media.attachment ->
   (Keeper_media_reading.reading, Keeper_media_reading.failure) result
 
-let prepared_context ~read_media snapshot =
+let prepared_context ~(read_media : media_reader option) snapshot =
   let context = developer_context snapshot in
   match read_media with
   | None -> context

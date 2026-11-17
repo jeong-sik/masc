@@ -21,7 +21,6 @@ describe('BoardCurationPanel', () => {
       id: 'cu-1',
       generated_at: '2026-05-06T10:00:00.000Z',
       submitted_by: 'keeper-curator',
-      model: 'gpt-5',
       summary: 'Two active incidents need review.',
       ordering: ['post-a', 'post-b'],
       highlights: ['post-a'],
@@ -35,10 +34,6 @@ describe('BoardCurationPanel', () => {
           score: 0.86,
           rationale: 'Same stack trace',
         },
-      ],
-      health_score: 0.74,
-      health_components: [
-        { name: 'answer_rate', score: 0.8, weight: 0.25, rationale: 'Most questions have replies' },
       ],
       rationale: 'Prioritize incidents before planning threads.',
       provenance: { run_id: 'curation-run-1' },
@@ -55,13 +50,11 @@ describe('BoardCurationPanel', () => {
 
     expect(await screen.findByText('Two active incidents need review.')).toBeTruthy()
     expect(screen.getByText(/keeper-curator/)).toBeTruthy()
-    expect(screen.getByText('74%')).toBeTruthy()
     expect(screen.getAllByText('post-a').length).toBeGreaterThan(0)
     expect(screen.getByText('incident')).toBeTruthy()
     expect(screen.getByText('post-question')).toBeTruthy()
-    expect(screen.getByText('answer_rate')).toBeTruthy()
     expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
-    expect(container.querySelectorAll('.v2-workspace-row').length).toBeGreaterThanOrEqual(3)
+    expect(container.querySelectorAll('.v2-workspace-row').length).toBe(2)
   })
 
   it('renders an empty state when no curation snapshot exists', async () => {

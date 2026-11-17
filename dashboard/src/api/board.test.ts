@@ -943,14 +943,13 @@ describe('fetchBoardFlairs', () => {
 })
 
 describe('fetchBoardCuration', () => {
-  it('normalizes summary, tags, answer matches, and health score from the curation snapshot', async () => {
+  it('normalizes summary, tags and answer matches from the curation snapshot', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         snapshot: {
           id: 'cu-1',
           generated_at: 1_748_779_200,
           submitted_by: 'keeper-curator',
-          model: 'gpt-5',
           summary: 'Two active incidents need review.',
           ordering: ['post-a', { id: 'not-coerced' }, 'post-b', 7, ' '],
           highlights: ['post-a', { name: 'not-coerced' }, null],
@@ -965,10 +964,6 @@ describe('fetchBoardCuration', () => {
               score: 0.86,
               rationale: 'Same stack trace',
             },
-          ],
-          health_score: 0.74,
-          health_components: [
-            { name: 'answer_rate', score: 0.8, weight: 0.25, rationale: 'Most questions have replies' },
           ],
           rationale: 'Prioritize incidents before planning threads.',
           provenance: { run_id: 'curation-run-1' },
@@ -985,7 +980,6 @@ describe('fetchBoardCuration', () => {
     expect(result).toMatchObject({
       id: 'cu-1',
       submitted_by: 'keeper-curator',
-      model: 'gpt-5',
       summary: 'Two active incidents need review.',
       ordering: ['post-a', 'post-b'],
       highlights: ['post-a'],
@@ -999,10 +993,6 @@ describe('fetchBoardCuration', () => {
           score: 0.86,
           rationale: 'Same stack trace',
         },
-      ],
-      health_score: 0.74,
-      health_components: [
-        { name: 'answer_rate', score: 0.8, weight: 0.25, rationale: 'Most questions have replies' },
       ],
       rationale: 'Prioritize incidents before planning threads.',
       provenance: { run_id: 'curation-run-1' },

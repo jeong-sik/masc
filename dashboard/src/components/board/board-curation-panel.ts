@@ -35,7 +35,6 @@ function CurationSnapshot({ snapshot }: { snapshot: BoardCurationSnapshot }) {
             <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
               <span class="font-mono">${snapshot.id}</span>
               <span>submitted by ${snapshot.submitted_by}</span>
-              ${snapshot.model ? html`<span>${snapshot.model}</span>` : null}
             </div>
             ${snapshot.summary ? html`
               <p class="mt-2 text-sm leading-relaxed text-[var(--color-fg-primary)]">${snapshot.summary}</p>
@@ -45,8 +44,6 @@ function CurationSnapshot({ snapshot }: { snapshot: BoardCurationSnapshot }) {
             ` : null}
           </div>
           <div class="grid gap-1 text-right text-2xs text-[var(--color-fg-secondary)]">
-            <span class="text-lg font-bold tabular-nums text-[var(--color-fg-primary)]">${percent(snapshot.health_score)}</span>
-            <span>health</span>
             <${TimeAgo} timestamp=${snapshot.generated_at} />
           </div>
         </div>
@@ -97,22 +94,6 @@ function CurationSnapshot({ snapshot }: { snapshot: BoardCurationSnapshot }) {
         <//>
       ` : null}
 
-      ${snapshot.health_components.length > 0 ? html`
-        <${SurfaceCard} variant="compact">
-          <h3 class="mb-2 text-xs font-bold uppercase text-[var(--color-fg-secondary)]">Health components</h3>
-          <div class="grid gap-2">
-            ${snapshot.health_components.map(item => html`
-              <div key=${item.name} class="v2-workspace-row grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
-                <div class="flex items-center justify-between gap-2 text-xs">
-                  <span class="font-bold text-[var(--color-fg-primary)]">${item.name}</span>
-                  <span class="font-mono tabular-nums text-[var(--color-fg-secondary)]">${percent(item.score)} / weight ${item.weight}</span>
-                </div>
-                ${item.rationale ? html`<p class="text-xs text-[var(--color-fg-secondary)]">${item.rationale}</p>` : null}
-              </div>
-            `)}
-          </div>
-        <//>
-      ` : null}
     </div>
   `
 }

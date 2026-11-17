@@ -142,7 +142,7 @@ export interface ContextPosition {
 }
 /** Local continuity stop branch, not a diagnosis of a provider or its output. */
 export type ContextSynthesisStopReason =
-  | 'source_read_failed' | 'input_build_failed' | 'no_smaller_range_evidence'
+  | 'source_read_failed' | 'history_resolution_required' | 'input_build_failed' | 'no_smaller_range_evidence'
   | 'narrowed_for_next_signal' | 'indivisible_unit_uncommitted'
   | 'observed_capacity_unfit' | 'observed_capacity_disagrees' | 'raised_during_pass'
 
@@ -577,7 +577,7 @@ function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
   }
   const stop_reason = raw.stop_reason
   switch (stop_reason) {
-    case null: case 'source_read_failed': case 'input_build_failed':
+    case null: case 'source_read_failed': case 'history_resolution_required': case 'input_build_failed':
     case 'no_smaller_range_evidence': case 'narrowed_for_next_signal':
     case 'indivisible_unit_uncommitted': case 'observed_capacity_unfit':
     case 'observed_capacity_disagrees': case 'raised_during_pass': break
@@ -588,7 +588,8 @@ function decodeContextSynthesis(raw: unknown): ContextSynthesis | null {
       if (stop_reason !== null) return null
       break
     case 'source_unavailable':
-      if (stop_reason !== null && stop_reason !== 'source_read_failed') return null
+      if (stop_reason !== null && stop_reason !== 'source_read_failed'
+        && stop_reason !== 'history_resolution_required') return null
       break
     case 'input_unavailable':
       if (stop_reason !== 'input_build_failed') return null

@@ -48,7 +48,7 @@ let validate_state request =
 (* The external cursor is prepared again on every pass that selects the range,
    so it moves between passes as admissions arrive. Only a publication of the
    original's own preparation requires it to be as captured. *)
-type cursor = Prepared_as_captured | Moves
+type cursor = Prepared_as_captured | Moves | Recovering_settlement
 let with_fence ~request ~cursor read =
   let source=Request.source request and owner=Request.physical_owner request in
   let checkpoint,traces=parts (Capture.source source) in
@@ -59,6 +59,9 @@ let with_fence ~request ~cursor read =
   let root=Keeper_fs.session_store_path_for_base_path (Request.base_path owner) in
   let validate snapshot =
     let* ()=Request.confirm_owner request in
+    match cursor with
+    | Recovering_settlement -> read ~messages:None
+    | Prepared_as_captured | Moves ->
     let* boundaries=Keeper_turn_boundaries.read ~keepers_dir:(Capture.runtime_keepers_dir source)
       ~keeper_id:(Request.keeper_id owner) in
     let* live =
@@ -85,13 +88,17 @@ let with_fence ~request ~cursor read =
       | Prepared_as_captured -> validate_state request
       | Moves ->
         let* unchanged=positions_unchanged request in
-        require unchanged "Original history read positions changed before the floor read its source" in
+        require unchanged "Original history read positions changed before the floor read its source"
+      | Recovering_settlement -> Error "Settlement scope entered source-publication validation" in
     read ~messages:(Option.map Checkpoint.exact_snapshot_messages snapshot) in
+  let read_checkpoint=match cursor with
+    | Prepared_as_captured | Moves -> true
+    | Recovering_settlement -> false in
   let rec lock snapshot = function
     | [] -> validate snapshot
     | id::rest ->
       let session_dir=Filename.concat root id in
-      if checkpoint_id=Some id then
+      if checkpoint_id=Some id && read_checkpoint then
         Checkpoint.with_agent_core_exact_snapshot ~session_dir ~session_id:id
           (fun actual -> lock (Some actual) rest)
         |> Result.map_error Checkpoint.checkpoint_ref_load_error_to_string |> Result.join
@@ -102,3 +109,5 @@ let with_fence ~request ~cursor read =
 let with_original ~request publish =
   with_fence ~request ~cursor:Prepared_as_captured (fun ~messages:_ -> publish ())
 let with_original_snapshot ~request read = with_fence ~request ~cursor:Moves read
+let with_original_settlement ~request settle =
+  with_fence ~request ~cursor:Recovering_settlement (fun ~messages:_ -> settle ())

@@ -1729,6 +1729,40 @@ let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixtur
     check int "Off recovery actually acknowledges the original external admission" 1
       (Keeper_external_read_cursor.observation_offset settled_cursor);
     check int "ACK recovery never repeats inference" posts (F.post_count fixture.server)))
+let test_receipt_proved_partial_ack_keeps_source_locks_without_rereading_prefix () =
+  with_fixture (fun ~sw:_ fixture ->
+    fixture.delivery_loss:=true;
+    let delivered= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);await_delivery fixture ~after:delivered;
+    let original,request=only_original fixture in
+    let positions=progress fixture and posts=F.post_count fixture.server in
+    let proved_revision=ref None in
+    let result=resume_with_settlement_fault fixture (fun () ->
+      check bool "the partial settlement starts only after actual range receipts" true
+        (io (fun () -> Keeper_librarian_durable_commit.receipt_state request |> get));
+      proved_revision:=io (fun () -> Option.map (fun (snapshot:Current.t) -> snapshot.revision) (current fixture.keepers_dir));
+      io (fun () -> Keeper_external_read_cursor.acknowledge
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get);
+      check bool "external ACK can precede atom settlement" true (progress fixture=positions);
+      (* Memory now owns the read prefix; acknowledgement must not need a
+         second copy of it after retention has pruned the checkpoint. *)
+      let turn=Ids.Turn_ref.absolute_turn (Source.input (Capture.source request)).turn_ref in
+      save_checkpoint fixture.config ~trace_id [] turn;
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      io (fun () -> Checkpoint.with_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
+        (fun snapshot -> check int "the canonical prefix was actually pruned" 0
+          (List.length (Checkpoint.exact_snapshot_messages snapshot)))
+        |> Result.map_error Checkpoint.checkpoint_ref_load_error_to_string |> get)) in
+    (match result with
+     | Ok (Durable_owner.Resumed (Finished completed,_)) ->
+       check string "the same original finishes the partial settlement" original.request_id completed.Owner.request_id
+     | Ok (Waited _ | Original_replaced _ | Resumed ((Refused _ | Publication_waiting _ | Basis_superseded _),_)) ->
+       fail "receipt-proved partial ACK did not finish under the source locks"
+     | Error error -> fail (Durable_owner.error_to_string error));
+    check bool "partial settlement advances the original atom frontier" true (progress fixture<>positions);
+    check bool "receipt-proved ACK writes no second Memory revision" true
+      (!proved_revision=io (fun () -> Option.map (fun (snapshot:Current.t) -> snapshot.revision) (current fixture.keepers_dir)));
+    check int "settlement dispatches no additional model request" posts (F.post_count fixture.server))
 type source_change = Replaced_checkpoint | Restarted_history
 let test_source_replacement_cannot_publish_retained_answer change () = with_fixture (fun ~sw:_ fixture ->
   fixture.delivery_loss:=true;
@@ -2707,6 +2741,269 @@ let refuse_fenced_resume fixture original request =
   check bool "fenced original refuses before any worker or Memory action" true (Result.is_error result);
   check bool "fence refusal preserves Memory and source position" true
     (before = (io (fun () -> current fixture.keepers_dir), progress fixture))
+(* Real host cancellation/join and worker restoration, without declaration
+   replacement. The same Cut fixture remains outside automatic ingress. *)
+let with_same_binding_cut ?(history_kind=Atoms) use =
+  with_fixture ~history_kind (fun ~sw fixture ->
+    let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+    fixture.set_response (fun capture ->
+      ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
+      `OK,F.openai_response (answer capture));
+    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+      assert_pending (run_worker fixture);Eio.Promise.await arrived;
+      let before_delivery= !(fixture.deliveries) in
+      (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () -> ()) with
+       | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
+      ignore (Eio.Promise.try_resolve unblock ());
+      fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
+      restart_actual_worker fixture ~sw;
+      await_delivery fixture ~after:before_delivery;
+      assert_pending (run_worker fixture);
+      let original,request=only_original fixture in
+      let exact=Capture.request request |> get in
+      let schema=Option.to_result ~none:"Cut original schema" exact.Exact.schema |> get in
+      (match Progress.phase original.progress with
+       | Rejected {stage=Execution;evidence} ->
+         check bool "fixture joined the actual cancelled host and retained Cut" true
+           ((Exact.retained_final_of_json ~schema evidence |> get) = Exact.Retained_unknown Exact.Cut)
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+         fail "actual cancellation did not retain an execution-stage Cut");
+      use fixture original request exact schema))
+let cut_preview fixture original = io (fun () ->
+  Resolution.preview_cut ~config:fixture.config ~keeper_name ~request_id:original.Owner.request_id
+  |> Result.map_error Resolution.error_to_string |> get)
+let cut_fence fixture original expected = memory_action fixture (fun () -> io (fun () ->
+  Resolution.fence_cut_serialized ~config:fixture.config ~keeper_name ~request_id:original.Owner.request_id
+    ~expected ~actor:"operator" ~reason:"Exclude this original's future local effects"
+    ~now:(Time_compat.now ())))
+let cut_source_positions fixture = io (fun () ->
+  let runtime_keepers_dir=Workspace.keepers_runtime_dir fixture.config in
+  let atom=Position.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    |> Result.map_error Position.read_error_to_string |> get in
+  let official=Keeper_librarian_official_progress.read ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get in
+  let external_cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
+  atom,official,Keeper_external_read_cursor.observation_to_json external_cursor)
+let cut_memory_bytes fixture = io (fun () ->
+  List.map (fun path -> path,Fs_compat.load_file_opt path) [
+    Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+    Current.journal_path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+    Current.durable_range_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+    Current.publication_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name])
+let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () =
+  with_same_binding_cut ~history_kind (fun fixture original request exact _schema ->
+    let positions=cut_source_positions fixture and posts=F.post_count fixture.server in
+    let memory_before=cut_memory_bytes fixture in
+    let parent=Owner.to_json original in
+    let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+      ~request_id:exact.Exact.request_id |> get) in
+    check bool "absence preview never borrows terminal Cut authority" true
+      (Result.is_error (io (fun () -> Resolution.preview ~config:fixture.config
+        ~keeper_name ~request_id:original.request_id)));
+    let preview=cut_preview fixture original in
+    (* Submission records work; the serial consumer decides its authority. *)
+    let accepted=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id ~expected:preview.expected ~actor:"operator"
+      ~reason:"Exclude this original's future local effects" ~now:(Time_compat.now ())
+      |> Result.map_error Resolution_intent.error_to_string |> get) in
+    let fence=cut_fence fixture original preview.expected |> Result.map_error Resolution.error_to_string |> get in
+    let roundtrip=Fence.of_json (Fence.to_json fence) |> get in
+    (match roundtrip.authority with
+     | Fence.Excluded_cut basis ->
+       check string "Cut basis names the original ID" original.request_id basis.request_id;
+       check string "Cut basis binds the Exact digest" (Exact.digest exact) basis.exact_digest;
+       check bool "Cut basis retains the real attempt" true (basis.attempt_ordinal>0)
+     | Worker_absent -> fail "Cut was relabelled as worker absence");
+    check json "fence preserves the complete original Unknown" parent fence.original_record;
+    check bool "fence consumes no checkpoint, official or external source" true (cut_source_positions fixture=positions);
+    no_memory fixture;
+    check int "fence makes no further provider call" posts (F.post_count fixture.server);
+    check bool "fence retains the host outcome exactly" true
+      (io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+        ~request_id:exact.request_id |> get)=host);
+    let current_parent=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+      ~request_id:original.request_id |> owned |> Option.get) in
+    check json "parent progress was not settled or rewritten" parent (Owner.to_json current_parent);
+    check bool "direct refusal settlement cannot abandon an effect-fenced original" true
+      (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+        Keeper_librarian_durable_commit.settle_refused ~store:fixture.store ~request
+          ~record:current_parent ~diagnosis:(`Assoc ["kind",`String "must_not_abandon_fenced_source"])))));
+    check bool "the serial consumer refuses Cut as a successor grant" true
+      (Result.is_error (memory_action fixture (fun () ->
+        Resolution_work.run_serialized ~config:fixture.config ~keeper_name)));
+    let intents=io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+    check bool "Cut fence leaves the submitted intent without a child or completion" true
+      (match intents with
+       | [intent] -> intent.Resolution_intent.intent_id=accepted.intent.intent_id
+         && intent.phase=Resolution_intent.Requested && Option.is_none intent.memory_commit
+       | [] | _::_::_ -> false);
+    check bool "Cut fencing and refused continuation preserve snapshot, journal, receipts and publication bytes" true
+      (cut_memory_bytes fixture=memory_before);
+    refuse_fenced_resume fixture current_parent request)
+let test_cut_effect_fence_refuses_a_busy_claim_and_late_bad_proof () =
+  with_same_binding_cut (fun fixture original _request exact schema ->
+    let preview=cut_preview fixture original in
+    let positions=cut_source_positions fixture in
+    let held=memory_action fixture (fun () -> io (fun () ->
+      Exact.with_cut_exclusion ~store:fixture.store ~declaration_id:"librarian"
+      ~schema exact ~use:(fun _ ->
+        check bool "another Cut claim cannot authorize the fence" true
+          (Result.is_error (Resolution.fence_cut_serialized ~config:fixture.config ~keeper_name
+            ~request_id:original.request_id ~expected:preview.expected ~actor:"operator"
+            ~reason:"busy is no authority" ~now:(Time_compat.now ()))))))
+      |> Result.map_error Exact.describe_recovery_error |> get in
+    (match held with Exact.Cut_excluded () -> ()
+     | Cut_busy | Cut_not_retained _ -> fail "fixture failed to acquire its original claim");
+    let proof=proof_path fixture exact in
+    io (fun () -> write proof "{late unreadable execution proof");
+    check bool "proof changed after preview cannot authorize a fence" true
+      (Result.is_error (cut_fence fixture original preview.expected));
+    check bool "both denied attempts leave no fence" true
+      (io (fun () -> Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get)=None);
+    check bool "denied attempts acknowledge no source" true (cut_source_positions fixture=positions);
+    no_memory fixture)
+let test_cut_effect_fence_refuses_an_actual_range_receipt () =
+  with_same_binding_cut (fun fixture original request _exact _schema ->
+    let source=Capture.source request and positions=cut_source_positions fixture in
+    memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+      ~pass:Keeper_memory_commit_pass.Durable ?durable_range_id:(Source.range_id source)
+      ?official_range_id:(Source.official_range_id source) ~absorbed:[] ~revisions:[]
+      ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+      ~source:{kind=Current.Librarian;trace_id} ~new_claims:[] () |> get)) |> ignore;
+    (match io (fun () -> Resolution.preview_cut ~config:fixture.config ~keeper_name
+       ~request_id:original.request_id) with
+     | Error Resolution.Range_already_recorded -> ()
+     | Error error -> fail (Resolution.error_to_string error)
+     | Ok _ -> fail "an actual Memory range receipt permitted a Cut fence");
+    check bool "apply-first does not create a Cut fence" true
+      (io (fun () -> Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get)=None);
+    check bool "the denied fence does not move positions" true (cut_source_positions fixture=positions))
+let test_cut_effect_fence_refuses_moved_source_positions () =
+  with_same_binding_cut (fun fixture original request _exact _schema ->
+    let preview=cut_preview fixture original in
+    let range=Source.range_id (Capture.source request) |> Option.get in
+    let next:Position.t={position={trace_id=range.trace_id;end_atom=range.end_atom;
+      last_atom_digest=range.last_atom_digest};boundary_lines_seen=range.boundary_lines_seen} in
+    io (fun () -> Position.write ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
+      ~keeper_id:keeper_name next |> Result.map_error Position.write_error_to_string |> get);
+    let positions=cut_source_positions fixture in
+    check bool "a changed source position invalidates the Cut preview" true
+      (Result.is_error (cut_fence fixture original preview.expected));
+    check bool "the refusal does not change positions again" true (cut_source_positions fixture=positions);
+    no_memory fixture)
+let test_cut_fence_is_not_direct_child_or_host_authority () =
+  with_same_binding_cut (fun fixture original request _exact _schema ->
+    let expected=(cut_preview fixture original).expected in
+    let accepted=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id ~expected ~actor:"operator"
+      ~reason:"Exclude this original's future local effects" ~now:(Time_compat.now ())
+      |> Result.map_error Resolution_intent.error_to_string |> get) in
+    let fence=cut_fence fixture original expected |> Result.map_error Resolution.error_to_string |> get in
+    let before=cut_memory_bytes fixture,cut_source_positions fixture,F.post_count fixture.server in
+    check bool "direct intent confirmation cannot promote a Cut fence to successor authority" true
+      (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+        Resolution_intent.confirm_fence ~store:fixture.store ~expected:accepted.intent fence))));
+    let owner=Capture.physical_owner request in
+    let child=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+      ~predecessor:{request_id=original.request_id;request_digest=original.request_digest}
+      ~owner ~destination:(Capture.destination request) ~source:(Capture.source request)
+      ~preparation:(Capture.preparation request) ()) |> get in
+    (* Existing or externally supplied metadata must not bypass the effect
+       check merely by already claiming an acknowledged child. *)
+    io (fun () ->
+      let stored=Store.load_history_resolution fixture.store ~scope:original.scope
+        ~request_id:original.request_id |> get |> Option.get in
+      let phase=`Assoc ["kind",`String "child_confirmed";"child",`Assoc [
+        "request_id",`String (Capture.request_id child);"request_digest",`String (Capture.body_digest child)]] in
+      let next=`Assoc (List.map (fun (name,value) -> if name="intents" then
+          name,`List (List.map (fun json -> `Assoc (List.map (fun (name,value) ->
+            if name="phase" then name,phase else name,value) (Yojson.Safe.Util.to_assoc json)))
+            (Yojson.Safe.Util.to_list value))
+          else name,value) (Yojson.Safe.Util.to_assoc stored)) in
+      (match Store.publish_history_resolution fixture.store ~scope:original.scope
+        ~request_id:original.request_id ~expected:(Some stored) ~next |> get with
+       | Store.History_resolution_stored -> ()
+       | History_resolution_changed | History_resolution_unconfirmed _ -> fail "fixture child metadata was not retained");
+      let destination=Capture.destination child in
+      let index=Capture.index child |> get in
+      Owner.retain ~store:fixture.store ~scope:original.scope ~request_id:(Capture.request_id child)
+        ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
+        ~summary:(Capture.index_to_json index) ~request:(Capture.to_json child) |> owned);
+    check bool "direct lineage consumption refuses an already acknowledged Cut child" true
+      (Result.is_error (io (fun () -> Keeper_librarian_history_resolution_lineage.confirm_predecessor_by_body
+        ~store:fixture.store ~require_confirmed:true child)));
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    check bool "actual host authorization refuses Cut metadata before any provider dispatch" true
+      (Result.is_error (Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+        ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request child |> get)));
+    check bool "denied authority changes no Memory, source position or provider count" true
+      (before=(cut_memory_bytes fixture,cut_source_positions fixture,F.post_count fixture.server)))
+let test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner () =
+  with_same_binding_cut (fun fixture original request _exact _schema ->
+    let expected=(cut_preview fixture original).expected in
+    ignore (cut_fence fixture original expected |> Result.map_error Resolution.error_to_string |> get);
+    check bool "the Cut fence really has no resolution intent" true
+      (io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+        ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)=[]);
+    let owner_path=Filename.concat (scope_directory fixture original.scope)
+      (Store.digest original.request_id ^ ".json") in
+    if remove_owner then io (fun () -> Sys.remove owner_path);
+    let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture in
+    let posts=F.post_count fixture.server in
+    let body_directory=Filename.dirname (Filename.concat (Store.root fixture.store)
+      (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest)) in
+    let bodies ()=io (fun () -> Sys.readdir body_directory |> Array.to_list |> List.sort String.compare
+      |> List.map (fun name -> name,Fs_compat.load_file_opt (Filename.concat body_directory name))) in
+    let before_bodies=bodies () in
+    let original_count=List.length (observed_originals fixture) in
+    let blocked = function
+      | Error (Consumer.Original_publication_blocked _) -> ()
+      | Error error -> fail (Consumer.error_to_string error)
+      | Ok _ -> fail "a Cut fence permitted fresh history selection" in
+    blocked (run_worker fixture);
+    blocked (memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
+      ~commit:(fun _ -> fail "direct Consumer reached a fresh commit callback")));
+    blocked (memory_action fixture (fun () -> Consumer.consume_one_with_runtime
+      ~config:fixture.config ~keeper_name ()));
+    check bool "the exported production commit edge cannot bypass source selection" true
+      (match memory_action fixture (fun () -> Consumer.commit_with_runtime
+         ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+         (Capture.source request)) with
+       | Consumer.Memory_pending (Keeper_librarian_pending.Local_failure _) -> true
+       | Memory_pending _ | Memory_committed | Memory_replaced _ | Memory_refused _ -> false);
+    memory_action fixture (fun () -> Refresh.For_testing.run_continuity
+      ~base_path:fixture.base_path ~keeper_name ());
+    let module Observation=Keeper_continuity_observation in
+    check bool "direct continuity reports the retained resolution boundary" true
+      (match Observation.latest_synthesis ~config:fixture.config ~keeper_name with
+       | Some value -> value.state=Observation.Source_unavailable
+         && value.stop_reason=Some Observation.History_resolution_required
+       | None -> false);
+    ignore (Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name);
+    Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+    check bool "the production queue keeps this publication unfinished" true
+      (match Refresh.last_measurement ~config:fixture.config ~keeper_name with
+       | Some value -> (match value.Refresh.last_pass with
+         | Refresh.Stopped (Consumer.Original_publication_blocked _) -> true
+         | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Not_committed
+         | Pending _ | Stopped _ | Raised _ -> false)
+       | None -> false);
+    check int "no path dispatches another provider request" posts (F.post_count fixture.server);
+    check int "no path creates an unparented original" original_count (List.length (observed_originals fixture));
+    check bool "no path stages another original body" true (bodies ()=before_bodies);
+    check bool "every source frontier and external ACK stays exact" true (cut_source_positions fixture=positions);
+    check bool "no path publishes even empty Memory or receipts" true (cut_memory_bytes fixture=memory);
+    if not remove_owner then refuse_fenced_resume fixture original request;
+    let fence_path=Filename.concat (Store.root fixture.store)
+      (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
+    io (fun () -> write fence_path "{unreadable retained Cut fence");
+    blocked (run_worker fixture);
+    check bool "unreadable fence evidence cannot become fresh-work permission" true
+      (bodies ()=before_bodies && cut_source_positions fixture=positions
+       && cut_memory_bytes fixture=memory && F.post_count fixture.server=posts))
 let test_missing_history_recovers_without_operator_submission history_kind () =
   with_fixture ~history_kind (fun ~sw:_ fixture ->
   let original,request=retain_absent_history_original fixture in
@@ -3032,7 +3329,7 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
     |> Result.map_error Resolution_intent.error_to_string |> get) in
   let child_id=match (List.hd (List.rev (view ()).intents)).phase with
     | Resolution_intent.Child_confirmed child -> child.request_id
-    | Requested | Refused _ | Fenced | Child_intended _ -> fail "the operator resolution has no confirmed child" in
+    | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> fail "the operator resolution has no confirmed child" in
   let child,request=io (fun () ->
     let child=Owner.load ~store:fixture.store ~scope:parent.scope ~request_id:child_id |> owned |> Option.get in
     let request=Capture.restore ~owner:(Capture.physical_owner parent_request) child |> get in
@@ -3198,7 +3495,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
     run_ok ();
     let child_id=match (last request).phase with
       | Child_confirmed child -> child.request_id
-      | Requested | Refused _ | Fenced | Child_intended _ -> fail "nested fixture has no confirmed child" in
+      | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> fail "nested fixture has no confirmed child" in
     let child,request=io (fun () ->
       let child=Owner.load ~store:fixture.store ~scope:original.scope ~request_id:child_id |> owned |> Option.get in
       let request=Capture.restore ~owner:(Capture.physical_owner request) child |> get in child,request) in
@@ -3235,7 +3532,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
   run_ok ();
   check bool "a definite post-fence cursor change is durably refused" true
     (match (last request).phase with Refused (No_longer_eligible _) -> true
-     | Requested | Refused Observation_changed | Fenced | Child_intended _ | Child_confirmed _ -> false);
+     | Requested | Refused Observation_changed | Fenced | Child_prepared _ | Child_intended _ | Child_confirmed _ -> false);
   check bool "terminal refusal has no child or claimed Memory receipt" true
     (Resolution_intent.child (last request)=None && (read request).completion=Resolution_work.Not_observed);
   check bool "refusal does not move the externally observed cursor" true
@@ -3259,6 +3556,135 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
     (Option.map Owner.to_json (io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
       ~request_id:original.request_id |> owned))=Some (Owner.to_json original));
   refuse_fenced_resume fixture original request)
+let prepare_resolution_fixture fixture =
+  let original,request=retain_absent_history_original fixture in
+  let expected=(fence_preview fixture request).expected in
+  let accepted=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id ~expected ~actor:"operator"
+    ~reason:"Retain one complete successor before staging" ~now:(Time_compat.now ())
+    |> Result.map_error Resolution_intent.error_to_string |> get) in
+  let fenced=memory_action fixture (fun () -> io (fun () ->
+    let fence=Resolution.fence_serialized ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id ~expected ~actor:accepted.intent.actor
+      ~reason:accepted.intent.reason ~now:(Time_compat.now ())
+      |> Result.map_error Resolution.error_to_string |> get in
+    Resolution_intent.confirm_fence ~store:fixture.store ~expected:accepted.intent fence
+      |> Result.map_error Resolution_intent.error_to_string |> get)) in
+  let owner=Capture.physical_owner request in
+  let child ()=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+    ~predecessor:{request_id=original.request_id;request_digest=original.request_digest}
+    ~owner ~destination:(Capture.destination request) ~source:(Capture.source request)
+    ~preparation:(Capture.preparation request) ()) |> get in
+  original,request,fenced,child
+type resolution_preparation_cut = Before_body | Body_before_compaction | Compaction_before_owner
+let test_resolution_preparation_recovers_exact_bytes cut () = with_fixture (fun ~sw:_ fixture ->
+  let original,_request,fenced,make_child=prepare_resolution_fixture fixture in
+  let child=make_child () and losing_child=make_child () in
+  let before=progress fixture,F.post_count fixture.server in
+  let prepared=memory_action fixture (fun () -> io (fun () ->
+    Resolution_intent.prepare_child ~store:fixture.store ~expected:fenced child
+      |> Result.map_error Resolution_intent.error_to_string |> get)) in
+  let load_resolution ()=io (fun () -> Store.load_history_resolution fixture.store
+    ~scope:original.scope ~request_id:original.request_id |> get |> Option.get) in
+  let original_preparation=load_resolution () in
+  (* Reloaded canonical JSON can order nested schema fields differently from
+     the live request. The same ID and verified digest still name its bytes. *)
+  let prepared=io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)
+    |> List.hd in
+  let body_path=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:(Capture.body_digest child)) in
+  check bool "the complete preparation exists before its body or child owner" true
+    (not (Sys.file_exists body_path) && Resolution_intent.child prepared=None
+      && io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+        ~request_id:(Capture.request_id child) |> owned)=None);
+  check bool "the prepared phase is not execution authority" true
+    (Result.is_error (memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store child)));
+  let public_phase=member "phase" (Resolution_intent.to_public_json prepared) in
+  check json "the public phase contains identifiers without the private request"
+    (`Assoc ["kind",`String "child_prepared";"child",`Assoc [
+      "request_id",`String (Capture.request_id child);"request_digest",`String (Capture.body_digest child)]]) public_phase;
+  check bool "a competing preparation cannot remint or overwrite the winner" true
+    (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+      Resolution_intent.prepare_child ~store:fixture.store ~expected:fenced losing_child)))
+      && load_resolution ()=original_preparation);
+  let preflight ()=io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
+    ~validate_history_resolution:Resolution_intent.check_published_file
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
+  check int "deployment preflight accepts the complete prepared intermediate state" 0
+    (List.length (preflight ()).refusals);
+  (match cut with
+   | Before_body -> ()
+   | Body_before_compaction ->
+     ignore (io (fun () -> Owner.prepare_successor ~store:fixture.store ~scope:original.scope
+       ~request_id:(Capture.request_id child) ~request:(Capture.to_json child) |> owned));
+     check json "a crash after the body leaves the same complete preparation"
+       original_preparation (load_resolution ())
+   | Compaction_before_owner ->
+     ignore (memory_action fixture (fun () -> io (fun () ->
+       Resolution_intent.intend_child ~store:fixture.store ~expected:prepared child
+         |> Result.map_error Resolution_intent.error_to_string |> get))));
+  let written_inode=if Sys.file_exists body_path then Some (Unix.lstat body_path).st_ino else None in
+  let fact=Types.observed ~claim:"Memory changed while the complete child waited" ~category:Types.Fact
+    ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="prepared-child-writer"} in
+  io (fun () -> Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write
+    ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+    ~source:{kind=Current.Explicit_write;trace_id="prepared-child-writer"} fact
+    |> Result.map_error Current.upsert_error_to_string |> get) |> ignore;
+  let previous=(Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+  Fun.protect ~finally:(fun () -> match previous with
+    | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+    | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
+    Prompt_registry.set_override Prompt_names.librarian "A changed template must not rerender a retained preparation." |> get;
+    memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name)
+      |> Result.map_error Resolution_intent.error_to_string |> get);
+  let intent=io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)
+    |> List.hd in
+  (match intent.phase with
+   | Resolution_intent.Child_confirmed confirmed ->
+     check string "restart acknowledges the retained child ID" (Capture.request_id child) confirmed.request_id;
+     check string "restart acknowledges the retained body digest" (Capture.body_digest child) confirmed.request_digest
+   | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> fail "retained preparation was not recovered");
+  let retained=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:(Capture.request_id child) |> owned |> Option.get) in
+  check json "changed Memory, template and clock do not change prepared request bytes"
+    (Lane_addon_action.canonical (Capture.to_json child) |> get) retained.request;
+  check bool "an existing exact body is reobserved without replacing its inode" true
+    (Option.fold ~none:true ~some:(fun inode -> inode=(Unix.lstat body_path).st_ino) written_inode);
+  check bool "publication of the child advances no source and calls no provider" true
+    (before=(progress fixture,F.post_count fixture.server));
+  check bool "compaction removes the private request from the resolution envelope" true
+    (member "request" (member "phase" (Yojson.Safe.Util.to_list (member "intents" (load_resolution ())) |> List.hd))=`Null);
+  check bool "the losing candidate has no body or owner record" true
+    (not (Sys.file_exists (Filename.concat (Store.root fixture.store)
+       (Store.tool_request_body_path ~scope:original.scope ~request_digest:(Capture.body_digest losing_child))))
+      && io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+        ~request_id:(Capture.request_id losing_child) |> owned)=None))
+let test_resolution_preparation_preserves_conflicting_body () = with_fixture (fun ~sw:_ fixture ->
+  let original,_request,fenced,make_child=prepare_resolution_fixture fixture in
+  let child=make_child () in
+  let prepared=memory_action fixture (fun () -> io (fun () ->
+    Resolution_intent.prepare_child ~store:fixture.store ~expected:fenced child
+      |> Result.map_error Resolution_intent.error_to_string |> get)) in
+  let before=io (fun () -> Store.load_history_resolution fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> get) in
+  let path=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:(Capture.body_digest child)) in
+  let conflicting="conflicting retained body evidence" in
+  io (fun () -> write path conflicting);
+  check bool "a conflicting content address cannot be repaired by overwriting evidence" true
+    (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+      Resolution_intent.intend_child ~store:fixture.store ~expected:prepared child))));
+  check string "the conflicting bytes are preserved" conflicting
+    (io (fun () -> In_channel.with_open_bin path In_channel.input_all));
+  check bool "failure keeps the complete preparation and publishes no child" true
+    (io (fun () -> Store.load_history_resolution fixture.store ~scope:original.scope
+      ~request_id:original.request_id |> get)=before
+      && io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+        ~request_id:(Capture.request_id child) |> owned)=None);
+  no_memory fixture)
 let test_history_resolution_rejects_stale_then_continues_the_same_original () = with_fixture (fun ~sw:_ fixture ->
   let original,request=retain_absent_history_original fixture in
   let preview=fence_preview fixture request in
@@ -5829,6 +6255,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "a different installation cannot prepare an answered floor Gate" `Quick
     (test_answered_floor_gate_follows_replacement ~foreign_installation:true);
   test_case "actual Memory receipt with failed ACK settles while Off" `Quick test_real_memory_receipt_then_failed_ack_recovers_while_off;
+  test_case "receipt-proved partial ACK holds source locks without requiring the pruned prefix" `Quick
+    test_receipt_proved_partial_ack_keeps_source_locks_without_rereading_prefix;
   test_case "a worker call reads the record and writes nothing" `Quick test_a_worker_call_reads_the_record_and_writes_nothing;
   test_case "a waiting pass reads no body" `Quick test_a_waiting_pass_reads_no_body;
   test_case "a finished worker answer reads the body first" `Quick test_a_finished_worker_answer_reads_the_body_first;
@@ -5885,6 +6313,22 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_an_absent_continuation_yields_before_its_next_child;
   test_case "an explicit history fence blocks late observations and unreadable fence state" `Quick
     test_history_fence_retains_unknown_and_blocks_late_observations;
+  test_case "a same-binding Cut effect fence preserves Unknown without creating a successor" `Quick
+    (test_cut_effect_fence_preserves_unknown_without_a_successor Atoms);
+  test_case "a mixed-source Cut effect fence preserves every original frontier" `Quick
+    (test_cut_effect_fence_preserves_unknown_without_a_successor Mixed);
+  test_case "a Cut effect fence refuses active claims and a proof changed after preview" `Quick
+    test_cut_effect_fence_refuses_a_busy_claim_and_late_bad_proof;
+  test_case "a Cut effect fence refuses an actual original Memory range receipt" `Quick
+    test_cut_effect_fence_refuses_an_actual_range_receipt;
+  test_case "a Cut effect fence refuses source positions moved after preview" `Quick
+    test_cut_effect_fence_refuses_moved_source_positions;
+  test_case "a Cut fence grants no direct intent, lineage or host execution authority" `Quick
+    test_cut_fence_is_not_direct_child_or_host_authority;
+  test_case "a Cut fence without an intent blocks ordinary, direct and queued fresh history" `Quick
+    (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:false);
+  test_case "a Cut fence still blocks fresh history after its live owner record disappears" `Quick
+    (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:true);
   test_case "a fenced unknown original does not block the next history pass" `Quick
     test_history_fence_allows_the_next_history_pass;
   test_case "the deploy check reads no Exact file of a fenced original" `Quick
@@ -5899,6 +6343,14 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_history_fence_uncertain_publication_still_blocks;
   test_case "history resolution survives stale preview and continues one exact range" `Quick
     test_history_resolution_rejects_stale_then_continues_the_same_original;
+  test_case "resolution recovers complete preparation after a crash before body publication" `Quick
+    (test_resolution_preparation_recovers_exact_bytes Before_body);
+  test_case "resolution recovers the same prepared child after body publication before compaction" `Quick
+    (test_resolution_preparation_recovers_exact_bytes Body_before_compaction);
+  test_case "resolution recovers compacted intent before child ownership publication" `Quick
+    (test_resolution_preparation_recovers_exact_bytes Compaction_before_owner);
+  test_case "resolution preserves conflicting body evidence and its complete preparation" `Quick
+    test_resolution_preparation_preserves_conflicting_body;
   test_case "concurrent explicit Memory write closes known basis and resumes original source once" `Quick
     (test_changed_memory_rebases_original_source_without_unknown_retry ~lose_child_after_dispatch:false);
   test_case "confirmed successor loss refuses fresh inference and late answer" `Quick

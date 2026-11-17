@@ -462,6 +462,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
   it.each([
     ['source_unavailable', null], ['source_unavailable', 'source_read_failed'],
+    ['source_unavailable', 'history_resolution_required'],
     ['input_unavailable', 'input_build_failed'],
     ['not_committed', 'no_smaller_range_evidence'], ['not_committed', 'narrowed_for_next_signal'],
     ['not_committed', 'indivisible_unit_uncommitted'], ['not_committed', 'observed_capacity_unfit'],
@@ -478,6 +479,7 @@ describe('fetchKeeperMemoryHealth', () => {
   it.each([
     { state: 'running', stop_reason: 'narrowed_for_next_signal' },
     { state: 'not_committed', stop_reason: 'source_read_failed' },
+    { state: 'not_committed', stop_reason: 'history_resolution_required' },
     { state: 'capacity_refused', stop_reason: 'raised_during_pass' },
     { state: 'not_committed', stop_reason: null },
     { state: 'not_committed', stop_reason: 'provider_quota' },

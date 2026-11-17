@@ -200,6 +200,10 @@ type history_fence_publication =
   | History_fence_unconfirmed of string
 val load_history_fence : t -> scope:string -> request_id:string ->
   (Yojson.Safe.t option, string) result
+val history_fence_inventory : t -> scope:string ->
+  ((string * Yojson.Safe.t) list, string) result
+(** Strict owned scope inventory, including fences whose original record is
+    absent. Reads under the existing scope serializer and creates no records. *)
 val history_fences_directory : string
 (** The directory below {!root} that holds one directory of fences per
     original scope, named by the scope's {!digest}. *)
@@ -235,8 +239,9 @@ val tool_request_body_path : scope:string -> request_digest:string -> string
 val save_tool_request_body : t -> scope:string -> request_digest:string -> string -> (unit, string) result
 (** Publish one original request body, named by the {!digest} of its bytes.
     Bytes that do not match [request_digest] are refused before writing.
-    Writing the same body again publishes the same file. Same serializer and
-    durability as record publication. *)
+    An existing identical body is strictly reobserved without replacement.
+    A different or unreadable existing body is preserved and refused. Same
+    serializer and durability as record publication. *)
 val load_tool_request_body : t -> scope:string -> request_digest:string -> (string option, string) result
 (** Read one staged or published body under its scope serializer. Only a
     SHA-256 name is accepted; the consumer verifies canonical bytes against

@@ -1142,6 +1142,10 @@ let consume_one_with_extent
     =
     read_positions ~config ~keeper_name
   in
+  let* ()=Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    Keeper_librarian_history_resolution_selection.check ~config ~keeper_name)
+    |> Result.map_error (fun error -> Original_publication_blocked
+      (Keeper_librarian_history_resolution_selection.error_to_string error)) in
   let cursor_error detail = Counterpart_observations_unreadable
     (Keeper_librarian_input_sources.External_cursor_failed detail) in
   let* _ = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -1791,7 +1795,11 @@ let commit_with_runtime_runner
 ;;
 
 let commit_with_runtime ~base_path ~keepers_dir ~keeper_id original =
-  commit_with_runtime_runner ~base_path ~keepers_dir ~keeper_id original
+  let module Selection=Keeper_librarian_history_resolution_selection in
+  match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    Selection.check_for_keepers_dir ~base_path ~keepers_dir ~keeper_name:keeper_id) with
+  | Ok () -> commit_with_runtime_runner ~base_path ~keepers_dir ~keeper_id original
+  | Error error -> Memory_pending (Keeper_librarian_pending.Local_failure (Selection.error_to_string error))
 ;;
 
 let consume_one_with_runtime_and_progress_writers ?cli_runner ~write_progress_store

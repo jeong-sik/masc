@@ -801,6 +801,15 @@ let history_fence_record t ~scope ~request_id =
   Ok (Option.join result)
 let load_history_fence t ~scope ~request_id =
   serialized_tool_request_read t ~scope (fun () -> history_fence_record t ~scope ~request_id)
+let history_fence_inventory t ~scope =
+  serialized_tool_request_read t ~scope (fun () ->
+    let* rows=read_tool_request_scope ~namespace:history_fences_directory
+      ~sync_parent:Unix.fsync t ~scope (fun ~owner_uid held names ->
+        List.fold_left (fun result name ->
+          let* rows=result in
+          let+ json=read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name in
+          (name,json)::rows) (Ok []) names) in
+    Ok (Option.value ~default:[] rows))
 let publish_history_fence_with ~write_fence t ~scope ~request_id ~expected_owner ~fence =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     let* expected = Lane_addon_json.canonical expected_owner in
@@ -894,13 +903,18 @@ let load_tool_request t ~scope ~request_id ~name_body =
       let* record,request_digest = name_body json in
       let* body = tool_request_body t ~scope ~request_digest in
       Ok (Some (record,body)))
-(* A body is named by the digest of its bytes, so writing it again publishes
-   the same file; each write is atomic and synced with its directory. *)
+(* A body is named by its bytes. Observe an existing file under this same
+   serializer before writing: a retry must not erase conflicting evidence. *)
 let save_tool_request_body t ~scope ~request_digest bytes =
   let* () = if String.equal (digest bytes) request_digest then Ok ()
     else Error "a request body must be named by the digest of its bytes" in
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
-    write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
+    let* existing = tool_request_body t ~scope ~request_digest in
+    match existing with
+    | Some observed ->
+      if observed=bytes then Ok () else Error "existing request body differs from its content digest"
+    | None ->
+      write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
 (* Settled originals: each record, under the date its chain began. The body
    its record names does not move here; the settle removes it. *)
 let tool_request_archive_directory = "tool-request-owners-settled"

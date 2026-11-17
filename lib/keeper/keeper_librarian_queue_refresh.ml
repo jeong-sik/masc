@@ -911,7 +911,19 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
        | Error _ -> ()
        | Ok _ -> if not (has_waiting ()) then next ~previous:selected ())
   in
-  try next () with
+  try
+    let module Selection=Keeper_librarian_history_resolution_selection in
+    (match Env_config.KeeperMemoryOs.librarian_config_state () with
+     | Disabled | Invalid -> next ()
+     | Enabled ->
+       match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+         Selection.check ~config ~keeper_name) with
+       | Ok () -> next ()
+       | Error (Selection.Unresolved_cut _ as error) ->
+         report O.Source_unavailable O.History_resolution_required (Selection.error_to_string error)
+       | Error (Unavailable _ as error) ->
+         report O.Source_unavailable O.Source_read_failed (Selection.error_to_string error))
+  with
   | Eio.Cancel.Cancelled _ as exn -> observe O.Cancelled; raise exn
   | exn -> observe ~stop_reason:O.Raised_during_pass O.Not_committed; raise exn
 ;;

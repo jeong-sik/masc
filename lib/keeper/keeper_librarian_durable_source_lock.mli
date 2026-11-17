@@ -28,6 +28,16 @@ val with_original_snapshot : request:Keeper_librarian_durable_request.t ->
     as admissions arrive. The read positions must still be the captured ones.
     Everything else above holds: blocking scope, no reentry of a selected lock,
     and no authority beyond the call. *)
+val with_original_settlement : request:Keeper_librarian_durable_request.t ->
+  (unit -> ('a, string) result) -> ('a, string) result
+(** Hold the same physical source locks while recovering a receipt-proved
+    settlement. The callback must check the original effect fence and actual
+    Memory receipts, and accept only captured or already settled frontiers
+    before any ACK/write. This scope permits a partial previous settlement;
+    it does not require every frontier to still equal the captured one and
+    does not reread a receipt-proved history prefix that may have been pruned.
+    It checks the physical owner and grants no publication or acknowledgement
+    authority of its own. *)
 val positions_unchanged : Keeper_librarian_durable_request.t -> (bool, string) result
 (** Whether the atom and official read positions are still the ones the
     original captured. A position that cannot be read is an error, not [false].

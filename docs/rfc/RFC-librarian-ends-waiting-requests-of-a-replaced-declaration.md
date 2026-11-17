@@ -241,16 +241,16 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 저장된 종료 증거는 예전 목적지와 확인한 새 목적지뿐 아니라 위의 원본 결속과 실행 부재 확인을 함께 검증할 수 있어야 한다. 목적지 둘만 있는 값으로 종료를 승인하지 않는다. 읽을 때 정해진 타입으로 풀리지 않으면 거절한다.
 
 - history 가 읽는 자리는 둘이다.
-  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 지금은 오류다(`keeper_librarian_durable_commit.ml` 252~253행). 운영자 해소 흐름도 같은 검사 함수를 쓴다.
-  - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 지금은 오류다(`lib/keeper/keeper_librarian_durable_owner.ml` 216~217행). pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
+  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다(`keeper_librarian_durable_commit.ml` 252~253행). 운영자 해소 흐름도 같은 검사 함수를 쓴다.
+  - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 문제 확인 당시에는 오류였다(`lib/keeper/keeper_librarian_durable_owner.ml` 216~217행). pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
 - 이 갈래는 거절 갈래(`Refused`)를 지나지 않는다. 다음 읽기를 좁히지 않는다.
   - 새 원본을 만든 바로 그 pass 에서 이 갈래가 나와도 같다. 그 자리는 거절을 `Memory_refused` 로 돌려주고, 그 값은 좁히기 표시를 남긴다(`keeper_librarian_durable_execution.ml` 519~530행, `lib/keeper/keeper_librarian_durable_consumer.ml` 1692~1719행). 이 갈래는 그 값으로 돌려주지 않는다.
 - 그다음 pass 는 정리된 원본을 옮기고 같은 범위를 지금 목적지로 새로 만든다. 정리된 거절이 가는 길 그대로다. 그 pass 는 3.6 이 부른다.
 - main `8e78ac5f9e10`의 L2a(#52674)는 두 목적지를 담는 `Request.replaced`와 원본 record·본문·owner 결속을 검증한다. `Captured`·`Admission_wait`에서 관계와 live owner를 확인한 뒤 종료를 저장한다.
   - 이 종료 갈래는 Exact inventory·proof 부재를 직접 조회하지 않는다. 위의 실제 실행 부재 확인은 이 정책이 요구하는 미완료 검증이다. 현재의 두 목적지 증거만으로 그 요구까지 구현됐다고 판정하지 않는다.
 
-- 목적지 확인은 지금 두 벌이다(`keeper_librarian_durable_edge.ml` 51행, `keeper_librarian_admission_dispatch.ml` 38행). 오류 글자만 다르고 하는 일이 같다.
-  - 이 층에서 관계를 돌려주는 함수 하나로 합친다. 한쪽만 타입으로 바꾸면 두 벌이 서로 달라진다.
+- 문제 확인 당시 목적지 확인 코드는 두 벌이었다(`keeper_librarian_durable_edge.ml` 51행, `keeper_librarian_admission_dispatch.ml` 38행). 오류 글자만 다르고 하는 일이 같았다.
+  - 현재 L2a는 관계를 돌려주는 함수 하나를 쓴다. 한쪽만 타입으로 바꾸면 두 벌이 서로 달라진다.
   - admission 은 `Other_owner` 를 거절하며 `Replaced` 는 3.9절의 묶음 교체로 처리한다.
 - floor step 은 같은 규칙을 따로 옮긴다(7절의 L2b).
   - floor step owner 는 `Settled` 로 돌아온 이 phase 를 지금 오류로 본다(`lib/keeper/keeper_librarian_floor_step_owner.ml` 95행). 결과에 갈래 하나를 더한다. "접수 전에 끝났다"이다.
@@ -267,7 +267,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 교체 전에 실제로 받은 입력 크기 거절과 이미 좁힌 범위는 보존한다. 새 선언은 그 증거를 없애지 않는다.
 - 종료 증거를 저장한 뒤에는 현재 worker나 목적지를 읽지 못해도 같은 종료로 읽는다. 선언을 되돌렸다고 일반 거절로 바뀌지 않는다.
 - 다음 pass는 읽은 위치에서 미소비 입력을 다시 고른다. 그 사이 도착한 입력이 함께 포함될 수 있다.
-- `Permission_refused {detail}`는 권한·소유 거절이다. 설명에 교체를 가리키는 글자가 있어도 교체 종료가 아니다.
+- `Permission_refused {detail}`는 권한·소유 거절이다. 설명에 교체를 가리키는 글자가 있어도 교체 종료가 아니다. 다음 읽기는 기존처럼 좁힌다.
 
 ### 3.5 교체된 선언에서 끊긴 history 원본은 미소비 종료 증거를 남긴다
 
@@ -474,7 +474,7 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
   - 같은 선언에서 거절된 step 은 지금처럼 `Stopped` 다. `wake` 를 부르지 않는다.
 - 좁히기
   - 검증된 교체 종료는 좁히지 않는다. 저장 뒤 rollback되거나 현재 목적지를 읽지 못해도 같다.
-  - 일반 `Not_allowed`는 현재 관계가 `Replaced`여도 교체 종료가 되지 않는다. 설명 글자가 같아도 같다.
+  - 일반 `Not_allowed`는 현재 관계가 `Replaced`여도 교체 종료가 되지 않는다. 설명 글자가 같아도 같다. `Permission_refused`의 다음 읽기는 기존처럼 좁힌다.
   - 실제 입력 크기 거절과 이미 좁힌 범위는 교체 후에도 보존된다. 다음 pass는 그 위치에서 미소비 입력을 고른다.
 - worker
   - 교체 종료는 worker 를 다시 띄운 뒤에도 그 모양으로 읽히고 대기 목록에서 빠진다.
@@ -508,8 +508,8 @@ host·Runtime·Keeper·Memory·ACK 사이의 실제 권한과 저장 경계를 �
   - 저장된 종료 대신 현재 관계만 보면 rollback·목적지 조회 실패 시험이 실패해야 한다.
   - phase만으로 실행 부재를 정하거나 Cut claim·Memory receipt 확인을 빼면 대응 경계 시험이 실패해야 한다.
   - Deferred 후보를 빼거나, 미해소 형제를 다른 후보의 종료에 동승시키거나, 전송된 Gate를 미실행으로 취급하면 각각의 묶음 보존·권한·Gate 재전송 방지 시험이 실패해야 한다.
-  - 좁히기 규칙이 사유를 가리지 않게 하면 "`Permission_refused` 면 좁힌다" 시험이 실패한다.
-  - 깨움이 사유를 가리지 않게 하면 "나머지 둘은 부르지 않는다" 시험이 실패한다.
+  - 좁히기 규칙이 사유를 가리지 않게 하면 일반 `Permission_refused`의 좁히기 시험이 실패해야 한다.
+  - 깨움이 사유를 가리지 않게 하면 일반 거절은 깨우지 않는다는 시험이 실패해야 한다.
 
 
 ## 9. 운영자가 정한 정책

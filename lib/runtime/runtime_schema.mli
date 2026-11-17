@@ -509,6 +509,27 @@ val default_typesafeai : typesafeai
     set, {!typesafe_destination} alone, Board attention on with a 0.3
     confidence floor, the absorb gate and memory recall off. *)
 
+type media_reader_adapter = Markitdown_mcp
+[@@deriving show, eq]
+
+(** A complete external-reader declaration from one runtime snapshot.
+    [revision] names an interpretation revision; it does not authenticate
+    executable bytes, dependencies or an account. [command] and [args] name
+    the Keeper execution environment and are preserved without host expansion.
+    [media_types] contains exact declared MIME strings. Overlapping support
+    between distinct IDs is valid; list order does not select a reader.
+    Loading a declaration does not grant execution authority or prove support. *)
+type media_reader_decl =
+  { id : string
+  ; revision : string
+  ; kind : Media_reading_kind.t
+  ; media_types : string list
+  ; adapter : media_reader_adapter
+  ; command : string
+  ; args : string list
+  }
+[@@deriving show, eq]
+
 type config =
   { providers : provider list
   ; models : model_spec list
@@ -527,6 +548,9 @@ type config =
         image reroute stays inside its lane. [[]] = no vision runtimes. Each id must
         resolve to a configured runtime (rejected at load like
         [\[runtime\].default]). *)
+  ; media_readers : media_reader_decl list
+    (** [\[\[media_readers\]\]] — complete declarations in source order.
+        Absence and an explicit empty list both mean no declared readers. *)
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

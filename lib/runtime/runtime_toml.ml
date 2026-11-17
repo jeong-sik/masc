@@ -993,6 +993,7 @@ let parse_table ~home (toml : Otoml.t) : (Runtime_schema.config, parse_error lis
   let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
   let providers_result = parse_providers ~home toml in
   let models_result = parse_models toml in
+  let media_readers_result = Runtime_toml_media_readers.parse_media_readers toml in
   let runtime_section_result = parse_runtime_section toml in
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
@@ -1016,6 +1017,7 @@ let parse_table ~home (toml : Otoml.t) : (Runtime_schema.config, parse_error lis
     errs obsolete_namespaces_result
     @ errs providers_result
     @ errs models_result
+    @ errs media_readers_result
     @ errs runtime_section_result
     @ errs assignments_result
     @ errs bindings_result
@@ -1035,6 +1037,9 @@ let parse_table ~home (toml : Otoml.t) : (Runtime_schema.config, parse_error lis
       extract_after_all_errors_guard ~label:(Ns.(key Providers)) providers_result
     in
     let models = extract_after_all_errors_guard ~label:(Ns.(key Models)) models_result in
+    let media_readers =
+      extract_after_all_errors_guard ~label:(Ns.key Ns.Media_readers) media_readers_result
+    in
     let keeper_assignments =
       extract_after_all_errors_guard ~label:"assignments" assignments_result
     in
@@ -1082,6 +1087,7 @@ let parse_table ~home (toml : Otoml.t) : (Runtime_schema.config, parse_error lis
         ; default_runtime_id = runtime_section.default_runtime_id
         ; keeper_assignments
         ; media_failover = runtime_section.media_failover
+        ; media_readers
         ; lane_decls
         ; exact_output_lane_decls
         ; exec_ssh_endpoints

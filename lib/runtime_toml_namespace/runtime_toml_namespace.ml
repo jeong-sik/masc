@@ -1,6 +1,7 @@
 type t =
   | Providers
   | Models
+  | Media_readers
   | Model_sets
   | Runtime
   | Exec
@@ -23,6 +24,7 @@ type t =
 let key = function
   | Providers -> "providers"
   | Models -> "models"
+  | Media_readers -> "media_readers"
   | Model_sets -> "model_sets"
   | Runtime -> "runtime"
   | Exec -> "exec"

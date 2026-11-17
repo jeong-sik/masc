@@ -605,6 +605,20 @@ let default_typesafeai =
   }
 ;;
 
+type media_reader_adapter = Markitdown_mcp
+[@@deriving show, eq]
+
+type media_reader_decl =
+  { id : string
+  ; revision : string
+  ; kind : Media_reading_kind.t
+  ; media_types : string list
+  ; adapter : media_reader_adapter
+  ; command : string
+  ; args : string list
+  }
+[@@deriving show, eq]
+
 type config =
   { providers : provider list
   ; models : model_spec list
@@ -627,6 +641,7 @@ type config =
         image reroute stays inside its lane. [[]] = no vision runtimes. Each id must
         resolve to a configured runtime (rejected at load like
         [\[runtime\].default]). *)
+  ; media_readers : media_reader_decl list
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;

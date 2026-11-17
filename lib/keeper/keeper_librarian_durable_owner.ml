@@ -101,15 +101,18 @@ let restore_answer ~store request record =
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
   | Outcome_unknown | Not_allowed _ | Request_id_reused ->
     Error (Rejected "Original history publication requires an actual answered host result")
-(* RFC-0500. Whether the retained refusal says the process that started the
-   attempt stopped before it ended. *)
-let interrupted ~schema (record:Owner.retained) =
+(* Whether inventory validation reads this unknown outcome as settled: an
+   attempt a stopped process interrupted (RFC-0500), or one cut off in this
+   process whose declaration was since replaced. [current] is the pass's one
+   reading of the destination of now, the same one its inventory check used. *)
+let settles ~current request ~schema (record:Owner.retained) =
   match Progress.phase record.progress with
   | Progress.Rejected {stage=Progress.Execution;evidence} ->
     let* retained=rejected (Exact.retained_final_of_json ~schema evidence) in
     Ok (match retained with
       | Exact.Retained_unknown Exact.Interrupted -> true
-      | Retained_unknown (Exact.Cut | Exact.Raised)
+      | Retained_unknown Exact.Cut -> Request.replaced_since ~current:(current ()) request
+      | Retained_unknown Exact.Raised
       | Retained_call (Answered _ | Invalid_output _ | Input_refused _ | Output_limit_reached _)
       | Retained_not_allowed _ | Retained_request_id_reused -> false)
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
@@ -151,7 +154,7 @@ let body_of (retained,request) =
   {retained;request;exact;schema}
 type terminal = Answer of Memory_runtime.durable_proposal * Owner.retained
   | Refusal of Exact.final * Owner.retained
-let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publish) ~wake =
+let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publish) ~wake ~current =
   let record,owner,destination=match original with
     | Listed (record,index) -> record,index.owner,index.destination
     | Read (retained,request) ->
@@ -280,12 +283,13 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
   | Submit.Awaiting (wait,record) -> Ok (Waited (wait,record))
   | Final (body,Answer (proposal,record)) -> publish_answer body record proposal
   | Final (body,Refusal (Exact.Outcome_unknown,record)) ->
-    (* Inventory validation reads an interrupted refusal as settled, so the
-       next pass moves the original and selects its range again. Wake it:
-       no host event follows this refusal. A cut or raised original stays
-       unfinished and every pass resumes it, so waking it would never end. *)
-    let* interrupted=interrupted ~schema:body.schema record in
-    if interrupted then wake ();
+    (* Inventory validation reads an interrupted refusal, and a cut one
+       whose declaration was replaced, as settled, so the next pass moves the
+       original and selects its range again. Wake it: no host event follows
+       this refusal. Any other cut or raised original stays unfinished and
+       every pass resumes it, so waking it would never end. *)
+    let* settles=settles ~current body.request ~schema:body.schema record in
+    if settles then wake ();
     Ok (Waited (Worker_unknown,Owner.listed record))
   | Final (body,Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
     Ok (Resumed (Refused (final,record),body.request))

@@ -115,11 +115,22 @@ only to installations that still have those records.
 
 A package path, revision or image change also changes the semantic configuration
 revision. Preserving the volume does not reauthorize a captured original under
-the new configuration. Before switching, inspect retained host originals,
-worker records, Exact outcomes and proofs. Finish outstanding work through its
-existing owner, or use a separately reviewed, explicitly authorized plan to set
-aside the affected original chains and make their preserved inputs eligible
-again. Missing or unknown results do not authorize replay. See
+the new configuration. A completed-history original with no answer is ended
+under the new configuration and its Keeper reads the same range again, whole:
+the host ends one its worker holds with no call under way, the Keeper's next
+pass ends one no worker received, and the Keeper's next pass ends one whose
+call the change cut off. That last read asks the model once more.
+
+These still wait under the new configuration and are not read again: an
+original or message-floor step whose answer arrived and whose gate has not
+started, a message-floor step no worker received or whose call was cut off,
+an admission request, an attempt the host ended with a raised error, and a
+`Dispatch_pending` original its worker has no record of. Before switching,
+inspect retained host originals, worker records, Exact outcomes and proofs
+for these. Finish outstanding work through its existing owner, or use a
+separately reviewed, explicitly authorized plan to set aside the affected
+original chains and make their preserved inputs eligible again. For these,
+missing or unknown results do not authorize replay. See
 [the original-inventory requirements](EXACT-WORKER-STATE-HARD-CUT.md#deploy-with-a-stopped-writer).
 
 An approved fresh-state operation stops writers and holds the workspace lease

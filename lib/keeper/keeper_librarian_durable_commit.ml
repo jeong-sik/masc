@@ -202,7 +202,7 @@ let settle_positions request =
   require (atom=Option.fold ~none:positions.current ~some:(fun value -> Some value) atom_next
     && official=Option.fold ~none:positions.official ~some:(fun value -> Some value) official_next)
     "Original history read-position settlement remains unconfirmed"
-type frontier = Unfinished | Settled
+type frontier = Unfinished | Settled | Settled_if_replaced
 let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_result
     ~store ~request ~(record : Owner.retained) =
   let* ()=Request.confirm_record request record in
@@ -243,7 +243,12 @@ let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_re
     let* ()=Request.confirm_final ~store request (Exact.delivered retained) in
     (match retained with
      | Exact.Retained_call (Answered _) -> Error "History refusal contains an answered host result"
-     | Retained_unknown (Exact.Cut | Exact.Raised) -> Ok Unfinished
+     | Retained_unknown Exact.Raised -> Ok Unfinished
+     (* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.5.
+        The attempt was cut off in this process. Under the declaration it
+        was captured for it stays unfinished; under a replaced one it settles
+        as an interrupted attempt does. The pass reads the declaration. *)
+     | Retained_unknown Exact.Cut -> Ok Settled_if_replaced
      (* RFC-0500. The process that started the attempt stopped before it
         ended. The original settles and the next pass selects its range. *)
      | Retained_unknown Exact.Interrupted

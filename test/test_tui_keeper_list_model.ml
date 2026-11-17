@@ -33,10 +33,10 @@ let keeper name : Decode.keeper =
   ; k_activity = None
   }
 
-let turn activity : Decode.keeper_turn_state =
+let turn ?(started_at = 1.) activity : Decode.keeper_turn_state =
   Decode.Keeper_turn_running
     { lane = Decode.Turn_lane_autonomous
-    ; started_at_unix = 1.
+    ; started_at_unix = started_at
     ; interrupt_token = "token"
     ; turn_ref = None
     ; preview = Some
@@ -163,8 +163,10 @@ let test_cycles () =
 let test_priority_orders_attention_activity_waiting_then_inactive () =
   let rows =
     [ row ~last_activity_at:(Some 70.) "unknown"
-    ; row ~last_activity_at:(Some 80.) ~waiting:(waiting "delegate") ~turn:model_waiting "model"
-    ; row ~last_activity_at:(Some 90.) ~turn:streaming "stream"
+    ; row ~last_activity_at:(Some 80.) ~waiting:(waiting "delegate")
+        ~turn:(turn ~started_at:80. Masc.Keeper_turn_preview.Awaiting_response) "model"
+    ; row ~last_activity_at:(Some 90.)
+        ~turn:(turn ~started_at:90. Masc.Keeper_turn_preview.Receiving_response) "stream"
     ; row ~last_activity_at:(Some 100.) ~approval:(approval "held") "held"
     ; row ~last_activity_at:(Some 70.) ~turn:Decode.Keeper_turn_idle ~waiting:(waiting ~state:Model.Keeper_waiting_idle "idle") "idle"
     ; row ~last_activity_at:(Some 100.) ~open_questions:1 "question"
@@ -177,8 +179,8 @@ let test_priority_orders_attention_activity_waiting_then_inactive () =
         ~waiting:(waiting ~items:[waiting_item ~producer:Model.Wake_keeper_delegate ()] "delegate") "delegate"
     ]
   in
-  Alcotest.(check (list string)) "attention, failing, activity, waiting, inactive"
-    [ "held"; "question"; "failure"; "async"; "stream"; "delegate"; "model"; "verify"; "idle"; "paused"; "unknown" ]
+  Alcotest.(check (list string)) "attention, failing, activity (with running turn waits), waiting, inactive"
+    [ "held"; "question"; "failure"; "async"; "stream"; "model"; "delegate"; "verify"; "idle"; "paused"; "unknown" ]
     (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Priority rows))
 
 let test_recent_and_name_have_deterministic_ties () =
@@ -196,6 +198,47 @@ let test_recent_and_name_have_deterministic_ties () =
   let duplicates = [ row ~last_activity_at:(Some 10.) "same-a"; row ~last_activity_at:(Some 10.) "same-b" ] in
   Alcotest.(check (list string)) "identical sort keys remain stable"
     [ "same-a"; "same-b" ] (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Recent duplicates))
+
+let running ~started_at ~event_at : Decode.keeper_turn_state =
+  match streaming with
+  | Decode.Keeper_turn_running ({ preview = Some preview; _ } as running) ->
+      Decode.Keeper_turn_running
+        { running with
+          started_at_unix = started_at
+        ; preview = Some { preview with ktp_updated_at_unix = event_at } }
+  | Decode.Keeper_turn_running { preview = None; _ }
+  | Decode.Keeper_turn_idle | Decode.Keeper_turn_unavailable _ -> streaming
+
+let test_running_rows_keep_their_place_while_events_stream () =
+  let order ~early_event ~late_event =
+    names
+      (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Priority
+         [ row ~last_activity_at:(Some early_event)
+             ~turn:(running ~started_at:10. ~event_at:early_event) "early"
+         ; row ~last_activity_at:(Some late_event)
+             ~turn:(running ~started_at:20. ~event_at:late_event) "late"
+         ])
+  in
+  Alcotest.(check (list string)) "later start first" [ "late"; "early" ]
+    (order ~early_event:30. ~late_event:25.);
+  Alcotest.(check (list string)) "a newer event on the earlier turn does not swap them"
+    [ "late"; "early" ] (order ~early_event:40. ~late_event:25.)
+
+let test_a_turn_phase_does_not_move_its_row () =
+  let order phase =
+    names
+      (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Priority
+         [ row ~last_activity_at:(Some 30.) ~turn:(turn ~started_at:30. phase) "phased"
+         ; row ~last_activity_at:(Some 20.) ~turn:(turn ~started_at:20.
+             Masc.Keeper_turn_preview.Receiving_response) "streaming"
+         ; row ~last_activity_at:(Some 40.)
+             ~waiting:(waiting ~items:[waiting_item ~producer:Model.Wake_keeper_delegate ()] "d") "delegate"
+         ])
+  in
+  let expected = [ "phased"; "streaming"; "delegate" ] in
+  List.iter
+    (fun phase -> Alcotest.(check (list string)) "same place in every phase" expected (order phase))
+    Masc.Keeper_turn_preview.[ Preparing; Awaiting_response; Receiving_response; Tool_observed ]
 
 let test_runtime_view_contains_only_failing_rows () =
   let rows =
@@ -833,6 +876,12 @@ let () =
             test_time_memory_and_age_views_follow_the_outside_reading
         ; Alcotest.test_case "the portrait shows only in the two-line list" `Quick
             test_portrait_shows_only_in_the_two_line_list
+        ] )
+    ; ( "running order"
+      , [ Alcotest.test_case "running rows keep their place while events stream" `Quick
+            test_running_rows_keep_their_place_while_events_stream
+        ; Alcotest.test_case "a turn phase does not move its row" `Quick
+            test_a_turn_phase_does_not_move_its_row
         ] )
     ; ( "person wait"
       , [ Alcotest.test_case "a person wait is the reading that made it" `Quick

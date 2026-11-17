@@ -622,6 +622,59 @@ GitHub 연결 도구와 `gh`의 공개 저장소 조회도 확인했다. 후자�
 이 실행 환경의 CLI는 OAuth 토큰을 찾지 못하므로 인증이 필요한 게시까지 된 것은 아니다.
 현재 PR 전수 diff·최신 base·native stack 확인과 게시·readback은 별도로 남는다.
 
+## 11월 17일: 새 첨부의 읽기를 막던 누적 시간 제한 제거
+
+게시한 Document 9층 뒤의 후속 단위다. H5는 첫 읽기에서 시작한 deadline 하나를
+같은 walk의 후속 요청에도 공유했다. 그 사이 provider나 도구가 정상 진행해도,
+새로 들어온 첨부는 원본 조회와 reader 호출 전에 `budget_spent`로 거절될 수 있었다.
+이는 계획의 WIM-S05와 삭제 목록에 남아 있던 누적 시간 gate다.
+
+projector에서 deadline 상태와 사전 시간 판정을 제거했다. 성공한 읽기와 첨부별 실패의
+memo는 그대로 공유하며, 같은 첨부는 한 walk에서 한 번 읽고 실패는 다음 walk에서
+재시도한다. 취소를 실패로 저장하지 않고 원문·receipt·ACK 조건도 바꾸지 않는다.
+Voice에서 이 호출만 쓰던 aggregate deadline 인자와 분기도 함께 제거했다.
+각 STT 요청의 기존 transport 제한은 유지한다. PDF는 기존 Poppler의 문서별 60초
+제한을 그 추출 작업이 소유한다. 이전에는 provider 무응답 설정의 기본 900초를
+공유했으므로, 첫 PDF 한 건의 허용시간도 달라진다. 자세한 계약은
+[H5 문서](../KEEPER-MEDIA-FALLBACK-H5.md)에 적었다.
+
+기능 커밋 `48768d4d3ed1f2860e86e3738232a159435e6a8b`의 17파일을 독립 검토했고
+해당 snapshot에 미해결 P0·P1·P2는 없었다. 앞선 성공·실패 뒤 새 첨부, 후속 요청,
+실제 Outbox carrier와 cache·취소의 시험 소스를 갱신했다. 이 시험은 아직 실행하지
+않았고, 예전 900초가 실제로 흐른 provider 요청을 재현한 증거도 아니다.
+
+선택한 전체 구현 6개와 인터페이스 5개는 과거 interface cache를 사용한 초기 컴파일을
+통과했지만, 현재 소스와 전체 import의 일치 확인은 끝나지 않았다. 새 Types의 CRC를
+반영하던 검사가 공개 mli 없는 `Auth_credential_base`에 도달해 멈췄다. 따라서 이를
+현재 head의 타입 PASS로 세지 않는다. 입력 snapshot 553개는 위 고정 커밋과 대조했다.
+링크·새 동작 실행은 0이며, 가짜 product module이나 함수 추출로 경계를 대신하지 않았다.
+
+게시 후 실제 CI도 별도로 읽었다. `PR type-check (dune build @check)`
+[run 43993384711](https://github.com/jeong-sik/masc/actions/runs/43993384711)은
+Document PR head `3e483e10e0e41c4668a8c35973807650e4875e12`를 대상으로 failure였다.
+실제 checkout은 `refs/pull/52606/merge`의
+`4b4c6455c09ac5c5e97a005668d862e88448c405`였음을 원문에서 확인했다.
+Gate fixture의 공개 모듈 이름, 격리 GitHub fixture의 새 이름 검증 의존성,
+요청 이력 fixture의 `Stored` 생성자 표기가 각각 원인이었다. 소유한 4·6·7층에
+최소 수리를 커밋하고 전체 10층을 native restack했다. GitHub 이름 검증은 실제
+`Keeper_id.Keeper_name`을 직접 사용하며, 격리 fixture의 검증 모사는 지웠다.
+이 세 수리도 독립 소스 검토했으며 새 CI 결과를 미리 성공으로 세지 않는다.
+
+Schedule은 `test_schedule_runner`의 직접 `masc_core` 의존성 한 줄을 보완했다.
+`PR type-check (dune build @check)`의
+[run 43996952803](https://github.com/jeong-sik/masc/actions/runs/43996952803)은
+run의 head_sha가 `28f6f480382addd78f118e1c1efb972fb40dc756`이며 success였고,
+[run 43996951213](https://github.com/jeong-sik/masc/actions/runs/43996951213)은
+run의 head_sha가 `63e74a56dd679c30c7e8c101e207ed7e7419a2ac`이며 success였다.
+이 두 성공 run의 실제 checkout SHA는 별도로 확인하지 않았다.
+상위 head `4059319f3bfe2866f9fdca698fdf283b48ab68c9`의
+[run 43996952266](https://github.com/jeong-sik/masc/actions/runs/43996952266)은
+확인 시점 진행 중이었다. 전체 스택 CI나 동작 시험의 성공으로 확대하지 않는다.
+
+선언된 외부 reader 연결과 닫힌 media·failure 타입을 포함하는 WIM-S05 전체,
+실제 PDF·STT·provider·ACK·GC·재시작·여러 Keeper 연속 실행은 여전히 남아 있다.
+이 단위는 원래 25개 요구나 어느 규모 단계를 완료 처리하지 않는다.
+
 ## 원래 25개 요구의 현재 위치
 
 아래 조각은 원래 계획 §8의 핵심 연결이다. 전체 연결과 의존·결정은 원래 표를 따른다.
@@ -644,7 +697,7 @@ GitHub 연결 도구와 `gh`의 공개 저장소 조회도 확인했다. 후자�
 | 13. Identity·MCP·Artifact·Wiki·Web Renderer·Search·Browser 완전 지원 | WIM-S01·S02·S04·S08, CMG-S15 | WIM-S04 후보가 MCP 결과의 일반/승인 경로와 보관 소유자를 연결. 실제 호출은 미실행 | 실제 MCP non-text 결과가 도구 소비자·저장·후속 입력에 보존됨. 각 외부 도구의 자격·실패·재접속·산출물 확인은 따로 필요 |
 | 14. 프롬프트·Keeper 설정을 포함한 세계 Export/Import | WIM-S09~S12, SP-S11·S12·S14·S15 | 현재 round-trip 동작 미확인 | 세계 묶음을 다른 위치에 import한 뒤 설정·identity·참조·권한 대조와 재기동. 파일 복사 성공만으로 판정하지 않음 |
 | 15. 모델에 가는 글과 설정을 TOML·Markdown 등으로 외부화 | WIM-S13~S16, TLJ-S14a·S14b, X08 | 이번 수리는 전체 문자열 외부화를 수행하지 않음 | 모델 입력·도구 설명·화면 문구별 소유 정본, 텍스트 변경 후 실제 소비 결과. 타입/wire 식별자와 자연어 본문 범위를 구분 |
-| 16. 에이전트 개발을 전제로 CI·검사 병목 완화 | OD-S07·S09~S12·S14, POC-S14 | 작은 소스 단위와 독립 리뷰 사용. CI 기다림 없이 후속 구현 진행. 직접 gh 조회는 연결 실패이며 원격 게시는 미완료 | ready→review, fix→rereview, freeze→검증 시간과 미완료 표본. 기존 release 필수 검증을 빠뜨리지 않고 병목이 줄었는지 측정 |
+| 16. 에이전트 개발을 전제로 CI·검사 병목 완화 | OD-S07·S09~S12·S14, POC-S14 | 작은 소스 단위와 독립 리뷰 사용. Document9·Schedule3 native Draft 게시와 원격 readback 완료. 실제 CI 실패는 소유 층에서 수리하고 다음 단위를 진행 | ready→review, fix→rereview, freeze→검증 시간과 미완료 표본. 기존 release 필수 검증을 빠뜨리지 않고 병목이 줄었는지 측정 |
 | 17. MultiModal과 외부 도구 해석 | WIM-S03~S07 | WIM-S03 후보에 문서·혼합 투영, 중첩 ToolResult, canonical 복원 사례 작성 | 같은 후보에서 실제 PDF/STT·provider failover·재시작 실행. active tool round의 문서, connector 첨부, video·외부 reader는 별도 남음 |
 | 18. 일관되고 편한 TUI 조작 | OD-S02·S03a·S03b | 이번 실행의 키 조작·화면 흐름 미확인 | 키 입력→요청·저장 상태·결정의 일관성, 실제 사용 관측. 문구·행 순서 snapshot으로 대체하지 않음 |
 | 19. File I/O 병목 | SP-S01·S03·S04·S09·S10a·S10c, CA-S11a~S11c, POC-S16 | Schedule 수리는 정확성 후보이며 I/O 절감 후보가 아님 | store 크기·동시 writer별 읽고 쓴 바이트와 지연 측정. Board·Task·이력 경로의 전후 비교 |

@@ -132,3 +132,39 @@ it('refuses a nested default grid that cannot fit in its parent cell in integer 
   await expect(artifactWordFile(artifact(content))).rejects.toThrow('단위보다 작습니다')
   await expect(artifactHwpxFile(artifact(content))).rejects.toThrow('단위보다 작습니다')
 })
+
+it('refuses table and cell sizes that the supported native HWPX reader would turn into zero', async () => {
+  for (const content of [
+    '<table style="width:42949672.96pt"><tr><td style="width:10pt">표</td></tr></table>',
+    '<table style="width:10pt"><tr><td style="width:42949672.96pt">셀</td></tr></table>',
+    '<table><tr><td style="width:21474836.48pt">합계</td><td style="width:21474836.48pt">초과</td></tr></table>',
+  ]) await expect(artifactHwpxFile(artifact(content))).rejects.toThrow('32비트 범위')
+  const boundary = await nativeHwpx((await artifactHwpxFile(artifact('<table style="width:42949672.95pt"><tr><td style="width:42949672.95pt">경계</td></tr></table>'))).data)
+  expect(boundary[0]!.width).toBe('4294967295')
+  expect(boundary[0]!.cells[0]!.width).toBe('4294967295')
+})
+
+it('reports unsupported width preferences even when other absolute constraints resolve the grid', async () => {
+  for (const content of [
+    '<table style="width:calc(100% - 1pt)"><colgroup><col style="width:20pt"><col style="width:30pt"></colgroup><tr><td>A</td><td>B</td></tr></table>',
+    '<table style="width:50pt"><colgroup><col style="width:20pt"><col style="width:30pt"></colgroup><tr><td style="width:var(--a)">A</td><td>B</td></tr></table>',
+    '<table style="width:50pt"><colgroup><col style="width:2em"><col style="width:30pt"></colgroup><tr><td style="width:20pt">A</td><td>B</td></tr></table>',
+  ]) {
+    const file = await artifactWordFile(artifact(content)), xml = await readOfficeXml(await JSZip.loadAsync(file.data), 'word/document.xml')
+    expect(file.notices).toContain('표의 일부 너비 단위는 출력에서 자동 배치합니다.')
+    expect(xmlDescendants(xml, word, 'tblLayout')).toHaveLength(0)
+  }
+})
+
+it('checks declared HWPX columns before allocating a graph or expanding empty cells', async () => {
+  const content = '<table><colgroup><col span="1000"><col></colgroup><tr><td>A</td></tr></table>'
+  await expect(artifactHwpxFile(artifact(content))).rejects.toThrow('열 수')
+})
+
+it('refuses unrepresentable percentage preferences and nested derived grids before returning a file', async () => {
+  for (const content of [
+    '<table style="width:1e100%"><tr><td>A</td></tr></table>',
+    '<table><tr><td style="width:100000000000000000000%">A</td></tr></table>',
+    '<table style="width:50000000000000pt"><tr><td style="width:50000000000000pt"><table style="width:1000%"><tr><td>A</td></tr></table></td></tr></table>',
+  ]) await expect(artifactWordFile(artifact(content))).rejects.toThrow('DOCX 너비 단위')
+})

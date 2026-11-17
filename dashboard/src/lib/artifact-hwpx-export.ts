@@ -5,7 +5,7 @@ import { officeXmlText } from './artifact-office-text'
 import { artifactWordFile } from './artifact-word-export'
 import type { PreparedOfficeBlock, PreparedOfficeCell, PreparedOfficeTable } from './artifact-office-prepared'
 import { loadOfficeArchive, officeNs, readOfficeBytes, readOfficeRelationships, readOfficeXml, resolveOfficePart, xmlChild, xmlChildren, xmlDescendants, type OfficeXmlElement } from './artifact-office-xml'
-import { hwpxGeometry, hwpxHeader, hwpxManifest, hwpxTableLimits, hwpxNs, hwpxObjectAttributes, hwpxPage, hwpxParagraph, hwpxPicture, hwpxSection, hwpxXmlDeclaration, type HwpxCharacterStyle, type HwpxManifestItem } from './artifact-hwpx-template'
+import { hwpxGeometry, hwpxHeader, hwpxManifest, hwpxTableLimits, maximumHwpxWidth, hwpxNs, hwpxObjectAttributes, hwpxPage, hwpxParagraph, hwpxPicture, hwpxSection, hwpxXmlDeclaration, type HwpxCharacterStyle, type HwpxManifestItem } from './artifact-hwpx-template'
 
 const word = officeNs.word, emuPerHwpUnit = 127, hwpUnitsPerTwip = 5, hwpUnitsPerHalfPoint = 50
 const wordprocessingDrawing = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'
@@ -16,6 +16,10 @@ function value(node: OfficeXmlElement | undefined): string | null { return node?
 function positive(value: string | null, description: string): number {
   if (!value || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) throw new Error(`${description} 값이 올바르지 않습니다.`)
   return Number(value)
+}
+function tableWidth(width: number): number {
+  if (!Number.isSafeInteger(width) || width < 0 || width > maximumHwpxWidth) throw new Error('표 너비가 HWPX를 읽는 변환기의 32비트 범위를 벗어납니다.')
+  return width
 }
 function flag(node: OfficeXmlElement | undefined): boolean {
   if (!node) return false
@@ -36,7 +40,7 @@ function relativePart(source: string, target: string): string {
 
 /** Map the existing DOCX producer's native elements; reuse its chart XML and embedded workbook bytes. */
 export async function artifactHwpxFile(doc: ArtifactDocument): Promise<{ data: ArrayBuffer; notices: readonly string[] }> {
-  const file = await artifactWordFile(doc), source = await loadOfficeArchive(file.data), zip = new JSZip()
+  const file = await artifactWordFile(doc, 'hwpx'), source = await loadOfficeArchive(file.data), zip = new JSZip()
   // OCF requires the MIME entry first and uncompressed, before adding chart/image parts.
   zip.file('mimetype', 'application/hwp+zip', { compression: 'STORE' })
   const sourcePath = 'word/document.xml', document = await readOfficeXml(source, sourcePath), body = xmlChild(document.documentElement!, word, 'body')
@@ -171,12 +175,12 @@ export async function artifactHwpxFile(doc: ArtifactDocument): Promise<{ data: A
       const cellXml: string[] = []
       for (const cell of owned) {
         if (cell.rows !== cell.source.rows) throw new Error('생성한 표의 세로 병합이 원본 너비 구조와 다릅니다.')
-        const width = cell.source.width ?? widths.slice(cell.col, cell.col + cell.cols).reduce((sum, value) => sum + value, 0), height = cell.rows * hwpxPage.cellHeight
+        const width = tableWidth(cell.source.width ?? widths.slice(cell.col, cell.col + cell.cols).reduce((sum, value) => sum + value, 0)), height = cell.rows * hwpxPage.cellHeight
         cellXml.push(`<hp:tc name="" header="${cell.header ? '1' : '0'}" hasMargin="1" protect="0" editable="1" dirty="0" borderFillIDRef="2"><hp:subList id="" textDirection="HORIZONTAL" lineWrap="BREAK" vertAlign="TOP" linkListIDRef="0" linkListNextIDRef="0" textWidth="0" textHeight="0" hasTextRef="0" hasNumRef="0">${await blocks(cell.node, cell.source.children) || paragraph('')}</hp:subList><hp:cellAddr colAddr="${cell.col}" rowAddr="${cell.row}"/><hp:cellSpan colSpan="${cell.cols}" rowSpan="${cell.rows}"/><hp:cellSz width="${width}" height="${height}"/><hp:cellMargin left="${minimumCellPadding}" right="${minimumCellPadding}" top="${minimumCellPadding}" bottom="${minimumCellPadding}"/></hp:tc>`)
       }
       rowXml.push(`<hp:tr>${cellXml.join('')}</hp:tr>`)
     }
-    const width = prepared.width ?? widths.reduce((sum, item) => sum + item, 0), height = rows.length * hwpxPage.cellHeight
+    const width = tableWidth(prepared.width ?? widths.reduce((sum, item) => sum + item, 0)), height = rows.length * hwpxPage.cellHeight
     const contents = `<hp:tbl ${hwpxObjectAttributes(objectId++)} pageBreak="CELL" repeatHeader="${cells.some(cell => cell.row === 0 && cell.header) ? '1' : '0'}" rowCnt="${rows.length}" colCnt="${widths.length}" cellSpacing="0" borderFillIDRef="2" noAdjust="0">${hwpxGeometry(width, height)}<hp:inMargin left="${minimumCellPadding}" right="${minimumCellPadding}" top="${minimumCellPadding}" bottom="${minimumCellPadding}"/>${rowXml.join('')}</hp:tbl>`
     return paragraph(`<hp:run charPrIDRef="0">${contents}</hp:run>`)
   }

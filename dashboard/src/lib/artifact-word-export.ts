@@ -36,7 +36,7 @@ type Context={quote?:boolean;list?:{reference:string;depth:number;used:boolean};
 type Block=Paragraph|Table
 export type ArtifactWordFile={data:ArrayBuffer;notices:readonly string[];blocks:readonly PreparedOfficeBlock[]}
 
-export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWordFile> {
+export async function artifactWordFile(doc:ArtifactDocument,target:'docx'|'hwpx'='docx'):Promise<ArtifactWordFile> {
   const source=doc.artifact.format==='html'?doc.content:toHtml(raw(toHast(fromMarkdown(doc.content,{extensions:[gfm()],mdastExtensions:[gfmFromMarkdown()]}),{allowDangerousHtml:true})))
   const parsed=parse(source),notices=new Set<string>(),numbering:INumberingOptions['config'][number][]=[]
   const charts:OfficeChart[]=[]
@@ -59,7 +59,9 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
   const widthOptions=(width:OfficeTableWidth):ITableWidthProperties|undefined=>{
     switch(width.kind){
       case 'absolute':return {size:Math.round(width.hwpUnits/5),type:WidthType.DXA}
-      case 'percent':return {size:width.value,type:WidthType.PERCENTAGE}
+      case 'percent':
+        if(!Number.isSafeInteger(Math.round(width.value*50)))throw new Error('표의 백분율을 DOCX 너비 단위로 표현할 수 없습니다.')
+        return {size:width.value,type:WidthType.PERCENTAGE}
       case 'auto':return {size:0,type:WidthType.AUTO}
       case 'absent':return undefined
       case 'unsupported':notices.add('표의 일부 너비 단위는 출력에서 자동 배치합니다.');return undefined
@@ -148,11 +150,17 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
     })
   }
   function table(node:Nodes.Element,context:Context):Block[] {
+    const columnLimit=target==='hwpx'?hwpxTableLimits.columns:bodyWidth
+    const requireColumns=(columns:number)=>{
+      if(!Number.isSafeInteger(columns)||columns>columnLimit)throw new Error(target==='hwpx'
+        ?'표의 행 또는 열 수를 HWPX와 HTML 양쪽에 옮길 수 없습니다.':'표의 열을 인쇄 영역에 배치할 수 없습니다.')
+    }
     // HTML table parsing places rows in explicit or implicit row groups.
     // A rowspan cannot continue beyond its thead/tbody/tfoot group.
     const groups=node.childNodes.filter((child):child is Nodes.Element=>tree.isElementNode(child)&&['thead','tbody','tfoot'].includes(child.tagName))
       .map(group=>group.childNodes.filter((child):child is Nodes.Element=>tree.isElementNode(child)&&child.tagName==='tr'))
     const rows=groups.flat(),groupEnds:number[]=[]
+    if(target==='hwpx'&&rows.length>hwpxTableLimits.rows)throw new Error('표의 행 또는 열 수를 HWPX와 HTML 양쪽에 옮길 수 없습니다.')
     let end=0
     for(const group of groups){end+=group.length;groupEnds.push(...group.map(()=>end))}
     const cells=rows.map(row=>row.childNodes.filter((child):child is Nodes.Element=>tree.isElementNode(child)&&(child.tagName==='td'||child.tagName==='th')))
@@ -163,7 +171,7 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
       return row.map(cell=>{
         while((occupied.get(column)??0)>rowIndex)column++
         const count=columnSpan(cell,'colspan')
-        if(!Number.isSafeInteger(column+count)||column+count>bodyWidth)throw new Error('표의 열을 인쇄 영역에 배치할 수 없습니다.')
+        requireColumns(column+count)
         const requested=integer(attr(cell,'rowspan'),1),rowSpan=requested===0?groupEnds[rowIndex]!-rowIndex:Math.min(Math.max(1,requested),groupEnds[rowIndex]!-rowIndex)
         for(let offset=0;offset<count;offset++){
           if((occupied.get(column+offset)??0)>rowIndex)throw new Error('서로 겹치는 표 셀을 Word로 옮길 수 없습니다.')
@@ -177,10 +185,15 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
     for(const group of node.childNodes.filter((child):child is Nodes.Element=>tree.isElementNode(child)&&child.tagName==='colgroup')){
       const children=group.childNodes.filter((child):child is Nodes.Element=>tree.isElementNode(child)&&child.tagName==='col')
       const groupWidth=tableSourceWidth(group)
-      if(children.length===0)sourceColumns.push(...Array.from({length:columnSpan(group,'span')},()=>groupWidth))
+      if(children.length===0){
+        const count=columnSpan(group,'span')
+        requireColumns(sourceColumns.length+count)
+        sourceColumns.push(...Array.from({length:count},()=>groupWidth))
+      }
       for(const column of children){
-        const width=tableSourceWidth(column)
-        sourceColumns.push(...Array.from({length:columnSpan(column,'span')},()=>width.kind==='absent'||width.kind==='auto'?groupWidth:width))
+        const width=tableSourceWidth(column),count=columnSpan(column,'span')
+        requireColumns(sourceColumns.length+count)
+        sourceColumns.push(...Array.from({length:count},()=>width.kind==='absent'||width.kind==='auto'?groupWidth:width))
       }
     }
     columns=Math.max(columns,sourceColumns.length)
@@ -218,6 +231,8 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
     const hasWidths=sourceWidth.kind!=='absent'||sourceColumns.some(width=>width.kind!=='absent')||sourceCells.some(cell=>cell.width.kind!=='absent')
     const relative=(width:OfficeTableWidth)=>width.kind==='percent'||width.kind==='auto'
     const relativeWidths=relative(sourceWidth)||sourceColumns.some(relative)||sourceCells.some(cell=>relative(cell.width))
+    const unsupportedWidths=[sourceWidth,...sourceColumns,...sourceCells.map(cell=>cell.width)].some(width=>width.kind==='unsupported')
+    if(unsupportedWidths)notices.add('표의 일부 너비 단위는 출력에서 자동 배치합니다.')
     if(relativeWidths)notices.add('표의 백분율·자동 너비는 출력 앱에서 배치합니다. HWPX는 열·셀의 절대 너비로 다시 배치합니다.')
     const widths=geometry.kind==='unique'?officeTableTwips(geometry.widths):hasWidths?undefined:
       Array.from({length:columns},(_,index)=>Math.floor((context.availableWidth??bodyWidth)*(index+1)/columns)-Math.floor((context.availableWidth??bodyWidth)*index/columns))
@@ -246,7 +261,7 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
           ...(cell.tagName==='th'?{shading:{type:ShadingType.CLEAR,fill:'E5E7EB'}}:{})})
       })})
     })
-    const wordTable=new Table({width:tableWidth,columnWidths:widths,...(geometry.kind==='unique'&&!relativeWidths?{layout:TableLayoutType.FIXED}:{}),rows:wordRows})
+    const wordTable=new Table({width:tableWidth,columnWidths:widths,...(geometry.kind==='unique'&&!relativeWidths&&!unsupportedWidths?{layout:TableLayoutType.FIXED}:{}),rows:wordRows})
     tables.set(wordTable,{kind:'table',columns,width:sourceWidth.kind==='absolute'?sourceWidth.hwpUnits:sourceWidth.kind==='absent'&&geometry.kind==='unique'?geometry.widths.reduce((sum,width)=>sum+width,0):null,rows:preparedRows})
     output.push(wordTable)
     return output
@@ -287,5 +302,9 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
     sections:[{properties:{page:{size:page,margin:{top:margin,bottom:margin,left:margin,right:margin}}},
       footers:{default:new Footer({children:[new Paragraph({children:[new TextRun({text:`${doc.artifact.id} · v${doc.artifact.revision} · `,size:16,color:'6B7280'}),new TextRun({children:[PageNumber.CURRENT],size:16})]})]})},
       children:children.length?children:[new Paragraph({})]}]})
-  return {data:await formatOfficeChartSeries(await Packer.toArrayBuffer(document),charts),notices:[...notices],blocks:prepared(children.length?children:[new Paragraph({})])}
+  const data=await Packer.toArrayBuffer(document)
+  // Derived grids are resolved against the real page/parent during packing.
+  // Check the public result as well as explicit preferences before download.
+  for(const table of tables.keys())if(table.ColumnWidths.some(width=>!Number.isSafeInteger(width)||width<0))throw new Error('표의 배치 결과를 DOCX 너비 단위로 표현할 수 없습니다.')
+  return {data:await formatOfficeChartSeries(data,charts),notices:[...notices],blocks:prepared(children.length?children:[new Paragraph({})])}
 }

@@ -1,8 +1,11 @@
 # 리뷰 뒤 표·차트 웹 검증
 
-확인: 2026-11-17 13:27 KST. Task `task-3703`.
-표 소스는 `b41856ca9af7`, 통합 제품 소스는 `426037698d1d`다.
+확인: 2026-11-17. Task `task-3703`.
+기준 main은 `9c17fe6be262`다.
+표 소스는 `d622dbff6d58`, 통합 제품 소스는 `ce6b2f357089`다.
 이 기록을 넣는 뒤 커밋은 제품 코드를 바꾸지 않는다.
+기존 두 PR은 수정 전 소스로 병합됐다.
+후속 스택에는 아래의 리뷰 수리만 넣었다.
 
 ## 확인해서 고친 문제
 
@@ -45,10 +48,10 @@ Mac Ego Chrome 156에서 제품 컴포넌트·Worker·WASM을 실행했다.
 | 좁은 화면 | 차트 글자 12px, 원형 그림 전체 표시, 바깥 페이지 가로 넘침 없음 |
 | 실제 가로 이동 | 포인터 휠로 차트 386px·표 220px 이동해 나머지 항목 확인 |
 
-차트 편집과 8개 다운로드는 `f20cd4b3dd75`에서 확인했다.
-최종 `426037698d1d`는 원형 그림과 범례의 표시만 바꿨다.
-이 소스에서 4개 HWPX를 다시 가져와 화면을 확인했다.
-표 가져오기와 두 다운로드도 최종 소스에서 확인했다.
+첫 검증 소스 `426037698d1d`와 제품 파일이 같다.
+작업 폴더 정리로 첫 실행의 임시 자료가 사라졌다.
+새 main 위에서 다섯 HWP 가져오기부터 모두 다시 실행했다.
+차트 편집·열 개 다운로드·화면·가로 이동 자료도 다시 남겼다.
 생성 SVG·범례·편집 안내가 원고에 섞이지 않았다.
 
 화면 치수는 게시 iframe에 읽기 전용 측정 스크립트를 붙여 쟀다.
@@ -72,7 +75,8 @@ PNG에서 제목·한글·차트·표를 직접 확인했다.
 제품 파일은 바꾸지 않았다.
 차트 PDF는 AppleSDGothicNeo-Regular를 포함했다.
 표 PDF는 NotoSansKR-Bold·AppleGothic을 포함했다.
-두 실행의 PDF·PNG·글꼴 목록을 따로 보관했다.
+기본 설정의 한글 누락은 첫 실행의 직접 관찰이다.
+재실행 자료에는 시스템 Fontconfig를 쓴 PDF·PNG·글꼴 목록을 남겼다.
 
 한글·Microsoft Word 앱의 화면과 인쇄는 확인하지 않았다.
 원본의 테두리·여백·글꼴·행 높이·전체 페이지 배치를 복원한 결과도 아니다.
@@ -83,7 +87,8 @@ PNG에서 제목·한글·차트·표를 직접 확인했다.
 [이슈 #52637](https://github.com/jeong-sik/masc/issues/52637)에 남아 있다.
 현재 직접 HWPX 가져오기·내보내기는 그 경로를 거치지 않는다.
 
-원자료는 ignored `artifacts/office-web-review-20261117/`에 있다.
-`web-layout-final.json`, `web-scroll-final.json`,
-`browser-download-check.json`, `table-download-check.json`,
-`combined-web-final-tests.json`, `native-render-report.json`을 포함한다.
+원자료는 worktree 밖의 MASC Task 생산자 디렉터리에 보관했다.
+위치는 `artifacts/office-web-review-20261117-live/`다.
+`browser-final.json`에 화면 치수·편집·다운로드·가로 이동 결과가 있다.
+`combined-web-final-tests.json`과 실행 명령 영수증도 남겼다.
+`records/`에는 원본과 파일 대조 기록을, `native-pdf/`에는 PDF·PNG를 둔다.

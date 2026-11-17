@@ -233,9 +233,21 @@ val validate_live_acceptance :
 val error_to_string : error -> string
 
 (** [unverified_retry_notice ~request_id error] is the status line shown while
-    the TUI re-POSTs an operation whose outcome it could not verify: the cause
-    from {!error_to_string}, then the request being reconciled. *)
+    the TUI reconciles an operation whose outcome it could not verify: the
+    cause from {!error_to_string}, then the request being reconciled. *)
 val unverified_retry_notice : request_id:string -> error -> string
+
+(** When the watcher sends the next reconcile of an unverified request. *)
+type reconcile_pace =
+  | Reconcile_now
+      (** The answer is fresh: the attempt was the first POST or a follow
+          after a checkpoint, or its stream delivered a new frame. *)
+  | Reconcile_after_inventory_change
+      (** A reconcile came back unverified without a new frame. The next one
+          waits for the Keeper's waiting inventory to change, which the server
+          announces when the queue moves or its store fence rises or lifts. *)
+
+val reconcile_pace : attempt_was_reconcile:bool -> progressed:bool -> reconcile_pace
 val protocol_error : ?acceptance_observed:bool -> stream_error -> error
 val error_acceptance_observed : error -> bool
 val error_certainty : ?was_unverified:bool -> error -> error_certainty

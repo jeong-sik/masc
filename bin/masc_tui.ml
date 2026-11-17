@@ -3055,6 +3055,49 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    asks the server to resume from the log's last seq instead. *)
 exception Rejected_keeper_live_stream
 
+(* How many waiting-inventory changes this terminal has heard for each Keeper.
+   A watcher holding an unverified request waits on it instead of a timer:
+   the server announces a change when the Keeper's queue moves or its store
+   fence rises or lifts (#36205). An observer stream that (re)opens may have
+   missed changes for every Keeper, so it moves them all. Both counts only
+   grow, so their sum does too. The main loop writes and watcher fibers read,
+   so the state is one immutable value swapped atomically. *)
+module Waiting_inventory_heard = struct
+  module Keepers = Map.Make (String)
+
+  type heard = { reopened : int; changed : int Keepers.t }
+
+  let heard = Atomic.make { reopened = 0; changed = Keepers.empty }
+  let moved = Eio.Condition.create ()
+
+  let rec update f =
+    let before = Atomic.get heard in
+    if Atomic.compare_and_set heard before (f before)
+    then Eio.Condition.broadcast moved
+    else update f
+
+  let keeper_changed keeper =
+    update (fun heard ->
+      { heard with
+        changed =
+          Keepers.update keeper
+            (function Some count -> Some (count + 1) | None -> Some 1)
+            heard.changed })
+
+  let stream_reopened () =
+    update (fun heard -> { heard with reopened = heard.reopened + 1 })
+
+  (* A Keeper this terminal has heard nothing about has heard zero changes. *)
+  let generation keeper =
+    let heard = Atomic.get heard in
+    heard.reopened
+    + (match Keepers.find_opt keeper heard.changed with Some count -> count | None -> 0)
+
+  let await_after keeper seen =
+    Eio.Condition.loop_no_mutex moved (fun () ->
+      if generation keeper > seen then Some () else None)
+end
+
 let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_post ~follow_kept_back ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
   let enqueue_async = enqueue in
   let host = server_peer_host in
@@ -3088,7 +3131,13 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
         | Masc.Keeper_chat_event_log.After_seq held ->
             Masc.Keeper_chat_event_log.replay_position_advance !delivered held
       in
+      let keeper_name = request.Keeper_chat.keeper_name in
       let rec watch ~first_post ~since_seq was_unverified =
+        (* What the attempt starts from: a change heard or a frame delivered
+           while it runs is news the next reconcile does not wait for. *)
+        let inventory_seen = Waiting_inventory_heard.generation keeper_name in
+        let position_at_start =
+          Masc.Keeper_chat_event_log.replay_position_to_wire (resume_position ()) in
         match check_request () with
         | Error refusal when first_post -> Keeper_chat_kept_back refusal
         | Error refusal -> Keeper_chat_answered (Error (follow_kept_back refusal))
@@ -3184,7 +3233,19 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                subscribe/reconcile path. The in-flight owner stays held until
                one watcher observes terminal truth, so NEXT cannot overlap a
                turn whose first stream merely disappeared. *)
-            Eio.Time.sleep clock 0.5;
+            let progressed =
+              not
+                (Option.equal Int.equal position_at_start
+                   (Masc.Keeper_chat_event_log.replay_position_to_wire
+                      (resume_position ())))
+            in
+            (match
+               Keeper_chat.reconcile_pace ~attempt_was_reconcile:was_unverified
+                 ~progressed
+             with
+             | Keeper_chat.Reconcile_now -> ()
+             | Keeper_chat.Reconcile_after_inventory_change ->
+                 Waiting_inventory_heard.await_after keeper_name inventory_seen);
             watch ~first_post:false ~since_seq:(resume_position ()) true
         | (Ok (Keeper_chat.Turn_completed
                  { turn_outcome =
@@ -25423,6 +25484,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.mcp_session <- Some session_id
   | Observer_msg (Observer_opened (owner, session_id, handshake))
     when Masc_tui_async_protocol.observer_stream_owned state owner ->
+      (* Changes made while no stream was open were not heard. *)
+      Waiting_inventory_heard.stream_reopened ();
       let scope_replaced =
         match state.workspace_identity, state.observer_scope_binding with
         | Workspace_identity_match, Observer_scope_bound previous ->
@@ -25712,6 +25775,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    (* A running fusion is an item of its Keeper's waiting list. *)
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_waiting_inventory_changed { keeper; _ } ->
+                   Waiting_inventory_heard.keeper_changed keeper;
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_roster_change change ->
                    owe_keeper_roster_change state change;

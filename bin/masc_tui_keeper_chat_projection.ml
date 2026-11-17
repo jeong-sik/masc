@@ -413,6 +413,22 @@ let unverified_retry_notice ~request_id error =
   Printf.sprintf "%s; reconciling exact request %s before NEXT"
     (error_to_string error |> terminal_safe_text) request_id
 
+type reconcile_pace =
+  | Reconcile_now
+  | Reconcile_after_inventory_change
+
+(* The re-POST of the same id is the server's idempotent reconcile: it
+   subscribes to an operation it holds and admits one it does not. One
+   follows a fresh unverified answer at once. A reconcile that itself came
+   back unverified without one new frame learned nothing, and sending it again
+   at once would learn nothing either (#36205: twenty POSTs a second against a
+   fenced store), so the next one waits for the Keeper's waiting inventory to
+   move. *)
+let reconcile_pace ~attempt_was_reconcile ~progressed =
+  match attempt_was_reconcile, progressed with
+  | false, (true | false) | true, true -> Reconcile_now
+  | true, false -> Reconcile_after_inventory_change
+
 (* A reconciliation read asks "what happened to the operation". 401 and 403 do
    not answer that question: the request stopped before the handler, so the
    operation is untouched and still on the server. [error_certainty] below reads

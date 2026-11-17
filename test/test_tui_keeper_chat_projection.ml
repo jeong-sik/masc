@@ -1141,10 +1141,24 @@ let test_error_certainty () =
        (Chat.protocol_error
           (Chat.Run_failed
              { accepted = false
-             ; message = "store unavailable"
-             ; code = Some "store_unavailable"
+             ; message = "store commit unknown"
+             ; code = Some Masc.Keeper_chat_public_error.(code Store_commit_unknown)
              }))
      = Chat.Outcome_unverified);
+  (* #36205: a fenced Owner refused before it touched the store, and the TUI
+     read that as possibly admitted and resent it every 0.5s. *)
+  let fenced =
+    Chat.protocol_error
+      (Chat.Run_failed
+         { accepted = false
+         ; message = "store fenced"
+         ; code = Some Masc.Keeper_chat_public_error.(code Store_fenced)
+         })
+  in
+  check bool "a fenced store refusal is a verified rejection" true
+    (Chat.error_certainty fenced = Chat.Verified_rejected);
+  check bool "a fenced re-POST does not show the id admitted nothing" true
+    (Chat.error_certainty ~was_unverified:true fenced = Chat.Outcome_unverified);
   (* 2026-10-22: no Keeper had an Owner, the server answered every message
      before any Owner saw it, and the TUI resent each one every 0.5s. *)
   check bool "a request that reached no owner is a verified rejection" true
@@ -1231,6 +1245,20 @@ let test_reader_unauthenticated () =
        (Chat.protocol_error
           (Chat.Run_failed { accepted = false; message = "bad"; code = None })))
 
+(* #36205: the reconcile is paced by what the server says, never by a timer.
+   A fresh unverified answer is reconciled at once; a reconcile that came back
+   unverified with no new frame waits for the Keeper's inventory to move. *)
+let test_reconcile_pace_waits_only_when_nothing_moved () =
+  let pace = Chat.reconcile_pace in
+  check bool "the first unverified answer is reconciled at once" true
+    (pace ~attempt_was_reconcile:false ~progressed:false = Chat.Reconcile_now
+     && pace ~attempt_was_reconcile:false ~progressed:true = Chat.Reconcile_now);
+  check bool "a reconcile that delivered a frame is followed at once" true
+    (pace ~attempt_was_reconcile:true ~progressed:true = Chat.Reconcile_now);
+  check bool "a reconcile that learned nothing waits for the inventory" true
+    (pace ~attempt_was_reconcile:true ~progressed:false
+     = Chat.Reconcile_after_inventory_change)
+
 let test_unverified_retry_notice_names_the_cause () =
   let notice error = Chat.unverified_retry_notice ~request_id:"tui-01" error in
   let has ~needle value = String_util.string_contains_substring ~needle value in
@@ -1238,8 +1266,8 @@ let test_unverified_retry_notice_names_the_cause () =
     Chat.protocol_error
       (Chat.Run_failed
          { accepted = false
-         ; message = "the operation store is fenced"
-         ; code = Some "store_unavailable"
+         ; message = "the operation store failed"
+         ; code = Some "store_commit_unknown"
          })
   in
   (* The server answered this one over a live connection. The line used to open
@@ -1248,9 +1276,9 @@ let test_unverified_retry_notice_names_the_cause () =
   check bool "a rejection is not reported as a lost connection" false
     (has ~needle:"connection lost" (notice fenced));
   check bool "the rejection names its code" true
-    (has ~needle:"store_unavailable" (notice fenced));
+    (has ~needle:"store_commit_unknown" (notice fenced));
   check bool "the rejection carries the server's words" true
-    (has ~needle:"the operation store is fenced" (notice fenced));
+    (has ~needle:"the operation store failed" (notice fenced));
   check bool "the request being reconciled is named" true
     (has ~needle:"reconciling exact request tui-01 before NEXT" (notice fenced));
   let dropped = Chat.Transport_error "connection refused" in
@@ -1264,7 +1292,7 @@ let test_unverified_retry_notice_names_the_cause () =
   let injected =
     Chat.protocol_error
       (Chat.Run_failed
-         { accepted = false; message = "fenced\x1b[31m"; code = Some "store_unavailable" })
+         { accepted = false; message = "fenced\x1b[31m"; code = Some "store_commit_unknown" })
   in
   check bool "the server's words cannot move the cursor" false
     (has ~needle:"\x1b[" (notice injected))
@@ -1733,6 +1761,8 @@ let () =
             test_reader_unauthenticated
         ; test_case "unverified retry notice names the cause" `Quick
             test_unverified_retry_notice_names_the_cause
+        ; test_case "reconcile pace waits only when nothing moved" `Quick
+            test_reconcile_pace_waits_only_when_nothing_moved
         ; test_case "batch accepted-user history preserves original identities" `Quick
             test_batch_preserves_original_user_history_once
         ; test_case "batch respects interleaved conversation order" `Quick

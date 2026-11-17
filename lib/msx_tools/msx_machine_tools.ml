@@ -168,8 +168,20 @@ let path_is_within ~root candidate =
 
 let authorized_argument_roms_dir ~base_path dir =
   match Unix.realpath dir with
-  | exception Unix.Unix_error _ ->
-    Error (Msx_lane.Unreadable (Printf.sprintf "no cbios_main_msx2.rom in %s" dir))
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+    (* The caller named a directory that names nothing. That is the argument,
+       not the machine: [Invalid_request] keeps [Unreadable] for a path that
+       resolved and then could not be read. [ENOTDIR] belongs here too -- a
+       regular file somewhere along the path makes the last component name
+       nothing as well. *)
+    Error
+      (Msx_lane.Invalid_request
+         (Printf.sprintf "roms_dir %s does not exist" dir))
+  | exception Unix.Unix_error (error, _, _) ->
+    Error
+      (Msx_lane.Unreadable
+         (Printf.sprintf "roms_dir %s cannot be resolved: %s" dir
+            (Unix.error_message error)))
   | real_dir ->
     let in_base =
       match Unix.realpath base_path with

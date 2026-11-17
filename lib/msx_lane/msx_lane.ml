@@ -386,7 +386,16 @@ let load_cart = function
     if Sys.file_exists path then
       let* bytes = read_file_result path in
       Ok (Some (path, bytes))
-    else Error (Unreadable (Printf.sprintf "cartridge not found: %s" path))
+    else
+      (* [resolve_cart] hands over a path only after it was a regular file
+         inside the inventory, so a path that is missing here names nothing:
+         the caller named a cartridge and can fix it by naming another.
+         [Unreadable] is left for the branch above -- there, and gone. *)
+      Error
+        (Invalid_request
+           (Printf.sprintf
+              "cartridge %s is no longer in the inventory (resolved to %s)"
+              (Filename.basename path) path))
 ;;
 
 let load_disk = function
@@ -395,7 +404,12 @@ let load_disk = function
     if Sys.file_exists path then
       let* bytes = read_file_result path in
       Ok (Some (path, bytes))
-    else Error (Unreadable (Printf.sprintf "disk not found: %s" path))
+    else
+      Error
+        (Invalid_request
+           (Printf.sprintf
+              "disk %s is no longer in the inventory (resolved to %s)"
+              (Filename.basename path) path))
 ;;
 
 let media_id bytes = Agent_core_sha256.(to_hex (digest_string bytes))

@@ -369,6 +369,12 @@
   (run %{test})))
 
 (test
+ (name test_agent_cleanup_diagnostics)
+ (modules test_agent_cleanup_diagnostics)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (deps ../models.toml))
+
+(test
  (name test_agent_uncollected_turn)
  (modules test_agent_uncollected_turn)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)

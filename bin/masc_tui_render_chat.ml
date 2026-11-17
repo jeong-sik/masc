@@ -5452,7 +5452,7 @@ let render_keeper_message (state : state) =
           Some
             (say "↑/↓:선택  Tab/Enter:넣기  Esc:닫기"
                "↑/↓:select  Tab/Enter:insert  Esc:close")
-      | None -> slash_hint_text ~restore:Ansi.default_fg (Masc_tui_message_input.contents state.msg_input)
+      | None -> slash_hint_text ~restore:(Theme.recede ()) (Masc_tui_message_input.contents state.msg_input)
     in
     let help_hint =
       if help_door then "  " ^ Masc_tui_footer.help_hint ~ko
@@ -5477,39 +5477,34 @@ let render_keeper_message (state : state) =
           match state.voice_capture_phase, state.voice_level_db with
           | Voice_recording, Some db when not state.voice_capture_withdrawn ->
             Printf.sprintf
-              "%s%s%s  %s%.0f dB%s"
+              "%s%s%s%s  %.0f dB"
               (Theme.accent ())
               (Masc_tui_footer.voice_bar
                  ~width:Masc_tui_footer.voice_bar_width
                  ~db:(Some db))
               Ansi.reset
-              Ansi.dim
+              (Theme.recede ())
               db
-              Ansi.reset
           | Voice_recording, (Some _ | None)
           | (Voice_calibrating | Voice_starting | Voice_stopping | Voice_processing), (Some _ | None) ->
-              Printf.sprintf "%s%s%s" Ansi.dim (voice_meter_text state) Ansi.reset
+              voice_meter_text state
         in
         (* Both endings, because they are not the same and the difference is
            what the operator loses. Ctrl-Y keeps the sentence; Esc abandons it. *)
         Printf.sprintf
-          "%s  %s%s %s · Esc %s%s"
+          "%s  %s %s · Esc %s"
           bar
-          Ansi.dim
           Masc_tui_keys.voice_speak_key
           (say "전송" "send")
           (say "버리기" "discard")
-          Ansi.reset
       (* Between utterances in continuous mode: on, but nothing recording. A
          mode that is idle looks exactly like one that is off without this. *)
       | None when state.voice_continuous <> None ->
         Printf.sprintf
-          "%s%s · %s %s%s"
-          Ansi.dim
+          "%s · %s %s"
           (say "대기 중 — 말하면 잡습니다" "waiting — speech starts a capture")
           Masc_tui_keys.voice_listen_key
           (say "멈춤" "to stop")
-          Ansi.reset
       | None ->
       if state.keeper_message_focus = Left_pane then
         say "Up/Down:선택  Enter:열기  Right/Esc:채팅"

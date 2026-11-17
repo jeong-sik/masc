@@ -467,6 +467,12 @@ let prepare_hints full_text =
         { hint_text; pinned = item_is_pinned hint_text })) in
   { full_text; items }
 
+let is_key_token key =
+  let len = String.length key in
+  len > 0
+  && not (String.contains key '(')
+  && not (len > 1 && key.[0] = '/')
+
 let stylize_hint_item ~key_style ~dim ~reset item =
   if String.equal key_style "" || String.contains item '\027' then item
   else
@@ -475,17 +481,43 @@ let stylize_hint_item ~key_style ~dim ~reset item =
     | Some i when i <= 0 -> item
     | Some i ->
       let key = String.sub item 0 i in
-      let rest = String.sub item i (String.length item - i) in
-      key_style ^ key ^ reset ^ dim ^ rest
+      if not (is_key_token key) then item
+      else
+        let rest = String.sub item i (String.length item - i) in
+        key_style ^ key ^ reset ^ dim ^ rest
+
+let map_double_space_items f s =
+  let n = String.length s in
+  let buf = Buffer.create (n + 64) in
+  let rec scan item_start i =
+    if i >= n then (
+      let item = String.sub s item_start (n - item_start) in
+      if not (String.equal (String.trim item) "") then
+        Buffer.add_string buf (f item)
+      else Buffer.add_string buf item)
+    else if s.[i] = ' ' && i + 1 < n && s.[i + 1] = ' ' then (
+      let item = String.sub s item_start (i - item_start) in
+      if not (String.equal (String.trim item) "") then
+        Buffer.add_string buf (f item)
+      else Buffer.add_string buf item;
+      let rec skip_spaces j =
+        if j < n && s.[j] = ' ' then skip_spaces (j + 1) else j
+      in
+      let next = skip_spaces (i + 2) in
+      Buffer.add_substring buf s i (next - i);
+      scan next next)
+    else scan item_start (i + 1)
+  in
+  scan 0 0;
+  Buffer.contents buf
 
 let style_hint_row ~key_style ~dim ~reset hints =
   if String.equal key_style "" || String.contains hints.full_text '\027' then hints
   else
     let full_text =
-      split_on_double_space hints.full_text
-      |> List.filter (fun item -> not (String.equal (String.trim item) ""))
-      |> List.map (stylize_hint_item ~key_style ~dim ~reset)
-      |> String.concat "  "
+      map_double_space_items
+        (stylize_hint_item ~key_style ~dim ~reset)
+        hints.full_text
     in
     let items =
       lazy
@@ -830,7 +862,11 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
     else key_style ^ more_key ^ reset ^ dim
   in
   let cut_marker = styled_cut_marker ~key_style ~dim ~reset more_key in
-  let hints = style_hint_row ~key_style ~dim ~reset (prepare_hints hints) in
+  let raw_hints = hints in
+  let style_choices s =
+    (style_hint_row ~key_style ~dim ~reset (prepare_hints s)).full_text
+  in
+  let hints = style_hint_row ~key_style ~dim ~reset (prepare_hints raw_hints) in
   let statuses =
     List.filter_map (status_item_projection ~ko)
       (status @ Option.to_list (Option.map (fun port -> Port port) port))
@@ -855,7 +891,7 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
   let place =
     match preferred_action with
     | Some (Pending_question (text, mark)) -> place_question text mark
-    | Some (Menu_choices text) -> place_question text Fun.id
+    | Some (Menu_choices text) -> place_question text style_choices
     | Some (Outcome _) | None -> Not_drawn
   in
   let fit_row question =
@@ -866,7 +902,7 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
           (match preferred_action with
            | Some (Menu_choices text) ->
                style_hint_row ~key_style ~dim ~reset
-                 (prepare_hints (text ^ "  " ^ Masc_tui_theme.strip_sgr hints.full_text))
+                 (prepare_hints (text ^ "  " ^ raw_hints))
            | Some (Outcome _ | Pending_question _) | None -> hints)
     in
     let conflicts =

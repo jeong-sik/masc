@@ -329,8 +329,8 @@ let render_detail_reading (state : state) reading =
         (* The footer can collapse to its help door. Keep the query with the
            document too, ahead of its title so narrow readers can see it. *)
         (if editing then "Find " else "") ^ query_label ^ " · " ^ source_title,
-        query_label ^ " " ^
-          (if editing then "Enter:keep Esc:cancel" else "n/N:next/previous /:find") in
+        query_label ^ "  " ^
+          (if editing then "Enter:keep  Esc:cancel" else "n/N:next/previous  /:find") in
   let hints=Option.value (Masc_tui_detail_reading.hints reading)
       ~default:"j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back" in
   surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state

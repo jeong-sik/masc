@@ -3378,7 +3378,7 @@ let test_failed_turn_keeps_unnamed_error_scalars () =
 ;;
 
 (* These two sizes are the only report of what a turn actually sends: the
-   keeper log's [system_and_user_bytes] sums the prompt strings and omits both
+   keeper log's [masc_rendered_bytes_estimate] sums the prompt strings and omits both
    the history and the tool declarations (#28071). The expectations are computed
    literals, not a second call to the function under test — that would pass for
    any implementation. *)

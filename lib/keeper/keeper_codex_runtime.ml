@@ -1335,7 +1335,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         host_dynamic_tools
     in
     (* The only size this tree reports for a turn is
-       [keeper_unified_turn.ml]'s [system_and_user_bytes], which sums
+       [keeper_unified_turn.ml]'s [masc_rendered_bytes_estimate], which sums
        [system_prompt + world_state + user_message] and nothing else. The
        history and the tool declarations reach the provider through
        [thread/inject_items] and [thread/start]'s [dynamicTools], so a live

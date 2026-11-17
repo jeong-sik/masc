@@ -28,7 +28,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(turn_cost : float)
     ~(channel : Keeper_world_observation.keeper_cycle_channel)
     ~(checkpoint_bytes : int option)
-    ~(message_count : int)
+    ~(message_count : int option)
     () : unit =
   let now_ts = Time_compat.now () in
   let turn_mode = turn_mode_of_result result in
@@ -136,7 +136,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("latency_ms", `Int latency_ms);
         ("cost_usd", cost_json);
         ("checkpoint_bytes", Json_util.int_opt_to_json checkpoint_bytes);
-        ("message_count", `Int message_count);
+        ("message_count", Json_util.int_opt_to_json message_count);
         ("turn_mode", `String (turn_mode_to_string turn_mode));
         ("tool_call_count", `Int tool_call_count);
         ("tools_used", `List (List.map (fun tool -> `String tool) tools_used));

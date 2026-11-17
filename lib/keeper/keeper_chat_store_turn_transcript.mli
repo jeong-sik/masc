@@ -10,8 +10,9 @@
     [transcript_of_messages] and [turn_transcript_to_json] are those of
     [Keeper_chat_projection].
     [load_turn_transcript_result] reads the transcript of a turn page by page.
-    A row must pass [exact_transcript_row_identity] and decode strictly, or the
-    read is an [Error]. It scans the pages twice, from the same first page: once
+    Row identity and typed-field decoding share the original parsed JSON
+    value. Invalid rows make the read an [Error].
+    It scans the pages twice, from the same first page: once
     for the rows of the turn and once for the user rows that belong to it.
     [Keeper_chat_store] includes this module. *)
 open Keeper_chat_types

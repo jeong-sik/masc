@@ -14,6 +14,7 @@ module Position = Keeper_librarian_progress
 module Checkpoint = Keeper_checkpoint_store
 module Memory_lane = Keeper_memory_lane
 module Current = Keeper_memory_os_current
+module Commit = Keeper_librarian_durable_commit
 module Types = Keeper_memory_os_types
 module Capture = Keeper_librarian_durable_request
 module Owner = Lane_addon_tool_request_owner

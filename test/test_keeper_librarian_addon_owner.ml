@@ -1605,7 +1605,7 @@ let replacement_source fixture = fixture.declaration true |> String.split_on_cha
   |> String.concat "\n"
 let replace_admission_configuration fixture ~sw source =
   let export ()=Keeper_librarian_addon.resolve ~config:fixture.config
-    ~reserved:Keeper_librarian_addon.reserved Keeper_librarian_addon.Admission
+    ~reserved:(Keeper_librarian_addon.reserved ()) Keeper_librarian_addon.Admission
     |> Result.map_error Keeper_librarian_addon.unavailable_to_string |> get in
   let old=(export ()).Runtime.instance_id in
   let changed=Eio.Condition.create () in

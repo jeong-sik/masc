@@ -95,5 +95,9 @@ val run_complete_original :
     live-source check and reobserves the same in-flight requests. Only fresh
     admission/new Gate work requires [before_inference]'s actual source and
     anchor check. Changed facts alone never retire pending/unknown work.
+    New step retention additionally requires the ready configured destination
+    to be semantically identical to this actual leaf's captured destination.
+    A replaced semantic configuration waits without retaining another ID;
+    comments/source-byte changes alone do not replace the destination.
     A refused message stops with its actual report; it cannot become a hole.
     No publication, ACK, cleanup or Cut authority is supplied by this API. *)

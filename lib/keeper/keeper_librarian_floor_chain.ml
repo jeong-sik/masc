@@ -55,9 +55,10 @@ let hole_reasons report =
 type mode = Ordinary | Complete_original of {
   source : Memory_runtime.retained_step_source;
   preparation : Memory_runtime.durable_preparation;
+  destination : Durable.destination;
   before_inference : Step.retained_chain_basis -> (unit,string) result;
 }
-type selected_step = Selected of Owner.retained * Step.t | Basis_wait of string
+type selected_step = Selected of Owner.retained * Step.t | Basis_wait of string | Semantic_replaced
 let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~unread_message =
   let keeper_name = Durable.keeper_id owner in
   let* found = Step_owner.discover ~store ~owner |> Result.map_error owner_error in
@@ -122,7 +123,11 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
       let* step = Step.restore ~owner record in
       let* ()=match mode with
         | Ordinary -> Ok ()
-        | Complete_original original -> Memory_runtime.validate_retained_durable_step
+        | Complete_original original ->
+          let* ()=require (Lane_addon_captured_destination.same_semantic
+            original.destination (Step.destination step))
+            "Retained floor step differs from its original leaf's semantic destination" in
+          Memory_runtime.validate_retained_durable_step
             ~source:original.source ~original:original.preparation (Step.step step) in
       let* () = Memory_runtime.require_counterpart_template (Step.step step).preparation in
       let* () = Step.matches_question question step in
@@ -136,6 +141,14 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
        | Error detail -> Ok (Basis_wait detail)
        | Ok () ->
       Edge.with_destination ~config ~reserved (fun destination ->
+        let relation=match mode with
+          | Ordinary -> Lane_addon_captured_destination.Same
+          | Complete_original original -> Lane_addon_captured_destination.relation
+              ~captured:original.destination ~current:destination in
+        match relation with
+        | Lane_addon_captured_destination.Replaced -> Ok Semantic_replaced
+        | Other_owner -> Error "Retained floor destination belongs to another original owner"
+        | Same ->
         let context : Memory_runtime.durable_step_context =
           {previous_state = question.previous_state; unread_messages = question.unread_messages} in
         let* preparation=match mode with
@@ -166,6 +179,8 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
       (match selected with
        | Basis_wait detail -> Ok (Pending (Keeper_librarian_pending.Message_floor
            {request_id=range.request_id;detail}))
+       | Semantic_replaced -> Ok (Pending (Keeper_librarian_pending.Publication
+           {request_id=range.request_id;detail="Retained floor leaf's semantic configuration was replaced"}))
        | Selected (record,step) ->
       let* outcome = Step_owner.resume_with_admission ~before_admission:(fun () ->
         before_inference () |> Result.map_error (fun detail -> Step_owner.Unavailable detail))
@@ -228,7 +243,8 @@ let run_complete_original ~store ~config ~reserved ~original ~fresh ~before_infe
   let* source_basis_digest=Durable.source_basis_digest original in
   let source : Memory_runtime.retained_step_source = {request_id=Durable.request_id original;
     request_digest=Durable.body_digest original;source_basis_digest} in
-  let mode=Complete_original {source;preparation=Durable.preparation original;before_inference} in
+  let mode=Complete_original {source;preparation=Durable.preparation original;
+    destination=Durable.destination original;before_inference} in
   let range : Step.link = {request_id=source.request_id;request_digest=source.request_digest} in
   let* outcome,basis,transaction_id=run_with ~mode ~store ~config ~reserved
     ~owner:(Durable.physical_owner original) ~range

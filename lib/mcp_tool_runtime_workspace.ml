@@ -110,7 +110,17 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
           match Mcp_server.validate_workspace_config state cfg with
           | Error error -> Error (Workspace_runtime_failed error)
           | Ok () ->
-            if Workspace.is_initialized cfg then
+            let current = Mcp_server.workspace_config state in
+            (* The workspace this server already serves stays in place. A
+               replacement retires every observer and fleet stream of the
+               scope, so a client joining the same workspace closed every
+               open terminal's live stream (2026-11-17: three closes, each in
+               the second a session's masc_start completed). *)
+            if Workspace.is_initialized cfg
+               && String.equal cfg.base_path current.base_path
+               && String.equal cfg.workspace_path current.workspace_path
+            then Ok current
+            else if Workspace.is_initialized cfg then
               activate_workspace state cfg
             else begin
               let _msg = Workspace.init cfg ~agent_name:None in

@@ -53,6 +53,44 @@ let test_masc_start_tilde_rejects_empty_initial_home () =
         (String_util.contains_substring message "HOME is required to expand '~'"))
 ;;
 
+(* Joining the workspace the server already serves keeps its scope: a
+   replacement would close every terminal's observer stream. *)
+let test_masc_start_on_the_active_workspace_keeps_its_scope () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = Cases.temp_dir "mcp-start-same-scope-" in
+  Fun.protect
+    ~finally:(fun () -> Cases.cleanup_dir base_path)
+    (fun () ->
+      let fixture =
+        Cases.make_fixture
+          sw
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~fs:(Eio.Stdenv.fs env)
+          ~net:(Eio.Stdenv.net env)
+          ~mono_clock:(Eio.Stdenv.mono_clock env)
+          (Eio.Stdenv.clock env)
+          ~base_path
+          Cases.Fresh
+      in
+      let state = fixture.state in
+      let active = (Mcp_server.workspace_config state).Masc.Workspace.workspace_path in
+      let start () =
+        Cases.execute_tool fixture ~name:"masc_start"
+          ~arguments:(`Assoc [ "path", `String active ])
+      in
+      Alcotest.(check bool) "first join" true (Tool_result.is_success (start ()));
+      let before = Mcp_server.workspace_scope state in
+      Alcotest.(check bool) "second join" true (Tool_result.is_success (start ()));
+      Alcotest.(check bool) "same scope epoch" true
+        (Mcp_server.Workspace_scope_epoch.equal before.epoch
+           (Mcp_server.workspace_scope state).epoch);
+      Alcotest.(check bool) "scope not retired" false
+        (Eio.Promise.is_resolved (Mcp_server.workspace_scope_replaced before)))
+;;
+
 (* RFC-0393 D4: identity uniqueness. A name that already names a Keeper is
    refused at the join boundary — an external agent binding under it would
    poison every ledger attribution for that Keeper. *)
@@ -871,6 +909,10 @@ let () =
             "workspace replacement wakes waiters across racing updates"
             `Quick
             test_workspace_scope_replacement_waiters_and_racing_updates
+        ; Alcotest.test_case
+            "keeps the scope when joining the active workspace"
+            `Quick
+            test_masc_start_on_the_active_workspace_keeps_its_scope
         ; Alcotest.test_case
             "rejects tilde expansion when initial HOME is empty"
             `Quick

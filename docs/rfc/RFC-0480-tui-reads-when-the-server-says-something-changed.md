@@ -1,9 +1,9 @@
 ---
 rfc: "0480"
 title: "TUI 는 2초마다 다시 읽지 않고, 서버가 바뀌었다고 알릴 때 읽는다"
-status: Draft
+status: Implemented (주기 읽기와 --refresh 제거 #48677, 2026-11-06)
 created: 2026-11-02
-updated: 2026-11-07
+updated: 2026-11-17
 author: vincent + claude
 supersedes: []
 superseded_by: null

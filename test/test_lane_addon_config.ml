@@ -742,6 +742,29 @@ let operator_asks_are_a_package_declaration () = with_directory (fun _root packa
     check bool ("world.asks refuses " ^ table) true (Result.is_error (Config.load_file ~path)))
     [ "operator = \"yes\"\n"; "operator = true\nkeeper = true\n" ])
 
+(* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1. *)
+let host_request_pages_are_a_package_declaration () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "quiz.toml" in
+  write path (declaration msx_binding);
+  let with_world world = write manifest (package () ^ "\n[world]\n" ^ world) in
+  with_world "[world.asks]\noperator = true\n";
+  let initial = unwrap (Config.load_file ~path) in
+  check bool "a package without the key answers once" true
+    (initial.package.host_request_listing = Lane_addon_types.One_answer);
+  check bool "and its package value carries no host_request_pages key" true
+    (Yojson.Safe.Util.member "host_request_pages" (Lane_addon_types.package_to_json initial.package) = `Null);
+  with_world "host_request_pages = true\n[world.asks]\noperator = true\n";
+  let paged = unwrap (Config.load_file ~path) in
+  check bool "host_request_pages = true answers in pages" true
+    (paged.package.host_request_listing = Lane_addon_types.Pages);
+  check bool "and changes the configuration identity" false (initial.revision = paged.revision);
+  List.iter (fun (label, world) ->
+    with_world world;
+    check bool label true (Result.is_error (Config.load_file ~path)))
+    [ "a value that is not a boolean", "host_request_pages = \"yes\"\n[world.asks]\noperator = true\n"
+    ; "pages without a host request", "host_request_pages = true\n" ])
+
 let exact_outputs_are_package_schemas () = with_directory (fun root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "quiz.toml" in
@@ -1314,6 +1337,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "tool hooks are selectable per installation and revisioned" `Quick tool_hooks_are_selected_and_revisioned;
      test_case "exact outputs are package schemas in the configuration identity" `Quick exact_outputs_are_package_schemas;
      test_case "operator asks are a package declaration" `Quick operator_asks_are_a_package_declaration;
+     test_case "host request pages are a package declaration" `Quick host_request_pages_are_a_package_declaration;
      test_case "exact outputs are selectable independently from tool hooks" `Quick exact_outputs_are_selected_independently;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;

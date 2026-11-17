@@ -1,8 +1,9 @@
 (** What a package lists through [lane_host_requests] and what it answers
     through [lane_host_result] (RFC operator-quiz §4.4). The request kinds are
     a closed set. A listing with a kind this host does not have, a malformed
-    request or a request id listed twice is refused whole: the host cannot
-    tell which part the package meant. *)
+    request, a request id listed twice, or a page whose ids do not rise
+    above its cursor is refused whole: the host cannot tell which part the
+    package meant. *)
 
 type t =
   | Exact_output of Lane_addon_exact.request
@@ -32,20 +33,19 @@ val request_id : t -> string
 val to_json : t -> Yojson.Safe.t
 (** Exact request identity retained with an oversized result. *)
 
-type listing = { requests : t list; next : string option }
-(** One page of what a worker waits for, in the package's order. [next] is
-    present when the worker has more to list after this page: the value the
-    host passes back as [after] to read the page that follows. A worker that
-    lists everything in one answer never sends it. *)
+val listing_of_json : Yojson.Safe.t -> (t list, string) result
+(** {!Lane_addon_types.One_answer}: exactly [{"requests": [...]}], in the
+    package's order, with no request id twice. *)
 
-val listing_of_json : Yojson.Safe.t -> (listing, string) result
-(** Exactly [{"requests": [...]}], or [{"requests": [...], "next": name}] with
-    a non-empty [name] and at least one request. No request id appears twice
-    in a page. *)
+val page_of_json : after:string option -> Yojson.Safe.t -> (t list, string) result
+(** {!Lane_addon_types.Pages}: exactly [{"requests": [...]}], one page read
+    after the cursor [after]. Request ids rise strictly in byte order
+    ([String.compare]), the first one above [after]. An empty page ends the
+    listing. *)
 
 val listing_arguments : after:string option -> Yojson.Safe.t
-(** The [lane_host_requests] arguments: [{}] for the first page and
-    [{"after": name}] for the page after the one that answered [name]. *)
+(** The [lane_host_requests] arguments: [{}] for the first page, and
+    [{"after": id}] for the page after the one whose last request had [id]. *)
 
 val result_arguments : request_id:string -> result:Yojson.Safe.t -> Yojson.Safe.t
 (** The [lane_host_result] arguments for one delivered result. *)

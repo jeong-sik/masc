@@ -22,6 +22,26 @@ let test_a_listing_is_refused_whole () =
     ; "not an object", `List [] ];
   check bool "an empty listing is a listing" true (Host.listing_of_json (`Assoc [ "requests", `List [] ]) = Ok [])
 
+(* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1. *)
+let test_a_page_rises_above_its_cursor () =
+  let page ids = `Assoc [ "requests", `List (List.map exact ids) ] in
+  let read ~after json = Result.map (List.map Host.request_id) (Host.page_of_json ~after json) in
+  let pages = result (list string) string in
+  check pages "the first page" (Ok [ "a"; "b" ]) (read ~after:None (page [ "a"; "b" ]));
+  check pages "a page after a cursor" (Ok [ "c" ]) (read ~after:(Some "b") (page [ "c" ]));
+  check pages "an empty page" (Ok []) (read ~after:(Some "c") (page []));
+  check pages "byte order, not length" (Ok [ "9" ]) (read ~after:(Some "10") (page [ "9" ]));
+  check pages "byte order beyond ASCII" (Ok [ "\xc3\xa9" ]) (read ~after:(Some "z") (page [ "\xc3\xa9" ]));
+  List.iter (fun (label, after, json) -> check bool label true (Result.is_error (Host.page_of_json ~after json)))
+    [ "ids out of order", None, page [ "b"; "a" ]
+    ; "a request id listed twice", None, page [ "a"; "a" ]
+    ; "the cursor itself", Some "b", page [ "b"; "c" ]
+    ; "an id below the cursor", Some "b", page [ "a" ]
+    ; "a key beside requests", None, `Assoc [ "requests", `List [ exact "a" ]; "next", `String "a" ] ];
+  check bool "the first page is asked with no arguments" true (Host.listing_arguments ~after:None = `Assoc []);
+  check bool "the page after an id is asked with that id" true
+    (Host.listing_arguments ~after:(Some "b") = `Assoc [ "after", `String "b" ])
+
 let test_a_read_request_is_strict () =
   let read fields = `Assoc [ "requests", `List [ `Assoc (("kind", `String "read_records") :: fields) ] ] in
   (match Host.listing_of_json (read [ "request_id", `String "r"; "source_id", `String "board"; "after", `Null ]) with
@@ -127,6 +147,7 @@ let () =
     [ ( "protocol"
       , [ test_case "a listing keeps the package order" `Quick test_a_listing_keeps_the_package_order
         ; test_case "a listing is refused whole" `Quick test_a_listing_is_refused_whole
+        ; test_case "a page rises above its cursor" `Quick test_a_page_rises_above_its_cursor
         ; test_case "a read request is strict" `Quick test_a_read_request_is_strict
         ; test_case "a file request is strict" `Quick test_a_file_request_is_strict
         ; test_case "question requests are strict" `Quick test_question_requests_are_strict

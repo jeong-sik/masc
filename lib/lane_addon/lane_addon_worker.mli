@@ -105,10 +105,9 @@ val call_exported_tool : ?on_result:(Mcp_protocol.Mcp_types.tool_result -> unit)
     before output validation. It is not publication of a validated result. *)
 
 val host_requests : t -> after:string option -> (Yojson.Safe.t, error) result
-(** Calls [lane_host_requests] for one page and returns its structured
-    content, undecoded: the first page with [None], the page after the one
-    that answered [next] with [Some next]
-    ({!Lane_addon_host_request.listing_arguments}). *)
+(** Calls [lane_host_requests] once and returns its structured content,
+    undecoded: [None] asks for the first answer, [Some id] for the page after
+    request [id] ({!Lane_addon_host_request.listing_arguments}). *)
 
 val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
 (** Calls [lane_host_result]. After dispatch, a transport failure does not

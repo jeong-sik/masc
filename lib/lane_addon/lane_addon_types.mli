@@ -72,6 +72,18 @@ type exact_output = { name : string; schema : Yojson.Safe.t; request_schema : re
     request schema as the model requirement, with a partial required-shape check;
     the consumer owns complete validation of that schema before acting. *)
 
+type host_request_listing =
+  | One_answer
+      (** [lane_host_requests] takes no argument and answers once with the
+          requests the worker waits for (RFC operator-quiz §4.4). *)
+  | Pages
+      (** [[world] host_request_pages = true]: the worker answers one page per
+          call (RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says
+          3.1). A page is exactly [{"requests": [...]}] and lists, in rising
+          request id order, the pending requests after the cursor it was asked
+          with. The host asks for the next page after the last id of each page
+          and stops at an empty page. *)
+
 type package = {
   id : string;
   revision : string;
@@ -110,13 +122,12 @@ type package = {
   (** [[world.web_search] = true]: the package may list secret-free
       web-search requests through its host requests; the host runs its
       existing provider chain and delivers the search envelope. *)
+  host_request_listing : host_request_listing;
+  (** How the worker answers [lane_host_requests]. *)
 }
 val host_requests_tool : string
-(** [lane_host_requests]: the worker lists every request it waits for
-    (RFC operator-quiz §4.4). An answer that cannot carry them all names
-    where the next page starts, and the host reads that page with it (RFC
-    librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1). A
-    worker that names no next page lists everything in one answer. *)
+(** [lane_host_requests]: the worker lists the requests it waits for, in the
+    package's {!host_request_listing}. *)
 val operator_tool : string
 (** Reserved private operator port. Cannot be an export or an action tool. *)
 

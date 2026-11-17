@@ -23,9 +23,9 @@ type 'halt step =
   | Beside of 'halt run  (** Runs in its own fiber. *)
 
 type ('request, 'halt) listing =
-  | Last of 'request list  (** The page that ends the listing. *)
-  | More of 'request list * (unit -> (('request, 'halt) listing, 'halt) result)
-      (** A page and how to read the one after it. *)
+  | Done  (** Nothing more to list. *)
+  | Page of 'request * 'request list * (unit -> (('request, 'halt) listing, 'halt) result)
+      (** A page of one or more requests, and how to read what follows it. *)
 
 val walk :
   max_in_flight:Lane_addon_config.exact_in_flight ->
@@ -36,8 +36,8 @@ val walk :
 (** [step] is asked for each request when the walk reaches it, so it sees
     what earlier requests of the same listing left behind.
 
-    The walk reads the page after a [More] page when it has started that
-    page's last request. The requests it started keep running meanwhile, so
+    The walk reads what follows a [Page] when it has started that page's
+    last request. The requests it started keep running meanwhile, so
     the number running does not fall at a page end. A page that cannot be
     read ends the cycle like a [Halt] at that place.
 

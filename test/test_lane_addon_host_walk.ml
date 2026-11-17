@@ -35,7 +35,11 @@ let body t name work ~running_at_start:(_ : int) =
     result)
 
 let walk_pages ?(propagates = never) n listing = Walk.walk ~max_in_flight:(count n) ~propagates ~step:Fun.id listing
-let walk ?propagates n steps = walk_pages ?propagates n (Walk.Last steps)
+(* One page, then nothing more. *)
+let last = function
+  | [] -> Walk.Done
+  | first :: rest -> Walk.Page (first, rest, fun () -> Ok Walk.Done)
+let walk ?propagates n steps = walk_pages ?propagates n (last steps)
 
 let raised_by run = match run () with
   | (_ : string option) -> None
@@ -45,7 +49,7 @@ let test_one_at_a_time_keeps_listing_order = in_eio (fun () ->
   let t = trace () in
   let yielding () = Eio.Fiber.yield (); Ok () in
   let halted = Walk.walk ~max_in_flight:Config.one_exact_at_a_time ~propagates:never ~step:Fun.id
-      (Walk.Last [ Walk.Beside (body t "a" yielding); Walk.Here (body t "b" yielding); Walk.Skip
+      (last [ Walk.Beside (body t "a" yielding); Walk.Here (body t "b" yielding); Walk.Skip
                  ; Walk.Beside (body t "c" yielding); Walk.Here (body t "d" yielding) ]) in
   check (option string) "no halt" None halted;
   check (list string) "each request ends before the next starts"
@@ -170,8 +174,8 @@ let test_the_running_count_does_not_fall_at_a_page_end = in_eio (fun () ->
   let halted = ref None in
   Eio.Fiber.both
     (fun () -> halted := walk_pages 2
-      (Walk.More ([ request "a" (fun () -> Eio.Promise.await released; Ok ()) ],
-         then_page t "page 2" (Ok (Walk.Last [ request "b" (fun () -> Ok ()) ])))))
+      (Walk.Page (request "a" (fun () -> Eio.Promise.await released; Ok ()), [],
+         then_page t "page 2" (Ok (last [ request "b" (fun () -> Ok ()) ])))))
     (fun () -> Eio.Promise.resolve release ());
   check (option string) "no halt" None !halted;
   check (list string) "the next page is read and its request starts while the first still runs"
@@ -183,9 +187,9 @@ let test_a_full_count_reads_the_next_page_after_a_place_is_free = in_eio (fun ()
   let t = trace () in
   let yielding () = Eio.Fiber.yield (); Ok () in
   let halted = walk_pages 1
-    (Walk.More ([ Walk.Beside (body t "a" yielding) ],
-       then_page t "page 2" (Ok (Walk.More ([ Walk.Beside (body t "b" yielding) ],
-         then_page t "page 3" (Ok (Walk.Last []))))))) in
+    (Walk.Page (Walk.Beside (body t "a" yielding), [],
+       then_page t "page 2" (Ok (Walk.Page (Walk.Beside (body t "b" yielding), [],
+         then_page t "page 3" (Ok Walk.Done)))))) in
   check (option string) "no halt" None halted;
   check (list string) "each page is read after the request before it ended"
     [ "start a"; "end a"; "read page 2"; "start b"; "end b"; "read page 3" ] (events t))
@@ -196,7 +200,7 @@ let test_a_page_that_cannot_be_read_halts_there = in_eio (fun () ->
   let halted = ref None in
   Eio.Fiber.both
     (fun () -> halted := walk_pages 2
-      (Walk.More ([ Walk.Beside (body t "a" (fun () -> Eio.Promise.await released; Ok ())) ],
+      (Walk.Page (Walk.Beside (body t "a" (fun () -> Eio.Promise.await released; Ok ())), [],
          then_page t "page 2" (Error "page 2 was not read"))))
     (fun () -> Eio.Promise.resolve release ());
   check (option string) "the page is the halt" (Some "page 2 was not read") !halted;
@@ -205,8 +209,8 @@ let test_a_page_that_cannot_be_read_halts_there = in_eio (fun () ->
 let test_a_halt_reads_no_page_after_it = in_eio (fun () ->
   let t = trace () in
   let halted = walk_pages 2
-    (Walk.More ([ Walk.Here (body t "a" (fun () -> Error "a halted")) ],
-       then_page t "page 2" (Ok (Walk.Last [ Walk.Here (body t "late" (fun () -> Ok ())) ])))) in
+    (Walk.Page (Walk.Here (body t "a" (fun () -> Error "a halted")), [],
+       then_page t "page 2" (Ok (last [ Walk.Here (body t "late" (fun () -> Ok ())) ])))) in
   check (option string) "the halt" (Some "a halted") halted;
   check (list string) "no page is read after it" [ "start a"; "end a" ] (events t))
 
@@ -218,7 +222,7 @@ let test_a_request_halt_comes_before_the_page_after_it = in_eio (fun () ->
   let halted = ref None in
   Eio.Fiber.both
     (fun () -> halted := walk_pages 2
-      (Walk.More ([ Walk.Beside (body t "a" (fun () -> Eio.Promise.await released; Error "a halted")) ],
+      (Walk.Page (Walk.Beside (body t "a" (fun () -> Eio.Promise.await released; Error "a halted")), [],
          then_page t "page 2" (Error "page 2 was not read"))))
     (fun () -> Eio.Promise.resolve release ());
   check (option string) "the request listed first" (Some "a halted") !halted)
@@ -229,7 +233,7 @@ let test_an_exception_reading_a_page_waits_for_the_running_request = in_eio (fun
   let raised = ref None in
   Eio.Fiber.both
     (fun () -> raised := raised_by (fun () -> walk_pages 2
-      (Walk.More ([ Walk.Beside (body t "slow" (fun () -> Eio.Promise.await released; Ok ())) ],
+      (Walk.Page (Walk.Beside (body t "slow" (fun () -> Eio.Promise.await released; Ok ())), [],
          fun () -> note t "read page 2"; failwith "broken page"))))
     (fun () -> Eio.Promise.resolve release ());
   check bool "the exception leaves the walk as itself" true
@@ -243,8 +247,8 @@ let a_stop_on_a_later_page_leaves ~stopping_page = in_eio (fun () ->
   let t = trace () in
   let cancelled = ref false in
   let raised = raised_by (fun () -> walk_pages ~propagates:on_stop 3
-    (Walk.More ([ Walk.Beside (body t "running" (fun () ->
-         try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled _ as exn -> cancelled := true; raise exn)) ],
+    (Walk.Page (Walk.Beside (body t "running" (fun () ->
+         try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled _ as exn -> cancelled := true; raise exn)), [],
        stopping_page t))) in
   check bool "it leaves as itself" true (match raised with Some Stop -> true | Some _ | None -> false);
   check bool "the running request is cancelled" true !cancelled)
@@ -253,7 +257,7 @@ let test_a_stop_while_reading_a_page_leaves =
   a_stop_on_a_later_page_leaves ~stopping_page:(fun _t () -> raise Stop)
 let test_a_stop_from_a_request_of_a_later_page_leaves =
   a_stop_on_a_later_page_leaves ~stopping_page:(fun t ->
-    then_page t "page 2" (Ok (Walk.Last [ Walk.Here (body t "stopping" (fun () -> raise Stop)) ])))
+    then_page t "page 2" (Ok (last [ Walk.Here (body t "stopping" (fun () -> raise Stop)) ])))
 
 let () =
   run "lane_addon_host_walk"

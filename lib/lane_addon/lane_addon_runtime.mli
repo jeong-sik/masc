@@ -594,9 +594,9 @@ module For_testing : sig
     list_requests : after:string option -> (Yojson.Safe.t, string) result;
     deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
   }
-  (** A worker's private host request tools. [list_requests] reads one page:
-      the first with [None], the page after the one that named [next] with
-      [Some next]. *)
+  (** A worker's private host request tools. [list_requests] reads one answer:
+      the first with [None]. A {!Lane_addon_types.Pages} worker is asked with
+      [Some id] for the page after the one whose last request had [id]. *)
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;

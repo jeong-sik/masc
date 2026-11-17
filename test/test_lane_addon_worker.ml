@@ -363,6 +363,7 @@ let package directory mode : Types.package = {
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled; exact_outputs = []; tool_hooks = []; operator_asks = false; web_search = false; worker_service=Types.Mcp_tools;
+  host_request_listing = Types.One_answer;
 }
 
 let container package = match Types.container package with Ok value -> value | Error detail -> fail detail

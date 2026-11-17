@@ -3768,18 +3768,27 @@ let test_startup_requeues_exact_native_call () =
       ~on_turn_slot_released:None ~keeper_name:"native-restart"
       ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
     check int "witnessed native operation not interrupted" 0 (List.length (Owner.failed_operations_at_start owner));
+    let writer label expected =
+      match Owner.native_call_writer owner ~call_id:call.call_id |> owner_ok, expected with
+      | Owner.Writer_exited, Owner.Writer_exited | Owner.Writer_unproven, Owner.Writer_unproven -> ()
+      | Owner.Writer_exited, Owner.Writer_unproven | Owner.Writer_unproven, Owner.Writer_exited ->
+        fail label in
+    writer "a call settlement has not requeued is not proven exited" Owner.Writer_unproven;
     (* The Owner keeps an Active call Running until its journal has been read.
        A journal that holds no terminal puts the operation back in the queue. *)
     check int "a journal without a terminal interrupts nothing" 0
-      (List.length (Owner.complete_restart_settlement owner ~journal_terminal:(fun _ -> Ok None) |> owner_ok));
+      (List.length (Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_exited
+         ~journal_terminal:(fun _ -> Ok None) |> owner_ok));
     let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
     check bool "Owner claims original operation" true (Chat_operation.Operation_id.equal operation_id resumed.operation_id);
     check bool "Owner preserves input" true (operation.input = resumed.input);
     let observed = Owner.direct_native_call owner ~operation_id |> owner_ok in
     check bool "Owner restores exact native witness" true
       (Keeper_native_call.equal_state observed (Keeper_native_call.Active call));
+    writer "a call requeued after its writers exited answers Writer_exited" Owner.Writer_exited;
     Owner.bind_direct_native_call owner ~operation_id ~execution_digest:operation.execution_digest
       ~observed ~call |> owner_ok;
+    writer "binding the resumed call makes this process its writer" Owner.Writer_unproven;
     let advanced_checkpoint = Keeper_checkpoint_ref.of_persisted
       ~trace_id:checkpoint.trace_id ~turn_count:2
       ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "native progress after restart") |> Result.get_ok in
@@ -3802,6 +3811,47 @@ let test_startup_requeues_exact_native_call () =
     ignore (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"native-owner-receipt" |> owner_ok);
     check bool "Owner receipt retires native witness" true
       (Keeper_native_call.equal_state Keeper_native_call.No_native_call (Owner.direct_native_call owner ~operation_id |> owner_ok)))
+;;
+
+let test_startup_settlement_with_unproven_writers_keeps_calls_unproven () =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file "keeper-owner-native-unproven-" ".sqlite3" in
+  Unix.unlink path;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path) (fun () ->
+    let operation_id = operation_id "kmsg-native-restart-unproven" in
+    let seed = Keeper_chat_operation_store.open_or_create ~path |> Result.get_ok in
+    ignore (Keeper_chat_operation_store.submit seed ~now:10. ~operation_id
+      ~source:operation_source ~input:(operation_input "native input") |> Result.get_ok);
+    let operation = Keeper_chat_operation_store.claim_next seed ~now:11. |> Result.get_ok |> Option.get in
+    let checkpoint = Keeper_checkpoint_ref.of_persisted
+      ~trace_id:(Keeper_id.Trace_id.of_string "native-owner-unproven-trace" |> Result.get_ok)
+      ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "unproven seed") |> Result.get_ok in
+    let locator = Agent_core.Agent.execution_locator_of_yojson
+      (`Assoc ["version", `Int 1; "run_id", `String "execution-run-native-unproven"]) |> Result.get_ok in
+    let call = Keeper_native_call.create
+      ~call_id:"019a0010-1000-7000-8000-000000000011" ~runtime_id:"native.primary"
+      ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
+      ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
+    Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
+      ~execution_digest:operation.execution_digest
+      (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok;
+    Keeper_chat_operation_store.close seed |> Result.get_ok;
+    Eio.Switch.run @@ fun sw ->
+    let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
+      ~now:(fun () -> 20.) ~operation_runner:None ~on_turn_slot_released:None
+      ~keeper_name:"native-restart-unproven"
+      ~initial_meta:(Some (make_meta "native-restart-unproven")) |> owner_ok in
+    check int "the call is requeued, not interrupted" 0
+      (List.length (Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_unproven
+         ~journal_terminal:(fun _ -> Ok None) |> owner_ok));
+    let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+    check bool "Owner claims the requeued operation" true
+      (Chat_operation.Operation_id.equal operation_id resumed.operation_id);
+    match Owner.native_call_writer owner ~call_id:call.call_id |> owner_ok with
+    | Owner.Writer_unproven -> ()
+    | Owner.Writer_exited -> fail "a pool that may share this process with the writer proved it exited")
 ;;
 
 let test_startup_interrupts_running_without_requeue () =
@@ -7337,6 +7387,8 @@ let () =
             `Quick
             test_startup_interrupts_running_without_requeue
         ; test_case "native restart and stale callback preserve Owner progress" `Quick test_startup_requeues_exact_native_call
+        ; test_case "restart settlement with unproven writers keeps calls unproven" `Quick
+            test_startup_settlement_with_unproven_writers_keeps_calls_unproven
         ; test_case "operation id stop leaves an autonomous slot holder alone" `Quick
             test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone
         ; test_case

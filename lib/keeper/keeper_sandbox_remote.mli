@@ -339,6 +339,60 @@ type execution_observation =
 
 val execution_observation_to_yojson : execution_observation -> Yojson.Safe.t
 
+(** Internal preparation/ownership port shared by the interactive runner.
+    A prepared request is bound to its endpoint; its carrier, payload argv,
+    mode, environment, cwd and jail do not change while waiting for a lease. *)
+module Stdio_request : sig
+  type endpoint = t
+  type t
+
+  type refusal =
+    | Guest_agent_unavailable
+    | Docker_unavailable
+    | Mode_unavailable of string
+    | Invalid_request of string
+    | Probe_unavailable of string
+    | Interactive_unavailable of
+        { major : Exec_ssh_protocol.major; capabilities : string list }
+
+  val prepare :
+    ?mode:Exec_ssh_protocol.mode -> timeout_sec:float -> endpoint ->
+    argv:string list -> env:string array -> cwd:string option ->
+    (t, refusal) result
+  (** Pure capture and protocol validation, including a finite positive timeout.
+      Unsupported guest-agent and Docker
+      carriers are refused before probing or spawning. No carrier fallback. *)
+
+  type launch = private
+    { argv : string list
+    ; env : string array
+    ; frame : string
+    ; budget_sec : float
+    ; acceptance_frame : bool
+    }
+
+  val with_lease : t -> (launch -> 'a) -> ('a, refusal) result
+  (** Holds this endpoint's shared session lease through callback completion
+      and its process cleanup. Requires a decoded V3 probe with the exact
+      interactive-stdin capability; a failed probe never assumes a version.
+      The launch environment is a fresh copy of the prepared snapshot. *)
+
+  type completion =
+    { dispatch : dispatch_record
+    ; execution : execution_observation
+    }
+
+  val complete :
+    t -> status:Unix.process_status -> raw_stderr:string ->
+    prior:execution_observation -> completion
+  (** Settle this invocation's actual carrier status and final shim trailer.
+      The trailer major and any execution receipt mode must match the captured
+      request. A mismatch leaves execution unavailable and records a trailer
+      disagreement, never evidence that the requested sandbox was applied. *)
+
+  val record_incomplete : t -> failure:dispatch_failure -> detail:string -> unit
+end
+
 type stdout_mode = Text_paths | Binary_bytes
 (** Binary_bytes collects raw stdout chunks without text capture limits or path rewriting. *)
 
@@ -359,7 +413,9 @@ val runner :
     remote payload timeout.
 
     [on_receipt] receives only this runner call's response evidence. The caller
-    owns its collection; endpoint-wide [last_dispatch] is never consulted. *)
+    owns its collection; endpoint-wide [last_dispatch] is never consulted.
+    Final control frames are retained independently of the bounded payload
+    stderr preview, so a large Observe receipt is not parsed from clipped text. *)
 
 val bootstrap_keeper_control_root :
   timeout_sec:float -> t -> Masc_exec.Sandbox_target.run_outcome

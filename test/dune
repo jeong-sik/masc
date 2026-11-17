@@ -5901,6 +5901,7 @@
  (libraries alcotest shim_clock unix))
 
 (include stanzas/test_process_eio_stdio.inc)
+(include stanzas/test_keeper_sandbox_remote_stdio.inc)
 
 (test
  (name test_keeper_sandbox_ssh)

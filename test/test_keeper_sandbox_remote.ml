@@ -49,6 +49,11 @@ let read_file path =
     (fun () -> really_input_string ic (in_channel_length ic))
 ;;
 
+let large_observations () = List.init 40000 (fun _ -> 41)
+let rs_payload () = "guest\x1e" ^ String.make 70000 'p' ^ "\x1eend"
+let large_refusal () =
+  String.make (Common.max_process_capture_head_bytes + Common.max_process_capture_tail_bytes + 1) 'x'
+
 let stub_main () =
   let frame_path = Sys.argv.(2) in
   let mode = Sys.argv.(3) in
@@ -69,7 +74,10 @@ let stub_main () =
        args
   then (
     let capabilities =
-      if String.equal mode "probe-observe" then [ Exec_ssh_protocol.observe_capability ]
+      if List.mem mode ["accept-large-observe"; "accept-large-refusal"] then
+        [Exec_ssh_protocol.interactive_stdin_capability;
+         Exec_ssh_protocol.request_acceptance_capability]
+      else if String.equal mode "probe-observe" then [ Exec_ssh_protocol.observe_capability ]
       else if String.starts_with ~prefix:"accept-" mode
       then [ Exec_ssh_protocol.request_acceptance_capability ]
       else []
@@ -116,6 +124,23 @@ let stub_main () =
   let half s = String.sub s 0 (String.length s / 2) in
   let after_half s = String.sub s (String.length s / 2) (String.length s - String.length s / 2) in
   match mode with
+  | "accept-large-observe" | "accept-large-refusal" ->
+    let refused = String.equal mode "accept-large-refusal" in
+    let execution_receipt : Exec_ssh_protocol.execution_receipt =
+      {mode=request.mode;boundary=(if refused then Refused else Sandbox_applied)} in
+    let result = Exec_ssh_protocol.render_trailer ~execution_receipt
+        {v;exit=(if refused then None else Some 3);signal=None;timed_out=false;
+         shim_error=(if refused then Some (large_refusal ()) else None);
+         observed_syscalls=large_observations ()} in
+    write_all Unix.stderr (acceptance ^ rs_payload ());
+    (* Split real rendered control bytes across transport writes. *)
+    let rec write offset =
+      if offset < String.length result then (
+        let length = min 4093 (String.length result - offset) in
+        write_all Unix.stderr (String.sub result offset length);
+        write (offset + length)) in
+    write 0;
+    exit (if refused then 1 else 0)
   | "accept-ok" ->
     write_all Unix.stdout "guest-out";
     write_all Unix.stderr (acceptance ^ "guest-err" ^ trailer ~exit:3 ());
@@ -1740,6 +1765,117 @@ let test_acceptance_evidence_stays_with_an_unknown_effect () =
     ; "die", Keeper_sandbox_remote.Acceptance_not_asked, "not_asked" ]
 ;;
 
+let check_large_receipt observed ~refused =
+  let receipt, trailer = match observed with
+    | [Keeper_sandbox_remote.Execution_observed (receipt, trailer)] -> receipt, trailer
+    | [Keeper_sandbox_remote.Execution_unavailable _] | [] | _ :: _ :: _ ->
+      fail "large control frame lost its execution receipt"
+  in
+    check bool "complete observed syscall list" true
+      (trailer.observed_syscalls = large_observations ());
+    check bool "receipt retains requested mode and actual boundary" true
+      (receipt = Exec_ssh_protocol.{mode=Observe;
+        boundary=(if refused then Refused else Sandbox_applied)});
+    if refused then check (option int) "large refusal is complete"
+      (Some (String.length (large_refusal ()))) (Option.map String.length trailer.shim_error)
+
+let test_large_trailer_is_separate_from_payload_preview () =
+  with_eio @@ fun () ->
+  List.iter (fun refused ->
+    let base_path = temp_dir () in
+    let mode = if refused then "accept-large-refusal" else "accept-large-observe" in
+    let cli, _ = make_stub ~dir:base_path ~mode in
+    let observed = ref [] and streamed = Buffer.create 32 in
+    let state = make_state ~base_path ~cli in
+    let runner = Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe
+        ~on_receipt:(fun receipt -> observed := receipt :: !observed)
+        ~timeout_sec:10. state in
+    let result = runner ~on_stdout_chunk:None
+        ~on_stderr_chunk:(Some (Buffer.add_string streamed))
+        ~stdin_content:None ~argv:["/bin/true"] ~env:[||] ~cwd:None in
+    (match refused, result with
+     | false, Masc_exec.Sandbox_target.Ran {status;stderr;_} ->
+       check status_testable "actual payload exit" (Unix.WEXITED 3) status;
+       check string "payload result contains no control JSON" (rs_payload ()) stderr
+     | true, Masc_exec.Sandbox_target.Transport_failed {failure;_} ->
+       check bool "refused lane" true (failure=Masc_exec.Sandbox_target.Lane_unavailable)
+     | true, Masc_exec.Sandbox_target.Ran _
+     | false, Masc_exec.Sandbox_target.Transport_failed _ ->
+       fail "large trailer changed the completion classification");
+    check string "stream contains exactly payload RS bytes" (rs_payload ()) (Buffer.contents streamed);
+    check_large_receipt !observed ~refused)
+    [false;true]
+
+let test_interactive_large_observe_trailer_is_retained () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"accept-large-observe" in
+  let endpoint = make_state ~base_path ~cli in
+  let prepared = match Keeper_sandbox_remote.Stdio_request.prepare
+      ~mode:Exec_ssh_protocol.Observe ~timeout_sec:10. endpoint
+      ~argv:["/bin/true"] ~env:[||] ~cwd:None with
+    | Ok prepared -> prepared | Error _ -> fail "interactive fixture preparation failed" in
+  let observed = ref [] and streamed = Buffer.create 32 in
+  let result = Keeper_sandbox_remote_stdio.with_stdio prepared
+      ~on_dispatch:(fun () -> Ok ())
+      ~on_receipt:(fun receipt -> observed := receipt :: !observed)
+      ~on_stderr_chunk:(Buffer.add_string streamed) ~on_stdout_tail:ignore
+      (fun ~input:_ ~output:_ -> ()) in
+  (match result with
+   | Ok ((), completion) ->
+     (match completion.dispatch with
+      | Keeper_sandbox_remote.Payload_finished {status;_} ->
+        check status_testable "interactive actual exit" (Unix.WEXITED 3) status
+      | Keeper_sandbox_remote.Dispatch_failed _ -> fail "interactive large trailer failed")
+   | Error _ -> fail "interactive large trailer failed");
+  check string "interactive stream excludes all control bytes" (rs_payload ()) (Buffer.contents streamed);
+  check_large_receipt !observed ~refused:false
+
+exception Stderr_callback_failed
+
+let test_callback_failure_does_not_discard_received_control () =
+  let module Stderr = Keeper_sandbox_remote_stderr in
+  let trailer = Exec_ssh_protocol.render_trailer
+      {v=V3;exit=Some 3;signal=None;timed_out=false;shim_error=None;observed_syscalls=[]} in
+  let state = Stderr.create ~acceptance_frame:false ~on_accepted:ignore
+      ~callback:(fun _ -> raise Stderr_callback_failed) () in
+  (match Stderr.stream_chunk state ("payload" ^ trailer) with
+   | () -> fail "callback failure disappeared"
+   | exception Stderr_callback_failed -> ());
+  check string "already-received control survives callback failure" trailer (Stderr.tail state)
+
+let test_finite_callback_failure_keeps_payload_and_receipt () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"accept-large-observe" in
+  let observed = ref [] and called = ref false in
+  let runner = Keeper_sandbox_remote.runner ~mode:Exec_ssh_protocol.Observe
+      ~on_receipt:(fun receipt -> observed := receipt :: !observed)
+      ~timeout_sec:10. (make_state ~base_path ~cli) in
+  let result = runner ~on_stdout_chunk:None
+      ~on_stderr_chunk:(Some (fun _ -> called := true; raise Stderr_callback_failed))
+      ~stdin_content:None ~argv:["/bin/true"] ~env:[||] ~cwd:None in
+  (match result with
+   | Masc_exec.Sandbox_target.Ran {status;stderr;_} ->
+     check status_testable "actual exit despite callback failure" (Unix.WEXITED 3) status;
+     check string "preview retains all payload despite callback failure" (rs_payload ()) stderr
+   | Masc_exec.Sandbox_target.Transport_failed _ ->
+     fail "finite callback error changed established process-collector behavior");
+  check bool "callback did fail" true !called;
+  check_large_receipt !observed ~refused:false
+
+let test_missing_carrier_keeps_transport_diagnostic () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"exit3" in
+  Unix.unlink cli;
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec:2. (make_state ~base_path ~cli) in
+  match runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+      ~argv:["/bin/true"] ~env:[||] ~cwd:None with
+  | Masc_exec.Sandbox_target.Transport_failed {stderr;_} ->
+    check bool "missing carrier cause remains visible" true (contains cli stderr)
+  | Masc_exec.Sandbox_target.Ran _ -> fail "missing carrier became a payload result"
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--container-stub"
   then stub_main ()
@@ -1754,6 +1890,16 @@ let () =
               test_acceptance_frame_is_asked_only_of_a_shim_that_advertises_it
           ; test_case "the acceptance frame never reaches the payload stderr" `Quick
               test_acceptance_frame_never_reaches_the_payload_stderr
+          ; test_case "large control frame is separate from payload preview" `Quick
+              test_large_trailer_is_separate_from_payload_preview
+          ; test_case "interactive Observe retains the complete large trailer" `Quick
+              test_interactive_large_observe_trailer_is_retained
+          ; test_case "callback failure preserves already-received control" `Quick
+              test_callback_failure_does_not_discard_received_control
+          ; test_case "finite callback failure preserves payload and receipt" `Quick
+              test_finite_callback_failure_keeps_payload_and_receipt
+          ; test_case "missing carrier retains transport diagnostics" `Quick
+              test_missing_carrier_keeps_transport_diagnostic
           ; test_case "a transport line ahead of the frame stays" `Quick
               test_a_transport_line_ahead_of_the_frame_stays_and_the_frame_goes
           ; test_case "a frame past the bound is the same on both paths" `Quick

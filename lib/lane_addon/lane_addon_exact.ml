@@ -1346,9 +1346,10 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
           Eio.Fiber.check ();
           match authorization.before_dispatch () with
           | Error Declaration_replaced ->
-            (* The request has no result and no open attempt, and no later run
-               can be granted under the declaration it was captured for. End
-               it; its consumer asks again under the declaration of now. *)
+            (* The request has no result and no open attempt, and the
+               declaration it was captured for was replaced. End it: an ended
+               request stays ended when that declaration is put back, and its
+               consumer asks again under the declaration of now. *)
             let refusal=Not_allowed {reason=Replaced_declaration} in
             let* ()=save {previous with final=Some refusal} in
             Ok (Final refusal)
@@ -1363,7 +1364,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
              proof. It is written when the call reaches its first generation
              dispatch: after any provider admission wait, before the request
              is sent. A call cut off while it waited leaves no marker, so the
-             next run tries the request again. *)
+             next run reads the guard for the request again. *)
           let started = ref false and marker_failure = ref None in
           let mark_started () =
             if !started then Ok ()

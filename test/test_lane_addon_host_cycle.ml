@@ -237,7 +237,8 @@ let test_original_exact_semantic_dispatch_authority () =
     check bool "Off is not a replacement: the original waits" true (waits (guard ()));
     write source declaration;
     check bool "On restores the same semantic original" true (Result.is_ok (guard ()));
-    write source ("id=\"quiz\"\nrun_id=\"changed-world\"\nmanifest_path=\"../../package.toml\"\n[binding]\nsources=[]\n");
+    let changed_source="id=\"quiz\"\nrun_id=\"changed-world\"\nmanifest_path=\"../../package.toml\"\n[binding]\nsources=[]\n" in
+    write source changed_source;
     check bool "a pending original cannot dispatch under a new semantic revision" true (Result.is_error (guard ()));
     check bool "an edited file with no worker attached for it is not yet a replacement" true (waits (guard ()));
     ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
@@ -256,6 +257,10 @@ let test_original_exact_semantic_dispatch_authority () =
     check bool "the replacement worker cannot execute the old original" true (Result.is_error (guard ()));
     check bool "once the replacement worker is attached the old original's declaration is replaced" true
       (replaced (guard ()));
+    write source ("enabled=false\n" ^ changed_source);
+    check bool "a replacement that is switched off ends nothing: the old original waits" true (waits (guard ()));
+    write source changed_source;
+    check bool "switched on again it is the replacement" true (replaced (guard ()));
     write source "invalid TOML = [";
     check bool "an incomplete fresh read grants no dispatch" true (Result.is_error (guard ()));
     check bool "an unreadable file is not a replacement" true (waits (guard ()));

@@ -36,8 +36,13 @@ val authorize_captured_exact_dispatch : store:Lane_addon_store.t -> declaration_
     its semantic revision and the live configured incarnation before a new host
     Exact provider effect. [Declaration_replaced] when the fresh reading is
     complete, exactly one declaration has this id, it is enabled and of this
-    package, exactly one live worker is attached for the revision it has now,
-    and that revision is not [configuration_revision]. Every other refusal is
+    package, exactly one entry that is not stopping holds a connection made
+    from that declaration's file for the revision the file has now and runs
+    the package the file names, and that revision is not
+    [configuration_revision]. An entry holds its connection from the moment
+    its worker is created. The guards that call this run in the host cycle of
+    a worker that finished starting, and one installation has one entry at a
+    time, so the entry found is the caller's own. Every other refusal is
     [Not_now]: a declaration that is off, unreadable or of another package,
     and a file that was edited while its worker is not attached yet.
     Inspect under the configuration serializer only;

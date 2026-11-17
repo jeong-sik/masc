@@ -384,6 +384,10 @@ let with_fixture ?(history_kind=Atoms) f =
         set_enabled fixture false;
         Memory_lane.For_testing.reset ())))))))))))
 
+(* A guard's own failed read, and a declaration that is off, say nothing
+   about a replacement: the request waits. *)
+let guard_waits before_dispatch = match before_dispatch () with
+  | Error (Exact.Not_now _) -> true | Ok () | Error Exact.Declaration_replaced -> false
 let assert_pending = function
   | Ok (Consumer.Pending _) -> ()
   | Ok (Consumer.Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
@@ -2823,12 +2827,13 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     ~finally:(fun () -> Eio.Cancel.protect (fun () -> io (fun () -> write parent_body parent_bytes))) action in
   preserve_parent (fun () ->
     io (fun () -> Sys.remove parent_body);
-    check bool "a missing ancestor body refuses actual dispatch" true (Result.is_error (guard ())));
+    check bool "a missing ancestor body refuses actual dispatch" true (guard_waits authorization.before_dispatch));
   preserve_parent (fun () ->
     let corrupted=Bytes.of_string parent_bytes in
     Bytes.set corrupted 0 (if Bytes.get corrupted 0='{' then '[' else '{');
     io (fun () -> write parent_body (Bytes.to_string corrupted));
-    check bool "same-length ancestor corruption refuses actual dispatch" true (Result.is_error (guard ())));
+    check bool "same-length ancestor corruption refuses actual dispatch" true
+      (guard_waits authorization.before_dispatch));
   let proof=io (fun () -> Lineage.verify_predecessors ~store:fixture.store
     ~require_confirmed:true child_request |> get) in
   let copied=io (fun () -> Capture.restore ~owner:(Capture.physical_owner request) child |> get) in
@@ -2861,7 +2866,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   check (result unit string) "preflight proves the restored summary again" (Ok ()) (payload_lineage ~indexes ());
   check bool "a changed ancestor summary refuses actual dispatch" true
     (with_summary_value original.request_id "source_digest" (String.make 64 '0')
-      (fun () -> Result.is_error (guard ())));
+      (fun () -> guard_waits authorization.before_dispatch));
   check (result unit string) "restoring the ancestor lets the same authorization recheck again" (Ok ()) (guard ());
   (* The resolution pass reads a waiting pair as two records and their
      indexes, and neither body. *)
@@ -3073,7 +3078,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       inspect ~require_confirmed:true child |> get;
       (match authorize child with
        | Ok (Some authorization) -> check bool "Off still refuses actual dispatch after local ACK" true
-           (Result.is_error (authorization.before_dispatch ()))
+           (guard_waits authorization.before_dispatch)
        | Error (Exact.Unowned {reason}) -> fail reason
        | Error (Exact.Undecided {detail}) -> fail detail
        | Ok None -> fail "history request lost its actual host namespace");
@@ -3332,7 +3337,7 @@ let test_dispatch_rechecks_owner_without_restoring_the_body () = with_fixture (f
     io (fun () -> Store.save_tool_request_owner fixture.store ~scope:original.scope
       ~request_id:original.request_id changed |> get);
     check bool "a changed owner summary refuses the previously validated body" true
-      (Result.is_error (authorization.before_dispatch ()));
+      (guard_waits authorization.before_dispatch);
     check int "dispatch authorization calls no model" posts (F.post_count fixture.server);
     check bool "dispatch authorization acknowledges no source position" true (progress fixture=positions)))
 
@@ -3956,11 +3961,20 @@ let await_deferral fixture request_id =
     match io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id) |> get with
     | None -> false
     | Some stored ->
-      (match List.rev (Yojson.Safe.Util.to_list (member "attempts" stored)) with
-       | `Assoc fields::_ -> not (List.mem_assoc "started" fields)
-       | [] | _::_ -> false) in
+      member "final" stored = `Null
+      && (match List.rev (Yojson.Safe.Util.to_list (member "attempts" stored)) with
+          | `Assoc fields::_ -> not (List.mem_assoc "started" fields)
+          | [] | _::_ -> false) in
   Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
     while not (deferred ()) do Eio.Time.sleep fixture.clock 0.01 done)
+(* The fixture declaration under another [run_id]: the same installation,
+   package and tool with another semantic revision. *)
+let replaced_declaration fixture =
+  let replaced=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-replaced\"" | line -> line)
+    |> String.concat "\n" in
+  check bool "the fixture declaration names the run a test replaces" true (replaced<>fixture.declaration true);
+  replaced
 (* The provider is busy, so the host's attempt ends without a result and the
    request stays with its worker. The declaration is then replaced: the
    replacement worker lists the request it inherited, and the host ends it and
@@ -3975,16 +3989,44 @@ let host_ends_the_original_of_a_replaced_declaration fixture ~sw =
   await_deferral fixture waiting.request_id;
   check int "the provider was asked once and gave no result" 1 (F.post_count fixture.server);
   fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
-  let replaced=fixture.declaration true |> String.split_on_char '\n'
-    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-replaced\"" | line -> line)
-    |> String.concat "\n" in
-  check bool "the fixture declaration names the run this test replaces" true
-    (replaced<>fixture.declaration true);
   let deliveries= !(fixture.deliveries) in
-  replace_actual_worker_configuration fixture ~sw replaced;
+  replace_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
   await_delivery fixture ~after:deliveries;
   check int "the request of the replaced declaration was not sent again" 1 (F.post_count fixture.server);
   waiting
+(* RFC 3.2. A floor step's guard gives the Runtime's answer as it is, and a
+   failed read of the step's own record is not an answer about the
+   declaration. *)
+let test_a_floor_step_guard_tells_a_replaced_declaration_from_a_failed_read () =
+  with_fixture (fun ~sw fixture ->
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate,request=candidate_and_request fixture in
+    fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+    ignore (finished (descend fixture candidate));
+    let record,step=first_step_request fixture request in
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    let authorization=Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+      ~store:fixture.store ~declaration_id:"librarian" ~package step
+      |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
+      |> get |> Option.get in
+    authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail |> get;
+    replace_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
+    check bool "under a replaced declaration the step's guard says so" true
+      (match authorization.before_dispatch () with
+       | Error Exact.Declaration_replaced -> true | Ok () | Error (Exact.Not_now _) -> false);
+    (* The stored record now names another request body, so the guard's own
+       reload refuses it before the declaration is read. *)
+    let changed=match Owner.to_json record with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          key, if key="request_digest" then `String (String.make 64 '0') else value) fields)
+      | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ | `List _ ->
+        fail "the retained step is not an object" in
+    check bool "the fixture changes the step's stored digest" true (changed<>Owner.to_json record);
+    io (fun () -> Store.save_tool_request_owner fixture.store ~scope:record.scope
+      ~request_id:record.request_id changed |> get);
+    check bool "a step record that cannot be confirmed is not a replaced declaration" true
+      (guard_waits authorization.before_dispatch))
 let test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again () =
   with_fixture (fun ~sw fixture ->
     let waiting=host_ends_the_original_of_a_replaced_declaration fixture ~sw in
@@ -4603,6 +4645,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_purge_joins_unknown_then_worker_restart_does_not_resubmit Mixed);
   test_case "an original a stopped server interrupted settles and its range is read again" `Quick
     test_interrupted_original_settles_and_its_range_is_read_again;
+  test_case "a floor step guard tells a replaced declaration from a failed read" `Quick
+    test_a_floor_step_guard_tells_a_replaced_declaration_from_a_failed_read;
   test_case "a replaced declaration ends a waiting original and its range is read whole again" `Quick
     test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again;
   test_case "a declaration put back before the end is read preserves the recorded ending" `Quick

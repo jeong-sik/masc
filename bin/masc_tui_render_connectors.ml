@@ -150,7 +150,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Scene_follow _) -> "Following observed browser link…", Theme.info ()
         | Loading (_, Scene_follow_refresh _) -> "Rechecking followed browser destination…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
-        | Loading (_, (Viewport_refresh _ | Viewport_cadence _)) -> "Refreshing selected browser viewport…", Theme.info ()
+        | Loading (_, (Viewport_refresh _ | Viewport_observed _)) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
         | Loading
             ( _

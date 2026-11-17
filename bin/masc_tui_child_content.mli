@@ -11,7 +11,7 @@ type error = Transport of string | Kept_back of string | Http_refused of int | I
   | History_rewritten of Read.receiver * string
 (** History rewrite includes same-incarnation rollback or changed prior immutable
     correlations/timestamp. Only human text/model may change on a full Audit. *)
-type read_mode = Poll | Audit
+type read_mode = Suffix | Audit
 type history
 type store = private
   { receiver : Read.receiver; store_id : string; cursor : Read.cursor option
@@ -38,13 +38,13 @@ val read : mode:read_mode -> keeper_name:string ->
   fetch:(string -> (int * string,error) result) -> previous:t -> (t,error) result
 (** Caller supplies actual guarded authenticated fetch and owns workspace/cache
     lifetime and read epoch mailbox admission; Keeper equality/DTO is not auth.
-    Poll reads unchecked hints, exact changed suffixes only; same attempted hint
+    Suffix reads unchecked hints, exact changed suffixes only; same attempted hint
     avoids repeated failed audits, and cannot erase an audited failure. Failure
     retains prior snapshots/cursor; healthy receivers may advance independently.
     Audit reads full current-incarnation records even unchanged tail, refreshing
     public body/model redaction only as supplied in that full response. Same-store
     tail regression or changed prior immutable identity refuses and retains cache.
-    A changed Poll after such a refusal requests the full prefix again. Rewrite
+    A changed Suffix after such a refusal requests the full prefix again. Rewrite
     remains the primary failure through transient errors until full comparison
     succeeds; a valid suffix alone cannot clear it.
     Absent older stores remain last-observed, current redaction coverage unknown.

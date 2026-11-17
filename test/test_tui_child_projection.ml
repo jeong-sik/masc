@@ -26,9 +26,9 @@ let receipt kind store through =
   `Assoc ["kind", `String kind; "store_id", `String store; "through_sequence", `Int through]
 let inventory mode entries =
   let schema, key, kind = match mode with
-    | Consumer.Poll -> "masc.child_content.hints.v1", "hints", "unchecked"
+    | Consumer.Suffix -> "masc.child_content.hints.v1", "hints", "unchecked"
     | Consumer.Audit -> "masc.child_content.receivers.v1", "receivers", "audited" in
-  let field = match mode with Consumer.Poll -> "hint" | Consumer.Audit -> "storage" in
+  let field = match mode with Consumer.Suffix -> "hint" | Consumer.Audit -> "storage" in
   envelope schema ["keeper_name", `String keeper; "cleanup_failures", `List [];
     key, `List (List.map (fun (receiver, status) -> `Assoc ["receiver", child_receiver_json receiver;
       field, (match status with Ok (store, through) -> receipt kind store through
@@ -65,7 +65,7 @@ let read mode previous entries serve =
   let reads = ref [] in
   let fetch path =
     let uri = Uri.of_string path in
-    let endpoint = match mode with Consumer.Poll -> "/api/v1/keepers/alpha/child-content/hints"
+    let endpoint = match mode with Consumer.Suffix -> "/api/v1/keepers/alpha/child-content/hints"
       | Consumer.Audit -> "/api/v1/keepers/alpha/child-content/receivers" in
     if Uri.path uri = endpoint then Ok (200, json (inventory mode entries))
     else if Uri.path uri = "/api/v1/keepers/alpha/child-content/records" then begin
@@ -155,7 +155,7 @@ let test_skip_transcript_parent_omits_child_row () =
     ~rows:[1, native_registered ~origin:origin_skip ~skip:true "native-one";
            2, native_registered ~origin:origin_plain "native-two"]
     ~after:None in
-  let child, _ = read Consumer.Poll Consumer.empty [child_receiver, Ok ("child-store", 3)]
+  let child, _ = read Consumer.Suffix Consumer.empty [child_receiver, Ok ("child-store", 3)]
     (fun uri ->
       check (option string) "fresh store begins without cursor" None (after uri);
       Ok (200, json (page "child-store" 3
@@ -171,7 +171,7 @@ let test_skip_transcript_parent_omits_child_row () =
 let test_child_rows_follow_arrival_order_across_stores () =
   let receiver_b : ChildRead.receiver =
     {receiver_generation="child-gen-b"; session_id="child-session-b"; client_uuid="input-b"} in
-  let child, requests = read Consumer.Poll Consumer.empty
+  let child, requests = read Consumer.Suffix Consumer.empty
     [child_receiver, Ok ("store-a", 2); receiver_b, Ok ("store-b", 1)] (fun uri ->
       match Uri.get_query_param uri "client_uuid" with
       | Some id when String.equal id child_receiver.client_uuid ->

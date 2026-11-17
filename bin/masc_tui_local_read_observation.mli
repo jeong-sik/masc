@@ -1,6 +1,6 @@
 (** Facts for one original local source request, never read/effect authority. *)
 type source = Local_keepers | Local_work
-type intent = Poll | Refresh
+type intent = Join | Refresh
 type identity =
   { source:source; intent:intent; request_id:int; demand_revision:string
   ; workspace_revision:int; workspace_fingerprint:string option }

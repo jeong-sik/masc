@@ -9,12 +9,12 @@ module Metrics_tail = Masc_tui_metrics_tail
 module Rows = Masc_tui_rows
 module Task_payloads = Masc_tui_task_payloads
 
-(* A poll shares the current read; an explicit refresh owns a new one.
+(* A joining read shares the current read; an explicit refresh owns a new one.
    Only the owning response can settle that source and publish its result. *)
 module Snapshot_read : sig
   type request
   type t
-  type intent = Poll | Refresh
+  type intent = Join | Refresh
 
   val idle : t
   (** Stable per-source ticket for correlating runtime diagnostics. *)
@@ -29,7 +29,7 @@ module Snapshot_read : sig
 end = struct
   type request = int
   type t = { next : int; pending : request option }
-  type intent = Poll | Refresh
+  type intent = Join | Refresh
 
   let idle = { next = 0; pending = None }
   let request_id request = request
@@ -38,8 +38,8 @@ end = struct
 
   let start ~intent state =
     match intent, state.pending with
-    | Poll, Some _ -> state, None
-    | (Poll | Refresh), _ ->
+    | Join, Some _ -> state, None
+    | (Join | Refresh), _ ->
       let request = state.next in
       { next = request + 1; pending = Some request }, Some request
 
@@ -123,7 +123,7 @@ end = struct
   let exclusive t = { t with exclusive = true }
 
   let start t =
-    let reading, ticket = Snapshot_read.start ~intent:Snapshot_read.Poll t.reading in
+    let reading, ticket = Snapshot_read.start ~intent:Snapshot_read.Join t.reading in
     match ticket with
     | None -> t, None
     | Some ticket ->
@@ -375,15 +375,15 @@ end = struct
   let request_revision request = request.revision
   let start ~intent state =
     let state = match intent with
-      | Snapshot_read.Poll -> state
+      | Snapshot_read.Join -> state
       | Snapshot_read.Refresh ->
           { state with demanded = Int64.succ state.demanded; followup = Refresh_requested } in
     if in_flight state then state, None
     else
       let intent = match state.followup with
-        | No_followup -> Snapshot_read.Poll
+        | No_followup -> Snapshot_read.Join
         | Refresh_requested -> Snapshot_read.Refresh in
-      let tickets, ticket = Snapshot_read.start ~intent:Snapshot_read.Poll state.tickets in
+      let tickets, ticket = Snapshot_read.start ~intent:Snapshot_read.Join state.tickets in
       let recovery = match state.recovery with
         | Retry_if_failed _ -> state.recovery
         | No_recovery | Read_failed -> No_recovery in
@@ -4940,7 +4940,7 @@ let nothing =
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
    request and a decode on it only while one of them is open. The planning and
    system-log payloads are tens of kilobytes each, and fetching them behind
-   every other surface cost that on every tick for rows nobody was looking at.
+   every other surface cost that on every read for rows nobody was looking at.
 
    [keeper_pane_drawn] is the reading a surface cannot answer for itself: the
    Keeper pane on the right of the screen draws a health mark per Keeper and
@@ -4954,7 +4954,7 @@ let rec surface_needs ~keeper_pane_drawn ~about_open surface =
   let needs = surface_needs_of_surface surface in
   let needs =
     (* About hides the ordinary Keeper pane but draws current outfits. Its
-       opening delta and refresh cadence must keep reading that same roster. *)
+       opening delta and later owed reads must keep reading that same roster. *)
     if keeper_pane_drawn || about_open then { needs with needs_keeper_roster = true }
     else needs
   in
@@ -7023,20 +7023,20 @@ module Browser_lane_view = struct
         scene_view : Browser_lane.scene_view;
       }
     | Viewport_refresh of { tab_id : int; expected_url : string }
-    | Viewport_cadence of int
+    | Viewport_observed of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   let operation_is_read = function
     | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _
     | Scene_refresh _ | Scene_focus _ | Scene_follow_refresh _
-    | Viewport_refresh _ | Viewport_cadence _ -> true
+    | Viewport_refresh _ | Viewport_observed _ -> true
     | Scene_scroll _ | Scene_click _
     | Scene_follow _ | Viewport_pointer _ -> false
 
-  (* The operations [cadence_operation] can return: they re-read what is already
+  (* The operations [observation_operation] can return: they re-read what is already
      on screen, mark [refresh_pending] while they run, and give way to operator
      input in [yield_refresh_to_input]. [Viewport_refresh] is not one of them. *)
   let operation_is_refresh = function
-    | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> true
+    | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_observed _ -> true
     | Discover _ | Read | Screenshot _
     | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _
     | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ -> false
@@ -7051,7 +7051,7 @@ module Browser_lane_view = struct
     | Discover _ | Read | Screenshot _
     | Read_refresh | Scene_read _ | Scene_regions _ | Scene_refresh _
     | Scene_focus _ | Scene_follow _ | Scene_follow_refresh _
-    | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> None
+    | Viewport_refresh _ | Viewport_observed _ | Viewport_pointer _ -> None
 
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
@@ -7173,7 +7173,7 @@ module Browser_lane_view = struct
     | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
-    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)), _ -> Reading
+    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_refresh _ | Scene_follow_refresh _ | Viewport_observed _)), _ -> Reading
     | Loading (_, (Discover _ | Screenshot _ | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   (* The badge in the Browser Lane title. Five of these six name the read the
@@ -7386,14 +7386,14 @@ module Browser_lane_view = struct
     | (Unbound | Live_unbound), _, _ -> false
     | (Bound_automatic | Bound_explicit), Live, None -> false
     | (Bound_automatic | Bound_explicit), Live, Some selected -> List.exists (same_client selected) (listed_clients t)
-  let cadence_operation ?(allow_inflight = false) ?(viewport : screenshot option) t =
+  let observation_operation ?(allow_inflight = false) ?(viewport : screenshot option) t =
     if (not allow_inflight && (busy t || Option.is_some t.refresh_pending))
        || awaiting_browser t || Option.is_some t.client_picker
        || not (selected_client_available t) then None
     else match viewport with
       | Some shot when shot.source = t.source && shot.client_id = client_id t
           && t.selected_tab = Some shot.tab_id ->
-          Some (Viewport_cadence shot.tab_id)
+          Some (Viewport_observed shot.tab_id)
       | Some _ -> None
       | None -> match t.selected_tab, t.read_view with
       | None, _ -> None
@@ -7409,7 +7409,7 @@ module Browser_lane_view = struct
       | Loading (_, operation) when not (operation_is_read operation) -> None
       | Idle when Option.is_some t.refresh_pending -> None
       | Loading _ | Idle | No_browser | Failed _ ->
-          cadence_operation ~allow_inflight:true
+          observation_operation ~allow_inflight:true
             ?viewport:(if image_open then viewport else None) t
     in
     match t.selected_tab, operation with
@@ -7422,7 +7422,7 @@ module Browser_lane_view = struct
     | Some tab_id, Some (Scene_follow_refresh { scene_view; _ }) ->
         Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
              ; tab_id; view = Masc.Workspace_dataset_event.Scene { scene_view; scope = None } }
-    | Some tab_id, Some (Viewport_cadence _) ->
+    | Some tab_id, Some (Viewport_observed _) ->
         Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
              ; tab_id; view = Masc.Workspace_dataset_event.Viewport }
     | (Some _ | None),
@@ -7430,9 +7430,9 @@ module Browser_lane_view = struct
         ( Discover _ | Read | Screenshot _ | Read_refresh
         | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
         | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-        | Viewport_cadence _ | Viewport_pointer _ )) -> None
+        | Viewport_observed _ | Viewport_pointer _ )) -> None
   (* [Viewport_refresh] stays loading: the operator's own [r] key in the viewport
-     launches it (bin/masc_tui.ml), [cadence_operation] never does. *)
+     launches it (bin/masc_tui.ml), [observation_operation] never does. *)
   let yield_refresh_to_input t =
     match t.load with
     | Loading (_, operation) when operation_is_refresh operation -> {t with load = Idle}
@@ -7448,7 +7448,7 @@ module Browser_lane_view = struct
     | Scene_follow _ -> Scene_view {scene_view = Browser_lane.Content; scope = None}
     | Scene_follow_refresh {scene_view;_} -> Scene_view {scene_view; scope = None}
     | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
-    | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
+    | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_observed _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with source = Live; selected_client = Some client; selection = Bound_explicit; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scene_scope = None; scene_guard = None; scene_delta = None;
@@ -7530,7 +7530,7 @@ module Browser_lane_view = struct
           | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
           | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
           | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-          | Viewport_cadence _ | Viewport_pointer _ ) )
+          | Viewport_observed _ | Viewport_pointer _ ) )
     | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
   let field name = function
@@ -8016,9 +8016,9 @@ module Browser_lane_view = struct
       scroll = if Option.is_some selected_index then t.scroll else 0}
 
   let accept_scene ~generation (result : (scene, string) result) t =
-    (* Operator input can supersede a cadence result, but the actual request
-       remains in flight until this completion. Do not start another cadence
-       read merely because its foreground load label was withdrawn. *)
+    (* Operator input can supersede an observation result, but the actual
+       request remains in flight until this completion. Do not start another
+       observation read merely because its foreground load label was withdrawn. *)
     let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
     match t.load with
     | Loading (current, Scene_refresh {tab_id;scene_view;scope}) when current = generation ->
@@ -8040,7 +8040,7 @@ module Browser_lane_view = struct
           | Scene_follow _ -> Browser_lane.Content, None
           | Scene_follow_refresh {scene_view;_} -> scene_view, None
           | Read | Read_refresh | Discover _ | Screenshot _
-          | Scene_read _ | Scene_refresh _ | Viewport_refresh _ | Viewport_cadence _
+          | Scene_read _ | Scene_refresh _ | Viewport_refresh _ | Viewport_observed _
           | Viewport_pointer _ -> Browser_lane.Content, None in
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t
@@ -8051,7 +8051,7 @@ module Browser_lane_view = struct
                              | Read | Read_refresh | Discover _
                              | Screenshot _ | Scene_read _ | Scene_regions _
                              | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _
-                             | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _
+                             | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_observed _
                              | Viewport_pointer _ -> true) ->
              publish_scene scene t
          | Ok _ ->
@@ -8060,7 +8060,7 @@ module Browser_lane_view = struct
                | Read | Read_refresh | Discover _
                | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _
                | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _
-               | Viewport_cadence _ | Viewport_pointer _ -> t.scene_guard in
+               | Viewport_observed _ | Viewport_pointer _ -> t.scene_guard in
              {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
          | Error detail ->
              let scene_guard = match operation with
@@ -8068,9 +8068,9 @@ module Browser_lane_view = struct
                | Read | Read_refresh | Discover _
                | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _
                | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _
-               | Viewport_cadence _ | Viewport_pointer _ -> t.scene_guard in
+               | Viewport_observed _ | Viewport_pointer _ -> t.scene_guard in
              {t with scene = None; scene_scope = None; scene_delta = None; scene_guard; load = Failed detail})
-    | Loading (_, (Read | Read_refresh | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _))
+    | Loading (_, (Read | Read_refresh | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_observed _ | Viewport_pointer _))
     | Idle | No_browser | Failed _
     | Loading (_, (Scene_read _|Scene_regions _|Scene_refresh _|Scene_scroll _| Scene_focus _|Scene_click _|Scene_follow _|Scene_follow_refresh _)) -> t
 
@@ -8094,7 +8094,7 @@ module Browser_lane_view = struct
           | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
           | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
           | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-          | Viewport_cadence _ | Viewport_pointer _ ) )
+          | Viewport_observed _ | Viewport_pointer _ ) )
     | Idle | No_browser | Failed _ -> t
 
 
@@ -8248,7 +8248,7 @@ module Browser_lane_view = struct
     `Assoc (("lane",`String (source_name t.source)) :: fields @
       (match client_id t with None -> [] | Some id -> ["clientId",`String id]))
 
-  (* A cadence observes the selected tab, including navigation by another
+  (* An observation read follows the selected tab, including navigation by another
      actor. Its self-contained PNG and document/URL/viewport are accepted
      together; the next gesture uses that displayed snapshot. Explicit refresh
      and scroll retain their expected URL checks. Settle even when a later key
@@ -8256,7 +8256,7 @@ module Browser_lane_view = struct
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
     let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
     match t.load with
-    | Loading (current, (Screenshot requested_tab | Viewport_cadence requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
+    | Loading (current, (Screenshot requested_tab | Viewport_observed requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
       when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
@@ -8290,7 +8290,7 @@ module Browser_lane_view = struct
                                         | Scene_scroll _ | Scene_focus _
                                         | Scene_click _ | Scene_follow _
                                         | Scene_follow_refresh _
-                                        | Viewport_cadence _ ) )
+                                        | Viewport_observed _ ) )
                                   | Idle | No_browser | Failed _ -> true) ->
              { t with load = Idle }, Some screenshot
          | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None
@@ -8301,7 +8301,7 @@ module Browser_lane_view = struct
           | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
           | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
           | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-          | Viewport_cadence _ | Viewport_pointer _ ) )
+          | Viewport_observed _ | Viewport_pointer _ ) )
     | Idle | No_browser | Failed _ -> t, None
 
   let accept ~generation (result : (reading, string) result) t =
@@ -8329,7 +8329,7 @@ module Browser_lane_view = struct
           | Screenshot _ | Read_refresh | Scene_read _ | Scene_regions _
           | Scene_refresh _ | Scene_scroll _ | Scene_focus _ | Scene_click _
           | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-          | Viewport_cadence _ | Viewport_pointer _ ) )
+          | Viewport_observed _ | Viewport_pointer _ ) )
     | Idle | No_browser | Failed _ -> t
   let select_tab direction t =
     match t.reading with
@@ -8725,7 +8725,7 @@ type msx_meta = {
 }
 
 (* [msx_meta] is [None] for a frame read through the live route, which names
-   no mode, media or players; the next tick answer carries them again. *)
+   no mode, media or players; the next tick read carries them again. *)
 type msx_frame = {
   msx_number : int;
   msx_width : int;
@@ -9921,7 +9921,7 @@ type state = {
   mutable acting_chunk_projection: Masc_tui_acting.chunk_projection option;
   (* The selected keeper's recorded file changes, keyed by keeper name, for
      the pane's Changes tab. Refetched when the feed shows that keeper
-     complete a tool call and on the operator cadence. *)
+     complete a tool call and on an explicit refresh. *)
   mutable acting_pane_changes:
     (acting_pane_key, acting_pane_read, request_failure) Masc_tui_fetched.source;
   (* A loss during a read owes one more reading after that read settles. *)
@@ -10000,9 +10000,8 @@ type state = {
      and it survives closing -- reopening continues the same frame. *)
   mutable msx_open: bool;
   (* RFC-0439 §3.7: the TUI no longer owns a machine. The spectator caches
-     the last frame the server handed it and when it last asked. *)
+     the last frame the server handed it. *)
   mutable msx_frame: msx_frame option;
-  mutable msx_last_poll_ns: int64;
   (* Which machine the spectator shows. The menu picks it. *)
   mutable machine_source: Masc.Machine_lane.t;
   mutable machine_interaction: machine_interaction;
@@ -10666,7 +10665,7 @@ type state = {
   mutable approvals_error: request_failure option;
   (* Ticket for the confirm-queue read outside the refresh bundle. The count
      on Home draws from [approval_snapshot] alone, so a refused refresh answer
-     needs a read of its own to recover the count before the next cadence. *)
+     needs a read of its own to recover the count before the next change. *)
   mutable approvals_summary_read: Snapshot_read.t;
   (* Questions Keepers put to a human, drawn beside the approvals. [None]
      means nothing has been read yet, which is not the same as a fleet with
@@ -12460,7 +12459,7 @@ let ask_followup_target (state : state) =
 let begin_ask_followup_read (state : state) =
   match ask_followup_target state with
   | Some (submission, keeper_name) ->
-      let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.ask_followup_read in
+      let reading, request = Snapshot_read.start ~intent:Snapshot_read.Join state.ask_followup_read in
       state.ask_followup_read <- reading;
       Option.map (fun request ->
         let previous = Option.bind state.ask_followup (fun (owner, reading) ->
@@ -12677,9 +12676,9 @@ let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
 
 (* Totals stay borrowable while an ordinary poll is in flight -- the census
    on screen is the last reading until a newer one lands, and dropping the
-   totals for every poll made the title's count flip "(N of M)"↔"(N)" at
-   read cadence. A read running past the pending display bar lets go of
-   them: totals gone stale are worth retiring, a poll is not. *)
+   totals for every read made the title's count flip "(N of M)"↔"(N)" on
+   each read. A read running past the pending display bar lets go of
+   them: totals gone stale are worth retiring, a read in flight is not. *)
 let board_census_holding (state : state) ~hearth =
   match board_census_reading state with
   | Masc_tui_fetched.Ready census, pending
@@ -12753,7 +12752,7 @@ let take_early_asks_observation (state : state) early =
   then take_asks_observation state early.ea_observation
   else None
 
-(* [Poll] shares a whole read already in flight; [Refresh] owns a new one. *)
+(* [Join] shares a whole read already in flight; [Refresh] owns a new one. *)
 let begin_keeper_roster_read ~intent (state : state) =
   let reading, request = Snapshot_read.start ~intent state.keeper_roster_read in
   state.keeper_roster_read <- reading;
@@ -12871,7 +12870,7 @@ let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~start
           Agent_core_sha256.(digest_string (Yojson.Safe.to_string (`List
             [`String (Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path);`String (Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root)])) |> to_hex)) state.server_identity in
         let lwr_observation=Local_read_observation.create ~requested_ns:started_ns
-          {source;intent=(match actual_intent with Snapshot_read.Poll -> Poll | Refresh -> Refresh);
+          {source;intent=(match actual_intent with Snapshot_read.Join -> Join | Refresh -> Refresh);
            request_id=Local_read_order.request_id lwr_request;
            demand_revision=Local_read_order.revision_to_string (Local_read_order.request_revision lwr_request);
            workspace_revision;workspace_fingerprint} in
@@ -15174,7 +15173,7 @@ let begin_tools_async_task_history ?(older=false) state ~force ~limit =
   | Some key ->
     let view=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source
       state.tools_async_task_history ~key in
-    (* Cadence shares the initial read and never replaces a paged prefix or
+    (* A joining read shares the initial read and never replaces a paged prefix or
        retries a failed older read. H continues; explicit refresh starts anew. *)
     let initial=match view with Masc_tui_fetched.Absent -> true
       | Loading | Ready _ | Stale _ | Failed _ -> false in
@@ -15530,7 +15529,7 @@ let suspend_workspace_readings state =
      explicit audit intent for a confirmed read in the successor epoch. *)
   List.iter (fun (keeper_name, mode) ->
     match mode with
-    | Masc_tui_native_tasks.Poll -> ()
+    | Masc_tui_native_tasks.Suffix -> ()
     | Audit ->
         if not (List.mem keeper_name state.msg_native_tasks_audit_pending) then
           state.msg_native_tasks_audit_pending <- keeper_name :: state.msg_native_tasks_audit_pending)
@@ -15538,7 +15537,7 @@ let suspend_workspace_readings state =
   state.msg_native_tasks_inflight <- [];
   List.iter (fun (keeper_name, mode) ->
     match mode with
-    | Masc_tui_child_content.Poll -> ()
+    | Masc_tui_child_content.Suffix -> ()
     | Audit ->
         if not (List.mem keeper_name state.msg_child_content_audit_pending) then
           state.msg_child_content_audit_pending <- keeper_name :: state.msg_child_content_audit_pending)
@@ -15932,7 +15931,7 @@ let identity_logins_for_keeper (state : state) keeper_name =
     state.identity_logins
 
 (* A recovered provider read may still be pending browser consent. Continue
-   the existing cadence without resurrecting the withdrawn consent URL. *)
+   the existing owed read without resurrecting the withdrawn consent URL. *)
 let identity_login_pending_for_keeper (state : state) ~now:_ keeper_name =
   server_authority_ready state
   && List.exists (fun expectation ->
@@ -18158,21 +18157,19 @@ let pending_detail_read (state : state) ~tab ~keeper =
     (fun request -> request.drr_tab = tab && String.equal request.drr_keeper keeper)
     state.detail_reads
 
-(* The tick may reopen a provider read only after the old response settles and
-   the same workspace confirms the waiting Keeper's login. The expectation
-   carries no consent URL or authorization; it only keeps the read alive. *)
-let identity_login_recovery_poll_ready (state : state) ~now keeper_name =
+(* A provider read may reopen only after the old response settles and the
+   same workspace confirms the waiting Keeper's login. The expectation carries
+   no consent URL or authorization; it only keeps the read alive. *)
+let identity_login_read_ready (state : state) ~now keeper_name =
   identity_login_pending_for_keeper state ~now keeper_name
   && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
-
-let identity_login_read_ready = identity_login_recovery_poll_ready
 
 let detail_read_started state ~tab ~keeper =
   Option.map (fun request -> request.drr_started_ns)
     (pending_detail_read state ~tab ~keeper)
 
-(* A refresh supersedes the response, not the elapsed interval. Periodic OAuth
-   polling waits for an in-flight read; explicit refreshes and service switches
+(* A refresh supersedes the response, not the elapsed interval. An owed login
+   read waits for an in-flight read; explicit refreshes and service switches
    may still supersede it so a pre-mutation response cannot win. *)
 let mark_detail_read_started (state : state) ~tab ~keeper ~now_ns =
   let started_ns =
@@ -20907,7 +20904,6 @@ let create_state
   sent_image_read = None;
   msx_open = false;
   msx_frame = None;
-  msx_last_poll_ns = 0L;
   machine_source = Masc.Machine_lane.Msx;
   machine_interaction = Observe_machine;
   msx_live = Masc_tui_machine_live.Unread;
@@ -24287,7 +24283,7 @@ let apply_memory_health_snapshot (state : state) snapshot =
   state.memory_health <- Some snapshot;
   state.memory_health_error <- None;
   let rows = visible_memory_keepers state in
-  (* A cadence read can change the current sort order. Follow the Keeper the
+  (* An owed read can change the current sort order. Follow the Keeper the
      operator was reading, then clamp the old position if that row vanished. *)
   state.memory_health_cursor <-
     match Option.bind selected_id (fun keeper_id ->

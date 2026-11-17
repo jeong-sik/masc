@@ -1,5 +1,5 @@
 type source = Local_keepers | Local_work
-type intent = Poll | Refresh
+type intent = Join | Refresh
 type identity =
   { source:source; intent:intent; request_id:int; demand_revision:string
   ; workspace_revision:int; workspace_fingerprint:string option }
@@ -111,7 +111,7 @@ let create ~requested_ns identity =
   emit t ~at:requested_ns ~phase:"requested"
     ["pid",`Int t.pid;
      "source",`String (match t.identity.source with Local_keepers -> "keepers" | Local_work -> "work");
-     "intent",`String (match t.identity.intent with Poll -> "poll" | Refresh -> "refresh");
+     "intent",`String (match t.identity.intent with Join -> "join" | Refresh -> "refresh");
      "request_id",`Int t.identity.request_id;"demand_revision",`String t.identity.demand_revision;
      "workspace_revision",`Int t.identity.workspace_revision;
      "workspace_fingerprint",optional (fun s -> `String s) t.identity.workspace_fingerprint];

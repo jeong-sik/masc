@@ -53,13 +53,33 @@ type integration =
     connect route judges a person's login by. *)
 val of_config : Runtime_schema.config -> integration list
 
-(** What the operator is told once when the account server starts
-    ({!Server_accounts.run}), a line each: that no provider is one a person
-    signs in to, or which providers offer no model, with the code of
-    {!answer} for each binding withheld. The page of a person shows the same
-    reasons; the log is where the operator reads them. Empty when every
-    provider offers a model. *)
-val start_notes : integration list -> string list
+(** What a start of the routes of people says once about the providers a
+    person signs in to. *)
+type start_note =
+  | No_person_provider
+      (** runtime.toml declares no provider that a person signs in to. *)
+  | No_model of
+      { integration_id : string
+      ; withheld : (string * withheld) list
+      }
+      (** A provider whose models are called here ([Allowed]) offers none.
+          [withheld] holds its bindings, and is empty when it has none. *)
+
+(** The notes of the providers {!of_config} gave, in their order. A provider
+    whose calls are [Refused] gets no note: a model of it would still not be
+    called here, and the page of a person says that refusal. For a provider
+    with a note, the page says beside the model check which models are
+    withheld and why. [calls] is read from the access this process
+    published, so this is asked after the publication. *)
+val start_notes : integration list -> start_note list
+
+(** The lines of {!start_notes} for the runtime.toml of [base_path], with the
+    code of {!answer} for each binding withheld: what the account server
+    ({!Server_accounts.run}) writes to its log and [masc auth preview] prints.
+    The person is not the one who edits runtime.toml, so the operator reads
+    them there. A file that cannot be read gives no line:
+    {!Server_runtime_setup_actions.config} writes that to the log itself. *)
+val start_lines : base_path:string -> string list
 
 (** [/api/v1/auth/integrations]. *)
 val path : string

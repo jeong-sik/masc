@@ -227,17 +227,6 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
    | None -> ()
    | Some reason ->
      Log.Server.warn "%s answers 503: %s" Server_account_console.page_path reason);
-  (* Said once, here, for the operator: the page of a person names why a
-     subscription has no model, and the person is not the one who edits
-     runtime.toml. The routes read the file again at each request, so an edit
-     after the start is not said here. A file that cannot be read is said by
-     [Server_runtime_setup_actions.config] itself. *)
-  (match Server_runtime_setup_actions.config ~base_path with
-   | Error (_ : Server_runtime_setup_actions.error) -> ()
-   | Ok config ->
-     List.iter
-       (fun note -> Log.Server.warn "%s" note)
-       (Server_person_integrations.start_notes (Server_person_integrations.of_config config)));
   let* table =
     Result.map_error
       (fun refusal -> Route_of_another_kind refusal)
@@ -366,6 +355,13 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
      | Some port -> string_of_int port
      | None -> "off")
     (Table.route_count table);
+  (* Said once, here, for the operator: which providers offer people no model
+     to check. The access is published, which the calls of a provider are
+     read from. The routes read runtime.toml again at each request, so an
+     edit after the start is not said here. *)
+  List.iter
+    (fun line -> Log.Server.warn "%s" line)
+    (Server_person_integrations.start_lines ~base_path);
   Option.iter (fun on_ready -> on_ready ()) on_ready;
   serve ~sw ~clock ~http_mode ~config ~socket ~https_listener ~trust_policy table;
   Ok ()

@@ -274,6 +274,58 @@ streaming = true
 |}
 ;;
 
+(* The bindings of Claude Code in the order they are declared: one of a
+   model with no row, [offered] (the binding of a model that calls tools, or
+   nothing), and one of a model that declares no tool calling. Codex is
+   declared with no binding, and its calls are refused here. *)
+let withheld_toml ~offered =
+  Printf.sprintf
+    {|[runtime]
+default = "local.local-model"
+
+[providers.local]
+display-name = "Local server"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.claude_code]
+display-name = "Claude Code"
+protocol = "claude-code"
+command = "/nonexistent/claude"
+is-non-interactive = true
+
+[providers.codex]
+display-name = "Codex"
+protocol = "codex-app-server"
+command = "/nonexistent/codex"
+is-non-interactive = true
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[models.claude-notools]
+api-name = "claude-notools"
+max-context = 200000
+streaming = true
+
+[models.local-model]
+api-name = "local-model"
+max-context = 32000
+tools-support = true
+streaming = true
+
+[local.local-model]
+
+[claude_code.claude-ghost]
+%s
+[claude_code.claude-notools]
+|}
+    offered
+;;
+
 type someone =
   { person : Login.person
   ; account_id : string
@@ -620,6 +672,68 @@ let test_turn () =
               Server_person_integrations.answer ~base_path:every_kind_base
             in
             R.status_code status, body));
+        (* Every binding of a provider is answered once, in the order it is
+           declared: the one between two withheld ones is offered, a model
+           with no row and a model that declares no tool calling each have
+           their own code. *)
+        (let withheld_base = Filename.concat root "withheld" in
+         let config =
+           Filename.concat (Common.masc_dir_from_base_path ~base_path:withheld_base) "config"
+         in
+         Fs_compat.mkdir_p config;
+         Out_channel.with_open_bin
+           (Filename.concat config Config_dir_resolver.runtime_toml_filename)
+           (fun out ->
+             output_string out (withheld_toml ~offered:{|[claude_code."claude-sonnet-5"]|}));
+         Alcotest.(check (pair int string))
+           "the bindings of a provider, offered and withheld, in declared order"
+           ( 200
+           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[{"model":"claude-ghost","reason":"model_undeclared"},{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":[],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+           )
+           (let { R.status; headers = _; body } =
+              Server_person_integrations.answer ~base_path:withheld_base
+            in
+            R.status_code status, body));
+        (* What a start says of those providers. A provider is noted when its
+           models are called here and it offers none, with every binding it
+           withholds. Codex offers none in both files and is not noted: its
+           calls are refused. *)
+        (let note =
+           Alcotest.testable
+             (fun out -> function
+               | Server_person_integrations.No_person_provider ->
+                 Format.pp_print_string out "No_person_provider"
+               | Server_person_integrations.No_model { integration_id; withheld } ->
+                 Format.fprintf
+                   out
+                   "No_model %s [%s]"
+                   integration_id
+                   (String.concat "; " (List.map fst withheld)))
+             ( = )
+         in
+         let notes ~offered =
+           match Runtime_toml.parse_string (withheld_toml ~offered) with
+           | Ok config ->
+             Server_person_integrations.start_notes (Server_person_integrations.of_config config)
+           | Error _ -> Alcotest.fail "the runtime.toml of the withheld bindings does not parse"
+         in
+         Alcotest.(check (list note))
+           "a provider that offers a model has no note"
+           []
+           (notes ~offered:{|[claude_code."claude-sonnet-5"]|});
+         Alcotest.(check (list note))
+           "a provider that is called here and offers no model is noted with what it withholds"
+           [ Server_person_integrations.No_model
+               { integration_id = "claude_code"
+               ; withheld =
+                   [ "claude-ghost", Server_person_integrations.Model_undeclared
+                   ; ( "claude-notools"
+                     , Server_person_integrations.Model_refused
+                         Runtime_verification.Tools_not_declared )
+                   ]
+               }
+           ]
+           (notes ~offered:""));
         (* The model left out is the one a verification of her account
            refuses before any client starts. The window is never reached. *)
         (let left_out =

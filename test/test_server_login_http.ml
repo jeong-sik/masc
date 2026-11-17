@@ -876,7 +876,7 @@ let the_preview_follows_a_login () =
     check_reply
       "the integrations of the workspace"
       ( 200
-      , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"calls":"allowed"}]}|}
+      , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"}]}|}
       )
       (integrations ());
     let refused sentence = 400, Yojson.Safe.to_string (`Assoc [ "error", `String sentence ]) in

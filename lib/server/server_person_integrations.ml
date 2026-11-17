@@ -113,32 +113,69 @@ let integration_json { integration_id; display_name; models; withheld; calls } =
      @ calls_fields calls)
 ;;
 
+type start_note =
+  | No_person_provider
+  | No_model of
+      { integration_id : string
+      ; withheld : (string * withheld) list
+      }
+
+(* A provider whose calls are refused gets no note: a model of it would
+   still not be called here. *)
 let start_notes = function
-  | [] ->
-    [ "runtime.toml declares no provider that a person signs in to, so people can connect \
-       nothing"
-    ]
+  | [] -> [ No_person_provider ]
   | _ :: _ as integrations ->
     List.filter_map
-      (fun { integration_id; display_name = (_ : string); models; withheld; calls = (_ : calls) } ->
-        match models, withheld with
-        | _ :: _, (_ : (string * withheld) list) -> None
-        | [], [] ->
-          Some
-            (Printf.sprintf
-               "%s offers people no model: runtime.toml declares no binding of it"
-               integration_id)
-        | [], _ :: _ ->
-          Some
-            (Printf.sprintf
-               "%s offers people no model: %s"
-               integration_id
-               (String.concat
-                  ", "
-                  (List.map
-                     (fun (model, why) -> Printf.sprintf "%s (%s)" model (withheld_code why))
-                     withheld))))
+      (fun { integration_id; display_name = (_ : string); models; withheld; calls } ->
+        match calls, models with
+        | Allowed, [] -> Some (No_model { integration_id; withheld })
+        | Allowed, _ :: _ -> None
+        | Refused (_ : Runtime_account_access.native_refusal), (_ : string list) -> None)
       integrations
+;;
+
+let start_note_to_string = function
+  | No_person_provider ->
+    "runtime.toml declares no provider that a person signs in to, so people can connect nothing"
+  | No_model { integration_id; withheld = [] } ->
+    Printf.sprintf
+      "%s offers people no model: runtime.toml declares no binding of it"
+      integration_id
+  | No_model { integration_id; withheld = _ :: _ as withheld } ->
+    Printf.sprintf
+      "%s offers people no model: %s"
+      integration_id
+      (String.concat
+         ", "
+         (List.map
+            (fun (model, why) -> Printf.sprintf "%s (%s)" model (withheld_code why))
+            withheld))
+;;
+
+(* [Server_runtime_setup_actions.config] writes a file it cannot read to the
+   log itself, so that failure has no line here. It gives no other error;
+   one that it came to give would be said here. *)
+let start_lines ~base_path =
+  match Server_runtime_setup_actions.config ~base_path with
+  | Ok config -> List.map start_note_to_string (start_notes (of_config config))
+  | Error
+      Server_runtime_setup_actions.(
+        Configuration_unavailable
+          (Unreadable (_ : string) | Unparsable (_ : Runtime_toml.parse_error list))) -> []
+  | Error
+      (Server_runtime_setup_actions.(
+         ( Invalid_request
+         | Network_unavailable
+         | Unsupported_connection
+         | Disabled_connection
+         | Credential_unavailable
+         | Discovery_failed (_ : Runtime_model_discovery.error)
+         | Save_failed (_ : Runtime_setup_batch.error)
+         | Account_refused (_ : Runtime_account_access.refusal) )) as error) ->
+    [ Printf.sprintf
+        "runtime.toml was not read for what people may connect: %s"
+        (Server_runtime_setup_actions.error_message error)
+    ]
 ;;
 
 let path = "/api/v1/auth/integrations"

@@ -182,6 +182,18 @@ jobs:
       - name: Test the changelog fragment check of the changes job
         run: python3 -I scripts/ci/test_pr_changelog_fragments.py
 
+      # RFC a-request-reads-its-bearer-once-at-the-door, D6: a request's
+      # bearer is read at the door, and lib/ outside lib/auth/ calls the
+      # functions that read a raw token again only where the script's
+      # allow-list says, as many times as it says. Every source change starts
+      # this job, so a new call fails here. A lower stack layer is checked at
+      # the top pull request, as the type-check is.
+      - name: Test the raw token call check
+        run: python3 -I scripts/ci/test_raw_token_auth_calls.py
+
+      - name: Hold raw token reads to the RFC D6 allow-list
+        run: python3 -I scripts/ci/raw_token_auth_calls.py
+
       # The path and the key prefix are the ones main-minimal-build.yml
       # saves under; a different path would never match its cache entry.
       - name: Dune build cache location

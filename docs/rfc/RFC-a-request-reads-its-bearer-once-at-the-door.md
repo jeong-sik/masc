@@ -212,10 +212,29 @@ type bearer = private
 - Add-on 노출(`addon_exports_for_request`)도 `bearer` 를 받는다(3b). `tools/list` 와 `tools/call` 이 쓰는 값이다. `Admitted` 면 credential 과 입구의 role 을 쓰고, `Unread` 면 지금처럼 token 을 조회하고 role 을 구한다.
 - OAuth step-up(`Server_oauth_step_up.required_scope`)은 주체를 받는다(3c). OAuth access 기록은 주체의 `Oauth_access` credential 이다. 입구는 같은 expected resource 아래에서 OAuth 를 static credential 보다 먼저 조회했다. 그래서 static bearer 에는 OAuth 기록이 없다. internal Keeper token 은 OAuth access token 처럼 무작위 값이라, 그 hash 를 가진 기록도 없다.
 
-**D6. raw token 함수 가두기.** 아래 층이 `Auth.find_credential_by_token`, `Auth.resolve_agent_from_token`, `Auth.check_permission ~token`, `Auth.authorize_tool ~token` 을 새로 부르면 CI 가 실패한다.
+**D6. 네 legacy API의 정적 참조 수 고정.** 4a는 `lib/auth/`를 제외한 `lib/**/*.ml`에서 `Auth.find_credential_by_token`, `Auth.resolve_agent_from_token`, `Auth.check_permission`, `Auth.authorize_tool`의 정적 참조 수를 파일별 허용 목록과 대조한다. `Auth_credential_token`으로 부르는 같은 이름도 센다. 검사는 `scripts/ci/raw_token_auth_calls.py`다.
 
-- 허용 목록은 입구 파일(`lib/server/server_auth.ml`, `lib/mcp_server_eio.ml` 의 stdio 입구), D5 의 「이름이 다르다」 자리, `Unread` 를 읽는 두 자리(`Mcp_server_eio_caller_identity.resolve`, `Mcp_server_eio_execute.bearer_credential`)다.
-- 검사는 `rg` 로 하고, 허용 목록 밖에서 부르는 자리를 출력하며 실패한다.
+- 이 단계는 1b·2·3a·3b·3c에서 바꾼 네 API의 참조가 다시 늘거나, 지운 참조가 다시 생기는 회귀만 고정한다. PPX 확장 전 소스를 세며 실행 횟수·요청당 I/O·dataflow·PPX 생성 코드까지 증명하지 않는다.
+- `find_token_credential`, `find_static_token_credential`, `find_static_credential_by_token`, `verify_token`, `verify_internal_keeper_token`, `internal_keeper_bearer`, `identify_bearer`, `resolve_role`과 `resolve_role_*`, raw token 직접 비교는 감시하지 않는다. 입구·자격증명 관리·내부 token 비교 등 별도 계약을 가진 helpers이며, 이 네 API의 마이그레이션 고정 범위에 넣지 않았다. 이 검사의 성공은 모든 raw bearer 재조회 방지나 인증 의미의 검증을 뜻하지 않는다.
+
+- 허용 목록은 파일과 함수마다 호출 수를 적는다. 수가 늘어도 줄어도 실패한다. 줄어든 수를 목록에 적어야 지운 조회가 다시 생기지 않는다.
+- 늘리려면 이 절에 이유를 쓰고 목록의 수를 올린다.
+
+| 파일 | 이유 |
+|---|---|
+| `lib/server/server_auth.ml` | HTTP 입구. `/mcp`, seat, observer, operator, dashboard, credential 관리 경로 |
+| `lib/server/masc_grpc_server.ml` | gRPC 입구. bearer 가 없는 호출을 workspace 설정대로 받는다(`~token:None`) |
+| `lib/server/server_mcp_transport_ws.ml` | dashboard WebSocket 입구(`dashboard/hello`) |
+| `lib/sse.ml` | SSE 등록 입구 |
+| `lib/server/server_routes_http_dashboard_dev_token.ml` | dashboard 개발용 token 저장소가 자기가 가진 token 을 가른다 |
+| `lib/mcp_server_eio_protocol.ml` | D3 의 internal Keeper bearer 조회, 3b 의 Add-on 노출이 `Unread` token 을 읽는 자리 |
+| `lib/mcp_server_eio_caller_identity.ml` | D5. `Unread` token 으로 호출자 이름을 정한다 |
+| `lib/mcp_server_eio_execute.ml` | D5. 「이름이 다르다」 자리와 `Unread` 의 권한 판정, lane·browser·board 의 credential 조회 |
+
+- 검사는 주석, 문자열, 문자 리터럴을 지운 뒤 토큰으로 읽는다. 점 옆에 공백·줄바꿈·주석이 있어도 같은 참조로 센다. 이름을 숨길 수 있는 모듈 참조(`open Auth`, `include Auth`, `Auth.( … )`, 괄호·타입 표시가 붙은 alias, first-class module, functor 인자)는 보수적으로 거절한다. `module Auth = Auth`와 `module Auth = Masc_auth.Auth`처럼 이름을 유지하는 단순 alias만 허용한다.
+- `rg` 대신 Python 으로 쓴다. `rg` 는 주석 속 이름과 호출을 가르지 못하고, 줄어든 수를 잡지 못한다. `scripts/ci/` 의 다른 검사처럼 pyright strict 와 단위 시험을 둔다.
+- `.mli`와 `lib/` 밖(`test/`, `bin/`, `packages/`)은 보지 않는다. 4a는 기존 `lib/` 마이그레이션의 네 API 참조만 고정한다. 이 제외를 다른 token helpers의 호출이 없다는 뜻으로 읽지 않는다.
+- `pr-type-check.yml` 의 `type-check` job 에서 돈다. native stack 의 아래 층은 맨 위 PR 에서 검사한다. type-check 와 같은 범위다.
 
 ### 3.3 남는 비용
 
@@ -282,7 +301,8 @@ type bearer = private
 | 3a | 실행부(호출자 신원, 실행 권한, lane·browser·board 조회)가 `bearer` 를 받는다(D5). `handle_call_tool_eio`·`execute_tool_eio` 의 `?auth_token`·`?internal_keeper_runtime` 을 지운다 | L1(같은 호출을 입구의 답과 token 으로 풀어 비교), `tools/call` 의 L2 |
 | 3b | Add-on 노출(`addon_exports_for_request`)이 `bearer` 를 받는다. `tools/list` 와 `tools/call` 이 같은 값을 쓴다 | L1, `tools/list` 의 L2 |
 | 3c | transport 의 OAuth step-up(`Server_oauth_step_up.required_scope`)이 주체의 OAuth credential 을 쓴다. Keeper stream 과 SDK adapter 가 받고 버리는 `?auth_token` 을 지운다 | L1 |
-| 4 | raw token 함수 허용 목록 검사(D6)와 TLA+ 갱신 | CI 검사, TLC 정상·buggy |
+| 4a | 네 legacy API의 정적 참조 허용 목록 검사(D6) | 검사 스크립트의 단위 시험, 지금 트리에서 통과 |
+| 4b | TLA+ 갱신 | TLC 정상·buggy |
 
 D4 는 처음에 단계 2 에 있었다. 1b 로 옮긴 이유는 두 가지다.
 

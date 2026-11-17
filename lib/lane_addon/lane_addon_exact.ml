@@ -1213,16 +1213,8 @@ let recovery ~store ~declaration_id ~schema ~invalid_error bound ~record ~proof 
       | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->
           Ok (Recovered observed)
 
-let recover_retained ~store ~declaration_id ~schema request =
-  (* Same split as [observe_retained]: the schema is the caller's own, so a
-     mismatch is permanent. *)
-  let* schema = invalid (original_schema ~declaration_id ~schema request) in
-  let bound = Digested.make request in
-  let* key = unreadable (claim_key ~store ~declaration_id ~request_id:request.request_id) in
-  (* [observe_retained] already reports [recovery_error], so a concurrent claim
-     is forwarded unchanged instead of being folded into one class. *)
-  if not (claim key) then observe_retained_classified ~store ~declaration_id ~schema bound
-  else Fun.protect ~finally:(fun () -> release key) (fun () ->
+let recover_claimed ~store ~declaration_id ~schema bound =
+    let request=Digested.request bound in
     let* record = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
       ~request_id:request.request_id) in
     (* The proof link is read from disk and then decoded. A read that fails may
@@ -1236,7 +1228,17 @@ let recover_retained ~store ~declaration_id ~schema request =
         let* () = unreadable (Lane_addon_store.save_exact_request store ~declaration_id
           ~request_id:request.request_id
           (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
-        observe_retained_classified ~store ~declaration_id ~schema bound)
+        observe_retained_classified ~store ~declaration_id ~schema bound
+
+let recover_retained ~store ~declaration_id ~schema request =
+  (* Same split as [observe_retained]: the schema is the caller's own, so a
+     mismatch is permanent. *)
+  let* schema = invalid (original_schema ~declaration_id ~schema request) in
+  let bound = Digested.make request in
+  let* key = unreadable (claim_key ~store ~declaration_id ~request_id:request.request_id) in
+  if not (claim key) then observe_retained_classified ~store ~declaration_id ~schema bound
+  else Fun.protect ~finally:(fun () -> release key) (fun () ->
+    recover_claimed ~store ~declaration_id ~schema bound)
 
 type cut_exclusion_evidence = {
   key:Retained_key.t; attempt_ordinal:int; record_sha256:string; proof_sha256:string option;
@@ -1329,6 +1331,101 @@ type authority_refusal =
 type execution_authority =
   store:Lane_addon_store.t -> declaration_id:string -> package:Lane_addon_types.package ->
   request -> (request_authorization, authority_refusal) result
+
+type replacement_pending =
+  | Replacement_claim_busy
+  | Declaration_current
+  | Declaration_unavailable of {detail:string}
+  | Execution_unresolved
+type replacement_reconciliation =
+  | Reconciled_terminal of retained_final
+  | Reconciliation_pending of replacement_pending
+
+let reconcile_replaced ~store ~declaration_id ~schema ~(package:Lane_addon_types.package)
+    ~authorize_request request =
+  let declared ()=invalid (Option.to_result ~none:"Original Exact output is not declared by its package"
+    (List.find_opt (fun (output:Lane_addon_types.exact_output) -> output.name=request.output)
+      package.exact_outputs)) in
+  let* schema=invalid (original_schema ~declaration_id ~schema request) in
+  let bound=Digested.make request in
+  let* key=unreadable (claim_key ~store ~declaration_id ~request_id:request.request_id) in
+  if not (claim key) then Ok (Reconciliation_pending Replacement_claim_busy) else
+  Fun.protect ~finally:(fun () -> release key) (fun () ->
+    let io work=Systhread_host.run ~label:"addon-exact-reconcile-replaced" work in
+    let* observed=io (fun () -> recover_claimed ~store ~declaration_id ~schema bound) in
+    match observed with
+    | Retained_terminal final -> Ok (Reconciled_terminal final)
+    | Retained_absent | Retained_open ->
+      let* previous=io (fun () ->
+        let* wire=unreadable (Lane_addon_store.load_exact_request store ~declaration_id
+          ~request_id:request.request_id) in
+        match wire with
+        | None -> Ok {digest=Digested.digest bound;request=request_to_json request;attempts=[];final=None}
+        | Some wire -> invalid (bound_record ~declaration_id bound wire)) in
+      let* previous=io (fun () ->
+        let* _=invalid (validate_record ~request ~schema:(Some schema) previous) in
+        let* proofs=invalid (bound_proofs ~store ~declaration_id bound previous) in
+        match List.rev previous.attempts with
+        | Started _ :: earlier ->
+          (match selected_proof ~attempt_ordinal:(List.length previous.attempts) proofs with
+           | Some (_, ({outcome=Call_refused _;_} as execution)) ->
+             Ok (finish_record {previous with attempts=List.rev earlier} execution.outcome)
+           | Some (_, {outcome=Call_ended _;_}) ->
+             invalid (Error "Original completed execution changed during replacement reconciliation")
+           | None -> Ok previous)
+        | [] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
+            | Unknown_raised _ | Delivery_refused _ | Reused) :: _ -> Ok previous) in
+      let* observed=invalid (validate_record ~request ~schema:(Some schema) previous) in
+      match observed with
+      | Retained_terminal final -> Ok (Reconciled_terminal final)
+      | Retained_absent | Retained_open ->
+        match List.rev previous.attempts with
+        | Started _ :: _ -> Ok (Reconciliation_pending Execution_unresolved)
+        | [] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
+            | Unknown_raised _ | Delivery_refused _ | Reused) :: _ ->
+          let* output=declared () in
+          let* _=invalid (schema_for_request ~output request) in
+          let* authorization=match authorize_request ~store ~declaration_id ~package request with
+            | Ok authorization -> Ok authorization
+            | Error (Unowned {reason}) -> invalid (Error reason)
+            | Error (Undecided {detail}) -> unreadable (Error detail) in
+          match authorization.before_dispatch () with
+          | Ok () -> Ok (Reconciliation_pending Declaration_current)
+          | Error (Not_now {detail}) -> Ok (Reconciliation_pending (Declaration_unavailable {detail}))
+          | Error Declaration_replaced ->
+            let refusal=Not_allowed {reason=Replaced_declaration} in
+            let expected=record_to_json ~declaration_id ~request_id:request.request_id
+              {previous with final=Some refusal} in
+            let confirm ()=io (fun () ->
+              let* actual=unreadable (Lane_addon_store.load_exact_request store ~declaration_id
+                ~request_id:request.request_id) in
+              let* actual=invalid (Option.to_result ~none:"Original Exact ending disappeared before readback" actual) in
+              let* actual=invalid (Lane_addon_action.canonical actual) in
+              let* expected=invalid (Lane_addon_action.canonical expected) in
+              let* ()=invalid (if Yojson.Safe.equal actual expected then Ok ()
+                else Error "Original Exact ending bytes changed before readback") in
+              let* confirmed=recover_claimed ~store ~declaration_id ~schema bound in
+              match confirmed with
+              | Retained_terminal (Retained_not_allowed {reason=Replaced_declaration} as final) -> Ok final
+              | Retained_absent | Retained_open
+              | Retained_terminal (Retained_call _ | Retained_unknown _
+                  | Retained_not_allowed {reason=Permission_refused _} | Retained_request_id_reused) ->
+                invalid (Error "Original Exact replacement ending changed before strict readback")) in
+            let* result=unreadable (authorization.with_execution (fun () ->
+              Eio.Fiber.check ();
+              let* ()=match authorization.before_dispatch () with
+                | Error Declaration_replaced -> Ok ()
+                | Error (Not_now {detail}) -> Error detail
+                | Ok () -> Error "Original Exact declaration became current before ending" in
+              let* ()=io (fun () -> Lane_addon_store.save_exact_request store ~declaration_id
+                ~request_id:request.request_id expected) in
+              let+ _=confirm () |> Result.map_error describe_recovery_error in Final refusal)) in
+            match result with
+            | Final (Not_allowed {reason=Replaced_declaration}) ->
+              let+ final=confirm () in Reconciled_terminal final
+            | Final (Call_final _ | Outcome_unknown | Not_allowed {reason=Permission_refused _} | Request_id_reused)
+            | Not_final _ -> invalid (Error "Original Exact ending lifetime returned another outcome"))
+
 
 let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~authorize_request request =
   let request_id = request.request_id in

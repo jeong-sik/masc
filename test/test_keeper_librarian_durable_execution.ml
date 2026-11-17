@@ -4793,6 +4793,45 @@ let test_history_fence_retains_unknown_and_blocks_late_observations () = with_fi
     (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
   io (fun () -> write path "{unreadable fence");
   refuse_fenced_resume fixture changed request)
+let test_actual_history_guard_rechecks_own_fence_for_replacement () = with_fixture (fun ~sw fixture ->
+  let original,request=retain_absent_history_original ~failed_selection:false fixture in
+  let exact=Capture.request request |> get in
+  let schema=Option.to_result ~none:"fenced replacement has no schema" exact.Exact.schema |> get in
+  let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+    |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+  let authorization=Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+    ~store:fixture.store ~declaration_id:"librarian" ~package exact
+    |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
+    |> get |> Option.get in
+  check (result unit string) "the original guard is current before its own fence" (Ok ())
+    (authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail);
+  let preview=fence_preview fixture request in
+  ignore (memory_action fixture (fun () -> io (fun () ->
+    Resolution.fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+      ~expected:preview.expected ~actor:"operator" ~reason:"Exclude this original's future effects"
+      ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)));
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-fenced-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_actual_worker_configuration fixture ~sw replacement;
+  let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture in
+  check bool "the previously captured host guard rereads its own fence" true
+    (guard_waits authorization.before_dispatch);
+  (match memory_action fixture (fun () -> Keeper_librarian_durable_edge.reconcile_replacement
+      ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ())
+      ~original:(Owner.listed original) ~request:exact)
+      |> Result.map_error Lane_addon_submit_once.error_to_string |> get with
+   | Exact.Reconciliation_pending (Declaration_unavailable _) -> ()
+   | Reconciliation_pending (Replacement_claim_busy | Declaration_current | Execution_unresolved)
+   | Reconciled_terminal _ -> fail "an own fence was treated as replacement authority");
+  check bool "the actual runner-free Runtime port creates no host ending" true
+    ((io (fun () -> Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian" ~schema exact) |> get)
+      =Exact.Retained_absent);
+  let current,_=only_original fixture in
+  check json "the fenced original record is unchanged" (Owner.to_json original) (Owner.to_json current);
+  check bool "the fenced reconciliation changes no source ACK" true (cut_source_positions fixture=positions);
+  check bool "the fenced reconciliation changes no Memory publication" true (cut_memory_bytes fixture=memory);
+  check int "the fenced reconciliation sends no model request" 0 (F.post_count fixture.server))
 let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_ fixture ->
   let original,request=retain_absent_history_original fixture in
   let preview=fence_preview fixture request in
@@ -6877,6 +6916,190 @@ let test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_wh
     check int "one more provider call judged the range" 2 (F.post_count fixture.server);
     check (list string) "the new original's answer reached Memory"
       ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
+let test_runner_free_replacement_recovers_an_unlisted_dispatch_pending_original () =
+  with_fixture (fun ~sw fixture ->
+    let original,request=retain_absent_history_original ~failed_selection:false fixture in
+    let exact=Capture.request request |> get in
+    let schema=Option.to_result ~none:"waiting replacement has no schema" exact.Exact.schema |> get in
+    check bool "the dispatched owner has no actual host record or proof" true
+      ((io (fun () -> Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian" ~schema exact) |> get)
+       =Exact.Retained_absent);
+    replace_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
+    let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture and wakes=ref 0 in
+    ended_by_one_refusal (run_worker_waking fixture wakes);
+    check int "normal owner reconciliation asks for its next pass" 1 !wakes;
+    let ended,ended_request=only_original fixture in
+    check string "the ending belongs to the same original" original.request_id ended.Owner.request_id;
+    check json "the ending preserves its immutable request" original.request ended.request;
+    check json "the restored ending keeps the same captured body" (Capture.to_json request) (Capture.to_json ended_request);
+    let expected=Exact.Retained_not_allowed {reason=Replaced_declaration} in
+    io (fun () -> Capture.confirm_retained_final ~store:fixture.store request expected |> get);
+    (match io (fun () -> Exact.read_latest_original_execution ~store:fixture.store
+       ~declaration_id:"librarian" ~schema exact) |> get with
+     | Exact.No_completed_latest -> ()
+     | Completed_latest _ -> fail "the ending fabricated an original host execution");
+    check bool "ending alone leaves the original live until fresh inventory" false
+      (settled_on fixture ~date:(day_of original.request_id) original);
+    check bool "ending alone changes no source ACK" true (cut_source_positions fixture=positions);
+    check bool "ending alone changes no Memory, journal or receipts" true (cut_memory_bytes fixture=memory);
+    check int "the replaced original never reaches the model" 0 (F.post_count fixture.server);
+    let provider_ids=ref [] in
+    fixture.set_response (fun capture ->
+      let id=Capture.request_id capture in
+      check bool "only a fresh original reaches the provider" true (id<>original.request_id);
+      provider_ids:=id:: !provider_ids;
+      `OK,F.openai_response (answer capture));
+    assert_pending (run_worker_waking fixture wakes);
+    check bool "fresh inventory moves the actual ended original" true
+      (settled_on fixture ~date:(day_of original.request_id) original);
+    let fresh,fresh_request=only_original fixture in
+    check bool "the next request has a fresh identity" true (fresh.Owner.request_id<>original.request_id);
+    check bool "the complete unread range is selected again" true
+      (Source.extent (Capture.source fresh_request)=Keeper_librarian_range.All_unread);
+    drive_advanced fixture;
+    check (list string) "only the fresh retained original was dispatched" [fresh.request_id] !provider_ids;
+    check (list string) "the actual fresh answer reached Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+    check bool "only that completed read advances source ACK" false (cut_source_positions fixture=positions))
+(* Two independent originals can wait before either worker accepted them. A
+   changed declaration must retain one actual no-send ending before the
+   multiplicity guard, then yield so the next pass uses a fresh inventory. *)
+let test_two_absent_originals_drain_replaced_endings_before_fresh_selection () =
+  with_fixture (fun ~sw fixture ->
+    let first,first_request=retain_absent_history_original ~failed_selection:false fixture in
+    let second,second_request=memory_action fixture (fun () ->
+      Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+        ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination ->
+          let owner=Capture.physical_owner first_request in
+          let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ())
+            ~source_lines:["Second independent waiting original fixture source"]
+            (Source.input (Capture.source first_request)) |> get in
+          let request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+            ~owner ~destination ~source:(Capture.source first_request) ~preparation ()) |> get in
+          let record=Durable_owner.retain ~store:fixture.store request
+            |> Result.map_error Durable_owner.error_to_string |> get in
+          let record=advance_original fixture record Progress.Dispatch_intended in
+          let record=advance_original fixture record (Progress.Execution_observed (Progress.Absent (`Assoc []))) in
+          Ok (record,request))) |> get in
+    let first_exact=Capture.request first_request |> get and second_exact=Capture.request second_request |> get in
+    check bool "the factory gives the two original questions distinct HTTP identities" true
+      (first_exact.system<>second_exact.system || first_exact.messages<>second_exact.messages);
+    check string "both originals preserve the same source obligation"
+      (Capture.source_basis_digest first_request |> get) (Capture.source_basis_digest second_request |> get);
+    let originals=[first,first_request;second,second_request] in
+    let ids=List.map (fun ((record:Owner.retained),_) -> record.request_id) originals |> List.sort String.compare in
+    let live_ids ()=List.map (fun ((record:Owner.retained),_) -> record.request_id)
+      (observed_originals fixture) |> List.sort String.compare in
+    let live request_id=List.find_opt (fun ((record:Owner.retained),_) -> record.request_id=request_id)
+      (observed_originals fixture) |> Option.to_result ~none:"expected a retained waiting original" |> get in
+    let assert_no_host request =
+      let exact=Capture.request request |> get in
+      let schema=Option.to_result ~none:"waiting original has no schema" exact.Exact.schema |> get in
+      check bool "the waiting original has no actual host record" true
+        ((io (fun () -> Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian" ~schema exact) |> get)
+          =Exact.Retained_absent);
+      check bool "the waiting original has no completed host proof" true
+        (latest fixture request=Exact.No_completed_latest) in
+    List.iter (fun (_,request) -> assert_no_host request) originals;
+    let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture and wakes=ref 0 in
+    let no_effects () =
+      check bool "ending recovery moves no source cursor or ACK" true (cut_source_positions fixture=positions);
+      check bool "ending recovery changes no Memory, journal or receipts" true (cut_memory_bytes fixture=memory);
+      check int "neither waiting original reaches the provider" 0 (F.post_count fixture.server) in
+    (match run_worker_waking fixture wakes with
+     | Error (Consumer.Original_publication_blocked _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "two current-declaration originals must retain the multiplicity refusal");
+    check int "the unchanged declaration requests no next pass" 0 !wakes;
+    check (list string) "multiplicity creates or archives no original ID" ids (live_ids ());
+    List.iter (fun ((record:Owner.retained),request) ->
+      let actual,_=live record.request_id in
+      check json "multiplicity refuses without rewriting either owner" (Owner.to_json record) (Owner.to_json actual);
+      assert_no_host request) originals;
+    no_effects ();
+    replace_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
+    List.iter (fun (_,request) -> assert_no_host request) originals;
+    let ended_id=match run_worker_waking fixture wakes with
+      | Ok (Consumer.Pending (Keeper_librarian_pending.Publication {request_id;_})) -> request_id
+      | Error error -> fail (Consumer.error_to_string error)
+      | Ok (Consumer.Pending _ | Nothing_to_read | Baseline_advanced _ | Progress_advanced _
+          | Official_advanced _ | Memory_not_committed _) ->
+        fail "one retained no-send ending must yield before reusing frontier counts" in
+    check int "one changed ending requests exactly one fresh pass" 1 !wakes;
+    check (list string) "the ending pass creates or archives no original ID" ids (live_ids ());
+    let ended,ended_request=live ended_id in
+    let assert_ending ((record:Owner.retained),request) =
+      let exact=Capture.request request |> get in
+      let schema=Option.to_result ~none:"ended original has no schema" exact.Exact.schema |> get in
+      let expected=Exact.Retained_not_allowed {reason=Replaced_declaration} in
+      (match Progress.phase record.progress with
+       | Rejected {stage=Execution;evidence} ->
+         check bool "the original retains the actual typed replacement cause" true
+           ((Exact.retained_final_of_json ~schema evidence |> get)=expected)
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+         fail "the original has no execution-stage replacement ending");
+      io (fun () -> Capture.confirm_retained_final ~store:fixture.store request expected |> get);
+      check bool "the ending introduces no completed host execution" true
+        (latest fixture request=Exact.No_completed_latest) in
+    assert_ending (ended,ended_request);
+    let other_id=List.find_opt (fun id -> id<>ended_id) ids
+      |> Option.to_result ~none:"the fixture must retain two distinct original IDs" |> get in
+    let other,other_request=live other_id in
+    assert_no_host other_request;
+    List.iter (fun ((record:Owner.retained),request) ->
+      let actual,actual_request=live record.request_id in
+      check json "the ending pass preserves the exact original body" (Capture.to_json request) (Capture.to_json actual_request);
+      check json "the ending pass preserves the owner's immutable request" record.request actual.request;
+      check bool "the first ending pass archives neither original" false
+        (settled_on fixture ~date:(day_of record.request_id) record)) originals;
+    no_effects ();
+    ended_by_one_refusal (run_worker_waking fixture wakes);
+    check int "the second real ending requests its next pass" 2 !wakes;
+    check bool "fresh inventory archives the first confirmed ending" true
+      (settled_on fixture ~date:(day_of ended.request_id) ended);
+    let other_ended,other_ended_request=only_original fixture in
+    check string "the remaining original ends under its same ID" other_id other_ended.Owner.request_id;
+    assert_ending (other_ended,other_ended_request);
+    check bool "the second ending waits for its own fresh inventory" false
+      (settled_on fixture ~date:(day_of other.request_id) other);
+    no_effects ();
+    let provider_ids=ref [] in
+    fixture.set_response (fun request ->
+      let id=Capture.request_id request in
+      check bool "only a fresh identity may reach the provider" false (List.mem id ids);
+      provider_ids:=id:: !provider_ids;
+      `OK,F.openai_response (answer request));
+    assert_pending (run_worker_waking fixture wakes);
+    List.iter (fun ((record:Owner.retained),_) ->
+      check bool "both real no-send endings are archived before fresh selection" true
+        (settled_on fixture ~date:(day_of record.request_id) record)) originals;
+    let fresh,fresh_request=only_original fixture in
+    check bool "one fresh original owns the complete unread source" true
+      (not (List.mem fresh.Owner.request_id ids)
+       && Capture.predecessor fresh_request=None
+       && Source.extent (Capture.source fresh_request)=Keeper_librarian_range.All_unread);
+    check string "fresh selection preserves the original source obligation"
+      (Capture.source_basis_digest first_request |> get) (Capture.source_basis_digest fresh_request |> get);
+    drive_advanced fixture;
+    let completed,_=only_original fixture in
+    check string "the actual committed answer belongs to that fresh original" fresh.request_id completed.Owner.request_id;
+    check bool "the fresh original finishes only after real publication and ACK" true
+      (match Progress.phase completed.progress with Finished _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check bool "the fresh original has actual Memory range receipts" true
+      (io (fun () -> Commit.receipt_state fresh_request) |> get);
+    check (list string) "exactly that fresh original reaches the provider" [fresh.request_id] !provider_ids;
+    check int "both obsolete originals remain unsent" 1 (F.post_count fixture.server);
+    check (list string) "the fresh answer reaches actual Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+    check bool "only the fresh committed read advances source positions" false (cut_source_positions fixture=positions);
+    let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source fresh_request)) in
+    let cursor=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    check bool "the fresh commit ACKs the exact original external frontier" true
+      (Keeper_external_read_cursor.observation_matches_preparation cursor ~after:through ~through ~atom:None ~official:None))
 (* A real host no-send ending can already be retained as Rejected. Submit
    recovery is then skipped, so the chain's recreation decision must read the
    actual proof link independently before cleanup can move that step. *)
@@ -8026,6 +8249,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_floor_step_guard_tells_a_replaced_declaration_from_a_failed_read;
   test_case "a replaced declaration ends a waiting original and its range is read whole again" `Quick
     test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again;
+  test_case "a normal waiting pass ends its unlisted replaced original without a runner" `Quick
+    test_runner_free_replacement_recovers_an_unlisted_dispatch_pending_original;
+  test_case "two absent originals retain actual replacement endings before fresh selection" `Quick
+    test_two_absent_originals_drain_replaced_endings_before_fresh_selection;
   test_case "a retained replaced floor step checks its actual proof before recreation" `Quick
     test_a_retained_replaced_floor_step_requires_its_actual_proof_link;
   test_case "retained history inventory checks a replaced original's actual proof before archive" `Quick
@@ -8065,6 +8292,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_an_absent_continuation_yields_before_its_next_child;
   test_case "an explicit history fence blocks late observations and unreadable fence state" `Quick
     test_history_fence_retains_unknown_and_blocks_late_observations;
+  test_case "the actual host guard rereads its own fence before a replacement ending" `Quick
+    test_actual_history_guard_rechecks_own_fence_for_replacement;
   test_case "a same-binding Cut effect fence preserves Unknown without creating a successor" `Quick
     (test_cut_effect_fence_preserves_unknown_without_a_successor Atoms);
   test_case "a mixed-source Cut effect fence preserves every original frontier" `Quick

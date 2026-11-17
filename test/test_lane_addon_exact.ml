@@ -1483,6 +1483,180 @@ let test_execution_guard_is_not_retained_delivery_authority () =
     check bool "execution authority changes preserve original bytes" true
       (retained=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)))
 
+let replacement_authority guard ~store ~declaration_id ~package request =
+  let original=require (authorize_request ~store ~declaration_id ~package request
+    |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)) in
+  Ok {original with Exact.before_dispatch=guard}
+let reconcile_replacement ?(package=package) store authorize_request original =
+  let schema=match original.Exact.schema with Some schema -> schema | None -> schema in
+  Exact.reconcile_replaced ~store ~declaration_id ~schema ~package ~authorize_request original
+  |> Result.map_error Exact.describe_recovery_error
+let replacement_terminal = function
+  | Exact.Reconciled_terminal (Exact.Retained_not_allowed {reason=Replaced_declaration}) -> true
+  | Reconciled_terminal (Retained_call _ | Retained_unknown _
+      | Retained_not_allowed {reason=Permission_refused _} | Retained_request_id_reused)
+  | Reconciliation_pending _ -> false
+let original_wire store original =
+  require (Store.load_exact_request store ~declaration_id ~request_id:original.Exact.request_id)
+let original_proof store original =
+  let instance_id,request_id=proof_address original in
+  require (Store.load_host_result store ~instance_id ~request_id)
+let replace_wire_field name value = function
+  | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "expected original object"
+
+let test_runner_free_replacement_ends_absent_and_survives_rollback () = with_root (fun root ->
+  let store=Store.create ~root and checks=ref 0 and scopes=ref 0 in
+  let original=request "runner-free-absent" in
+  let authority ~store ~declaration_id ~package request =
+    let base=require (replacement_authority (fun () -> incr checks;Error Exact.Declaration_replaced)
+      ~store ~declaration_id ~package request |> Result.map_error (fun _ -> "fixture authority refused")) in
+    Ok {base with Exact.with_execution=(fun run ->
+      incr scopes;
+      let result=run () in
+      check bool "real ending is readable before its lifecycle leaves" true
+        (match original_wire store original with Some wire -> Yojson.Safe.Util.member "final" wire<>`Null | None -> false);
+      result)} in
+  check bool "runner-free API retains actual typed ending" true
+    (replacement_terminal (require (reconcile_replacement store authority original)));
+  check int "both fresh authority checks ran" 2 !checks;
+  check int "one actual lifecycle scope" 1 !scopes;
+  let retained=original_wire store original in
+  check bool "same ID cannot end another immutable request" true
+    (Result.is_error (reconcile_replacement store authority (request ~message:"another input" original.request_id)));
+  check bool "identity refusal preserves the original ending" true (original_wire store original=retained);
+  check bool "rollback does not reopen the original" true
+    (replacement_terminal (require (reconcile_replacement (Store.create ~root)
+      (fun ~store:_ ~declaration_id:_ ~package:_ _ -> fail "terminal must win over newer authority") original)));
+  check bool "same original bytes remain" true (original_wire store original=retained);
+  check bool "ending fabricates no execution proof" true (original_proof store original=None))
+
+let test_runner_free_replacement_current_unavailable_and_changed_authority () =
+  List.iter (fun (name,guard,expected) -> with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request name in
+    let result=require (reconcile_replacement store (replacement_authority guard) original) in
+    check bool "no ending without actual replacement authority" true
+      (result=Exact.Reconciliation_pending expected);
+    check bool "read-only pending leaves the store absent" false (Sys.file_exists root)))
+    ["runner-free-current",(fun () -> Ok ()),Exact.Declaration_current;
+     "runner-free-unavailable",(fun () -> Error (Exact.Not_now {detail="not ready"})),
+       Exact.Declaration_unavailable {detail="not ready"}];
+  List.iter (fun refusal -> with_root (fun root ->
+    let store=Store.create ~root and original=request "runner-free-permission" in
+    check bool "permission is not a replacement ending" true
+      (Result.is_error (reconcile_replacement store
+        (fun ~store:_ ~declaration_id:_ ~package:_ _ -> Error refusal) original));
+    check bool "permission refusal writes nothing" false (Sys.file_exists root)))
+    [Exact.Unowned {reason="another owner"};Exact.Undecided {detail="owner unavailable"}];
+  List.iter (fun second -> with_root (fun root ->
+    let store=Store.create ~root and checks=ref 0 in
+    let original=request "runner-free-authority-changed" in
+    let authority=replacement_authority (fun () -> incr checks;
+      if !checks=1 then Error Exact.Declaration_replaced else second) in
+    check bool "authority changing inside actual lifecycle refuses publication" true
+      (Result.is_error (reconcile_replacement store authority original));
+    check int "publication rechecked authority" 2 !checks;
+    check bool "changed authority writes no original" false (Sys.file_exists root)))
+    [Ok ();Error (Exact.Not_now {detail="replacement no longer ready"})]
+
+let test_runner_free_replacement_preserves_started_unknown_and_busy () = with_root (fun root ->
+  let store=Store.create ~root in
+  let authority=replacement_authority (fun () -> Error Exact.Declaration_replaced) in
+  let started=request "runner-free-started" in
+  require (Store.save_exact_request store ~declaration_id ~request_id:started.request_id (`Assoc [
+    "declaration_id",`String declaration_id;"request_id",`String started.request_id;
+    "digest",`String (Exact.digest started);"request",Exact.request_to_json started;
+    "attempts",`List [other_process_marker];"final",`Null]));
+  let before=original_wire store started in
+  check bool "old unproven Started is not no-send authority" true
+    (require (reconcile_replacement store authority started)=Exact.Reconciliation_pending Exact.Execution_unresolved);
+  check bool "Started is neither cut nor rewritten" true (original_wire store started=before);
+  let unknown=request "runner-free-unknown" in
+  let raised ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    Ok (fun ~validate:_ -> require (before_dispatch Exact.Generation);raise Exit) in
+  ignore (run_request store raised unknown);
+  let before=original_wire store unknown in
+  check bool "actual unknown terminal wins over replacement authority" true
+    (require (reconcile_replacement store authority unknown)=
+      Exact.Reconciled_terminal (Exact.Retained_unknown Exact.Raised));
+  check bool "actual unknown bytes survive" true (original_wire store unknown=before);
+  let active=request "runner-free-active" in
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    Ok (fun ~validate ->
+      require (before_dispatch Exact.Generation);
+      let before=original_wire store active in
+      let alias=Store.create ~root:(Filename.concat root ".") in
+      check bool "actual canonical Exact claim remains exclusive" true
+        (require (reconcile_replacement alias authority active)=
+          Exact.Reconciliation_pending Exact.Replacement_claim_busy);
+      check bool "busy claim writes nothing" true (original_wire store active=before);
+      let output=require (validate question) in
+      executed (Exact.Call_ended (Exact.Answered {output;slot="actual";usage=None}))) in
+  check bool "owner of the real claim can still answer" true (answered_with question (run_request store runner active)))
+
+let test_runner_free_replacement_completed_and_latest_proof_priority () = with_root (fun root ->
+  let store=Store.create ~root in
+  let ending=replacement_authority (fun () -> Error Exact.Declaration_replaced) in
+  let completed=request ~schema:consumer_schema "runner-free-completed" in
+  let runner,sends,_=counting_runner store (ref [Answer question]) in
+  ignore (consumer_run store runner completed);
+  let wire=Option.get (original_wire store completed) in
+  let proof=original_proof store completed in
+  let lost=replace_wire_field "final" `Null (replace_wire_field "attempts" (`List [other_process_marker]) wire) in
+  require (Store.save_exact_request store ~declaration_id ~request_id:completed.request_id lost);
+  let denied ~store:_ ~declaration_id:_ ~package:_ _=Error (Exact.Unowned {reason="later permission changed"}) in
+  check bool "actual completed proof recovers before newer permission" true
+    (match require (reconcile_replacement ~package:{consumer_package with exact_outputs=[]}
+      store denied completed) with
+     | Exact.Reconciled_terminal (Retained_call (Answered {output;_})) -> Exact.checked_json output=question
+     | Reconciled_terminal (Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+         | Retained_unknown _ | Retained_not_allowed _ | Retained_request_id_reused)
+     | Reconciliation_pending _ -> false);
+  check bool "actual completed terminal was durably recovered" true (original_wire store completed=Some wire);
+  check bool "completed proof unchanged" true (original_proof store completed=proof);
+  check int "only the original fixture dispatch ran" 1 !sends;
+  let deferred=request "runner-free-deferral" in
+  let runner,_,_=counting_runner store (ref [Refused (Exact.Provider_unavailable {detail="actual deferred call"})]) in
+  ignore (run_request store runner deferred);
+  let wire=Option.get (original_wire store deferred) and proof=original_proof store deferred in
+  let later=replace_wire_field "attempts"
+    (`List (Yojson.Safe.Util.(wire |> member "attempts" |> to_list) @ [other_process_marker])) wire in
+  require (Store.save_exact_request store ~declaration_id ~request_id:deferred.request_id later);
+  check bool "a later Started cannot borrow the earlier actual proof" true
+    (require (reconcile_replacement store ending deferred)=Exact.Reconciliation_pending Exact.Execution_unresolved);
+  check bool "latest ambiguity remains exact" true (original_wire store deferred=Some later);
+  let closed_proof_pending=replace_wire_field "attempts" (`List [other_process_marker]) wire in
+  require (Store.save_exact_request store ~declaration_id ~request_id:deferred.request_id closed_proof_pending);
+  check bool "current authority does not normalize a closed refusal into an ending" true
+    (require (reconcile_replacement store (replacement_authority (fun () -> Ok ())) deferred)=
+      Exact.Reconciliation_pending Exact.Declaration_current);
+  check bool "known refusal stays byte-identical until actual replacement grant" true
+    (original_wire store deferred=Some closed_proof_pending && original_proof store deferred=proof);
+  check bool "the actual bound closed refusal can end without another call" true
+    (replacement_terminal (require (reconcile_replacement store ending deferred)));
+  check bool "earlier real refusal proof retained" true (original_proof store deferred=proof);
+  check bool "latest proof is the actual prior refusal, not a fabricated execution" true
+    (match require (Exact.read_latest_original_execution ~store ~declaration_id ~schema deferred) with
+     | Exact.Completed_latest {execution={outcome=Exact.Call_refused _;_};_} -> true
+     | No_completed_latest | Completed_latest {execution={outcome=Call_ended _;_};_} -> false))
+
+let test_runner_free_replacement_refuses_corrupt_and_orphan_proof () =
+  List.iter (fun corrupt -> with_root (fun root ->
+    let store=Store.create ~root and original=request "runner-free-bad-proof" in
+    let runner,_,_=counting_runner store (ref [Answer question]) in
+    ignore (run_request store runner original);
+    let instance_id,request_id=proof_address original in
+    if corrupt then require (Store.save_host_result store ~instance_id ~request_id (`Assoc ["bad",`Bool true]))
+    else Sys.remove (Filename.concat (Filename.concat (Filename.concat root "exact-requests")
+      (Store.digest declaration_id)) (Store.digest original.request_id ^ ".json"));
+    let before=original_wire store original and proof=original_proof store original in
+    check bool "corrupt/orphan actual proof is not an ending grant" true
+      (Result.is_error (reconcile_replacement store
+        (replacement_authority (fun () -> Error Exact.Declaration_replaced)) original));
+    check bool "original record not rewritten or recreated" true (original_wire store original=before);
+    check bool "proof bytes not replaced" true (original_proof store original=proof))) [true;false]
+
 let test_worker_cannot_select_admission_policy () =
   let original=request "untrusted-policy" in
   let fields=match Exact.request_to_json original with
@@ -2174,6 +2348,16 @@ let () =
             test_a_replaced_declaration_ends_a_request_that_never_ran
         ; test_case "a replaced declaration ends a deferred request" `Quick
             test_a_replaced_declaration_ends_a_deferred_request
+        ; test_case "runner-free replacement ends absent original and survives rollback" `Quick
+            test_runner_free_replacement_ends_absent_and_survives_rollback
+        ; test_case "runner-free replacement preserves current and changed authority" `Quick
+            test_runner_free_replacement_current_unavailable_and_changed_authority
+        ; test_case "runner-free replacement preserves Started Unknown and actual busy claim" `Quick
+            test_runner_free_replacement_preserves_started_unknown_and_busy
+        ; test_case "runner-free replacement honors actual completed and latest proof" `Quick
+            test_runner_free_replacement_completed_and_latest_proof_priority
+        ; test_case "runner-free replacement refuses corrupt and orphan proof" `Quick
+            test_runner_free_replacement_refuses_corrupt_and_orphan_proof
         ; test_case "worker wire cannot select admission policy" `Quick test_worker_cannot_select_admission_policy ] )
     ; ( "deploy preflight"
       , [ test_case "a refused record is deleted with its link and observations" `Quick

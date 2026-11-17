@@ -37,6 +37,14 @@ val confirm_destination : config:Workspace.config -> reserved:string list ->
     tool and semantic revision. A missing export is [Unavailable]: the Add-on is
     off or not ready. A conflicting export or a changed configuration is [Rejected]. *)
 
+val reconcile_replacement : config:Workspace.config -> reserved:string list ->
+  original:Lane_addon_tool_request_owner.Record.t -> request:Lane_addon_exact.request ->
+  (Lane_addon_exact.replacement_reconciliation, Lane_addon_submit_once.error) result
+(** Reconcile this complete retained original through the trusted runner-free
+    Runtime ending port. The caller keeps its physical owner, own-fence and
+    confirmed-predecessor authority. This never reads/submits worker state or
+    grants Memory/ACK authority; pending and unknown originals remain owned. *)
+
 val observe_relation : config:Workspace.config -> reserved:string list ->
   Keeper_librarian_durable_request.destination ->
   (Lane_addon_captured_destination.relation, Lane_addon_submit_once.error) result

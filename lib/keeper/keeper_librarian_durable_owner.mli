@@ -53,7 +53,7 @@ type listed = Lane_addon_tool_request_owner.Record.t * Keeper_librarian_durable_
 type terminal_ending_recovery =
   | No_ending
   | Ending_retained of Lane_addon_tool_request_owner.Record.t
-val recover_terminal_ending : store:Lane_addon_store.t -> config:Workspace.config ->
+val recover_terminal_ending : store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
   original:listed -> (terminal_ending_recovery, error) result
 (** Retain only an actual host [Replaced_declaration] or [Interrupted] ending
     for a dispatch-pending original. The caller first validates the complete
@@ -61,8 +61,12 @@ val recover_terminal_ending : store:Lane_addon_store.t -> config:Workspace.confi
     publication. This port validates the immutable body, current physical
     owner, acknowledged predecessor, absence of a fence and strict host proofs
     before the original's refusal CAS and readback. Other host states return
-    [No_ending], without worker/provider calls, publication, source ACK or a
-    replacement ID. Open/absent host state needs no body read. [Ending_retained]
+    [No_ending], without worker/provider calls, Memory publication, source ACK or a
+    replacement ID. For open/absent host state, only a ready same-owner replaced
+    declaration enters the trusted runner-free Exact claim and execution guard
+    to reconcile a no-send ending. An unproved Started stays unresolved; no
+    missing-record observation alone grants refusal. Other destinations need
+    no body read. [Ending_retained]
     is a lifecycle observation, never Finished or Memory completion. The caller
     wakes the same serialized lane and ends its current unit; a fresh inventory
     decides settlement and which source remains to be read. Uncertain writes
@@ -110,7 +114,13 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
     [interrupted] cause also calls [wake]: inventory validation reads that
     refusal as settled, so the next pass moves the original and selects its
     range again (RFC-0500). Other unknown causes and [cut] without the bound
-    disposition stay pending. Only shared submit-once pre-admission/Not_sent
+    disposition stay pending. A dispatch-pending original whose declaration
+    changed first uses the runner-free trusted Exact reconciliation port. Only
+    its real claim, bound input/proofs and fresh execution guard may retain a
+    no-send ending; the normal submit-once path then rereads that terminal.
+    Busy, unavailable and unresolved execution remain waits, without worker
+    RPC, source ACK or invented refusal. The same declaration keeps its lazy
+    waiting-body path. Only shared submit-once pre-admission/Not_sent
     rules retry the same original. New admission and every
     unfinished publication require the frozen prompt to cover its counterpart
     input. A receipt alone cannot authorize a new ACK of observations an old

@@ -24,6 +24,7 @@ type resumed = Waited of wait * Owner.Record.t | Resumed of outcome * Request.t
   | Original_replaced of Owner.Record.t
 type listed = Owner.Record.t * Request.index
 type terminal_ending_recovery = No_ending | Ending_retained of Owner.Record.t
+type ending_source = Host_ending | Replaced_ending
 type held = Listed of listed | Read of (Owner.retained * Request.t)
 let io work = Systhread_host.run work
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
@@ -150,7 +151,7 @@ let body_of (retained,request) =
   let+ schema=match exact.schema with Some schema -> Ok schema
     | None -> Error (Rejected "Original history request has no output schema") in
   {retained;request;exact;schema}
-let recover_terminal_ending ~store ~config ~original:((record,index) as listed) =
+let recover_terminal_ending ~store ~config ~reserved ~original:((record,index) as listed) =
   match Progress.phase (Owner.Record.progress record) with
   | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok No_ending
@@ -172,9 +173,18 @@ let recover_terminal_ending ~store ~config ~original:((record,index) as listed) 
   let identity=Exact.identity_of_digest ~request_id:(Owner.Record.request_id record) ~digest:index.exact_digest in
   let* observed=io (fun () -> Exact.observe_open ~store ~declaration_id identity
     |> Result.map_error Exact.describe_recovery_error) |> rejected in
-  match observed with
-  | Exact.No_record | Open -> Ok No_ending
-  | Needs_request ->
+  let* source=match observed with
+    | Exact.Needs_request -> Ok (Some Host_ending)
+    | No_record | Open ->
+      match Keeper_librarian_durable_edge.observe_destination ~config ~reserved index.destination with
+      | Error (Submit.Unavailable _ | Rejected _ | Uncertain _) -> Ok None
+      | Ok current ->
+        match Lane_addon_captured_destination.relation ~captured:index.destination ~current with
+        | Same | Other_owner -> Ok None
+        | Replaced -> Ok (Some Replaced_ending) in
+  match source with
+  | None -> Ok No_ending
+  | Some source ->
   let* original,request=load ~store listed in
   let* ()=require (Progress.to_json original.progress=Progress.to_json (Owner.Record.progress record))
     "History original changed during ending recovery" in
@@ -184,12 +194,23 @@ let recover_terminal_ending ~store ~config ~original:((record,index) as listed) 
     let* ()=Keeper_librarian_history_resolution_state.check_unfenced ~store ~request ~original in
     Keeper_librarian_history_resolution_lineage.confirm_predecessor ~store ~require_confirmed:true request in
   let* ()=io validate |> rejected in
-  let* observed=io (fun () -> Exact.observe_retained ~store ~declaration_id ~schema:body.schema body.exact) |> rejected in
+  let* observed=match source with
+    | Host_ending ->
+      let+ observed=io (fun () -> Exact.observe_retained ~store ~declaration_id ~schema:body.schema body.exact) |> rejected in
+      (match observed with
+       | Exact.Retained_absent | Retained_open -> None
+       | Retained_terminal final -> Some final)
+    | Replaced_ending ->
+      let+ reconciled=Keeper_librarian_durable_edge.reconcile_replacement ~config ~reserved
+        ~original:record ~request:body.exact in
+      (match reconciled with
+       | Exact.Reconciled_terminal final -> Some final
+       | Reconciliation_pending _ -> None) in
   match observed with
-  | Retained_absent | Retained_open
-  | Retained_terminal (Retained_call _ | Retained_unknown (Cut | Raised)
+  | None
+  | Some (Exact.Retained_call _ | Retained_unknown (Cut | Raised)
     | Retained_not_allowed {reason=Permission_refused _} | Retained_request_id_reused) -> Ok No_ending
-  | Retained_terminal ((Retained_not_allowed {reason=Replaced_declaration} | Retained_unknown Interrupted) as ending) ->
+  | Some ((Exact.Retained_not_allowed {reason=Replaced_declaration} | Retained_unknown Interrupted) as ending) ->
   let confirm_ending () =
     Request.confirm_retained_final ~store request ending |> rejected in
   (* No call or publication port is reachable here. Protect only this local
@@ -211,6 +232,7 @@ type terminal = Answer of Memory_runtime.durable_proposal * Owner.retained
   | Refusal of Exact.final * Owner.retained
 type admission_check = Admission_continues | Admission_unavailable
   | Admission_replaced of Owner.Record.t
+type replacement_check = Continue_original | Replacement_wait of wait
 let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publish) ~wake =
   let record,owner,destination=match original with
     | Listed (record,index) -> record,index.owner,index.destination
@@ -364,6 +386,45 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     Resumed (outcome,request) in
   let source:body Submit.source={identity;load=read_body;request=(fun body -> body.exact);schema=(fun body -> body.schema)} in
   let decode_final (body:body) json=io (fun () -> Request.decode_final ~store body.request json) in
+  let reconcile_replacement () =
+    match Progress.phase (Owner.Record.progress record) with
+    | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
+    | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok Continue_original
+    | Dispatch_pending _ ->
+      match Keeper_librarian_durable_edge.observe_destination ~config ~reserved destination with
+      | Error (Submit.Unavailable _ | Rejected _ | Uncertain _) -> Ok Continue_original
+      | Ok current ->
+        match Lane_addon_captured_destination.relation ~captured:destination ~current with
+        | Same | Other_owner -> Ok Continue_original
+        | Replaced ->
+          let* declaration_id=io (fun () ->
+            let* installation=Owner.installation_of_id destination.installation_id in
+            match installation with
+            | Owner.Configuration id -> Ok id
+            | Manual _ -> Error "History replacement requires a configured original") |> rejected in
+          let* observed=io (fun () -> Exact.observe_open ~store ~declaration_id identity
+            |> Result.map_error Exact.describe_recovery_error) |> rejected in
+          match observed with
+          | Exact.Needs_request -> Ok Continue_original
+          | No_record | Open ->
+          let* body=read_body () in
+          let* ()=io (fun () ->
+            let* ()=Request.confirm_owner body.request in
+            let* ()=Keeper_librarian_history_resolution_state.check_unfenced
+              ~store ~request:body.request ~original:body.retained in
+            Keeper_librarian_history_resolution_lineage.confirm_predecessor
+              ~store ~require_confirmed:true body.request) |> rejected in
+          let+ reconciled=Keeper_librarian_durable_edge.reconcile_replacement ~config ~reserved
+            ~original:record ~request:body.exact in
+          match reconciled with
+          | Exact.Reconciled_terminal _ | Reconciliation_pending Declaration_current -> Continue_original
+          | Reconciliation_pending Replacement_claim_busy -> Replacement_wait Worker_pending
+          | Reconciliation_pending (Declaration_unavailable _) -> Replacement_wait Worker_unreachable
+          | Reconciliation_pending Execution_unresolved -> Replacement_wait Worker_unknown in
+  let* replacement=reconcile_replacement () in
+  match replacement with
+  | Replacement_wait wait -> Ok (Waited (wait,record))
+  | Continue_original ->
   let* result=Submit.resume ~store ~label:"History Memory" ~original:record ~source ~decode_final
     ~unadmitted ~prepare:admit ~call ~terminal in
   match result with

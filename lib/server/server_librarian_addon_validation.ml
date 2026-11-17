@@ -49,6 +49,8 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
           let* actual=History.observe_record_owner ~base_path ~keepers_dir fresh in
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
           let* ()=History.confirm_record capture fresh in
+          let* ()=Keeper_librarian_history_resolution_state.check_unfenced
+            ~store ~request:capture ~original:fresh in
           let* ()=Keeper_librarian_history_resolution_lineage.recheck_predecessors ~store ~require_confirmed:true capture predecessors in
           Keeper_librarian_runtime.require_counterpart_template (History.preparation capture))
           |> Result.map_error not_now in

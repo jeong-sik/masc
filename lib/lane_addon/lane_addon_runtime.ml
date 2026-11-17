@@ -2663,6 +2663,42 @@ let call_captured_tool_request ~config ~access ~reserved ~export ~installation_i
           ~authorize:None ~principal:(Some Lane_addon_call_context.Operator)
           ~config ~access ~reserved ~export ~arguments))
 
+let reconcile_captured_exact_replacement ~config ~access ~reserved ~export
+    ~(original:Lane_addon_tool_request_owner.Record.t) ~(request:Lane_addon_exact.request) =
+  Eio_context.run_on_owner_domain_joined (fun () ->
+    let* prepared=with_tool_request_destination_on_owner ~config ~access ~reserved ~export
+      ~prepare:(fun destination ->
+        let* ()=if Lane_addon_tool_request_owner.Record.installation_id original=destination.installation_id
+            && Lane_addon_tool_request_owner.Record.package_id original=destination.package_id
+            && Lane_addon_tool_request_owner.Record.tool original=destination.tool
+            && Lane_addon_tool_request_owner.Record.request_id original=request.request_id
+          then Ok () else Error (Host_refusal (Lane_addon_call_context.Rejected
+            "Original Exact ending belongs to another configured tool owner")) in
+        let* m=match Hashtbl.find_opt managers (store_directory config) with
+          | Some m -> Ok m | None -> Error (Unavailable "Original Add-on Runtime owner is unavailable") in
+        let* e,owner=match Hashtbl.find_opt m.entries export.instance_id with
+          | Some ({configuration=Some owner;_} as e) -> Ok (e,owner)
+          | None | Some {configuration=None;_} ->
+            Error (Unavailable "Original Exact ending requires its configured installation") in
+        let* ()=offload (fun () -> Lane_addon_tool_request_owner.confirm_listed ~store:m.store original)
+          |> Result.map_error (fun error -> Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
+        let* authorize_request=match !exact_runner with
+          | Some (_,authorize_request) -> Ok authorize_request
+          | None -> Error (Unavailable "Original Exact host authority is unavailable") in
+        let* _=authorize_request ~store:m.store ~declaration_id:owner.id ~package:e.package request
+          |> Result.map_error (function
+            | Lane_addon_exact.Unowned {reason} -> Host_refusal (Lane_addon_call_context.Rejected reason)
+            | Undecided {detail} -> Unavailable detail) in
+        let* schema=Option.to_result ~none:(Host_refusal (Lane_addon_call_context.Rejected
+          "Original Exact ending lacks its captured schema")) request.schema in
+        Ok (m.store,owner.id,e.package,authorize_request,schema))
+      ~use:(fun value -> Ok value) in
+    let store,declaration_id,package,authorize_request,schema=prepared in
+    Lane_addon_exact.reconcile_replaced ~store ~declaration_id ~schema ~package ~authorize_request request
+    |> Result.map_error (function
+      | Lane_addon_exact.Recovery_invalid detail -> Host_refusal (Lane_addon_call_context.Rejected detail)
+      | Recovery_unavailable detail -> Unavailable detail))
+
 let call_exported_tool_with_principal = call_exported_tool_with_authority ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ()) ~authorize:None
 
 let call_exported_tool = call_exported_tool_with_principal ~principal:None

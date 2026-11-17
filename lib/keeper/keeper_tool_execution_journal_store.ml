@@ -90,7 +90,7 @@ let validate_artifacts ~base_path immutable_source =
       && field "source_turn" fields = `Int immutable_source.source_turn) "run artifact original invocation mismatch"))
 
 let strict_read ~root path =
-  match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ()) ~ownership_root:root path with
+  match Fs_compat.load_owned_regular_file_with_snapshot_locked ~owner_uid:(Unix.getuid ()) ~ownership_root:root path with
   | Error error -> Error (Unreadable_journal (Fs_compat.owned_regular_file_read_error_to_string error))
   | Ok None -> Error Missing_journal
   | Ok (Some contents) -> Result.map_error (fun detail -> Corrupt_journal detail) (decode_state contents.content)

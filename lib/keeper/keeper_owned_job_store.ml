@@ -494,7 +494,7 @@ let discover_pending_deliveries ~base_path ~on_entry =
     let* job_id = if Filename.extension name <> ".json" then Error (Corrupt "invalid pending marker name")
       else Job_id.of_string (Filename.remove_extension name) |> Result.map_error (fun detail -> Corrupt detail) in
     let* () = validate_owned_file ~base_path ~path ~create:false in
-    let* bytes = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
+    let* bytes = Fs_compat.load_owned_regular_file_with_snapshot_locked ~owner_uid:(Unix.getuid ())
         ~ownership_root:(Common.masc_dir_from_base_path ~base_path) path
         |> Result.map_error (fun error -> Io_failed (Fs_compat.owned_regular_file_read_error_to_string error)) in
     let* () = validate_owned_file ~base_path ~path ~create:false in

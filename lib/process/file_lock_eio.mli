@@ -73,9 +73,10 @@ val lock_file_path : string -> string
     from event data. Does not create or inspect the file. *)
 
 (** [with_mutex path f] runs [f] while holding the cooperative
-    per-[path] Eio.Mutex only. Use for in-memory backends that need
-    single-process fiber serialisation but have no filesystem
-    artifact to flock. *)
+    per-[path] cross-context mutex only. Symlinked parent directories
+    canonicalize to the same entry; leaf symlinks lock their own logical path.
+    Use for in-memory backends that need single-process fiber serialisation but
+    have no filesystem artifact to flock. *)
 val with_mutex : string -> (unit -> 'a) -> 'a
 
 val try_with_mutex : string -> (unit -> 'a) -> 'a option
@@ -83,9 +84,10 @@ val try_with_mutex : string -> (unit -> 'a) -> 'a option
     after admission the body runs with cancellation deferred through release. *)
 
 (** [with_lock ?clock path f] runs [f] while holding both the
-    cooperative Eio.Mutex and an OS-level flock on [path ^ ".lock"].
-    The flock uses non-blocking F_TLOCK retries — max 200 attempts,
-    ~2s total with default sleeps. *)
+    cooperative cross-context mutex and an OS-level flock on the canonical
+    parent's [<basename>.lock] sidecar (leaf symlinks are not dereferenced and
+    lock their own [<leaf>.lock] sidecar). The flock uses non-blocking F_TLOCK
+    retries — max 200 attempts, ~2s total with default sleeps. *)
 val with_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   string ->
@@ -93,10 +95,11 @@ val with_lock :
   'a
 
 (** Cross-context/process transaction lock on the explicit [lock_path]. Eio
-    admission is cooperatively cancellable and unbounded; cancellation is
-    masked only after the OS lock is held, through body execution and release.
-    The parent directory must exist. I/O failures are typed and body exceptions
-    survive cleanup errors. *)
+    admission is cooperatively cancellable, paced by the retry interval without
+    busy-spinning, and unbounded (unlike {!with_lock}'s bounded 200-attempt
+    cap); cancellation is masked only after the OS lock is held, through body
+    execution and release. The parent directory must exist. I/O failures are
+    typed and body exceptions survive cleanup errors. *)
 type 'a durable_lock_observation =
   | Lock_not_acquired of durable_lock_error
   | Body_completed of
@@ -159,7 +162,10 @@ val with_durable_lock :
 
 module For_testing : sig
   val holders_and_waiters : lock_path:string -> int
-  (** Read the existing entry reference count without changing lock state. *)
+  (** Read the existing entry reference count without changing lock state.
+      Normalizes [lock_path] with the same parent-directory canonicalization as
+      {!with_lock}, {!with_mutex}, and {!with_durable_lock}, so callers may pass
+      either raw or canonical paths. *)
   val with_durable_lock_observed_with_release_failure :
     release_failure:durable_lock_error ->
     lock_path:string ->
@@ -173,8 +179,9 @@ end
 
 (** {1 Observability hook} *)
 
-(** Fires after every {!acquire_flock_retry} / {!acquire_flock_retry_cooperative}
-    attempt sequence completes — once per [acquire_*] invocation, with
+(** Fires after every {!acquire_flock_retry}, {!acquire_flock_retry_cooperative},
+    or Eio {!with_durable_lock} / {!with_durable_lock_observed} attempt sequence
+    completes — once per lock acquisition invocation, with
     [outcome] = ["acquired"] or ["timeout"].
 
     [retries] is the number of failed [F_TLOCK] attempts before the

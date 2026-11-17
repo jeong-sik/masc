@@ -1168,6 +1168,105 @@ let test_an_expiring_token_is_exchanged_and_stored () =
       | Ok (Some value) -> check str "the rotated refresh token" "rotated" value
       | Ok None | Error _ -> Alcotest.fail "the refresh token went missing"
 
+let test_concurrent_eio_renewals_coalesce_to_single_flight () =
+  let base_path = temp_base () in
+  let provider = provider () in
+  store_expiry ~base_path ~provider ~at:100.0;
+  (match
+     Projection.set_file_entry ~base_path ~keeper_name:"attaching-fixture"
+       ~scope:Projection.Keeper_secret
+       ~container_path:provider.Provider.refresh_token_file
+       ~value:"single-use-refresh-token"
+   with
+   | Ok () -> ()
+   | Error message -> Alcotest.failf "could not store a refresh token: %s" message);
+  bind_registered_client ~base_path ~provider ~client_id:"client-singleflight";
+  let shared_attachment = attachment ~base_path in
+  let discover ~mcp_url:_ =
+    Ok
+      { Keeper_oauth_discovery.resource = "https://mcp.example.com/v1/mcp"
+      ; issuer = "https://auth.example.com"
+      ; authorize_url = "https://auth.example.com/authorize"
+      ; token_url = "https://auth.example.com/oauth/token"
+      ; registration_url = None
+      ; revocation_endpoint = None
+      ; scopes_supported = []
+      ; supports_pkce_s256 = true
+      }
+  in
+  Eio_main.run (fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Eio_context.with_test_env
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~sw
+      (fun () ->
+        let in_flight, resolve_in_flight = Eio.Promise.create () in
+        let follower_ready, resolve_follower_ready = Eio.Promise.create () in
+        let release_token, resolve_release_token = Eio.Promise.create () in
+        let token_calls = ref 0 in
+        let token_post ~url:_ ~headers:_ ~body:_ =
+          incr token_calls;
+          if !token_calls = 1
+          then (
+            Eio.Promise.resolve resolve_in_flight ();
+            Eio.Promise.await release_token;
+            Ok
+              ( 200
+              , {|{"access_token":"singleflight-token","refresh_token":"rotated-once","expires_in":28800}|}
+              ))
+          else
+            Ok (400, {|{"error":"invalid_grant","error_description":"refresh token reused"}|})
+        in
+        let result_a = ref None in
+        let result_b = ref None in
+        Eio.Fiber.all
+          [ (fun () ->
+              result_a :=
+                Some
+                  (Identity_tools.renew_if_needed
+                     ~attachment:shared_attachment
+                     ~token_post
+                     ~discover
+                     ~base_path
+                     ~keeper_name:"attaching-fixture"
+                     ~provider
+                     ~now:0.0
+                     ~access_token:"about-to-expire"
+                     ()))
+          ; (fun () ->
+              Eio.Promise.await in_flight;
+              Eio.Promise.resolve resolve_follower_ready ();
+              result_b :=
+                Some
+                  (Identity_tools.renew_if_needed
+                     ~attachment:shared_attachment
+                     ~token_post
+                     ~discover
+                     ~base_path
+                     ~keeper_name:"attaching-fixture"
+                     ~provider
+                     ~now:0.0
+                     ~access_token:"about-to-expire"
+                     ()))
+          ; (fun () ->
+              Eio.Promise.await follower_ready;
+              Eio.Fiber.yield ();
+              Eio.Fiber.yield ();
+              Eio.Promise.resolve resolve_release_token ())
+          ];
+        check Alcotest.int "single-flight token exchange count" 1 !token_calls;
+        List.iter
+          (fun (label, cell) ->
+            match !cell with
+            | Some (Ok cred) ->
+              check str label "singleflight-token" cred.Identity_tools.access_token
+            | Some (Error err) ->
+              Alcotest.failf "%s failed: %s" label (Identity_tools.renewal_error_message err)
+            | None -> Alcotest.fail (label ^ " did not complete"))
+          [ ("leader fiber", result_a); ("follower fiber", result_b) ]))
+
 let test_a_transient_renewal_failure_is_marked_transient () =
   (* A network blip while renewing must not be reported as permanent: the token
      may still be good, and reporting it as deterministic tells the model the
@@ -1464,6 +1563,8 @@ let () =
             test_no_stored_expiry_renews_nothing;
           Alcotest.test_case "an expiring token is exchanged and stored" `Quick
             test_an_expiring_token_is_exchanged_and_stored;
+          Alcotest.test_case "concurrent Eio renewals coalesce to single-flight" `Quick
+            test_concurrent_eio_renewals_coalesce_to_single_flight;
           Alcotest.test_case "a transient renewal failure is marked transient"
             `Quick test_a_transient_renewal_failure_is_marked_transient;
           Alcotest.test_case "a 401 is cleared by one reactive refresh" `Quick

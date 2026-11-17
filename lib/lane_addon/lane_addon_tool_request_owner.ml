@@ -95,9 +95,11 @@ let decode ~scope ~request_id json =
     decode_record ~scope ~request_id json)
 (* The body a record names: present, its bytes named by that digest, and the
    canonical JSON of the request. *)
+let check_body_digest ~request_digest bytes =
+  if String.equal (Lane_addon_store.digest bytes) request_digest then Ok ()
+  else Error "original request body does not match its record's digest"
 let check_body ~request_digest bytes =
-  let* () = if String.equal (Lane_addon_store.digest bytes) request_digest then Ok ()
-    else Error "original request body does not match its record's digest" in
+  let* () = check_body_digest ~request_digest bytes in
   let* json = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
   let* request = Lane_addon_action.canonical json in
   if String.equal (Yojson.Safe.to_string request) bytes then Ok request
@@ -127,7 +129,7 @@ let listed (r : retained) : Record.t =
    tool=r.tool; request_digest=r.request_digest; summary=r.summary; progress=r.progress}
 let record_to_json record = to_json (with_request record `Null)
 let same_record a b = same_listed (listed a) (listed b)
-let load ~store ~scope ~request_id =
+let load_with_request ~request_from_body ~store ~scope ~request_id =
   let* () = validate_identity ["scope", scope; "request_id", request_id] in
   let unavailable detail = Store_unavailable detail in
   (* The record and its body in one read, so a settle between them cannot
@@ -138,8 +140,11 @@ let load ~store ~scope ~request_id =
   match read with
   | None -> Ok None
   | Some (record,body) ->
-    let* request = request_of_body ~request_digest:record.request_digest body |> Result.map_error unavailable in
+    let* request = request_from_body record body |> Result.map_error unavailable in
     Ok (Some (with_request record request))
+let load ~store ~scope ~request_id =
+  load_with_request ~store ~scope ~request_id
+    ~request_from_body:(fun record body -> request_of_body ~request_digest:record.Record.request_digest body)
 let discover ~store ~scope =
   let* () = validate_identity ["scope",scope] in
   let unavailable value = Result.map_error (fun detail -> Store_unavailable detail) value in
@@ -250,12 +255,14 @@ let unavailable result = Result.map_error (fun detail -> Store_unavailable detai
    record in between: the same original, further along. A write to a record
    is compare-and-set against what its writer read of that record, so a write
    decided on its stale progress is refused. *)
-let load_listed ~store (record : Record.t) =
-  let* original = load ~store ~scope:record.scope ~request_id:record.request_id in
+let checked_listed (record : Record.t) original =
   match original with
   | Some original when same_identity record (listed original) -> Ok original
   | Some _ -> Error (Store_unavailable "an inventoried original changed")
   | None -> Error (Store_unavailable "an inventoried original disappeared")
+let load_listed ~store (record : Record.t) =
+  let* original = load ~store ~scope:record.scope ~request_id:record.request_id in
+  checked_listed record original
 (* Retain fixes the digest a record names its body by, so the record of the
    same ID naming the same digest names the body [previous] already read and
    checked; only its progress can differ. Reading the record alone keeps a
@@ -279,17 +286,20 @@ let verified_body (original:retained) =
   Verified_body {scope=original.scope;request_id=original.request_id;
     installation_id=original.installation_id;package_id=original.package_id;
     tool=original.tool;request_digest=original.request_digest;summary=original.summary}
-let recheck_body ~store (Verified_body previous) =
+let verified_matches (Verified_body previous) (current:Record.t) =
+  String.equal previous.scope current.scope
+  && String.equal previous.request_id current.request_id
+  && String.equal previous.installation_id current.installation_id
+  && String.equal previous.package_id current.package_id
+  && String.equal previous.tool current.tool
+  && String.equal previous.request_digest current.request_digest
+  && Yojson.Safe.equal previous.summary current.summary
+let recheck_body ~store verified =
+  let Verified_body previous = verified in
   let scope=previous.scope and request_id=previous.request_id in
   let* read=Lane_addon_store.load_tool_request store ~scope ~request_id ~name_body:(fun json ->
     let* current=decode ~scope ~request_id json in
-    if String.equal previous.scope current.Record.scope
-      && String.equal previous.request_id current.request_id
-      && String.equal previous.installation_id current.installation_id
-      && String.equal previous.package_id current.package_id
-      && String.equal previous.tool current.tool
-      && String.equal previous.request_digest current.request_digest
-      && Yojson.Safe.equal previous.summary current.summary
+    if verified_matches verified current
     then Ok (current,current.request_digest)
     else Error "a verified original names another request or binding") |> unavailable in
   match read with
@@ -314,6 +324,50 @@ let load_scope ~store ~scope =
       let* original = load_listed ~store record in
       restore (original::found) rest in
   restore [] records
+module Observed_requests = Map.Make (String)
+type observed_request = { binding:verified_body; request:Yojson.Safe.t }
+type scope_observation = {
+  store:Lane_addon_store.t;
+  scope:string;
+  hints:observed_request Observed_requests.t Atomic.t;
+}
+let observe_scope ~store ~scope =
+  let+ originals = load_scope ~store ~scope in
+  let hints = List.fold_left (fun hints original ->
+    Observed_requests.add original.request_id
+      {binding=verified_body original;request=original.request} hints)
+    Observed_requests.empty originals in
+  originals,{store;scope;hints=Atomic.make hints}
+let reread_scope_with ~after_inventory observation =
+  let hints=Atomic.exchange observation.hints Observed_requests.empty in
+  let store=observation.store and scope=observation.scope in
+  let* records=discover ~store ~scope in
+  let hints=
+    let listed=List.fold_left (fun listed (record:Record.t) ->
+      Observed_requests.add record.request_id record listed) Observed_requests.empty records in
+    Observed_requests.filter (fun id previous ->
+      match Observed_requests.find_opt id listed with
+      | Some record -> verified_matches previous.binding record
+      | None -> false) hints in
+  after_inventory ();
+  let request_from_body (record:Record.t) body =
+    match Observed_requests.find_opt record.request_id hints with
+    | Some previous when verified_matches previous.binding record ->
+      (match body with
+       | None -> request_of_body ~request_digest:record.request_digest None
+       | Some bytes ->
+         Domain_pool_ref.submit_cpu_or_inline ~name:"lane-addon-original-body-recheck" (fun () ->
+           let+ ()=check_body_digest ~request_digest:record.request_digest bytes in previous.request))
+    | Some _ | None -> request_of_body ~request_digest:record.request_digest body in
+  let rec restore found = function
+    | [] -> Ok (List.rev found)
+    | record::rest ->
+      let* original=load_with_request ~request_from_body ~store ~scope:record.Record.scope
+        ~request_id:record.request_id in
+      let* original=checked_listed record original in
+      restore (original::found) rest in
+  restore [] records
+let reread_scope observation = reread_scope_with ~after_inventory:(fun () -> ()) observation
 let fold_all_records_with ~after_inventory ~store ~init ~f =
   let* records_rev =
     Lane_addon_store.fold_tool_request_owner_inventory_all store ~init:[]
@@ -437,6 +491,7 @@ let confirm_listed ~store (expected : Record.t) =
   | Some _ -> Error Binding_conflict
   | None -> Error (Store_unavailable "an original request named by a worker call has no record")
 module For_testing = struct
+  let reread_scope = reread_scope_with
   let fold_all ~store ~(after_inventory : unit -> unit) ~init ~f =
     fold_all_with ~after_inventory ~store ~init ~f
   let fold_all_records ~store ~(after_inventory : unit -> unit) ~init ~f =

@@ -131,6 +131,27 @@ val load_scope : store:Lane_addon_store.t -> scope:string -> (retained list, err
     that record was loaded, so the result is not one snapshot of the scope.
     Unlike {!discover}, this explicitly reads every request body in the
     scope. *)
+type scope_observation
+val observe_scope : store:Lane_addon_store.t -> scope:string ->
+  (retained list * scope_observation, error) result
+(** One successful {!load_scope}, with opaque hints retaining only its
+    immutable bindings and verified canonical request JSON. No owner progress or
+    body bytes are held by the hints. Keep this local to one discovery/reread
+    pair; it is not authority for effects or a cross-write snapshot. *)
+val reread_scope : scope_observation -> (retained list, error) result
+(** Discover this observation's original store/scope afresh, then atomically
+    read each current record and body through the ordinary owned store.
+    Every body is hashed again. An unchanged complete binding may reuse its
+    verified JSON; new or changed bindings run the full decoder. The listed
+    identity is checked after body validation, as in {!load_listed}; progress
+    is always current. Removed inventory entries are not replayed.
+
+    The hints are consumed before any I/O, including on failure/cancellation.
+    Hints absent from, or bound differently in, the fresh inventory are
+    dropped before loading its bodies; matching hints last through the read.
+    Calling this again performs ordinary fresh full reads. Consuming hints
+    only releases their references; it neither gates rereading nor changes
+    the result's authority. *)
 val prepare_successor : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   request:Yojson.Safe.t -> (Lane_addon_request_progress.successor, error) result
 (** Durably stage canonical input before retaining its digest-only successor
@@ -217,6 +238,10 @@ val confirm_listed : store:Lane_addon_store.t -> Record.t -> (unit, error) resul
     record naming anything else is [Binding_conflict]; an absent record is
     [Store_unavailable]. The body is not read and nothing is written. *)
 module For_testing : sig
+  val reread_scope : after_inventory:(unit -> unit) -> scope_observation ->
+    (retained list, error) result
+  (** The actual reread, with a hook after the fresh inventory and before
+      loading its listed records. Hints have already been consumed. *)
   val fold_all : store:Lane_addon_store.t -> after_inventory:(unit -> unit) ->
     init:'a -> f:('a -> retained -> 'a) -> ('a, error) result
   (** Invoke the hook after inventory and before restoring the listed records. *)

@@ -271,6 +271,7 @@ let spawn_refusal_to_string = function
 type spawn_outlook =
   | Same_input_fails_again
   | Resources_may_free
+  | Cause_unknown
 
 (* Whether spawning the same argv, env and cwd again can succeed without
    anyone changing them. Only a shortage the system releases on its own
@@ -301,18 +302,25 @@ let unix_error_spawn_outlook : Unix.error -> spawn_outlook = function
      request is not sent again on its own. *)
   | Unix.EUNKNOWNERR (_ : int) -> Same_input_fails_again
 
-(* A child's setup failure (fchdir, dup2, execve) depends on the argv, env and
-   cwd it was given, which a retry repeats. *)
+(* A child's setup failure (fchdir, dup2, execve) reaches the parent only as
+   eio's "<action>: <strerror>" text, so its errno is not known here: execve
+   fails for E2BIG or ENOEXEC, which a retry repeats, and equally for ENOMEM,
+   EAGAIN, ENFILE or ETXTBSY (the binary being replaced), which pass. The text
+   is not parsed, so the outlook says the cause is unknown. *)
 let spawn_refusal_outlook = function
-  | Empty_argv | Executable_not_found _ | Child_setup_failed _ | Cwd_unavailable _ ->
-    Same_input_fails_again
+  | Empty_argv | Executable_not_found _ | Cwd_unavailable _ -> Same_input_fails_again
+  | Child_setup_failed _ -> Cause_unknown
   | Spawn_failed { executable = _; error } -> unix_error_spawn_outlook error
 
 (* [Eio.Process.spawn] for a child the caller keeps talking to. Only this one
    call is inside the handler, so each exception below has the single source
    the table above [cwd_error] gives it: a [Failure] here is the child's own
-   setup report and a [Unix_error] is the pipe or fork. Anything else,
-   cancellation included, is not a refusal and propagates. *)
+   setup report, a [Unix_error] is a pipe eio made or the fork, an
+   [Eio.Fs.E] is the cwd open with an errno eio names, and an
+   [Eio_unix.Unix_error] is the cwd open with any other errno ([ENOTDIR],
+   [ELOOP], [EMFILE], ...), carried as [Spawn_failed] like the foreground path
+   does. Anything else, cancellation included, is not a refusal and
+   propagates. *)
 let spawn_child ~sw mgr ?cwd ?stdin ?stdout ?stderr ?env argv =
   match argv with
   | [] -> Error Empty_argv
@@ -323,6 +331,8 @@ let spawn_child ~sw mgr ?cwd ?stdin ?stdout ?stderr ?env argv =
        Error (Executable_not_found program)
      | exception Failure detail -> Error (Child_setup_failed { executable; detail })
      | exception Unix.Unix_error (error, _, _) -> Error (Spawn_failed { executable; error })
+     | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (error, _, _)), _) ->
+       Error (Spawn_failed { executable; error })
      | exception Eio.Io (Eio.Fs.E error, _) ->
        Error
          (Cwd_unavailable
@@ -332,6 +342,43 @@ let spawn_child ~sw mgr ?cwd ?stdin ?stdout ?stderr ?env argv =
                  | None -> "<inherited>")
             ; error = Eio_cwd_error (Eio.Fs.E error)
             }))
+
+(* [Eio.Process.pipe] is [Unix.pipe] on both backends (see the table above
+   [cwd_error]); a descriptor or memory shortage there refuses the spawn as
+   much as one in the fork does, so it is a [Spawn_failed] with its errno. *)
+let child_pipe ~sw mgr ~executable =
+  match Eio.Process.pipe ~sw mgr with
+  | ends -> Ok ends
+  | exception Unix.Unix_error (error, _, _) -> Error (Spawn_failed { executable; error })
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (error, _, _)), _) ->
+    Error (Spawn_failed { executable; error })
+
+type 'tag piped_child =
+  { process : 'tag Eio.Process.ty Eio.Resource.t
+  ; to_stdin : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Resource.t
+  ; from_stdout : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Resource.t
+  ; from_stderr : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Resource.t
+  }
+
+(* The three pipes and the spawn are one refusal boundary: a pipe that cannot
+   be made refuses the child exactly like a fork that cannot run. The child's
+   ends are closed here once it holds its copies; the parent's ends belong to
+   [sw], which also closes every pipe made before a refusal. *)
+let spawn_piped_child ~sw mgr ?cwd ?env argv =
+  match argv with
+  | [] -> Error Empty_argv
+  | executable :: _ ->
+    let ( let* ) = Result.bind in
+    let* stdin_r, stdin_w = child_pipe ~sw mgr ~executable in
+    let* stdout_r, stdout_w = child_pipe ~sw mgr ~executable in
+    let* stderr_r, stderr_w = child_pipe ~sw mgr ~executable in
+    let* process =
+      spawn_child ~sw mgr ?cwd ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w ?env argv
+    in
+    Eio.Flow.close stdin_r;
+    Eio.Flow.close stdout_w;
+    Eio.Flow.close stderr_w;
+    Ok { process; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r }
 
 (* True while the child does not exist yet. [phase_ref] moves to [Command]
    right after [Eio.Process.spawn] returns, so an exception seen in [Spawn]

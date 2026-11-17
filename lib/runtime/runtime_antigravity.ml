@@ -911,30 +911,29 @@ let child_fd_sampler_key : (unit -> Runtime_cli_spawn_gate.child_fds) Eio.Fiber.
 let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd config ~conversation_mode
     ~prompt ~on_conversation_ready ~on_stream_event ~on_terminal_received =
   Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
-    let proc =
-      Option.iter (fun callback -> callback ()) before_spawn;
+    (* The caller's own record that a spawn is about to happen, not part of
+       starting the child: its failure is the host's state write, so it is a
+       [State_callback_failed] and no child is started. *)
+    (match before_spawn with
+     | None -> ()
+     | Some callback ->
+       (match callback () with
+        | Ok () -> ()
+        | Error detail -> raise (Runtime_error (State_callback_failed detail))));
+    let { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } =
       match
-        Process_eio.spawn_child
+        Process_eio.spawn_piped_child
           ~sw
           mgr
           ~cwd
           ~env:(official_client_environment ?home_dir ())
-          ~stdin:stdin_r
-          ~stdout:stdout_w
-          ~stderr:stderr_w
           (argv config ~conversation_mode)
       with
-      | Ok proc -> proc
+      | Ok child -> child
       | Error refusal -> raise (Runtime_error (Spawn_refused refusal))
     in
     Option.iter (fun callback -> callback ~pid:(Eio.Process.pid proc)) on_spawned;
-    Eio.Flow.close stdin_r;
-    Eio.Flow.close stdout_w;
-    Eio.Flow.close stderr_w;
     (* A prompt longer than the pipe buffer stops until the CLI reads it, and
        a CLI that answers without draining stdin never does. [Switch.run]
        joins an ordinary fiber on the way out of a body that returned a

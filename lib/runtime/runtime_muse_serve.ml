@@ -797,25 +797,16 @@ let turn_start_selection =
 let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ())
       ?(trust_workspace = false) ~mgr ~clock ~cwd ~account_home config run =
   Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     match
-      Process_eio.spawn_child
+      Process_eio.spawn_piped_child
         ~sw
         mgr
         ~cwd
         ~env:(client_environment ?storage_root account_home config.prepared_home)
-        ~stdin:stdin_r
-        ~stdout:stdout_w
-        ~stderr:stderr_w
         (client_argv config ~trust_workspace)
     with
     | Error refusal -> Error (Spawn_refused refusal)
-    | Ok proc ->
-      Eio.Flow.close stdin_r;
-      Eio.Flow.close stdout_w;
-      Eio.Flow.close stderr_w;
+    | Ok { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } ->
       let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
       (* Diagnostics only, so a daemon: a grandchild the CLI leaves behind
          (an MCP server) can hold this pipe open after the turn is served. *)

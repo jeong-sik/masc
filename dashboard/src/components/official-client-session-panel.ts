@@ -42,6 +42,7 @@ function retryPreviousOffered(failure: DashboardOfficialClientRecoveryFailure): 
     case 'pre_dispatch_failed':
     case 'spawn_resources_busy':
     case 'spawn_refused_same_input':
+    case 'spawn_failed_cause_unknown':
     case 'transport_interrupted':
     case 'protocol_failed':
     case 'provider_rejected':

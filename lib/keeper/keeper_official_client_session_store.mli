@@ -51,6 +51,11 @@ type recovery_failure =
   | Spawn_refused_same_input
       (** The child could not start and the same request fails again until
           someone changes it. Fatal. *)
+  | Spawn_failed_cause_unknown
+      (** The forked child could not finish its setup (fchdir, dup2, execve)
+          and reported the errno only as text, so whether the same request
+          fails again is not known. Transient, as every spawn failure was
+          before the outlook existed. *)
   | Owner_stopped_turn
   | Retryable_turn_failed
   | Transport_interrupted

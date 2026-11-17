@@ -98,11 +98,12 @@ let candidate rejection =
           | Exact.Capacity_evidence_expired _ | Exact.Capacity_boundary_unknown _)) -> Transient
 
 (* A spawn the same request cannot pass waits on the operator; a shortage
-   passes on its own (#28072). *)
+   passes on its own. A child setup failure whose errno arrived only as text
+   has no known cause, so it keeps the transient path (#28072). *)
 let spawn_refusal refusal =
   match Process_eio.spawn_refusal_outlook refusal with
   | Process_eio.Same_input_fails_again -> Configuration_refused
-  | Process_eio.Resources_may_free -> Transient
+  | Process_eio.Resources_may_free | Process_eio.Cause_unknown -> Transient
 
 let codex_error = function
   | Runtime_codex_app_server.Invalid_config _

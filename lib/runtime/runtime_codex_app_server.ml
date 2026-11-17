@@ -2939,21 +2939,12 @@ let context_submission frame json payload =
 let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd ~account config run =
   let* environment = client_environment ?isolated_home:config.isolated_home account in
   Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     match
-      Process_eio.spawn_child ~sw mgr ~cwd
-        ~env:environment
-        ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
-        (client_argv config)
+      Process_eio.spawn_piped_child ~sw mgr ~cwd ~env:environment (client_argv config)
     with
     | Error refusal -> Error (Spawn_refused refusal)
-    | Ok proc ->
-    Eio.Flow.close stdin_r;
-    Eio.Flow.close stdout_w;
-    Eio.Flow.close stderr_w;
+    | Ok { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } ->
     (* Diagnostics only, so a daemon: the switch cancels it once the body
        returns. A grandchild the CLI leaves behind (an MCP server orphaned
        when the CLI is reaped) inherits this pipe's write end, so EOF may

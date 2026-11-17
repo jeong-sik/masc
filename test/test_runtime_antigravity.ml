@@ -948,7 +948,7 @@ let test_spawn_observer_receives_the_actual_child_pid () =
   let transitions = ref [] in
   with_fixture ~capture_pid:captured [ init (); result () ] (fun path ->
     match run_fixture
-      ~before_spawn:(fun () -> transitions := `Before_spawn :: !transitions)
+      ~before_spawn:(fun () -> transitions := `Before_spawn :: !transitions; Ok ())
       ~on_spawned:(fun ~pid ->
         observed := Some pid;
         transitions := `Spawned :: !transitions)
@@ -963,6 +963,21 @@ let test_spawn_observer_receives_the_actual_child_pid () =
         (Some actual) !observed;
       check bool "ownership publication brackets the actual spawn" true
         (!transitions = [ `Spawned; `Before_spawn ]))
+;;
+
+(* #28072: a failed ownership publication is the caller's state write, not a
+   refusal of the child, and no child is started after it. *)
+let test_before_spawn_failure_is_a_state_callback_failure () =
+  let spawned = ref false in
+  with_fixture [ init (); result () ] (fun path ->
+    match run_fixture
+      ~before_spawn:(fun () -> Error "ownership record not written")
+      ~on_spawned:(fun ~pid:_ -> spawned := true)
+      path with
+    | Error (Runtime_antigravity.State_callback_failed "ownership record not written") ->
+      check bool "no child after a failed publication" false !spawned
+    | Error error -> failf "expected State_callback_failed, got %s" (Runtime_antigravity.error_to_string error)
+    | Ok _ -> fail "a failed publication still ran the turn")
 ;;
 
 let test_incomplete_prompt_is_not_reported () =
@@ -2250,7 +2265,7 @@ let test_admission_is_process_free () =
   let before_spawn_called = ref false in
   let result = Eio_main.run (fun env ->
     Runtime_antigravity.run_turn ~host:(antigravity_host ())
-      ~before_spawn:(fun () -> before_spawn_called := true)
+      ~before_spawn:(fun () -> before_spawn_called := true; Ok ())
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -2431,6 +2446,8 @@ let () =
             "large prompt uses stdin"
             `Quick
             test_large_prompt_streams_over_stdin
+        ; test_case "before_spawn failure is a state callback failure" `Quick
+            test_before_spawn_failure_is_a_state_callback_failure
         ; test_case "spawn observer receives the actual child PID" `Quick
             test_spawn_observer_receives_the_actual_child_pid
         ; test_case "incomplete prompt is not reported as transmitted" `Quick

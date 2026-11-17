@@ -767,6 +767,7 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
                   ( Pre_dispatch_failed
                   | Spawn_resources_busy
                   | Spawn_refused_same_input
+                  | Spawn_failed_cause_unknown
                   | Owner_stopped_turn
                   | Retryable_turn_failed
                   | Transport_interrupted

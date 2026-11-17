@@ -3213,23 +3213,10 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd ~account config ~dynamic_tools
     let* argv = command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
     let environment = client_environment account in
     Eio.Switch.run (fun sw ->
-    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
-    let proc =
-      match
-        Process_eio.spawn_child
-          ~sw
-          mgr
-          ~cwd
-          ~env:environment
-          ~stdin:stdin_r
-          ~stdout:stdout_w
-          ~stderr:stderr_w
-          argv
-      with
-      | Ok proc -> proc
+    let { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } =
+      match Process_eio.spawn_piped_child ~sw mgr ~cwd ~env:environment argv with
+      | Ok child -> child
       | Error refusal -> raise (Runtime_error (Spawn_refused refusal))
     in
     Option.iter (fun callback -> callback ()) on_spawned;
@@ -3241,9 +3228,6 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd ~account config ~dynamic_tools
         ; write = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
             Runtime_official_client_write.raw contents) })
       system_prompt;
-    Eio.Flow.close stdin_r;
-    Eio.Flow.close stdout_w;
-    Eio.Flow.close stderr_w;
     (* Diagnostics only, so a daemon: the switch cancels it once the body
        returns. A grandchild the CLI leaves behind (an MCP server orphaned
        when the CLI is reaped) inherits this pipe's write end, so EOF may

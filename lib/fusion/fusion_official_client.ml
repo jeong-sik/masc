@@ -894,10 +894,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
     let config = { config with Runtime_antigravity.cwd = native_cwd } in
     (match Runtime_antigravity.run_turn
        ~host
-       ~before_spawn:(fun () ->
-         match Antigravity_panel_root_owner.before_spawn ~root:panel_root with
-         | Ok () -> ()
-         | Error detail -> raise (Sys_error detail))
+       ~before_spawn:(fun () -> Antigravity_panel_root_owner.before_spawn ~root:panel_root)
        ~on_spawned:(fun ~pid ->
          match Antigravity_panel_root_owner.spawned ~root:panel_root ~pid with
          | Ok () -> ()

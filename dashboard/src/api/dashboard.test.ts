@@ -6279,7 +6279,7 @@ describe('official-client session API', () => {
     expect(result.session?.phase.kind).toBe(phase.kind)
   })
 
-  it.each(['pre_dispatch_failed', 'spawn_resources_busy'])('accepts exact %s release evidence', async failure => {
+  it.each(['pre_dispatch_failed', 'spawn_resources_busy', 'spawn_failed_cause_unknown'])('accepts exact %s release evidence', async failure => {
     const payload = { ...recoveryPayload, session: { ...recoveryPayload.session,
       phase: { kind: 'ready' }, turn_count: 0,
       last_transient_release: { failure, owner_epoch: recoveryPayload.session.phase.owner_epoch,

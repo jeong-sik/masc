@@ -428,29 +428,6 @@ let stop ~clock proc stdin =
 
 let valid_timeout timeout_s = Float.is_finite timeout_s && timeout_s > 0.0
 
-let spawn ~sw ~mgr ~cwd ~cli_path =
-  let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-  let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-  let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-  match
-    Process_eio.spawn_child
-      ~sw
-      mgr
-      ~cwd
-      ~env:(Runtime_vibe_cli.child_environment (Unix.environment ()))
-      ~stdin:stdin_r
-      ~stdout:stdout_w
-      ~stderr:stderr_w
-      [ cli_path ]
-  with
-  | Error _ as refused -> refused
-  | Ok proc ->
-    Eio.Flow.close stdin_r;
-    Eio.Flow.close stdout_w;
-    Eio.Flow.close stderr_w;
-    Ok (proc, stdin_w, stdout_r, stderr_r)
-;;
-
 let read ~host:(_ : Runtime_account_access.host_account) ~mgr ~clock ~fs ~workdir ~cli_path
     ~timeout_s () =
   if Filename.is_relative workdir
@@ -460,9 +437,16 @@ let read ~host:(_ : Runtime_account_access.host_account) ~mgr ~clock ~fs ~workdi
   else
     Eio.Switch.run
     @@ fun sw ->
-    match spawn ~sw ~mgr ~cwd:Eio.Path.(fs / workdir) ~cli_path with
+    match
+      Process_eio.spawn_piped_child
+        ~sw
+        mgr
+        ~cwd:Eio.Path.(fs / workdir)
+        ~env:(Runtime_vibe_cli.child_environment (Unix.environment ()))
+        [ cli_path ]
+    with
     | Error refusal -> Error (Spawn_refused refusal)
-    | Ok (proc, stdin, stdout, stderr_flow) ->
+    | Ok { Process_eio.process = proc; to_stdin = stdin; from_stdout = stdout; from_stderr = stderr_flow } ->
       let stderr = Buffer.create stderr_read_chunk_bytes in
       let stderr_drained, drained = Eio.Promise.create () in
       Eio.Fiber.fork_daemon ~sw (fun () ->

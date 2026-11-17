@@ -272,7 +272,7 @@ val context_submission_to_json : Runtime_official_client_write.t -> Yojson.Safe.
 val run_turn :
   ?conversation_mode:conversation_mode ->
   ?home_dir:string ->
-  ?before_spawn:(unit -> unit) ->
+  ?before_spawn:(unit -> (unit, string) result) ->
   ?on_spawned:(pid:int -> unit) ->
   ?on_prompt_sent:(unit -> unit) ->
   ?on_context_submission:(Runtime_official_client_write.t -> unit) ->
@@ -291,7 +291,9 @@ val run_turn :
   prompt:string ->
   (turn_result, error) result
 (** [before_spawn] runs after validation and spawn-slot admission, immediately
-    before creating the process. A callback failure prevents spawning.
+    before creating the process. Its [Error] prevents spawning and ends the
+    turn as [State_callback_failed]: it is the caller's state write, not a
+    refusal of the child.
 
     [on_spawned] receives the actual child PID immediately after a successful
     spawn, before any prompt is sent. The process manager determines whether

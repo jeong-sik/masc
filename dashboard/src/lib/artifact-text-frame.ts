@@ -17,7 +17,12 @@ export function artifactTextFrame(document: Nodes.Document, token: string, parts
       node.attrs=node.attrs.filter(attr=>![binding,marker,'nonce','contenteditable','autofocus','href','action','formaction','target'].includes(attr.name))
       if(bound!==undefined && node.namespaceURI===html.NS.HTML) {
         const id=Number(bound),part=Number.isSafeInteger(id)?parts[id]:undefined
-        if(part)node.attrs.push({name:marker,value:String(id)},{name:'tabindex',value:'0'},{name:'role',value:'button'},{name:'aria-label',value:part.text?`문장 편집: ${part.text}`:'빈 셀 편집'})
+        const chartCaption=tree.isElementNode(parent)&&parent.tagName==='figcaption'
+        const emptyLabel=chartCaption?'빈 차트 제목 편집':'빈 셀 편집'
+        if(part){
+          node.attrs.push({name:marker,value:String(id)},{name:'tabindex',value:'0'},{name:'role',value:'button'},{name:'aria-label',value:part.text?`문장 편집: ${part.text}`:emptyLabel})
+          if(!part.text&&chartCaption)tree.insertText(node,'제목 추가')
+        }
       }
       if(controls.has(node.tagName))node.attrs.push({name:'disabled',value:''})
       visit(node)

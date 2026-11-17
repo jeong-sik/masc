@@ -3,12 +3,15 @@ import { officeChartAttribute, officeChartFromFigure, type OfficeChart } from '.
 import { officeHtmlText } from './artifact-office-text'
 
 const width = 640, height = 360, left = 72, top = 24, plotWidth = 540, plotHeight = 240
+const labelSize = 12
 const palette = ['#2563eb', '#059669', '#d97706', '#9333ea', '#dc2626', '#0891b2']
 const colour = (index: number): string => palette[index % palette.length]!
 const label = (x: number, y: number, value: string, anchor = 'middle'): string =>
-  `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="12" fill="#1f2937">${officeHtmlText(value)}</text>`
+  `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="${labelSize}" fill="#1f2937">${officeHtmlText(value)}</text>`
 
 function chartSvg(chart: OfficeChart): string {
+  const viewWidth = chart.type === 'pie' ? plotHeight + top * 2 : width
+  const viewHeight = chart.type === 'pie' ? plotHeight + top * 2 : height
   let low = 0, high = 0
   for (const series of chart.series) for (const value of series.values) if (value !== null) { low = Math.min(low, value); high = Math.max(high, value) }
   const extent = high === low ? 1 : high - low
@@ -18,7 +21,7 @@ function chartSvg(chart: OfficeChart): string {
   if (chart.type === 'pie') {
     const values = chart.series[0]!.values, total = values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
     if (!Number.isFinite(total)) throw new Error('차트 합계가 표현 가능한 숫자 범위를 넘습니다.')
-    const cx = width / 2, cy = top + plotHeight / 2, radius = plotHeight / 2
+    const cx = viewWidth / 2, cy = top + plotHeight / 2, radius = plotHeight / 2
     let angle = -Math.PI / 2
     values.forEach((value, index) => {
       if (value === null || value === 0 || total === 0) return
@@ -55,9 +58,10 @@ function chartSvg(chart: OfficeChart): string {
   }
   const legend = chart.type === 'pie' ? chart.categories : chart.series.map(series => series.name)
   const legendY = top + plotHeight + 44
-  legend.forEach((name, index) => shapes.push(label(left + index * plotWidth / legend.length, legendY, name, 'start')))
+  if (chart.type !== 'pie') legend.forEach((name, index) => shapes.push(label(left + index * plotWidth / legend.length, legendY, name, 'start')))
   const axis = chart.type === 'pie' ? '' : `<path d="M${left},${top}V${top + plotHeight}H${left + plotWidth}" fill="none" stroke="#9ca3af"/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${officeHtmlText(chart.title || '차트')}" style="display:block;width:100%;max-height:24rem"><title>${officeHtmlText(chart.title || '차트')}</title>${axis}${shapes.join('')}</svg>`
+  const minimumWidth = chart.type === 'pie' ? '' : `min-width:${width}px;`
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewWidth} ${viewHeight}" role="img" aria-label="${officeHtmlText(chart.title || '차트')}" style="display:block;width:100%;${minimumWidth}max-height:24rem"><title>${officeHtmlText(chart.title || '차트')}</title>${axis}${shapes.join('')}</svg>`
 }
 
 function previews(document: Nodes.Document): { node: Nodes.Element; markup: string }[] {
@@ -65,7 +69,13 @@ function previews(document: Nodes.Document): { node: Nodes.Element; markup: stri
   const visit = (parent: Nodes.ParentNode): void => {
     for (const node of parent.childNodes) if (tree.isElementNode(node)) {
       if (node.tagName === 'figure' && node.attrs.some(attr => attr.name === officeChartAttribute)) {
-        try { const chart = officeChartFromFigure(node); if (chart) output.push({ node, markup: chartSvg(chart) }) }
+        try {
+          const chart = officeChartFromFigure(node)
+          if (chart) {
+            const legend = chart.type === 'pie' ? `<div style="display:flex;flex-wrap:wrap;gap:.5em 1em;font:${labelSize}px sans-serif;color:#1f2937">${chart.categories.map((name, index) => `<span style="display:inline-flex;align-items:center;gap:.5em"><span aria-hidden="true" style="display:inline-block;width:.75em;height:.75em;background:${colour(index)}"></span>${officeHtmlText(name)}</span>`).join('')}</div>` : ''
+            output.push({ node, markup: `<div style="max-width:100%;overflow-x:auto">${chartSvg(chart)}</div>${legend}` })
+          }
+        }
         catch (error) { output.push({ node, markup: `<p role="alert">${officeHtmlText(error instanceof Error ? error.message : '차트 데이터를 읽지 못했습니다.')}</p>` }) }
       } else visit(node)
     }

@@ -86,8 +86,8 @@ R6 replaced ambient discovery with actual explicit config/backend construction
 and verified both config and store paths before writes. Original R1 captures
 were preserved rather than relabeled as the corrected execution.
 
-The [source review](source-review-r1.json) and
-[response review](response-review-r1.json) bind their listed snapshots and
+The [source review](source-review-r1.json), [response review](response-review-r1.json), and
+[final correction review](correction-packaging-review-r1.json) bind their listed snapshots and
 limits. [Review provenance](review-provenance.json) records the original
 private report digests and any selected derivative changes. These are
 independent session reports, not current-head GitHub account approvals.

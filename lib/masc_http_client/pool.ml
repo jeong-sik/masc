@@ -32,10 +32,10 @@ let default_config = {
   max_total_idle    = 256;
   idle_ttl_seconds  = 60.0;
   connect_timeout_seconds = 5.0;
-  (* TUI refresh ticks every 2 s and issues ~9 surface GETs. After a
-     reported failure, 5 s suppresses subsequent attempts across ticks.
-     Concurrent cold requests can already be connecting when that failure
-     arrives; each owns its own client scope. *)
+  (* For 5 s after a connect failure, requests to that host fail at once
+     instead of each opening a socket. Concurrent cold requests can
+     already be connecting when that failure arrives; each owns its own
+     client scope. *)
   connect_failure_cooldown_seconds = 5.0;
 }
 

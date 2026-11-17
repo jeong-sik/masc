@@ -6,16 +6,10 @@
 
 set -e
 
-# OCaml GC tuning is applied programmatically in
-# lib/server/server_runtime_bootstrap.ml (minor_heap=16MB / space_overhead=200 /
-# max_overhead=500), only when OCAMLRUNPARAM is unset.
-#
-# Historical context: an earlier 4MB minor heap (OCAMLRUNPARAM=s=4194304)
-# produced 10GB+ RSS under shared-fiber workloads with many tools/keepers. A
-# 2026-04 root-cause analysis traced the symptom to MADV_FREE page faults
-# during aggressive major GC slices on macOS, which blocked the Eio event
-# loop. The current settings reduce major GC frequency to absorb bursty
-# dashboard allocations without thrashing — they do not shrink the minor heap.
+# When OCAMLRUNPARAM is unset, the server sets its own GC parameters:
+# space_overhead from MASC_GC_SPACE_OVERHEAD (default 100) in
+# lib/server/server_runtime_bootstrap.ml, and a 4M-word minor heap on each
+# domain that runs masc work in lib/core/minor_heap.ml.
 #
 # To override at launch, set OCAMLRUNPARAM before invoking this script.
 

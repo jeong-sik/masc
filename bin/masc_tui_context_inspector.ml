@@ -198,7 +198,7 @@ type exact_turn_record =
   ; skipped_rows : int
   }
 
-type 'a observation = Pending | Observed of ('a, string) result
+type 'a observation = Not_requested | Pending | Observed of ('a, string) result
 
 type exact_reading =
   { turn_ref : Ids.Turn_ref.t
@@ -211,13 +211,13 @@ type reading =
   | Request_failed of string
   | Turn_read_failed of
       { detail : string
-      ; forecast : (forecast, string) result
+      ; forecast : forecast observation
       }
   | Turn_read of
       { selection : selection
-      ; provider_input : (provider_input, string) result
-      ; response : (response_turn, string) result
-      ; forecast : (forecast, string) result
+      ; provider_input : provider_input observation
+      ; response : response_turn observation
+      ; forecast : forecast observation
       }
   | Exact_read of exact_reading
 
@@ -234,19 +234,33 @@ let page_scroll_should_reset ~previous reading =
   | _, (Request_failed _ | Turn_read_failed _) -> true
   | _, (Turn_read _ | Exact_read _) -> false
 
+let pending = function Pending -> true | Not_requested | Observed _ -> false
+
 let is_loading = function
-  | Request_failed _ | Turn_read_failed _ | Turn_read _ -> false
+  | Request_failed _ -> false
+  | Turn_read_failed { forecast; _ } -> pending forecast
+  | Turn_read { provider_input; response; forecast; _ } ->
+      pending provider_input || pending response || pending forecast
   | Exact_read { record; provider_input; response; _ } ->
-      let pending = function Pending -> true | Observed _ -> false in
       pending record || pending provider_input || pending response
 
 let merge_progress ~previous incoming =
+  let merge held next = match held, next with
+    | Observed _, (Pending | Not_requested) -> held
+    | (Not_requested | Pending | Observed _), (Not_requested | Pending | Observed _) -> next in
   match incoming with
-  | Request_failed _ | Turn_read_failed _ | Turn_read _ -> incoming
+  | Request_failed _ | Turn_read_failed _ -> incoming
+  | Turn_read next ->
+      (match previous with
+       | Some (Turn_read held) when held.selection == next.selection ->
+           Turn_read { next with
+             provider_input = merge held.provider_input next.provider_input
+           ; response = merge held.response next.response
+           ; forecast = merge held.forecast next.forecast }
+       | Some (Turn_read _ | Exact_read _ | Request_failed _ | Turn_read_failed _) | None -> incoming)
   | Exact_read next ->
       (match previous with
        | Some (Exact_read held) when Ids.Turn_ref.equal held.turn_ref next.turn_ref ->
-           let merge held = function Pending -> held | Observed result -> Observed result in
            Exact_read
              { next with
                record = merge held.record next.record
@@ -255,11 +269,11 @@ let merge_progress ~previous incoming =
        | Some (Exact_read _ | Request_failed _ | Turn_read_failed _ | Turn_read _) | None -> incoming)
 
 let observed_input = function
-  | Turn_read { provider_input = Ok input; _ }
+  | Turn_read { provider_input = Observed (Ok input); _ }
   | Exact_read { provider_input = Observed (Ok input); _ } -> Some input
   | Request_failed _ | Turn_read_failed _
-  | Turn_read { provider_input = Error _; _ }
-  | Exact_read { provider_input = (Pending | Observed (Error _)); _ } -> None
+  | Turn_read { provider_input = (Not_requested | Pending | Observed (Error _)); _ }
+  | Exact_read { provider_input = (Not_requested | Pending | Observed (Error _)); _ } -> None
 
 let step_recent target ~older ~count =
   match target with
@@ -269,7 +283,10 @@ let step_recent target ~older ~count =
       if count <= 0 || next = turn_back then None else Some (Recent next)
 
 let retained_forecast = function
-  | Turn_read { forecast; _ } | Turn_read_failed { forecast; _ } -> Some forecast
+  | Turn_read { forecast = Observed forecast; _ }
+  | Turn_read_failed { forecast = Observed forecast; _ } -> Some forecast
+  | Turn_read { forecast = (Not_requested | Pending); _ }
+  | Turn_read_failed { forecast = (Not_requested | Pending); _ }
   | Request_failed _ | Exact_read _ -> None
 
 type tab =
@@ -277,6 +294,47 @@ type tab =
   | Exact_input
   | Input_map
   | Response
+
+let tab_sources = function
+  | Composition -> false, false, true
+  | Exact_input | Input_map -> true, false, false
+  | Response -> false, true, false
+
+let prepare_tab_read ~tab reading =
+  let input, response, forecast = tab_sources tab in
+  let prepare wanted = function
+    | Observed _ as held -> held
+    | Not_requested | Pending -> if wanted then Pending else Not_requested in
+  match reading with
+  | Request_failed _ -> reading
+  | Turn_read_failed failed ->
+      Turn_read_failed { failed with forecast = prepare forecast failed.forecast }
+  | Turn_read recent ->
+      Turn_read { recent with
+        provider_input = prepare input recent.provider_input
+      ; response = prepare response recent.response
+      ; forecast = prepare forecast recent.forecast }
+  | Exact_read exact ->
+      Exact_read { exact with
+        record = prepare true exact.record
+      ; provider_input = prepare input exact.provider_input
+      ; response = prepare response exact.response }
+
+let needs_tab_read ~tab reading =
+  let input, response, forecast = tab_sources tab in
+  let needs wanted = function
+    | Not_requested -> wanted
+    | Pending -> not wanted
+    | Observed _ -> false in
+  match reading with
+  | Request_failed _ -> false
+  | Turn_read_failed failed -> needs forecast failed.forecast
+  | Turn_read recent ->
+      needs input recent.provider_input || needs response recent.response
+      || needs forecast recent.forecast
+  | Exact_read exact ->
+      needs true exact.record || needs input exact.provider_input
+      || needs response exact.response
 
 type input_source =
   | Turn_prompt_assembly
@@ -406,7 +464,7 @@ let inspected_record ~target = function
        | Recent _ -> None
        | Pinned expected ->
          match reading.record with
-         | Pending | Observed (Error _) -> None
+         | Not_requested | Pending | Observed (Error _) -> None
          | Observed (Ok exact) ->
            if Ids.Turn_ref.equal expected reading.turn_ref
               && Ids.Turn_ref.equal expected exact.record.turn_ref

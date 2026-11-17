@@ -505,9 +505,9 @@ let test_retained_forecast_reuses_recent_reading_only () =
   let turn_read =
     Inspector.Turn_read
       { selection
-      ; provider_input = Error "absent"
-      ; response = Error "absent"
-      ; forecast = Ok measured
+      ; provider_input = Inspector.Observed (Error "absent")
+      ; response = Inspector.Observed (Error "absent")
+      ; forecast = Inspector.Observed (Ok measured)
       }
   in
   Alcotest.(check bool) "Turn_read retains its forecast" true
@@ -522,7 +522,7 @@ let test_retained_forecast_reuses_recent_reading_only () =
   in
   let with_record = Inspector.Turn_read
       { selection = { selection with attributed }
-      ; provider_input = Error "absent"; response = Error "absent"; forecast = Ok measured } in
+      ; provider_input = Inspector.Observed (Error "absent"); response = Inspector.Observed (Error "absent"); forecast = Inspector.Observed (Ok measured) } in
   Alcotest.(check bool) "proof with an attributed record keeps selection" false
     (Inspector.scroll_plain_body ~tab:Inspector.Input_map ~target:(Inspector.Recent 0) with_record);
   Alcotest.(check bool) "proof resets when attribution disappears" true
@@ -535,7 +535,7 @@ let test_retained_forecast_reuses_recent_reading_only () =
     (Inspector.proof_scroll_should_reset ~target:(Inspector.Recent 0)
        ~previous:(Some with_record) with_record);
   let failed_turn =
-    Inspector.Turn_read_failed { detail = "turn-records 503"; forecast = Ok measured }
+    Inspector.Turn_read_failed { detail = "turn-records 503"; forecast = Inspector.Observed (Ok measured) }
   in
   Alcotest.(check bool) "a failed proof scrolls its message" true
     (Inspector.scroll_plain_body ~tab:Inspector.Input_map ~target:(Inspector.Recent 0) failed_turn);

@@ -294,7 +294,9 @@ type exact_turn_record =
   ; skipped_rows : int
   }
 
-type 'a observation = Pending | Observed of ('a, string) result
+type 'a observation = Not_requested | Pending | Observed of ('a, string) result
+(** An unopened tab owns no request. [Pending] means its read was requested;
+    a skipped read is neither loading nor a failure. *)
 
 type exact_reading =
   { turn_ref : Ids.Turn_ref.t
@@ -308,18 +310,18 @@ type reading =
       (** The whole inspector request could not start. Keep its cause once. *)
   | Turn_read_failed of
       { detail : string
-      ; forecast : (forecast, string) result
+      ; forecast : forecast observation
       }
       (** The turn-dependent reads cannot start. The independently fetched
           next-request forecast remains visible. *)
   | Turn_read of
       { selection : selection
-      ; provider_input : (provider_input, string) result
-      ; response : (response_turn, string) result
-      ; forecast : (forecast, string) result
+      ; provider_input : provider_input observation
+      ; response : response_turn observation
+      ; forecast : forecast observation
       }
-      (** Once the turn is known, its provider input and response may each
-          fail independently. *)
+      (** The recent page arrives before tab detail. Each detail is requested
+          only by a tab that consumes it and can fail independently. *)
   | Exact_read of exact_reading
       (** Independent, progressively delivered observations for one immutable
           source. A missing record never prevents its known input read. There
@@ -331,8 +333,9 @@ val page_scroll_should_reset : previous:reading option -> reading -> bool
 (** Reset when a page error begins, changes, or recovers. *)
 val is_loading : reading -> bool
 val merge_progress : previous:reading option -> reading -> reading
-(** Within one admitted generation, late pending fields cannot erase an
-    already completed observation. The caller clears the previous generation. *)
+(** Late pending fields cannot erase a completed observation of the same
+    immutable turn or recent-page instance. A refreshed recent page never
+    borrows a previous page's parts. Generation admission belongs to the caller. *)
 val observed_input : reading -> provider_input option
 val inspected_record : target:target -> reading -> Turn_record.t option
 val step_recent : target -> older:bool -> count:int -> target option
@@ -348,6 +351,14 @@ type tab =
   | Exact_input
   | Input_map
   | Response
+
+val prepare_tab_read : tab:tab -> reading -> reading
+(** Preserve completed observations, request only this tab's missing source,
+    and withdraw pending sources owned by the replaced read. Call only after
+    cancelling that read and assigning a new generation. *)
+val needs_tab_read : tab:tab -> reading -> bool
+(** A tab has an unread source, or the current read is still fetching a source
+    this tab does not use. Settled failures require explicit refresh. *)
 
 val scroll_plain_body : tab:tab -> target:target -> reading -> bool
 (** Whether this reading uses a scrollable message instead of selectable rows. *)

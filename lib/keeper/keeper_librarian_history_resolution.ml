@@ -13,9 +13,15 @@ module Cursor = Keeper_external_read_cursor
 module Exact = Lane_addon_exact
 open Result.Syntax
 
-type error = Original_absent | Ineligible of string | Observation_changed
-  | Range_already_recorded | Already_fenced of State.t | Unavailable of string
-  | Publication_uncertain of string | Host_claim_busy
+type error =
+  | Original_absent
+  | Ineligible of string
+  | Observation_changed
+  | Range_already_recorded
+  | Already_fenced of State.t
+  | Host_claim_busy
+  | Unavailable of string
+  | Publication_uncertain of string
 type preview = { expected:State.guard; scope:string; request_id:string; request_digest:string }
 let error_to_string = function
   | Original_absent -> "Original history request is absent"

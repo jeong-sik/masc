@@ -192,16 +192,17 @@ let declare_connections ~base_path =
     Error
       (Printf.sprintf
          "%s, which declares what people may connect, could not be made, and nothing \
-          was activated: %s. Make the path writable or put a runtime.toml there (%s), \
-          and run the command again."
+          was activated: %s. Put a runtime.toml there (%s), or end what stopped the \
+          command, and run it again."
          path
          reason
          setup_guide_step_6)
-  | Error (Config_root.Published_unsynced reason) ->
+  | Error (Config_root.Not_synced reason) ->
     Error
       (Printf.sprintf
-         "%s, which declares what people may connect, was made but not synced, and \
-          nothing was activated: %s. The next run keeps the file."
+         "%s, which declares what people may connect, is in place, but its directory \
+          could not be synced, and nothing was activated: %s. The next run keeps what \
+          is there and syncs again."
          path
          reason)
 ;;
@@ -222,7 +223,8 @@ let declaration_line { path; placement } =
       setup_guide_step_6
 ;;
 
-(* An activation that stops after the placement leaves the file it wrote. *)
+(* The writes of an activation that stop come after the placement, and
+   leave the file it wrote. *)
 let written_before_the_refusal { path; placement } =
   match placement with
   | Config_root.Embedded_written ->
@@ -230,15 +232,17 @@ let written_before_the_refusal { path; placement } =
   | Config_root.Existing_kept -> ""
 ;;
 
+(* Every check of the activation comes before the placement: a command that
+   a check refuses has made no file and no directory for runtime.toml. *)
 let bootstrap ~base_path ~external_store =
   let activate ~base_path ~config_dir ~anonymous_mutations ~now_ms =
-    let* () =
+    let* prepared =
       Result.map_error
         A.error_to_string
-        (A.asked ~base_path ~config_dir ~anonymous_mutations)
+        (A.prepare ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms)
     in
     let* declaration = declare_connections ~base_path in
-    match A.activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms with
+    match A.complete prepared with
     | Ok activated -> Ok (activated, declaration)
     | Error error ->
       Error (A.error_to_string error ^ written_before_the_refusal declaration)

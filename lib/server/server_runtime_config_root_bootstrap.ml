@@ -243,12 +243,7 @@ type runtime_toml_placement =
 
 type runtime_toml_placement_error =
   | Not_published of string
-  | Published_unsynced of string
-
-let runtime_toml_placement_error_to_string = function
-  | Not_published reason -> "no file was made: " ^ reason
-  | Published_unsynced reason -> "the file was made, and syncing it failed: " ^ reason
-;;
+  | Not_synced of string
 
 (* Owner only, as the stores of an account workspace are. *)
 let runtime_toml_permissions = 0o600
@@ -269,7 +264,7 @@ let entry_at path =
 (* The file is staged beside [path], synced, and published by a rename that
    replaces nothing. [path] then holds the whole file or the entry that was
    there, and never a part of the file. *)
-let publish_staged ~path content =
+let publish_runtime_toml ~path content =
   let staged, channel =
     Fs_compat.open_atomic_temp_file ~temp_dir:(Filename.dirname path) ()
   in
@@ -281,6 +276,8 @@ let publish_staged ~path content =
       | Unix.Unix_error _ -> ())
     (fun () ->
       let descriptor = Unix.descr_of_out_channel channel in
+      (* Said here: the staging promises no mode, and the umask can take bits
+         from the one it gives. *)
       Unix.fchmod descriptor runtime_toml_permissions;
       output_string channel content;
       flush channel;
@@ -288,34 +285,86 @@ let publish_staged ~path content =
       close_out channel;
       match Fs_compat.rename_noreplace staged path with
       | () -> Embedded_written
-      | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Existing_kept)
+      | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Existing_kept
+      (* The rename names the staged file, which is removed before its
+         failure is read. *)
+      | exception Unix.Unix_error (error, operation, (_ : string)) ->
+        raise (Unix.Unix_error (error, operation, path)))
+;;
+
+(* The directories on the way to [directory] that are not there, innermost
+   first. *)
+let rec absent_directories directory =
+  match entry_at directory with
+  | Error reason -> Error reason
+  | Ok true -> Ok []
+  | Ok false ->
+    let above = Filename.dirname directory in
+    if String.equal above directory
+    then Ok []
+    else Result.map (fun absent -> directory :: absent) (absent_directories above)
+;;
+
+(* Innermost first. One that holds an entry by now stays: it is not empty. *)
+let remove_directories directories =
+  List.iter
+    (fun directory ->
+      try Unix.rmdir directory with
+      | Unix.Unix_error _ -> ())
+    directories
+;;
+
+(* [Fs_compat.sync_file_and_parent_strict] syncs what the path names, opened
+   for reading, and then the directory it is in. Given a directory it syncs
+   the entries in it and its own entry. *)
+let sync_directories directories placement =
+  let rec sync = function
+    | [] -> Ok placement
+    | directory :: rest ->
+      (match Fs_compat.sync_file_and_parent_strict directory with
+       | Ok () -> sync rest
+       | Error reason -> Error (Not_synced reason))
+  in
+  sync directories
 ;;
 
 (* [masc auth bootstrap] names the path the account server reads and says
    what happened there. An entry at the path is kept without a write, so a
-   directory the operator made read-only keeps its file. *)
+   directory the operator made read-only keeps its file. The directory of the
+   path is synced either way: a run after one that could not sync it syncs it
+   before it answers. *)
 let place_embedded_runtime_toml ~path =
+  let directory = Filename.dirname path in
   match entry_at path with
   | Error reason -> Error (Not_published reason)
-  | Ok true -> Ok Existing_kept
+  | Ok true -> sync_directories [ directory ] Existing_kept
   | Ok false ->
     (match Embedded_config.read Config_dir_resolver.runtime_toml_filename with
      | None -> Error (Not_published "this build embeds no runtime.toml")
      | Some content ->
-       let publish () =
-         Fs_compat.mkdir_p (Filename.dirname path);
-         publish_staged ~path content
-       in
-       (match publish () with
-        | exception Unix.Unix_error (error, operation, argument) ->
-          Error (Not_published (unix_failure error operation argument))
-        | exception Sys_error reason -> Error (Not_published reason)
-        | exception (Eio.Io _ as error) -> Error (Not_published (Printexc.to_string error))
-        | Existing_kept -> Ok Existing_kept
-        | Embedded_written ->
-          Fs_compat.sync_file_and_parent_strict path
-          |> Result.map (fun () -> Embedded_written)
-          |> Result.map_error (fun reason -> Published_unsynced reason)))
+       (match absent_directories directory with
+        | Error reason -> Error (Not_published reason)
+        | Ok absent ->
+          let publish () =
+            Fs_compat.mkdir_p directory;
+            publish_runtime_toml ~path content
+          in
+          let not_published reason =
+            remove_directories absent;
+            Error (Not_published reason)
+          in
+          (match publish () with
+           | exception Unix.Unix_error (error, operation, argument) ->
+             not_published (unix_failure error operation argument)
+           | exception Sys_error reason -> not_published reason
+           | (Embedded_written | Existing_kept) as placement ->
+             (* The directory of the path is the innermost one made, when
+                any was. *)
+             sync_directories
+               (match absent with
+                | [] -> [ directory ]
+                | _ :: _ -> absent)
+               placement)))
 ;;
 
 let builtin_skills () =

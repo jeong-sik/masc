@@ -131,18 +131,33 @@ let write_invitation ~base_path ~external_store ~now_ms =
   Ok { invite_id; token; expires_at_ms }
 ;;
 
-let activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms =
+type prepared =
+  { bootstrap : Authz_bootstrap.prepared
+  ; workspace_id : Authz_types.Workspace_id.t
+  ; base_path : string
+  ; external_store : string
+  ; now_ms : unit -> int
+  }
+
+let prepare ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms =
   let* () = asked ~base_path ~config_dir ~anonymous_mutations in
   let* workspace_id =
     Result.map_error
       (fun error -> Workspace_id_not_built error)
       (Authz_types.Workspace_id.of_string (Random_id.hex ~bytes:id_bytes))
   in
-  let* (_ : Authz_bootstrap.completed) =
+  let* bootstrap =
     Result.map_error
       (fun error -> Bootstrap_failed error)
-      (Authz_bootstrap.fresh_bootstrap
+      (Authz_bootstrap.prepare
          { Authz_bootstrap.base_path; config_dir; external_store; workspace_id; now_ms })
+  in
+  Ok { bootstrap; workspace_id; base_path; external_store; now_ms }
+;;
+
+let complete { bootstrap; workspace_id; base_path; external_store; now_ms } =
+  let* (_ : Authz_bootstrap.completed) =
+    Result.map_error (fun error -> Bootstrap_failed error) (Authz_bootstrap.write bootstrap)
   in
   let* invitation =
     Result.map_error
@@ -150,6 +165,11 @@ let activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms
       (write_invitation ~base_path ~external_store ~now_ms)
   in
   Ok { workspace_id; invitation }
+;;
+
+let activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms =
+  let* prepared = prepare ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms in
+  complete prepared
 ;;
 
 type invite_error =

@@ -13,19 +13,21 @@
     refused. Before anything is written it reads [MASC_HTTP_BASE_URL], the
     public address that the person opens, and refuses when it is not an http(s)
     origin with no path; [MASC_HOST] and [MASC_HTTP_PORT] are not read, because
-    the server can listen elsewhere. It then runs {!Authz_activation.activate}
+    the server can listen elsewhere. It then runs the two steps of
+    {!Authz_activation}
     with the anonymous-mutation setting of this process's environment, which a
     server started from the same environment reads, and prints
     {!Authz_activation.link} once on standard output. The link is printed
     nowhere else.
 
-    Under the lease, once {!Authz_activation.asked} says a boot asks for the
-    activation and before {!Authz_activation.activate}, it puts the
-    runtime.toml this build embeds at
+    Under the lease, between the checks of the activation
+    ({!Authz_activation.prepare}) and its writes ({!Authz_activation.complete}),
+    it puts the runtime.toml this build embeds at
     {!Server_runtime_setup_actions.config_path} where no entry is
     ({!Server_runtime_config_root_bootstrap.place_embedded_runtime_toml}): the
     account server reads what people may connect from that file. An entry
-    that is there is kept. A placement that fails refuses the command with
+    that is there is kept. A command that a check refuses has made no file
+    and no directory there. A placement that fails refuses the command with
     nothing activated, so the same command runs again.
 
     Returns the exit code: [0] once the link is printed, [1] otherwise, with

@@ -1670,23 +1670,64 @@ let acting_pane_sgr (tone : Masc_tui_acting_pane.tone) =
    back to the page's ground mid-row, so the ground is re-opened after each
    one; the row ends on a full reset so the surface's next row starts on the
    page. Without a palette the ground is [""] and the row draws as before. *)
-let paint_acting_pane_line ?(selected = false) ~ground
+let paint_acting_pane_line ?(selected = false)
+    ~(target : Masc_tui_acting_pane.row_target) ~ground
     (line : Masc_tui_acting_pane.line) =
-  (* The cursor row is reverse video over the whole row, re-opened after
-     each span's reset the way the ground is: an attribute, not a colour,
-     so NO_COLOR keeps it. *)
-  let ground = if selected then ground ^ Ansi.reverse else ground in
-  let restore = if String.equal ground "" then "" else Ansi.reset ^ ground in
-  let close = if String.equal ground "" then "" else Ansi.reset in
-  ground
-  ^ String.concat ""
-      (List.map
-         (fun (span : Masc_tui_acting_pane.span) ->
-           match acting_pane_sgr span.tone with
-           | "" -> span.text
-           | sgr -> sgr ^ span.text ^ Ansi.reset ^ restore)
-         line)
-  ^ close
+  if selected then
+    let sel = Theme.sidebar_selection () in
+    match line with
+    | [] -> ""
+    | border_span :: rest ->
+        let border_paint =
+          match acting_pane_sgr border_span.tone with
+          | "" ->
+              ground ^ border_span.text
+              ^ (if String.equal ground "" then "" else Ansi.reset)
+          | sgr -> ground ^ sgr ^ border_span.text ^ Ansi.reset
+        in
+        let body_paint =
+          String.concat ""
+            (List.map
+               (fun (span : Masc_tui_acting_pane.span) ->
+                 match span.tone with
+                 | Masc_tui_acting_pane.Accent ->
+                     Ansi.bold ^ span.text ^ Ansi.reset ^ sel
+                 | Masc_tui_acting_pane.Plain
+                 | Masc_tui_acting_pane.Dim
+                 | Masc_tui_acting_pane.Ok
+                 | Masc_tui_acting_pane.Warn
+                 | Masc_tui_acting_pane.Bad
+                 | Masc_tui_acting_pane.Info -> span.text)
+               rest)
+        in
+        border_paint ^ sel ^ body_paint ^ Ansi.reset
+  else
+    let is_tab_header =
+      match target with
+      | Masc_tui_acting_pane.Target_next_tab -> true
+      | Masc_tui_acting_pane.Target_none
+      | Masc_tui_acting_pane.Target_keeper _
+      | Masc_tui_acting_pane.Target_more
+      | Masc_tui_acting_pane.Target_file _
+      | Masc_tui_acting_pane.Target_calls _
+      | Masc_tui_acting_pane.Target_call _
+      | Masc_tui_acting_pane.Target_call_order -> false
+    in
+    let restore = if String.equal ground "" then "" else Ansi.reset ^ ground in
+    let close = if String.equal ground "" then "" else Ansi.reset in
+    ground
+    ^ String.concat ""
+        (List.map
+           (fun (span : Masc_tui_acting_pane.span) ->
+             if is_tab_header && span.tone = Masc_tui_acting_pane.Accent then
+               Theme.sidebar_selection () ^ Ansi.bold ^ span.text
+               ^ Ansi.reset ^ restore
+             else
+               match acting_pane_sgr span.tone with
+               | "" -> span.text
+               | sgr -> sgr ^ span.text ^ Ansi.reset ^ restore)
+           line)
+    ^ close
 
 
 (* A surface's rows with the Activity pane beside the first [pane_rows] of
@@ -1723,10 +1764,15 @@ let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
     let ground = Theme.side_pane_background () in
     let right = Buffer.create 4096 in
     let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
+    let targets = Array.of_list rendering.Masc_tui_acting_pane.targets in
     List.iteri
       (fun index line ->
+         let target =
+           if index < Array.length targets then targets.(index)
+           else Masc_tui_acting_pane.Target_none
+         in
          Buffer.add_string right
-           (paint_acting_pane_line ~selected:(index = cursor) ~ground line);
+           (paint_acting_pane_line ~selected:(index = cursor) ~target ~ground line);
          Buffer.add_char right '\n')
       rendering.Masc_tui_acting_pane.rows;
     write_two_panes framed ~left_cols:cols ~left ~right
@@ -2461,11 +2507,17 @@ let sidebar_line ?(style = "") buf ~cols text =
 let sidebar_rule ~cols = "  " ^ draw_hline (max 0 (cols - 5)) ^ "  "
 
 let sidebar_heading ~cols ~title ~count =
+  let avail = max 0 (cols - 1) in
   let title = "  " ^ Terminal_text.single_line title in
   let count = Terminal_text.single_line count in
   let count_cells = Message_layout.display_width count in
-  let title_cells = max 0 (cols - 1 - count_cells - 3) in
-  fit_width title title_cells ^ " " ^ count ^ "  "
+  if avail < count_cells + 4 then
+    Ansi.bold ^ Theme.Side_pane.info () ^ fit_width title avail
+  else
+    let restore = Ansi.reset ^ Theme.side_pane_background () in
+    let title_cells = avail - count_cells - 3 in
+    Ansi.bold ^ Theme.Side_pane.info () ^ fit_width title title_cells
+    ^ restore ^ " " ^ Theme.Side_pane.recede () ^ count ^ "  "
 
 (* A quiet rail beside the conversation. Only the cursor row gets a band when
    this pane owns the keys; the selected Keeper's readings sit below the list.

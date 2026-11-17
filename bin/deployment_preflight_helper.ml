@@ -1241,6 +1241,11 @@ let validate_runtime_config base_path allow_empty_workspace =
       base_path
       (Unix.error_message error)
   | base_path ->
+    (* Readers still using ambient workspace resolution must see the canonical
+       CLI root, just as they do after main_eio publishes its workspace. *)
+    Unix.putenv Env_config_core.base_path_env_key base_path;
+    Config_dir_resolver.reset ();
+    Masc.Workspace.cache_resolved_base_path base_path;
     let resolution = Config_dir_resolver.resolve_for_base_path ~base_path in
     let config_root = resolution.config_root.path in
     let path = Filename.concat config_root Config_dir_resolver.runtime_toml_filename in

@@ -414,7 +414,11 @@ let with_fresh store agent run = with_writer_lifetime @@ fun caller_sw ->
            in_caller_switch ~sw:caller_sw (fun sw -> run ~sw scope))))
 ;;
 
-let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw ->
+let with_resumed store resume agent run = with_writer_lifetime @@ fun caller_sw ->
+  let locator =
+    match resume with
+    | Resume_writer_exit_unproven locator | Resume_after_writer_exit locator -> locator
+  in
   let captured : terminal_disposition option ref = ref None in
   let on_terminal_disposition = captured_terminal_sink store captured in
   finish_writer_scope store captured (fun () ->
@@ -433,6 +437,11 @@ let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw
        | Error error ->
          Error (execution_failure (Execution_agent_scope.error_to_string error))
        | Ok scope ->
+         let scope =
+           match resume with
+           | Resume_writer_exit_unproven _ -> scope
+           | Resume_after_writer_exit _ -> Execution_agent_scope.after_writer_exit scope
+         in
          (match prepare_scope store on_terminal_disposition scope with
           | Error detail ->
             abort_error
@@ -448,8 +457,7 @@ let with_resumed store locator agent run = with_writer_lifetime @@ fun caller_sw
 let with_store store agent run =
   match store.mode with
   | Fresh -> with_fresh store agent run
-  | Resume (Resume_writer_exit_unproven locator | Resume_after_writer_exit locator) ->
-    with_resumed store locator agent run
+  | Resume resume -> with_resumed store resume agent run
 ;;
 
 let is_resume store =

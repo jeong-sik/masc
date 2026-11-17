@@ -107,6 +107,19 @@ val resume_running
   -> scope_locator
   -> (t, error) result
 
+(** Record the host's claim that the process which last wrote this resumed run
+    has exited, so no code it started is still running. On such a scope,
+    {!execute_phased} meets an open attempt of an open invocation of a Tool
+    that continues the turn ([Continue_after_success]) and settles it instead
+    of failing: the attempt and the child runs under it close [Cancelled], and
+    the invocation gets a failed ToolResult of kind
+    [Writer_exited_tool_error]. The handler does not run. A descendant Tool
+    invocation with an attempt but no result fails closed even if a child
+    abort already closed it. Recorded descendant results remain valid.
+    Without the claim, and for a Tool that ends the run, the attempt fails
+    closed as before. *)
+val after_writer_exit : t -> t
+
 (** Total classification of a turn node found at a resume ordinal. [Settled] is a
     turn already [Closed Succeeded] under a still-[Running] root: an idempotent
     completed boundary (crash after {!close_turn} but before the root

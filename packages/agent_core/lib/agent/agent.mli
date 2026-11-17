@@ -233,7 +233,8 @@ type execution_resume =
           running. *)
   | Resume_after_writer_exit of execution_locator
       (** The process that last wrote the run has exited, so none of the code
-          it started is still running. *)
+          it started is still running. The host must not pass this for a run
+          whose writer may still be this process. *)
 
 type execution_terminal_outcome =
   | Terminal_succeeded
@@ -370,9 +371,20 @@ val retire_uncollected_turn
     be new and the call starts a fresh scope. With [resume], the same Agent API
     reopens that scope in the same directory, validates Agent identity and the
     restored user input, and replays settled ToolResults without rerunning tool
-    gates, handlers, or completion observers. With either [execution_resume]
-    constructor, an admitted Tool attempt without a settled result fails
-    closed because its external outcome is unknown.
+    gates, handlers, or completion observers. With [Resume_writer_exit_unproven],
+    an admitted Tool attempt without a settled result fails closed because its
+    external outcome is unknown. With [Resume_after_writer_exit], an open
+    attempt of an open invocation of a Tool that continues the turn is settled
+    instead: the attempt and the child runs under it close [Cancelled], the
+    invocation gets a failed ToolResult of kind [Writer_exited_tool_error]
+    saying that the call was cut off, that its effect is unknown and that it
+    was not run again, and the next provider request carries that result. The
+    handler, its gate and its observers do not run. The settled attempt does
+    not make the terminal recovery [Operator_repair_required]. A terminal Tool's
+    open attempt, an invocation closed without a result, and an open attempt
+    with a descendant Tool invocation that has an attempt but no result still
+    fail closed. This includes a descendant already closed by a child abort;
+    descendant invocations with recorded results remain valid.
     If a terminal response and its collected checkpoint were persisted before
     the provider/turn close, recovery validates their exact content and turn
     identity, then runs the pending output stage before closing and returning

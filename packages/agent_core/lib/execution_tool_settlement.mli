@@ -48,6 +48,27 @@ val execute_with_attempt_phased
   -> invoke:(Execution_event.Node_id.t -> phased_effect)
   -> (execution, error) result
 
+type unreturned_settlement =
+  | Not_unreturned
+      (** The invocation has no attempt or is settled, or its shape is not one
+          open attempt under an open invocation (closed without a result, or
+          more than one attempt). Nothing was written. *)
+  | Unreturned_settled
+      (** The invocation was open and its one attempt was open, so the handler
+          never returned in the writer that admitted it. This call settled the
+          attempt with [result] and [terminal]. *)
+
+(** Settle an attempt whose handler never returned, with a result the caller
+    writes in the handler's place. The handler is not called. Only the caller
+    knows that no code the handler started can still run; this function does
+    not check it. [terminal] must be failed or cancelled. After
+    [Unreturned_settled], {!execute} returns [Replayed result]. *)
+val settle_unreturned
+  :  t
+  -> result:Llm_provider.Types.content_block
+  -> Execution_event.terminal
+  -> (unreturned_settlement, error) result
+
 module For_testing : sig
   val execute_with_attempt_after_attempt_committed
     :  t

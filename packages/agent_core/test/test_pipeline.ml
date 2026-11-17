@@ -3059,6 +3059,7 @@ let test_agent_run_resumes_tool_without_duplicate_effects
       ?(extra_restored_messages = [])
       ?(resume_prompt = "run the tool")
       ?(expect_reject = false)
+      ?(writer_exited = false)
       ~settled
       ()
   =
@@ -3264,7 +3265,10 @@ let test_agent_run_resumes_tool_without_duplicate_effects
            ~on_terminal_disposition:(fun disposition ->
              terminal_disposition := Some disposition;
              Ok ())
-           ~resume:(Agent.Resume_writer_exit_unproven locator)
+           ~resume:
+             (if writer_exited
+              then Agent.Resume_after_writer_exit locator
+              else Agent.Resume_writer_exit_unproven locator)
            ()
        in
        let run_result = Agent.run ~sw:runtime_sw ~execution_store agent resume_prompt in
@@ -3285,8 +3289,8 @@ let test_agent_run_resumes_tool_without_duplicate_effects
           | Ok _ -> Alcotest.fail "expected resume-input rejection, but resume succeeded");
          Alcotest.(check int) "rejected resume does not run tool handler" 0 !effect_count)
        else (
-         (match settled, run_result with
-          | true, Ok response ->
+         (match settled, writer_exited, run_result with
+          | true, _, Ok response ->
             Alcotest.(check string)
               "terminal response"
               "done-after-restart"
@@ -3302,17 +3306,40 @@ let test_agent_run_resumes_tool_without_duplicate_effects
                |> List.map (fun (message : Types.message) ->
                  Types.Tool_results_appended_at.classify message.metadata)
                = [ Types.Tool_results_appended_at.Absent ])
-          | true, Error error -> Alcotest.fail (Error.to_string error)
-          | false, Error (Error.Internal _) -> ()
-          | false, Error error ->
+          | false, true, Ok response ->
+            Alcotest.(check string)
+              "terminal response"
+              "done-after-restart"
+              (Types.text_of_response response);
+            Alcotest.(check bool)
+              "the cut Tool reaches the model as a writer-exited failure"
+              true
+              (List.exists
+                 (fun (message : Types.message) ->
+                    List.exists
+                      (function
+                        | Types.ToolResult
+                            { tool_use_id = id
+                            ; outcome =
+                                Types.Tool_failed
+                                  { failure_kind = Types.Writer_exited_tool_error; _ }
+                            ; _
+                            } -> String.equal id tool_use_id
+                        | _ -> false)
+                      message.content)
+                 (Agent.state agent).messages)
+          | true, _, Error error | false, true, Error error ->
+            Alcotest.fail (Error.to_string error)
+          | false, false, Error (Error.Internal _) -> ()
+          | false, false, Error error ->
             Alcotest.failf
               "unknown effect changed error category: %s"
               (Error.to_string error)
-          | false, Ok _ -> Alcotest.fail "unknown effect unexpectedly completed");
+          | false, false, Ok _ -> Alcotest.fail "unknown effect unexpectedly completed");
          Alcotest.(check int) "settled tool handler is not rerun" 0 !effect_count;
          Alcotest.(check int) "settled pre-tool hook is not rerun" 0 !pre_hook_count;
          Alcotest.(check int) "settled post-tool hook is not rerun" 0 !post_hook_count;
-         if settled
+         if settled || writer_exited
          then
            check_terminal_disposition
              ~outcome:"succeeded"
@@ -3331,6 +3358,22 @@ let test_agent_run_resumes_settled_tool_without_duplicate_effects () =
 
 let test_agent_run_reports_unknown_effect_for_operator_repair () =
   test_agent_run_resumes_tool_without_duplicate_effects ~settled:false ()
+;;
+
+(* The host says the writer exited: the open attempt is settled as cut off and
+   the turn continues without running the handler. *)
+let test_agent_run_settles_unreturned_tool_after_writer_exit () =
+  test_agent_run_resumes_tool_without_duplicate_effects
+    ~writer_exited:true
+    ~settled:false
+    ()
+;;
+
+let test_agent_run_replays_settled_tool_after_writer_exit () =
+  test_agent_run_resumes_tool_without_duplicate_effects
+    ~writer_exited:true
+    ~settled:true
+    ()
 ;;
 
 (* A legacy journal could contain an invocation opened after an untyped
@@ -6000,6 +6043,14 @@ let () =
             "terminal disposition requires operator repair for unknown effect"
             `Quick
             test_agent_run_reports_unknown_effect_for_operator_repair
+        ; Alcotest.test_case
+            "resume after writer exit settles the cut Tool and continues"
+            `Quick
+            test_agent_run_settles_unreturned_tool_after_writer_exit
+        ; Alcotest.test_case
+            "resume after writer exit replays a settled Tool"
+            `Quick
+            test_agent_run_replays_settled_tool_after_writer_exit
         ; Alcotest.test_case
             "terminal disposition sink failure fails call"
             `Quick

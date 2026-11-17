@@ -17,6 +17,7 @@ import { executionWorkspaceAuthority } from '../../store'
 import { ArtifactImport } from './artifact-import'
 import { downloadArtifactDraft, type ArtifactDraftRetention, type ArtifactPublicationOutcome } from './artifact-composer'
 import { useArtifactDraftSession } from './artifact-draft-session'
+import { downloadArtifactTextInput } from '../../lib/artifact-local-text'
 
 type Remote<T> = { key: object; kind: 'loaded'; data: T; receivedAt: number }
   | { key: object; kind: 'error'; message: string; data?: T; revalidating?: boolean }
@@ -95,6 +96,10 @@ export function ArtifactsSurface() {
         <h3>${snapshot.value.title}</h3>
         <p>원래 작업 공간 ${original.authority?.workspaceRoot}${snapshot.base ? ` · ${snapshot.base.id} · v${snapshot.base.revision} 기준` : ' · 새 문서'}</p>
         <button type="button" onClick=${() => downloadArtifactDraft(snapshot.value)}>원고 다운로드</button>
+        ${snapshot.pendingText ? html`<aside aria-label="보관한 미반영 입력" class="mt-2 border p-3">
+          <p>원고에 아직 반영하지 않은 입력입니다.</p><pre class="whitespace-pre-wrap">${snapshot.pendingText.input}</pre>
+          <button type="button" onClick=${() => downloadArtifactTextInput(snapshot.pendingText!)}>미반영 입력 다운로드</button>
+        </aside>` : null}
         <button type="button" onClick=${() => {
           if (window.confirm('보관한 원고를 폐기할까요? 다운로드하지 않은 내용은 사라집니다.')) {
             draftSession.forget(original, snapshot.identity)

@@ -101,6 +101,13 @@ export function selectSharedTextRange(doc: Y.Doc, selection: SourceSelection): S
   return selectValidated(inspectDocument(doc), selection, 'text')
 }
 
+// A rendering binds every leaf to the same document observation. Keep the
+// validation inside this synchronous operation rather than retaining a view.
+export function selectSharedTextRanges(doc: Y.Doc, selections: readonly SourceSelection[]): readonly SharedSelection[] {
+  const view = inspectDocument(doc)
+  return selections.map(selection => selectValidated(view, selection, 'text'))
+}
+
 function resolveValidated({ doc, text, content }: ValidatedDocument, selection: SharedSelection): SourceSelection | null {
   const resolve = (bytes: number[]) => {
     if (!Array.isArray(bytes) || !bytes.every(value => Number.isInteger(value) && value >= 0 && value <= 255)) return null

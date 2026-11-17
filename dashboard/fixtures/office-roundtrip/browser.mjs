@@ -41,6 +41,7 @@ try {
   for (const format of ['docx', 'hwpx']) {
     await page.getByRole('button', { name: '파일 가져오기', exact: true }).click()
     await page.getByLabel('가져올 문서 파일').setInputFiles(originals[format])
+    await page.getByRole('button', { name: 'HTML 원본 편집', exact: true }).click()
     const source = page.getByLabel('문서 본문')
     await source.waitFor()
     const imported = await source.inputValue()

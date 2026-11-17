@@ -1,7 +1,7 @@
 import * as Y from 'yjs'
 import { afterEach, expect, it } from 'vitest'
 import { executeSharedDocumentOperation, replaceSharedSelection, resolveSharedSelection, restoreSharedDocument,
-  seedSharedDocument, selectSharedSource, selectSharedTextRange, sharedSource, sharedState } from './artifact-shared-document'
+  seedSharedDocument, selectSharedSource, selectSharedTextRange, selectSharedTextRanges, sharedSource, sharedState } from './artifact-shared-document'
 
 const docs: Y.Doc[] = []
 const keep = (doc: Y.Doc) => { docs.push(doc); return doc }
@@ -57,6 +57,42 @@ it('keeps an empty-field range attached through unrelated insertions before the 
   replaceSharedSelection(doc, selectSharedSource(doc, { anchor: 0, head: 0 }), '', '<p>앞 문단</p>')
   replaceSharedSelection(doc, field, '', '12')
   expect(sharedSource(doc)).toBe('<p>앞 문단</p><td>12</td>')
+})
+
+it('binds forward, reverse and empty rendered fields to the same document observation', () => {
+  const doc = seed('<td>한글 😀</td><td></td>'), source = sharedSource(doc)
+  const ranges = [{ anchor: 4, head: 9 }, { anchor: 9, head: 4 }, { anchor: source.indexOf('</td>', 13), head: source.indexOf('</td>', 13) }]
+  const before = sharedState(doc)
+  expect(selectSharedTextRanges(doc, ranges)).toEqual(ranges.map(range => selectSharedTextRange(doc, range)))
+  expect(sharedState(doc)).toEqual(before)
+})
+
+it('keeps batched empty fields attached through concurrent inserts and refuses a second fill', () => {
+  const doc = seed('<td></td><td>5</td>'), remote = copy(doc)
+  const fields = selectSharedTextRanges(doc, [{ anchor: 4, head: 4 }, { anchor: 4, head: 4 }, { anchor: 13, head: 14 }])
+  remote.getText('content').insert(0, '<p>앞 문단</p>')
+  Y.applyUpdate(doc, sharedState(remote))
+  replaceSharedSelection(doc, fields[0]!, '', '12')
+  expect(() => replaceSharedSelection(doc, fields[1]!, '', '20')).toThrow('선택한 내용이 바뀌었습니다')
+  replaceSharedSelection(doc, fields[2]!, '5', '0')
+  expect(sharedSource(doc)).toBe('<p>앞 문단</p><td>12</td><td>0</td>')
+})
+
+it.each([-1, 2, 5, 0.5, NaN])('rejects an entire rendered selection batch containing invalid offset %s', point => {
+  const doc = seed('가😀나'), before = sharedState(doc)
+  expect(() => selectSharedTextRanges(doc, [{ anchor: 0, head: 1 }, { anchor: point, head: point }])).toThrow()
+  expect(sharedState(doc)).toEqual(before)
+})
+
+it('revalidates malformed shared documents even when the rendered selection list is empty', () => {
+  const doc = seed('safe'), remote = keep(new Y.Doc())
+  Y.applyUpdate(remote, sharedState(doc))
+  expect(selectSharedTextRanges(doc, [])).toEqual([])
+  remote.getMap('content').set('author', 'forged')
+  Y.applyUpdate(doc, Y.encodeStateAsUpdate(remote))
+  for (const ranges of [[], [{ anchor: 0, head: 4 }]]) {
+    expect(() => selectSharedTextRanges(doc, ranges)).toThrow('본문 텍스트만')
+  }
 })
 
 it('keeps the selection direction and excludes concurrent insertions at its boundaries', () => {

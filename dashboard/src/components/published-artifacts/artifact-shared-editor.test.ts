@@ -238,6 +238,7 @@ it('publishes again only after explicit latest-version comparison, preserving it
   editor.dispatch({ changes: { from: 0, insert: 'later shared edit ' } })
   await waitFor(() => expect(sharedSource(f.authority)).toBe(`later shared edit ${frozen}`))
   fireEvent.click(comparison.getByRole('button', { name: '이 원고로 새 버전 준비' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'HTML 원본 편집' }))
   expect((await screen.findByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe(frozen)
   expect((screen.getByLabelText('문서 제목') as HTMLInputElement).value).toBe('latest title')
   expect((screen.getByLabelText('문서 요약') as HTMLInputElement).value).toBe('latest summary')

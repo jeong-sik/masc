@@ -38,7 +38,7 @@ export async function formatOfficeChartSeries(data: ArrayBuffer, charts: readonl
     if (!xfs || !baseline) throw new Error('생성한 Excel 데이터의 기본 숫자 서식이 없습니다.')
     let formats = xmlChild(root, ns.spreadsheet, 'numFmts')
     if (!formats) { formats = styles.createElementNS(ns.spreadsheet, 'numFmts'); root.insertBefore(formats, root.firstChild) }
-    const rows = xmlDescendants(sheet, ns.spreadsheet, 'row'), seriesNodes = xmlDescendants(chartXml, ns.chart, 'ser')
+    const rows = new Map(xmlDescendants(sheet, ns.spreadsheet, 'row').map(row => [row.getAttribute('r'), row])), seriesNodes = xmlDescendants(chartXml, ns.chart, 'ser')
     if (seriesNodes.length !== chart.series.length) throw new Error('생성한 차트의 계열 수가 원본과 다릅니다.')
     for (const [seriesIndex, series] of chart.series.entries()) {
       if (series.numberFormat === undefined || series.numberFormat === 'General') continue
@@ -55,7 +55,7 @@ export async function formatOfficeChartSeries(data: ArrayBuffer, charts: readonl
       xf.setAttribute('numFmtId', String(formatId)); xf.setAttribute('applyNumberFormat', '1'); xfs.appendChild(xf)
       const column = columnName(seriesIndex + 2)
       for (const [at] of series.values.entries()) {
-        const rowNumber = at + 2, row = rows.find(row => row.getAttribute('r') === String(rowNumber))
+        const rowNumber = at + 2, row = rows.get(String(rowNumber))
         if (!row) throw new Error('생성한 Excel 데이터의 행이 없습니다.')
         const address = `${column}${rowNumber}`
         let cell = xmlChildren(row, ns.spreadsheet, 'c').find(cell => cell.getAttribute('r') === address)

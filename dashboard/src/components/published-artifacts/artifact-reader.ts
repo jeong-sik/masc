@@ -14,6 +14,7 @@ import type { ArtifactCheckState } from '../../api/published-artifact-checks'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
 import { ArtifactSharedEditor, type ArtifactSharedCloseRequest } from './artifact-shared-editor'
 import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
+import type { ArtifactLocalTextInput } from '../../lib/artifact-local-text'
 import { ArtifactAppView } from './artifact-app-view'
 import { artifactAppFrame, appFrameMessage } from '../../lib/artifact-app-frame'
 import { ArtifactWordExport } from './artifact-word-export'
@@ -343,7 +344,7 @@ export function ArtifactReader({ doc, fixedRevision, readOnly = false, readOnlyI
           onClose=${() => { if (sharedCloseRequest.current?.().kind === 'close') setSharing(null) }} />`
           : editing ? html`<${ArtifactComposer} initial=${editing.snapshot.value}
           base=${editing.document} workspaceRoot=${workspaceRoot} capturedWorkspace=${editing.workspace} isCurrent=${isCurrent} onMutation=${onPublication}
-          onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...editing.snapshot, value })}
+          onDraftChange=${(value: ArtifactDraftSnapshot['value'], pendingText: ArtifactLocalTextInput | null) => draftRetention.remember({ ...editing.snapshot, value, pendingText: pendingText ?? undefined })}
           onRelease=${() => draftRetention.release(editing.snapshot.identity)}
           onSaved=${(publication: ArtifactPublication, workspace: ArtifactWorkspace) => { draftRetention.forget(editing.snapshot.identity); setEditing(null); onPublished(publication, workspace) }}
           onCancel=${() => { if (discardDraft()) { draftRetention.forget(editing.snapshot.identity); setEditing(null) } }} />`

@@ -288,7 +288,7 @@ code-reviewer 와 pr-updater 가 6,535턴, 81.4% 다.
 - D2 는 거절된 범위를 다 읽을 때마다 더 넓은 범위를 다시 내 본다. 밀린 양이 받는 쪽의 한도보다 계속 큰 Keeper 는 커밋 한 번에 거절을 한 번쯤 받는다. frame 에서 받는 거절은 host 가 본문을 보내지 않고 낸다. 공급자에서 받는 거절은 걸음 한 번의 시간이 든다(§9 Q1).
 - 새 폭 라벨이 생긴 뒤 이전 빌드로 돌아가면, 그 라벨을 가진 원본에서 그 Keeper 의 pass 가 막힌다.
 - 여러 장 worker 는 기다리는 요청이 있는 pass 마다 빈 장을 한 번 더 읽는다. 목록 호출이 하나 는다.
-- 앞 서버는 `host_request_pages` 가 든 manifest 를 읽지 못한다. 서버를 먼저 올리고 package 를 올린다.
+- 앞 서버는 `host_request_pages` 가 든 manifest 를 읽지 못한다. 그렇다고 서버를 먼저 올리면, `capacity_wait` 를 답하는 worker(0.2.6 전)의 원본이 멈춘다. 새 서버는 그 답을 읽지 않고, 원본은 `Dispatch_pending` 에 남아 다시 보내지지 않는다(#52762). 그래서 서버를 멈추고 선언을 새 package 로 바꾼 뒤 새 서버를 띄운다. 0.2.6 이 도는 설치만 서버를 먼저 올려도 잃는 것이 없다.
 
 ### 4.5 여러 장 목록이 닫히는 이유
 
@@ -329,9 +329,10 @@ L1 이 먼저다. L2 를 먼저 넣으면 접은 범위가 frame 안에 처음 �
 | L1 | D1. 접수, 여러 장 목록과 그 manifest 선언, 모든 장을 걷는 pass, `capacity_wait` 삭제, 네 package revision | `addons/exact_worker.py`, 네 Add-on package, `lib/lane_addon/lane_addon_manifest.ml`, `lane_addon_types.ml`, `lib/lane_addon/lane_addon_runtime.ml`, `lane_addon_host_walk.ml`, `lane_addon_host_request.ml`, `lane_addon_submit_once.ml`, `lane_addon_types.mli`, §3.1 "지우는 것"의 파일 |
 | L2 | D2. 폭 타입, 합쳐 고르는 함수, 절반 접기와 풀기, 접은 뒤 다음 회차 걸기 | `lib/keeper/keeper_librarian_range.ml`, `keeper_librarian_durable_consumer.ml`, `keeper_librarian_durable_execution.ml`, `keeper_librarian_durable_capture.ml`, `keeper_librarian_floor_descent.ml`, `bin/masc_librarian_replay.ml` |
 
-- L1 은 package 를 올린다. 기다리던 원본이 막히는 문제(#51278)가 먼저 풀려야 한다. 설계는 `RFC-librarian-ends-waiting-requests-of-a-replaced-declaration` 에 있고, 구현은 `lib/` 에서 찾지 못했다(11-17).
+- L1 은 package 를 올린다. 기다리던 원본이 막히는 문제(#51278)는 #52622·#52674·#52695 가 풀었다. 그래도 기다리는 원본은 `docs/guides/keeper-memory-execution.md` 의 업그레이드 절에 있다.
 - L2 는 host 코드만 바꾼다. package 를 올리지 않는다.
-- L1 은 서버를 먼저 올린다. 앞 서버는 `host_request_pages` 를 읽지 못한다(§4.4).
+- L1 은 서버를 멈추고 선언을 바꾼 뒤 새 서버를 띄운다(§4.4).
+- L1 은 처음에 `next` 판(#52728·#52729·#52731, keeper-librarian 0.2.6)으로 병합됐다. 그 판은 장에 `next` 를 더해서 §4.5 의 논증이 닫히지 않았다. 요청 id 커서 판(0.2.7)이 그 뒤를 잇는다.
 - L1 을 설치한 뒤 §7.2 를 재고 L2 를 넣는다.
 
 ## 7. 검증

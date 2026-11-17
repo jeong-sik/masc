@@ -521,16 +521,17 @@ let settle_refused_with ~before_settlement ~store ~request ~(record : Owner.reta
       | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
       | Subdividing _ | Subdivided _),(None | Some _) ->
       Error "Only an execution refusal can be settled by abandoning its range" in
-  let* ()=Keeper_librarian_history_resolution_state.check_unfenced ~store ~request ~original:record in
   let inspect () =
       let* actual=reload ~store ~previous:record request in
       let* ()=Keeper_librarian_history_resolution_state.check_unfenced
         ~store ~request ~original:actual in
       let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
       receipt_state request in
-  (* This observation selects a lock scope, never authority to write Memory.
-     Both callbacks reread the actual receipts and fence under source locks. *)
-  let* receipt_proved=receipt_state request in
+  (* Receipt lookup can reconcile an earlier Memory publication, so inspect
+     first confirms the live owner, retained record and effect fence. It selects
+     a lock scope, never authority for a new disposition. Both callbacks repeat
+     these checks and reread actual receipts under the source locks. *)
+  let* receipt_proved=inspect () in
   let* ()=if receipt_proved then
     Keeper_librarian_durable_source_lock.with_original_settlement ~request (fun () ->
       let* proved=inspect () in

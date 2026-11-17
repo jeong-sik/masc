@@ -1897,20 +1897,20 @@ let keeper_waiting_refresh_slow state =
   | Some age when past_pending_display_bar age -> Some age
   | Some _ | None -> None
 
-(* A slow waiting refresh is said in the title row's readings. A row of its
-   own came and went with each slow read and moved every Keeper row below it
-   by one line: 60 moves in 180s on a live list, 2026-11-17. *)
-let keeper_waiting_refresh_reading state =
-  match state.keeper_waiting_error, state.keeper_waiting_failure with
-  | Some _, _ | None, Some _ -> None
-  | None, None ->
-      Option.map (fun age ->
-        let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
-        Theme.warn ()
-        ^ ui_text state ~ko:("대기 목록 갱신 중 · " ^ elapsed ^ "초")
-            ~en:("waiting refresh · " ^ elapsed ^ "s")
-        ^ Ansi.reset)
-        (keeper_waiting_refresh_slow state)
+(* The line a slow waiting refresh is said on. Its slot is drawn on every
+   frame, blank while the read keeps up: a line that came and went with each
+   slow read moved every Keeper row below it (60 moves in 180s on a live
+   list, 2026-11-17). *)
+let keeper_waiting_refresh_line state =
+  match keeper_waiting_refresh_slow state with
+  | None -> ""
+  | Some age ->
+      let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
+      Theme.warn ()
+      ^ ui_text state
+          ~ko:("  대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed ^ "초")
+          ~en:("  waiting refresh pending · showing last observation · " ^ elapsed ^ "s")
+      ^ Ansi.reset
 
 (* The operator roster uses the same row readings as the axis views. These
    sentences do not turn missing observations into idle work or no requests. *)
@@ -2283,15 +2283,15 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
         [warning "" (Message_layout.fit_width
            (failure ^ text " · 대기 목록이 업무 차단을 뜻하지는 않습니다"
               " · inventory is not a work blocker") cells)]
-    | None -> []
+    | None -> [ keeper_waiting_refresh_line state ]
   in
+  let waiting_failed = Option.is_some state.keeper_waiting_failure in
   [ here_row ~cols state
       ~path:[ text "일과 도움" "work and help" ]
       ~readings:
-        ((if errors <> [] || roster <> [] || waiting <> [] then
-            [ Theme.warn () ^ text "일부 관측 미확인" "some observations unknown" ^ Ansi.reset ]
-          else [])
-         @ Option.to_list (keeper_waiting_refresh_reading state))
+        (if errors <> [] || roster <> [] || waiting_failed then
+           [ Theme.warn () ^ text "일부 관측 미확인" "some observations unknown" ^ Ansi.reset ]
+         else [])
       ~position:
         (keeper_list_position ~stop:(keeper_list_stop state)
            (keeper_list_reading state).klr_rows) ]
@@ -2544,11 +2544,10 @@ let render_keeper_axes (state : state) =
   let heading =
     here_row ~cols state ~path:[]
       ~readings:
-        ((match state.keepers, keeper_rows_page state ~error:keepers_error with
+        (match state.keepers, keeper_rows_page state ~error:keepers_error with
          | _ :: _, _ | [], Page_empty -> []
          | [], (Page_unread | Page_failed) ->
              [ here_missing_reading state ~error:keepers_error ])
-        @ Option.to_list (keeper_waiting_refresh_reading state))
       ~position:(keeper_list_position ~stop model_rows)
   in
   box_line buf cols heading;
@@ -2815,7 +2814,7 @@ let render_keeper_axes (state : state) =
          (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
    | Some (Request_withdrawn refusal) ->
        kept_back Kept_request.Waiting_list_read refusal
-   | None -> ());
+   | None -> box_line buf cols (keeper_waiting_refresh_line state));
   (match state.keeper_waiting_failure with
    | None -> ()
    | Some failure ->

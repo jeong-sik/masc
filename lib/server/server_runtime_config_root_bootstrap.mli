@@ -19,6 +19,42 @@ val backfill_startup_required_from_embedded : config_root:string -> int
     {!seed_missing_from_embedded} on purpose: an existing root is operator-owned,
     while the runtime configuration is required for startup. *)
 
+type runtime_toml_placement =
+  | Embedded_written
+      (** No entry was at the path. It now holds the runtime.toml this build
+          embeds, readable by its owner only. *)
+  | Existing_kept
+      (** An entry was at the path: a file, a directory or a link, also a link
+          whose target is gone. It is untouched. *)
+
+type runtime_toml_placement_error =
+  | Not_published of string
+      (** No entry was made at the path, and the directories the call made on
+          the way to it are removed. *)
+  | Not_synced of string
+      (** The path holds its entry, written or kept. The directory of the
+          path, or one the call made, could not be synced. *)
+
+val publish_runtime_toml : path:string -> string -> runtime_toml_placement
+(** The step of {!place_embedded_runtime_toml} that writes. The content is
+    staged beside [path] with mode 0600, synced, and published by a rename
+    that replaces nothing: [path] holds the whole file, or the entry of any
+    kind that is there by then ([Existing_kept]). The staged file is removed
+    either way. The directory of [path] exists. Raises [Unix.Unix_error] or
+    [Sys_error] when the staging or the rename fails, and [path] then holds
+    what it held. *)
+
+val place_embedded_runtime_toml
+  :  path:string
+  -> (runtime_toml_placement, runtime_toml_placement_error) result
+(** Put the runtime.toml this build embeds at [path] where no entry is, making
+    its directory ({!publish_runtime_toml}). An entry that is there is kept
+    with no write, so a directory its owner made read-only keeps its file.
+    Either way the directory of [path] and the directories the call made are
+    synced before [Ok]: a call after one that gave [Not_synced] syncs again.
+    The calls block on the file system: a command calls this, not a fiber of
+    a server. *)
+
 val bootstrap_base_path_config_root : base_path:string -> unit
 
 type missing_runtime_toml =

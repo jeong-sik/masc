@@ -95,6 +95,125 @@ let test_backfill_repairs_only_startup_required () =
   check int "second call is a no-op" 0
     (Seed.backfill_startup_required_from_embedded ~config_root)
 
+(* [masc auth bootstrap] places the embedded runtime.toml for an account
+   workspace. The account server reads what people may connect at the path
+   [Server_runtime_setup_actions.config_path] names, so a placement there on
+   an empty base path is read back by that reader, and the file this build
+   embeds offers a person a provider with a model. *)
+let placed path =
+  match Seed.place_embedded_runtime_toml ~path with
+  | Ok placement -> placement
+  | Error (Seed.Not_published reason) -> fail ("no entry was made: " ^ reason)
+  | Error (Seed.Not_synced reason) -> fail ("the directory was not synced: " ^ reason)
+
+let beside path = Array.to_list (Sys.readdir (Filename.dirname path))
+
+let test_placed_runtime_toml_is_what_people_connect () =
+  let base_path = fresh_dst () in
+  let path = Server_runtime_setup_actions.config_path ~base_path in
+  (match placed path with
+   | Seed.Embedded_written -> ()
+   | Seed.Existing_kept -> fail "an empty base path holds no runtime.toml to keep");
+  check (option string) "the embedded file, whole"
+    (Embedded_config.read "runtime.toml") (Some (read_file path));
+  check int "readable by its owner only" 0o600 (Unix.stat path).st_perm;
+  check (list string) "the staged file is not left beside it" [ "runtime.toml" ] (beside path);
+  match Server_runtime_setup_actions.config ~base_path with
+  | Error error -> fail (Server_runtime_setup_actions.error_message error)
+  | Ok config ->
+    check bool "a person may connect a provider that offers a model" true
+      (List.exists
+         (fun (integration : Server_person_integrations.integration) ->
+            integration.models <> [])
+         (Server_person_integrations.of_config config))
+
+(* An entry at the path is the operator's. A file keeps its bytes, a directory
+   stays one, and a link keeps where it points, also when nothing is there.
+   Nothing is written beside it. [place] is the placement, which looks at the
+   path before it writes, or its writing step alone, where the rename meets
+   the entry: an entry that came to be there after the look. *)
+let entries_are_kept ~place () =
+  let base_path = fresh_dst () in
+  let path = Server_runtime_setup_actions.config_path ~base_path in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let kept what =
+    (match place path with
+     | Seed.Existing_kept -> ()
+     | Seed.Embedded_written -> fail (what ^ " was replaced"));
+    check (list string) (what ^ ": nothing is written beside it") [ "runtime.toml" ]
+      (beside path)
+  in
+  let operator_runtime = "# operator runtime\n" in
+  Fs_compat.save_file path operator_runtime;
+  kept "the operator's runtime.toml";
+  check string "operator runtime.toml untouched" operator_runtime (read_file path);
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  kept "a directory";
+  check bool "the directory is still one" true ((Unix.lstat path).st_kind = Unix.S_DIR);
+  Unix.rmdir path;
+  let elsewhere = Filename.concat base_path "operator.toml" in
+  Fs_compat.save_file elsewhere operator_runtime;
+  Unix.symlink elsewhere path;
+  kept "a link to the operator's file";
+  check string "the link points where it did" elsewhere (Unix.readlink path);
+  check string "the file it points at is untouched" operator_runtime (read_file elsewhere);
+  Sys.remove path;
+  let gone = Filename.concat base_path "gone" in
+  Unix.symlink gone path;
+  kept "a link whose target is gone";
+  check string "that link points where it did" gone (Unix.readlink path);
+  check bool "its target was not made" false (Sys.file_exists gone)
+
+let test_placement_keeps_what_is_there = entries_are_kept ~place:placed
+
+let test_the_rename_keeps_what_is_there =
+  entries_are_kept ~place:(fun path -> Seed.publish_runtime_toml ~path "# a candidate\n")
+
+let not_published path =
+  match Seed.place_embedded_runtime_toml ~path with
+  | Error (Seed.Not_published (_ : string)) -> true
+  | Error (Seed.Not_synced (_ : string))
+  | Ok (Seed.Embedded_written | Seed.Existing_kept) -> false
+
+(* A path where no entry can be made is an [Error] that says no file was
+   made. Under a file the path cannot be looked at; under a link whose target
+   is gone it can, and the staging beside it fails. *)
+let test_placement_reports_a_path_it_cannot_write () =
+  let base_path = fresh_dst () in
+  let not_published parent = not_published (Filename.concat parent "runtime.toml") in
+  let file = Filename.concat base_path "file" in
+  Fs_compat.save_file file "";
+  check bool "under a file" true (not_published file);
+  check string "the file is untouched" "" (read_file file);
+  let link = Filename.concat base_path "link" in
+  let gone = Filename.concat base_path "gone" in
+  Unix.symlink gone link;
+  check bool "under a link whose target is gone" true (not_published link);
+  check string "the link points where it did" gone (Unix.readlink link);
+  check bool "its target was not made" false (Sys.file_exists gone)
+
+(* A placement that makes directories and then no file removes them: a base
+   path it leaves holds no config root that a later boot would take for the
+   operator's. Under this umask a directory is made without the write bit,
+   so the first stops the staging and the second stops the directory below
+   it. The superuser writes there all the same. *)
+let test_failed_placement_removes_the_directories_it_made () =
+  if Unix.geteuid () = 0 then Alcotest.skip ();
+  let base_path = fresh_dst () in
+  let without_write_bit = 0o222 in
+  let earlier = Unix.umask without_write_bit in
+  Fun.protect
+    ~finally:(fun () -> ignore (Unix.umask earlier : int))
+    (fun () ->
+      let one = Filename.concat base_path "one" in
+      check bool "one directory to make" true (not_published (Filename.concat one "runtime.toml"));
+      check bool "it is gone" false (Sys.file_exists one);
+      let outer = Filename.concat base_path "outer" in
+      check bool "two directories to make" true
+        (not_published (Filename.concat (Filename.concat outer "inner") "runtime.toml"));
+      check bool "both are gone" false (Sys.file_exists outer))
+
 (* The packages the binary ships are whatever the embedded listing holds, so
    the expectation is read from that listing rather than typed in: a typed
    count went stale twice as packages were added (#34256 shipped five,
@@ -245,5 +364,16 @@ let () =
     ; ( "backfill_startup_required_from_embedded"
       , [ test_case "repairs only the startup-required files" `Quick
             test_backfill_repairs_only_startup_required
+        ] )
+    ; ( "place_embedded_runtime_toml"
+      , [ test_case "the placed file is what people connect" `Quick
+            test_placed_runtime_toml_is_what_people_connect
+        ; test_case "keeps what is there" `Quick test_placement_keeps_what_is_there
+        ; test_case "the rename keeps what came to be there" `Quick
+            test_the_rename_keeps_what_is_there
+        ; test_case "a failed placement removes the directories it made" `Quick
+            test_failed_placement_removes_the_directories_it_made
+        ; test_case "reports a path it cannot write" `Quick
+            test_placement_reports_a_path_it_cannot_write
         ] )
     ]

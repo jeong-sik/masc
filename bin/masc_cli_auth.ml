@@ -2,6 +2,7 @@
 
 module A = Authz_activation
 module T = Server_startup_takeover
+module Config_root = Server_runtime_config_root_bootstrap
 
 let ( let* ) = Result.bind
 let now_ms () = int_of_float (Unix.gettimeofday () *. 1000.)
@@ -165,25 +166,102 @@ let refused command reason =
   1
 ;;
 
+(* What people may connect is read from runtime.toml
+   ([Server_runtime_setup_actions.config]), and a workspace that has none
+   offers nothing: the integrations route answers 503 and every connection is
+   refused. A bootstrap therefore puts the runtime.toml this build embeds at
+   the path the account server reads, where no entry is. An entry that is
+   there is the operator's and is kept.
+
+   The file is placed after a boot is known to ask for the activation and
+   before the activation, which is committed once and is not run twice. A
+   placement that fails refuses the bootstrap with nothing activated, and the
+   same command runs again. *)
+type declaration =
+  { path : string
+  ; placement : Config_root.runtime_toml_placement
+  }
+
+let setup_guide_step_6 = "docs/guides/account-server-setup.md, step 6"
+
+let declare_connections ~base_path =
+  let path = Server_runtime_setup_actions.config_path ~base_path in
+  match Config_root.place_embedded_runtime_toml ~path with
+  | Ok placement -> Ok { path; placement }
+  | Error (Config_root.Not_published reason) ->
+    Error
+      (Printf.sprintf
+         "%s, which declares what people may connect, could not be made, and nothing \
+          was activated: %s. Put a runtime.toml there (%s), or end what stopped the \
+          command, and run it again."
+         path
+         reason
+         setup_guide_step_6)
+  | Error (Config_root.Not_synced reason) ->
+    Error
+      (Printf.sprintf
+         "%s, which declares what people may connect, is in place, but its directory \
+          could not be synced, and nothing was activated: %s. The next run keeps what \
+          is there and syncs again."
+         path
+         reason)
+;;
+
+let declaration_line { path; placement } =
+  match placement with
+  | Config_root.Embedded_written ->
+    Printf.sprintf
+      "- %s is the runtime.toml this release ships: no entry was there. It declares \
+       what people may connect, and an edit of it changes that (%s).\n"
+      path
+      setup_guide_step_6
+  | Config_root.Existing_kept ->
+    Printf.sprintf
+      "- An entry was at %s and is left as it is. The account server reads what people \
+       may connect from that path at each request (%s).\n"
+      path
+      setup_guide_step_6
+;;
+
+(* The writes of an activation that stop come after the placement, and
+   leave the file it wrote. *)
+let written_before_the_refusal { path; placement } =
+  match placement with
+  | Config_root.Embedded_written ->
+    Printf.sprintf "; %s now holds the runtime.toml this release ships" path
+  | Config_root.Existing_kept -> ""
+;;
+
+(* Every check of the activation comes before the placement: a command that
+   a check refuses has made no file and no directory for runtime.toml. *)
 let bootstrap ~base_path ~external_store =
   let activate ~base_path ~config_dir ~anonymous_mutations ~now_ms =
-    Result.map_error
-      A.error_to_string
-      (A.activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms)
+    let* prepared =
+      Result.map_error
+        A.error_to_string
+        (A.prepare ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms)
+    in
+    let* declaration = declare_connections ~base_path in
+    match A.complete prepared with
+    | Ok activated -> Ok (activated, declaration)
+    | Error error ->
+      Error (A.error_to_string error ^ written_before_the_refusal declaration)
   in
   match under_lease ~held:T.base_path_contention_message ~base_path activate with
   | Error reason -> refused "bootstrap" reason
-  | Ok (base_url, { A.workspace_id; invitation }) ->
+  | Ok (base_url, ({ A.workspace_id; invitation }, declaration)) ->
     Printf.printf
       "Multi-account use is on for workspace %s.\n\
        - From now on %s.\n\
        - %s.\n\
        - The external store is %s.\n\
+       %s\
        The first Admin is invited.\n"
       (Authz_types.Workspace_id.to_string workspace_id)
       account_server_line
       (String.capitalize_ascii Authz_boot_mode_read.turn_off_line)
-      external_store;
+      external_store
+      (declaration_line declaration);
     print_link
       ~command:"bootstrap"
       ~base_url

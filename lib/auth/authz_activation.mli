@@ -4,8 +4,11 @@
    where a boot would not open it leaves an installation that refuses to boot. *)
 
 (** The host-local activation of a multi-account installation (design 5.1-1,
-    8.4, plan B3d-1). [masc auth bootstrap] calls {!activate}, which does this,
-    in order, and stops at the first step that fails:
+    8.4, plan B3d-1). It is two steps, each of which stops at the first part
+    that fails. [masc auth bootstrap] calls {!prepare}, puts in place what the
+    workspace needs, and calls {!complete}. {!activate} is the two in a row.
+
+    {!prepare} checks:
     + It reads what a boot reads ({!Authz_boot_mode_read.input}) and goes on
       only on the row of design 5.1 that asks for an activation: [config.json]
       asks for [Multi_account] with [enabled] and [require_token], anonymous
@@ -15,21 +18,25 @@
       an installation that a boot reads as activated with {!Already_active},
       and a boot that stops for another reason with the lines it prints
       ({!Boot_stops}).
-    + It runs {!Authz_bootstrap.fresh_bootstrap} with a new workspace id.
+    + It runs {!Authz_bootstrap.prepare} with a new workspace id: every check
+      of the bootstrap, the path of the external store among them.
+
+    {!complete} writes:
+    + It runs {!Authz_bootstrap.write}.
     + It opens the zone over the two files and commits an Admin invitation
       written by the host-local operator. Only the digest of the token is
       written. The invitation expires {!admin_invitation_lifetime_ms} after
       the clock read before the commit.
 
-    A failure of the last step leaves the installation bootstrapped with no
+    A failure of the last part leaves the installation bootstrapped with no
     invitation ({!Invitation_not_written}).
 
-    A refusal writes no record. The first step opens the log and the store as a
-    boot does, which cuts a last line that never ended and leaves lock files
-    next to them.
+    {!prepare} writes no record. It opens the log and the store as a boot
+    does, which cuts a last line that never ended, leaves lock files next to
+    them and makes the directory of the log.
 
     The caller holds the BasePath lease, so no server runs on the base path and
-    no other activation runs at once. It calls {!activate} inside an Eio event
+    no other activation runs at once. It calls the steps inside an Eio event
     loop, because the zones are [Eio.Mutex]es. The workspace id, the invite id
     and the token come from the operating system ({!Random_id.hex}). *)
 
@@ -93,6 +100,24 @@ type error =
 
 val error_to_string : error -> string
 
+(** An activation that passed every check of {!prepare}. It holds the log and
+    the store open ({!Authz_bootstrap.prepared}). Give it to {!complete}
+    once. *)
+type prepared
+
+(** Checks. An [Error] has written no record. *)
+val prepare
+  :  base_path:string
+  -> config_dir:string option
+  -> external_store:string
+  -> anonymous_mutations:bool
+  -> now_ms:(unit -> int)
+  -> (prepared, error) result
+
+(** Writes: the bootstrap, then the invitation. *)
+val complete : prepared -> (activated, error) result
+
+(** {!prepare}, then {!complete}. *)
 val activate
   :  base_path:string
   -> config_dir:string option

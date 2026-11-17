@@ -43,10 +43,12 @@ let text = function
   | _ -> Error Invalid_request
 let list = function `List values -> Ok values | _ -> Error Invalid_request
 let value key fields = match List.assoc_opt key fields with Some v -> v | None -> `Null
+let config_path ~base_path =
+  Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") Config_dir_resolver.runtime_toml_filename
 (* The person routes answer only error_message, and two callers keep only
    Ok, so the operator log written here is the one place the reason shows. *)
 let config ~base_path =
-  let path = Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") Config_dir_resolver.runtime_toml_filename in
+  let path = config_path ~base_path in
   let unread reason =
     let kind, diagnostic = match reason with
       | Unreadable detail -> "unreadable", detail

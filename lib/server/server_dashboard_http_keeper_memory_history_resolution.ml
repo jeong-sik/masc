@@ -164,7 +164,8 @@ let handle_get state request reqd target =
         | Error (Resolution.Already_fenced fence as error) ->
           Some fence, refused_preview ~keeper_name:target.keeper_name error
         | Error ((Original_absent | Ineligible _ | Observation_changed
-                 | Range_already_recorded | Unavailable _ | Publication_uncertain _) as error) ->
+                 | Range_already_recorded | Unavailable _ | Publication_uncertain _
+                 | Host_claim_busy) as error) ->
           observation.fence, refused_preview ~keeper_name:target.keeper_name error
       in
       respond request reqd (`Assoc [ "schema", `String response_schema;

@@ -94,10 +94,21 @@ Version 0.2.6 lists its waiting requests in pages, each as large as one reply
 frame, and admits a request when a page carrying only that request fits the
 frame. Other waiting requests no longer hold a new one back
 ([RFC](../rfc/RFC-librarian-read-waits-and-shrinks-no-further-than-the-refusal-says.md)
-3.1). A server that does not read pages refuses the listing of a 0.2.6 worker
-once that worker has more than one page to give. Update the server first, then
-select 0.2.6. A server that reads pages also reads the single answer of an
-older worker.
+3.1).
+
+Select 0.2.6 before a server that includes
+[#52731](https://github.com/jeong-sik/masc/pull/52731) runs the installation.
+An earlier version answers a submission with `capacity_wait` when its waiting
+requests fill the frame, and that server no longer reads the answer. The
+original stays `Dispatch_pending`, its worker has no record of it, and nothing
+sends it again; selecting 0.2.6 afterwards leaves it among the originals below
+that still wait. The other order loses nothing: a server from before
+[#52728](https://github.com/jeong-sik/masc/pull/52728) refuses a 0.2.6 listing
+that names `next`, and those requests wait in the worker until the server is
+updated. With the server stopped, change the declaration's `manifest_path` to
+the 0.2.6 package before starting the updated server, which reads the
+[declaration file](lane-declaration-editor.md) as it starts. With the server
+running, save the 0.2.6 declaration first and update the server after it.
 
 Version 0.2.6 also accepts the ending the host delivers for a request whose
 declaration was replaced: `{"status":"not_allowed","cause":"declaration_replaced"}`

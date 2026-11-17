@@ -84,6 +84,12 @@ Build the optional container from the repository root:
 docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.6 addons
 ```
 
+Select this revision before a server that includes
+[#52731](https://github.com/jeong-sik/masc/pull/52731) runs the installation.
+Earlier revisions answer `capacity_wait`, which that server no longer reads; the
+[Keeper Librarian upgrade](../../docs/guides/keeper-memory-execution.md#upgrade-an-existing-installation)
+gives the order.
+
 The host mounts the package at `/addon` and its installation-owned persistent
 state at `/state`, using the existing container/engine ownership contract.
 Provider keys do not belong in this container.

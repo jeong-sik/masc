@@ -202,10 +202,6 @@ type preset_sink =
   | Preset_to_chat of string option
   | Preset_to_pane
 
-(* The UI domain owns these refs. A posted tick is a mutation: closing its
-   view invalidates presentation, never cancels or retries the request. Keep
-   the pending request until its terminal mailbox result, even across reopen. *)
-type msx_poll_request = { poll_view : unit ref; poll_port : int; poll_authority : Masc_tui_types.workspace_authority; poll_reading : unit ref }
 
 (* A DOS read changes nothing on the server. The current view owns one read;
    reopening may start another without waiting for an old view's HTTP timeout.
@@ -520,11 +516,6 @@ type lane_msg =
       string * int * (Masc.Tui_decode.lane_run_detail, string) result
 
 type msx_msg =
-  | Msx_tick_withdrawn of msx_poll_request * string
-  | Msx_frame_loaded of msx_poll_request
-      * (Masc_tui_msx_tick.response, string) result
-  | Msx_activity_loaded of msx_poll_request
-      * (Masc_tui_msx_tick.activity * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, string) result, string) result
   | Msx_live_loaded of machine_live_request
       * (Masc_tui_machine_live.answer * Masc_tui_machine_live.activity, request_failure) result
 
@@ -1137,8 +1128,7 @@ let rec workspace_message_is_read = function
   | Lane_addons_loaded _
   | Lane_subscriptions_loaded _)
   | Keeper_msg (Keeper_deletions_loaded _)
-  | Msx_msg (Msx_activity_loaded _
-  | Msx_live_loaded _)
+  | Msx_msg (Msx_live_loaded _)
   | Dos_live_loaded _
   | Voice_msg (Voice_agent_voices_loaded _
   | Voice_wizard_reread _
@@ -1241,11 +1231,6 @@ let rec workspace_message_is_read = function
   | Keeper_msg (Keeper_chat_dispatch_started _)
     -> true
   | Voice_msg (Voice_wizard_saved _)
-  | Msx_msg (Msx_frame_loaded _
-  (* A withdrawn tick attempted no POST and changes no server state; it only
-     releases the pending poll token, so it stays an observation, not an
-     operation outcome. *)
-  | Msx_tick_withdrawn _)
   | Voice_msg (Voice_agent_voice_saved _
   | Voice_calibrated _ | Voice_level _
   | Voice_transcribed _
@@ -1353,8 +1338,8 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Lane_msg (Lane_package_catalog_loaded _ | Lane_package_preview_loaded _)
   | Keeper_msg (Keeper_queue_resume_confirmed _ | Keeper_queue_loaded _) | Lane_msg (Lane_addons_loaded _
   | Lane_application_loaded _ | Lane_subscriptions_loaded _ | Lane_declaration_loaded _)
-  | Keeper_msg (Keeper_deletions_loaded _) | Msx_msg (Msx_tick_withdrawn _) | Keeper_msg (Keeper_deletion_retry_done _)
-  | Msx_msg (Msx_frame_loaded _ | Msx_activity_loaded _ | Msx_live_loaded _) | Dos_live_loaded _
+  | Keeper_msg (Keeper_deletions_loaded _) | Keeper_msg (Keeper_deletion_retry_done _)
+  | Msx_msg (Msx_live_loaded _) | Dos_live_loaded _
   | Voice_msg (Voice_wizard_saved _ | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
   | Voice_wizard_probed _ | Voice_wizard_reread _ | Voice_config_loaded _ | Voice_calibrated _
   | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _)
@@ -1505,9 +1490,8 @@ let retired_operation_observation state ~authority ~reading message =
     | Lane_msg (Lane_addons_loaded (_, _, _) | Lane_application_loaded (_, _)
     | Lane_subscriptions_loaded (_, Error _)
     | Lane_declaration_loaded (_, _, _, _, _))
-    | Keeper_msg (Keeper_deletions_loaded (_, _)) | Msx_msg (Msx_tick_withdrawn (_, _))
-    | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_msg (Msx_frame_loaded (_, _)
-    | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _))
+    | Keeper_msg (Keeper_deletions_loaded (_, _))
+    | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_msg (Msx_live_loaded (_, _))
     | Dos_live_loaded (_, _) | Voice_msg (Voice_wizard_saved (_, _)
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
@@ -1654,9 +1638,8 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Lane_msg (Lane_addons_loaded (_, _, (Error _ | Ok { lar_snapshot = None; _ }))
   | Lane_application_loaded (_, _)
   | Lane_subscriptions_loaded (_, Error _) | Lane_declaration_loaded (_, _, _, _, _))
-  | Keeper_msg (Keeper_deletions_loaded (_, _)) | Msx_msg (Msx_tick_withdrawn (_, _))
-  | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_msg (Msx_frame_loaded (_, _)
-  | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _)) | Dos_live_loaded (_, _)
+  | Keeper_msg (Keeper_deletions_loaded (_, _))
+  | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_msg (Msx_live_loaded (_, _)) | Dos_live_loaded (_, _)
   | Voice_msg (Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_calibrated _ | Voice_level _

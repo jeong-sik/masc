@@ -2478,10 +2478,10 @@
  (modules masc_tui_artifact_share_confirmation))
 
 (library
- (name masc_tui_msx_tick)
+ (name masc_tui_msx_refusal)
  (wrapped false)
- (modules masc_tui_msx_tick)
- (libraries masc.msx_wire masc_tui_types masc_tui_machine_live yojson base64))
+ (modules masc_tui_msx_refusal)
+ (libraries masc.msx_wire yojson))
 
 ;; The spectator's typed read of GET /api/v1/lane-addons/live: one route for
 ;; every machine with a screen (MSX and DOS). Pure decoding, no I/O.
@@ -2799,7 +2799,7 @@
   masc_tui_mcp
   masc_tui_memory_usage masc_tui_keeper_turns
   masc_tui_msx
-  masc_tui_msx_tick
+  masc_tui_msx_refusal
   masc_tui_observer
   masc_tui_operator_projection
   masc_tui_overview_tasks
@@ -2864,7 +2864,7 @@
   masc_tui_mcp
   masc_tui_memory_usage masc_tui_keeper_turns
   masc_tui_metrics_tail
-  masc_tui_msx_tick
+  masc_tui_msx_refusal
   masc_tui_native_tasks
   masc_tui_observer
   masc_tui_operator_projection
@@ -3084,7 +3084,7 @@
   masc_tui_render_chat
   masc_tui_interactive
   masc_tui_msx
-  masc_tui_msx_tick
+  masc_tui_msx_refusal
   masc_tui_msx_checkpoint_pending
   masc_tui_artifact_share_attempt
   masc_tui_artifact_share_pending

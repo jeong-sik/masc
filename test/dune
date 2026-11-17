@@ -6016,9 +6016,9 @@
  (libraries alcotest yojson base64 masc masc_tui_machine_live))
 
 (test
- (name test_tui_msx_tick)
- (modules test_tui_msx_tick)
- (libraries masc_test_deps masc_tui_machine_live masc.msx_wire))
+ (name test_tui_msx_refusal)
+ (modules test_tui_msx_refusal)
+ (libraries alcotest yojson masc_tui_msx_refusal masc.msx_wire))
 
 (test
  (name test_msx_wire)

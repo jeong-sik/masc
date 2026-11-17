@@ -697,7 +697,7 @@ let msx_refusal ~status_code ~body =
   match status_code with
   | 401 | 403 -> refusal ~status_code ~body
   | _ ->
-      (match Masc_tui_msx_tick.refusal_sentence body with
+      (match Masc_tui_msx_refusal.refusal_sentence body with
        | Some sentence ->
            Printf.sprintf "HTTP %d: %s" status_code
              (Masc.Tui_terminal_text.sanitize_terminal_text sentence)

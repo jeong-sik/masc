@@ -43,9 +43,11 @@ review and any later execution are recorded separately against their candidates.
 
 ## Remaining reader work
 
-Durable media originals still need a real execution binding with held-directory
-identity, exact captured request/carrier data, and owner/declaration cross-checks.
-Serialization must not recreate a process capability. Existing originals must
+Durable media originals need an invocation recipe binding the exact captured
+request/carrier data, configured cwd/path semantics, and owner/declaration checks.
+It identifies the requested invocation without pinning filesystem objects,
+executable bytes, dependencies or credential contents. Serialization must not
+recreate a process capability. Existing originals must
 be inspected before current reader selection, including after a workspace or
 declaration change. Owner/preflight integration, approval recovery, retained full
 MCP results and an actual DOCX run through the owned SSH/guest route remain required.

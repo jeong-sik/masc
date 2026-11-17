@@ -270,7 +270,7 @@ let test_retraction_and_following_retrieval_are_counted () =
       (Events.path_for_keepers_dir ~keepers_dir ~keeper_id)) rows;
   let read = read_ok ~keepers_dir ~keeper_id in
   check int "all rows are accounted for" 2 (List.length read);
-  let summary = Events.summary_for ~memory_id:id_a (events_only read) in
+  let summary = Events.summaries_for ~memory_ids:[id_a] (events_only read) |> List.hd in
   check int "the retraction is counted" 1 summary.retracted_count;
   check int "the following retrieval is counted" 1 summary.retrieved_count
 ;;
@@ -321,7 +321,7 @@ let test_summary_counts_only_this_fact () =
     ; revised ~memory_id:id_a ~at:(16. *. day) id_b
     ]
   in
-  let s = Events.summary_for ~memory_id:id_a events in
+  let s = Events.summaries_for ~memory_ids:[id_a] events |> List.hd in
   check int "retrieved count" 3 s.retrieved_count;
   check int "two UTC days, not three retrievals" 2 s.retrieved_distinct_days;
   check (option (float 0.0)) "last retrieval is the latest" (Some (12. *. day +. 1.))
@@ -332,8 +332,9 @@ let test_summary_counts_only_this_fact () =
 
 let test_summary_json_names_every_field () =
   let s =
-    Events.summary_for ~memory_id:id_a
+    Events.summaries_for ~memory_ids:[id_a]
       [ retrieved ~at:(10. *. day) "q"; revised ~memory_id:id_b ~at:1. id_a ]
+    |> List.hd
   in
   let json = Events.summary_to_json s in
   let field k =
@@ -346,18 +347,95 @@ let test_summary_json_names_every_field () =
   check bool "last_retrieved_at is the time" true (field "last_retrieved_at" = `Float (10. *. day));
   check bool "retracted_count" true (field "retracted_count" = `Int 0);
   check bool "revised_from lists the predecessor" true (field "revised_from" = `List [ `String id_b ]);
-  match Events.summary_to_json (Events.summary_for ~memory_id:id_c []) with
+  match Events.summary_to_json (List.hd (Events.summaries_for ~memory_ids:[id_c] [])) with
   | `Assoc fields -> check bool "never retrieved is null, not zero" true (List.assoc "last_retrieved_at" fields = `Null)
   | _ -> fail "summary json is not an object"
 ;;
 
 let test_summary_of_an_unused_fact_is_empty () =
-  let s = Events.summary_for ~memory_id:id_c [ retrieved ~at:1. "q"; retracted ~at:2. () ] in
+  let s = Events.summaries_for ~memory_ids:[id_c]
+      [ retrieved ~at:1. "q"; retracted ~at:2. () ] |> List.hd in
   check int "no retrievals" 0 s.retrieved_count;
   check int "no days" 0 s.retrieved_distinct_days;
   check (option (float 0.0)) "never retrieved" None s.last_retrieved_at;
   check int "no retractions" 0 s.retracted_count;
   check (list string) "no predecessors" [] s.revised_from
+;;
+
+(* The previous per-fact scan is the oracle for the shared index. Keep it
+   independent of the index's map and sets, including the self-revision rule. *)
+let reference_summary ~memory_id events : Events.summary =
+  let open Events in
+  let own, others = List.partition
+      (fun (event : event) -> String.equal event.memory_id memory_id) events in
+  let times = List.filter_map (fun (event : event) ->
+    match event.kind with
+    | Retrieved _ -> Some event.recorded_at
+    | Retracted | Revised _ -> None) own in
+  { retrieved_count = List.length times
+  ; retrieved_distinct_days = List.map (fun at -> int_of_float (Float.floor (at /. day))) times
+      |> List.sort_uniq Int.compare |> List.length
+  ; last_retrieved_at = List.fold_left (fun latest at ->
+      Some (match latest with None -> at | Some seen -> Float.max seen at)) None times
+  ; retracted_count = List.filter (fun (event : event) ->
+      match event.kind with
+      | Retracted -> true
+      | Retrieved _ | Revised _ -> false) own |> List.length
+  ; revised_from = List.filter_map (fun (event : event) ->
+      match event.kind with
+      | Revised { superseded_by } when String.equal superseded_by memory_id -> Some event.memory_id
+      | Revised _ | Retrieved _ | Retracted -> None) others |> List.sort_uniq String.compare
+  }
+;;
+
+let summary_testable =
+  testable (fun fmt summary -> Yojson.Safe.pretty_print fmt (Events.summary_to_json summary))
+    (fun left right -> left = right)
+;;
+
+let test_summary_index_matches_per_fact_scan () =
+  let id_d = memory_id 'd' in
+  let absent = memory_id 'e' in
+  let events =
+    [ retrieved ~at:(3. *. day +. 1.) "latest first"
+    ; retrieved ~memory_id:id_b ~at:day "another fact"
+    ; revised ~memory_id:id_c ~at:1. id_a
+    ; retracted ~at:1. ()
+    ; retrieved ~at:(-1.) "before UTC epoch"
+    ; retrieved ~at:0. "next UTC day"
+    ; retrieved ~at:(day -. 1.) "same UTC day"
+    ; retrieved ~at:(3. *. day +. 1.) "duplicate retrieval still counts"
+    ; revised ~memory_id:id_b ~at:2. id_a
+    ; revised ~memory_id:id_c ~at:3. id_a
+    ; revised ~memory_id:id_a ~at:4. id_a
+    ; revised ~memory_id:id_a ~at:5. id_b
+    ; revised ~memory_id:id_c ~at:6. id_d
+    ; retracted ~at:1. ()
+    ; retracted ~memory_id:id_c ~at:8. ()
+    ; retrieved ~memory_id:id_b ~at:(day +. 1.) "same day, another fact"
+    ]
+  in
+  List.iter (fun rows ->
+    List.iter (fun memory_ids ->
+      check (list summary_testable) "selected summaries preserve requested order and duplicates"
+        (List.map (fun memory_id -> reference_summary ~memory_id rows) memory_ids)
+        (Events.summaries_for ~memory_ids rows))
+      [[]; [id_a]; [id_b]; [id_a; id_b; id_c; id_d; absent];
+       [absent; id_d; id_a; id_a]];
+    let current = Events.summaries_for ~memory_ids:[id_a] rows |> List.hd in
+    check int "duplicates still count as retrievals" 5 current.retrieved_count;
+    check int "UTC days include the negative timestamp day" 3 current.retrieved_distinct_days;
+    check (list string) "self revisions are excluded, predecessors sorted and deduplicated"
+      [id_b; id_c] current.revised_from;
+    check (list string) "a successor need not own any event"
+      [id_c] (List.hd (Events.summaries_for ~memory_ids:[id_d] rows)).revised_from;
+    let next = Events.summaries_for ~memory_ids:[id_a] [retrieved ~at:0. "new capture"] in
+    check summary_testable "new captures do not keep previous history"
+      (reference_summary ~memory_id:id_a [retrieved ~at:0. "new capture"])
+      (List.hd next);
+    check summary_testable "a later capture does not replace earlier results"
+      (reference_summary ~memory_id:id_a rows) current)
+    [events; List.rev events]
 ;;
 
 let () =
@@ -391,6 +469,8 @@ let () =
             test_summary_of_an_unused_fact_is_empty
         ; test_case "the summary json names every field" `Quick
             test_summary_json_names_every_field
+        ; test_case "one index preserves per-fact summaries across ids and captures" `Quick
+            test_summary_index_matches_per_fact_scan
         ] )
     ]
 ;;

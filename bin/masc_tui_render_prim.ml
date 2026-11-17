@@ -435,7 +435,7 @@ let voice_meter_text (state : state) =
     in
     Printf.sprintf
       "[%s%s] "
-      (String.concat "" (List.init filled (fun _ -> "\xe2\x96\x88")))
+      (String.concat "" (List.init filled (fun _ -> "\xe2\x96\xa0")))
       (String.concat "" (List.init (width - filled) (fun _ -> "\xc2\xb7")))
 
 ;;
@@ -838,12 +838,13 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
     | Masc_tui_types.Workspace_identity_match -> []
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
-    ~help_key_answers:door_answers ~ko:(state.ui_language = Lang_ko)
+    ~help_key_answers:door_answers ~key_style:(Ansi.bold ^ Theme.accent ())
+    ~ko:(state.ui_language = Lang_ko)
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status
       @ identity @ conflict)
-    ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~hints ()
+    ~dim:(Theme.recede ()) ~reset:Ansi.reset ~max_cells ~hints ()
 
 
 (* The slash word being typed, painted: the run already pressed in the accent,
@@ -1266,23 +1267,36 @@ let surface_strip (state : state) ~cols =
      Tab walked to it; a press on a count is one Tab step toward that edge. *)
   if lo > 0 then
     Buffer.add_string parts
-      (Printf.sprintf "%s%s%s " Ansi.dim
+      (Printf.sprintf "%s%s%s " (Theme.recede ())
          (pressable (Press_ring_edge Ring_before) (hidden_before_mark lo))
          Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
-    let surface, _ = ring.(i) in
+    let surface, name = ring.(i) in
     let entry =
       if i = active then
-        Theme.sidebar_selection () ^ Ansi.bold ^ Masc_tui_theme.Glyph.current_entry
-        ^ label i ^ Ansi.reset
-      else Ansi.dim ^ label i ^ Ansi.reset
+        let sel = Theme.sidebar_selection () in
+        if String.equal sel Masc_tui_theme.selection then
+          sel ^ Ansi.bold ^ Masc_tui_theme.Glyph.current_entry ^ label i ^ Ansi.reset
+        else
+          sel ^ Ansi.bold ^ Theme.accent () ^ Masc_tui_theme.Glyph.current_entry
+          ^ Ansi.default_fg ^ label i ^ Ansi.reset
+      else
+        let base_name =
+          Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
+            surface name
+        in
+        let badge_suffix = badge_of_surface surface in
+        if String.equal badge_suffix "" then
+          Theme.recede () ^ label i ^ Ansi.reset
+        else
+          Theme.recede () ^ base_name ^ Theme.warn () ^ badge_suffix ^ Ansi.reset
     in
     Buffer.add_string parts (pressable (Press_surface surface) entry)
   done;
   if hi < n - 1 then
     Buffer.add_string parts
-      (Printf.sprintf " %s%s%s" Ansi.dim
+      (Printf.sprintf " %s%s%s" (Theme.recede ())
          (pressable (Press_ring_edge Ring_after) (hidden_after_mark (n - 1 - hi)))
          Ansi.reset);
   if badge <> "" then
@@ -1305,7 +1319,7 @@ let surface_strip (state : state) ~cols =
   (match reading_clock with
    | Some clock ->
        Buffer.add_string parts
-         (String.make strip_reading_gap_cells ' ' ^ Ansi.dim ^ clock ^ Ansi.reset)
+         (String.make strip_reading_gap_cells ' ' ^ Theme.recede () ^ clock ^ Ansi.reset)
    | None -> ());
   Buffer.contents parts
 
@@ -2002,8 +2016,8 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
        let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
        let edge = Theme.recede () in
        Buffer.add_string buf
-         (edge ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
-          ^ edge ^ draw_hline remaining ^ Ansi.box_br ^ Ansi.reset ^ "\n"));
+         (edge ^ Ansi.box_bl_round ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
+          ^ edge ^ draw_hline remaining ^ Ansi.box_br_round ^ Ansi.reset ^ "\n"));
   let buf = match sidebar with
     | None -> buf
     | Some (left_cols, draw) ->

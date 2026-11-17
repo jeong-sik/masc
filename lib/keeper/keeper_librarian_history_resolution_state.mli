@@ -35,6 +35,11 @@ type t = private {
 
 val guard_to_json : guard -> Yojson.Safe.t
 val guard_of_json : Yojson.Safe.t -> (guard, string) result
+val cut_to_json : cut_basis -> Yojson.Safe.t
+val cut_of_json : Yojson.Safe.t -> (cut_basis, string) result
+val observe_cut_basis : store:Lane_addon_store.t ->
+  request:Keeper_librarian_durable_request.t ->
+  exclusion:Lane_addon_exact.cut_exclusion -> (cut_basis, string) result
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 val create : request:Keeper_librarian_durable_request.t ->

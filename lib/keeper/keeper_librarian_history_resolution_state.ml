@@ -164,7 +164,7 @@ let make ~authority ~request ~(original:Owner.retained) ~expected ~actor ~reason
     source_sha256;original_record=Owner.to_json original;authority;expected;actor;reason;fenced_at=now})
 let create ~request ~original ~expected ~actor ~reason ~now =
   make ~authority:Worker_absent ~request ~original ~expected ~actor ~reason ~now
-let create_cut ~store ~request ~original ~expected ~exclusion ~actor ~reason ~now =
+let observe_cut_basis ~store ~request ~exclusion =
   let* exact=Request.request request in
   let* schema=Option.to_result ~none:"Cut original has no captured schema" exact.Exact.schema in
   let* installation=Owner.installation_of_id (Request.destination request).installation_id in
@@ -172,10 +172,12 @@ let create_cut ~store ~request ~original ~expected ~exclusion ~actor ~reason ~no
     | Manual _ -> Error "Cut original is not configured" in
   let* evidence=Exact.confirm_cut_exclusion ~store ~declaration_id ~schema exact exclusion
     |> Result.map_error Exact.describe_recovery_error in
-  let cut={declaration_id=evidence.key.declaration_id;request_id=evidence.key.request_id;
+  Ok {declaration_id=evidence.key.declaration_id;request_id=evidence.key.request_id;
     exact_digest=evidence.key.digest;
     attempt_ordinal=evidence.attempt_ordinal;record_sha256=evidence.record_sha256;
-    proof_sha256=evidence.proof_sha256} in
+    proof_sha256=evidence.proof_sha256}
+let create_cut ~store ~request ~original ~expected ~exclusion ~actor ~reason ~now =
+  let* cut=observe_cut_basis ~store ~request ~exclusion in
   make ~authority:(Excluded_cut cut) ~request ~original ~expected ~actor ~reason ~now
 let read ~store ~scope ~request_id =
   let* stored = Store.load_history_fence store ~scope ~request_id in

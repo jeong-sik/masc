@@ -1,7 +1,10 @@
 (** One original's durable resolution requests. Submission identity is the
-    canonical original/guard/actor/reason digest; old refusals remain readable.
+    canonical original/guard/actor/reason digest; Cut also binds its tagged
+    origin. Existing absence submissions retain their exact encoding/identity.
     At most one non-refused request and one child intent own an original. *)
 type refusal = Observation_changed | No_longer_eligible of string
+type origin = Worker_absence
+  | Same_binding_cut of Keeper_librarian_history_resolution_state.cut_basis
 type child = private { request_id:string; request_digest:string }
 type prepared_child = private {
   child:child;
@@ -18,6 +21,7 @@ type t = private {
   scope:string;
   original_request_id:string;
   expected:Keeper_librarian_history_resolution_state.guard;
+  origin:origin;
   actor:string;
   reason:string;
   submitted_at:float;
@@ -25,7 +29,7 @@ type t = private {
   memory_commit:memory_commit option;
 }
 type error = Invalid of string | Conflict of string | Unavailable of string
-  | Publication_uncertain of string
+  | Publication_uncertain of string | Host_claim_busy
 val error_to_string : error -> string
 val to_public_json : t -> Yojson.Safe.t
 (** Contains no original body, preimage or child request body. *)
@@ -40,6 +44,12 @@ val check_published_file : group:string -> name:string -> Yojson.Safe.t -> (unit
 val submit : config:Workspace.config -> keeper_name:string -> request_id:string ->
   expected:Keeper_librarian_history_resolution_state.guard -> actor:string ->
   reason:string -> now:float -> (t * bool, error) result
+val submit_cut : config:Workspace.config -> keeper_name:string -> request_id:string ->
+  expected:Keeper_librarian_history_resolution_state.guard ->
+  basis:Keeper_librarian_history_resolution_state.cut_basis -> actor:string ->
+  reason:string -> now:float -> (t * bool, error) result
+(** Explicit same-binding Cut command. Requested grants no successor. The
+    existing absence v2 encoding and identity remain unchanged. *)
 (** The bool is true for an existing identical submission. This only persists
     the intent; no scheduling or Memory effect. Changed payloads refuse while
     active or fenced. A pre-fence refusal permits a new guard, preserving both.
@@ -57,6 +67,15 @@ val refuse : store:Lane_addon_store.t -> expected:t -> refusal -> (t, error) res
     source cursor or Memory receipt is removed or acknowledged. *)
 val confirm_fence : store:Lane_addon_store.t -> expected:t ->
   Keeper_librarian_history_resolution_state.t -> (t, error) result
+val confirm_cut_fence : store:Lane_addon_store.t -> expected:t ->
+  Keeper_librarian_history_resolution.cut_grant -> (t, error) result
+(** Only the source/Memory/actual-claim callback can produce this grant.
+    Strict Fenced publication and readback complete before that scope exits. *)
+val require_successor_authority : t -> Keeper_librarian_history_resolution_state.t ->
+  (unit, string) result
+(** Contextual authority: absence retains its exact guard; Cut additionally
+    needs the matching explicit command's durable Fenced-or-later phase.
+    Neither a bare Cut fence nor Requested/Refused Cut grants a child. *)
 val prepare_child : store:Lane_addon_store.t -> expected:t ->
   Keeper_librarian_durable_request.t -> (t, error) result
 (** Persist the complete canonical child and its identity in the resolution

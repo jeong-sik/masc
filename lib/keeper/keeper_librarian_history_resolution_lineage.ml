@@ -38,8 +38,8 @@ let fenced_record ~store ~record ~index =
    holds the child's whole request in its progress, reads requests. The walk
    starts from one original given as those values. *)
 let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed
-    ~id ~digest ~owner ~predecessor ~basis ~body =
-  let rec visit seen ~require_confirmed ~id ~digest ~owner ~predecessor ~basis ~body =
+    ~id ~digest ~owner ~destination ~predecessor ~basis ~body =
+  let rec visit seen ~require_confirmed ~id ~digest ~owner ~destination ~predecessor ~basis ~body =
     let* ()=require (not (List.mem id seen)) "History resolution ancestry contains a cycle" in
     match predecessor with
     | None -> Ok ()
@@ -58,7 +58,6 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
           confirm_ending parent
         | Some json ->
           let* fence=Fence.of_json json in
-          let* ()=Fence.require_resolution_successor_authority fence in
           let* ()=Fence.confirm_binding_index ~index:parent.index ~original:parent.record fence in
           let* stored=read_resolution ~scope ~request_id:parent_id in
           let* stored=Option.to_result ~none:"Fenced history parent has no resolution intent" stored in
@@ -68,8 +67,11 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
               | Child_confirmed child -> child.request_id=id
               | Child_intended child -> not require_confirmed && child.request_id=id
               | Requested | Refused _ | Fenced | Child_prepared _ -> false) intents) in
-          let* ()=require (intent.expected=fence.expected && intent.actor=fence.actor && intent.reason=fence.reason)
-            "History child intent does not own the original fence" in
+          let* ()=Intent.require_successor_authority intent fence in
+          let* ()=match intent.origin with
+            | Intent.Worker_absence -> Ok ()
+            | Same_binding_cut _ -> require (Lane_addon_captured_destination.same_semantic
+                destination parent.index.destination) "Cut lineage changed its semantic destination" in
           (* The intent names its child by digest, and equal digests are
              equal requests. *)
           let* intended=Option.to_result ~none:"Resolution child intent is absent" (Intent.child intent) in
@@ -80,13 +82,13 @@ let validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending 
           require (basis=parent.index.source_basis_digest && owner=parent.index.owner)
             "History resolution child changed its original source or owner" in
       visit (id::seen) ~require_confirmed:true ~id:parent_id ~digest:(Owner.Record.request_digest parent.record)
-        ~owner:parent.index.owner ~predecessor:parent.index.predecessor
+        ~owner:parent.index.owner ~destination:parent.index.destination ~predecessor:parent.index.predecessor
         ~basis:(fun () -> Ok parent.index.source_basis_digest) ~body:parent.body in
-  visit [] ~require_confirmed ~id ~digest ~owner ~predecessor ~basis ~body
+  visit [] ~require_confirmed ~id ~digest ~owner ~destination ~predecessor ~basis ~body
 let validate ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed request =
   validate_node ~read_node ~read ~read_fence ~read_resolution ~confirm_ending ~require_confirmed
     ~id:(Request.request_id request) ~digest:(Request.body_digest request)
-    ~owner:(Request.physical_owner request) ~predecessor:(Request.predecessor request)
+    ~owner:(Request.physical_owner request) ~destination:(Request.destination request) ~predecessor:(Request.predecessor request)
     ~basis:(fun () -> Request.source_basis_digest request) ~body:(fun () -> Ok request)
 (* A reader that has the body: the index it hands on is made from the request
    it restored, and the record's summary must be that index. *)
@@ -216,7 +218,7 @@ let confirm_predecessor_record ~store ~require_confirmed record (index:Request.i
   validate_node ~read_node:(record_node ~store) ~read ~read_fence ~read_resolution
     ~confirm_ending:(confirm_ending ~store) ~require_confirmed
     ~id:(Owner.Record.request_id record) ~digest:(Owner.Record.request_digest record)
-    ~owner:index.owner ~predecessor:index.predecessor
+    ~owner:index.owner ~destination:index.destination ~predecessor:index.predecessor
     ~basis:(fun () -> Ok index.source_basis_digest) ~body:(record_body ~store record index)
 (* Names the acknowledged child only. Its lineage is confirmed by whoever
    reads that child next. *)
@@ -225,13 +227,13 @@ let confirmed_resolution_child ~store ~record ~index =
   match fence with
   | None -> Ok None
   | Some fence ->
-    let* ()=Fence.require_resolution_successor_authority fence in
     let scope=Owner.Record.scope record and request_id=Owner.Record.request_id record in
     let* json=Store.load_history_resolution store ~scope ~request_id in
     let* json=Option.to_result ~none:"Fenced history original has no resolution intent" json in
     let* intents=Intent.decode_published ~scope ~request_id json in
-    let* intent=Option.to_result ~none:"Fenced history original has no active resolution" (List.find_opt (fun intent ->
-      intent.Intent.expected=fence.expected && intent.actor=fence.actor && intent.reason=fence.reason) intents) in
+    let* intent=Option.to_result ~none:"Fenced history original has no active resolution"
+      (List.nth_opt (List.rev intents) 0) in
+    let* ()=Intent.require_successor_authority intent fence in
     match intent.phase with
     | Intent.Child_confirmed child -> Ok (Some child.request_id)
     | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> Ok None

@@ -2315,6 +2315,20 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
     set_enabled fixture false;
     assert_pending (run_worker fixture);
     assert_preserved ()))
+(* Observe the actual retained host ending through its owner, before the
+   execution consumer's separate automatic continuation ingress. *)
+let observe_retained_cut fixture =
+  let original=only_original fixture in
+  let result=memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store
+    ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ())
+    ~original:(Durable_owner.Read original)
+    ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "retained Cut replayed its original RPC")
+    ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "retained Cut published Memory")
+    ~wake:(fun () -> ())) |> Result.map_error Durable_owner.error_to_string |> get in
+  match result with
+  | Durable_owner.Waited (Worker_unknown,_) -> ()
+  | Waited ((Capacity | Worker_pending | Worker_unreachable | Missing_after_dispatch | Journal_recheck),_)
+  | Resumed _ | Original_replaced _ -> fail "actual host Cut did not remain a retained unknown"
 let test_cut_replacement_releases_unread_source_and_survives_rollback () = with_fixture (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   fixture.set_response (fun capture ->
@@ -2338,7 +2352,7 @@ let test_cut_replacement_releases_unread_source_and_survives_rollback () = with_
     let wakes=ref 0 in
     let pass ()=memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
       ~wake:(fun () -> incr wakes)) in
-    assert_pending (pass ());
+    observe_retained_cut fixture;
     let cut,_=only_original fixture in
     (match Progress.phase cut.progress with
      | Progress.Rejected {stage=Execution;evidence} ->
@@ -2348,8 +2362,8 @@ let test_cut_replacement_releases_unread_source_and_survives_rollback () = with_
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
      | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
        fail "the actual interrupted worker did not leave an execution refusal");
-    assert_pending (pass ());
-    check int "the same declaration never wakes a Cut replay" 0 !wakes;
+    observe_retained_cut fixture;
+    check int "the retained owner never wakes a Cut replay" 0 !wakes;
     let replacement=fixture.declaration true |> String.split_on_char '\n'
       |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-cut-replacement\"" | line -> line)
       |> String.concat "\n" in
@@ -2780,8 +2794,8 @@ let refuse_fenced_resume fixture original request =
   check bool "fenced original refuses before any worker or Memory action" true (Result.is_error result);
   check bool "fence refusal preserves Memory and source position" true
     (before = (io (fun () -> current fixture.keepers_dir), progress fixture))
-(* Real host cancellation/join and worker restoration, without declaration
-   replacement. The same Cut fixture remains outside automatic ingress. *)
+(* Actual host cancellation/join and worker restoration. Observe through the
+   owner so each test can choose its consumer/continuation entry afterward. *)
 let with_same_binding_cut ?(history_kind=Atoms) use =
   with_fixture ~history_kind (fun ~sw fixture ->
     let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
@@ -2797,7 +2811,7 @@ let with_same_binding_cut ?(history_kind=Atoms) use =
       fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
       restart_actual_worker fixture ~sw;
       await_delivery fixture ~after:before_delivery;
-      assert_pending (run_worker fixture);
+      observe_retained_cut fixture;
       let original,request=only_original fixture in
       let exact=Capture.request request |> get in
       let schema=Option.to_result ~none:"Cut original schema" exact.Exact.schema |> get in
@@ -2980,6 +2994,111 @@ let test_cut_fence_is_not_direct_child_or_host_authority () =
         ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request child |> get)));
     check bool "denied authority changes no Memory, source position or provider count" true
       (before=(cut_memory_bytes fixture,cut_source_positions fixture,F.post_count fixture.server)))
+let submit_cut_command fixture original =
+  let preview,basis=io (fun () -> Resolution.preview_cut_command ~config:fixture.config
+    ~keeper_name ~request_id:original.Owner.request_id |> Result.map_error Resolution.error_to_string |> get) in
+  io (fun () -> Resolution_work.submit_cut ~config:fixture.config ~keeper_name ~request_id:original.request_id
+    ~expected:preview.expected ~basis ~actor:"operator" ~reason:"Continue this same-binding Cut"
+    ~now:(Time_compat.now ()) |> Result.map_error Resolution_intent.error_to_string |> get)
+let last_cut_intent fixture original =
+  io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name ~request_id:original.Owner.request_id
+    |> Result.map_error Resolution_intent.error_to_string |> get) |> List.rev |> List.hd
+let run_cut_command fixture = memory_action fixture (fun () ->
+  Resolution_work.run_serialized ~config:fixture.config ~keeper_name)
+let test_automatic_cut_continuation_commits_and_retains_compact_proof history_kind () =
+  with_same_binding_cut ~history_kind (fun fixture original request exact _schema ->
+    let before=cut_source_positions fixture and posts=F.post_count fixture.server in
+    let parent=Owner.to_json original in
+    let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+      ~request_id:exact.Exact.request_id |> get) in
+    let wakes=ref 0 in
+    assert_pending (memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config
+      ~keeper_name ~wake:(fun () -> incr wakes)));
+    let intent=last_cut_intent fixture original in
+    (match intent.origin with
+     | Resolution_intent.Same_binding_cut basis -> check string "Cut origin binds the actual original" original.request_id basis.request_id
+     | Worker_absence -> fail "actual Cut borrowed absence authority");
+    let child=match intent.phase with
+      | Resolution_intent.Child_confirmed child -> child
+      | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ ->
+        fail "fresh actual Cut did not retain its explicit confirmed continuation" in
+    check int "automatic Cut yields one durable wake" 1 !wakes;
+    check int "the grant does not inline-dispatch another provider request" posts (F.post_count fixture.server);
+    check bool "child confirmation alone cannot release fresh selection" true
+      (Result.is_error (io (fun () -> Keeper_librarian_history_resolution_selection.check ~config:fixture.config ~keeper_name)));
+    check bool "grant consumes no original source" true (cut_source_positions fixture=before);
+    drive_advanced fixture;
+    let completed=last_cut_intent fixture original in
+    check bool "actual descendant Finished retains its committed receipt set" true
+      (match completed.memory_commit with Some proof -> proof.request_id=child.request_id && proof.receipts<>[] | None -> false);
+    check int "one new question, without replaying the original" (posts+1) (F.post_count fixture.server);
+    let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source request)) in
+    check bool "actual original external frontier was ACKed" true (io (fun () ->
+      let cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
+        ~keeper_name |> get in
+      Keeper_external_read_cursor.observation_matches_preparation cursor ~after:through ~through ~atom:None ~official:None));
+    check bool "original host Unknown is retained" true (host=io (fun () ->
+      Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id |> get));
+    check json "fenced parent bytes remain unchanged" parent (io (fun () ->
+      Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> owned |> Option.get |> Owner.to_json));
+    io (fun () ->
+      List.iter (fun digest -> let path=Filename.concat (Store.root fixture.store)
+        (Store.tool_request_body_path ~scope:original.scope ~request_digest:digest) in
+        if Sys.file_exists path then Sys.remove path) [original.request_digest;child.request_digest];
+      let receipts=Current.durable_range_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
+      if Sys.file_exists receipts then Sys.remove receipts);
+    check bool "compact completion survives raw body and rolling receipt pruning" true
+      (Result.is_ok (io (fun () -> Keeper_librarian_history_resolution_selection.check ~config:fixture.config ~keeper_name))))
+let test_cut_command_recovers_fence_before_grant_after_memory_rebase () =
+  with_same_binding_cut (fun fixture original _request _exact _schema ->
+    let accepted=submit_cut_command fixture original in
+    let basis=match accepted.intent.origin with Same_binding_cut basis -> basis | Worker_absence -> fail "Cut command origin" in
+    let escaped=ref None in
+    let interrupted=memory_action fixture (fun () -> io (fun () ->
+      Resolution.with_cut_fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+        ~expected:accepted.intent.expected ~basis ~actor:accepted.intent.actor ~reason:accepted.intent.reason
+        ~now:(Time_compat.now ()) ~use:(fun grant -> escaped:=Some grant;raise Exit))) in
+    check bool "interruption after fence has an uncertain publication result" true
+      (match interrupted with Error (Resolution.Publication_uncertain _) -> true
+       | Ok _ | Error (Original_absent | Ineligible _ | Observation_changed | Range_already_recorded
+         | Already_fenced _ | Unavailable _ | Host_claim_busy) -> false);
+    check bool "the same command is still Requested" true ((last_cut_intent fixture original).phase=Requested);
+    check bool "an escaped claim-scoped grant cannot persist Fenced" true
+      (Result.is_error (io (fun () -> Resolution_intent.confirm_cut_fence ~store:fixture.store
+        ~expected:accepted.intent (Option.get !escaped))));
+    let fact=Types.observed ~claim:"Independent current Memory" ~category:Types.Fact
+      ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="independent-writer"} in
+    memory_action fixture (fun () -> io (fun () -> Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable
+      ~absorbed:[] ~revisions:[] ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+      ~now:(Time_compat.now ()) ~source:{kind=Current.Librarian;trace_id} ~new_claims:[fact] () |> get)) |> ignore;
+    run_cut_command fixture |> Result.map_error Resolution_intent.error_to_string |> get;
+    let intent=last_cut_intent fixture original in
+    check string "recovery does not mint another command" accepted.intent.intent_id intent.intent_id;
+    check bool "same fenced command recovers its child despite unrelated Memory" true
+      (match intent.phase with Child_confirmed _ -> true
+       | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> false);
+    let first=Resolution_intent.child intent |> Option.get in
+    run_cut_command fixture |> Result.map_error Resolution_intent.error_to_string |> get;
+    check bool "later recovery retains that same child" true
+      (Resolution_intent.child (last_cut_intent fixture original)=Some first))
+let test_cut_command_busy_and_late_proof_keep_requested () =
+  with_same_binding_cut (fun fixture original _request exact schema ->
+    let accepted=submit_cut_command fixture original and before=cut_source_positions fixture in
+    let held=memory_action fixture (fun () -> io (fun () -> Exact.with_cut_exclusion
+      ~store:fixture.store ~declaration_id:"librarian" ~schema exact ~use:(fun _ ->
+        check bool "busy is a typed retryable command result" true
+          (match Resolution_work.run_serialized ~config:fixture.config ~keeper_name with
+           | Error Resolution_intent.Host_claim_busy -> true
+           | Ok () | Error (Invalid _ | Conflict _ | Unavailable _ | Publication_uncertain _) -> false))))
+      |> Result.map_error Exact.describe_recovery_error |> get in
+    (match held with Exact.Cut_excluded () -> () | Cut_busy | Cut_not_retained _ -> fail "actual claim was not held");
+    check bool "busy retains Requested and the original intent ID" true
+      (let current=last_cut_intent fixture original in current.intent_id=accepted.intent.intent_id && current.phase=Requested);
+    io (fun () -> write (proof_path fixture exact) "{late unreadable execution proof");
+    check bool "late proof prevents a grant" true (Result.is_error (run_cut_command fixture));
+    check bool "late proof neither refuses the command nor consumes source" true
+      ((last_cut_intent fixture original).phase=Requested && cut_source_positions fixture=before);
+    no_memory fixture)
 let test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner () =
   with_same_binding_cut (fun fixture original request _exact _schema ->
     let expected=(cut_preview fixture original).expected in
@@ -3560,7 +3679,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
   io (fun () -> write cursor_path "{unreadable cursor");
   check bool "unreadable source state stays unavailable rather than terminal" true
     (match run () with Error (Resolution_intent.Unavailable _) -> true
-     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _ | Host_claim_busy) -> false);
   check bool "an unavailable read preserves the fenced phase" true ((last request).phase=Resolution_intent.Fenced);
   (* Model the durable cursor left by another operation during the crash cut;
      resolution itself must neither advance it nor restore the older offset. *)
@@ -3586,7 +3705,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
   let changed={preview.expected with cursors_sha256=Store.digest "another observation"} in
   check bool "another guard cannot remove or retarget the immutable fence" true
     (match submit request changed with Error (Resolution_intent.Conflict _) -> true
-     | Ok _ | Error (Invalid _ | Unavailable _ | Publication_uncertain _) -> false);
+     | Ok _ | Error (Invalid _ | Unavailable _ | Publication_uncertain _ | Host_claim_busy) -> false);
   run_ok ();
   drive_advanced fixture;
   check int "ordinary fresh history runs after the durable refusal" 1 (F.post_count fixture.server);
@@ -3803,7 +3922,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   check bool "a lost staged body stops the resolution" true
     (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
      | Error (Resolution_intent.Unavailable _) -> not (Sys.file_exists child_record)
-     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _ | Host_claim_busy) -> false);
   io (fun () -> write child_body body_bytes);
   run_resolution ();
   (* The record names a child by ID and digest only. A record made to name
@@ -3830,7 +3949,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   check bool "a record naming an original that is not its child stops the resolution" true
     (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
      | Error (Resolution_intent.Unavailable detail) -> detail="Resolution child has no original predecessor"
-     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _ | Host_claim_busy) -> false);
   io (fun () -> write original_resolution honest;
     Sys.remove (Filename.concat root (Filename.concat Store.tool_request_owners_directory
       (Filename.concat (Store.digest original.scope) (Store.digest stranger.request_id ^ ".json")))));
@@ -4013,7 +4132,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   check bool "that record stops the Keeper's resolution pass" true
     (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
      | Error (Resolution_intent.Unavailable _) -> true
-     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _ | Host_claim_busy) -> false);
   io (fun () -> Sys.remove stray);
   let resume_descendant ()=
     let original,request=load_child descendant_id in
@@ -6366,6 +6485,14 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_cut_effect_fence_refuses_moved_source_positions;
   test_case "a Cut fence grants no direct intent, lineage or host execution authority" `Quick
     test_cut_fence_is_not_direct_child_or_host_authority;
+  test_case "actual Cut continuation commits atoms and survives proof pruning" `Slow
+    (test_automatic_cut_continuation_commits_and_retains_compact_proof Atoms);
+  test_case "actual Cut continuation commits mixed source and ACK" `Slow
+    (test_automatic_cut_continuation_commits_and_retains_compact_proof Mixed);
+  test_case "Cut command recovers fence before grant with rebased Memory" `Slow
+    test_cut_command_recovers_fence_before_grant_after_memory_rebase;
+  test_case "Cut command busy and late proof stay Requested" `Slow
+    test_cut_command_busy_and_late_proof_keep_requested;
   test_case "a Cut fence without an intent blocks ordinary, direct and queued fresh history" `Quick
     (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:false);
   test_case "a Cut fence still blocks fresh history after its live owner record disappears" `Quick

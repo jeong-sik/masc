@@ -1,6 +1,7 @@
 module Request = Keeper_librarian_durable_request
 module Fence = Keeper_librarian_history_resolution_state
 module Store = Lane_addon_store
+module Intent = Keeper_librarian_history_resolution_intent
 open Result.Syntax
 type error = Unresolved_cut of string | Unavailable of string
 let error_to_string = function
@@ -18,7 +19,23 @@ let check_for_keepers_dir ~base_path ~keepers_dir ~keeper_name =
       else Error (Unavailable "History fence is stored under another original or scope") in
     match fence.authority with
     | Fence.Worker_absent -> Ok ()
-    | Excluded_cut _ -> Error (Unresolved_cut fence.request_id)) (Ok ()) rows
+    | Excluded_cut _ ->
+      let* stored=unavailable (Store.load_history_resolution
+        (Store.of_config (Workspace.default_config base_path)) ~scope ~request_id:fence.request_id) in
+      (match stored with
+       | None -> Error (Unresolved_cut fence.request_id)
+       | Some json ->
+         let* intents=unavailable (Intent.decode_published ~scope ~request_id:fence.request_id json) in
+         match List.rev intents with
+         | [] -> Error (Unresolved_cut fence.request_id)
+         | intent::_ ->
+           let* ()=unavailable (Intent.require_successor_authority intent fence) in
+           (* This proof was retained after actual Finished and strict source
+              ACK, before another range could replace the rolling receipts.
+              Do not restore pruned raw bodies or re-decide that old effect. *)
+           match intent.memory_commit with
+           | Some _ -> Ok ()
+           | None -> Error (Unresolved_cut fence.request_id))) (Ok ()) rows
 let check ~config ~keeper_name =
   check_for_keepers_dir ~base_path:config.Workspace.base_path
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path) ~keeper_name

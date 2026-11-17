@@ -9,5 +9,6 @@ val check_for_keepers_dir : base_path:string -> keepers_dir:string ->
 val check : config:Workspace.config -> keeper_name:string -> (unit, error) result
 (** Reads the authoritative fence namespace, not just surviving owner records.
     No recovery, original/body creation, provider call or source consumption.
-    This source unit grants no Cut successor, so every retained Cut blocks
-    fresh history selection. *)
+    Cut stays blocked until its matching command retains a genuine descendant
+    Memory completion after source ACK. That compact proof remains sufficient
+    after raw bodies and rolling receipts are pruned. *)

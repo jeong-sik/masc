@@ -33,5 +33,11 @@ type parsed_line =
 
 val parse_line_decoded : file_path:string -> string -> parsed_line
 
+val parse_json_decoded : file_path:string -> Yojson.Safe.t -> parsed_line
+(** Decode the original JSON tree of a row that its caller has already
+    parsed. Field validation, read-drop reporting and strict error causes
+    are the same as {!parse_line_decoded}; this does not grant read authority
+    or replace any caller's additional row-identity checks. *)
+
 val parse_line :
   file_path:string -> string -> chat_message option

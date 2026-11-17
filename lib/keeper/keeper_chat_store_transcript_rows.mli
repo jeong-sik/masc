@@ -62,6 +62,16 @@ val transcript_identity : string -> (int * int * int) option
 
 type transcript_position = Line_number of int | Byte_offset of int
 
+val parse_transcript_json_strict :
+  path:string ->
+  redaction:Keeper_secret_redaction.t ->
+  position:transcript_position ->
+  Yojson.Safe.t ->
+  [ `Message of chat_message | `Unreadable of strict_decode_error ]
+(** Strict decoding and redaction of the original parsed row. A caller that
+    also checks row identity can share that exact tree without parsing its
+    text again. Errors retain the supplied source position. *)
+
 val parse_transcript_row_strict :
   path:string ->
   redaction:Keeper_secret_redaction.t ->

@@ -65,21 +65,31 @@ let parse_transcript_row_permissive ~path ~redaction line =
 
 type transcript_position = Line_number of int | Byte_offset of int
 
-let parse_transcript_row_strict ~path ~redaction ~position line =
+let strict_decoded_message ~path ~redaction ~position decoded =
   let location = match position with
     | Line_number line -> Printf.sprintf "%s:%d" path line
     | Byte_offset offset -> Printf.sprintf "%s at byte %d" path offset in
+  match decoded with
+  | { strict_decode_error = Some cause; _ } ->
+    `Unreadable { location; cause }
+  | { message = Some message; strict_decode_error = None } ->
+    `Message (redact_message redaction message)
+  | { message = None; strict_decode_error = None } ->
+    `Unreadable { location; cause = Invalid_row_contract "unreadable chat row" }
+;;
+
+let parse_transcript_json_strict ~path ~redaction ~position json =
+  strict_decoded_message ~path ~redaction ~position
+    (parse_json_decoded ~file_path:path json)
+;;
+
+let parse_transcript_row_strict ~path ~redaction ~position line =
   let trimmed = String.trim line in
   if String.equal trimmed ""
   then `Blank
   else
-    match parse_line_decoded ~file_path:path trimmed with
-        | { strict_decode_error = Some cause; _ } ->
-      `Unreadable { location; cause }
-    | { message = Some message; strict_decode_error = None } ->
-      `Message (redact_message redaction message)
-    | { message = None; strict_decode_error = None } ->
-      `Unreadable { location; cause = Invalid_row_contract "unreadable chat row" }
+    strict_decoded_message ~path ~redaction ~position
+      (parse_line_decoded ~file_path:path trimmed)
 ;;
 
 let parse_transcript_rows ~path ~redaction rows =

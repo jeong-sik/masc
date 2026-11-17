@@ -8,11 +8,13 @@ the omission preamble once. Both bounds consume the resulting opaque scalar
 snapshot inside the existing CPU job, before `Host.project_source` adds request
 evidence. The finished value holds only integers and a private suffix array.
 
-The source candidate is `8509f161b1d498fbc0001c3fdfae047b012de3b6`, based on
-`c97d0f9b850c812885a7f89a4fcdc280a6738416`. Later changelog-only commits can
-retain these seven source/test blobs; their exact hashes appear in the review
-and input manifests. No installed candidate or live server observation is
-included here.
+The initial source candidate is `8509f161b1d498fbc0001c3fdfae047b012de3b6`,
+based on `c97d0f9b850c812885a7f89a4fcdc280a6738416`. A later CI correction,
+`2d580ed1dd08efb8417e349941018f7aa5998e61`, changes one Window-test renderer.
+All four product files and the other two maintained tests retain their original
+blobs. The original seven hashes remain in the earlier manifests; the corrected
+test hash is in [ci-test-correction.json](ci-test-correction.json). No installed
+candidate or live server observation is included here.
 
 ## Measured scope
 
@@ -64,7 +66,10 @@ the smaller and bounded rows are included there as well.
 - The complete maintained Window suite passed **41 tests**, including signed
   zero, repeated physical occurrences, original error precedence, materialized
   preambles, no-atom behavior and a caller-held/weak-release ownership control.
-  Its full output is [window-suite.stdout](window-suite.stdout).
+  Its full output is [window-suite.stdout](window-suite.stdout). That earlier
+  execution used both Window and codec aliases and did not establish the
+  maintained test's declared library visibility. The CI correction below
+  records the dependency failure and new checks separately.
 - The corrected differential fixture passed **24,084 assertions** across 54
   histories and six stable measurement policies. It compares next/floor,
   atom labels and exact encoded projections or typed errors, including sparse
@@ -103,6 +108,49 @@ in three helpers and was also rejected. Both failures remain in
 without weakening assertions or warning policy. The earlier cost fixture
 omitted the bounded baseline's outer fold and used two incorrectly tagged
 marker rows. Its cost series is superseded in full by corrected `cost-r4`.
+
+## CI test dependency correction
+
+`Merge compile` run [44083963891](https://github.com/jeong-sik/masc/actions/runs/44083963891),
+job `134041528895`, failed for top head
+`30123545d27f87309c640efbb335ebf6b74e3b5a`: the new Window regression referenced
+`Keeper_official_client_context_codec` by a bare name unavailable in its actual
+wrapped-library visibility. The module is not listed in `lib/dune`'s
+`private_modules`. The earlier native check compiled the codec under an alias
+and therefore missed this dependency error. Its successful behavior results
+are not proof that the original maintained test could compile as declared.
+
+The one-line test repair uses the public
+`Agent_core.Checkpoint.message_to_json` rendered by `Yojson.Safe.to_string`.
+The measurement API accepts an injected stable renderer; the test still checks
+signed-zero byte distinction, exact original occurrences/order and reuse of
+the measured result. It makes no claim that this renderer equals the
+official-client wire encoder. Product implementation and measured cost inputs
+are unchanged.
+
+The new bounded check preserves the CI command's 179 visible `-I` and 417
+hidden `-H` entries, translating only the runner/opam/build roots. Complete
+actual Window MLI/ML files compile under their original basename. The original
+test then fails with the same unbound-module diagnostic, while the corrected
+unmodified maintained test compiles. Generated `Dune__exe` sibling-test alias
+opening and output/CMI paths are omitted; this is not an original Dune invocation
+or clean dependency rebuild. No codec alias or newly exposed library is used.
+
+A separate native execution changes only the Window alias and uses the earlier
+broad real-archive link vector. All **41 tests pass**, including the repaired
+regression. [ci-test-correction.json](ci-test-correction.json) records command
+results, input/output hashes and limits;
+[ci-test-original.stderr](ci-test-original.stderr) retains the reproduced
+failure and [ci-test-fixed.stdout](ci-test-fixed.stdout) the full suite output.
+These checks do not establish a new CI result, full adapter-suite success,
+installed behavior or live CPU/RSS improvement. Earlier receipts and reviews
+remain unchanged historical records.
+
+The independent [source review](ci-test-source-review.json) is bound to the
+one-line fix and the exact focused captures. It found no P0/P1/P2 in that scope;
+it is separate from a current-head formal GitHub account approval.
+The [response review](ci-test-response-review.json) separately checks the
+correction prose, selected receipt hashes and the declared/executed scope.
 
 Independent source review and response are retained as
 [source-review-r1.json](source-review-r1.json) and

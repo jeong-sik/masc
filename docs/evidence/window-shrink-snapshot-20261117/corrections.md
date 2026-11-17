@@ -25,3 +25,21 @@ Source commit `8509f161b1d498fbc0001c3fdfae047b012de3b6` contains the exact seve
 final source/test blobs reviewed by the response and cost reviewers. Any
 later changelog-only head must be checked against these same blobs before
 reusing their source and measurement findings.
+
+## Correction: maintained test dependency visibility
+
+Merge compile run `44083963891`, job `134041528895`, failed for
+`30123545d27f87309c640efbb335ebf6b74e3b5a` because the new test named the
+wrapped Keeper codec as a bare module. Earlier Window+codec alias checks missed
+the declared-library visibility error. They did not prove that the original
+maintained test compiled as declared. The codec is not explicitly listed in
+`lib/dune`'s `private_modules`.
+
+Commit `2d580ed1dd08efb8417e349941018f7aa5998e61` changes only that test's
+renderer to the public Checkpoint JSON encoder. Product four files and the
+other two tests retain their original blobs; the claim that all seven blobs
+are unchanged no longer applies. The README and `ci-test-correction.json`
+record the new unmodified-test typecheck with CI include visibility, original
+failure reproduction and separate Window-only-alias 41-test execution. No old
+receipt is rewritten, no performance recapture is claimed, and current-head CI
+was not rerun by this repair.

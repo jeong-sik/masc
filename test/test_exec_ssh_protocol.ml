@@ -835,7 +835,10 @@ let test_relay_request_kinds_are_closed () =
     (fun kind ->
        check bool "a kind byte reads back as its kind" true
          (Relay.request_kind_of_byte (Relay.request_kind_byte kind) = Some kind))
-    Relay.[ Run; Probe ];
+    Relay.[ Run; Probe; Interactive_run ];
+  check char "interactive runs have a distinct wire kind" 'I'
+    (Relay.request_kind_byte Relay.Interactive_run);
+  check int "interactive relay contract has its own version" 2 Relay.version;
   check bool "another byte is no kind" true (Relay.request_kind_of_byte 'X' = None)
 
 let () =

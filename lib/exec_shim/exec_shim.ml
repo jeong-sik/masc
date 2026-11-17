@@ -13,19 +13,6 @@ external set_pdeathsig : unit -> unit = "ocaml_prctl_set_pdeathsig"
    runtime's own table. *)
 external host_signal_number : int -> int = "ocaml_shim_host_signal_number"
 
-external channel_hung_up : Unix.file_descr -> bool = "ocaml_shim_channel_hung_up"
-external set_nonblock_flags : Unix.file_descr -> int = "ocaml_shim_set_nonblock"
-external restore_flags : Unix.file_descr -> int -> unit = "ocaml_shim_restore_flags"
-
-let with_nonblocking fd f =
-  let flags = set_nonblock_flags fd in
-  Fun.protect ~finally:(fun () ->
-    try restore_flags fd flags with Unix.Unix_error _ -> ()) f
-
-(* The existing grace for pipes held by descendants after their leader is
-   reaped also bounds final delivery. It is cleanup, not a renewed call budget. *)
-let drain_grace_sec = 1.0
-
 (* The box (RFC-0422). [observe_support_abi] is the Landlock ABI the kernel
    enforces, 0 where the shim cannot box a payload (no Landlock, no seccomp,
    or not Linux). [restrict_self scratch deny_fs deny_net] is applied in the
@@ -1012,7 +999,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
     (* Drain grace after reap: close any pipes an escaped daemon keeps
        open so the loop is guaranteed to terminate. *)
     (match !reaped_at with
-     | Some t when now -. t > drain_grace_sec ->
+     | Some t when now -. t > Shim_stream.drain_grace_sec ->
        if !out_open
        then (
          (try Unix.close stdout_r with
@@ -1031,7 +1018,7 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
       @ if !chan_eof then [] else [ Unix.stdin ] in
     let writefds = if !stdin_open then [ stdin_w ] else [] in
     let select_timeout =
-      let quantum = 0.2 in
+      let quantum = Shim_stream.lifecycle_poll_sec in
       (* Deadline counts only before it fires; after [timed_out] is set the
          past deadline must not clamp the sleep to 0 (busy spin). *)
       let t =
@@ -1273,11 +1260,14 @@ let supervise_interactive ~v ~pid ~stdin_w ~stdout_r ~stderr_r
     close_if_open stderr_open stderr_r
   in
   Fun.protect ~finally:finish (fun () ->
-    with_nonblocking Unix.stdout (fun () ->
-    with_nonblocking Unix.stderr (fun () ->
+    Shim_stream.with_nonblocking Unix.stdout (fun () ->
+    Shim_stream.with_nonblocking Unix.stderr (fun () ->
     while unfinished () do
       let now = Shim_clock.elapsed_seconds () in
-      if not !channel_closed && channel_hung_up Unix.stdin then cancel_channel ();
+      if not !channel_closed then
+        (match Shim_stream.peer_state Unix.stdin with
+         | Shim_stream.Connected -> ()
+         | Shim_stream.Send_closed | Shim_stream.Disconnected -> cancel_channel ());
       if !status = None && not !kill_started && now >= deadline then begin
         timed_out := true;
         start_kill On_timeout
@@ -1285,7 +1275,7 @@ let supervise_interactive ~v ~pid ~stdin_w ~stdout_r ~stderr_r
       step_kill now;
       poll_child ();
       (match !reaped_at with
-       | Some reaped when now -. reaped >= drain_grace_sec && unfinished () ->
+       | Some reaped when now -. reaped >= Shim_stream.drain_grace_sec && unfinished () ->
          (* This also bounds sinks the caller left open without reading. An
             incomplete stream is a shim failure, not the child's successful exit. *)
          fail_output Output_drain_incomplete;
@@ -1307,8 +1297,8 @@ let supervise_interactive ~v ~pid ~stdin_w ~stdout_r ~stderr_r
         (* The original supervisor's quantum also polls hangup while every
            payload queue is backpressured. It does not renew either deadline. *)
         let wait = match !status, !kill_started with
-          | None, false -> min 0.2 (max 0.0 (deadline -. now))
-          | None, true | Some _, (false | true) -> 0.2 in
+          | None, false -> min Shim_stream.lifecycle_poll_sec (max 0.0 (deadline -. now))
+          | None, true | Some _, (false | true) -> Shim_stream.lifecycle_poll_sec in
         let wait = match !grace_until with
           | None -> wait | Some until -> min wait (max 0.0 (until -. now)) in
         let readable, writable, _ =
@@ -1350,8 +1340,8 @@ let supervise_interactive ~v ~pid ~stdin_w ~stdout_r ~stderr_r
    child. Each write reuses the cleanup grace duration with its own deadline.
    A partial/unwritten trailer is no receipt; the caller exits nonzero. *)
 let write_control_frame fd text =
-  try with_nonblocking fd (fun () ->
-    let deadline = Shim_clock.elapsed_seconds () +. drain_grace_sec in
+  try Shim_stream.with_nonblocking fd (fun () ->
+    let deadline = Shim_clock.elapsed_seconds () +. Shim_stream.drain_grace_sec in
     let rec write offset =
       if offset = String.length text then true
       else if Shim_clock.elapsed_seconds () >= deadline then false

@@ -9,19 +9,25 @@
 #include <fcntl.h>
 #include <poll.h>
 
-CAMLprim value ocaml_shim_channel_hung_up(value vfd)
+CAMLprim value ocaml_shim_stream_peer_state(value vfd)
 {
   CAMLparam1(vfd);
   struct pollfd p = { .fd = Int_val(vfd), .events = 0, .revents = 0 };
-  int mask = POLLHUP | POLLERR | POLLNVAL;
 #ifdef POLLRDHUP
   p.events |= POLLRDHUP;
-  mask |= POLLRDHUP;
 #endif
   int result;
   do { result = poll(&p, 1, 0); } while (result < 0 && errno == EINTR);
   if (result < 0) uerror("poll", Nothing);
-  CAMLreturn(Val_bool(result > 0 && (p.revents & mask) != 0));
+  /* The constant constructors of Shim_stream.peer_state, in declaration
+     order. Full disconnect takes precedence over send-half-close. */
+  if (result > 0 && (p.revents & (POLLHUP | POLLERR | POLLNVAL)) != 0)
+    CAMLreturn(Val_int(2));
+#ifdef POLLRDHUP
+  if (result > 0 && (p.revents & POLLRDHUP) != 0)
+    CAMLreturn(Val_int(1));
+#endif
+  CAMLreturn(Val_int(0));
 }
 
 CAMLprim value ocaml_shim_set_nonblock(value vfd)

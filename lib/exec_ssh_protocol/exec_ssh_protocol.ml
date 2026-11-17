@@ -693,20 +693,23 @@ let parse_probe (s : string) : (probe, string) result =
   Ok { name; version; capabilities; release; boot_id }
 
 module Relay = struct
-  let version = 1
+  let version = 2
   let serve_flag = "--serve"
 
   type request_kind =
     | Run
     | Probe
+    | Interactive_run
 
   let request_kind_byte = function
     | Run -> 'R'
     | Probe -> 'P'
+    | Interactive_run -> 'I'
 
   let request_kind_of_byte = function
     | 'R' -> Some Run
     | 'P' -> Some Probe
+    | 'I' -> Some Interactive_run
     | _ -> None
 
   type exit_status =

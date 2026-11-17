@@ -312,7 +312,11 @@ let relay_fixture_agent ~root ~guest conn =
   match request with
   | None -> ()
   | Some request ->
-    let request = match request with Relay.Run -> "run" | Relay.Probe -> "probe" in
+    let request = match request with
+      | Relay.Run -> "run"
+      | Relay.Probe -> "probe"
+      | Relay.Interactive_run -> failwith "finite survival fixture received an interactive request"
+    in
     let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
     let stderr_r, stderr_w = Unix.pipe ~cloexec:true () in
     let executable = Unix.realpath Sys.executable_name in

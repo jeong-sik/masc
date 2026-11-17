@@ -46,6 +46,10 @@ let test_final_fields_and_order () =
              ; "stream_options", `List []; "messages", `List [] ]
     ; `Assoc [ "value", `String "quote\" slash\\ line\n\r\000 한글"
              ; "value", `List [ `Null; `Bool true; `Int min_int; `Int max_int ] ]
+    ; `Assoc [ "value", `String "\255\254\128" ]
+    ; `Assoc [ "value", `List
+                 [ `Float (-0.); `Float (1. /. 3.); `Float 1e-320
+                 ; `Float max_float; `Float min_float ] ]
     ; `Assoc [ "value", `List
                  [ `Float (-0.); `Float 1e-320; `Float max_float
                  ; `Float min_float; `Float infinity; `Float neg_infinity; `Float nan ] ]
@@ -60,7 +64,8 @@ let test_nonobject_refusal () =
          Alcotest.(check bool) "nonobject stays an error" true
            (Stream.encode ~fields json = Error Http_client.Body_not_object))
          policies)
-    [ `Null; `Bool false; `Int 1; `Float 1.25; `String "{}"; `List [] ]
+    [ `Null; `Bool false; `Int 1; `Float 1.25; `String "{}"
+    ; `String "\255\254\128"; `List [] ]
 ;;
 
 let test_literal_validation_and_normalization () =

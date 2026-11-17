@@ -719,6 +719,41 @@ val message_history_height : terminal_rows:int -> status_rows:int -> int
 (** Physical transcript rows left after fixed chrome and variable status rows.
     This is both the renderer height and the PgUp/PgDn distance. *)
 
+val chat_min_history_rows : int
+(** The transcript rows nothing drawn around the composer may take. *)
+
+val command_menu_page_rows : int
+(** How many candidates the slash menu shows at once. *)
+
+val command_menu_chrome_rows : int
+(** The menu's heading and the separator before the composer. *)
+
+val command_menu_rows : candidates:int -> int
+(** Rows a menu of this many candidates draws when nothing caps it. *)
+
+type chat_block_rows =
+  { status_block_extra : int  (** Rows of the Keeper status block after its first. *)
+  ; progress_extra : int  (** Rows of the turn's progress row after its first. *)
+  ; schedule : int  (** Rows the schedule block may take, its first included. *)
+  }
+
+val chat_block_rows
+  :  history_rows:int
+  -> menu_rows:int
+  -> status_block_wanted:int
+  -> progress_wanted:int
+  -> schedule_draws:bool
+  -> chat_block_rows
+(** How the rows the transcript can spare are shared among the fact blocks
+    around the composer (RFC tui-one-screen-grammar section 5.5).
+
+    [history_rows] is the transcript's height with the status block and the
+    progress row at one row each and no schedule row. The transcript keeps
+    {!chat_min_history_rows} and, while a slash menu is open, [menu_rows] more.
+    Of the rest, the schedule block has one row when it draws anything, then
+    the status block takes what it wants, then the progress row, and the
+    schedule block has what remains. *)
+
 val chat_title_row :
   inner_cells:int -> title:string -> mode_suffix:string -> string
 (** Fit a chat navigation title while reserving the complete projection-mode

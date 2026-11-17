@@ -1546,8 +1546,8 @@ let handle_message_key (state : state) ~(submit_message : Masc_tui_message_input
   in
   let command_menu =
     let rows, cols = get_terminal_size () in
-    let status_frame = keeper_message_viewport_frame state ~now:(Unix.gettimeofday ())
-        ~terminal_rows:rows ~terminal_cols:cols in
+    let status_frame = lazy (keeper_message_viewport_frame state ~now:(Unix.gettimeofday ())
+        ~terminal_rows:rows ~terminal_cols:cols) in
     keeper_message_command_window ~status_frame state ~terminal_rows:rows ~terminal_cols:cols
     |> Option.map fst in
   let accept_command_menu menu =

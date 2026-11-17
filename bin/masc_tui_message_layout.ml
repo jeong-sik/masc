@@ -773,6 +773,47 @@ let message_fixed_chrome_rows = 8
 let message_history_height ~terminal_rows ~status_rows =
   Int.max 0 (terminal_rows - message_fixed_chrome_rows - Int.max 0 status_rows)
 
+(* Three history rows are the minimum that can show an oversized entry's
+   identity/opening, an omission marker, and its latest output instead of
+   silently dropping one of those facts. *)
+let chat_min_history_rows = 3
+
+(* The slash menu's visible page and the two rows drawn with it: its heading
+   and the separator before the composer. The page is not a limit on what the
+   menu holds. *)
+let command_menu_page_rows = 8
+let command_menu_chrome_rows = 2
+
+let command_menu_rows ~candidates =
+  command_menu_chrome_rows + Int.min command_menu_page_rows (Int.max 0 candidates)
+
+type chat_block_rows =
+  { status_block_extra : int
+  ; progress_extra : int
+  ; schedule : int
+  }
+
+(* The order is who loses a row last. An open menu is what the operator is
+   doing, so its rows come off first. Each block then has its first row before
+   any has a second: the status block's and the progress row's are already
+   outside [history_rows], and the schedule's is set aside here. What is left
+   goes to the status block, which names whom the next Enter reaches, then to
+   the running turn, then to the schedule. *)
+let chat_block_rows ~history_rows ~menu_rows ~status_block_wanted ~progress_wanted
+    ~schedule_draws =
+  let spare = Int.max 0 (history_rows - chat_min_history_rows - Int.max 0 menu_rows) in
+  let schedule_first = if schedule_draws then Int.min spare 1 else 0 in
+  let status_block_extra =
+    Int.min (spare - schedule_first) (Int.max 0 (status_block_wanted - 1))
+  in
+  let progress_extra =
+    Int.min (spare - schedule_first - status_block_extra) (Int.max 0 (progress_wanted - 1))
+  in
+  { status_block_extra
+  ; progress_extra
+  ; schedule = (if schedule_draws then spare - status_block_extra - progress_extra else 0)
+  }
+
 let chat_title_row ~inner_cells ~title ~mode_suffix =
   let inner_cells = Int.max 0 inner_cells in
   let mode_cells = display_width mode_suffix in
@@ -1079,12 +1120,9 @@ let chat_min_terminal_cols =
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   (* The fixed chrome costs eight rows. The title and operational identity use
-     separate rows so a provider id cannot cut the title or context reading.
-     Three history rows are the minimum that
-     can show an oversized entry's identity/opening, an omission marker, and
-     its latest output instead of silently dropping one of those facts. *)
+     separate rows so a provider id cannot cut the title or context reading. *)
   terminal_cols >= chat_min_terminal_cols
-  && message_history_height ~terminal_rows ~status_rows >= 3
+  && message_history_height ~terminal_rows ~status_rows >= chat_min_history_rows
 
 let take_last count values =
   let drop = Int.max 0 (List.length values - Int.max 0 count) in

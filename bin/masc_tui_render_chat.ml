@@ -4741,9 +4741,13 @@ let render_keeper_message (state : state) =
     let status_facts = keeper_status_facts state keeper_name in
     let status_frame = keeper_message_viewport_frame ~scroll:requested ~status_facts state
         ~now:(Unix.gettimeofday ()) ~terminal_rows:rows ~terminal_cols:cols in
-    let command_window = keeper_message_command_window ~status_frame ~scroll:requested state
+    let command_window = keeper_message_command_window
+      ~status_frame:(Lazy.from_val status_frame) ~scroll:requested state
       ~terminal_rows:rows ~terminal_cols:cols in
-    let command_rows = match command_window with None -> 0 | Some (_, entries) -> 2 + List.length entries in
+    let command_rows = match command_window with
+      | None -> 0
+      | Some (_, entries) ->
+          Message_layout.command_menu_chrome_rows + List.length entries in
     let status_rows = keeper_message_status_rows ~status_frame ~scroll:requested state + command_rows in
     let support_status_rows =
       keeper_message_support_status_rows ~scroll:requested state ~status_rows

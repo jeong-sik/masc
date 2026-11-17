@@ -28044,61 +28044,74 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
-(* [status_block_rows] is how many rows the Keeper status block takes at this
-   width when nothing caps it, and [progress_rows_of] answers the same for the
-   turn's progress row of a frame, 0 when the frame draws none. The caller
-   measures both because the facts are the renderer's; this decides how many
-   of those rows the viewport grants. *)
-let keeper_message_frame_for_viewport ?scroll ~status_block_rows ~progress_rows_of state ~now
-    ~terminal_rows ~terminal_cols =
-  let frame = keeper_message_status_frame ~schedule_budget:0 ~terminal_cols state ~now in
-  let status_rows = keeper_message_status_rows ~status_frame:frame ?scroll state
-    + (if keeper_message_reading_back ?scroll state then 0 else 1) in
-  (* Keep the existing three-row transcript minimum. The status block takes
-     what it needs of the rows above that first, because it names whom the
-     next Enter reaches, and the running turn's progress row is next;
-     schedule rows are a viewport choice, never a limit on
-     stored jobs or their execution, and take what is left. How many jobs an
-     open block lists is [chat_schedule_open_entries]; how many rows they
-     wrap to follows the width. *)
-  let spare = max 0
-      (Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows - 3) in
-  let block_extra = min spare (max 0 (status_block_rows - 1)) in
-  let progress_extra = min (spare - block_extra) (max 0 (progress_rows_of frame - 1)) in
-  { frame with
-    kmsf_status_block_rows = 1 + block_extra
-  ; kmsf_progress_rows = 1 + progress_extra
-  ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now
-      ~max_rows:(spare - block_extra - progress_extra)
-      ~max_cells:(keeper_message_inner_cells state ~terminal_cols)
-  }
-
-let keeper_message_command_window ~status_frame ?scroll state ~terminal_rows ~terminal_cols =
+(* The slash menu the draft opens. It opens only where a draft is typed: the
+   chat's own pane at the live edge, with no voice capture and no recalled
+   line being edited. *)
+let keeper_message_command_menu ?scroll state =
   match state.view, state.keeper_message_focus, state.voice_capture,
         current_recall_edit state with
   | Keepers Keeper_message, Right_pane, None, None
     when not (keeper_message_reading_back ?scroll state) ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
-    (match Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
-        (Masc_tui_message_input.contents state.msg_input) with
-     | None -> None
-     | Some menu ->
-       let status_rows = keeper_message_status_rows ~status_frame ?scroll state + 1 in
-       let chat_cols = Masc_tui_roster_pane.content_cols
-           ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
-       let history_rows = Masc_tui_message_layout.message_history_height
-           ~terminal_rows ~status_rows in
-       (* Keep three conversation rows plus a heading and input separator.
-          Eight candidates is the menu's visible page, not a result limit. *)
-       let max_rows = min 8 (max 0 (history_rows - 5)) in
-       if max_rows = 0 || not (Masc_tui_message_layout.message_viewport_supported
-           ~terminal_rows ~terminal_cols:chat_cols ~status_rows) then None
-       else Some (menu, Masc_tui_command.menu_window ~max_rows menu))
+    Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
+      (Masc_tui_message_input.contents state.msg_input)
   | (Keepers (Keeper_message), Right_pane, None, Some _)
   | (Keepers (Keeper_message), Right_pane, Some _, _) | (Keepers (Keeper_message), Left_pane, _, _)
   | (Keepers (Keeper_list | (Keeper_detail | (Keeper_logs | (Keeper_calls | Keeper_runtime_pick)))), _, _, _)
   | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))))), _, _, _)
   | (Keepers Keeper_message, Right_pane, None, None) -> None
+
+(* [status_block_rows] is how many rows the Keeper status block takes at this
+   width when nothing caps it, and [progress_rows_of] answers the same for the
+   turn's progress row of a frame, 0 when the frame draws none. The caller
+   measures both because the facts are the renderer's; this decides how many
+   of those rows the viewport grants.
+
+   Schedule rows are a viewport choice, never a limit on stored jobs or their
+   execution. How many jobs an open block lists is
+   [chat_schedule_open_entries]; how many rows they wrap to follows the
+   width. *)
+let keeper_message_frame_for_viewport ?scroll ~status_block_rows ~progress_rows_of state ~now
+    ~terminal_rows ~terminal_cols =
+  let frame = keeper_message_status_frame ~schedule_budget:0 ~terminal_cols state ~now in
+  let status_rows = keeper_message_status_rows ~status_frame:frame ?scroll state
+    + (if keeper_message_reading_back ?scroll state then 0 else 1) in
+  let schedule_rows max_rows = keeper_message_schedule_rows state ~now ~max_rows
+      ~max_cells:(keeper_message_inner_cells state ~terminal_cols) in
+  let granted = Masc_tui_message_layout.chat_block_rows
+      ~history_rows:(Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows)
+      ~menu_rows:(match keeper_message_command_menu ?scroll state with
+        | None -> 0
+        | Some menu ->
+            Masc_tui_message_layout.command_menu_rows ~candidates:(List.length menu.items))
+      ~status_block_wanted:status_block_rows
+      ~progress_wanted:(progress_rows_of frame)
+      ~schedule_draws:(schedule_rows 1 <> []) in
+  { frame with
+    kmsf_status_block_rows = 1 + granted.status_block_extra
+  ; kmsf_progress_rows = 1 + granted.progress_extra
+  ; kmsf_schedule_rows = schedule_rows granted.schedule
+  }
+
+(* The menu's window in the frame the pane draws. The frame is forced only
+   when a menu is open: every key in the composer asks this, and measuring
+   the frame reads the whole conversation. *)
+let keeper_message_command_window ~status_frame ?scroll state ~terminal_rows ~terminal_cols =
+  match keeper_message_command_menu ?scroll state with
+  | None -> None
+  | Some menu ->
+    let status_frame = Lazy.force status_frame in
+    let status_rows = keeper_message_status_rows ~status_frame ?scroll state + 1 in
+    let chat_cols = Masc_tui_roster_pane.content_cols
+        ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
+    let history_rows = Masc_tui_message_layout.message_history_height
+        ~terminal_rows ~status_rows in
+    let max_rows = min Masc_tui_message_layout.command_menu_page_rows
+        (max 0 (history_rows - Masc_tui_message_layout.chat_min_history_rows
+                - Masc_tui_message_layout.command_menu_chrome_rows)) in
+    if max_rows = 0 || not (Masc_tui_message_layout.message_viewport_supported
+        ~terminal_rows ~terminal_cols:chat_cols ~status_rows) then None
+    else Some (menu, Masc_tui_command.menu_window ~max_rows menu)
 
 (* Support cannot disappear merely because PgUp adds the reading-back notice.
    At the live edge, reserve that possible row only for the support threshold;

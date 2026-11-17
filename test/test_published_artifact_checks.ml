@@ -207,13 +207,18 @@ let test_check_notifications_preserve_uncertainty () = with_base (fun base_path 
   Fun.protect ~finally:unsubscribe (fun () ->
     let checked = set ~base_path ~actor:"human" (change ~checked:true artifact.id revision) in
     Alcotest.(check int) "one real check attempt notifies" 1 (List.length !changes);
-    let io = Fs_compat.{before_sync_parent=(fun _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "injected")));
-      close_fd=Unix.close} in
-    let uncertain = match S.For_testing.set_with_rewrite_io ~io ~base_path ~actor:"human"
+    let injected = Atomic.make false in
+    let before_sync_rewrite_parent _ =
+      Atomic.set injected true;
+      raise (Unix.Unix_error (Unix.EIO, "fsync", "injected rewrite parent sync")) in
+    let io = Fs_compat.{before_sync_parent=ignore; close_fd=Unix.close} in
+    let uncertain = match S.For_testing.set_with_rewrite_io ~before_sync_rewrite_parent
+      ~io ~base_path ~actor:"human"
       (change ~expected:(Some checked.change_id) ~checked:false artifact.id revision) with
       | Error (S.Commit_uncertain check) -> check
       | Error error -> Alcotest.fail (S.error_message error)
       | Ok _ -> Alcotest.fail "post-rename failure became certain" in
+    Alcotest.(check bool) "actual post-publication parent sync boundary failed" true (Atomic.get injected);
     Alcotest.(check int) "uncertain published rewrite also notifies" 2 (List.length !changes);
     let observed = S.list ~base_path |> stored in
     Alcotest.(check string) "notified reader sees the uncertain write without replay"

@@ -296,7 +296,10 @@ let login_home ~base_path ~namespace ~account_id ~client =
   let private_dir path = try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> () in
   private_dir (Filename.dirname runtime_root);
   private_dir runtime_root;
-  match Runtime_setup_login_client.prepare ~runtime_root ~account_id ~client ~existing:None with
+  match
+    Runtime_setup_login_client.prepare ~browser:Runtime_setup_login_client.host_browser
+      ~runtime_root ~account_id ~client ~existing:None
+  with
   | Ok (_ : Runtime_setup_login_client.t) -> ()
   | Error detail -> Alcotest.failf "the login home was not made: %s" detail
 ;;

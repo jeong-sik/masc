@@ -5,30 +5,33 @@ type client = Codex | Claude | Antigravity | Muse
 type native = Runtime_account_home_layout.client = Codex_home | Claude_home | Muse_home
 (** A client that signs in to an account home. *)
 type t
+(** A login, with the {!browser} that was decided for its sign-in. *)
 type observation = Authenticated | Login_completed | Credential_captured
 
 (** What a sign-in child is handed for the browser it would start. *)
 type browser
 
 val host_browser : browser
-(** Nothing: the client decides, as it does when a terminal of this machine
-    starts it. *)
+(** No command: the environment of the child carries no [BROWSER], and the
+    client does what it does without one. *)
 
 val no_host_browser : ?getenv:(string -> string option) -> unit -> (browser, string) result
 (** A command that does nothing, for a sign-in that someone at another machine
     started: they open the link the client prints. The command is the [true]
     utility that an absolute directory of [PATH] holds, and the result is an
     error when [PATH] holds none. [getenv] reads [PATH]; it is the environment
-    of this process unless given. Ask before {!prepare}, so a refusal leaves
-    no home behind. *)
+    of this process unless given. {!prepare} takes the answer, so a refusal
+    leaves no home behind. *)
 
 val browser_command : browser -> string option
 (** The command a child is handed in place of the browser of this machine, and
     [None] for {!host_browser}. *)
 
-val prepare : runtime_root:string -> account_id:string -> client:client ->
-  existing:Runtime_setup_accounts.binding option -> (t, string) result
-val selected_native : native -> account_home:string -> (t, string) result
+val prepare : browser:browser -> runtime_root:string -> account_id:string ->
+  client:client -> existing:Runtime_setup_accounts.binding option -> (t, string) result
+(** The login of a sign-in whose browser is [browser]. For an account that is
+    not there yet it makes the home the login runs in. *)
+val selected_native : browser:browser -> native -> account_home:string -> (t, string) result
 (** A login on an account home the operator already declared, as the
     installer's sign-in has it: the exact spelling, which must name an owned
     directory. *)
@@ -39,11 +42,11 @@ val account_home : runtime_root:string -> account_id:string -> client:client ->
     directory. Antigravity keeps no such home. *)
 val home_dir : t -> string
 val argv : cli_path:string -> t -> string list
-val environment : browser:browser -> t -> (string array, string) result
-(** The environment of the login child. A command of [browser] is bound once,
-    as [BROWSER]. Claude Code hands the browser of the machine a link whose
-    approval returns to a port of that machine, so an approval there signs the
-    approver's account in to the home of the login. *)
+val environment : t -> (string array, string) result
+(** The environment of the login child. A command of the login's browser is
+    bound once, as [BROWSER]. Claude Code hands the browser of the machine a
+    link whose approval returns to a port of that machine, so an approval
+    there signs the approver's account in to the home of the login. *)
 val is_pty : t -> bool
 val saved_login_check : t -> (unit -> (bool, string) result) option
 (** Antigravity runs its full interactive client, so its newly saved login

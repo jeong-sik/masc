@@ -36,8 +36,9 @@ val stream_cors_headers : owner -> Httpun.Request.t -> (string * string) list
     start. A person signs in from another machine, so their client gets a
     command that does nothing ({!Runtime_setup_login_client.no_host_browser}),
     and the sign-in is refused on a machine that has none. The operator's
-    client gets {!Runtime_setup_login_client.host_browser}. {!start} asks this
-    before it makes anything for the login. *)
+    client gets {!Runtime_setup_login_client.host_browser}. {!start} hands the
+    answer to {!Runtime_setup_login_client.prepare}, which makes the home of
+    the login, so a refused sign-in has no directory made for it. *)
 val sign_in_browser : owner -> (Runtime_setup_login_client.browser, string) result
 
 (** Why a person may not log in to an integration. *)

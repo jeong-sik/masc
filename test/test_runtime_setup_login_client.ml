@@ -29,17 +29,18 @@ let values env key =
 let value env key = List.nth_opt (values env key) 0
 
 (* The sign-in a terminal of this machine starts. *)
-let host_environment login = Login.environment ~browser:Login.host_browser login
+(* The login of a sign-in that a terminal of this machine starts. *)
+let at_this_machine = Login.prepare ~browser:Login.host_browser
 
 let isolated_native_login () = fixture (fun root _ ->
   List.iter (fun (client, id, variable, argv) ->
-    let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
+    let login = at_this_machine ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
     let home = Login.home_dir login in
     check int "new login owns private directory" 0o700 ((Unix.stat home).st_perm land 0o777);
     check (list string) "official login command" argv (Login.argv ~cli_path:"fixture-cli" login);
     check bool "native device or code flow uses pipes" false (Login.is_pty login);
     check bool "native login command exits itself" true (Option.is_none (Login.saved_login_check login));
-    let env = host_environment login |> ok in
+    let env = Login.environment login |> ok in
     check (option string) "child selects new account" (Some home) (value env variable);
     check (option string) "ambient provider key omitted" None (value env "ANTHROPIC_API_KEY");
     check (option string) "ambient Meta key omitted" None (value env "META_API_KEY");
@@ -48,7 +49,7 @@ let isolated_native_login () = fixture (fun root _ ->
       Login.Claude, "claude-login", "CLAUDE_CONFIG_DIR", ["fixture-cli"; "auth"; "login"];
       Login.Muse, "muse-login", "HOME", ["fixture-cli"; "login"] ];
   check bool "path traversal rejected before allocation" true
-    (Result.is_error (Login.prepare ~runtime_root:root ~account_id:"../escape"
+    (Result.is_error (at_this_machine ~runtime_root:root ~account_id:"../escape"
       ~client:Login.Muse ~existing:None)))
 
 (* Someone at another machine signs in. The server's own environment names a
@@ -66,16 +67,21 @@ let a_remote_sign_in_is_handed_no_browser_of_this_machine () = fixture (fun root
   check (option string) "a sign-in at this machine is handed none" None
     (Login.browser_command Login.host_browser);
   List.iter (fun (client, id) ->
-    let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
+    let remote =
+      Login.prepare ~browser ~runtime_root:root ~account_id:(id ^ "-remote") ~client
+        ~existing:None |> ok in
     check (list string) "the child is handed that command once" [ command ]
-      (values (Login.environment ~browser login |> ok) "BROWSER");
+      (values (Login.environment remote |> ok) "BROWSER");
+    let local =
+      at_this_machine ~runtime_root:root ~account_id:(id ^ "-local") ~client ~existing:None
+      |> ok in
     check bool "a sign-in at this machine is not handed that command" false
-      (List.mem command (values (host_environment login |> ok) "BROWSER")))
-    [ Login.Codex, "codex-remote"; Login.Claude, "claude-remote"; Login.Muse, "muse-remote" ])
+      (List.mem command (values (Login.environment local |> ok) "BROWSER")))
+    [ Login.Codex, "codex"; Login.Claude, "claude"; Login.Muse, "muse" ])
 
 (* The command is the [true] an absolute directory of PATH holds. A machine
-   that has none has nothing to hand over, and the answer needs no login: the
-   server asks before it prepares one, so a refusal leaves no home behind. *)
+   that has none has nothing to hand over, and the answer needs no login: a
+   login is prepared only with it, so a refusal leaves no home behind. *)
 let the_browser_command_comes_from_path_or_the_sign_in_is_refused () = fixture (fun root _ ->
   let asked path =
     Login.no_host_browser
@@ -126,7 +132,7 @@ let login_email_reaches_the_saved_provider () = fixture (fun root _ ->
     segment {|{"alg":"none"}|} ^ "." ^ segment claims ^ ".fixture-signature" in
   let workspace = root and cli_path = "fixture-cli" in
   List.iter (fun (client, integration_id, api_format, relative, body, expected) ->
-    let login = Login.prepare ~runtime_root:root ~account_id:integration_id ~client ~existing:None |> ok in
+    let login = at_this_machine ~runtime_root:root ~account_id:integration_id ~client ~existing:None |> ok in
     let reference = Login.publish ~workspace ~integration_id ~cli_path login |> ok in
     let account_home = match Accounts.resolve ~workspace ~integration_id ~cli_path reference |> account_ok with
       | Accounts.Native_home {account_home} -> account_home
@@ -151,10 +157,10 @@ let login_email_reaches_the_saved_provider () = fixture (fun root _ ->
       {|{"schema_version":1,"providers":{"meta":{"user_email":"muse@example.com"}}}|}, "muse@example.com" ])
 
 let muse_capture_and_reference () = fixture (fun root env ->
-  let login = Login.prepare ~runtime_root:root ~account_id:"muse-login"
+  let login = at_this_machine ~runtime_root:root ~account_id:"muse-login"
     ~client:Login.Muse ~existing:None |> ok in
   let home = Login.home_dir login in
-  let child_env = host_environment login |> ok in
+  let child_env = Login.environment login |> ok in
   check (option string) "login cannot fork a detached launcher update" (Some "1")
     (value child_env "MUSE_NO_AUTO_UPDATE");
   check (option string) "login keeps the sign-in in auth.json, not the Keychain" (Some "file")
@@ -184,7 +190,7 @@ let muse_capture_and_reference () = fixture (fun root env ->
    | Login.Authenticated | Login.Credential_captured -> fail "Muse capture claimed authentication");
   let reference = Login.publish ~workspace:root ~integration_id:"muse-code" ~cli_path:"muse" login |> ok in
   let binding = Accounts.resolve ~workspace:root ~integration_id:"muse-code" ~cli_path:"muse" reference |> account_ok in
-  let again = Login.prepare ~runtime_root:root ~account_id:"retry"
+  let again = at_this_machine ~runtime_root:root ~account_id:"retry"
     ~client:Login.Muse ~existing:(Some binding) |> ok in
   check string "explicit reauthentication selects exact same account" home (Login.home_dir again))
 
@@ -195,11 +201,11 @@ let claude_reference_spelling () = fixture (fun root _ ->
     ~cli_path:"claude" ~account_home:selected |> account_ok in
   let binding = Accounts.resolve ~workspace:root ~integration_id:"claude-code"
     ~cli_path:"claude" reference |> account_ok in
-  let login = Login.prepare ~runtime_root:root ~account_id:"reauth"
+  let login = at_this_machine ~runtime_root:root ~account_id:"reauth"
     ~client:Login.Claude ~existing:(Some binding) |> ok in
   check string "Claude keychain identity keeps configured spelling" selected (Login.home_dir login);
   check (option string) "login sees same keychain identity" (Some selected)
-    (value (host_environment login |> ok) "CLAUDE_CONFIG_DIR"))
+    (value (Login.environment login |> ok) "CLAUDE_CONFIG_DIR"))
 
 let native_authentication_observation () = fixture (fun root env ->
   let script name body =
@@ -209,7 +215,7 @@ let native_authentication_observation () = fixture (fun root env ->
     path in
   let emit body = "printf '%s\\n' " ^ Filename.quote body ^ "\n" in
   let observe client id cli_path =
-    let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
+    let login = at_this_machine ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
     Login.observe ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / root) ~cli_path
       ~account_request:Runtime_account_access.Operator_call login in
@@ -236,7 +242,7 @@ let native_authentication_observation () = fixture (fun root env ->
 (* Plan D1-6a: the home a new login made is found again by its id, and an id
    with no home, or an Antigravity login, finds none. *)
 let a_new_logins_home_is_found_again () = fixture (fun root _ ->
-  let login = Login.prepare ~runtime_root:root ~account_id:"acct-1" ~client:Login.Claude ~existing:None |> ok in
+  let login = at_this_machine ~runtime_root:root ~account_id:"acct-1" ~client:Login.Claude ~existing:None |> ok in
   check (result string string) "the same home" (Ok (Login.home_dir login))
     (Login.account_home ~runtime_root:root ~account_id:"acct-1" ~client:Login.Claude);
   check bool "no home for another id" true
@@ -255,7 +261,7 @@ let antigravity_reauthentication_starts_without_a_login () = fixture (fun root e
     |> account_ok in
   let existing = Accounts.resolve ~workspace:root ~integration_id:"antigravity" ~cli_path:"agy" reference
     |> account_ok in
-  let login = Login.prepare ~runtime_root:root ~account_id:"reauthentication"
+  let login = at_this_machine ~runtime_root:root ~account_id:"reauthentication"
     ~client:Login.Antigravity ~existing:(Some existing) |> ok in
   check string "selected credential is unchanged" contents (Fs_compat.load_file credential_file);
   let check_saved = match Login.saved_login_check login with
@@ -270,7 +276,7 @@ let antigravity_reauthentication_starts_without_a_login () = fixture (fun root e
     Ok (Session.with_session ~workspace:root ~actor:(Session.Agent "operator")
     ~account_key:(Login.home_dir login) (fun session ->
       Session.run ~saved_login:check_saved session ~env:(env :> Eio_unix.Stdenv.base)
-        ~child_env:(host_environment login |> ok) ~cwd:(Login.home_dir login)
+        ~child_env:(Login.environment login |> ok) ~cwd:(Login.home_dir login)
         ~argv:["python3"; "-c";
           "import os,sys,time\npath,login=sys.argv[1:]\n"
           ^ "with open(path,'w') as f: f.write('{')\nprint('writing',flush=True)\n"

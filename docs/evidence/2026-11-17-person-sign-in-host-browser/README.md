@@ -97,14 +97,46 @@ gh workflow run test.yml --ref fix/person-login-opens-no-host-browser \
 
 - Workflow `Test`, run 44014905280, head `1a1c79ad166d`. Conclusion: failure.
 - `test_lsp_process_manager`: 14 cases ran and passed, the new
-  `absolute lookup passes over relative entries` among them.
+  `absolute lookup passes over relative PATH entries` among them.
 - `test_runtime_setup_login_client`: 8 cases ran and 7 passed, the new
   `a remote sign-in is handed no browser of this machine` among them.
   `Antigravity reauthentication has no prior login` failed at
   `Accounts.create`, before the call this change touches (issue #52681).
 
+## The follow-up: no home for a refused sign-in
+
+Candidate of #52699, base `8e78ac5f9e10`. A login is made only with the
+browser that was decided for its sign-in: `prepare` and `selected_native`
+take it, and `environment` reads it from the login. No Dune build ran.
+
+- Type check as above, against the `.cmi` files of a build of the base. 13
+  units passed: the two changed interfaces and their implementations, the
+  five interfaces that import them, `bin/masc_cli_account_login.ml`, the
+  test support module and the two test files.
+  - Negative control: a copy whose `start` prepares the login without the
+    browser does not compile. `Client.prepare ~runtime_root ...` is a
+    partial application there.
+- Test run 44021901913 of an earlier head of the follow-up, `cf3ce550acce`,
+  read once on 2026-11-17. In that head `start` asked for the browser before
+  `prepare`, which did not take it yet. Conclusion: failure.
+  - `test_server_preview_keeper_turn`: 1 case ran and passed.
+  - `test_runtime_setup_login_client`: 9 cases ran and 8 passed, among them
+    `a remote sign-in is handed no browser of this machine` and
+    `the browser command comes from PATH or the sign-in is refused`. The
+    failure is the Antigravity case of issue #52681.
+
 ## Unverified
 
+- A person's sign-in through the route on a machine without `true`. That it
+  is refused with no directory made follows from the types and from reading
+  `start`; no test posts that sign-in.
+- What Claude Code does when the command `BROWSER` names cannot be run, such
+  as a file removed after the lookup or a path with a space in it. The rows
+  above ran a command that exists.
+- The filter that drops a `BROWSER` binding of the client's own environment
+  is reached by no client today: the three environment projections pass no
+  `BROWSER`. The test that sets `BROWSER` in the process and finds the
+  command once holds by the projections alone.
 - A sign-in that ends with an approved code pasted into the console of an
   account server. It needs a person's approval at the vendor.
 - An opener that asks LaunchServices without starting a process. The sandbox

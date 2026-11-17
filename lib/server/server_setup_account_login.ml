@@ -168,11 +168,11 @@ let start ~owner ~base_path ~body request reqd =
     | Error message -> respond ~status:`Service_unavailable ~request reqd message; Ok ()
     | Ok account_key -> Session.with_session ~workspace:base_path ~actor ~account_key (fun session ->
       let prepared =
-        (* Asked first: a sign-in this machine has no browser command for is
-           refused before a directory is made for it. *)
+        (* A sign-in this machine has no browser command for is refused
+           here. The home is made only with the answer. *)
         let* browser = sign_in_browser owner in
         let* runtime_root = runtime_root_of ~base_path owner in
-        let* home = Client.prepare ~runtime_root
+        let* home = Client.prepare ~browser ~runtime_root
           ~account_id:(Session.id session) ~client ~existing in
         let* () = match client, existing with
           | Client.Antigravity, Some _ -> Ok ()
@@ -180,7 +180,7 @@ let start ~owner ~base_path ~body request reqd =
             let* account_key = canonical_account_key (Client.home_dir home) in
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
-        let* child_env = Client.environment ~browser home in
+        let* child_env = Client.environment home in
         let* account = match owner, client, reference with
           | Operator _, Client.Antigravity, Some reference -> Ok (Receipt.Published reference)
           | Operator _, Client.Antigravity, None -> Ok Receipt.Unselected

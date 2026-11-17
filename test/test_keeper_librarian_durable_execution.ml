@@ -4751,7 +4751,8 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
         io (fun () -> Capture.create ~request_id ~owner ~destination
           ~predecessor:{request_id=child.request_id;request_digest=child.request_digest}
           ~source:(Capture.source request) ~preparation:(Capture.preparation request) ())) |> get in
-    let intended:Progress.preparation_intent={request_id;request=Capture.to_json successor} in
+    let intended:Progress.preparation_intent={request_id;
+      request=Lane_addon_action.canonical (Capture.to_json successor) |> get} in
     let parent=advance actual (Progress.Replacement_intended intended) in
     let inspect ~require_confirmed ()=io (fun () -> Keeper_librarian_history_resolution_lineage.validate_predecessor_payload
       ~read:(fun ~scope ~request_id -> Owner.load ~store:fixture.store ~scope ~request_id

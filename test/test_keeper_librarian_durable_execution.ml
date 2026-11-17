@@ -2327,7 +2327,7 @@ let observe_retained_cut fixture =
     ~wake:(fun () -> ())) |> Result.map_error Durable_owner.error_to_string |> get in
   match result with
   | Durable_owner.Waited (Worker_unknown,_) -> ()
-  | Waited ((Capacity | Worker_pending | Worker_unreachable | Missing_after_dispatch | Journal_recheck),_)
+  | Waited ((Worker_pending | Worker_unreachable | Missing_after_dispatch | Journal_recheck),_)
   | Resumed _ | Original_replaced _ -> fail "actual host Cut did not remain a retained unknown"
 let test_cut_replacement_releases_unread_source_and_survives_rollback () = with_fixture (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in

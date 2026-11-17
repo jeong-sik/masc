@@ -1136,8 +1136,10 @@ let test_missing_cli_is_not_reported_as_logout () =
         ~account:(fixture_account ())
         config)
   in
+  (* #28072: a missing executable is the typed spawn refusal every runtime
+     reports, not a configuration error and not a logout. *)
   match outcome with
-  | Error (Runtime_claude_code.Invalid_config _) -> ()
+  | Error (Runtime_claude_code.Spawn_refused (Process_eio.Executable_not_found _)) -> ()
   | Error error -> fail (Runtime_claude_code.error_to_string error)
   | Ok _ -> fail "missing Claude CLI was reported as a valid login"
 ;;

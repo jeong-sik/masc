@@ -133,10 +133,12 @@ let test_unreadable_history_never_becomes_absence () =
       | _ -> fail "row fixture changed" in
     write_rows path [ invalid_surface ];
     (match lookup query with `Service_unavailable, _ -> () | _ -> fail "invalid typed surface became a complete response");
-    let nonfinite_timestamp = match valid with
-      | `Assoc fields -> `Assoc (("ts", `Float nan) :: List.remove_assoc "ts" fields)
-      | _ -> fail "row fixture changed" in
-    write_rows path [ nonfinite_timestamp ];
+    let channel = open_out_bin path in
+    Fun.protect ~finally:(fun () -> close_out channel) (fun () ->
+      (* The writer rejects non-finite floats; exercise the reader using raw
+         JSON whose numeric exponent overflows a float. *)
+      output_string channel
+        ({|{"id":"nonfinite","role":"assistant","content":"bad timestamp","ts":1e999}|} ^ "\n"));
     (match lookup query with `Service_unavailable, _ -> () | _ -> fail "non-finite timestamp became a complete response");
     let channel = open_out_bin path in
     output_string channel "{unfinished"; close_out channel;

@@ -50,6 +50,7 @@ jobs:
           python3 -c "import xml.etree.ElementTree as ET; ET.parse('docs/constitution.xml')"
           bash scripts/lint/yaml-syntax.sh
           bash scripts/check-toml-syntax.sh
+          python3 -I scripts/ci/check-test-prompt-deps.py
       - name: Scan the tracked tree for credentials
         run: python3 scripts/ci/check-committed-secrets.py
 

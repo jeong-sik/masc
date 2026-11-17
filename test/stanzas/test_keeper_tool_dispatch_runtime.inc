@@ -3,7 +3,7 @@
  (modules test_keeper_tool_dispatch_runtime)
  (deps
   ../bin/masc_native_addon_launcher.exe
-  ../skills/browser-live-follow-read/SKILL.md)
+  ../skills/browser-live-follow-read/SKILL.md (source_tree %{workspace_root}/config/prompts))
  (libraries
   browser_addon_fixture
   mtime

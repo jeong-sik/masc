@@ -5,4 +5,5 @@
 (test
  (name test_verifier_exact_lane)
  (modules test_verifier_exact_lane)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))

@@ -10,6 +10,7 @@
 (test
  (name test_keeper_owner)
  (modules test_keeper_owner)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (action
   (setenv MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false (run %{test})))
  (libraries uri masc_test_deps masc.keeper_chat_operations masc.keeper_execution_scope masc.keeper_registry masc.keeper_checkpoint_ref masc.agent_core.llm_provider eio.mock))

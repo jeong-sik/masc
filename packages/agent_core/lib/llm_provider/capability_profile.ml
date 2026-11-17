@@ -152,6 +152,7 @@ type capabilities =
   ; supports_required_tool_choice : bool
   ; supports_named_tool_choice : bool
   ; supports_parallel_tool_calls : bool
+  ; supports_function_response_parts : bool
   ; assistant_tool_content_format : assistant_tool_content_format
     (** Wire shape for assistant messages that contain tool calls but no visible
         text. OpenAI-compatible providers disagree here: OpenAI accepts
@@ -265,6 +266,7 @@ let default_capabilities =
   ; supports_required_tool_choice = false
   ; supports_named_tool_choice = false
   ; supports_parallel_tool_calls = false
+  ; supports_function_response_parts = false
   ; assistant_tool_content_format = Assistant_tool_content_null
   ; chat_output_budget_field = Chat_max_tokens
   ; tool_schema_conformance = Rich_json_schema

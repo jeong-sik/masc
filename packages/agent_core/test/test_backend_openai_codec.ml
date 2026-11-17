@@ -3282,7 +3282,7 @@ let test_tool_image_followups_preserve_batch_order () =
   check_bool "a real later human still creates its own query boundary" true
     (List.map (fun item -> item |> member "role" |> to_string) with_human
      = [ "user"; "assistant"; "tool"; "tool"; "user" ]);
-  let gemini, _ = Backend_gemini.contents_of_messages messages in
+  let gemini, _ = Backend_gemini.contents_of_messages ~supports_function_response_parts:false messages in
   let parts = List.concat_map (fun item -> item |> member "parts" |> to_list) gemini in
   let rec check_after_results count = function
     | [] -> Alcotest.fail "Gemini image omitted"

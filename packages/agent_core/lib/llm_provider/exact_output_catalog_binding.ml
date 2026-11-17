@@ -227,6 +227,7 @@ let functional_capability_projection
     ; "audio=" ^ bool_string caps.supports_audio_input
     ; "video=" ^ bool_string caps.supports_video_input
     ; "document=" ^ bool_string caps.supports_document_input
+    ; "function_response_parts=" ^ bool_string caps.supports_function_response_parts
     ; "modality_priority=" ^ modality_priority_string caps.modality_priority
     ; "system_prompt=" ^ bool_string caps.supports_system_prompt
     ; "assistant_prefill=" ^ bool_string caps.supports_assistant_prefill

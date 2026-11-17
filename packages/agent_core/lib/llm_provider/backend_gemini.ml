@@ -365,7 +365,74 @@ let blocks_with_part_signature ~target ~block = function
   | None -> [ block ]
 ;;
 
-let part_of_content_block tool_signatures (block, tool_result_name) =
+(* FunctionResponsePart carries media, while the response object carries text
+   and structured tool data. References bind each nested media position to a
+   part of this exact correlated response, without manufacturing a User row. *)
+let function_response_payload ~supports_function_response_parts ~content ~outcome
+      ~json ~content_blocks =
+  let rec reserve_json names = function
+    | `Assoc fields ->
+      let names = match List.assoc_opt "$ref" fields with
+        | Some (`String name) -> String_map.add name () names
+        | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> names in
+      List.fold_left (fun names (_, value) -> reserve_json names value) names fields
+    | `List values -> List.fold_left reserve_json names values
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> names
+  in
+  let rec reserve_blocks names blocks = List.fold_left (fun names -> function
+    | ToolResult {json; content_blocks; _} ->
+      reserve_blocks (reserve_json names (Option.value json ~default:`Null))
+        (Option.value content_blocks ~default:[])
+    | Image _ | Document _ | Audio _ -> names
+    | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _) as block ->
+      reserve_json names (Api_common.content_block_to_json block)) names blocks in
+  let reserved_names = reserve_blocks
+    (reserve_json String_map.empty (Option.value json ~default:`Null))
+    (Option.value content_blocks ~default:[]) in
+  let parts = ref [] in
+  let position = ref 0 in
+  let rec fresh_name () =
+    let name = Printf.sprintf "attachment-%d" !position in
+    incr position;
+    if String_map.mem name reserved_names then fresh_name () else name
+  in
+  let media ~kind ~media_type source =
+    if not supports_function_response_parts then
+      raise (Gemini_api_error
+        "Gemini function response media parts are not declared for this model");
+    let display_name = fresh_name () in
+    let data = Api_common.base64_media_payload ~backend:"gemini"
+      ~block:kind source in
+    parts := `Assoc ["inlineData", `Assoc
+      ["mimeType", `String media_type; "data", `String data;
+       "displayName", `String display_name]] :: !parts;
+    `Assoc ["type", `String kind; "media_type", `String media_type;
+            "source", `Assoc ["$ref", `String display_name]]
+  in
+  let rec nested = function
+    | Image {media_type; source} -> media ~kind:"image" ~media_type source
+    | Audio {media_type; source} -> media ~kind:"audio" ~media_type source
+    | Document {media_type; source} -> media ~kind:"document" ~media_type source
+    | ToolResult {tool_use_id; content; outcome; json; content_blocks} ->
+      `Assoc (["type", `String "tool_result";
+               "tool_use_id", `String tool_use_id] @
+        response_fields ~content ~outcome ~json ~content_blocks)
+    | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _) as block ->
+      Api_common.content_block_to_json block
+  and response_fields ~content ~outcome ~json ~content_blocks =
+    ["result", `String (Utf8_sanitize.sanitize content);
+     "is_error", `Bool (tool_result_outcome_is_error outcome)]
+    @ (match json with None -> [] | Some data -> ["data", data])
+    @ (match content_blocks with
+       | None -> []
+       | Some blocks -> ["content_blocks", `List (List.map nested blocks)])
+  in
+  let response = `Assoc (response_fields ~content ~outcome ~json ~content_blocks) in
+  response, List.rev !parts
+;;
+
+let part_of_content_block ~supports_function_response_parts tool_signatures
+      (block, tool_result_name) =
   match block with
   | Text s -> Some (`Assoc [ "text", `String (Utf8_sanitize.sanitize s) ])
   | Thinking { content; _ } ->
@@ -388,7 +455,7 @@ let part_of_content_block tool_signatures (block, tool_result_name) =
       | None -> fields
     in
     Some (`Assoc fields)
-  | ToolResult { tool_use_id; content; _ } ->
+  | ToolResult { tool_use_id; content; outcome; json; content_blocks } ->
     let name =
       match tool_result_name with
       | Some name -> name
@@ -399,16 +466,14 @@ let part_of_content_block tool_signatures (block, tool_result_name) =
               resolved tool name"
              tool_use_id)
     in
-    Some
-      (`Assoc
-          [ ( "functionResponse"
-            , `Assoc
-                [ "id", `String tool_use_id
-                ; "name", `String name
-                ; ( "response"
-                  , `Assoc [ "result", `String (Utf8_sanitize.sanitize content) ] )
-                ] )
-          ])
+    let response, parts = function_response_payload ~supports_function_response_parts
+      ~content ~outcome ~json ~content_blocks in
+    let fields = ["id", `String tool_use_id; "name", `String name;
+                  "response", response] in
+    let fields = match parts with
+      | [] -> fields
+      | _ :: _ -> fields @ ["parts", `List parts] in
+    Some (`Assoc ["functionResponse", `Assoc fields])
   | RedactedThinking _ -> None
 ;;
 
@@ -458,7 +523,7 @@ let attach_thought_signature thought_signature = function
          "Gemini part serializer produced a non-object for a thoughtSignature target")
 ;;
 
-let parts_of_content_blocks ~role tool_signatures blocks =
+let parts_of_content_blocks ~role ~supports_function_response_parts tool_signatures blocks =
   (* Gemini requires an opaque [thoughtSignature] to be replayed on the exact
      model part that carried it. AGENT_CORE represents that otherwise-unmodeled field
      as a [RedactedThinking] block immediately before its target. Adjacency is
@@ -497,7 +562,7 @@ let parts_of_content_blocks ~role tool_signatures blocks =
          let actual_target = signature_target_of_content_block target_block in
          (match actual_target with
           | Some actual_target when same_signature_target expected_target actual_target ->
-            (match part_of_content_block tool_signatures target with
+            (match part_of_content_block ~supports_function_response_parts tool_signatures target with
              | Some part ->
                loop (attach_thought_signature thought_signature part :: acc) rest
              | None -> malformed_carrier expected_target (Some actual_target))
@@ -514,7 +579,7 @@ let parts_of_content_blocks ~role tool_signatures blocks =
     | (((Text _ | Thinking _ | ReasoningDetails _ | ToolUse _ | ToolResult _
          | Image _ | Document _ | Audio _), _) as block) :: rest ->
       let acc =
-        match part_of_content_block tool_signatures block with
+        match part_of_content_block ~supports_function_response_parts tool_signatures block with
         | Some part -> part :: acc
         | None -> acc
       in
@@ -526,8 +591,55 @@ let parts_of_content_blocks ~role tool_signatures blocks =
 
 (* ── Message list -> (contents, systemInstruction option) ── *)
 
-let contents_of_messages (messages : message list) =
-  let messages = Tool_result_projection.with_image_followups messages in
+(* For models without native response media, move only images to a labelled
+   followup. Keep the result tree, including nested summaries/JSON/outcomes,
+   in the correlated response and leave the same position label in that tree. *)
+let with_function_response_image_followups messages =
+  let project_result root_tool_use_id block =
+    let rec project path outcome = function
+      | Image _ as image ->
+        let label = Text ("Image from tool result " ^ Yojson.Safe.to_string
+          (`Assoc ["tool_use_id", `String root_tool_use_id;
+                   "content_path", `List (List.map (fun index -> `Int index) (List.rev path));
+                   "is_error", `Bool (tool_result_outcome_is_error outcome)])) in
+        label, [label; image]
+      | ToolResult ({outcome; content_blocks = Some blocks; _} as result) ->
+        let blocks, images = List.split (List.mapi
+          (fun index block -> project (index :: path) outcome block) blocks) in
+        ToolResult {result with content_blocks = Some blocks}, List.concat images
+      | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+        | ToolUse _ | Document _ | Audio _ | ToolResult {content_blocks = None; _}) as block ->
+        block, []
+    in
+    project [] Tool_succeeded block
+  in
+  let flush pending reversed = match pending with
+    | [] -> reversed
+    | _ :: _ ->
+      { origin = Tool_result_followup; role = User; content = List.rev pending;
+        name = None; tool_call_id = None; metadata = [] } :: reversed
+  in
+  let rec loop reversed pending = function
+    | [] -> List.rev (flush pending reversed)
+    | ({role = Tool; _} as message) :: rest ->
+      let content, pending = List.fold_left (fun (content, pending) block ->
+        let block, images = match block with
+          | ToolResult {tool_use_id; _} -> project_result tool_use_id block
+          | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+            | ToolUse _ | Image _ | Document _ | Audio _) -> block, [] in
+        block :: content, List.rev_append images pending) ([], pending) message.content in
+      loop ({message with content = List.rev content} :: reversed) pending rest
+    | ({role = System | User | Assistant; _} as message) :: rest ->
+      loop (message :: flush pending reversed) [] rest
+  in
+  loop [] [] messages
+;;
+
+let contents_of_messages ~supports_function_response_parts (messages : message list) =
+  let messages =
+    if supports_function_response_parts then messages
+    else with_function_response_image_followups messages
+  in
   let messages = Api_common.merge_tool_result_followup_user_messages messages in
   let projection =
     match Tool_result_projection.of_messages messages with
@@ -547,12 +659,14 @@ let contents_of_messages (messages : message list) =
        match msg.role with
        | System ->
          let parts =
-           parts_of_content_blocks ~role:msg.role tool_signatures resolved_content
+           parts_of_content_blocks ~role:msg.role ~supports_function_response_parts
+             tool_signatures resolved_content
          in
          system_parts := !system_parts @ parts
        | User | Assistant | Tool ->
          let parts =
-           parts_of_content_blocks ~role:msg.role tool_signatures resolved_content
+           parts_of_content_blocks ~role:msg.role ~supports_function_response_parts
+             tool_signatures resolved_content
          in
          if parts <> []
          then
@@ -601,12 +715,60 @@ let build_function_declaration = function
 
 (* ── Build request body ─────────────────────────────── *)
 
-(* The reasoning blocks this codec puts on the wire, and the ones it
-   drops. Separated from [build_request] so a caller that must size a
-   request before building it gets the same answer the wire will give;
-   the diagnostic [observe] stays at the call site, which keeps this a
-   function of its arguments. *)
+let capabilities_of_config config =
+  match Provider_config.capabilities_for_config_model config with
+  | Some caps -> caps
+  | None -> Capabilities.gemini_capabilities
+;;
+
+(* Older or undeclared models can still receive the existing labelled image
+   followup. Document/audio data has no such native function-response carrier
+   without this separate declaration. Preserve the original and make that
+   omission explicit in both preflight and the serialized result. *)
+let project_function_response_media messages =
+  let omitted kind media_type =
+    Printf.sprintf
+      "[%s omitted: this model does not declare media in function responses (media_type %s)]"
+      kind media_type
+  in
+  let rec nested = function
+    | Document {media_type; _} ->
+      let note = omitted "document" media_type in Text note, [note]
+    | Audio {media_type; _} ->
+      let note = omitted "audio" media_type in Text note, [note]
+    | ToolResult ({content_blocks = Some blocks; _} as result) ->
+      let blocks, notes = List.split (List.map nested blocks) in
+      let notes = List.concat notes in
+      let content = match notes with
+        | [] -> result.content
+        | _ :: _ -> String.concat "\n" (result.content :: notes) in
+      ToolResult {result with content; content_blocks = Some blocks}, notes
+    | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+      | ToolUse _ | Image _ | ToolResult {content_blocks = None; _}) as block -> block, []
+  in
+  List.map (fun (message : 'source Types.message_with) ->
+    let content = List.map (function
+      | ToolResult _ as block -> fst (nested block)
+      | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+        | ToolUse _ | Image _ | Document _ | Audio _) as block -> block)
+      message.content in
+    {message with content}) messages
+;;
+
+(* Document admission is shared by preflight projection and request building.
+   The diagnostic [observe] stays at the dispatch site. *)
 let project_history ?(tools_present = false) config messages =
+  let caps = capabilities_of_config config in
+  let messages, _documents_degraded =
+    Api_common.degrade_document_messages
+      ~wire_form:Api_common.Document_inline_data
+      ~supports_document_input:caps.supports_document_input
+      messages
+  in
+  let messages =
+    if caps.supports_function_response_parts then messages
+    else project_function_response_media messages
+  in
   Reasoning_history_projection.project_for_provider_config
     ~tools_present
     ~assistant_has_payload:(fun content -> content <> [])
@@ -657,27 +819,14 @@ let build_request_artifact
      the endpoint rejects or drops. Degrading to a named placeholder keeps
      the turn live, mirroring the OpenAI-compatible request boundary. *)
   let projected_messages =
-    let caps =
-      match Provider_config.capabilities_for_config_model config with
-      | Some caps -> caps
-      | None -> Capabilities.gemini_capabilities
-    in
+    let caps = capabilities_of_config config in
     let projected_messages, _images_degraded =
       Api_common.degrade_image_messages
         ~supports_image_input:caps.supports_image_input
         projected_messages
     in
-    (* Same boundary for documents and audio: [media_parts] projects
-       tool-result Document/Audio blocks alongside images, so a model lacking
-       declared capability ([supports_document_input] / [supports_audio_input])
-       would reach [contents_of_messages] unrepresentable. Degrading here —
-       before projection — mirrors the image rule above. *)
-    let projected_messages, _documents_degraded =
-      Api_common.degrade_document_messages
-        ~wire_form:Api_common.Document_inline_data
-        ~supports_document_input:caps.supports_document_input
-        projected_messages
-    in
+    (* Documents already passed the same boundary in [project_history].
+       Audio, like images, still needs its capability projection here. *)
     let projected_messages, _audio_degraded =
       Api_common.degrade_audio_messages
         ~supports_audio_input:caps.supports_audio_input
@@ -685,7 +834,11 @@ let build_request_artifact
     in
     projected_messages
   in
-  let contents, system_instruction = contents_of_messages projected_messages in
+  let contents, system_instruction =
+    contents_of_messages
+      ~supports_function_response_parts:(capabilities_of_config config).supports_function_response_parts
+      projected_messages
+  in
   (* Prepend system_prompt from config if present *)
   let system_instruction =
     match config.system_prompt, system_instruction with

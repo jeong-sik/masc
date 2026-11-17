@@ -51,6 +51,9 @@ type entry =
   ; supports_required_tool_choice : bool option
   ; supports_named_tool_choice : bool option
   ; supports_parallel_tool_calls : bool option
+  ; supports_function_response_parts : bool option
+    (** Explicit Gemini function-response media support. [None] leaves the
+        selected capability base's declaration unchanged. *)
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option

@@ -131,6 +131,7 @@ type declarative_capability_overrides =
   ; supports_required_tool_choice : bool option
   ; supports_named_tool_choice : bool option
   ; supports_parallel_tool_calls : bool option
+  ; supports_function_response_parts : bool option
   ; assistant_tool_content_format : string option
   ; chat_output_budget_field : string option
   ; tool_schema_conformance : string option
@@ -221,6 +222,10 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
       override_bool
         base.supports_parallel_tool_calls
         overrides.supports_parallel_tool_calls
+  ; supports_function_response_parts =
+      override_bool
+        base.supports_function_response_parts
+        overrides.supports_function_response_parts
   ; assistant_tool_content_format =
       (match overrides.assistant_tool_content_format with
        | Some s ->
@@ -387,6 +392,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_required_tool_choice = entry.supports_required_tool_choice
   ; supports_named_tool_choice = entry.supports_named_tool_choice
   ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
+  ; supports_function_response_parts = entry.supports_function_response_parts
   ; assistant_tool_content_format = entry.assistant_tool_content_format
   ; chat_output_budget_field = entry.chat_output_budget_field
   ; tool_schema_conformance = entry.tool_schema_conformance

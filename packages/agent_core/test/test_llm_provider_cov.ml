@@ -644,14 +644,14 @@ let test_tool_result_followup_merge_preserves_internal_metadata () =
 
 let test_contents_of_messages_user () =
   let msgs = [ user_msg "hello" ] in
-  let contents, sys = Backend_gemini.contents_of_messages msgs in
+  let contents, sys = Backend_gemini.contents_of_messages ~supports_function_response_parts:false msgs in
   Alcotest.(check int) "1 content" 1 (List.length contents);
   Alcotest.(check bool) "no system" true (sys = None)
 ;;
 
 let test_contents_of_messages_system () =
   let msgs = [ system_msg "you are helpful"; user_msg "hi" ] in
-  let contents, sys = Backend_gemini.contents_of_messages msgs in
+  let contents, sys = Backend_gemini.contents_of_messages ~supports_function_response_parts:false msgs in
   Alcotest.(check int) "1 user content" 1 (List.length contents);
   Alcotest.(check bool) "has system" true (sys <> None)
 ;;
@@ -660,7 +660,7 @@ let test_contents_of_messages_mixed () =
   let msgs =
     [ system_msg "system prompt"; user_msg "user question"; assistant_msg "model answer" ]
   in
-  let contents, sys = Backend_gemini.contents_of_messages msgs in
+  let contents, sys = Backend_gemini.contents_of_messages ~supports_function_response_parts:false msgs in
   Alcotest.(check int) "user + model contents" 2 (List.length contents);
   Alcotest.(check bool) "has system" true (sys <> None)
 ;;
@@ -691,7 +691,7 @@ let test_contents_of_messages_tool_use () =
       }
     ]
   in
-  let contents, _sys = Backend_gemini.contents_of_messages msgs in
+  let contents, _sys = Backend_gemini.contents_of_messages ~supports_function_response_parts:false msgs in
   (* Should have 3 content entries: user, assistant with functionCall, tool with functionResponse *)
   Alcotest.(check int) "3 contents" 3 (List.length contents)
 ;;
@@ -706,7 +706,7 @@ let test_contents_of_messages_redacted_filtered () =
       }
     ]
   in
-  let contents, _sys = Backend_gemini.contents_of_messages msgs in
+  let contents, _sys = Backend_gemini.contents_of_messages ~supports_function_response_parts:false msgs in
   Alcotest.(check int) "1 content" 1 (List.length contents);
   (* The redacted thinking should be filtered out, leaving only text *)
   let open Yojson.Safe.Util in

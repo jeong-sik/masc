@@ -18,8 +18,10 @@ val project_history
   -> Provider_config.t
   -> 'source Types.message_with list
   -> ('source Reasoning_history_projection.projection, Reasoning_history_projection.error) result
-(** The history this codec will actually serialize: reasoning blocks it cannot
-    carry, and blocks the config's replay policy excludes, are already gone.
+(** The history after document admission and reasoning replay policy:
+    documents the model cannot receive are replaced with explicit omission
+    text, and reasoning blocks the codec or replay policy excludes are gone.
+    Image and audio capability projection still belongs to request building.
 
     Exported so a caller that must size a request before building it asks the
     same function the wire does, rather than keeping a second opinion about
@@ -105,6 +107,12 @@ val media_content_block_of_inline_data
   :  Yojson.Safe.t
   -> gemini_part_signature_target * Types.content_block
 
-(** Extract [contents] list and optional [systemInstruction] from messages.
-    Exposed for unit-testing the AGENT_CORE-to-Gemini message mapping. *)
-val contents_of_messages : Types.message list -> Yojson.Safe.t list * Yojson.Safe.t option
+(** Extract [contents] and optional [systemInstruction] from already admitted
+    messages. Native media inside function responses requires the exact
+    model's explicit declaration; direct input support alone does not imply it.
+    Undeclared document/audio tool media must be projected before this codec.
+    The existing labelled image followup remains available when native parts
+    are not declared. *)
+val contents_of_messages :
+  supports_function_response_parts:bool ->
+  Types.message list -> Yojson.Safe.t list * Yojson.Safe.t option

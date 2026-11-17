@@ -1690,6 +1690,10 @@ modality_priority = "visual_first"
 supports_native_streaming = true
 
 # Gemini Models
+# FunctionResponse.parts is declared on these chat rows, separately from direct
+# media input. The generic Gemini preset does not grant it to unlisted models.
+# https://ai.google.dev/api/generate-content#FunctionResponse
+# https://ai.google.dev/gemini-api/docs/function-calling#multimodal
 # Gemini 4 rows: 1,048,576 is one window shared by input and output, and 65,536
 # is the default synchronous output. One non-streaming hop on Carbon and Argon
 # stops at 32,768 tokens (models.list reports that figure as outputTokenLimit;
@@ -1709,6 +1713,7 @@ supports_native_streaming = true
 # $0.075. A non-streaming hop runs to 65,536 here.
 model_id = "gemini-4-hydrogen"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1048576
 max_output_tokens = 65536
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh"]
@@ -1726,6 +1731,7 @@ cache_read_multiplier = 0.05
 # cache reads $0.20.
 model_id = "gemini-4-carbon"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1048576
 max_output_tokens = 65536
 accepted_reasoning_efforts = ["low", "medium", "high"]
@@ -1747,6 +1753,7 @@ cache_read_multiplier = 0.05
 # introductory $2/$10 ends 2026-11-30, checked 2026-11-13).
 model_id = "gemini-4-argon"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1048576
 max_output_tokens = 65536
 accepted_reasoning_efforts = ["low", "medium", "high"]
@@ -1775,6 +1782,7 @@ cache_read_multiplier = 0.05
 # picks the wire.
 model_id = "gemini-3.8-flash"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1048576
 max_output_tokens = 65536
 accepted_reasoning_efforts = ["low", "medium", "high"]
@@ -1787,6 +1795,7 @@ accepted_reasoning_efforts = ["low", "medium", "high"]
 # supported and returns an error", so it is not admitted here.
 model_id = "gemini-3.7-flash"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1048576
 max_output_tokens = 65536
 accepted_reasoning_efforts = ["low", "medium", "high"]
@@ -1797,6 +1806,7 @@ accepted_reasoning_efforts = ["low", "medium", "high"]
 # Runtime effort/slot aliases are not additional model IDs. Values mirror the declared gemini-3.5-flash sibling.
 model_id = "gemini-3.6-flash"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1000000
 max_output_tokens = 64000
 accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
@@ -1804,6 +1814,7 @@ accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
 [[models]]
 model_id = "gemini-3.5-flash"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1000000
 max_output_tokens = 64000
 accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
@@ -1811,6 +1822,7 @@ accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
 [[models]]
 model_id = "gemini-3-flash-preview"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1000000
 accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
 input_per_million = 0.50
@@ -1821,6 +1833,7 @@ cache_read_multiplier = 1.0
 [[models]]
 model_id = "gemini-3.1-pro-preview"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1000000
 accepted_reasoning_efforts = ["low", "medium", "high"]
 input_per_million = 2.0
@@ -1831,6 +1844,7 @@ cache_read_multiplier = 1.0
 [[models]]
 model_id = "gemini-3.1-pro"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1000000
 accepted_reasoning_efforts = ["low", "medium", "high"]
 input_per_million = 2.0
@@ -1841,6 +1855,7 @@ cache_read_multiplier = 1.0
 [[models]]
 model_id = "gemini-3.1-flash-lite-preview"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1000000
 accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
 input_per_million = 0.25
@@ -1851,6 +1866,7 @@ cache_read_multiplier = 1.0
 [[models]]
 model_id = "gemini-3.1-flash-lite"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1000000
 accepted_reasoning_efforts = ["minimal", "low", "medium", "high"]
 input_per_million = 0.25
@@ -1861,6 +1877,7 @@ cache_read_multiplier = 1.0
 [[models]]
 model_id = "gemini-3"
 base = "gemini"
+supports_function_response_parts = true
 max_context_tokens = 1000000
 input_per_million = 0.50
 output_per_million = 3.0

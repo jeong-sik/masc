@@ -78,6 +78,28 @@ let require_capabilities (entry : Provider_catalog.entry) =
   | None -> fail "fixture requires explicit provider-wide capability policy"
 ;;
 
+let test_gemini_function_response_parts_override_independently () =
+  List.iter (fun (parts, documents) ->
+    let json = catalog_with_provider
+      (`Assoc
+        [ "id", `String "function-response-provider"
+        ; "kind", `String "gemini"
+        ; "request_path", `String ""
+        ; "capabilities_base", `String "gemini"
+        ; "capabilities", `Assoc
+            [ "supports_function_response_parts", `Bool parts
+            ; "supports_document_input", `Bool documents ] ]) in
+    let catalog = match Provider_catalog.of_json json with
+      | Ok catalog -> catalog
+      | Error detail -> fail detail in
+    let capabilities = require_capabilities (require_lookup catalog "function-response-provider") in
+    check bool "provider response-parts declaration keeps explicit false" parts
+      capabilities.supports_function_response_parts;
+    check bool "provider direct document declaration is independent" documents
+      capabilities.supports_document_input)
+    [false, true; true, false; false, false; true, true]
+;;
+
 let valid_typed_entry
       ?(id = "typed-provider")
       ?(aliases = [])
@@ -1176,6 +1198,8 @@ let () =
         ; test_case "required provider declarations" `Quick test_required_provider_declarations
         ; test_case "models-only override boundary" `Quick test_models_only_override_boundary
         ; test_case "capability overrides are applied" `Quick test_capability_overrides_are_applied
+        ; test_case "Gemini response-parts override is independent of documents" `Quick
+            test_gemini_function_response_parts_override_independently
         ; test_case "typed thinking token boundary" `Quick test_typed_thinking_token_boundary
         ; test_case "auth shape contract" `Quick test_auth_shape_contract
         ; test_case "closed object contract" `Quick test_closed_object_contract

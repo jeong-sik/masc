@@ -486,6 +486,7 @@ let capability_fields =
   ; "supports_required_tool_choice"
   ; "supports_named_tool_choice"
   ; "supports_parallel_tool_calls"
+  ; "supports_function_response_parts"
   ; "assistant_tool_content_format"
   ; "chat_output_budget_field"
   ; "tool_schema_conformance"

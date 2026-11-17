@@ -153,6 +153,10 @@ type capabilities =
   ; supports_required_tool_choice : bool
   ; supports_named_tool_choice : bool
   ; supports_parallel_tool_calls : bool
+  ; supports_function_response_parts : bool
+    (** Whether Gemini generateContent accepts media inside [FunctionResponse.parts].
+        Independent of direct input modality flags; each media kind still needs
+        its own input capability. Absent declarations withhold this wire form. *)
   ; assistant_tool_content_format : assistant_tool_content_format
   ; chat_output_budget_field : chat_output_budget_field
     (** Which Chat Completions field carries the output-token budget — classic

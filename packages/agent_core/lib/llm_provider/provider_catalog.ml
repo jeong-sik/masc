@@ -607,6 +607,9 @@ let parse_capability_overrides ~base cap_json =
   let* supports_parallel_tool_calls =
     member_bool "supports_parallel_tool_calls" cap_json
   in
+  let* supports_function_response_parts =
+    member_bool "supports_function_response_parts" cap_json
+  in
   let* supports_reasoning = member_bool "supports_reasoning" cap_json in
   let* supports_response_format_json =
     member_bool "supports_response_format_json" cap_json
@@ -663,6 +666,9 @@ let parse_capability_overrides ~base cap_json =
     |> fun caps ->
     override supports_parallel_tool_calls caps (fun caps value ->
       { caps with Capability_profile.supports_parallel_tool_calls = value })
+    |> fun caps ->
+    override supports_function_response_parts caps (fun caps value ->
+      { caps with Capability_profile.supports_function_response_parts = value })
     |> fun caps ->
     (match assistant_tool_content_format with
      | Some assistant_tool_content_format ->

@@ -112,11 +112,16 @@ let run_child_if_requested () =
   | [|_; "--owned-lock-probe"; path|] -> exit (lock_probe path)
   | _ -> ()
 
+let rec wait_for_child pid =
+  match Unix.waitpid [] pid with
+  | status -> status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_child pid
+
 let contender path =
   let pid = Unix.create_process Sys.executable_name
       [|Sys.executable_name; "--owned-lock-probe"; path|]
       Unix.stdin Unix.stdout Unix.stderr in
-  match Unix.waitpid [] pid with
+  match wait_for_child pid with
   | _, Unix.WEXITED code -> code
   | _, (Unix.WSIGNALED signal | Unix.WSTOPPED signal) -> failf "lock probe signal %d" signal
 

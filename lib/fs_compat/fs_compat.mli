@@ -187,11 +187,24 @@ val observe_owned_regular_file
     This is a point-in-time observation, not authority for a later read or
     write. Callers must still use their authoritative transaction protocol. *)
 
+val load_owned_regular_file_with_snapshot_locked
+  : ?owner_uid:int -> ?single_link:bool -> ownership_root:string -> string
+  -> (owned_regular_file_contents option, owned_regular_file_read_error) result
+(** Same policies, absence and errors as {!load_owned_regular_file_with_snapshot},
+    with open/read/validation/close under the canonical data-path append mutex.
+    Opens read-only and creates nothing. No cross-process read lock is added.
+    Do not call inside a private-file update callback: that mutex is not
+    reentrant. Use the updater's descriptor-bound observation instead.
+    Cooperating path aliases share the canonical directory/leaf key; arbitrary
+    external inode aliases are not a new guarantee. *)
+
 module Owned_read_for_testing : sig
   val load_with_snapshot : ?single_link:bool -> parent_lstat:(string -> Unix.stats) -> owner_uid:int ->
     ownership_root:string -> string -> (owned_regular_file_contents option, owned_regular_file_read_error) result
   val observe : parent_lstat:(string -> Unix.stats) -> owner_uid:int ->
     ownership_root:string -> string -> (owned_regular_file_snapshot option, owned_regular_file_read_error) result
+  val load_with_snapshot_locked : ?single_link:bool -> parent_lstat:(string -> Unix.stats) -> owner_uid:int ->
+    ownership_root:string -> string -> (owned_regular_file_contents option, owned_regular_file_read_error) result
 end
 
 val sha256_owned_regular_file
@@ -2412,3 +2425,45 @@ val append_path_mutex_count_for_testing : unit -> int
 (** Canonical per-path mutex key resolved via the nearest existing parent
     directory [realpath] + leaf basename. Test-only. *)
 val canonical_append_mutex_path_for_testing : string -> string
+
+type 'error owned_file_update_error =
+  | Owned_observation_failed of owned_regular_file_read_error
+  | Underlying_update_failed of 'error
+
+val update_owned_private_file_durable_locked_result :
+  ?owner_uid:int -> ownership_root:string -> string ->
+  (owned_regular_file_contents -> string option * 'a) ->
+  ('a, durable_append_error owned_file_update_error) private_file_transaction_outcome
+(** Create/update one data leaf in an already prepared owned parent. Admission
+    precedes creation or permission changes. The callback borrows the actual
+    transaction bytes and descriptor snapshot; it must not reopen the path.
+    No sidecar is created. The existing private writer's unique-leaf policy,
+    append/fsync/rollback and primary/close-failure outcomes are preserved.
+    Eio cancellation waits for settlement and does not discard a committed
+    receipt. Callbacks must not suspend or reopen this cooperating path. *)
+
+val update_existing_owned_private_file_durable_locked_result :
+  ?owner_uid:int -> ownership_root:string -> string ->
+  (owned_regular_file_contents -> string option * 'a) ->
+  ('a option, private_jsonl_transaction_error owned_file_update_error)
+    private_file_transaction_outcome
+(** Existing-only sibling. Missing parent/data returns a successful [None],
+    without creating anything or invoking the callback. Both APIs require one
+    hard link, as their matching existing private-file writers already do.
+    Ownership remains optional: [None] retains the owned reader's no-follow and
+    immediate-parent identity policy without adding UID/parent-mode authority. *)
+
+module Owned_private_file_for_testing : sig
+  val create :
+    io:private_jsonl_transaction_io_for_testing ->
+    ?owner_uid:int -> ownership_root:string -> string ->
+    (owned_regular_file_contents -> string option * 'a) ->
+    ('a, durable_append_error owned_file_update_error) private_file_transaction_outcome
+  val existing :
+    io:private_jsonl_transaction_io_for_testing ->
+    ?owner_uid:int -> ownership_root:string -> string ->
+    (owned_regular_file_contents -> string option * 'a) ->
+    ('a option, private_jsonl_transaction_error owned_file_update_error)
+      private_file_transaction_outcome
+  val path_mutex_available : string -> bool
+end

@@ -4836,6 +4836,119 @@ let advance_original fixture original event=io (fun () ->
   | Ok (Owner.Stored original | Already_stored original) -> original
   | Ok (Unconfirmed detail) -> fail detail
   | Error error -> fail (Owner.update_error_to_string error))
+(* Inventory may archive an unlinked Rejected before the Owner's resume path
+   runs again. Confirm the actual typed host ending at that earlier boundary,
+   including when all unread history makes this original no floor candidate. *)
+let test_a_retained_replaced_history_original_checks_its_proof_before_inventory_settlement () =
+  with_fixture (fun ~sw fixture ->
+    let waiting=host_ends_the_original_of_a_replaced_declaration fixture ~sw in
+    let wakes=ref 0 in
+    ended_by_one_refusal (run_worker_waking fixture wakes);
+    let ended,request=only_original fixture in
+    check string "the actual ending still owns the original ID" waiting.Owner.request_id ended.Owner.request_id;
+    check bool "the inventory regression is unlinked and reads all unread history" true
+      (Capture.predecessor request=None && Source.extent (Capture.source request)=Keeper_librarian_range.All_unread);
+    let exact=Capture.request request |> get in
+    let schema=Option.to_result ~none:"ended history fixture has no schema" exact.Exact.schema |> get in
+    (match io (fun () -> Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian" ~schema exact) |> get with
+     | Retained_terminal (Retained_not_allowed {reason=Replaced_declaration}) -> ()
+     | Retained_absent | Retained_open
+     | Retained_terminal (Retained_call _ | Retained_unknown _ | Retained_not_allowed {reason=Permission_refused _}
+       | Retained_request_id_reused) -> fail "the actual host did not retain its typed declaration ending");
+    (match Progress.phase ended.progress with
+     | Rejected {stage=Execution;_} -> ()
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+       fail "the original must already be Rejected before its next inventory read");
+    check bool "the all-unread replaced original is not a floor candidate" true
+      (Option.is_none (candidate_of fixture));
+    (match latest fixture request with
+     | Exact.Completed_latest {execution={outcome=Exact.Call_refused _;_};_} -> ()
+     | No_completed_latest | Completed_latest {execution={outcome=Exact.Call_ended _;_};_} ->
+       fail "the actual replaced original must retain its earlier closed-deferral proof");
+    let validates ()=io (fun () -> Commit.validate ~store:fixture.store ~request ~record:ended) in
+    (match validates () |> get with Commit.Settled -> () | Unfinished -> fail "a valid declaration ending was not settled");
+    (* Produce a foreign completed proof through real configured Runtime and
+       Exact HTTP. Its definite capacity refusal is validated and archived by
+       the ordinary public policy; it consumes no source or Memory. *)
+    fixture.set_response (fun _ -> size_refusal);
+    let foreign,record,foreign_exact=memory_action fixture (fun () ->
+      let owner=Capture.physical_owner request in
+      Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+        ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination ->
+          let foreign=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+            ~owner ~destination ~source:(Capture.source request) ~preparation:(Capture.preparation request) ()) |> get in
+          let record=Durable_owner.retain ~store:fixture.store foreign
+            |> Result.map_error Durable_owner.error_to_string |> get in
+          let record=advance_original fixture record Progress.Dispatch_intended in
+          Ok (foreign,record,Capture.request foreign |> get)) |> get) in
+    (* The HTTP fixture waits for the submitting Memory unit to become idle,
+       just as the configured worker executes after its submit returned. *)
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    (match Exact.run ~store:fixture.store ~declaration_id:"librarian" ~package
+      ~runner:(Server_lane_addon_exact.runner ~base_path:fixture.base_path)
+      ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path) foreign_exact |> get with
+     | Final (Call_final (Input_refused _)) -> ()
+     | Final (Call_final (Answered _ | Invalid_output _ | Output_limit_reached _) | Outcome_unknown
+         | Not_allowed _ | Request_id_reused) | Not_final _ -> fail "the foreign original has no actual capacity result");
+    let foreign_completed_proof=memory_action fixture (fun () ->
+      let foreign_schema=Option.to_result ~none:"foreign original lacks its schema" foreign_exact.Exact.schema |> get in
+      let retained=match io (fun () -> Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian"
+        ~schema:foreign_schema foreign_exact) |> get with
+        | Retained_terminal (Retained_call (Input_refused _) as retained) -> retained
+        | Retained_absent | Retained_open | Retained_terminal (Retained_call (Answered _ | Invalid_output _
+            | Output_limit_reached _) | Retained_unknown _ | Retained_not_allowed _ | Retained_request_id_reused) ->
+          fail "the foreign host proof has no retained capacity result" in
+      let record=advance_original fixture record
+        (Progress.Refused {stage=Execution;evidence=Exact.retained_final_to_json retained}) in
+      (match io (fun () -> Commit.validate ~store:fixture.store ~request:foreign ~record) |> get with
+       | Settled -> () | Unfinished -> fail "the definite foreign refusal was not settled");
+      let bytes=io (fun () -> Fs_compat.load_file (proof_path fixture foreign_exact)) in
+      settle_only fixture ~date:(day_of record.request_id) record;
+      bytes) in
+    fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
+    let path=proof_path fixture exact in
+    let original_proof=io (fun () -> Fs_compat.load_file_opt path) in
+    let restore_proof ()=match original_proof with
+      | Some bytes -> write path bytes
+      | None -> if Sys.file_exists path then Sys.remove path in
+    let before_record=Owner.record_to_json (Owner.listed ended) in
+    let ids ()=List.map (fun ((record:Owner.retained),_) -> record.request_id) (observed_originals fixture) in
+    let before_ids=ids () and posts=F.post_count fixture.server and before_wakes= !wakes in
+    let runtime_keepers_dir=Workspace.keepers_runtime_dir fixture.config in
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name |> get)
+      |> Keeper_external_read_cursor.observation_to_json in
+    let official ()=io (fun () -> Keeper_librarian_official_progress.read ~keepers_dir:runtime_keepers_dir
+      ~keeper_id:keeper_name |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+    let snapshot ()=io (fun () -> Fs_compat.load_file_opt
+      (Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)) in
+    let atom=progress fixture and before_official=official () and before_cursor=cursor () and memory=snapshot () in
+    let damages=[
+      (fun () -> write path "{malformed actual original proof"),restore_proof;
+      (fun () -> write path foreign_completed_proof),restore_proof;
+      (fun () -> if Sys.file_exists path then Sys.remove path; Unix.mkdir path 0o700),
+        (fun () -> Unix.rmdir path; restore_proof ())] in
+    List.iter (fun (damage,restore) ->
+      io damage;
+      check bool "inventory validation refuses the actual damaged original proof" true (Result.is_error (validates ()));
+      (match run_worker_waking fixture wakes with
+       | Error (Consumer.Original_publication_blocked _) -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "an invalid retained declaration ending reached inventory archive or fresh selection");
+      check bool "the retained ending remains unarchived" false
+        (settled_on fixture ~date:(day_of ended.request_id) ended);
+      check (list string) "no fresh original is retained" before_ids (ids ());
+      let current,_=only_original fixture in
+      check json "the exact original and its refusal remain" before_record (Owner.record_to_json (Owner.listed current));
+      check int "invalid inventory proof schedules no fresh pass" before_wakes !wakes;
+      check int "invalid inventory proof calls no provider" posts (F.post_count fixture.server);
+      check bool "invalid inventory proof moves no atom position" true (progress fixture=atom);
+      check bool "invalid inventory proof moves no official position" true (official ()=before_official);
+      check json "invalid inventory proof preserves external ACK" before_cursor (cursor ());
+      check bool "invalid inventory proof preserves exact Memory bytes" true (snapshot ()=memory);
+      io restore;
+      (match validates () |> get with Settled -> () | Unfinished -> fail "restored actual proof did not restore the ending")) damages)
 (* A history original captured for the declaration of now that no worker has
    received. The pass that takes its source ends Pending, so it leaves no
    narrowing mark. [declined] is the same original after a submit the host
@@ -5735,6 +5848,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again;
   test_case "a retained replaced floor step checks its actual proof before recreation" `Quick
     test_a_retained_replaced_floor_step_requires_its_actual_proof_link;
+  test_case "retained history inventory checks a replaced original's actual proof before archive" `Quick
+    test_a_retained_replaced_history_original_checks_its_proof_before_inventory_settlement;
   test_case "a declaration put back before the end is read preserves the recorded ending" `Quick
     test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending;
   test_case "a replaced declaration ends a captured original no worker received" `Quick

@@ -92,6 +92,14 @@ let confirm ~(observe : unit -> (Exact.retained_observation, string) result)
   | Retained_terminal actual ->
   let* delivered=same (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final) in
   if not delivered then Ok (Unconfirmed Terminal_differs) else
+  (* Worker Not_allowed JSON need not retain the host's typed ending cause.
+     Every consumer, including retained-inventory settlement, checks the
+     actual original terminal before it can release that source for reread. *)
+  let* ()=match actual with
+    | Exact.Retained_not_allowed {reason=Replaced_declaration} ->
+      let* latest=latest () in require_declaration_ending_latest latest
+    | Retained_call _ | Retained_unknown _ | Retained_not_allowed {reason=Permission_refused _}
+    | Retained_request_id_reused -> Ok () in
   match final with
   | Exact.Call_final expected ->
     let* latest=latest () in

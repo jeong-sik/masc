@@ -180,6 +180,51 @@ let test_restoration_keeps_the_frozen_contract () = with_prompts (fun () ->
     (Result.is_error (R.validate_durable_step_preparation
       {step with context={context with previous_state=Some "Changed carried state"}})))
 
+let test_retained_floor_uses_original_assets_and_context () = with_prompts (fun () ->
+  Prompt_registry.set_override Prompt_names.librarian_turn_inputs
+    "{{conversation_history}}\n{{counterpart_observations}}" |> get;
+  let counterpart : Keeper_counterpart_observation.t =
+    {origin=Durable_chat;channel="direct";workspace_id=None;user_id=Some "retained-speaker";
+     user_name=None;authority=External;content="Retained counterpart evidence"} in
+  let original=R.prepare_durable ~now:123. ~source_lines:["Frozen source line"]
+    {(input ()) with counterpart_observations=[counterpart]} |> get in
+  let source : R.retained_step_source =
+    {request_id="retained-original";request_digest=String.make 64 'a';source_basis_digest=String.make 64 'b'} in
+  let context : R.durable_step_context = {previous_state=Some "Retained state";unread_messages=[]} in
+  let question={original.source_input with current=None;messages=[List.hd original.source_input.messages]} in
+  Prompt_registry.set_override Prompt_names.librarian "Changed live body" |> get;
+  Prompt_registry.set_override Prompt_names.librarian_working_contexts_rule "Changed live rule" |> get;
+  Prompt_registry.set_override Prompt_names.librarian_turn_inputs "Changed live turn slot" |> get;
+  let step=Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key (Some "1")
+    (fun () -> R.prepare_retained_durable_step ~source ~original ~context question |> get) in
+  R.validate_retained_durable_step ~source ~original step |> get;
+  check bool "retained floor preserves the entire captured working context" true
+    (step.preparation.source_input.working_context=original.source_input.working_context);
+  check bool "counterpart input is still attached to the first question" true
+    (step.preparation.source_input.counterpart_observations=[counterpart]);
+  check bool "the policy, parse time and three prompt assets remain frozen" true
+    (step.preparation.policy=original.policy && step.preparation.parsing_now=original.parsing_now
+     && step.preparation.prompt=original.prompt && step.preparation.rule_prompt=original.rule_prompt
+     && step.preparation.turn_prompts=original.turn_prompts);
+  let p=step.preparation in
+  let restore source_input=R.restore_retained_durable_step_preparation ~source ~context ~source_input
+    ~parsing_now:p.parsing_now ~policy:p.policy ~rule_prompt:p.rule_prompt ~turn_prompts:p.turn_prompts
+    ~prompt:p.prompt ~output_schema:p.output_schema |> get in
+  check bool "closed retained restoration renders exactly the same question" true (restore question=step);
+  check bool "a mode identity cannot substitute another original" true
+    (Result.is_error (R.validate_retained_durable_step
+      ~source:{source with source_basis_digest=String.make 64 'c'} ~original step));
+  check bool "retained restoration alone does not authorize clearing captured context" true
+    (Result.is_error (R.validate_retained_durable_step ~source ~original
+      (restore {question with working_context=C.empty})));
+  check bool "retained restoration alone does not authorize changing instructions" true
+    (Result.is_error (R.validate_retained_durable_step ~source ~original
+      (restore {question with keeper_instructions="Changed original"})));
+  check bool "ordinary step restoration still refuses that working context" true
+    (Result.is_error (R.restore_durable_step_preparation ~context ~source_input:question
+      ~parsing_now:p.parsing_now ~policy:p.policy ~rule_prompt:p.rule_prompt ~turn_prompts:p.turn_prompts
+      ~prompt:p.prompt ~output_schema:p.output_schema)))
+
 let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fun () ->
   let counterpart : Keeper_counterpart_observation.t =
     {origin=Durable_chat;channel="direct";workspace_id=None;user_id=Some "speaker";
@@ -441,6 +486,8 @@ let () = run "Original history Memory preparation" ["preparation",[
   test_case "restore inconsistency never reaches domain parsing" `Quick test_restore_refuses_tampering;
   test_case "restoration preserves frozen validation and the floor context" `Quick
     test_restoration_keeps_the_frozen_contract;
+  test_case "retained floor preserves source context and frozen assets" `Quick
+    test_retained_floor_uses_original_assets_and_context;
   test_case "counterpart admission requires a substitution while legacy restores" `Quick
     test_counterpart_template_admission_and_legacy_restore;
   test_case "admission omits the turn-material slots that durable questions render" `Quick

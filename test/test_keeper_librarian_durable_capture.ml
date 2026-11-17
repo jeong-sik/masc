@@ -377,6 +377,32 @@ let test_richer_producer_snapshot_retains_complete_tool_json () =
       message.content) (Capture.input restored).messages);
   expect_confirmed "the richer original against the checkpoint read from disk" live restored
 
+let test_full_manifest_retains_mixed_order_after_append () = with_fixture Mixed @@ fun config trace_id original ->
+  let restored=restore_from_disk config original in
+  let materialize ()=let live=read_live config trace_id in
+    Capture.message_manifest ~boundaries:live.boundaries ~messages:live.messages ~traces:live.traces restored
+    |> Result.map_error Capture.error_to_string |> get in
+  let manifest=materialize () in
+  let atom_kinds=List.map (function
+    | Keeper_librarian_unread.Atom _ -> true | Official_turn _ -> false) manifest.ordered_sources in
+  check (list bool) "official messages precede the later atom cut in the original manifest"
+    [false;false;true;true;true] atom_kinds;
+  check (list string) "every original message retains its exact source hash"
+    (List.map Keeper_librarian_unread.message_digest (Capture.input restored).messages)
+    (List.map Keeper_librarian_unread.source_digest manifest.ordered_sources);
+  let live=read_live config trace_id in
+  let appended=Option.get live.messages @ [message "append outside the retained original"] in
+  save_checkpoint config ~trace_id appended 4;
+  official_row config ~trace_id ~turn:10 "append outside the retained official prefix";
+  let later=materialize () in
+  check bool "appended source messages cannot enlarge or reorder the retained manifest" true (manifest=later);
+  let broken={live with messages=Some (message "replaced old prefix"::List.tl (Option.get live.messages))} in
+  check bool "a replaced retained prefix cannot produce a full-source manifest" true
+    (Result.is_error (Capture.message_manifest ~boundaries:broken.boundaries ~messages:broken.messages
+      ~traces:broken.traces restored));
+  check bool "manifest materialization leaves the complete captured input unchanged" true
+    (Capture.to_json restored=Capture.to_json original)
+
 let test_source_changes_do_not_replace_the_original () = with_fixture Mixed @@ fun config trace_id original ->
   let retained=Capture.to_json original in
   let before=read_live config trace_id in
@@ -449,5 +475,7 @@ let () = Alcotest.run "durable source original capture" ["actual source retentio
   test_case "a changed range is never confirmed against its sources" `Quick test_a_changed_range_is_never_confirmed;
   test_case "producer snapshot richer ToolResult JSON confirms against the disk checkpoint" `Quick
     test_richer_producer_snapshot_retains_complete_tool_json;
+  test_case "full retained manifest preserves mixed order and ignores appended source" `Quick
+    test_full_manifest_retains_mixed_order_after_append;
   test_case "later source replacement cannot substitute a retained original" `Quick
     test_source_changes_do_not_replace_the_original]]

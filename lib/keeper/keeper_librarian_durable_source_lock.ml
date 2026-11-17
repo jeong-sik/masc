@@ -49,7 +49,8 @@ let validate_state request =
    so it moves between passes as admissions arrive. Only a publication of the
    original's own preparation requires it to be as captured. *)
 type cursor = Prepared_as_captured | Moves | Recovering_settlement
-let with_fence ~request ~cursor read =
+type material = Source_only | Message_manifest
+let with_fence ~request ~cursor ~material read =
   let source=Request.source request and owner=Request.physical_owner request in
   let checkpoint,traces=parts (Capture.source source) in
   let checkpoint_id=Option.map (fun (value : Capture.Held.checkpoint) ->
@@ -60,7 +61,7 @@ let with_fence ~request ~cursor read =
   let validate snapshot =
     let* ()=Request.confirm_owner request in
     match cursor with
-    | Recovering_settlement -> read ~messages:None
+    | Recovering_settlement -> read ~messages:None ~manifest:None
     | Prepared_as_captured | Moves ->
     let* boundaries=Keeper_turn_boundaries.read ~keepers_dir:(Capture.runtime_keepers_dir source)
       ~keeper_id:(Request.keeper_id owner) in
@@ -75,8 +76,14 @@ let with_fence ~request ~cursor read =
       in
       loop [] traces
     in
-    let* ()=Capture.confirm_sources ~boundaries ~messages:(Option.map Checkpoint.exact_snapshot_messages snapshot)
-      ~traces:live source |> Result.map_error Capture.error_to_string in
+    let messages=Option.map Checkpoint.exact_snapshot_messages snapshot in
+    let* manifest=match material with
+      | Source_only ->
+        let+ ()=Capture.confirm_sources ~boundaries ~messages ~traces:live source
+          |> Result.map_error Capture.error_to_string in None
+      | Message_manifest ->
+        let+ manifest=Capture.message_manifest ~boundaries ~messages ~traces:live source
+          |> Result.map_error Capture.error_to_string in Some manifest in
     let* ()=match checkpoint,snapshot with
       | None,None -> Ok ()
       | Some original,Some _ -> same_generation original boundaries
@@ -90,7 +97,7 @@ let with_fence ~request ~cursor read =
         let* unchanged=positions_unchanged request in
         require unchanged "Original history read positions changed before the floor read its source"
       | Recovering_settlement -> Error "Settlement scope entered source-publication validation" in
-    read ~messages:(Option.map Checkpoint.exact_snapshot_messages snapshot) in
+    read ~messages ~manifest in
   let read_checkpoint=match cursor with
     | Prepared_as_captured | Moves -> true
     | Recovering_settlement -> false in
@@ -107,7 +114,11 @@ let with_fence ~request ~cursor read =
         |> Result.join in
   lock None ids
 let with_original ~request publish =
-  with_fence ~request ~cursor:Prepared_as_captured (fun ~messages:_ -> publish ())
-let with_original_snapshot ~request read = with_fence ~request ~cursor:Moves read
+  with_fence ~request ~cursor:Prepared_as_captured ~material:Source_only (fun ~messages:_ ~manifest:_ -> publish ())
+let with_original_snapshot ~request read =
+  with_fence ~request ~cursor:Moves ~material:Source_only (fun ~messages ~manifest:_ -> read ~messages)
 let with_original_settlement ~request settle =
-  with_fence ~request ~cursor:Recovering_settlement (fun ~messages:_ -> settle ())
+  with_fence ~request ~cursor:Recovering_settlement ~material:Source_only (fun ~messages:_ ~manifest:_ -> settle ())
+let with_original_manifest ~request read =
+  with_fence ~request ~cursor:Moves ~material:Message_manifest (fun ~messages:_ ~manifest ->
+    match manifest with Some manifest -> read manifest | None -> Error "Original source manifest is absent")

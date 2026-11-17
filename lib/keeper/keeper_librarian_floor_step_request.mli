@@ -29,7 +29,14 @@ val minted_on : string -> (string, string) result
 (** The UTC day a step ID was minted, which is the day its records settle under. *)
 
 type t
-val create : request_id:string -> owner:Keeper_librarian_durable_request.owner ->
+type retained_chain_basis = {
+  anchor : Keeper_memory_os_current.program_anchor_evidence;
+  sources : Keeper_librarian_unread.source list;
+}
+(** Position zero's original Memory anchor and complete ordered message
+    manifest. Data only; the actual source and Memory locks must rejoin it. *)
+val create : ?basis:retained_chain_basis ->
+  request_id:string -> owner:Keeper_librarian_durable_request.owner ->
   destination:Keeper_librarian_durable_request.destination -> transaction_id:string -> range:link ->
   previous:link option ->
   question:Keeper_librarian_message_floor.Machine.question ->
@@ -40,7 +47,8 @@ val create : request_id:string -> owner:Keeper_librarian_durable_request.owner -
     carries the same value, and a restarted chain takes it from its first step
     rather than naming a new one. The step must be the preparation of
     [question]. The request restores from its own encoding before it is
-    returned. *)
+    returned. A retained-original chain requires its complete initial Memory
+    anchor in position zero only; ordinary questions cannot carry one. *)
 val restore : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_request_owner.retained ->
   (t, string) result
 (** Decode the record's request, render its prompt again from the retained
@@ -61,7 +69,9 @@ val matches_question : Keeper_librarian_message_floor.Machine.question -> t -> (
     the same carried working state and unread messages, and the same input. *)
 type header = {request_id:string;destination:Keeper_librarian_durable_request.destination;
   transaction_id:string;range:link;previous:link option;position:int;
-  sources:Keeper_librarian_unread.source list}
+  sources:Keeper_librarian_unread.source list;
+  retained_source:Keeper_librarian_runtime.retained_step_source option;
+  basis_sha256:string option}
 type index = private {
   owner : Keeper_librarian_durable_request.owner;
   header : header;
@@ -101,6 +111,9 @@ val previous : t -> link option
 val position : t -> int
 val sources : t -> Keeper_librarian_unread.source list
 val step : t -> Keeper_librarian_runtime.durable_step_preparation
+val chain_basis : t -> retained_chain_basis option
+(** Original position-zero anchor data. It must be rejoined to the actual
+    Memory incarnation and journal before inference or publication. *)
 val request : t -> (Lane_addon_exact.request, string) result
 val decode_final : store:Lane_addon_store.t -> t -> Yojson.Safe.t ->
   (Lane_addon_exact.final, string) result

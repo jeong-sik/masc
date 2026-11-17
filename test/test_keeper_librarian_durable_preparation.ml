@@ -162,8 +162,10 @@ let test_restoration_keeps_the_frozen_contract () = with_prompts (fun () ->
   check bool "the retained prompt digest still refuses changed captured input" true
     (Result.is_error (Keeper_librarian_durable_question.rendered_matches frozen changed_source));
   let context:R.durable_step_context={previous_state=Some "Carried state";unread_messages=[]} in
+  Prompt_registry.set_override Prompt_names.librarian_turn_inputs
+    "{{conversation_history}}\n{{continuity}}" |> get;
   Prompt_registry.set_override Prompt_names.librarian
-    "{{turn_inputs}}\n{{continuity}}\n{{working_contexts_rule}}" |> get;
+    "{{turn_inputs}}\n{{working_contexts_rule}}" |> get;
   let step=R.prepare_durable_step ~source_lines:[] ~now:123. ~context (input ()) |> get in
   let p=step.preparation in
   let restore_step ~context ~source_input=R.restore_durable_step_preparation ~context ~source_input
@@ -419,9 +421,7 @@ let test_admission_proposal_enforces_facts_commit_budget () =
         "category", `String "fact"; "board_post_id", `Null; "board_comment_id", `Null;
         "supersedes", `Null; "absorbs", `List [`String "m1"; `String "m2"];
         "evidence", empty_evidence]];
-      "dropped", `List [
-        `Assoc ["memory_id", `String "m1"; "reason", `String "absorbed into summary"];
-        `Assoc ["memory_id", `String "m2"; "reason", `String "absorbed into summary"]];
+      "dropped", `List [];
       "working_state", `Null; "working_contexts", `List []];
     "candidates", `List [`Assoc [
       "request_id", `String "source"; "outcome", `String "incorporated";

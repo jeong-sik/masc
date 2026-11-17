@@ -57,6 +57,9 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 - 폴더 안의 심볼릭 링크도 다른 파일로 보고 거절한다.
 - 서버가 모르는 이름이면 서버가 가진 이름을 나열해 거절한다.
 
+`package` 키를 모르는 서버 빌드는 그 선언을 거절한다. 그런 서버로 되돌릴 때는 선언의 `package`를
+`manifest_path`로 먼저 바꾼다.
+
 `manifest_path`와 `binding.sources`의 `snapshot_file.path`는 선언 파일이 있는 디렉터리를 기준으로
 해석한다. 그 밖의 package-specific binding 문자열을 파일 경로로 추측하거나 확장하지 않는다.
 현재 source 종류는 `snapshot_file`, `msx_capture`, `browser_document`, `lane_output`, `fusion_run`이다.

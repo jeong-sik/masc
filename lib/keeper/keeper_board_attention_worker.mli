@@ -109,7 +109,8 @@ type settlement =
       ; continuation_wake : Keeper_registry.wakeup_outcome option
       }
       (** The walk settled nothing: each of the [held] captured members
-          records a judgment its candidate refused, and stays [Completed]. *)
+          records a judgment its candidate refused, or names a candidate the
+          ledger cannot read, and stays [Completed]. *)
 
 type wake_skip_reason =
   | Keeper_paused
@@ -174,8 +175,10 @@ val settle_completed_snapshot :
     delivery failure retains its evidence without consuming the candidate; if
     delivery committed before partition settlement failed, replay preserves
     that effect. A member whose candidate already records another judgment
-    ([Keeper_board_attention_candidate.Judgment_conflict]) is not a failed
-    transition: it stays [Completed], the walk logs it as an error and goes on
+    ([Keeper_board_attention_candidate.Judgment_conflict]), or whose
+    candidate is not among the readable rows of a ledger holding rows the
+    decoder refused ([Keeper_board_attention_candidate.Candidate_unreadable]),
+    is not a failed transition: it stays [Completed], the walk logs it as an error and goes on
     to the next member, and it does not count toward the continuation wake,
     because the same refusal would answer that wake. The returned candidate
     id is the last settled member. A

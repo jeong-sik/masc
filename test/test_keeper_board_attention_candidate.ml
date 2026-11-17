@@ -48,6 +48,8 @@ let delivered label = function
   | Ok (A.Delivered candidate) -> candidate
   | Ok A.Candidate_absent ->
     Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Ok (A.Candidate_unreadable { rejected_rows }) ->
+    Alcotest.failf "%s: candidate behind %d unreadable row(s)" label rejected_rows
   | Ok (A.Judgment_conflict _) ->
     Alcotest.failf "%s: the candidate already records another judgment" label
   | Error detail -> Alcotest.failf "%s: %s" label detail
@@ -1149,6 +1151,45 @@ let test_unreadable_row_does_not_hide_the_rest () =
     (List.length rejections)
 ;;
 
+(* A candidate whose only row the decoder refuses is not known to be gone:
+   the refused row may still hold it. Delivery answers that as a value, writes
+   nothing, and a repaired ledger delivers the same request (#38068). *)
+let test_delivery_behind_an_unreadable_row_is_not_absence () =
+  with_temp_base "board-attention-candidate-delivery-unreadable" @@ fun base_path ->
+  let persisted = record ~base_path (candidate (signal "post-unreadable-delivery")) in
+  let path = ledger_path ~base_path in
+  let readable = In_channel.with_open_bin path In_channel.input_all in
+  let unreadable = "{not-json}\n" in
+  replace_ledger_bytes path unreadable;
+  let deliver () =
+    A.apply_judgment_and_deliver
+      ~base_path
+      ~keeper_name:persisted.keeper_name
+      ~candidate_id:persisted.candidate_id
+      ~judgment:(judgment J.Relevant)
+  in
+  (match deliver () with
+   | Ok (A.Candidate_unreadable { rejected_rows }) ->
+     Alcotest.(check int) "the refused row is counted" 1 rejected_rows
+   | Ok A.Candidate_absent ->
+     Alcotest.fail "a candidate behind a refused row was reported absent"
+   | Ok (A.Delivered _) -> Alcotest.fail "an unreadable candidate was delivered"
+   | Ok (A.Judgment_conflict _) ->
+     Alcotest.fail "an unreadable candidate reported a judgment conflict"
+   | Error detail ->
+     Alcotest.failf "the unreadable candidate was not returned as a value: %s" detail);
+  Alcotest.(check string)
+    "nothing was written behind the refused row"
+    unreadable
+    (In_channel.with_open_bin path In_channel.input_all);
+  replace_ledger_bytes path readable;
+  let consumed = delivered "deliver after repair" (deliver ()) in
+  match consumed.status with
+  | A.Consumed _ -> ()
+  | A.Pending _ | A.Judged _ | A.Quarantine _ ->
+    Alcotest.fail "the repaired candidate did not reach Consumed"
+;;
+
 let test_record_requests_worker_without_invoking_judgment () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1248,6 +1289,8 @@ let test_not_relevant_delivery_is_idempotent () =
      Alcotest.fail "conflicting terminal judgment was accepted"
    | Ok A.Candidate_absent ->
      Alcotest.fail "the consumed candidate was reported absent"
+   | Ok (A.Candidate_unreadable _) ->
+     Alcotest.fail "the consumed candidate was reported unreadable"
    | Error detail ->
      Alcotest.failf "the conflict was not returned as a value: %s" detail);
   Alcotest.(check bool)
@@ -1605,6 +1648,10 @@ let () =
             "an unreadable row does not hide the rest"
             `Quick
             test_unreadable_row_does_not_hide_the_rest
+        ; Alcotest.test_case
+            "delivery behind an unreadable row is not absence"
+            `Quick
+            test_delivery_behind_an_unreadable_row_is_not_absence
         ; Alcotest.test_case
             "a keeper purge removes both Board attention ledgers"
             `Quick

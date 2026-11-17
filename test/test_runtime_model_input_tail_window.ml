@@ -1126,7 +1126,7 @@ let test_a_window_without_an_atom_observes_the_history_end () =
 
 let test_measured_history_preserves_exact_occurrences () =
   let encode message =
-    Keeper_official_client_context_codec.(encode Canonical_source message)
+    Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)
   in
   let bytes message = String.length (encode message) in
   let tool_input value =

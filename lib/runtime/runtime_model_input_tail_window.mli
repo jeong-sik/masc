@@ -107,6 +107,13 @@ val annotate
     a second implementation of it would let the two stages disagree about
     where an atom begins. *)
 
+val atom_opening_index
+  :  Agent_core.Types.message list
+  -> int * (int -> string option)
+(** The atom count and opening-digest lookup from one application of
+    {!annotate}. The lookup has the same bytes, bounds and lazy encoding as
+    {!atom_opening_digest}: constructing the index hashes no message. *)
+
 val atom_opening_digest
   :  Agent_core.Types.message list
   -> int

@@ -1,8 +1,8 @@
 (** RFC-0387 — B1 creation requirement + verification ledger + the stage-2
     completion gate.
 
-    B1: creation without a declared success condition ([metric] +
-    [target_value]) is a typed rejection. Partial updates retain omitted
+    B1: creation without a declared success condition ([measure] +
+    [procedure]) is a typed rejection. Partial updates retain omitted
     fields, and changed effective criteria must remain non-blank.
 
     Ledger: verdict commits round-trip through the file store, the decoders
@@ -121,7 +121,7 @@ let json_bool json path =
 
 let isolated_criterion =
   Goal_store.Criterion { revision = "test-criterion"; title = "Ledger proof";
-    metric = Some "verified services"; target_value = Some "3" }
+    measure = Goal_measure_fixture.done_when "3"; procedure = "verified services" }
 ;;
 
 let current_criterion config goal_id =
@@ -173,7 +173,7 @@ let test_create_requires_a_success_condition () =
   let ctx = workspace_ctx config in
   let rejected =
     must_fail
-      "create without metric"
+      "create without measure"
       (dispatch ctx ~name:"masc_goal_upsert" [ "title", `String "No condition" ])
   in
   check string "typed validation error" "validation_error"
@@ -181,17 +181,17 @@ let test_create_requires_a_success_condition () =
   check bool "the message names the missing condition" true
     (String_util.contains_substring
        (Yojson.Safe.to_string rejected)
-       "metric and target_value");
+       "measure and a non-blank procedure");
   (* A blank value rejects exactly like an absent one. *)
   let blank =
     must_fail
-      "create with blank target_value"
+      "create with a blank measure condition"
       (dispatch
          ctx
          ~name:"masc_goal_upsert"
          [ "title", `String "Blank condition"
-         ; "metric", `String "verified services"
-         ; "target_value", `String "   "
+         ; "measure", `Assoc [ "kind", `String "done_when"; "condition", `String "   " ]
+         ; "procedure", `String "verified services"
          ])
   in
   check string "typed validation error" "validation_error"
@@ -209,8 +209,8 @@ let test_create_with_a_success_condition_succeeds () =
          ctx
          ~name:"masc_goal_upsert"
          [ "title", `String "Verifiable goal"
-         ; "metric", `String "verified services"
-         ; "target_value", `String "3"
+         ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "3")
+         ; "procedure", `String "verified services"
          ])
   in
   check string "created" "created" (json_state body [ "action" ])
@@ -224,21 +224,21 @@ let test_partial_update_preserves_success_condition () =
       Goal_store.upsert_goal_with_events ~actor:"test"
         config
         ~title:"Created with a condition"
-        ~metric:"m"
-        ~target_value:"1"
+        ~measure:(Goal_measure_fixture.done_when "1")
+        ~procedure:"m"
         ()
     with
     | Ok payload -> payload
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
-  (* A partial rename uses the stored metric and target when checking the
+  (* A partial rename uses the stored measure and procedure when checking the
      changed effective criterion. No re-declaration is required. *)
   match
     Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~title:"Renamed" ()
   with
   | Ok (updated, `updated _, _) ->
-    check (option string) "metric retained" goal.metric updated.metric;
-    check (option string) "target retained" goal.target_value updated.target_value
+    check string "procedure retained" goal.procedure updated.procedure;
+    check bool "measure retained" true (Goal_measure.equal goal.measure updated.measure)
   | Ok (_, `created, _) -> fail "an existing id must update, not create"
   | Error error -> fail ("partial update rejected: " ^ Goal_store.write_error_to_string error)
 ;;
@@ -248,7 +248,7 @@ let test_undecodable_goal_store_reports_corruption_not_b1 () =
   @@ fun config ->
   (* Poison the GOAL store: the create/update split is decided inside the
      write lock on the decoded state, so a corrupt store must surface the
-     fail-closed persistence error — not "metric and target_value are
+     fail-closed persistence error — not "measure and procedure are
      required", which would misreport corruption as a caller mistake. *)
   let goals_path = Goal_store.goals_path config in
   let poison path =
@@ -257,7 +257,7 @@ let test_undecodable_goal_store_reports_corruption_not_b1 () =
   in
   poison goals_path;
   poison (goals_path ^ ".last-good");
-  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"x" ~metric:"m" ~target_value:"1" () with
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"x" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
   | Ok _ -> fail "Goal upsert wrote over an undecodable store"
   (* The refusal is the store's typed Unavailable, never the B1 rejection:
      the create/update split is decided only on a state that was read. *)
@@ -405,8 +405,8 @@ let test_goal_list_joins_the_ledger () =
          ctx
          ~name:"masc_goal_upsert"
          [ "title", `String "Observable goal"
-         ; "metric", `String "verified services"
-         ; "target_value", `String "3"
+         ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "3")
+         ; "procedure", `String "verified services"
          ])
   in
   let goal_id = json_state created [ "goal_id" ] in
@@ -449,8 +449,8 @@ let test_goal_list_renders_a_ledger_error_state () =
           ctx
           ~name:"masc_goal_upsert"
           [ "title", `String "Goal beside a corrupt ledger"
-          ; "metric", `String "m"
-          ; "target_value", `String "1"
+          ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+          ; "procedure", `String "m"
           ]));
   poison_ledger config;
   let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" [ "detailed", `Bool true ]) in
@@ -473,8 +473,8 @@ let create_goal ctx title =
          ctx
          ~name:"masc_goal_upsert"
          [ "title", `String title
-         ; "metric", `String "m"
-         ; "target_value", `String "1"
+         ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+         ; "procedure", `String "m"
          ])
   in
   json_state created [ "goal_id" ]
@@ -549,7 +549,7 @@ let test_measurement_requires_current_criterion_and_evidence () =
    | Ok _ | Error _ -> fail "measurement snapshot kept more than one row for a Goal");
   let before_revision = Goal_projection_generation.current () in
   let changed =
-    match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"2" () with
+    match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~measure:(Goal_measure_fixture.done_when "2") () with
     | Ok (goal, _, _) -> goal
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
@@ -648,7 +648,7 @@ let test_measurement_receipt_preserves_lifecycle_and_criterion () =
     | Ok receipt -> receipt
     | Error error -> fail (Goal_measurement.error_to_string error) in
   let captured = `Assoc (Goal_measurement.receipt_fields receipt) in
-  let changed = match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~target_value:"2" () with
+  let changed = match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~measure:(Goal_measure_fixture.done_when "2") () with
     | Ok (changed, _, _) -> changed
     | Error error -> fail (Goal_store.write_error_to_string error) in
   check bool "criterion really changed after recording" true
@@ -1197,7 +1197,7 @@ let test_blank_public_criterion_edits_preserve_pending_proof () =
         (proof_before = proof_identity config goal_id);
       check string "goal remains verifying" "verifying" (stored_phase config goal_id))
       [""; " \t\n"])
-    ["title"; "metric"; "target_value"]
+    ["title"; "procedure"]
 ;;
 
 (* (b) Public callers cannot self-verify. Only the typed verifier boundary can
@@ -1338,7 +1338,7 @@ let test_verifying_does_not_recreate_an_unknown_request () =
           (match Goal_verification.reopen_goal config ~goal_id ~actor:"operator" ~note:None with
            | Ok _ -> () | Error detail -> fail detail)
         | Stale ->
-          (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"4" () with
+          (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~measure:(Goal_measure_fixture.done_when "4") () with
            | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error))
         | Confirmed ->
           let request_id, criterion = proof_identity config goal_id in
@@ -1829,7 +1829,7 @@ let test_stale_proof_request_cannot_consume_revised_criterion () =
   let old_request, old_criterion = proof_identity config goal_id in
   ignore (must_succeed "change target"
     (dispatch ctx ~name:"masc_goal_upsert"
-      [ "id", `String goal_id; "target_value", `String "300" ]));
+      [ "id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "300") ]));
   let criterion = current_criterion config goal_id in
   (match Goal_verification.mark_proof_pending config ~goal_id ~criterion with
    | Ok _ -> () | Error detail -> fail detail);
@@ -1866,7 +1866,7 @@ let test_criterion_edit_records_its_phase_move () =
   ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
   ignore (must_succeed "change target"
     (dispatch ctx ~name:"masc_goal_upsert"
-      [ "id", `String goal_id; "target_value", `String "300" ]));
+      [ "id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "300") ]));
   check string "changed criterion returns to execution" "executing"
     (stored_phase config goal_id);
   let edit_moves =
@@ -1893,7 +1893,7 @@ let test_criterion_edit_on_executing_goal_records_no_phase_move () =
   let goal_id = create_goal ctx "An edit that moves nothing records nothing" in
   ignore (must_succeed "change target"
     (dispatch ctx ~name:"masc_goal_upsert"
-      [ "id", `String goal_id; "target_value", `String "300" ]));
+      [ "id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "300") ]));
   check int "no goal_phase event" 0 (List.length (goal_phase_events config))
 ;;
 
@@ -1925,7 +1925,7 @@ let test_recovered_goal_cannot_authorize_edits_or_deletion () =
   let path = Goal_store.goals_path config in
   let mirror = Fs_compat.load_file (path ^ ".last-good") in
   let refuse_changes () =
-    (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"300" () with
+    (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~measure:(Goal_measure_fixture.done_when "300") () with
      | Error _ -> () | Ok _ -> fail "mirror authorized a changed criterion");
     (match Goal_store.transact_goal config ~goal_id
        (fun goal -> Ok ({ goal with phase = Goal_phase.Dropped }, ())) with
@@ -2589,7 +2589,7 @@ let test_proof_request_follows_the_phase_machine () =
   @@ fun config ->
   let ctx = workspace_ctx config in
   let goal =
-    match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"proof" ~metric:"m" ~target_value:"1" () with
+    match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"proof" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
     | Ok (goal, _, _) -> goal
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
@@ -2681,8 +2681,8 @@ let large_criterion =
   Goal_store.Criterion
     { revision = "test-criterion"
     ; title = String.make (2 * Safe_ops.json_parse_offload_min_bytes) 't'
-    ; metric = None
-    ; target_value = None
+    ; measure = Goal_measure_fixture.measure
+    ; procedure = "read the fixture"
     }
 ;;
 
@@ -2757,7 +2757,7 @@ let test_the_state_kept_after_a_write_is_the_state_the_file_decodes_to () =
   @@ fun config ->
   let criterion =
     Goal_store.Criterion
-      { revision = "test-criterion"; title = "caf\xff"; metric = None; target_value = None }
+      { revision = "test-criterion"; title = "caf\xff"; measure = Goal_measure_fixture.measure; procedure = "read the fixture" }
   in
   pending_ok config ~goal_id:"goal-repaired" ~criterion;
   let kept = records_ok config in

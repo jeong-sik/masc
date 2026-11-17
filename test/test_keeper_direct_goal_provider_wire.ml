@@ -77,7 +77,7 @@ let install_catalog ~sw =
 
 let create_goal config =
   match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Inspect both independent results"
-      ~metric:"independently inspected persisted results" ~target_value:"2/2" () with
+      ~measure:(Goal_measure_fixture.done_when "2/2") ~procedure:"independently inspected persisted results" () with
   | Ok (goal, _, _) -> goal
   | Error error -> fail (Goal_store.write_error_to_string error)
 
@@ -106,7 +106,7 @@ let run_case source () =
   let original = prepare config in
   let goal = match source, goal with
     | Revised, Some goal ->
-      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~target_value:"3/3" () with
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~measure:(Goal_measure_fixture.done_when "3/3") () with
        | Ok (changed, _, _) -> Some changed
        | Error error -> fail (Goal_store.write_error_to_string error))
     | (Current | Measurement_unavailable | Goal_unavailable | Empty), _ -> goal

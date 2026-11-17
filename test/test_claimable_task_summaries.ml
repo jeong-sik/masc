@@ -298,8 +298,8 @@ let goal_in phase id =
   { Goal_store.id
   ; criterion_revision = "fixture-" ^ id
   ; title = "title of " ^ id
-  ; metric = None
-  ; target_value = None
+  ; measure = Goal_measure_fixture.measure
+  ; procedure = "read the fixture"
   ; due_date = None
   ; priority = 3
   ; phase

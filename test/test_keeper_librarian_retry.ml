@@ -1829,7 +1829,7 @@ let test_template_slots_match_supplied_variables () =
 let test_repo_template_carries_goal_criteria () =
   let criterion = Goal_store.Criterion
     { revision = "criterion-audio-1"; title = "Publish a playable audio essay"
-    ; metric = Some "independently reviewed audio essays"; target_value = Some "1" } in
+    ; measure = Goal_measure_fixture.done_when "1"; procedure = "independently reviewed audio essays" } in
   let render context =
     match Runtime.messages_for_librarian ~source_lines:[] { (input ()) with goal_context = context } with
     | Error detail -> failf "Goal context render failed: %s" detail
@@ -1839,7 +1839,7 @@ let test_repo_template_carries_goal_criteria () =
   List.iter (fun text -> check bool ("model receives " ^ text) true
     (String_util.contains_substring rendered text))
     [ "task-audio"; "goal-audio"; "criterion-audio-1"
-    ; "independently reviewed audio essays"; "\"target_value\":\"1\"" ];
+    ; "independently reviewed audio essays"; "\"condition\":\"1\"" ];
   let unavailable = render (Librarian.Task_goals
     { task_id = "task-audio"; criteria = Error "Goal source unreadable" }) in
   check bool "read failure is visible" true

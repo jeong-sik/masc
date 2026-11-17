@@ -37,8 +37,8 @@ let goal_in phase id title =
   { Goal_store.id
   ; criterion_revision = "fixture-" ^ id
   ; title
-  ; metric = None
-  ; target_value = None
+  ; measure = Goal_measure_fixture.measure
+  ; procedure = "read the fixture"
   ; due_date = None
   ; priority = 3
   ; phase
@@ -367,8 +367,8 @@ max-concurrent = 1
    | Ok () -> () | Error detail -> fail detail);
   seed_all_phases config;
   let goal = { (goal_in Goal_phase.Executing "goal-executing" "Publish an audio essay") with
-    metric = Some "independently reviewed playable audio essays";
-    target_value = Some "1";
+    measure = Goal_measure_fixture.done_when "1";
+    procedure = "independently reviewed playable audio essays";
     last_review_note = Some "Audio has not yet been played back." } in
   Goal_store.write_state config
     { pending_events = []; pending_notifications = []; version = 1; updated_at = Masc_domain.now_iso (); goals = [goal] };
@@ -395,13 +395,14 @@ max-concurrent = 1
       (contains_in world_state goal.criterion_revision)
   in
   check_criterion "independently reviewed playable audio essays"
-    "\"target_value\":\"1\"" "Audio has not yet been played back."
+    "\"condition\":\"1\"" "Audio has not yet been played back."
     "Provide an explicit measurable criterion." ();
   Goal_store.write_state config
     { pending_events = []; pending_notifications = []; version = 1; updated_at = Masc_domain.now_iso ();
-      goals = [{ goal with metric = None; target_value = None;
+      goals = [{ goal with measure = Goal_measure_fixture.measure; procedure = "read the fixture";
         last_review_note = Some "Provide an explicit measurable criterion." }] };
-  check_criterion "\"metric\":null" "\"target_value\":null"
+  check_criterion "\"procedure\":\"read the fixture\""
+    "\"condition\":\"the declared target is reached\""
     "Provide an explicit measurable criterion."
     "independently reviewed playable audio essays" ();
   let primary = Goal_store.goals_path config in
@@ -523,8 +524,8 @@ let test_goal_measurement_tracks_current_revision_and_read_failure () =
   let goal_id = "goal-executing" in
   let declared_goal =
     { (goal_in Goal_phase.Executing goal_id "acceptance outcome") with
-      metric = Some "observed acceptance cases"
-    ; target_value = Some "2 of 2 cases observed with evidence"
+      measure = Goal_measure_fixture.done_when "2 of 2 cases observed with evidence"
+    ; procedure = "observed acceptance cases"
     }
   in
   Goal_store.write_state config
@@ -613,8 +614,8 @@ let test_a_measurement_or_a_claim_moves_only_the_goal_observations () =
     ; updated_at = Masc_domain.now_iso ()
     ; goals =
         [ { (goal_in Goal_phase.Executing "goal-executing" "still work") with
-            metric = Some "observed fixture cases"
-          ; target_value = Some "3 of 3 fixture cases observed"
+            measure = Goal_measure_fixture.done_when "3 of 3 fixture cases observed"
+          ; procedure = "observed fixture cases"
           }
         ; goal_in Goal_phase.Verifying "goal-verifying" "proof pending"
         ]

@@ -143,8 +143,8 @@ let make_goal config =
       config
       ~name:"masc_goal_upsert"
       [ "title", `String "Ship the ledger"
-      ; "metric", `String "tests"
-      ; "target_value", `String "10"
+      ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "10")
+      ; "procedure", `String "tests"
       ]
   in
   Yojson.Safe.Util.(

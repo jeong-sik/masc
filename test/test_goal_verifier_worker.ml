@@ -89,7 +89,7 @@ let submit_measurement config goal_id value =
 
 let pending config =
   let goal, _, _ = stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Measure the original result"
-    ~metric:measurement_reference ~target_value:"100" ()) in
+    ~measure:(Goal_measure_fixture.done_when "100") ~procedure:measurement_reference ()) in
   submit_measurement config goal.id 100;
   request_complete config goal.id;
   goal.id

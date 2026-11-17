@@ -78,7 +78,7 @@ let test_reads_trust_once_for_assigned_keepers_only () =
   List.iter (write_keeper config) [ "alpha"; "beta" ];
   let goal title =
     get_ok Goal_store.write_error_to_string
-      (Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"tasks" ~target_value:"1" ())
+      (Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"tasks" ())
     |> (fun (goal, _, _) -> goal)
   in
   let assigned_task (goal : Goal_store.goal) title =
@@ -139,7 +139,7 @@ let with_goal_events f =
   let goal, _, _ =
     get_ok Goal_store.write_error_to_string
       (Goal_store.upsert_goal_with_events ~actor:"test" config
-         ~title:"Listed" ~metric:"tasks" ~target_value:"1" ())
+         ~title:"Listed" ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"tasks" ())
   in
   f config goal
 ;;

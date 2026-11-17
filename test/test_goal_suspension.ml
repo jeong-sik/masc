@@ -37,7 +37,7 @@ let state config = match Goal_store.load_source config with
   | Unavailable error -> fail (Goal_store.unavailable_to_string error)
 let create config =
   match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Suspension scenario"
-      ~metric:"observed successful requests" ~target_value:"1" () with
+      ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"observed successful requests" () with
   | Ok (goal, _, _) -> goal
   | Error error -> fail (Goal_store.write_error_to_string error)
 let phase expected goal = check bool (GP.to_string expected) true (goal.Goal_store.phase = expected)
@@ -218,7 +218,7 @@ let test_edit_suspended () = with_workspace @@ fun config _ ->
   List.iter (fun suspension ->
     let goal = create config in change config goal.id "request_complete";
     let request = pending config goal.id in change config goal.id suspension;
-    (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~target_value:"2" () with
+    (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~measure:(Goal_measure_fixture.done_when "2") () with
      | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
     phase (if suspension = "pause" then GP.Paused GP.Resume_executing else GP.Blocked GP.Resume_executing)
       (saved config goal.id);

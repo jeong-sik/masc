@@ -1396,23 +1396,23 @@ let replaced_declaration_ends ~steps ~deferred_first id =
           match !veto with Some veto -> Error veto | None -> Ok ())} in
     let runner,sends,_=counting_runner store (ref steps) in
     let execute ()=require (Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original) in
-    let not_allowed = function
-      | Exact.Final (Exact.Not_allowed _) -> true
+    let replacement_ending = function
+      | Exact.Final (Exact.Not_allowed {reason=Replaced_declaration}) -> true
       | Exact.Final _ | Exact.Not_final _ -> false in
     if deferred_first then begin
       check bool "the lane has no slot, so the first run defers" true
         (match execute () with Exact.Not_final _ -> true | Exact.Final _ -> false);
       veto:=Some Exact.Declaration_replaced
     end;
-    check bool "the request ends as not_allowed" true (not_allowed (execute ()));
+    check bool "the request ends with the typed replacement reason" true (replacement_ending (execute ()));
     check int "no provider was asked" 0 !sends;
     check bool "the host record holds that result" true
       (match require (Exact.observe_retained ~store ~declaration_id ~schema original) with
-       | Exact.Retained_terminal (Retained_not_allowed _) -> true
+       | Exact.Retained_terminal (Retained_not_allowed {reason=Replaced_declaration}) -> true
        | Retained_absent | Retained_open | Retained_terminal _ -> false);
     let before= !checks in
     veto:=None;
-    check bool "a guard that allows later does not reopen it" true (not_allowed (execute ()));
+    check bool "a guard that allows later does not reinterpret it" true (replacement_ending (execute ()));
     check int "a finished record does not ask the guard" before !checks;
     check int "and still no provider was asked" 0 !sends)
 

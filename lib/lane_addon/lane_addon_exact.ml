@@ -454,10 +454,9 @@ type execution_result = { outcome : call_outcome; receipt : Keeper_exact_walk_re
 type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
 type dispatch_veto = Not_now of { detail : string } | Declaration_replaced
 type dispatch_guard = unit -> (unit, dispatch_veto) result
-let declaration_replaced_reason = "the declaration this request was captured for has been replaced"
 let dispatch_veto_detail = function
   | Not_now { detail } -> detail
-  | Declaration_replaced -> declaration_replaced_reason
+  | Declaration_replaced -> not_allowed_reason_detail Replaced_declaration
 type dispatch = Measurement | Generation
 type runner = before_dispatch:(dispatch -> (unit, string) result) ->
   admission_class:Agent_core.Llm_provider.Admission_class.t ->
@@ -1350,7 +1349,9 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
             (* The request has no result and no open attempt, and no later run
                can be granted under the declaration it was captured for. End
                it; its consumer asks again under the declaration of now. *)
-            deny declaration_replaced_reason
+            let refusal=Not_allowed {reason=Replaced_declaration} in
+            let* ()=save {previous with final=Some refusal} in
+            Ok (Final refusal)
           | Error (Not_now {detail}) -> Error detail
           | Ok () ->
           (* Inside the walk either veto only stops it. The stopped attempt

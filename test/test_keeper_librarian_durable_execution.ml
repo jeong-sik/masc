@@ -3974,21 +3974,20 @@ let test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_wh
     check int "one more provider call judged the range" 2 (F.post_count fixture.server);
     check (list string) "the new original's answer reached Memory"
       ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
-(* RFC 3.7. The declaration is the request's again when its Keeper reads the
-   end, so the pass reads a refusal under the same declaration: it narrows the
-   next read and asks for no pass. *)
-let test_a_declaration_put_back_before_the_end_is_read_narrows_and_does_not_wake () =
+(* RFC 3.4. A stored replacement ending remains that ending even when the
+   original declaration is restored before its Keeper reads it. *)
+let test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending () =
   with_fixture (fun ~sw fixture ->
     let waiting=host_ends_the_original_of_a_replaced_declaration fixture ~sw in
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
     let wakes=ref 0 in
     ended_by_one_refusal (run_worker_waking fixture wakes);
-    check int "a refusal under the same declaration asks for no pass" 0 !wakes;
+    check int "the recorded replacement ending asks for the next pass" 1 !wakes;
     assert_pending (run_worker_waking fixture wakes);
     let fresh,fresh_capture=only_original fixture in
     check bool "a new original read the range" true (fresh.Owner.request_id<>waiting.request_id);
-    check bool "up to the first cut point" true
-      (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.To_first_cut_point);
+    check bool "rollback does not narrow the next read" true
+      (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
     check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture)))
 (* A pass reads and sends its range, and the provider's refusal reaches the
    next pass. *)
@@ -4575,8 +4574,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_interrupted_original_settles_and_its_range_is_read_again;
   test_case "a replaced declaration ends a waiting original and its range is read whole again" `Quick
     test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again;
-  test_case "a declaration put back before the end is read narrows and does not wake" `Quick
-    test_a_declaration_put_back_before_the_end_is_read_narrows_and_does_not_wake;
+  test_case "a declaration put back before the end is read preserves the recorded ending" `Quick
+    test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
   test_case "a missing history original automatically continues and commits its exact source" `Quick
     (test_missing_history_recovers_without_operator_submission Atoms);

@@ -255,7 +255,8 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
     returned by a provider. Not used for local retained terminal observation.
     {!run} reads which veto it is only where it would start an execution: the
     request has no result and no open attempt. [Declaration_replaced] there
-    ends the request as [Not_allowed] and [Not_now] leaves it listed. Inside a
+    ends the request as [Not_allowed {reason=Replaced_declaration}] and
+    [Not_now] leaves it listed. Inside a
     walk either veto only stops the walk; the stopped attempt stays deferred
     and the next run reads the veto at its start. *)
 
@@ -326,7 +327,8 @@ type execution_authority =
     admission-class audit.
     [before_dispatch] is execution-only: an initial refusal occurs before the
     started marker, later guard vetoes stop the actual walk. An initial
-    [Declaration_replaced] ends the request as [Not_allowed]. Retained terminal
+    [Declaration_replaced] ends the request as
+    [Not_allowed {reason=Replaced_declaration}]. Retained terminal
     replay uses only original validation and never invokes this guard. *)
 
 module Retained_key : sig

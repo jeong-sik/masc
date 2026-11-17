@@ -345,7 +345,7 @@ claim 이 native 호출을 열기 직전의 준비(`keeper_direct_native_continu
 기동 정리가 `Active` 호출의 journal 을 읽지 못하면 그 작업 하나를 실패로 끝낸다. 다시 큐에 넣지 않는다(운영자 결정, 2026-11-17).
 
 - 지금은 읽기 실패를 「terminal 없음」과 같게 다시 큐에 넣는다(`keeper_chat_operation_store.ml:3659-3662`). 읽기 실패는 로그에만 남는다(`keeper_owner.ml:2046-2051`).
-- 그 뒤 claim 도 기록을 못 읽으면 실패한다(`keeper_turn.ml:496-501`). 호출이 `Active` 라 행은 `running` 으로 남고, 그 Keeper 는 다음 기동까지 다른 채팅 작업을 집지 못한다(4.5). 기록이 계속 안 읽히면 기동마다 되풀이된다.
+- 그 뒤 claim 도 기록을 못 읽으면 실패한다(`keeper_turn.ml:496-501`). 지금은 호출이 `Active` 라 행이 `running` 으로 남고, 그 Keeper 는 다음 기동까지 다른 채팅 작업을 집지 못한다. 기록이 계속 안 읽히면 기동마다 되풀이된다.
 - 읽지 못한 기록을 두고 실행을 다시 허락하는 일이기도 하다. 권위 있는 저장소를 읽지 못하면 변경을 승인하지 않는다(`docs/constitution.xml` 의 `authoritative_read_only`).
 - 고친 동작: 호출을 「효과 모름」 영수증으로 닫고 작업을 `Interrupted_by_restart` 로 끝낸다. 저장소 복구 뒤의 정리(`After_store_recovery`)가 `Active` 호출을 닫는 방식과 같다(`keeper_chat_operation_store.ml:3663-3679`). 새 상태나 실패 종류를 더하지 않는다.
 - Keeper 는 계속 돈다. 기록 파일은 그대로 둔다. 읽기 실패가 잠깐이었어도 그 작업은 잃는다.
@@ -495,7 +495,7 @@ masc:
   - L3: `Agent.execution_store` 문서.
   - L4.2: `keeper_direct_native_continuation.ml:349-350` 주석. 미룬 작업이 같은 프로세스에서 호출을 잇는다고 적는데, 미루기는 `Active` 호출을 둔 채 못 한다(4.5).
   - L4.3: `packages/agent_core/lib/agent/agent.mli:353` 과 `agent_uncollected_turn.ml:24`. 닫는 때를 「restart settlement」라고 적는다. masc 에서 그 말은 기동 정리를 가리킨다.
-  - L4.3: `keeper_owner.ml` 의 `active_native_call_policy` 주석. 불러온 호출을 열지 못하면(「a resumed call failed to load」) 호출을 남긴다고 적는다. #52359 §10 의 둘째 항목과 `a-keeper-takes-every-waiting-message-in-one-turn` 4.1 의 1 도 같은 동작을 적는다.
+  - L4.3: `keeper_owner.ml` 의 `active_native_call_policy` 주석. 불러온 호출을 열지 못하면(「a resumed call failed to load」) 호출을 남긴다고 적는다. #52359 §4.2 의 5 와 §10 의 둘째 항목, `a-keeper-takes-every-waiting-message-in-one-turn` 4.1 의 1 도 같은 동작을 적는다.
   - L5: `docs/design/keeper-repetition-scope-boundaries.md:13`, `keeper_owner_registry.ml:426-434`, `keeper_owner.ml:951-956`·1862-1868.
 
 ## 10. 정할 것

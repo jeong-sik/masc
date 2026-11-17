@@ -152,9 +152,9 @@ claim 이 native 호출을 열기 직전의 준비(`Keeper_direct_native_continu
 4. `Not_uncollected` 면 지금처럼 같은 호출을 이어 한다.
 5. 오류면 `read_execution_terminal` 로 기록을 한 번 더 읽는다.
    - 닫기는 commit 됐는데 writer 닫기가 실패했을 수 있다(`execution_lane_writer.ml:870-877`).
-   - terminal 이 있으면 3 으로 간다. 없으면 그 claim 은 실패하고 호출은 `Active` 로 남는다. 행은 `running` 으로 남고 다음 기동이 다시 판정한다(`restart-resumes-running-chat-operations` §4.4).
+   - terminal 이 있으면 3 으로 간다. 없으면 그 claim 은 실패한다. Owner 가 호출을 「효과 모름」 영수증으로 닫고 작업을 실패로 끝낸다(`restart-resumes-running-chat-operations` §4.3, §4.4).
 
-- 기동 정리 안에서 닫지 않으므로, 닫다가 난 실패가 그 Keeper 의 Owner 를 멈추지 않는다. 다만 호출이 `Active` 로 남으면 그 Keeper 는 다음 기동까지 다른 채팅 작업을 집지 않는다.
+- 기동 정리 안에서 닫지 않으므로, 닫다가 난 실패가 그 Keeper 의 Owner 를 멈추지 않는다. 그 작업은 실패로 끝나고 Keeper 는 다음 작업을 집는다(`restart-resumes-running-chat-operations` §4.3).
 - 새 실패 종류가 필요 없다.
 - 기록을 두 번 읽는다(terminal 읽기, 잠금 아래 다시 읽기). Owner 의 자식 fiber 에서 읽으므로 그동안에도 Owner 는 다른 명령을 받는다.
 

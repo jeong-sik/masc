@@ -1861,6 +1861,22 @@ let test_machine_live_pushes_scope_the_machine () =
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\",\"machine\":\"\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\",\"machine\":\"other\"}\n\n" ]
 
+(* Batches the reader collected while the UI was busy reach it joined, in
+   arrival order, and never mix two stream instances. *)
+let test_collected_batches_join_per_instance_in_order () =
+  let d cursor = { Masc_tui_observer.cursor = Some cursor; decoded = Masc_tui_observer.Undecodable "x" } in
+  let cursors batches =
+    List.map (fun (instance, deliveries) ->
+        instance, List.map (fun (delivery : Masc_tui_observer.delivery) -> delivery.cursor) deliveries)
+      batches
+  in
+  check (list (pair (option string) (list (option int)))) "joined per instance"
+    [ Some "a", [ Some 1; Some 2; Some 3 ]; Some "b", [ Some 4 ]; Some "a", [ Some 5 ] ]
+    (cursors (Masc_tui_observer.merge_batches
+       [ Some "a", [ d 1 ]; Some "a", [ d 2; d 3 ]; Some "b", [ d 4 ]; Some "a", [ d 5 ] ]));
+  check int "nothing collected stays nothing" 0
+    (List.length (Masc_tui_observer.merge_batches []))
+
 let () =
   run "tui observer"
     [ ( "session"
@@ -1977,5 +1993,7 @@ let () =
             `Quick test_a_turn_observation_names_the_call_and_the_completed_count
         ; test_case "a settle keeps its cache counts apart from absent" `Quick
             test_a_settle_keeps_its_cache_counts_apart_from_absent
+        ; test_case "collected batches join per instance in order" `Quick
+            test_collected_batches_join_per_instance_in_order
         ] )
     ]

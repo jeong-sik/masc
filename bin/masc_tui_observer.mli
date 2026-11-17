@@ -511,3 +511,9 @@ val feed : t -> string -> delivery list
     delivered as that event without the rest of the frame being read, so the
     rest is not checked either. Every other frame is parsed whole, and one
     that is not JSON is {!Undecodable}. *)
+
+val merge_batches :
+  (string option * delivery list) list -> (string option * delivery list) list
+(** Joins consecutive batches of the same stream instance, keeping every
+    delivery in arrival order. Batches of different instances stay apart, so
+    each joined batch still names the one instance it came from. *)

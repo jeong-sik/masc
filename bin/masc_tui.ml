@@ -20595,6 +20595,11 @@ let reconcile_observer_recovery state ~refresh_inflight ~mailbox =
   | (Workspace_identity_unread | Workspace_identity_match | Workspace_identity_mismatch _), _, _
   | Workspace_identity_match_unconfirmed _, None, _ -> stop_observer_recovery state
 
+(* The server replays at most this many events to a reconnecting client
+   (Sse.max_buffer_size's upper clamp). *)
+let observer_backlog_limit = 1000
+exception Observer_backlog_exceeded
+
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
    through the mailbox; the render fiber owns all state. The fiber ends with
@@ -20646,17 +20651,67 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                   instance_id := Option.map (fun handshake -> handshake.Sse_wire.instance_id) handshake;
                   enqueue_async mailbox (Observer_msg (Observer_opened (owner, session_id, handshake)))
                 in
+                (* The socket is read without waiting on the UI. Handing each
+                   chunk to the mailbox stopped this reader whenever the UI was
+                   behind; the server's queue for the session then filled and
+                   it closed the stream (four closes in 15 minutes,
+                   2026-11-17). Deliveries collect in [received], and the
+                   forwarder hands all collected so far to the UI as one
+                   batch, which the UI already reads as one. *)
+                let received = Eio.Stream.create max_int in
+                let backlog = Atomic.make 0 in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
-                  | decoded -> enqueue_async mailbox (Observer_msg (Observer_received (owner, (!instance_id, decoded))))
+                  | decoded ->
+                      (* Past what the server can replay, holding more gains
+                         nothing: the stream is closed, and the reopen
+                         resumes from the last applied cursor or revalidates
+                         after the gap. *)
+                      if Atomic.fetch_and_add backlog (List.length decoded) + List.length decoded
+                         > observer_backlog_limit
+                      then raise Observer_backlog_exceeded;
+                      Eio.Stream.add received (Some (!instance_id, decoded))
                 in
-                Masc_tui_http.observe_runtime_events_with_scopes ?play ~machine ~browser ~clock
-                  ~expected_base_path:expected_workspace.sid_base_path
-                  ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
-                  ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk ())
+                let rec collected acc =
+                  match Eio.Stream.take_nonblocking received with
+                  | Some (Some batch) -> collected (batch :: acc)
+                  | Some None -> List.rev acc, `Ended
+                  | None -> List.rev acc, `Open
+                in
+                let rec forward () =
+                  let first = Eio.Stream.take received in
+                  let batches, stream =
+                    match first with
+                    | None -> [], `Ended
+                    | Some batch -> collected [ batch ]
+                  in
+                  ignore (Atomic.fetch_and_add backlog
+                    (- List.fold_left (fun n (_, d) -> n + List.length d) 0 batches));
+                  List.iter (fun batch ->
+                      enqueue_async mailbox (Observer_msg (Observer_received (owner, batch))))
+                    (Masc_tui_observer.merge_batches batches);
+                  match stream with
+                  | `Ended -> ()
+                  | `Open -> forward ()
+                in
+                let observed = ref (Ok ()) in
+                Eio.Fiber.both
+                  (fun () ->
+                    observed :=
+                      Masc_tui_http.observe_runtime_events_with_scopes ?play ~machine ~browser ~clock
+                        ~expected_base_path:expected_workspace.sid_base_path
+                        ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
+                        ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk ();
+                    Eio.Stream.add received None)
+                  forward;
+                !observed)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Observer_backlog_exceeded ->
+          Error (Masc_tui_http.Transport_failed
+            (Printf.sprintf "the screen fell %d events behind the observer stream"
+               observer_backlog_limit))
       | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))
     in
     enqueue_async mailbox (Observer_msg (Observer_closed (owner, workspace, result)))

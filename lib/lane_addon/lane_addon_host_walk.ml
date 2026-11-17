@@ -6,7 +6,11 @@ type 'halt step =
   | Here of 'halt run
   | Beside of 'halt run
 
-let walk ~max_in_flight ~propagates ~step requests =
+type ('request, 'halt) listing =
+  | Last of 'request list
+  | More of 'request list * (unit -> (('request, 'halt) listing, 'halt) result)
+
+let walk ~max_in_flight ~propagates ~step listing =
   let max_in_flight = (max_in_flight : Lane_addon_config.exact_in_flight :> int) in
   Eio.Switch.run (fun sw ->
     (* These are touched only by fibers of this domain between effects, so
@@ -51,12 +55,30 @@ let walk ~max_in_flight ~propagates ~step requests =
               (fun () -> caught (fun () -> settle index (run ~running_at_start))));
           while !running >= max_in_flight do Eio.Condition.await_no_mutex changed done in
     let rec each index = function
-      | [] -> ()
+      | [] -> index
       | request :: rest ->
-          if not (stopped ()) then (
+          if stopped () then index
+          else (
             caught (fun () -> start index request);
             each (index + 1) rest) in
-    each 0 requests;
+    (* [caught] wraps the reading alone. Around the pages that follow it would
+       take the propagating exception a request of those pages lets out. *)
+    let read next =
+      let answer = ref None in
+      caught (fun () -> answer := Some (next ()));
+      !answer in
+    (* The requests of the pages before keep running while the next page is
+       read, so the count of running requests does not fall at a page end. *)
+    let rec pages index = function
+      | Last requests -> ignore (each index requests)
+      | More (requests, next) ->
+          let index = each index requests in
+          if not (stopped ()) then (
+            match read next with
+            | Some (Ok listing) -> pages index listing
+            | Some (Error halt) -> settle index (Error halt)
+            | None -> ()) in
+    pages 0 listing;
     while !running > 0 do Eio.Condition.await_no_mutex changed done;
     match !raised with
     | Some (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace

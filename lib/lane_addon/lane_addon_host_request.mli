@@ -32,8 +32,20 @@ val request_id : t -> string
 val to_json : t -> Yojson.Safe.t
 (** Exact request identity retained with an oversized result. *)
 
-val listing_of_json : Yojson.Safe.t -> (t list, string) result
-(** Exactly [{"requests": [...]}], in the package's order. *)
+type listing = { requests : t list; next : string option }
+(** One page of what a worker waits for, in the package's order. [next] is
+    present when the worker has more to list after this page: the value the
+    host passes back as [after] to read the page that follows. A worker that
+    lists everything in one answer never sends it. *)
+
+val listing_of_json : Yojson.Safe.t -> (listing, string) result
+(** Exactly [{"requests": [...]}], or [{"requests": [...], "next": name}] with
+    a non-empty [name] and at least one request. No request id appears twice
+    in a page. *)
+
+val listing_arguments : after:string option -> Yojson.Safe.t
+(** The [lane_host_requests] arguments: [{}] for the first page and
+    [{"after": name}] for the page after the one that answered [name]. *)
 
 val result_arguments : request_id:string -> result:Yojson.Safe.t -> Yojson.Safe.t
 (** The [lane_host_result] arguments for one delivered result. *)

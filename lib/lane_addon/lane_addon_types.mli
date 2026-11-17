@@ -113,7 +113,10 @@ type package = {
 }
 val host_requests_tool : string
 (** [lane_host_requests]: the worker lists every request it waits for
-    (RFC operator-quiz §4.4). *)
+    (RFC operator-quiz §4.4). An answer that cannot carry them all names
+    where the next page starts, and the host reads that page with it (RFC
+    librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1). A
+    worker that names no next page lists everything in one answer. *)
 val operator_tool : string
 (** Reserved private operator port. Cannot be an export or an action tool. *)
 

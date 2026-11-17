@@ -471,5 +471,5 @@ let call_exported_tool ?on_result ?on_dispatch ?authorize ?principal t ~name ~ar
   Protocol.call_exported_tool ?on_result ?on_dispatch ?authorize ?principal t.protocol ~name ~arguments
   |> protocol_result
 
-let host_requests t = Protocol.host_requests t.protocol |> protocol_result
+let host_requests t ~after = Protocol.host_requests t.protocol ~after |> protocol_result
 let host_result t ~arguments = Protocol.host_result t.protocol ~arguments |> protocol_result

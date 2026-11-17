@@ -367,5 +367,6 @@ let call_host_tool t ~name ~arguments = protect_call t (fun () ->
     with
     | (Eio.Io _|Unix.Unix_error _|Sys_error _|End_of_file|Failure _|Invalid_argument _) as exn ->
         Error (Protocol_failed (Printexc.to_string exn))))
-let host_requests t = call_host_tool t ~name:host_requests_tool ~arguments:(`Assoc [])
+let host_requests t ~after =
+  call_host_tool t ~name:host_requests_tool ~arguments:(Lane_addon_host_request.listing_arguments ~after)
 let host_result t ~arguments = call_host_tool t ~name:host_result_tool ~arguments

@@ -591,10 +591,12 @@ module For_testing : sig
   (** Terminal historical cleanup persistence. [None] removes a never-started
       binding; [Some json] persists its final phase. Captured before offload. *)
   type host_port = {
-    list_requests : unit -> (Yojson.Safe.t, string) result;
+    list_requests : after:string option -> (Yojson.Safe.t, string) result;
     deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
   }
-  (** A worker's private host request tools. *)
+  (** A worker's private host request tools. [list_requests] reads one page:
+      the first with [None], the page after the one that named [next] with
+      [Some next]. *)
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;

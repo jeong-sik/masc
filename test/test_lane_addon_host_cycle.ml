@@ -81,11 +81,27 @@ let runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lan
         | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None }))
         | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output { detail })))
 
-let port ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
-  list_requests = (fun () ->
+(* A worker that lists everything in one answer. *)
+let one_page ~after:(_ : string option) requests = `Assoc [ "requests", `List requests ]
+
+(* A worker that lists one request a page, in id order. A page is named by
+   the id of its request, and the page after a name starts at the first id
+   above it, as the Exact worker pages its records by file name. *)
+let a_request_a_page ~after requests =
+  let waiting = List.filter (fun request ->
+    match after with
+    | None -> true
+    | Some name -> String.compare (text "request_id" request) name > 0) requests in
+  match waiting with
+  | [] -> `Assoc [ "requests", `List [] ]
+  | [ last ] -> `Assoc [ "requests", `List [ last ] ]
+  | first :: _ :: _ -> `Assoc [ "requests", `List [ first ]; "next", `String (text "request_id" first) ]
+
+let port ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) ?(page = one_page) worker : Runtime.For_testing.host_port = {
+  list_requests = (fun ~after ->
     let requests= !(worker.listing) in
     before_listing requests;
-    Ok (`Assoc [ "requests", `List requests ]));
+    Ok (page ~after requests));
   deliver = (fun ~arguments ->
     during_delivery true;
     Fun.protect ~finally:(fun () -> during_delivery false) (fun () ->
@@ -99,7 +115,7 @@ let port ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ 
     | Some reply -> reply arguments));
 }
 
-let backend ?deliver_reply ?during_delivery ?before_listing ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
+let backend ?deliver_reply ?during_delivery ?before_listing ?page ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
         await_exit = (fun () -> Eio.Fiber.await_cancel ());
@@ -123,7 +139,7 @@ let backend ?deliver_reply ?during_delivery ?before_listing ?exported_tool ?(bef
       stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released
         { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));
       resource = Lane_addon_lifecycle.Container_resource instance_id;
-      host = Some (port ?deliver_reply ?during_delivery ?before_listing worker) } in
+      host = Some (port ?deliver_reply ?during_delivery ?before_listing ?page worker) } in
     ignore (on_authority (Lane_addon_lifecycle.Container_authority
       { runtime = Lane_addon_types.Docker; engine = Lane_addon_lifecycle.Docker_engine "fixture-engine" }));
     on_created connection; Ok connection);
@@ -161,7 +177,7 @@ let permit : Exact.execution_authority = fun ~store:_ ~declaration_id:_ ~package
   Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
       before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())}
 
-let with_installation ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(authorize_request = permit) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?page ?before_stop ?exported_tool ?(make_runner = runner) ?(authorize_request = permit) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -189,7 +205,7 @@ let with_installation ?deliver_reply ?during_delivery ?owner_setup ?before_listi
                 let state = { mode = ref mode; resolutions = ref 0 } in
                 Runtime.register_exact_runner ~authorize_request (make_runner state);
                 let config = Workspace.default_config root in
-                Runtime.For_testing.with_backend (backend ?deliver_reply ?during_delivery ?before_listing ?before_stop ?exported_tool worker) (fun () ->
+                Runtime.For_testing.with_backend (backend ?deliver_reply ?during_delivery ?before_listing ?page ?before_stop ?exported_tool worker) (fun () ->
                   let unsubscribe=match owner_setup with None -> (fun () -> ()) | Some setup -> setup clock config in
                   Fun.protect ~finally:unsubscribe (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
@@ -899,6 +915,74 @@ let test_a_request_listed_again_after_delivery_ends_the_cycle () =
       check string "the instance shows it" "relisted_delivered_request" (text "kind" issue);
       check string "for that request" "r3" (text "request_id" issue)
     | _ -> fail "a relisted delivered request must end the cycle with an issue")
+
+(* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1:
+   one pass walks every page of the listing. *)
+let answered ~validate =
+  match validate (`Assoc [ "question", `String "Q?" ]) with
+  | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None }))
+  | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output { detail }))
+
+let test_a_waiting_request_does_not_take_the_turn_of_the_next_page () =
+  (* The request of the first page is asked first and stays not final. *)
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    incr state.resolutions;
+    if !(state.resolutions) = 1 then Error Exact.Lane_off else Ok answered in
+  with_installation ~make_runner ~page:a_request_a_page ~listing:[ exact "page-1"; exact "page-2" ]
+    (fun clock config worker state _root ->
+      await clock (fun () -> cycles config >= 1);
+      check (list string) "the request of the second page is delivered in the same cycle" [ "page-2" ]
+        (List.map (text "request_id") !(worker.delivered));
+      (match member "waiting" (host_requests config) with
+       | `List [ waiting ] ->
+         check string "the request of the first page waits" "page-1" (text "request_id" waiting)
+       | _ -> fail "the not-final request must show as waiting");
+      check int "each request was asked once" 2 !(state.resolutions))
+
+let test_requests_of_two_pages_run_side_by_side () =
+  let entered = ref 0 in
+  let together, reached = Eio.Promise.create () and released, release = Eio.Promise.create () in
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    incr state.resolutions;
+    Ok (fun ~validate ->
+      incr entered;
+      if !entered = 2 then Eio.Promise.resolve reached ();
+      Eio.Promise.await released;
+      answered ~validate) in
+  with_installation ~make_runner ~page:a_request_a_page ~declaration:side_by_side_declaration
+    ~listing:[ exact "page-1"; exact "page-2"; exact "page-3" ]
+    (fun clock _config worker state _root ->
+      (* Two calls are under way at once only when the walk read the second
+         page while the request of the first was still running. *)
+      Eio.Promise.await together;
+      check int "the request of the third page waits for a free place" 2 !(state.resolutions);
+      Eio.Promise.resolve release ();
+      await clock (fun () -> List.length !(worker.delivered) = 3))
+
+let test_a_request_a_later_page_lists_again_ends_the_cycle () =
+  let listings = ref 0 in
+  let released, release = Eio.Promise.create () in
+  (* The call is still under way when the next page is read, so a walk that
+     took the request from that page too would start it a second time. *)
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    incr state.resolutions;
+    Eio.Promise.await released;
+    Error Exact.Lane_off in
+  (* Both pages carry the one request. *)
+  let page ~after requests =
+    incr listings;
+    match after with
+    | None -> `Assoc [ "requests", `List requests; "next", `String "again" ]
+    | Some (_ : string) -> `Assoc [ "requests", `List requests ] in
+  with_installation ~make_runner ~page ~declaration:side_by_side_declaration ~listing:[ exact "twice" ]
+    (fun clock config _worker state _root ->
+      await clock (fun () -> !listings = 2);
+      Eio.Promise.resolve release ();
+      await clock (fun () -> cycles config >= 1);
+      check int "the request started once" 1 !(state.resolutions);
+      match member "issue" (host_requests config) with
+      | `Assoc _ as issue -> check string "the instance shows it" "listing_refused" (text "kind" issue)
+      | _ -> fail "a request listed again by a later page must end the cycle with an issue")
 
 let test_a_result_larger_than_the_frame_is_delivered_as_its_size () =
   let long = `Assoc [ "question", `String (String.make 5000 'q') ] in
@@ -1832,6 +1916,12 @@ let () =
             test_export_reading_retains_typed_provider_wait_without_dispatch
         ; test_case "a request listed again after delivery ends the cycle" `Quick
             test_a_request_listed_again_after_delivery_ends_the_cycle
+        ; test_case "a waiting request does not take the turn of the next page" `Quick
+            test_a_waiting_request_does_not_take_the_turn_of_the_next_page
+        ; test_case "requests of two pages run side by side" `Quick
+            test_requests_of_two_pages_run_side_by_side
+        ; test_case "a request a later page lists again ends the cycle" `Quick
+            test_a_request_a_later_page_lists_again_ends_the_cycle
         ; test_case "a result larger than the frame is delivered as its size" `Quick
             test_a_result_larger_than_the_frame_is_delivered_as_its_size
         ; test_case "a listing with an unknown kind is refused whole" `Quick

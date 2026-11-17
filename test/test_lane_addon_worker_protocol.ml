@@ -264,14 +264,14 @@ let host_port_admission ~selected ~advertised () = Eio_main.run (fun env -> Eio.
         require initialized;
         if selected then (
           check bool "private listing reaches the actual worker" true
-            (require (Protocol.host_requests protocol) = `Assoc ["requests",`List []]);
+            (require (Protocol.host_requests protocol ~after:None) = `Assoc ["requests",`List []]);
           check bool "private result reaches the actual worker" true
             (require (Protocol.host_result protocol ~arguments:(`Assoc [])) = `Assoc ["accepted",`Bool true]);
           check int "private ports are not public exports" 0 (List.length (Protocol.exported_tools protocol));
           Protocol.revoke protocol;
-          check bool "retirement refuses private listing" true (Result.is_error (Protocol.host_requests protocol)))
+          check bool "retirement refuses private listing" true (Result.is_error (Protocol.host_requests protocol ~after:None)))
         else (
-          check bool "unselected listing never dispatches" true (Result.is_error (Protocol.host_requests protocol));
+          check bool "unselected listing never dispatches" true (Result.is_error (Protocol.host_requests protocol ~after:None));
           check bool "unselected delivery never dispatches" true
             (Result.is_error (Protocol.host_result protocol ~arguments:(`Assoc [])));
           check string "no tools/call reached the actual worker" "" (In_channel.with_open_bin calls In_channel.input_all)))))))

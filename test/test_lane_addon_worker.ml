@@ -559,8 +559,8 @@ let test_host_result_continuations_cross_the_real_worker_port () = with_fixture 
   let listing request =
     write (Filename.concat dir "host-listing.json")
       (Yojson.Safe.to_string (`Assoc ["requests", `List [Host.to_json request]]));
-    match unwrap (Worker.host_requests worker) |> Host.listing_of_json with
-    | Ok [request] -> request
+    match unwrap (Worker.host_requests worker ~after:None) |> Host.listing_of_json with
+    | Ok {requests = [request]; next = None} -> request
     | Ok _ | Error _ -> fail "worker did not return the exact host request" in
   let request = listing request in
   let result = `Assoc ["status", `String "records"; "source_id", `String "board";

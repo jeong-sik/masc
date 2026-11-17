@@ -1,5 +1,7 @@
 (** One listing of a host cycle, walked in order (RFC
-    host-cycle-runs-exact-requests-side-by-side 3.3 and 3.5).
+    host-cycle-runs-exact-requests-side-by-side 3.3 and 3.5). A listing is
+    one page or several (RFC
+    librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1).
 
     The walk starts each request once. A request that runs beside the walk
     gets its own fiber, and the walk goes on to the next request only while
@@ -20,14 +22,24 @@ type 'halt step =
   | Here of 'halt run  (** Handled where the walk stands; the walk waits for it. *)
   | Beside of 'halt run  (** Runs in its own fiber. *)
 
+type ('request, 'halt) listing =
+  | Last of 'request list  (** The page that ends the listing. *)
+  | More of 'request list * (unit -> (('request, 'halt) listing, 'halt) result)
+      (** A page and how to read the one after it. *)
+
 val walk :
   max_in_flight:Lane_addon_config.exact_in_flight ->
   propagates:(exn -> bool) ->
   step:('request -> 'halt step) ->
-  'request list ->
+  ('request, 'halt) listing ->
   'halt option
 (** [step] is asked for each request when the walk reaches it, so it sees
     what earlier requests of the same listing left behind.
+
+    The walk reads the page after a [More] page when it has started that
+    page's last request. The requests it started keep running meanwhile, so
+    the number running does not fall at a page end. A page that cannot be
+    read ends the cycle like a [Halt] at that place.
 
     After a [Halt] or an [Error] the walk starts no other request. The
     requests already running go on to their end, and the walk returns the

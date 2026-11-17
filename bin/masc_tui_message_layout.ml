@@ -1369,8 +1369,14 @@ let split_word ~max_cells word =
    (pinned in the layout tests). A row carrying an escape therefore measures
    itself whole, the way this used to for every word of every row -- which
    made a row cost grow with the square of the words in it. *)
-let wrap_words_internal ?on_row ~max_cells text =
+let wrap_words_internal ?on_row ?first_cells ~max_cells text =
   let max_cells = Int.max 1 max_cells in
+  (* The first row is shorter when something already stands on it. *)
+  let first_cells =
+    match first_cells with
+    | None -> max_cells
+    | Some cells -> Int.min max_cells (Int.max 1 cells)
+  in
   let current = Buffer.create 128 in
   let current_cells = ref 0 in
   let current_holds_escape = ref false in
@@ -1393,13 +1399,18 @@ let wrap_words_internal ?on_row ~max_cells text =
         in
         List.rev rows
     | word :: rest as words ->
+        let room =
+          match rows with
+          | [] -> first_cells
+          | _ :: _ -> max_cells
+        in
         let addition = if Buffer.length current = 0 then word else " " ^ word in
         let candidate_cells =
           if !current_holds_escape then
             display_width (Buffer.contents current ^ addition)
           else !current_cells + display_width addition
         in
-        if candidate_cells <= max_cells then begin
+        if candidate_cells <= room then begin
           if Buffer.length current>0 then record (!source_byte-1) 1;
           record !source_byte (String.length word);
           source_byte:= !source_byte + String.length word + 1;
@@ -1410,7 +1421,18 @@ let wrap_words_internal ?on_row ~max_cells text =
         end
         else if Buffer.length current > 0 then loop (take_row () :: rows) words
         else
-          let chunks = split_word ~max_cells word in
+          (* A word too wide for the short first row gives that row its head
+             and is split again from there at the full width: rows cut at the
+             first row's width all the way down would leave cells empty. *)
+          let chunks =
+            match split_word ~max_cells:room word with
+            | head :: _ :: _ when room < max_cells ->
+                head
+                :: split_word ~max_cells
+                     (String.sub word (String.length head)
+                        (String.length word - String.length head))
+            | ([] | _ :: _) as chunks -> chunks
+          in
           (match List.rev chunks with
            | [] -> source_byte:= !source_byte + String.length word + 1; loop rows rest
            | last :: reversed_completed ->
@@ -1432,6 +1454,9 @@ let wrap_words_internal ?on_row ~max_cells text =
   loop [] (String.split_on_char ' ' text)
 
 let wrap_words ~max_cells text = wrap_words_internal ~max_cells text
+
+let wrap_words_after_prefix ~prefix_cells ~max_cells text =
+  wrap_words_internal ~first_cells:prefix_cells ~max_cells text
 
 (* The rows a box body spends on [content] at inner width [inner]: one row per
    server line, plus the rows a line longer than the body wraps to. The box

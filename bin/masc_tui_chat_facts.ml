@@ -49,10 +49,24 @@ let row_cells row = Layout.display_width (text row)
 
 (* An item wider than a whole row. Its label and the head of its value take
    the first row, the value's remainder takes whole rows, and the last part
-   is returned like any other row so the next item can share it. *)
+   is returned like any other row so the next item can share it.
+
+   Where the value breaks depends on what it is. A sentence -- a failed
+   turn's message -- breaks between words, so no row ends inside one. A name
+   or a number has no word to end a row on: it is cut at the cell, which
+   spends the fewest rows. *)
 let broken_rows ~max_cells item =
-  let value_rows tone text =
-    List.map (fun chunk -> [ Value (tone, chunk) ]) (Layout.split_cells ~max_cells text)
+  let whole_rows tone text =
+    match tone with
+    | Plain -> Layout.wrap_words ~max_cells text
+    | Who | Amount | Reading _ -> Layout.split_cells ~max_cells text
+  in
+  let rows_after_label tone ~room value =
+    match tone with
+    | Plain -> Layout.wrap_words_after_prefix ~prefix_cells:room ~max_cells value
+    | Who | Amount | Reading _ ->
+      let head, rest = Layout.split_cells_after_prefix ~prefix_cells:room ~max_cells value in
+      head :: rest
   in
   match item with
   | Mark text ->
@@ -60,16 +74,13 @@ let broken_rows ~max_cells item =
   | Fact { label; value; tone } ->
     let label_cells = Layout.display_width label in
     if label_cells = 0 || label_cells >= max_cells
-    then value_rows tone (label ^ value)
+    then List.map (fun chunk -> [ Value (tone, chunk) ]) (whole_rows tone (label ^ value))
     else (
-      let head, rest =
-        Layout.split_cells_after_prefix
-          ~prefix_cells:(max_cells - label_cells)
-          ~max_cells
-          value
-      in
-      [ Label label; Value (tone, head) ]
-      :: List.map (fun chunk -> [ Value (tone, chunk) ]) rest)
+      match rows_after_label tone ~room:(max_cells - label_cells) value with
+      | [] -> [ [ Label label ] ]
+      | head :: rest ->
+        [ Label label; Value (tone, head) ]
+        :: List.map (fun chunk -> [ Value (tone, chunk) ]) rest)
 
 (* Rows are filled in order and never revisited: an item joins the open row
    when it fits after a separator, and otherwise starts the next one. [closed]

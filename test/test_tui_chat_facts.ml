@@ -1,7 +1,8 @@
 (* Which facts the block below a Keeper chat keeps. The row a fact lands on is
    not checked here: only that an uncapped block loses and cuts nothing, that
-   a capped one drops whole trailing facts and says how many, and that a fact
-   wider than a row is cut at the cap instead of dropped. *)
+   a capped one drops whole trailing facts and says how many, that a fact
+   wider than a row is cut at the cap instead of dropped, and where such a
+   fact may break. *)
 
 open Alcotest
 module Facts = Masc_tui_chat_facts
@@ -105,19 +106,69 @@ let test_a_fact_with_no_text_is_not_a_fact () =
    the count: the pane subtracts the rows it granted, so a block that drew
    one more would push the composer off its row. *)
 let test_a_capped_block_takes_no_more_rows_than_granted () =
-  for max_cells = 1 to 24 do
-    for max_rows = 0 to 3 do
-      let layout = Facts.layout ~max_cells ~max_rows ~more facts in
-      check bool
-        (Printf.sprintf "%d cells, %d rows" max_cells max_rows)
-        true
-        (List.compare_length_with layout.Facts.rows max_rows <= 0)
-    done
-  done
+  let sentence = Facts.fact Facts.Plain "the provider closed the stream before a reply" in
+  List.iter
+    (fun (name, facts) ->
+      for max_cells = 1 to 24 do
+        for max_rows = 0 to 3 do
+          let layout = Facts.layout ~max_cells ~max_rows ~more facts in
+          check bool
+            (Printf.sprintf "%s: %d cells, %d rows" name max_cells max_rows)
+            true
+            (List.compare_length_with layout.Facts.rows max_rows <= 0)
+        done
+      done)
+    [ "names and numbers", facts; "a sentence first", sentence :: facts ]
+
+(* A sentence wider than a row breaks between two of its words: its rows
+   joined with one space are the sentence again, which a row ending inside a
+   word would not give. A name has no word to end a row on and is cut at the
+   cell, so every row of it but the last is full. *)
+let test_a_sentence_breaks_between_words_and_a_name_at_the_cell () =
+  let sentence =
+    String.concat " " (List.init 12 (fun index -> Printf.sprintf "word%02d" index))
+  in
+  let name = String.concat "" (List.init 12 (fun index -> Printf.sprintf "part%02d" index)) in
+  let rows ~max_cells facts =
+    List.map Facts.text (Facts.layout ~max_cells ~max_rows:max_int ~more facts).Facts.rows
+  in
+  List.iter
+    (fun max_cells ->
+      let at = Printf.sprintf "%d cells" max_cells in
+      let sentence_rows = rows ~max_cells [ Facts.fact Facts.Plain sentence ] in
+      check string ("the sentence's rows are its words at " ^ at) sentence
+        (String.concat " " sentence_rows);
+      check string ("so are the rows of a sentence behind a label at " ^ at)
+        ("stopped: " ^ sentence)
+        (String.concat " " (rows ~max_cells [ Facts.fact ~label:"stopped: " Facts.Plain sentence ]));
+      check bool ("no row of the sentence is wider than the block at " ^ at) true
+        (List.for_all (fun row -> Layout.display_width row <= max_cells) sentence_rows);
+      let name_rows = rows ~max_cells [ Facts.fact Facts.Who name ] in
+      check string ("the name's rows are the name at " ^ at) name (String.concat "" name_rows);
+      check bool ("every row of the name but the last is full at " ^ at) true
+        (List.for_all
+           (fun row -> Layout.display_width row = max_cells)
+           (List.take (List.length name_rows - 1) name_rows)))
+    [ 20; 33; 47 ];
+  (* The label leaves the first row eleven cells. The word that does not fit
+     them goes on at the block's width, not at the first row's. *)
+  check (list string) "a word wider than what the label leaves goes on at the full width"
+    [ "stopped: abcdefghijk"; "lmnopqrstuvwxyz01234"; "56789 end" ]
+    (rows ~max_cells:20
+       [ Facts.fact ~label:"stopped: " Facts.Plain "abcdefghijklmnopqrstuvwxyz0123456789 end" ])
+
+let mentions text word =
+  let length = String.length word in
+  let rec from index =
+    index + length <= String.length text
+    && (String.equal (String.sub text index length) word || from (index + 1))
+  in
+  from 0
 
 (* A fact wider than a row is prose -- a failed turn's message. Its head is
    what the reader needs, so a cap that cannot hold all of it cuts it rather
-   than replacing it with a count. *)
+   than replacing it with a count. A cap that holds all of it with the count
+   behind it draws it whole, and says so by not marking a cut. *)
 let test_a_fact_wider_than_a_row_is_cut_not_dropped () =
   let max_cells = 40 in
   let heading = "REQUEST ERROR" in
@@ -132,12 +183,16 @@ let test_a_fact_wider_than_a_row_is_cut_not_dropped () =
   in
   let wanted = Facts.rows_wanted ~max_cells facts in
   check bool "the fixture needs several rows" true (wanted > 2);
+  check bool "one row cuts the message" true
+    (Facts.layout ~max_cells ~max_rows:1 ~more facts).Facts.cut;
   for max_rows = 1 to wanted - 1 do
     let layout = Facts.layout ~max_cells ~max_rows ~more facts in
     let at = Printf.sprintf "%d rows" max_rows in
     let text = drawn layout.Facts.rows in
     let head = heading ^ "word00" in
-    check bool ("the message is cut at " ^ at) true layout.Facts.cut;
+    check bool ("the message is marked cut exactly when its end is not drawn at " ^ at)
+      (not (mentions text "word29"))
+      layout.Facts.cut;
     check int ("only the fact behind it is left out at " ^ at) 1 layout.Facts.omitted;
     check string ("its head is drawn at " ^ at) head
       (String.sub text 0 (Int.min (String.length head) (String.length text)));
@@ -163,5 +218,7 @@ let () =
             test_a_capped_block_takes_no_more_rows_than_granted
         ; test_case "a fact wider than a row is cut, not dropped" `Quick
             test_a_fact_wider_than_a_row_is_cut_not_dropped
+        ; test_case "a sentence breaks between words, a name at the cell" `Quick
+            test_a_sentence_breaks_between_words_and_a_name_at_the_cell
         ] )
     ]

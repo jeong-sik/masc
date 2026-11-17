@@ -2152,7 +2152,10 @@ let read_latest_view_file_result ~project ~previous path =
         let* after = latest_input_stats_result ~path input in
         let* current = inspect_path_result path in
         Ok (complete, after, current)) in
-      if not (same_latest_snapshot stats after && same_latest_snapshot stats current)
+      (* Keep the captured extent, rather than treating a concurrent append as
+         a read failure or marking its unread bytes as consumed. Replacement
+         and shrinkage still fail the append-only identity checks. *)
+      if not (append_only_successor stats after && append_only_successor after current)
       then Error (appended_read_changed path)
       else
         let latest_value = match scanned with Some _ -> scanned | None -> fallback in

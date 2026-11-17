@@ -300,8 +300,10 @@ val read_latest_view_result : 'a latest_view -> ('a option, read_error) result
     combined with growth are outside the append-only contract.
 
     Missing stores yield [Ok None]. Removed paths cannot supply a cached
-    result. Storage errors remain explicit, and a file changing during a scan
-    is an error. Only files visited by a successful read remain in the view;
+    result. A same-inode append during a scan preserves the result through
+    the captured end; the next read inspects the appended bytes. Replacement,
+    shrinkage, same-size metadata changes and storage errors remain explicit
+    failures. Only files visited by a successful read remain in the view;
     no full retained row count is taken. *)
 
 val month_dir_paths_newest_first_result : t -> (string list, read_error) result

@@ -51,6 +51,37 @@ type t
 type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
   (Mcp_protocol.Sampling.create_message_result, string) result
 
+(** MCP over a caller-owned duplex byte stream. The caller owns process or
+    remote-session lifetime, cancellation, and closing both flows. This module
+    neither spawns nor signals a process and does not invent a process ID.
+    Calls on one channel must be serialized. *)
+module Channel : sig
+  type t
+
+  val create :
+    input:Eio.Flow.source_ty Eio.Resource.t ->
+    output:Eio.Flow.sink_ty Eio.Resource.t ->
+    ?max_response_bytes:int ->
+    ?sampling_handler:sampling_handler ->
+    unit -> (t, string) result
+  (** [input] carries server stdout; [output] carries server stdin.
+      A nonpositive byte limit is rejected before using either flow.
+      Response bounds and sampling behavior match [connect]. *)
+
+  val initialize : t -> client_version:string -> (unit, Error.t) result
+  val list_tools_full : t -> (Mcp_schema.Sdk_types.tool list, Error.t) result
+  val call_tool_full :
+    t -> name:string -> arguments:Yojson.Safe.t ->
+    (Mcp_schema.Sdk_types.tool_result, Error.t) result
+  (** Preserve the full SDK result and [is_error]. An error does not establish
+      that the request was unsent; callers must not infer replay permission. *)
+
+  val close : t -> unit
+  (** Stop protocol use without closing, signalling, or otherwise releasing
+      the caller's flows. The transport owner must cancel an in-flight call
+      and release its session; this operation does not interrupt a read. *)
+end
+
 (** {1 Connection lifecycle} *)
 
 val connect

@@ -31,8 +31,8 @@ let fresh_authority ~config ~reserved request () =
   Edge.fresh_authority ~config ~reserved ~owner:(Request.physical_owner request)
     ~expected:(Request.destination request) ()
 let call = Edge.call
-let resume ~store ~config ~reserved ~wake original =
-  Owner.resume ~store ~config ~reserved ~original ~wake ~call:(call ~config ~reserved)
+let resume ~store ~config ~reserved ~wake ~current original =
+  Owner.resume ~store ~config ~reserved ~original ~wake ~current ~call:(call ~config ~reserved)
     ~publish:(fun ~original ~request ~proposal ->
       Keeper_librarian_durable_commit.publish ~store ~config ~original ~request ~proposal
         ~fresh_authority:(fresh_authority ~config ~reserved request)
@@ -333,6 +333,27 @@ let rec consume_one ~config ~keeper_name ~wake =
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let store=Lane_addon_store.of_config config in
   let reserved=reserved () in
+  (* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.5. The
+     destination the configuration names now, as this call of the pass judges
+     a cut original by it: read on the first cut original met and not again.
+     The inventory check and the owner both use this one reading; two
+     readings could disagree and keep the pass waking itself. [None] when no
+     destination could be read: the configuration names none, or reading it
+     failed. A cut original waits then, and the reason is logged, because
+     the log is what tells that wait from one under its own declaration. *)
+  let current =
+    let read=ref None in
+    fun () -> match !read with
+      | Some destination -> destination
+      | None ->
+        let destination=match with_destination ~config ~reserved (fun destination -> Ok destination) with
+          | Ok destination -> Some destination
+          | Error detail ->
+            Log.Keeper.info ~keeper_name
+              "durable Librarian read no destination to judge a cut original by, so it waits: %s" detail;
+            None in
+        read:=Some destination;
+        destination in
   let error detail=Error (Consumer.Original_publication_blocked detail) in
   let wait_for_original wait record =
     let+ resolution=match wait with
@@ -364,7 +385,7 @@ let rec consume_one ~config ~keeper_name ~wake =
       ~detail:"Original history request ended before any worker received it: its declaration was replaced"
       Keeper_exact_walk_failure.empty] in
   let resume_original original =
-    match resume ~store ~config ~reserved ~wake original with
+    match resume ~store ~config ~reserved ~wake ~current original with
     | Error detail -> error detail
     | Ok (Owner.Waited (wait, record)) ->
       (match wait_for_original wait record with
@@ -495,7 +516,11 @@ let rec consume_one ~config ~keeper_name ~wake =
           let* frontier=io (fun () -> Commit.validate_inventory ~inventory ~store ~request ~record) in
           match frontier with
           | Commit.Unfinished -> Ok (Owner.Read original::unfinished,settled,fenced_read)
-          | Commit.Settled -> Ok (unfinished,original::settled,fenced_read)) (Ok ([],[],[])) originals in
+          | Commit.Settled -> Ok (unfinished,original::settled,fenced_read)
+          | Commit.Settled_if_replaced ->
+            if Request.replaced_since ~current:(current ()) request
+            then Ok (unfinished,original::settled,fenced_read)
+            else Ok (Owner.Read original::unfinished,settled,fenced_read)) (Ok ([],[],[])) originals in
         (* A waiting original's fence is read again here, as the fold above
            reads it for every original it holds with its body. *)
         let* unfinished,fenced_read=List.fold_left (fun result ((record,index) as original) ->
@@ -653,7 +678,7 @@ let rec consume_one ~config ~keeper_name ~wake =
           match capture ~before_retain ~store ~config ~reserved ~keeper_name source with
           | Error detail -> stop detail
           | Ok original ->
-            match resume ~store ~config ~reserved ~wake (Owner.Read original) with
+            match resume ~store ~config ~reserved ~wake ~current (Owner.Read original) with
             | Error detail -> stop detail
             | Ok (Owner.Waited (wait, record)) ->
               (match wait_for_original wait record with

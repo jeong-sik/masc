@@ -179,6 +179,12 @@ let confirm_replaced capture json =
        Error (context ^ " does not show a replaced declaration"))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
     Error (context ^ " is not the declaration-replaced object")
+let replaced_since ~current capture = match current with
+  | None -> false
+  | Some current ->
+    (match Destination.relation ~captured:capture.destination ~current with
+     | Destination.Replaced -> true
+     | Destination.Same | Destination.Other_owner -> false)
 let source capture=capture.source
 let preparation capture=capture.preparation
 let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "completed-history-execution";

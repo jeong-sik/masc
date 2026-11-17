@@ -135,6 +135,12 @@ val confirm_replaced : t -> Yojson.Safe.t -> (replaced, string) result
     destination, and the two must differ in the semantic configuration
     revision only ({!Lane_addon_captured_destination.Replaced}). Anything else
     is refused. *)
+val replaced_since : current:destination option -> t -> bool
+(** Whether the declaration this request was captured for was replaced: the
+    destination the configuration names now differs from the captured one in
+    the semantic configuration revision only. [current] is [None] when no
+    destination of now could be read; nothing is known then and the answer is
+    [false]. *)
 val source : t -> Keeper_librarian_durable_capture.t
 val preparation : t -> Keeper_librarian_runtime.durable_preparation
 val request : t -> (Lane_addon_exact.request, string) result

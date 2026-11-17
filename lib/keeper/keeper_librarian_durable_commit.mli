@@ -22,13 +22,19 @@ val publish : store:Lane_addon_store.t -> config:Workspace.config ->
   fresh_authority:(unit -> (unit, string) result) ->
   (Keeper_librarian_durable_owner.publication, string) result
 
-type frontier = Unfinished | Settled
+type frontier = Unfinished | Settled | Settled_if_replaced
 val validate : store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->
   record:Lane_addon_tool_request_owner.retained -> (frontier, string) result
 (** Blocking strict full-inventory validation. Original host proof, preparation,
     complete Gate lineage, terminal and immutable commit markers are checked.
-    [Unfinished] includes an actual host terminal [Outcome_unknown]: its source
-    remains owned by this original and cannot be freshly selected. Definite
+    An actual host terminal [Outcome_unknown] is read by its cause. An attempt
+    that raised is [Unfinished]: its source remains owned by this original and
+    cannot be freshly selected. An attempt a stopped process interrupted is
+    [Settled] (RFC-0500). An attempt cut off in this process is
+    [Settled_if_replaced]: settled when
+    {!Keeper_librarian_durable_request.replaced_since} holds for the
+    destination the caller's pass read, unfinished otherwise (RFC
+    librarian-ends-waiting-requests-of-a-replaced-declaration 3.5). Definite
     terminal refusals are [Settled]; a known basis conflict is also [Settled]
     here and must separately pass the existing strict successor-lineage policy.
     Historical Finished and known typed-basis conflicts do not require today's

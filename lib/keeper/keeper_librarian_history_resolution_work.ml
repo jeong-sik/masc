@@ -190,7 +190,7 @@ let find_completed ~config ~keeper_name ~store ~child_id =
        | None | Some (Preparation_pending _) -> Ok None)
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _),
-      (Keeper_librarian_durable_commit.Unfinished | Settled) -> Ok None in
+      (Keeper_librarian_durable_commit.Unfinished | Settled | Settled_if_replaced) -> Ok None in
   descend [] child_id
 let retain_completion ~config ~keeper_name ~store intent =
   match intent.Intent.phase with

@@ -1,14 +1,25 @@
 (** Production completed-history Addon adapter. Call only inside the Keeper's
     serialized Memory lane and purge fence. Resume immutable retained work before
-    invoking a fresh selector; never re-create or redispatch an unknown request. *)
+    invoking a fresh selector; never send an unknown request again. *)
 val consume_one : config:Workspace.config -> keeper_name:string ->
   wake:(unit -> unit) ->
   (Keeper_librarian_durable_consumer.outcome,
    Keeper_librarian_durable_consumer.error) result
 (** An unavailable attachment reports [Original_publication_blocked] and leaves
-    the original source unread. A verified host terminal [Outcome_unknown]
-    remains the original unfinished frontier and returns [Pending] on its first
-    and later wakes, without fresh selection or a new provider call. Observed
+    the original source unread. A verified host terminal [Outcome_unknown] is
+    read by its cause. An attempt that raised, and one cut off in this process
+    under the declaration it was captured for, remain the original unfinished
+    frontier and return [Pending] on the first and later wakes, without fresh
+    selection or a new provider call. An attempt a stopped process interrupted
+    settles (RFC-0500), and so does one cut off in this process whose
+    declaration was replaced since (RFC
+    librarian-ends-waiting-requests-of-a-replaced-declaration 3.5): the pass
+    that reads the refusal asks [wake], and the next pass moves the original
+    and selects its range again, whole, under a new ID, which asks the model
+    once more. For the cut one that holds only while the destination the pass
+    reads names another configuration revision of the same installation,
+    package and tool; the end is the move, so an original not yet moved waits
+    again once its declaration is put back. Observed
     worker absence after dispatch may instead prepare the existing fenced
     history resolution, only after its host-proof, receipt and source guards
     pass. Its durable continuation requests a later Memory-lane unit before

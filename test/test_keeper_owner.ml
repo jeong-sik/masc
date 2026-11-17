@@ -4953,6 +4953,64 @@ let test_recovery_keeps_integrity_failure_fenced () =
       |> expect_store_fenced)
 ;;
 
+(* #36205: a client holding a request whose acceptance is unknown waits for
+   the Keeper's waiting inventory to move and sends no command. The Owner
+   must lift an availability fence on its own wake once the store heals and
+   announce the lift, or the request stays held until a restart. *)
+let test_owner_lifts_an_availability_fence_without_a_command () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.make () in
+  Eio_context.with_test_env ~sw ~net:env#net
+    ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+    ~mono_clock:env#mono_clock @@ fun () ->
+  let keeper_name = "self-recovery" in
+  with_recovery_store ~sw ~keeper_name ~runner:None ~on_turn_slot_released:None
+    (fun owner path ->
+      let subscriber = Printf.sprintf "owner-self-recovery-%d" (Unix.getpid ()) in
+      let heard = ref 0 in
+      Sse.subscribe_external
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:(Filename.dirname path))
+        ~id:subscriber
+        ~callback:(fun (event : Sse.external_event) ->
+          match
+            Json_util.assoc_string_opt "type" event.ext_payload,
+            Json_util.assoc_string_opt "keeper_name" event.ext_payload
+          with
+          | Some "keeper_waiting_inventory_changed", Some name
+            when String.equal name keeper_name -> incr heard
+          | (Some _ | None), (Some _ | None) -> ())
+        ();
+      Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external subscriber);
+      let away = path ^ ".away" in
+      Eio.Switch.on_release sw (fun () -> if Sys.file_exists away then Unix.unlink away);
+      inject_operation_failure owner (operation_id "kmsg-self-recovery-rollback");
+      (* The store file is gone, so the recovery this submission runs fails
+         and leaves the fence up. *)
+      Unix.rename path away;
+      Owner.submit_operation owner ~operation_id:(operation_id "kmsg-self-recovery-refused")
+        ~source:operation_source ~input:(operation_input "refused while fenced")
+      |> expect_store_fenced;
+      check bool "the failed recovery leaves the fence up" true
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      (* The store heals. No client command follows. *)
+      Unix.rename away path;
+      heard := 0;
+      Eio.Time.sleep env#clock 0.05;
+      check bool "the fence stays up until the Owner's own wake is due" true
+        (Owner.operation_projection owner).Owner.store_unavailable;
+      Eio_mock.Clock.advance clock;
+      Eio.Time.with_timeout_exn env#clock 2.0 (fun () ->
+        while (Owner.operation_projection owner).Owner.store_unavailable do
+          Eio.Time.sleep env#clock 0.01
+        done);
+      check bool "the lift is announced to waiting-inventory readers" true (!heard > 0);
+      ignore
+        (owner_ok
+           (Owner.submit_operation owner ~operation_id:(operation_id "kmsg-self-recovery-after")
+              ~source:operation_source ~input:(operation_input "accepted after the lift"))))
+;;
+
 (* The Owner clears its child slot in the same mailbox turn that settles the
    child, so an empty slot is the observable end of the child even when that
    settlement was refused by a fenced store. [on_turn_slot_released] cannot be
@@ -7718,6 +7776,8 @@ let () =
             test_idle_wake_recovers_store_and_answers_queued_chat
         ; test_case "recovery keeps integrity failures fenced" `Quick
             test_recovery_keeps_integrity_failure_fenced
+        ; test_case "the Owner lifts an availability fence without a command" `Quick
+            test_owner_lifts_an_availability_fence_without_a_command
         ; test_case "recovery settles an orphaned child row without replay" `Quick
             test_recovery_settles_an_orphaned_child_row_without_replay
         ; test_case "recovery closes an active native call instead of running it" `Quick

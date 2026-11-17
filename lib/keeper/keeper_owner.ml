@@ -455,6 +455,15 @@ let operation_fault_detail = function
   | Operation_integrity_failure detail ->
     "Keeper chat operation integrity failure: " ^ detail
 
+(* How long the Owner waits before it retries an availability fence on its
+   own, through its cooling-retry wake. A command retries the fence too, but
+   a client that waits for the fence to lift sends none, so without this wake
+   a healed store stays fenced until a restart (#36205). A store that is out of disk or permission heals on
+   an operator's timescale, so a lift within two seconds of the heal is
+   prompt; a persistent outage costs at most thirty close+reopen attempts a
+   minute, and [set_operation_fault] logs only a changed detail. *)
+let store_recovery_retry_sec = 2.0
+
 let retain_operation_fault fault previous =
   match previous with
   | Some (Operation_integrity_failure _) -> previous
@@ -1330,12 +1339,12 @@ let log_restart_settlement ~keeper_name ~observations ~interrupted_here =
        (List.length requeued) (List.length failed) unreadable)
 ;;
 
-(* A command is the moment the fence is re-examined, not a later wake:
-   [wake_operation_drain] fires only when a keepalive starts or a deferred
-   retry comes due, so a fence raised mid-day had no trigger to lift it and
-   every later submission was refused with a stale detail (msx-retro-mania,
+(* A command re-examines the fence before it touches the store, so a
+   submission is never refused with a stale detail (msx-retro-mania,
    2026-09-14 16:45 KST). An availability fault is retried here while no
-   child holds the handle; the other faults stay fenced. *)
+   child holds the handle; the other faults stay fenced. The Owner also
+   retries an availability fence on its own wake ([store_recovery_retry_sec]),
+   since a client waiting for the lift sends no command (#36205). *)
 let run_operation_command t ~label f =
   match recover_operation_availability t with
   | Error error -> Error error
@@ -1664,11 +1673,26 @@ let start
         ~delay:(Float.min (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
           (Float.max 0.0 (not_before -. t.now ())))
   in
+  (* While an availability fence is up, the Owner itself owns its recovery:
+     the cooling-retry wake runs [Observe_runtime_retry_waits], which retries
+     the fence first and publishes the lift. An integrity fence is not
+     retried in process, and no fence needs no recovery. *)
+  let arm_store_recovery_wake () =
+    match !(t.operation_error) with
+    | Some (Operation_availability_failure _) ->
+      schedule_cooling_retry_wake ~delay:store_recovery_retry_sec
+    | Some (Operation_integrity_failure _) | None -> ()
+  in
   let retry_cooling_observation () =
     (* The cached deadline may already have passed, or a failed projection
        may have lost it. A failed observation retains a positive retry wake
-       without interpreting either condition as dispatch permission. *)
-    schedule_cooling_retry_wake ~delay:(Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
+       without interpreting either condition as dispatch permission. A
+       failure that left an availability fence up retries at the recovery
+       cadence instead, since the next observation starts by retrying it. *)
+    match !(t.operation_error) with
+    | Some (Operation_availability_failure _) -> arm_store_recovery_wake ()
+    | Some (Operation_integrity_failure _) | None ->
+      schedule_cooling_retry_wake ~delay:(Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())
   in
   (* A transient (non-throttle) failure defers with no cooling time: the
      continuation is immediately claimable again, but the Owner never polls
@@ -2031,6 +2055,10 @@ let start
                     { claimed_operation_id = !claimed_operation_id; execution; ended }))
           ))
     and loop state =
+        (* Every command that can raise the fence returns here, so a fence up
+           now has a recovery wake armed before the mailbox waits again; no
+           client command is needed to lift it (#36205). *)
+        arm_store_recovery_wake ();
         (* The drain is the only writer; decisions and external observers
            read the same published shutdown reservation. *)
         let shutdown_operation_id = Atomic.get t.shutdown_operation_id in

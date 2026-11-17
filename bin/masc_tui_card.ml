@@ -12,6 +12,13 @@ type style =
   ; reset : string
   }
 
+type chrome =
+  { hotkey : (string * string) option
+  ; badge : (string * string) option
+  }
+
+let empty_chrome = { hotkey = None; badge = None }
+
 (* A side, one cell of padding, a cell of content, one cell of padding, a side. *)
 let side_and_padding_cells = 4
 let min_width = side_and_padding_cells + 1
@@ -25,21 +32,70 @@ let top_edge_fixed_cells = 5
 let repeat text count = String.concat "" (List.init (max 0 count) (fun _ -> text))
 let blank width = String.make (max 0 width) ' '
 
-let top_edge ~rounded ~style ~width title =
+let top_edge ~rounded ~chrome ~style ~width title =
+  let tl = if rounded then Box.tl_round else Box.tl in
+  let tr = if rounded then Box.tr_round else Box.tr in
   let room = max 0 (width - top_edge_fixed_cells) in
-  let label_cells = min room (Layout.display_width title) in
+  let hk_text, hk_style, hk_cells =
+    match chrome.hotkey with
+    | None -> ("", "", 0)
+    | Some (tag, tag_style) ->
+      let plain = Masc_tui_theme.strip_sgr tag in
+      let cells = Layout.display_width plain in
+      if cells > 0 && cells < room then
+        (Layout.fit_width plain cells, tag_style, cells)
+      else ("", "", 0)
+  in
+  let badge_opt =
+    match chrome.badge with
+    | None -> None
+    | Some (badge, badge_style) ->
+      let plain = Masc_tui_theme.strip_sgr badge in
+      let cells = Layout.display_width plain in
+      (* Reserve 4 framing cells ("─ " + badge + " ─") plus >= 6 cells for title. *)
+      if cells > 0 && room - hk_cells >= cells + 10 then
+        Some (Layout.fit_width plain cells, badge_style, cells)
+      else None
+  in
+  let badge_reserved =
+    match badge_opt with
+    | None -> 0
+    | Some (_, _, cells) -> cells + 4
+  in
+  let title_room = max 0 (room - hk_cells - badge_reserved) in
+  let label_cells = min title_room (Layout.display_width title) in
   let label = Layout.fit_width title label_cells in
-  let fill = width - top_edge_fixed_cells - label_cells in
+  let hk_part =
+    if hk_cells = 0 then []
+    else [ hk_style; hk_text; style.reset ]
+  in
+  let tail =
+    match badge_opt with
+    | None ->
+      let fill = max 0 (room - hk_cells - label_cells) in
+      [ style.edge; " "; repeat Box.h fill; tr; style.reset ]
+    | Some (badge_text, badge_style, badge_cells) ->
+      let fill = max 0 (room - hk_cells - label_cells) in
+      let mid_rule = max 1 (fill - badge_cells - 3) in
+      [ style.edge; " "; repeat Box.h mid_rule; " "; style.reset
+      ; badge_style; badge_text; style.reset
+      ; style.edge; " "; Box.h; tr; style.reset
+      ]
+  in
   String.concat ""
-    [ style.edge; (if rounded then "╭" else Box.tl); Box.h; " "; style.reset
-    ; style.title_style; label; style.reset
-    ; style.edge; " "; repeat Box.h fill; (if rounded then "╮" else Box.tr); style.reset
-    ]
+    ([ style.edge; tl; Box.h; " "; style.reset ]
+     @ hk_part
+     @ [ style.title_style; label; style.reset ]
+     @ tail)
 
 let bottom_edge ~rounded ~style ~width =
   String.concat ""
-    [ style.edge; (if rounded then "╰" else Box.bl); repeat Box.h (width - 2);
-      (if rounded then "╯" else Box.br); style.reset ]
+    [ style.edge
+    ; (if rounded then Box.bl_round else Box.bl)
+    ; repeat Box.h (width - 2)
+    ; (if rounded then Box.br_round else Box.br)
+    ; style.reset
+    ]
 
 let body_row ~style ~width content =
   String.concat ""
@@ -64,19 +120,20 @@ let window ~style ~rows body =
 (* [body] is the rows already asked of the card at its content width, so a
    body that wraps is asked once per card however many times the layout reads
    its height. *)
-let render_body ~rounded ~style ~width ~height ~title body =
+let render_body ~rounded ~chrome ~style ~width ~height ~title body =
   if width < min_width || height < min_height then
     List.init (max 0 height) (fun _ -> blank width)
   else begin
     let rows = height - 2 in
     let body = window ~style ~rows body in
     let filler = List.init (rows - List.length body) (fun _ -> "") in
-    (top_edge ~rounded ~style ~width title :: List.map (body_row ~style ~width) (body @ filler))
+    (top_edge ~rounded ~chrome ~style ~width title
+     :: List.map (body_row ~style ~width) (body @ filler))
     @ [ bottom_edge ~rounded ~style ~width ]
   end
 
-let render ?(rounded=false) ~style ~width ~height card =
-  render_body ~rounded ~style ~width ~height ~title:card.title
+let render ?(rounded = false) ?(chrome = empty_chrome) ~style ~width ~height card =
+  render_body ~rounded ~chrome ~style ~width ~height ~title:card.title
     (card.body ~cells:(content_cells ~width))
 
 let columns_that_fit ~inner_width ~gap ~min_card_width ~max_columns =
@@ -101,28 +158,32 @@ let stack_height ~row_gap heights =
 
 (* Each card of a column with its body, asked once at the column's width. *)
 let prepare_column ~width stack =
-  List.map (fun card -> (card.title, card.body ~cells:(content_cells ~width))) stack
+  List.map
+    (fun (card, chrome) ->
+       (card.title, chrome, card.body ~cells:(content_cells ~width)))
+    stack
 
 let prepared_height ~row_gap prepared =
-  stack_height ~row_gap (List.map (fun (_, body) -> natural_height body) prepared)
+  stack_height ~row_gap (List.map (fun (_, _, body) -> natural_height body) prepared)
 
 (* The last card of a column takes whatever the column lacks against the
    tallest, so every column ends on the same row. *)
-let column_rows ~style ~row_gap ~width ~height prepared =
+let column_rows ~rounded ~style ~row_gap ~width ~height prepared =
   let extra = max 0 (height - prepared_height ~row_gap prepared) in
   let last = List.length prepared - 1 in
   let drawn =
     List.mapi
-      (fun index (title, body) ->
+      (fun index (title, chrome, body) ->
          let card_height = natural_height body + if index = last then extra else 0 in
-         render_body ~rounded:false ~style ~width ~height:card_height ~title body)
+         render_body ~rounded ~chrome ~style ~width ~height:card_height ~title body)
       prepared
   in
   let gap_rows = List.init row_gap (fun _ -> blank width) in
   List.concat
     (List.mapi (fun index rows -> if index = 0 then rows else gap_rows @ rows) drawn)
 
-let grid ~style ~inner_width ~gap ~row_gap ~max_rows columns =
+let grid_with_chrome ?(rounded = false) ~style ~inner_width ~gap ~row_gap ~max_rows
+    columns =
   let count = List.length columns in
   let prepared =
     List.mapi
@@ -144,7 +205,7 @@ let grid ~style ~inner_width ~gap ~row_gap ~max_rows columns =
            match column with
            (* A column with no cards is blank rows of its width. *)
            | [] -> List.init height (fun _ -> blank width)
-           | _ :: _ -> column_rows ~style ~row_gap ~width ~height column)
+           | _ :: _ -> column_rows ~rounded ~style ~row_gap ~width ~height column)
         prepared
     in
     let rec zip rows =
@@ -156,3 +217,7 @@ let grid ~style ~inner_width ~gap ~row_gap ~max_rows columns =
     in
     Some (zip drawn)
   end
+
+let grid ?(rounded = false) ~style ~inner_width ~gap ~row_gap ~max_rows columns =
+  grid_with_chrome ~rounded ~style ~inner_width ~gap ~row_gap ~max_rows
+    (List.map (List.map (fun card -> (card, empty_chrome))) columns)

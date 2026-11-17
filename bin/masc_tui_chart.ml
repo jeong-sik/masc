@@ -4,6 +4,8 @@ module Layout = Masc_tui_message_layout
 
 let bar_full = "\xe2\x96\x88" (* U+2588 FULL BLOCK *)
 let bar_light = "\xe2\x96\x91" (* U+2591 LIGHT SHADE *)
+let meter_fill = "\xe2\x96\xa0" (* U+25A0 BLACK SQUARE *)
+let meter_track = "\xc2\xb7" (* U+00B7 MIDDLE DOT *)
 let glyph_block_1 = "\xe2\x96\x81" (* U+2581 *)
 let glyph_block_2 = "\xe2\x96\x82" (* U+2582 *)
 let glyph_block_3 = "\xe2\x96\x83" (* U+2583 *)
@@ -91,7 +93,15 @@ let format_compact_num n =
 
 let bar_filled_cells ~width ~value ~max_value =
   if width <= 0 || max_value <= 0 || value <= 0 then 0
-  else Stdlib.max 1 (Stdlib.min width (Stdlib.min value max_value * width / max_value))
+  else
+    let clamped = Stdlib.min value max_value in
+    let scaled =
+      Z.to_int
+        (Z.div
+           (Z.mul (Z.of_int clamped) (Z.of_int width))
+           (Z.of_int max_value))
+    in
+    Stdlib.max 1 (Stdlib.min width scaled)
 ;;
 
 (* A gauge states a proportion and nothing else. It used to colour the bar
@@ -156,6 +166,83 @@ let gauge ~width ~value ~max_value ?label () =
         Layout.fit_width (Printf.sprintf "%s%d%%" prefix pct) width
 ;;
 
+let meter_bar ~width ~value ~max_value ?cell_style ?(track_style = "")
+    ?(reset = Masc_tui_theme.Sgr.reset) () =
+  if width <= 0 then ""
+  else
+    let filled = bar_filled_cells ~width ~value ~max_value in
+    let unfilled = Stdlib.max 0 (width - filled) in
+    let filled_part =
+      if filled <= 0 then ""
+      else
+        match cell_style with
+        | None -> repeat meter_fill filled
+        | Some style_at ->
+          String.concat ""
+            (List.init filled (fun index -> style_at ~index ~width ^ meter_fill))
+          ^ reset
+    in
+    let track_part =
+      if unfilled <= 0 then ""
+      else if String.equal track_style "" then repeat meter_track unfilled
+      else track_style ^ repeat meter_track unfilled ^ reset
+    in
+    filled_part ^ track_part
+;;
+
+let meter ~width ~value ~max_value ?label ?suffix ?cell_style
+    ?(track_style = "") ?(suffix_style = "")
+    ?(reset = Masc_tui_theme.Sgr.reset) () =
+  if width <= 0 then ""
+  else
+    let clamped_val =
+      Stdlib.max 0 (if max_value > 0 then Stdlib.min value max_value else value)
+    in
+    let pct =
+      if max_value <= 0 then 0
+      else
+        let scaled =
+          Z.to_int
+            (Z.div
+               (Z.mul (Z.of_int clamped_val) (Z.of_int 100))
+               (Z.of_int max_value))
+        in
+        Stdlib.min 100 scaled
+    in
+    let prefix =
+      match label with
+      | Some l when l <> "" -> l ^ " "
+      | Some _ | None -> ""
+    in
+    let raw_suffix =
+      match suffix with
+      | Some s -> s
+      | None -> Printf.sprintf "%3d%%" pct
+    in
+    let styled_suffix =
+      if String.equal raw_suffix "" then ""
+      else if String.equal suffix_style "" then " " ^ raw_suffix
+      else " " ^ suffix_style ^ raw_suffix ^ reset
+    in
+    let suffix_cells =
+      if String.equal raw_suffix "" then 0
+      else 1 + Layout.display_width raw_suffix
+    in
+    let chrome_cells = Layout.display_width prefix + suffix_cells in
+    if width >= chrome_cells + 3 then
+      let bar_width = width - chrome_cells in
+      prefix
+      ^ meter_bar ~width:bar_width ~value:clamped_val ~max_value ?cell_style
+          ~track_style ~reset ()
+      ^ styled_suffix
+    else
+      let fallback =
+        if String.equal raw_suffix "" then Printf.sprintf "%d%%" pct
+        else raw_suffix
+      in
+      Layout.fit_width (prefix ^ fallback) width
+;;
+
 
 type bar_item = {
   name : string;
@@ -212,9 +299,9 @@ let distribution_bars ~width items =
           Printf.sprintf "  %s  %s%s%s%s%s %*d (%2d%%)"
             padded_name
             color
-            (repeat bar_full filled)
+            (repeat meter_fill filled)
             (Masc_tui_theme.Sgr.reset ^ Masc_tui_theme.Sgr.dim)
-            (repeat bar_light unfilled)
+            (repeat meter_track unfilled)
             Masc_tui_theme.Sgr.reset
             count_width count
             pct)
@@ -231,4 +318,68 @@ let braille_cell ~mask =
   Bytes.set s 1 b2;
   Bytes.set s 2 b3;
   Bytes.to_string s
+;;
+
+(* Bottom-up 0..4 dot subcolumns in the Unicode Braille block:
+   left column uses dots 7, 3, 2, 1; right column uses dots 8, 6, 5, 4. *)
+let braille_left_dots = [| 0x00; 0x40; 0x44; 0x46; 0x47 |]
+let braille_right_dots = [| 0x00; 0x80; 0xa0; 0xb0; 0xb8 |]
+let braille_top = 4
+
+let braille_levels ?min ?max values =
+  match values with
+  | [] -> []
+  | first :: rest ->
+    let v_min =
+      match min with
+      | Some m -> m
+      | None -> List.fold_left Stdlib.min first rest
+    in
+    let v_max =
+      match max with
+      | Some m -> m
+      | None -> List.fold_left Stdlib.max first rest
+    in
+    let lower = Z.of_int v_min in
+    let range = Z.sub (Z.of_int v_max) lower in
+    List.map
+      (fun v ->
+        if Z.sign range <= 0 then
+          if v_min <= 0 then 0 else braille_top / 2
+        else
+          let clamped_v = Stdlib.max v_min (Stdlib.min v_max v) in
+          let offset = Z.sub (Z.of_int clamped_v) lower in
+          let scaled =
+            Z.to_int (Z.div (Z.mul offset (Z.of_int braille_top)) range)
+          in
+          if v_min = 0 && clamped_v > 0 then Stdlib.max 1 scaled else scaled)
+      values
+;;
+
+let clamp_braille_level level = Stdlib.max 0 (Stdlib.min braille_top level)
+
+let braille_pair ~left ~right =
+  let l = clamp_braille_level left and r = clamp_braille_level right in
+  braille_cell ~mask:(braille_left_dots.(l) lor braille_right_dots.(r))
+;;
+
+let braille_bar_mark ~level = braille_pair ~left:level ~right:level
+
+let braille_sparkline ?min ?max values =
+  match braille_levels ?min ?max values with
+  | [] -> ""
+  | levels ->
+    let aligned =
+      if List.length levels mod 2 = 1 then 0 :: levels else levels
+    in
+    let buf = Buffer.create ((List.length aligned / 2) * 3) in
+    let rec emit = function
+      | left :: right :: rest ->
+        Buffer.add_string buf (braille_pair ~left ~right);
+        emit rest
+      | [ only ] -> Buffer.add_string buf (braille_pair ~left:0 ~right:only)
+      | [] -> ()
+    in
+    emit aligned;
+    Buffer.contents buf
 ;;

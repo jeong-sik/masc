@@ -45,6 +45,35 @@ val gauge :
     colouring: fill and remainder differ by glyph and dimming only. A domain
     that defines a warning or critical level draws it beside the bar. *)
 
+val meter_bar :
+  width:int ->
+  value:int ->
+  max_value:int ->
+  ?cell_style:(index:int -> width:int -> string) ->
+  ?track_style:string ->
+  ?reset:string ->
+  unit ->
+  string
+(** Bracketless segmented bar of exactly [width] display cells ([""] when
+    [width <= 0]): filled cells draw ["■"] with optional per-cell [cell_style]
+    (for Oklab gradient ramps), and remaining cells draw ["·"] in [track_style]. *)
+
+val meter :
+  width:int ->
+  value:int ->
+  max_value:int ->
+  ?label:string ->
+  ?suffix:string ->
+  ?cell_style:(index:int -> width:int -> string) ->
+  ?track_style:string ->
+  ?suffix_style:string ->
+  ?reset:string ->
+  unit ->
+  string
+(** Bracketless segmented telemetry meter bounded within [width] display cells:
+    optional [label], {!meter_bar}, and right readout ([suffix], defaulting to
+    aligned ["%3d%%"]). *)
+
 (** {1 Distribution Bars} *)
 
 type bar_item = {
@@ -77,3 +106,22 @@ val distribution_bars :
 
 val braille_cell : mask:int -> string
 (** Encodes a Braille pattern (0x2800 + mask) to UTF-8. *)
+
+val braille_levels : ?min:int -> ?max:int -> int list -> int list
+(** Maps each input onto the 5-step Braille subcolumn scale ([0..4]) without
+    integer overflow. When the lower bound is zero, strictly positive values
+    map to at least [1] so non-zero activity never disappears. *)
+
+val braille_pair : left:int -> right:int -> string
+(** One 2x4 Braille cell pairing two bottom-up dot heights ([0..4]) into the
+    left and right subcolumns (e.g. ["⠀"], ["⢀"], ["⣀"], ["⣠"], ["⣤"], ["⣴"],
+    ["⣶"], ["⣾"], ["⣿"]). *)
+
+val braille_bar_mark : level:int -> string
+(** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
+    ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. *)
+
+val braille_sparkline : ?min:int -> ?max:int -> int list -> string
+(** High-density single-row Braille sparkline packing two consecutive samples
+    per terminal cell (2x horizontal resolution). An odd sample count left-pads
+    with [0] so the newest sample sits in the rightmost subcolumn. *)

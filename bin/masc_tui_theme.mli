@@ -148,6 +148,10 @@ module Box : sig
   val tr : string
   val bl : string
   val br : string
+  val tl_round : string
+  val tr_round : string
+  val bl_round : string
+  val br_round : string
   val l : string
   val r : string
 end
@@ -156,6 +160,14 @@ end
     anything. A fact about health, phase, or attention draws through these
     names, so one remap moves every reading at once. *)
 type status = Ok | Warn | Bad | Info | Muted
+
+(** Semantic multi-stop Oklab ramps for continuous meters and sparklines.
+    [Pressure] walks [Ok -> Warn -> Bad] for utilization, memory, and saturation;
+    [Progress] walks [Bright_blue -> Info -> Ok] for completion and throughput so
+    100% completion never reads as failure. *)
+type ramp =
+  | Pressure
+  | Progress
 
 (** The ANSI colours masc names. Only the ones something draws a meaning
     through: a colour absent here is one nothing reads a meaning out of. *)
@@ -224,6 +236,19 @@ val status_text_readable
     if the terminal's own foreground is low-contrast. Preserve the original
     ANSI colour when the reader has explicitly disabled
     colour lifting. Colour-only distinctions continue to use {!status_readable}. *)
+
+val ramp_readable
+  :  surface:surface
+  -> Masc_tui_terminal_palette.t option
+  -> ramp
+  -> t:float
+  -> string
+(** Continuous Oklab interpolation along [ramp] at normalized position [t]
+    (clamped to [[0.0, 1.0]]), lifted against [surface]'s ground to clear the
+    4.5:1 WCAG floor and projected through [best_color]. Falls back to the
+    corresponding discrete ANSI colour when no palette is reported, colour
+    lifting is disabled, or projection is unavailable, and emits [""] under
+    [NO_COLOR]. *)
 
 (** Test-only environment and projection fixtures. Code under [bin/] and
     [lib/] may not name this module outside its owner
@@ -303,6 +328,18 @@ module For_testing : sig
     -> status
     -> string
   (** Capability fixture for {!val:status_text_readable}. *)
+
+  val ramp_readable
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
+    -> Masc_tui_terminal_palette.t option
+    -> ramp
+    -> t:float
+    -> string
+  (** Capability fixture for {!val:ramp_readable}. *)
 
   val recede
     :  colors_enabled:bool
@@ -385,6 +422,10 @@ module Glyph : sig
   val priority : int -> string
   (** ["!"] when the priority number is 1 or lower, the top priority, and an
       empty string for the rest. *)
+
+  val superscript_digit : int -> string
+  (** Unicode superscript numeral (["⁰"]..["⁹"]) for single digits [0..9], or
+      [string_of_int] outside that range, for compact border-embedded hotkeys. *)
 end
 
 val set_lift_enabled : bool -> unit

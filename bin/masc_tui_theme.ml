@@ -246,11 +246,19 @@ module Box = struct
   let tr = "\xe2\x94\x90"
   let bl = "\xe2\x94\x94"
   let br = "\xe2\x94\x98"
+  let tl_round = "\xe2\x95\xad"
+  let tr_round = "\xe2\x95\xae"
+  let bl_round = "\xe2\x95\xb0"
+  let br_round = "\xe2\x95\xaf"
   let l = "\xe2\x94\x9c"
   let r = "\xe2\x94\xa4"
 end
 
 type status = Ok | Warn | Bad | Info | Muted
+
+type ramp =
+  | Pressure
+  | Progress
 
 let status = function
   | Ok -> Sgr.bright_green
@@ -396,6 +404,62 @@ let status_text_readable_for ~colors_enabled ~project ~surface palette state =
     ~project ~surface palette (status_ansi_color state)
 ;;
 
+let ramp_stops = function
+  | Pressure -> Bright_green, Bright_yellow, Bright_red
+  | Progress -> Bright_blue, Bright_cyan, Bright_green
+;;
+
+let ramp_discrete_color ramp t =
+  let low, mid, high = ramp_stops ramp in
+  match ramp with
+  | Pressure ->
+    if t < 0.5 then low else if t < 0.8 then mid else high
+  | Progress ->
+    if t < 0.34 then low else if t < 0.67 then mid else high
+;;
+
+let ramp_readable_for ~colors_enabled ~project ~surface palette ramp ~t =
+  let t =
+    if Float.is_nan t then 0.
+    else Float.max 0. (Float.min 1. t)
+  in
+  let discrete = ramp_discrete_color ramp t in
+  if not colors_enabled then ""
+  else if not !lift_enabled then ansi_color_code discrete
+  else
+    match palette with
+    | None -> ansi_color_code discrete
+    | Some palette ->
+      let low, mid, high = ramp_stops ramp in
+      let left_color, right_color, seg_t =
+        if t <= 0.5 then low, mid, t *. 2.
+        else mid, high, (t -. 0.5) *. 2.
+      in
+      (match
+         ( Terminal_palette.ansi palette (ansi_color_index left_color)
+         , Terminal_palette.ansi palette (ansi_color_index right_color) )
+       with
+       | Some left_rgb, Some right_rgb ->
+         let background = surface_background surface palette in
+         let blended =
+           Color.lerp_oklab ~background ~floor:status_contrast_floor ~t:seg_t
+             left_rgb right_rgb
+         in
+         (match project blended with
+          | Some projected
+            when Color.contrast_ratio
+                   (Terminal_palette.estimated_rgb projected)
+                   background
+                 >= status_contrast_floor ->
+            projected_foreground ~colors_enabled (Some projected)
+          | Some _ | None ->
+            ansi_readable_for ~colors_enabled ~project ~surface (Some palette)
+              discrete)
+       | None, _ | _, None ->
+         ansi_readable_for ~colors_enabled ~project ~surface (Some palette)
+           discrete)
+;;
+
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb
@@ -407,6 +471,7 @@ module For_testing = struct
   let ansi_color_code = ansi_color_code
   let ansi_readable = ansi_readable_for
   let status_text_readable = status_text_readable_for
+  let ramp_readable = ramp_readable_for
 end
 
 let ansi_readable ~surface palette color =
@@ -422,6 +487,11 @@ let status_readable ~surface palette state =
 let status_text_readable ~surface palette state =
   status_text_readable_for ~colors_enabled ~project:Terminal_palette.best_color
     ~surface palette state
+;;
+
+let ramp_readable ~surface palette ramp ~t =
+  ramp_readable_for ~colors_enabled ~project:Terminal_palette.best_color
+    ~surface palette ramp ~t
 ;;
 
 let selection = Sgr.reverse
@@ -547,4 +617,17 @@ module Glyph = struct
      shout — on the live Overview five of eight rows carried a red tail —
      and a mark on most rows distinguishes nothing. *)
   let priority p = if p <= 1 then "!" else ""
+
+  let superscript_digit = function
+    | 0 -> "\xe2\x81\xb0"
+    | 1 -> "\xc2\xb9"
+    | 2 -> "\xc2\xb2"
+    | 3 -> "\xc2\xb3"
+    | 4 -> "\xe2\x81\xb4"
+    | 5 -> "\xe2\x81\xb5"
+    | 6 -> "\xe2\x81\xb6"
+    | 7 -> "\xe2\x81\xb7"
+    | 8 -> "\xe2\x81\xb8"
+    | 9 -> "\xe2\x81\xb9"
+    | n -> string_of_int n
 end

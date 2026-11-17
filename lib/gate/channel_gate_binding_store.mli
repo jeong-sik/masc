@@ -116,3 +116,8 @@ val unbind :
     channel name is trimmed; actor identity is retained as supplied. *)
 
 val read_recent_audit : t -> limit:int -> Yojson.Safe.t list
+(** Newest-first valid JSON rows, skipping blank and malformed lines. A
+    nonpositive limit or a missing path returns no rows. The complete binary
+    file, including an unterminated final line, is read under the canonical
+    append mutex; parsing then stops after [limit] valid rows outside the
+    mutex. Other file errors propagate. *)

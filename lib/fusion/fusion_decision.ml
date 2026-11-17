@@ -71,7 +71,7 @@ let read_events ~config ~run_id = protect (fun () ->
         Array.sort Dated_jsonl.Layout.compare_day_files files;
         Array.iter (fun name ->
           if Filename.check_suffix name ".jsonl" then
-            Fs_compat.load_file (Filename.concat directory name)
+            Fs_compat.load_file_locked (Filename.concat directory name)
             |> String.split_on_char '\n'
             |> List.iter (fun line -> if String.trim line <> "" then
               let json = Yojson.Safe.from_string line in

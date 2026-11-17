@@ -212,6 +212,36 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
          (Fusion_decision.failure_class error = Tool_result.Runtime_failure)
    | Error (Fusion_decision.Rejected _) | Ok _ -> fail "corrupt storage misclassified"))
 
+let test_event_file_final_rows_and_strict_failures () = with_fixture (fun config task_id _ ->
+  let proposal = Fusion_decision.parse
+    (args task_id "adopted" "Measured evidence supports it") |> require "parse" in
+  let recorded = Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref proposal
+    |> require "record" in
+  let fields = match recorded.event with
+    | `Assoc fields -> fields
+    | _ -> fail "recorded decision is not an object" in
+  let dated = events_day_file config in
+  let prefix = Fs_compat.load_file dated.path in
+  let final = `Assoc (("notes", `String "valid final row without a newline") :: fields) in
+  let valid = prefix ^ "\n \t\n{\"type\":\"unrelated\"}\n" ^ Yojson.Safe.to_string final in
+  Fs_compat.save_file dated.path valid;
+  check bool "valid unterminated row and stable chronological order are retained" true
+    (Fusion_decision.read ~config ~run_id:"run-advice" |> require "read final row"
+      = [recorded.event; final]);
+  check string "read leaves every physical byte unchanged" valid (Fs_compat.load_file dated.path);
+  let invalid_selected = `Assoc (List.remove_assoc "choice" fields) |> Yojson.Safe.to_string in
+  List.iter (fun suffix ->
+    let bytes = prefix ^ suffix in
+    Fs_compat.save_file dated.path bytes;
+    let expect_storage_failure = function
+      | Error (Fusion_decision.Storage_failure _) -> ()
+      | Error (Fusion_decision.Rejected _) | Ok _ -> fail "unreadable history was accepted" in
+    expect_storage_failure (Fusion_decision.read ~config ~run_id:"run-advice");
+    expect_storage_failure
+      (Fusion_decision.record ~config ~keeper:"fusion-keeper" ~turn_ref proposal);
+    check string "strict failure appends and repairs nothing" bytes (Fs_compat.load_file dated.path))
+    ["{malformed"; "{malformed\n"; invalid_selected])
+
 let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _ ->
   let rejection run_id =
     match Fusion_decision.source ~keeper:"foreign" ~run_id with
@@ -434,4 +464,5 @@ let () = run "Fusion decision attribution" ["behavior", [
     test_historical_turn_spelling_preserves_conflict_and_retry;
   test_case "read-only lookup respects source ownership and does not adopt advice" `Quick test_read_source_ownership_and_no_adoption;
   test_case "unknown or foreign source and unreadable history refuse writes" `Quick test_bad_source_and_storage;
+  test_case "final physical rows preserve strict event history semantics" `Quick test_event_file_final_rows_and_strict_failures;
   test_case "a decision names only the Task its run was requested for" `Quick test_a_decision_names_the_task_its_run_was_requested_for]]

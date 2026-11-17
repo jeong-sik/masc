@@ -98,6 +98,17 @@ class PrePushTraceGuard(unittest.TestCase):
         self.delete("trace.csexp")
         self.assert_refused(self.push())
 
+    def test_deleting_a_remote_branch_is_accepted(self) -> None:
+        self.commit("lib/a.ml", "let x = 1\n")
+        self.assert_accepted(self.push())
+        hooks = str(HOOKS_DIR)
+        result = git(self.work, "push", "-q", "origin", "--delete", "feature", hooks_path=hooks)
+        self.assert_accepted(result)
+        self.commit("lib/b.ml", "let y = 2\n")
+        self.assert_accepted(self.push())
+        result = git(self.work, "push", "-q", "origin", ":feature", hooks_path=hooks)
+        self.assert_accepted(result)
+
     def test_push_that_deletes_a_pushed_dump_is_accepted(self) -> None:
         self.commit("trace.csexp", "(env ...)\n")
         self.setup_git("push", "-q", "origin", "feature")

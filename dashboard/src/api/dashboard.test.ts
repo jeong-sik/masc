@@ -6170,7 +6170,7 @@ describe('official-client session API', () => {
     },
   )
 
-  it.each(['transient_spawn_failed', 'owner_stopped_turn', 'retryable_turn_failed'])(
+  it.each(['spawn_resources_busy', 'owner_stopped_turn', 'retryable_turn_failed'])(
     'retains Muse session evidence after %s', async (failure) => {
       const release = { failure, owner_epoch: recoveryPayload.session.phase.owner_epoch, released_at: 1_786_230_001 }
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -6279,7 +6279,7 @@ describe('official-client session API', () => {
     expect(result.session?.phase.kind).toBe(phase.kind)
   })
 
-  it.each(['pre_dispatch_failed', 'transient_spawn_failed'])('accepts exact %s release evidence', async failure => {
+  it.each(['pre_dispatch_failed', 'spawn_resources_busy'])('accepts exact %s release evidence', async failure => {
     const payload = { ...recoveryPayload, session: { ...recoveryPayload.session,
       phase: { kind: 'ready' }, turn_count: 0,
       last_transient_release: { failure, owner_epoch: recoveryPayload.session.phase.owner_epoch,

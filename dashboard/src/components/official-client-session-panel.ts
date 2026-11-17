@@ -40,7 +40,8 @@ function retryPreviousOffered(failure: DashboardOfficialClientRecoveryFailure): 
     case 'input_rejected_bootstrap_floor_exceeded':
     case 'input_rejected_effect_fenced':
     case 'pre_dispatch_failed':
-    case 'transient_spawn_failed':
+    case 'spawn_resources_busy':
+    case 'spawn_refused_same_input':
     case 'transport_interrupted':
     case 'protocol_failed':
     case 'provider_rejected':

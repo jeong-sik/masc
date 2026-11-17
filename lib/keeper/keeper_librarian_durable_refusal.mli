@@ -80,17 +80,14 @@ type next_read =
 
 val next_read :
   final:Lane_addon_exact.final ->
-  relation:(unit -> (Lane_addon_captured_destination.relation, string) result) ->
   next_read
 (** What a refusal that ended an original says about the next read (RFC
     librarian-ends-waiting-requests-of-a-replaced-declaration 3.4, 3.6).
-    [Not_allowed] means the host ended the request without running it. When the
-    declaration the original was captured for has since been replaced, that
-    says nothing about the size of its input and no host event follows it:
-    [Whole_again]. A [Not_allowed] under the same declaration, one whose
-    relation is not known, and every refusal that came from a call are
-    [Narrowed]. [relation] is asked only for [Not_allowed]; the reason text of
-    the refusal is never read. *)
+    Only [Not_allowed {reason=Replaced_declaration}] is [Whole_again]. The
+    host's stored reason says nothing about input size, so the next pass
+    reads the range whole. Ordinary permission refusals and refusals from a
+    call remain [Narrowed]. The current declaration and display text cannot
+    change a stored replacement ending. *)
 
 val blocks_destination : t list -> Keeper_librarian_durable_request.destination ->
   Keeper_librarian_durable_consumer.error option

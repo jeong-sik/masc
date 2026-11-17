@@ -376,15 +376,7 @@ let rec consume_one ~config ~keeper_name ~wake =
       (match refused with
        | Error _ -> ()
        | Ok _ ->
-         match Refusal.next_read ~final ~relation:(fun () ->
-           let relation=Edge.relation_to_current ~config ~reserved (Request.destination request) in
-           (match relation with
-            | Ok (Lane_addon_captured_destination.Same | Replaced | Other_owner) -> ()
-            | Error detail ->
-              Log.Keeper.info ~keeper_name
-                "durable Librarian original was ended unrun and the current destination is not known, so the next read narrows: %s"
-                detail);
-           relation) with
+         match Refusal.next_read ~final with
          | Refusal.Narrowed -> Consumer.mark_range_failed ~config ~keeper_name
          | Whole_again ->
            Log.Keeper.info ~keeper_name

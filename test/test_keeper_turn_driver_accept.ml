@@ -308,6 +308,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
   let hooks = { Core.Hooks.empty with after_turn = Some (function
     | Core.Hooks.AfterTurn { turn; _ } ->
       observed_provider_turn_ordinal := Some turn; Core.Hooks.Continue
+    | Core.Hooks.AfterRestoredTurn _
     | Core.Hooks.BeforeTurn _ | Core.Hooks.BeforeTurnParams _
     | Core.Hooks.PreToolUse _ | Core.Hooks.PostToolUse _
     | Core.Hooks.PostToolUseFailure _ | Core.Hooks.OnStop _

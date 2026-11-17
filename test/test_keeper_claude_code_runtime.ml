@@ -3410,7 +3410,7 @@ let test_start_authority_is_user_context_not_standing_system () =
             extra_system_context=assembly.A.extra_system_context;
             system_prompt_override=A.system_prompt_override
               ~previous:current_params.system_prompt_override assembly}
-        | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+        | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
         | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
       with_fixture ~system_marker ~prompt_marker
         [Emit (assistant ~turn_id:(string_of_int index) "ANSWER");

@@ -2,6 +2,36 @@ open Alcotest
 open Agent_core
 open Types
 
+(* A durable response whose every tool call was admitted under its registered
+   name, in provider order. *)
+let all_admitted_snapshot (response : Llm_provider.Types.api_response)
+  : Agent_core__.Execution_provider_response_snapshot.t =
+  let count =
+    List.length
+      (List.filter
+         (function
+           | Llm_provider.Types.ToolUse _ -> true
+           | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+           | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+         response.content)
+  in
+  { Agent_core__.Execution_provider_response_snapshot.response
+  ; admission =
+      { Agent_core__.Execution_provider_response_snapshot.source_map =
+          { Agent_core.Hooks.admitted_tool_sources =
+              List.init count (fun index ->
+                { Agent_core.Hooks.planned_index = index
+                ; source_tool_use_ordinal = index
+                ; name_resolution = Agent_core.Hooks.Registered_name
+                })
+          ; source_tool_use_count = count
+          }
+      ; unavailable_names = []
+      ; unreadable = []
+      }
+  }
+;;
+
 let output content = Ok { content; content_blocks = None; _meta = None }
 let unavailable message = { message; recoverable = false; error_class = Some Unknown }
 
@@ -378,7 +408,7 @@ let test_durable_truth_precedes_current_preparation () =
       let response =
         { id = "scoped-durable-response"; model = "fixture"; unreadable_tool_uses = []; stop_reason = StopToolUse
         ; content = [ call "durable" ]; usage = None; telemetry = None } in
-      Scope.record_provider_response provider response |> require;
+      Scope.record_provider_response provider (all_admitted_snapshot response) |> require;
       let original = prepared_tool ~name:"durable" (fun ~sw:_ _ ->
         Ok (Some (Tool.scoped_call ~scope:(scope "durable") (fun _ _ ->
           incr ran;
@@ -463,7 +493,7 @@ let test_unattempted_sibling_preserves_original_wave () =
       let response =
         { id = "unattempted-sibling-response"; model = "fixture"; unreadable_tool_uses = []; stop_reason = StopToolUse
         ; content = calls; usage = None; telemetry = None } in
-      Scope.record_provider_response provider response |> require;
+      Scope.record_provider_response provider (all_admitted_snapshot response) |> require;
       let counts = Hashtbl.create 2 in
       let count name = match Hashtbl.find_opt counts name with Some value -> value | None -> 0 in
       let perform name _env _input =

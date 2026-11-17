@@ -37,6 +37,10 @@ let with_scope ~actor ~runtime_id ~provider_id operation =
     | Agent_core.Hooks.BeforeTurn _ -> response := None; Agent_core.Hooks.Continue
     | Agent_core.Hooks.AfterTurn { turn; response = observed; tool_source_map } ->
       response := Some (turn, observed, tool_source_map); Agent_core.Hooks.Continue
+    | Agent_core.Hooks.AfterRestoredTurn { turn; response = observed; tool_source_map } ->
+      (* A resumed turn's tools run against the admission recorded with its
+         response, so their identities are frozen the same way (#30728). *)
+      response := Some (turn, observed, Some tool_source_map); Agent_core.Hooks.Continue
     | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.PreToolUse _
     | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _
     | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ ->

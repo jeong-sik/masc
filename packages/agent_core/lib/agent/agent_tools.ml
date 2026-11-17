@@ -525,7 +525,7 @@ let invoke_hook ?on_hook_invoked ~tracer ~agent_name ~turn_count ~hook_name hook
                     | Hooks.PostToolUseFailure { tool_name; _ } -> Some tool_name
                     | Hooks.BeforeTurn _
                     | Hooks.BeforeTurnParams _
-                    | Hooks.AfterTurn _
+                    | Hooks.AfterTurn _ | Hooks.AfterRestoredTurn _
                     | Hooks.OnStop _
                     | Hooks.OnError _
                     | Hooks.OnToolError _ -> None)

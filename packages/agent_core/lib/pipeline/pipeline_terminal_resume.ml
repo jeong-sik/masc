@@ -2,7 +2,7 @@ open Types
 open Agent_types
 open Result_syntax
 
-let replay ~persist_checkpoint agent ~response ~turn ~invocations ~tool_results tool_uses =
+let replay ~persist_checkpoint ~refusal agent ~response ~turn ~invocations ~tool_results tool_uses =
   let* report =
     Pipeline_terminal_tool.recovered_report
       ~response
@@ -19,9 +19,15 @@ let replay ~persist_checkpoint agent ~response ~turn ~invocations ~tool_results 
   let* history_results =
     Agent_turn.make_tool_results ~media_store:agent.media_store report.completed_results
   in
+  (* The refusal note rides with the results, as on the fresh path, so a
+     crash between settling and the checkpoint does not drop it (#32715). *)
   update_state agent (fun state ->
+    let with_results = Util.snoc state.messages (make_message ~role:Tool history_results) in
     { state with
-      messages = Util.snoc state.messages (make_message ~role:Tool history_results)
+      messages =
+        (match refusal with
+         | None -> with_results
+         | Some note -> Util.snoc with_results note)
     });
   let base_state = agent.state in
   let* () = persist_checkpoint After_tool_results_appended base_state in

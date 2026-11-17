@@ -121,6 +121,7 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
       | Agent_core.Hooks.AfterTurn _ ->
         progress_at_collection := Buffer.contents deltas :: !progress_at_collection;
         Agent_core.Hooks.Continue
+      | Agent_core.Hooks.AfterRestoredTurn _
       | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
       | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _
       | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _
@@ -288,6 +289,7 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
        | Ok _ -> ()
        | Error detail -> fail detail);
       Agent_core.Hooks.Continue
+    | Agent_core.Hooks.AfterRestoredTurn _
     | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
     | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _
     | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _

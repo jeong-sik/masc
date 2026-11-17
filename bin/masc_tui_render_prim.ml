@@ -1719,14 +1719,13 @@ let paint_acting_pane_line ?(selected = false)
     ^ String.concat ""
         (List.map
            (fun (span : Masc_tui_acting_pane.span) ->
-             match is_tab_header, span.tone with
-             | true, Masc_tui_acting_pane.Accent ->
-                 Theme.sidebar_selection () ^ Ansi.bold ^ span.text
-                 ^ Ansi.reset ^ restore
-             | (true | false), tone -> (
-                 match acting_pane_sgr tone with
-                 | "" -> span.text
-                 | sgr -> sgr ^ span.text ^ Ansi.reset ^ restore))
+             if is_tab_header && span.tone = Masc_tui_acting_pane.Accent then
+               Theme.sidebar_selection () ^ Ansi.bold ^ span.text
+               ^ Ansi.reset ^ restore
+             else
+               match acting_pane_sgr span.tone with
+               | "" -> span.text
+               | sgr -> sgr ^ span.text ^ Ansi.reset ^ restore)
            line)
     ^ close
 

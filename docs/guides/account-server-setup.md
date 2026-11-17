@@ -185,7 +185,13 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   subscriptions and models they may connect. A multi-account process calls
   the models of Claude Code. It refuses those of Codex and Muse for their
   native tools. It leaves out a model whose runtime.toml row declares no
-  tool calling.
+  tool calling, and names it under `withheld` with the reason.
+- A subscription that is left with no model runs no Keeper. The console
+  says so where the subscription is picked and on the card of an account of
+  it, with the reason, and the account server logs the same once at its
+  start. The reasons are that runtime.toml binds no model to the provider
+  (`[<provider>."<model>"]`), that the bound model has no row, and that its
+  row does not set `tools-support = true`.
 - The person makes Keepers on their own Runtimes, from the console or from
   an MCP client. See [The MCP endpoint of a person](account-server-mcp.md).
 - A browser that is signed in and opens `/` goes on to `/accounts/console`.

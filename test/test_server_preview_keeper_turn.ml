@@ -560,7 +560,7 @@ let test_turn () =
         Alcotest.(check (pair int string))
           "the integrations a person is offered"
           ( 200
-          , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":["gpt-5.5"],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+          , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"withheld":[],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
           )
           (let { R.status; headers = _; body } = Server_person_integrations.answer ~base_path in
            R.status_code status, body);
@@ -600,6 +600,26 @@ let test_turn () =
                    offer.integration_id
                    (Access.native_refusal_to_string refusal))
              offered);
+        (* The answer says which model of a provider is left out and why,
+           with the code the verification below ends with. The route reads the
+           runtime.toml of the base path it is given. *)
+        (let every_kind_base = Filename.concat root "every-kind" in
+         let config =
+           Filename.concat (Common.masc_dir_from_base_path ~base_path:every_kind_base) "config"
+         in
+         Fs_compat.mkdir_p config;
+         Out_channel.with_open_bin
+           (Filename.concat config Config_dir_resolver.runtime_toml_filename)
+           (fun out -> output_string out offered_toml);
+         Alcotest.(check (pair int string))
+           "the models a person is offered and the one left out, with why"
+           ( 200
+           , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5","claude-opus-5"],"withheld":[{"model":"claude-notools","reason":"tools_not_declared"}],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":["gpt-5.5"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"},{"integration_id":"muse","display_name":"Muse Code","models":["muse-fixture"],"withheld":[],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+           )
+           (let { R.status; headers = _; body } =
+              Server_person_integrations.answer ~base_path:every_kind_base
+            in
+            R.status_code status, body));
         (* The model left out is the one a verification of her account
            refuses before any client starts. The window is never reached. *)
         (let left_out =

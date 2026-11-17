@@ -401,8 +401,8 @@ describe('the Keepers of a person', () => {
 
 // ---- the panel ----
 
-const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } }
-const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], calls: { kind: 'refused', refusal: 'native_unpublished' } }
+const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } }
+const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' } }
 const owned: Owned = {
   accounts: [
     { id: 'acct_claude_1', integration: { read: true, value: 'claude_code' } },

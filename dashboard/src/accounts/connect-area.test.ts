@@ -16,8 +16,8 @@ import type { LoginEnd } from './login'
 import type { Integration } from './wire'
 
 const integrations: readonly Integration[] = [
-  { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } },
-  { id: 'codex', displayName: '', models: ['gpt-5.5'], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+  { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
+  { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
 ]
 const loginId = 'a'.repeat(64)
 const printed = 'Open https://claude.ai/oauth/authorize?code=true&state=x to sign in.\nPaste code here: '

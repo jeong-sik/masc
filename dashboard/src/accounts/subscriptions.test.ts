@@ -74,8 +74,8 @@ const linking = (): Response => new Response(
   { status: 200, headers: { 'content-type': 'text/event-stream' } },
 )
 
-const claude = { integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], calls: 'allowed' }
-const codex = { integration_id: 'codex', display_name: 'Codex', models: ['gpt-5.5'], calls: 'refused', refusal: 'native_tools_reach_other_homes' }
+const claude = { integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: 'allowed' }
+const codex = { integration_id: 'codex', display_name: 'Codex', models: ['gpt-5.5'], withheld: [], calls: 'refused', refusal: 'native_tools_reach_other_homes' }
 const offered = (): Response => json(200, { integrations: [claude, codex] })
 const ownedNothing = (): Response => json(200, { provider_accounts: [], runtimes: [] })
 const ownedOne = (): Response => json(200, {
@@ -110,8 +110,8 @@ describe('reading the subscriptions', () => {
       kind: 'read',
       forUser: person,
       integrations: [
-        { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } },
-        { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+        { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
+        { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
       ],
       owned: {
         accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' } }],
@@ -389,8 +389,8 @@ describe('checking a model from the panel', () => {
 
 describe('what the panel knows of each account', () => {
   const integrations: readonly Integration[] = [
-    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } },
-    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
+    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
   ]
   const facts = accountFacts(integrations, {
     accounts: [
@@ -444,6 +444,10 @@ describe('what the panel knows of each account', () => {
     expect(runnable(integrations).map((one) => one.id)).toEqual(['claude_code'])
   })
 
+  it('names no subscription that has no model to check', () => {
+    expect(runnable(integrations.map((one) => ({ ...one, models: [] })))).toEqual([])
+  })
+
   it('counts a model as checked only while the server still finds it in its settings', () => {
     expect(byAccount((one) => one.checked)).toEqual([
       ['acct_gone', false], ['acct_claude', true], ['acct_codex', true], ['acct_unknown', false], ['acct_new', false],
@@ -457,8 +461,8 @@ describe('the panel', () => {
     kind: 'read',
     forUser: person,
     integrations: [
-      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } },
-      { id: 'codex', displayName: '', models: ['gpt-5.5'], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
+      { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
     ],
     owned,
   })

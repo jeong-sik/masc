@@ -111,11 +111,11 @@ describe('signing out', () => {
 
 describe('readIntegrations', () => {
   const one = (fields: Record<string, unknown>): unknown => ({
-    integrations: [{ integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], calls: 'allowed', ...fields }],
+    integrations: [{ integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: 'allowed', ...fields }],
   })
   it('reads a subscription whose models a Keeper may call', () => {
     expect(readIntegrations(one({}))).toEqual([
-      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } },
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
     ])
   })
   it.each([
@@ -127,6 +127,16 @@ describe('readIntegrations', () => {
   ] as const)('reads the refusal %s as %s', (code, refusal) => {
     expect(readIntegrations(one({ calls: 'refused', refusal: code }))?.[0]?.calls).toEqual({ kind: 'refused', refusal })
   })
+  it.each([
+    ['model_undeclared', 'model_undeclared'],
+    ['tools_not_declared', 'tools_not_declared'],
+    ['a code named later', 'unrecognised'],
+  ] as const)('reads a model left out for %s as %s', (code, reason) => {
+    expect(readIntegrations(one({ models: [], withheld: [{ model: 'claude-notools', reason: code }] }))?.[0]).toMatchObject({
+      models: [],
+      withheld: [{ model: 'claude-notools', reason }],
+    })
+  })
   it('reads an empty name and no models as they came', () => {
     expect(readIntegrations(one({ display_name: '', models: [] }))?.[0]).toMatchObject({ displayName: '', models: [] })
   })
@@ -137,6 +147,9 @@ describe('readIntegrations', () => {
     ['a name that is no string', one({ display_name: null })],
     ['a model that is no string', one({ models: ['claude-sonnet-5', 7] })],
     ['an empty model', one({ models: [''] })],
+    ['no list of the models left out', one({ withheld: undefined })],
+    ['a model left out with no name', one({ withheld: [{ reason: 'tools_not_declared' }] })],
+    ['a model left out with no reason', one({ withheld: [{ model: 'claude-notools' }] })],
     ['no calls', one({ calls: undefined })],
     ['calls of another word', one({ calls: 'maybe' })],
     ['a refusal with no code', one({ calls: 'refused' })],

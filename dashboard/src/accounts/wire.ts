@@ -63,6 +63,20 @@ export type CallRefusal =
 /** Whether a Keeper may run on an account of the subscription here. */
 export type Calls = { readonly kind: 'allowed' } | { readonly kind: 'refused'; readonly refusal: CallRefusal }
 
+/**
+ * Why a model the operator bound to a subscription is not one a person may
+ * name (lib/server/server_person_integrations.ml, `withheld_code`). A code
+ * this console does not know is kept apart: the console says the model is
+ * left out, and not why.
+ */
+export type WithheldReason = 'model_undeclared' | 'tools_not_declared' | 'unrecognised'
+
+/** A model of a subscription that is not in its `models`, and why. */
+export interface Withheld {
+  readonly model: string
+  readonly reason: WithheldReason
+}
+
 /** A subscription a person may connect: a provider of the workspace. */
 export interface Integration {
   readonly id: string
@@ -70,6 +84,8 @@ export interface Integration {
   readonly displayName: string
   /** The models a verification of an account of it may name. */
   readonly models: readonly string[]
+  /** The other models the operator bound to it. With none of either, the operator bound no model. */
+  readonly withheld: readonly Withheld[]
   readonly calls: Calls
 }
 
@@ -186,13 +202,30 @@ function readCalls(json: Readonly<Record<string, unknown>>): Calls | null {
   }
 }
 
+function readWithheldReason(code: string): WithheldReason {
+  switch (code) {
+    case 'model_undeclared':
+    case 'tools_not_declared':
+      return code
+    default: return 'unrecognised'
+  }
+}
+
+function readWithheld(json: unknown): Withheld | null {
+  if (!isRecord(json)) return null
+  const model = text(json.model)
+  const reason = text(json.reason)
+  return model === null || reason === null ? null : { model, reason: readWithheldReason(reason) }
+}
+
 function readIntegration(json: unknown): Integration | null {
   if (!isRecord(json)) return null
   const id = text(json.integration_id)
   const models = readList(json.models, text)
+  const withheld = readList(json.withheld, readWithheld)
   const calls = readCalls(json)
-  if (id === null || typeof json.display_name !== 'string' || models === null || calls === null) return null
-  return { id, displayName: json.display_name, models, calls }
+  if (id === null || typeof json.display_name !== 'string' || models === null || withheld === null || calls === null) return null
+  return { id, displayName: json.display_name, models, withheld, calls }
 }
 
 export function readIntegrations(json: unknown): readonly Integration[] | null {

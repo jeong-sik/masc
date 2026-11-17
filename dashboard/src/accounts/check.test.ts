@@ -274,9 +274,9 @@ describe('the checks of a person', () => {
 
 // ---- the card of an account ----
 
-const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5', 'claude-opus-9'], calls: { kind: 'allowed' } }
-const bare: Integration = { id: 'bare', displayName: '', models: [], calls: { kind: 'allowed' } }
-const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], calls: { kind: 'refused', refusal: 'native_unpublished' } }
+const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5', 'claude-opus-9'], withheld: [], calls: { kind: 'allowed' } }
+const bare: Integration = { id: 'bare', displayName: '', models: [], withheld: [], calls: { kind: 'allowed' } }
+const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' } }
 const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: { read: true, value: integrationId } }], runtimes: [] })
 
 const card = (checks: ChecksModel, owned: Owned = one('claude_code')) =>

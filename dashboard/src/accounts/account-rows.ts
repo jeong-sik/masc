@@ -8,9 +8,9 @@ import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
-import { Callout, ProblemNote, fell, idTail, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, fell, idTail, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { integrationName } from './wire'
-import type { CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, ProviderAccount, Runtime } from './wire'
+import type { CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, ProviderAccount, Runtime, Withheld } from './wire'
 
 // ---- what the panel knows of each account ----
 
@@ -45,9 +45,12 @@ function keeperOn(offered: Integration | null, checked: boolean): KeeperOn {
   return checked ? { kind: 'can_run' } : { kind: 'needs_model' }
 }
 
+/** Whether a Keeper may run on the subscription here: the server calls its
+    models, and it has a model to check. */
+export const runs = (one: Integration): boolean => one.calls.kind === 'allowed' && one.models.length > 0
+
 /** The subscriptions a Keeper may run on here. */
-export const runnable = (integrations: readonly Integration[]): readonly Integration[] =>
-  integrations.filter((one) => one.calls.kind === 'allowed')
+export const runnable = (integrations: readonly Integration[]): readonly Integration[] => integrations.filter(runs)
 
 /** The facts of each account, in the order the server lists the accounts.
     No Runtime is left out: an account is never unlinked
@@ -110,8 +113,6 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
     case 'unrecognised': return '서버가 이 모델을 알려 주지 않았어요.'
   }
 }
-
-const operatorWords = '이 서버를 운영하는 사람에게 알려 주세요.'
 
 /** Why a call of a model did not pass, and what the person can do next. */
 function checkFailureWords(failure: CheckFailure): string {
@@ -219,15 +220,18 @@ function UnknownNote({ check }: { readonly check: Extract<Check, { kind: 'unknow
     second one for the same reason is read out too. The field and the
     button are named with the card, so a list of the controls of the page
     tells the cards apart. */
-function CheckArea({ accountId, models, check, checks, card }: {
+function CheckArea({ accountId, models, withheld, check, checks, card }: {
   readonly accountId: string
   readonly models: readonly string[]
+  readonly withheld: readonly Withheld[]
   readonly check: Check | undefined
   readonly checks: ChecksModel
   /** The ids of what names the card: its title and its account line. */
   readonly card: string
 }): VNode {
-  if (models.length === 0) return html`<p class="hint">이 서버에는 이 구독으로 확인할 수 있는 모델이 없어요. ${operatorWords}</p>`
+  if (models.length === 0) {
+    return html`<p class="hint">이 서버에는 이 구독으로 확인할 수 있는 모델이 없어요. ${noModelWords(withheld)}</p>`
+  }
   const busy = check?.kind === 'checking' || check?.kind === 'leaving'
   const onSubmit = (event: Event): void => {
     event.preventDefault()
@@ -258,7 +262,7 @@ function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly 
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
   const title = useRef<HTMLHeadingElement>(null)
-  const checkable = offered !== null && offered.calls.kind === 'allowed' && offered.models.length > 0
+  const checkable = offered !== null && runs(offered)
   const couldCheck = useRef(checkable)
   // A reading after a check can find the subscription no longer one a
   // Keeper may run on, which takes the pressed button away. The focus then
@@ -282,7 +286,7 @@ function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly 
       ${facts.keeper.kind === 'refused' ? html`<p class="hint">${refusedWords(facts.keeper.refusal, name)}</p>` : null}
       <${Models} runtimes=${facts.runtimes} />
       ${offered !== null && offered.calls.kind === 'allowed'
-        ? html`<${CheckArea} accountId=${account.id} models=${offered.models} check=${checks.checks.value.get(account.id)}
+        ? html`<${CheckArea} accountId=${account.id} models=${offered.models} withheld=${offered.withheld} check=${checks.checks.value.get(account.id)}
             checks=${checks} card=${`${titleId} ${accountLine}`} />`
         : null}
     </li>

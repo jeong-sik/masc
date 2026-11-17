@@ -31,6 +31,49 @@ val default_request_timeout_sec : float
     This bounds the full request/response exchange, unlike the pool's separate
     connection-establishment timeout. *)
 
+(** {1 Typed requests} *)
+
+(** Why a request through this module produced no response. *)
+type failure =
+  | Pool_unavailable
+      (** No Eio context was set on this domain, so no pool exists: a
+          bootstrap-order bug, not a network fact. *)
+  | Request_failed of Pool.request_error
+
+val failure_to_string : failure -> string
+(** The text the string helpers below return. *)
+
+val request :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  ?max_body_bytes:int ->
+  ?resolved_addresses:Eio.Net.Ipaddr.v4v6 list ->
+  method_:Pool.http_method ->
+  url:string ->
+  headers:(string * string) list ->
+  ?body:string ->
+  unit ->
+  (response, failure) result
+(** One buffered request through the domain's pool, with the failure kept as
+    a case. Every buffered helper below is this call with [failure] turned
+    into text; a caller that says a failure on a screen, or acts on its case,
+    calls this instead. *)
+
+val request_stream :
+  retention:'body Pool.body_retention ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  method_:Pool.http_method ->
+  url:string ->
+  headers:(string * string) list ->
+  ?body:string ->
+  ?on_response:(status:int -> headers:(string * string) list -> unit) ->
+  on_chunk:(string -> unit) ->
+  unit ->
+  ('body Pool.stream_outcome, failure) result
+(** {!request} for a streamed body: {!post_stream} and {!get_stream} are this
+    call with [failure] turned into text. *)
+
 (** {1 Synchronous request helpers}
 
     All three helpers:
@@ -38,9 +81,8 @@ val default_request_timeout_sec : float
       lets repeated requests against the same host reuse the same TCP+TLS
       session.  Connection cleanup is owned by the pool's idle-eviction
       fiber, not the caller switch.
-    - Convert {!Eio.Cancel.Cancelled} re-raises (cancellation
-      propagates); wrap any other exception as
-      [Error (Printexc.to_string exn)].
+    - Return {!failure_to_string} of the {!request} failure: they are for
+      callers that only report a failure as text.
     - When [?clock] {b and} [?timeout_sec > 0.0] are both supplied,
       the request runs under that window, armed once in {!Pool.request}:
       a response that arrived as the window passed is the result; when

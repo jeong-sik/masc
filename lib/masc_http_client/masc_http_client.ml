@@ -53,12 +53,17 @@ let default_request_timeout_sec = 10.0
 let pool_key : Pool.t option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
-let pool_init_error () =
-  Error
+type failure =
+  | Pool_unavailable
+  | Request_failed of Pool.request_error
+
+let failure_to_string = function
+  | Pool_unavailable ->
     "masc_http_client: Eio_context.set_env not called — \
      RFC-0107 Phase D pool cannot be initialized.  This indicates a \
      bootstrap-order bug (Pool.request from before \
      Server_runtime_bootstrap.create_server_state)."
+  | Request_failed error -> Pool.request_error_to_string error
 
 (* Registry of all created pools, for metrics aggregation.
    Stdlib.Mutex protected because writes (pool creation) and reads
@@ -112,7 +117,7 @@ let with_pool f =
           | _ -> ());
          unregister_pool p);
        f p
-     | _ -> pool_init_error ())
+     | _ -> Error Pool_unavailable)
 
 (* ── Public API ───────────────────────────────────────────────────── *)
 
@@ -127,46 +132,54 @@ let ensure_default_headers headers =
   else ("User-Agent", "masc/" ^ Build_version.current) :: headers
 ;;
 
-let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
+(* The one typed entry point every buffered helper below goes through. The
+   helpers turn [failure] into text at this boundary because their callers
+   only report it; a caller that says the failure on a screen uses this. *)
+let request ?clock ?timeout_sec ?max_body_bytes ?resolved_addresses ~method_ ~url
+    ~headers ?body () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
-          ~method_:`POST ~url ~headers ~body () with
+  Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes
+    ?resolved_addresses ~method_ ~url ~headers ?body ()
+  |> Result.map_error (fun error -> Request_failed error)
+
+let request_stream ~retention ~clock ~idle_timeout_sec ~method_ ~url ~headers
+    ?body ?on_response ~on_chunk () =
+  let headers = ensure_default_headers headers in
+  with_pool @@ fun pool ->
+  Pool.request_streaming pool ~retention ~clock ~idle_timeout_sec ~method_ ~url
+    ~headers ?body ?on_response ~on_chunk ()
+  |> Result.map_error (fun error -> Request_failed error)
+
+let status_and_body = function
   | Ok { Pool.status; body; _ } -> Ok (status, body)
-  | Error e -> Error e
+  | Error failure -> Error (failure_to_string failure)
+
+let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
+  request ?clock ?timeout_sec ~method_:`POST ~url ~headers ~body ()
+  |> status_and_body
 
 (** POST that keeps the response headers. The MCP transport answers an
     [initialize] with its session id in a header, not the body, so a caller
     opening a session has nothing to read from [post_sync]. *)
 let post_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers ~body () =
-  let headers = ensure_default_headers headers in
-  with_pool @@ fun pool ->
-  Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes
-    ~method_:`POST ~url ~headers ~body ()
+  request ?clock ?timeout_sec ?max_body_bytes ~method_:`POST ~url ~headers ~body ()
+  |> Result.map_error failure_to_string
 
 (** PATCH with structured error handling. *)
 let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
-  let headers = ensure_default_headers headers in
-  with_pool @@ fun pool ->
-  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
-          ~method_:`PATCH ~url ~headers ~body () with
-  | Ok { Pool.status; body; _ } -> Ok (status, body)
-  | Error e -> Error e
+  request ?clock ?timeout_sec ~method_:`PATCH ~url ~headers ~body ()
+  |> status_and_body
 
 let delete_sync ?clock ?timeout_sec ?body ~url ~headers () =
-  let headers = ensure_default_headers headers in
-  with_pool @@ fun pool ->
-  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
-          ~method_:`DELETE ~url ?body ~headers () with
-  | Ok { Pool.status; body; _ } -> Ok (status, body)
-  | Error e -> Error e
+  request ?clock ?timeout_sec ~method_:`DELETE ~url ?body ~headers ()
+  |> status_and_body
 
 (** GET with structured error handling. *)
 let get_response_sync ?clock ?timeout_sec ?max_body_bytes ?resolved_addresses ~url ~headers () =
-  let headers = ensure_default_headers headers in
-  with_pool @@ fun pool ->
-  Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes ?resolved_addresses
-    ~method_:`GET ~url ~headers ()
+  request ?clock ?timeout_sec ?max_body_bytes ?resolved_addresses ~method_:`GET ~url
+    ~headers ()
+  |> Result.map_error failure_to_string
 
 (** GET with structured error handling. *)
 let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
@@ -186,10 +199,9 @@ let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
     [retention] is required for the same reason: only the caller knows
     whether it decodes the whole body once the stream ends. *)
 let post_stream ~retention ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
-  let headers = ensure_default_headers headers in
-  with_pool @@ fun pool ->
-  Pool.request_streaming pool ~retention ~clock ~idle_timeout_sec ~method_:`POST ~url
-    ~headers ~body ~on_chunk ()
+  request_stream ~retention ~clock ~idle_timeout_sec ~method_:`POST ~url ~headers
+    ~body ~on_chunk ()
+  |> Result.map_error failure_to_string
 
 (** GET that hands each response body chunk to [on_chunk] as it arrives,
     for a server-sent event stream a client subscribes to rather than
@@ -200,10 +212,9 @@ let post_stream ~retention ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chun
     kept: a subscription stays open for hours and [on_chunk] is its only
     reader. *)
 let get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response ~on_chunk () =
-  let headers = ensure_default_headers headers in
-  with_pool @@ fun pool ->
-  Pool.request_streaming pool ~retention:Pool.Discard_body ~clock ~idle_timeout_sec
-    ~method_:`GET ~url ~headers ?on_response ~on_chunk ()
+  request_stream ~retention:Pool.Discard_body ~clock ~idle_timeout_sec ~method_:`GET
+    ~url ~headers ?on_response ~on_chunk ()
+  |> Result.map_error failure_to_string
 
 module For_testing = struct
   let with_request_timeout ~clock ~timeout_sec f =

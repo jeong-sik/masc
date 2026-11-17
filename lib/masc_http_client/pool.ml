@@ -41,9 +41,15 @@ let default_config = {
 
 (* ── Host_key ──────────────────────────────────────────────────── *)
 
+type origin = {
+  scheme : string;   (* "http" | "https" *)
+  host   : string;
+  port   : int;
+}
+
 module Host_key = struct
-  type t = {
-    scheme : string;   (* "http" | "https" *)
+  type t = origin = {
+    scheme : string;
     host   : string;
     port   : int;
   }
@@ -311,6 +317,44 @@ let new_counters () =
     create_count_total = 0;
     inflight = 0; }
 
+(* ── Connect failure ───────────────────────────────────────────── *)
+
+(* Why one attempt to establish a client failed. The exceptions are kept for
+   the log line the caller writes; a screen says the case, not the
+   exception's printer output. *)
+type connect_failure =
+  | No_addresses
+  | Dns_failure of exn
+  | Tcp_failure of exn
+  | Establishment_timeout
+  | Client_failure of string
+
+(* An origin whose last connect failed, and why. The pool refuses the origin
+   until [connect_failure_cooldown_seconds] after [failed_at], and a refused
+   request reports the same [failure] its origin is held back for. *)
+type held_failure = {
+  failed_at : float;
+  failure : connect_failure;
+}
+
+type retry =
+  | Retry_in of float
+  | Retry_unblocked
+
+type invalid_request =
+  | Negative_body_limit of int
+  | No_resolved_addresses
+
+type request_error =
+  | Connect_failed of { origin : origin; failure : connect_failure; retry : retry }
+  | Connect_held_back of
+      { origin : origin; failure : connect_failure; retry_in_seconds : float }
+  | Timed_out of { after_seconds : float }
+  | Exchange_failed of string
+  | Invalid_request of invalid_request
+
+let origin_to_string = Host_key.to_string
+
 (* ── Pool state ────────────────────────────────────────────────── *)
 
 (* [idle] is a per-host queue of reusable clients, newest-first (push
@@ -326,11 +370,11 @@ type t = {
   config   : config;
   mu       : Eio.Mutex.t;
   mutable idle : idle_entry list Host_map.t;
-  (* Last connect-failure timestamp per host. A host inside
+  (* Last connect failure per host. A host inside
      [connect_failure_cooldown_seconds] of its last failure fast-fails
      without opening a socket. Lookup and the existing eviction fiber
      remove expired entries; success and shutdown clear them too. *)
-  mutable connect_failures : float Host_map.t;
+  mutable connect_failures : held_failure Host_map.t;
   stop     : bool Atomic.t;
   counters : stats_counters;
 }
@@ -346,8 +390,8 @@ let with_mu t f =
 
 let evict_expired_entries t now =
   with_mu t (fun () ->
-    t.connect_failures <- Host_map.filter (fun _ ts ->
-      now -. ts < t.config.connect_failure_cooldown_seconds)
+    t.connect_failures <- Host_map.filter (fun _ held ->
+      now -. held.failed_at < t.config.connect_failure_cooldown_seconds)
       t.connect_failures;
     let evicted_clients = ref [] in
     let remaining =
@@ -510,27 +554,31 @@ let try_acquire_idle t key ~now =
 let now_ts t =
   Eio.Time.now (Eio.Stdenv.clock t.env)
 
-let connect_backoff_active t key ~now =
+(* The failure [key] is still held back for, with the seconds left. *)
+let held_back t key ~now =
   with_mu t (fun () ->
     match Host_map.find_opt key t.connect_failures with
-    | Some ts when now -. ts < t.config.connect_failure_cooldown_seconds -> true
-    | Some _ ->
-      t.connect_failures <- Host_map.remove key t.connect_failures;
-      false
-    | None -> false)
+    | Some held ->
+      let remaining =
+        t.config.connect_failure_cooldown_seconds -. (now -. held.failed_at)
+      in
+      if remaining > 0.0 then Some (held.failure, remaining)
+      else begin
+        t.connect_failures <- Host_map.remove key t.connect_failures;
+        None
+      end
+    | None -> None)
 
-let record_connect_failure t key ~now =
+(* Hold [key] back after [failure] and say when the pool tries it again. A
+   stopping pool and a zero cooldown hold nothing, so the next request tries. *)
+let record_connect_failure t key failure ~now =
   with_mu t (fun () ->
     if not (Atomic.get t.stop)
-       && t.config.connect_failure_cooldown_seconds > 0.0 then
-      t.connect_failures <- Host_map.add key now t.connect_failures)
-
-type connect_failure =
-  | No_addresses
-  | Dns_failure of exn
-  | Tcp_failure of exn
-  | Establishment_timeout
-  | Client_failure of string
+       && t.config.connect_failure_cooldown_seconds > 0.0 then begin
+      t.connect_failures <-
+        Host_map.add key { failed_at = now; failure } t.connect_failures;
+      Retry_in t.config.connect_failure_cooldown_seconds
+    end else Retry_unblocked)
 
 let connect_failure_to_string = function
   | No_addresses -> "DNS resolution failed: no stream addresses"
@@ -538,6 +586,24 @@ let connect_failure_to_string = function
   | Tcp_failure exn -> "TCP connect failed: " ^ exn_message exn
   | Establishment_timeout -> "connect timeout"
   | Client_failure msg -> msg
+
+(* One line for a log or a caller that only reports the failure as text. A
+   screen builds its own sentence from the cases. *)
+let request_error_to_string = function
+  | Connect_failed { origin; failure; retry = _ } ->
+    Printf.sprintf "%s: %s" (connect_failure_to_string failure)
+      (origin_to_string origin)
+  | Connect_held_back { origin; failure; retry_in_seconds } ->
+    Printf.sprintf "connect backoff: %s failed recently (%s; retry in %.0fs)"
+      (origin_to_string origin) (connect_failure_to_string failure)
+      retry_in_seconds
+  | Timed_out { after_seconds } ->
+    Printf.sprintf "Pool.request: timeout after %.1fs" after_seconds
+  | Exchange_failed detail -> detail
+  | Invalid_request (Negative_body_limit _) ->
+    "max_body_bytes must be non-negative"
+  | Invalid_request No_resolved_addresses ->
+    "resolved_addresses must not be empty"
 
 (* One timer covers every yielding establishment stage. Catch only network
    exceptions; cancellation and unexpected exceptions must still unwind. A
@@ -627,15 +693,12 @@ let create_probed_client t ?resolved_addresses key uri =
    connect-failure backoff and a TCP reachability probe (see
    [create_probed_client]). Returns [Result] mirroring piaf's API so
    callers can surface DNS/TCP/TLS failures distinctly. *)
-let create_fresh t ?resolved_addresses key uri =
+let create_fresh t ?resolved_addresses key uri : (_, request_error) result =
   let now = now_ts t in
-  if connect_backoff_active t key ~now then
-    Error
-      (Printf.sprintf
-         "connect backoff: %s failed recently (cooldown %.0fs)"
-         (Host_key.to_string key)
-         t.config.connect_failure_cooldown_seconds)
-  else
+  match held_back t key ~now with
+  | Some (failure, retry_in_seconds) ->
+    Error (Connect_held_back { origin = key; failure; retry_in_seconds })
+  | None ->
     match create_probed_client t ?resolved_addresses key uri with
     | Ok c ->
       (try
@@ -647,10 +710,9 @@ let create_fresh t ?resolved_addresses key uri =
        | Eio.Cancel.Cancelled _ as exn ->
          reraise_after_close (fun () -> request_close_client c) exn
        | exn -> reraise_after_close (fun () -> request_close_client c) exn)
-    | Error err ->
-      record_connect_failure t key ~now:(now_ts t);
-      Error (Printf.sprintf "%s: %s"
-        (connect_failure_to_string err) (Host_key.to_string key))
+    | Error failure ->
+      let retry = record_connect_failure t key failure ~now:(now_ts t) in
+      Error (Connect_failed { origin = key; failure; retry })
 
 (* Parking and its ownership transfer share the protected queue mutation.
    A cancellation while acquiring [mu] still leaves the request responsible
@@ -808,7 +870,7 @@ let request_body body =
 (* Wrap a single request: acquire-or-create client, send, release.
    Errors return [Error string]; the connection is dropped (close)
    on error, parked on success. *)
-let do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri : (response, string) result =
+let do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri : (response, request_error) result =
   let key = Host_key.of_uri uri in
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
@@ -846,7 +908,7 @@ let do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri
         | Error err ->
           (* Connection is suspect; close, do not park. *)
           release_once ~close_only:true;
-          Error (piaf_error_message (err :> Piaf.Error.t))
+          Error (Exchange_failed (piaf_error_message (err :> Piaf.Error.t)))
         | Ok resp ->
           let status = Piaf.Status.to_code (Piaf.Response.status resp) in
           let headers_list =
@@ -858,7 +920,7 @@ let do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri
           (match body_result with
            | Error err ->
              release_once ~close_only:true;
-             Error (piaf_error_message (err :> Piaf.Error.t))
+             Error (Exchange_failed (piaf_error_message (err :> Piaf.Error.t)))
            | Ok body_str ->
              release_once ~close_only:(Option.is_some resolved_addresses);
              Ok { status; headers = headers_list; body = body_str }))
@@ -867,24 +929,25 @@ let do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri
    window over a request: [Masc_http_client]'s sync entry points call
    [request] and arm nothing of their own. *)
 let with_optional_timeout
-    (type a) ?clock ?timeout_seconds (f : unit -> (a, string) result) :
-  (a, string) result =
+    (type a e) ?clock ?timeout_seconds ~(timed_out : float -> e)
+    (f : unit -> (a, e) result) : (a, e) result =
   match clock, timeout_seconds with
   | Some clock, Some t when t > 0.0 ->
     Watched_work.run f ~watcher:(fun () ->
       Eio.Time.sleep clock t;
-      Error (Printf.sprintf "Pool.request: timeout after %.1fs" t))
+      Error (timed_out t))
   | _ -> f ()
 
 let request t ?(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t option)
     ?timeout_seconds ?max_body_bytes ?resolved_addresses ~method_ ~url ?headers ?body () =
   match max_body_bytes with
-  | Some limit when limit < 0 -> Error "max_body_bytes must be non-negative"
+  | Some limit when limit < 0 -> Error (Invalid_request (Negative_body_limit limit))
   | Some _ | None ->
     match resolved_addresses with
-    | Some [] -> Error "resolved_addresses must not be empty"
+    | Some [] -> Error (Invalid_request No_resolved_addresses)
     | None | Some (_ :: _) ->
-    with_optional_timeout ?clock ?timeout_seconds @@ fun () ->
+    with_optional_timeout ?clock ?timeout_seconds
+      ~timed_out:(fun after_seconds -> Timed_out { after_seconds }) @@ fun () ->
     let uri = Uri.of_string url in
     do_request t ?headers ?body ?max_body_bytes ?resolved_addresses ~method_ uri
 
@@ -1019,7 +1082,7 @@ let do_request_streaming
     ~method_
     ~(on_chunk : string -> unit)
     uri
-  : (body stream_outcome, string) result =
+  : (body stream_outcome, request_error) result =
   let key = Host_key.of_uri uri in
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
@@ -1053,7 +1116,7 @@ let do_request_streaming
         match result with
         | Error err ->
           release_once ~close_only:true;
-          Error (piaf_error_message (err :> Piaf.Error.t))
+          Error (Exchange_failed (piaf_error_message (err :> Piaf.Error.t)))
         | Ok resp ->
           let status = Piaf.Status.to_code (Piaf.Response.status resp) in
           let headers_list =
@@ -1073,7 +1136,7 @@ let do_request_streaming
           let settle outcome_of = function
             | Error detail ->
               release_once ~close_only:true;
-              Error detail
+              Error (Exchange_failed detail)
             | Ok (held, progress) ->
               release_once ~close_only:false;
               Ok (outcome_of held progress)
@@ -1143,7 +1206,10 @@ module For_testing = struct
 
   let request_body = request_body
   let with_request_timeout ~clock ~timeout_seconds f =
-    with_optional_timeout ~clock ~timeout_seconds f
+    with_optional_timeout ~clock ~timeout_seconds
+      ~timed_out:(fun after_seconds ->
+        request_error_to_string (Timed_out { after_seconds }))
+      f
 
   let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
     establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create

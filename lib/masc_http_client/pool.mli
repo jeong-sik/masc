@@ -36,7 +36,7 @@ type t
     [connect_timeout_seconds]: max wait when establishing a fresh
     connection, shared by DNS resolution, every TCP probe address, and
     Piaf client creation (including TLS). Surfaces as
-    [Error "connect timeout ..."] to the caller.
+    [Error (Connect_failed { failure = Establishment_timeout; _ })].
 
     [connect_failure_cooldown_seconds]: after a connect to a host fails,
     requests to that host fast-fail without opening a socket for this
@@ -83,6 +83,65 @@ val create :
 
 (* ── Request API ───────────────────────────────────────────────── *)
 
+(** The scheme, host and port one pooled connection serves. *)
+type origin = {
+  scheme : string;
+  host   : string;
+  port   : int;
+}
+
+val origin_to_string : origin -> string
+(** ["scheme://host:port"]. *)
+
+(** Why one attempt to establish a client failed. The exceptions are the
+    resolver's and the socket's own; a caller writes them to its log and
+    says the case on a screen. *)
+type connect_failure =
+  | No_addresses  (** The name resolved to no stream address. *)
+  | Dns_failure of exn
+  | Tcp_failure of exn  (** Every resolved address refused or failed TCP. *)
+  | Establishment_timeout
+      (** [connect_timeout_seconds] passed before any address produced a
+          client. *)
+  | Client_failure of string
+      (** TCP connected, then Piaf client creation (TLS included) failed. *)
+
+(** When the pool next tries an origin whose connect just failed. *)
+type retry =
+  | Retry_in of float
+      (** The pool refuses the origin, without a socket, for these seconds. *)
+  | Retry_unblocked
+      (** Nothing holds the origin back: backoff is off or the pool is
+          stopping. *)
+
+(** A request the pool refused before sending it. *)
+type invalid_request =
+  | Negative_body_limit of int
+  | No_resolved_addresses
+
+(** Why a request produced no response. A connect failure stays a case all
+    the way to the caller, with the origin and the retry fact the pool
+    holds, so a caller can say once what happened without parsing text. *)
+type request_error =
+  | Connect_failed of { origin : origin; failure : connect_failure; retry : retry }
+      (** This request tried to connect and [failure] is why it did not. *)
+  | Connect_held_back of
+      { origin : origin; failure : connect_failure; retry_in_seconds : float }
+      (** An earlier request to [origin] failed with [failure]; this one
+          opened no socket and the origin is refused for
+          [retry_in_seconds] more. *)
+  | Timed_out of { after_seconds : float }
+      (** The request window passed before any response finished. *)
+  | Exchange_failed of string
+      (** The connection was established and the exchange then failed: a
+          protocol or I/O error, an exceeded body limit, or an idle stream.
+          The text is the transport's own. *)
+  | Invalid_request of invalid_request
+
+val request_error_to_string : request_error -> string
+(** One line for a log, or for a caller whose only use of the failure is to
+    report it as text. *)
+
 (** Typed HTTP response. {!Masc_http_client.response} is this type. *)
 type response = {
   status : int;
@@ -103,7 +162,7 @@ val request :
   ?headers:(string * string) list ->
   ?body:string ->
   unit ->
-  (response, string) result
+  (response, request_error) result
 (** Scoped one-shot request. Acquires a connection from the per-host
     pool (or creates one if the pool is empty / under
     [max_idle_per_host]), issues the request, releases the connection
@@ -203,7 +262,7 @@ val request_streaming :
   ?on_response:(status:int -> headers:(string * string) list -> unit) ->
   on_chunk:(string -> unit) ->
   unit ->
-  ('body stream_outcome, string) result
+  ('body stream_outcome, request_error) result
 (** [request_streaming t ~retention ~clock ~idle_timeout_sec ~method_ ~url
     ~on_chunk ()] issues one request and calls [on_chunk] with each body chunk
     as it arrives. [retention] decides whether a successful body is also kept
@@ -281,7 +340,7 @@ module For_testing : sig
   val evict_expired_entries : t -> float -> unit
 
   module Host_key : sig
-    type t = {
+    type t = origin = {
       scheme : string;
       host   : string;
       port   : int;

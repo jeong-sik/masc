@@ -1215,6 +1215,15 @@
   masc_tui_message_layout
   yojson))
 
+;; The facts below a Keeper chat and the rows they wrap onto (RFC
+;; tui-one-screen-grammar section 5.5). Own library so the decision of which
+;; facts a capped block keeps runs under a test without a TTY.
+(library
+ (name masc_tui_chat_facts)
+ (wrapped false)
+ (modules masc_tui_chat_facts)
+ (libraries masc_tui_message_layout))
+
 (library
  (name masc_tui_observation_layout)
  (wrapped false)

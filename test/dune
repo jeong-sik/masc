@@ -1749,6 +1749,11 @@
  (modules test_goal_due)
  (libraries alcotest masc.masc_goal ptime))
 
+(test
+ (name test_goal_measure)
+ (modules test_goal_measure)
+ (libraries alcotest masc.masc_goal yojson))
+
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
 

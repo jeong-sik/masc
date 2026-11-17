@@ -1,8 +1,8 @@
 # What an activated workspace offers people, without and with a runtime.toml
 
-Date: 2026-11-17. Measurements of an account server, and source checks of the
-candidate. No binary of the candidate was built, so the write of
-`masc auth bootstrap` itself did not run for this record.
+Date: 2026-11-17. Measurements of an account server, source checks of the
+candidate, and two test runs. No binary of the candidate was built on this
+machine: `masc auth bootstrap` of the candidate ran in the second test run.
 
 - Base: `8e78ac5f9e1039241d1e120ae47a6a360179f900`.
 - Measured binary: a Dune build of `467cfe8e83736cdacc76b2871da966a7309ef80a`.
@@ -58,7 +58,8 @@ activation.
 
 ## Source checks of the candidate
 
-No Dune build ran. The checks below read the candidate's sources.
+No Dune build ran on this machine. The checks below read the candidate's
+sources.
 
 - Type check with `ocamlc.opt` 5.5.2, replaying the compiler arguments and
   the ppx action that a build of the base recorded, against the `.cmi` files
@@ -84,27 +85,33 @@ No Dune build ran. The checks below read the candidate's sources.
   the `PATH` and `HOME` of the client lookup, which falls back to the
   configured command.
 
-## Test run
+## Test runs
 
-Read once on 2026-11-17.
+Each read once on 2026-11-17.
 
 ```sh
 gh workflow run test.yml --ref feat/bootstrap-writes-runtime-toml \
-  -f suite=test_config_root_embedded_seed -f minimal=true
+  -f suite=test_config_root_embedded_seed,test_onboarding_journey -f minimal=true
 ```
 
 - Workflow `Test`, run 44021898479, an earlier head of the candidate,
-  `ca48ed19bbb0`. Conclusion: success. In that head the command placed the
-  file after the activation, with a write that replaced by rename.
-- `test_config_root_embedded_seed`: 10 cases ran and passed, the three
-  `place_embedded_runtime_toml` cases of that head among them.
+  `ca48ed19bbb0`, with `suite=test_config_root_embedded_seed`. Conclusion:
+  success, 10 cases. In that head the command placed the file after the
+  activation, with a write that replaced by rename.
+- Run 44030305939, head `fde1ab45ae81`, with the command above. Conclusion:
+  failure, for one case this change does not reach.
+  - `test_config_root_embedded_seed`: 10 cases ran and passed, the three
+    `place_embedded_runtime_toml` cases among them.
+  - `test_onboarding_journey`: 243 cases ran and none was skipped. 242
+    passed, the two that run `masc auth bootstrap` of the built binary among
+    them: one reads the file the command leaves, the other refuses a
+    workspace where the file cannot go and then runs the command again.
+  - The one that ended in an error is
+    `test_native_antigravity_account_import_keeps_original_and_lists_exact_models`,
+    a case of `masc runtime-antigravity-account` (#52741).
 
 ## Unverified
 
-- `masc auth bootstrap` of the candidate from start to end. Two cases of
-  `test/test_onboarding_journey.py` run it with the built binary: one reads
-  the file it leaves, the other refuses a workspace where the file cannot
-  go and then runs the command again. They did not run for this record.
 - The outcome `Published_unsynced`. No test makes the sync of the published
   file fail.
 - A sign-in, a model verification and a Keeper turn with the ids of the

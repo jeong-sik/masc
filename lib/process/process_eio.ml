@@ -276,6 +276,45 @@ let in_spawn_phase phase_ref =
   | Timeout_origin.Spawn -> true
   | Timeout_origin.Command -> false
 
+type stdio_refusal =
+  | Runtime_unavailable of string
+  | Spawn_refused of spawn_refusal
+
+let with_stdio ?env ?cwd ~on_stderr_chunk ~on_stdout_tail argv callback =
+  match argv with
+  | [] -> Error (Spawn_refused Empty_argv)
+  | executable :: _ ->
+    (match Fs_compat.execution_context (), Atomic.get runtime_state with
+     | Fs_compat.Non_eio, (None | Some _) | Fs_compat.Eio_fiber, None ->
+       Error (Runtime_unavailable "Process_eio.with_stdio requires an initialized Eio runtime")
+     | Fs_compat.Eio_fiber, Some runtime ->
+       Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status
+         ~argv ?env ?cwd ();
+       with_spawn_guard (fun () ->
+         let cwd = effective_cwd runtime.cwd_default cwd in
+         let phase_ref = ref Timeout_origin.Spawn in
+         try
+           Ok (Eio.Switch.run (fun sw ->
+             Eio_process_capture.with_stdio ~phase_ref ~sw runtime.proc_mgr
+               ~cwd ?env ~clock:runtime.clock ~on_stderr_chunk ~on_stdout_tail
+               argv callback))
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | Eio.Io (Eio.Process.E (Eio.Process.Executable_not_found program), _)
+             when in_spawn_phase phase_ref ->
+           Error (Spawn_refused (Executable_not_found program))
+         | Failure detail when in_spawn_phase phase_ref ->
+           Error (Spawn_refused (Child_setup_failed { executable; detail }))
+         | Unix.Unix_error (error, _, _) when in_spawn_phase phase_ref ->
+           Error (Spawn_refused (Spawn_failed { executable; error }))
+         | Eio.Io (Eio.Fs.E error, _) when in_spawn_phase phase_ref ->
+           Error (Spawn_refused (Cwd_unavailable
+             { cwd = Format.asprintf "%a" Eio.Path.pp cwd
+             ; error = Eio_cwd_error (Eio.Fs.E error) }))
+         | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (error, _, _)), _)
+             when in_spawn_phase phase_ref ->
+           Error (Spawn_refused (Spawn_failed { executable; error }))))
+
 let empty_argv_exn = Invalid_argument "Process_eio: argv is empty"
 
 (* Raised at the foreground spawn boundary in [with_unix_capture] so the

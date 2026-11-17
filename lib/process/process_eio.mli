@@ -258,6 +258,37 @@ type spawn_refusal =
 
 val spawn_refusal_to_string : spawn_refusal -> string
 
+type stdio_refusal =
+  | Runtime_unavailable of string
+      (** No initialized runtime or no Eio fiber in which to own the child.
+          No process is started and there is no Unix fallback. *)
+  | Spawn_refused of spawn_refusal
+      (** A failure before the child exists, never a callback failure. *)
+
+val with_stdio :
+  ?env:string array ->
+  ?cwd:string ->
+  on_stderr_chunk:(string -> unit) ->
+  on_stdout_tail:(string -> unit) ->
+  string list ->
+  (input:Eio.Flow.source_ty Eio.Resource.t ->
+   output:Eio.Flow.sink_ty Eio.Resource.t -> 'a) ->
+  ('a * Unix.process_status, stdio_refusal) result
+(** Own a foreground process group while the callback uses its stdout [input]
+    and stdin [output]. The callback borrows both flows and must finish any
+    fibers using them before returning. Stderr is drained concurrently and
+    delivered unchanged to [on_stderr_chunk].
+
+    After a normal callback return, close stdin, deliver stdout bytes still in
+    the pipe to [on_stdout_tail], drain stderr to EOF, and await the actual
+    child status. There is no preview truncation, fabricated exit status, or
+    internal timeout. The caller owns any timeout and may cancel the call.
+
+    Callback, stream, and cancellation exceptions propagate after the owned
+    child/group is released. Stream callback failures are not swallowed.
+    Only initialization and pre-child spawn failures return [Error]. The
+    process-wide spawn guard and initialized cwd capability are preserved. *)
+
 val run_argv_with_status_split_or_refusal :
   ?timeout_sec:float ->
   ?env:string array ->

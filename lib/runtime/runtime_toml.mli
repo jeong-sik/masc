@@ -15,6 +15,9 @@
     - [\[exec.ssh.endpoints.*\]] — SSH remote execution endpoint registry
       (Phase 1 SSH lane, spec §4.2); exposed as
       {!Runtime_schema.config.exec_ssh_endpoints}
+    - [\[\[media_readers\]\]] — strict external-reader declarations, preserved
+      in source order without selecting or executing a reader; exposed as
+      {!Runtime_schema.config.media_readers}
 
     The routing layers are intentionally NOT parsed: Layer 4 aliases
     ([<p>.<m>.<a>]), Layer 5 [\[routes\]]/[\[system\]]/[\[profiles\]], and the

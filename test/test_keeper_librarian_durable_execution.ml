@@ -4937,9 +4937,9 @@ let test_resolution_preparation_recovers_exact_bytes cut () = with_fixture (fun 
   let original,_request,fenced,make_child=prepare_resolution_fixture fixture in
   let child=make_child () and losing_child=make_child () in
   let before=progress fixture,F.post_count fixture.server in
-  let prepared=memory_action fixture (fun () -> io (fun () ->
+  ignore (memory_action fixture (fun () -> io (fun () ->
     Resolution_intent.prepare_child ~store:fixture.store ~expected:fenced child
-      |> Result.map_error Resolution_intent.error_to_string |> get)) in
+      |> Result.map_error Resolution_intent.error_to_string |> get)));
   let load_resolution ()=io (fun () -> Store.load_history_resolution fixture.store
     ~scope:original.scope ~request_id:original.request_id |> get |> Option.get) in
   let original_preparation=load_resolution () in

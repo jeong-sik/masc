@@ -529,12 +529,16 @@ let build_keeper_execution_queue keepers =
             ])))
 ;;
 
+(* The model a Keeper's runtime actually selected, read from the row's
+   runtime trust: the operator row no longer carries a meta-level model. *)
 let model_map_of_keeper_rows keepers =
   List.fold_left
     (fun model_map -> function
       | `Assoc _ as keeper_json ->
         (match Json_util.assoc_member_opt "name" keeper_json,
-               Json_util.assoc_member_opt "active_model" keeper_json with
+               Option.bind
+                 (Json_util.assoc_member_opt "runtime_trust" keeper_json)
+                 (Json_util.assoc_member_opt "active_model") with
          | Some (`String keeper_name), Some (`String model) ->
            Agent_name_map.add keeper_name model model_map
          | Some (`String _), _

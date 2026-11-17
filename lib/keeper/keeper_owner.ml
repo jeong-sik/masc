@@ -971,12 +971,19 @@ let native_call_unknown_effect_success_detail =
   "turn reported success, but its native call has an unknown effect; recorded as failed"
 ;;
 
-(* An Active call has two futures. A restart requeues the operation and resumes
-   the same call from its checkpoint, which is right when this process never
-   dispatched into it (the Owner is stopping, or a resumed call failed to load).
-   Closing it is permanent, which is right when the call was cancelled or ran
-   and the Owner cannot prove that no tool attempt is unsettled. An operator
-   interrupt is a permanent cancel, so it closes even on a stopping Owner. *)
+(* An Active call has two futures. Leaving it lets the next process requeue the
+   operation and resume the same call from its checkpoint, which is right when
+   a restart is what ended the child: the Owner is stopping. Closing it is
+   permanent and records an unknown effect. Any other failure closes it: no
+   restart is coming to resume the call in this process, and a Running row
+   with no child would hold the Keeper's queue until one did. That holds
+   whether or not this process bound the call, so a claim that could not open
+   an inherited call closes it too, and an operation lost to a momentary
+   failure stays lost (operator decision, RFC
+   restart-resumes-running-chat-operations 4.3). An operator interrupt is a
+   permanent cancel, so it closes even on a stopping Owner. A deferral is
+   settled without consulting this policy. Each failure kind is listed so that
+   a new one has to take a side. *)
 let active_native_call_policy ~owner_stopping ~ended execution =
   match ended with
   | Child_interrupted_by_operator | Child_raised -> Close_active_call
@@ -987,15 +994,15 @@ let active_native_call_policy ~owner_stopping ~ended execution =
      | Operation_deferred -> Leave_active_call_for_restart
      | Operation_failed { kind; _ } ->
        (match kind with
-        | Chat_operation.Turn_cancelled ->
-          if owner_stopping then Leave_active_call_for_restart else Close_active_call
+        | Chat_operation.Turn_cancelled
         | Chat_operation.Interrupted_by_restart
         | Chat_operation.Turn_exception
         | Chat_operation.Store_unavailable
         | Chat_operation.No_queued_operation
         | Chat_operation.Invalid_input
         | Chat_operation.Turn_invariant
-        | Chat_operation.Delivery_failed -> Leave_active_call_for_restart))
+        | Chat_operation.Delivery_failed ->
+          if owner_stopping then Leave_active_call_for_restart else Close_active_call))
 ;;
 
 let owner_error_of_operation_error = function

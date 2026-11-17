@@ -3,7 +3,7 @@ rfc: "a-keeper-takes-every-waiting-message-in-one-turn"
 title: "기다리던 메시지는 한 턴에 같이 들어간다 — 큐는 업무 종류를 모른다"
 status: Draft
 created: 2026-11-16
-updated: 2026-11-16
+updated: 2026-11-17
 author: claude
 related: ["0377", "backlog-never-preempts-a-running-turn", "arrived-stimuli-reach-the-running-turn", "event-queue-admit-all-ready"]
 ---
@@ -163,10 +163,7 @@ related: ["0377", "backlog-never-preempts-a-running-turn", "arrived-stimuli-reac
 
 1단계는 묶음과 관계없이 먼저 들어간다. 묶음을 넓히면 한 실행이 더 많은 요청을 안는다. 그 실행이 멈추면 더 많은 요청이 같이 멈춘다.
 
-1. **실패한 실행은 슬롯을 놓는다.** child 가 끝났다는 사실만으로는 호출을 닫을 근거도, 재시작을 기다릴 근거도 되지 않는다. native 실행을 관측해 상태를 가른다(`Agent.observe_execution`).
-   - journal terminal 이 있으면 그 disposition 을 옮기고 원래 실패로 정산한다.
-   - writer 가 없고 효과를 모르면 효과 불명을 사실로 남기고 실패로 정산한다. 자동으로 다시 실행하지 않는다.
-   - 관측할 수 없으면 그 사실을 typed 대기로 남긴다. `Running` 으로 두거나 바로 claim 가능한 `Queued` 로 돌리지 않는다.
+1. **실패한 실행은 슬롯을 놓는다.** child 가 `Active` 호출을 둔 채 실패로 끝나면, owner 가 멈추는 중이 아닌 한 호출을 「효과 모름」 영수증으로 닫고 작업을 child 가 돌려준 실패 종류로 끝낸다. journal 은 읽지 않는다. 자동으로 다시 실행하지 않는다(`restart-resumes-running-chat-operations` 4.3, 운영자 결정 2026-11-17).
 
    시간이 지났다는 이유로 죽은 실행으로 판정하지 않는다(constitution `no_wall_clock_death`).
    늦게 돌아온 옛 실행이 결과를 쓰지 못하게 child 종료와 native 콜백에 실행 회차 token 을 묶는다. 지금 `Operation_child_finished` 에는 이 token 이 없다(#52407).

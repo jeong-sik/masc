@@ -2895,117 +2895,6 @@ let test_autonomous_operator_interrupt_is_a_typed_outcome () =
      fail "the Owner did not admit the next autonomous turn")
 ;;
 
-(* A turn that fails while its native call is still Active leaves the durable
-   row Running after the child released the slot: the Owner leaves the call
-   for restart recovery instead of settling the row. A later autonomous cycle
-   then holds the slot while the operation id still reads as running. The
-   operation-id stop must not cancel that cycle; the observed-turn stop, which
-   names the slot's own occupant, still does.
-   The failure kind must not be [Turn_cancelled]: with the Owner not stopping,
-   that kind closes the Active call and settles the row, so no Running row
-   would be left behind. *)
-let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
-  Eio_main.run @@ fun env ->
-  let clock = env#clock in
-  Eio.Switch.run @@ fun sw ->
-  let owner_ref = ref None in
-  let stuck_id = operation_id "kmsg-refused-settle" in
-  let executor_returned = ref false in
-  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
-    match claim (), !owner_ref with
-    | Ok (Some (operation : Chat_operation.t)), Some owner ->
-      let checkpoint = Keeper_checkpoint_ref.of_persisted
-        ~trace_id:(Keeper_id.Trace_id.of_string "refused-settle-trace" |> Result.get_ok)
-        ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "refused settle seed") |> Result.get_ok in
-      let locator = Agent_core.Agent.execution_locator_of_yojson
-        (`Assoc ["version", `Int 1; "run_id", `String "execution-run-refused-settle"]) |> Result.get_ok in
-      let call = Keeper_native_call.create
-        ~call_id:"019a0010-1000-7000-8000-000000000020" ~runtime_id:"native.primary"
-        ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
-        ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
-      Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
-        ~execution_digest:operation.execution_digest ~observed:Keeper_native_call.No_native_call ~call
-        |> owner_ok;
-      (* Active native call and no terminal receipt: a [Turn_exception]
-         failure leaves the call for restart recovery, so the row stays
-         Running. *)
-      executor_returned := true;
-      Owner.Operation_failed
-        { kind = Chat_operation.Turn_exception; detail = "no receipt"; outcome_ref = None }
-    | _ ->
-      Owner.Operation_failed
-        { kind = Chat_operation.Store_unavailable; detail = "claim did not yield an operation"
-        ; outcome_ref = None }
-  in
-  let owner =
-    owner_ok
-      (start_owner_with_executor
-         ~sw
-         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_executor:(Some operation_executor)
-         ~keeper_name:"operation-id-vs-autonomous"
-         ~initial_meta:(Some (make_meta "operation-id-vs-autonomous"))
-         ())
-  in
-  owner_ref := Some owner;
-  ignore
-    (owner_ok
-       (Owner.submit_operation owner ~operation_id:stuck_id ~source:operation_source
-          ~input:(operation_input "stuck")));
-  let deadline = Eio.Time.now clock +. fixture_start_deadline_s in
-  let rec await_left_running_row () =
-    let projection = Owner.operation_projection owner in
-    if !executor_returned
-       && Option.is_none (Owner.turn_in_flight owner)
-       && Option.is_some projection.running_operation_id
-    then ()
-    else if Eio.Time.now clock > deadline
-    then fail "the left-running row was not observed within the fixture deadline"
-    else (
-      Eio.Time.sleep clock slot_release_poll_s;
-      await_left_running_row ())
-  in
-  await_left_running_row ();
-  (match (Owner.operation_projection owner).running_operation_id with
-   | Some running ->
-     check bool "the failed turn leaves the row running" true
-       (Chat_operation.Operation_id.equal running stuck_id)
-   | None -> fail "the failed turn cleared the running id");
-  let autonomous_started, resolve_autonomous_started = Eio.Promise.create () in
-  let release_autonomous, resolve_release_autonomous = Eio.Promise.create () in
-  let autonomous_result = Eio.Stream.create 1 in
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Stream.add autonomous_result
-      (Owner.run_autonomous_if_idle owner (fun () ->
-         Eio.Promise.resolve resolve_autonomous_started ();
-         try Eio.Promise.await release_autonomous; `Completed with
-         | exn when Keeper_registry_types.is_operator_interrupt exn -> `Cancelled)));
-  Eio.Promise.await autonomous_started;
-  (match Owner.turn_in_flight owner with
-   | Some { lane = Owner.Autonomous; _ } -> ()
-   | Some { lane = Owner.Chat_operation | Owner.Maintenance; _ } | None ->
-     fail "the autonomous cycle does not hold the slot");
-  (match owner_ok (Owner.interrupt_running_operation owner stuck_id) with
-   | Owner.Operation_slot_held_by_autonomous_turn -> ()
-   | Owner.Operation_interrupt_signalled -> fail "the operation id cancelled the autonomous cycle"
-   | Owner.Operation_not_current _ | Owner.Operation_settling | Owner.Operation_maintenance_running
-   | Owner.Operation_interrupt_failed _ ->
-     fail "the operation id stop did not report the autonomous slot holder");
-  check bool "the autonomous cycle keeps the slot" true
-    (Option.is_some (Owner.turn_in_flight owner));
-  (match fst (owner_ok (Owner.interrupt_turn owner
-     (Owner.Observed_turn { interrupt_token = observed_token owner }))) with
-   | Owner.Interrupt_result Owner.Operation_interrupt_signalled -> ()
-   | Owner.Interrupt_result _ | Owner.Pending_admission_paused ->
-     fail "the observed-turn stop no longer reaches the autonomous cycle");
-  (match Eio.Stream.take autonomous_result with
-   | Ok (`Ran `Cancelled) | Ok `Interrupted -> ()
-   | Ok (`Ran `Completed) -> fail "the observed-turn stop did not cancel the cycle"
-   | Ok (`Busy _) -> fail "the autonomous cycle was refused the slot"
-   | Error error -> fail ("autonomous cycle failed: " ^ Owner.error_to_string error));
-  Eio.Promise.resolve resolve_release_autonomous ()
-;;
-
 let test_chat_interrupt_cancels_the_turn_and_the_queue_continues () =
   Eio_main.run @@ fun env ->
   let clock = env#clock in
@@ -4026,6 +3915,140 @@ let test_restart_settlement_ends_an_operation_whose_journal_is_unreadable () =
   let claimed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
   check bool "the Keeper's next operation is claimed" true
     (Chat_operation.Operation_id.equal next claimed.operation_id)
+;;
+
+(* The claim of an operation a restart requeued fails before it binds the
+   inherited call, as when that call's journal cannot be read. No restart is
+   coming to resume the call in this process, so the Owner closes it as an
+   unknown effect and ends the operation with the claim's own failure. The
+   Keeper's next operation runs. *)
+let test_a_failed_claim_closes_the_inherited_call_and_the_next_operation_runs () =
+  Eio_main.run @@ fun env ->
+  let path = Filename.temp_file "keeper-owner-failed-claim-" ".sqlite3" in
+  Unix.unlink path;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path) @@ fun () ->
+  let operation, call = seed_active_native_call ~path ~name:"failed-claim"
+      ~call_id:"019a0010-1000-7000-8000-000000000019" ~requeued:true in
+  Eio.Switch.run @@ fun sw ->
+  let owner_cell = ref None in
+  let ready = ref false in
+  let claims = Eio.Stream.create 2 in
+  let writer_at_claim = ref None in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    match claim (), !owner_cell with
+    | Ok (Some (claimed : Chat_operation.t)), Some owner ->
+      Eio.Stream.add claims claimed.operation_id;
+      if Chat_operation.Operation_id.equal claimed.operation_id operation.operation_id
+      then (
+        writer_at_claim := Some (Owner.native_call_writer owner ~call_id:call.call_id);
+        Owner.Operation_failed
+          { kind = Chat_operation.Turn_exception
+          ; detail = "the inherited call's journal could not be read"
+          ; outcome_ref = None })
+      else Owner.Operation_succeeded { outcome_ref = "next" }
+    | Ok (Some _), None | Ok None, _ | Error _, _ ->
+      Owner.Operation_failed
+        { kind = Chat_operation.Store_unavailable; detail = "claim did not yield an operation"
+        ; outcome_ref = None }
+  in
+  let owner =
+    Owner.start ~base_path:(Filename.dirname path) ~sw
+      ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+      ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
+      ~now:(fun () -> 20.)
+      ~operation_runner:(Some Owner.{ ready = (fun ~keeper_name:_ -> !ready); execute
+                                    ; on_execution_settled = noop_execution_settled })
+      ~on_turn_slot_released:None ~keeper_name:"failed-claim"
+      ~initial_meta:(Some (make_meta "failed-claim")) |> owner_ok in
+  owner_cell := Some owner;
+  check int "nothing was Running, so nothing is interrupted" 0
+    (List.length (Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_exited
+       ~journal_terminal:(fun _ -> Ok None) |> owner_ok));
+  let next = operation_id "kmsg-failed-claim-next" in
+  ready := true;
+  ignore (owner_ok (Owner.submit_operation owner ~operation_id:next ~source:operation_source
+    ~input:(operation_input "runs after the failed claim")));
+  let take what =
+    try Eio.Time.with_timeout_exn env#clock fixture_start_deadline_s (fun () ->
+      Eio.Stream.take claims)
+    with Eio.Time.Timeout -> fail ("timed out waiting for " ^ what)
+  in
+  check bool "the requeued operation is claimed first" true
+    (Chat_operation.Operation_id.equal operation.operation_id (take "the requeued claim"));
+  check bool "the Keeper's next operation is claimed" true
+    (Chat_operation.Operation_id.equal next (take "the next claim"));
+  (match !writer_at_claim with
+   | Some (Ok Owner.Writer_exited) -> ()
+   | Some (Ok Owner.Writer_unproven) ->
+     fail "the claim did not see the inherited call's writers as exited"
+   | Some (Error error) -> fail (Owner.error_to_string error)
+   | None -> fail "the claim did not ask for the inherited call's writer");
+  (match (Option.get (owner_ok (Owner.exact_operation owner operation.operation_id))).state with
+   | Chat_operation.Failed {failure={kind=Chat_operation.Turn_exception; _}; _} -> ()
+   | state -> fail ("the failed claim left its operation " ^ Chat_operation.state_to_string state));
+  (match Owner.direct_native_call owner ~operation_id:operation.operation_id |> owner_ok with
+   | Keeper_native_call.Terminal_unacknowledged (closed, disposition) ->
+     check bool "the receipt names the inherited call" true (Keeper_native_call.equal closed call);
+     check bool "the call is closed as an unknown effect" true
+       (disposition = Keeper_native_call.unknown_effect_disposition)
+   | Keeper_native_call.No_native_call | Keeper_native_call.Active _ ->
+     fail "the failed claim left the inherited call open")
+;;
+
+(* A durable Running row can have no child in this process: a restart keeps an
+   inherited row Running until its journal is read, and a refused settle keeps
+   one Running after the slot is released. An autonomous cycle may then hold
+   the slot while the operation id still reads as running. The operation-id
+   stop must not cancel that cycle; the observed-turn stop, which names the
+   slot's own occupant, still does. *)
+let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
+  with_native_restart_store "autonomous-slot-holder" @@ fun path ->
+  let operation, _call = seed_active_native_call ~path ~name:"autonomous-slot-holder"
+      ~call_id:"019a0010-1000-7000-8000-000000000020" ~requeued:false in
+  let stuck_id = operation.operation_id in
+  Eio.Switch.run @@ fun sw ->
+  (* No settlement reads the journal here, so the inherited row stays Running
+     and no child of this process holds it. *)
+  let owner = start_restart_owner ~sw ~path ~name:"autonomous-slot-holder" in
+  (match (Owner.operation_projection owner).running_operation_id with
+   | Some running ->
+     check bool "the inherited row is running" true
+       (Chat_operation.Operation_id.equal running stuck_id)
+   | None -> fail "the inherited row is not running");
+  check bool "no child holds the slot" true (Option.is_none (Owner.turn_in_flight owner));
+  let autonomous_started, resolve_autonomous_started = Eio.Promise.create () in
+  let release_autonomous, resolve_release_autonomous = Eio.Promise.create () in
+  let autonomous_result = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Stream.add autonomous_result
+      (Owner.run_autonomous_if_idle owner (fun () ->
+         Eio.Promise.resolve resolve_autonomous_started ();
+         try Eio.Promise.await release_autonomous; `Completed with
+         | exn when Keeper_registry_types.is_operator_interrupt exn -> `Cancelled)));
+  Eio.Promise.await autonomous_started;
+  (match Owner.turn_in_flight owner with
+   | Some { lane = Owner.Autonomous; _ } -> ()
+   | Some { lane = Owner.Chat_operation | Owner.Maintenance; _ } | None ->
+     fail "the autonomous cycle does not hold the slot");
+  (match owner_ok (Owner.interrupt_running_operation owner stuck_id) with
+   | Owner.Operation_slot_held_by_autonomous_turn -> ()
+   | Owner.Operation_interrupt_signalled -> fail "the operation id cancelled the autonomous cycle"
+   | Owner.Operation_not_current _ | Owner.Operation_settling | Owner.Operation_maintenance_running
+   | Owner.Operation_interrupt_failed _ ->
+     fail "the operation id stop did not report the autonomous slot holder");
+  check bool "the autonomous cycle keeps the slot" true
+    (Option.is_some (Owner.turn_in_flight owner));
+  (match fst (owner_ok (Owner.interrupt_turn owner
+     (Owner.Observed_turn { interrupt_token = observed_token owner }))) with
+   | Owner.Interrupt_result Owner.Operation_interrupt_signalled -> ()
+   | Owner.Interrupt_result _ | Owner.Pending_admission_paused ->
+     fail "the observed-turn stop no longer reaches the autonomous cycle");
+  (match Eio.Stream.take autonomous_result with
+   | Ok (`Ran `Cancelled) | Ok `Interrupted -> ()
+   | Ok (`Ran `Completed) -> fail "the observed-turn stop did not cancel the cycle"
+   | Ok (`Busy _) -> fail "the autonomous cycle was refused the slot"
+   | Error error -> fail ("autonomous cycle failed: " ^ Owner.error_to_string error));
+  Eio.Promise.resolve resolve_release_autonomous ()
 ;;
 
 let restart_settlement_observations ~keeper_name ~since_seq =
@@ -7618,6 +7641,8 @@ let () =
             test_cancel_ends_an_operation_restart_settlement_requeued
         ; test_case "restart settlement ends an operation whose journal is unreadable" `Quick
             test_restart_settlement_ends_an_operation_whose_journal_is_unreadable
+        ; test_case "a failed claim closes the inherited call and the next operation runs" `Quick
+            test_a_failed_claim_closes_the_inherited_call_and_the_next_operation_runs
         ; test_case "restart settlement reports what it did" `Quick
             test_restart_settlement_reports_what_it_did
         ; test_case "operation id stop leaves an autonomous slot holder alone" `Quick

@@ -41,7 +41,8 @@ val last_admission_wait :
 val forget_measurement : config:Workspace.config -> keeper_name:string -> unit
 (** Clear after the purge has quiesced the lane and while submissions remain
     excluded, so a deleted keeper's observations, including measured CLI input
-    capacity, cannot outlive its identity. *)
+    capacity, cannot outlive its identity. Also discards the previous verified
+    unread count and retires any older pass's measurement publication token. *)
 
 val attention_health_json : config:Workspace.config -> Yojson.Safe.t
 (** Nonblocking process-local projection for full health. Read durable-pass
@@ -128,6 +129,15 @@ val submit_durable_for_unlaunched
 type read_limit = Oldest_turn | Oldest_turn_messages
 
 module For_testing : sig
+  val run_durable_with_observers :
+    config:Workspace.config -> keeper_name:string ->
+    consume:(unit -> (Keeper_librarian_durable_consumer.outcome,
+                     Keeper_librarian_durable_consumer.error) result) ->
+    on_checkpoint_load:(unit -> unit) -> before_publish:(unit -> unit) -> pass_end
+  (** The production drain and real unread reader. Observe full checkpoint
+      loads and interleave a purge or another pass immediately before the
+      completed observation attempts publication. Neither callback is kept. *)
+
   val run_explicit_admission_with :
     base_path:string -> keeper_name:string ->
     run:(unit -> Keeper_memory_admission_worker.outcome) -> unit

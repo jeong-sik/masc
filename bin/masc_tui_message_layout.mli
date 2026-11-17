@@ -825,6 +825,13 @@ val wrap_words : max_cells:int -> string -> string list
     ends at a separator can be as little as half full, so a name can take up to
     about twice the rows a cut at the width takes. *)
 
+val wrap_words_after_prefix :
+  prefix_cells:int -> max_cells:int -> string -> string list
+(** {!wrap_words} for text that follows something on its first row: that row
+    holds [prefix_cells] cells and every later row [max_cells]. A first word
+    wider than [prefix_cells] gives the first row its head, as {!wrap_words}
+    splits a word, and goes on at the full width. *)
+
 val boxed_rows : inner:int -> string -> string list
 (** The rows a box body spends on [content] at inner width [inner]: one row per
     server line, plus the rows a line longer than the body wraps to. The box

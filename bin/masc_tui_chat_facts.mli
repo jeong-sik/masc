@@ -2,8 +2,9 @@
     (RFC tui-one-screen-grammar §5.5).
 
     A row that cannot hold every fact breaks between two of them. A fact wider
-    than a whole row breaks at the row's edge and continues on the next. No
-    value is shortened and no fact is left out for width. *)
+    than a whole row continues on the next: a sentence ([Plain]) breaks
+    between two words, a name or a number at the row's edge. No value is
+    shortened and no fact is left out for width. *)
 
 (** What kind of thing a value is. The kind picks its colour (§7.3); the label
     says the same thing in words, so the row reads without colour. *)
@@ -16,7 +17,7 @@ type 'reading tone =
       (** A reading of state. The caller's own type says which, and its
           palette gives the status colour, so a module that builds facts
           needs no colours. *)
-  | Plain
+  | Plain  (** Words of no kind: a sentence, a notice, a heading. *)
 
 type 'reading t =
   { label : string

@@ -91,9 +91,12 @@ and reported image identity are separate from source-build provenance.
 
 The native capture uses broad real prebuilt dependencies. It proves neither
 the full maintained target's declared visibility nor a clean dependency/ABI
-rebuild. [probe.ml](probe.ml) and [driver.py](driver.py) retain the executed
-fixture/driver, but the driver references pre-existing local include/link
-metadata and original source copies; it is not a clean-checkout build recipe.
+rebuild. [probe.ml](probe.ml) retains the executed fixture. [driver.py](driver.py)
+is an output-path derivative that writes new runs under ignored `artifacts/`
+and reads original source copies from the retained private capture. Its
+[provenance](replay-driver-provenance.json) distinguishes its hash from the
+original executed driver; the derivative was not rerun. It still references
+pre-existing local include/link metadata, so it is not a clean-checkout recipe.
 No Dune or CI run, installed candidate, live profile/GC/provider call, restart,
 merge or recovery of an original request is included. All explicit collections
 were confined to the owned cost processes.

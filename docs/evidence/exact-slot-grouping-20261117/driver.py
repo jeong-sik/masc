@@ -1,13 +1,15 @@
+# Output-path derivative of the retained native-r3 driver; see replay-driver-provenance.json.
 from pathlib import Path
 import hashlib,json,os,subprocess,sys,tempfile,time
 
 ROOT=Path(__file__).resolve().parent
 REPO=ROOT.parents[2]
+CAPTURE=REPO/'artifacts/cpu-memory-20261116/exact-slot-grouping-20261117'
 WORK=Path('/Users/dancer/.codex/worktrees/exact-slot-grouping-20261117/masc')
 sha=lambda data:hashlib.sha256(data).hexdigest()
 
 def main():
-    out=ROOT/(sys.argv[1] if len(sys.argv)>1 else 'native-r2');out.mkdir()
+    out=CAPTURE/(sys.argv[1] if len(sys.argv)>1 else 'native-replay-'+str(time.time_ns()));out.mkdir()
     (out/'driver.py').write_bytes(Path(__file__).read_bytes())
     old=json.loads((REPO/'artifacts/cpu-memory-20261116/window-shrink-snapshot-20261117/native-r1/commands.json').read_text())
     args=old[0]['argv'];prefix=[args[0],'-I',str(out)]+args[3:-2]
@@ -24,7 +26,7 @@ def main():
       'maintained_full_source_sha256':sha(suite.encode())}
     for side in ['base','test']:
         for suffix in ['mli','ml']:
-            data=(ROOT/('original.'+suffix)).read_bytes() if side=='base' else (WORK/('lib/server/server_exact_slot_projection.'+suffix)).read_bytes()
+            data=(CAPTURE/('original.'+suffix)).read_bytes() if side=='base' else (WORK/('lib/server/server_exact_slot_projection.'+suffix)).read_bytes()
             name='slot_under_'+side+'.'+suffix;(out/name).write_bytes(data);manifest['sources'][name]=sha(data)
         data=('open Alcotest\nmodule Exact = Masc.Exact_lane_run_registry\nmodule Server_exact_slot_projection = Slot_under_'+side+'\n'+helper+'\n'+case+'\n').encode()
         name='maintained_'+side+'.ml';(out/name).write_bytes(data);manifest['sources'][name]=sha(data)

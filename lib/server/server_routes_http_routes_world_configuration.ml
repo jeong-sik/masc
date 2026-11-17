@@ -4,7 +4,7 @@ module Bundle = World_configuration_bundle
 
 let error_status = function
   | Capture.Invalid_base_path _ -> `Bad_request
-  | Config_root_unavailable _ | Read_failed _ | Invalid_bundle _ -> `Unprocessable_entity
+  | Config_root_unavailable _ | Read_failed _ | Invalid_bundle _ -> `Code 422
   | Configuration_lock_failed _ -> `Conflict
 
 let add_routes router =

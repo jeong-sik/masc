@@ -686,11 +686,11 @@ let test_world_export_authority_and_documents ~strict () =
     | Ok () -> () | Error detail -> fail detail in
   write "alpha.toml" declaration;
   let router = Server_routes_http_routes_world_configuration.add_routes (Router.create ()) in
-  let path = "/api/v1/world/configuration/export" in
-  check int "no credential" 401 (dispatch router path).status;
-  check int "invalid credential" 401 (dispatch ~token:"invalid-world-token" router path).status;
-  check int "Worker cannot read confidential documents" 403 (dispatch ~token:worker router path).status;
-  let guarded base = Uri.to_string (Uri.make ~path ~query:
+  let export_path = "/api/v1/world/configuration/export" in
+  check int "no credential" 401 (dispatch router export_path).status;
+  check int "invalid credential" 401 (dispatch ~token:"invalid-world-token" router export_path).status;
+  check int "Worker cannot read confidential documents" 403 (dispatch ~token:worker router export_path).status;
+  let guarded base = Uri.to_string (Uri.make ~path:export_path ~query:
     ["expected_base_path", [base];
      "expected_masc_root", [Filename.concat base Common.masc_dirname]] ()) in
   let response = dispatch ~token:admin router (guarded base_path) in
@@ -713,7 +713,7 @@ let test_world_export_authority_and_documents ~strict () =
   check int "another workspace is refused" 409
     (dispatch ~token:admin router (guarded "/other-world")).status;
   write "broken.toml" "[keeper]\ninstructions = [\n";
-  let failed = dispatch ~token:admin router path in
+  let failed = dispatch ~token:admin router export_path in
   check int "a broken declaration is not omitted" 422 failed.status;
   check bool "capture errors are uncached" true
     (List.mem ("cache-control", "no-store") failed.headers)

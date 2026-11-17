@@ -64,6 +64,17 @@ val run_on_owner_domain : (unit -> 'a) -> 'a
     and the caller suspends until the result is ready. Exceptions raised by
     [f] on the owner domain are re-raised to the caller. *)
 
+val run_on_owner_domain_joined : (unit -> 'a) -> 'a
+(** Local publication whose actual owner task must end before its caller.
+    Dispatches like [run_on_owner_domain], but forwards caller cancellation to
+    the queued/running owner task and joins its result before re-raising the
+    caller's cancellation. Cancellation that wins queued entry retires the task
+    without entering [f] or waiting for the dispatcher. Once entered, the actual
+    owner task is joined; cancellation can still interrupt [f]'s waits. Only
+    enqueue and the cancellation join are protected by this port. [f] owns any
+    protection required for its local publication and must not dispatch worker/model RPCs.
+    Without a root switch or on its owner domain, [f] runs inline. *)
+
 val set_env : Eio_unix.Stdenv.base -> unit
 (** Set the global Eio standard environment.  Required by long-lived
     consumers that need more than [net]/[clock] (e.g. piaf

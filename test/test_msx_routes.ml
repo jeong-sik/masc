@@ -6,12 +6,6 @@
 open Alcotest
 module Lane = Msx_lane
 module Route = Server_routes_http_routes_msx
-module Tick = Masc_tui_msx_tick
-
-(* What the terminal's tick client concludes from a 409 body. *)
-let terminal_reads_409 body =
-  Tick.fetch (Tick.create ()) ~host:"localhost" ~port:1 ~headers:[]
-    ~request:(fun ~body:_ -> Ok (409, body))
 
 let unwatched_config =
   lazy (Masc.Workspace.default_config (Filename.temp_dir "msx-press-route-" ""))
@@ -286,9 +280,9 @@ let test_tick_validation_precedes_mutation () =
 let test_503_codes_separate_unavailable_from_outcome_unknown () =
   let answer error =
     let status, body = Route.call_error_answer error in
-    status, Result.get_ok (Msx_wire.decode body), body in
+    status, Result.get_ok (Msx_wire.decode body) in
   List.iter (fun (label, error, expected) ->
-    let status, refusal, _ = answer error in
+    let status, refusal = answer error in
     check bool (label ^ " is 503") true (status = `Service_unavailable);
     check bool (label ^ " is told apart by code") true (refusal.Msx_wire.code = Some expected))
     ["no attached worker", Masc.Lane_addon_runtime.Unavailable "No attached shared Add-on provides masc_msx_step",
@@ -297,18 +291,7 @@ let test_503_codes_separate_unavailable_from_outcome_unknown () =
        Masc.Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable "control port closed"),
        Msx_wire.Worker_unavailable;
      "result lost after dispatch", Masc.Lane_addon_runtime.Outcome_unknown "transport closed",
-       Msx_wire.Outcome_unknown];
-  (* What the terminal concludes from each real body. *)
-  let reads error =
-    let _, _, body = answer error in
-    Tick.fetch (Tick.create ()) ~host:"localhost" ~port:1 ~headers:[]
-      ~request:(fun ~body:_ -> Ok (503, body)) in
-  check bool "the terminal keeps polling past an unavailable worker" true
-    (match reads (Masc.Lane_addon_runtime.Unavailable "no worker") with
-     | Ok (Tick.Worker_unavailable (Some _)) -> true
-     | Ok _ | Error _ -> false);
-  check bool "the terminal stops on a lost result" true
-    (Result.is_error (reads (Masc.Lane_addon_runtime.Outcome_unknown "transport closed")))
+       Msx_wire.Outcome_unknown]
 
 let test_tick_worker_advances_and_returns_frame () =
   with_tick_machine (fun () ->
@@ -1041,12 +1024,6 @@ let test_activity_read_and_route_refusals () =
         check bool "known activity refusal is HTTP 409" true (status=`Conflict);
         check bool "closed refusal code" true
           (member "ok" body = Some (`Bool false) && member "code" body = Some (`String code));
-        (* The body the route really sent, read by the decoder the terminal
-           really runs. *)
-        check bool "the terminal reads the route's 409 as a known refusal" true
-          (terminal_reads_409 body
-           = Ok (Tick.Not_started (if code = "activity_disabled" then Tick.Off
-                                   else Tick.Activity_unobserved)));
         let press_status,press_body = Route.press_response ~config ~who:"unit-presser"
           ~body:{|{"keys":["space"]}|} in
         check bool "press answers the same activity refusal as tick" true
@@ -1217,9 +1194,6 @@ let test_msx_routes_bind_workspace_before_effects () =
             (refusal_of (bound_tick (expected config_a))
              = (`Conflict, {Msx_wire.code = Some Msx_wire.Workspace_precondition_failed;
                   message = Some "workspace precondition failed"}));
-          check bool "the terminal reads the failed precondition as a changed workspace" true
-            (terminal_reads_409 (snd (bound_tick (expected config_a)))
-             = Ok (Tick.Not_started Tick.Workspace_changed));
           check bool "a malformed binding names no code" true
             (refusal_of (bound_tick `Null)
              = (`Bad_request, {Msx_wire.code = None;

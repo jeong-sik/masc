@@ -1850,10 +1850,6 @@ let approval_decision_unverified = function
 open Masc_tui_async_protocol
 
 let msx_poll_view = ref (ref ())
-type msx_poll_state = Poll_ready of Masc_tui_msx_tick.poll_policy
-  | Poll_pending of msx_poll_request
-  | Poll_observing of msx_poll_request * Masc_tui_msx_tick.refusal
-let msx_pending_poll = ref (Poll_ready Advancing)
 let invalidate_msx_poll () = msx_poll_view := ref ()
 type pending_msx_checkpoint = {
   checkpoint_operation_id : string;
@@ -2139,43 +2135,19 @@ let run_machine_change ?(checkpoint_boundary=false) state ~mailbox ~refused ~unk
   | Ok expected_workspace ->
       let result =
         try
-            let unsettled_tick = match !msx_pending_poll with
-              | Poll_pending _ | Poll_ready Outcome_unknown -> true
-              | Poll_ready (Advancing | Observing _) | Poll_observing _ -> false in
-            if checkpoint_boundary && unsettled_tick then
-              Error (refused "An MSX tick is still unsettled; no checkpoint was sent.")
-            else begin
-              if checkpoint_boundary then begin
-                invalidate_msx_poll ();
-                view := !msx_poll_view;
-                state.msx_live_in_flight <- None;
-                (match !msx_pending_poll with
-                 | Poll_observing (_,refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
-                 | Poll_pending _ | Poll_ready _ -> ())
-              end;
-              (* No yield separates retirement from the checkpoint callback,
-                 which records its pending identity before sending HTTP. *)
-              write ~port ~expected_workspace
-            end
+            if checkpoint_boundary then begin
+              invalidate_msx_poll ();
+              view := !msx_poll_view;
+              state.msx_live_in_flight <- None
+            end;
+            (* No yield separates retirement from the checkpoint callback,
+               which records its pending identity before sending HTTP. *)
+            write ~port ~expected_workspace
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (unknown (Printexc.to_string exn))
       in
-      if current () then begin
-        (* Only an explicit, freshly admitted successful control action can
-           retire a workspace refusal. Retire any old observation token too;
-           an activity answer alone cannot grant control. *)
-        if Result.is_ok result then begin
-          match !msx_pending_poll with
-          | Poll_ready (Observing Workspace_changed)
-          | Poll_observing (_, Workspace_changed) ->
-              msx_pending_poll := Poll_ready Advancing;
-              state.msx_notice <- None
-          | Poll_ready (Advancing | Observing (Off | Activity_unobserved) | Outcome_unknown)
-          | Poll_pending _ | Poll_observing (_, (Off | Activity_unobserved)) -> ()
-        end;
-        deliver (Some expected_workspace) result
-      end
+      if current () then deliver (Some expected_workspace) result
 
 ;;
 
@@ -13969,7 +13941,7 @@ let observe_msx_carts state ~mailbox =
     (fun () -> Masc_tui_http.fetch_msx_carts ~host:server_peer_host ~port:state.port)
     (fun carts -> state.msx_carts <- carts)
 
-let observe_msx_frame ?(clear_notice = false) ?expected_workspace
+let observe_msx_frame ?expected_workspace
     ?(current = fun () -> true) (state : Masc_tui_types.state) ~mailbox =
   if Option.is_some (checkpoint_for_workspace state) then () else
   let captured_view = !msx_poll_view in
@@ -13996,15 +13968,7 @@ let observe_msx_frame ?(clear_notice = false) ?expected_workspace
        in
        state.msx_live <- view;
        state.msx_frame <- frame;
-       msx_surface_frame := frame);
-  (* An explicit fresh observation can rearm machine ticks after a lost tick reply.
-     It cannot settle an outstanding request whose result has yet to arrive. *)
-  match !msx_pending_poll with
-  | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame ->
-      msx_pending_poll := Poll_ready Advancing;
-      if clear_notice then state.msx_notice <- None
-  | Poll_ready (Advancing | Observing _ | Outcome_unknown)
-  | Poll_pending _ | Poll_observing _ -> ()
+       msx_surface_frame := frame)
   end)
 ;;
 
@@ -14072,7 +14036,7 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
     state.image_pixel_source <- None;
     state.image_cell_view <- None
   end;
-  observe_msx_frame ~clear_notice:true state ~mailbox;
+  observe_msx_frame state ~mailbox;
   observe_msx_carts state ~mailbox;
   Masc_tui_msx.open_menu ~write:write_to_terminal state;
   (* A first DOS read may carry a full screen. Let the menu accept keys while
@@ -14102,7 +14066,6 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   state.msx_frame <- None;
   msx_surface_frame := None;
   state.msx_notice <- None;
-  state.msx_worker_down_notice <- None;
   render_spectator state;
   launch_msx_live_read state ~mailbox
 
@@ -19448,10 +19411,7 @@ let apply_server_identity_reading ?(withdraw_on_error = false) state ~mailbox re
     settle_retired_sent_image state;
     settle_retired_chat_copy state;
     settle_retired_queue_inspections state;
-    settle_retired_chat_command_reads state;
-    (match !msx_pending_poll with
-     | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
-     | Poll_ready _ | Poll_pending _ -> ())
+    settle_retired_chat_command_reads state
   | Workspace_identity_unread | Workspace_identity_match
   | Workspace_identity_mismatch _ as next ->
     (match state.workspace_identity, next with
@@ -19488,9 +19448,6 @@ let apply_server_identity_reading ?(withdraw_on_error = false) state ~mailbox re
 let apply_refused_workspace_identity state ~mailbox ~detail latest =
   withdraw_resource_diagram_pending state;
   let reading = retire_refused_workspace_readings state ~detail latest in
-  (match !msx_pending_poll with
-   | Poll_observing (_, refusal) -> msx_pending_poll := Poll_ready (Observing refusal)
-   | Poll_ready _ | Poll_pending _ -> ());
   apply_server_identity_reading state ~mailbox reading
 
 (* Scoped navigation reads carry the final identity of their verified interval.
@@ -24516,8 +24473,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_queue_loaded (_, _, _, _)) | Lane_msg (Lane_addons_loaded (_, _, _)
         | Lane_application_loaded (_, _) | Lane_subscriptions_loaded (_, _)
         | Lane_declaration_loaded (_, _, _, _, _)) | Keeper_msg (Keeper_deletions_loaded (_, _))
-        | Msx_msg (Msx_tick_withdrawn (_, _)) | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_msg (Msx_frame_loaded (_, _)
-        | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _)) | Dos_live_loaded (_, _)
+        | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_msg (Msx_live_loaded (_, _)) | Dos_live_loaded (_, _)
         | Voice_msg (Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
         | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _)
         | Voice_calibrated _ | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _)
@@ -28877,130 +28833,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              schedule_discarded_copy_cleanup ()
          | Ok (Remote_unfetched | Remote_native _ | Remote_bounded_source _ | Remote_cells _
               | Remote_busy _ | Remote_bounded_failure _ | Remote_native_failed _ | Remote_copy_failed _) | Error _ -> ())
-  | Msx_msg (Msx_tick_withdrawn (request, detail)) ->
-      (match !msx_pending_poll with
-       | Poll_pending pending when pending == request ->
-           (* No POST was attempted, so this receipt releases the pending
-              token without inventing an unknown server outcome. A later
-              control view still needs its own fresh identity admission. *)
-           msx_pending_poll := Poll_ready Advancing;
-           if request.poll_authority = state.workspace_authority
-              && request.poll_view == !msx_poll_view && request.poll_port = state.port
-              && state.msx_open && not state.msx_menu_open then begin
-             state.machine_interaction <- Observe_machine;
-             state.msx_notice <- Some ("No MSX tick sent: " ^ detail);
-             render_spectator state
-           end
-       | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
-  | Msx_msg (Msx_frame_loaded (request, result)) ->
-      (match !msx_pending_poll with
-       | Poll_pending pending when pending == request ->
-           (* A scope change invalidates presentation, not knowledge of an
-              in-flight mutation. A lost reply remains unknown until an
-              explicit current-scope frame read succeeds. *)
-           let observation_current = request.poll_port = state.port
-             && workspace_reply_admitted state ~authority:request.poll_authority
-                  ~reading:(Some request.poll_reading) ~kind:Workspace_observation in
-           msx_pending_poll := Poll_ready
-             (if observation_current then Masc_tui_msx_tick.policy_after_tick result
-              else Outcome_unknown);
-           (match result with
-            | _ when not observation_current ->
-                ()
-            | Error detail ->
-                (* A lost HTTP response does not prove the server stopped its
-                   mutation. Observe explicitly before another automatic tick. *)
-                let notice = "Refresh outcome unknown; reopen before continuing: " ^ detail in
-                if request.poll_view == !msx_poll_view && state.msx_open
-                   && state.machine_source = Masc.Machine_lane.Msx then begin
-                  state.msx_notice <- Some notice;
-                  if state.msx_menu_open then
-                    Masc_tui_msx.render_menu ~write:write_to_terminal ~status:notice state
-                  else
-                    render_spectator state
-                end
-            | Ok (Not_started refusal) ->
-                if request.poll_view == !msx_poll_view && request.poll_port = state.port
-                   && state.msx_open && not state.msx_menu_open
-                   && state.machine_source = Masc.Machine_lane.Msx then begin
-                  state.msx_notice <- Some (Masc_tui_msx_tick.refusal_notice refusal);
-                  render_spectator state
-                end
-            | Ok (Worker_unavailable detail) ->
-                (* Nothing was dispatched, so the poll stays Advancing and the
-                   retained screen stays up until the worker answers again. *)
-                if request.poll_view == !msx_poll_view && request.poll_port = state.port
-                   && state.msx_open && not state.msx_menu_open
-                   && state.machine_source = Masc.Machine_lane.Msx then begin
-                  state.msx_notice <- Some (Masc_tui_msx_tick.worker_unavailable_notice detail);
-                  state.msx_worker_down_notice <- state.msx_notice;
-                  render_spectator state
-                end
-            | Ok (Advanced (frame, mark)) ->
-                if request.poll_view == !msx_poll_view && request.poll_port = state.port
-                   && state.msx_open && not state.msx_menu_open then begin
-                  (* The worker answers again: retire the notice the tick left
-                     while it did not. *)
-                  state.msx_notice <- Masc_tui_msx_tick.notice_after_advance
-                    ~notice:state.msx_notice ~worker_down_notice:state.msx_worker_down_notice;
-                  state.msx_worker_down_notice <- None;
-                  state.msx_frame <- frame;
-                  state.msx_live <-
-                    (match frame, mark with
-                     | Some frame, Some mark ->
-                       Masc_tui_machine_live.Showing
-                         { width = frame.msx_width; height = frame.msx_height
-                         ; rgb = frame.msx_rgb; mark
-                         ; time = Masc_tui_machine_live.Frame frame.msx_number }
-                     | None, None -> Masc_tui_machine_live.Not_loaded
-                     | Some _, None | None, Some _ ->
-                       Masc_tui_machine_live.Failed "MSX tick mark and picture disagree");
-                  msx_surface_frame := frame;
-                                  render_spectator state
-                end)
-       | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
-  | Msx_msg (Msx_activity_loaded (request, result)) ->
-      (match !msx_pending_poll with
-       | Poll_observing (pending,refusal) when pending == request ->
-           (* This read can recover a known refusal only. It never owns an
-              outstanding or unknown mutation, including from another view. *)
-           msx_pending_poll := Poll_ready (Observing refusal);
-           if request.poll_view == !msx_poll_view && request.poll_port = state.port
-              && request.poll_authority = state.workspace_authority
-              && state.msx_open && not state.msx_menu_open
-              && state.machine_source = Masc.Machine_lane.Msx then begin
-             let activity = match result with
-               | Ok (activity,Ok _) -> Ok activity
-               | Ok (_,Error detail) | Error detail -> Error detail in
-             let policy = Masc_tui_msx_tick.policy_after_activity (Observing refusal) activity in
-             msx_pending_poll := Poll_ready policy;
-             (match result with
-              | Error detail -> state.msx_notice <- Some ("Activity read failed; no tick sent: " ^ detail)
-              | Ok (_,live) ->
-                  (match live with
-                   | Error detail -> state.msx_notice <- Some ("Screen read failed; retaining previous frame: " ^ detail)
-                   | Ok (answer,_) ->
-                       let observed = match Masc_tui_machine_live.advance state.msx_live (Ok answer) with
-                        | None -> Ok ()
-                        | Some (Masc_tui_machine_live.Failed detail) ->
-                            Error detail
-                        | Some ((Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
-                                | Masc_tui_machine_live.Showing _
-                                | Masc_tui_machine_live.Kept_back _) as live) ->
-                            let live,frame = msx_frame_of_live ~previous_live:state.msx_live ~previous_frame:state.msx_frame live in
-                            state.msx_live <- live; state.msx_frame <- frame; msx_surface_frame := frame;
-                            Ok () in
-                       (match observed with
-                        | Error detail ->
-                            msx_pending_poll := Poll_ready (Observing refusal);
-                            state.msx_notice <- Some ("Screen read rejected; retaining previous frame: " ^ detail)
-                        | Ok () -> state.msx_notice <- (match policy with
-                          | Advancing -> None
-                          | Observing refusal -> Some (Masc_tui_msx_tick.refusal_notice refusal)
-                          | Outcome_unknown -> state.msx_notice))));
-                        render_spectator state
-           end
-       | Poll_observing _ | Poll_pending _ | Poll_ready _ -> ())
   | Msx_msg (Msx_live_loaded (request, result)) ->
       (match state.msx_live_in_flight with
        | Some pending when pending == request ->
@@ -29027,10 +28859,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    state.msx_frame <- frame;
                    msx_surface_frame := frame;
                    true in
-             (match !msx_pending_poll with
-              | Poll_ready Outcome_unknown when Result.is_ok result && Option.is_some state.msx_frame -> msx_pending_poll := Poll_ready Advancing
-              | Poll_ready (Advancing | Observing _ | Outcome_unknown)
-              | Poll_pending _ | Poll_observing _ -> ());
                         if picture_changed then render_spectator state
            end
        | Some _ | None -> ())
@@ -35313,14 +35141,7 @@ Use relative paths for resources already held in the package. -->
           reconcile_observer_machine state ~host:server_peer_host ~port:state.port
             ~mailbox:async_messages;
           launch_owed_machine_live state ~mailbox:async_messages;
-          (* A presentation token is not a mutation barrier. Never start a
-             checkpoint while our earlier tick may still be running. *)
-          (match !msx_pending_poll with
-           | Poll_pending _ | Poll_ready Outcome_unknown ->
-               state.msx_notice <- Some "Wait for the outstanding MSX tick to settle before checkpointing.";
-               render_spectator state
-           | Poll_ready (Advancing | Observing _) | Poll_observing _ ->
-               let restore = name="f7" in
+          (let restore = name="f7" in
                let requested = ref None in
                run_machine_change ~checkpoint_boundary:true state ~mailbox:async_messages
                  ~refused:(fun detail -> Masc_tui_http.Checkpoint_refused detail)
@@ -35391,7 +35212,7 @@ Use relative paths for resources already held in the package. -->
                                   render_spectator state)
                 ~deliver:(fun expected_workspace result ->
                   (match result with
-                   | Ok _ -> observe_msx_frame ~clear_notice:true ?expected_workspace state ~mailbox:async_messages
+                   | Ok _ -> observe_msx_frame ?expected_workspace state ~mailbox:async_messages
                    | Error detail -> state.msx_notice <- Some detail);
                                   render_spectator state)
                 (fun ~port ~expected_workspace -> Masc_tui_http.post_msx_press

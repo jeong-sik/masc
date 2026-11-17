@@ -10044,7 +10044,6 @@ type state = {
   (* The notice the tick wrote when no worker answered, kept so the first tick
      that advances can retire it: [msx_notice] is that very value until something
      else replaces it. *)
-  mutable msx_worker_down_notice: string option;
   mutable msx_menu_mode: msx_menu_mode;
   mutable msx_carts: msx_carts;
   mutable msx_menu_selected: msx_menu_entry option;
@@ -20922,7 +20921,6 @@ let create_state
   play_changes = [];
   msx_menu_open = false;
   msx_notice = None;
-  msx_worker_down_notice = None;
   msx_menu_mode = Boot_game;
   msx_carts = No_carts;
   msx_menu_selected = None;

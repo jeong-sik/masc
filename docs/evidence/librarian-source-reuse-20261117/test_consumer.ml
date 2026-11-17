@@ -33,7 +33,7 @@ let compare label store records =
   check(label^" fresh IO boundaries") (!(Before.io_count)= !(After.io_count));
   a,b
 let write path bytes = let channel=open_out_bin path in output_string channel bytes;close_out channel
-let allocated () = let s=Gc.quick_stat () in s.Gc.minor_words+.s.major_words-.s.promoted_words
+let allocated () = let minor,promoted,major=Gc.counters () in minor+.major-.promoted
 let measure operation =
   Gc.full_major ();
   let before=allocated () in

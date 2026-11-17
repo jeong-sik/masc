@@ -13,6 +13,9 @@ Baseline: `a5eae5da05442ea52f67e3fd44705293b7392e7c` plus the lower
 The production consumer filter retains its original selected subsequence and
 order. The three changed production file hashes, exact copied function-body
 hashes and proof limits are in [provenance.json](provenance.json).
+The current measurement driver is bound by
+[replay-provenance.json](replay-provenance.json); original source and observation
+records remain unchanged.
 
 ## Observed native experiment
 
@@ -32,10 +35,17 @@ source digest with different source text, progress advanced after discovery,
 and a corrupted or missing second body after a reuse hit. In those failure
 cases both paths stop before the third body.
 
-Eight all-distinct synthetic sources allocated 8,568,888 bytes before and
-8,569,184 after in each of four alternating trials: an additional 296 bytes.
-This case measures the hint index's overhead, not a performance improvement.
-There is no upper-layer CPU measurement. Together with the lower layer's two
+The original claimed 296-byte overhead, and a subsequent 416-byte replay
+observation, are withdrawn as allocation evidence. Both used GC-boundary
+sampled `Gc.quick_stat` counters. See the lower packet's
+[measurement correction](../durable-source-reuse-20261117/README.md#measurement-correction)
+and this packet's [original driver location](measurement-correction.json).
+The corrected all-distinct-source measurement uses current-domain `Gc.counters`;
+the new [counter replay](counter-replay-observations.json) records 9,157,248 to
+9,158,560 bytes for eight distinct sources, an additional 1,312 bytes in each of
+four alternating trials. Native-counter precision and measurement overhead
+still apply; no fixed overhead is promised. There is no upper-layer CPU measurement.
+Together with the lower layer's two
 executions, the total is 73 assertion calls, not 73 full integration scenarios.
 
 ## Replay and verification boundary

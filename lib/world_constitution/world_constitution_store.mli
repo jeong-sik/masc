@@ -148,6 +148,20 @@ val load_articles :
     keeps no isolated-line report, so a roster change that newly isolates a
     line surfaces through the tool read, not here. *)
 
+type diagnostics = {
+  rejected : rejected_line list;
+  isolated : isolated_line list;
+}
+
+val load_diagnostics :
+  base_path:string ->
+  resolve_subject:(string -> bool) ->
+  (diagnostics, read_error) result
+(** Read the ledger independently and report unreadable or unresolved lines
+    in their original order, without retaining decoded event history.
+    Missing files have no diagnostics. The file and any unfinished tail are
+    left unchanged; storage failures remain [Error]. *)
+
 (** Which ledger bytes a read folded: the length and SHA-256 of its complete
     lines. An unterminated last line is in neither. *)
 type position = {

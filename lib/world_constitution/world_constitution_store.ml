@@ -262,6 +262,19 @@ let load_articles ~base_path ~resolve_subject =
   | Ok None -> Ok []
   | Ok (Some contents) -> Ok (parse_with ~keep_history:false ~resolve_subject contents).articles
 
+type diagnostics = {
+  rejected : rejected_line list;
+  isolated : isolated_line list;
+}
+
+let load_diagnostics ~base_path ~resolve_subject =
+  match read_contents ~base_path with
+  | Error _ as error -> error
+  | Ok None -> Ok { rejected = []; isolated = [] }
+  | Ok (Some contents) ->
+    let ledger = parse_with ~keep_history:false ~resolve_subject contents in
+    Ok { rejected = ledger.rejected; isolated = ledger.isolated }
+
 type position = {
   end_offset : int;
   digest : string;

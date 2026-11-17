@@ -167,6 +167,23 @@ type transition_shutdown_result =
   | Shutdown_transition_already_applied
   | Shutdown_transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
 
+(** Whether every process that wrote this Owner's stored native calls has
+    exited. Only the registry can say [Prior_writers_exited]: it gives it to
+    the first pool installed for a base path in this process image, because
+    the base path lease admits a process only after the previous holder
+    exited. *)
+type prior_writers =
+  | Prior_writers_exited
+  | Prior_writers_unproven
+
+(** Whether code that may still be running could write an active native
+    call's execution. *)
+type native_call_writer =
+  | Writer_exited
+      (** Restart settlement requeued this call under [Prior_writers_exited],
+          and no claim in this process has bound it since. *)
+  | Writer_unproven
+
 type operation_acceptance =
   { operation : Chat_operation.t
   ; existing : bool
@@ -394,6 +411,7 @@ val failed_operations_at_start : t -> Chat_operation.t list
 
 val complete_restart_settlement :
   t ->
+  prior_writers:prior_writers ->
   journal_terminal:(Keeper_chat_operation_store.restart_native_call ->
     (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
   (Chat_operation.t list, error) result
@@ -404,11 +422,17 @@ val complete_restart_settlement :
     the confirmed Failed batch rows for the registry's startup projections,
     including compositions without a live operation runner. A failed
     startup Store commit closes this actor; the registry fences its exact
-    handle as unavailable, independently of other Keepers. *)
+    handle as unavailable, independently of other Keepers. Under
+    [Prior_writers_exited] the calls it requeues answer [Writer_exited] in
+    {!native_call_writer} until a claim binds them. *)
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result
 val direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_native_call.state, error) result
+
+(** Who may still write the call [call_id]. Process memory only: a committed
+    {!bind_direct_native_call} of the call makes it [Writer_unproven]. *)
+val native_call_writer : t -> call_id:string -> (native_call_writer, error) result
 
 type current_input_checkpoint =
   { trace_id : Keeper_id.Trace_id.t

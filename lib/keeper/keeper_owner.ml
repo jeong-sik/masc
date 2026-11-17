@@ -246,6 +246,16 @@ type preparation_wait_intent =
     preparation_checkpoint:Keeper_semantic_execution.gate_checkpoint;
     preparation_failure:Agent_core.Error.t; preparation_child:Keeper_interrupt_token.t }
 
+type prior_writers =
+  | Prior_writers_exited
+  | Prior_writers_unproven
+
+type native_call_writer =
+  | Writer_exited
+  | Writer_unproven
+
+module Call_id_set = Set.Make (String)
+
 type _ command =
   | Exact_projection :
       (Keeper_owner_reducer.projection, error) result command
@@ -280,6 +290,7 @@ type _ command =
       request:Agent_core.Agent_input_request.t} ->
       (Chat_operation.t, error) result command
   | Direct_native_call : Operation_id.t -> (Keeper_native_call.state, error) result command
+  | Native_call_writer : string -> (native_call_writer, error) result command
   | Current_input_checkpoint : (current_input_checkpoint, error) result command
   | Input_checkpoint : Keeper_id.Trace_id.t -> (Chat_operation_store.input_checkpoint_observation, error) result command
   | Begin_history_clear : Keeper_interrupt_token.t -> (history_clear_writer, error) result command
@@ -369,7 +380,7 @@ type _ command =
       -> (Chat_operation.t, error) result command
   | Observe_runtime_retry_waits : (unit, error) result command
   | Complete_restart_settlement :
-      (Chat_operation_store.restart_native_call ->
+      prior_writers * (Chat_operation_store.restart_native_call ->
         (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
       (Chat_operation.t list, error) result command
   | Wake_operation_drain : (unit, error) result command
@@ -486,6 +497,11 @@ type t =
            that it is free. Owner-fiber-local; every reader and writer below
            runs in the command loop. *)
   ; pending_restart_calls : Chat_operation_store.restart_native_call list ref
+  ; writer_exited_calls : Call_id_set.t ref
+        (* Calls restart settlement requeued while every earlier writer had
+           exited, not bound by a claim since. Process memory on purpose:
+           "the writer exited" is a fact about this process image, and the
+           next image settles again from the store. Owner-fiber-local. *)
   ; failed_at_start : Chat_operation.t list
         (* All durable [Failed] operations, including batch
            members and prior starts, so the transcript and event journal can
@@ -689,7 +705,7 @@ let answer : type response. response command -> answer = function
   | Enter_direct_preparation _ | Direct_preparation_wait _ | Wait_direct_preparation _ | Retry_direct_preparation _ -> In_its_drain_step
   | Direct_checkpoint _ -> In_its_drain_step
   | Begin_direct_input_response _ | Prepare_direct_input_response _ | Commit_direct_input_response _ -> In_its_drain_step
-  | Direct_native_call _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
+  | Direct_native_call _ | Native_call_writer _ | Direct_input_wait _ | Defer_direct_input_wait _ -> In_its_drain_step
   | Current_input_checkpoint | Input_checkpoint _ | Begin_input_checkpoint _ | Advance_input_checkpoint _
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
@@ -1453,6 +1469,7 @@ let start
     ; on_turn_slot_released
     ; operation_runner
     ; pending_restart_calls = ref pending_restart_calls
+    ; writer_exited_calls = ref Call_id_set.empty
     ; failed_at_start
     }
   in
@@ -2013,7 +2030,7 @@ let start
         | Command (Exact_projection, resolve) ->
           Eio.Promise.resolve resolve (Ok (Keeper_owner_reducer.projection state));
           loop state
-        | Command (Complete_restart_settlement journal_terminal, resolve) ->
+        | Command (Complete_restart_settlement (prior_writers, journal_terminal), resolve) ->
           if Option.is_some (Atomic.get t.turn_in_flight) && !(t.pending_restart_calls) <> []
           then (
             Eio.Promise.resolve resolve (Error (Operation_rejected Chat_operation_store.Native_call_unsettled));
@@ -2056,6 +2073,17 @@ let start
                            Ok (List.rev reversed)) with
                          | Error error -> Error (record_operation_error t error)
                          | Ok failed ->
+                           (match prior_writers with
+                            | Prior_writers_exited ->
+                              t.writer_exited_calls := List.fold_left
+                                  (fun calls (observed : Chat_operation_store.restart_native_call) ->
+                                     if List.exists (fun (operation : Chat_operation.t) ->
+                                         Operation_id.equal operation.operation_id
+                                           observed.operation.operation_id) interrupted
+                                     then calls
+                                     else Call_id_set.add observed.call.Keeper_native_call.call_id calls)
+                                  !(t.writer_exited_calls) pending
+                            | Prior_writers_unproven -> ());
                            t.pending_restart_calls := [];
                            publish_operation_projection t projection;
                            Keeper_waiting_inventory_broadcast.changed ~base_path:t.base_path
@@ -2224,6 +2252,12 @@ let start
             Chat_operation_store.direct_native_call t.operation_store ~operation_id) in
           Eio.Promise.resolve resolve response;
           loop state
+        | Command (Native_call_writer call_id, resolve) ->
+          let writer =
+            if Call_id_set.mem call_id !(t.writer_exited_calls) then Writer_exited
+            else Writer_unproven in
+          Eio.Promise.resolve resolve (Ok writer);
+          loop state
         | Command (Current_input_checkpoint, resolve) ->
           let response = match (Keeper_owner_reducer.projection state).meta with
             | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
@@ -2374,7 +2408,15 @@ let start
              bound call already did; its cancelled child still reports them
              while the owner drains, and the settlement reads them. *)
           let response = match change with
-            | Keeper_native_call.Bind _ -> reject_if_stopping state persist
+            | Keeper_native_call.Bind {call; _} ->
+              let response = reject_if_stopping state persist in
+              (* From this bind on, this process writes the call's execution. *)
+              (match response with
+               | Ok () ->
+                 t.writer_exited_calls :=
+                   Call_id_set.remove call.Keeper_native_call.call_id !(t.writer_exited_calls)
+               | Error _ -> ());
+              response
             | Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ -> persist () in
           Eio.Promise.resolve resolve response;
           loop state
@@ -3180,6 +3222,7 @@ let defer_direct_input_wait t ~operation_id ~request:visible_request =
   | None -> Error (Operation_rejected (Chat_operation_store.Invalid_input
       "input waiting requires an inherited executing child"))
 let direct_native_call t ~operation_id = request t (Direct_native_call operation_id)
+let native_call_writer t ~call_id = request t (Native_call_writer call_id)
 let input_child_request t writer change =
   match Keeper_turn_preview_owner.current () with
   | Some caller when Keeper_interrupt_token.equal caller writer.input_child ->
@@ -3234,8 +3277,8 @@ let resume_direct_runtime_retry t ~operation_id ~observed =
 let exact_operation t operation_id = request t (Exact_operation operation_id)
 
 let failed_operations_at_start t = t.failed_at_start
-let complete_restart_settlement t ~journal_terminal =
-  request t (Complete_restart_settlement journal_terminal)
+let complete_restart_settlement t ~prior_writers ~journal_terminal =
+  request t (Complete_restart_settlement (prior_writers, journal_terminal))
 let pause_and_interrupt ?expected_control_token t target = request t (Pause_and_interrupt {target; expected_control_token})
 let interrupt_turn = pause_and_interrupt
 let run_next_operation ?priority_predecessors t ~operation_id ~observed =

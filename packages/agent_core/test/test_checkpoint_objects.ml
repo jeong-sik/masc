@@ -51,6 +51,19 @@ let plan_ok ?previous ?absent memo boundary cp =
   | Error error -> Alcotest.fail (Error.to_string error)
 ;;
 
+let load_error_kind : O.load_error -> _ = function
+  | O.Head_invalid _ -> `Head_invalid
+  | O.Checkpoint_invalid _ -> `Checkpoint_invalid
+  | O.Object_missing _ -> `Object_missing
+  | O.Object_unreadable _ -> `Object_unreadable
+  | O.Object_digest_mismatch _ -> `Object_digest_mismatch
+  | O.Bundle_invalid _ -> `Bundle_invalid
+  | O.Turn_mismatch _ -> `Turn_mismatch
+  | O.Message_invalid _ -> `Message_invalid
+  | O.Segment_invalid _ -> `Segment_invalid
+  | O.Header_object_invalid _ -> `Header_object_invalid
+;;
+
 let load_ok store (plan : O.plan) =
   let head =
     match O.head_of_string plan.head_bytes with
@@ -238,7 +251,7 @@ let test_an_overflowing_history_count_is_refused () =
   in
   let refused label history =
     match parse history with
-    | Error (O.Head_invalid _) -> ()
+    | Error error when load_error_kind error = `Head_invalid -> ()
     | Ok _ | Error _ -> Alcotest.fail (label ^ ": expected Head_invalid")
   in
   refused "turn and open" (history ~segment:None ~turns:[ max_int ] ~open_count:1);
@@ -271,11 +284,11 @@ let test_an_overflowing_bundle_length_is_refused () =
       set_field "messages" (`Int 1) (set_field "bundle" (`String (digest :> string)) field))
   in
   (match load_error objects head_bytes with
-   | Some (O.Bundle_invalid _) -> ()
+   | Some error when load_error_kind error = `Bundle_invalid -> ()
    | Some _ | None -> Alcotest.fail "an overflowing bundle length must be Bundle_invalid");
   let head = Result.get_ok (O.head_of_string head_bytes) in
   match O.find_last ~read_object:(read objects) head (fun _ -> None) with
-  | Error (O.Bundle_invalid _) -> ()
+  | Error error when load_error_kind error = `Bundle_invalid -> ()
   | Ok _ | Error _ -> Alcotest.fail "a preview must refuse an overflowing bundle length"
 ;;
 
@@ -292,23 +305,23 @@ let test_a_load_refuses_what_it_cannot_prove () =
   let without_bundle = full () in
   Hashtbl.remove without_bundle key;
   (match load_error without_bundle plan.head_bytes with
-   | Some (O.Object_missing missing) when String.equal (missing :> string) key -> ()
+   | Some error when error = O.Object_missing bundle -> ()
    | Some _ | None -> Alcotest.fail "a missing bundle must be Object_missing");
   let corrupt = full () in
   Hashtbl.replace corrupt key (bytes ^ " ");
   (match load_error corrupt plan.head_bytes with
-   | Some (O.Object_digest_mismatch _) -> ()
+   | Some error when load_error_kind error = `Object_digest_mismatch -> ()
    | Some _ | None -> Alcotest.fail "changed bytes must be Object_digest_mismatch");
   (* The bundle is intact but the head names another message count for it. *)
   (match load_error (full ()) (with_turn_edited plan.head_bytes (set_field "messages" (`Int 3))) with
-   | Some (O.Turn_mismatch _) -> ()
+   | Some error when load_error_kind error = `Turn_mismatch -> ()
    | Some _ | None -> Alcotest.fail "a turn that names another count must be Turn_mismatch");
   (* The head names another chain for an intact bundle. *)
   (match
      load_error (full ())
        (with_turn_edited plan.head_bytes (set_field "chain" (`String (O.chain_start :> string))))
    with
-   | Some (O.Turn_mismatch _) -> ()
+   | Some error when load_error_kind error = `Turn_mismatch -> ()
    | Some _ | None -> Alcotest.fail "a turn that names another chain must be Turn_mismatch");
   (* A bundle stored under its own digest whose header names a digest its
      message bytes do not have. *)
@@ -326,7 +339,7 @@ let test_a_load_refuses_what_it_cannot_prove () =
       set_field "messages" (`Int 1) (set_field "bundle" (`String (lying_digest :> string)) field))
   in
   (match load_error lying_store lying_head with
-   | Some (O.Bundle_invalid _) -> ()
+   | Some error when load_error_kind error = `Bundle_invalid -> ()
    | Some _ | None -> Alcotest.fail "a header that names another digest must be Bundle_invalid");
   (* The same messages and header, but a message does not end its line. *)
   let unseparated =
@@ -341,7 +354,7 @@ let test_a_load_refuses_what_it_cannot_prove () =
      load_error unseparated_store
        (with_turn_edited plan.head_bytes (set_field "bundle" (`String (unseparated_digest :> string))))
    with
-   | Some (O.Bundle_invalid _) -> ()
+   | Some error when load_error_kind error = `Bundle_invalid -> ()
    | Some _ | None -> Alcotest.fail "a message that does not end its line must be Bundle_invalid");
   (* A header object whose bytes are not JSON, stored under their digest. *)
   let broken_tools = "not json" in
@@ -359,13 +372,13 @@ let test_a_load_refuses_what_it_cannot_prove () =
               Alcotest.fail "head.header_objects must be an object")
           else name, value))
    with
-   | Some (O.Header_object_invalid _) -> ()
+   | Some error when load_error_kind error = `Header_object_invalid -> ()
    | Some _ | None -> Alcotest.fail "a header object that is not JSON must be Header_object_invalid");
   match
     load_error (full ())
       (with_head_edited plan.head_bytes (set_field "format" (`String "another.format")))
   with
-  | Some (O.Head_invalid _) -> ()
+  | Some error when load_error_kind error = `Head_invalid -> ()
   | Some _ | None -> Alcotest.fail "a head of another format must be Head_invalid"
 ;;
 
@@ -471,13 +484,13 @@ let test_a_document_that_is_not_a_head () =
   in
   let earlier = Checkpoint.checkpoint_version - 1 in
   (match O.head_of_string (flat earlier) with
-   | Error
-       (O.Checkpoint_invalid
-          (Error.Serialization (VersionMismatch { expected; got })))
-     when expected = Checkpoint.checkpoint_version && got = earlier -> ()
+   | Error error
+     when error = O.Checkpoint_invalid
+       (Error.Serialization (VersionMismatch
+          { expected = Checkpoint.checkpoint_version; got = earlier })) -> ()
    | Ok _ | Error _ -> Alcotest.fail "an earlier version must be reported as that version");
   match O.head_of_string (flat Checkpoint.checkpoint_version) with
-  | Error (O.Head_invalid _) -> ()
+  | Error error when load_error_kind error = `Head_invalid -> ()
   | Ok _ | Error _ -> Alcotest.fail "this build's version without a head must be Head_invalid"
 ;;
 
@@ -750,7 +763,7 @@ let test_a_head_names_fewer_turns_than_a_segment () =
       else name, value)
   in
   match load_error store miscounted with
-  | Some (O.Segment_invalid _) -> ()
+  | Some error when load_error_kind error = `Segment_invalid -> ()
   | Some _ | None -> Alcotest.fail "a segment the head miscounts must be Segment_invalid"
 ;;
 
@@ -847,9 +860,10 @@ let test_a_later_head_reads_as_its_version () =
       Alcotest.fail "a head is an object"
   in
   match O.head_of_string later_head with
-  | Error
-      (O.Checkpoint_invalid (Error.Serialization (VersionMismatch { expected; got })))
-    when expected = Checkpoint.checkpoint_version && got = later -> ()
+  | Error error
+    when error = O.Checkpoint_invalid
+      (Error.Serialization (VersionMismatch
+         { expected = Checkpoint.checkpoint_version; got = later })) -> ()
   | Ok _ | Error _ -> Alcotest.fail "a later head must be reported as its version"
 ;;
 
@@ -892,6 +906,54 @@ let test_an_absent_object_is_written_again () =
   same_messages "the history loads back" messages (load_ok store third)
 ;;
 
+let test_a_written_memo_releases_omitted_source_fields () =
+  let memo = O.create_memo () in
+  let source = ref None in
+  let payload_witness = Weak.create 1 in
+  let message_witness = Weak.create 1 in
+  let[@inline never] prepare () =
+    let payload = String.make (1024 * 1024) 'p' in
+    let message =
+      Types.make_message ~role:Types.Tool
+        [ Types.ToolResult
+            { tool_use_id = "omitted-json"
+            ; content = "persisted result"
+            ; outcome = Llm_provider.Types.Tool_succeeded
+            ; json = Some (`String payload)
+            ; content_blocks = None
+            }
+        ]
+    in
+    source := Some message;
+    Weak.set payload_witness 0 (Some payload);
+    Weak.set message_witness 0 (Some message);
+    plan_ok memo O.Turn_closes (checkpoint [ message ])
+  in
+  let plan = prepare () in
+  let collect () = for _ = 1 to 8 do Gc.full_major () done in
+  collect ();
+  Alcotest.(check bool) "the caller keeps its original message" true
+    (Weak.check message_witness 0);
+  Alcotest.(check bool) "the caller keeps its original JSON" true
+    (Weak.check payload_witness 0);
+  ignore (Sys.opaque_identity !source);
+  source := None;
+  for _ = 1 to 8 do
+    (match O.content_digest memo plan.decoded with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Error.to_string error));
+    Gc.full_major ()
+  done;
+  Alcotest.(check bool) "the written memo releases its original message" false
+    (Weak.check message_witness 0);
+  Alcotest.(check bool) "the written memo releases JSON the writer omitted" false
+    (Weak.check payload_witness 0);
+  let next = plan_ok memo ~previous:plan.head O.Turn_closes plan.decoded in
+  Alcotest.(check string) "the decoded history still writes the same head"
+    plan.head_bytes next.head_bytes;
+  ignore (Sys.opaque_identity (memo, plan, next))
+;;
+
 let () =
   Alcotest.run "checkpoint_objects"
     [ ( "save and load"
@@ -903,6 +965,8 @@ let () =
         ; Alcotest.test_case "a loaded checkpoint saves unchanged" `Quick
             test_a_loaded_checkpoint_saves_unchanged
         ; Alcotest.test_case "a value is encoded once" `Quick test_a_value_is_encoded_once
+        ; Alcotest.test_case "a written memo releases omitted source fields" `Quick
+            test_a_written_memo_releases_omitted_source_fields
         ; Alcotest.test_case "loaded bytes stay in the load's memo" `Quick
             test_loaded_bytes_stay_in_the_load_memo
         ; Alcotest.test_case "one content digest for every layout" `Quick

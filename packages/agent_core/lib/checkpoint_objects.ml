@@ -219,6 +219,7 @@ type entry =
   { bytes : string
   ; digest : digest
   ; decoded : Types.message
+  ; original : Types.message Weak.t option
   }
 
 (* The entry of each message this process encoded and still holds. A
@@ -344,13 +345,13 @@ let keep_encoded message (entry : entry) =
 
 (* ── The memo ───────────────────────────────────────────── *)
 
-(* The messages of the last plan or load, by position, with each one's entry
-   and [chains.(i)], the chain over the first [i]. A later save whose
-   messages begin with these values, physically, takes their entries and
-   chain values as they are, so it hashes only what follows. *)
+(* The entries of the last plan or load, by position, and [chains.(i)], the
+   chain over the first [i]. Only their written values are held strongly:
+   original records can contain large fields the writer deliberately drops.
+   Each encoded entry remembers its original identity weakly, so another
+   save of a source still held by its caller reuses the same prefix. *)
 type last =
-  { last_messages : Types.message array
-  ; last_entries : entry array
+  { last_entries : entry array
   ; last_chains : chain array
   }
 
@@ -377,7 +378,11 @@ let encoded_entry message =
     let* { Checkpoint_codec.bytes; decoded } =
       Checkpoint_codec.validated_message_encoding message
     in
-    Ok (keep_encoded message { bytes; digest = digest_of_bytes bytes; decoded })
+    let original = Weak.create 1 in
+    Weak.set original 0 (Some message);
+    Ok
+      (keep_encoded message
+         { bytes; digest = digest_of_bytes bytes; decoded; original = Some original })
 ;;
 
 (* ── Bundles ────────────────────────────────────────────── *)
@@ -427,11 +432,17 @@ let shared_prefix last (messages : Types.message array) =
   match last with
   | None -> 0
   | Some last ->
-    let limit = min (Array.length last.last_messages) (Array.length messages) in
+    let limit = min (Array.length last.last_entries) (Array.length messages) in
     let rec count index =
       if index < limit
-         && (last.last_messages.(index) == messages.(index)
-             || last.last_entries.(index).decoded == messages.(index))
+         && (let entry = last.last_entries.(index) in
+             entry.decoded == messages.(index)
+             || match entry.original with
+                | None -> false
+                | Some original ->
+                  match Weak.get original 0 with
+                  | None -> false
+                  | Some message -> message == messages.(index))
       then count (index + 1)
       else index
     in
@@ -499,10 +510,10 @@ let unwritten_open_objects ~previous_open entries =
   collect (Digest_set.of_list previous_open) [] entries
 ;;
 
-(* After a plan of [messages], the memo holds them with their entries and
-   chain values for the next plan's shared prefix. *)
-let remember_plan memo (messages : Types.message array) (entries : entry array) chains =
-  memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains }
+(* After a plan, the memo holds its entries and chain values for the next
+   plan's shared prefix. *)
+let remember_plan memo (entries : entry array) chains =
+  memo.last <- Some { last_entries = entries; last_chains = chains }
 ;;
 
 let rec take n = function
@@ -609,7 +620,7 @@ let plan_save memo ?previous ?(absent = []) boundary (cp : Checkpoint_types.t) =
       , unwritten_open_objects ~previous_open open_entries )
   in
   let segment, turns, segments = pack kept_segment closed [] in
-  remember_plan memo messages entries chains;
+  remember_plan memo entries chains;
   let head =
     { header =
         { session_id = decoded_header.session_id
@@ -1028,7 +1039,7 @@ let bundle_entries ~bundle bytes =
   bundle_entries_with ~bundle bytes ~decode_slice:(fun ~digest bytes ~off ~len ->
     let bytes = String.sub bytes off len in
     let+ decoded = decode_message ~digest bytes in
-    { bytes; digest; decoded })
+    { bytes; digest; decoded; original = None })
 ;;
 
 let bundle_messages ~bundle bytes =
@@ -1186,7 +1197,8 @@ let load_with ~decode_open ~decode_bundle ~entry_digest ~finish_loaded ~read_obj
 let load memo ~read_object head =
   load_with ~read_object head ~decode_bundle:bundle_entries
     ~decode_open:(fun ~digest bytes ->
-      let+ decoded = decode_message ~digest bytes in { bytes; digest; decoded })
+      let+ decoded = decode_message ~digest bytes in
+      { bytes; digest; decoded; original = None })
     ~entry_digest:(fun (entry : entry) -> entry.digest)
     ~finish_loaded:(fun rev_loaded ->
       let loaded = Array.of_list (List.rev rev_loaded) in
@@ -1194,7 +1206,7 @@ let load memo ~read_object head =
       let chains = Array.make (Array.length loaded + 1) chain_start in
       Array.iteri (fun index (_, chain) -> chains.(index + 1) <- chain) loaded;
       let messages = Array.map (fun (entry : entry) -> entry.decoded) entries in
-      memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains };
+      memo.last <- Some { last_entries = entries; last_chains = chains };
       Array.to_list messages)
 ;;
 

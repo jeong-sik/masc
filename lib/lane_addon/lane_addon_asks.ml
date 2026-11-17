@@ -147,7 +147,7 @@ let decode content =
 
 let load_path store path =
   match
-    Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
+    Fs_compat.load_owned_regular_file_with_snapshot_locked ~owner_uid:(Unix.getuid ())
       ~ownership_root:(Lane_addon_store.root store) path
   with
   | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)

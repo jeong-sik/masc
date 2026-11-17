@@ -149,7 +149,7 @@ let decode_log ~path content =
                parsed)
 
 let load_events_at_path_result ~base_path ~path =
-  match Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
+  match Fs_compat.load_owned_regular_file_with_snapshot_locked ~owner_uid:(Unix.getuid ())
       ~ownership_root:(Common.masc_dir_from_base_path ~base_path) path with
   | Error error -> Error (Log_read_failed
       { path; detail = Fs_compat.owned_regular_file_read_error_to_string error })

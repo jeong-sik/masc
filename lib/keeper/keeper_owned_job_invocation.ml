@@ -191,7 +191,7 @@ let lookup ~base_path ~keeper_name invocation = protect (fun () ->
            | Store.Io_failed _ | Store.Commit_unconfirmed _) as cause) ->
     Error (wrap cause)
   | Ok () ->
-      let* contents = Fs_compat.load_owned_regular_file_with_snapshot ~owner_uid:(Unix.getuid ())
+      let* contents = Fs_compat.load_owned_regular_file_with_snapshot_locked ~owner_uid:(Unix.getuid ())
           ~ownership_root:(Common.masc_dir_from_base_path ~base_path) location
           |> Result.map_error (fun error -> wrap (Store.Io_failed
               (Fs_compat.owned_regular_file_read_error_to_string error))) in

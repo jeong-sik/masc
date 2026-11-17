@@ -101,7 +101,7 @@ type keeper_turn_complete = {
 type keeper_turn_observation = {
   to_keeper : string;
   to_session_turn : int option;
-  to_total_turns : int option;
+  to_keeper_turn : int option;
   to_at : float;
 }
 
@@ -943,7 +943,7 @@ let decode_keeper_waiting_inventory_changed fields =
        { keeper; queue_kind = string_field fields "queue_kind"; at })
 
 (* The hook's per-call report: [turn] is the agent session's ordinal for
-   the call and [total_turns] the keeper turns completed before it. *)
+   the call and [keeper_turn_id] the keeper turn number it ran under. *)
 let decode_keeper_turn_observation fields =
   let event = "keeper_turn_observation" in
   let* to_keeper = required string_field fields "name" ~event in
@@ -952,7 +952,7 @@ let decode_keeper_turn_observation fields =
     (Keeper_turn_observation
        { to_keeper
        ; to_session_turn = int_field fields "turn"
-       ; to_total_turns = int_field fields "total_turns"
+       ; to_keeper_turn = int_field fields "keeper_turn_id"
        ; to_at
        })
 

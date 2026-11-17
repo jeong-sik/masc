@@ -1489,7 +1489,7 @@ let test_status_shows_the_turn_running_now () =
         true
         (json_field "live_turn" (status ()) = Some `Null);
       let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-      Masc.Keeper_registry.mark_turn_started
+      Masc.Keeper_registry.mark_turn_started ~turn_id:1
         ~observation_token
         ~base_path:config.base_path
         ~wake:Masc.Keeper_registry.Proactive_tick

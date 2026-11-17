@@ -149,7 +149,7 @@ let record_pre_dispatch_terminal_observation
     ; turn_count =
         (match keeper_turn_id with
          | Some _ -> keeper_turn_id
-         | None -> Some meta.runtime.usage.total_turns)
+         | None -> Some meta.runtime.last_turn_id)
     ; agent_core_turn_count = None
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; outcome

@@ -13,8 +13,9 @@ cleanup; the autonomous event-bus callback captures that same token. Registry
 finish and tool-count updates require an exact token match. Stale cleanup also
 leaves the successor's wakeup signal and completed-turn record intact.
 
-The display `total_turns + 1` counter and durable operation ID are unsuitable:
-continuation attempts can reuse them. The opaque token has no wire or persistent
+The Keeper turn number (`runtime.last_turn_id`, allocated by the Keeper Owner)
+and the durable operation ID are unsuitable: every attempt inside one turn
+shares them. The opaque token has no wire or persistent
 representation and cannot authorize external effects or cancellation.
 
 The regression scenario in `test_keeper_composite_live_turn_surface.ml` starts

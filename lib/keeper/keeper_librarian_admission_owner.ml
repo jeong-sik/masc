@@ -123,7 +123,7 @@ let new_capture ~config ~reserved ~owner part =
   let expected_revision=Option.map (fun (value : Current.t) -> value.revision) snapshot in
   let input : Keeper_librarian.input={keeper_id;keeper_instructions=meta.instructions;
     turn_ref=Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~absolute_turn:meta.runtime.usage.total_turns;
+      ~absolute_turn:meta.runtime.last_turn_id;
     current=Option.map (fun (value : Current.t) -> ({Keeper_librarian.facts=value.facts} : Keeper_librarian.current_selection)) snapshot;
     historical_task_contexts=[];goal_context=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
       Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id));

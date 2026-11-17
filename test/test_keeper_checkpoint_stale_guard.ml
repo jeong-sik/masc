@@ -768,7 +768,7 @@ description: Keeper refusal fixture
       in
       let prompt_built = ref false in
       let settlement =
-        Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable ~config ~meta ~base_dir
+        Keeper_agent_run.run_turn ~keeper_turn_id:1 ~approval_admission:Keeper_approval_origin.Unavailable ~config ~meta ~base_dir
           ~publication_recovery:
             { Keeper_publication_recovery_availability.provider =
                 Keeper_publication_recovery_availability.non_runtime_provider
@@ -831,7 +831,7 @@ let test_checkpoint_read_error_stops_turn ~io_failure () =
   in
   let prompt_built = ref false in
   let result =
-    Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable ~config ~meta ~base_dir
+    Keeper_agent_run.run_turn ~keeper_turn_id:1 ~approval_admission:Keeper_approval_origin.Unavailable ~config ~meta ~base_dir
       ~publication_recovery:
         { Keeper_publication_recovery_availability.provider =
             Keeper_publication_recovery_availability.non_runtime_provider
@@ -884,7 +884,7 @@ let test_unreadable_constitution_stops_turn_and_the_next_tick_resumes () =
   Fs_compat.mkdir_p ledger;
   let prompt_built = ref false in
   let settlement =
-    Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable ~config ~meta ~base_dir
+    Keeper_agent_run.run_turn ~keeper_turn_id:1 ~approval_admission:Keeper_approval_origin.Unavailable ~config ~meta ~base_dir
       ~publication_recovery:
         { Keeper_publication_recovery_availability.provider =
             Keeper_publication_recovery_availability.non_runtime_provider

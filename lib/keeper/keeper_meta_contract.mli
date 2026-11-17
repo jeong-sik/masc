@@ -90,6 +90,12 @@ type agent_runtime_state = {
   last_usage_resolution : Keeper_usage_resolution.t option;
   proactive_rt : proactive_runtime;
   trace_id : Keeper_id.Trace_id.t;
+ last_turn_id : int;
+ (** The newest Keeper turn number the Keeper Owner has handed out
+     ([Allocate_turn]). A turn takes its number from this counter before it
+     writes anything under it, so two turns never share a number even when
+     one ends before its usage commit. [usage.total_turns] counts the turns
+     whose usage was committed and is not a turn number (#52839). *)
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a
       completed Keeper turn. *)

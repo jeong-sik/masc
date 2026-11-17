@@ -78,7 +78,7 @@ let append_decision_record
     Keeper_tool_call_log.get_turn_context ~cell:turn_ctx_cell ()
   in
   let turn_id =
-    Option.value ~default:meta.runtime.usage.total_turns turn_id_opt
+    Option.value ~default:meta.runtime.last_turn_id turn_id_opt
   in
   let task_id =
     match task_id_opt with

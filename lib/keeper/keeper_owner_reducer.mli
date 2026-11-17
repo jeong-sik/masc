@@ -78,6 +78,7 @@ type meta_command =
   | Update_profile of profile_update
   | Delete_if_snapshot of Keeper_meta_json.Snapshot_digest.t
   | Commit_turn_runtime of turn_runtime_delta
+  | Allocate_turn of { updated_at : string }
   | Set_current_task of
       { task_id : Keeper_id.Task_id.t option
       ; updated_at : string

@@ -48,7 +48,7 @@ let register ~base name =
 
 let start_turn ~base name =
   let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-  Keeper_registry.mark_turn_started
+  Keeper_registry.mark_turn_started ~turn_id:1
     ~observation_token
     ~base_path:base
     ~wake:Keeper_registry.Proactive_tick

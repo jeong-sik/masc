@@ -124,6 +124,13 @@ take it, and `environment` reads it from the login. No Dune build ran.
     `a remote sign-in is handed no browser of this machine` and
     `the browser command comes from PATH or the sign-in is refused`. The
     failure is the Antigravity case of issue #52681.
+- Test run 44028569591 of head `97b302ce03de`, where `prepare` takes the
+  browser, read once on 2026-11-17, with the same two suites. Conclusion:
+  failure, for the same case.
+  - `test_server_preview_keeper_turn`: 1 case ran and passed.
+  - `test_runtime_setup_login_client`: 9 cases ran and 8 passed, the two
+    named above among them. The failure is the Antigravity case of issue
+    #52681.
 
 ## Unverified
 

@@ -86,7 +86,9 @@ val partition
     keep the default [false] to reject broken structures. *)
 
 (** Validate the same structural contract as {!partition} without exposing a
-    partition to persistence callers that must preserve every message exactly. *)
+    partition to persistence callers that must preserve every message exactly.
+    Uses the same scan without allocating closed units or copies of the open
+    cycle's message list. Every message's protocol anchors are still checked. *)
 val validate
   :  Agent_core.Types.message list
   -> (unit, structural_error) result

@@ -103,6 +103,27 @@ let test_ordinary_prefix_order () =
     output.closed_prefix;
   check_exact "empty suffix" [] output.protected_suffix
 
+let test_checkpoint_validation_contract () =
+  let prefix = [text T.System "system"; text T.User "request"] in
+  let request = message T.Assistant [use "a"; use "b"] in
+  let progress = text T.Assistant "still working" in
+  let result_a = message T.Tool [result "a"] in
+  let result_b = message T.User [result ~content_blocks:[use "payload-only"] "b"] in
+  check_exact "unfinished checkpoint remains valid" (Ok ())
+    (U.validate (prefix @ [request; progress; result_a]));
+  let closed = [request; progress; result_a; result_b] in
+  check_exact "closed cycles may reuse IDs and ignore nested payload anchors" (Ok ())
+    (U.validate (prefix @ closed @ closed));
+  check_exact "duplicate result retains its source index"
+    (Error (U.Duplicate_tool_result {message_index = 5; tool_use_id = "a"}))
+    (U.validate (prefix @ [request; progress; result_a; result_a]));
+  check_exact "overlapping cycle remains invalid"
+    (Error (U.Overlapping_tool_cycle {message_index = 4; tool_use_id = "a"}))
+    (U.validate (prefix @ [request; progress; request]));
+  check_exact "orphan result remains invalid"
+    (Error (U.Orphan_tool_result {message_index = 2; tool_use_id = "a"}))
+    (U.validate (prefix @ [result_a]))
+
 let test_orphan_result_error () =
   match U.partition [ message T.User [ result "orphan" ] ] with
   | Error (U.Orphan_tool_result { message_index = 0; tool_use_id = "orphan" }) ->
@@ -925,6 +946,8 @@ let () =
             test_tool_id_can_repeat_after_closed_cycle
         ; Alcotest.test_case "ordinary prefix order" `Quick
             test_ordinary_prefix_order
+        ; Alcotest.test_case "checkpoint validation contract" `Quick
+            test_checkpoint_validation_contract
         ; Alcotest.test_case "orphan result" `Quick test_orphan_result_error
         ; Alcotest.test_case "duplicate result" `Quick
             test_duplicate_result_error

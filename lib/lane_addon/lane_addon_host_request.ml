@@ -149,22 +149,42 @@ let request_of_json = function
      | Some _ | None -> Error "a host request requires a string kind")
   | _ -> Error "a host request must be an object"
 
+type listing = { requests : t list; next : string option }
+
+let requests_of_json values =
+  let* requests =
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* request = request_of_json value in
+        loop (request :: acc) rest
+    in
+    loop [] values
+  in
+  let ids = List.map request_id requests in
+  if List.length (List.sort_uniq String.compare ids) <> List.length ids
+  then Error "a listing names the same request id twice"
+  else Ok requests
+
 let listing_of_json = function
   | `Assoc [ "requests", `List values ] ->
-    let* requests =
-      let rec loop acc = function
-        | [] -> Ok (List.rev acc)
-        | value :: rest ->
-          let* request = request_of_json value in
-          loop (request :: acc) rest
-      in
-      loop [] values
-    in
-    let ids = List.map request_id requests in
-    if List.length (List.sort_uniq String.compare ids) <> List.length ids
-    then Error "a listing names the same request id twice"
-    else Ok requests
-  | _ -> Error "a host request listing must be exactly {\"requests\": [...]}"
+    let* requests = requests_of_json values in
+    Ok { requests; next = None }
+  | `Assoc ([ "requests", `List values; "next", `String next ]
+           | [ "next", `String next; "requests", `List values ]) when next <> "" ->
+    let* requests = requests_of_json values in
+    (match requests with
+     (* A page that carried nothing and still named a next one would let a
+        listing go on without end. *)
+     | [] -> Error "a listing page that names a next page must carry a request"
+     | _ :: _ -> Ok { requests; next = Some next })
+  | _ ->
+    Error "a host request listing must be exactly {\"requests\": [...]} or \
+           {\"requests\": [...], \"next\": name}"
+
+let listing_arguments ~after = match after with
+  | None -> `Assoc []
+  | Some name -> `Assoc [ "after", `String name ]
 
 let result_arguments ~request_id ~result = `Assoc [ "request_id", `String request_id; "result", result ]
 

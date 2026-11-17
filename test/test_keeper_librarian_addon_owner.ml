@@ -117,8 +117,8 @@ let backend env base_path delivery delivery_observed observation_observed after_
       act=(fun ~arguments -> Protocol.act protocol ~arguments |> Result.map_error protocol_error);
       stop=(fun () -> Protocol.close protocol;Ok (Lane_addon_lifecycle.Released
         {engine=Lane_addon_lifecycle.Docker_engine "fixture-resource-launch";container_id=Some instance_id}));
-      host=Some {list_requests=(fun () ->
-          let result=Protocol.host_requests protocol |> Result.map_error protocol_error in
+      host=Some {list_requests=(fun ~after ->
+          let result=Protocol.host_requests protocol ~after |> Result.map_error protocol_error in
           Result.iter observe_listing result;result);
         deliver=(fun ~arguments ->
           let result=if !delivery then Error "controlled reply loss before worker delivery"

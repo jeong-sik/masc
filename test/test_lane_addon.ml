@@ -109,7 +109,7 @@ let make_backend ?observe_step () =
         (* A package that waits on the host lists no requests; its host cycle
            only ends with the observation every cycle ends with. *)
         host = (if package.id = "declared-read-host" then
-            Some {list_requests=(fun () -> Ok (`Assoc ["requests", `List []]));
+            Some {list_requests=(fun ~after:_ -> Ok (`Assoc ["requests", `List []]));
               deliver=(fun ~arguments:_ -> Error "the fixture lists no request")}
           else None);
         exported_tools = (fun () -> exported_tools);

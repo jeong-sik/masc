@@ -56,7 +56,7 @@ val call_operator : t -> admit:(unit -> (unit, operator_error) result) ->
     replayed. Cancellation revokes the original connection. [admit] rechecks
     original host authority under the per-worker RPC mutex, just before send;
     the host must not hold global lifecycle locks while waiting for the reply. *)
-val host_requests : t -> (Yojson.Safe.t, error) result
+val host_requests : t -> after:string option -> (Yojson.Safe.t, error) result
 val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
 (** Private host request/result ports. Both must be advertised exactly once
     before a model-capable contract becomes Ready. They cannot be exported as

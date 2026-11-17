@@ -58,7 +58,7 @@ let publish_owner_event ~root ~package_id event =
 (* The two private tools of a worker whose package waits on the host (RFC
    operator-quiz §4.4). Their answers are decoded by the cycle. *)
 type host_port = {
-  list_requests : unit -> (Yojson.Safe.t, string) result;
+  list_requests : after:string option -> (Yojson.Safe.t, string) result;
   deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
 }
 type connection = {
@@ -1453,13 +1453,31 @@ let run_host_cycle m e (port : host_port) =
           Lane_addon_host_walk.Here (run_request ~position request) in
   let rec pass () =
     check_live ();
-    let* listing = port.list_requests () |> Result.map_error (fun detail -> Listing_failed detail) in
-    let* requests = Lane_addon_host_request.listing_of_json listing
-      |> Result.map_error (fun detail -> Listing_refused detail) in
+    (* One listing is every page the worker answers, read as the walk
+       reaches each (RFC
+       librarian-read-waits-and-shrinks-no-further-than-the-refusal-says
+       3.1). A request id a page repeats from an earlier page of the same
+       listing would be started twice, so the listing ends there. *)
+    let listed = Hashtbl.create 16 in
+    let rec page ~after =
+      check_live ();
+      let* answer = port.list_requests ~after |> Result.map_error (fun detail -> Listing_failed detail) in
+      let* {Lane_addon_host_request.requests; next} = Lane_addon_host_request.listing_of_json answer
+        |> Result.map_error (fun detail -> Listing_refused detail) in
+      let* () = List.fold_left (fun checked request ->
+        let* () = checked in
+        let request_id = Lane_addon_host_request.request_id request in
+        if Hashtbl.mem listed request_id
+        then Error (Listing_refused ("a later page lists request " ^ request_id ^ " again"))
+        else (Hashtbl.replace listed request_id (); Ok ())) (Ok ()) requests in
+      Ok (match next with
+        | None -> Lane_addon_host_walk.Last requests
+        | Some name -> Lane_addon_host_walk.More (requests, fun () -> page ~after:(Some name))) in
+    let* listing = page ~after:None in
     let delivered_before = Hashtbl.length delivered in
     (* The pass keeps the count it started with (RFC 3.2). *)
     match Lane_addon_host_walk.walk ~max_in_flight:e.max_exact_in_flight
-        ~propagates:(function Host_cycle_stopped -> true | _ -> false) ~step requests with
+        ~propagates:(function Host_cycle_stopped -> true | _ -> false) ~step listing with
     | Some issue -> Error issue
     | None -> if Hashtbl.length delivered > delivered_before then pass () else Ok () in
   let outcome = try pass () with Host_cycle_stopped -> Ok () in
@@ -1866,7 +1884,7 @@ let backend ~store ~artifact_store () = match !override with
                 (* The manifest refuses exact outputs and asks in a browser
                    package, so only a tools worker reaches this port. *)
                 host=(if not (uses_host_requests package) then None else Some {
-                  list_requests=(fun () -> Lane_addon_native_worker.host_requests worker
+                  list_requests=(fun ~after -> Lane_addon_native_worker.host_requests worker ~after
                     |> Result.map_error Lane_addon_native_worker.error_to_string);
                   deliver=(fun ~arguments -> Lane_addon_native_worker.host_result worker ~arguments
                     |> Result.map_error Lane_addon_native_worker.error_to_string)});
@@ -1931,7 +1949,8 @@ let backend ~store ~artifact_store () = match !override with
              resolved_image=Some (Lane_addon_worker.image_identity worker);
             browser=None;
             host=(if not (uses_host_requests package) then None else Some {
-              list_requests=(fun () -> Lane_addon_worker.host_requests worker |> Result.map_error Lane_addon_worker.error_to_string);
+              list_requests=(fun ~after -> Lane_addon_worker.host_requests worker ~after
+                |> Result.map_error Lane_addon_worker.error_to_string);
               deliver=(fun ~arguments -> Lane_addon_worker.host_result worker ~arguments |> Result.map_error Lane_addon_worker.error_to_string)});
             exported_tools=(fun () -> Lane_addon_worker.exported_tools worker);
             operator_schema=(fun () -> Lane_addon_worker.operator_schema worker);
@@ -4955,7 +4974,7 @@ module For_testing = struct
   let with_cleanup_writer writer f = Eio.Fiber.with_binding cleanup_writer_key writer f
   let with_declaration_writer writer f = Eio.Fiber.with_binding declaration_writer_key writer f
   type nonrec host_port = host_port = {
-    list_requests : unit -> (Yojson.Safe.t, string) result;
+    list_requests : after:string option -> (Yojson.Safe.t, string) result;
     deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
   }
   type nonrec connection = connection = {

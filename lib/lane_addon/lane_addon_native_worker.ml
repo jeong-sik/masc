@@ -85,7 +85,7 @@ let call ?(reached = fun () -> true) t work =
         raise exn
 let observe t ~binding ~sources = call t (fun () -> Protocol.observe t.protocol ~binding ~sources)
 let act t ~arguments = call t (fun () -> Protocol.act t.protocol ~arguments)
-let host_requests t = call t (fun () -> Protocol.host_requests t.protocol)
+let host_requests t ~after = call t (fun () -> Protocol.host_requests t.protocol ~after)
 let host_result t ~arguments = call t (fun () -> Protocol.host_result t.protocol ~arguments)
 let call_exported_tool ?on_result ?(on_dispatch = fun () -> ()) ?finalize_result ?authorize ?principal
     t ~name ~arguments =

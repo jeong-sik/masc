@@ -59,7 +59,7 @@ let load ~store ~(owner : owner) ~original_request_id =
         | None -> Error (Storage_failed "retained result has no original request")
         | Some request ->
             let* listing = Lane_addon_host_request.listing_of_json (`Assoc ["requests", `List [request]]) |> storage in
-            (match listing with
+            (match listing.Lane_addon_host_request.requests with
              | [((Lane_addon_host_request.Exact_output _ | Read_records _ | Read_file _ | Ask _ | Withdraw_ask _ | Web_search _) as request)]
                  when Lane_addon_host_request.request_id request = original_request_id -> Ok request
              | [(Lane_addon_host_request.Exact_output _ | Read_records _ | Read_file _ | Ask _ | Withdraw_ask _

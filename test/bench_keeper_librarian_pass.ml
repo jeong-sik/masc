@@ -102,8 +102,8 @@ let backend env base_path delivery_observed : Runtime.For_testing.backend = {
       act=(fun ~arguments -> Protocol.act protocol ~arguments |> Result.map_error protocol_error);
       stop=(fun () -> Protocol.close protocol;Ok (Lane_addon_lifecycle.Released
         {engine=Lane_addon_lifecycle.Docker_engine "fixture-resource-launch";container_id=Some instance_id}));
-      host=Some {list_requests=(fun () ->
-          Protocol.host_requests protocol |> Result.map_error protocol_error);
+      host=Some {list_requests=(fun ~after ->
+          Protocol.host_requests protocol ~after |> Result.map_error protocol_error);
         deliver=(fun ~arguments ->
           let result=Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in
           delivery_observed ();result)}} in

@@ -91,9 +91,11 @@ bypassing the isolation guard; the failed run's digests remain in the receipt.
 ## Declared dependency correction
 
 The original broad native include paths did not verify Dune dependency
-declarations. CI type-check run `44015974590`, job `133813948816`, on upper
-head `76713ba09c39add7b9f5f68fa56e1d6908333d42` failed at the new `Unix`
-calls because the test stanza did not declare `unix`. The stanza now declares
+declarations. `PR type-check (dune build @check)`
+(`.github/workflows/pr-type-check.yml`), run `44015974590`, job `133813948816`,
+on head `76713ba09c39add7b9f5f68fa56e1d6908333d42`, ref
+`perf/workspace-inventory-preflight-20261117`, completed with `failure` at
+the new `Unix` calls because the test stanza did not declare `unix`. The stanza now declares
 it directly; the test body and production files are unchanged.
 
 [dependency-visibility-verification.json](dependency-visibility-verification.json)
@@ -115,3 +117,8 @@ The checker verifies the frozen source and Dune-file hashes in
 [dependency-visibility.json](dependency-visibility.json). Its seven commands
 include one expected hidden-Unix failure. Original captures, recipes and
 provenance remain unchanged; this additional check covers the declaration gap.
+
+The captured dependency-visibility manifest incorrectly labels that workflow
+`CI / type-check`. The exact name and result above correct that metadata; the
+capture and its verification digest retain their original bytes. The checker
+does not use the workflow label to compile or run the suite.

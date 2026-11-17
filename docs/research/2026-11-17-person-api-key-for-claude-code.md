@@ -66,6 +66,7 @@ env -i HOME=<빈 폴더> USER=$USER PATH="$PATH" TMPDIR=<빈 폴더> TERM=dumb N
 
 - 자식 프로세스의 환경은 허용 목록이다. 선언된 홈은 이름 14개만 받는다(`runtime_claude_environment_projection.ml:6`, `inherited_names`).
   `ANTHROPIC_API_KEY` 같은 자격·경로 변수는 빠진다.
+- 홈을 선언하지 않았으면 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, 클라우드 provider 선택·자격·endpoint 변수도 상속한다. `Runtime_official_account.capture` 의 최종 `validate_environment` 는 이름이 중복되면 거절한다. 따라서 파일 키를 받게 할 때는 홈 선언 여부와 별개로 상속 범위와 키가 하나만 실리는 규칙을 정해야 한다.
 - 선언된 홈에는 `CLAUDE_CONFIG_DIR=<홈>` 과 `ANTHROPIC_CONFIG_DIR=<홈>/anthropic` 을 준다(같은 파일 `:52`, `of_inherited`).
   profile 이 설정 폴더 밖에 놓이는 것을 홈 안으로 돌리려는 것이다.
 - 환경을 만드는 곳은 `Runtime_official_account.capture` 하나다(`runtime_official_account.ml:123`).

@@ -69,9 +69,10 @@ related: []
 - 로그인이 확인되면 권한 로그에 `{"event":"linked","provider_account_id","user_id"}` 를 쓴다(`server_setup_account_login.ml:125`).
 - 계정이 어느 template 것인지는 로그인 영수증 파일의 `integration_id` 가 말한다. 턴과 확인이 이 파일을 읽는다(`server_setup_account_login.ml:412`).
 
-### 1.2 CLI 는 자격 변수를 받지 못한다
+### 1.2 계정 홈을 선언하면 자격 변수를 상속하지 않는다
 
 - CLI 자식 프로세스의 환경은 허용 목록이다. 계정 홈이 선언된 CLI 는 이름 14개만 받는다. `ANTHROPIC_API_KEY` 는 빠진다(`runtime_claude_environment_projection.ml:6`).
+- 계정 홈을 선언하지 않았으면 상속 목록에 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, 클라우드 provider 선택·자격·endpoint 변수도 남는다. 파일 키를 단순히 덧붙이면 이름이 중복될 수 있고, 지금의 `capture` 는 중복 이름을 거절한다(`runtime_official_account.ml`, `validate_environment`).
 - 환경을 만드는 곳은 `Runtime_official_account.capture` 하나다(`runtime_official_account.ml:123`). 호출자가 임의의 값을 환경에 넣지 못한다.
 - `claude-code` provider 가 `credentials` 를 선언하면 거절한다(`runtime_adapter.ml:1057`).
 
@@ -154,7 +155,7 @@ related: []
 
 1. `Runtime_account_runtime.of_template` 이 계정 종류를 받는다. 키 계정이면 template 을 복사할 때 `credentials = Some (File <키 파일 경로>)` 를 넣는다.
 2. `Runtime_adapter` 는 `claude-code` provider 의 `credentials` 가 `File` 이면 받는다. 그 파일을 §3.2 의 검사로 읽어 `Runtime_official_account.capture` 에 넘긴다. `Env` 와 `Inline` 은 지금처럼 거절한다.
-3. `capture` 는 허용 목록으로 환경을 만든 뒤 `ANTHROPIC_API_KEY=<키>` 를 더한다. 키를 받지 않은 계정의 환경은 지금과 같다.
+3. `capture` 는 파일 자격이 있으면 계정 홈 선언(`explicit_account`)과 무관하게 기존 `base_names` 허용 목록으로 상속 환경을 좁힌다. 상속된 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, 클라우드 provider 선택·자격·endpoint 변수는 남기지 않는다. 그 뒤 파일에서 검증한 키만 `ANTHROPIC_API_KEY` 하나로 넣고, 기존 환경 이름 중복 검사를 거친다. 파일 자격이 없으면 지금의 환경 구성과 같다.
 4. 그 뒤는 지금 그대로다. 계정은 봉인된 채 실행 표에 있고, `Runtime_account_access.authorize` 가 요청을 허락해야 환경이 나온다(`runtime_account_access.mli`).
 
 - `authorize` 는 사람의 턴이면 Keeper 의 주인과 계정의 주인을, 확인이면 요청한 사람과 계정의 주인을 맞춰 본다. 키 계정도 같은 판정을 지난다. 새 문을 더하지 않는다.
@@ -246,7 +247,7 @@ Console 로그인(`claude auth login --console`)은 고르지 않은 길이 아�
 
 - **기록**: `key_linked` 와 계정 purge 본문이 쓰고 읽은 뒤 같다. 멤버가 다르거나 순서가 다르면 거절한다. 남의 이름으로, 비활성인 사람이, 같은 id 로 두 번 쓰면 거절한다.
 - **파일**: 놓인 파일이 0600 이고 그 사람의 namespace 아래다. 같은 세대에 두 번 쓰면 거절한다. 소유나 권한이 다른 파일은 읽지 않는다.
-- **환경**: 가짜 CLI 가 받은 `ANTHROPIC_API_KEY` 의 digest 를 남긴다. 키 계정이면 저장한 키의 digest 와 같고, 로그인 계정이면 변수가 없다.
+- **환경**: 파일 자격을 주고 계정 홈을 선언한 경우와 선언하지 않은 경우를 각각 본다. 서로 다른 상속 API key, 인증 token, 클라우드 provider 선택·자격·endpoint 값이 있어도, 가짜 CLI 가 받은 `ANTHROPIC_API_KEY` 는 정확히 하나이고 그 digest 는 파일 키와 같다. 상속된 인증·provider 변수는 없고 환경 이름은 중복되지 않는다. 파일 자격이 없는 경로는 기존 구성을 유지하며, 사람의 로그인 계정에는 API key 변수가 없다.
 - **주인**: 다른 사람의 요청과 운영자의 호출은 프로세스가 뜨기 전에 거절된다. 가짜 CLI 가 불리지 않았음을 본다.
 - **새는 곳**: 등록·목록·확인의 응답과 서버 로그에 시험용 키의 글자가 없다.
 - **없애기**: `Purge_pending` 뒤의 턴은 거절된다. `Purged` 뒤에는 키 폴더와 계정 홈이 없다. 지우는 도중에 멈춘 것은 재기동이 끝낸다.
@@ -280,7 +281,7 @@ Console 로그인(`claude auth login --console`)은 고르지 않은 길이 아�
 
 - **추천: 그대로 둔다.**
 - 근거: §3.4 의 길은 provider 선언 하나다. 사람의 계정에서만 받게 하려면 adapter 가 선언의 출처를 알아야 하고, 갈래가 하나 는다.
-- 대가: 운영자가 로그인이 있는 홈에 키를 같이 선언하면 키로 과금된다. CLI 가 `-p` 에서 환경 변수 키를 먼저 쓰기 때문이다. 가이드에 한 줄 적는다.
+- 대가: 파일 자격을 선언하면 상속된 인증·provider 선택·endpoint 설정은 쓰지 않는다. 운영자가 로그인이 있는 홈에 키를 같이 선언한 경우도 호출이 성공하면 그 파일 키에 과금된다. 가이드에 적는다.
 
 ### D4. 키를 구분하게 해 주는 표시
 

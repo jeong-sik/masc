@@ -1,8 +1,9 @@
 # What an activated workspace offers people, without and with a runtime.toml
 
 Date: 2026-11-17. Measurements of an account server, source checks of the
-candidate, and two test runs. No binary of the candidate was built on this
-machine: `masc auth bootstrap` of the candidate ran in the second test run.
+candidate, and three test runs. No binary of the candidate was built on this
+machine: `masc auth bootstrap` of the candidate ran in the second and the
+third test run.
 
 - Base: `8e78ac5f9e1039241d1e120ae47a6a360179f900`.
 - Measured binary: a Dune build of `467cfe8e83736cdacc76b2871da966a7309ef80a`.
@@ -121,6 +122,21 @@ gh workflow run test.yml --ref feat/bootstrap-writes-runtime-toml \
   - The one that ended in an error is
     `test_native_antigravity_account_import_keeps_original_and_lists_exact_models`,
     a case of `masc runtime-antigravity-account` (#52741).
+- Run 44042356262, head `9bd0881ae1df`, with
+  `suite=test_config_root_embedded_seed,test_onboarding_journey,test_authz_activation`.
+  In this head the command checks, places the file, and activates last.
+  Conclusion: failure, for the same case at the same line.
+  - `test_config_root_embedded_seed`: 12 cases ran and passed. The five
+    `place_embedded_runtime_toml` cases are among them: the rename alone over
+    each kind of entry that is there, and a placement that fails and removes
+    the one and the two directories it made. That case does nothing for
+    root, and its four assertions ran.
+  - `test_onboarding_journey`: 244 cases ran and none was skipped. 243
+    passed, the case of the two refused commands among them: a config.json
+    that does not ask for the activation, and an external store inside the
+    base path. Neither leaves a `.masc/config`.
+  - `test_authz_activation`: 8 cases ran and passed. They call `activate`,
+    which is `prepare` and `complete` in a row.
 
 ## Unverified
 

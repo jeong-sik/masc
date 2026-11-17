@@ -10,6 +10,20 @@ type titles =
   ; actions : string
   }
 
+type chromes =
+  { decisions : Masc_tui_card.chrome
+  ; continuation : Masc_tui_card.chrome
+  ; capacity : Masc_tui_card.chrome
+  ; actions : Masc_tui_card.chrome
+  }
+
+let empty_chromes =
+  { decisions = Masc_tui_card.empty_chrome
+  ; continuation = Masc_tui_card.empty_chrome
+  ; capacity = Masc_tui_card.empty_chrome
+  ; actions = Masc_tui_card.empty_chrome
+  }
+
 let column_gap = 2
 let min_card_width = 44
 let card_row_gap = 1
@@ -48,7 +62,8 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
-let draw ~(titles : titles) ~empty_decisions ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
+let draw ~(chromes : chromes) ~(titles : titles) ~empty_decisions ~inner
+    ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
       ~min_card_width ~max_columns:column_count
@@ -87,11 +102,16 @@ let draw ~(titles : titles) ~empty_decisions ~inner ~rows ~is_selected ~decision
       }
     in
     let grid status_column =
-      Masc_tui_card.grid ~style ~inner_width:inner ~gap:column_gap
-        ~row_gap:card_row_gap ~max_rows:rows
-        [ [ decision_card; continue_card ]; status_column ]
+      Masc_tui_card.grid_with_chrome ~rounded:true ~style ~inner_width:inner
+        ~gap:column_gap ~row_gap:card_row_gap ~max_rows:rows
+        [ [ (decision_card, chromes.decisions)
+          ; (continue_card, chromes.continuation)
+          ]
+        ; status_column
+        ]
     in
     match actions with
-    | [] -> grid [ status_card ]
-    | _ :: _ -> grid [ status_card; actions_card ]
+    | [] -> grid [ (status_card, chromes.capacity) ]
+    | _ :: _ ->
+      grid [ (status_card, chromes.capacity); (actions_card, chromes.actions) ]
   end

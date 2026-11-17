@@ -182,31 +182,56 @@ let operator_actions_reading (state : state) =
 
 (* Requests and capacity have separate observation paths. In particular a
    working HTTP connection does not make a retained fleet reading current. *)
-let overview_capacity_lines (state : state) =
+let overview_capacity_badge (state : state) =
+  let text ko en = ui_text state ~ko ~en in
+  let ko = state.ui_language = Lang_ko in
+  match fleet_stream_view state with
+  | Masc_tui_fleet_stream.Awaiting_first_reading ->
+      Some (text "미관측" "unread", Theme.recede ())
+  | Unreachable _ | Unavailable _ | Cannot_read _ ->
+      Some (text "관측 불가" "unavailable", Theme.warn ())
+  | Reading { reading; trouble } ->
+      let fleet = reading.fleet in
+      let retained =
+        Option.is_some trouble || state.workspace_identity <> Workspace_identity_match
+      in
+      let grade = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
+      let grade_style =
+        if retained then Theme.warn ()
+        else if fleet.fs_operator_action_required then Theme.bad ()
+        else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status) then Theme.warn ()
+        else Theme.ok ()
+      in
+      Some
+        ( Printf.sprintf "%d/%d %s" fleet.fs_running_count fleet.fs_bootable_count grade
+        , grade_style )
+
+let overview_capacity_lines ?(cells = 48) (state : state) =
   let text ko en = ui_text state ~ko ~en in
   let quiet line = Theme.recede () ^ line ^ Ansi.reset in
   let warning line = Theme.warn () ^ line ^ Ansi.reset in
+  let wrap line = Message_layout.wrap_styled_words ~max_cells:(max 1 cells) line in
   let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
-      [warning (text "미관측 · fleet 첫 관측 대기" "Not observed · awaiting fleet reading")]
+      wrap (warning (text "미관측 · fleet 첫 관측 대기" "Not observed · awaiting fleet reading"))
   | Unreachable { since } ->
-      [warning (text "미관측 · fleet에 연결하지 못함" "Not observed · fleet unreachable")
-      ; quiet (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since)]
+      wrap (warning (text "미관측 · fleet에 연결하지 못함" "Not observed · fleet unreachable"))
+      @ wrap (quiet (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since))
   | Unavailable { degradation; disconnected_since } ->
-      [warning (text "미관측 · fleet 스캔 실패" "Not observed · fleet scan unavailable")
-      ; quiet (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since)]
+      wrap (warning (text "미관측 · fleet 스캔 실패" "Not observed · fleet scan unavailable"))
+      @ wrap (quiet (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since))
   | Cannot_read failure ->
-      [warning (text "미관측 · fleet 응답을 읽지 못함" "Not observed · fleet response unreadable")
-      ; quiet (Masc_tui_fleet_line.failure_text ~ko failure)]
+      wrap (warning (text "미관측 · fleet 응답을 읽지 못함" "Not observed · fleet response unreadable"))
+      @ wrap (quiet (Masc_tui_fleet_line.failure_text ~ko failure))
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
       let retained = Option.is_some trouble
         || state.workspace_identity <> Workspace_identity_match in
       let scope =
         if retained then
-          [warning (text "이전 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown")]
+          wrap (warning (text "이전 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown"))
         else []
       in
       let grade = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
@@ -215,27 +240,56 @@ let overview_capacity_lines (state : state) =
         else if fleet.fs_operator_action_required then Theme.bad ()
         else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status)
         then Theme.warn () else Theme.ok () in
-      scope
-      @ (if not retained && Masc_tui_fleet_line.status_is_ok fleet.fs_status
+      let avail =
+        max 0 (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
+      in
+      let meters =
+        if cells >= 28 && (fleet.fs_bootable_count > 0 || fleet.fs_target_reaction_capacity > 0) then
+          [ Chart.meter ~width:cells ~value:fleet.fs_running_count
+              ~max_value:(max 1 fleet.fs_bootable_count)
+              ~label:(text "실행" "Run ")
+              ~suffix:(Printf.sprintf "%d/%d" fleet.fs_running_count fleet.fs_bootable_count)
+              ~cell_style:(fun ~index ~width ->
+                Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+              ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+          ; Chart.meter ~width:cells ~value:avail
+              ~max_value:(max 1 fleet.fs_target_reaction_capacity)
+              ~label:(text "여력" "Turn")
+              ~suffix:
+                (if fleet.fs_reaction_capacity_shortfall > 0 then
+                   Printf.sprintf "%d/%d -%d" avail fleet.fs_target_reaction_capacity
+                     fleet.fs_reaction_capacity_shortfall
+                 else Printf.sprintf "%d/%d" avail fleet.fs_target_reaction_capacity)
+              ~cell_style:(fun ~index ~width ->
+                if fleet.fs_reaction_capacity_shortfall > 0 then Theme.warn ()
+                else Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+              ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+          ]
+        else
+          wrap
+            (text
+               (Printf.sprintf "실행 중 %d · 기동 가능 %d" fleet.fs_running_count fleet.fs_bootable_count)
+               (Printf.sprintf "Running %d · bootable %d" fleet.fs_running_count fleet.fs_bootable_count))
+          @ wrap
+              (text
+                 (Printf.sprintf "턴 여력 %d/%d · 부족 %d" avail
+                    fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall)
+                 (Printf.sprintf "Turn capacity %d/%d · shortfall %d" avail
+                    fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall))
+      in
+      let notes =
+        (if not retained && Masc_tui_fleet_line.status_is_ok fleet.fs_status
             && not fleet.fs_operator_action_required then []
          else [grade_style ^ grade ^ Ansi.reset])
-      @ [text
-          (Printf.sprintf "실행 중 %d · 기동 가능 %d" fleet.fs_running_count fleet.fs_bootable_count)
-          (Printf.sprintf "Running %d · bootable %d" fleet.fs_running_count fleet.fs_bootable_count)
-      ; text
-          (Printf.sprintf "턴 여력 %d/%d · 부족 %d"
-             (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
-             fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall)
-          (Printf.sprintf "Turn capacity %d/%d · shortfall %d"
-             (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
-             fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall)]
-      @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~ko ~now detail)) trouble)
-      @ (if state.workspace_identity = Workspace_identity_match then [] else
-           [warning (String.capitalize_ascii (workspace_identity_unconfirmed ~ko))])
-      @ Option.to_list (Option.map (fun detail ->
-          (if retained then quiet else warning) (Terminal_text.single_line detail))
-          (Masc_tui_fleet_line.blocker_text ~ko fleet))
-      @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text ~ko fleet))
+        @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~ko ~now detail)) trouble)
+        @ (if state.workspace_identity = Workspace_identity_match then [] else
+             [warning (String.capitalize_ascii (workspace_identity_unconfirmed ~ko))])
+        @ Option.to_list (Option.map (fun detail ->
+            (if retained then quiet else warning) (Terminal_text.single_line detail))
+            (Masc_tui_fleet_line.blocker_text ~ko fleet))
+        @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text ~ko fleet))
+      in
+      scope @ meters @ List.concat_map wrap notes
 
 let overview_header (state : state) ~cols =
   here_row ~cols state ~path:[]
@@ -253,8 +307,10 @@ let render_overview (state : state) home =
   let cols = full_cols - (match sidebar with None -> 0 | Some (width, _) -> width) in
   let all_decisions = Masc_tui_home.home_decision_rows home in
   let continuation = Masc_tui_home.home_continue_rows home in
+  let operator_rows = Masc_tui_home.home_operator_rows home in
   let selected = Masc_tui_home.home_selected_action home in
-  let capacity_lines = overview_capacity_lines state in
+  let inner_cols = framed_inner_width cols in
+  let capacity_lines = overview_capacity_lines ~cells:inner_cols state in
   (* The last day of tool calls, whatever window Usage's [w] holds
      ([tool_series_days]). A reading that is missing says so in words, never as
      a count of zero. A press on the line opens Usage on its Calls section. *)
@@ -280,15 +336,20 @@ let render_overview (state : state) home =
       let rows_started = Masc_tui_frame_timing.start_stage () in
       let body = Masc_tui_home.home_body home ~scroll:state.home_decision_scroll ~budget:chrome_budget in
       if body.hb_help then
-        c.push (" " ^ Ansi.dim
+        c.push (" " ^ Theme.recede ()
           ^ Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko)
           ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys" ^ Ansi.reset);
-      if body.hb_shortcuts then
-        c.push (" " ^ ui_text state ~ko:"v:조치 원인" ~en:"v:action reasons"
+      if body.hb_shortcuts then begin
+        let shortcut key label =
+          Ansi.bold ^ Theme.accent () ^ key ^ Ansi.reset
+          ^ Theme.recede () ^ ":" ^ label ^ Ansi.reset
+        in
+        c.push (" " ^ shortcut "v" (ui_text state ~ko:"조치 원인" ~en:"action reasons")
           ^ "  " ^ pressable (Press_surface Approvals)
-              (ui_text state ~ko:"p:승인·질문" ~en:"p:Requests")
+              (shortcut "p" (ui_text state ~ko:"승인·질문" ~en:"Requests"))
           ^ "  " ^ pressable (Press_surface Metrics)
-              (ui_text state ~ko:"m:사용량" ~en:"m:Usage"));
+              (shortcut "m" (ui_text state ~ko:"사용량" ~en:"Usage")))
+      end;
       List.iter c.push body.hb_notices;
       if body.hb_selection_changed then
         c.push_styled ~style:(Theme.warn ())
@@ -307,25 +368,52 @@ let render_overview (state : state) home =
             ; continuation=ui_text state ~ko:"대화" ~en:"Conversations"
             ; capacity=ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
             ; actions=ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed" } in
-          let status ~cells = List.concat_map
-              (Message_layout.wrap_styled_words ~max_cells:(max 1 cells)) capacity_lines in
-          Masc_tui_overview_cards.draw ~titles
+          let hk tag =
+            if state.keeper_navigation_open then None
+            else Some (tag, Ansi.bold ^ Theme.accent ())
+          in
+          let decision_count = List.length all_decisions in
+          let chromes : Masc_tui_overview_cards.chromes =
+            { decisions =
+                { Masc_tui_card.hotkey = hk "p "
+                ; badge =
+                    Some
+                      ( (if decision_count = 0 then ui_text state ~ko:"대기 없음" ~en:"clear"
+                         else string_of_int decision_count)
+                      , if decision_count = 0 then Theme.recede () else Theme.warn () )
+                }
+            ; continuation =
+                { Masc_tui_card.hotkey = None
+                ; badge = Some (string_of_int (List.length continuation), Theme.recede ())
+                }
+            ; capacity =
+                { Masc_tui_card.hotkey = hk "m "
+                ; badge = overview_capacity_badge state
+                }
+            ; actions =
+                { Masc_tui_card.hotkey = hk "v "
+                ; badge = Some (string_of_int (List.length operator_rows), Theme.bad ())
+                }
+            }
+          in
+          let status ~cells = overview_capacity_lines ~cells state in
+          Masc_tui_overview_cards.draw ~chromes ~titles
             ~empty_decisions:(ui_text state ~ko:"대기 중인 요청이 없습니다." ~en:"No decision is waiting on you.")
-            ~inner:(framed_inner_width cols) ~rows:available
+            ~inner:inner_cols ~rows:available
             ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)
             ~decisions:all_decisions ~decisions_whole:true ~continuation ~status
-            ~actions:(Masc_tui_home.home_operator_rows home) in
+            ~actions:operator_rows in
       (match card_rows with
        | Some rows ->
            List.iter c.push rows;
-           if available > List.length rows then c.push (tool_calls_line ~cells:(framed_inner_width cols))
+           if available > List.length rows then c.push (tool_calls_line ~cells:inner_cols)
        | None ->
            if body.hb_spare > 0 then
              c.push_styled ~style:Ansi.bold
                (ui_text state ~ko:" 바로가기" ~en:" Destinations");
            List.iter draw_row body.hb_rows;
            let spare = max 0 (body.hb_spare - 1) in
-           List.take spare (capacity_lines @ [tool_calls_line ~cells:(framed_inner_width cols)])
+           List.take spare (capacity_lines @ [tool_calls_line ~cells:inner_cols])
            |> List.iter c.push);
       Masc_tui_frame_timing.finish_stage ~name:"overview.rows" rows_started)
 

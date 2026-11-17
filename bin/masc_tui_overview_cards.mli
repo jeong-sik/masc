@@ -26,7 +26,18 @@ type titles =
   }
 (** The caller owns the language and observation scope of each heading. *)
 
+type chromes =
+  { decisions : Masc_tui_card.chrome
+  ; continuation : Masc_tui_card.chrome
+  ; capacity : Masc_tui_card.chrome
+  ; actions : Masc_tui_card.chrome
+  }
+(** Optional border-embedded hotkey tags and live summary badges per card. *)
+
+val empty_chromes : chromes
+
 val draw :
+  chromes:chromes ->
   titles:titles ->
   empty_decisions:string ->
   inner:int ->

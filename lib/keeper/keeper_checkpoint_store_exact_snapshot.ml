@@ -208,8 +208,7 @@ let decode_changed_bytes changed =
     | Some checkpoint -> Ok checkpoint
     | None ->
       offload_checkpoint_cpu (fun () ->
-        Objects.load
-          (Objects.create_memo ())
+        Objects.load_read_only
           ~read_object:(Keeper_checkpoint_object_store.read ~session_dir:changed.changed_session_dir)
           changed.changed_head)
   in

@@ -3337,7 +3337,9 @@ let test_approved_web_search_replays_without_model_resubmission () =
            projected_message
            |> String.split_on_char '\n'
            |> List.rev
-           |> List.find (fun line -> not (String.equal (String.trim line) ""))
+           |> List.find (fun line ->
+                let line = String.trim line in
+                not (String.equal line "") && not (Tool_output.is_marker line))
            |> Yojson.Safe.from_string
          in
          check bool
@@ -10464,10 +10466,21 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
             blocks; the resumed adapter receives those blocks and the prepared
             resolution blocks, the same arguments Keeper_agent_run passes. *)
          let original_blocks = [Agent_core.Types.Text "Finish the original research"] in
+         (* The flat string carries the original and the resolution fragment, and
+            each replay also appends its own artifact marker block so a
+            structured input keeps the exact owner (#52601). The marker is not
+            part of the flat rendering: the fragment itself names the sha256. *)
+         let resolution_block_text block = Agent_core.Types.text_of_content [block] in
+         let instruction_blocks, marker_blocks =
+           List.partition
+             (fun block -> not (Tool_output.is_marker (resolution_block_text block)))
+             model.resolution_blocks in
          check string "string input is the original followed by the same resolution fragments"
-           (String.concat "\n\n" (prepared_prompt
-              :: List.map (fun block -> Agent_core.Types.text_of_content [block]) model.resolution_blocks))
+           (String.concat "\n\n"
+              (prepared_prompt :: List.map resolution_block_text instruction_blocks))
            model.text;
+         check bool "each extra resolution block is one replay artifact marker" true
+           (List.length marker_blocks = List.length model.replay_evidence);
          (match model.replay_evidence with
           | [ evidence ] ->
             check bool "structured resume appends the block the Agent Core path appends" true

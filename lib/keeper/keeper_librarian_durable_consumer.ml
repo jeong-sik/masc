@@ -7,6 +7,7 @@ module String_map = Map.Make (String)
 
 module O = Keeper_librarian_official_progress
 module History = Keeper_checkpoint_store.Saved_history
+module Unread_observation = Keeper_librarian_unread_observation
 
 type commit_result =
   | Memory_committed
@@ -1073,14 +1074,20 @@ type unread =
   ; official : int
   }
 
+type unread_observation = Unread_observation.t
+
+type unread_read_use =
+  | Count_only
+  | Observe of unread_observation option
+
 (* RFC §4.9, invariant I4. Read-only: the number the operator surfaces show,
    taken from the same files a pass reads. A keeper that never ran on
    AGENT_CORE has no checkpoint, so its atoms are nothing to count and its
    official lines are counted alone. *)
-let unread_turns ~config ~keeper_name =
+let unread_turns_as ~read_use ~on_checkpoint_load ~config ~keeper_name =
   let open Result.Syntax in
   let* positions = read_positions ~config ~keeper_name in
-  let* _keeper_id, meta = read_meta ~config ~keeper_name in
+  let* keeper_id, meta = read_meta ~config ~keeper_name in
   let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let official =
     R.unread_official_turns ~lines:positions.lines ~cursor:positions.official_cursor
@@ -1092,36 +1099,79 @@ let unread_turns ~config ~keeper_name =
        turns are behind is a question about a history this keeper has left. *)
     Error (Position_in_other_trace position)
   | Some _ | None ->
-    let* atoms =
+    let* atoms, observation =
       if not (R.may_have_unread ~trace_id:current_trace_id
         ~lines:positions.lines ~progress:positions.progress)
-      then Ok (Some 0)
-      else match load_current_checkpoint ~config ~trace_id:current_trace_id with
-      | Error History.Not_found when Option.is_none positions.progress ->
-        Ok (Some 0)
-      | Ok (History.Superseded _) -> Ok (Some 0)
-      | Error
-          (( History.Not_found | History.Store_error _ | History.Parse_error _
-            | History.Newer_version _ | History.Io_error _
-            | History.Read_failed _ | History.Agent_core_error _
-            | History.Objects_invalid _ ) as error) ->
-        Error (Checkpoint_unreadable { trace_id = current_trace_id; error })
-      | Ok (History.Read checkpoint) ->
-        Ok
-          (R.unread_turns
-             ~trace_id:current_trace_id
-             ~lines:positions.lines
-             ~progress:positions.progress
-             ~messages:checkpoint.Agent_core.Checkpoint.messages)
+      then Ok (Some 0, None)
+      else
+        let session_dir = Filename.concat (Keeper_fs.session_store_path config) current_trace_id in
+        let key = match read_use with
+          | Count_only -> None
+          | Observe _ -> Some (Unread_observation.key
+              ~keeper_dir:(Filename.concat positions.runtime_keepers_dir keeper_name)
+              ~session_dir ~keeper_id ~keeper_uid:meta.keeper_id ~created_at:meta.created_at
+              ~trace_id:current_trace_id ~lines:positions.lines ~progress:positions.progress
+              ~official_cursor:positions.official_cursor) in
+        let reused = match key, read_use with
+          | Some key, Observe (Some previous) ->
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              Unread_observation.reuse key previous)
+            |> Option.map (fun atoms -> atoms, previous)
+          | None, (Count_only | Observe _) | Some _, (Count_only | Observe None) -> None in
+        match reused with
+        | Some (atoms, observation) -> Ok (Some atoms, Some observation)
+        | None ->
+          on_checkpoint_load ();
+          let loaded = match key with
+            | None -> load_current_checkpoint ~config ~trace_id:current_trace_id
+                |> Result.map (function
+                  | History.Read checkpoint -> History.Read (checkpoint, None)
+                  | History.Superseded version -> History.Superseded version)
+            | Some _ -> Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                Keeper_checkpoint_store.Read_observation.load ~session_dir ~session_id:current_trace_id
+                |> Result.map (fun (checkpoint, witness) -> checkpoint, Some witness)
+                |> Keeper_checkpoint_store.saved_history) in
+          match loaded with
+          | Error History.Not_found when Option.is_none positions.progress ->
+            Ok (Some 0, None)
+          | Ok (History.Superseded _) -> Ok (Some 0, None)
+          | Error
+              (( History.Not_found | History.Store_error _ | History.Parse_error _
+                | History.Newer_version _ | History.Io_error _
+                | History.Read_failed _ | History.Agent_core_error _
+                | History.Objects_invalid _ ) as error) ->
+            Error (Checkpoint_unreadable { trace_id = current_trace_id; error })
+          | Ok (History.Read (checkpoint, witness)) ->
+            let atoms = R.unread_turns
+                 ~trace_id:current_trace_id
+                 ~lines:positions.lines
+                 ~progress:positions.progress
+                 ~messages:checkpoint.Agent_core.Checkpoint.messages in
+            let observation = match atoms, key, witness with
+              | Some atoms, Some key, Some witness ->
+                Some (Unread_observation.remember key ~atoms ~witness)
+              | (None | Some _), (None | Some _), (None | Some _) -> None in
+            Ok (atoms, observation)
     in
     (match atoms, positions.progress with
-     | Some atoms, (Some _ | None) -> Ok { atoms; official }
+     | Some atoms, (Some _ | None) -> Ok ({ atoms; official }, observation)
      | None, Some { P.position; _ } -> Error (Position_not_in_history position)
      | None, None ->
        (* [R.unread_turns] answers [None] only for a position it could not
           place, and there is none here. *)
        invalid_arg "librarian unread turns: no position and no count")
 ;;
+
+let unread_turns ~config ~keeper_name =
+  unread_turns_as ~read_use:Count_only ~on_checkpoint_load:(fun () -> ()) ~config ~keeper_name
+  |> Result.map fst
+
+let unread_turns_observed_with_load_observer ~on_checkpoint_load ?previous ~config ~keeper_name () =
+  unread_turns_as ~read_use:(Observe previous) ~on_checkpoint_load ~config ~keeper_name
+
+let unread_turns_observed ?previous ~config ~keeper_name () =
+  unread_turns_observed_with_load_observer ~on_checkpoint_load:(fun () -> ())
+    ?previous ~config ~keeper_name ()
 
 let consume_one_with_extent
       ~write_progress_store
@@ -1818,6 +1868,7 @@ let consume_one_with_runtime ?cli_runner ~config ~keeper_name () =
 ;;
 
 module For_testing = struct
+  let unread_turns_observed_with_load_observer = unread_turns_observed_with_load_observer
   let consume_one_with_progress_writer = consume_one_with_progress_writer
   let consume_one_with_runtime_and_progress_writers = consume_one_with_runtime_and_progress_writers
 

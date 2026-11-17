@@ -171,6 +171,18 @@ type unread =
 
 val unread_turns : config:Workspace.config -> keeper_name:string -> (unread, error) result
 
+type unread_observation
+
+val unread_turns_observed :
+  ?previous:unread_observation -> config:Workspace.config -> keeper_name:string -> unit ->
+  (unread * unread_observation option, error) result
+(** Read the same fresh count inputs as [unread_turns]. An unchanged complete
+    checkpoint witness and equal count-relevant metadata permit reuse of the
+    prior scalar atom count. No checkpoint messages or boundary task contexts
+    are retained. Errors, absent/superseded checkpoints and the existing
+    no-checkpoint preflight return no reusable observation. The caller owns
+    at most its latest successful observation and discards it after errors. *)
+
 val mark_range_failed : config:Workspace.config -> keeper_name:string -> unit
 (** Narrow the next fresh read of this Keeper to one turn, as a failed commit
     does. A refusal the host returns after the pass that sent the request ended
@@ -300,6 +312,12 @@ val commit_with_runtime
   -> commit_result
 
 module For_testing : sig
+  val unread_turns_observed_with_load_observer :
+    on_checkpoint_load:(unit -> unit) -> ?previous:unread_observation ->
+    config:Workspace.config -> keeper_name:string -> unit ->
+    (unread * unread_observation option, error) result
+  (** Observe actual full-load attempts without replacing the store reader. *)
+
   val consume_one_with_runtime_and_progress_writers
     : ?cli_runner:Keeper_lane_cli_oneshot.runner
     -> write_progress_store:

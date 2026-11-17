@@ -390,6 +390,167 @@ let test_unread_turns_counts_what_a_pass_has_left () =
   | Error error -> fail (Consumer.error_to_string error)
 ;;
 
+let unread_fixture config trace_id =
+  establish_progress config ~trace_id "one";
+  let first_two = [ message "one"; message "two" ] in
+  let messages = first_two @ [ message "three" ] in
+  append_boundary config ~trace_id ~turn:2 ~recorded_at:2. first_two;
+  append_boundary config ~trace_id ~turn:3 ~recorded_at:3. messages;
+  save_checkpoint config ~trace_id messages 3;
+  messages
+
+let observe_unread ?previous config loads =
+  Consumer.For_testing.unread_turns_observed_with_load_observer
+    ~on_checkpoint_load:(fun () -> incr loads) ?previous ~config ~keeper_name ()
+
+let observed_unread ?previous config loads ~atoms ~official =
+  match observe_unread ?previous config loads with
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok (count, observation) ->
+    check int "observed atoms" atoms count.atoms;
+    check int "observed official" official count.official;
+    (match Consumer.unread_turns ~config ~keeper_name with
+     | Ok expected -> check bool "matches a fresh uncached count" true (count = expected)
+     | Error error -> fail (Consumer.error_to_string error));
+    match observation with
+    | Some observation -> observation
+    | None -> fail "a verified checkpoint count has no observation"
+
+let test_observed_unread_reuses_only_unchanged_count_inputs () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-observed-unread" in
+  let messages = unread_fixture config trace_id in
+  let loads = ref 0 in
+  let previous = observed_unread config loads ~atoms:2 ~official:0 in
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  check int "unchanged sources avoid another complete load" 1 !loads;
+  let messages = messages @ [message "four"] in
+  save_checkpoint config ~trace_id messages 4;
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  check int "changed head reloads even without another end line" 2 !loads;
+  append_boundary config ~trace_id ~turn:4 ~recorded_at:4. messages;
+  let previous = observed_unread ~previous config loads ~atoms:3 ~official:0 in
+  check int "new boundary invalidates the previous count" 3 !loads;
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let last_atom_digest = match Boundaries.position_of_messages [message "one";message "two"] with
+    | Ok (Boundaries.Atom_history {last_atom_digest;_}) -> last_atom_digest
+    | Ok _ -> fail "fixture has no atom position" | Error detail -> fail detail in
+  (match Progress.write ~keepers_dir ~keeper_id:keeper_name
+      {position={trace_id;end_atom=2;last_atom_digest};boundary_lines_seen=2} with
+   | Ok () -> () | Error error -> fail (Progress.write_error_to_string error));
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  check int "atom cursor invalidates the previous count" 4 !loads;
+  (match Boundaries.append ~keepers_dir ~keeper_id:keeper_name
+      {recorded_at=5.;event=Boundaries.Turn_ended
+        {turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:5;
+         task_context=Masc.Keeper_turn_task_context.No_task;
+         history_at_start=Boundaries.Continued_history;position=Boundaries.No_atom_history}} with
+   | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:1 in
+  let module Official = Masc.Keeper_librarian_official_progress in
+  (match Official.write ~keepers_dir ~keeper_id:keeper_name {boundary_line=5} with
+   | Ok () -> () | Error error -> fail (Official.write_error_to_string error));
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  check int "both the official row and its cursor were observed" 6 !loads;
+  write_meta config "trace-after-observation";
+  (match observe_unread ~previous config loads with
+   | Error (Consumer.Position_in_other_trace position) ->
+     check string "the original position is preserved" trace_id position.trace_id
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "a changed trace reused the old count");
+  check int "non-current progress stops before checkpoint loading" 6 !loads
+
+let test_observed_unread_rechecks_object_integrity_and_head_errors () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-observed-corruption" in
+  let _messages = unread_fixture config trace_id in
+  let loads = ref 0 in
+  let previous = observed_unread config loads ~atoms:2 ~official:0 in
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  let bytes = Fs_compat.load_file path in
+  let head = match Agent_core.Checkpoint_objects.head_of_string bytes with
+    | Ok head -> head | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error) in
+  let bundle = match head.history.turns with
+    | turn :: _ -> turn.bundle | [] -> fail "fixture has no bundle" in
+  let object_path = Masc.Keeper_checkpoint_object_store.path ~session_dir bundle in
+  let object_bytes = Fs_compat.load_file object_path in
+  let replace path bytes = match Fs_compat.save_file_atomic path bytes with
+    | Ok () -> () | Error detail -> fail detail in
+  replace object_path "corrupt under the same canonical";
+  (match observe_unread ~previous config loads with
+   | Error (Consumer.Checkpoint_unreadable {error=Store.Saved_history.Objects_invalid _;_}) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "object corruption reused a positive count");
+  check int "failed witness validation performed the strict full read" 2 !loads;
+  replace object_path object_bytes;
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  replace path "{";
+  (match observe_unread ~previous config loads with
+   | Error (Consumer.Checkpoint_unreadable {error=Store.Saved_history.Parse_error _;_}) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "truncated head reused the previous count");
+  replace path bytes;
+  let previous = observed_unread ~previous config loads ~atoms:2 ~official:0 in
+  Sys.remove path;
+  match observe_unread ~previous config loads with
+  | Error (Consumer.Checkpoint_unreadable {error=Store.Saved_history.Not_found;_}) -> ()
+  | Error error -> fail (Consumer.error_to_string error)
+  | Ok _ -> fail "missing positioned checkpoint reused the previous count"
+
+let test_observed_unread_detects_boundary_rewrite_truncation_and_restart () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-observed-boundaries" in
+  let _messages = unread_fixture config trace_id in
+  let loads = ref 0 in
+  let previous = observed_unread config loads ~atoms:2 ~official:0 in
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let path = Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+  let lines = match Boundaries.read ~keepers_dir ~keeper_id:keeper_name with
+    | Ok lines -> lines | Error detail -> fail detail in
+  let rewritten = List.map (fun (line, read) ->
+    let record = match read with Ok record -> record | Error error -> fail (Boundaries.read_error_to_string error) in
+    let record = match line, record.Boundaries.event with
+      | 2, Boundaries.Turn_ended ended ->
+        {record with event=Boundaries.Turn_ended
+          {ended with position=Boundaries.Atom_history {end_atom=2;last_atom_digest="different opening"}}}
+      | _ -> record in
+    Yojson.Safe.to_string (Boundaries.record_to_json record) ^ "\n") lines |> String.concat "" in
+  (match Fs_compat.save_file_atomic path rewritten with Ok () -> () | Error detail -> fail detail);
+  let previous = observed_unread ~previous config loads ~atoms:1 ~official:0 in
+  check int "same row count with another endpoint must reload" 2 !loads;
+  (match Boundaries.append ~keepers_dir ~keeper_id:keeper_name
+      {recorded_at=4.;event=Boundaries.History_restarted {trace_id}} with
+   | Ok () -> () | Error error -> fail (Boundaries.append_error_to_string error));
+  let previous = observed_unread ~previous config loads ~atoms:0 ~official:0 in
+  check int "an unseen restart invalidates the old count" 3 !loads;
+  (match Fs_compat.save_file_atomic path "" with Ok () -> () | Error detail -> fail detail);
+  let _previous = observed_unread ~previous config loads ~atoms:0 ~official:0 in
+  check int "truncation below the cursor's seen lines reloads" 4 !loads
+
+let test_observed_unread_does_not_cache_absence_or_superseded_heads () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-observed-empty" in
+  let messages = [message "one"] in
+  write_meta config trace_id;
+  append_boundary config ~trace_id ~turn:1 ~recorded_at:1. messages;
+  let loads = ref 0 in
+  let expect_unobserved_zero () =
+    match observe_unread config loads with
+    | Ok ({atoms=0;official=0},None) -> ()
+    | Ok _ -> fail "an absent or superseded checkpoint produced reusable evidence"
+    | Error error -> fail (Consumer.error_to_string error) in
+  expect_unobserved_zero (); expect_unobserved_zero ();
+  check int "absence is checked afresh" 2 !loads;
+  save_checkpoint config ~trace_id messages 1;
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_id in
+  let path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id in
+  let bytes = Masc_test_deps.checkpoint_head_with_version path
+      (Agent_core.Checkpoint.checkpoint_version - 1) in
+  (match Fs_compat.save_file_atomic path bytes with Ok () -> () | Error detail -> fail detail);
+  expect_unobserved_zero (); expect_unobserved_zero ();
+  check int "superseded state is checked afresh" 4 !loads
+
 let test_failed_commit_and_restart_retry_the_same_range () =
   with_workspace @@ fun config ->
   let trace_id = "trace-retry" in
@@ -2596,6 +2757,12 @@ let test_seen_restart_skips_checkpoint fault () =
       (match Consumer.unread_turns ~config ~keeper_name with
        | Ok { atoms = 0; official = 0 } -> ()
        | Ok _ -> fail "quiet count reports unread history"
+       | Error error -> fail (Consumer.error_to_string error));
+      (match Consumer.For_testing.unread_turns_observed_with_load_observer
+          ~on_checkpoint_load:(fun () -> fail "quiet observed count loaded the checkpoint")
+          ~config ~keeper_name () with
+       | Ok ({atoms=0;official=0},None) -> ()
+       | Ok _ -> fail "quiet observed count retained checkpoint evidence"
        | Error error -> fail (Consumer.error_to_string error));
       check string "quiet tick preserves actual progress bytes" before
         (Fs_compat.load_file progress_path)) [1; 2; 3]
@@ -5171,6 +5338,14 @@ let () =
             test_n_tick_reads_every_intermediate_turn
         ; test_case "unread turns counts what a pass has left" `Quick
             test_unread_turns_counts_what_a_pass_has_left
+        ; test_case "observed unread count reuses only unchanged inputs" `Quick
+            test_observed_unread_reuses_only_unchanged_count_inputs
+        ; test_case "observed unread count preserves object and head errors" `Quick
+            test_observed_unread_rechecks_object_integrity_and_head_errors
+        ; test_case "observed unread count follows boundary rewrite and restart" `Quick
+            test_observed_unread_detects_boundary_rewrite_truncation_and_restart
+        ; test_case "observed unread count never caches absent or superseded heads" `Quick
+            test_observed_unread_does_not_cache_absence_or_superseded_heads
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
         ; test_case "undecodable current routes through write-path quarantine" `Quick

@@ -7,10 +7,28 @@
 
 초기 조사 기준은 로컬 `85f2823f053a693cecc8b63d6d0cb460dd10f9d0`이며,
 후속 후보의 별도 base와 검토 head는 아래에 적는다.
-다른 세션의 작업은 별도 worktree에서 확인했다. 현재 원격 main 전체와 모든 열린 PR의
-구현을 대조한 기록은 없다. 이 기록의 미확인은 기능 부재 판정이 아니다.
+초기에는 다른 세션의 작업을 별도 worktree에서 확인했으며, 원격 main과 열린 PR의
+구현 대조는 아래 게시 준비 checkpoint에서 이어갔다. 미확인은 기능 부재 판정이 아니다.
 
-## 현재 후보와 담당
+## 2026-11-17 게시 준비 checkpoint
+
+`gh api user`의 계정 조회와 지정된 협업 세션의 읽기·메시지 전달이 다시 성공했다.
+아래의 연결 실패와 게시 위임 실패는 그 이전 관측이며 현재 인증 상태를 뜻하지 않는다.
+Document 9층은 `gh stack rebase`로 전체를 `f9083a9957785a942d71611adb857d8d49a73388`
+위에 올렸다. 23개 커밋의 패치는 이전 후보 `46e09ab0b1e73ce621c65eef75329b1df6475dac`와
+`git range-diff`에서 모두 같았고 충돌은 없었다. 재기반 직후 leaf는
+`bd48b2e74d28653eebf3ba9ee1815e7a5db4709f`이며, 이 문단은 그 뒤의 문서 보완이다.
+
+게시 전 원격 PR의 파일·diff와 변경된 main의 직접 소비자를 별도로 대조한다.
+이 checkpoint에서 실행 시험을 다시 돌린 것은 아니다. 아래의 Core 18개, MCP 8개,
+retained decoder 7개와 타입 검사 결과는 각각 기록된 소스의 증거로 유지한다.
+현재 head의 소스 검토와 Draft 게시 여부는
+[Document 추적 이슈 #52591](https://github.com/jeong-sik/masc/issues/52591) 및
+[Schedule 추적 이슈 #52592](https://github.com/jeong-sik/masc/issues/52592)에 연결된 PR에서 확인한다.
+이번 게시 범위는 Schedule 3층과 Document 9층이다. UID·Librarian·설치·운영 복구와
+원래 25개 요구의 완료는 이 checkpoint로 확인되지 않는다.
+
+## 게시 준비 이전 후보와 담당
 
 | 작업 | 확인한 산출물 | 증거와 남은 일 |
 | --- | --- | --- |

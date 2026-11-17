@@ -14063,7 +14063,6 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
   state.msx_frame <- None;
   msx_surface_frame := None;
   state.msx_notice <- None;
-  state.msx_worker_down_notice <- None;
   render_spectator state;
   launch_msx_live_read state ~mailbox
 

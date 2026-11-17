@@ -2513,7 +2513,7 @@ let sidebar_heading ~cols ~title ~count =
   let count = Terminal_text.single_line count in
   let count_cells = Message_layout.display_width count in
   if avail < count_cells + 4 then
-    fit_width title avail
+    Ansi.bold ^ Theme.Side_pane.info () ^ fit_width title avail
   else
     let restore = Ansi.reset ^ Theme.side_pane_background () in
     let title_cells = avail - count_cells - 3 in

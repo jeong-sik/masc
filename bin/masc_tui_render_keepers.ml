@@ -859,9 +859,8 @@ let grid_librarian memory =
      | Memory_reading.Row_refused -> Memory_reading.pass_cell memory)
 
 (* The strip column of the memory and age views: the unread turns as a
-   segmented Oklab bar against [peak_lag] on a ground of dots, in the info
-   colour when requests skip atoms. A reading without a row leaves it to the
-   ● cell. *)
+   segmented bar against [peak_lag] on a ground of dots, in the info colour
+   when requests skip atoms. A reading without a row leaves it to the ● cell. *)
 let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
   let cells = Grid.strip_cells grid in
   let ground count = Theme.recede () ^ grid_repeat count Keeper_mark.grid_dot_mark ^ Ansi.reset in
@@ -873,12 +872,7 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
         | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured ->
             fun ~index:_ ~width:_ -> Theme.info ()
         | Memory_reading.No_gap ->
-            fun ~index ~width ->
-              let t =
-                if width <= 1 then 1.0
-                else float_of_int index /. float_of_int (width - 1)
-              in
-              Theme.pressure ~t
+            fun ~index:_ ~width:_ -> Theme.recede ()
       in
       Masc_tui_chart.meter_bar ~width:cells ~cell_style
         ~track_style:(Theme.recede ()) ~reset:Ansi.reset ~value:filled

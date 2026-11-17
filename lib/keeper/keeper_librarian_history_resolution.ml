@@ -38,6 +38,7 @@ let digest json =
   let+ canonical = unavailable (Lane_addon_action.canonical json) in
   Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string canonical)))
 let optional encode = function None -> `Null | Some value -> encode value
+let io work = Systhread_host.run ~label:__FUNCTION__ work
 let scope ~config ~keeper_name ~request_id =
   let* scope = unavailable (Request.discovery_scope ~base_path:config.Workspace.base_path
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path)
@@ -230,14 +231,14 @@ let same_binding ~config request =
     | Uncertain detail -> Unavailable detail)
 let preview_cut_command ~config ~keeper_name ~request_id =
   try
-    let* store,original,request=load ~config ~keeper_name ~request_id in
+    let* store,original,request=io (fun () -> load ~config ~keeper_name ~request_id) in
     let* ()=same_binding ~config request in
-    with_observation ~kind:Cut_original ~store ~original ~request
+    io (fun () -> with_observation ~kind:Cut_original ~store ~original ~request
       ~check_fence:(fun current -> unavailable (State.check_unfenced ~store ~request ~original:current))
       (fun current expected exclusion ->
         let* exclusion=Option.to_result ~none:(Unavailable "Cut observation has no held claim") exclusion in
         let+ basis=unavailable (State.observe_cut_basis ~store ~request ~exclusion) in
-        {expected;scope=current.Owner.scope;request_id;request_digest=current.request_digest},basis)
+        {expected;scope=current.Owner.scope;request_id;request_digest=current.request_digest},basis))
   with Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error (Unavailable (Printexc.to_string exn))
 type cut_grant = {
@@ -256,9 +257,9 @@ let confirm_cut_grant ~store grant =
   let* expected=Lane_addon_action.canonical (State.to_json grant.fence) in
   let* actual=Lane_addon_action.canonical (State.to_json stored) in
   let+ ()=if expected=actual then Ok () else Error "Cut grant fence changed" in stored
-let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use =
+let with_cut_fence_serialized_with ~after_publish ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use =
   try
-    let* store,original,request=load_original ~config ~keeper_name ~request_id in
+    let* store,original,request=io (fun () -> load_original ~config ~keeper_name ~request_id) in
     let run () =
     let* previous=unavailable (State.read ~store ~scope:original.scope ~request_id) in
     let check_fence current = match previous with
@@ -287,7 +288,7 @@ let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis 
               ~exclusion ~actor ~reason ~now) in
             let* published=unavailable (State.publish ~store fence) in
             (match published with
-             | Store.History_fence_stored | History_fence_already_stored -> Ok fence
+             | Store.History_fence_stored | History_fence_already_stored -> after_publish (); Ok fence
              | History_fence_owner_changed -> Error Observation_changed
              | History_fence_unconfirmed detail -> Error (Publication_uncertain detail)) in
         let grant={store;request;original=current;exclusion;fence} in
@@ -296,8 +297,14 @@ let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis 
     Keeper_librarian_durable_edge.with_destination ~config
       ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun current ->
         if Lane_addon_captured_destination.same_semantic current (Request.destination request)
-        then Ok (run ())
+        then Ok (io run)
         else Error "Cut command no longer has its same semantic destination")
     |> unavailable |> Result.join
   with Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error (Publication_uncertain (Printexc.to_string exn))
+let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use =
+  with_cut_fence_serialized_with ~after_publish:(fun () -> ())
+    ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use
+module For_testing = struct
+  let with_cut_fence_serialized = with_cut_fence_serialized_with
+end

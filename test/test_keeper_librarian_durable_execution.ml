@@ -126,6 +126,7 @@ type fixture = {
   set_step_response:(string -> Cohttp.Code.status_code * string) -> unit;
   delivery_loss:bool ref; deliveries:int ref; delivery_changed:Eio.Condition.t;
   clock:float Eio.Time.clock_ty Eio.Resource.t;
+  io_pool:Domain_pool.t option;
 }
 let observed_originals fixture=originals fixture.base_path fixture.keepers_dir fixture.store
 let start_memory_action ?(keeper_name=keeper_name) fixture action =
@@ -277,7 +278,7 @@ let prepare_history config kind =
   | `Error detail -> fail detail
 let progress fixture = io (fun () -> Position.read ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
   ~keeper_id:keeper_name |> Result.map_error Position.read_error_to_string |> get)
-let with_fixture ?(history_kind=Atoms) f =
+let with_fixture ?(history_kind=Atoms) ?(with_io_pool=false) f =
   let base_path=Filename.temp_dir "librarian-addon-owner-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path) (fun () ->
@@ -285,6 +286,8 @@ let with_fixture ?(history_kind=Atoms) f =
   Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") (fun () ->
   F.with_official_client_runtimes (fun () -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     Eio_guard.enable ();Eio.Switch.on_release sw Eio_guard.disable;
+    let io_pool=if with_io_pool then
+      Some (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)) else None in
     Fs_compat.set_fs (Eio.Stdenv.fs env);Masc_test_deps.init_eio_clock env;
     Process_eio.init ~cwd_default:(Eio.Stdenv.cwd env) ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
     Fun.protect ~finally:(fun () -> Process_eio.reset_for_testing ();Fs_compat.clear_fs ();Config_dir_resolver.reset ()) (fun () ->
@@ -362,7 +365,7 @@ let with_fixture ?(history_kind=Atoms) f =
       let fixture={base_path;config;keepers_dir;store;source;declaration;server;
         set_response=(fun callback -> response:=callback);
         set_step_response=(fun callback -> step_response:=callback);delivery_loss;deliveries;delivery_changed;
-        clock=Eio.Stdenv.clock env} in
+        clock=Eio.Stdenv.clock env;io_pool} in
       Runtime.For_testing.with_backend
         (backend env base_path delivery_loss delivery_observed) (fun () ->
         let exported,ready=Eio.Promise.create () in
@@ -2796,8 +2799,9 @@ let refuse_fenced_resume fixture original request =
     (before = (io (fun () -> current fixture.keepers_dir), progress fixture))
 (* Actual host cancellation/join and worker restoration. Observe through the
    owner so each test can choose its consumer/continuation entry afterward. *)
-let with_same_binding_cut ?(history_kind=Atoms) ?(before_capture=(fun _ -> ())) use =
-  with_fixture ~history_kind (fun ~sw fixture ->
+let with_same_binding_cut ?(history_kind=Atoms) ?(with_io_pool=false)
+    ?(before_capture=(fun _ -> ())) use =
+  with_fixture ~history_kind ~with_io_pool (fun ~sw fixture ->
     before_capture fixture;
     let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
     fixture.set_response (fun capture ->
@@ -2996,8 +3000,8 @@ let test_cut_fence_is_not_direct_child_or_host_authority () =
     check bool "denied authority changes no Memory, source position or provider count" true
       (before=(cut_memory_bytes fixture,cut_source_positions fixture,F.post_count fixture.server)))
 let submit_cut_command fixture original =
-  let preview,basis=io (fun () -> Resolution.preview_cut_command ~config:fixture.config
-    ~keeper_name ~request_id:original.Owner.request_id |> Result.map_error Resolution.error_to_string |> get) in
+  let preview,basis=Resolution.preview_cut_command ~config:fixture.config
+    ~keeper_name ~request_id:original.Owner.request_id |> Result.map_error Resolution.error_to_string |> get in
   io (fun () -> Resolution_work.submit_cut ~config:fixture.config ~keeper_name ~request_id:original.request_id
     ~expected:preview.expected ~basis ~actor:"operator" ~reason:"Continue this same-binding Cut"
     ~now:(Time_compat.now ()) |> Result.map_error Resolution_intent.error_to_string |> get)
@@ -3055,10 +3059,10 @@ let test_cut_command_recovers_fence_before_grant_after_memory_rebase () =
     let accepted=submit_cut_command fixture original in
     let basis=match accepted.intent.origin with Same_binding_cut basis -> basis | Worker_absence -> fail "Cut command origin" in
     let escaped=ref None in
-    let interrupted=memory_action fixture (fun () -> io (fun () ->
+    let interrupted=memory_action fixture (fun () ->
       Resolution.with_cut_fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
         ~expected:accepted.intent.expected ~basis ~actor:accepted.intent.actor ~reason:accepted.intent.reason
-        ~now:(Time_compat.now ()) ~use:(fun grant -> escaped:=Some grant;raise Exit))) in
+        ~now:(Time_compat.now ()) ~use:(fun grant -> escaped:=Some grant;raise Exit)) in
     check bool "interruption after fence has an uncertain publication result" true
       (match interrupted with Error (Resolution.Publication_uncertain _) -> true
        | Ok _ | Error (Original_absent | Ineligible _ | Observation_changed | Range_already_recorded
@@ -3377,15 +3381,179 @@ let test_counterpart_cut_capacity_refusal_preserves_original_obligation () =
     check bool "the original host Unknown evidence is preserved" true
       (host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
         ~request_id:exact.request_id |> get)))
+let test_cut_fence_outer_cancellation_joins_fs_scope () =
+  with_same_binding_cut ~history_kind:Mixed ~with_io_pool:true (fun fixture original request exact schema ->
+    let pool=match fixture.io_pool with Some pool -> pool | None -> fail "fixture has no actual IO pool" in
+    let accepted=submit_cut_command fixture original in
+    let basis=match accepted.intent.origin with
+      | Resolution_intent.Same_binding_cut basis -> basis
+      | Worker_absence -> fail "Cut command origin" in
+    let ids=let checkpoint (value:Source.Held.checkpoint)=Keeper_id.Trace_id.to_string value.trace_id in
+      let official (value:Source.Held.official)=List.map (fun (trace:Source.Held.trace) -> trace.id) value.traces in
+      (match Source.source (Capture.source request) with
+       | Source.Held.Checkpoint_only value -> [checkpoint value]
+       | Official_only value -> official value
+       | Mixed (left,right) -> checkpoint left::official right) |> List.sort_uniq String.compare in
+    let lock_paths=io (fun () -> List.map (fun id ->
+      let session_dir=Filename.concat (Keeper_fs.session_store_path_for_base_path fixture.base_path) id in
+      Checkpoint.with_session_lock ~session_dir (fun canonical -> canonical ^ ".checkpoint.lock") |> get) ids) in
+    let protected_paths=[
+      Filename.concat (scope_directory fixture original.scope) (Store.digest original.request_id ^ ".json");
+      Filename.concat (Store.root fixture.store) (Store.tool_request_body_path
+        ~scope:original.scope ~request_digest:original.request_digest);
+      Filename.concat (Store.root fixture.store) (Store.exact_request_path
+        ~declaration_id:"librarian" ~request_id:exact.Exact.request_id);
+      proof_path fixture exact] in
+    let protected_bytes ()=io (fun () -> List.map (fun path -> path,Fs_compat.load_file_opt path) protected_paths) in
+    let protected_before=protected_bytes () and positions=cut_source_positions fixture in
+    let memory_before=cut_memory_bytes fixture and posts=F.post_count fixture.server in
+    let published,published_u=Eio.Promise.create () and owner_context,owner_context_u=Eio.Promise.create () in
+    let pool_invocation_done,pool_invocation_done_u=Eio.Promise.create () in
+    let source_scope_joined=Atomic.make None and runtime_owner_joined=Atomic.make None in
+    let worker_entries=Atomic.make 0 in
+    let cancel_requested=Atomic.make false and readback_after_cancel=Atomic.make false in
+    let confirmed=Atomic.make None and escaped=Atomic.make None in
+    let mutex=Stdlib.Mutex.create () and condition=Stdlib.Condition.create () and released=ref false in
+    let release ()=Stdlib.Mutex.protect mutex (fun () ->
+      if not !released then (released:=true;Stdlib.Condition.broadcast condition)) in
+    let after_publish ()=
+      Stdlib.Mutex.lock mutex;
+      Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) (fun () ->
+        Eio.Promise.resolve published_u ();
+        while not !released do Stdlib.Condition.wait condition mutex done) in
+    let cancelled,pending,claim_busy,source_held,sibling_worker,published_bytes,blocked_intent,blocked_positions,blocked_memory =
+      Eio.Switch.run (fun cleanup_sw ->
+        (* The cancelled context belongs to the actual submitting Memory action,
+           not to a fiber that merely awaits that action's result promise. *)
+        let owner=start_memory_action fixture (fun () ->
+          try
+            Eio.Cancel.sub (fun context ->
+              Eio.Promise.resolve owner_context_u context;
+              ignore (Domain_pool.submit_io ~name:__FUNCTION__ pool (fun () ->
+                Atomic.incr worker_entries;
+                Fun.protect ~finally:(fun () -> Eio.Promise.resolve pool_invocation_done_u ()) (fun () ->
+                  Resolution.For_testing.with_cut_fence_serialized ~after_publish
+                    ~config:fixture.config ~keeper_name ~request_id:original.request_id
+                    ~expected:accepted.intent.expected ~basis ~actor:accepted.intent.actor ~reason:accepted.intent.reason
+                    ~now:(Time_compat.now ()) ~use:(fun grant ->
+                      Atomic.set escaped (Some grant);
+                      Atomic.set readback_after_cancel (Atomic.get cancel_requested);
+                      let result=Resolution_intent.confirm_cut_fence ~store:fixture.store ~expected:accepted.intent grant in
+                      Atomic.set confirmed (Some result);result))));
+              false)
+          with Eio.Cancel.Cancelled _ -> true) in
+        (* A cancelled cross-domain Runtime waiter may finish before its actual
+           owner callback. First drain the held source locks, then pass that
+           callback's configuration/action serializers. Neither barrier writes
+           product state. A failing baseline must join these scopes as well. *)
+        Eio.Switch.on_release cleanup_sw (fun () -> Eio.Cancel.protect (fun () ->
+          release ();
+          let sources=io (fun () -> List.map (fun lock_path ->
+            File_lock_eio.with_durable_lock ~lock_path (fun () -> ())) lock_paths) in
+          Atomic.set source_scope_joined (Some sources);
+          let joined=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+            ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun actual ->
+              Ok (Lane_addon_captured_destination.same_semantic actual (Capture.destination request))) in
+          Atomic.set runtime_owner_joined (Some joined);
+          (* Preserve an action exception for the ordinary observer; it cannot
+             skip the actual owner/source barriers during cleanup. *)
+          ignore (Eio.Promise.await owner);
+          Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name));
+        let context=Eio.Promise.await owner_context in
+        Eio.Promise.await published;
+        Eio.Cancel.cancel context Exit;
+        Atomic.set cancel_requested true;
+        Eio.Fiber.yield ();
+        let sibling_worker=Domain_pool.submit_io ~name:__FUNCTION__ pool Executor_pool_ref.in_worker_context in
+        let claim_busy=io (fun () -> match Exact.with_cut_exclusion
+          ~store:fixture.store ~declaration_id:"librarian" ~schema exact ~use:(fun _ -> ()) with
+          | Ok Exact.Cut_busy -> true
+          | Ok (Cut_not_retained _ | Cut_excluded ()) | Error _ -> false) in
+        let source_held=io (fun () -> List.map (fun lock_path ->
+          match File_lock_eio.try_with_durable_lock_observed ~lock_path (fun () -> ()) with
+          | File_lock_eio.Lock_held_elsewhere -> true
+          | Lock_attempted (Lock_not_acquired _ | Body_completed _) -> false) lock_paths) in
+        let published_bytes=io (fun () -> Fs_compat.load_file_opt (Filename.concat (Store.root fixture.store)
+          (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id))) in
+        let blocked_intent=last_cut_intent fixture original in
+        let blocked_positions=cut_source_positions fixture and blocked_memory=cut_memory_bytes fixture in
+        let pending=not (Eio.Promise.is_resolved owner) && not (Eio.Promise.is_resolved pool_invocation_done) in
+        release ();
+        let cancelled=Eio.Promise.await_exn owner in
+        Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+        cancelled,pending,claim_busy,source_held,sibling_worker,published_bytes,blocked_intent,blocked_positions,blocked_memory) in
+    check bool "actual fence bytes exist before the cancelled submission can finish" true (Option.is_some published_bytes);
+    check bool "outer cancellation waits for the held filesystem worker" true pending;
+    check bool "another actual pool worker progresses while the first joins" true sibling_worker;
+    check bool "the original Exact claim remains excluded after cancellation" true claim_busy;
+    check bool "the actual original trace locks remain held after cancellation" true
+      (source_held<>[] && List.for_all Fun.id source_held);
+    check bool "blocked fence grants no child" true
+      (blocked_intent.intent_id=accepted.intent.intent_id && blocked_intent.phase=Requested);
+    check bool "blocked fence advances no source ACK" true (blocked_positions=positions);
+    check bool "blocked fence writes no Memory" true (blocked_memory=memory_before);
+    check bool "the actual submitting fiber propagates cancellation" true cancelled;
+    check bool "pool invocation finished before the Memory lane drained" true (Eio.Promise.is_resolved pool_invocation_done);
+    check bool "cleanup joined the actual source scope before filesystem teardown" true
+      (match Atomic.get source_scope_joined with
+       | Some sources -> sources<>[] && List.for_all Result.is_ok sources
+       | None -> false);
+    check bool "cleanup crossed the same Runtime owner serializers after source release" true
+      (Atomic.get runtime_owner_joined=Some (Ok true));
+    check int "cancelled filesystem work is never replayed" 1 (Atomic.get worker_entries);
+    check bool "strict fence readback runs after outer cancellation" true (Atomic.get readback_after_cancel);
+    let fenced=match Atomic.get confirmed with
+      | Some result -> result |> Result.map_error Resolution_intent.error_to_string |> get
+      | None -> fail "cancelled filesystem scope never reached actual grant readback" in
+    check bool "the joined worker retained only the same command's Fenced CAS" true
+      (fenced.intent_id=accepted.intent.intent_id && fenced.phase=Fenced);
+    check bool "the released grant has no authority" true
+      (match Atomic.get escaped with None -> false | Some grant ->
+        Result.is_error (io (fun () -> Resolution.confirm_cut_grant ~store:fixture.store grant)));
+    check bool "cancelled fence preserves original owner, body, Unknown and proof bytes" true (protected_bytes ()=protected_before);
+    check bool "cancelled fence preserves all original source frontiers" true (cut_source_positions fixture=positions);
+    check bool "cancelled fence preserves every Memory publication file" true (cut_memory_bytes fixture=memory_before);
+    check int "cancelled fence sends no provider call" posts (F.post_count fixture.server);
+    let observed=io (fun () -> Resolution.read ~config:fixture.config ~keeper_name ~request_id:original.request_id
+      |> Result.map_error Resolution.error_to_string |> get) |> Option.get in
+    check bool "actual strict readback binds the same Cut" true (observed.Fence.authority=Excluded_cut basis);
+    run_cut_command fixture |> Result.map_error Resolution_intent.error_to_string |> get;
+    let first=last_cut_intent fixture original in
+    let child=match first.phase with
+      | Child_confirmed child -> child
+      | Requested | Refused _ | Fenced | Child_prepared _ | Child_intended _ -> fail "same command did not recover one child" in
+    run_cut_command fixture |> Result.map_error Resolution_intent.error_to_string |> get;
+    check bool "ordinary recovery retains one command and one child identity" true
+      (let intents=io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name ~request_id:original.request_id
+         |> Result.map_error Resolution_intent.error_to_string |> get) in
+       List.length intents=1 && (last_cut_intent fixture original).intent_id=accepted.intent.intent_id
+       && Resolution_intent.child (last_cut_intent fixture original)=Some child);
+    check bool "child preparation still consumes no original source" true (cut_source_positions fixture=positions);
+    check bool "child preparation still writes no Memory" true (cut_memory_bytes fixture=memory_before);
+    check bool "child preparation still preserves parent bytes" true (protected_bytes ()=protected_before);
+    check int "child preparation does not dispatch a provider" posts (F.post_count fixture.server);
+    drive_advanced fixture;
+    let completed=last_cut_intent fixture original in
+    check bool "only actual descendant Memory receipts prove completion" true
+      (match completed.memory_commit with Some proof -> proof.request_id=child.request_id && proof.receipts<>[] | None -> false);
+    check int "only the descendant adds one provider request" (posts+1) (F.post_count fixture.server);
+    let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source request)) in
+    check bool "actual descendant settlement ACKs the original external frontier" true (io (fun () ->
+      let cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config)
+        ~keeper_name |> get in
+      Keeper_external_read_cursor.observation_matches_preparation cursor ~after:through ~through ~atom:None ~official:None));
+    check json "descendant completion preserves the parent's retained Unknown" (Owner.to_json original)
+      (io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id
+        |> owned |> Option.get |> Owner.to_json)))
 let test_cut_command_busy_and_late_proof_keep_requested () =
   with_same_binding_cut (fun fixture original _request exact schema ->
     let accepted=submit_cut_command fixture original and before=cut_source_positions fixture in
-    let held=memory_action fixture (fun () -> io (fun () -> Exact.with_cut_exclusion
+    let held=memory_action fixture (fun () -> Exact.with_cut_exclusion
       ~store:fixture.store ~declaration_id:"librarian" ~schema exact ~use:(fun _ ->
         check bool "busy is a typed retryable command result" true
           (match Resolution_work.run_serialized ~config:fixture.config ~keeper_name with
            | Error Resolution_intent.Host_claim_busy -> true
-           | Ok () | Error (Invalid _ | Conflict _ | Unavailable _ | Publication_uncertain _) -> false))))
+           | Ok () | Error (Invalid _ | Conflict _ | Unavailable _ | Publication_uncertain _) -> false)))
       |> Result.map_error Exact.describe_recovery_error |> get in
     (match held with Exact.Cut_excluded () -> () | Cut_busy | Cut_not_retained _ -> fail "actual claim was not held");
     check bool "busy retains Requested and the original intent ID" true
@@ -6799,6 +6967,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_capacity_refusal_checks_no_host_proof ~frame_refusal:false);
   test_case "an actual unfenced root Cut cannot use the public refusal adapter" `Slow
     test_root_cut_cannot_use_the_public_refusal_adapter;
+  test_case "outer cancellation joins the actual Cut fence write before readback and recovery" `Slow
+    test_cut_fence_outer_cancellation_joins_fs_scope;
   test_case "a Cut fence without an intent blocks ordinary, direct and queued fresh history" `Quick
     (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:false);
   test_case "a Cut fence still blocks fresh history after its live owner record disappears" `Quick

@@ -40,16 +40,21 @@ export const LANE_QUEUE_WINDOW_S = 1200
  *  says what each lane held when the window opens. Observations arrive per
  *  change, so a count cap would cut a busy Keeper's window short. The window is
  *  read from timestamps, not positions: a snapshot without a server `ts` is
- *  stamped with the browser clock, so arrival order need not be time order. */
+ *  stamped with the browser clock, so arrival order need not be time order.
+ *  The result is sorted by ts. */
 export function retainLaneWindow<T extends { ts: number }>(observations: readonly T[]): T[] {
   if (observations.length === 0) return []
-  const newest = Math.max(...observations.map(observation => observation.ts))
+  const newest = observations.reduce((max, observation) => Math.max(max, observation.ts), -Infinity)
   const windowStart = newest - LANE_QUEUE_WINDOW_S
   const before = observations.filter(observation => observation.ts < windowStart)
   const opening = before.length === 0
     ? undefined
     : before.reduce((latest, observation) => (observation.ts > latest.ts ? observation : latest))
-  return observations.filter(observation => observation.ts >= windowStart || observation === opening)
+  // The swimlane reads segments by position, so the kept window is returned
+  // in time order with the opening observation first.
+  return observations
+    .filter(observation => observation.ts >= windowStart || observation === opening)
+    .sort((left, right) => left.ts - right.ts)
 }
 
 const SECONDS_PER_MINUTE = 60

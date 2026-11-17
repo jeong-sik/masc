@@ -95,7 +95,7 @@ describe('retainLaneWindow', () => {
     const early = at(newest.ts - LANE_QUEUE_WINDOW_S - 100)
     const opening = at(newest.ts - LANE_QUEUE_WINDOW_S - 5)
     const inside = at(newest.ts - 10)
-    expect(retainLaneWindow([early, newest, opening, inside])).toEqual([newest, opening, inside])
+    expect(retainLaneWindow([early, newest, opening, inside])).toEqual([opening, inside, newest])
   })
 
   it('an empty buffer stays empty', () => {

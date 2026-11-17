@@ -270,6 +270,24 @@ docker exec "$container" bash -lc '
   set -e
   cd /src
   eval "$(opam env --switch=masc)"
+  # The image ships a repo index from its own build date. A dependency the lock
+  # file names can be newer than that index, and --locked then has no candidate
+  # at all (v0.73.1 stopped on "matrix >= 0.2.0 / no matching version"). The
+  # switch step above updates only when this image lacks the OCaml patch
+  # release, so refresh the index unconditionally before resolving.
+  #
+  # --repositories only: a bare `opam update` also advances the branch pins
+  # taken just above (compact-protocol#main, bisect_ppx#5.2), which would move a
+  # release build to whatever those branches hold at build time. The lock file
+  # already fixes every version this step needs; only "that version exists" is
+  # missing. Retried for the same reason the install below is: one transient
+  # fetch failure should not end the job.
+  for attempt in 1 2 3; do
+    opam update --repositories -y && break
+    if [ "$attempt" -eq 3 ]; then echo "opam update failed after 3 attempts" >&2; exit 1; fi
+    echo "opam update failed (attempt $attempt); retrying in 15s"
+    sleep 15
+  done
   for attempt in 1 2 3; do
     opam install ./masc.opam --deps-only --with-test --locked -y && break
     if [ "$attempt" -eq 3 ]; then echo "opam install failed after 3 attempts" >&2; exit 1; fi

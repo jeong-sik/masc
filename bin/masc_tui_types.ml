@@ -27748,7 +27748,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
       layout.Facts.rows in
   let notice facts =
     lines ~lead:"  " ~rows_left:max_rows
-      (fact Facts.Plain "Job" :: facts @ [fact Facts.Plain chat_schedule_toggle_label]) in
+      (fact Facts.Plain "예약 Job" :: facts @ [fact Facts.Plain chat_schedule_toggle_label]) in
   let unread text = notice [fact (Facts.Reading Schedule_unknown) text] in
   match state.msg_target_keeper_name with
   | None -> []

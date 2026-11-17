@@ -2046,6 +2046,140 @@ let test_symlink_alias_mutex_convergence_and_zero_entry_leak () =
               (Fs_compat.append_path_mutex_count_for_testing ())))
 ;;
 
+let with_isolated_jsonl_dir f =
+  let dir = Filename.temp_dir "masc-private-jsonl-stage-" "" in
+  let rec rm_tree p =
+    match Unix.lstat p with
+    | exception Unix.Unix_error _ -> ()
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter (fun e -> rm_tree (Filename.concat p e)) (Sys.readdir p);
+      (try Unix.rmdir p with Unix.Unix_error _ -> ())
+    | _ -> (try Unix.unlink p with Unix.Unix_error _ -> ())
+  in
+  Fun.protect ~finally:(fun () -> rm_tree dir) (fun () -> f dir)
+;;
+
+let has_stage_or_prep_entries dir =
+  Array.exists
+    (fun entry ->
+       Fs_compat.is_atomic_orphan_name entry
+       || String.starts_with ~prefix:".private_jsonl_prep_" entry)
+    (Sys.readdir dir)
+;;
+
+let test_private_jsonl_rewrite_fails_closed_when_stage_flock_or_dup_fails () =
+  with_isolated_jsonl_dir @@ fun dir ->
+  let path = Filename.concat dir "store.jsonl" in
+  let original = "{\"row\":1}\n" in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = ignore; close_fd = Unix.close }
+  in
+  (match Fs_compat.append_private_jsonl_durable_stable_result path original with
+   | Ok _ -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  let expected = transaction_snapshot path ~after:None in
+  (match
+     Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_stage_hooks_for_testing
+       ~lock_stage_fd:(fun _fd ~path:prep_path ->
+         raise (Unix.Unix_error (Unix.EOPNOTSUPP, "flock", prep_path)))
+       ~io
+       path
+       ~expected
+       "{\"rewritten\":true}\n"
+   with
+   | Error
+       (Fs_compat.Rewrite_stage_failed
+         { failure =
+             { operation = Fs_compat.Create_rewrite_stage
+             ; exception_ = Unix.Unix_error (Unix.EOPNOTSUPP, "flock", _)
+             ; _
+             }
+         ; cleanup_failures = []
+         }) -> ()
+   | Error error ->
+     fail ("unexpected stage flock error: " ^ Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "rewrite succeeded despite unacquired stage flock");
+  check string "original bytes preserved on flock refusal" original (Fs_compat.load_file path);
+  check bool "no prep or stage leftovers after flock refusal" false (has_stage_or_prep_entries dir);
+  (match
+     Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_stage_hooks_for_testing
+       ~dup_stage_fd:(fun _fd ->
+         raise (Unix.Unix_error (Unix.EMFILE, "dup", "")))
+       ~io
+       path
+       ~expected
+       "{\"rewritten\":true}\n"
+   with
+   | Error
+       (Fs_compat.Rewrite_stage_failed
+         { failure =
+             { operation = Fs_compat.Create_rewrite_stage
+             ; exception_ = Unix.Unix_error (Unix.EMFILE, "dup", "")
+             ; _
+             }
+         ; cleanup_failures = []
+         }) -> ()
+   | Error error ->
+     fail ("unexpected stage dup error: " ^ Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "rewrite succeeded despite stage lease dup failure");
+  check string "original bytes preserved on dup refusal" original (Fs_compat.load_file path);
+  check bool "no prep or stage leftovers after dup refusal" false (has_stage_or_prep_entries dir)
+;;
+
+let test_private_jsonl_rewrite_prep_and_locked_stage_survive_orphan_sweep () =
+  with_isolated_jsonl_dir @@ fun dir ->
+  let path = Filename.concat dir "store.jsonl" in
+  let original = "{\"row\":1}\n" in
+  let replacement = "{\"rewritten\":true}\n" in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = ignore; close_fd = Unix.close }
+  in
+  (match Fs_compat.append_private_jsonl_durable_stable_result path original with
+   | Ok _ -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  let expected = transaction_snapshot path ~after:None in
+  let saw_before_lock = ref false in
+  let saw_after_promote = ref false in
+  (match
+     Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_stage_hooks_for_testing
+       ~before_lock_stage:(fun prep_path ->
+         saw_before_lock := true;
+         check bool "prep file exists before lock" true (Sys.file_exists prep_path);
+         check bool "prep basename is non-reclaimable" false
+           (Fs_compat.is_atomic_orphan_name (Filename.basename prep_path));
+         let report =
+           Fs_compat.cleanup_atomic_orphans ~ownership_root:dir ~base_path:dir ()
+         in
+         check int "unlocked prep file is not inspected as orphan" 0 report.inspected;
+         check int "unlocked prep file is not deleted" 0 report.deleted;
+         check bool "prep file survives sweep before lock" true (Sys.file_exists prep_path))
+       ~after_promote_stage:(fun stage_path ->
+         saw_after_promote := true;
+         check bool "promoted stage exists" true (Sys.file_exists stage_path);
+         check bool "promoted basename is reclaimable stage" true
+           (Fs_compat.is_atomic_orphan_name (Filename.basename stage_path));
+         let report =
+           Fs_compat.cleanup_atomic_orphans ~ownership_root:dir ~base_path:dir ()
+         in
+         check int "flocked stage is skipped by sweep" 0 report.inspected;
+         check int "flocked stage is not deleted" 0 report.deleted;
+         check int "flocked stage is not preserved" 0 report.preserved;
+         check bool "flocked stage survives sweep" true (Sys.file_exists stage_path))
+       ~io
+       path
+       ~expected
+       replacement
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  check bool "before_lock_stage hook ran" true !saw_before_lock;
+  check bool "after_promote_stage hook ran" true !saw_after_promote;
+  check string "replacement committed cleanly" replacement (Fs_compat.load_file path);
+  check string "unique regular binding preserved after promotion" replacement
+    (transaction_snapshot path ~after:None).bytes;
+  check bool "no prep or stage leftovers after commit" false (has_stage_or_prep_entries dir)
+;;
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; "--fifo-probe"; operation; path ] ->
@@ -2295,6 +2429,14 @@ let () =
             "symlink alias mutex convergence and zero entry leak"
             `Quick
             test_symlink_alias_mutex_convergence_and_zero_entry_leak
+        ; test_case
+            "private JSONL rewrite fails closed when stage flock or dup fails"
+            `Quick
+            test_private_jsonl_rewrite_fails_closed_when_stage_flock_or_dup_fails
+        ; test_case
+            "private JSONL rewrite prep and locked stage survive orphan sweep"
+            `Quick
+            test_private_jsonl_rewrite_prep_and_locked_stage_survive_orphan_sweep
         ] )
     ]
 ;;

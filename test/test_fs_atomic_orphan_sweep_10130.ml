@@ -76,6 +76,8 @@ let test_name_matcher () =
   yes ".atomic_.tmp";
   yes ".private_jsonl_a1b2c3.stage";
   yes ".private_jsonl_.stage";
+  no ".private_jsonl_prep_a1b2c3.prep";
+  no ".private_jsonl_prep_.prep";
   no "atomic_abc.tmp";
   no ".atomic_abc";
   no ".private_jsonl_abc";

@@ -348,8 +348,18 @@ let private_jsonl_current_cursor ~io path =
               |> Result.map (fun () -> cursor)))
 ;;
 
+let rec link_no_eintr ~src ~dst =
+  try Unix.link ~follow:false src dst with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> link_no_eintr ~src ~dst
+;;
+
+let rec unlink_no_eintr path =
+  try Unix.unlink path with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> unlink_no_eintr path
+;;
+
 let private_jsonl_remove_rewrite_stage temp_path =
-  match private_jsonl_capture Remove_rewrite_stage (fun () -> Unix.unlink temp_path) with
+  match private_jsonl_capture Remove_rewrite_stage (fun () -> unlink_no_eintr temp_path) with
   | Ok () -> None
   | Error failure ->
     (match failure.exception_ with
@@ -359,106 +369,204 @@ let private_jsonl_remove_rewrite_stage temp_path =
      | _ -> Some failure)
 ;;
 
-let private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content =
+let private_jsonl_promote_locked_prep_to_stage ~dir ~prep_path =
+  let module Names = Fs_compat_internal.Atomic_temp_name in
+  let prep_base = Filename.basename prep_path in
+  let prefix_len = String.length Names.private_jsonl_prep_prefix in
+  let suffix_len = String.length Names.private_jsonl_prep_suffix in
+  let stem =
+    if Names.is_private_jsonl_prep_name prep_base
+       && String.length prep_base > prefix_len + suffix_len
+    then
+      String.sub
+        prep_base
+        prefix_len
+        (String.length prep_base - prefix_len - suffix_len)
+    else Printf.sprintf "%d" (Unix.getpid ())
+  in
+  let rec try_link attempt =
+    let middle =
+      if attempt = 0 then stem else Printf.sprintf "%s_%d" stem attempt
+    in
+    let stage_name =
+      Names.private_jsonl_stage_prefix ^ middle ^ Names.private_jsonl_stage_suffix
+    in
+    let stage_path = Filename.concat dir stage_name in
+    match link_no_eintr ~src:prep_path ~dst:stage_path with
+    | () ->
+      (match unlink_no_eintr prep_path with
+       | () -> stage_path
+       | exception exn ->
+         let bt = Printexc.get_raw_backtrace () in
+         (try unlink_no_eintr stage_path with
+          | Unix.Unix_error _ -> ());
+         Printexc.raise_with_backtrace exn bt)
+    | exception Unix.Unix_error (Unix.EEXIST, _, _) when attempt < 64 ->
+      try_link (attempt + 1)
+  in
+  try_link 0
+;;
+
+let private_jsonl_replace_locked
+      ?(before_lock_stage = ignore)
+      ?(after_promote_stage = ignore)
+      ?(lock_stage_fd = Fs_compat_internal.Stage_flock.lock_exclusive_fd)
+      ?(dup_stage_fd = fun fd -> Unix.dup ~cloexec:true fd)
+      ?before_sync_rewrite_parent
+      ~dir
+      path
+      content
+  =
   match private_jsonl_capture Create_rewrite_stage (fun () ->
     (* Open_binary for the same reason as [Atomic_replace.open_atomic_temp_file]:
-       the stage file holds the replacement bytes verbatim. *)
+       the stage file holds the replacement bytes verbatim. Open under the
+       non-reclaimable [.prep] name first so an orphan sweep cannot delete an
+       unlocked 0-byte staging file before its [flock] lease is held. *)
     Filename.open_temp_file
       ~mode:[ Open_binary ]
       ~temp_dir:dir
-      Fs_compat_internal.Atomic_temp_name.private_jsonl_stage_prefix
-      Fs_compat_internal.Atomic_temp_name.private_jsonl_stage_suffix)
+      Fs_compat_internal.Atomic_temp_name.private_jsonl_prep_prefix
+      Fs_compat_internal.Atomic_temp_name.private_jsonl_prep_suffix)
   with
   | Error failure -> Error (Private_jsonl_operation_failed failure)
-  | Ok (temp_path, output) ->
+  | Ok (prep_path, output) ->
     let descriptor = Unix.descr_of_out_channel output in
-    let stage_lease_fd =
-      if Fs_compat_internal.Stage_flock.try_lock_exclusive_fd descriptor
-      then
-        (try Some (Unix.dup ~cloexec:true descriptor) with
-         | Unix.Unix_error _ -> None)
-      else None
+    let lease_fd_slot = ref None in
+    let close_lease_fd () =
+      match !lease_fd_slot with
+      | None -> ()
+      | Some lease_fd ->
+        lease_fd_slot := None;
+        (try Unix.close lease_fd with
+         | Unix.Unix_error _ -> ())
     in
-    Fun.protect
-      ~finally:(fun () ->
-        match stage_lease_fd with
-        | Some lease_fd ->
-          (try Unix.close lease_fd with
-           | Unix.Unix_error _ -> ())
-        | None -> ())
-    @@ fun () ->
-    let first_failure = ref None in
-    let run_until_failure operation f =
-      match !first_failure with
-      | Some _ -> ()
-      | None ->
-        (match private_jsonl_capture operation f with
-         | Ok () -> ()
-         | Error failure -> first_failure := Some failure)
+    Fun.protect ~finally:close_lease_fd @@ fun () ->
+    let setup_result =
+      match
+        private_jsonl_capture Create_rewrite_stage (fun () ->
+          before_lock_stage prep_path;
+          lock_stage_fd descriptor ~path:prep_path;
+          let lease_fd = dup_stage_fd descriptor in
+          lease_fd_slot := Some lease_fd;
+          private_jsonl_promote_locked_prep_to_stage ~dir ~prep_path)
+      with
+      | value -> value
+      | exception (Eio.Cancel.Cancelled _ as cancellation) ->
+        let bt = Printexc.get_raw_backtrace () in
+        close_out_noerr output;
+        (try unlink_no_eintr prep_path with
+         | Unix.Unix_error _ -> ());
+        Printexc.raise_with_backtrace cancellation bt
     in
-    run_until_failure Set_rewrite_stage_permissions (fun () ->
-      Unix.fchmod descriptor 0o600);
-    run_until_failure Write_rewrite_stage (fun () ->
-      output_string output content;
-      flush output);
-    run_until_failure Sync_rewrite_stage (fun () -> Unix.fsync descriptor);
-    let operation_failure = !first_failure in
-    let close_failure =
-      match private_jsonl_capture Close_rewrite_stage (fun () -> close_out output) with
-      | Ok () -> None
-      | Error failure -> Some failure
-    in
-    (match operation_failure, close_failure with
-     | Some failure, close_failure ->
-       let cleanup_failures =
-         [ close_failure; private_jsonl_remove_rewrite_stage temp_path ]
-         |> List.filter_map Fun.id
-       in
-       Error (Rewrite_stage_failed { failure; cleanup_failures })
-     | None, Some failure ->
-       let cleanup_failures =
-         private_jsonl_remove_rewrite_stage temp_path |> Option.to_list
-       in
-       Error (Rewrite_stage_failed { failure; cleanup_failures })
-     | None, None ->
-       (match private_jsonl_capture Rename_rewrite_stage (fun () ->
-          Unix.rename temp_path path)
-        with
-        | Error failure ->
-          let cleanup_failures =
-            private_jsonl_remove_rewrite_stage temp_path |> Option.to_list
-          in
-          Error (Rewrite_stage_failed { failure; cleanup_failures })
-        | Ok () ->
-          (match private_jsonl_capture Inspect_rewritten_data (fun () ->
-             Unix.lstat path)
+    match setup_result with
+    | Error failure ->
+      let close_failure =
+        match private_jsonl_capture Close_rewrite_stage (fun () -> close_out output) with
+        | Ok () -> None
+        | Error close_err ->
+          close_out_noerr output;
+          Some close_err
+      in
+      let cleanup_failures =
+        [ close_failure; private_jsonl_remove_rewrite_stage prep_path ]
+        |> List.filter_map Fun.id
+      in
+      Error (Rewrite_stage_failed { failure; cleanup_failures })
+    | Ok temp_path ->
+      let output_closed = ref false in
+      let stage_published = ref false in
+      (try
+         let first_failure = ref None in
+         let run_until_failure operation f =
+           match !first_failure with
+           | Some _ -> ()
+           | None ->
+             (match private_jsonl_capture operation f with
+              | Ok () -> ()
+              | Error failure -> first_failure := Some failure)
+         in
+         run_until_failure Create_rewrite_stage (fun () ->
+           after_promote_stage temp_path);
+         run_until_failure Set_rewrite_stage_permissions (fun () ->
+           Unix.fchmod descriptor 0o600);
+         run_until_failure Write_rewrite_stage (fun () ->
+           output_string output content;
+           flush output);
+         run_until_failure Sync_rewrite_stage (fun () -> Unix.fsync descriptor);
+         let operation_failure = !first_failure in
+         let close_failure =
+           match
+             private_jsonl_capture Close_rewrite_stage (fun () ->
+               close_out output;
+               output_closed := true)
            with
+           | Ok () -> None
            | Error failure ->
-             Error
-               (Rewrite_published_durability_unknown
-                  { cursor = None; failure })
-           | Ok stats ->
-             (match private_jsonl_cursor_of_stats stats with
-              | Error error ->
-                let failure =
-                  private_jsonl_failure
-                    Inspect_rewritten_data
-                    (Failure (private_jsonl_transaction_error_to_string error))
-                in
-                Error
-                  (Rewrite_published_durability_unknown
-                     { cursor = None; failure })
-              | Ok cursor ->
-                (match private_jsonl_capture Sync_rewrite_parent (fun () ->
-                   Option.iter (fun before_sync -> before_sync dir)
-                     before_sync_rewrite_parent;
-                   fsync_parent_directory dir)
-                 with
-                 | Ok () -> Ok cursor
-                 | Error failure ->
-                   Error
-                     (Rewrite_published_durability_unknown
-                        { cursor = Some cursor; failure }))))))
+             close_out_noerr output;
+             output_closed := true;
+             Some failure
+         in
+         match operation_failure, close_failure with
+         | Some failure, close_failure ->
+           let cleanup_failures =
+             [ close_failure; private_jsonl_remove_rewrite_stage temp_path ]
+             |> List.filter_map Fun.id
+           in
+           Error (Rewrite_stage_failed { failure; cleanup_failures })
+         | None, Some failure ->
+           let cleanup_failures =
+             private_jsonl_remove_rewrite_stage temp_path |> Option.to_list
+           in
+           Error (Rewrite_stage_failed { failure; cleanup_failures })
+         | None, None ->
+           (match private_jsonl_capture Rename_rewrite_stage (fun () ->
+              Unix.rename temp_path path;
+              stage_published := true)
+            with
+            | Error failure ->
+              let cleanup_failures =
+                private_jsonl_remove_rewrite_stage temp_path |> Option.to_list
+              in
+              Error (Rewrite_stage_failed { failure; cleanup_failures })
+            | Ok () ->
+              (match private_jsonl_capture Inspect_rewritten_data (fun () ->
+                 Unix.lstat path)
+               with
+               | Error failure ->
+                 Error
+                   (Rewrite_published_durability_unknown
+                      { cursor = None; failure })
+               | Ok stats ->
+                 (match private_jsonl_cursor_of_stats stats with
+                  | Error error ->
+                    let failure =
+                      private_jsonl_failure
+                        Inspect_rewritten_data
+                        (Failure (private_jsonl_transaction_error_to_string error))
+                    in
+                    Error
+                      (Rewrite_published_durability_unknown
+                         { cursor = None; failure })
+                  | Ok cursor ->
+                    (match private_jsonl_capture Sync_rewrite_parent (fun () ->
+                       Option.iter (fun before_sync -> before_sync dir)
+                         before_sync_rewrite_parent;
+                       fsync_parent_directory dir)
+                     with
+                     | Ok () -> Ok cursor
+                     | Error failure ->
+                       Error
+                         (Rewrite_published_durability_unknown
+                            { cursor = Some cursor; failure })))))
+       with
+       | Eio.Cancel.Cancelled _ as cancellation ->
+         let bt = Printexc.get_raw_backtrace () in
+         if not !output_closed then close_out_noerr output;
+         if not !stage_published
+         then
+           (try unlink_no_eintr temp_path with
+            | Unix.Unix_error _ -> ());
+         Printexc.raise_with_backtrace cancellation bt)
 ;;
 
 type private_jsonl_append_observation =
@@ -664,6 +772,10 @@ let rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
 (* A cursor can repeat after an inode is recycled. Compare the full observed
    bytes under the stable sibling lock before replacing the current store. *)
 let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
+      ?before_lock_stage
+      ?after_promote_stage
+      ?lock_stage_fd
+      ?dup_stage_fd
       ?before_sync_rewrite_parent ~io path ~(expected : private_jsonl_snapshot) content =
   if not (String.equal content "")
      && not (Char.equal content.[String.length content - 1] '\n')
@@ -679,7 +791,16 @@ let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
       if not (Private_jsonl_cursor.equal expected.cursor actual)
       then Error (Cursor_mismatch { expected = expected.cursor; actual })
       else if not (String.equal expected.bytes "") then Error (Transaction_content_changed { path })
-      else private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content
+      else
+        private_jsonl_replace_locked
+          ?before_lock_stage
+          ?after_promote_stage
+          ?lock_stage_fd
+          ?dup_stage_fd
+          ?before_sync_rewrite_parent
+          ~dir
+          path
+          content
     | Some fd ->
       private_jsonl_with_fd ~close_operation:Close_transaction_data ~close_fd:io.close_fd ~success fd (fun () ->
         let* stats = private_jsonl_capture Inspect_transaction_data (fun () -> Unix.fstat fd)
@@ -691,7 +812,15 @@ let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
         let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size in
         let* () = if String.equal expected.bytes bytes then Ok () else Error (Transaction_content_changed { path }) in
         let* () = private_jsonl_validate_open_binding ~operation:Inspect_transaction_path ~path fd in
-        private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content)
+        private_jsonl_replace_locked
+          ?before_lock_stage
+          ?after_promote_stage
+          ?lock_stage_fd
+          ?dup_stage_fd
+          ?before_sync_rewrite_parent
+          ~dir
+          path
+          content)
 ;;
 
 let rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected content =
@@ -703,4 +832,27 @@ let rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
       ?before_sync_rewrite_parent ~io path ~expected content =
   rewrite_private_jsonl_durable_locked_at_snapshot_with_io
     ?before_sync_rewrite_parent ~io path ~expected content
+;;
+
+let rewrite_private_jsonl_durable_locked_at_snapshot_with_stage_hooks_for_testing
+      ?before_lock_stage
+      ?after_promote_stage
+      ?lock_stage_fd
+      ?dup_stage_fd
+      ?before_sync_rewrite_parent
+      ~io
+      path
+      ~expected
+      content
+  =
+  rewrite_private_jsonl_durable_locked_at_snapshot_with_io
+    ?before_lock_stage
+    ?after_promote_stage
+    ?lock_stage_fd
+    ?dup_stage_fd
+    ?before_sync_rewrite_parent
+    ~io
+    path
+    ~expected
+    content
 ;;

@@ -1209,8 +1209,18 @@ let run_keeper_invocation_turn_admitted
   (* The turn's number is spent with the Owner before the observation names
      it and before the body writes under it (#52839). *)
   match Keeper_turn_allocation.allocate ~config:ctx.config ~keeper_name:name with
-  | Error error ->
-    let { Keeper_request_failure.cause } = Keeper_request_failure.of_core_error error in
+  (* A name with no Keeper behind it is refused the way [ensure_keeper_exists]
+     refuses it in the body: the caller named something absent. *)
+  | Error (Keeper_turn_allocation.Keeper_absent _) ->
+    dispatch_failed
+      ~class_:Tool_result.Workflow_rejection
+      (Keeper_request_failure.Keeper_meta_unresolved
+         { keeper = name; detail = keeper_absent_detail ~config:ctx.config name })
+  | Error (Keeper_turn_allocation.Owner_refused _ as error) ->
+    let { Keeper_request_failure.cause } =
+      Keeper_request_failure.of_core_error
+        (Keeper_turn_allocation.to_core_error ~config:ctx.config ~keeper_name:name error)
+    in
     dispatch_failed ~class_:Tool_result.Runtime_failure cause
   | Ok keeper_turn_id ->
   let observation_token = Keeper_turn_observation_token.fresh () in

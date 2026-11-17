@@ -234,7 +234,13 @@ let run_keeper_cycle
      terminal paths can include it in the receipt and observability stream.
      The Owner has spent it before anything below writes under it (#52839). *)
   match Keeper_turn_allocation.allocate ~config ~keeper_name:meta.name with
-  | Error error ->
+  | Error allocation_error ->
+    let error =
+      Keeper_turn_allocation.to_core_error
+        ~config
+        ~keeper_name:meta.name
+        allocation_error
+    in
     Error
       { error
       ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
@@ -1160,6 +1166,7 @@ let run_keeper_cycle
                   Keeper_unified_metrics.append_decision_record
                     ~config
                     ~meta:updated_meta
+                    ~keeper_turn_id
                     ~turn_ctx_cell
                     ~observation
                     ~latency_ms

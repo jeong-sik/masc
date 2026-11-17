@@ -436,7 +436,7 @@ max-concurrent = 1
     let directory = Filename.dirname log_path in
     if not (Sys.file_exists directory) then Unix.mkdir directory 0o755;
     Keeper_unified_metrics_decision.append_decision_record ~config ~meta
-      ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~keeper_turn_id:1 ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
       ~observation ~latency_ms:0 ~outcome:Keeper_decision_outcome.Success
       ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
       ~degraded_retry_applied:None ~degraded_retry_deferred:None ();

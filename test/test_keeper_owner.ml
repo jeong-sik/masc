@@ -5746,6 +5746,43 @@ let test_turn_number_survives_an_owner_restart_without_commit () =
        check int "the restarted Owner hands out a fresh number" 2 second)
 ;;
 
+(* #52839: a turn for a name with no Keeper is the caller naming something
+   absent, so the allocation says so in its type; only an Owner that exists
+   and still fails is a refusal. *)
+let test_turn_allocation_types_an_absent_keeper () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "owner-test"));
+       let meta = make_meta "alloc-present" in
+       (match Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error detail -> fail ("failed to seed owner meta: " ^ detail));
+       Eio.Switch.run @@ fun sw ->
+       (match
+          Owner_registry.install_from_store
+            ~sw ~operation_runner:None ~on_turn_slot_released:None config
+        with
+        | Ok _ -> ()
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       (match Keeper_turn_allocation.allocate ~config ~keeper_name:meta.name with
+        | Ok turn_id -> check int "a present Keeper gets its first number" 1 turn_id
+        | Error (Keeper_turn_allocation.Keeper_absent error)
+        | Error (Keeper_turn_allocation.Owner_refused error) ->
+          fail (Owner_registry.command_error_to_string error));
+       match Keeper_turn_allocation.allocate ~config ~keeper_name:"alloc-absent" with
+       | Error (Keeper_turn_allocation.Keeper_absent _) -> ()
+       | Error (Keeper_turn_allocation.Owner_refused error) ->
+         fail ("an absent Keeper read as an Owner failure: "
+               ^ Owner_registry.command_error_to_string error)
+       | Ok turn_id ->
+         fail (Printf.sprintf "an absent Keeper got turn number %d" turn_id))
+;;
+
 let test_root_inventory_loads_and_extends_exactly_once () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -7899,6 +7936,10 @@ let () =
             "turn number survives an owner restart without commit"
             `Quick
             test_turn_number_survives_an_owner_restart_without_commit
+        ; test_case
+            "turn allocation types an absent keeper"
+            `Quick
+            test_turn_allocation_types_an_absent_keeper
         ; test_case
             "same-process recreate reopens purged operation store"
             `Quick

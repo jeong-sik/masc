@@ -126,9 +126,9 @@ let record_pre_dispatch_terminal_observation
       ~(terminal_reason_code : string)
       ~(activity_kind : string)
       ~(trajectory_outcome : Trajectory.trajectory_outcome)
+      ~(keeper_turn_id : int)
       ?error_kind
       ?error_message
-      ?keeper_turn_id
       ()
   : unit
   =
@@ -146,10 +146,7 @@ let record_pre_dispatch_terminal_observation
   let receipt : Keeper_execution_receipt.t =
     { keeper_name = meta.name
     ; trace_id
-    ; turn_count =
-        (match keeper_turn_id with
-         | Some _ -> keeper_turn_id
-         | None -> Some meta.runtime.last_turn_id)
+    ; turn_count = Some keeper_turn_id
     ; agent_core_turn_count = None
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; outcome
@@ -198,7 +195,7 @@ let record_pre_dispatch_terminal_observation
       | None -> Keeper_execution_receipt.outcome_kind_to_string outcome
     in
     Keeper_runtime_manifest.make ~ts:ended_at ~keeper_name:meta.name
-      ~trace_id ?keeper_turn_id ~event
+      ~trace_id ~keeper_turn_id ~event
       ~runtime_id:runtime_id_string ~status ?decision ~receipt_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in

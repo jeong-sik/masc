@@ -2,7 +2,13 @@
 
     Organises JSONL records into [base_dir/YYYY-MM/DD.jsonl] files.
     Stores rooted at the same [base_dir] share one {!Cross_context_mutex.t} for
-    concurrent-safe appends from fibers and OS threads. *)
+    concurrent-safe appends from fibers and OS threads.
+
+    Day-file readers coordinate descriptor admission and final close with the
+    canonical data-path mutex used by cooperative private-file writers. Row
+    callbacks run outside that mutex, and chunked scans retain one channel.
+    This does not add an atomic content snapshot or arbitrary inode-alias
+    coordination; each reader retains its existing captured extent/tail policy. *)
 
 type t
 (** Opaque handle.  Holds [base_dir] and the append mutex. *)

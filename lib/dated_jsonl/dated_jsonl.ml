@@ -328,8 +328,7 @@ let line_is_non_empty line =
 let iter_non_empty_lines path f =
   if Fs_compat.file_exists path then
     try
-      let ic = open_in_bin path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      Fs_compat.Input.with_open ~path ~open_input:open_in_bin (fun ic ->
         try
           while true do
             let line = input_line ic in
@@ -342,8 +341,7 @@ let count_non_empty_lines path =
   if not (Fs_compat.file_exists path) then 0
   else
     try
-      let ic = open_in_bin path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      Fs_compat.Input.with_open ~path ~open_input:open_in_bin (fun ic ->
         let count = ref 0 in
         (try
            while true do
@@ -377,6 +375,17 @@ let remove_file_and_empty_month ~month_path path =
 let close_file_descriptor_noerr descriptor =
   try Unix.close descriptor with
   | Unix.Unix_error _ -> ()
+;;
+
+(* Conversion is still part of admission: a rejected raw descriptor must be
+   settled before leaving the path mutex, with its original exception intact. *)
+let input_channel_of_descriptor descriptor =
+  match Unix.in_channel_of_descr descriptor with
+  | input -> input
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    close_file_descriptor_noerr descriptor;
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let non_regular_file_kind_of_stats stats =
@@ -446,7 +455,7 @@ let open_regular_input_result path =
                         ; detail = "path identity changed while opening"
                         })
                  | None ->
-                   Ok (Unix.in_channel_of_descr descriptor))))))
+                   Ok (input_channel_of_descriptor descriptor))))))
 ;;
 
 (** Read the last [n] non-empty lines from an open file. Each byte is inspected
@@ -582,12 +591,15 @@ let load_tail_rows_inline path ~max_lines =
   if max_lines <= 0 || not (Fs_compat.file_exists path)
   then []
   else
-    match open_in_bin path with
-    | exception Sys_error _ when not (Fs_compat.file_exists path) -> []
-    | input ->
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr input)
-        (fun () -> load_tail_rows_from_channel input ~max_lines)
+    let open_input path =
+      match open_in_bin path with
+      | input -> Ok input
+      | exception Sys_error _ when not (Fs_compat.file_exists path) -> Error ()
+    in
+    match Fs_compat.Input.with_open_result ~path ~open_input
+      (fun input -> Ok (load_tail_rows_from_channel input ~max_lines)) with
+    | Ok rows -> rows
+    | Error () -> []
 ;;
 
 let load_tail_lines_inline path ~max_lines =
@@ -626,13 +638,32 @@ let load_tail_lines_result_inline path ~max_lines =
   if max_lines <= 0
   then Ok []
   else
-    match open_regular_input_result path with
-    | Error _ as error -> error
-    | Ok input ->
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr input)
-        (fun () ->
-           tail_rows_of_input_result ~path input ~max_lines |> Result.map tail_lines)
+    Fs_compat.Input.with_open_result ~path ~open_input:open_regular_input_result
+      (fun input -> tail_rows_of_input_result ~path input ~max_lines |> Result.map tail_lines)
+;;
+
+type tail_input_rejection =
+  | Missing_tail_file
+  | Tail_input_error of read_error
+
+let open_tail_input_result path =
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error Missing_tail_file
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Tail_input_error
+      (Io_error { operation = Open_file; path; detail = Unix.error_message error }))
+  | descriptor ->
+    let reject error =
+      close_file_descriptor_noerr descriptor;
+      Error (Tail_input_error error)
+    in
+    (match Unix.fstat descriptor with
+     | exception Unix.Unix_error (error, _, _) ->
+       reject (Io_error { operation = Inspect; path; detail = Unix.error_message error })
+     | stats ->
+       match non_regular_file_kind_of_stats stats with
+       | Some kind -> reject (Non_regular_file { path; kind })
+       | None -> Ok (input_channel_of_descriptor descriptor))
 ;;
 
 (* The open itself tells a missing file from one that cannot be opened, so no
@@ -642,29 +673,12 @@ let load_tail_rows_result_inline path ~max_lines =
   if max_lines <= 0
   then Ok []
   else
-    match
-      Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0
-    with
-    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
-    | exception Unix.Unix_error (error, _, _) ->
-      Error
-        (Io_error { operation = Open_file; path; detail = Unix.error_message error })
-    | descriptor ->
-      (match Unix.fstat descriptor with
-       | exception Unix.Unix_error (error, _, _) ->
-         close_file_descriptor_noerr descriptor;
-         Error
-           (Io_error { operation = Inspect; path; detail = Unix.error_message error })
-       | stats ->
-         (match non_regular_file_kind_of_stats stats with
-          | Some kind ->
-            close_file_descriptor_noerr descriptor;
-            Error (Non_regular_file { path; kind })
-          | None ->
-            let input = Unix.in_channel_of_descr descriptor in
-            Fun.protect
-              ~finally:(fun () -> close_in_noerr input)
-              (fun () -> tail_rows_of_input_result ~path input ~max_lines)))
+    match Fs_compat.Input.with_open_result ~path ~open_input:open_tail_input_result
+      (fun input -> tail_rows_of_input_result ~path input ~max_lines
+        |> Result.map_error (fun error -> Tail_input_error error)) with
+    | Ok rows -> Ok rows
+    | Error Missing_tail_file -> Ok []
+    | Error (Tail_input_error error) -> Error error
 ;;
 
 let map_tail_rows_result path ~max_lines ~f =
@@ -777,12 +791,8 @@ let find_latest_decoded_from_channel input ~decode f =
 ;;
 
 let find_latest_entry_in_file_result path f =
-  match open_regular_input_result path with
-  | Error _ as error -> error
-  | Ok input ->
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr input)
-      (fun () ->
+  Fs_compat.Input.with_open_result ~path ~open_input:open_regular_input_result
+      (fun input ->
          match
            find_latest_decoded_from_channel
              input
@@ -1157,43 +1167,46 @@ let collect_matching_files ?(offset = 0) t n ~month_is_in_range
              if day_is_in_range m d
              then begin
                let path = Filename.concat month_path d in
-               match Unix.openfile path [ Unix.O_RDONLY ] 0 with
-               | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+               let open_input path =
+                 match Unix.openfile path [ Unix.O_RDONLY ] 0 with
+                 | descriptor -> Ok (input_channel_of_descriptor descriptor)
+                 | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error ()
+               in
+               (match Fs_compat.Input.with_open_result ~path ~open_input
+                 (fun input ->
+                    (* See [find_latest_decoded_from_channel]: only its selected value matters. *)
+                    ignore
+                      (find_latest_decoded_from_channel
+                         input
+                         ~decode:(fun line ->
+                           try Some (Yojson.Safe.from_string line)
+                           with Yojson.Json_error _ -> None)
+                         (fun parsed ->
+                         match parsed with
+                         | None -> None
+                         | Some json ->
+                           (match f json with
+                            | None -> None
+                            | Some value ->
+                              if !skip > 0
+                              then (
+                                decr skip;
+                                None)
+                              else begin
+                                collected := value :: !collected;
+                                incr count;
+                                if !count >= n then Some () else None
+                              end)));
+                    Ok ()) with
+               | Ok () -> ()
+               | Error () ->
                  (* Retention snapshots names before reading them. A later
                     day or its month may disappear after a newer day's
                     callback yields. Other open failures stay observable. *)
                  Log.Misc.debug
                    "dated_jsonl: skipped day file removed during scan path=%s"
                    path;
-                 ()
-               | descriptor ->
-                 let input = Unix.in_channel_of_descr descriptor in
-                 Fun.protect
-                   ~finally:(fun () -> close_in_noerr input)
-                   (fun () ->
-                      (* See [find_latest_decoded_from_channel]: only its selected value matters. *)
-                      ignore
-                        (find_latest_decoded_from_channel
-                           input
-                           ~decode:(fun line ->
-                             try Some (Yojson.Safe.from_string line)
-                             with Yojson.Json_error _ -> None)
-                           (fun parsed ->
-                           match parsed with
-                           | None -> None
-                           | Some json ->
-                             (match f json with
-                              | None -> None
-                              | Some value ->
-                                if !skip > 0
-                                then (
-                                  decr skip;
-                                  None)
-                                else begin
-                                  collected := value :: !collected;
-                                  incr count;
-                                  if !count >= n then Some () else None
-                                end))))
+                 ())
              end)
              days
          end
@@ -1373,12 +1386,8 @@ let iter_all t f =
     months
 
 let iter_json_file_entries_result path f =
-  match open_regular_input_result path with
-  | Error _ as error -> error
-  | Ok input ->
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr input)
-      (fun () ->
+  Fs_compat.Input.with_open_result ~path ~open_input:open_regular_input_result
+      (fun input ->
          let rec loop line_number =
            match input_line input with
            | exception End_of_file -> Ok ()
@@ -1967,8 +1976,7 @@ let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
   if invalidated then Ok Cursor_invalidated
   else
     let read_file acc (path, captured) =
-      let* channel = open_regular_input_result path in
-      Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      Fs_compat.Input.with_open_result ~path ~open_input:open_regular_input_result (fun channel ->
         let* opened =
           match Unix.fstat (Unix.descr_of_in_channel channel) with
           | stats -> Ok stats
@@ -2027,8 +2035,7 @@ let fold_file_appended path ~incomplete_tail ~cursor ~init ~f =
   | [(prior_path, prior, _)] when prior_path <> path || not (append_only_successor prior captured) ->
       Ok Cursor_invalidated
   | [] | [_] ->
-    let* channel = open_regular_input_result path in
-    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+    Fs_compat.Input.with_open_result ~path ~open_input:open_regular_input_result (fun channel ->
       let* opened = match Unix.fstat (Unix.descr_of_in_channel channel) with
         | stats -> Ok stats
         | exception Unix.Unix_error (error, _, _) ->

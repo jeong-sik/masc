@@ -30,6 +30,10 @@ let request_error = function
 let error_message result =
   Masc_http_client.Pool.request_error_to_string (request_error result)
 
+let string_error_message = function
+  | Ok _ -> Alcotest.fail "expected Error from establishment"
+  | Error (message : string) -> message
+
 (* The refusal a closed port produces: this request tried TCP and every
    address refused it. *)
 let is_tcp (failure : Masc_http_client.Pool.connect_failure) =
@@ -222,12 +226,12 @@ let test_establishment_errors () =
   let no_create () = Alcotest.fail "failed probe reached Piaf creation" in
   Alcotest.(check string) "empty DNS result"
     "DNS resolution failed: no stream addresses"
-    (error_message (establish ~resolve:(fun () -> [])
+    (string_error_message (establish ~resolve:(fun () -> [])
       ~connect:no_connect ~create:no_create));
   let dns_error = Unix.Unix_error (Unix.EHOSTUNREACH, "getaddrinfo", "host") in
   Alcotest.(check string) "DNS error preserves cause"
     ("DNS resolution failed: " ^ Printexc.to_string dns_error)
-    (error_message (establish ~resolve:(fun () -> raise dns_error)
+    (string_error_message (establish ~resolve:(fun () -> raise dns_error)
       ~connect:no_connect ~create:no_create));
   (* Eio's printer breaks an [Io] error's context onto its own line; the
      message it goes into is one line. *)
@@ -236,7 +240,7 @@ let test_establishment_errors () =
       "connecting to %s" "tcp:127.0.0.1:8935"
   in
   let refused_with_context =
-    error_message (establish ~resolve:(fun () -> [()])
+    string_error_message (establish ~resolve:(fun () -> [()])
       ~connect:(fun () -> raise with_context) ~create:no_create)
   in
   Alcotest.(check bool) "an Eio error's context stays on the message's line" false
@@ -247,10 +251,10 @@ let test_establishment_errors () =
   let resource_error = Unix.Unix_error (Unix.EMFILE, "socket", "") in
   Alcotest.(check string) "resource exhaustion is not reported as refusal"
     ("TCP connect failed: " ^ Printexc.to_string resource_error)
-    (error_message (establish ~resolve:(fun () -> [()])
+    (string_error_message (establish ~resolve:(fun () -> [()])
       ~connect:(fun () -> raise resource_error) ~create:no_create));
   Alcotest.(check string) "Piaf failure preserves cause" "TLS failure"
-    (error_message (establish ~resolve:(fun () -> [()])
+    (string_error_message (establish ~resolve:(fun () -> [()])
       ~connect:(fun () -> ()) ~create:(fun () -> Error "TLS failure")));
   Alcotest.(check (result string string)) "later address can connect"
     (Ok "created")
@@ -276,7 +280,7 @@ let test_later_address_after_client_failure () =
     [1; 2] (List.rev !attempts);
   Alcotest.(check string) "all client failures preserve the last cause"
     "TLS failure at 3"
-    (error_message (establish ~create:(fun address ->
+    (string_error_message (establish ~create:(fun address ->
       Error (Printf.sprintf "TLS failure at %d" address))))
 
 let test_establishment_deadline () =
@@ -286,7 +290,7 @@ let test_establishment_deadline () =
     Masc_http_client.Pool.For_testing.establish_connection
       ~clock ~timeout_seconds:0.05 ~resolve ~connect ~create in
   let check_timeout label result =
-    Alcotest.(check string) label "connect timeout" (error_message result)
+    Alcotest.(check string) label "connect timeout" (string_error_message result)
   in
   check_timeout "DNS uses establishment deadline"
     (establish ~resolve:Eio.Fiber.await_cancel
@@ -342,7 +346,7 @@ let test_establishment_cancellation () =
   Alcotest.(check bool) "cancellation reaches active establishment stage"
     true !cancelled;
   Alcotest.(check string) "outer cancellation is not a probe failure"
-    "outer cancellation" (error_message result)
+    "outer cancellation" (string_error_message result)
 
 (* Each accepted socket has its own switch. Completion is published after
    that switch closes, so FD measurements exclude server-side socket races.

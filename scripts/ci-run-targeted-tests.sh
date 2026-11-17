@@ -17,6 +17,75 @@ export DUNE_SOURCEROOT
 if [ -n "${TARGET_EIO_BACKEND:-}" ]; then
   export EIO_BACKEND="${TARGET_EIO_BACKEND:-}"
 fi
+# Shard support: SHARD_COUNT + SHARD_INDEX split the full behavioural
+# suite across workflow matrix jobs. The nightly measured one job growing
+# _build/<hash>/default/test by ~24G to 97% disk (run 43858983604), and
+# between-suite cleanup cannot help inside a single sequential job, so
+# the split itself is the fix. With both vars set and no explicit
+# TARGET_SUITES, suites are enumerated as the root @runtest alias runs
+# them — every (test (name X)) stanza in test/dune, the stanza files it
+# (include)s and test/<dir>/dune, plus the runtest-<name> lanes that the
+# root (alias (name runtest)) bundles reference — then filtered by a
+# stable checksum so every runner assigns every suite identically. Explicit TARGET_SUITES always wins, so the pull-request
+# gate and targeted dispatches are untouched.
+if [ -n "${SHARD_COUNT:-}" ] && [ -n "${SHARD_INDEX:-}" ] && [ -z "${TARGET_SUITES}" ]; then
+  case "${SHARD_COUNT}" in *[!0-9]*|"") log "[targeted] FAIL - shard: SHARD_COUNT is not a number"; exit 2;; esac
+  case "${SHARD_INDEX}" in *[!0-9]*|"") log "[targeted] FAIL - shard: SHARD_INDEX is not a number"; exit 2;; esac
+  if [ "${SHARD_COUNT}" -lt 1 ] || [ "${SHARD_INDEX}" -ge "${SHARD_COUNT}" ]; then
+    log "[targeted] FAIL - shard: need SHARD_COUNT >= 1 and SHARD_INDEX in [0,SHARD_COUNT)"
+    exit 2
+  fi
+  shard_list=""
+  shard_n=0
+  while IFS= read -r name; do
+    [ -n "${name}" ] || continue
+    if [ "$(( $(printf '%s' "${name}" | cksum | cut -d' ' -f1) % SHARD_COUNT ))" -eq "${SHARD_INDEX}" ]; then
+      shard_list="${shard_list:+${shard_list},}${name}"
+      shard_n=$((shard_n + 1))
+    fi
+  done < <(
+    {
+      python3 - <<'PY_ENUM'
+import re, glob
+names = set()
+files = ['test/dune'] + sorted(glob.glob('test/stanzas/*.inc')) + sorted(glob.glob('test/*/dune'))
+stanza = re.compile(r'\(test\b')
+name = re.compile(r'\(name\s+([A-Za-z0-9_.-]+)\)')
+bundle = re.compile(r'\(alias\s*\(\s*name\s+runtest\s*\)\s*\(deps\s*(.*?)\)\s*\)', re.S)
+ref = re.compile(r'\(alias\s+runtest-([A-Za-z0-9_.-]+)\)')
+for f in files:
+    try:
+        s = open(f, encoding='utf-8', errors='replace').read()
+    except OSError:
+        continue
+    for m in stanza.finditer(s):
+        nm = name.search(s[m.end():m.end() + 600])
+        if nm:
+            names.add(nm.group(1))
+    for bm in bundle.finditer(s):
+        for am in ref.finditer(bm.group(1)):
+            names.add(am.group(1))
+for n in sorted(names):
+    print(n)
+PY_ENUM
+      find test -maxdepth 1 -name 'test_*.ml' -printf '%f\n' 2>/dev/null | sed -e 's|\.ml$||'
+      find test -maxdepth 1 -name '*.py' -printf '%f\n' 2>/dev/null | sed -e 's|\.py$||'
+      grep -Eho '^[[:space:]]*\(alias runtest-[A-Za-z0-9_-]+\)[[:space:]]*$' \
+        test/dune test/stanzas/* 2>/dev/null | sed -e 's|.*(alias runtest-||' -e 's|)||'
+      for d in test/*/; do
+        [ -f "${d}dune" ] && grep -Eq '^\(test' "${d}dune" 2>/dev/null \
+          && basename "${d}"
+      done
+    } | LC_ALL=C sort -u
+  )
+  if [ "${shard_n}" -eq 0 ]; then
+    log "[targeted] FAIL - shard ${SHARD_INDEX}/${SHARD_COUNT}: enumeration matched nothing"
+    exit 2
+  fi
+  TARGET_SUITES="${shard_list}"
+  log "[targeted] shard ${SHARD_INDEX}/${SHARD_COUNT}: ${shard_n} suites"
+fi
+
 suites=()
 exes=()
 aliases=()

@@ -59,7 +59,9 @@ GC는 두 위치의 정확한 직접 파일만 같은 receipt codec으로 해석
 cache의 보존이나 재시작 후 같은 읽기를 증명하지는 않는다.
 
 Keeper-history 요청은 실제 host가 저장한 Audio/Document 참조에 H5 읽기를 붙인다.
-Core·Codex·Claude·Antigravity·Muse가 같은 walk의 원문 읽기와 deadline을 공유한다.
+Core·Codex·Claude·Antigravity·Muse가 같은 walk에서 첨부별 원문 읽기 결과를 공유한다.
+앞선 읽기나 provider 요청에 걸린 시간은 새 첨부의 읽기를 막지 않는다. 외부 요청과
+PDF 명령의 자원 제한은 각 reader가 소유한다.
 읽기 결과는 receipt 내용 주소와 첨부 slot으로 구별한 JSON이며, 원본·성공 여부·ACK
 조건을 바꾸지 않는다. 임의 response JSON이나 vendor 데이터에서 첨부를 추정하지 않는다.
 완료 심사에는 새 읽기를 켜지 않는다.

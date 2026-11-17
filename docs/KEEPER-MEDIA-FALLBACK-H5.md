@@ -73,11 +73,19 @@ The original attachment remains available for another capable candidate.
   Poppler text extraction path. It does not render every page to images or take
   a verifier review slot. Other document MIME types report `no_document_reader`.
 
-The walk starts one reader deadline when it first needs a reader. The value comes
-from the existing `Keeper_runtime_resolved.provider_call_deadline_sec ()`.
-For this pre-provider step it is a wall-clock allowance shared by all attachments;
-it is not a remaining turn budget or a limit on Keeper autonomy. Both readers
-receive that deadline. Stored readings need no new reader call or deadline.
+One walk reuses attachment results. A new attachment reaches its
+reader even if earlier reads or provider requests took a long time. An operation
+failure belongs to that attachment; it does not refuse another original. Stored
+readings need no reader call.
+
+The reader owns each external operation's resource bounds. STT commands and HTTP
+requests retain their configured transport timeouts. PDF extraction uses the
+existing Poppler limit of 60 seconds for that document, together with its source,
+page and extracted-text limits and cancellation cleanup. The provider-call
+no-progress setting does not govern attachment reading. This also changes a
+single PDF's allowance: it used to inherit that setting (900 seconds by default)
+from the walk; it now receives the PDF operation's 60-second limit. It is not a
+limit shared across attachments or later requests.
 
 `Keeper_media_reading_maintenance` owns stored-reading retention. Retention is
 separate from admission, original attachment ownership and successful extraction.
@@ -182,8 +190,8 @@ does not establish a size guarantee for either lane.
 Consumed receipts retain original artifact bytes. Artifact-only ownership does
 not retain the H5 disk cache: maintenance can evict a derived reading, and a
 later walk then reads the preserved original again. The current walk still
-shares one raw result and deadline. Temporary aggregate-address lifetime also
-remains separate.
+shares the raw result for each attachment. Temporary aggregate-address lifetime
+also remains separate.
 
 ## Verification and remaining work
 

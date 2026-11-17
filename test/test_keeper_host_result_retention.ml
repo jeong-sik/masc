@@ -1266,7 +1266,7 @@ let retain_readable_media base_path =
 let retained_reader base_path read =
   let projector = Keeper_media_reading.projector
     ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~keeper_name
-    ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.) ~read () in
+    ~read () in
   projector, Keeper_turn_driver.For_testing.retained_media_reader
     ~input_source:(Keeper_request_source.Keeper_history {trace_id="retained-reading"}) projector
 
@@ -1282,7 +1282,7 @@ let test_retained_readings_share_raw_reader_and_shrink_exact_text () = with_work
   let reads = ref [] in
   let extracted = String.make 8192 'r' ^ " original-derived fact" in
   let projector, read_media = retained_reader base_path
-    (fun ~deadline:_ ~kind ~media_type ~bytes ->
+    (fun ~kind ~media_type ~bytes ->
       reads := (kind, media_type, bytes) :: !reads; Ok extracted) in
   let before = receipt_files base_path in
   let run = Outbox.run_carrier ~base_path ~keeper_name ~read_media
@@ -1332,13 +1332,51 @@ let test_retained_readings_share_raw_reader_and_shrink_exact_text () = with_work
   check (list (pair string string)) "reading and shrinking leave original receipts unchanged"
     before (receipt_files base_path))
 
+let test_later_host_attachments_are_read_after_a_history_timeout () = with_workspace (fun base_path ->
+  let media_store = Tool_blob_media_store.of_base_path ~base_path in
+  let earlier_bytes = "earlier history document" in
+  let earlier = match media_store.put ~media_type:"application/pdf" ~raw:earlier_bytes with
+    | Ok stored -> stored
+    | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
+  let calls = ref [] in
+  let projector, read_media = retained_reader base_path
+    (fun ~kind:_ ~media_type:_ ~bytes ->
+      calls := bytes :: !calls;
+      if String.equal bytes earlier_bytes then Error "budget_spent"
+      else Ok ("retained reading: " ^ bytes)) in
+  let history, _ = Keeper_media_reading.project projector ~needs_projection:(fun _ -> true)
+    [Agent_core.Types.Document {media_type="application/pdf";source=Agent_core.Types.Stored earlier}] in
+  (match history with
+   | [Agent_core.Types.Text text] -> check bool "the earlier reader timeout stays explicit" true
+       (String_util.contains_substring text "budget_spent")
+   | _ -> fail "history must represent the reader's failure");
+  let _, _, document, audio = retain_readable_media base_path in
+  let run = Outbox.run_carrier ~base_path ~keeper_name ~read_media
+    ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
+  let snapshot, carrier = get (Outbox.run_carrier_load run) in
+  let rows = reading_rows (Outbox.carrier_context carrier) in
+  let open Yojson.Safe.Util in
+  check int "the later host result carries both new attachment readings" 2 (List.length rows);
+  List.iter (fun row -> check string "the earlier timeout does not refuse another original"
+    "read" (row |> member "reading" |> member "status" |> to_string)) rows;
+  check bool "the new document reached its reader" true (List.mem document !calls);
+  check bool "the new audio reached its reader" true (List.mem audio !calls);
+  check int "only the three distinct originals were read" 3 (List.length !calls);
+  ignore (get (Outbox.run_carrier_load run));
+  check (result string string) "the earlier failed original still shares its own memo"
+    (Error "budget_spent")
+    (Keeper_media_reading.read_stored projector ~kind:Keeper_media_reading.Document
+       ~media_type:"application/pdf" earlier);
+  check int "carrier retry and the old failure do not read again" 3 (List.length !calls);
+  check int "reading leaves the original result pending" 1 (List.length (Outbox.receipt_ids snapshot)))
+
 let test_retained_readings_require_host_lineage () = with_workspace (fun base_path ->
   let response, _, _, _ = retain_readable_media base_path in
   get (Outbox.retain ~base_path ~keeper_name
     (vendor_receipt ~call_id:"opaque-vendor" ~tool_name:"Read" response));
   let calls = ref 0 in
   let _, read_media = retained_reader base_path
-    (fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> incr calls; Ok "read from host") in
+    (fun ~kind:_ ~media_type:_ ~bytes:_ -> incr calls; Ok "read from host") in
   let snapshot = load base_path in
   let message = match Outbox.context_message ~read_media snapshot with
     | Some message -> message | None -> fail "direct lanes need their retained context" in
@@ -1354,7 +1392,7 @@ let test_retained_readings_require_host_lineage () = with_workspace (fun base_pa
 let test_completion_review_retained_media_is_not_read () = with_workspace (fun base_path ->
   ignore (retain_readable_media base_path);
   let projector, _ = retained_reader base_path
-    (fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> fail "review cannot read retained media") in
+    (fun ~kind:_ ~media_type:_ ~bytes:_ -> fail "review cannot read retained media") in
   let read_media = Keeper_turn_driver.For_testing.retained_media_reader
     ~input_source:Keeper_request_source.Completion_review projector in
   check bool "review has no retained reader" true (Option.is_none read_media);
@@ -1368,7 +1406,7 @@ let test_retained_reader_cancellation_does_not_cache_partial_snapshot () = with_
   let _, retain, _, _ = retain_readable_media base_path in
   let calls = ref 0 and cancelled = Eio.Cancel.Cancelled Exit in
   let _, read_media = retained_reader base_path
-    (fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ ->
+    (fun ~kind:_ ~media_type:_ ~bytes:_ ->
       incr calls; if !calls=1 then raise cancelled else Ok "resumed original reading") in
   let run = Outbox.run_carrier ~base_path ~keeper_name ~read_media
     ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
@@ -1468,6 +1506,7 @@ let () = run "Original official-client host result retention"
       test_run_carrier_reprojection_waits_for_the_load];
    "retained media reading",[
     test_case "shared raw reader and exact address text" `Quick test_retained_readings_share_raw_reader_and_shrink_exact_text;
+    test_case "later host attachments survive an earlier history timeout" `Quick test_later_host_attachments_are_read_after_a_history_timeout;
     test_case "host lineage and direct context" `Quick test_retained_readings_require_host_lineage;
     test_case "completion review does not read retained media" `Quick test_completion_review_retained_media_is_not_read;
     test_case "cancellation leaves no partial cached carrier" `Quick test_retained_reader_cancellation_does_not_cache_partial_snapshot;

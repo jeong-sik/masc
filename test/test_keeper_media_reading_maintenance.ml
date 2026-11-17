@@ -154,8 +154,7 @@ let test_projected_reading_follows_its_attachment () =
       ~base_path
       ~keeper_name:"sweep-keeper"
       ~needs_projection:(fun _ -> true)
-      ~deadline:(Monotonic_deadline.after ~seconds:30.)
-      ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> Ok "the reading")
+      ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ -> Ok "the reading")
       [ block ]
   in
   let checkpoint = "keepers/sweep-keeper/checkpoint.json" in
@@ -202,11 +201,10 @@ let project_document projector stored =
 
 let test_raw_and_history_share_one_reading ~raw_first () =
   with_stored_reading @@ fun _base_path media_store stored ->
-  let reads = ref 0 and deadlines = ref 0 in
+  let reads = ref 0 in
   let raw = "  exact extracted fact\n" in
   let projector = Reading.projector ~media_store ~keeper_name:"shared-reader"
-    ~start_deadline:(fun () -> incr deadlines; Monotonic_deadline.after ~seconds:30.)
-    ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> incr reads; Ok raw) () in
+    ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ -> incr reads; Ok raw) () in
   let read_raw () = Reading.read_stored projector ~kind:Reading.Document
     ~media_type:"application/pdf" stored in
   let raw_result, history =
@@ -219,20 +217,17 @@ let test_raw_and_history_share_one_reading ~raw_first () =
     (String_util.contains_substring history "conversation history");
   check bool "history preserves exact extracted bytes" true
     (String.ends_with ~suffix:raw history);
-  check int "both consumers share one extraction" 1 !reads;
-  check int "both consumers share one lazy deadline" 1 !deadlines
+  check int "both consumers share one extraction" 1 !reads
 ;;
 
-let test_raw_disk_cache_needs_no_deadline () =
+let test_raw_disk_cache_needs_no_reader () =
   with_stored_reading @@ fun base_path media_store stored ->
   let raw = "persisted raw reading" in
   let first = Reading.projector ~base_path ~media_store ~keeper_name:"shared-reader"
-    ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.)
-    ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> Ok raw) () in
+    ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ -> Ok raw) () in
   ignore (project_document first stored);
   let reopened = Reading.projector ~base_path ~media_store ~keeper_name:"shared-reader"
-    ~start_deadline:(fun () -> fail "stored reading must not start a deadline")
-    ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> fail "stored reading must not extract again") () in
+    ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ -> fail "stored reading must not extract again") () in
   check (result string string) "a new walk reads the unchanged raw disk record" (Ok raw)
     (Reading.read_stored reopened ~kind:Reading.Document ~media_type:"application/pdf" stored)
 ;;
@@ -242,8 +237,8 @@ let test_unavailable_raw_result_retries_only_in_a_new_walk () =
     with_stored_reading @@ fun base_path media_store stored ->
     let reads = ref 0 in
     let make read = Reading.projector ~base_path ~media_store ~keeper_name:"shared-reader"
-      ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.) ~read () in
-    let unavailable = make (fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ ->
+      ~read () in
+    let unavailable = make (fun ~kind:_ ~media_type:_ ~bytes:_ ->
       incr reads; answer) in
     check (result string string) "raw failure stays a reason" (Error reason)
       (Reading.read_stored unavailable ~kind:Reading.Document ~media_type:"application/pdf" stored);
@@ -251,7 +246,7 @@ let test_unavailable_raw_result_retries_only_in_a_new_walk () =
     check bool "history marks the same attachment unavailable" true
       (String_util.contains_substring history "status=unavailable");
     check int "history does not retry the unavailable reading in this walk" 1 !reads;
-    let next = make (fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ ->
+    let next = make (fun ~kind:_ ~media_type:_ ~bytes:_ ->
       incr reads; Ok "reader recovered") in
     check (result string string) "unavailable is not a durable successful reading"
       (Ok "reader recovered")
@@ -260,24 +255,35 @@ let test_unavailable_raw_result_retries_only_in_a_new_walk () =
     [ Error "reader_unavailable", "reader_unavailable"; Ok " \n", "empty_reading" ]
 ;;
 
-let test_raw_and_history_share_an_expired_deadline () =
+let test_later_attachment_is_read_after_earlier_result ~earlier_succeeded () =
   with_stored_reading @@ fun _base_path media_store stored ->
-  let deadlines = ref 0 and gets = ref 0 in
+  let another = match media_store.put ~media_type:"application/pdf" ~raw:"later PDF bytes" with
+    | Ok stored -> stored
+    | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
+  let gets = ref 0 and reads = ref [] in
   let counted_store = { media_store with Agent_core.History.get = (fun reference ->
     incr gets; media_store.get reference) } in
+  let earlier_result = if earlier_succeeded then Ok "earlier reading" else Error "budget_spent" in
   let projector = Reading.projector ~media_store:counted_store ~keeper_name:"shared-reader"
-    ~start_deadline:(fun () -> incr deadlines; Monotonic_deadline.after ~seconds:(-1.))
-    ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> fail "expired walk must not read") () in
-  check (result string string) "raw API observes the caller's spent deadline"
-    (Error "budget_spent")
+    ~read:(fun ~kind:_ ~media_type:_ ~bytes ->
+      reads := bytes :: !reads;
+      if String.equal bytes "stored PDF bytes" then earlier_result else Ok "later reading") () in
+  check (result string string) "the first attachment keeps its own reader outcome"
+    earlier_result
     (Reading.read_stored projector ~kind:Reading.Document ~media_type:"application/pdf" stored);
   ignore (project_document projector stored);
-  let another = Agent_core.History.stored_of_raw "another attachment" in
-  check (result string string) "another attachment shares the same spent deadline"
-    (Error "budget_spent")
+  let later_history = project_document projector another in
+  check bool "a later history request reads a newly arrived attachment" true
+    (String.ends_with ~suffix:"later reading" later_history);
+  check (result string string) "a retained consumer shares the later attachment's reading"
+    (Ok "later reading")
     (Reading.read_stored projector ~kind:Reading.Document ~media_type:"application/pdf" another);
-  check int "one deadline for every consumer and attachment" 1 !deadlines;
-  check int "expired reading does not fetch stored bytes" 0 !gets
+  check (result string string) "the later result does not replace the first attachment's memo"
+    earlier_result
+    (Reading.read_stored projector ~kind:Reading.Document ~media_type:"application/pdf" stored);
+  check (list string) "each distinct original reaches its reader once"
+    [ "stored PDF bytes"; "later PDF bytes" ] (List.rev !reads);
+  check int "each distinct original is fetched once" 2 !gets
 ;;
 
 let test_raw_cancellation_propagates_without_memoization () =
@@ -285,8 +291,7 @@ let test_raw_cancellation_propagates_without_memoization () =
   let reads = ref 0 in
   let cancelled = Eio.Cancel.Cancelled Exit in
   let projector = Reading.projector ~media_store ~keeper_name:"shared-reader"
-    ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.)
-    ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ ->
+    ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ ->
       incr reads;
       if !reads = 1 then raise cancelled else Ok "resumed reading") () in
   (match Reading.read_stored projector ~kind:Reading.Document ~media_type:"application/pdf" stored with
@@ -326,12 +331,14 @@ let () =
             (test_raw_and_history_share_one_reading ~raw_first:true)
         ; test_case "history then raw read retain distinct attribution" `Quick
             (test_raw_and_history_share_one_reading ~raw_first:false)
-        ; test_case "raw disk reading needs no deadline" `Quick
-            test_raw_disk_cache_needs_no_deadline
+        ; test_case "raw disk reading needs no reader" `Quick
+            test_raw_disk_cache_needs_no_reader
         ; test_case "unavailable raw reading retries in the next walk" `Quick
             test_unavailable_raw_result_retries_only_in_a_new_walk
-        ; test_case "raw and history consumers share the spent deadline" `Quick
-            test_raw_and_history_share_an_expired_deadline
+        ; test_case "later attachment is read after an earlier success" `Quick
+            (test_later_attachment_is_read_after_earlier_result ~earlier_succeeded:true)
+        ; test_case "one attachment timeout does not reject a later attachment" `Quick
+            (test_later_attachment_is_read_after_earlier_result ~earlier_succeeded:false)
         ; test_case "raw reader cancellation propagates without memoization" `Quick
             test_raw_cancellation_propagates_without_memoization
         ] )

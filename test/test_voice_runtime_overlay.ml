@@ -655,11 +655,10 @@ let test_transcribe_endpoint_failover_surfaces_each_attempt () =
           (String_util.contains_substring msg "stt-b:")))
 ;;
 
-(* H5: one shared deadline for the whole STT chain. Two whisper_cli endpoints
-   whose commands are scripts, so no network and no model is involved. A script
-   that is started leaves a marker, which is how "not started" is observed. *)
-let h5_stt_fixture ~first ~second f =
-  let dir = Filename.temp_file "h5-stt-" "" in
+(* Two whisper_cli endpoints whose commands are scripts, so no network or
+   model is involved. Each command leaves a marker when it starts. *)
+let stt_chain_fixture ~first ~second f =
+  let dir = Filename.temp_file "stt-chain-" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o700;
   let script name body =
@@ -689,67 +688,15 @@ let h5_stt_fixture ~first ~second f =
     f ~audio ~first_marker ~second_marker)
 ;;
 
-let test_h5_stt_slow_first_endpoint_stops_the_chain_at_the_shared_deadline () =
-  h5_stt_fixture ~first:"/bin/sleep 5\nprintf late" ~second:"printf second"
+let test_stt_chain_fails_over_after_an_endpoint_error () =
+  stt_chain_fixture ~first:"exit 3" ~second:"printf second-heard"
     (fun ~audio ~first_marker ~second_marker ->
-      Eio_main.run @@ fun _env ->
-      let started = Unix.gettimeofday () in
-      (match
-         Masc.Voice_bridge.transcribe_audio ~audio_file:audio
-           ~deadline:(Monotonic_deadline.after ~seconds:0.5) ()
-       with
-       | Ok _ -> fail "a chain past its deadline must not answer"
-       | Error msg ->
-         check bool "reported as a spent budget" true
-           (String_util.contains_substring msg "budget_spent"));
-      check bool "it returned long before the slow endpoint would have" true
-        (Unix.gettimeofday () -. started < 4.);
-      check bool "the first endpoint was started" true (Sys.file_exists first_marker);
-      check bool "the second endpoint did not get a fresh budget" false
-        (Sys.file_exists second_marker))
-;;
-
-let test_h5_stt_timeout_is_none_for_a_spent_budget () =
-  (match
-     Voice_bridge_transport.stt_timeout_sec
-       ~deadline:(Monotonic_deadline.after ~seconds:0.) ()
-   with
-   | None -> ()
-   | Some seconds -> failf "a spent budget gave a timeout of %g s" seconds);
-  (match
-     Voice_bridge_transport.stt_timeout_sec
-       ~deadline:(Monotonic_deadline.after ~seconds:30.) ()
-   with
-   | Some seconds -> check bool "a live budget gives a positive timeout" true (seconds > 0.)
-   | None -> fail "a live budget must give a timeout");
-  match Voice_bridge_transport.stt_timeout_sec () with
-  | Some seconds -> check bool "no deadline keeps the configured timeout" true (seconds > 0.)
-  | None -> fail "without a deadline the configured timeout applies"
-;;
-
-let test_h5_stt_spent_deadline_starts_no_endpoint () =
-  h5_stt_fixture ~first:"printf first" ~second:"printf second"
-    (fun ~audio ~first_marker ~second_marker ->
-      Eio_main.run @@ fun _env ->
-      (match
-         Masc.Voice_bridge.transcribe_audio ~audio_file:audio
-           ~deadline:(Monotonic_deadline.after ~seconds:0.) ()
-       with
-       | Ok _ -> fail "a spent deadline must not answer"
-       | Error msg ->
-         check bool "reported as a spent budget" true
-           (String_util.contains_substring msg "budget_spent"));
-      check bool "no endpoint started" false
-        (Sys.file_exists first_marker || Sys.file_exists second_marker))
-;;
-
-let test_h5_stt_without_a_deadline_still_fails_over () =
-  h5_stt_fixture ~first:"exit 3" ~second:"printf second-heard"
-    (fun ~audio ~first_marker:_ ~second_marker:_ ->
       Eio_main.run @@ fun _env ->
       match Masc.Voice_bridge.transcribe_audio ~audio_file:audio () with
       | Error msg -> failf "the second endpoint must answer: %s" msg
       | Ok json ->
+        check bool "the first endpoint ran" true (Sys.file_exists first_marker);
+        check bool "the second endpoint ran" true (Sys.file_exists second_marker);
         check string "the second endpoint's transcript" "second-heard"
           (Option.value ~default:"" (Json_util.get_string json "text")))
 ;;
@@ -983,21 +930,9 @@ let () =
             `Quick
             test_transcribe_endpoint_failover_surfaces_each_attempt
         ; test_case
-            "H5 STT: a slow first endpoint stops the chain at the shared deadline"
+            "STT chain fails over after an endpoint error"
             `Quick
-            test_h5_stt_slow_first_endpoint_stops_the_chain_at_the_shared_deadline
-        ; test_case
-            "H5 STT: a spent budget gives no timeout"
-            `Quick
-            test_h5_stt_timeout_is_none_for_a_spent_budget
-        ; test_case
-            "H5 STT: a spent deadline starts no endpoint"
-            `Quick
-            test_h5_stt_spent_deadline_starts_no_endpoint
-        ; test_case
-            "H5 STT: without a deadline the chain still fails over"
-            `Quick
-            test_h5_stt_without_a_deadline_still_fails_over
+            test_stt_chain_fails_over_after_an_endpoint_error
         ; test_case
             "agent_speak invalid config surfaces load failure"
             `Quick

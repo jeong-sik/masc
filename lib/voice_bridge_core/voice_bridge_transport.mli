@@ -19,12 +19,6 @@ val make_audio_file : format:Voice_bridge_core.clip_format -> string
     [<token><extension>] for the format the caller is about to write. The
     128-bit token is also the HTTP capability the dashboard fetches it by. *)
 
-val stt_timeout_sec : ?deadline:Monotonic_deadline.t -> unit -> float option
-(** The time one STT process may take: the configured per-call timeout, capped
-    by what is left of [deadline], read once. [None] when [deadline] is spent;
-    a spent budget is never turned into a zero timeout, which the process runner
-    refuses by raising. *)
-
 val run_voice_status
   :  ?timeout_sec:float
   -> ?stdin_content:string
@@ -45,8 +39,7 @@ val speak_via_http_tts_to_file
   -> (int, string) result
 
 val transcribe_via_http_stt
-  :  ?deadline:Monotonic_deadline.t
-  -> Voice_config.endpoint
+  :  Voice_config.endpoint
   -> api_key:string
   -> audio_file:string
   -> model:string
@@ -92,12 +85,9 @@ val speak_via_command_to_file
     (WebM, Ogg Opus, AIFF, MP4) is refused before the command runs, with the
     container named; so is a file that cannot be read.
 
-    With [deadline], the command is not started once it has passed
-    ([Error "budget_spent"]) and its process timeout is the configured one
-    capped by the time left. Without it nothing changes. *)
+    The command uses the configured per-call process timeout. *)
 val transcribe_via_command
-  :  ?deadline:Monotonic_deadline.t
-  -> Voice_config.endpoint
+  :  Voice_config.endpoint
   -> audio_file:string
   -> model:string
   -> (string, string) result

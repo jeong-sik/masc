@@ -64,16 +64,6 @@ let media_projection_manifest_decision ~(runtime_id : string)
         ("media_projected_counts", `String (modality_counts_summary projected));
       ])
 
-(* One wall-clock deadline for every attachment a lane walk reads, built from
-   the operator's existing [turn.provider_call_deadline_sec]. That setting is
-   the per-attempt no-progress ceiling of a provider call; here it only caps
-   the pre-provider reading step, once per walk. It is not a turn-wide
-   deadline and reserves nothing for the fallback provider call. Attachments
-   and candidates share it, so the total wait does not grow with their
-   number. *)
-let media_reading_deadline () =
-  Monotonic_deadline.after ~seconds:(Keeper_runtime_resolved.provider_call_deadline_sec ())
-
 type output_contract = Provider_default | Tool_verdict
 
 
@@ -1633,8 +1623,7 @@ let project_input_for_attempt
           Keeper_media_reading.projector
             ~media_store
             ~keeper_name
-            ~start_deadline:media_reading_deadline
-            ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> Error "no_reader")
+            ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ -> Error "no_reader")
             ()
         in
         Keeper_media_reading.project projector
@@ -1793,7 +1782,7 @@ let project_input_for_attempt
    Decide against the complete selected bundle each time, so a newly added
    image also changes the treatment of a native document on a runtime that
    cannot accept their mixed bundle. The walk owns both projectors and their
-   memo/deadline; this view never writes back into canonical history. *)
+   memo; this view never writes back into canonical history. *)
 let project_request_media ~project_media ~project_images
     (runtime : Runtime_instance.t) : Keeper_history_projection.t =
   fun messages ->
@@ -2661,18 +2650,14 @@ let run_named
       project ~mode blocks
   in
   (* H5 readings belong to the walk. History projections and retained Text
-     carriers share raw results and one lazy reading deadline, even when the
+     carriers share raw results, even when the
      selected runtime accepts native documents in other input positions. *)
   let media_projector =
     Keeper_media_reading.projector
       ~base_path
       ~media_store
       ~keeper_name
-      ~start_deadline:media_reading_deadline
-      ~read:
-        (Keeper_media_reading.production_reader
-           ~base_path
-           ~budget_sec:(Keeper_runtime_resolved.provider_call_deadline_sec ()))
+      ~read:(Keeper_media_reading.production_reader ~base_path)
       ()
   in
   let read_retained_media = retained_media_reader ~input_source media_projector in

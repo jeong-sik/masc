@@ -50,6 +50,18 @@ val confirm_cut_grant : store:Lane_addon_store.t -> cut_grant ->
   (Keeper_librarian_history_resolution_state.t, string) result
 (** Recheck the bound fence and actual live claim. Expired/foreign/changed
     evidence refuses; the value is not usable outside [use]. *)
+module For_testing : sig
+  val with_cut_fence_serialized : after_publish:(unit -> unit) ->
+    config:Workspace.config -> keeper_name:string -> request_id:string ->
+    expected:Keeper_librarian_history_resolution_state.guard ->
+    basis:Keeper_librarian_history_resolution_state.cut_basis -> actor:string ->
+    reason:string -> now:float -> use:(cut_grant -> 'a) -> ('a, error) result
+  (** The production critical section with one call-local observation hook.
+      [after_publish] runs after an actual successful fence publication and
+      before its strict readback, under the source/Memory locks and Exact
+      claim. Adopting an already observed fence does not invoke the hook.
+      The hook grants no authority and cannot replace publication/readback. *)
+end
 val read : config:Workspace.config -> keeper_name:string -> request_id:string ->
   (Keeper_librarian_history_resolution_state.t option, error) result
 val fence_serialized : config:Workspace.config -> keeper_name:string -> request_id:string ->

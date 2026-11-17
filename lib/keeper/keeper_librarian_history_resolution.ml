@@ -256,7 +256,7 @@ let confirm_cut_grant ~store grant =
   let* expected=Lane_addon_action.canonical (State.to_json grant.fence) in
   let* actual=Lane_addon_action.canonical (State.to_json stored) in
   let+ ()=if expected=actual then Ok () else Error "Cut grant fence changed" in stored
-let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use =
+let with_cut_fence_serialized_with ~after_publish ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use =
   try
     let* store,original,request=load_original ~config ~keeper_name ~request_id in
     let run () =
@@ -287,7 +287,7 @@ let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis 
               ~exclusion ~actor ~reason ~now) in
             let* published=unavailable (State.publish ~store fence) in
             (match published with
-             | Store.History_fence_stored | History_fence_already_stored -> Ok fence
+             | Store.History_fence_stored | History_fence_already_stored -> after_publish (); Ok fence
              | History_fence_owner_changed -> Error Observation_changed
              | History_fence_unconfirmed detail -> Error (Publication_uncertain detail)) in
         let grant={store;request;original=current;exclusion;fence} in
@@ -301,3 +301,9 @@ let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis 
     |> unavailable |> Result.join
   with Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error (Publication_uncertain (Printexc.to_string exn))
+let with_cut_fence_serialized ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use =
+  with_cut_fence_serialized_with ~after_publish:(fun () -> ())
+    ~config ~keeper_name ~request_id ~expected ~basis ~actor ~reason ~now ~use
+module For_testing = struct
+  let with_cut_fence_serialized = with_cut_fence_serialized_with
+end

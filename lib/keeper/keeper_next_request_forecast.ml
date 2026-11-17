@@ -142,15 +142,14 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start ~counted_tokens
-      messages =
-  let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
+let carry_indexed ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start
+      ~counted_tokens ~atom_count ~digest_at messages =
   let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
     Keeper_turn_driver_try_provider.choose_range_start
       ~continuity
       ~front
       ~accepted
-      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+      ~history_digest_at:digest_at
       ~turn_boundary:turn_start
       ~history_at_start
   in
@@ -193,6 +192,13 @@ let carry ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start ~c
   ; origin = Keeper_turn_driver_try_provider.range_start_origin start
   ; counted_tokens
   }
+;;
+
+let carry ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start ~counted_tokens
+      messages =
+  let atom_count, digest_at = Runtime_model_input_tail_window.atom_opening_index messages in
+  carry_indexed ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start
+    ~counted_tokens ~atom_count ~digest_at messages
 ;;
 
 (* The request in travel order. The system prompt and the tool array are
@@ -415,6 +421,7 @@ let wake_line () =
 
 type range_reads =
   { messages : Agent_core.Types.message list
+  ; atom_count : int
   ; digest_at : int -> string option
   ; continuity : Keeper_turn_driver_try_provider.continuity
   ; turn_start : Keeper_carried_front.turn_start
@@ -425,6 +432,7 @@ type range_reads =
 let read_range ~config ~keeper_name ~trace_id history =
   let wake, (_ : int) = wake_line () in
   let messages = history @ [ wake ] in
+  let atom_count, digest_at = Runtime_model_input_tail_window.atom_opening_index messages in
   (* The Librarian point every candidate of the turn starts from, as the
      driver chooses it once per turn. Its notes are the turn's to log; a
      reader here only looks. *)
@@ -433,7 +441,8 @@ let read_range ~config ~keeper_name ~trace_id history =
       ~config ~keeper_name ~trace_id ~messages:history
   in
   { messages
-  ; digest_at = Runtime_model_input_tail_window.atom_opening_digest messages
+  ; atom_count
+  ; digest_at
   ; continuity
   ; (* Where a candidate with no front starts: the end of the last
        completed turn on this history, as the driver reads it. *)
@@ -480,7 +489,7 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
     | Keeper_turn_driver_try_provider.Chose_no_point -> None
   in
   { carried =
-      carry
+      carry_indexed
         ~measure:(Keeper_context_core.message_measurer ())
         ~continuity:(Some reads.continuity)
         ~front
@@ -488,6 +497,8 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
         ~turn_start:reads.turn_start
         ~history_at_start:reads.history_at_start
         ~counted_tokens
+        ~atom_count:reads.atom_count
+        ~digest_at:reads.digest_at
         reads.messages
   ; ledger_front
   }
@@ -559,9 +570,7 @@ let forecast ~config ~keeper_name =
        in
        let (_ : Agent_core.Types.message), wake_line_bytes = wake_line () in
        let reads = read_range ~config ~keeper_name ~trace_id history in
-       let _labelled, history_atoms =
-         Runtime_model_input_tail_window.annotate reads.messages
-       in
+       let history_atoms = reads.atom_count in
        let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta in
        (* NDT-OK: one wall-clock read at the boundary, compared with stored expiries. *)
        let now = Unix.gettimeofday () in

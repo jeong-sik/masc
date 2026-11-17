@@ -135,13 +135,16 @@ val list : base_path:string -> listing
 val restore : base_path:string -> string -> (restore_report, string) result
 (** Loads the named preset, saves the current state as {!autosave_name}
     over the previous one, then applies the loaded preset surface by surface.
+    Restores of the same workspace are serialized across fibers, threads and
+    processes from target loading through the last surface. The autosave of a
+    later restore therefore cannot capture another restore's intermediate state.
     Restoring {!autosave_name} undoes the latest restore for the prompt
     overrides and the runtime assignments, which a restore sets exactly.
     Keeper instructions and exact-output lanes are written only for the
     keepers and lanes a preset holds, so a keeper that had no instructions
     keeps what the latest restore gave it, and a lane that restore added
     stays. The autosave then holds the state the undo replaced.
-    Only the load and the autosave can fail the whole call; each surface
+    Lock admission, loading and the autosave can fail the whole call; each surface
     reports what it applied and what it skipped. An override that no
     longer renders under the prompt's current contract is skipped with that
     reason, as the boot-time restore would refuse it. One written against an
@@ -149,9 +152,13 @@ val restore : base_path:string -> string -> (restore_report, string) result
     that the current runtime writer refuses, and assignments unavailable under
     the current capability catalog, are reported separately and keep
     their current values. Accepted declarations still restore; no replacement
-    runtime is inferred. *)
+    runtime is inferred. A completed report survives a lock-release warning,
+    which is logged; that warning must not cause the restore to be replayed. *)
 
 module For_testing : sig
+  val restore_lock_path : base_path:string -> string
+  (** The production restore's stable workspace lock. Tests use its actual
+      holder/waiter observation to coordinate overlapping calls. *)
   val restore_with_config_commit :
     commit:(runtime_config_path:string -> string ->
       (Runtime.config_commit_receipt, string) result) ->

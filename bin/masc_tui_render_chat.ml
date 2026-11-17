@@ -1136,7 +1136,10 @@ let keeper_turn_progress state (frame : keeper_message_status_frame) =
                  ]
                else [])
               @ (if folded_away > 0
-                 then [ fact Chat_facts.Plain (Printf.sprintf "+%d" folded_away) ]
+                 then
+                   [ fact Chat_facts.Plain
+                       (Printf.sprintf (if ko then "외 %d" else "%d more") folded_away)
+                   ]
                  else [])
             in
             { tp_mark = mark
@@ -5102,7 +5105,7 @@ let render_keeper_message (state : state) =
          let turn_progress = keeper_turn_progress state status_frame in
          if status.kmsp_details_hint
          then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-           (Printf.sprintf (if ko then "  +%d · %s:턴 상세" else "  +%d · %s:details")
+           (Printf.sprintf (if ko then "  외 %d · %s:턴 상세" else "  %d more · %s:details")
               folded_away Masc_tui_keys.expand_turn_label);
          List.iter
            (fun (kind, text) ->

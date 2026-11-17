@@ -52,6 +52,13 @@ jobs:
           bash scripts/check-toml-syntax.sh
       - name: Scan the tracked tree for credentials
         run: python3 scripts/ci/check-committed-secrets.py
+      # The collector refuses a linked package whose nested notice it cannot
+      # classify, and a release build dies there (run 44173709932 lost two
+      # jobs to dune-build-info.3.25.0). release-build.yml already runs this,
+      # but only on macos-arm64 behind workflow_call, so a table regression
+      # was first seen a release later. It is pure Python and takes 0.2s.
+      - name: Test the OCaml notice collector's classification table
+        run: python3 scripts/tests/test_collect_ocaml_notices.py
 
   native-tui:
     if: inputs.native-tui-source-sha != ''

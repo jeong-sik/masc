@@ -60,8 +60,8 @@ const scenarios = {
 const longModel = "claude-code-sonnet-thinking-high-effort-with-a-long-identifier-2026";
 const offered = {
   integrations: [
-    { integration_id: "claude_code", display_name: "Claude Code", models: ["claude-sonnet-5", longModel], calls: "allowed" },
-    { integration_id: "codex", display_name: "Codex", models: ["gpt-5.5"], calls: "refused", refusal: "native_tools_reach_other_homes" },
+    { integration_id: "claude_code", display_name: "Claude Code", models: ["claude-sonnet-5", longModel], withheld: [], calls: "allowed" },
+    { integration_id: "codex", display_name: "Codex", models: ["gpt-5.5"], withheld: [], calls: "refused", refusal: "native_tools_reach_other_homes" },
   ],
 };
 const id = (c) => c.repeat(64);

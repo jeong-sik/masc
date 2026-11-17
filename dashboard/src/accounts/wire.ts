@@ -63,6 +63,26 @@ export type CallRefusal =
 /** Whether a Keeper may run on an account of the subscription here. */
 export type Calls = { readonly kind: 'allowed' } | { readonly kind: 'refused'; readonly refusal: CallRefusal }
 
+/** The codes this console has words for, of those the server gives for a
+    model the operator bound to a subscription that is not one a person may
+    name (lib/server/server_person_integrations.ml, `withheld_code`): a model
+    with no row, and the refusal of a row a verification ends with today
+    (`Runtime_verification.model_refusal`). */
+const withheldCodes = ['tools_not_declared', 'model_undeclared'] as const
+
+/** Why such a model is left out. A code this console does not know is kept
+    apart: the console says the model is left out, and not why. */
+export type WithheldReason = typeof withheldCodes[number] | 'unrecognised'
+
+/** Every reason, in the order the page says them. */
+export const withheldReasons: readonly WithheldReason[] = [...withheldCodes, 'unrecognised']
+
+/** A model of a subscription that is not in its `models`, and why. */
+export interface Withheld {
+  readonly model: string
+  readonly reason: WithheldReason
+}
+
 /** A subscription a person may connect: a provider of the workspace. */
 export interface Integration {
   readonly id: string
@@ -70,8 +90,17 @@ export interface Integration {
   readonly displayName: string
   /** The models a verification of an account of it may name. */
   readonly models: readonly string[]
+  /** The other models the operator bound to it. With none of either, the operator bound no model. */
+  readonly withheld: readonly Withheld[]
   readonly calls: Calls
 }
+
+/** Whether a model of the subscription can be checked here now: the server
+    calls its models and offers one. A check makes the Runtime a Keeper runs
+    on, so an account connected now comes to run a Keeper only on such a
+    subscription. A Runtime made by an earlier check is another matter: the
+    page reads that from the Runtime (`Runtime.model`). */
+export const checkable = (one: Integration): boolean => one.calls.kind === 'allowed' && one.models.length > 0
 
 /** The name the operator gave a subscription, or its id when the name is empty. */
 export const integrationName = (integration: Integration): string =>
@@ -186,13 +215,23 @@ function readCalls(json: Readonly<Record<string, unknown>>): Calls | null {
   }
 }
 
+const readWithheldReason = (code: string): WithheldReason => withheldCodes.find((known) => known === code) ?? 'unrecognised'
+
+function readWithheld(json: unknown): Withheld | null {
+  if (!isRecord(json)) return null
+  const model = text(json.model)
+  const reason = text(json.reason)
+  return model === null || reason === null ? null : { model, reason: readWithheldReason(reason) }
+}
+
 function readIntegration(json: unknown): Integration | null {
   if (!isRecord(json)) return null
   const id = text(json.integration_id)
   const models = readList(json.models, text)
+  const withheld = readList(json.withheld, readWithheld)
   const calls = readCalls(json)
-  if (id === null || typeof json.display_name !== 'string' || models === null || calls === null) return null
-  return { id, displayName: json.display_name, models, calls }
+  if (id === null || typeof json.display_name !== 'string' || models === null || withheld === null || calls === null) return null
+  return { id, displayName: json.display_name, models, withheld, calls }
 }
 
 export function readIntegrations(json: unknown): readonly Integration[] | null {

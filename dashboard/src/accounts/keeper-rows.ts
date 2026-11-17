@@ -13,7 +13,7 @@ import { Callout, ProblemNote, Retry, fell, idTail, sessionEndedWords } from './
 import type { Shown } from './notes'
 import type { SubscriptionsModel } from './subscriptions'
 import { TalkPart } from './talk-area'
-import { integrationName } from './wire'
+import { checkable, integrationName } from './wire'
 import type { Integration, Owned } from './wire'
 
 /** A Runtime a Keeper can be given here, and how the page names it. */
@@ -52,7 +52,11 @@ function usesOf(keeper: Keeper, owned: Owned | null, choices: readonly Choice[] 
 // ---- words ----
 
 const nameRuleWords = '영문, 숫자, 마침표(.), 밑줄(_), 붙임표(-)로 128자까지 쓸 수 있어요.'
-const noChoiceWords = '고를 수 있는 모델이 아직 없어요. 위 구독에서 모델을 먼저 확인해 주세요.'
+/** Said on a Keeper card when no Runtime can be given. [canCheck]: some
+    subscription of the server has a model to check now. */
+const noChoiceWords = (canCheck: boolean): string => canCheck
+  ? '고를 수 있는 모델이 아직 없어요. 위 구독에서 모델을 먼저 확인해 주세요.'
+  : '고를 수 있는 모델이 없어요. 이 서버에는 지금 확인할 수 있는 모델이 없어요. 이유는 위 구독에 있어요.'
 
 function usesWords(uses: Uses): string {
   switch (uses.kind) {
@@ -179,10 +183,12 @@ function Chip({ uses }: { readonly uses: Uses }): VNode | null {
   }
 }
 
-function KeeperRow({ keeper, owned, choices, model }: {
+function KeeperRow({ keeper, owned, choices, canCheck, model }: {
   readonly keeper: Keeper
   readonly owned: Owned | null
   readonly choices: readonly Choice[] | null
+  /** Some subscription of the server has a model to check now. */
+  readonly canCheck: boolean
   readonly model: KeepersModel
 }): VNode {
   const uses = usesOf(keeper, owned, choices)
@@ -195,7 +201,7 @@ function KeeperRow({ keeper, owned, choices, model }: {
       ${choices === null
         ? null
         : choices.length === 0
-          ? html`<p class="hint">${noChoiceWords}</p>`
+          ? html`<p class="hint">${noChoiceWords(canCheck)}</p>`
           : html`<${AssignArea} keeper=${keeper} uses=${uses} choices=${choices} assign=${model.assigning.value.get(keeper.id)}
               model=${model} card=${titleId} />`}
       <${TalkPart} keeperId=${keeper.id} card=${titleId} talk=${model.talking} />
@@ -267,6 +273,7 @@ export function KeepersPanel({ model, subscriptions }: { readonly model: Keepers
   const panel = subscriptions.view.value
   const owned = panel.kind === 'read' ? panel.owned : null
   const choices = panel.kind === 'read' ? runtimeChoices(panel.integrations, panel.owned) : null
+  const canCheck = panel.kind === 'read' && panel.integrations.some(checkable)
   const heading = useRef<HTMLHeadingElement>(null)
   const shown = useRef(view.kind)
   // A retry that read takes the pressed button away. The focus then goes to
@@ -300,7 +307,7 @@ export function KeepersPanel({ model, subscriptions }: { readonly model: Keepers
         ? html`
             ${view.keepers.length === 0
               ? html`<p>아직 Keeper가 없어요. 아래에서 첫 Keeper를 만들어 보세요.</p>`
-              : html`<ul class="rows">${view.keepers.map((keeper) => html`<${KeeperRow} key=${keeper.id} keeper=${keeper} owned=${owned} choices=${choices} model=${model} />`)}</ul>`}
+              : html`<ul class="rows">${view.keepers.map((keeper) => html`<${KeeperRow} key=${keeper.id} keeper=${keeper} owned=${owned} choices=${choices} canCheck=${canCheck} model=${model} />`)}</ul>`}
             <${MakeForm} model=${model} choices=${choices} />
           `
         : view.kind === 'failed'

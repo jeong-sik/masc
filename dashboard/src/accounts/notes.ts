@@ -4,7 +4,8 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import type { Problem } from './wire'
+import { withheldReasons } from './wire'
+import type { Problem, Withheld, WithheldReason } from './wire'
 
 /** A problem a page shows. A missing session is never shown: the console
     leaves for the sign-in page. */
@@ -51,6 +52,28 @@ function problemWords(problem: Shown): string {
 /** What a page says while the browser leaves for the sign-in page because a
     request found that the session had ended. */
 export const sessionEndedWords = '세션이 끝났어요. 로그인 화면으로 이동해요…'
+
+export const operatorWords = '이 서버를 운영하는 사람에게 알려 주세요.'
+
+/** Why the models the operator bound are left out, a sentence for each reason. */
+function withheldWords(reason: WithheldReason, models: readonly string[]): string {
+  const names = models.join(', ')
+  switch (reason) {
+    case 'tools_not_declared': return `서버 설정에서 도구 호출을 켜지 않은 모델이에요: ${names}.`
+    case 'model_undeclared': return `서버 설정에 정보가 없는 모델이에요: ${names}.`
+    case 'unrecognised': return `이 화면이 모르는 까닭으로 빠진 모델이에요: ${names}.`
+  }
+}
+
+/** Why a subscription has no model to check, for the person to pass on to the operator. */
+export function noModelWords(withheld: readonly Withheld[]): string {
+  if (withheld.length === 0) return `서버 설정에 이 구독의 모델이 하나도 적혀 있지 않아요. ${operatorWords}`
+  const reasons = withheldReasons.flatMap((reason) => {
+    const models = withheld.filter((one) => one.reason === reason).map((one) => one.model)
+    return models.length === 0 ? [] : [withheldWords(reason, models)]
+  })
+  return `${reasons.join(' ')} ${operatorWords}`
+}
 
 /** What the status line under a button that reads again says. */
 function nextWords(next: Next): string {

@@ -355,6 +355,13 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
      | Some port -> string_of_int port
      | None -> "off")
     (Table.route_count table);
+  (* Said once, here, for the operator: which providers offer people no model
+     to check. The access is published, which the calls of a provider are
+     read from. The routes read runtime.toml again at each request, so an
+     edit after the start is not said here. *)
+  List.iter
+    (fun line -> Log.Server.warn "%s" line)
+    (Server_person_integrations.start_lines ~base_path);
   Option.iter (fun on_ready -> on_ready ()) on_ready;
   serve ~sw ~clock ~http_mode ~config ~socket ~https_listener ~trust_policy table;
   Ok ()

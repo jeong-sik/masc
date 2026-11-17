@@ -310,8 +310,7 @@ let select ~trace_id ~lines ~progress ~messages extent =
      | Some position -> Position_in_other_trace position
      | None ->
        let boundary_lines_seen = complete_line_count lines in
-       let _labelled, atom_count = Window.annotate messages in
-       let digest_at = Window.atom_opening_digest messages in
+       let atom_count, digest_at = Window.atom_opening_index messages in
        let current_history = current_history_lines own in
        let history_start_boundary_line =
          match current_history with
@@ -390,8 +389,7 @@ let select ~trace_id ~lines ~progress ~messages extent =
    behind it, and the number is what says how far behind. *)
 let unread_turns ~trace_id ~lines ~progress ~messages =
   let own = lines_of_trace ~trace_id lines in
-  let _labelled, atom_count = Window.annotate messages in
-  let digest_at = Window.atom_opening_digest messages in
+  let atom_count, digest_at = Window.atom_opening_index messages in
   let cuts =
     stated_positions ~trace_id (current_history_lines own)
     |> List.filter_map (cut_point ~digest_at ~atom_count)

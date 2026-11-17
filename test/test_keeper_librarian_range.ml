@@ -103,6 +103,41 @@ let select ?(extent = Range.All_unread) ?progress ~lines messages =
   describe (Range.select ~trace_id:trace ~lines ~progress ~messages extent)
 ;;
 
+let test_an_old_cut_keeps_its_lazy_writer_error () =
+  let invalid =
+    { (assistant "old") with
+      content = [ Types.ToolUse { id = "fixture"; name = "fixture"; input = `Float nan } ]
+    }
+  in
+  let saved = [ invalid; assistant "current" ] in
+  let progress = progress_at ~seen:2 saved 2 in
+  let boundary turn end_atom last_atom_digest : Boundaries.record =
+    { recorded_at = 100.
+    ; event =
+        Turn_ended
+          { task_context = Masc.Keeper_turn_task_context.No_task
+          ; turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
+          ; history_at_start = Continued_history
+          ; position = Atom_history { end_atom; last_atom_digest }
+          }
+    }
+  in
+  let lines =
+    [ 1, Ok (boundary 1 1 (String.make 64 'a'))
+    ; 2, Ok (boundary 2 2 progress.position.last_atom_digest)
+    ]
+  in
+  let expect_writer_error operation =
+    match operation () with
+    | _ -> fail "the already-read cut must retain its writer error"
+    | exception Yojson.Json_error _ -> ()
+  in
+  expect_writer_error (fun () ->
+    Range.select ~trace_id:trace ~lines ~progress:(Some progress) ~messages:saved All_unread);
+  expect_writer_error (fun () ->
+    Range.unread_turns ~trace_id:trace ~lines ~progress:(Some progress) ~messages:saved)
+;;
+
 (* {1 Where a range starts} *)
 
 let test_a_new_trace_is_read_from_zero () =
@@ -748,6 +783,8 @@ let () =
     ; ( "how far behind"
       , [ test_case "counts the turns beyond the position" `Quick
             test_unread_counts_the_turns_beyond_the_position
+        ; test_case "an old cut keeps its lazy writer error" `Quick
+            test_an_old_cut_keeps_its_lazy_writer_error
         ; test_case "without a position the baseline is not behind" `Quick
             test_unread_without_a_position_leaves_out_the_baseline
         ; test_case "after a restart the whole history is behind" `Quick

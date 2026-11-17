@@ -259,119 +259,176 @@ let exit_of_status ~host_signal_number = function
   | Unix.WSTOPPED signal -> Relay.Signaled (host_signal_number signal)
 ;;
 
-(* Moves bytes until the shim has closed its stdout and stderr, then reaps it
-   and sends the exit chunk. *)
-let pump ~conn ~pid ~stdin_w ~outputs ~host_signal_number =
-  Unix.set_nonblock conn;
-  Unix.set_nonblock stdin_w;
-  List.iter (fun output -> Unix.set_nonblock output.fd) outputs;
+(* Keep both stream directions nonblocking through terminal delivery. The
+   interactive EOF contract is cancellation, not a finite input flush. *)
+let pump ~kind ~conn ~pid ~stdin_w ~outputs ~host_signal_number =
   let to_child = Pending.create () in
   let to_host = Pending.create () in
   let child_stdin = ref (Some stdin_w) in
   let open_outputs = ref outputs in
   let host_sending = ref true in
   let host_reading = ref true in
+  let status = ref None in
+  let reaped_at = ref None in
+  let exit_queued = ref false in
+  let finished = ref false in
+  let close fd = try Unix.close fd with Unix.Unix_error _ -> () in
   let close_child_stdin () =
     match !child_stdin with
     | None -> ()
     | Some fd ->
-      Unix.close fd;
+      close fd;
       child_stdin := None;
       Pending.clear to_child
   in
-  (* The shim reads its stdin closing as a cancel. *)
   let host_gone () =
     host_sending := false;
     host_reading := false;
     Pending.clear to_host;
     close_child_stdin ()
   in
+  let host_send_closed () =
+    host_sending := false;
+    match kind with
+    | Relay.Interactive_run -> close_child_stdin ()
+    | Relay.Run | Relay.Probe ->
+      if Pending.is_empty to_child then close_child_stdin ()
+  in
+  let poll_peer () =
+    if !host_reading then
+      match Shim_stream.peer_state conn with
+      | Shim_stream.Disconnected -> host_gone ()
+      | Shim_stream.Send_closed ->
+        (* R/P must read their queued socket bytes before closing stdin.
+           I must cancel even when the input queue cannot accept a read. *)
+        (match kind with
+         | Relay.Interactive_run -> host_send_closed ()
+         | Relay.Run | Relay.Probe -> ())
+      | Shim_stream.Connected -> ()
+  in
+  let poll_child () =
+    match !status with
+    | Some _ -> ()
+    | None ->
+      (match Unix.waitpid [ Unix.WNOHANG ] pid with
+       | 0, _ -> ()
+       | _, actual ->
+         status := Some actual;
+         reaped_at := Some (Shim_clock.elapsed_seconds ());
+         close_child_stdin ()
+       | exception Unix.Unix_error (Unix.EINTR, _, _) -> ())
+  in
+  let close_outputs () =
+    List.iter (fun output -> close output.fd) !open_outputs;
+    open_outputs := []
+  in
+  let incomplete () =
+    (* Do not append Exit after dropping any stream bytes. Shutdown makes
+       the missing completion observable even before the caller closes fd. *)
+    host_gone ();
+    close_outputs ();
+    (try Unix.shutdown conn Unix.SHUTDOWN_ALL with Unix.Unix_error _ -> ());
+    finished := true
+  in
+  let cleanup () =
+    close_child_stdin ();
+    close_outputs ();
+    match !status with
+    | Some _ -> ()
+    | None ->
+      (* An unexpected relay exception must not leave its exact shim child
+         behind. The real shim owns its payload group's lifetime. *)
+      (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+      status := Some (waitpid_retrying pid)
+  in
   let buffer = Bytes.create Relay.max_payload_bytes in
-  while !open_outputs <> [] do
-    let reads =
-      (if !host_sending && Pending.length to_child < pending_high_water
-       then [ conn ]
-       else [])
-      @
-      if Pending.length to_host < pending_high_water
-      then List.map (fun output -> output.fd) !open_outputs
-      else []
-    in
-    let writes =
-      (match !child_stdin with
-       | Some fd when not (Pending.is_empty to_child) -> [ fd ]
-       | Some _ | None -> [])
-      @ if !host_reading && not (Pending.is_empty to_host) then [ conn ] else []
-    in
-    match Unix.select reads writes [] (-1.0) with
-    | exception Unix.Unix_error (Unix.EINTR, _, _) -> ()
-    | readable, writable, _ ->
-      if List.memq conn readable
-      then (
-        match Unix.read conn buffer 0 (Bytes.length buffer) with
-        | 0 ->
-          (* The host has said all it will. Bytes it sent before still go to
-             the shim; its stdin closes once they have. *)
-          host_sending := false;
-          if Pending.is_empty to_child then close_child_stdin ()
-        | read ->
-          if Option.is_some !child_stdin
-          then Pending.push to_child (Bytes.sub_string buffer 0 read)
-        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _)
-          -> ()
-        | exception Unix.Unix_error ((Unix.ECONNRESET | Unix.EPIPE), _, _) -> host_gone ());
-      (match !child_stdin with
-       | Some fd when List.memq fd writable ->
-         (match Pending.write_some to_child fd with
-          | () ->
-            if (not !host_sending) && Pending.is_empty to_child then close_child_stdin ()
-          | exception
-              Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
-          | exception Unix.Unix_error (Unix.EPIPE, _, _) -> close_child_stdin ())
+  Fun.protect ~finally:cleanup (fun () ->
+    Unix.set_nonblock conn;
+    Unix.set_nonblock stdin_w;
+    List.iter (fun output -> Unix.set_nonblock output.fd) outputs;
+    while not !finished do
+      poll_peer ();
+      poll_child ();
+      let now = Shim_clock.elapsed_seconds () in
+      (match !status with
+       | Some actual when !open_outputs = [] && Pending.is_empty to_host ->
+         if !host_reading && not !exit_queued then begin
+           Pending.push to_host
+             (Relay.encode (Relay.Exit (exit_of_status ~host_signal_number actual)));
+           exit_queued := true
+         end else finished := true
        | Some _ | None -> ());
-      let current = !open_outputs in
-      List.iter
-        (fun output ->
-          if List.memq output.fd readable
-          then (
-            match Unix.read output.fd buffer 0 (Bytes.length buffer) with
-            | 0 ->
-              Unix.close output.fd;
-              open_outputs := List.filter (fun other -> other.fd != output.fd) !open_outputs
-            | read ->
-              (* After the host has gone the bytes are read and dropped, so the
-                 shim never blocks and still sees its stdin close and its
-                 deadline. *)
-              if !host_reading
-              then
-                Pending.push to_host
-                  (Relay.encode (output.chunk (Bytes.sub_string buffer 0 read)))
-            | exception
-                Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()))
-        current;
-      if !host_reading && List.memq conn writable
-      then (
-        match Pending.write_some to_host conn with
-        | () -> ()
-        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _)
-          -> ()
-        | exception Unix.Unix_error ((Unix.EPIPE | Unix.ECONNRESET), _, _) -> host_gone ())
-  done;
-  close_child_stdin ();
-  let status = waitpid_retrying pid in
-  if !host_reading
-  then (
-    Pending.push to_host (Relay.encode (Relay.Exit (exit_of_status ~host_signal_number status)));
-    Unix.clear_nonblock conn;
-    let rec flush () =
-      if not (Pending.is_empty to_host)
-      then (
-        match Pending.write_some to_host conn with
-        | () -> flush ()
-        | exception Unix.Unix_error (Unix.EINTR, _, _) -> flush ()
-        | exception Unix.Unix_error ((Unix.EPIPE | Unix.ECONNRESET), _, _) -> ())
-    in
-    flush ())
+      (match !reaped_at with
+       | Some reaped when not !finished
+                           && now -. reaped >= Shim_stream.drain_grace_sec -> incomplete ()
+       | Some _ | None -> ());
+      if not !finished then begin
+        let output_room () = pending_high_water - Pending.length to_host - 5 in
+        let reads =
+          (if !host_sending && Pending.length to_child < pending_high_water
+           then [ conn ] else [])
+          @ (if not !host_reading || output_room () > 0
+             then List.map (fun output -> output.fd) !open_outputs else [])
+        in
+        let writes =
+          (match !child_stdin with
+           | Some fd when not (Pending.is_empty to_child) -> [ fd ]
+           | Some _ | None -> [])
+          @ if !host_reading && not (Pending.is_empty to_host) then [ conn ] else []
+        in
+        let wait = match !reaped_at with
+          | None -> Shim_stream.lifecycle_poll_sec
+          | Some reaped ->
+            min Shim_stream.lifecycle_poll_sec
+              (max 0.0 (reaped +. Shim_stream.drain_grace_sec -. now))
+        in
+        let readable, writable, _ =
+          try Unix.select reads writes [] wait with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> [], [], []
+        in
+        (* A half-close may arrive while select waits on a full input queue.
+           Observe it before forwarding any further queued interactive input. *)
+        poll_peer ();
+        if !host_sending && List.memq conn readable then begin
+          let room = min (Bytes.length buffer) (pending_high_water - Pending.length to_child) in
+          match Unix.read conn buffer 0 room with
+          | 0 -> host_send_closed ()
+          | read ->
+            if Option.is_some !child_stdin then
+              Pending.push to_child (Bytes.sub_string buffer 0 read)
+          | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+          | exception Unix.Unix_error ((Unix.ECONNRESET | Unix.EPIPE), _, _) -> host_gone ()
+        end;
+        (match !child_stdin with
+         | Some fd when List.memq fd writable ->
+           (match Pending.write_some to_child fd with
+            | () ->
+              if not !host_sending && Pending.is_empty to_child then close_child_stdin ()
+            | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+            | exception Unix.Unix_error (Unix.EPIPE, _, _) -> close_child_stdin ())
+         | Some _ | None -> ());
+        List.iter
+          (fun output ->
+            let room = if !host_reading then min (Bytes.length buffer) (output_room ())
+              else Bytes.length buffer in
+            if room > 0 && List.memq output.fd readable then
+              match Unix.read output.fd buffer 0 room with
+              | 0 ->
+                close output.fd;
+                open_outputs := List.filter (fun other -> other.fd != output.fd) !open_outputs
+              | read ->
+                if !host_reading then
+                  Pending.push to_host
+                    (Relay.encode (output.chunk (Bytes.sub_string buffer 0 read)))
+              | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ())
+          !open_outputs;
+        if !host_reading && List.memq conn writable then
+          match Pending.write_some to_host conn with
+          | () -> ()
+          | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+          | exception Unix.Unix_error ((Unix.EPIPE | Unix.ECONNRESET), _, _) -> host_gone ()
+      end
+    done)
 ;;
 
 let read_kind conn =
@@ -386,7 +443,7 @@ let read_kind conn =
   read ()
 ;;
 
-let run_child ~conn ~program ~argv ~env ~host_signal_number =
+let run_child ~kind ~conn ~program ~argv ~env ~host_signal_number =
   let stdin_r, stdin_w = Unix.pipe ~cloexec:true () in
   let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
   let stderr_r, stderr_w = Unix.pipe ~cloexec:true () in
@@ -404,7 +461,7 @@ let run_child ~conn ~program ~argv ~env ~host_signal_number =
     prerr_endline (Printf.sprintf "masc-exec-shim --serve: run %s: %s" program detail);
     List.iter Unix.close [ stdin_w; stdout_r; stderr_r ]
   | Ok pid ->
-    pump ~conn ~pid ~stdin_w
+    pump ~kind ~conn ~pid ~stdin_w
       ~outputs:
         [ { fd = stdout_r; chunk = (fun bytes -> Relay.Stdout bytes) }
         ; { fd = stderr_r; chunk = (fun bytes -> Relay.Stderr bytes) }
@@ -418,10 +475,11 @@ let relay ~conn ~program ~env ~host_signal_number =
   | () ->
     (match read_kind conn with
      | None -> ()
-     | Some Relay.Run ->
-       run_child ~conn ~program ~argv:[| program |] ~env ~host_signal_number
+     | Some ((Relay.Run | Relay.Interactive_run) as kind) ->
+       run_child ~kind ~conn ~program ~argv:[| program |] ~env ~host_signal_number
      | Some Relay.Probe ->
-       run_child ~conn ~program ~argv:[| program; "--probe" |] ~env ~host_signal_number)
+       run_child ~kind:Relay.Probe ~conn ~program ~argv:[| program; "--probe" |]
+         ~env ~host_signal_number)
 ;;
 
 (* As the VM's first process the agent inherits every orphan, and it reaps at

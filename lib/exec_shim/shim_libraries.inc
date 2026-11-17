@@ -28,6 +28,16 @@
   (language c)
   (names fdpass_stub)))
 
+; Shared stream lifecycle without an exec_shim / shim_agent dependency cycle.
+(library
+ (name shim_stream)
+ (wrapped false)
+ (modules shim_stream)
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names stream_stub)))
+
 ; RFC microvm-guest-agent-over-socket. The guest agent behind
 ; [masc-exec-shim --serve]; a leaf library for the same reason as the two
 ; above. It takes the signal-number conversion from exec_shim as an argument
@@ -36,7 +46,7 @@
  (name shim_agent)
  (wrapped false)
  (modules shim_agent)
- (libraries exec_ssh_protocol unix)
+ (libraries exec_ssh_protocol shim_stream shim_clock unix)
  (foreign_stubs
   (language c)
   (names agent_stub)))
@@ -44,7 +54,7 @@
 (library
  (name exec_shim)
  (modules exec_shim shim_build_id)
- (libraries exec_ssh_protocol shim_agent shim_clock shim_fdpass unix uuidm)
+ (libraries exec_ssh_protocol shim_agent shim_clock shim_fdpass shim_stream unix uuidm)
  (foreign_stubs
   (language c)
-  (names prctl_stub observe_stub stream_stub)))
+  (names prctl_stub observe_stub)))

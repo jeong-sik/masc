@@ -451,16 +451,21 @@ val supports_interactive_stdin : probe -> bool
     payload. *)
 module Relay : sig
   val version : int
-  (** The chunk layout and hello fields this build speaks. A peer with
-      another version is refused, never read past its hello. *)
+  (** Version 2 adds the interactive request kind and its cancellation
+      contract. A peer with another version is refused before any request
+      kind/header byte is sent, never read past its hello. *)
 
   val serve_flag : string
   (** The shim argument that makes it the agent:
       [masc-exec-shim --serve SOCKET UID:GID]. *)
 
   type request_kind =
-    | Run  (** an ordinary request frame follows *)
+    | Run  (** a finite request frame follows; queued input precedes EOF *)
     | Probe  (** the agent answers with the shim's [--probe] output *)
+    | Interactive_run
+        (** ['I']: a V3 interactive frame with empty initial payload follows,
+            then raw input. Send-half-close cancels immediately, discarding
+            queued input while leaving output delivery open. *)
 
   val request_kind_byte : request_kind -> char
   val request_kind_of_byte : char -> request_kind option

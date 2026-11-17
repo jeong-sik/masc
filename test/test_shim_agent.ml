@@ -77,7 +77,7 @@ let check_exit_zero ~what pid =
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failf "%s died on signal %d" what signal
 
 (* Every byte until the peer closes. *)
-let read_until_eof fd =
+let read_until_eof ?(allow_reset = false) fd =
   let deadline = Unix.gettimeofday () +. deadline_sec in
   let out = Buffer.create 4096 in
   let bytes = Bytes.create 65536 in
@@ -92,7 +92,8 @@ let read_until_eof fd =
        | 0 -> ()
        | read ->
          Buffer.add_subbytes out bytes 0 read;
-         loop ())
+         loop ()
+       | exception Unix.Unix_error (Unix.ECONNRESET, _, _) when allow_reset -> ())
   in
   loop ();
   Buffer.contents out
@@ -472,7 +473,7 @@ let test_real_shim_exchanges_interactive_bytes_through_the_relay () =
   let (_ : Relay.hello) = read_hello host in
   let first = "a\000\255z" and second = "b\030\000\254yz" in
   send host
-    (kind_byte Relay.Run ^ request ~root ~stdin:Exec_ssh_protocol.Interactive
+    (kind_byte Relay.Interactive_run ^ request ~root ~stdin:Exec_ssh_protocol.Interactive
        [ "/bin/sh"; "-c"
        ; "dd bs=1 count=4 2>/dev/null; printf ready; \
           dd bs=1 count=6 2>/dev/null; exit 7" ]);
@@ -514,6 +515,148 @@ let test_real_shim_exchanges_interactive_bytes_through_the_relay () =
   | Exec_ssh_protocol.Head_frame _ -> ()
   | Exec_ssh_protocol.Head_pending | Exec_ssh_protocol.Head_payload ->
     fail "the real interactive shim did not acknowledge the request"
+
+(* The payload never reads stdin and ignores TERM. Its observer records the
+   kernel's actual full pipe(s), without copying the shim/relay queue sizes. *)
+let pressure_payload =
+  {|import array, fcntl, os, signal, sys, termios, threading, time
+marker, output_pressure = sys.argv[1], sys.argv[2] == "output"
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+def occupancy(fd):
+    size = fcntl.fcntl(fd, fcntl.F_GETPIPE_SZ)
+    queued = array.array("i", [0])
+    fcntl.ioctl(fd, termios.FIONREAD, queued, True)
+    return queued[0], size
+def observe():
+    while True:
+        incoming, capacity = occupancy(0)
+        outgoing, out_capacity = occupancy(1) if output_pressure else (0, 0)
+        if incoming == capacity and (not output_pressure or outgoing == out_capacity):
+            with open(marker + ".tmp", "w") as destination:
+                destination.write(f"{incoming} {capacity} {outgoing} {out_capacity}")
+            os.rename(marker + ".tmp", marker)
+            return
+        time.sleep(0.01)
+os.write(1, (str(os.getpid()) + "\n").encode())
+threading.Thread(target=observe, daemon=True).start()
+if output_pressure:
+    while True:
+        os.write(1, b"\x00\xff" * 32768)
+else:
+    while True:
+        signal.pause()
+|}
+
+let complete_prefix bytes =
+  let rec loop pos chunks =
+    if pos = String.length bytes then List.rev chunks
+    else match Relay.decode bytes ~pos with
+      | Ok (Relay.Chunk { chunk; consumed }) -> loop (pos + consumed) (chunk :: chunks)
+      | Ok Relay.Need_more -> List.rev chunks
+      | Error _ -> fail "the incomplete transport contained an invalid complete header"
+  in
+  loop 0 []
+
+let test_interactive_half_close_cancels_pressure ~output_pressure () =
+  if not (Sys.file_exists "/proc/self/fd") then skip ();
+  with_temp_dir @@ fun dir ->
+  let root = Unix.realpath dir in
+  let config = Filename.concat root "shim.conf" in
+  let marker = Filename.concat root "pressure" in
+  write_file ~perm:0o644 config
+    (Printf.sprintf "remote_root=%s\nscratch_root=%s\n" root root);
+  let env = Array.append base_env
+      [| Printf.sprintf "%s=%s" Exec_ssh_protocol.shim_config_env_var config |] in
+  let host, relay_pid = start_relay ~program:!shim_binary ~env in
+  let payload_pid = ref None and reaped = ref false in
+  Fun.protect ~finally:(fun () ->
+    (try Unix.close host with Unix.Unix_error _ -> ());
+    (match !payload_pid with
+     | None -> ()
+     | Some pid ->
+       (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ()));
+    if not !reaped then begin
+      (try Unix.kill relay_pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+      (try ignore (Unix.waitpid [] relay_pid) with Unix.Unix_error (Unix.ECHILD, _, _) -> ())
+    end) @@ fun () ->
+  let hello = read_hello host in
+  check int "the real relay advertises the interactive contract" 2 hello.Relay.relay_version;
+  send host (kind_byte Relay.Interactive_run
+    ^ request ~root ~stdin:Exec_ssh_protocol.Interactive
+        [ "python3"; "-c"; pressure_payload; marker
+        ; if output_pressure then "output" else "input" ]);
+  let initial_stdout = Buffer.create 32 in
+  let rec ready chunks =
+    if String.contains (Buffer.contents initial_stdout) '\n' then List.rev chunks
+    else
+      let header = read_exact host header_bytes in
+      let length = Int32.to_int (String.get_int32_be header 1) in
+      match decode_all (header ^ read_exact host length) with
+      | [ (Relay.Stdout bytes as chunk) ] ->
+        Buffer.add_string initial_stdout bytes; ready (chunk :: chunks)
+      | [ (Relay.Stderr _ as chunk) ] -> ready (chunk :: chunks)
+      | [ Relay.Exit _ ] -> fail "payload exited before its pressure handshake"
+      | [ Relay.Hello _ ] | [] | _ :: _ :: _ -> fail "unexpected pressure handshake chunk"
+  in
+  let initial = ready [] in
+  let line = List.hd (String.split_on_char '\n' (Buffer.contents initial_stdout)) in
+  let payload = match int_of_string_opt line with
+    | Some pid -> pid | None -> fail "pressure handshake omitted the actual child pid" in
+  payload_pid := Some payload;
+  Unix.set_nonblock host;
+  let bytes = String.make 65536 '\000' in
+  let deadline = Unix.gettimeofday () +. deadline_sec in
+  let rec saturate () =
+    if Unix.gettimeofday () >= deadline then fail "the input path did not reach kernel backpressure";
+    match Unix.single_write_substring host bytes 0 (String.length bytes) with
+    | _ -> saturate ()
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+      if not (Sys.file_exists marker) then begin
+        ignore (Unix.select [] [ host ] [] poll_interval_sec); saturate ()
+      end
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> saturate ()
+  in
+  saturate ();
+  let incoming, capacity, outgoing, out_capacity =
+    Scanf.sscanf (read_file marker) "%d %d %d %d" (fun a b c d -> a, b, c, d) in
+  check bool "the real payload input pipe is full" true (capacity > 0 && incoming = capacity);
+  if output_pressure then
+    check bool "the real payload output pipe is full" true (out_capacity > 0 && outgoing = out_capacity);
+  Unix.shutdown host Unix.SHUTDOWN_SEND;
+  Unix.clear_nonblock host;
+  let chunks =
+    if output_pressure then begin
+      (* Keep the receive direction unread until the relay itself exits.
+         A blocking terminal flush or a missing RDHUP observation cannot pass. *)
+      check_exit_zero ~what:"the output-pressured relay" relay_pid;
+      reaped := true;
+      initial @ complete_prefix (read_until_eof ~allow_reset:true host)
+    end else begin
+      (* AF_UNIX may reset on close with the deliberately discarded input
+         still queued. A reset is no success: the complete Exit and actual
+         payload trailer below remain mandatory for this drained case. *)
+      let chunks = initial @ decode_all (read_until_eof ~allow_reset:true host) in
+      check_exit_zero ~what:"the input-pressured relay" relay_pid;
+      reaped := true;
+      chunks
+    end
+  in
+  let outcome = outcome_of chunks in
+  if output_pressure then
+    check (list exit_status) "incomplete output cannot claim a terminal relay Exit" [] outcome.exits
+  else begin
+    check (list exit_status) "drained cancellation keeps the actual shim exit" [ Relay.Exited 0 ] outcome.exits;
+    match Exec_ssh_protocol.parse_trailer outcome.stderr with
+    | Error message -> fail message
+    | Ok trailer ->
+      check (option int) "EOF cancellation killed the TERM-resistant payload" (Some 9) trailer.signal;
+      check (option int) "cancellation did not invent an exit" None trailer.exit;
+      check bool "EOF was not mislabeled as timeout" false trailer.timed_out;
+      check (option string) "drained cancellation has no transport error" None trailer.shim_error
+  end;
+  let running = try Unix.kill payload 0; true with Unix.Unix_error (Unix.ESRCH, _, _) -> false in
+  check bool "the owned actual payload was reaped" false running;
+  payload_pid := None
 
 (* The real shim behind serve: two connections at once and a probe. *)
 let test_serve_runs_the_real_shim () =
@@ -645,5 +788,9 @@ let () =
     ; ( "serve"
       , [ test_case "runs the real shim" `Quick test_serve_runs_the_real_shim
         ; test_case "real shim exchanges interactive binary input through the relay" `Quick
-            test_real_shim_exchanges_interactive_bytes_through_the_relay ] )
+            test_real_shim_exchanges_interactive_bytes_through_the_relay
+        ; test_case "interactive half-close cancels full input" `Quick
+            (test_interactive_half_close_cancels_pressure ~output_pressure:false)
+        ; test_case "interactive output pressure cannot report a false Exit" `Quick
+            (test_interactive_half_close_cancels_pressure ~output_pressure:true) ] )
     ]

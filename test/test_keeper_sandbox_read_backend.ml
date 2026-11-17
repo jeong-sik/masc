@@ -551,6 +551,8 @@ let serve_fake_apple_agent ~sw ~net ~host_socket =
       send (Relay.Stdout "remote-file-content");
       send (Relay.Stderr fake_shim_trailer);
       send (Relay.Exit (Relay.Exited 0))
+    | Some Relay.Interactive_run ->
+      Alcotest.fail "finite read fixture received an interactive request"
     | None -> Alcotest.fail "the fake agent received an unknown request kind"
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->

@@ -14,8 +14,9 @@
     {!serve} accepts connections and forks one relay for each. {!relay}
     writes a hello, reads one request-kind byte, and runs the shim at the path
     the agent was started from. Bytes from the connection go to the shim's
-    stdin; the shim's stdout and stderr go back as chunks as they arrive, then
-    one exit chunk. *)
+    stdin; the shim's stdout and stderr go back as chunks as they arrive.
+    An exit chunk follows only a completely delivered stream and the actual
+    reaped child status. *)
 
 type owner =
   { uid : int
@@ -61,17 +62,25 @@ val relay :
   host_signal_number:(int -> int) ->
   unit
 (** Serves one connection and returns once the shim child is reaped. Runs
-    [program] for a [Run] and [program --probe] for a [Probe], with [env] and
-    the caller's working directory.
+    [program] for [Run] or [Interactive_run] and [program --probe] for a
+    [Probe], with [env] and the caller's working directory.
 
     A connection that ends before the kind byte, or sends an unknown one,
-    gets the hello and nothing else. When the host ends its side, the bytes
-    it sent before still reach the shim and then the shim's stdin closes —
-    the shim reads that as a cancel. When the host goes away (a failed write
+    gets the hello and nothing else. For [Run]/[Probe], when the host ends
+    its sending side the bytes it sent before still reach the shim and then
+    the shim's stdin closes. For [Interactive_run], send-half-close instead
+    discards pending input and closes shim stdin immediately, even under
+    input backpressure; output remains deliverable. The shim reads its
+    stdin closing as cancellation. When the host goes away (a failed write
     or a reset), its queued bytes are dropped, the shim's stdin closes, and
     the shim's output is still read to the end and dropped, so the shim never
-    blocks on a full pipe. [host_signal_number] turns an OCaml signal code
-    into the guest OS number the exit chunk carries.
+    blocks on a full pipe. Output queues and the final drain stay bounded
+    and nonblocking. Once the shim is reaped, the shared cleanup grace also
+    bounds undrained pipes or an unread host socket. An incomplete stream
+    shuts down the connection without an [Exit] chunk; a truncated stream
+    cannot claim completion. The caller owns closing [conn] after return.
+    [host_signal_number] turns an OCaml signal code into the guest OS number
+    the exit chunk carries.
 
     SIGPIPE must be ignored ({!main} does it), or a host that goes away kills
     the relay instead of reaching those branches. *)

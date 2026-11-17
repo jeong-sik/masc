@@ -250,6 +250,92 @@ let test_recovery_creation_failure_is_reported () =
   Alcotest.(check bool) "failure surfaced" true (report.failures <> []);
   Alcotest.(check bool) "source retained" true (Sys.file_exists orphan)
 
+let test_private_jsonl_stage_undeterminable_is_not_reaped () =
+  with_temp_base @@ fun base_path ->
+  (* A stage-named entry whose holder cannot be told apart from a dead writer.
+     A directory with the stage name makes the probe answer [Undeterminable
+     Not_regular_file] without needing a filesystem that refuses flock: this is
+     the same "the probe learned nothing" answer, and the sweep must not delete
+     or move it. Before the probe distinguished the two, this entry read as
+     "not held" and a live writer's stage file could be reaped the same way. *)
+  let undeterminable = Filename.concat base_path ".private_jsonl_unknown01.stage" in
+  Unix.mkdir undeterminable 0o700;
+  let report = cleanup base_path in
+  Alcotest.(check bool) "undeterminable stage still present" true
+    (Sys.file_exists undeterminable);
+  Alcotest.(check int) "nothing deleted" 0 report.Fs_compat.deleted;
+  Alcotest.(check int) "nothing preserved" 0 report.Fs_compat.preserved;
+  (match report.Fs_compat.failures with
+   | [ { Fs_compat.operation = Fs_compat.Inspect_orphan
+       ; path
+       ; cause = Fs_compat.Liveness_undeterminable reason
+       }
+     ] ->
+     Alcotest.(check string) "reported path" undeterminable path;
+     Alcotest.(check string) "reported reason" "not_regular_file" reason
+   | failures ->
+     Alcotest.failf
+       "expected one Liveness_undeterminable failure, got %d: %s"
+       (List.length failures)
+       (String.concat
+          "\n"
+          (List.map Fs_compat.atomic_orphan_cleanup_failure_to_string failures)))
+;;
+
+let test_private_jsonl_stage_unreadable_is_not_reaped () =
+  with_temp_base @@ fun base_path ->
+  (* The loss being fixed: a regular stage file whose holder cannot be probed.
+     [open] on it fails, which used to answer "not held" and the sweep then
+     moved or deleted a file a live writer still owned. A stage file the
+     process cannot read is the same "the probe learned nothing" answer as a
+     filesystem that refuses flock, and it is reproducible here without a
+     test-only seam. *)
+  let unreadable = Filename.concat base_path ".private_jsonl_locked01.stage" in
+  write_file ~path:unreadable ~content:"{\"in_flight\":true}\n";
+  Unix.chmod unreadable 0o000;
+  Fun.protect
+    ~finally:(fun () -> try Unix.chmod unreadable 0o600 with Unix.Unix_error _ -> ())
+    (fun () ->
+       let report = cleanup base_path in
+       Alcotest.(check bool) "unreadable stage still present" true
+         (Sys.file_exists unreadable);
+       Alcotest.(check int) "not deleted" 0 report.Fs_compat.deleted;
+       Alcotest.(check int) "not preserved" 0 report.Fs_compat.preserved;
+       (match report.Fs_compat.failures with
+        | [ { Fs_compat.operation = Fs_compat.Inspect_orphan
+            ; cause = Fs_compat.Liveness_undeterminable reason
+            }
+          ] ->
+          Alcotest.(check string) "reported reason" "open_failed" reason
+        | failures ->
+          Alcotest.failf
+            "expected one Liveness_undeterminable failure, got %d: %s"
+            (List.length failures)
+            (String.concat
+               "\n"
+               (List.map Fs_compat.atomic_orphan_cleanup_failure_to_string
+                  failures))))
+;;
+
+let test_private_jsonl_holding_file_is_not_swept () =
+  with_temp_base @@ fun base_path ->
+  (* A rewrite that is still filling its replacement carries a holding name,
+     never a stage name, until its lease is held. A sweep in that window must
+     leave it alone: a stage name there is exactly what the sweep reclaims,
+     which is how a live writer's file was taken. The name is spelled out rather
+     than read from the module so that changing it to a swept shape fails here. *)
+  let holding =
+    Filename.concat base_path ".private_jsonl_holding_mid01.holding"
+  in
+  write_file ~path:holding ~content:"{\"in_flight\":true}\n";
+  let report = cleanup base_path in
+  Alcotest.(check bool) "holding file still present" true
+    (Sys.file_exists holding);
+  Alcotest.(check int) "nothing deleted" 0 report.Fs_compat.deleted;
+  Alcotest.(check int) "nothing preserved" 0 report.Fs_compat.preserved;
+  check_no_failures report
+;;
+
 let test_private_jsonl_stage_reclaims_stranded_and_skips_active () =
   with_temp_base @@ fun base_path ->
   let empty_stage = Filename.concat base_path ".private_jsonl_empty01.stage" in
@@ -313,5 +399,11 @@ let () =
             test_recovery_creation_failure_is_reported;
           Alcotest.test_case "private_jsonl stage stranded vs active" `Quick
             test_private_jsonl_stage_reclaims_stranded_and_skips_active;
+          Alcotest.test_case "private_jsonl stage with undeterminable liveness" `Quick
+            test_private_jsonl_stage_undeterminable_is_not_reaped;
+          Alcotest.test_case "private_jsonl unreadable stage is not reaped" `Quick
+            test_private_jsonl_stage_unreadable_is_not_reaped;
+          Alcotest.test_case "private_jsonl holding file is not swept" `Quick
+            test_private_jsonl_holding_file_is_not_swept;
         ] );
     ]

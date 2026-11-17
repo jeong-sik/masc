@@ -21,6 +21,10 @@ type atomic_orphan_cleanup_cause =
   | Unexpected_file_kind of Unix.file_kind
   | Outside_ownership_root of { ownership_root : string }
   | Identity_changed
+  | Liveness_undeterminable of string
+    (** The stage file's holder could not be told apart from a dead writer, so
+        the entry was left alone. Deleting on this answer is what loses a live
+        writer's data on a filesystem without [flock(2)]. *)
   | Other_failure of exn
 
 type atomic_orphan_cleanup_failure =
@@ -63,6 +67,8 @@ let atomic_orphan_cleanup_cause_to_string = function
   | Outside_ownership_root { ownership_root } ->
     Printf.sprintf "path is outside ownership root: %s" ownership_root
   | Identity_changed -> "filesystem identity changed during cleanup"
+  | Liveness_undeterminable reason ->
+    Printf.sprintf "stage liveness could not be determined: %s" reason
   | Other_failure exn -> Printexc.to_string exn
 ;;
 
@@ -520,8 +526,27 @@ let cleanup_atomic_orphans ~ownership_root ~(base_path : string) () =
         ~dir_stat:base_stat
         ~on_entry:(fun report ~base_stat ~dir ~dir_stat name ->
           if Atomic_temp_name.is_private_jsonl_stage_name name
-             && Stage_flock.is_path_flocked (Filename.concat dir name)
-          then report
+          then
+            (* Only [Not_held] says the writer is gone. [Held] is a live
+               writer, and [Undeterminable] is a filesystem or path where the
+               probe learned nothing: deleting on that answer would reap a live
+               writer's stage file, so it is reported and left alone. *)
+            (match Stage_flock.probe_path (Filename.concat dir name) with
+             | Stage_flock.Held -> report
+             | Stage_flock.Not_held ->
+               handle_orphan
+                 { report with inspected = report.inspected + 1 }
+                 ~base_stat
+                 ~dir
+                 ~dir_stat
+                 name
+             | Stage_flock.Undeterminable reason ->
+               add_failure
+                 { report with inspected = report.inspected + 1 }
+                 ~operation:Inspect_orphan
+                 ~path:(Filename.concat dir name)
+                 (Liveness_undeterminable
+                    (Stage_flock.undeterminable_reason_label reason)))
           else if Atomic_temp_name.is_name name
           then
             handle_orphan

@@ -23,6 +23,9 @@ type atomic_orphan_cleanup_cause =
   | Unexpected_file_kind of Unix.file_kind
   | Outside_ownership_root of { ownership_root : string }
   | Identity_changed
+  | Liveness_undeterminable of string
+    (** A stage file's holder could not be told apart from a dead writer, so
+        the entry was left alone and reported here. *)
   | Other_failure of exn
 
 type atomic_orphan_cleanup_failure =

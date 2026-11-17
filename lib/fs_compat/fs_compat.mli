@@ -1105,6 +1105,7 @@ type atomic_orphan_cleanup_cause =
   | Unexpected_file_kind of Unix.file_kind
   | Outside_ownership_root of { ownership_root : string }
   | Identity_changed
+  | Liveness_undeterminable of string
   | Other_failure of exn
 
 type atomic_orphan_cleanup_failure =

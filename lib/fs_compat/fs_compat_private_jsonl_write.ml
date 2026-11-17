@@ -363,11 +363,14 @@ let private_jsonl_replace_locked ?before_sync_rewrite_parent ~dir path content =
   match private_jsonl_capture Create_rewrite_stage (fun () ->
     (* Open_binary for the same reason as [Atomic_replace.open_atomic_temp_file]:
        the stage file holds the replacement bytes verbatim. *)
+    (* Created under a name the sweep does not reclaim, and renamed straight
+       onto [path]: a stage name during the create-to-lease window would let the
+       reclaimer take a file this writer still owns. *)
     Filename.open_temp_file
       ~mode:[ Open_binary ]
       ~temp_dir:dir
-      Fs_compat_internal.Atomic_temp_name.private_jsonl_stage_prefix
-      Fs_compat_internal.Atomic_temp_name.private_jsonl_stage_suffix)
+      Fs_compat_internal.Atomic_temp_name.private_jsonl_holding_prefix
+      Fs_compat_internal.Atomic_temp_name.private_jsonl_holding_suffix)
   with
   | Error failure -> Error (Private_jsonl_operation_failed failure)
   | Ok (temp_path, output) ->

@@ -507,6 +507,7 @@ type atomic_orphan_cleanup_cause = Atomic_orphan_cleanup.atomic_orphan_cleanup_c
   | Unexpected_file_kind of Unix.file_kind
   | Outside_ownership_root of { ownership_root : string }
   | Identity_changed
+  | Liveness_undeterminable of string
   | Other_failure of exn
 
 type atomic_orphan_cleanup_failure = Atomic_orphan_cleanup.atomic_orphan_cleanup_failure =

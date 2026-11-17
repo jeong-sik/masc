@@ -99,5 +99,13 @@ val run_complete_original :
     The installation/package/tool must match the leaf; a supported semantic
     revision change is allowed for a fresh question. Every retained question
     keeps its own immutable semantic destination and submit-once identity.
+    A strictly confirmed non-executed declaration ending may publish a complete
+    same-coordinate replacement intent and child, then return Pending and signal
+    the next Memory unit. Selection requires the exact parent's publication ACK;
+    every historical parent and the initial position-zero basis stay retained.
+    Unknown effects, permission refusals, answered steps and actual Gate work
+    cannot create these replacement edges. Saved intents reuse their exact
+    child even after configuration rollback; no original question is replayed.
     A refused message stops with its actual report; it cannot become a hole.
-    No publication, ACK, cleanup or Cut authority is supplied by this API. *)
+    No Memory publication, source ACK, cleanup or Cut authority is supplied
+    by this API. *)

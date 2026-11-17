@@ -11,6 +11,7 @@ module Refusal = Keeper_librarian_input_refusal
 module Memory_runtime = Keeper_librarian_runtime
 module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
+module Replacement = Keeper_librarian_retained_step_replacement
 let ( let* ) = Result.bind
 let ( let+ ) result f = Result.map f result
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
@@ -67,16 +68,23 @@ let same_owner captured current =
   | Other_owner -> false
 let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~unread_message =
   let keeper_name = Durable.keeper_id owner in
-  let* found = Step_owner.discover ~store ~owner |> Result.map_error owner_error in
-  let selected = List.filter (fun (_, (index : Step.index)) -> index.header.range = range) found in
-  let expected_source=match mode with Ordinary -> None | Complete_original original -> Some original.source in
-  let* ()=require (List.for_all (fun (_, (index:Step.index)) ->
-    index.header.retained_source=expected_source) selected)
-    "Floor range already belongs to another preparation mode or source" in
-  let* mine = List.fold_left (fun result listed ->
-    let* loaded = result in
-    let* original = Step_owner.load ~store listed |> Result.map_error owner_error in
-    Ok (original :: loaded)) (Ok []) selected |> Result.map List.rev in
+  let* mine=match mode with
+    | Ordinary ->
+      let* found=Step_owner.discover ~store ~owner |> Result.map_error owner_error in
+      let selected=List.filter (fun (_, (index:Step.index)) -> index.header.range=range) found in
+      let* ()=require (List.for_all (fun (_, (index:Step.index)) -> index.header.retained_source=None) selected)
+        "Ordinary floor range belongs to another preparation mode" in
+      List.fold_left (fun result listed ->
+        let* loaded=result in
+        let+ original=Step_owner.load ~store listed |> Result.map_error owner_error in
+        original::loaded) (Ok []) selected |> Result.map List.rev
+    | Complete_original original -> io (fun () ->
+      let* selected=Replacement.read ~store ~owner ~range ~source:original.source in
+      List.fold_left (fun result (record,_step) ->
+        let* loaded=result in
+        let+ header=Step.header ~owner record in
+        (record,header)::loaded) (Ok []) (Replacement.steps selected)
+      |> Result.map List.rev) in
   let* retained = index mine in
   (* The gate scope is read once for the pass, when the first answered step
      needs judging. The judgments of the steps that earlier passes finished are
@@ -172,6 +180,16 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
   let fresh_authority step () =
     let* ()=before_inference () in
     Edge.fresh_gate_authority ~config ~reserved ~owner ~expected:(Step.destination step) () in
+  let replaced (question:Machine.question) (record:Owner.retained) step = match mode with
+    | Ordinary -> Ok (Declaration_replaced {position=question.position;request_id=record.request_id})
+    | Complete_original _ ->
+      (match before_inference () with
+       | Error detail -> Ok (Pending (Keeper_librarian_pending.Message_floor {request_id=range.request_id;detail}))
+       | Ok () ->
+         let* child_id=Replacement.resume ~store ~config ~reserved ~original:record ~step in
+         Keeper_librarian_queue_signal.changed ~base_path:(Durable.base_path owner) ~keeper_name;
+         Ok (Pending (Keeper_librarian_pending.Message_floor
+           {request_id=child_id;detail="The retained question replacement is durable; the next Memory unit resumes that ID"}))) in
   let rec go machine ~previous =
     let* next = Machine.next machine in
     match next with
@@ -195,7 +213,7 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
            (Keeper_librarian_pending.of_worker_wait ~installation_id:record.installation_id
               ~request_id:record.request_id wait)))
        | Step_owner.Before_dispatch_replaced record ->
-         Ok (Declaration_replaced {position=question.position;request_id=record.request_id})
+         replaced question record step
        | Step_owner.Refused (final, record) ->
          let* replacement=match final with
            | Exact.Not_allowed _ ->
@@ -205,8 +223,7 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
                  ~installation_id:(Step.destination step).installation_id exact in
                Keeper_librarian_original_final.declaration_replaced ~store target record)
            | Call_final _ | Outcome_unknown | Request_id_reused -> Ok false in
-         if replacement then Ok (Declaration_replaced
-           {position=question.position;request_id=record.request_id}) else
+         if replacement then replaced question record step else
          let* ()=Memory_runtime.require_counterpart_template (Step.step step).preparation in
          let detail = Printf.sprintf "Floor step %d was refused: %s" question.position
            (Yojson.Safe.to_string (Exact.final_to_json final)) in

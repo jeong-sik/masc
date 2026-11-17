@@ -6,7 +6,7 @@ module State = Keeper_librarian_history_resolution_state
 module Journal = Keeper_librarian_durable_gate
 module Chain = Keeper_librarian_floor_chain
 module Step = Keeper_librarian_floor_step_request
-module Steps = Keeper_librarian_floor_step_owner
+module Replacement = Keeper_librarian_retained_step_replacement
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
@@ -83,22 +83,15 @@ let same_owner captured current =
   | Other_owner -> false
 let retained_basis t =
   let* source=source_identity t in
-  let* found=Steps.discover ~store:t.store ~owner:(Request.physical_owner t.request)
-    |> Result.map_error Steps.error_to_string in
-  let matching=List.filter (fun (_, (index:Step.index)) ->
-    index.header.range.request_id=source.request_id) found in
-  let* ()=require (List.for_all (fun (_, (index:Step.index)) ->
-    index.header.range.request_digest=source.request_digest && index.header.retained_source=Some source
-    && same_owner (Request.destination t.request) index.header.destination) matching)
-    "Cut floor range has another source, preparation mode or destination owner" in
+  let range:Step.link={request_id=source.request_id;request_digest=source.request_digest} in
+  let* selected=Replacement.read ~store:t.store ~owner:(Request.physical_owner t.request) ~range ~source in
+  let matching=Replacement.steps selected in
+  let* ()=require (List.for_all (fun (_,step) ->
+    same_owner (Request.destination t.request) (Step.destination step)) matching)
+    "Cut floor range has another destination owner" in
   match matching with
   | [] -> Ok None
-  | _::_ ->
-    let* first=match List.filter (fun (_, (index:Step.index)) -> index.header.position=0) matching with
-      | [first] -> Ok first
-      | [] | _::_ -> Error "Cut floor has no unique retained first question" in
-    let* record,_=Steps.load ~store:t.store first |> Result.map_error Steps.error_to_string in
-    let* step=Step.restore ~owner:(Request.physical_owner t.request) record in
+  | (_,step)::_ ->
     let* ()=require (same_owner
       (Request.destination t.request) (Step.destination step))
       "Cut floor first question belongs to another original leaf owner" in
@@ -270,6 +263,7 @@ let validate_retained_step ~store step =
       (Request.destination original) (Step.destination step))
       "Retained floor request belongs to another original leaf owner" in
     let* ()=Runtime.validate_retained_durable_step ~source:identity ~original:(Request.preparation original) (Step.step step) in
+    let* ()=Replacement.confirm_selected ~store step in
     let* retained=retained_basis selected in
     let* basis,transaction_id=Option.to_result ~none:"Retained floor has no initial anchor/manifest" retained in
     let* ()=require (transaction_id=Step.transaction_id step) "Retained floor changed its original transaction" in

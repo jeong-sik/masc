@@ -7,7 +7,7 @@ module Memory = Keeper_memory_os_current_types
 module Publication = Keeper_memory_os_program_publication
 module Codec = Keeper_memory_os_current_range_codec
 module Step = Keeper_librarian_floor_step_request
-module Steps = Keeper_librarian_floor_step_owner
+module Replacement = Keeper_librarian_retained_step_replacement
 module Runtime = Keeper_librarian_runtime
 module Cursor = Keeper_external_read_cursor
 module Atom = Keeper_librarian_progress
@@ -131,17 +131,11 @@ let first_basis ~store request =
   let* source_basis_digest=Request.source_basis_digest request in
   let identity={Runtime.request_id=Request.request_id request;request_digest=Request.body_digest request;
     source_basis_digest} in
-  let* found=Steps.discover ~store ~owner |> Result.map_error Steps.error_to_string in
-  let matching=List.filter (fun (_, (index:Step.index)) ->
-    index.header.range.request_id=identity.request_id) found in
-  let* ()=require (List.for_all (fun (_, (index:Step.index)) ->
-    index.header.range.request_digest=identity.request_digest && index.header.retained_source=Some identity) matching)
-    "Program original has a different retained source or preparation mode" in
-  let* selected=match List.filter (fun (_, (index:Step.index)) -> index.header.position=0) matching with
-    | [first] -> Ok first
-    | [] | _::_ -> Error "Program has no unique retained first question" in
-  let* record,_=Steps.load ~store selected |> Result.map_error Steps.error_to_string in
-  let* step=Step.restore ~owner record in
+  let range:Step.link={request_id=identity.request_id;request_digest=identity.request_digest} in
+  let* selected=Replacement.read ~store ~owner ~range ~source:identity in
+  let* record,step=match Replacement.steps selected with
+    | first::_ -> Ok first
+    | [] -> Error "Program has no retained first question" in
   let same_owner=match Lane_addon_captured_destination.relation
       ~captured:(Request.destination request) ~current:(Step.destination step) with
     | Lane_addon_captured_destination.Same | Replaced -> true

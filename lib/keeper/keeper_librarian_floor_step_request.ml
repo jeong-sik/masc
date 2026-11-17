@@ -323,6 +323,16 @@ let create ?basis ~request_id ~owner ~destination ~transaction_id ~range ~previo
   let* ()=matches_question question draft in
   decode ~owner ~digest:None (to_json draft)
 let of_json ~owner json = decode ~owner ~digest:None json
+let replace_declaration ~request_id ~destination (parent:t) =
+  let* ()=match parent.step.mode with
+    | Runtime.Retained_original _ -> Ok ()
+    | Ordinary_floor -> Error "Only a retained original question has declaration replacement lineage" in
+  let* ()=require (request_id<>parent.id) "A replacement question must have its own original ID" in
+  let* ()=match Destination.relation ~captured:parent.destination ~current:destination with
+    | Destination.Same | Replaced -> Ok ()
+    | Other_owner -> Error "Replacement question belongs to another destination owner" in
+  let draft={parent with id=request_id;destination;digest=""} in
+  decode ~owner:parent.owner ~digest:None (to_json draft)
 let binds (step:t) record = binds_record ~owner:step.owner ~id:step.id ~destination:step.destination (Owner.listed record)
 let header ~owner (record:Owner.retained) =
   let* f=body_fields record.request in

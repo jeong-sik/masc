@@ -58,6 +58,11 @@ val restore : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_re
 val of_json : owner:Keeper_librarian_durable_request.owner -> Yojson.Safe.t -> (t, string) result
 (** Pure complete capture decoder. This does not prove a retained original,
     observe its physical owner or authorize any effect. *)
+val replace_declaration : request_id:string ->
+  destination:Keeper_librarian_durable_request.destination -> t -> (t, string) result
+(** Pure retained-question derivation: only ID and same-owner destination change.
+    Initial anchor, manifest, transaction, coordinate, carried state and frozen
+    preparation remain identical. Data only; it proves no ending or authority. *)
 val validate_ancestry_payload :
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   t -> (unit, string) result

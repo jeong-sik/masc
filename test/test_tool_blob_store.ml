@@ -861,6 +861,70 @@ let test_ordinary_put_does_not_establish_durable_reuse () =
       Alcotest.(check bool) "first strict publication does write" true
         (inode <> (Unix.stat path).Unix.st_ino))
 
+let test_prepared_payload_preserves_reference_across_roots () =
+  List.iter (fun bytes ->
+    let payload = B.prepare_payload ~bytes in
+    Alcotest.(check string) "prepared bytes are unchanged" bytes (B.prepared_bytes payload);
+    Alcotest.(check string) "owner computed the exact digest"
+      Agent_core_sha256.(digest_string bytes |> to_hex) (B.prepared_sha256 payload);
+    with_temp_dir (fun first -> with_temp_dir (fun second ->
+      let first_store = B.create ~base_path:first and second_store = B.create ~base_path:second in
+      let prepared = B.put_prepared_durable_reuse first_store ~payload ~mime:"text/plain" in
+      let ordinary = B.put_durable_reuse second_store ~bytes ~mime:"text/plain" in
+      Alcotest.(check bool) "ordinary and prepared references match" true (prepared = ordinary);
+      let second_prepared = B.put_prepared_durable_reuse second_store ~payload ~mime:"text/plain" in
+      Alcotest.(check bool) "one prepared payload can be published in another root" true
+        (prepared = second_prepared);
+      List.iter (fun store ->
+        Alcotest.(check (option string)) "each root owns the original bytes" (Some bytes)
+          (fetch_ok store ~sha256:prepared.O.sha256)) [first_store;second_store])))
+    ["";"exact UTF-8: 한글\ncontrol\001\255";String.make 301 'x']
+
+let test_prepared_durable_reuse_preserves_repair_and_strict_evidence () =
+  with_temp_dir (fun dir ->
+    let store = B.create ~base_path:dir in
+    let bytes = "prepared exact provider-input bytes" in
+    let payload = B.prepare_payload ~bytes in
+    let put () = B.put_prepared_durable_reuse store ~payload ~mime:"application/json" in
+    let reference = put () in
+    let path = blob_path store reference.O.sha256 in
+    let inode = (Unix.stat path).Unix.st_ino in
+    ignore (put () : O.artifact_ref);
+    Alcotest.(check int) "verified prepared recall is not rewritten" inode (Unix.stat path).Unix.st_ino;
+    Fs_compat.save_file path "corrupt recalled bytes";
+    ignore (put () : O.artifact_ref);
+    Alcotest.(check (option string)) "prepared recall repairs corrupt bytes" (Some bytes)
+      (fetch_ok store ~sha256:reference.sha256);
+    Unix.unlink path;
+    ignore (B.put store ~bytes ~mime:"application/json" : O.t);
+    let ordinary_inode = (Unix.stat path).Unix.st_ino in
+    ignore (put () : O.artifact_ref);
+    Alcotest.(check bool) "an ordinary replacement does not inherit strict evidence" true
+      (ordinary_inode <> (Unix.stat path).Unix.st_ino);
+    Unix.unlink path;
+    ignore (put () : O.artifact_ref);
+    Alcotest.(check (option string)) "prepared bytes republish a missing blob" (Some bytes)
+      (fetch_ok store ~sha256:reference.sha256))
+
+let test_strict_reuse_rechecks_unsafe_parent_after_warm_publication () =
+  List.iter (fun (label, put) -> with_temp_dir (fun dir ->
+    let store = B.create ~base_path:dir in
+    let payload = B.prepare_payload ~bytes:"parent permissions must remain private" in
+    let reference = put store payload in
+    let path = blob_path store reference.O.sha256 in
+    let inode = (Unix.stat path).Unix.st_ino in
+    Unix.chmod (B.root_dir store) 0o777;
+    Fun.protect ~finally:(fun () -> Unix.chmod (B.root_dir store) 0o700) (fun () ->
+      (match put store payload with
+       | _ -> Alcotest.fail (label ^ ": reused through a writable parent")
+       | exception Sys_error _ -> ());
+      Alcotest.(check int) (label ^ ": refused before replacing the unchanged leaf")
+        inode (Unix.stat path).Unix.st_ino)))
+    ["ordinary",(fun store payload ->
+        B.put_durable_reuse store ~bytes:(B.prepared_bytes payload) ~mime:"text/plain");
+     "prepared",(fun store payload ->
+        B.put_prepared_durable_reuse store ~payload ~mime:"text/plain")]
+
 let test_sharding_layout () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
@@ -2825,6 +2889,10 @@ let test_writers_refuse_symbolic_link_root_and_shard () =
       , fun store _source ->
           ignore
             (B.put_durable_reuse store ~bytes:payload ~mime:"text/plain" : O.artifact_ref) )
+    ; ( "put_prepared_durable_reuse"
+      , fun store _source ->
+          ignore (B.put_prepared_durable_reuse store ~payload:(B.prepare_payload ~bytes:payload)
+            ~mime:"text/plain" : O.artifact_ref) )
     ; ( "put_file_durable"
       , fun store source ->
           ignore (B.put_file_durable store ~path:source ~mime:"text/plain" : O.artifact_ref) )
@@ -3114,6 +3182,12 @@ let () =
             test_durable_reuse_revalidates_without_rewriting;
           Alcotest.test_case "ordinary put is not durable reuse evidence" `Quick
             test_ordinary_put_does_not_establish_durable_reuse;
+          Alcotest.test_case "prepared payload keeps its reference across roots" `Quick
+            test_prepared_payload_preserves_reference_across_roots;
+          Alcotest.test_case "prepared durable reuse preserves repair and strict evidence" `Quick
+            test_prepared_durable_reuse_preserves_repair_and_strict_evidence;
+          Alcotest.test_case "strict reuse rechecks an unsafe parent after warm publication" `Quick
+            test_strict_reuse_rechecks_unsafe_parent_after_warm_publication;
           Alcotest.test_case "repeated put no dup" `Quick
             test_repeated_put_no_dup;
           Alcotest.test_case "spaced mime is refused at construction" `Quick

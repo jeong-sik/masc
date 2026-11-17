@@ -84,6 +84,17 @@ type addressed
 (** The half of a {!put} that reads and writes no file: the sha256 of a body,
     the preview cut from it, and the address those name. *)
 
+type prepared_payload
+(** Immutable bytes with the SHA-256 computed by this module. Preparation is
+    independent of a store root and retains no path, preview or filesystem
+    authority. It is not evidence that a blob has been durably published. *)
+
+val prepare_payload : bytes:string -> prepared_payload
+(** Hash once without filesystem access. Pure; safe on a CPU worker. *)
+
+val prepared_bytes : prepared_payload -> string
+val prepared_sha256 : prepared_payload -> string
+
 val address : t -> bytes:string -> mime:string -> addressed
 (** The content address of [bytes] under [mime], computed without touching the
     filesystem. {!put_addressed} then stores it.
@@ -123,11 +134,20 @@ val put_durable : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
 
 val put_durable_reuse : t -> bytes:string -> mime:string -> Tool_output.artifact_ref
 (** Strictly publish once per process, then reuse the address only after a
-    successful integrity-checked read. Ordinary [put] does not establish this
-    durability evidence. Missing or damaged bytes are strictly republished.
+    successful integrity-checked read that revalidates the effective owner's
+    UID and every parent's lack of group/other write permission. Ordinary [put]
+    does not establish this durability evidence. Missing or damaged bytes are strictly republished.
     Each publication checks and syncs the owned directory chain as
     {!put_durable} does, so an unsafe chain raises [Sys_error] before any
     payload is written. *)
+
+val put_prepared_durable_reuse :
+  t -> payload:prepared_payload -> mime:string -> Tool_output.artifact_ref
+(** {!put_durable_reuse} using the owner's previously computed digest.
+    Addressing happens only here, so a caller may look up reuse by the digest
+    before allocating a root-dependent path or preview. All owned reads,
+    exact byte comparisons, strict syncs, repair and publication checks are
+    the same as [put_durable_reuse]. Preparation alone authorizes no reuse. *)
 
 val put_file_durable_blocking : t -> path:string -> mime:string -> Tool_output.artifact_ref
 (** The same durable file ingestion, executed synchronously on the caller.
@@ -205,6 +225,10 @@ val fetch_range :
     filesystem failures remain typed. Cancellation propagates. *)
 
 module For_testing : sig
+  val address_prepared : t -> payload:prepared_payload -> mime:string -> addressed
+  (** The actual pure addressing step of [put_prepared_durable_reuse], without
+      any publication or file read, for allocation/cost comparisons. *)
+
   val put_file_durable
     :  after_hash:(unit -> unit)
     -> t

@@ -167,15 +167,30 @@ let handle_facts_get state req reqd name =
   else (
     let config = Mcp_server.workspace_config state in
     let keepers_dir = memory_os_keepers_dir config in
-    (* What happened to each fact (RFC-0418): retrievals, retractions
-       and revisions, projected from the events sidecar at read time and
-       stored nowhere. A line the reader could not decode is counted, not
-       dropped. *)
-    let event_rows, events_read_error =
+    (* What happened to each fact (RFC-0418): retrievals from the events
+       sidecar, retractions and revisions from the memory journal the commits
+       wrote, projected at read time and stored nowhere. A sidecar line the
+       reader could not decode is counted, not dropped. A history that could
+       not be read is named in [events_read_error], so its zeros are not taken
+       for an empty history. *)
+    let event_rows, sidecar_read_error =
       match Keeper_memory_os_events.read ~keepers_dir ~keeper_id:name with
       | Ok rows -> rows, None
       | Error error ->
         [], Some (Keeper_memory_os_events.file_read_error_to_string error)
+    in
+    let lineage, lineage_read_error =
+      match Keeper_memory_os_current.read_commit_lineage ~keepers_dir ~keeper_id:name with
+      | Ok lineage -> lineage, None
+      | Error detail ->
+        ( { Keeper_memory_os_current.revisions = []; retractions = [] }
+        , Some ("memory journal lineage read failed: " ^ detail) )
+    in
+    let events_read_error =
+      match sidecar_read_error, lineage_read_error with
+      | None, None -> None
+      | Some detail, None | None, Some detail -> Some detail
+      | Some sidecar, Some journal -> Some (sidecar ^ "; " ^ journal)
     in
     let events =
       List.filter_map
@@ -241,7 +256,10 @@ let handle_facts_get state req reqd name =
           | facts ->
             let facts = List.map (fun fact -> Keeper_memory_os_types.memory_id fact, fact) facts in
             let summaries = Keeper_memory_os_events.summaries_for
-                ~memory_ids:(List.map fst facts) events in
+                ~memory_ids:(List.map fst facts)
+                ~revisions:lineage.Keeper_memory_os_current.revisions
+                ~retractions:lineage.Keeper_memory_os_current.retractions
+                events in
             List.map2 fact_json facts summaries
         in
         `Assoc

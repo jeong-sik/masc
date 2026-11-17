@@ -1,16 +1,19 @@
 (** Memory history events (RFC-0418).
 
-    This module records retrieval, retraction and revision as typed events
-    in a per-keeper append-only sidecar, [<keeper>.memory-events.jsonl], and
-    projects them at read time. It stores no strength, score, or threshold;
-    every number a consumer shows is computed from the events it reads.
+    This module records retrieval as typed events in a per-keeper append-only
+    sidecar, [<keeper>.memory-events.jsonl], and projects them at read time
+    together with the revisions and retractions the memory journal records. It
+    stores no strength, score, or threshold; every number a consumer shows is
+    computed from what it reads.
 
-    The sidecar is separate from the memory journal on purpose: the journal
-    holds one line per librarian pass and is not read on the turn path, while
-    [Retrieved] is written on the turn path by [keeper_memory_search] and
-    [keeper_memory_select]. Events
-    outlive the fact they name; a dropped fact keeps its events and a reader
-    attaches them only to facts that still exist. *)
+    Only reads live here. A retrieval changes no snapshot, so it has no journal
+    row to ride on, and it is written on the turn path by
+    [keeper_memory_search] and [keeper_memory_select]. Revisions and
+    retractions change the snapshot, and the commit's own journal row is their
+    record ({!Keeper_memory_os_current.read_commit_lineage}): a separate append
+    after the commit could be lost to a cancellation or crash in between
+    (#37433). Events outlive the fact they name; a dropped fact keeps its
+    events and a reader attaches them only to facts that still exist. *)
 
 (** What happened to the memory. A closed set: a new kind of event is a new
     constructor, and the compiler names every consumer that has to learn it. *)
@@ -19,16 +22,6 @@ type event_kind =
   (** The fact was among the results [keeper_memory_search] or
       [keeper_memory_select] returned for [query]. Assessment without delivery
       does not create a retrieval event. *)
-  | Retracted
-  (** [keeper_memory_retract] successfully removed the fact identified by its
-      [memory_id]. This records removal, not a judgment of the fact's quality. *)
-  | Revised of { superseded_by : string }
-  (** A new claim continues this fact and this one was dropped: the librarian
-      wrote it, or the keeper passed this fact's id as [supersedes] to
-      [keeper_memory_write]. [superseded_by] is the new fact's [memory_id]. The
-      producer is
-      responsible for pairing this with the drop and for never letting a fact
-      supersede itself. *)
 
 type event =
   { recorded_at : float (** Unix seconds, the producer's clock. *)
@@ -44,10 +37,10 @@ val suffix : string
 (** {1 Codec}
 
     One JSON object per line. [recorded_at], [memory_id], [trace_id], [kind]
-    and the kind's payload ([query] or [superseded_by]); [Retracted] has none.
-    The decoder rejects a missing, extra or
-    duplicate field, an unknown kind token, a non-finite time, a string that is
-    not a memory id where one is required, and a blank [query]. *)
+    and the kind's payload ([query]). The decoder rejects a missing, extra or
+    duplicate field, an unknown kind token (including the [retracted] and
+    [revised] rows earlier builds wrote), a non-finite time, a string that is
+    not a memory id, and a blank [query]. *)
 
 val event_to_json : event -> Yojson.Safe.t
 val event_of_json : Yojson.Safe.t -> (event, Keeper_memory_os_types.wire_error) result
@@ -112,16 +105,23 @@ type summary =
       shown as a count of days, not turned into a score. *)
   ; last_retrieved_at : float option
   ; retracted_count : int
+  (** Explicit retractions of this memory id in the journal lineage. *)
   ; revised_from : string list
-  (** Memory ids of facts whose [Revised] event names this fact as their
+  (** Memory ids of facts whose journal revision link names this fact as their
       successor, sorted, without repeats. *)
   }
 
-val summaries_for : memory_ids:string list -> event list -> summary list
-(** Analyze one captured event list for only the requested ids. Results have
-    exactly the requested order and length, including duplicate ids. A requested
-    id with no events has an empty summary. Incoming revisions from unrequested
-    predecessors still count; self-revisions do not. No state crosses calls. *)
+val summaries_for :
+  memory_ids:string list ->
+  revisions:Keeper_memory_os_types.revision list ->
+  retractions:string list ->
+  event list -> summary list
+(** Analyze one captured event list and one journal lineage
+    ({!Keeper_memory_os_current.read_commit_lineage}) for only the requested
+    ids. Results have exactly the requested order and length, including
+    duplicate ids. A requested id with no events and no lineage has an empty
+    summary. Incoming revisions from unrequested predecessors still count;
+    self-revisions do not. No state crosses calls. *)
 
 (** The summary on the wire: the five fields by name, [last_retrieved_at]
     null when the fact was never retrieved. *)

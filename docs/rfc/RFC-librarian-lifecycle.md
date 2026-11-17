@@ -64,10 +64,10 @@ Keeper
 | `authored` / `injected` | 누가 적었나. `authored` 는 Keeper 가 `keeper_memory_write` 도구로 직접 적은 것이고 `injected` 는 Librarian 이 대화에서 뽑아 넣은 것이다. "주입"이 아니라 "Librarian 이 뽑음"으로 읽는다 | `origin.kind` |
 | `observed` / `derived` | 무엇에 근거하나. `observed` 는 어디서 읽었는지(자기 대화, Board 글)를 갖고 `derived` 는 유도(derivation)를 하나 이상 갖고 유도마다 전제가 된 다른 fact 의 id 를 갖는다. 전제가 모두 살아 있는 유도가 하나라도 남아 있으면 `derived` fact 는 유효하다(`keeper_memory_os_current.ml` 의 `derivations_supported`) | `basis` |
 | `dropped` | 회차가 "이 기억을 버린다"고 말한 것. 이유를 같이 적는다. 스냅숏에서 빠지고, 저널 커밋 줄에 id·이유와 원문이 남는다 | `dropped_statement`, 저널의 `dropped`·`change.removed` |
-| `supersedes` | 옛 기억 하나를 새 claim 하나가 고쳐 쓴다(1:1). 옛 id 는 같은 답의 `dropped` 에도 있어야 한다. 기억 이벤트에 `revised`(옛 id → 새 id)가 남아 거슬러 올라갈 수 있다 | `revision`, `Keeper_memory_os_events.Revised` |
+| `supersedes` | 옛 기억 하나를 새 claim 하나가 고쳐 쓴다(1:1). 옛 id 는 같은 답의 `dropped` 에도 있어야 한다. 커밋의 저널 줄에 `revision_links`(옛 id → 새 id)가 남아 거슬러 올라갈 수 있다(#37433) | `revision`, `Keeper_memory_os_current.read_commit_lineage` |
 | `absorbs` | 기억 여러 개를 새 claim 하나가 대신 말한다(N:1). 흡수된 id 는 `dropped` 에 있으면 안 된다. 스냅숏에서 빠지고 원문은 "어느 claim 으로 들어갔나"와 함께 남아 검색으로 다시 찾을 수 있다 | `absorbed_statement`, `<keeper>.memory-absorbed.jsonl` |
 | `retrieved` | 이 fact 가 `keeper_memory_search` 결과에 나온 횟수 | `Keeper_memory_os_events.Retrieved` |
-| `retracted` | Keeper 가 `keeper_memory_retract` 로 이 fact 를 id 로 지목해 철회에 성공한 사건이다. 같은 claim 이 다시 추가되면 과거 철회 이력이 다시 보인다 | `Keeper_memory_os_events.Retracted` |
+| `retracted` | Keeper 가 `keeper_memory_retract` 로 이 fact 를 id 로 지목해 철회에 성공한 사건이다. 같은 claim 이 다시 추가되면 과거 철회 이력이 다시 보인다. 기록은 `explicit_retract` 커밋 저널 줄의 `dropped` 다(#37433) | `Keeper_memory_os_current.read_commit_lineage` |
 
 회차가 말하지 않은 fact 는 그대로 남는다. 규칙을 하나라도 어긴 답(모르는 id, `supersedes` 의 id 가 `dropped` 에 없음, `absorbs` 의 id 가 `dropped` 에 있음)은 회차 전체가 거절되고 기억은 바뀌지 않는다. 2026-09-18 라이브 20개 Keeper 의 fact 2,462개 가운데 `injected` 가 2,157개, `derived` 가 9개였고, 기억 이벤트는 `revised` 3,632건, `retrieved` 1,508건, 당시 wire 이름 `cited`(현재 `retracted`) 116건, 흡수 기록은 300줄이었다.
 

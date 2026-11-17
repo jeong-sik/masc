@@ -185,8 +185,14 @@ let authorized_argument_roms_dir ~base_path dir =
       | Some _ | None -> false
     in
     if not (in_base || matches_env) then
+      (* The caller named this path and it does not sit where a request may
+         name one: [Invalid_request], not [Unreadable]. The type's contract
+         says a path the caller supplied is an invalid request, and the
+         difference is what a caller sees -- a workflow rejection it can fix
+         by naming a path inside the workspace, not a runtime failure that
+         reads as the machine breaking. *)
       Error
-        (Msx_lane.Unreadable
+        (Msx_lane.Invalid_request
            (Printf.sprintf
               "roms_dir %s is outside workspace %s and configured MSX_ROMS"
               dir base_path))
@@ -205,7 +211,7 @@ let authorized_argument_roms_dir ~base_path dir =
       (match symlink_escape with
        | Some name ->
          Error
-           (Msx_lane.Unreadable
+           (Msx_lane.Invalid_request
               (Printf.sprintf "refusing symlinked BIOS ROM %s in %s" name dir))
        | None -> Ok real_dir)
 ;;

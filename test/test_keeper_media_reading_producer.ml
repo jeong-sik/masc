@@ -64,7 +64,6 @@ let carrier dir mode binary args =
   Unix.execv binary (Array.of_list (binary :: args))
 
 type fixture = {
-  dir : string;
   config : Workspace.config;
   meta : Keeper_meta_contract.keeper_meta;
   store : Lane_addon_store.t;
@@ -117,7 +116,7 @@ let with_fixture ?(mode="reply") f =
             {prefix=[!self;"--carrier";dir;mode];probe_prefix=None;
              container_name=Filename.basename dir;shim_path= !shim} in
         Unix.mkdir (Remote.workspace_root endpoint) 0o700;
-        f {dir;config;meta;store;media;stored;subject;declaration;endpoint;acquisitions=ref 0})))
+        f {config;meta;store;media;stored;subject;declaration;endpoint;acquisitions=ref 0})))
 
 let producer ?retain_original ?declarations fixture =
   Producer.For_testing.create

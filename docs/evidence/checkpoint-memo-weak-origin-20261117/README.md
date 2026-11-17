@@ -1,4 +1,4 @@
-# Written checkpoint memo: release source-only fields
+# Written checkpoint memo: release original messages
 
 Source repair: `b204a00085dd5d08e7f421ebc4d6f383cf21e86c`, based on
 `56dcd7042332032bd5b9f0750a11164ef623c8a1`. Tracks [issue #52798](https://github.com/jeong-sik/masc/issues/52798), a focused reproduction of item 7 in closed issue #43575.
@@ -12,8 +12,9 @@ weak original-message witness per encoded entry. Loaded entries need no witness.
 Decoded identity is checked first so normal decoded reuse never reads the weak
 original. All wire validation, bytes and digest rules remain in place.
 
-This is a retention repair with measured costs, not a CPU-speedup claim. It does
-not attribute the running server's whole heap or demonstrate deployed recovery.
+This is a retention repair with measured costs and a conditional forced-GC
+benefit. It does not attribute the running server's whole heap or CPU, or
+demonstrate deployed recovery.
 
 ## Behavior evidence
 
@@ -57,9 +58,11 @@ or current server result.
 ## Provenance and limits
 
 source-bindings.json records exact baseline/measured/final source hashes. The
-final commit changes two comments after native candidate compilation; actual
-execution remains bound to its earlier complete source bytes. The maintained
-test bytes match the committed source, apart from its explicit namespace alias.
+final commit changes two comments after the earlier reproduction, leaf-suite
+and warm-save native compilation; those executions remain bound to their
+earlier complete source bytes. The maintained test bytes match the committed
+source, apart from its explicit namespace alias. The newer ToolUse input unit
+below compiles and executes the final published source bytes.
 Independent reviews distinguish these scopes. capture-provenance.json records
 exact copies and host-path substitutions; verification.json summarizes native
 commands and hashes their full private include vectors. Existing dependencies
@@ -68,3 +71,20 @@ profile/GC/restart, CI, original-request replay or merge was performed.
 
 Independent source, maintained-test and cost reviews are retained here. They
 record scoped source/evidence assessments, not formal GitHub approvals.
+
+## Persisted JSON input and forced-collection cost
+
+The [ToolUse input experiment](tool-input-gc-README.md) measures duplicated
+persisted trees, separately from the omitted ToolResult.json example. Ordinary
+Agent_turn tool results use json=None; the omitted-field reproduction alone
+does not establish a common operational CPU source.
+
+Four AB/BA pairs, eight fresh processes, compare a released original with a
+caller-held positive control. During 24 explicit forced full-major calls, the
+released candidate's paired median process CPU ratio is 0.5142/0.4846 for
+32768/131072 input rows. Post-GC live-word gauges fall by 14,147,976/56,615,304
+bytes. Caller-held CPU ratios are 1.0153/1.0211 and live-word differences are
+32 bytes; that control keeps both graphs alive. These are owned-process results,
+with a fixed four-row order inside each process and additional untimed Gc.stat
+collections. They do not establish ordinary allocation-load CPU, server RSS or
+end-to-end recovery. The warm-save costs above remain material.

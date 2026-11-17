@@ -7663,3 +7663,4 @@
 
 (include stanzas/test_keeper_stdio_binding.inc)
 (include stanzas/test_keeper_media_reading_original.inc)
+(include stanzas/test_keeper_media_original_preflight.inc)

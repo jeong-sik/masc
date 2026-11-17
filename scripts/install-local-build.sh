@@ -506,6 +506,18 @@ else
   echo "install-local-build: the browser Add-on is not declared: workspace $workspace_root does not exist yet; run masc browser-lane-setup --mode addon --base-path $workspace_root once it does"
 fi
 
+# The masc just installed writes the Exact worker packages it carries into
+# the workspace and builds their images, so a declaration that names one with
+# package = "<name>" finds this build's copy. It writes no declaration. A
+# package it cannot install, for one when Docker is absent, is reported and
+# does not fail the install: the server reports that package as not installed.
+if [ "$workspace_kind" = directory ]; then
+  "$prefix/masc" exact-addon-setup --base-path "$workspace_root" ||
+    echo "install-local-build: an Exact worker package of $workspace_root is not installed; the lines above say which, and masc exact-addon-setup --base-path $workspace_root tries again" >&2
+else
+  echo "install-local-build: the Exact worker packages are not installed: workspace $workspace_root does not exist yet; run masc exact-addon-setup --base-path $workspace_root once it does"
+fi
+
 if [ "$addon_failed" = true ]; then
   echo "install-local-build: the browser Add-on of $workspace_root is not set up; the programs above are installed" >&2
   exit 1

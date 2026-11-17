@@ -27182,8 +27182,8 @@ type keeper_message_status_source =
   | Message_status of turn_log * keeper_message_status_projection
 
 (* One synchronous draw may pass this value through menu measurement, history
-   budgeting and status drawing. The frame adds no cache or worker handoff;
-   the next draw observes the current selection again. *)
+   budgeting and status drawing. The frame keeps no copy of it and hands none
+   to a worker; the next draw observes the current selection again. *)
 let keeper_message_status_source (state : state) ~now =
   match keeper_message_status_log state with
   | None -> No_message_status
@@ -27890,6 +27890,68 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
                   ; fact Facts.Plain "Keeper Automation에서 전체 확인" ]
               else rows
 
+(* What the height of the fact blocks around the composer is held against
+   (RFC tui-one-screen-grammar section 8). While a turn's progress row is
+   drawn, the values around the composer lengthen and shorten every few
+   seconds ("5s with no new output"), and a block whose height followed them
+   would move the conversation up and down a row each time. So while all of
+   this stays the same, a block keeps the rows the frame before drew for it.
+
+   Everything here is a turn boundary or something the operator did: which
+   Keeper, the window's size, which turn is running, whether a draft is
+   typed, and the views that decide what a block says. Any of them changing
+   is a moment the screen moves anyway, so the blocks are measured again. *)
+type chat_rows_epoch =
+  { cre_keeper : string option
+  ; cre_terminal_rows : int
+  ; cre_terminal_cols : int
+  ; cre_running_turn : string option
+        (* The execution whose progress row is drawn. *)
+  ; cre_draft_typed : bool
+        (* A typed draft adds what Enter will do to the progress row. *)
+  ; cre_origin_display : Masc_tui_message_layout.origin_display
+  ; cre_schedules_expanded : bool
+  ; cre_turn_folded : bool
+  ; cre_tool_visibility : tool_visibility
+  ; cre_roster_hidden : bool
+  ; cre_language : ui_language
+  }
+
+type chat_rows_held =
+  { crh_status_block : int
+  ; crh_progress : int
+  ; crh_schedule : int
+  }
+
+(* Frames the renderer has begun. *)
+let chat_rows_frame : int Domain.DLS.key = Domain.DLS.new_key (fun () -> 0)
+
+let keeper_message_rows_begin_frame () =
+  Domain.DLS.set chat_rows_frame (Domain.DLS.get chat_rows_frame + 1)
+
+(* The rows the chat's fact blocks were drawn on, with the state and the
+   epoch they were drawn for and the frame that drew them: another state is
+   another screen. Only the renderer writes it
+   ([keeper_message_note_rows_drawn]). The frames measured for a key or a
+   page read it and leave it alone, so a row is kept only if it was on the
+   screen. *)
+let chat_rows_held_cell
+  : (state * chat_rows_epoch * chat_rows_held * int) option Domain.DLS.key
+  =
+  Domain.DLS.new_key (fun () -> None)
+
+(* The rows held for this epoch: those of the frame being built or of the one
+   before it. A frame that drew something else in between -- another view, a
+   panel over the chat -- ends the hold, and so does a frame with no turn
+   row, which has no epoch. *)
+let keeper_message_rows_held state epoch =
+  match epoch, Domain.DLS.get chat_rows_held_cell with
+  | Some epoch, Some (whose, drawn_for, drawn, drawn_in)
+    when whose == state && drawn_for = epoch && drawn_in >= Domain.DLS.get chat_rows_frame - 1 ->
+      drawn
+  | (Some _ | None), (Some _ | None) ->
+      { crh_status_block = 0; crh_progress = 0; crh_schedule = 0 }
+
 type keeper_message_status_frame =
   { kmsf_source : keeper_message_status_source
   ; kmsf_inflight_rows : (bool * string) list
@@ -27904,6 +27966,9 @@ type keeper_message_status_frame =
   ; kmsf_progress_rows : int
         (* Rows the turn's progress row is given. Its first is counted with
            the status rows; the rest come out of the history. *)
+  ; kmsf_rows_epoch : chat_rows_epoch option
+        (* What the rows of the fact blocks are held against. [None] when the
+           frame draws no turn row: then nothing is held. *)
   }
 
 (* Warnings have counted rows. A complete reading stays in the title when it
@@ -27979,7 +28044,9 @@ let keeper_message_inner_cells state ~terminal_cols =
              ~cols:terminal_cols)
 
 (* These are the same original rows used by the budget and the draw. The
-   frame is local to that synchronous call, never a state or worker cache. *)
+   frame is local to that synchronous call, never a state or worker cache.
+   What one draw leaves for the next is only how many rows its fact blocks
+   took ([chat_rows_held_cell]). *)
 let keeper_message_status_frame ?(schedule_budget = 1) ?(terminal_cols = max_int) state ~now =
   let evidence_rows, title_suffix = keeper_message_evidence_layout state ~terminal_cols in
   { kmsf_source = keeper_message_status_source state ~now
@@ -27992,6 +28059,7 @@ let keeper_message_status_frame ?(schedule_budget = 1) ?(terminal_cols = max_int
   ; kmsf_title_suffix = title_suffix
   ; kmsf_status_block_rows = 1
   ; kmsf_progress_rows = 1
+  ; kmsf_rows_epoch = None
   }
 
 let keeper_message_status_rows ?status_frame ?scroll (state : state) =
@@ -28078,20 +28146,72 @@ let keeper_message_frame_for_viewport ?scroll ~status_block_rows ~progress_rows_
     + (if keeper_message_reading_back ?scroll state then 0 else 1) in
   let schedule_rows max_rows = keeper_message_schedule_rows state ~now ~max_rows
       ~max_cells:(keeper_message_inner_cells state ~terminal_cols) in
+  let schedule_whole = schedule_rows max_int in
+  let progress_wanted = progress_rows_of frame in
+  let epoch =
+    if progress_wanted > 0
+    then
+      Some
+        { cre_keeper = state.msg_target_keeper_name
+        ; cre_terminal_rows = terminal_rows
+        ; cre_terminal_cols = terminal_cols
+        ; cre_running_turn =
+            Option.map turn_log_execution_id (keeper_message_status_log state)
+        ; cre_draft_typed = Masc_tui_message_input.length state.msg_input > 0
+        ; cre_origin_display = state.msg_origin_display
+        ; cre_schedules_expanded = state.msg_schedules_expanded
+        ; cre_turn_folded = state.msg_turn_folded
+        ; cre_tool_visibility = state.msg_tool_visibility
+        ; cre_roster_hidden = roster_pane_hidden state
+        ; cre_language = state.ui_language
+        }
+    else None
+  in
+  let held = keeper_message_rows_held state epoch in
   let granted = Masc_tui_message_layout.chat_block_rows
       ~history_rows:(Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows)
       ~menu_rows:(match keeper_message_command_menu ?scroll state with
         | None -> 0
         | Some menu ->
             Masc_tui_message_layout.command_menu_rows ~candidates:(List.length menu.items))
-      ~status_block_wanted:status_block_rows
-      ~progress_wanted:(progress_rows_of frame)
-      ~schedule_draws:(schedule_rows 1 <> []) in
+      ~status_block_wanted:(max status_block_rows held.crh_status_block)
+      ~progress_wanted:(max progress_wanted held.crh_progress)
+      ~schedule_draws:(match schedule_whole with
+        | [] -> held.crh_schedule > 0
+        | _ :: _ -> true) in
+  let schedule_drawn =
+    if List.compare_length_with schedule_whole granted.schedule <= 0
+    then schedule_whole
+    else schedule_rows granted.schedule
+  in
+  (* A block shorter than the frame before drew it keeps its height with
+     empty rows. The status block and the progress row are padded where they
+     are drawn; the schedule block's rows are counted from this list. *)
+  let schedule_kept =
+    max 0 (min granted.schedule held.crh_schedule - List.length schedule_drawn)
+  in
   { frame with
     kmsf_status_block_rows = 1 + granted.status_block_extra
   ; kmsf_progress_rows = 1 + granted.progress_extra
-  ; kmsf_schedule_rows = schedule_rows granted.schedule
+  ; kmsf_schedule_rows =
+      schedule_drawn @ List.init schedule_kept (fun _ -> { csl_lead = ""; csl_pieces = [] })
+  ; kmsf_rows_epoch = epoch
   }
+
+(* The renderer says which frame it drew. Its block rows are what the next
+   frame holds. *)
+let keeper_message_note_rows_drawn state (frame : keeper_message_status_frame) =
+  Domain.DLS.set chat_rows_held_cell
+    (Option.map
+       (fun epoch ->
+         ( state
+         , epoch
+         , { crh_status_block = frame.kmsf_status_block_rows
+           ; crh_progress = frame.kmsf_progress_rows
+           ; crh_schedule = List.length frame.kmsf_schedule_rows
+           }
+         , Domain.DLS.get chat_rows_frame ))
+       frame.kmsf_rows_epoch)
 
 (* The menu's window in the frame the pane draws. The frame is forced only
    when a menu is open: every key in the composer asks this, and measuring

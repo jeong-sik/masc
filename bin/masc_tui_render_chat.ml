@@ -4741,6 +4741,7 @@ let render_keeper_message (state : state) =
     let status_facts = keeper_status_facts state keeper_name in
     let status_frame = keeper_message_viewport_frame ~scroll:requested ~status_facts state
         ~now:(Unix.gettimeofday ()) ~terminal_rows:rows ~terminal_cols:cols in
+    keeper_message_note_rows_drawn state status_frame;
     let command_window = keeper_message_command_window
       ~status_frame:(Lazy.from_val status_frame) ~scroll:requested state
       ~terminal_rows:rows ~terminal_cols:cols in

@@ -53,15 +53,24 @@ for (const format of ['docx', 'hwpx', 'hwp'] as const) it(`imports ${format}, ed
   const generated = format === 'hwp' ? { data: new ArrayBuffer(0) } : await write(input)
   const view = open(), selected = file(generated.data, `실적.${format}`)
   fireEvent.change(screen.getByLabelText('가져올 문서 파일'), { target: { files: [selected] } })
-  const body = await screen.findByLabelText('문서 본문') as HTMLTextAreaElement
-  expect(body.value).toContain('data-masc-chart="column"')
-  expect(body.value).toContain('colspan="2"')
-  expect(body.value).toContain('<td>12.5</td>')
-  expect(body.value).toContain('<td></td>')
-  expect(view.drafts.at(-1)!.value.content).toBe(body.value)
+  const frame = await screen.findByTitle('글과 셀을 눌러 편집하는 미리보기') as HTMLIFrameElement
+  const source = view.drafts.at(-1)!.value.content
+  expect(source).toContain('data-masc-chart="column"')
+  expect(source).toContain('colspan="2"')
+  expect(source).toContain('<td>12.5</td>')
+  expect(source).toContain('<td></td>')
+  expect(screen.queryByLabelText('문서 본문')).toBeNull()
   expect(post).not.toHaveBeenCalled()
-  const edited = body.value.replace('<td>12.5</td>', '<td>42</td>')
-  fireEvent.input(body, { target: { value: edited } })
+  const projected = new DOMParser().parseFromString(frame.srcdoc, 'text/html')
+  const cell = [...projected.querySelectorAll('[data-masc-artifact-text]')].find(node => node.textContent === '12.5')!
+  fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data: { type: 'masc.artifact.text.selected.v1',
+    token: projected.querySelector('script')!.getAttribute('nonce'), id: Number(cell.getAttribute('data-masc-artifact-text')) } }))
+  fireEvent.input(await screen.findByLabelText('선택한 글 또는 셀 값'), { target: { value: '42' } })
+  expect(view.drafts.at(-1)!.pendingText!.input).toBe('42')
+  expect(view.drafts.at(-1)!.value.content).toBe(source)
+  fireEvent.click(screen.getByRole('button', { name: '원고에 반영' }))
+  const edited = source.replace('<td>12.5</td>', '<td>42</td>')
+  expect(view.drafts.at(-1)!.pendingText).toBeUndefined()
   const sent = view.drafts.at(-1)!.value, stored = { ...meta, title: sent.title, summary: sent.summary }
   const publication = { schema: 'masc.published_artifact.v1', artifact: stored, revision_url: '/' }
   vi.mocked(post).mockResolvedValue(publication)
@@ -144,7 +153,8 @@ it('cancels a non-responding HWP read, retries the same file and ignores the old
   expect(screen.queryByLabelText('문서 본문')).toBeNull()
   expect(screen.getByRole('status').textContent).toBe('파일을 읽고 있습니다.')
   await act(async () => { next.resolve({ content: '<p>새 원고</p>', notices: [] }) })
-  expect((await screen.findByLabelText('문서 본문') as HTMLTextAreaElement).value).toBe('<p>새 원고</p>')
+  await screen.findByTitle('글과 셀을 눌러 편집하는 미리보기')
+  expect(view.drafts[0]!.value.content).toBe('<p>새 원고</p>')
   expect(view.drafts).toHaveLength(1)
   expect(post).not.toHaveBeenCalled()
 })

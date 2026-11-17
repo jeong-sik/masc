@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ArtifactDraft, ArtifactPublication, ArtifactWorkspace } from '../../api/published-artifacts'
+import type { ArtifactLocalTextInput } from '../../lib/artifact-local-text'
 import { ArtifactComposer, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
 
 type ReadFeedback = { kind: 'reading' } | { kind: 'message'; message: string }
@@ -102,7 +103,7 @@ export function ArtifactImport({ workspaceRoot, draftRetention, isCurrent, onMut
     </div>`}
     ${message ? html`<p role="status" class="px-6">${message}</p>` : null}
     ${draft ? html`<${ArtifactComposer} key=${draft.key} initial=${draft.value} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent}
-      onMutation=${onMutation} onDraftChange=${(value: ArtifactDraft) => draftRetention.remember({ ...draft, value })}
+      onMutation=${onMutation} onDraftChange=${(value: ArtifactDraft, pendingText: ArtifactLocalTextInput | null) => draftRetention.remember({ ...draft, value, pendingText: pendingText ?? undefined })}
       onRelease=${() => draftRetention.release(draft.identity)}
       onSaved=${(publication: ArtifactPublication, workspace: ArtifactWorkspace) => { draftRetention.forget(draft.identity); onSaved(publication, workspace) }}
       onCancel=${() => { if (window.confirm('작성 중인 원고를 닫을까요? 저장하지 않은 내용은 사라집니다.')) { draftRetention.forget(draft.identity); onCancel() } }} />` : null}

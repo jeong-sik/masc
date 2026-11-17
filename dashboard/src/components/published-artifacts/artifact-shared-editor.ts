@@ -14,6 +14,7 @@ import { ArtifactLiveSession, draftBytes, type ArtifactLiveState } from '../../l
 import { resolveSharedSelection, restoreSharedDocument, sharedSource, type SharedSelection } from '../../lib/artifact-shared-document'
 import { ArtifactComposer, downloadArtifactDraft, type ArtifactPublicationOutcome, type ArtifactDraftRetention, type ArtifactDraftSnapshot } from './artifact-composer'
 import { ArtifactSentenceEditor } from './artifact-sentence-editor'
+import type { ArtifactLocalTextInput } from '../../lib/artifact-local-text'
 import { ArtifactDiscussionPanel } from './artifact-discussion-panel'
 
 export type ArtifactSharedCloseResult = { kind: 'keep_open' } | { kind: 'close'; publicationDiscarded: boolean }
@@ -322,7 +323,7 @@ export function ArtifactSharedEditor({ doc, workspaceRoot, capturedWorkspace, dr
     ${publication ? html`<${ArtifactComposer} initial=${publication.snapshot.value} base=${publication.base}
       capturedWorkspace=${publication.owner.workspace} workspaceRoot=${workspaceRoot} isCurrent=${isCurrent} onMutation=${onMutation}
       captureAttempt=${() => { const generation = pageGeneration.current; return () => mounted.current && !retired.current && pageGeneration.current === generation }}
-      onDraftChange=${(value: ArtifactDraftSnapshot['value']) => draftRetention.remember({ ...publication.snapshot, value })}
+      onDraftChange=${(value: ArtifactDraftSnapshot['value'], pendingText: ArtifactLocalTextInput | null) => draftRetention.remember({ ...publication.snapshot, value, pendingText: pendingText ?? undefined })}
       onRelease=${() => draftRetention.release(publication.snapshot.identity)}
       onSaved=${(value: ArtifactPublication) => {
         if (attempted.current.has(publication.snapshot.identity)) return

@@ -804,7 +804,7 @@ let request_for ~remote_root ~cwd =
   ; cwd
   ; remote_root
   ; timeout_sec = 1.0
-  ; stdin_len = 0L
+  ; stdin = Framed 0L
   ; mode = Exec_ssh_protocol.Effect
   ; acceptance_frame = false
   }
@@ -909,8 +909,11 @@ let test_probe_identity () =
      @ (if Exec_shim.user_notif_supported ()
         then [ Exec_ssh_protocol.user_notif_capability ]
         else [])
-     @ [ Exec_ssh_protocol.request_acceptance_capability ])
+     @ [ Exec_ssh_protocol.request_acceptance_capability
+       ; Exec_ssh_protocol.interactive_stdin_capability ])
     p.Exec_ssh_protocol.capabilities;
+  check bool "the real shim advertises the interactive input contract" true
+    (Exec_ssh_protocol.supports_interactive_stdin p);
   match Exec_ssh_protocol.parse_probe (Exec_ssh_protocol.render_probe p) with
   | Error e -> fail e
   | Ok p' ->

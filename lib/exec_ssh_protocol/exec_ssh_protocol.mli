@@ -127,6 +127,15 @@ val default_scratch_root : string
 
 (** {1 Request frame} *)
 
+type stdin =
+  | Framed of int64
+      (** Exactly this many bytes follow the JSON inside the initial frame.
+          Child stdin closes after those bytes are delivered. *)
+  | Interactive
+      (** No bytes follow the JSON inside the initial frame. Subsequent channel
+          bytes are the child's stdin, unchanged. Channel EOF cancels the
+          execution; it is not a graceful half-close of the child's input. *)
+
 type request =
   { v : major
     (** a request is framed in the receiving shim's major; a trailer echoes
@@ -147,8 +156,7 @@ type request =
         matched exactly so there is no older client to keep working. *)
   ; timeout_sec : float
     (** payload wall-clock budget, enforced server-side by the shim *)
-  ; stdin_len : int64
-    (** declared byte length of the raw stdin payload *)
+  ; stdin : stdin
   ; mode : mode  (** how the shim boxes the payload; ["mode"] on the wire *)
   ; acceptance_frame : bool
     (** ask the shim to write {!render_acceptance_frame} to the front of its
@@ -183,6 +191,13 @@ type request =
         "mode": "effect" }
     ]}
 
+    [Interactive] is V3-only. Its JSON contains ["stdin_stream": true] and
+    omits [stdin_len]; its length prefix covers only JSON. A peer that knows
+    only framed input requires [stdin_len] and rejects this header before
+    spawning, even if an earlier capability observation is stale. Exactly one
+    input representation is allowed, including no duplicate input keys.
+    Live bytes after this complete header are not part of [decode_request].
+
     Binary-suspect fields ([argv] entries, [env] names and values,
     [cwd]) are base64-encoded (RFC 4648, standard alphabet, WITH
     padding) INSIDE the JSON, so invalid UTF-8 and control bytes
@@ -196,9 +211,9 @@ val encode_request : request -> stdin:string -> (string, string) result
     Fails with [remote_ssh_transport_error] when:
     - [req.timeout_sec] is not finite ([nan]/[infinity] do not survive
       JSON — caught here instead of raising);
-    - [req.stdin_len] differs from the byte length of [stdin] — the
-      caller inconsistency is rejected at the source rather than
-      producing a frame the peer would reject as a truncated read. *)
+    - [Framed length] differs from the byte length of [stdin], or
+      [Interactive] is given a nonempty initial payload.
+    Interactive input in V2 is a version error. *)
 
 val decode_request : string -> (request * string, string) result
 (** [decode_request frame] parses exactly one frame: [frame] must be
@@ -215,13 +230,14 @@ val decode_request : string -> (request * string, string) result
       [remote_ssh_transport_error] — a timer must never receive
       [infinity];
     - a [mode] outside the closed set → [remote_ssh_transport_error];
-    - [v <> 3] → [remote_ssh_version_error].
+    - an unsupported major, or interactive input in V2 →
+      [remote_ssh_version_error].
 
     The [stdin_len] check happens BEFORE the payload is handed back, so
     a truncated frame can never be mistaken for a valid request.
 
-    Duplicate JSON keys are first-wins ([List.assoc_opt]); benign, and
-    identical on both peers since both use this module. *)
+    Duplicate input keys and ambiguous input representations are rejected.
+    Other duplicate JSON keys retain their existing first-wins behavior. *)
 
 (** {1 Result trailer}
 
@@ -413,6 +429,13 @@ val major_of_probe : probe -> (major, string) result
     for ["2.4.1"], [Ok V3] for ["3.0.0"]; [Error] naming both sides for a
     major this build does not speak or a version with no numeric major.
     Never raises. *)
+
+val interactive_stdin_capability : string
+(** ["interactive_stdin"]. A host must observe this capability before sending
+    an interactive header; a failed probe never grants it. *)
+
+val supports_interactive_stdin : probe -> bool
+(** Only a decoded V3 probe advertising {!interactive_stdin_capability}. *)
 
 (** {1 Guest agent relay}
 

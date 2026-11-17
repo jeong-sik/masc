@@ -59,6 +59,7 @@
 
 #ifdef __linux__
 #include <fcntl.h>
+#include <poll.h>
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
@@ -547,33 +548,53 @@ report:
 #endif
 }
 
-/* One iteration of the supervisor drain (task-1575 phase 3 wiring).
-   Returns the syscall number from the next pending notification and
-   replies EPERM. -2: queue empty (EAGAIN) -- the caller keeps observing.
-   -1: the child is gone (ENOTCONN/EBADF) or the SEND itself failed --
-   the caller stops. Single-call drain so the cap on outstanding
-   notifications moves to the OCaml loop (reviewer concern: drain until
-   EAGAIN, not a magic ceiling); the return value alone carries
-   everything the caller needs, no errno out-param. */
+/* One readiness-backed receive, then EPERM for that exact notification id.
+   The supervisor is this listener's sole receiver. NOTIF_RECV ignores
+   O_NONBLOCK: never call it speculatively to find an empty queue.
+
+   Linux kernel/seccomp.c increments notif->requests before publishing INIT;
+   withdrawing that notification removes it from the list without consuming
+   this receive token. recv_wait_event consumes the token, and notify_recv
+   returns ENOENT if the target withdrew before it acquired notify_lock.
+   Thus readiness plus sole-reader ownership permits ONE receive, not a loop.
+   Source: kernel seccomp.c, seccomp_do_user_notification, recv_wait_event,
+   seccomp_notify_recv and seccomp_notify_poll (blob
+   3eecba5ccdef3d1f6f353ff77c2e51e2f3c99fae).
+
+   -2 means no ready notification, interruption, or a withdrawn id: return
+   to multiplexing and keep the listener. -1 is an unusable listener/reply
+   failure. A successful return records only an actual EPERM reply. SEND
+   validates the received id itself; no target memory is read, so a separate
+   ID_VALID check would not remove the withdrawal race or grant authority. */
 CAMLprim value ocaml_shim_user_notif_drain_one(value vlistener)
 {
   CAMLparam1(vlistener);
 #ifdef __linux__
   int fd = Int_val(vlistener);
+  struct pollfd ready = { .fd = fd, .events = POLLIN, .revents = 0 };
   struct shim_seccomp_notif req;
   struct shim_seccomp_notif_resp resp;
+  int polled = poll(&ready, 1, 0);
+  if (polled < 0)
+    CAMLreturn(Val_int(errno == EINTR ? -2 : -1));
+  if (polled == 0) CAMLreturn(Val_int(-2));
+  if (!(ready.revents & POLLIN))
+    CAMLreturn(Val_int((ready.revents & (POLLHUP | POLLERR | POLLNVAL)) ? -1 : -2));
   memset(&req, 0, sizeof(req));
   if (ioctl(fd, SECCOMP_IOCTL_NOTIF_RECV, &req) != 0)
   {
     int e = errno;
-    CAMLreturn(Val_int((e == EAGAIN || e == EWOULDBLOCK) ? -2 : -1));
+    CAMLreturn(Val_int((e == EAGAIN || e == EWOULDBLOCK || e == EINTR || e == ENOENT) ? -2 : -1));
   }
   memset(&resp, 0, sizeof(resp));
   resp.id = req.id;
   resp.error = -EPERM;
   resp.flags = 0;
-  if (ioctl(fd, SECCOMP_IOCTL_NOTIF_SEND, &resp) != 0)
-    CAMLreturn(Val_int(-1));
+  int sent;
+  do { sent = ioctl(fd, SECCOMP_IOCTL_NOTIF_SEND, &resp); }
+  while (sent != 0 && errno == EINTR);
+  if (sent != 0)
+    CAMLreturn(Val_int(errno == ENOENT ? -2 : -1));
   CAMLreturn(Val_int((int) req.data.nr));
 #else
   CAMLreturn(Val_int(-1));

@@ -9,7 +9,24 @@
     drift from the keeper-side runner), executes the payload under a
     supervised child, streams the child's stdout/stderr through verbatim,
     and appends a result trailer ({!Exec_ssh_protocol.render_trailer}) to
-    its own STDERR, after the child's stderr.
+    its own STDERR, after the child's stderr. Interactive requests keep child
+    stdin open and forward later channel bytes. Underlying channel EOF always
+    cancels the execution, rather than half-closing the child's input.
+
+    Interactive supervision uses bounded nonblocking queues in both directions.
+    A blocked output cannot prevent child cancellation or the per-call timeout.
+    Output not drained after the existing post-reap grace is reported as an
+    incomplete transport, never a successful complete payload stream. The
+    final trailer writer reuses that cleanup grace duration with its own
+    deadline, not the supervisor's already elapsed drain deadline. If it cannot
+    finish, the shim exits nonzero and the peer has no complete receipt.
+
+    Both supervisors receive at most one Observe notification per ready
+    multiplex iteration, then service stream I/O and cancellation again.
+    The seccomp receive ioctl is not made nonblocking by [O_NONBLOCK]. A
+    withdrawn notification leaves the sole receiver with [ENOENT]; that and
+    interruption retain the listener. A response only denies that received
+    notification id and never inspects target memory.
 
     Design notes:
 
@@ -452,7 +469,8 @@ val probe : unit -> Exec_ssh_protocol.probe
     {!Exec_ssh_protocol.protocol_version}, which is the compatibility value
     checked by the SSH runner. [capabilities] carries
     {!Exec_ssh_protocol.observe_capability} exactly when {!observe_supported}
-    is true on this host. *)
+    is true on this host, and {!Exec_ssh_protocol.interactive_stdin_capability}
+    for this build's interactive input contract. *)
 
 val main : unit -> unit
 (** [masc-exec-shim --probe] prints {!probe} via

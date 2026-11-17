@@ -83,7 +83,7 @@ let frame ~root argv =
       ; cwd = root
       ; remote_root = root
       ; timeout_sec = budget_sec
-      ; stdin_len = 0L
+      ; stdin = Exec_ssh_protocol.Framed 0L
       ; mode = Exec_ssh_protocol.Effect
       ; acceptance_frame = true
       }

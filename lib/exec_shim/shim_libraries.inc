@@ -47,4 +47,4 @@
  (libraries exec_ssh_protocol shim_agent shim_clock shim_fdpass unix uuidm)
  (foreign_stubs
   (language c)
-  (names prctl_stub observe_stub)))
+  (names prctl_stub observe_stub stream_stub)))

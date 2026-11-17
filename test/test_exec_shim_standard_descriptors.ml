@@ -151,7 +151,7 @@ let reported_closed closed () =
 
 (* A shim config whose root is [dir], and one Effect request whose payload
    leaves [marker] in it. *)
-let marker_request dir =
+let marker_request ~stdin dir =
   let config = Filename.concat dir "shim.conf" in
   Out_channel.with_open_bin config (fun channel ->
     Out_channel.output_string channel
@@ -165,7 +165,7 @@ let marker_request dir =
       ; cwd = dir
       ; remote_root = dir
       ; timeout_sec = 60.0
-      ; stdin_len = 0L
+      ; stdin
       ; mode = Effect
       ; acceptance_frame = false
       }
@@ -182,9 +182,9 @@ let marker_request dir =
   in
   frame, env, Filename.concat dir "marker"
 
-let shim_run closed =
+let shim_run ?(stdin = Exec_ssh_protocol.Framed 0L) closed =
   with_temp_dir (fun dir ->
-    let frame, env, marker = marker_request dir in
+    let frame, env, marker = marker_request ~stdin dir in
     let code =
       fixture_exit ~env ~stdin:(Frame_held_open frame) "exec-shim" (!shim :: List.map name closed)
     in
@@ -199,6 +199,19 @@ let test_shim_runs_with_all_open () =
   let code, payload_ran = shim_run [] in
   check int "the shim exits after the payload's trailer" 0 code;
   check bool "the payload ran" true payload_ran
+
+let test_interactive_preserves_standard_descriptor_refusal () =
+  let code, payload_ran =
+    shim_run ~stdin:Exec_ssh_protocol.Interactive [ Exec_shim.Standard_error ] in
+  check bool "interactive input cannot bypass the closed descriptor refusal"
+    false payload_ran;
+  check int "the same refusal occurs before reading the interactive request"
+    Exec_shim.closed_standard_descriptor_exit_code code
+
+let test_interactive_runs_with_all_open () =
+  let code, payload_ran = shim_run ~stdin:Exec_ssh_protocol.Interactive [] in
+  check int "the interactive shim exits after the payload" 0 code;
+  check bool "a payload may finish while the interactive transport is open" true payload_ran
 
 let () =
   match Array.to_list Sys.argv with
@@ -221,6 +234,10 @@ let () =
           ; test_case "does not run the payload with stdout closed" `Quick
               (shim_refuses [ Exec_shim.Standard_output ])
           ; test_case "runs the payload with all three open" `Quick test_shim_runs_with_all_open
+          ; test_case "interactive input preserves closed descriptor refusal" `Quick
+              test_interactive_preserves_standard_descriptor_refusal
+          ; test_case "interactive payload runs with all three open" `Quick
+              test_interactive_runs_with_all_open
           ] )
       ]
   | _ -> failwith "usage: test_exec_shim_standard_descriptors.exe MASC_EXEC_SHIM [alcotest args]"

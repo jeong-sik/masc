@@ -78,6 +78,10 @@ export function normalizeKeeperContextMetricsUnavailable(
     case 'usage_scope_unavailable':
       return raw.usage_scope === 'unavailable'
         ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
+    case 'context_input_estimate':
+    case 'input_provenance_unavailable':
+      return raw.usage_scope === 'per_request'
+        ? { kind, reason, usage_scope: raw.usage_scope, raw_input_tokens, context_window } : invalid
     case 'context_tokens_exceed_window':
       return raw.usage_scope === 'per_request'
         && raw_input_tokens !== null && context_window !== null
@@ -522,7 +526,10 @@ export function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
       const ctx_composition: CtxCompositionTelemetry | null =
         rawCtxComposition != null && attribution != null
           ? {
-              actual_input_tokens: asNumber(rawCtxComposition.actual_input_tokens) ?? null,
+              // A retained bare count may have been a compaction estimate.
+              // Only the producer's explicit request provenance certifies it.
+              actual_input_tokens: rawCtxComposition.input_provenance === 'measured_request'
+                ? asNumber(rawCtxComposition.actual_input_tokens) ?? null : null,
               attribution,
             }
           : null

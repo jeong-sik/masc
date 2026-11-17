@@ -70,7 +70,8 @@ let recent_input_trend recent =
     | Some count ->
       (match turn.input_provenance with
        | Some Turn_input_provenance.Context_estimate -> Input_estimate count
-       | Some Turn_input_provenance.Measured_request | None -> Input_count count)) recent in
+       | Some Turn_input_provenance.Measured_request -> Input_count count
+       | None -> Input_unavailable)) recent in
   let measured_count, estimate_count, bounds =
     List.fold_left
       (fun (measured_count, estimate_count, bounds) -> function
@@ -1247,9 +1248,9 @@ let decode_forecast = function
    integer range cannot hold is no client-context figure at all, so it is
    reported the one way the readers already have for a total that is not
    available: [None]. A real zero stays a real zero. *)
-let client_context_tokens ~scope ~input_tokens ~output_tokens =
-  match (scope : Runtime_usage_scope.t), input_tokens with
-  | Per_request, Some input -> (
+let client_context_tokens ~scope ~provenance ~input_tokens ~output_tokens =
+  match (scope : Runtime_usage_scope.t), provenance, input_tokens with
+  | Per_request, Some Turn_input_provenance.Measured_request, Some input -> (
       match output_tokens with
       | None -> Some input
       | Some output ->
@@ -1258,8 +1259,9 @@ let client_context_tokens ~scope ~input_tokens ~output_tokens =
             || (input < 0 && output < min_int - input)
           in
           if unrepresentable then None else Some (input + output))
-  | Per_request, None
-  | (Turn_total | Conversation_cumulative | Usage_scope_unavailable), _ -> None
+  | Per_request, Some Turn_input_provenance.Measured_request, None
+  | Per_request, (Some Turn_input_provenance.Context_estimate | None), _
+  | (Turn_total | Conversation_cumulative | Usage_scope_unavailable), _, _ -> None
 ;;
 
 let provider_usage_summary (usage : Turn_record.usage) =

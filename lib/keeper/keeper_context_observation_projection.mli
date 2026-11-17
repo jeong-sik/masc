@@ -27,7 +27,9 @@ val context_fields :
 (** The fields of {!context_observation}, for display consumers. Context
     occupancy is projected from the keeper's newest TurnRecord
     (RFC-0233), the measurement SSOT: [context_tokens] is the
-    provider-reported prompt total of the last completed turn,
+    provider-reported prompt total of the last completed turn with explicit
+    [Measured_request] provenance. Estimates and absent provenance keep their
+    raw count only in the typed unavailability diagnostic,
     [context_max] its provider-reported usable window (or the configured
     request window if the provider did not report one), and
     the nested ["context"] object carries provenance ([turn_ref],
@@ -49,8 +51,10 @@ val context_fields :
     [conversation_cumulative_usage] (only conversation-wide usage is available),
     [turn_total_usage] (usage is summed across a client turn),
     [usage_scope_unavailable] (the recorded usage has no known scope),
+    [context_input_estimate] (the count estimates the context, not a dispatched request),
+    [input_provenance_unavailable] (the record does not say what the count measured),
     [context_tokens_exceed_window] (reported per-request input exceeds the
-    reported/configured window). These last four carry [usage_scope] and any
+    reported/configured window). These usage diagnostics carry [usage_scope] and any
     available [raw_input_tokens]/[context_window] evidence; no occupancy is
     inferred from that evidence. *)
 

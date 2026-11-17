@@ -1238,6 +1238,8 @@ export const KEEPER_CONTEXT_NOT_OBSERVED_REASONS = [
   'turn_total_usage',
   'usage_scope_unavailable',
   'context_tokens_exceed_window',
+  'context_input_estimate',
+  'input_provenance_unavailable',
 ] as const
 
 export type KeeperContextNotObservedReason =
@@ -1252,7 +1254,8 @@ export type KeeperContextMetricsUnavailable =
   | {
       kind: 'not_observed'
       reason: Exclude<KeeperContextNotObservedReason,
-        'conversation_cumulative_usage' | 'turn_total_usage' | 'usage_scope_unavailable' | 'context_tokens_exceed_window'>
+        'conversation_cumulative_usage' | 'turn_total_usage' | 'usage_scope_unavailable'
+        | 'context_tokens_exceed_window' | 'context_input_estimate' | 'input_provenance_unavailable'>
     }
   | ({
       kind: 'not_observed'
@@ -1276,6 +1279,11 @@ export type KeeperContextMetricsUnavailable =
       raw_input_tokens: number
       context_window: number
     }
+  | ({
+      kind: 'not_observed'
+      reason: 'context_input_estimate' | 'input_provenance_unavailable'
+      usage_scope: 'per_request'
+    } & KeeperContextUsageEvidence)
   | {
       kind: 'invalid_payload'
       reported_kind: string | null

@@ -1837,12 +1837,15 @@ let run_turn
                  let ctx_composition
                    : Keeper_agent_prompt_metrics.ctx_composition_metrics
                    =
-                   let actual_input_tokens =
+                   let input_tokens, input_provenance =
                      match result.runtime_observation with
                      | Some { request_context = Some context; _ } ->
-                       Some context.Runtime_observation.input_tokens
+                       Some context.Runtime_observation.input_tokens, Some context.provenance
                      | Some { usage_scope = Runtime_usage_scope.Per_request; _ }
-                       when usage.input_tokens > 0 -> Some usage.input_tokens
+                       when usage.input_tokens > 0 ->
+                       (* This is the completed provider request's own response,
+                          not an official client's context estimate. *)
+                       Some usage.input_tokens, Some Turn_input_provenance.Measured_request
                      | Some
                          { usage_scope =
                              ( Runtime_usage_scope.Per_request
@@ -1851,7 +1854,7 @@ let run_turn
                              | Runtime_usage_scope.Usage_scope_unavailable )
                          ; _
                          }
-                     | None -> None
+                     | None -> None, None
                    in
                    (* Absent evidence and unresolved provenance are recorded
                       as what they are. Writing a zero here is what let a
@@ -1872,7 +1875,8 @@ let run_turn
                             ; segments = compute_input_segments attribution input_messages
                             })
                    in
-                   { Keeper_agent_prompt_metrics.actual_input_tokens
+                   { Keeper_agent_prompt_metrics.input_tokens
+                   ; input_provenance
                    ; attribution
                    }
                  in

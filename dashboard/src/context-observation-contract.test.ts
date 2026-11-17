@@ -17,6 +17,9 @@ const observations = [
   { reason: 'turn_total_usage', usage_scope: 'turn_total', raw_input_tokens: 600000, context_window: 200000 },
   { reason: 'usage_scope_unavailable', usage_scope: 'unavailable' },
   { reason: 'context_tokens_exceed_window', usage_scope: 'per_request', raw_input_tokens: 200001, context_window: 200000 },
+  { reason: 'context_input_estimate', usage_scope: 'per_request', raw_input_tokens: 45000, context_window: 200000 },
+  { reason: 'context_input_estimate', usage_scope: 'per_request', raw_input_tokens: 310209, context_window: 272000 },
+  { reason: 'input_provenance_unavailable', usage_scope: 'per_request', raw_input_tokens: 45000, context_window: 200000 },
 ]
 
 describe('context observation wire consumers', () => {
@@ -50,6 +53,9 @@ describe('context observation wire consumers', () => {
 
   it.each([
     { reason: 'conversation_cumulative_usage', usage_scope: 'per_request' },
+    { reason: 'context_input_estimate', usage_scope: 'turn_total', raw_input_tokens: 45000 },
+    { reason: 'input_provenance_unavailable', raw_input_tokens: 45000 },
+    { reason: 'context_input_estimate', usage_scope: 'per_request', raw_input_tokens: -1 },
     { reason: 'usage_scope_unavailable' },
     { reason: 'context_tokens_exceed_window', usage_scope: 'per_request', context_window: 100 },
     { reason: 'context_tokens_exceed_window', usage_scope: 'per_request', raw_input_tokens: 99, context_window: 100 },
@@ -69,6 +75,37 @@ describe('context observation wire consumers', () => {
     expect(contextObservationMessage(keeper.context_metrics_unavailable!).severity).toBe('error')
   })
 
+  it.each(['measured_request', 'context_estimate', undefined, 'future_provenance'])(
+    'requires measured provenance for retained composition input: %s', provenance => {
+      const composition = {
+        input_provenance: provenance, actual_input_tokens: 45000,
+        attribution: { status: 'attributed', runtime_profile: 'example.runtime', attributed_bytes: 0, segments: {} },
+      }
+      const row = { name: 'example-keeper', metrics_series: [{ ts_unix: 5, ctx_composition: composition }] }
+      const keeper = normalizeKeepers([row])[0]!
+      expect(keeper.metrics_series?.[0]?.ctx_composition?.actual_input_tokens)
+        .toBe(provenance === 'measured_request' ? 45000 : null)
+      expect(composition.actual_input_tokens).toBe(45000)
+    },
+  )
+
+  it('retains an explicitly measured producer observation', () => {
+    const row = {
+      name: 'example-keeper', context_source: 'turn_record',
+      context_ratio: 0.5, context_tokens: 100000, context_max: 200000,
+      context: { source: 'turn_record', context_ratio: 0.5, context_tokens: 100000, context_max: 200000 },
+      context_metrics_unavailable: null,
+    }
+    const keeper = normalizeKeepers([row])[0]!
+    const operator = normalizeOperatorSnapshot({ pending_confirm_envelope, keepers: { items: [row] } }).keepers[0]!
+    for (const decoded of [keeper, operator]) {
+      expect(decoded.context_ratio).toBe(0.5)
+      expect(decoded.context_tokens).toBe(100000)
+      expect(decoded.context_max).toBe(200000)
+      expect(decoded.context_metrics_unavailable).toBeNull()
+    }
+  })
+
   it('keeps store read failures actionable', () => {
     const keeper = normalizeKeepers([{
       name: 'example-keeper',
@@ -77,14 +114,13 @@ describe('context observation wire consumers', () => {
     expect(contextObservationMessage(keeper.context_metrics_unavailable!).severity).toBe('error')
   })
 
-  it('does not let stale measurement fields override typed unavailability', () => {
+  it.each(observations)('does not let stale measurement fields override $reason', observation => {
     const row = {
       name: 'example-keeper', context_source: 'turn_record',
       context_ratio: 2, context_tokens: 400000, context_max: 200000,
       context: { source: 'turn_record', context_ratio: 2, context_tokens: 400000, context_max: 200000 },
       context_metrics_unavailable: {
-        kind: 'not_observed', reason: 'conversation_cumulative_usage',
-        usage_scope: 'conversation_cumulative', raw_input_tokens: 400000, context_window: 200000,
+        kind: 'not_observed', ...observation,
       },
     }
     const keeper = normalizeKeepers([row])[0]!

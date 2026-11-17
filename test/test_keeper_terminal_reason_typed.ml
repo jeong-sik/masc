@@ -1167,7 +1167,8 @@ let () =
         ~user_message:""
     in
     let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
-      { actual_input_tokens = None
+      { input_tokens = None
+      ; input_provenance = None
       ; attribution =
           Masc.Keeper_agent_prompt_metrics.Not_measured
             Masc.Keeper_agent_prompt_metrics.Dispatch_not_reached
@@ -3158,7 +3159,8 @@ max-concurrent = 1
       ~system_prompt:"" ~dynamic_context:"" ~user_message:""
   in
   let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
-    { actual_input_tokens = None
+    { input_tokens = None
+    ; input_provenance = None
     ; attribution =
         Masc.Keeper_agent_prompt_metrics.Not_measured
           Masc.Keeper_agent_prompt_metrics.Dispatch_not_reached

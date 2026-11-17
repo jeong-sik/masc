@@ -39,6 +39,14 @@ const MESSAGES: Record<KeeperContextNotObservedReason, ContextObservationMessage
     severity: 'info', label: '사용량의 집계 범위 미확인',
     detail: '기록된 사용량의 집계 범위를 알 수 없어 점유율을 계산하지 않습니다.',
   },
+  context_input_estimate: {
+    severity: 'info', label: '컨텍스트 추정치만 관측됨',
+    detail: '런타임이 보유한 컨텍스트의 추정치입니다. 실제 요청의 입력량이나 점유율로 사용하지 않습니다.',
+  },
+  input_provenance_unavailable: {
+    severity: 'info', label: '입력량의 측정 출처 미확인',
+    detail: '실제 요청을 측정한 값인지 확인할 수 없어 점유율을 계산하지 않습니다.',
+  },
   context_tokens_exceed_window: {
     severity: 'warning', label: '보고된 입력 토큰이 창 크기를 초과함',
     detail: '보고된 토큰 수와 창 크기를 확인하세요. 점유율은 보정하거나 추정하지 않습니다.',
@@ -54,9 +62,11 @@ export function contextObservationMessage(value: KeeperContextMetricsUnavailable
   }
   const message = MESSAGES[value.reason]
   if ('usage_scope' in value && (value.raw_input_tokens !== null || value.context_window !== null)) {
+    const label = value.reason === 'context_input_estimate' ? '추정 컨텍스트'
+      : value.reason === 'input_provenance_unavailable' ? '출처 미확인 값' : '보고된 입력'
     return {
       ...message,
-      detail: `${message.detail} 보고된 입력: ${value.raw_input_tokens ?? '미보고'} · 창 크기: ${value.context_window ?? '미보고'}`,
+      detail: `${message.detail} ${label}: ${value.raw_input_tokens ?? '미보고'} · 창 크기: ${value.context_window ?? '미보고'}`,
     }
   }
   return message

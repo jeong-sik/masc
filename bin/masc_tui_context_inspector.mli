@@ -51,15 +51,17 @@ type recent_turn =
         (** Absolute-turn number, as [Turn_record.absolute_turn]. *)
   ; ts : float
   ; input_tokens : int option
-        (** What the provider counted as this request's input. [None] when
-            the provider reported a conversation-cumulative figure instead,
+        (** The latest request count or context estimate, distinguished by
+            [input_provenance]. [None] when the provider reported a
+            conversation-cumulative figure instead,
             which is a number about the whole conversation and not a fact
             about this turn. *)
   ; input_provenance : Turn_input_provenance.t option
         (** What [input_tokens] counted when the record says:
             {!Turn_input_provenance.Measured_request}, or a whole-context
             {!Turn_input_provenance.Context_estimate} after a compaction.
-            [None] on records written before provenance existed. *)
+            [None] means the record does not establish a measured request;
+            its count is unavailable in the measured-input trend. *)
   ; provider_context_window : int option
         (** The model window an official client reported
             ({!Turn_record.t.provider_context_window}); the context it holds is
@@ -474,11 +476,12 @@ val provider_usage_summary : Turn_record.usage -> string
     explicitly reported zero ([Some 0] -> ["cache read 0 (0.0% of input)"]). *)
 
 val client_context_tokens :
-  scope:Runtime_usage_scope.t -> input_tokens:int option -> output_tokens:int option -> int option
-(** The context one request occupied, as an official client counts it against
-    its model window: that request's input plus its output (an estimate after
-    a compaction has no output). Only a per-request figure is one request's;
-    a conversation-cumulative or turn total is [None], never a context size. *)
+  scope:Runtime_usage_scope.t -> provenance:Turn_input_provenance.t option ->
+  input_tokens:int option -> output_tokens:int option -> int option
+(** The context a measured request occupied, as an official client counts it
+    against its model window: that request's input plus its output. Only an
+    explicit [Measured_request] per-request figure qualifies. Estimates,
+    unknown provenance, conversation-cumulative and turn totals return [None]. *)
 
 val shown_part :
   keeper:string ->

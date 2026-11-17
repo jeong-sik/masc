@@ -50,7 +50,7 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = Some 500
       ; scope = usage_scope
-      ; input_provenance = None
+      ; input_provenance = Some Turn_input_provenance.Measured_request
       }
   ; turn_output_tokens = None
   ; ts = 1_787_600_000.
@@ -164,6 +164,7 @@ let test_client_context_sum_stays_representable () =
   let read ~scope ~input_tokens ~output_tokens =
     Inspector.client_context_tokens
       ~scope:(scope : Runtime_usage_scope.t)
+      ~provenance:(Some Turn_input_provenance.Measured_request)
       ~input_tokens ~output_tokens
   in
   check (option int) "a sum past max_int is not a figure" None
@@ -187,8 +188,8 @@ let test_client_context_sum_stays_representable () =
 
 (* An estimate after a compaction and a counted request carry the same bare
    number; the provenance the record keeps is what the trend separates them
-   by, and a record without it stays an ordinary count rather than a
-   guess. *)
+   by. A count with no provenance stays unavailable rather than becoming
+   a measured request. *)
 let test_recent_input_trend_marks_estimates_apart () =
   let marked input_tokens provenance (record : Turn_record.t) =
     { record with
@@ -215,9 +216,21 @@ let test_recent_input_trend_marks_estimates_apart () =
         (trend.samples =
            [ Inspector.Input_count 100
            ; Inspector.Input_estimate 45000
-           ; Inspector.Input_count 200
+           ; Inspector.Input_unavailable
            ]);
-      check int "measured counts stay measured" 2 trend.measured_count;
+      List.iter
+        (fun (recent : Inspector.recent_turn) ->
+           let occupied = Inspector.client_context_tokens ~scope:recent.scope
+               ~provenance:recent.input_provenance ~input_tokens:recent.input_tokens
+               ~output_tokens:recent.output_tokens in
+           match recent.input_provenance with
+           | Some Turn_input_provenance.Measured_request ->
+             check bool "decoded measured request has an active-context figure" true
+               (Option.is_some occupied)
+           | Some Turn_input_provenance.Context_estimate | None ->
+             check (option int) "decoded estimate or unknown has no measured active context" None occupied)
+        selection.recent;
+      check int "only explicit measured provenance counts" 1 trend.measured_count;
       check int "estimates are counted apart" 1 trend.estimate_count;
       check (option (pair int int)) "an estimate still spans the scale"
         (Some (100, 45000)) trend.bounds;

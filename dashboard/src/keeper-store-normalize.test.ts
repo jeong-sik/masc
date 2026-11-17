@@ -712,6 +712,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             model_used: 'glm-5',
             cost_usd: 0.04,
             ctx_composition: {
+              input_provenance: 'measured_request',
               actual_input_tokens: 1000,
               attribution: {
                 status: 'attributed',
@@ -761,6 +762,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             channel: 'turn',
             cost_usd: 0.01,
             ctx_composition: {
+              input_provenance: 'measured_request',
               actual_input_tokens: 4200,
               attribution: {
                 status: 'not_measured',

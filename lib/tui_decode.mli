@@ -2168,6 +2168,14 @@ type context_unavailable_reason =
       { raw_input_tokens : int option
       ; context_window : int option
       }
+  | Context_input_estimate of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_input_provenance_unavailable of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
   | Context_tokens_exceed_window of
       { raw_input_tokens : int
       ; context_window : int

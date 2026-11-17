@@ -2,7 +2,9 @@
 
     Context occupancy is projected from the newest TurnRecord (RFC-0233):
     [input_tokens] is the provider-reported prompt total for the last
-    completed turn. Prefer its [provider_context_window] when reported; otherwise
+    completed turn with explicit [Measured_request] provenance. Estimates and
+    unknown provenance retain their raw count as diagnostics only.
+    Prefer its [provider_context_window] when reported; otherwise
     use the configured [context_window] for that same request. The pair describes
     that completed request; it does not predict the next input. This module is the single wire projection for that
     measurement, for its typed absence, and for the separate,
@@ -25,6 +27,8 @@ let reason_cumulative_usage = "conversation_cumulative_usage"
 let reason_turn_total_usage = "turn_total_usage"
 let reason_usage_scope_unavailable = "usage_scope_unavailable"
 let reason_tokens_exceed_window = "context_tokens_exceed_window"
+let reason_input_estimate = "context_input_estimate"
+let reason_input_provenance_unavailable = "input_provenance_unavailable"
 
 let opt_assoc name to_json = function
   | Some value -> [ name, to_json value ]
@@ -191,16 +195,22 @@ let context_observation ~config ~keeper_name ~current_trace_id =
       match record.usage.scope, record.usage.input_tokens, context_window_of_record record with
       | Runtime_usage_scope.Per_request, None, _ ->
         context_fields_unavailable (not_observed_json ~reason:reason_without_usage ())
-      | Runtime_usage_scope.Per_request, Some tokens, Some window
-        when window > 0 && tokens > window ->
-        context_fields_unavailable
-          (not_observed_json
-             ~reason:reason_tokens_exceed_window
-             ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
-             ~raw_input_tokens:tokens
-             ~context_window:window
-             ())
-      | Runtime_usage_scope.Per_request, Some _, _ -> observed_context_fields record
+      | Runtime_usage_scope.Per_request, Some tokens, window ->
+        let unmeasured reason =
+          context_fields_unavailable
+            (not_observed_json ~reason
+               ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
+               ~raw_input_tokens:tokens ?context_window:window ())
+        in
+        (match record.usage.input_provenance with
+         | Some Turn_input_provenance.Context_estimate ->
+           unmeasured reason_input_estimate
+         | None -> unmeasured reason_input_provenance_unavailable
+         | Some Turn_input_provenance.Measured_request ->
+           (match window with
+            | Some maximum when maximum > 0 && tokens > maximum ->
+              unmeasured reason_tokens_exceed_window
+            | Some _ | None -> observed_context_fields record))
       | Runtime_usage_scope.Turn_total, tokens, window ->
         context_fields_unavailable
           (not_observed_json

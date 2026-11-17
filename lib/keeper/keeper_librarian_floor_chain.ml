@@ -58,7 +58,13 @@ type mode = Ordinary | Complete_original of {
   destination : Durable.destination;
   before_inference : Step.retained_chain_basis -> (unit,string) result;
 }
-type selected_step = Selected of Owner.retained * Step.t | Basis_wait of string | Semantic_replaced
+type selected_step = Selected of Owner.retained * Step.t | Basis_wait of string
+(* The leaf binds the installation/package/tool. Each fresh question captures
+   the current semantic revision; a retained question keeps its own revision. *)
+let same_owner captured current =
+  match Lane_addon_captured_destination.relation ~captured ~current with
+  | Same | Replaced -> true
+  | Other_owner -> false
 let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~unread_message =
   let keeper_name = Durable.keeper_id owner in
   let* found = Step_owner.discover ~store ~owner |> Result.map_error owner_error in
@@ -124,9 +130,9 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
       let* ()=match mode with
         | Ordinary -> Ok ()
         | Complete_original original ->
-          let* ()=require (Lane_addon_captured_destination.same_semantic
+          let* ()=require (same_owner
             original.destination (Step.destination step))
-            "Retained floor step differs from its original leaf's semantic destination" in
+            "Retained floor step belongs to another original leaf owner" in
           Memory_runtime.validate_retained_durable_step
             ~source:original.source ~original:original.preparation (Step.step step) in
       let* () = Memory_runtime.require_counterpart_template (Step.step step).preparation in
@@ -146,9 +152,8 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
           | Complete_original original -> Lane_addon_captured_destination.relation
               ~captured:original.destination ~current:destination in
         match relation with
-        | Lane_addon_captured_destination.Replaced -> Ok Semantic_replaced
         | Other_owner -> Error "Retained floor destination belongs to another original owner"
-        | Same ->
+        | Lane_addon_captured_destination.Same | Replaced ->
         let context : Memory_runtime.durable_step_context =
           {previous_state = question.previous_state; unread_messages = question.unread_messages} in
         let* preparation=match mode with
@@ -179,8 +184,6 @@ let run_with ~mode ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh
       (match selected with
        | Basis_wait detail -> Ok (Pending (Keeper_librarian_pending.Message_floor
            {request_id=range.request_id;detail}))
-       | Semantic_replaced -> Ok (Pending (Keeper_librarian_pending.Publication
-           {request_id=range.request_id;detail="Retained floor leaf's semantic configuration was replaced"}))
        | Selected (record,step) ->
       let* outcome = Step_owner.resume_with_admission ~before_admission:(fun () ->
         before_inference () |> Result.map_error (fun detail -> Step_owner.Unavailable detail))

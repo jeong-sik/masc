@@ -76,6 +76,10 @@ let source_identity t =
   let+ source_basis_digest=Request.source_basis_digest t.request in
   ({Runtime.request_id=Request.request_id t.request;request_digest=Request.body_digest t.request;
     source_basis_digest}:Runtime.retained_step_source)
+let same_owner captured current =
+  match Lane_addon_captured_destination.relation ~captured ~current with
+  | Same | Replaced -> true
+  | Other_owner -> false
 let retained_basis t =
   let* source=source_identity t in
   let* found=Steps.discover ~store:t.store ~owner:(Request.physical_owner t.request)
@@ -84,8 +88,8 @@ let retained_basis t =
     index.header.range.request_id=source.request_id) found in
   let* ()=require (List.for_all (fun (_, (index:Step.index)) ->
     index.header.range.request_digest=source.request_digest && index.header.retained_source=Some source
-    && Lane_addon_captured_destination.same_semantic (Request.destination t.request) index.header.destination) matching)
-    "Cut floor range has another source, preparation mode or semantic destination" in
+    && same_owner (Request.destination t.request) index.header.destination) matching)
+    "Cut floor range has another source, preparation mode or destination owner" in
   match matching with
   | [] -> Ok None
   | _::_ ->
@@ -94,9 +98,9 @@ let retained_basis t =
       | [] | _::_ -> Error "Cut floor has no unique retained first question" in
     let* record,_=Steps.load ~store:t.store first |> Result.map_error Steps.error_to_string in
     let* step=Step.restore ~owner:(Request.physical_owner t.request) record in
-    let* ()=require (Lane_addon_captured_destination.same_semantic
+    let* ()=require (same_owner
       (Request.destination t.request) (Step.destination step))
-      "Cut floor first question differs from its original leaf's semantic destination" in
+      "Cut floor first question belongs to another original leaf owner" in
     let* ()=Runtime.validate_retained_durable_step ~source ~original:(Request.preparation t.request) (Step.step step) in
     let+ basis=Option.to_result ~none:"Cut floor lost its retained anchor/manifest" (Step.chain_basis step) in
     Some (basis,Step.transaction_id step)
@@ -261,9 +265,9 @@ let validate_retained_step ~store step =
     let* selected=Option.to_result ~none:"Retained floor has no actual Cut source obligation" selected in
     let* actual=source_identity selected in
     let* ()=require (actual=identity) "Retained floor source identity differs from its actual leaf" in
-    let* ()=require (Lane_addon_captured_destination.same_semantic
+    let* ()=require (same_owner
       (Request.destination original) (Step.destination step))
-      "Retained floor request differs from its original leaf's semantic destination" in
+      "Retained floor request belongs to another original leaf owner" in
     let* ()=Runtime.validate_retained_durable_step ~source:identity ~original:(Request.preparation original) (Step.step step) in
     let* retained=retained_basis selected in
     let* basis,transaction_id=Option.to_result ~none:"Retained floor has no initial anchor/manifest" retained in

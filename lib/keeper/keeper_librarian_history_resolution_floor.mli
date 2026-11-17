@@ -33,13 +33,14 @@ val recover_committed : t -> (Keeper_memory_os_current.committed_program option,
     reread prunable source fragments or infer from a range receipt alone. *)
 val confirm_program : t -> Keeper_memory_os_current.committed_program -> (unit, string) result
 (** Fresh contextual leaf/Cut confirmation plus exact program/range readback.
-    The retained first step must still name the actual leaf's semantic
-    destination, even when the current configuration has changed. Caller
-    keeps the source-owner scope and holds no Memory lock. *)
+    The retained first step and leaf must share the installation/package/tool;
+    each step retains its own captured semantic revision. Caller keeps the
+    source-owner scope and holds no Memory lock. *)
 val validate_retained_step : store:Lane_addon_store.t ->
   Keeper_librarian_floor_step_request.t -> (unit, string) result
 (** Host fresh-dispatch guard. Ordinary steps preserve their existing policy.
     Retained mode must rejoin the actual input-refused leaf, confirmed Cut
-    ancestry, the same captured semantic destination, first full manifest/anchor
-    and current source. A mode tag alone
+    ancestry, the same installation/package/tool, first full manifest/anchor
+    and current source. Its own captured semantic revision remains subject to
+    the existing Runtime dispatch guard. A mode tag alone
     never grants execution authority. No provider call. *)

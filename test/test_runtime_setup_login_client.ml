@@ -10,7 +10,7 @@ let fixture run =
   let root = Filename.temp_dir ~perms:0o700 "setup-login-client-" "" |> Unix.realpath in
   let names = ["XDG_CONFIG_HOME"; "META_API_KEY"; "ANTHROPIC_API_KEY";
     "CODEX_HOME"; "CLAUDE_CONFIG_DIR"; "XDG_DATA_HOME"; "XDG_STATE_HOME";
-    "XDG_CACHE_HOME"; "XDG_RUNTIME_DIR"] in
+    "XDG_CACHE_HOME"; "XDG_RUNTIME_DIR"; "BROWSER"] in
   let previous = List.map (fun name -> name, Sys.getenv_opt name) names in
   Fun.protect ~finally:(fun () ->
     List.iter (fun (name, value) -> restore name value) previous;
@@ -19,12 +19,17 @@ let fixture run =
       Unix.putenv "XDG_CONFIG_HOME" root;
       Eio_main.run (fun env -> run root env))
 
-let value env key =
-  Array.to_list env |> List.find_map (fun entry ->
+let values env key =
+  Array.to_list env |> List.filter_map (fun entry ->
     match String.index_opt entry '=' with
     | Some offset when String.equal key (String.sub entry 0 offset) ->
       Some (String.sub entry (offset + 1) (String.length entry - offset - 1))
     | Some _ | None -> None)
+
+let value env key = List.nth_opt (values env key) 0
+
+(* The sign-in a terminal of this machine starts. *)
+let host_environment login = Login.environment ~browser:Login.Host_browser login
 
 let isolated_native_login () = fixture (fun root _ ->
   List.iter (fun (client, id, variable, argv) ->
@@ -34,7 +39,7 @@ let isolated_native_login () = fixture (fun root _ ->
     check (list string) "official login command" argv (Login.argv ~cli_path:"fixture-cli" login);
     check bool "native device or code flow uses pipes" false (Login.is_pty login);
     check bool "native login command exits itself" true (Option.is_none (Login.saved_login_check login));
-    let env = Login.environment login |> ok in
+    let env = host_environment login |> ok in
     check (option string) "child selects new account" (Some home) (value env variable);
     check (option string) "ambient provider key omitted" None (value env "ANTHROPIC_API_KEY");
     check (option string) "ambient Meta key omitted" None (value env "META_API_KEY");
@@ -45,6 +50,24 @@ let isolated_native_login () = fixture (fun root _ ->
   check bool "path traversal rejected before allocation" true
     (Result.is_error (Login.prepare ~runtime_root:root ~account_id:"../escape"
       ~client:Login.Muse ~existing:None)))
+
+(* Someone at another machine signs in. The server's own environment names a
+   browser command here ([fixture]); the child is still handed one command,
+   an executable file at an absolute path, in place of the browser of this
+   machine. The sign-in a terminal of this machine starts is not handed it. *)
+let a_remote_sign_in_is_handed_no_browser_of_this_machine () = fixture (fun root _ ->
+  List.iter (fun (client, id) ->
+    let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
+    let remote = Login.environment ~browser:Login.No_host_browser login |> ok in
+    (match values remote "BROWSER" with
+     | [ command ] ->
+       check bool "the command is spelled from the root" false (Filename.is_relative command);
+       check bool "the command is a regular file" true ((Unix.stat command).st_kind = Unix.S_REG);
+       Unix.access command [ Unix.X_OK ];
+       check bool "a sign-in at this machine is not handed that command" false
+         (List.mem command (values (host_environment login |> ok) "BROWSER"))
+     | commands -> failf "one browser command expected, %d handed" (List.length commands)))
+    [ Login.Codex, "codex-remote"; Login.Claude, "claude-remote"; Login.Muse, "muse-remote" ])
 
 (* runtime.toml as setup saves it from a reference: the provider's
    account-home is the reference's path. *)
@@ -110,7 +133,7 @@ let muse_capture_and_reference () = fixture (fun root env ->
   let login = Login.prepare ~runtime_root:root ~account_id:"muse-login"
     ~client:Login.Muse ~existing:None |> ok in
   let home = Login.home_dir login in
-  let child_env = Login.environment login |> ok in
+  let child_env = host_environment login |> ok in
   check (option string) "login cannot fork a detached launcher update" (Some "1")
     (value child_env "MUSE_NO_AUTO_UPDATE");
   check (option string) "login keeps the sign-in in auth.json, not the Keychain" (Some "file")
@@ -155,7 +178,7 @@ let claude_reference_spelling () = fixture (fun root _ ->
     ~client:Login.Claude ~existing:(Some binding) |> ok in
   check string "Claude keychain identity keeps configured spelling" selected (Login.home_dir login);
   check (option string) "login sees same keychain identity" (Some selected)
-    (value (Login.environment login |> ok) "CLAUDE_CONFIG_DIR"))
+    (value (host_environment login |> ok) "CLAUDE_CONFIG_DIR"))
 
 let native_authentication_observation () = fixture (fun root env ->
   let script name body =
@@ -226,7 +249,7 @@ let antigravity_reauthentication_starts_without_a_login () = fixture (fun root e
     Ok (Session.with_session ~workspace:root ~actor:(Session.Agent "operator")
     ~account_key:(Login.home_dir login) (fun session ->
       Session.run ~saved_login:check_saved session ~env:(env :> Eio_unix.Stdenv.base)
-        ~child_env:(Login.environment login |> ok) ~cwd:(Login.home_dir login)
+        ~child_env:(host_environment login |> ok) ~cwd:(Login.home_dir login)
         ~argv:["python3"; "-c";
           "import os,sys,time\npath,login=sys.argv[1:]\n"
           ^ "with open(path,'w') as f: f.write('{')\nprint('writing',flush=True)\n"
@@ -251,6 +274,8 @@ let antigravity_reauthentication_starts_without_a_login () = fixture (fun root e
 let () = run "official login adapters" ["selected accounts", [
   test_case "Antigravity reauthentication has no prior login" `Quick antigravity_reauthentication_starts_without_a_login;
   test_case "native login isolation" `Quick isolated_native_login;
+  test_case "a remote sign-in is handed no browser of this machine" `Quick
+    a_remote_sign_in_is_handed_no_browser_of_this_machine;
   test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;
   test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;

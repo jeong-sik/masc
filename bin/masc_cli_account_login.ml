@@ -22,7 +22,12 @@ let run ~client ~cli_path ~account_home =
     prerr_endline ("Account home: " ^ detail);
     1
   | Ok login ->
-    (match Runtime_setup_login_client.environment login with
+    (* The installer signs in at a terminal of this machine, so the client may
+       open its browser. *)
+    (match
+       Runtime_setup_login_client.environment
+         ~browser:Runtime_setup_login_client.Host_browser login
+     with
      | Error detail ->
        prerr_endline ("Sign-in environment: " ^ detail);
        1

@@ -112,6 +112,49 @@ let test_executable_path_ignores_empty_path_entries () =
           (Executable_path.command_available ~getenv:explicit_path name)))
 ;;
 
+(* A relative entry of PATH names the file only from this working directory,
+   so a path handed to a process that runs elsewhere comes from an absolute
+   entry. *)
+let test_executable_path_absolute_lookup_passes_over_relative_entries () =
+  let dir = temp_dir "executable-path-absolute-" in
+  let name = "masc-test-tool" in
+  let executable = Filename.concat dir name in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove executable with Sys_error _ -> ());
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      touch executable;
+      Unix.chmod executable 0o700;
+      with_cwd dir (fun () ->
+        let separator = String.make 1 Executable_path.search_path_separator in
+        let path_of entries = function
+          | "PATH" -> Some (String.concat separator entries)
+          | _ -> None
+        in
+        check
+          bool
+          "the relative entry holds the file from this working directory"
+          true
+          (Executable_path.command_available
+             ~getenv:(path_of [ Filename.current_dir_name ])
+             name);
+        check
+          (option string)
+          "empty and relative entries give no path"
+          None
+          (Executable_path.absolute_on_path
+             ~getenv:(path_of [ ""; Filename.current_dir_name ])
+             name);
+        check
+          (option string)
+          "the absolute entry gives the file itself"
+          (Some executable)
+          (Executable_path.absolute_on_path
+             ~getenv:(path_of [ Filename.current_dir_name; dir ])
+             name)))
+;;
+
 let check_ocamllsp_command_not_found ~path =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -425,6 +468,10 @@ let () =
             "ignores empty PATH entries"
             `Quick
             test_executable_path_ignores_empty_path_entries
+        ; test_case
+            "absolute lookup passes over relative PATH entries"
+            `Quick
+            test_executable_path_absolute_lookup_passes_over_relative_entries
         ] )
     ; ( "path-resolution"
       , [ test_case

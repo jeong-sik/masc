@@ -63,6 +63,15 @@ let stream_cors_headers owner request =
   | Person (_ : person) -> []
   | Operator { actor = (_ : string) } -> Server_auth.cors_headers (Server_auth.get_origin request)
 
+(* HIGH-RISK-UNREVIEWED: a person signs in from another machine. A browser
+   the client opened on this one would show their approval page to whoever
+   sits here, and an approval made there signs that one's account in to the
+   person's home ([Client.environment]). The operator's sign-in keeps what
+   the client does at a terminal of this machine. *)
+let browser_of = function
+  | Person (_ : person) -> Client.No_host_browser
+  | Operator { actor = (_ : string) } -> Client.Host_browser
+
 let private_child parent leaf =
   let path = Filename.concat parent leaf in
   (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -168,7 +177,7 @@ let start ~owner ~base_path ~body request reqd =
             let* account_key = canonical_account_key (Client.home_dir home) in
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
-        let* child_env = Client.environment home in
+        let* child_env = Client.environment ~browser:(browser_of owner) home in
         let* account = match owner, client, reference with
           | Operator _, Client.Antigravity, Some reference -> Ok (Receipt.Published reference)
           | Operator _, Client.Antigravity, None -> Ok Receipt.Unselected
@@ -182,7 +191,12 @@ let start ~owner ~base_path ~body request reqd =
           |> Result.map_error (fun _ -> receipt_failure) in
         Ok (home, child_env, receipt) in
       match prepared with
-      | Error _ -> respond ~status:`Service_unavailable ~request reqd account_failure; Ok ()
+      | Error detail ->
+        (* The caller is told only that the account was not prepared. Why is
+           the operator's to read: a sign-in that is refused for the state of
+           this machine stays refused until the operator changes it. *)
+        Log.Server.warn "Setup login was not prepared: %s" detail;
+        respond ~status:`Service_unavailable ~request reqd account_failure; Ok ()
       | Ok (home, child_env, initial_receipt) ->
         let receipt = ref initial_receipt in
         let headers = Httpun.Headers.of_list

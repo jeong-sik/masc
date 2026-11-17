@@ -189,7 +189,8 @@ let run_with ~registry ~base_path ~retain ~call ?(observe_slots=(fun _ -> None))
         (A.Execution_rejected "Candle appraisal outcome is unknown; the original request will not be dispatched again")
         (Exact.final_to_json final)
     | Exact.Not_allowed {reason} ->
-      reject ~slot:None ~code:"candle_appraisal_not_allowed" (A.Execution_rejected reason) (Exact.final_to_json final)
+      reject ~slot:None ~code:"candle_appraisal_not_allowed"
+        (A.Execution_rejected (Exact.not_allowed_reason_detail reason)) (Exact.final_to_json final)
     | Exact.Request_id_reused ->
       reject ~slot:None ~code:"candle_appraisal_request_id_reused"
         (A.Execution_rejected "Candle appraisal request ID already belongs to different input") (Exact.final_to_json final)

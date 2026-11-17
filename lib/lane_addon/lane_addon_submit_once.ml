@@ -160,7 +160,17 @@ let resume ~store ~label ~(original : Owner.Record.t) ~(source : _ source) ~deco
     final body (stored_record published) delivered in
   let finish_worker body original = function
     | Exact.Call_final result -> finish body original (Exact.Retained_call result)
-    | Exact.Not_allowed {reason} -> finish body original (Exact.Retained_not_allowed {reason})
+    | Exact.Not_allowed {reason=Permission_refused _ as reason} ->
+      finish body original (Exact.Retained_not_allowed {reason})
+    | Exact.Not_allowed {reason=Replaced_declaration} ->
+      let* retained = observe_host body in
+      (match retained with
+       | Exact.Retained_terminal (Exact.Retained_not_allowed {reason=Replaced_declaration} as result) ->
+         finish body original result
+       | Retained_absent | Retained_open
+       | Retained_terminal (Retained_call _ | Retained_unknown _
+           | Retained_not_allowed {reason=Permission_refused _} | Retained_request_id_reused) ->
+         Error (Rejected ("Worker declaration-replacement refusal contradicts original " ^ label ^ " host execution")))
     | Exact.Request_id_reused -> finish body original Exact.Retained_request_id_reused
     | Exact.Outcome_unknown ->
       (* The worker has no authority to name the cause. It can only echo a

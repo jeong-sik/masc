@@ -90,13 +90,27 @@ type call_final =
           rejection. This final never permits replay of the original request;
           any smaller successor is a separate consumer-owned decision. *)
 
+type not_allowed_reason =
+  | Permission_refused of { detail : string }
+      (** An ordinary host permission or ownership refusal. Its text is not
+          execution or declaration-replacement evidence. *)
+  | Replaced_declaration
+      (** The host ended the original before execution under a confirmed
+          replacement declaration. This reason survives storage and delivery;
+          a later declaration change cannot reinterpret it. *)
+
+val not_allowed_reason_detail : not_allowed_reason -> string
+(** Text for display only. Consumers select behavior on the typed reason. *)
+
 (** What a package receives. Each one ends the request. *)
 type final =
   | Call_final of call_final
   | Outcome_unknown
       (** A call may have been sent and no outcome was retained. *)
-  | Not_allowed of { reason : string }
-      (** The effective package does not permit this output. A newly refused
+  | Not_allowed of { reason : not_allowed_reason }
+      (** The effective package does not permit this output, the host has no
+          original for the request, or the declaration the request was
+          captured for was replaced before it ran. A newly refused
           request retains this final result, even after the selection changes.
           A refusal to deliver an already retained answer leaves that original
           answer intact; it can be delivered when the output is selected again. *)
@@ -114,7 +128,7 @@ type unknown_cause = Interrupted | Cut | Raised
 type retained_final =
   | Retained_call of call_final
   | Retained_unknown of unknown_cause
-  | Retained_not_allowed of { reason : string }
+  | Retained_not_allowed of { reason : not_allowed_reason }
   | Retained_request_id_reused
 
 val delivered : retained_final -> final

@@ -35,12 +35,17 @@ val is_eio_fiber : unit -> bool
 type mutex_access = Read_write | Read_only
 exception Non_eio_mutex_context of mutex_access
 
-(** Acquire the read-write lock when enabled from an Eio fiber. Runs directly
-    before {!enable}; raises {!Non_eio_mutex_context} for a ready non-Eio
-    caller. *)
+(** Take the mutex when enabled from an Eio fiber. Runs directly before
+    {!enable}; raises {!Non_eio_mutex_context} for a ready non-Eio caller.
+    Cancellation is prevented inside the critical section, and an exception
+    from the body disables the mutex, so the next use raises
+    [Eio.Mutex.Poisoned]. *)
 val with_mutex : Eio.Mutex.t -> (unit -> 'a) -> 'a
 
-(** Read-only counterpart of {!with_mutex}. *)
+(** [Eio.Mutex.use_ro] counterpart of {!with_mutex}: the same exclusive mutex,
+    with a cancellable critical section and release-instead-of-disable on an
+    exception. It is not a shared or read lock; no [Eio.Mutex] operation
+    admits two fibers at once. *)
 val with_mutex_ro : Eio.Mutex.t -> (unit -> 'a) -> 'a
 
 (** Run [f] in a system thread from an Eio fiber, directly from a non-Eio

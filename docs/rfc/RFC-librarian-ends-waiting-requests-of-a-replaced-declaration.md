@@ -250,7 +250,7 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
 - 이 보장은 기존 Keeper Memory lane의 Keeper별 직렬화와 workspace lease 안에서 성립한다. owner 갱신은 전체 expected record와 progress를 다시 비교하며 다른 tail을 거절한다.
 
 - history 가 읽는 자리는 둘이다.
-  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다. 지금은 `keeper_librarian_durable_commit.ml` 의 `frontier` 가 `Unfinished | Settled` 두 값이고, 교체가 이미 끝난 Cut 인지는 `Keeper_librarian_declaration_replacement.released_cut` 이 정해 `Settled` 로 접힌다. 운영자 해소 흐름도 같은 검사 함수를 쓴다.
+  - inventory 검사가 이 phase 를 정리된 원본으로 읽는다. 문제 확인 당시에는 오류였다. 지금은 `keeper_librarian_durable_commit.ml` 의 `frontier` 가 `Unfinished | Settled` 두 값이고, 접수 전 종료(`Rejected {stage=Progress.Before_dispatch}`)인지는 `Keeper_librarian_declaration_replacement.ended` 가 정한다. 끝났으면 `Settled`, 아니면 `Error "Original history has no declaration replacement ending"` 로 거절한다. 운영자 해소 흐름도 같은 검사 함수를 쓴다.
   - history owner 가 `Settled` 로 돌아온 이 phase 를 받는다. 문제 확인 당시에는 오류였다. 지금은 `lib/keeper/keeper_librarian_durable_owner.ml` 이 `Submit.End_replaced` 로 끝낸다. pass 는 "반영하지 않음"으로 끝나고 이유를 한 줄 남긴다.
 - 이 갈래는 거절 갈래(`Refused`)를 지나지 않는다. 다음 읽기를 좁히지 않는다.
   - 새 원본을 만든 바로 그 pass 에서 이 갈래가 나와도 같다. 그 자리는 거절을 `Memory_refused` 로 돌려주고, 그 값은 좁히기 표시를 남긴다(`keeper_librarian_durable_execution.ml` 519~530행, `lib/keeper/keeper_librarian_durable_consumer.ml` 1692~1719행). 이 갈래는 그 값으로 돌려주지 않는다.

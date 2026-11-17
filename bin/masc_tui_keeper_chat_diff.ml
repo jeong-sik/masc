@@ -321,19 +321,28 @@ let edited_evidence_rows ~max_line_cells ~replace_all
       ^ attempted
     , [] )
 
-let address_row ~max_line_cells ~summary change =
-  let prefix = "↳ " in
-  let suffix = " " ^ summary in
-  let address =
-    let address = change_address change |> Projection.terminal_safe_text in
-    let address_cells =
-      max 1
-        (max_line_cells - Layout.display_width prefix
-       - Layout.display_width suffix)
-    in
-    Layout.truncate_middle address_cells address
+(* Where the change was made, whole: the path is what the reader opens, and
+   one shortened in the middle names no file. A path wider than the row goes
+   on under itself, ending a row after a separator of the path where one
+   leaves the row at least half full ({!Layout.split_word}). The size of the
+   change follows the path on its last row, or takes the next one when that
+   row has no room for it. *)
+let address_rows ~max_line_cells ~summary change =
+  let lead = "↳ " in
+  let lead_cells = Layout.display_width lead in
+  let hang = String.make lead_cells ' ' in
+  let room = max 1 (max_line_cells - lead_cells) in
+  let address = change_address change |> Projection.terminal_safe_text in
+  let rows =
+    match List.rev (Layout.split_word ~max_cells:room address) with
+    | [] -> [ clipped ~max_cells:room summary ]
+    | last :: earlier ->
+        let joined = last ^ " " ^ summary in
+        List.rev_append earlier
+          (if Layout.display_width joined <= room then [ joined ]
+           else [ last; clipped ~max_cells:room summary ])
   in
-  clipped ~max_cells:max_line_cells (prefix ^ address ^ suffix)
+  List.mapi (fun index row -> (if index = 0 then lead else hang) ^ row) rows
 
 let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     ~replace_all ~numbered =
@@ -344,11 +353,10 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     if replace_all then Printf.sprintf "(+%d -%d per match)" added removed
     else Printf.sprintf "(+%d -%d)" added removed
   in
-  let address = address_row ~max_line_cells ~summary change in
+  let address = address_rows ~max_line_cells ~summary change in
   if removed = 0 && added = 0 then
-    [ address
-    ; clipped ~max_cells:max_line_cells (detail ^ " · no textual delta")
-    ]
+    address
+    @ [ clipped ~max_cells:max_line_cells (detail ^ " · no textual delta") ]
     @ evidence_rows
   else
     (* Coordinates cost the fourteen-cell gutter plus clipped source, whose
@@ -367,10 +375,11 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
           , numbered_omitted )
       | None -> (List.map (diff_line ~max_line_cells) preview, omitted)
     in
-    address :: detail :: (evidence_rows
-                          @ preview_block ~max_line_cells
-                              ~language:(diff_language change) lines
-                          @ omission_row ~max_line_cells omitted)
+    address
+    @ (detail
+       :: (evidence_rows
+           @ preview_block ~max_line_cells ~language:(diff_language change) lines
+           @ omission_row ~max_line_cells omitted))
 
 let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
       ~preview ~omitted ~row_count =
@@ -380,7 +389,7 @@ let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
         (if row_count = 1 then "" else "s")
     else Printf.sprintf "(%d-row write attempt)" row_count
   in
-  let address = address_row ~max_line_cells ~summary change in
+  let address = address_rows ~max_line_cells ~summary change in
   let evidence_rows =
     match change.fc_line_evidence with
     | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
@@ -395,7 +404,7 @@ let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
       (attempted_suffix change)
     |> clipped ~max_cells:max_line_cells
   in
-  if row_count = 0 then [ address; detail ] @ evidence_rows
+  if row_count = 0 then address @ (detail :: evidence_rows)
   else
     let lines =
       List.filter_map
@@ -404,16 +413,18 @@ let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
           | Diff.Context _ | Diff.Removed _ -> None)
         preview
     in
-    address :: detail :: (evidence_rows
-                          @ preview_block ~max_line_cells ~language:"" lines
-                          @ omission_row ~max_line_cells omitted)
+    address
+    @ (detail
+       :: (evidence_rows
+           @ preview_block ~max_line_cells ~language:"" lines
+           @ omission_row ~max_line_cells omitted))
 
 let materialized_section ~max_line_cells (change : Masc.Tui_decode.file_change)
       ~sha256 =
   let summary =
     if change.fc_succeeded then "(materialized)" else "(materialize attempt)"
   in
-  let address = address_row ~max_line_cells ~summary change in
+  let address = address_rows ~max_line_cells ~summary change in
   let evidence_rows =
     match change.fc_line_evidence with
     | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
@@ -428,7 +439,7 @@ let materialized_section ~max_line_cells (change : Masc.Tui_decode.file_change)
       (short_sha256 sha256) (attempted_suffix change)
     |> clipped ~max_cells:max_line_cells
   in
-  [ address; detail ] @ evidence_rows
+  address @ (detail :: evidence_rows)
 
 let section ~max_line_cells prepared =
   let change = prepared.change in

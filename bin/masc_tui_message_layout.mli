@@ -825,6 +825,13 @@ val wrap_words : max_cells:int -> string -> string list
     ends at a separator can be as little as half full, so a name can take up to
     about twice the rows a cut at the width takes. *)
 
+val split_word : max_cells:int -> string -> string list
+(** The rows of one name wider than [max_cells], as {!wrap_words} breaks a
+    word: after its last [_], [:], [/], [.] or [-] that leaves the row at
+    least half full, and at the width where there is none. A space is a
+    character of the name like any other, and the rows concatenate to the
+    name. *)
+
 val wrap_words_after_prefix :
   prefix_cells:int -> max_cells:int -> string -> string list
 (** {!wrap_words} for text that follows something on its first row: that row

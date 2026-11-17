@@ -321,6 +321,36 @@ let test_terminal_controls_are_sanitized_before_markdown () =
     (contains ~needle:"\027" (body rows))
 ;;
 
+(* The path is what the reader opens. At any width the rows of the change, put
+   end to end, hold the whole path: none of it is replaced by a mark. *)
+let test_a_path_wider_than_the_row_is_drawn_whole () =
+  let path =
+    "lib/keeper/runtime/provider_adapters/openai_compatible/streaming_response_decoder.ml"
+  in
+  let indexed = index [ change_json ~path () ] in
+  let activities = [ activity ~execution_id:"exec-edit-1" () ] in
+  List.iter
+    (fun max_line_cells ->
+      let at = Printf.sprintf "%d cells" max_line_cells in
+      let without_change = projected_rows ~max_line_cells Transcript.Full Chat_diff.empty activities in
+      let change_rows =
+        List.filter
+          (fun row -> not (List.mem row without_change))
+          (projected_rows ~max_line_cells Transcript.Full indexed activities)
+      in
+      let without_spaces =
+        String.concat "" (String.split_on_char ' ' (String.concat "" change_rows))
+      in
+      check bool ("the whole path is drawn at " ^ at) true
+        (contains ~needle:("masc:" ^ path) without_spaces);
+      check bool ("the size of the change is drawn at " ^ at) true
+        (contains ~needle:"(+1-1)" without_spaces);
+      check bool ("no row of the change is wider than the pane at " ^ at) true
+        (List.for_all
+           (fun row -> Masc_tui_message_layout.display_width row <= max_line_cells)
+           change_rows))
+    [ 96; 60; 40; 24 ]
+
 let () =
   run "tui_keeper_chat_diff"
     [ ( "identity"
@@ -354,6 +384,8 @@ let () =
     ; ( "projection"
       , [ test_case "terminal controls are sanitized" `Quick
             test_terminal_controls_are_sanitized_before_markdown
+        ; test_case "a path wider than the row is drawn whole" `Quick
+            test_a_path_wider_than_the_row_is_drawn_whole
         ] )
     ]
 ;;

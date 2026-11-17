@@ -49,6 +49,10 @@ val rows :
     rows per preview; every source row is clipped to [max_line_cells].
     Remaining annotations and source rows are counted explicitly.
 
+    The path of a change is never shortened: one wider than [max_line_cells]
+    goes on under itself on as many rows as it needs, and the size of the
+    change follows it.
+
     An [Edited] record is labelled as a replacement (or replace-all template),
     not a whole-file diff. Its typed path and [+added -removed] size share one
     heading. Producer-recorded old/new ranges are shown only when carried by

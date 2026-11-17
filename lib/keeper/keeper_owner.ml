@@ -1261,6 +1261,38 @@ let release_committed_checkpoints ~keeper_name ~session_root operation_store =
     (Chat_operation_store.take_released_checkpoints operation_store)
 ;;
 
+(* What one restart settlement did with the calls it found Active on Running
+   rows, for the operator. [routine] entries stay below the level the log file
+   keeps, so this one is Info. A requeued operation ends in the operation
+   store like any other; the same id in the next start's entry is an operation
+   that was cut off again. Nothing reads the entry back to decide anything. *)
+let log_restart_settlement ~keeper_name ~observations ~interrupted_here =
+  let ids keep =
+    List.filter_map
+      (fun ((observed : Chat_operation_store.restart_native_call), _) ->
+         if keep observed
+         then Some (`String (Operation_id.to_string observed.operation.operation_id))
+         else None)
+      observations
+  in
+  let requeued = ids (fun observed -> not (interrupted_here observed)) in
+  let failed = ids interrupted_here in
+  let unreadable =
+    List.length (List.filter (fun (_, terminal) -> Result.is_error terminal) observations)
+  in
+  Log.Keeper.emit Log.Info ~keeper_name
+    ~details:
+      (`Assoc
+         [ "event_kind", `String "keeper_restart_settlement"
+         ; "requeued", `List requeued
+         ; "failed", `List failed
+         ; "unreadable_journals", `Int unreadable
+         ])
+    (Printf.sprintf
+       "restart settlement requeued %d and failed %d chat operation(s) holding an active native call; %d journal(s) unreadable"
+       (List.length requeued) (List.length failed) unreadable)
+;;
+
 (* A command is the moment the fence is re-examined, not a later wake:
    [wake_operation_drain] fires only when a keepalive starts or a deferred
    retry comes due, so a fence raised mid-day had no trigger to lift it and
@@ -2104,15 +2136,19 @@ let start
                            Ok (List.rev reversed)) with
                          | Error error -> Error (record_operation_error t error)
                          | Ok failed ->
+                           let interrupted_here (observed : Chat_operation_store.restart_native_call) =
+                             List.exists (fun (operation : Chat_operation.t) ->
+                                 Operation_id.equal operation.operation_id
+                                   observed.operation.operation_id) interrupted in
                            admit_exited_writers
                              ~closed:(List.fold_left
                                 (fun closed (observed : Chat_operation_store.restart_native_call) ->
-                                   if List.exists (fun (operation : Chat_operation.t) ->
-                                       Operation_id.equal operation.operation_id
-                                         observed.operation.operation_id) interrupted
+                                   if interrupted_here observed
                                    then Call_id_set.add observed.call.Keeper_native_call.call_id closed
                                    else closed)
                                 Call_id_set.empty pending);
+                           log_restart_settlement ~keeper_name:t.keeper_name ~observations
+                             ~interrupted_here;
                            t.pending_restart_calls := [];
                            publish_operation_projection t projection;
                            Keeper_waiting_inventory_broadcast.changed ~base_path:t.base_path

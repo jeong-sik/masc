@@ -40,8 +40,12 @@ val with_stdio :
     deliberately cancelling the shim payload. It drains stderr and remaining
     stdout, then awaits the real carrier status or relay Exit chunk.
     [on_stdout_tail] receives every stdout byte the callback left unread;
-    [on_stderr_chunk] receives only payload stderr. The callback's value is
-    not evidence that the payload exited successfully.
+    [on_stderr_chunk] receives bytes not removed as control frames. If the
+    final suffix cannot be split into a trailer, its exact ambiguous bytes
+    are forwarded. This does not make completion valid: missing framing is a
+    failure, with transport failure taking precedence when present. Those
+    bytes are not authenticated as payload. The callback's value is not
+    evidence that the payload exited successfully.
 
     Callback exceptions and cancellation propagate after process cleanup.
     [on_receipt] runs once even on those paths and carries only this call's

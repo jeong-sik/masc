@@ -358,9 +358,55 @@ module Stdio_request : sig
     ?mode:Exec_ssh_protocol.mode -> timeout_sec:float -> endpoint ->
     argv:string list -> env:string array -> cwd:string option ->
     (t, refusal) result
-  (** Pure capture and protocol validation, including a finite positive timeout.
+  (** Pure capture and protocol validation, including finite positive payload
+      and computed host budgets, and the Guest connect budget when applicable.
       Docker is refused before probing or spawning. Guest socket identity
       and process launch inputs are frozen here; no carrier fallback. *)
+
+  type binding
+  type binding_error = Owner_mismatch | Payload_argv_mismatch
+
+  val binding :
+    t -> base_path:string -> keeper_name:string -> expected_argv:string list ->
+    (binding, binding_error) result
+  (** The prepared request's semantic identity after checking its actual
+      workspace/Keeper and payload argv against the caller's expected owner
+      and declaration. Blank owner names are refused. Values are compared
+      exactly, without path normalization or argv rewriting.
+
+      Preparation freezes the SHA-256 and byte length of the actual encoded
+      V3 Interactive frame with acceptance disabled. The binding also captures
+      carrier arguments or Guest address/expected owner, ordered carrier-env
+      digest, endpoint route/policy digest and host budget. Accessors never
+      reread the environment, registry or probe. No environment values or
+      encoded frame bytes are persisted by this representation.
+
+      This identifies the invocation recipe, not executable/dependency/key
+      contents, resolved executable lookup, physical cwd or a Guest inode.
+      Ambient executable PATH lookup and host cwd are not captured here;
+      relative paths retain their existing lookup semantics. It grants no
+      dispatch, approval, source-byte or workspace ownership authority. *)
+
+  val binding_to_json : binding -> Yojson.Safe.t
+  val binding_of_json : Yojson.Safe.t -> (binding, string) result
+  (** Strict data-only codec: schema [keeper-stdio-binding.v1], exact fields
+      and types, lowercase SHA-256 digests, positive frame length and finite
+      positive budgets. Budgets also accept exact integer representations:
+      the original-request store canonicalizes integral floats that way.
+      Lossy or noncanonical integer forms are refused. Unknown/duplicate
+      fields or carrier kinds are refused. The
+      decoder creates no request, runtime, process, socket or execution handle. *)
+
+  val validate_binding :
+    binding -> base_path:string -> keeper_name:string -> expected_argv:string list ->
+    (unit, binding_error) result
+  (** Check the decoded binding's owner/argv metadata against an original's
+      owner and declaration. This does not authenticate its frame digest or
+      inspect live state. *)
+
+  val matches_binding : t -> binding -> bool
+  (** Compare every captured semantic field with a freshly prepared request.
+      A match alone is neither live filesystem identity nor retry authority. *)
 
   type carrier =
     | Process of { argv : string list; env : string array }

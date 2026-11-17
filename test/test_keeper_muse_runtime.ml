@@ -1193,7 +1193,7 @@ let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_block
     }
   in
   let outcome =
-    Keeper_muse_runtime.run ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ?on_guidance_prepared ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    Keeper_muse_runtime.run ~read_retained_media:None ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ?on_guidance_prepared ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
       ?argument_source ?librarian_front
       ?composed_context
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)

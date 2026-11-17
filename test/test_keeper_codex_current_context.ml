@@ -203,7 +203,7 @@ default = "codex.%s"
             ~default:current_params.reasoning_effort in
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world;tool_choice;reasoning_effort}
       | _ -> Agent_core.Hooks.Continue) } in
-    Keeper_codex_runtime.run ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source
+    Keeper_codex_runtime.run ~read_retained_media:None ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source
       ?argument_source
       ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
       ~configured_reasoning_effort:runtime.model.reasoning_effort

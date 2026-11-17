@@ -411,7 +411,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     ~librarian_front
     ~on_carried_front
     ~turn_start
-    ~pre_tool_rejects ~base_path ~outbox_viewer ~goal ~goal_blocks
+    ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
@@ -687,7 +687,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     (* Original returned results are not history. A range shrink or caller
        projection cannot erase them before a completed consumer ACKs them. *)
     let prepared = {prepared with Host.messages = prepared.messages
-      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
+      @ Option.to_list (Keeper_client_tool_outbox.context_message ~read_media:read_retained_media tool_outbox)} in
     (* [Host.framed_prompt_for_turn] renders [prepared.system_prompt] as the
        system-instructions section; [Host.prepare_turn] has already refused a
        blank one, so the section is always present on a start (#33165). *)
@@ -1327,7 +1327,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                   recovery_detail))))
 ;;
 
-let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~goal ~goal_blocks ~system_prompt
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1366,7 +1366,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
-        ~outbox_viewer
+        ~outbox_viewer ~read_retained_media
         ~required_native_posture
         ~runtime_id
         ~host

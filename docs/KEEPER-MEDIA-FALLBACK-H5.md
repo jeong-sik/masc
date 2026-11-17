@@ -148,7 +148,42 @@ directory is delivered to later requests. Publication must be durable before
 pending removal. This preserves the original result's blobs, not the transient
 `By_address` carrier blob or the separate H5 reading cache. See
 [retained result ownership](design/retained-result-ownership.md) for the ordering,
-storage cost and remaining reading integration.
+storage cost and remaining lifetime limits.
+
+## Retained host attachment readings
+
+Keeper-history runs share the walk's H5 reader across Core, Codex, Claude Code,
+Antigravity and Muse. Their retained carrier is Text, so a normalized host audio
+or document attachment needs a reading even when the selected runtime accepts
+native media elsewhere. Ordinary native history projection is unchanged.
+Completion review receives no retained-media reader.
+
+The decoder admits only validated host receipts and the exact producer's
+`response.content_blocks` shape. It reads normalized binary artifact references
+for explicit audio/document slots using the sibling's original MIME. Arbitrary
+nested JSON, vendor responses and image slots do not authorize reading. Known
+unreadable slots produce an explicit unavailable reason without invalidating
+the original receipt; URLs and file IDs are not fetched.
+
+The carrier keeps the original encoded context and appends derived JSON keyed
+by physical receipt digest and attachment slot. Reused call IDs do not collapse
+occurrences. `read_stored` shares raw results, not history-formatted prose, so a
+receipt reading does not falsely say that its original is in conversation
+history. The existing viewer and active-producer filters run before reading.
+Reading does not acknowledge a result or change its success/failure outcome.
+
+Core, Codex and Claude prepare all readings before freezing the run carrier.
+Their existing size-refusal hook stores and replaces the complete text, including
+the readings; retries reuse that same carrier. Antigravity and Muse prepare the
+same derived data in their direct context path, but have no carrier-address
+shrink/retry mechanism. Large readings can enlarge those requests; this change
+does not establish a size guarantee for either lane.
+
+Consumed receipts retain original artifact bytes. Artifact-only ownership does
+not retain the H5 disk cache: maintenance can evict a derived reading, and a
+later walk then reads the preserved original again. The current walk still
+shares one raw result and deadline. Temporary aggregate-address lifetime also
+remains separate.
 
 ## Verification and remaining work
 
@@ -174,10 +209,12 @@ written source cases, not executed service/provider or restart evidence.
 
 Request-time projection covers structured media in the selected Keeper-history
 view. It does not cover media introduced later by the caller's custom history
-projection, opaque retained-outbox receipt text, Completion-review requests,
+projection, unsupported retained-result shapes, Completion-review requests,
 official-client internal rounds, or a position that a provider cannot represent
 despite its global document capability. Those paths need their own owners;
-rendered receipt text is not parsed to discover attachments. Restarted readings
+rendered receipt text is not parsed to discover attachments. Retained-reading
+fixtures cover the decoder, shared reader and actual carrier APIs; execution
+status is recorded separately in the Farm execution report. Restarted readings
 and signed-prefix continuity still need execution evidence.
 
 Generic non-PDF interpretation and URL/file-ID fetching remain outstanding.

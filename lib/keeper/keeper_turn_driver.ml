@@ -1827,6 +1827,21 @@ let project_request_media ~project_media ~project_images
              { message with content })
            messages)
 
+let retained_media_reader ~input_source projector =
+  match (input_source : Keeper_request_source.t) with
+  | Completion_review -> None
+  | Keeper_history _ ->
+    Some (fun (attachment : Keeper_client_tool_outbox_media.attachment) ->
+      let kind = match attachment.kind with
+        | Audio -> Keeper_media_reading.Audio
+        | Document -> Keeper_media_reading.Document in
+      Result.bind
+        (Agent_core.History.stored
+           ~sha256:attachment.original.sha256 ~bytes:attachment.original.bytes
+         |> Result.map_error Agent_core.History.stored_error_to_string)
+        (Keeper_media_reading.read_stored projector ~kind
+           ~media_type:attachment.media_type))
+
 type attempt_inference_policy =
   { attempt_enable_thinking : bool option
   ; attempt_preserve_thinking : bool option
@@ -2645,9 +2660,9 @@ let run_named
         | Tool_verdict -> Keeper_vision_ingest.Store_only in
       project ~mode blocks
   in
-  (* H5: audio and document readings, like [project_images], belong to the
-     walk. Every text-only candidate of this walk reuses what an earlier one
-     read or failed to read, under one reading deadline. *)
+  (* H5 readings belong to the walk. History projections and retained Text
+     carriers share raw results and one lazy reading deadline, even when the
+     selected runtime accepts native documents in other input positions. *)
   let media_projector =
     Keeper_media_reading.projector
       ~base_path
@@ -2660,6 +2675,7 @@ let run_named
            ~budget_sec:(Keeper_runtime_resolved.provider_call_deadline_sec ()))
       ()
   in
+  let read_retained_media = retained_media_reader ~input_source media_projector in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
@@ -3113,7 +3129,7 @@ let run_named
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             ~pre_tool_rejects
             ~base_path
-            ~outbox_viewer
+            ~outbox_viewer ~read_retained_media
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3291,7 +3307,7 @@ let run_named
               on_model_input_window_observation
             ~pre_tool_rejects
             ~base_path
-            ~outbox_viewer
+            ~outbox_viewer ~read_retained_media
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3445,7 +3461,7 @@ let run_named
               on_model_input_window_observation
             ~pre_tool_rejects
             ~base_path
-            ~outbox_viewer
+            ~outbox_viewer ~read_retained_media
             ~goal
             ~goal_blocks
             ~native_workspace_context:native_context
@@ -3594,7 +3610,7 @@ let run_named
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             ~pre_tool_rejects
             ~base_path
-            ~outbox_viewer
+            ~outbox_viewer ~read_retained_media
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3793,6 +3809,7 @@ let run_named
             ; restore_carried_front = (fun prior -> refused_carried_front := prior)
             ; base_path
             ; outbox_viewer
+            ; read_retained_media
             ; media_store
             ; keeper_name
             ; name
@@ -3936,6 +3953,7 @@ module For_testing = struct
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
   let project_input_for_attempt = project_input_for_attempt
   let project_request_media = project_request_media
+  let retained_media_reader = retained_media_reader
 	  let attempt_inference_policy = attempt_inference_policy
   let attempt_runtime_candidates = attempt_runtime_candidates
 

@@ -58,6 +58,14 @@ GC는 두 위치의 정확한 직접 파일만 같은 receipt codec으로 해석
 현재 typed history media만 소유권으로 인정한다. 원본 artifact가 남는다는 사실이 reading
 cache의 보존이나 재시작 후 같은 읽기를 증명하지는 않는다.
 
-보관 결과에 H5 읽기를 붙이는 작업은 별도다. 원본의 typed 첨부 참조, 실제 요청에 실린
-묶음, 서명 prefix와 크기 재투영을 함께 연결해야 한다. 이 문서는 소스 계약이며 실제
-서버·provider·설치 또는 장애 복구의 실행 기록이 아니다.
+Keeper-history 요청은 실제 host가 저장한 Audio/Document 참조에 H5 읽기를 붙인다.
+Core·Codex·Claude·Antigravity·Muse가 같은 walk의 원문 읽기와 deadline을 공유한다.
+읽기 결과는 receipt 내용 주소와 첨부 slot으로 구별한 JSON이며, 원본·성공 여부·ACK
+조건을 바꾸지 않는다. 임의 response JSON이나 vendor 데이터에서 첨부를 추정하지 않는다.
+완료 심사에는 새 읽기를 켜지 않는다.
+
+Core·Codex·Claude의 주소 축소는 원본과 읽기를 모두 포함한 실제 묶음을 저장한다.
+Antigravity·Muse에는 그 축소 재시도 기능이 없어 긴 읽기가 요청을 늘릴 수 있다.
+그림, 일반 비-PDF 해석, 참조 URL 가져오기, 실제 provider의 수신·서명 prefix와 재시작
+연속성은 별도 검증이 필요하다. 이 문서는 소스 계약이며 실제 서버·설치 또는 장애
+복구의 실행 기록이 아니다.

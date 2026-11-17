@@ -783,6 +783,14 @@ module For_testing : sig
       fiber and must run outside CPU sizing/demotion callbacks. Only content
       blocks change; message occurrences and canonical history stay intact. *)
 
+  val retained_media_reader :
+    input_source:Keeper_request_source.t ->
+    Keeper_media_reading.projector ->
+    Keeper_client_tool_outbox.media_reader option
+  (** The lane's shared raw reader for retained host attachments. A Text
+      carrier needs readings independently of native media capabilities.
+      Completion review returns [None] and never reads its outbox media. *)
+
   val attempt_inference_policy :
     runtime_id:string ->
     fallback_enable_thinking:bool option ->

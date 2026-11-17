@@ -52,3 +52,56 @@ val with_codex_items : Yojson.Safe.t list -> Yojson.Safe.t -> Yojson.Safe.t
 val with_input_text : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** [with_input_text text item] is the [inputText] [item] with [text] as its
     [text]; its other fields stay. *)
+
+(** Attachments in the exact response shape written by
+    {!Keeper_client_tool_outbox.host_response}. The caller must first establish
+    the receipt's host-producer lineage; an arbitrary vendor response with the
+    same JSON shape does not acquire that authority here. *)
+type retained_kind = Audio | Document
+
+type attachment = private
+  { slot : int
+  ; kind : retained_kind
+  ; media_type : string
+  ; original : Tool_output.artifact_ref
+  }
+(** [slot] is the zero-based occurrence in [content_blocks], including opaque
+    blocks before it. [media_type] is the exact producer-declared sibling
+    value, while [original.mime] is the ordinary binary blob label. *)
+
+type unavailable_reason =
+  | Ambiguous_type
+  | Malformed_attachment
+  | Invalid_artifact_reference
+  | Non_binary_artifact
+  | Undecodable_base64
+  | Reference_not_fetched
+  | Inline_media_not_materialized
+
+val unavailable_reason_to_string : unavailable_reason -> string
+(** Canonical diagnostic labels for output, never control-flow input. They
+    contain no original payload or arbitrary decoder error text. *)
+
+type attachment_view =
+  | Readable of attachment
+  | Unavailable of
+      { slot : int
+      ; kind : retained_kind option
+      ; media_type : string option
+      ; reason : unavailable_reason
+      }
+(** [kind] is absent only when competing type fields do not name one kind.
+    [media_type] is absent when its declared value is missing, not a string
+    or ambiguous. *)
+
+val host_attachments : Yojson.Safe.t -> attachment_view list
+(** Pure projection of an exact unique [success:bool], [content:string],
+    [content_blocks:list|null] host response. Other response shapes are opaque
+    and return [[]]; [null] means no attachments.
+
+    Only explicit top-level Audio/Document slots are considered. A readable
+    slot has exactly [type], [media_type] and [artifact], with a strict
+    normalized reference labelled [application/octet-stream]. Known malformed,
+    undecodable or nonstored media produces [Unavailable]. Images, unrelated
+    blocks and nested payloads stay opaque. Order and slot occurrences are
+    preserved. No bytes are decoded, fetched, stored, read or mutated. *)

@@ -109,6 +109,10 @@ val run :
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
   outbox_viewer:Keeper_client_tool_outbox.viewer ->
+  read_retained_media:Keeper_client_tool_outbox.media_reader option ->
+  (* The lane walk's shared reader for retained host Audio/Document results.
+      [None] preserves the original-only carrier, including completion review.
+      This Text surface needs readings even on a native-media-capable lane. *)
   goal:string ->
   goal_blocks:Agent_core.Types.content_block list option ->
   system_prompt:string ->

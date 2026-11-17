@@ -264,7 +264,7 @@ type projector =
   ; read : reader
   ; start_deadline : unit -> Monotonic_deadline.t
   ; mutable deadline : Monotonic_deadline.t option
-  ; memo : (kind * string * string, string) Hashtbl.t
+  ; memo : (kind * string * string, (string, string) result) Hashtbl.t
   }
 
 let projector ?base_path ~media_store ~keeper_name ~start_deadline ~read () =
@@ -287,8 +287,40 @@ let projector_deadline projector =
     deadline
 ;;
 
-let project projector ~needs_projection blocks =
+let read_stored projector ~kind ~media_type stored =
   let { base_path; media_store; keeper_name; read; memo; _ } = projector in
+  (* The digest names the reading, so the bytes are read from the store only
+     when no reading exists. Memoize the raw result: its consumer owns the
+     attribution to history, a retained receipt, or another original. *)
+  let sha = stored.Agent_core.History.sha256 in
+  let key = kind, media_type, String.lowercase_ascii sha in
+  match Hashtbl.find_opt memo key with
+  | Some result -> result
+  | None ->
+    let result =
+      match load_reading ~base_path ~keeper_name ~kind ~media_type ~sha with
+      | Some reading -> Ok reading
+      | None ->
+        let deadline = projector_deadline projector in
+        (match
+           if Monotonic_deadline.passed deadline
+           then Error "budget_spent"
+           else
+             match media_store.get stored with
+             | Ok bytes -> read ~deadline ~kind ~media_type ~bytes
+             | Error error -> Error (media_error_reason error)
+         with
+         | Ok reading when String.trim reading <> "" ->
+           store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text:reading;
+           Ok reading
+         | Ok _ -> Error "empty_reading"
+         | Error reason -> Error reason)
+    in
+    Hashtbl.replace memo key result;
+    result
+;;
+
+let project projector ~needs_projection blocks =
   let replaced : (string * int) list ref = ref [] in
   let project_one ~kind ~media_type ~source block =
     if not (needs_projection kind)
@@ -302,42 +334,13 @@ let project projector ~needs_projection blocks =
       | Agent_core.Types.File_id _ ->
         Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"file_id")
       | Agent_core.Types.Stored stored ->
-        (* The digest names the reading, so the bytes are read from the store
-           only when no reading of them exists yet. *)
         let sha = stored.Agent_core.History.sha256 in
         let text =
-             match Hashtbl.find_opt memo (kind, media_type, String.lowercase_ascii sha) with
-             | Some text -> text
-             | None ->
-               let text =
-                 match load_reading ~base_path ~keeper_name ~kind ~media_type ~sha with
-                 | Some reading -> read_text ~kind ~media_type ~sha ~text:reading
-                 | None ->
-                   let deadline = projector_deadline projector in
-                   (match
-                      if Monotonic_deadline.passed deadline
-                      then Error "budget_spent"
-                      else
-                        match media_store.get stored with
-                        | Ok bytes -> read ~deadline ~kind ~media_type ~bytes
-                        | Error error -> Error (media_error_reason error)
-                    with
-                    | Ok reading when String.trim reading <> "" ->
-                      store_reading
-                        ~base_path
-                        ~keeper_name
-                        ~kind
-                        ~media_type
-                        ~sha
-                        ~text:reading;
-                      read_text ~kind ~media_type ~sha ~text:reading
-                    | Ok _ -> unavailable_text ~kind ~media_type ~sha ~reason:"empty_reading"
-                    | Error reason -> unavailable_text ~kind ~media_type ~sha ~reason)
-               in
-               Hashtbl.replace memo (kind, media_type, String.lowercase_ascii sha) text;
-               text
-           in
-           Agent_core.Types.text_block text)
+          match read_stored projector ~kind ~media_type stored with
+          | Ok text -> read_text ~kind ~media_type ~sha ~text
+          | Error reason -> unavailable_text ~kind ~media_type ~sha ~reason
+        in
+        Agent_core.Types.text_block text)
   in
   let rec project_block (block : Agent_core.Types.content_block) =
     match block with

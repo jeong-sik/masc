@@ -24,6 +24,7 @@ related: ["0387", "0267", "0444", "0362", "goal-candle-ledger", "tui-one-screen-
 5. TUI 목록은 Goal 마다 진척(`1/14 층`)과 판정 종류를 같은 꼴로 보인다. 이유 글은 상세에서만 보인다.
 6. 저장소는 hard cut 이다. 지금 Goal 넷(goals, measurements, verifications, criterion reviews)은
    새 스키마를 읽지 못하는 행을 `Schema_rejected` 로 알리고 지운 뒤 새로 쓴다(RFC-0444 §2.7).
+   Candle 원장도 같은 배포에서 새로 시작하고, Snapshot 은 타입 있는 값을 담는다(§6).
 
 완료 판정은 바뀌지 않는다. Verifier 가 증명하고 사람이 확인해야 완료다(RFC-0387 B3, constitution
 goal). 측정값이 목표에 닿았다는 계산은 화면 표시에만 쓰고, phase 를 움직이지 않는다.
@@ -242,10 +243,12 @@ type verdict_outcome =
 - 지금 열린 Goal 32개는 새로 등록해야 한다. 지우는 일은 배포한 사람이 `reset_step` 으로 한다. 다시
   등록은 Goal 을 만든 Keeper 들에게 요청한다. 32개의 원문은 지우기 전에 `masc_goal_list` 출력으로
   운영 저장소 밖에 남긴다(복원용이 아니라 다시 쓸 때 읽을 원문).
-- Candle 원장은 건드리지 않는다. `Snapshot` 이벤트의 `metric`·`target_value` 문자열
-  (`lib/candle/candle_event.ml:50-61`)은 이미 쓰인 사실이다. 새 Snapshot 에는 `Goal_measure` 의 표시
-  글을 같은 두 칸에 쓴다(`metric` = 측정 설명, `target_value` = 목표 표시). 원장 형식이 바뀌지
-  않으니 RFC-goal-candle-ledger 의 writer 정지 절차가 필요 없다(D2).
+- Candle 원장도 같은 배포에서 hard cut 한다. `Snapshot` 이벤트(`lib/candle/candle_event.ml:50-61`)는
+  `metric`·`target_value` 문자열 대신 `criterion` 의 `measure`·`procedure` 와 통과 판정의 `measured`
+  값을 담는다. Candle 감정(`candle_appraisal.ml`)과 지급(`candle_payout.ml`)은 이 값을 읽는다.
+- 원장은 옛 행을 바꿔 읽지 않는다. 배포 때 원장에 접근하는 모든 writer 를 멈추고 원장을 새로 시작한다
+  (RFC-goal-candle-ledger 의 "혼합 버전 금지"를 지우고 새로 쓰는 쪽으로 지킨다). 잔액은 원장에서
+  계산하는 값이라(constitution candle) Keeper 잔액과 산 장신구 기록도 0 에서 다시 시작한다.
 
 ## 7. 바뀌는 소비자
 
@@ -262,7 +265,7 @@ type verdict_outcome =
 | TUI 그리기 `bin/masc_tui_render_work.ml` 목록·상세 | 문자열 자르기 | §5 |
 | Keeper 프롬프트 `lib/keeper/keeper_unified_prompt.ml:251-256`, `:331-350` | criterion JSON, review note | measure 표시, 진척, 판정 종류 |
 | 대시보드 `dashboard/src/components/goals/goal-create-state.ts`, `goal-tree.ts`, `components/work.ts`, `api/dashboard-goals.ts` | 문자열 | 같은 세 모양 |
-| Candle `candle_snapshot.ml`, `candle_payout.ml`, `candle_appraisal.ml` | 문자열 | 표시 글(§6) |
+| Candle `candle_event.ml`, `candle_snapshot.ml`, `candle_payout.ml`, `candle_appraisal.ml` | 문자열 | measure, procedure, measured(§6) |
 | 스크립트 `scripts/harness/contract/golden_path_1_contract.sh`, `public_tool_live_sweep.sh`, `scripts/verify-goal-confirmation-runtime.py` | 문자열 | measure 객체 |
 
 시험은 feature_surface 의 Goal 기능을 본다: 모양이 다른 측정값을 거절하는가, 판정이 잰 값을
@@ -287,9 +290,10 @@ type verdict_outcome =
 | L3 | 판정 출력에 잰 값, 원장 verdict 모양, evidence 정리 | 판정 결과 원장 시험 |
 | L4 | `last_review_note` 삭제, 메모를 Phase 이벤트로 | 이벤트 시험 |
 | L5 | TUI 목록·상세(§5), 작업 상세의 Goal 줄 | 120·60열 캡처 |
-| L6 | 대시보드, Keeper 프롬프트, Candle 표시 글, 스크립트 | 브라우저 캡처 |
+| L6 | Candle Snapshot 모양과 원장 hard cut, 감정·지급 입력 | 원장 시험 |
+| L7 | 대시보드, Keeper 프롬프트, 스크립트 | 브라우저 캡처 |
 
-L1 부터 L6 까지는 한 배포로 나간다. L1 만 배포되면 판정자와 화면이 없는 칸을 읽는다.
+L1 부터 L7 까지는 한 배포로 나간다. L1 만 배포되면 판정자와 화면이 없는 칸을 읽는다.
 
 ## 10. 앞선 사례
 
@@ -303,13 +307,10 @@ L1 부터 L6 까지는 한 배포로 나간다. L1 만 배포되면 판정자와
   공식 문서에서 확인하지 못했고 제3자 글에만 있다(https://linear.app/docs/project-milestones).
   MASC 는 진척을 작업 수에서 계산하지 않는다. 작업 수는 Goal 의 성공 조건이 아니기 때문이다.
 
-## 11. 열린 결정
+## 11. 정한 것(사용자, 2026-11-17)
 
-- **D1. hard cut 으로 Goal 32개를 지우고 다시 등록한다.** 추천. constitution legacy_residue 와 RFC-0352 가
-  이 길을 정한다. 대가는 Keeper 들이 32개를 다시 쓰는 턴이다. 다른 길(한 번 쓰는 변환기)은 옛 글에서
-  수와 단위를 뽑아야 해서 문자열 추측이 된다.
-- **D2. Candle Snapshot 은 형식을 바꾸지 않고 표시 글을 쓴다.** 추천. 원장 형식을 바꾸면
-  RFC-goal-candle-ledger 의 writer 정지와 혼합 버전 금지가 따라온다. 대가는 Candle 감정(appraisal)이
-  타입 없는 글을 계속 읽는 것이다.
-- **D3. 통과 판정에 잰 값을 꼭 요구한다.** 추천. 값 없는 통과를 받으면 목록의 진척 칸이 통과한 Goal 에서
-  비게 된다. 대가는 판정자가 값을 못 낸 통과를 다시 판정하는 비용이다.
+- **D1. hard cut.** Goal 저장소 넷을 지우고 Goal 32개는 다시 등록한다. 옛 글에서 수와 단위를 뽑는
+  변환기는 문자열 추측이라 만들지 않는다(constitution legacy_residue, RFC-0352).
+- **D2. Candle 도 다시 설계한다.** Snapshot 이 타입 있는 measure·procedure·measured 를 담고, 원장은
+  같은 배포에서 새로 시작한다(§6). 잔액과 장신구 기록도 0 에서 다시 시작한다.
+- **D3. 통과 판정에도 잰 값을 꼭 받는다.** 값 없는 통과는 이유 없는 판정과 같은 길로 간다(§3).

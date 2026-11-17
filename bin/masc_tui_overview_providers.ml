@@ -1195,8 +1195,8 @@ let draw_card_rows ~width ~tone entries =
       | _ :: _ :: _ | [] -> List.map (fun card -> [ card ]) cards
     in
     match
-      Masc_tui_card.grid ~style ~inner_width ~gap:card_gap ~row_gap:card_row_gap
-        ~max_rows:max_int columns
+      Masc_tui_card.grid ~rounded:true ~style ~inner_width ~gap:card_gap
+        ~row_gap:card_row_gap ~max_rows:max_int columns
     with
     | Some rows -> List.map (fun line -> indent ^ line) rows
     | None -> []

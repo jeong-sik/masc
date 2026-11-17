@@ -124,9 +124,6 @@ let format_megawords words =
   else if mw >= 1.0 then Printf.sprintf "%.1f MW" mw
   else Printf.sprintf "%.0f kW" (words /. 1000.0)
 
-let repeat_glyph glyph count =
-  if count <= 0 then "" else String.concat "" (List.init count (fun _ -> glyph))
-
 (* The probe's state in words. A word from a server newer than this build is
    drawn as it came behind [?] (RFC tui-one-screen-grammar section 7.1). That
    word and a stopped probe's reason come off the wire, so both are escaped
@@ -213,32 +210,31 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
   let card_w = max 18 ((inner_width - 10) / 4) in
+  let card_cells = Masc_tui_card.content_cells ~width:card_w in
   (* Reserve readable text cells inside the border and padding. Below this
      width use the compact summaries, not four boxes of clipped labels. *)
   let minimum_card_text_cells = 32 in
-  let format_card title line1 line2 tone_style =
-    let h_rule = repeat_glyph "\xe2\x94\x80" (max 0 (card_w - 2)) in
-    let box_t = "\xe2\x94\x8c" ^ h_rule ^ "\xe2\x94\x90" in
-    let box_b = "\xe2\x94\x94" ^ h_rule ^ "\xe2\x94\x98" in
-    let pad_line s =
-      let w = Layout.display_width s in
-      if w >= card_w - 4 then Layout.take_cells s (card_w - 4)
-      else s ^ String.make (card_w - 4 - w) ' '
+  let render_card ?hotkey ?badge ~title_style title line1 line2 =
+    let style =
+      { Masc_tui_card.edge = Theme.recede ()
+      ; title_style = Ansi.bold ^ title_style
+      ; reset = Ansi.reset
+      }
     in
-    let l_t = "\xe2\x94\x82 " ^ tone_style ^ pad_line title ^ Ansi.reset ^ " \xe2\x94\x82" in
-    let l_1 = "\xe2\x94\x82 " ^ pad_line line1 ^ " \xe2\x94\x82" in
-    let l_2 = "\xe2\x94\x82 " ^ pad_line line2 ^ " \xe2\x94\x82" in
-    (box_t, l_t, l_1, l_2, box_b)
+    let chrome =
+      { Masc_tui_card.hotkey =
+          Option.map (fun d -> (Masc_tui_theme.Glyph.superscript_digit d, Ansi.bold ^ Theme.accent ())) hotkey
+      ; badge
+      }
+    in
+    Masc_tui_card.render ~rounded:true ~chrome ~style ~width:card_w ~height:4
+      { Masc_tui_card.title; body = (fun ~cells:_ -> [ line1; line2 ]) }
   in
   let gc_opt =
-    match state.server_identity with
-    | Some { sid_gc = Some gc; _ } -> Some gc
-    | _ -> None
+    Option.bind state.server_identity (fun id -> id.Decode.sid_gc)
   in
   let sched_opt =
-    match state.server_identity with
-    | Some { sid_scheduler = Some s; _ } -> Some s
-    | _ -> None
+    Option.bind state.server_identity (fun id -> id.Decode.sid_scheduler)
   in
   let identity_gap = identity_gap state in
   let domains = match sched_opt with
@@ -248,36 +244,66 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   let c1_l1, c1_l2 = match gc_opt with
     | Some gc ->
-      (Printf.sprintf (if ko then "힙 %s · 사용 중 %s" else "Heap %s · live %s")
-         (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words),
-       Printf.sprintf (if ko then "워커 %s · 마이너 힙 %s" else "%s workers · minor %s")
-         domains (format_words gc.sgc_minor_heap_size))
+      let live_line =
+        if card_cells >= minimum_card_text_cells && gc.sgc_heap_words > 0 then
+          Chart.meter ~width:card_cells ~value:gc.sgc_live_words
+            ~max_value:(max 1 gc.sgc_heap_words)
+            ~label:(say "점유" "Live")
+            ~cell_style:(fun ~index ~width ->
+              Theme.pressure ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+            ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+        else
+          Printf.sprintf (if ko then "워커 %s · 마이너 힙 %s" else "%s workers · minor %s")
+            domains (format_words gc.sgc_minor_heap_size)
+      in
+      ( Printf.sprintf (if ko then "힙 %s · 사용 중 %s" else "Heap %s · live %s")
+          (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words)
+      , live_line )
     | None -> say "힙 " "Heap " ^ Unknown.glyph identity_gap, say "워커 " "Workers " ^ domains
   in
-  let c2_l1, c2_l2, c2_tone = match sched_opt with
+  let c1_badge = (domains ^ say " 워커" " wk", Theme.recede ()) in
+  let c2_l1, c2_l2, c2_tone, c2_badge = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       ( say "지연 표본 없음" "No latency samples",
         say "프로브: " "Probe: " ^ scheduler_probe_text ~ko s.ssch_probe,
-        Theme.recede () )
+        Theme.recede (),
+        (scheduler_probe_text ~ko s.ssch_probe, Theme.recede ()) )
     | Some s ->
+      let tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.recede () in
+      let badge_tone = if s.ssch_stalls > 0 then Theme.warn () else Theme.ok () in
       (Printf.sprintf (if ko then "p95 %.3fms · 최대 %.3fms" else "p95 %.3fms · max %.3fms")
          s.ssch_p95_ms s.ssch_max_ms,
        Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
          (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls),
-       if s.ssch_stalls > 0 then Theme.warn () else Theme.recede ())
+       tone,
+       (scheduler_probe_text ~ko s.ssch_probe, badge_tone))
     (* One condition -- no scheduler reading at all -- so both halves of the
        card draw the same mark. *)
     | None ->
       let mark = Unknown.glyph identity_gap in
-      "p95 " ^ mark, say "표본 " "Samples " ^ mark, Theme.recede ()
+      "p95 " ^ mark, say "표본 " "Samples " ^ mark, Theme.recede (), (mark, Theme.recede ())
   in
-  let c3_l1, c3_l2 = match kpis.tasks with
+  let c3_l1, c3_l2, c3_badge = match kpis.tasks with
     | Some count ->
-      (Printf.sprintf (if ko then "열린 작업 %s · 검증 대기 %s" else "%s open · %s verifying")
-         (Count.grouped (Task_flow.open_count count))
-         (Count.grouped count.awaiting_verification),
-       Printf.sprintf (if ko then "완료 %s · 취소 %s" else "%s done · %s cancelled")
-         (Count.grouped count.completed) (Count.grouped count.cancelled))
+      let total = Task_flow.total_count count in
+      let done_line =
+        if card_cells >= minimum_card_text_cells && total > 0 then
+          Chart.meter ~width:card_cells ~value:count.completed
+            ~max_value:(max 1 total)
+            ~label:(say "완료" "Done")
+            ~suffix:(Printf.sprintf "%s/%s" (Count.grouped count.completed) (Count.grouped total))
+            ~cell_style:(fun ~index ~width ->
+              Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+            ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+        else
+          Printf.sprintf (if ko then "완료 %s · 취소 %s" else "%s done · %s cancelled")
+            (Count.grouped count.completed) (Count.grouped count.cancelled)
+      in
+      ( Printf.sprintf (if ko then "열린 작업 %s · 검증 대기 %s" else "%s open · %s verifying")
+          (Count.grouped (Task_flow.open_count count))
+          (Count.grouped count.awaiting_verification)
+      , done_line
+      , (Count.grouped total ^ say "건" " total", Theme.recede ()) )
     | None ->
       let mark =
         Unknown.glyph
@@ -285,31 +311,31 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
            | Some _ -> Unknown.Read_failed
            | None -> Unknown.Unread)
       in
-      say "열린 작업 " "Open " ^ mark, say "완료 " "Done " ^ mark
+      say "열린 작업 " "Open " ^ mark, say "완료 " "Done " ^ mark, (mark, Theme.recede ())
   in
   let c4_l1 = "Gate " ^ observation_count (gate_observation state) in
   let c4_l2 = say "보류된 호출 " "Tool holds " ^ observation_count (held_observation state) in
-  let c4_tone = match kpis.gate_pending_count, kpis.held_approvals_count with
-    | Some 0, Some 0 -> Theme.recede ()
-    | _ -> Theme.warn () in
-
-  let combine (t1, lt1, l11, l21, b1)
-              (t2, lt2, l12, l22, b2)
-              (t3, lt3, l13, l23, b3)
-              (t4, lt4, l14, l24, b4) =
-    [ "  " ^ t1 ^ "  " ^ t2 ^ "  " ^ t3 ^ "  " ^ t4
-    ; "  " ^ lt1 ^ "  " ^ lt2 ^ "  " ^ lt3 ^ "  " ^ lt4
-    ; "  " ^ l11 ^ "  " ^ l12 ^ "  " ^ l13 ^ "  " ^ l14
-    ; "  " ^ l21 ^ "  " ^ l22 ^ "  " ^ l23 ^ "  " ^ l24
-    ; "  " ^ b1 ^ "  " ^ b2 ^ "  " ^ b3 ^ "  " ^ b4
-    ]
+  let c4_tone, c4_badge = match kpis.gate_pending_count, kpis.held_approvals_count with
+    | Some 0, Some 0 -> Theme.recede (), (say "정상" "clear", Theme.ok ())
+    | Some g, Some h -> Theme.warn (), (Count.grouped (g + h), Theme.warn ())
+    | None, _ | _, None -> Theme.warn (), (Unknown.(glyph Unread), Theme.recede ())
   in
-  if card_w - 4 >= minimum_card_text_cells then
-    combine
-      (format_card (say "엔진" "ENGINE") c1_l1 c1_l2 (Theme.info ()))
-      (format_card (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2 c2_tone)
-      (format_card (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2 (Theme.info ()))
-      (format_card (say "확인 필요" "ATTENTION") c4_l1 c4_l2 c4_tone)
+
+  let rec zip4 r1 r2 r3 r4 =
+    match r1, r2, r3, r4 with
+    | a :: t1, b :: t2, c :: t3, d :: t4 ->
+      ("  " ^ a ^ "  " ^ b ^ "  " ^ c ^ "  " ^ d) :: zip4 t1 t2 t3 t4
+    | [], _, _, _
+    | _ :: _, [], _, _
+    | _ :: _, _ :: _, [], _
+    | _ :: _, _ :: _, _ :: _, [] -> []
+  in
+  if card_cells >= minimum_card_text_cells then
+    zip4
+      (render_card ~hotkey:1 ~badge:c1_badge ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
+      (render_card ~badge:c2_badge ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
+      (render_card ~hotkey:2 ~badge:c3_badge ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
+      (render_card ~hotkey:3 ~badge:c4_badge ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
   else
     [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
         (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_l1
@@ -338,13 +364,13 @@ let session_entry_rows ~width ((event : event), run) =
       Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph Ansi.reset
   in
   let lead =
-    Printf.sprintf "    %s[%s]%s %s" Ansi.dim event.timestamp Ansi.reset mark
+    Printf.sprintf "    %s[%s]%s %s" (Theme.recede ()) event.timestamp Ansi.reset mark
   in
   let lead_cells = Layout.display_width lead in
   let content = Terminal_text.single_line event.content in
   let text =
     if run > 1 then
-      Printf.sprintf "%s %s\xc3\x97%d%s" content Ansi.dim run Ansi.reset
+      Printf.sprintf "%s %s\xc3\x97%d%s" content (Theme.recede ()) run Ansi.reset
     else content
   in
   match Layout.wrap_styled_words ~max_cells:(max 1 (width - lead_cells)) text with
@@ -410,21 +436,34 @@ let render_section_fleet ?session_rows ~cols (state : state) =
   let gc_lines = match gc with
     | None -> [ "    " ^ identity_gap ]
     | Some gc ->
+      let meter_rows =
+        if gc.sgc_heap_words > 0 then
+          [ "    "
+            ^ Chart.meter ~width:(min 56 (max 24 (inner_width - 4)))
+                ~value:gc.sgc_live_words ~max_value:(max 1 gc.sgc_heap_words)
+                ~label:(say "점유율" "Occupancy")
+                ~cell_style:(fun ~index ~width ->
+                  Theme.pressure ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+                ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+          ]
+        else []
+      in
       [ Printf.sprintf
           (if ko then "    힙 %s · 사용 중 %s · 마이너 힙 설정 %s"
            else "    Heap %s · live %s · configured minor heap %s")
           (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words)
-          (format_words gc.sgc_minor_heap_size)
-      ; Printf.sprintf
-          (if ko then "    수거: 마이너 %s · 메이저 %s · 강제 메이저 %s · 압축 %s"
-           else "    Collections: minor %s · major %s · forced %s · compactions %s")
-          (Count.grouped gc.sgc_minor_collections) (Count.grouped gc.sgc_major_collections)
-          (Count.grouped gc.sgc_forced_major_collections) (Count.grouped gc.sgc_compactions)
-      ; Printf.sprintf
-          (if ko then "    할당 누계: 마이너 %s · 승격 %s · 메이저 %s"
-           else "    Allocation totals: minor %s · promoted %s · major %s")
-          (format_megawords gc.sgc_minor_words) (format_megawords gc.sgc_promoted_words)
-          (format_megawords gc.sgc_major_words) ]
+          (format_words gc.sgc_minor_heap_size) ]
+      @ meter_rows
+      @ [ Printf.sprintf
+            (if ko then "    수거: 마이너 %s · 메이저 %s · 강제 메이저 %s · 압축 %s"
+             else "    Collections: minor %s · major %s · forced %s · compactions %s")
+            (Count.grouped gc.sgc_minor_collections) (Count.grouped gc.sgc_major_collections)
+            (Count.grouped gc.sgc_forced_major_collections) (Count.grouped gc.sgc_compactions)
+        ; Printf.sprintf
+            (if ko then "    할당 누계: 마이너 %s · 승격 %s · 메이저 %s"
+             else "    Allocation totals: minor %s · promoted %s · major %s")
+            (format_megawords gc.sgc_minor_words) (format_megawords gc.sgc_promoted_words)
+            (format_megawords gc.sgc_major_words) ]
   in
   let scheduler_lines = match scheduler with
     | None -> [ "    " ^ identity_gap ]
@@ -511,7 +550,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
       let rows = List.concat_map (fun entry -> entry.rows) block.kept in
       if block.earlier > 0 then
         Printf.sprintf (if ko then "    %s이전 %s건%s" else "    %s%s earlier%s")
-          Ansi.dim (Count.grouped block.earlier) Ansi.reset
+          (Theme.recede ()) (Count.grouped block.earlier) Ansi.reset
         :: rows
       else rows
   in
@@ -676,6 +715,14 @@ let render_section_resources ~cols (state : state) =
                  (fun (day, width) -> Layout.pad_left (Count.grouped (pick day)) width)
                  columns))
         rows
+      @ (match flow.Task_flow.daily with
+         | [] -> []
+         | days ->
+           let done_series = List.map (fun (d : Task_flow.day) -> d.d_completed) days in
+           [ "    " ^ Layout.fit_width (say "추세" "trend") 10 ^ " "
+             ^ Theme.progress ~t:0.75
+             ^ Chart.braille_sparkline ~min:0 done_series
+             ^ Ansi.reset ])
   in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
@@ -803,8 +850,13 @@ let render_section_tools ~cols (state : state) : string list =
           else
             List.map
               (fun (k : Masc.Tui_decode_memory_health.memory_keeper_health) ->
-                let pct = if total_facts = 0 then 0 else (k.mkh_facts * 100) / total_facts in
-                let bar = Chart.gauge ~width:16 ~value:pct ~max_value:100 ~label:"" () in
+                let bar =
+                  Chart.meter ~width:16 ~value:k.mkh_facts
+                    ~max_value:(max 1 total_facts)
+                    ~cell_style:(fun ~index ~width ->
+                      Theme.progress ~t:(float_of_int (index + 1) /. float_of_int (max 1 width)))
+                    ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+                in
                 Printf.sprintf
                   (if ko then "    %s  사실 %s  %s  %s tok%s" else "    %s  %s facts  %s  %s tok%s")
                   (Layout.fit_width

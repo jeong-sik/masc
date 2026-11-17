@@ -97,7 +97,7 @@ CAMLprim value masc_owner_identity_capture(value lease) {
    still answers. The pid is a number to compare with another kernel read and
    authorizes no signal.
    Outcome 0: [pid] holds it. 1: no other process does. 4: the kernel could
-   not be asked, or named no process above pid 1. */
+   not be asked, or named no positive process PID. */
 CAMLprim value masc_owner_identity_lease_holder(value lease) {
   CAMLparam1(lease); CAMLlocal1(result);
   int fd = Int_val(lease), outcome = 4;
@@ -105,7 +105,7 @@ CAMLprim value masc_owner_identity_lease_holder(value lease) {
   pid_t pid = lease_owner(fd);
   caml_leave_blocking_section();
   if (pid == 0) outcome = 1;
-  else if (pid > 1 && pid != getpid()) outcome = 0;
+  else if (pid > 0 && pid != getpid()) outcome = 0;
   result = caml_alloc_tuple(2);
   Store_field(result, 0, Val_int(outcome));
   Store_field(result, 1, Val_long(outcome == 0 ? pid : 0));

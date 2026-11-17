@@ -230,6 +230,10 @@ let to_yojson snapshot =
     ]
 ;;
 
+(* [Execution_event.node_update] derives [show]; the record prints as its
+   wire JSON so the printed form is the journaled form. *)
+let pp fmt snapshot = Yojson.Safe.pretty_print fmt (to_yojson snapshot)
+
 let of_yojson json =
   let* fields =
     Execution_json.object_fields

@@ -26,6 +26,9 @@ type t =
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
+(** Prints the record as its wire JSON. *)
+val pp : Format.formatter -> t -> unit
+
 (** Rejects a record whose admission does not describe its response: every
     ToolUse of the response has exactly one source in planned order, source
     ordinals are distinct and inside [source_tool_use_count], unreadable calls

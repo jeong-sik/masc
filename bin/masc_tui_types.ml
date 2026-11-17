@@ -19253,6 +19253,35 @@ let supersede_context_inspector_load state stop =
   state.context_inspector_cancel <- stop
 ;;
 
+(* A fresh page read must not remain reusable as the old page while it is
+   pending: a tab switch could otherwise cancel the requested refresh and
+   stamp the old selection as newly read. Tab detail reads keep their page. *)
+let begin_context_inspector_read ~reuse state ~keeper_name =
+  let previous =
+    if reuse then
+      match state.context_inspector_reading with
+      | Some (keeper, reading) when String.equal keeper keeper_name -> Some reading
+      | Some _ | None -> None
+    else None in
+  supersede_context_inspector_load state None;
+  state.context_inspector_generation <- state.context_inspector_generation + 1;
+  state.context_inspector_loading <- true;
+  (match previous with
+   | Some reading ->
+       state.context_inspector_reading <- Some
+         (keeper_name, Masc_tui_context_inspector.prepare_tab_read
+            ~tab:state.context_inspector_tab reading)
+   | None ->
+       (match state.context_inspector_reading with
+        | Some (_, reading) when Masc_tui_context_inspector.page_read_failed reading ->
+            state.context_inspector_scroll <- 0;
+            state.context_inspector_response_scroll <- 0
+        | Some _ | None -> ());
+       state.context_inspector_reading <- None;
+       state.context_inspector_read_at <- None);
+  previous
+;;
+
 let supersede_context_inspector_part_load state stop =
   Option.iter (fun previous -> previous ()) state.context_inspector_part_cancel;
   state.context_inspector_part_cancel <- stop

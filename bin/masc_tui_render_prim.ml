@@ -4783,7 +4783,7 @@ let context_error_lines ~cols ~label detail =
     (label ^ ": " ^ context_detail_preview detail)
 
 let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_note = false) ~cols ~scale
-    (forecast : (Masc_tui_context_inspector.forecast, string) result) =
+    (forecast : Masc_tui_context_inspector.forecast Masc_tui_context_inspector.observation) =
   let width = max 1 (framed_inner_width cols - 2) in
   let prose text =
     List.map
@@ -4800,10 +4800,14 @@ let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_not
     ^ Context_bars.band ~width ~title:"NEXT REQUEST"
         ~caption:"what the next Agent Core request would carry, computed now"
   ]
-  @ Masc_tui_next_request_band.lines ~runtime_details ~prose ~fact ~detail
+  @ (match forecast with
+     | Masc_tui_context_inspector.Not_requested -> prose "Next request has not been read."
+     | Masc_tui_context_inspector.Pending -> prose "Next request is still loading."
+     | Masc_tui_context_inspector.Observed forecast ->
+       Masc_tui_next_request_band.lines ~runtime_details ~prose ~fact ~detail
       ~error:(context_error_lines ~cols)
       ~safe:Keeper_chat.terminal_safe_text ~safe_detail:context_detail_preview
-      ~scale forecast
+      ~scale forecast)
   @ (if show_scale_note
      then prose (Masc_tui_token_scale.note scale)
      else [])
@@ -5748,6 +5752,7 @@ let context_response_lines ~cols state observation =
   let module Inspector = Masc_tui_context_inspector in
   let width = max 1 (framed_inner_width cols - 2) in
   let lines = match observation with
+    | Inspector.Not_requested -> [ Ansi.dim ^ "  Open 4:response to read the response" ^ Ansi.reset ]
     | Inspector.Pending -> [ Ansi.dim ^ "  Response observation is still loading" ^ Ansi.reset ]
     | Inspector.Observed (Error detail) ->
         context_error_lines ~cols ~label:"Response unavailable" detail
@@ -5768,6 +5773,7 @@ let context_response_lines ~cols state observation =
 let context_response_summary observation =
   let module Inspector = Masc_tui_context_inspector in
   match observation with
+  | Inspector.Not_requested -> Ansi.dim ^ "  Read response · 4:response" ^ Ansi.reset
   | Inspector.Pending -> Ansi.dim ^ "  Response loading · 4:response" ^ Ansi.reset
   | Inspector.Observed (Error _) -> (Theme.bad ()) ^ "  Response unavailable · 4:response" ^ Ansi.reset
   | Inspector.Observed (Ok { Inspector.parts = []; source }) ->
@@ -6072,11 +6078,14 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
   let part_of item =
     match provider_input with
     | Inspector.Observed (Ok input) -> context_part_view state input item
-    | Inspector.Pending | Inspector.Observed (Error _) -> Masc_tui_fetched.Absent
+    | Inspector.Not_requested | Inspector.Pending | Inspector.Observed (Error _) -> Masc_tui_fetched.Absent
   in
   let rows, exact_input, error_rows =
     match provider_input with
     | Inspector.Observed (Ok input) -> Inspector.input_map_rows record (Some input), Some input, []
+    | Inspector.Not_requested ->
+        ( Inspector.input_map_rows record None, None
+        , [ Ansi.dim ^ "  Original input has not been read" ^ Ansi.reset ] )
     | Inspector.Pending ->
         ( Inspector.input_map_rows record None, None
         , [ Ansi.dim ^ "  Original input is still loading; verification is pending" ^ Ansi.reset ] )
@@ -6329,6 +6338,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
         [ "  Original question turn: "
           ^ Keeper_chat.terminal_safe_text (Ids.Turn_ref.to_string reading.turn_ref) ]
         @ (match reading.record with
+           | Inspector.Not_requested -> [ Ansi.dim ^ "  Turn record has not been read" ^ Ansi.reset ]
            | Inspector.Pending -> [ Ansi.dim ^ "  Turn record is still loading" ^ Ansi.reset ]
            | Inspector.Observed (Error detail) ->
                context_error_lines ~cols ~label:"Turn record unavailable" detail
@@ -6367,6 +6377,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                  Plain (context_composition_lines ~cols ~turn_back:0 selection, None))
         | Inspector.Exact_input ->
             (match reading.provider_input with
+             | Inspector.Not_requested -> Plain ([ "  Original input has not been read" ], None)
              | Inspector.Pending -> pending "Original input"
              | Inspector.Observed (Error detail) -> unavailable "Original input" detail
              | Inspector.Observed (Ok input) ->
@@ -6389,7 +6400,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
        | Masc_tui_context_inspector.Recent turn_back ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Response ->
-           context_response_lines ~cols state (Masc_tui_context_inspector.Observed response)
+           context_response_lines ~cols state response
        | Masc_tui_context_inspector.Composition ->
            Plain
              ( context_composition_lines ~runtime_details ~cols
@@ -6397,7 +6408,11 @@ let context_inspector_content_lines ~cols state : context_pane_body =
              , None )
        | Masc_tui_context_inspector.Exact_input ->
            (match provider_input with
-            | Ok input ->
+            | Masc_tui_context_inspector.Not_requested ->
+                Plain ([ "  Original input has not been read" ], None)
+            | Masc_tui_context_inspector.Pending ->
+                Plain ([ Ansi.dim ^ "  Original input is still loading" ^ Ansi.reset ], None)
+            | Masc_tui_context_inspector.Observed (Ok input) ->
                 (* The same stepped/attributed record names the input,
                    token scale and response counters on this tab. *)
                 let record = Masc_tui_context_inspector.viewing_record selection ~turn_back in
@@ -6405,8 +6420,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                     ~some:(Masc_tui_token_scale.of_turn ~rows:selection.Masc_tui_context_inspector.rows) record in
                 context_exact_input_lines ~cols ~scale state
                   ~response:record
-                  ~response_parts:(Masc_tui_context_inspector.Observed response) input
-            | Error detail ->
+                  ~response_parts:response input
+            | Masc_tui_context_inspector.Observed (Error detail) ->
                 Plain
                   ( context_error_lines ~cols
                       ~label:"Exact input unavailable" detail
@@ -6435,7 +6450,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                         ~rows:selection.Masc_tui_context_inspector.rows record
                     in
                     context_input_map_lines ~cols ~scale state record
-                      (Masc_tui_context_inspector.Observed provider_input))))
+                      provider_input)))
 
 
 (* The rows a split body holds below the common summary: one pinned header

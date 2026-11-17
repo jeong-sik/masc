@@ -263,7 +263,7 @@ let test_recent_page_skipped_count_is_not_invented () =
 let test_page_failure_is_distinct_from_partial_failures () =
   let offline = Inspector.Request_failed "offline" in
   let unreadable = Inspector.Turn_read_failed
-      { detail = "unreadable"; forecast = Error "unavailable" } in
+      { detail = "unreadable"; forecast = Inspector.Observed (Error "unavailable") } in
   check bool "request failure has no page" true
     (Inspector.page_read_failed offline);
   check bool "first failure starts at the beginning" true
@@ -279,7 +279,7 @@ let test_page_failure_is_distinct_from_partial_failures () =
     (Inspector.page_scroll_should_reset ~previous:(Some unreadable) unreadable);
   check bool "a different turn failure starts at the beginning" true
     (Inspector.page_scroll_should_reset ~previous:(Some unreadable)
-       (Inspector.Turn_read_failed { detail = "damaged"; forecast = Error "unavailable" }));
+       (Inspector.Turn_read_failed { detail = "damaged"; forecast = Inspector.Observed (Error "unavailable") }));
   check bool "a different failure kind starts at the beginning" true
     (Inspector.page_scroll_should_reset ~previous:(Some offline) unreadable);
   let selection =
@@ -287,8 +287,8 @@ let test_page_failure_is_distinct_from_partial_failures () =
     | Ok selection -> selection
     | Error detail -> fail detail in
   let partial = Inspector.Turn_read
-      { selection; provider_input = Error "unavailable"
-      ; response = Error "unavailable"; forecast = Error "unavailable" } in
+      { selection; provider_input = Inspector.Observed (Error "unavailable")
+      ; response = Inspector.Observed (Error "unavailable"); forecast = Inspector.Observed (Error "unavailable") } in
   check bool "partial errors still have a page" false
     (Inspector.page_read_failed partial);
   check bool "a recovered page starts at the beginning" true
@@ -638,9 +638,9 @@ let test_a_pane_reads_the_part_it_shows () =
   let reading =
     Inspector.Turn_read
       { selection
-      ; provider_input = Ok input
-      ; response = Error "not read"
-      ; forecast = Error "not read"
+      ; provider_input = Inspector.Observed (Ok input)
+      ; response = Inspector.Not_requested
+      ; forecast = Inspector.Not_requested
       }
   in
   let shown ~tab ~opened ~cursor =
@@ -727,6 +727,99 @@ let test_late_pending_snapshot_cannot_erase_progress () =
   check bool "another source starts pending" true (Inspector.is_loading changed);
   check bool "another source does not inherit original input" true
     (Option.is_none (Inspector.observed_input changed))
+
+let test_recent_tabs_request_only_their_sources () =
+  let input = decoded_input () in
+  let selection = match Inspector.decode_turn_records
+      (envelope [record ~trace:"trace-map" ~turn:9 ()]) with
+    | Ok selection -> selection | Error detail -> fail detail in
+  let unread = Inspector.Turn_read
+      { selection; provider_input = Not_requested
+      ; response = Not_requested; forecast = Not_requested } in
+  let stack = Inspector.prepare_tab_read ~tab:Inspector.Composition unread in
+  (match stack with
+   | Inspector.Turn_read recent ->
+       check bool "the page is available while forecast runs" true (recent.selection == selection);
+       check bool "composition leaves input unread" true (recent.provider_input = Not_requested);
+       check bool "composition leaves response unread" true (recent.response = Not_requested);
+       check bool "composition requests forecast" true (recent.forecast = Pending)
+   | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Exact_read _ ->
+       fail "composition lost the recent page");
+  check bool "changing to proof supersedes the unused forecast" true
+    (Inspector.needs_tab_read ~tab:Inspector.Input_map stack);
+  let proof = Inspector.prepare_tab_read ~tab:Inspector.Input_map stack in
+  (match proof with
+   | Inspector.Turn_read recent ->
+       check bool "proof requests input" true (recent.provider_input = Pending);
+       check bool "proof leaves response unread" true (recent.response = Not_requested);
+       check bool "proof withdraws forecast" true (recent.forecast = Not_requested)
+   | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Exact_read _ ->
+       fail "proof lost the recent page");
+  check bool "the active proof request is shared" false
+    (Inspector.needs_tab_read ~tab:Inspector.Input_map proof);
+  let received = Inspector.Turn_read
+      { selection; provider_input = Observed (Ok input)
+      ; response = Not_requested; forecast = Not_requested } in
+  check bool "unopened tabs do not leave the inspector loading" false
+    (Inspector.is_loading received);
+  check bool "request tab reuses proof's immutable manifest" false
+    (Inspector.needs_tab_read ~tab:Inspector.Exact_input received);
+  let response = Inspector.prepare_tab_read ~tab:Inspector.Response received in
+  (match response with
+   | Inspector.Turn_read recent ->
+       check bool "response does not discard the original input" true
+         (Option.exists (fun held -> held == input) (Inspector.observed_input response));
+       check bool "response is requested" true (recent.response = Pending);
+       check bool "response leaves forecast unread" true (recent.forecast = Not_requested)
+   | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Exact_read _ ->
+       fail "response lost the recent page");
+  let failed = Inspector.Turn_read
+      { selection; provider_input = Observed (Ok input)
+      ; response = Observed (Error "history unavailable"); forecast = Not_requested } in
+  check bool "a failed tab waits for an explicit refresh" false
+    (Inspector.needs_tab_read ~tab:Inspector.Response failed)
+
+let test_recent_progress_is_bound_to_the_read_page () =
+  let input = decoded_input () in
+  let page () = match Inspector.decode_turn_records
+      (envelope [record ~trace:"trace-map" ~turn:9 ()]) with
+    | Ok selection -> selection | Error detail -> fail detail in
+  let selection = page () in
+  let held = Inspector.Turn_read
+      { selection; provider_input = Observed (Ok input)
+      ; response = Not_requested; forecast = Not_requested } in
+  let next selection = Inspector.Turn_read
+      { selection; provider_input = Pending; response = Not_requested
+      ; forecast = Not_requested } in
+  let combined = Inspector.merge_progress ~previous:(Some held) (next selection) in
+  check bool "late pending snapshot cannot erase a completed input" true
+    (Option.is_some (Inspector.observed_input combined));
+  let refreshed = Inspector.merge_progress ~previous:(Some held) (next (page ())) in
+  check bool "a new page read cannot borrow an earlier generation's input" true
+    (Option.is_none (Inspector.observed_input refreshed));
+  check bool "the new page remains in flight" true (Inspector.is_loading refreshed)
+
+let test_pinned_transcript_is_read_only_on_response () =
+  let input = decoded_input () in
+  let unread = Inspector.Exact_read
+      { turn_ref = input.turn_ref; record = Not_requested
+      ; provider_input = Not_requested; response = Not_requested } in
+  let request = Inspector.prepare_tab_read ~tab:Inspector.Exact_input unread in
+  (match request with
+   | Inspector.Exact_read exact ->
+       check bool "pinned input requests record" true (exact.record = Pending);
+       check bool "pinned input requests manifest" true (exact.provider_input = Pending);
+       check bool "pinned input leaves transcript unread" true (exact.response = Not_requested)
+   | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Turn_read _ ->
+       fail "opening a pinned input changed its source");
+  let response = Inspector.prepare_tab_read ~tab:Inspector.Response request in
+  (match response with
+   | Inspector.Exact_read exact ->
+       check bool "pinned response keeps record request" true (exact.record = Pending);
+       check bool "pinned response withdraws input request" true (exact.provider_input = Not_requested);
+       check bool "pinned response requests transcript" true (exact.response = Pending)
+   | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Turn_read _ ->
+       fail "switching to response changed its source")
 
 let test_exact_bytes_preserves_distinct_sizes_and_digit_order () =
   check string "zero bytes" "0 B" (Inspector.exact_bytes 0);
@@ -992,6 +1085,12 @@ let () =
             test_pinned_unattributed_record_stays_exact
         ; test_case "late pending snapshots preserve progress" `Quick
             test_late_pending_snapshot_cannot_erase_progress
+        ; test_case "recent tabs request only their sources" `Quick
+            test_recent_tabs_request_only_their_sources
+        ; test_case "recent progress belongs to its read page" `Quick
+            test_recent_progress_is_bound_to_the_read_page
+        ; test_case "pinned response is demand driven" `Quick
+            test_pinned_transcript_is_read_only_on_response
         ; test_case "exact_bytes preserves distinct sizes and digit order" `Quick
             test_exact_bytes_preserves_distinct_sizes_and_digit_order
         ; test_case "provider usage summary keeps decoded provenance" `Quick

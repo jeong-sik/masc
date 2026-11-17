@@ -11288,24 +11288,13 @@ let launch_runtime_catalog_load ?(intent=Snapshot_read.Join) state ~mailbox =
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
             | exception exn -> publish (Error (Printexc.to_string exn))))
 
-let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
+let launch_context_inspector_load ?forecast ?(reuse = false) state ~mailbox ~keeper_name =
   if server_authority_ready state then begin
   let deliver = deliver_context state mailbox in
   let host = server_peer_host in
   let port = state.port in
-  supersede_context_inspector_load state None;
-  state.context_inspector_generation <- state.context_inspector_generation + 1;
-  state.context_inspector_loading <- true;
-  (match state.context_inspector_target with
-   | Masc_tui_context_inspector.Recent _ -> ()
-   | Masc_tui_context_inspector.Pinned _ ->
-       (match state.context_inspector_reading with
-        | Some (_, reading) when Masc_tui_context_inspector.page_read_failed reading ->
-            state.context_inspector_scroll <- 0;
-            state.context_inspector_response_scroll <- 0
-        | Some _ | None -> ());
-       state.context_inspector_reading <- None;
-       state.context_inspector_read_at <- None);
+  let tab = state.context_inspector_tab in
+  let previous = begin_context_inspector_read ~reuse state ~keeper_name in
   let generation = state.context_inspector_generation in
   let target = state.context_inspector_target in
   let run () =
@@ -11315,12 +11304,11 @@ let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
     try
       match target with
       | Masc_tui_context_inspector.Recent turn_back ->
-          publish
-            (Masc_tui_http.fetch_keeper_context_inspector ~forecast ~host ~port
-               ~keeper_name ~turn_back)
+          Masc_tui_http.fetch_keeper_context_inspector ~forecast ~previous ~tab ~host ~port
+            ~keeper_name ~turn_back ~publish
       | Masc_tui_context_inspector.Pinned turn_ref ->
           Masc_tui_http.fetch_keeper_exact_context_inspector
-            ~host ~port ~keeper_name ~turn_ref ~publish
+            ~host ~port ~keeper_name ~turn_ref ~previous ~tab ~publish
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> publish (Masc_tui_context_inspector.Request_failed (Printexc.to_string exn))
@@ -11380,8 +11368,10 @@ let launch_context_inspector_part_load state ~mailbox request =
         (Context_results.Context_inspector_part_loaded
            (request, Error "Eio switch is unavailable"))
 
-(* Runs once per loop pass. The pane names the part it shows; when that is
-   not the part held, the held one's read stops and the shown one is read.
+(* Runs once per loop pass. The tab requests only its missing source, and
+   withdraws another tab's pending source before beginning a new generation.
+   The pane then names the part it shows; when that is not the part held,
+   the held one's read stops and the shown one is read.
    Asking here rather than in each key handler keeps every way the cursor,
    the tab or the reading can change on one path. *)
 let reconcile_context_inspector_part state ~mailbox =
@@ -11392,6 +11382,9 @@ let reconcile_context_inspector_part state ~mailbox =
     with
     | Some (keeper, reading), Some open_keeper
       when String.equal keeper open_keeper ->
+        if Masc_tui_context_inspector.needs_tab_read
+             ~tab:state.context_inspector_tab reading then
+          launch_context_inspector_load ~reuse:true state ~mailbox ~keeper_name:keeper;
         (match
            Masc_tui_context_inspector.shown_part ~keeper
              ~tab:state.context_inspector_tab
@@ -36523,10 +36516,13 @@ Use relative paths for resources already held in the package. -->
                 Option.iter
                   (fun keeper_name ->
                      (* Historical sources have no dependency on today's catalogue. *)
-                     (match state.context_inspector_target with
-                      | Masc_tui_context_inspector.Recent _ ->
+                     (match state.context_inspector_target, state.context_inspector_tab with
+                      | Masc_tui_context_inspector.Recent _, Masc_tui_context_inspector.Composition ->
                           launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages
-                      | Masc_tui_context_inspector.Pinned _ -> ());
+                      | Masc_tui_context_inspector.Recent _,
+                        (Masc_tui_context_inspector.Exact_input | Input_map | Response)
+                      | Masc_tui_context_inspector.Pinned _,
+                        (Masc_tui_context_inspector.Composition | Exact_input | Input_map | Response) -> ());
                      launch_context_inspector_load state
                        ~mailbox:async_messages ~keeper_name)
                   state.context_inspector_keeper

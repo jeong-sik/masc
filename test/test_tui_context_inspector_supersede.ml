@@ -1,10 +1,7 @@
 (** A context-inspector read replaces the one before it.
 
-    One read asks the server to resolve a whole provider input: hundreds of
-    blob artifacts for a live keeper turn. Stepping through turns starts a
-    read per step, and the reads a step replaced used to keep running with
-    their answers thrown away, so holding the key queued that work several
-    times over. *)
+    Page refresh, tab detail and selected-part reads retain their own source.
+    Replacing a read withdraws it before the next one starts. *)
 
 module Tui_types = Masc_tui_types
 
@@ -55,6 +52,37 @@ let test_response_reader_returns_to_the_open_input () =
     [ Inspector.Exact_input; Inspector.Input_map ]
 ;;
 
+let test_fresh_page_cannot_be_reused_while_refresh_is_pending () =
+  let module Inspector = Masc_tui_context_inspector in
+  let state = state () in
+  state.context_inspector_open <- true;
+  state.context_inspector_keeper <- Some "omega";
+  state.context_inspector_target <- Inspector.Recent 0;
+  state.context_inspector_tab <- Inspector.Input_map;
+  let old = Inspector.Turn_read_failed
+      { detail = "previous page failed"; forecast = Not_requested } in
+  state.context_inspector_reading <- Some ("omega", old);
+  state.context_inspector_read_at <- Some 42.;
+  let cancelled = ref false in
+  Tui_types.supersede_context_inspector_load state (Some (fun () -> cancelled := true));
+  let generation = state.context_inspector_generation in
+  let previous = Tui_types.begin_context_inspector_read ~reuse:false state ~keeper_name:"omega" in
+  Alcotest.(check bool) "the old request is withdrawn" true !cancelled;
+  Alcotest.(check int) "fresh page has a new generation" (generation + 1)
+    state.context_inspector_generation;
+  Alcotest.(check bool) "the reader cannot reuse the old page" true (Option.is_none previous);
+  Alcotest.(check bool) "old page is not available to tab reconciliation" true
+    (Option.is_none state.context_inspector_reading);
+  Alcotest.(check (option (float 0.))) "old page is not stamped freshly read" None
+    state.context_inspector_read_at;
+  Tui_types.enter_context_inspector_tab state Inspector.Composition;
+  Alcotest.(check bool) "tab switch waits for the requested fresh page" false
+    (Option.exists (fun (_, reading) ->
+       Inspector.needs_tab_read ~tab:state.context_inspector_tab reading)
+       state.context_inspector_reading);
+  Alcotest.(check bool) "the requested page is still loading" true state.context_inspector_loading
+;;
+
 let test_response_switch_and_close_release_the_previous_input () =
   let module Inspector = Masc_tui_context_inspector in
   let state = state () in
@@ -98,6 +126,8 @@ let () =
             test_response_reader_returns_to_the_open_input
         ; Alcotest.test_case "response switch and close release original navigation" `Quick
             test_response_switch_and_close_release_the_previous_input
+        ; Alcotest.test_case "fresh page is not reused by a tab switch" `Quick
+            test_fresh_page_cannot_be_reused_while_refresh_is_pending
         ] )
     ]
 ;;

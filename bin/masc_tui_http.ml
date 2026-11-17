@@ -2368,97 +2368,103 @@ let fetch_keeper_context_response ~host ~port ~keeper_name ~turn_ref =
           page.Masc_tui_keeper_chat_history.decoded.rows in
         Ok { Masc_tui_context_inspector.parts; source = Masc_tui_context_inspector.Newest_history_page })
 
-(** Fetch one completed turn and the immutable provider-input snapshot joined
-    by that turn's exact [turn_ref]. A failure on either side stays visible;
-    no mutable latest-prompt value is allowed to fill another turn. When
-    [~forecast] is [Some _] (turn navigation on an already-loaded recent page),
-    the next-request forecast is reused rather than re-fetched (#43592). *)
-let fetch_keeper_context_inspector
-    ~(forecast : (Masc_tui_context_inspector.forecast, string) result option)
+let observe_context_read read =
+  try read () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)
+
+(** Publish the recent page as soon as it is read. The selected tab alone
+    requests its detail; switching tabs can reuse the same page and already
+    completed observations without reading today's checkpoint or chat again. *)
+let fetch_keeper_context_inspector ~forecast ~previous ~tab
     ~(host : string) ~(port : int) ~(keeper_name : string) ~(turn_back : int)
-    : Masc_tui_context_inspector.reading =
+    ~publish =
+  let module Inspector = Masc_tui_context_inspector in
   let fetch ~label ~path ~decode =
-    fetch_context_json ~host ~port ~label ~path ~decode
+    observe_context_read (fun () ->
+      fetch_context_json ~host ~port ~label ~path ~decode)
   in
   let encoded = percent_encode_path_segment keeper_name in
-  let turn =
-    fetch ~label:"turn-records"
-      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
-               encoded Masc_tui_memory_usage.page_limit)
-      ~decode:Masc_tui_context_inspector.decode_turn_records
+  let initial = match previous with
+    | Some (Inspector.Turn_read _ | Inspector.Turn_read_failed _ as held) -> held
+    | Some (Inspector.Request_failed _ | Inspector.Exact_read _) | None ->
+        let forecast = match forecast with
+          | Some held -> Inspector.Observed held
+          | None -> Inspector.Not_requested in
+        match fetch ~label:"turn-records"
+          ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+                   encoded Masc_tui_memory_usage.page_limit)
+          ~decode:Inspector.decode_turn_records with
+        | Error detail -> Inspector.Turn_read_failed { detail; forecast }
+        | Ok selection -> Inspector.Turn_read
+            { selection; forecast; provider_input = Inspector.Not_requested
+            ; response = Inspector.Not_requested }
   in
-  (* Which row the exact provider input is read for. Stepping back names the
-     row itself; the newest reading keeps the attributed fallback, because a
-     keeper mid-turn has not written the snapshot for the row it is on and
-     the newest row that did is still the honest newest answer. *)
-  let read_provider_input selection =
-    match Masc_tui_context_inspector.viewing_record selection ~turn_back with
-    | None ->
-        Error "no turn on this page recorded an exact input composition"
-    | Some record ->
-        let turn_ref = Ids.Turn_ref.to_string record.Turn_record.turn_ref in
-        fetch ~label:"provider-input"
-          ~path:
-            (Printf.sprintf
-               "/api/v1/keepers/%s/provider-input?turn_ref=%s"
-               encoded
-               (percent_encode_query_value turn_ref))
-          ~decode:
-            (Masc_tui_context_inspector.decode_provider_input
-               ~expected_keeper:keeper_name
-               ~expected_turn_ref:record.Turn_record.turn_ref)
-  in
-  (* The answer that came back: the newest transcript page, joined to the
-     row by the turn_ref the chat rows carry. Rows this join cannot reach
-     say so; they never borrow another turn's answer. *)
-  let read_response selection =
-    match Masc_tui_context_inspector.viewing_record selection ~turn_back with
-    | None -> Error "no row on this page to name"
-    | Some record ->
-        fetch_keeper_context_response ~host ~port ~keeper_name
-          ~turn_ref:record.Turn_record.turn_ref
-  in
-  let dependent =
-    Result.map
-      (fun selection ->
-         selection, read_provider_input selection, read_response selection)
-      turn
-  in
-  (* Computed now from the turn's own values, without a turn; a server
-     that does not serve it yet says so in the band rather than hiding
-     the band. Reused across [ and ] steps on the same page (#43592). *)
-  let forecast =
-    match forecast with
-    | Some forecast -> forecast
-    | None ->
-        fetch ~label:"next-request"
-          ~path:(Printf.sprintf "/api/v1/keepers/%s/next-request" encoded)
-          ~decode:Masc_tui_context_inspector.decode_forecast
-  in
-  match dependent with
-  | Error detail -> Masc_tui_context_inspector.Turn_read_failed { detail; forecast }
-  | Ok (selection, provider_input, response) ->
-      Masc_tui_context_inspector.Turn_read
-        { selection; provider_input; response; forecast }
+  let initial = Inspector.prepare_tab_read ~tab initial in
+  let turn, provider_input, response, forecast = match initial with
+    | Inspector.Turn_read { selection; provider_input; response; forecast } ->
+        Ok selection, ref provider_input, ref response, ref forecast
+    | Inspector.Turn_read_failed { detail; forecast } ->
+        Error detail, ref Inspector.Not_requested, ref Inspector.Not_requested, ref forecast
+    | Inspector.Request_failed _ | Inspector.Exact_read _ ->
+        (* [initial] above has only the two recent variants. *)
+        assert false in
+  let emit () = publish (match turn with
+    | Error detail -> Inspector.Turn_read_failed { detail; forecast = !forecast }
+    | Ok selection -> Inspector.Turn_read
+        { selection; provider_input = !provider_input
+        ; response = !response; forecast = !forecast }) in
+  let selected_read read = match turn with
+    | Error detail -> Error detail
+    | Ok selection ->
+        match Inspector.viewing_record selection ~turn_back with
+        | None -> Error "no turn on this page recorded an exact input composition"
+        | Some record -> read record.Turn_record.turn_ref in
+  emit ();
+  Eio.Fiber.all
+    [ (fun () -> match !provider_input with
+        | Inspector.Not_requested | Inspector.Observed _ -> ()
+        | Inspector.Pending ->
+            let result = selected_read (fun turn_ref ->
+              fetch ~label:"provider-input"
+                ~path:(Printf.sprintf "/api/v1/keepers/%s/provider-input?turn_ref=%s"
+                  encoded (percent_encode_query_value (Ids.Turn_ref.to_string turn_ref)))
+                ~decode:(Inspector.decode_provider_input
+                  ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
+            provider_input := Inspector.Observed result;
+            emit ())
+    ; (fun () -> match !response with
+        | Inspector.Not_requested | Inspector.Observed _ -> ()
+        | Inspector.Pending ->
+            let result = selected_read (fun turn_ref -> observe_context_read (fun () ->
+              fetch_keeper_context_response ~host ~port ~keeper_name ~turn_ref)) in
+            response := Inspector.Observed result;
+            emit ())
+    ; (fun () -> match !forecast with
+        | Inspector.Not_requested | Inspector.Observed _ -> ()
+        | Inspector.Pending ->
+            let result = fetch ~label:"next-request"
+              ~path:(Printf.sprintf "/api/v1/keepers/%s/next-request" encoded)
+              ~decode:Inspector.decode_forecast in
+            forecast := Inspector.Observed result;
+            emit ())
+    ]
 
 (** Read a known immutable source without a recent-record dependency. Each
     completed observation is delivered while the other reads remain pending.
     The caller owns cancellation, workspace/generation admission and drawing. *)
-let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~publish =
+let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~previous ~tab ~publish =
   let module Inspector = Masc_tui_context_inspector in
-  let current : Inspector.exact_reading ref = ref
-    { Inspector.turn_ref
-    ; record = Inspector.Pending
-    ; provider_input = Inspector.Pending
-    ; response = Inspector.Pending
-    }
-  in
+  let initial : Inspector.exact_reading = match previous with
+    | Some (Inspector.Exact_read held) when Ids.Turn_ref.equal held.turn_ref turn_ref -> held
+    | Some (Inspector.Exact_read _ | Inspector.Request_failed _
+           | Inspector.Turn_read_failed _ | Inspector.Turn_read _) | None ->
+        { Inspector.turn_ref; record = Inspector.Not_requested
+        ; provider_input = Inspector.Not_requested; response = Inspector.Not_requested } in
+  let current = ref (match Inspector.prepare_tab_read ~tab (Inspector.Exact_read initial) with
+    | Inspector.Exact_read prepared -> prepared
+    | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Turn_read _ -> assert false) in
   let emit () = publish (Inspector.Exact_read !current) in
-  let observe read =
-    try read () with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
-  in
   let encoded = percent_encode_path_segment keeper_name in
   let reference = percent_encode_query_value (Ids.Turn_ref.to_string turn_ref) in
   let read_started_ns = Mtime_clock.elapsed_ns () in
@@ -2473,7 +2479,7 @@ let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~pub
     let log fields = Log.Transport.info "tui_context_source_read=%s"
         (Yojson.Safe.to_string (`Assoc (common @ fields))) in
     log [ "phase", `String "started" ];
-    let result = observe read in
+    let result = observe_context_read read in
     let observed_ns = Mtime_clock.elapsed_ns () in
     log [ "phase", `String "observed"
         ; "observed_ns", `String (Int64.to_string observed_ns)
@@ -2483,21 +2489,27 @@ let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~pub
   in
   emit ();
   Eio.Fiber.all
-    [ (fun () ->
+    [ (fun () -> match (!current).Inspector.record with
+      | Inspector.Not_requested | Inspector.Observed _ -> ()
+      | Inspector.Pending ->
         let result = observe_part "record" (fun () ->
           fetch_context_json ~host ~port ~label:"exact-turn-record"
             ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?turn_ref=%s" encoded reference)
             ~decode:(Inspector.decode_exact_turn_record ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
         current := { !current with Inspector.record = Inspector.Observed result };
         emit ())
-    ; (fun () ->
+    ; (fun () -> match (!current).Inspector.provider_input with
+      | Inspector.Not_requested | Inspector.Observed _ -> ()
+      | Inspector.Pending ->
         let result = observe_part "input" (fun () ->
           fetch_context_json ~host ~port ~label:"provider-input"
             ~path:(Printf.sprintf "/api/v1/keepers/%s/provider-input?turn_ref=%s" encoded reference)
             ~decode:(Inspector.decode_provider_input ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
         current := { !current with Inspector.provider_input = Inspector.Observed result };
         emit ())
-    ; (fun () ->
+    ; (fun () -> match (!current).Inspector.response with
+      | Inspector.Not_requested | Inspector.Observed _ -> ()
+      | Inspector.Pending ->
         let result = observe_part "response" (fun () ->
           fetch_context_json ~host ~port ~label:"turn-transcript"
             ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-transcript?turn_ref=%s" encoded reference)

@@ -345,7 +345,10 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
   let input_producer = ref input_producer in
   let call_id, api, resume, initial_call = match resumed with
     | Some resumed ->
-      resumed.call.call_id, resumed.call.api, Some resumed.call.locator, Some resumed.call
+      (* A deferred operation resumes its call in this process, and nothing
+         here records whether a restart came between. *)
+      resumed.call.call_id, resumed.call.api,
+      Some (Agent.Resume_writer_exit_unproven resumed.call.locator), Some resumed.call
     | None ->
       let api = match input with
         | Continue_from_checkpoint -> Native.Continue_from_checkpoint

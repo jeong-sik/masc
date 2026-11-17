@@ -225,6 +225,16 @@ type execution_store
 (** Opaque durable identity for one Agent API-call execution scope. *)
 type execution_locator
 
+(** The host's account of who last wrote a still-running scope it reopens. *)
+type execution_resume =
+  | Resume_writer_exit_unproven of execution_locator
+      (** The host does not claim that the process which last wrote the run
+          has exited. Code that its Tool handlers started may still be
+          running. *)
+  | Resume_after_writer_exit of execution_locator
+      (** The process that last wrote the run has exited, so none of the code
+          it started is still running. *)
+
 type execution_terminal_outcome =
   | Terminal_succeeded
   | Terminal_failed
@@ -360,8 +370,9 @@ val retire_uncollected_turn
     be new and the call starts a fresh scope. With [resume], the same Agent API
     reopens that scope in the same directory, validates Agent identity and the
     restored user input, and replays settled ToolResults without rerunning tool
-    gates, handlers, or completion observers. An admitted Tool attempt without
-    a settled result fails closed because its external outcome is unknown.
+    gates, handlers, or completion observers. With either [execution_resume]
+    constructor, an admitted Tool attempt without a settled result fails
+    closed because its external outcome is unknown.
     If a terminal response and its collected checkpoint were persisted before
     the provider/turn close, recovery validates their exact content and turn
     identity, then runs the pending output stage before closing and returning
@@ -418,7 +429,7 @@ val execution_store
   -> ?on_scope_ready:(execution_locator -> (unit, string) result)
   -> ?on_terminal_disposition:(execution_terminal_disposition -> (unit, string) result)
   -> ?host_stop:(exn -> bool)
-  -> ?resume:execution_locator
+  -> ?resume:execution_resume
   -> unit
   -> execution_store
 

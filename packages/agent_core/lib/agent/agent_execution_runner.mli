@@ -24,6 +24,10 @@ type terminal_disposition =
   ; recovery : recovery_action
   }
 
+type resume =
+  | Resume_writer_exit_unproven of locator
+  | Resume_after_writer_exit of locator
+
 val create_runtime
   :  sw:Eio.Switch.t
   -> domain_mgr:_ Eio.Domain_manager.t
@@ -38,7 +42,7 @@ val store
   -> ?on_scope_ready:(locator -> (unit, string) result)
   -> ?on_terminal_disposition:(terminal_disposition -> (unit, string) result)
   -> ?host_stop:(exn -> bool)
-  -> ?resume:locator
+  -> ?resume:resume
   -> unit
   -> store
 

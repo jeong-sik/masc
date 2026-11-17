@@ -178,17 +178,25 @@ type call_final =
   | Input_refused of input_refusal
   | Output_limit_reached of { detail : string }
 
+type not_allowed_reason =
+  | Permission_refused of { detail : string }
+  | Replaced_declaration
+
+let not_allowed_reason_detail = function
+  | Permission_refused { detail } -> detail
+  | Replaced_declaration -> "the declaration this request was captured for has been replaced"
+
 type final =
   | Call_final of call_final
   | Outcome_unknown
-  | Not_allowed of { reason : string }
+  | Not_allowed of { reason : not_allowed_reason }
   | Request_id_reused
 
 type unknown_cause = Interrupted | Cut | Raised
 type retained_final =
   | Retained_call of call_final
   | Retained_unknown of unknown_cause
-  | Retained_not_allowed of { reason : string }
+  | Retained_not_allowed of { reason : not_allowed_reason }
   | Retained_request_id_reused
 
 let delivered = function
@@ -264,7 +272,10 @@ let final_to_json final =
     `Assoc [ status; "kind", `String (input_refusal_to_string kind) ]
   | Call_final (Output_limit_reached { detail }) -> `Assoc [ status; "detail", `String detail ]
   | Outcome_unknown -> `Assoc [ status ]
-  | Not_allowed { reason } -> `Assoc [ status; "reason", `String reason ]
+  | Not_allowed { reason = Permission_refused { detail } } ->
+      `Assoc [ status; "reason", `String detail ]
+  | Not_allowed { reason = Replaced_declaration } ->
+      `Assoc [ status; "cause", `String "declaration_replaced" ]
   | Request_id_reused -> `Assoc [ status ]
 
 (* The retained record reads back only what this module wrote; anything else is
@@ -295,7 +306,12 @@ let worker_final_shape json =
     Option.to_result ~none:"final kind" (input_refusal_of_string kind)
     |> Result.map (fun kind -> Call_final (Input_refused kind))
   | "outcome_unknown" -> Ok Outcome_unknown
-  | "not_allowed" -> let* reason = text "reason" in Ok (Not_allowed { reason })
+  | "not_allowed" ->
+    let* reason = match field "cause" with
+      | None -> let+ detail = text "reason" in Permission_refused { detail }
+      | Some (`String "declaration_replaced") -> Ok Replaced_declaration
+      | Some _ -> Error "unknown Exact refusal cause" in
+    Ok (Not_allowed { reason })
   | "request_id_reused" -> Ok Request_id_reused
   | other -> Error ("final status " ^ other)
 
@@ -461,7 +477,8 @@ let recorded_attempt_to_json = function
   | Unknown_cut -> retained_final_to_json (Retained_unknown Cut)
   | Unknown_raised text ->
       `Assoc ["status", `String "outcome_unknown"; "cause", `String "raised"; "exception", `String text]
-  | Delivery_refused {reason} -> final_to_json (Not_allowed {reason})
+  | Delivery_refused {reason=detail} ->
+      final_to_json (Not_allowed {reason=Permission_refused {detail}})
   | Reused -> final_to_json Request_id_reused
 
 let recorded_attempt_of_json json =
@@ -484,7 +501,9 @@ let recorded_attempt_of_json json =
         let* final = final_shape_of_json normalized in
         (match final with
          | Call_final final -> Ok (Completed_call final)
-         | Not_allowed {reason} -> Ok (Delivery_refused {reason})
+         | Not_allowed {reason=Permission_refused {detail=reason}} -> Ok (Delivery_refused {reason})
+         | Not_allowed {reason=Replaced_declaration} ->
+             Error "declaration replacement is not an execution attempt"
          | Request_id_reused -> Ok Reused
          | Outcome_unknown -> Error "unknown Exact attempt has no host cause")
     | `Assoc _ -> let* reason = not_final_of_json normalized in Ok (Deferred reason)
@@ -584,7 +603,8 @@ let validate_record ~request ~schema record =
     | Unknown_interrupted -> Ok (Retained_unknown Interrupted)
     | Unknown_cut -> Ok (Retained_unknown Cut)
     | Unknown_raised _ -> Ok (Retained_unknown Raised)
-    | Delivery_refused {reason} -> Ok (Retained_not_allowed {reason})
+    | Delivery_refused {reason=detail} ->
+        Ok (Retained_not_allowed {reason=Permission_refused {detail}})
     | Reused -> Ok Retained_request_id_reused
     | Started _ | Deferred _ -> Error "original Exact final has no completed determining attempt" in
   let rec without_delivery_refusals = function
@@ -1280,7 +1300,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                  | Delivery_refused _ | Reused) :: _ -> Ok (previous,None))
         | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused) -> Ok (previous,None) in
       let deny reason =
-        let refusal = Not_allowed {reason} in
+        let refusal = Not_allowed {reason=Permission_refused {detail=reason}} in
         let record = match previous.final with
           | None -> {previous with final = Some refusal}
           | Some (Not_allowed _) -> previous

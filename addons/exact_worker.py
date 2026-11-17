@@ -146,8 +146,13 @@ def final_of_json(raw) -> dict:
             if result["kind"] not in ("input_capacity", "context_overflow", "invalid_request", "request_body_refused"):
                 raise InvalidInput("unknown input refusal")
         case "not_allowed":
-            exact(result, {"status", "reason"}, "output refusal")
-            text(result["reason"], "reason")
+            if "cause" in result:
+                exact(result, {"status", "cause"}, "declaration replacement")
+                if result["cause"] != "declaration_replaced":
+                    raise InvalidInput("unknown Exact refusal cause")
+            else:
+                exact(result, {"status", "reason"}, "output refusal")
+                text(result["reason"], "reason")
         case "outcome_unknown" | "request_id_reused":
             exact(result, {"status"}, "terminal result")
         case _:

@@ -218,11 +218,35 @@ let worker_finished final = Ok {
   (Mcp_protocol.Mcp_types.tool_result_of_text "retained worker terminal") with
   structured_content = Some (`Assoc ["request_id",`String request_id;
     "state",`String "finished";"result",Exact.final_to_json final]) }
-let host_record store ~attempt ~final =
+let host_record_with_attempts store ~attempts ~final =
   get (Store.save_exact_request store ~declaration_id:"submit-once-declaration" ~request_id
     (`Assoc ["declaration_id",`String "submit-once-declaration";"request_id",`String request_id;
       "digest",`String (Exact.digest request);"request",Exact.request_to_json request;
-      "attempts",`List [attempt];"final",final]))
+      "attempts",`List attempts;"final",final]))
+let host_record store ~attempt ~final = host_record_with_attempts store ~attempts:[attempt] ~final
+
+let replacement = Exact.Not_allowed {reason=Replaced_declaration}
+let test_worker_replacement_keeps_the_authoritative_host_reason () = with_store (fun store ->
+  let evidence=Exact.final_to_json replacement in
+  let call ~arguments=match kind arguments with
+    | "read" -> reply "absent"
+    | "submit" ->
+      host_record_with_attempts store ~attempts:[] ~final:evidence;
+      worker_finished replacement
+    | other -> Alcotest.fail ("unexpected worker command " ^ other) in
+  (match resume store call with
+   | Ok (Submit.Final (Exact.Not_allowed {reason=Replaced_declaration})) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "host-confirmed replacement ending was not retained");
+  (match Progress.phase (load store).progress with
+   | Progress.Rejected {stage=Progress.Execution;evidence=actual} ->
+     Alcotest.check json "typed host reason survives consumer storage" evidence actual
+   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+   | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+     Alcotest.fail "replacement ending was not retained");
+  let never_call ~arguments:_ = Alcotest.fail "retained replacement ending called a worker" in
+  match resume store never_call with
+  | Ok (Submit.Final (Exact.Not_allowed {reason=Replaced_declaration})) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "stored replacement ending changed on resume")
 let test_worker_unknown_keeps_the_authoritative_host_cause cause = with_store (fun store ->
   let retained=Exact.Retained_unknown cause in
   let evidence=Exact.retained_final_to_json retained in
@@ -258,7 +282,7 @@ let test_worker_unknown_keeps_the_authoritative_host_cause cause = with_store (f
    | Error error -> Alcotest.fail (Submit.error_to_string error));
   Alcotest.(check int) "this original was submitted once" 1 !calls)
 type contradictory_host = Absent_host | Open_host | Different_host
-let test_worker_unknown_refuses_a_contradictory_host host = with_store (fun store ->
+let test_worker_unknown_refuses_a_contradictory_host ?(final=Exact.Outcome_unknown) host = with_store (fun store ->
   let call ~arguments=match kind arguments with
     | "read" -> reply "absent"
     | "submit" ->
@@ -267,9 +291,10 @@ let test_worker_unknown_refuses_a_contradictory_host host = with_store (fun stor
        | Open_host -> host_record store
          ~attempt:(`Assoc ["started",`String (String.make 32 '0')]) ~final:`Null
        | Different_host ->
-         let denied=Exact.final_to_json (Exact.Not_allowed {reason="original host refusal"}) in
+         let denied=Exact.final_to_json
+           (Exact.Not_allowed {reason=Permission_refused {detail="original host refusal"}}) in
          host_record store ~attempt:denied ~final:denied);
-      worker_finished Exact.Outcome_unknown
+      worker_finished final
     | other -> Alcotest.fail ("unexpected worker command " ^ other) in
   (match resume store call with
    | Error (Submit.Rejected _) -> ()
@@ -321,7 +346,7 @@ let unreadable_leaves reason store before = function
     Alcotest.(check int) (reason ^ ": the body was asked for once") 1 loads;
     Alcotest.check json (reason ^ ": nothing was written") before (events store)
   | (Error _ | Ok _), _ -> Alcotest.fail (reason ^ ": an unreadable body must be this pass's error")
-let denied = Exact.Not_allowed {reason = "original host refusal"}
+let denied = Exact.Not_allowed {reason = Permission_refused {detail="original host refusal"}}
 let refused_once reason = function
   | Ok (Submit.Final (Exact.Not_allowed _)), loads -> Alcotest.(check int) reason 1 loads
   | (Ok _ | Error _), _ -> Alcotest.fail ("the refusal must be delivered: " ^ reason)
@@ -496,6 +521,11 @@ let () =
         test_a_worker_call_confirms_the_record_it_carries;
     ];
     "admission", [
+      Alcotest.test_case "worker replacement retains only its authoritative host reason" `Quick
+        test_worker_replacement_keeps_the_authoritative_host_reason;
+      Alcotest.test_case "worker replacement refuses absent, open and different host records" `Quick
+        (fun () -> List.iter (test_worker_unknown_refuses_a_contradictory_host ~final:replacement)
+          [Absent_host;Open_host;Different_host]);
       Alcotest.test_case "worker unknown retains Interrupted host cause" `Quick
         (fun () -> test_worker_unknown_keeps_the_authoritative_host_cause Exact.Interrupted);
       Alcotest.test_case "worker unknown retains Cut host cause" `Quick

@@ -15,6 +15,19 @@ val of_runtime : Lane_addon_runtime.tool_request_destination -> t
 (** The identity and revisions of the live destination. Its
     [max_reply_bytes] belongs to the live destination and is not kept. *)
 
+type relation =
+  | Same  (** {!same_semantic} holds. *)
+  | Replaced
+      (** The installation, package and tool are the captured ones and only
+          the semantic configuration revision differs. *)
+  | Other_owner  (** Another installation, package or tool. *)
+
+val relation : captured:t -> current:t -> relation
+(** How the destination a request was captured for stands to [current]. Pure
+    comparison only. [Replaced] means the declaration was replaced only when
+    [current] is the destination of a live attachment; obtaining that is the
+    caller's work. *)
+
 val same_semantic : t -> t -> bool
 (** Compare installation/package/tool and semantic configuration revision.
     Source bytes, comments and activity do not identify worker inputs.

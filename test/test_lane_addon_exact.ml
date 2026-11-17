@@ -1355,7 +1355,9 @@ let test_an_unowned_request_ends_as_not_allowed () =
         ~authorize_request:(owned_authority owned) ~runner (request "unowned")) in
     check bool "an unowned request ends as not_allowed with the owner's reason" true
       (match execute (Store.create ~root) with
-       | Exact.Final (Exact.Not_allowed {reason}) -> reason="no original host request owns it"
+       | Exact.Final (Exact.Not_allowed {reason=Permission_refused {detail=reason}}) ->
+           reason="no original host request owns it"
+       | Exact.Final (Exact.Not_allowed {reason=Replaced_declaration}) -> false
        | Exact.Final _ | Exact.Not_final _ -> false);
     owned:=true;
     check bool "the refusal is retained across a restart and a later grant" true

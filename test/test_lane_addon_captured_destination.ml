@@ -72,6 +72,29 @@ let test_same_semantic () =
       ("another configuration revision", { sample with configuration_revision = "config-2" });
     ]
 
+let relation =
+  testable
+    (fun ppf value ->
+      Format.pp_print_string ppf
+        (match value with D.Same -> "same" | Replaced -> "replaced" | Other_owner -> "other owner"))
+    ( = )
+
+let test_relation () =
+  let to_sample current = D.relation ~captured:sample ~current in
+  check relation "the source revision is not compared" D.Same (to_sample { sample with source_revision = "source-2" });
+  check relation "only the configuration revision differs" D.Replaced
+    (to_sample { sample with configuration_revision = "config-2" });
+  List.iter
+    (fun (label, other) ->
+      check relation label D.Other_owner (to_sample other);
+      check relation (label ^ ", and another configuration revision") D.Other_owner
+        (to_sample { other with configuration_revision = "config-2" }))
+    [
+      ("another installation", { sample with installation_id = "configuration:other" });
+      ("another package", { sample with package_id = "other" });
+      ("another tool", { sample with tool = "other" });
+    ]
+
 let () =
   run "Lane add-on captured destination"
     [
@@ -81,5 +104,9 @@ let () =
           test_case "round trip" `Quick test_round_trip;
           test_case "refusals" `Quick test_refusals;
         ] );
-      ("comparison", [ test_case "same semantic" `Quick test_same_semantic ]);
+      ( "comparison",
+        [
+          test_case "same semantic" `Quick test_same_semantic;
+          test_case "relation" `Quick test_relation;
+        ] );
     ]

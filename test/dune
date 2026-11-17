@@ -7410,6 +7410,11 @@
  (libraries alcotest masc_test_deps masc agent_core))
 
 (test
+ (name test_keeper_librarian_durable_refusal)
+ (modules test_keeper_librarian_durable_refusal)
+ (libraries alcotest masc))
+
+(test
  (name test_keeper_librarian_durable_execution)
  (modules test_keeper_librarian_durable_execution)
  (deps ../config/prompts/librarian.md

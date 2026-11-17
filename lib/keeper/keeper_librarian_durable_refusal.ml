@@ -178,6 +178,12 @@ let diagnosis stop = match stop.refusal with
   | Official_progress_unreadable _ | Official_progress_write_failed _
   | Official_progress_boundary_missing _ | Committed_official_range_mismatch
   | Official_range_stopped _ | Fragment_store_unreadable _ | Fragment_line_unreadable _ -> None
+type next_read = Narrowed | Whole_again
+let next_read ~(final:Exact.final) =
+  match final with
+  | Exact.Not_allowed {reason=Replaced_declaration} -> Whole_again
+  | Not_allowed {reason=Permission_refused _}
+  | Call_final _ | Outcome_unknown | Request_id_reused -> Narrowed
 let blocks_destination stops current =
   List.find_map (fun stop -> if Destination.same_semantic current stop.destination
     then Some stop.refusal else None) stops

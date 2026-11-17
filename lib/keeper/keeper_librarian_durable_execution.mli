@@ -37,8 +37,12 @@ val consume_one : config:Workspace.config -> keeper_name:string ->
     asks [wake] for another pass. The steps of a range that was published, or
     whose read position moved, are settled before the original that names
     them. A refusal that reaches a pass narrows the next fresh read to one
-    turn, as a failed commit does. This grants no consumption, capacity or skip
-    authority beyond that. Original
+    turn, as a failed commit does. One refusal does not: a request the host
+    ended unrun with the stored [Replaced_declaration] reason. It says
+    nothing about the size of the input, so the next read stays whole and the
+    pass asks [wake] for it; no host event follows that refusal. This does not
+    depend on the current declaration or worker being available. This grants
+    no consumption, capacity or skip authority beyond that. Original
     completed local publication may still recover while the Addon is Off.
     [wake] schedules the same Memory lane after a newly observed Finished fact;
     it also schedules after known basis supersession. Full scope validation

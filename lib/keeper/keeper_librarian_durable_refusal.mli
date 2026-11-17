@@ -72,6 +72,23 @@ val preserves_completed :
     previously archived evidence, or grant a Memory or cursor effect. A pair
     outside the prepared inventory is preserved, never assumed safe to settle. *)
 
+type next_read =
+  | Narrowed  (** The next fresh read is narrowed, as after any refusal. *)
+  | Whole_again
+      (** The next fresh read is not narrowed, and the pass that received the
+          refusal asks for that read itself. *)
+
+val next_read :
+  final:Lane_addon_exact.final ->
+  next_read
+(** What a refusal that ended an original says about the next read (RFC
+    librarian-ends-waiting-requests-of-a-replaced-declaration 3.4, 3.6).
+    Only [Not_allowed {reason=Replaced_declaration}] is [Whole_again]. The
+    host's stored reason says nothing about input size, so the next pass
+    reads the range whole. Ordinary permission refusals and refusals from a
+    call remain [Narrowed]. The current declaration and display text cannot
+    change a stored replacement ending. *)
+
 val blocks_destination : t list -> Keeper_librarian_durable_request.destination ->
   Keeper_librarian_durable_consumer.error option
 (** Pure check against every retained refusal. Recheck inside the existing

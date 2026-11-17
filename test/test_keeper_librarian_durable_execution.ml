@@ -3675,6 +3675,14 @@ let test_retained_question_replacement_refuses_unsafe_state unsafe () =
          (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () -> ()) with
           | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
          Eio.Promise.await stopped);
+       let posts=F.post_count fixture.server in
+       (* Reenter the actual host after the cancelled generation joined. Its
+          Started marker becomes Cut here; read-only recovery does not close it. *)
+       (match run_exact () |> get with
+        | Exact.Final Outcome_unknown -> ()
+        | Final (Call_final _ | Not_allowed _ | Request_id_reused) | Not_final _ ->
+          fail "the joined original was not recovered as an unknown host outcome");
+       check int "recovering the joined original sends no provider request" posts (F.post_count fixture.server);
        let retained=io (fun () -> Exact.recover_retained ~store:fixture.store ~declaration_id:"librarian"
          ~schema:(Option.get exact.schema) exact |> Result.map_error Exact.describe_recovery_error |> get) in
        (match retained with Exact.Retained_terminal (Retained_unknown Cut) -> ()

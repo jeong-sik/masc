@@ -357,6 +357,13 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     can show the same backpressure source as [/health] without scraping
     Otel_metric_store. *)
 
+val keeper_fleet_runtime_resolution_tools_fields : unit -> (string * Yojson.Safe.t) list
+(** The same full fleet observation as {!keeper_fleet_runtime_resolution_fields},
+    including full paused details and the boot path's bootable set, except
+    [keeper_reaction_ledger] is omitted for [/api/v1/dashboard/tools], whose
+    consumers do not use it. No ledger read is performed. Full shell and full
+    health retain that summary and its strict error/quarantine authority. *)
+
 val keeper_fleet_runtime_resolution_light_fields :
   ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
   unit -> (string * Yojson.Safe.t) list

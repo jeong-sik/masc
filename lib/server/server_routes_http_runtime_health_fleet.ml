@@ -729,9 +729,9 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
     ]
 ;;
 
-(* Both projections take the phase snapshot before the reading, so the
+(* The projections take the phase snapshot before the reading, so the
    owner set the execution snapshot classifies is read after the phases. *)
-let keeper_fleet_runtime_resolution_fields () =
+let full_runtime_resolution_fields ~include_reaction_ledger () =
   let phase_snapshot = keeper_phase_snapshot ?base_path:(runtime_base_path_opt ()) () in
   (* The full projection keeps the boot path's meaning of bootable
      ([Keeper_runtime.bootable_keeper_names]); paused and autoboot come from
@@ -745,8 +745,17 @@ let keeper_fleet_runtime_resolution_fields () =
             bootable_names = boot_path_bootable_names reading } ))
       (current_server_state_opt ())
   in
-  keeper_fleet_runtime_resolution_base_fields ~phase_snapshot ~fleet_reading ()
+  keeper_fleet_runtime_resolution_base_fields
+    ~phase_snapshot ~fleet_reading ~include_reaction_ledger ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
+;;
+
+let keeper_fleet_runtime_resolution_fields () =
+  full_runtime_resolution_fields ~include_reaction_ledger:true ()
+;;
+
+let keeper_fleet_runtime_resolution_tools_fields () =
+  full_runtime_resolution_fields ~include_reaction_ledger:false ()
 ;;
 
 let keeper_fleet_runtime_resolution_light_fields ?profile_snapshot () =

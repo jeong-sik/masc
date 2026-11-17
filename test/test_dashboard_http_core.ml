@@ -4360,6 +4360,16 @@ let test_tools_current_worker_bypasses_pending_private_cache () =
           (returned_seed.origin = Dashboard_cache.Seeded);
         check bool "current tools has the actual final live decoration" true
           (Yojson.Safe.Util.(ready |> member "keeper_waiting_inventory") <> `Null);
+        let runtime = Yojson.Safe.Util.(ready |> member "runtime_resolution") in
+        check bool "Tools does not carry the unused ledger summary" true
+          (not (List.mem_assoc "keeper_reaction_ledger" (Yojson.Safe.Util.to_assoc runtime)));
+        List.iter (fun field ->
+          check bool ("Tools retains full runtime field " ^ field) true
+            (Yojson.Safe.Util.(runtime |> member field) <> `Null))
+          [ "diagnostics"; "base_path"; "resolved_base_path"; "build"; "deployment_state"
+          ; "paused_keepers_health" ];
+        check bool "Tools retains the disk observation field even when unavailable" true
+          (List.mem_assoc "disk_observation" (Yojson.Safe.Util.to_assoc runtime));
         check bool "current tools did not wait for the old cache writer" false
           (Eio.Promise.is_resolved release);
         Eio.Promise.resolve release_u ()))

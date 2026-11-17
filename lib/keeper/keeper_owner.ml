@@ -139,6 +139,7 @@ type error =
   | Reducer_rejected of Keeper_owner_reducer.error
   | Operation_rejected of Chat_operation_store.error
   | Store_unavailable of string
+  | Store_fenced of string
   | Owner_stopping
   | Owner_closed
 
@@ -520,6 +521,7 @@ let error_to_string = function
   | Reducer_rejected error -> Keeper_owner_reducer.error_to_string error
   | Operation_rejected error -> Chat_operation_store.error_to_string error
   | Store_unavailable detail -> "keeper owner store unavailable: " ^ detail
+  | Store_fenced detail -> "keeper owner store fenced; nothing was written: " ^ detail
   | Owner_stopping -> "keeper owner is stopping"
   | Owner_closed -> "keeper owner is closed"
 ;;
@@ -584,6 +586,15 @@ let publish_operation_projection t next =
   if not (operation_projection_equal previous next)
   then (
     Atomic.set t.operation_projection next;
+    (* A fence raised or lifted changes whether the waiting queue can be
+       served without any row changing. Clients holding a request whose
+       acceptance is unknown wait for this event to read it again (#36205). *)
+    if not (Bool.equal previous.store_unavailable next.store_unavailable)
+    then
+      Keeper_waiting_inventory_broadcast.changed
+        ~base_path:t.base_path
+        ~keeper_name:t.keeper_name
+        ~source:Keeper_waiting_inventory_broadcast.Chat_operation;
     notify_state_change_observer ~keeper_name:t.keeper_name)
 ;;
 
@@ -921,7 +932,8 @@ let apply_transition t store old_state transition =
     set_metadata_fault t detail;
     Error (old_state, error)
   | Error
-      (Reducer_rejected _ | Operation_rejected _ | Owner_stopping | Owner_closed as error) ->
+      (Reducer_rejected _ | Operation_rejected _ | Store_fenced _ | Owner_stopping
+      | Owner_closed as error) ->
     Error (old_state, error)
   | Ok state ->
     let before = (Keeper_owner_reducer.projection old_state).meta in
@@ -1178,13 +1190,24 @@ let project_settled_after_recovery t settled =
       settled
 ;;
 
+(* Recovery runs before the command it guards touches the store, so whatever
+   recovery meets, that command wrote nothing: a store failure here is
+   [Store_fenced], never [Store_unavailable], whose commit may have landed
+   (#36205). *)
+let fenced_by_recovery t error =
+  match record_operation_error t error with
+  | Store_unavailable detail -> Store_fenced detail
+  | (Reducer_rejected _ | Operation_rejected _ | Store_fenced _ | Owner_stopping
+    | Owner_closed) as error -> error
+;;
+
 let recover_operation_availability t =
   match !(t.operation_error) with
   | None -> Ok ()
   | Some (Operation_integrity_failure _ as fault) ->
-    Error (Store_unavailable (operation_fault_detail fault))
+    Error (Store_fenced (operation_fault_detail fault))
   | Some (Operation_availability_failure detail) when chat_child_in_flight t ->
-    Error (Store_unavailable detail)
+    Error (Store_fenced detail)
   | Some (Operation_availability_failure _) ->
     (* The Owner mailbox excludes all store commands here, and no Chat_operation
        child holds the handle (an Autonomous or Maintenance turn reaches the
@@ -1198,11 +1221,11 @@ let recover_operation_availability t =
       Chat_operation_store.open_existing ~path)
     in
     (match recovered with
-     | Error error -> Error (record_operation_error t error)
+     | Error error -> Error (fenced_by_recovery t error)
      | Ok operation_store ->
        t.operation_store <- operation_store;
        (match Chat_operation_store.block_preparing_operations operation_store ~now:(t.now ()) with
-        | Error error -> Error (record_operation_error t error)
+        | Error error -> Error (fenced_by_recovery t error)
         | Ok () ->
        (* No Chat_operation child is in flight, so nothing in this process
           will commit a Running row: either the outage refused its child's
@@ -1219,15 +1242,15 @@ let recover_operation_availability t =
               Chat_operation_store.settle_running_without_executor operation_store
                 ~cause:Chat_operation_store.After_store_recovery ~now:(t.now ()))
         with
-        | Error error -> Error (record_operation_error t error)
+        | Error error -> Error (fenced_by_recovery t error)
         | Ok settled ->
        (match read_operation_projection operation_store ~now:(t.now ()) with
-        | Error error -> Error (record_operation_error t error)
+        | Error error -> Error (fenced_by_recovery t error)
         | Ok projection ->
           (match projection.running_operation_id with
            | Some operation_id ->
              Error
-               (record_operation_error t
+               (fenced_by_recovery t
                   (Chat_operation_store.Integrity_error
                      (Printf.sprintf
                         "operation %s is still Running after store recovery settled it"
@@ -1346,7 +1369,7 @@ let run_operation_command t ~label f =
 let run_operation_read t ~label f =
   match !(t.operation_error) with
   | Some fault when not (Chat_operation_store.is_open t.operation_store) ->
-    Error (Store_unavailable (operation_fault_detail fault))
+    Error (Store_fenced (operation_fault_detail fault))
   | Some _ | None ->
     run_operation_store ~label f
     |> Result.map_error (record_operation_error t)
@@ -2192,7 +2215,7 @@ let start
                 operation-store fault never reaches here: it no longer blocks a
                 metadata commit. *)
              Eio.Promise.resolve resolve
-               (Error (Store_unavailable (metadata_fault_detail fault)));
+               (Error (Store_fenced (metadata_fault_detail fault)));
              loop state
            | None ->
           let operation_store_ready =
@@ -2289,7 +2312,7 @@ let start
                   ~operation_id ~execution_digest ~observed ~detail)
                 |> Result.map fst in
               (match response with
-               | Error (Store_unavailable _) ->
+               | Error (Store_unavailable _ | Store_fenced _) ->
                  unpersisted_preparation_wait := Some
                    {preparation_operation=operation_id;preparation_digest=execution_digest;
                     preparation_checkpoint=observed;preparation_failure=failure;preparation_child=child}

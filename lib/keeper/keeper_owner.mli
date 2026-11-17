@@ -203,6 +203,10 @@ type error =
   | Reducer_rejected of Keeper_owner_reducer.error
   | Operation_rejected of Keeper_chat_operation_store.error
   | Store_unavailable of string
+      (** A store call failed; it may have committed before it failed. *)
+  | Store_fenced of string
+      (** A fence raised by an earlier fault refused the command before it
+          touched the store, so the command wrote nothing. *)
   | Owner_stopping
   | Owner_closed
 

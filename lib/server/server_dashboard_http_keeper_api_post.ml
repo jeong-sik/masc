@@ -18,7 +18,8 @@ let input_response_error_status =
         | Not_queued _ | Not_running _ | Idempotency_conflict _ | Native_call_unsettled) -> `Conflict
     | Keeper_owner.Operation_rejected (Store_unavailable _ | Integrity_error _)
     | Keeper_owner.Store_unavailable _ | Keeper_owner.Reducer_rejected _ -> `Internal_server_error
-    | Keeper_owner.Owner_stopping | Keeper_owner.Owner_closed -> `Service_unavailable in
+    | Keeper_owner.Store_fenced _ | Keeper_owner.Owner_stopping | Keeper_owner.Owner_closed ->
+      `Service_unavailable in
   function
   | Keeper_owner_registry.Response_owner_lookup_failed (Owner_not_found _) -> `Conflict
   | Keeper_owner_registry.Response_owner_lookup_failed

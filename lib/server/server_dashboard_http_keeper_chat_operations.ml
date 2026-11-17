@@ -110,8 +110,9 @@ let api_error_of_command_error error =
     | Registry.Command_lookup_failed
         (Owner_not_found _ | Owner_unavailable _ | Inventory_not_installed _) ->
       Public_error.Unknown_operation
-    | Command_lookup_failed (Owner_initialization_failed _ | Inventory_stopping) ->
-      Public_error.Store_unavailable
+    (* Neither lookup reached an Owner, so nothing was written. *)
+    | Command_lookup_failed (Owner_initialization_failed _) -> Public_error.Owner_unavailable
+    | Command_lookup_failed Inventory_stopping -> Public_error.Owner_stopping
     | Command_lifecycle_reserved _ -> Public_error.Owner_stopping
     | Command_rejected (Owner.Operation_rejected operation_error) ->
       (match Owner.operation_error_kind operation_error with
@@ -120,9 +121,10 @@ let api_error_of_command_error error =
        | Operation_not_queued -> Public_error.Not_queued
        | Operation_idempotency_conflict -> Public_error.Idempotency_conflict
        | Operation_native_call_unsettled -> Public_error.Native_call_unsettled
-       | Operation_store_unavailable -> Public_error.Store_unavailable)
+       | Operation_store_unavailable -> Public_error.Store_commit_unknown)
+    | Command_rejected (Owner.Store_fenced _) -> Public_error.Store_fenced
     | Command_rejected (Owner.Store_unavailable _ | Owner.Reducer_rejected _) ->
-      Public_error.Store_unavailable
+      Public_error.Store_commit_unknown
     | Command_rejected (Owner.Owner_stopping | Owner.Owner_closed) -> Public_error.Owner_stopping
   in
   public_error kind (Registry.command_error_to_string error)

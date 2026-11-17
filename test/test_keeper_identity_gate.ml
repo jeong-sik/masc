@@ -989,7 +989,7 @@ let check_history_owns_public_media ~base_path ~raw ~public_ref =
   let call_dir = Dated_jsonl.Store.dir
     (Dated_jsonl.Store.at (Masc.Workspace.dated_store_root config) Dated_jsonl.Store.Root.Tool_calls) in
   remove_fixture_tree call_dir;
-  remove_fixture_tree (Keeper_gate_path.dir ~base_path);
+  remove_fixture_tree (Masc.Keeper_gate_path.dir ~base_path);
   remove_fixture_tree (Filename.concat (Common.masc_dir_from_base_path ~base_path)
     Masc.Keeper_chat_store.chat_dirname);
   for _pass = 1 to 2 do

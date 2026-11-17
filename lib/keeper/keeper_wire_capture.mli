@@ -81,7 +81,10 @@ val capture_request :
     correlation. [base_path] selects the exact Keeper secret projection
     snapshot, and the record goes under [<base_path>/.masc]. [tool_schema_bytes] records the byte length of the exact unredacted
     compact JSON schema array while [tools_ref] points at its recursively
-    redacted content in the shared blob store (see the module header).
+    redacted content in the shared blob store (see the module header). Each
+    capture redacts again; unchanged durable blob snapshots are verified and
+    reused, while missing or changed files are strictly republished before
+    the request row is appended.
     [history_messages] is consumed for [history_message_count] and
     [history_messages_digest] only; the messages themselves are not written
     (see the module header). *)

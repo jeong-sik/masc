@@ -200,14 +200,15 @@ let capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn
          every request of the same tool surface (measured 2026-08-18 on a live
          root: 2,702 rows carried 2 unique arrays of ~80KB each — 99.3% of all
          capture bytes), so inlining it spent the day-file byte budget on
-         copies. [put_durable] is idempotent per content address, and blob
+         copies. [put_durable_reuse] reuses only a verified, durably published
+         file snapshot and repairs missing or changed files. Blob
          maintenance already lists wire-capture as a durable consumer, so the
          blob lives exactly as long as a retained row references it. A blob
          write failure raises out to [best_effort], which skips the whole
          record: a marker is never emitted for bytes that were not persisted. *)
       let tools_ref =
         let blob_store = Tool_blob_store.create ~base_path in
-        Tool_blob_store.put_durable
+        Tool_blob_store.put_durable_reuse
           blob_store
           ~bytes:text.redacted_tools
           ~mime:"application/json"

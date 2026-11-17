@@ -131,6 +131,26 @@ let fetch_tools_blob ~base json =
          (Tool_blob_store.fetch_error_to_string error))
 ;;
 
+let tools_blob_path ~base (reference : Tool_output.artifact_ref) =
+  let store = Tool_blob_store.create ~base_path:base in
+  Filename.concat (Tool_blob_store.root_dir store)
+    (Filename.concat (String.sub reference.sha256 0 2) reference.sha256)
+;;
+
+let request_rows base =
+  find_jsonl (wire_capture_dir base)
+  |> List.concat_map (fun path ->
+       read_file path |> String.split_on_char '\n'
+       |> List.filter (fun line -> not (String.equal "" (String.trim line)))
+       |> List.map Yojson.Safe.from_string)
+;;
+
+let with_open_blob path f =
+  let descriptor = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close descriptor)
+    (fun () -> f (Unix.fstat descriptor))
+;;
+
 let metric_value name ~labels =
   Metrics.metric_value_or_zero name ~labels ()
 ;;
@@ -353,7 +373,14 @@ let tools_blob_is_shared_across_requests () =
         ~tools:[ tool ] ()
     in
     capture ~turn_id:1;
-    capture ~turn_id:2;
+    let reference, _ = fetch_tools_blob ~base (read_single_json_record base) in
+    let path = tools_blob_path ~base reference in
+    (* Keep the original inode alive, so a rewrite cannot pass by recycling it. *)
+    with_open_blob path (fun before ->
+      capture ~turn_id:2;
+      let after = Unix.stat path in
+      Alcotest.(check int) "unchanged schemas keep the same file" before.Unix.st_ino after.Unix.st_ino;
+      Alcotest.(check int) "unchanged schemas keep the same device" before.Unix.st_dev after.Unix.st_dev);
     let files = find_jsonl (wire_capture_dir base) in
     Alcotest.(check int) "one day file written" 1 (List.length files);
     let rows =
@@ -369,6 +396,103 @@ let tools_blob_is_shared_across_requests () =
       Alcotest.(check string) "both rows resolve the same bytes" first_bytes
         second_bytes
     | rows -> Alcotest.failf "expected two request rows, got %d" (List.length rows))
+
+let tools_blob_is_repaired_before_new_rows () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_repair" "" in
+    let capture turn_id =
+      Wire.capture_request ~base_path:base ~keeper_name:"alpha" ~turn_id
+        ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
+        ~user_message:"u" ~history_messages:[] ~tools:[] ()
+    in
+    capture 1;
+    let reference, expected = fetch_tools_blob ~base (read_single_json_record base) in
+    let path = tools_blob_path ~base reference in
+    let check_row turn_id =
+      let rows = request_rows base in
+      Alcotest.(check int) "each successful repair publishes one request row" turn_id (List.length rows);
+      let row = List.find (fun json -> json_member "turn_id" json = `Int turn_id) rows in
+      let restored, bytes = fetch_tools_blob ~base row in
+      Alcotest.(check string) "repair preserves the content address" reference.sha256 restored.sha256;
+      Alcotest.(check string) "published row resolves repaired bytes" expected bytes
+    in
+    (* Same-size corruption must not inherit the cached publication evidence. *)
+    Out_channel.with_open_bin path (fun output -> output_string output "{}");
+    capture 2;
+    check_row 2;
+    (* Byte-identical replacement has no strict publication evidence yet. *)
+    (match Fs_compat.save_file_atomic path expected with
+     | Ok () -> ()
+     | Error detail -> Alcotest.failf "could not replace the fixture blob: %s" detail);
+    with_open_blob path (fun replacement ->
+      capture 3;
+      Alcotest.(check bool) "replacement is strictly republished" true
+        (replacement.Unix.st_ino <> (Unix.stat path).Unix.st_ino));
+    check_row 3;
+    Sys.remove path;
+    capture 4;
+    check_row 4;
+    (* A failed repair remains best effort and cannot publish another row. *)
+    Sys.remove path;
+    Unix.mkdir path 0o700;
+    capture 5;
+    Alcotest.(check int) "failed repair publishes no dangling request row" 4
+      (List.length (request_rows base)))
+
+let tools_blob_reuse_rechecks_parent_permissions () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_parent_permissions" "" in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
+    let capture turn_id =
+      Wire.capture_request ~base_path:base ~keeper_name:"alpha" ~turn_id
+        ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
+        ~user_message:"u" ~history_messages:[] ~tools:[] ()
+    in
+    capture 1;
+    let reference, expected = fetch_tools_blob ~base (read_single_json_record base) in
+    let path = tools_blob_path ~base reference in
+    let leaf_inode = (Unix.stat path).Unix.st_ino in
+    let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base) in
+    List.iteri (fun index directory ->
+      let permissions = (Unix.stat directory).Unix.st_perm in
+      Fun.protect ~finally:(fun () -> Unix.chmod directory permissions) (fun () ->
+        Unix.chmod directory 0o777;
+        capture (index + 2);
+        Alcotest.(check int) "unsafe parent cannot publish another request row" 1
+          (List.length (request_rows base));
+        Alcotest.(check int) "parent permission change leaves the cached leaf intact"
+          leaf_inode (Unix.stat path).Unix.st_ino))
+      [root; Filename.dirname path];
+    capture 4;
+    let rows = request_rows base in
+    Alcotest.(check int) "capture resumes after parent permissions are restored" 2 (List.length rows);
+    let current = List.find (fun row -> json_member "turn_id" row = `Int 4) rows in
+    let _, bytes = fetch_tools_blob ~base current in
+    Alcotest.(check string) "restored owned path retains the schema bytes" expected bytes)
+
+let tools_blob_uses_each_capture_redaction () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_redaction_refresh" "" in
+    let tool = Agent_core.Tool.create ~name:"probe_tool"
+        ~description:projected_secret ~parameters:[]
+        (fun _input -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None }) in
+    let capture turn_id =
+      Wire.capture_request ~base_path:base ~keeper_name:"alpha" ~turn_id
+        ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
+        ~user_message:"u" ~history_messages:[] ~tools:[tool] ()
+    in
+    capture 1;
+    let initial, initial_bytes = fetch_tools_blob ~base (read_single_json_record base) in
+    Alcotest.(check bool) "fixture starts without the secret projection" true
+      (contains ~needle:projected_secret initial_bytes);
+    install_projected_secret ~base_path:base ~keeper_name:"alpha";
+    capture 2;
+    let current = List.find (fun row -> json_member "turn_id" row = `Int 2) (request_rows base) in
+    let updated, bytes = fetch_tools_blob ~base current in
+    Alcotest.(check bool) "same tool object uses the new secret projection" false
+      (contains ~needle:projected_secret bytes);
+    Alcotest.(check bool) "redaction produces its own content address" true
+      (initial.sha256 <> updated.sha256))
 
 let request_trace_id_emitted () =
   with_flag "1" (fun () ->
@@ -818,6 +942,12 @@ let () =
             request_captures_exact_redacted_tool_schemas;
           Alcotest.test_case "tools blob is shared across requests" `Quick
             tools_blob_is_shared_across_requests;
+          Alcotest.test_case "tools blob repairs precede new request rows" `Quick
+            tools_blob_is_repaired_before_new_rows;
+          Alcotest.test_case "tools blob reuse rechecks parent permissions" `Quick
+            tools_blob_reuse_rechecks_parent_permissions;
+          Alcotest.test_case "tools blob uses each capture's redaction" `Quick
+            tools_blob_uses_each_capture_redaction;
           Alcotest.test_case "write failure is best effort" `Quick
             request_capture_failure_is_best_effort;
           Alcotest.test_case "trace_id is emitted when provided" `Quick

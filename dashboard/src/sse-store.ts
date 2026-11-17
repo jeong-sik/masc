@@ -248,8 +248,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   // Observatory activity telemetry
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
   // Fusion run registry — emitted by lib/fusion/fusion_sink.ml broadcast_run_status.
-  // Without this entry the live WS router dropped the event and the run-status
-  // panel only refreshed on the ~120s periodic poll / route revisit (RFC-0266 Phase 4).
+  // This entry is how the run-status panel learns about a run change (RFC-0266 Phase 4).
   fusion_run_status:    { target: 'fusion' },
   internal_agent_runs_changed: { target: 'internalAgents', debounceMs: 0 },
 }
@@ -489,8 +488,8 @@ async function hydrateAfterReconnect(): Promise<void> {
   handleGate()
   // Recover keeper_chat_appended events that fell outside the server replay
   // buffer while disconnected. The WS channel cannot re-deliver them, so the
-  // known conversations must re-fetch their transcripts. Route and periodic
-  // refreshes skip loaded transcripts to avoid polling, and only a reconnect
+  // known conversations must re-fetch their transcripts. Route refreshes
+  // skip loaded transcripts, and only a reconnect
   // knows a gap may exist. This covers previously visited and open panels on
   // any route.
   void import('./keeper-runtime')

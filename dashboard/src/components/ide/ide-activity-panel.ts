@@ -284,7 +284,7 @@ function mergeRunActivityEvents(
 
 /**
  * The canonical tool-result journal owns execution identity. Page shifts,
- * index rebuilds and polls retain that identity without hashing output or
+ * index rebuilds and re-reads retain that identity without hashing output or
  * inferring an occurrence from presentation fields.
  */
 function bridgeEventKey(event: IdeBridgeEvent): string {

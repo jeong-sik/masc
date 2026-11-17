@@ -340,7 +340,7 @@ export function parseKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnap
 // matrix UI (LT-16b, dashboard/src/components/fleet-fsm-matrix.ts) can
 // share render logic between single-keeper detail and fleet views.
 //
-// Each poll bumps the masc_keeper_invariant_violations_total counter
+// Each read bumps the masc_keeper_invariant_violations_total counter
 // for any violating keeper. The counter is declared in
 // lib/keeper_metrics/keeper_metrics.ml; no document under docs/observability/
 // covers it yet.

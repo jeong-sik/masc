@@ -17,8 +17,8 @@ import { createManagedAsyncResource } from '../../lib/async-state'
 import { setupObservationRefresh } from '../../lib/observation-refresh'
 
 // Managed (stale-while-revalidate) for the same reason tool-state is: the
-// surfaces poll on a timer, and a plain resource would blank the projection on
-// every cycle. The schedule-specific load wrapper below adds single-flight
+// surfaces re-read on every scheduled_automation observation, and a plain
+// resource would blank the projection on each re-read. The schedule-specific load wrapper below adds single-flight
 // semantics so a slow read retains the last snapshot until the next committed change.
 const scheduledAutomationResource =
   createManagedAsyncResource<DashboardScheduledAutomationProjection>()

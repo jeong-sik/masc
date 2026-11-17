@@ -922,7 +922,7 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
    loopback read contract stays available to an unauthenticated caller. The
    MCP client recovers from a rejected token by inspecting the auth error
    envelope of a *failed* call (`api/mcp.ts`), so a tab whose traffic is the
-   shell/bootstrap poll never reaches that path and re-sends the same
+   shell/bootstrap read never reaches that path and re-sends the same
    rejected token for the life of the tab.
 
    Measured on the live fleet 2026-08-12: one browser session re-sent a

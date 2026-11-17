@@ -344,7 +344,7 @@ export function mcpExposedToolGroups(items: readonly DashboardToolInventoryItem[
 
 // System-log row: [time, level, identity, message, status, isTool]. Derived from live
 // ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
-// polls. Status is derived from the entry level only (error→fail, warn→warn,
+// reads. Status is derived from the entry level only (error→fail, warn→warn,
 // else→ok); the in-progress "run" state is not knowable from a settled ring
 // entry, so it is never fabricated.
 type SysLogRow = [string, string, string, string, string, boolean]

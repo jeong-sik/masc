@@ -3145,6 +3145,7 @@
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
+(include stanzas/test_fs_compat_plain_locked_read.inc)
 
 (include stanzas/test_fs_compat_durable_append.inc)
 (include stanzas/test_fs_compat_update_after_cursor.inc)

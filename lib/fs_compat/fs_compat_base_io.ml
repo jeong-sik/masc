@@ -358,6 +358,44 @@ let load_file (path : string) : string =
          (fun () -> load_file_unix path))
 ;;
 
+let plain_read_under_mutex ~label path read =
+  let work () = with_append_path_mutex path read in
+  match execution_context () with
+  | Non_eio -> work ()
+  | Eio_fiber -> on_systhread ~label:(labelled label path) work
+;;
+
+let load_file_locked_with ~before_read path =
+  plain_read_under_mutex ~label:"fs-compat-load-file-locked" path (fun () ->
+    let input = Stdlib.open_in path in
+    read_channel_and_close
+      ~before_read:(fun () -> before_read (Unix.descr_of_in_channel input))
+      path input)
+;;
+
+let load_lines_rev_locked_with ~before_read path =
+  plain_read_under_mutex ~label:"fs-compat-load-lines-locked" path (fun () ->
+    let input = Stdlib.open_in_bin path in
+    Fun.protect ~finally:(fun () -> Stdlib.close_in_noerr input) (fun () ->
+      before_read (Unix.descr_of_in_channel input);
+      let rec loop reversed =
+        match input_line input with
+        | line -> loop (line :: reversed)
+        | exception End_of_file -> reversed
+      in
+      loop []))
+;;
+
+let load_file_locked path = load_file_locked_with ~before_read:ignore path
+let load_lines_rev_locked path = load_lines_rev_locked_with ~before_read:ignore path
+
+module Locked_read_for_testing = struct
+  let load_file = load_file_locked_with
+  let load_lines_rev = load_lines_rev_locked_with
+  let path_mutex_available path =
+    Option.is_some (try_with_append_path_mutex path (fun () -> ()))
+end
+
 (* The write behind [save_file] and the atomic writers: the path guard on
    the fiber, the open, write and close wherever the caller runs it. The
    atomic writers run it inside their own blocking job. *)

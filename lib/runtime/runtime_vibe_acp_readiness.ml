@@ -65,7 +65,7 @@ type budget_knowledge =
 type error =
   | Workdir_not_absolute of string
   | Invalid_timeout of float
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
   | Timed_out of { after_s : float }
   | Rpc_error of
       { meth : string
@@ -202,7 +202,8 @@ let error_to_string = function
   | Workdir_not_absolute workdir -> Printf.sprintf "workdir %S is not absolute" workdir
   | Invalid_timeout timeout_s ->
     Printf.sprintf "timeout_s %g is not a positive finite number" timeout_s
-  | Spawn_failed detail -> "vibe-acp did not start: " ^ detail
+  | Spawn_refused refusal ->
+    "vibe-acp did not start: " ^ Process_eio.spawn_refusal_to_string refusal
   | Timed_out { after_s } -> Printf.sprintf "vibe-acp did not answer within %gs" after_s
   | Rpc_error { meth; code = Some code; message } ->
     Printf.sprintf "vibe-acp refused %s (%d): %s" meth code message
@@ -431,8 +432,8 @@ let spawn ~sw ~mgr ~cwd ~cli_path =
   let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
   let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
   let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-  let proc =
-    Eio.Process.spawn
+  match
+    Process_eio.spawn_child
       ~sw
       mgr
       ~cwd
@@ -441,11 +442,13 @@ let spawn ~sw ~mgr ~cwd ~cli_path =
       ~stdout:stdout_w
       ~stderr:stderr_w
       [ cli_path ]
-  in
-  Eio.Flow.close stdin_r;
-  Eio.Flow.close stdout_w;
-  Eio.Flow.close stderr_w;
-  proc, stdin_w, stdout_r, stderr_r
+  with
+  | Error _ as refused -> refused
+  | Ok proc ->
+    Eio.Flow.close stdin_r;
+    Eio.Flow.close stdout_w;
+    Eio.Flow.close stderr_w;
+    Ok (proc, stdin_w, stdout_r, stderr_r)
 ;;
 
 let read ~host:(_ : Runtime_account_access.host_account) ~mgr ~clock ~fs ~workdir ~cli_path
@@ -458,13 +461,8 @@ let read ~host:(_ : Runtime_account_access.host_account) ~mgr ~clock ~fs ~workdi
     Eio.Switch.run
     @@ fun sw ->
     match spawn ~sw ~mgr ~cwd:Eio.Path.(fs / workdir) ~cli_path with
-    (* Eio raises [Eio.Io] for a missing executable or a pipe it could not
-       make, [Unix_error] for a fork failure, and [Failure] with the child's
-       own report for a setup step (fchdir, dup2, execve) that failed after
-       the fork. *)
-    | exception ((Eio.Io _ | Unix.Unix_error _ | Failure _) as exn) ->
-      Error (Spawn_failed (Printexc.to_string exn))
-    | proc, stdin, stdout, stderr_flow ->
+    | Error refusal -> Error (Spawn_refused refusal)
+    | Ok (proc, stdin, stdout, stderr_flow) ->
       let stderr = Buffer.create stderr_read_chunk_bytes in
       let stderr_drained, drained = Eio.Promise.create () in
       Eio.Fiber.fork_daemon ~sw (fun () ->

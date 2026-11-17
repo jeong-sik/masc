@@ -1702,6 +1702,301 @@ let test_batch_rejects_a_stale_base_without_rebuilding_events () =
     (Event.Event_id.equal (Event.event_id staged_event) (Event.event_id committed_event))
 ;;
 
+let test_unreturned_tool_attempt_settles_with_its_child_run () =
+  Eio_main.run
+  @@ fun _env ->
+  let journal = require_ok (Journal.create ()) in
+  let run = require_started_run (Journal.start_run journal ~agent_name:"keeper") in
+  let _agent_turn, provider = open_provider_attempt journal run in
+  let invocation =
+    require_opened_node
+      (Journal.open_node journal ~run ~parent:provider ~kind:(tool_invocation "deploy"))
+  in
+  ignore
+    (require_ok
+       (Journal.update_node
+          journal
+          ~node:invocation
+          (Event.Tool_input_snapshot (tool_use "deploy" (`Assoc [])))));
+  let attempt =
+    require_opened_node
+      (Journal.open_node journal ~run ~parent:invocation ~kind:Event.Tool_attempt)
+  in
+  let child_run =
+    require_started_run
+      (Journal.start_run ~parent_attempt:attempt journal ~agent_name:"reviewer")
+  in
+  let child_turn, child_provider = open_provider_attempt journal child_run in
+  let before = Journal.length journal in
+  let result =
+    Llm_provider.Types.ToolResult
+      { tool_use_id = "provider-deploy"
+      ; content = "cut off"
+      ; outcome =
+          Llm_provider.Types.Tool_failed
+            { failure_kind = Llm_provider.Types.Writer_exited_tool_error
+            ; error_class = None
+            }
+      ; json = None
+      ; content_blocks = None
+      }
+  in
+  let settle terminal =
+    Journal.stage
+      (Journal.begin_batch journal)
+      (Journal.Transaction.settle_unreturned_tool_attempt
+         ~attempt
+         ~invocation
+         ~result
+         terminal)
+  in
+  (match settle Event.Succeeded with
+   | Error (Journal.Invalid_argument _) -> ()
+   | Error error -> fail (Journal.error_to_string error)
+   | Ok _ -> fail "an unreturned attempt was settled as succeeded");
+  let terminal = Event.Cancelled { reason = Some "writer exited"; data = None } in
+  let batch, events = require_ok (settle terminal) in
+  let committed = require_ok (Journal.commit_batch batch) in
+  check
+    bool
+    "the staged events are the committed events"
+    true
+    (List.equal Event.equal events committed);
+  check
+    int
+    "child attempt, child turn, child root, attempt, result, invocation"
+    6
+    (Journal.length journal - before);
+  let closed_with expected node =
+    match Journal.find_node journal node with
+    | Some { status = Journal.Closed { value; _ }; _ } ->
+      Event.terminal_to_yojson value = Event.terminal_to_yojson expected
+    | Some { status = Journal.Open; _ } | None -> false
+  in
+  List.iter
+    (fun (label, node) -> check bool label true (closed_with terminal node))
+    [ "child provider attempt is cancelled", child_provider
+    ; "child turn is cancelled", child_turn
+    ; "attempt is cancelled", attempt
+    ];
+  (match Journal.find_run journal (Journal.run_id child_run) with
+   | Some { status = Journal.Finished { value = Event.Cancelled _; _ }; _ } -> ()
+   | Some _ | None -> fail "the child run did not finish cancelled");
+  check bool "invocation is settled" true (closed_with Event.Succeeded invocation);
+  (match Journal.find_node journal invocation with
+   | Some { materialized = Journal.Tool_invocation_state { result = Some stored; _ }; _ }
+     -> check bool "the given result is stored" true (stored = result)
+   | Some _ | None -> fail "the invocation has no result");
+  match settle terminal with
+  | Error (Journal.Invalid_argument _) -> ()
+  | Error error -> fail (Journal.error_to_string error)
+  | Ok _ -> fail "a settled attempt was settled again"
+;;
+
+let test_unreturned_tool_attempt_rejects_a_cut_inside_its_child_run () =
+  Eio_main.run
+  @@ fun _env ->
+  let journal = require_ok (Journal.create ()) in
+  let run = require_started_run (Journal.start_run journal ~agent_name:"keeper") in
+  let _agent_turn, provider = open_provider_attempt journal run in
+  let invocation =
+    require_opened_node
+      (Journal.open_node journal ~run ~parent:provider ~kind:(tool_invocation "delegate"))
+  in
+  ignore
+    (require_ok
+       (Journal.update_node
+          journal
+          ~node:invocation
+          (Event.Tool_input_snapshot (tool_use "delegate" (`Assoc [])))));
+  let attempt =
+    require_opened_node
+      (Journal.open_node journal ~run ~parent:invocation ~kind:Event.Tool_attempt)
+  in
+  let child_run =
+    require_started_run
+      (Journal.start_run ~parent_attempt:attempt journal ~agent_name:"reviewer")
+  in
+  let _child_turn, child_provider = open_provider_attempt journal child_run in
+  let child_invocation =
+    require_opened_node
+      (Journal.open_node
+         journal
+         ~run:child_run
+         ~parent:child_provider
+         ~kind:(tool_invocation "deploy"))
+  in
+  ignore
+    (require_ok
+       (Journal.update_node
+          journal
+          ~node:child_invocation
+          (Event.Tool_input_snapshot (tool_use "deploy" (`Assoc [])))));
+  let _child_attempt =
+    require_opened_node
+      (Journal.open_node
+         journal
+         ~run:child_run
+         ~parent:child_invocation
+         ~kind:Event.Tool_attempt)
+  in
+  let before = Journal.length journal in
+  let result =
+    Llm_provider.Types.ToolResult
+      { tool_use_id = "provider-delegate"
+      ; content = "cut off"
+      ; outcome =
+          Llm_provider.Types.Tool_failed
+            { failure_kind = Llm_provider.Types.Writer_exited_tool_error
+            ; error_class = None
+            }
+      ; json = None
+      ; content_blocks = None
+      }
+  in
+  (match
+     Journal.stage
+       (Journal.begin_batch journal)
+       (Journal.Transaction.settle_unreturned_tool_attempt
+          ~attempt
+          ~invocation
+          ~result
+          (Event.Cancelled { reason = Some "writer exited"; data = None }))
+   with
+   | Error (Journal.Invalid_argument _) -> ()
+   | Error error -> fail (Journal.error_to_string error)
+   | Ok _ -> fail "a cut inside the child run was settled by the parent's result");
+  check int "nothing was written" before (Journal.length journal);
+  match Journal.find_node journal attempt with
+  | Some { status = Journal.Open; _ } -> ()
+  | Some { status = Journal.Closed _; _ } | None -> fail "the parent attempt was closed"
+;;
+
+let build_unreturned_parent_with_closed_child ~child_has_result () =
+  let journal = require_ok (Journal.create ()) in
+  let run = require_started_run (Journal.start_run journal ~agent_name:"keeper") in
+  let _, provider = open_provider_attempt journal run in
+  let invocation =
+    require_opened_node
+      (Journal.open_node journal ~run ~parent:provider ~kind:(tool_invocation "delegate"))
+  in
+  ignore
+    (require_ok
+       (Journal.update_node
+          journal
+          ~node:invocation
+          (Event.Tool_input_snapshot (tool_use "delegate" (`Assoc [])))));
+  let attempt =
+    require_opened_node
+      (Journal.open_node journal ~run ~parent:invocation ~kind:Event.Tool_attempt)
+  in
+  let child_run =
+    require_started_run
+      (Journal.start_run ~parent_attempt:attempt journal ~agent_name:"reviewer")
+  in
+  let _, child_provider = open_provider_attempt journal child_run in
+  let child_invocation =
+    require_opened_node
+      (Journal.open_node
+         journal
+         ~run:child_run
+         ~parent:child_provider
+         ~kind:(tool_invocation "deploy"))
+  in
+  ignore
+    (require_ok
+       (Journal.update_node
+          journal
+          ~node:child_invocation
+          (Event.Tool_input_snapshot (tool_use "deploy" (`Assoc [])))));
+  let child_attempt =
+    require_opened_node
+      (Journal.open_node
+         journal
+         ~run:child_run
+         ~parent:child_invocation
+         ~kind:Event.Tool_attempt)
+  in
+  let child_result = tool_result "deploy" (`Assoc [ "ok", `Bool true ]) in
+  if child_has_result
+  then (
+    ignore (require_ok (Journal.close_node journal ~node:child_attempt Event.Succeeded));
+    ignore
+      (require_ok
+         (Journal.update_node journal ~node:child_invocation (Event.Tool_result child_result)));
+    ignore
+      (require_ok (Journal.close_node journal ~node:child_invocation Event.Succeeded)));
+  ignore
+    (require_ok
+       (Journal.abort_run
+          journal
+          ~run:child_run
+          (Event.Cancelled
+             { reason = Some "child cancelled before parent writer exited"; data = None })));
+  (match Journal.find_node journal attempt with
+   | Some { status = Journal.Open; _ } -> ()
+   | Some { status = Journal.Closed _; _ } | None -> fail "child abort closed parent attempt");
+  let result =
+    Llm_provider.Types.ToolResult
+      { tool_use_id = "provider-delegate"
+      ; content = "cut off"
+      ; outcome =
+          Llm_provider.Types.Tool_failed
+            { failure_kind = Llm_provider.Types.Writer_exited_tool_error
+            ; error_class = None
+            }
+      ; json = None
+      ; content_blocks = None
+      }
+  in
+  journal, attempt, invocation, result, child_invocation, child_result
+;;
+
+let stage_unreturned_parent journal attempt invocation result =
+  Journal.stage
+    (Journal.begin_batch journal)
+    (Journal.Transaction.settle_unreturned_tool_attempt
+       ~attempt
+       ~invocation
+       ~result
+       (Event.Cancelled { reason = Some "writer exited"; data = None }))
+;;
+
+let test_unreturned_parent_rejects_closed_unknown_child () =
+  Eio_main.run
+  @@ fun _env ->
+  let journal, attempt, invocation, result, _, _ =
+    build_unreturned_parent_with_closed_child ~child_has_result:false ()
+  in
+  let before = Journal.length journal in
+  (match stage_unreturned_parent journal attempt invocation result with
+   | Error (Journal.Invalid_argument _) -> ()
+   | Error error -> fail (Journal.error_to_string error)
+   | Ok _ -> fail "parent settled a closed child with an unknown Tool outcome");
+  check int "rejected unknown child writes nothing" before (Journal.length journal);
+  match Journal.find_node journal attempt with
+  | Some { status = Journal.Open; _ } -> ()
+  | Some { status = Journal.Closed _; _ } | None -> fail "rejection closed parent attempt"
+;;
+
+let test_unreturned_parent_accepts_closed_known_child () =
+  Eio_main.run
+  @@ fun _env ->
+  let journal, attempt, invocation, result, child_invocation, child_result =
+    build_unreturned_parent_with_closed_child ~child_has_result:true ()
+  in
+  let batch, _ = require_ok (stage_unreturned_parent journal attempt invocation result) in
+  ignore (require_ok (Journal.commit_batch batch));
+  (match Journal.find_node journal invocation with
+   | Some { materialized = Journal.Tool_invocation_state { result = Some actual; _ }; _ }
+     -> check bool "parent result recorded with known child" true (actual = result)
+   | Some _ | None -> fail "known child blocked parent settlement");
+  match Journal.find_node journal child_invocation with
+  | Some { materialized = Journal.Tool_invocation_state { result = Some actual; _ }; _ }
+    -> check bool "child result preserved" true (actual = child_result)
+  | Some _ | None -> fail "parent settlement lost the known child result"
+;;
+
 let test_closed_abort_transaction_stages_one_batch () =
   Eio_main.run
   @@ fun _env ->
@@ -1897,6 +2192,22 @@ let () =
             "abort closes a recursive subtree atomically"
             `Quick
             test_abort_run_closes_recursive_subtree_atomically
+        ; test_case
+            "unreturned tool attempt settles with its child run"
+            `Quick
+            test_unreturned_tool_attempt_settles_with_its_child_run
+        ; test_case
+            "unreturned tool attempt rejects a cut inside its child run"
+            `Quick
+            test_unreturned_tool_attempt_rejects_a_cut_inside_its_child_run
+        ; test_case
+            "unreturned parent rejects a closed child with no Tool result"
+            `Quick
+            test_unreturned_parent_rejects_closed_unknown_child
+        ; test_case
+            "unreturned parent preserves a closed child's known Tool result"
+            `Quick
+            test_unreturned_parent_accepts_closed_known_child
         ; test_case
             "abort handles deep recursive composition iteratively"
             `Slow

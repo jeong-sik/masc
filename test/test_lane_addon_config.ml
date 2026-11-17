@@ -854,6 +854,21 @@ let a_declaration_names_a_carried_package () = with_directory (fun _root package
   check bool "a manifest_path to the same folder records the path" true
     (by_path.package_source = Config.Manifest_path);
   check string "and reads the same manifest" declaration.manifest_path by_path.manifest_path;
+  let image_label (d : Config.declaration) = match d.package.execution with
+    | Lane_addon_types.Container container -> container.image_label
+    | Lane_addon_types.Host_process _ -> failf "%s does not run in a container" d.id in
+  check bool "the carried declaration requires this server's image digest" true
+    (image_label declaration = Some { Lane_addon_types.label_key = Lane_addon_carried.image_label;
+                                      label_value = Lane_addon_carried.image_digest carried });
+  check bool "the manifest_path declaration requires no image label" true (image_label by_path = None);
+  let names_image_label (d : Config.declaration) =
+    match Lane_addon_types.execution_package_json d.package with
+    | `Assoc fields -> List.mem_assoc "image_label" fields
+    | _ -> failf "%s package JSON is not an object" d.id in
+  check bool "the carried requirement is a worker input of the revision" true (names_image_label declaration);
+  check bool "a package without it keeps the revision it had" false (names_image_label by_path);
+  check bool "so the two declarations have different revisions" false
+    (String.equal declaration.revision by_path.revision);
   declare "package = \"keeper-librarian\"\n";
   let server = Filename.concat folder "server.py" in
   write server "# another worker\n";

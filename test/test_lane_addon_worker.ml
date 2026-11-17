@@ -13,6 +13,16 @@ if argv[:2] == ["image", "inspect"]:
     if (root / "daemon-unavailable").exists():
         print("fixture daemon unavailable", file=sys.stderr)
         raise SystemExit(7)
+    # Labels are answered for the immutable ID the {{.Id}} read printed, never
+    # for the tag, and every read is recorded.
+    if argv[:4] == ["image", "inspect", "--format", "{{json .Config.Labels}}"]:
+        if argv[4:] != ["sha256:" + "a" * 64]:
+            raise SystemExit(2)
+        with (root / "label-reads").open("a") as reads:
+            reads.write(argv[4] + "\n")
+        labels = root / "image-labels"
+        print(labels.read_text() if labels.exists() else "null")
+        raise SystemExit(0)
     if argv != ["image", "inspect", "--format", "{{.Id}}", "fixture/image"]:
         raise SystemExit(2)
     print("not-an-image-id" if (root / "malformed-image").exists() else "sha256:" + "a" * 64)
@@ -359,7 +369,7 @@ let package directory mode : Types.package = {
   id = "worker-test"; revision = "fixture-1"; title = "Worker test";
   ui_category = None; contributions = [ Types.Observe ];
   execution = Types.Container {runtime=Types.Docker;image="fixture/image";
-    resources={cpus=0.5;memory_bytes=67_108_864L;pids=Some 16;max_reply_bytes=4096}};
+    resources={cpus=0.5;memory_bytes=67_108_864L;pids=Some 16;max_reply_bytes=4096}; image_label=None};
   command = [ "observer"; mode ]; directory; skills_directory = None; action_tool = None; state_storage=Types.Ephemeral;tool_invocation=Types.Direct; exported_tools = []; outputs = [];
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;refresh_policy=Types.Every_hint;
   model_access=Types.Model_disabled; exact_outputs = []; tool_hooks = []; operator_asks = false; web_search = false; worker_service=Types.Mcp_tools;
@@ -1367,6 +1377,40 @@ let test_docker_control_ignores_the_package_reply_bound () = with_fixture (fun e
     (Masc.Lane_addon_engine.image_digest (unwrap (Worker.inspect_image ~clock:(Eio.Stdenv.clock env)
       ~control_timeout_sec ~mgr:(Eio.Stdenv.process_mgr env)
       ~package:small ~docker_command:docker ()))))
+
+(* A package that requires an image label starts only from an image that
+   carries it. The labels are read from the identity the start creates from:
+   the fixture answers them for that immutable ID only. *)
+let test_required_image_label_is_read_from_the_resolved_image () = with_fixture (fun env sw dir docker ->
+  let required : Types.image_label = { label_key = "masc.lane.carried.digest"; label_value = "this-server" } in
+  let labeled =
+    let base = package dir "good" in
+    match base.execution with
+    | Types.Container container -> { base with execution = Types.Container { container with image_label = Some required } }
+    | Types.Host_process _ -> fail "the fixture package runs in a container" in
+  let inspect package = Worker.inspect_image ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~package ~docker_command:docker () in
+  let start_labeled () = Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
+      ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:(Random_id.uuid_v7 ())
+      ~package:labeled ~docker_command:docker () in
+  let created () = Array.exists (fun file -> Filename.check_suffix file ".json") (Sys.readdir dir) in
+  let labels = Filename.concat dir "image-labels" in
+  let reads = Filename.concat dir "label-reads" in
+  check bool "an image without labels is refused" true (Result.is_error (inspect labeled));
+  write labels {|{"masc.lane.carried.digest":"another-server"}|};
+  check bool "an image with another value is refused" true (Result.is_error (inspect labeled));
+  check bool "a start from it is refused" true (Result.is_error (start_labeled ()));
+  check bool "the refused start created no container" false (created ());
+  write labels {|{"org.opencontainers.image.title":"x","masc.lane.carried.digest":"this-server"}|};
+  check string "the image that carries the label is accepted" ("sha256:" ^ String.make 64 'a')
+    (Masc.Lane_addon_engine.image_digest (unwrap (inspect labeled)));
+  ignore (unwrap (Worker.stop (unwrap (start_labeled ()))));
+  check (list string) "every read named the immutable ID"
+    [("sha256:" ^ String.make 64 'a')]
+    (List.sort_uniq String.compare (String.split_on_char '\n' (String.trim (Fs_compat.load_file reads))));
+  Sys.remove reads;
+  ignore (unwrap (inspect (package dir "good")));
+  check bool "a package without the requirement reads no labels" false (Sys.file_exists reads))
 
 (* Lists every request of one instance and reads each through the production
    loader, which prefers the terminal outcome over the pending index row. *)
@@ -2714,6 +2758,8 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "Docker refuses malformed image identities before create" `Quick test_docker_malformed_image_never_creates;
   test_case "native package never reaches container control" `Quick test_native_package_never_reaches_container_control;
   test_case "image preview is read only and preserves engine failures" `Quick test_image_preview_does_not_create_worker;
+  test_case "required image label is read from the resolved image" `Quick
+    test_required_image_label_is_read_from_the_resolved_image;
   test_case "docker control ignores the package reply bound" `Quick test_docker_control_ignores_the_package_reply_bound;
   test_case "world action and binary artifact ingress" `Quick test_world_action_artifact_ingress;
   test_case "persistent state has one writer and survives detach" `Quick

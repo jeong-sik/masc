@@ -410,7 +410,7 @@ let load ~path =
                    | Otoml.TomlTableArray _) -> Error "resources.pids requires an integer" in
           let resources = {cpus;memory_bytes=Int64.of_int memory;pids;max_reply_bytes} in
           let* () = check_resources ~runtime resources in
-          Ok (Container {runtime;image;resources}) in
+          Ok (Container {runtime;image;resources;image_label=None}) in
     let* () = match worker_service with
       | Mcp_tools -> Ok ()
       | Browser_service _ ->

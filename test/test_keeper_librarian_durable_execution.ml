@@ -3118,7 +3118,16 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
           | Successor_intended _ | Successor_observed _ | Observer _ -> event in
         Result.bind result (fun progress -> Progress.append progress event))
         (Ok Progress.captured) (Progress.events parent.progress) |> get in
-      let forged={parent with progress=raised} in
+      let metadata=match Owner.record_to_json (Owner.listed parent) with
+        | `Assoc fields -> `Assoc (List.map (fun (name,value) ->
+            name,if name="progress" then Progress.to_json raised else value) fields)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+          fail "fixture owner metadata is not an object" in
+      let forged_record=Owner.decode_published
+        ~directory_name:(Filename.basename (scope_directory fixture parent.scope))
+        ~file_name:(Store.digest parent.request_id ^ ".json") metadata |> get in
+      let forged=Owner.rebind parent forged_record
+        |> Option.to_result ~none:"fixture record no longer binds its original body" |> get in
       check bool "preflight does not turn a linked Raised into replacement permission" true
         (Result.is_error (io (fun () -> Keeper_librarian_history_resolution_lineage.validate_predecessor_payload
           ~read:(fun ~scope ~request_id ->

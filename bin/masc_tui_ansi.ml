@@ -462,7 +462,7 @@ let tab_strip ~width ~(press : 'target -> string -> string)
       (if current then
          Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
          ^ Ansi.reset
-       else Ansi.dim ^ label ^ Ansi.reset)
+       else Theme.recede () ^ label ^ Ansi.reset)
   in
   let target_of (_, _, target) = target in
   let cells text = Masc_tui_message_layout.display_width text in
@@ -513,7 +513,7 @@ let tab_strip ~width ~(press : 'target -> string -> string)
         let grew = if !prefer_right then right () || left () else left () || right () in
         if grew then prefer_right := not !prefer_right else growing := false
       done;
-      let mark text = Ansi.dim ^ text ^ Ansi.reset in
+      let mark text = Theme.recede () ^ text ^ Ansi.reset in
       let compose press =
         let shown =
           List.init (!hi - !lo + 1) (fun i -> draw press entries.(!lo + i))
@@ -848,13 +848,23 @@ let ctx_bar ratio width =
   let filled = int_of_float (visible_ratio *. float_of_int width) in
   let filled = max 0 (min width filled) in
   let empty = width - filled in
-  let color = ctx_color ratio in
-  let empty_color = Ansi.reset ^ Theme.recede () in
-  Printf.sprintf "%s%s%s%s"
-    color
-    (String.make filled '#')
-    (empty_color ^ String.make empty '-' ^ Ansi.reset)
-    Ansi.reset
+  let filled_part =
+    if filled <= 0 then ""
+    else
+      String.concat ""
+        (List.init filled (fun index ->
+           let t = float_of_int (index + 1) /. float_of_int (max 1 width) in
+           Theme.pressure ~t ^ "\xe2\x96\xa0"))
+      ^ Ansi.reset
+  in
+  let empty_part =
+    if empty <= 0 then ""
+    else
+      Theme.recede ()
+      ^ String.concat "" (List.init empty (fun _ -> "\xc2\xb7"))
+      ^ Ansi.reset
+  in
+  filled_part ^ empty_part
 
 (* The framed family keeps the full border box. Modals (palette, help) and
    side-by-side panes still need it: a border is what separates an overlay
@@ -876,11 +886,11 @@ let framed_content_height ~rows = Masc_tui_frame.content_height ~rows
 
 let framed_top buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    (Theme.recede ()) Ansi.box_tl (draw_hline (framed_rule_width cols)) Ansi.box_tr Ansi.reset)
+    (Theme.recede ()) Ansi.box_tl_round (draw_hline (framed_rule_width cols)) Ansi.box_tr_round Ansi.reset)
 
 let framed_bottom buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    (Theme.recede ()) Ansi.box_bl (draw_hline (framed_rule_width cols)) Ansi.box_br Ansi.reset)
+    (Theme.recede ()) Ansi.box_bl_round (draw_hline (framed_rule_width cols)) Ansi.box_br_round Ansi.reset)
 
 let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"

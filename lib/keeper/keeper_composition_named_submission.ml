@@ -191,14 +191,17 @@ let decode request bytes =
       else Error (Corrupt_intent "invalid broker-entry transition")) (Ok initial) events
   with Yojson.Json_error detail -> Error (Corrupt_intent detail)
 
+let private_content (contents : Fs_compat.owned_regular_file_contents) =
+  if contents.snapshot.permissions land 0o077 = 0 then Ok contents.content
+  else Error (Unreadable_intent "record is not private")
+
 let read ~root path =
-  let* contents = Fs_compat.load_owned_regular_file_with_snapshot
+  let* contents = Fs_compat.load_owned_regular_file_with_snapshot_locked
       ~owner_uid:(Unix.getuid ()) ~ownership_root:root path
     |> Result.map_error (fun error -> Unreadable_intent (Fs_compat.owned_regular_file_read_error_to_string error)) in
   match contents with
   | None -> Ok None
-  | Some contents when contents.snapshot.Fs_compat.permissions land 0o077 = 0 -> Ok (Some contents.content)
-  | Some _ -> Error (Unreadable_intent "record is not private")
+  | Some contents -> private_content contents |> Result.map Option.some
 
 let check_source request (source : Journal.source) =
   let matches = String.equal source.Journal.keeper_name request.keeper_name
@@ -227,16 +230,30 @@ let load_journal ~base_path request source =
     |> Result.map_error (fun error -> Journal_rejected error) in
   Ok journal
 
-let unwrap ~path ~failure_to_string = function
-  | Fs_compat.Private_file_succeeded value -> value
-  | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
-    (try Log.Keeper.warn "named submission primary transaction preserved at %s: %s" path
+let warn_cleanup ~path cleanup_failure =
+  try Log.Keeper.warn "named submission primary transaction preserved at %s: %s" path
        (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure) with
-     | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
-     | Sys_error _ | Unix.Unix_error _ -> ());
-    value
-  | Private_file_failed error -> Error (Persistence_failed (failure_to_string error))
-  | Private_file_failed_with_cleanup_failure {error;cleanup_failure} ->
+  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | Sys_error _ | Unix.Unix_error _ -> ()
+
+let unreadable error = Unreadable_intent (Fs_compat.owned_regular_file_read_error_to_string error)
+
+let unwrap ~path ~failure_to_string ~unpack = function
+  | Fs_compat.Private_file_succeeded value -> unpack value
+  | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
+    warn_cleanup ~path cleanup_failure;
+    unpack value
+  | Private_file_failed (Fs_compat.Owned_observation_failed error) -> Error (unreadable error)
+  | Private_file_failed_with_cleanup_failure
+      {error = Fs_compat.Owned_observation_failed error; cleanup_failure} ->
+    (* Owned reads used to fail inside the callback: retain that primary
+       Unreadable_intent, including when descriptor settlement also fails. *)
+    warn_cleanup ~path cleanup_failure;
+    Error (unreadable error)
+  | Private_file_failed (Fs_compat.Underlying_update_failed error) ->
+    Error (Persistence_failed (failure_to_string error))
+  | Private_file_failed_with_cleanup_failure
+      {error = Fs_compat.Underlying_update_failed error; cleanup_failure} ->
     Error (Persistence_failed (failure_to_string error ^ "; " ^
       Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
 
@@ -275,10 +292,9 @@ let prepare ~base_path request ~make_source = protect (fun () ->
     |> Result.map_error (fun _ -> Persistence_failed "owned intent directory preparation failed") in
   let* prior = read ~root path in
   let* () = match prior with None -> Ok () | Some bytes -> header request bytes |> Result.map (fun _ -> ()) in
-  let decide bytes =
+  let decide observed =
     let result =
-      let* current = read ~root path in
-      let* () = if current = Some bytes then Ok () else Error (Unreadable_intent "path changed during preparation") in
+      let* bytes = private_content observed in
       if bytes = "" && prior = None then
         let* journal = make_source () in
         let source = Journal.source journal in
@@ -292,18 +308,22 @@ let prepare ~base_path request ~make_source = protect (fun () ->
     match result with
     | Error error -> None,Error error
     | Ok (write,journal) -> write,Ok {root;path;request;journal} in
-  Fs_compat.update_private_file_durable_locked_result path decide
-  |> unwrap ~path ~failure_to_string:Fs_compat.durable_append_error_to_string)
+  Fs_compat.update_owned_private_file_durable_locked_result
+    ~owner_uid:(Unix.getuid ()) ~ownership_root:root path decide
+  |> unwrap ~path ~unpack:Fun.id ~failure_to_string:Fs_compat.durable_append_error_to_string)
 
 let source intent = Journal.source intent.journal
 let journal intent = intent.journal
 let path intent = intent.path
 
-let current intent =
-  let* bytes = read ~root:intent.root intent.path in
-  let* state = match bytes with None -> Error Missing_intent | Some bytes -> decode intent.request bytes in
+let current_bytes intent bytes =
+  let* state = decode intent.request bytes in
   let* () = if Journal.same_source state.source (source intent) then Ok () else Error Source_conflict in
   Ok state
+
+let current intent =
+  let* bytes = read ~root:intent.root intent.path in
+  match bytes with None -> Error Missing_intent | Some bytes -> current_bytes intent bytes
 
 let accepted intent = protect (fun () ->
   let* bytes = read ~root:intent.root intent.path in
@@ -317,12 +337,10 @@ let unconfirmed_request_id intent = protect (fun () ->
   Ok (match state.phase with Prepared -> None | Submitting {request_id;_} -> request_id))
 
 let update intent decide = protect (fun () ->
-  let callback bytes =
+  let callback observed =
     let result =
-      let* state = current intent in
-      let* expected = decode intent.request bytes in
-      let* () = if equal (state_json intent.request state) (state_json intent.request expected)
-        then Ok () else Error (Unreadable_intent "path changed during broker entry") in
+      let* bytes = private_content observed in
+      let* state = current_bytes intent bytes in
       let* next,value = decide state in
       let* () = if valid_transition state.phase next.phase then Ok ()
         else Error (Corrupt_intent "invalid requested phase transition") in
@@ -330,17 +348,10 @@ let update intent decide = protect (fun () ->
     match result with Error error -> None,Error error | Ok (before,state,value) ->
       Some (Yojson.Safe.to_string (phase_event state.source ~expected:before.phase state.phase) ^ "\n"),Ok value in
   let unpack = function None -> Error Missing_intent | Some result -> result in
-  Fs_compat.update_existing_private_file_durable_locked_result intent.path callback
-  |> (fun outcome -> match outcome with
-      | Fs_compat.Private_file_succeeded value -> unpack value
-      | Private_file_succeeded_with_cleanup_failure {value;cleanup_failure} ->
-        unwrap ~path:intent.path ~failure_to_string:Fs_compat.private_jsonl_transaction_error_to_string
-          (Private_file_succeeded_with_cleanup_failure {value=unpack value;cleanup_failure})
-      | Private_file_failed error -> unwrap ~path:intent.path
-          ~failure_to_string:Fs_compat.private_jsonl_transaction_error_to_string (Private_file_failed error)
-      | Private_file_failed_with_cleanup_failure failure ->
-        unwrap ~path:intent.path ~failure_to_string:Fs_compat.private_jsonl_transaction_error_to_string
-          (Private_file_failed_with_cleanup_failure failure)))
+  Fs_compat.update_existing_owned_private_file_durable_locked_result
+    ~owner_uid:(Unix.getuid ()) ~ownership_root:intent.root intent.path callback
+  |> unwrap ~path:intent.path ~unpack
+      ~failure_to_string:Fs_compat.private_jsonl_transaction_error_to_string)
 
 let begin_submit intent = update intent (fun state ->
   let* admission = Journal.named_admission intent.journal |> Result.map_error (fun error -> Journal_rejected error) in

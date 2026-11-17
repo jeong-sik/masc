@@ -9083,6 +9083,26 @@ let test_named_submission_crash_before_broker_entry_stays_fail_closed () =
          | Error error -> fail (Submission.error_to_string error)
        in
        let intent_path = Submission.path intent in
+       let original_intent = In_channel.with_open_bin intent_path In_channel.input_all in
+       Unix.chmod intent_path 0o644;
+       (match Submission.begin_submit intent with
+        | Error (Submission.Unreadable_intent _) -> ()
+        | Error error -> fail (Submission.error_to_string error)
+        | Ok _ -> fail "non-private borrowed intent issued a broker permit");
+       check int "existing observation does not repair private mode" 0o644
+         (Unix.stat intent_path).Unix.st_perm;
+       check string "private-mode refusal appends no phase" original_intent
+         (In_channel.with_open_bin intent_path In_channel.input_all);
+       Unix.chmod intent_path 0o600;
+       Out_channel.with_open_bin intent_path (fun channel ->
+         output_string channel (original_intent ^ "{"));
+       (match Submission.begin_submit intent with
+        | Error (Submission.Corrupt_intent _) -> ()
+        | Error error -> fail (Submission.error_to_string error)
+        | Ok _ -> fail "corrupt borrowed intent issued a broker permit");
+       check string "corrupt-tail refusal appends no phase" (original_intent ^ "{")
+         (In_channel.with_open_bin intent_path In_channel.input_all);
+       Out_channel.with_open_bin intent_path (fun channel -> output_string channel original_intent);
        (match Submission.begin_submit intent with
         | Ok _ -> ()
         | Error error -> fail (Submission.error_to_string error));

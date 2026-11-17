@@ -66,7 +66,7 @@ let capture_briefing ~config ~prompt ~batch =
   capture ~config ~request_id (fun ~workspace ~destination ->
     Capture.briefing ~request_id ~workspace ~destination:(Destination.of_runtime destination) ~prompt ~batch)
 
-type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+type wait = Submit.wait = Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
 type result =
   | Awaiting of wait * Owner.retained

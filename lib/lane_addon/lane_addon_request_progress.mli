@@ -67,10 +67,11 @@ val observer : t -> Lane_addon_request_receipt.t
     capture/judgment and confirm registry durability before recording an ACK. *)
 val append : t -> event -> (t, string) result
 (** Canonicalize payloads and validate the next transition. Dispatch is recorded
-    before each admission RPC. Only an explicit pre-admission capacity refusal
-    allows a later admission of the same captured request. Waiting, unknown and
-    worker absence never permit redispatch. A capacity refusal is accepted only
-    immediately after dispatch intent, before any execution observation.
+    before each admission RPC. Only an admission declined because it was not
+    sent allows a later admission of the same captured request. Waiting,
+    unknown and worker absence never permit redispatch. A declined admission is
+    accepted only immediately after dispatch intent, before any execution
+    observation.
     A late original judgment preserves earlier observations in the history.
     Commit retry requires a fresh exact before-state observation; confirmation
     requires the exact captured after-state. An execution or before-dispatch

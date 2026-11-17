@@ -45,46 +45,6 @@ let limited_reads : ((string * string), limited_read) Hashtbl.t = Hashtbl.create
 let reported_problems : (((string * string) * problem_site), string) Hashtbl.t =
   Hashtbl.create 16
 let measurements_mu = Stdlib.Mutex.create ()
-(* A completion can arrive between a capacity refusal and publication of its
-   measurement. Immutable marks close that race without a timer or replay. *)
-let capacity_marks : (string, (string * unit ref) list) Hashtbl.t = Hashtbl.create 4
-
-let capacity_mark_snapshot ~config =
-  let root = Workspace.keepers_runtime_dir config in
-  Stdlib.Mutex.protect measurements_mu (fun () ->
-    match Hashtbl.find_opt capacity_marks root with Some marks -> marks | None -> [])
-
-let capacity_released ~config ~installation_id =
-  let root = Workspace.keepers_runtime_dir config in
-  let keepers = Stdlib.Mutex.protect measurements_mu (fun () ->
-    let previous = match Hashtbl.find_opt capacity_marks root with
-      | Some marks -> marks | None -> [] in
-    Hashtbl.replace capacity_marks root
-      ((installation_id, ref ()) :: List.remove_assoc installation_id previous);
-    let durable = Hashtbl.fold (fun (directory, keeper) (measurement : measurement) names ->
-      match measurement.last_pass with
-      | Pending pending ->
-        let waiting = match pending with
-          | Keeper_librarian_pending.Worker waiting ->
-            (match waiting.wait with
-             | Capacity -> String.equal waiting.installation_id installation_id
-             | Processing | Outcome_unknown | Unreachable
-             | Missing_after_dispatch | Journal_recheck -> false)
-          | Publication _ | Basis_changed _ | Message_floor _ | Local_failure _ -> false in
-        if String.equal directory root && waiting then keeper :: names else names
-      | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
-      | Not_committed | Stopped _ | Raised _ -> names) measurements [] in
-    Hashtbl.fold (fun (directory, keeper) (admission : Keeper_librarian_pending.admission) names ->
-      match admission with
-      | Admission_waiting ({ wait = Capacity; _ } as waiting)
-        when String.equal directory root
-             && String.equal waiting.installation_id installation_id -> keeper :: names
-      | Admission_waiting { wait = (Capacity | Processing | Outcome_unknown | Unreachable
-          | Missing_after_dispatch | Journal_recheck); _ }
-      | Admission_failed _ -> names) admission_waits durable
-    |> List.sort_uniq String.compare) in
-  List.iter (fun keeper_name ->
-    Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
 
 (* RFC librarian-gate-waits-on-the-destination-not-on-passes §3.3. A gate
    that waited on refusing destinations ends its pass pending, in admission
@@ -92,7 +52,7 @@ let capacity_released ~config ~installation_id =
    ends pending is a recovery waiter of its site. A recovery replaces the
    mark and wakes the waiters of this root; a pass that read the destinations
    before the recovery and records itself after it sees a different mark and
-   wakes itself, the same race [capacity_marks] closes. *)
+   wakes itself. *)
 type recovery_site = Durable_history | Admission
 
 let recovery_mark : unit ref Atomic.t = Atomic.make (ref ())
@@ -117,16 +77,6 @@ let destination_recovered ~config =
     |> List.sort_uniq String.compare) in
   List.iter (fun keeper_name ->
     Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
-
-let recheck_capacity_release ~config ~keeper_name ~before
-    (waiting : Keeper_librarian_pending.worker) =
-  match waiting.wait with
-  | Capacity ->
-    let earlier = List.assoc_opt waiting.installation_id before in
-    let later = List.assoc_opt waiting.installation_id (capacity_mark_snapshot ~config) in
-    if not (Option.equal ( == ) earlier later) then
-      Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name
-  | Processing | Outcome_unknown | Unreachable | Missing_after_dispatch | Journal_recheck -> ()
 
 let measurement_key ~config ~keeper_name =
   Workspace.keepers_runtime_dir config, keeper_name
@@ -343,7 +293,6 @@ let uncommitted_pass () =
 ;;
 
 let run_durable_with_consumer ~config ~keeper_name ~consume =
-  let capacity_before = capacity_mark_snapshot ~config in
   let recovery_before = recovery_mark_snapshot () in
   let rec drain () =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -437,14 +386,6 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
         | Pending _ -> true
         | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
         | Not_committed | Stopped _ | Raised _ -> false);
-    (match last_pass with
-     | Pending pending ->
-       (match pending with
-        | Keeper_librarian_pending.Worker waiting ->
-          recheck_capacity_release ~config ~keeper_name ~before:capacity_before waiting
-        | Publication _ | Basis_changed _ | Message_floor _ | Local_failure _ -> ())
-     | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
-     | Not_committed | Stopped _ | Raised _ -> ());
     last_pass
   with
   | Eio.Cancel.Cancelled _ as exn ->
@@ -1121,7 +1062,6 @@ let run_memory_cleanup ~base_path ~keeper_name =
 
 let run_explicit_admission_with ~base_path ~keeper_name ~run =
   let config = Workspace.default_config base_path in
-  let capacity_before = capacity_mark_snapshot ~config in
   let recovery_before = recovery_mark_snapshot () in
   let outcome = run () in
   let observed = match outcome with
@@ -1143,10 +1083,6 @@ let run_explicit_admission_with ~base_path ~keeper_name ~run =
   !change_observer ~config ~keeper_name;
   Keeper_memory_health_input.written
     ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name;
-  (match observed with
-   | Some (Admission_waiting waiting) ->
-     recheck_capacity_release ~config ~keeper_name ~before:capacity_before waiting
-   | Some (Admission_failed _) | None -> ());
   match outcome with
   | Disabled | Idle ->
     clear_reported_problem ~config ~keeper_name ~site:Explicit_admission

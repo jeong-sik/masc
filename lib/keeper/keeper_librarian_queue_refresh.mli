@@ -22,8 +22,7 @@ val install_change_observer :
 val last_measurement : config:Workspace.config -> keeper_name:string -> measurement option
 (** Latest completed durable drain observation in this process, scoped to the
     runtime Keeper directory. [None] means no observation. Counts never grant
-    execution or scheduling; a typed pre-admission capacity wait may be woken
-    when that installation delivers a result. An unread count unavailable at that pass is
+    execution or scheduling. An unread count unavailable at that pass is
     [None], not the prior pass's count. *)
 
 val destination_recovered : config:Workspace.config -> unit
@@ -31,13 +30,6 @@ val destination_recovered : config:Workspace.config -> unit
     Keeper of [config]'s root whose last durable pass or explicit admission
     ended pending; each pass reads its own wait again. A pass that was
     running across the recovery and ends pending wakes itself. *)
-
-val capacity_released : config:Workspace.config -> installation_id:string -> unit
-(** A delivered worker result freed space in its pending-request listing.
-    Wake only the same installation's last observed pre-admission capacity
-    waiters in both admission and durable history. A concurrent pass cannot miss
-    the release while publishing its measurement. This never replays an
-    unconfirmed dispatch. *)
 
 val last_admission_wait :
   config:Workspace.config -> keeper_name:string -> Keeper_librarian_pending.admission option

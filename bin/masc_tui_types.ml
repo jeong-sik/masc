@@ -6729,9 +6729,7 @@ let memory_pass_text ~ko ending =
     | Pass_yielded_to_waiting_unit -> "대기 중인 처리에 양보", "yielded"
     | Pass_pending pending ->
         (match pending with
-         | Masc.Keeper_librarian_pending.Worker { wait = Capacity; _ } ->
-             "대기열 가득 참", "queue full"
-         | Worker { wait = Processing; _ } -> "처리 중", "processing"
+         | Masc.Keeper_librarian_pending.Worker { wait = Processing; _ } -> "처리 중", "processing"
          | Worker { wait = (Outcome_unknown | Missing_after_dispatch); _ } ->
              "결과 확인 필요", "check outcome"
          | Worker { wait = Unreachable; _ } -> "작업자 연결 안 됨", "worker offline"

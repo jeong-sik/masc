@@ -8,7 +8,7 @@ module Submit = Lane_addon_submit_once
 let ( let* ) = Result.bind
 type error = Submit.error = Unavailable of string | Rejected of string | Uncertain of string
 let error_to_string = Submit.error_to_string
-type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+type wait = Submit.wait = Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
 type call = expected:Durable.destination -> original:Owner.Record.t -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result,Submit.call_error) result

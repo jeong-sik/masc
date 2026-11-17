@@ -1,7 +1,6 @@
 (** Why an observed Librarian pass remains unfinished. This is an
     observation of that pass, never permission to replay a request or ACK input. *)
 type worker_wait =
-  | Capacity
   | Processing
   | Outcome_unknown
   | Unreachable

@@ -22,7 +22,7 @@ let call_error_of_runtime = function
   | Runtime.Outcome_unknown detail -> Sent_unknown detail
   | (Runtime.Unavailable _ | Runtime.Host_refusal _) as error -> Not_sent (error_of_runtime error)
 
-type wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+type wait = Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
 type ('original, 'final) result =
   | Awaiting of wait * 'original
@@ -32,7 +32,7 @@ type ('original, 'final) result =
 
 (* A finished reply keeps its result as the worker wrote it. Reading it needs
    the original's body, which the caller of [reply] reads only then. *)
-type worker_state = Absent | Pending | Capacity_wait | Finished of Yojson.Safe.t
+type worker_state = Absent | Pending | Finished of Yojson.Safe.t
 let reply ~label ~request_id (response : Mcp_protocol.Mcp_types.tool_result) =
   let context = label ^ " Add-on reply" in
   let* () = match response.is_error with
@@ -50,7 +50,6 @@ let reply ~label ~request_id (response : Mcp_protocol.Mcp_types.tool_result) =
     let* state, fields = match state with
       | "absent" -> Ok (Absent, fields)
       | "pending" -> Ok (Pending, fields)
-      | "capacity_wait" -> Ok (Capacity_wait, fields)
       | "finished" ->
         let* result, fields = Candle_json.field ~context "result" (fun json -> Ok json) fields in
         Ok (Finished result, fields)
@@ -216,11 +215,6 @@ let resume ~store ~label ~(original : Owner.Record.t) ~(source : _ source) ~deco
   let received original ~submission state evidence = match state with
     | Pending -> observe original Worker_pending (fun value -> Progress.Waiting value) evidence
     | Absent -> observe original Missing_after_dispatch (fun value -> Progress.Absent value) evidence
-    | Capacity_wait ->
-      if submission then
-        let* published = publish ~store original (Progress.Admission_declined evidence) in
-        Ok (Awaiting (Capacity, stored_record published))
-      else Error (Rejected (label ^ " read cannot grant a pre-admission capacity refusal"))
     | Finished result ->
       (* The body is read before the result is. A body that cannot be read
          ends the pass with nothing written; a result that cannot be read is
@@ -321,7 +315,7 @@ let resume ~store ~label ~(original : Owner.Record.t) ~(source : _ source) ~deco
         | Error (Unsent error) -> wait_before_send original error
         | Error (Unknown error) -> Error error
         | Ok (Absent, _) -> admit original
-        | Ok ((Pending | Capacity_wait | Finished _), _) ->
+        | Ok ((Pending | Finished _), _) ->
           Error (Rejected ("Worker state contradicts original " ^ label ^ " pre-admission progress"))))
   | Progress.Dispatch_pending _ ->
     let* observed = observe_open () in

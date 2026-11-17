@@ -7,7 +7,7 @@ type error = Lane_addon_submit_once.error =
   | Unavailable of string | Rejected of string | Uncertain of string
 val error_to_string : error -> string
 type wait = Lane_addon_submit_once.wait =
-  | Capacity | Worker_pending | Worker_unknown | Worker_unreachable
+  | Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
 type call = expected:Keeper_librarian_durable_request.destination ->
   original:Lane_addon_tool_request_owner.Record.t -> arguments:Yojson.Safe.t ->
@@ -42,8 +42,7 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
   call:call -> (outcome, error) result
 (** Run the step by the shared submit-once rules: a retained answer or refusal
     needs no live worker, a pending request is never submitted again, and only
-    a pre-send failure or an explicit capacity reply permits another
-    submission. The host's retained terminal and latest execution proof precede
+    a pre-send failure permits another submission. The host's retained terminal and latest execution proof precede
     any answer. Fresh admission also requires counterpart coverage by the
     frozen prompt; observing pending/unknown or retained terminals does not
     rewrite the step or authorize another dispatch. The step's gate judgment

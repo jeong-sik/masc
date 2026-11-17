@@ -21,7 +21,7 @@ val capture_briefing : config:Workspace.config -> prompt:Prompt_registry.prompt_
     prepared state to be saved and freshly confirmed first, by the serialized
     owner. An error may follow publication: discover original work before
     preparing another request. No model or domain save runs here. *)
-type wait = Lane_addon_submit_once.wait = Capacity | Worker_pending | Worker_unknown
+type wait = Lane_addon_submit_once.wait = Worker_pending | Worker_unknown
   | Worker_unreachable | Missing_after_dispatch | Journal_recheck
 type result =
   | Awaiting of wait * Lane_addon_tool_request_owner.retained
@@ -35,9 +35,8 @@ val resume : config:Workspace.config -> request_id:string -> (result, error) Std
 (** Fresh strict host load and physical workspace restore precede every pass.
     Existing judgments/commit progress need no live worker. Otherwise rebind the
     original installation and read before admission. Submit only after a newly
-    published intent and authoritative absence; only an explicit capacity reply
-    or a submit the host refused before sending permits another admission of
-    this same ID ({!Lane_addon_submit_once.resume}). Lost replies, journal uncertainty,
+    published intent and authoritative absence; only a submit the host refused
+    before sending permits another admission of this same ID ({!Lane_addon_submit_once.resume}). Lost replies, journal uncertainty,
     Already_stored and absence after dispatch never permit another submission.
     Consecutive equal observations reuse the current record without another
     journal write; changed kind/evidence remains a new original fact.

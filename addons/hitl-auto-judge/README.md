@@ -23,5 +23,5 @@ original ID, digest and result. Existing worker state needs the
 the host dispatch is not connected. Build its image from the repository root:
 
 ```sh
-docker build -f addons/hitl-auto-judge/Dockerfile -t masc-lane-hitl-auto-judge:0.1.1 addons
+docker build -f addons/hitl-auto-judge/Dockerfile -t masc-lane-hitl-auto-judge:0.1.2 addons
 ```

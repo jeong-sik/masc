@@ -296,10 +296,25 @@ docker exec "$container" bash -lc '
   # here would freeze every future build to today's index.
   #
   # Not `--all`: the question is which repository this switch selected, not
-  # which ones are defined. Not fatal either: this line only describes what the
-  # step above did, and `set -e` would otherwise turn a failed query into a
-  # failed build after the dependency step had already succeeded.
-  opam repository list || echo "opam repository list failed; index revision unknown"
+  # which ones are defined. Not fatal: these lines only describe what the step
+  # above did, and `set -e` would otherwise turn a failed query into a failed
+  # build after the dependency step had already succeeded.
+  #
+  # `opam repository list` prints the URL only -- the same string on every
+  # build -- so the revision has to come from the checkout itself. Without it
+  # this block would look like provenance while answering nothing.
+  opam repository list || echo "opam repository list failed"
+  repo_root="${OPAMROOT:-$(opam var root 2>/dev/null || echo /root/.opam)}"
+  for name in $(opam repository list --short 2>/dev/null || true); do
+    url=$(opam repository list 2>/dev/null | awk -v n="$name" '$2 == n {print $3; exit}')
+    path=${url#git+file://}
+    path=${path#file://}
+    path=${path#git+}
+    rev=$(git -C "${path}" rev-parse HEAD 2>/dev/null \
+          || git -C "${repo_root}/repo/${name}" rev-parse HEAD 2>/dev/null \
+          || true)
+    echo "opam repository ${name} revision ${rev:-unknown}"
+  done
   for attempt in 1 2 3; do
     opam install ./masc.opam --deps-only --with-test --locked -y && break
     if [ "$attempt" -eq 3 ]; then echo "opam install failed after 3 attempts" >&2; exit 1; fi

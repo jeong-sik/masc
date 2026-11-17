@@ -205,11 +205,13 @@ let encode entries =
             ("overrides", `List (List.map entry_to_yojson entries));
           ])
 
+let of_string content =
+  match Yojson.Safe.from_string content with
+  | json -> decode json
+  | exception Yojson.Json_error message -> Error (Invalid_json message)
+
 let load ~path =
-  try
-    let content = Fs_compat.load_file path in
-    try Yojson.Safe.from_string content |> decode
-    with Yojson.Json_error message -> Error (Invalid_json message)
+  try Fs_compat.load_file path |> of_string
   with
   | Sys_error message -> Error (Read_failed message)
   | Unix.Unix_error (error, operation, argument) ->

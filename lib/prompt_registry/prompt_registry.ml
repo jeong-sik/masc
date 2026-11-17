@@ -139,6 +139,8 @@ let quarantined_entries () = List.map fst (held_back_overrides ())
 let with_override_mutation_lock f =
   Prompt_registry_store.with_override_mutation_lock store f
 
+let with_override_snapshot = with_override_mutation_lock
+
 (** {1 Persistence} *)
 
 (** File-based persistence directory *)

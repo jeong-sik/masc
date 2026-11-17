@@ -624,7 +624,7 @@ let injected_developer_text rows =
 let test_issued_system_updates_do_not_reinject_standing_base () =
   with_fixture @@ fun ~run ~capture ~reports:_ ->
   let instructions = "STANDING_KEEPER_BASE: preserve the host authority." in
-  let send observations =
+  let send ?(instructions = instructions) observations =
     let before = List.length (read_requests capture) in
     successful (run ~instructions ~system_observations:observations
       ~world:"Current independent world context" ());
@@ -652,7 +652,16 @@ let test_issued_system_updates_do_not_reinject_standing_base () =
     (String_util.contains_substring (injected_developer_text returned) "GOAL_NEXT");
   let unchanged = send Keeper_context_assembly.[Active_goals "GOAL_NEXT"] in
   check string "settled unchanged observations need no injection" ""
-    (injected_developer_text unchanged)
+    (injected_developer_text unchanged);
+  let changed_base = send ~instructions:"REPLACEMENT_STANDING_BASE" [] in
+  let replaced = injected_developer_text changed_base in
+  check bool "base refresh carries the complete new base" true
+    (String_util.contains_substring replaced "REPLACEMENT_STANDING_BASE");
+  List.iter (fun block -> check bool "base refresh explicitly names every replaced standing kind" true
+    (String_util.contains_substring replaced (Prompt_block_id.to_string block)))
+    Prompt_block_id.[Constitution_amendments; Active_goals; Direct_input_source];
+  check bool "removed Goal is not part of the new snapshot" false
+    (String_util.contains_substring replaced "GOAL_NEXT")
 
 let test_native_compaction_keeps_issued_system_components () =
   with_fixture ~compact_resume:true ~compact_item:true @@ fun ~run ~capture ~reports:_ ->

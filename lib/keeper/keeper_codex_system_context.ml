@@ -23,6 +23,13 @@ let join pieces =
   List.filter (fun text -> String.trim text <> "") pieces
   |> String.concat "\n\n" |> String.trim
 
+let replacement_notice =
+  let kinds = String.concat ", " (List.map Prompt_block_id.to_string standing_blocks) in
+  "Current host-issued System observation snapshot for: " ^ kinds ^ ".\n"
+  ^ "This snapshot replaces earlier System observations of those kinds. "
+  ^ "An omitted kind has no current System observation. "
+  ^ "Other current-turn observations remain independent."
+
 let prepare ~full_system ~system_prompt ~posture_notes ~assembly ~previously_held =
   let full_receipt = receipt Store.Codex_system_prompt full_system in
   let base_context = Store.Context_block Prompt_block_id.Keeper_instructions in
@@ -50,7 +57,8 @@ let prepare ~full_system ~system_prompt ~posture_notes ~assembly ~previously_hel
     let persistent_context = full_receipt :: base_receipt :: observation_receipts in
     let developer_context = match previously_held with
       | None -> []
-      | Some held when not (List.mem base_receipt held) -> [full_system]
+      | Some held when not (List.mem base_receipt held) ->
+        [join [replacement_notice; full_system]]
       | Some held ->
         let held_observations = List.filter (fun (held : Store.held_context) ->
           List.exists (fun block -> held.context = Store.Context_block block) standing_blocks) held in
@@ -58,14 +66,7 @@ let prepare ~full_system ~system_prompt ~posture_notes ~assembly ~previously_hel
            && List.for_all (fun current -> List.mem current held_observations) observation_receipts
         then []
         else
-          let kinds = String.concat ", " (List.map Prompt_block_id.to_string standing_blocks) in
-          let snapshot =
-            "Current host-issued System observation snapshot for: " ^ kinds ^ ".\n"
-            ^ "This snapshot replaces earlier System observations of those kinds. "
-            ^ "An omitted kind has no current System observation. "
-            ^ "Other current-turn observations remain independent."
-          in
-          [join (snapshot :: List.map (fun observation ->
+          [join (replacement_notice :: List.map (fun observation ->
              snd (Assembly.observation_block observation)) issued.observations @ posture_notes)]
     in
     { full_receipt; developer_context

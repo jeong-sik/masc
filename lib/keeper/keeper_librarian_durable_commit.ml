@@ -254,7 +254,7 @@ let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_re
     let* exact=Request.request request in
     let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
     let* retained=Exact.retained_final_of_json ~schema evidence in
-    let* ()=Request.confirm_final ~store request (Exact.delivered retained) in
+    let* ()=Request.confirm_retained_final ~store request retained in
     (match retained with
      | Exact.Retained_call (Answered _) -> Error "History refusal contains an answered host result"
      | Retained_unknown Exact.Cut ->

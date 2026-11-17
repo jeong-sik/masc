@@ -580,6 +580,28 @@ let rec consume_one ~config ~keeper_name ~wake =
     match validate_lineage ~store ~fenced ~read:originals listed with
     | Error detail -> error detail
     | Ok superseded ->
+    (* A host may already have ended an independent waiting original while a
+       linked declaration replacement still owns an older source. Recover only
+       that no-Memory ending before counting frontiers; ordinary resume could
+       dispatch or publish here. Changed progress requires a new inventory. *)
+    let rec recover_ending = function
+      | [] -> Ok None
+      | ((record,_) as original)::rest ->
+        if fenced (Record.request_id record) then recover_ending rest else
+        let* recovered=Owner.recover_terminal_ending ~store ~config ~original
+          |> Result.map_error Owner.error_to_string in
+        match recovered with
+        | Owner.No_ending -> recover_ending rest
+        | Ending_retained record -> Ok (Some record) in
+    let multiple_frontiers=List.length unfinished + List.length superseded > 1 in
+    (match (if multiple_frontiers then recover_ending waiting else Ok None) with
+    | Error detail -> error detail
+    | Ok (Some record) ->
+      wake ();
+      Ok (Consumer.Pending (Keeper_librarian_pending.Publication
+        {request_id=Record.request_id record;
+         detail="Original host ending retained; the next pass revalidates history frontiers"}))
+    | Ok None ->
     let moved=List.fold_left (fun result (record,(index:Request.index)) ->
       let* moved=result in
       let* ()=io (fun () ->
@@ -671,7 +693,7 @@ let rec consume_one ~config ~keeper_name ~wake =
       match Progress.replacement record.progress with
       | Some (Preparation_pending _) -> true
       | None | Some (Preparation_confirmed _) -> false) originals in
-    if List.length unfinished + List.length superseded > 1 then
+    if multiple_frontiers then
       error "Completed-history Librarian has multiple unfinished original frontiers"
     else (match recoveries with
     | _::_::_ -> error "Original history has multiple unfinished replacement publications"
@@ -798,4 +820,4 @@ let rec consume_one ~config ~keeper_name ~wake =
         | Some refusal,_,_ -> Error refusal
         | None,Some detail,_ -> error detail
         | None,None,Some request_id -> Ok (ended_unadmitted request_id)
-        | None,None,None -> result)
+        | None,None,None -> result))

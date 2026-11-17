@@ -61,8 +61,8 @@ val confirm : observe:(unit -> (Lane_addon_exact.retained_observation, string) r
     then also needs the latest completed execution to have ended in it:
     [latest] reads that execution and checks the no-host frame exception.
     Independently, an actual retained typed
-    declaration-ending cause requires the strict latest read and
-    {!require_declaration_ending_latest}, even when the worker's delivered
+    declaration-ending or [Interrupted] cause requires the strict latest read
+    and the same no-answer rule as {!require_declaration_ending_latest}, even when the worker's delivered
     Not_allowed JSON carries only its public detail. Worker wording does not
     establish that typed cause. [Error] is
     a failed read, an incompatible proof or a canonical JSON failure. Reads only through [observe] and
@@ -75,13 +75,24 @@ val confirm_final : store:Lane_addon_store.t -> target -> Lane_addon_exact.final
   (unit, string) result
 (** Require the original retained host terminal. Each Call_final additionally
     requires the matching latest completed original execution proof and outcome.
-    An actual typed declaration ending also requires the strict latest-proof
-    check above before any consumer may treat its original as settled.
+    An actual typed declaration ending or [Interrupted] also requires the
+    strict latest-proof check above before any consumer may treat its original
+    as settled. This does not weaken the separate Cut release proof.
     Worker Finished JSON grants nothing, except a final where
     {!Lane_addon_exact.refused_before_host} holds, with both the host record
     and execution proof absent: the worker
     refuses a request no listing reply can carry before the host sees it, and
     that final holds no answer. Orphan or unreadable proof refuses. *)
+
+val confirm_retained_final : store:Lane_addon_store.t -> target -> Lane_addon_exact.retained_final ->
+  (unit, string) result
+(** Confirm retained owner evidence against the actual original host terminal,
+    preserving its complete typed cause in the same observation used by
+    {!confirm}. In particular, [Interrupted], [Cut] and [Raised] cannot confirm
+    one another through their shared delivered [Outcome_unknown]. All ordinary
+    proof checks and the absent-host request-body-refusal exception still apply.
+    This reads the actual store itself, grants no new effect and does not turn
+    matching Cut evidence into permission to release it. *)
 
 val decode : schema:Yojson.Safe.t ->
   observe:(unit -> (Lane_addon_exact.retained_observation, string) result) ->

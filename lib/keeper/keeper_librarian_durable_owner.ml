@@ -23,6 +23,7 @@ type outcome = Publication_waiting of string
 type resumed = Waited of wait * Owner.Record.t | Resumed of outcome * Request.t
   | Original_replaced of Owner.Record.t
 type listed = Owner.Record.t * Request.index
+type terminal_ending_recovery = No_ending | Ending_retained of Owner.Record.t
 type held = Listed of listed | Read of (Owner.retained * Request.t)
 let io work = Systhread_host.run work
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
@@ -149,6 +150,63 @@ let body_of (retained,request) =
   let+ schema=match exact.schema with Some schema -> Ok schema
     | None -> Error (Rejected "Original history request has no output schema") in
   {retained;request;exact;schema}
+let recover_terminal_ending ~store ~config ~original:((record,index) as listed) =
+  match Progress.phase (Owner.Record.progress record) with
+  | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok No_ending
+  | Dispatch_pending _ ->
+  let* ()=require (Option.is_none (Progress.preparation (Owner.Record.progress record))
+    && Option.is_none (Progress.replacement (Owner.Record.progress record)))
+    "History ending recovery cannot cross a publication intent" in
+  let* ()=io (fun () ->
+    let* stored=Request.index_of_summary record in
+    let* ()=if stored=index then Ok () else Error "History ending recovery has another index" in
+    let* _=Request.observe_index_owner ~base_path:config.Workspace.base_path
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path) index in
+    Request.confirm_index_source_root index) |> rejected in
+  let* declaration_id=io (fun () ->
+    let* installation=Owner.installation_of_id (Owner.Record.installation_id record) in
+    match installation with
+    | Owner.Configuration id -> Ok id
+    | Manual _ -> Error "History ending recovery requires a configured original") |> rejected in
+  let identity=Exact.identity_of_digest ~request_id:(Owner.Record.request_id record) ~digest:index.exact_digest in
+  let* observed=io (fun () -> Exact.observe_open ~store ~declaration_id identity
+    |> Result.map_error Exact.describe_recovery_error) |> rejected in
+  match observed with
+  | Exact.No_record | Open -> Ok No_ending
+  | Needs_request ->
+  let* original,request=load ~store listed in
+  let* ()=require (Progress.to_json original.progress=Progress.to_json (Owner.Record.progress record))
+    "History original changed during ending recovery" in
+  let* body=body_of (original,request) in
+  let validate () =
+    let* ()=Request.confirm_owner request in
+    let* ()=Keeper_librarian_history_resolution_state.check_unfenced ~store ~request ~original in
+    Keeper_librarian_history_resolution_lineage.confirm_predecessor ~store ~require_confirmed:true request in
+  let* ()=io validate |> rejected in
+  let* observed=io (fun () -> Exact.observe_retained ~store ~declaration_id ~schema:body.schema body.exact) |> rejected in
+  match observed with
+  | Retained_absent | Retained_open
+  | Retained_terminal (Retained_call _ | Retained_unknown (Cut | Raised)
+    | Retained_not_allowed {reason=Permission_refused _} | Retained_request_id_reused) -> Ok No_ending
+  | Retained_terminal ((Retained_not_allowed {reason=Replaced_declaration} | Retained_unknown Interrupted) as ending) ->
+  let confirm_ending () =
+    Request.confirm_retained_final ~store request ending |> rejected in
+  (* No call or publication port is reachable here. Protect only this local
+     refusal publication and its strict confirmation, joining the I/O work. *)
+  Eio.Cancel.protect (fun () -> io (fun () ->
+    let* ()=validate () |> rejected in
+    let* ()=confirm_ending () in
+    let* published=Submit.advance ~store original
+      (Progress.Refused {stage=Execution;evidence=Exact.retained_final_to_json ending}) in
+    let published=Submit.record published in
+    let* reread=Owner.reload ~store published |> owned in
+    let* reread=Option.to_result ~none:(Uncertain "Retained history ending is not observable") reread in
+    let* ()=require (Owner.same_record published reread) "Retained history ending changed before confirmation" in
+    let* ()=Request.confirm_record request reread |> rejected in
+    let* ()=validate () |> rejected in
+    let+ ()=confirm_ending () in
+    Ending_retained (Owner.listed reread)))
 type terminal = Answer of Memory_runtime.durable_proposal * Owner.retained
   | Refusal of Exact.final * Owner.retained
 type admission_check = Admission_continues | Admission_unavailable

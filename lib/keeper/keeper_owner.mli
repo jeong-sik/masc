@@ -418,8 +418,10 @@ val complete_restart_settlement :
   (Chat_operation.t list, error) result
 (** Complete this Owner's deferred Active startup calls in its Eio mailbox,
     after the application execution runtime is ready and before Keeper loops
-    start. Journal reads precede the identity-checked Store transaction. Repeat
-    completion returns no rows and never settles a later live child. Returns
+    start. Journal reads precede the identity-checked Store transaction. A call
+    whose journal cannot be read is closed as an unknown effect and its
+    operation fails; it is not requeued. Repeat completion returns no rows and
+    never settles a later live child. Returns
     the confirmed Failed batch rows for the registry's startup projections,
     including compositions without a live operation runner. A failed
     startup Store commit closes this actor; the registry fences its exact

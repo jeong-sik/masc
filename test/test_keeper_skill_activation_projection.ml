@@ -26,20 +26,20 @@ let with_workspace operation =
     (fun () -> operation config)
 ;;
 
-let meta keeper_name =
+let meta ?(trace_id = "trace-projection") keeper_name =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String keeper_name
-         ; "trace_id", `String "trace-projection"
+         ; "trace_id", `String trace_id
          ])
   with
   | Ok meta -> meta
   | Error detail -> fail detail
 ;;
 
-let persist_session config keeper_name =
-  let meta = meta keeper_name in
+let persist_session ?trace_id config keeper_name =
+  let meta = meta ?trace_id keeper_name in
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error detail -> fail detail);
@@ -79,7 +79,8 @@ let revision parse value =
   | Error _ -> fail "invalid revision fixture"
 ;;
 
-let record_one config (meta : Keeper_meta_contract.keeper_meta) =
+let record_one ?(absolute_turn = 1) ?(tool_use_id = "call-projection") config
+    (meta : Keeper_meta_contract.keeper_meta) =
   let reference =
     Skill_reference.make
       ~identity:
@@ -104,9 +105,9 @@ let record_one config (meta : Keeper_meta_contract.keeper_meta) =
         ~turn_ref:
           (Ids.Turn_ref.make
              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-             ~absolute_turn:1)
+             ~absolute_turn)
         ~runtime_id:"test.runtime"
-        ~skill_tool_use_id:"call-projection"
+        ~skill_tool_use_id:tool_use_id
         ~agent_core_turn:0
         ~invocation:
           (Ledger.Instruction_invocation
@@ -292,6 +293,89 @@ let test_chat_history_marks_an_unmatched_raw_skill_call () =
     (projection |> member "status" |> to_string);
   check int "no activation is attached across turn_refs" 0
     (projection |> member "activations" |> to_list |> List.length)
+;;
+
+let test_chat_history_groups_only_requested_exact_turns () =
+  with_workspace @@ fun config ->
+  let keeper_name = "chat-grouped-projection" in
+  let first = persist_session config keeper_name in
+  let other = persist_session ~trace_id:"trace-other" config "chat-other-projection" in
+  record_one ~absolute_turn:2 ~tool_use_id:"two-first" config first;
+  record_one ~absolute_turn:1 ~tool_use_id:"one" config first;
+  record_one ~absolute_turn:80 ~tool_use_id:"not-requested" config first;
+  record_one ~absolute_turn:2 ~tool_use_id:"two-second" config first;
+  record_one ~absolute_turn:2 ~tool_use_id:"other-trace" config other;
+  let without_report turn_ref = match chat_row turn_ref with
+    | `Assoc fields -> `Assoc (("blocks", `List []) :: List.remove_assoc "blocks" fields)
+    | _ -> fail "chat fixture is not an object" in
+  let user = match chat_row "trace-projection#2" with
+    | `Assoc fields -> `Assoc (("role", `String "user") :: List.remove_assoc "role" fields)
+    | _ -> fail "chat fixture is not an object" in
+  let rows =
+    [ chat_row "trace-projection#2"; user; chat_row "trace-other#2"
+    ; without_report "trace-projection#1"; chat_row "trace-projection#2"
+    ; chat_row "trace-projection#0001"; chat_row "trace-projection#9"
+    ; chat_row "trace-absent#1"; chat_row "invalid"
+    ; without_report "trace-projection#7"; `String "unstructured row"
+    ] in
+  let open Yojson.Safe.Util in
+  let projected = Server_dashboard_http_keeper_chat_history.attach_keeper_chat_skill_activations
+      ~config ~keeper_name (`List rows) |> to_list in
+  check int "all rows, including duplicates, survive" (List.length rows) (List.length projected);
+  let expected =
+    [ Some ("available", ["two-first"; "two-second"]); None
+    ; Some ("available", ["other-trace"]); Some ("available", ["one"])
+    ; Some ("available", ["two-first"; "two-second"]); Some ("available", ["one"])
+    ; Some ("missing", []); Some ("not_recorded", []); Some ("invalid_turn_ref", [])
+    ; None; None
+    ] in
+  List.iter2 (fun (original, expected) row ->
+    match expected with
+    | None -> check bool "non-enriched rows stay unchanged" true
+        (Yojson.Safe.equal original row)
+    | Some (status, calls) ->
+      check bool "row identity/order is preserved" true (member "id" original = member "id" row);
+      let projection = member "skill_activations" row in
+      check string "exact source status" status (projection |> member "status" |> to_string);
+      check (list string) "activation order and exact trace/turn binding" calls
+        (projection |> member "activations" |> to_list
+         |> List.map (fun activation -> activation |> member "skill_tool_use_id" |> to_string)))
+    (List.combine rows expected) projected;
+  let absent_dir = Keeper_fs.keeper_session_dir config "trace-absent" in
+  check bool "missing trace does not create a session directory" false (Sys.file_exists absent_dir);
+  check bool "missing trace does not acquire a writer lock" false
+    (Sys.file_exists (absent_dir ^ ".checkpoint.lock"))
+;;
+
+let test_chat_history_reads_fresh_without_repairing_event_tails () =
+  with_workspace @@ fun config ->
+  let keeper_name = "chat-read-only-projection" in
+  let meta = persist_session config keeper_name in
+  record_one config meta;
+  let open Yojson.Safe.Util in
+  let read () = attached_skill_projection config ~keeper_name "trace-projection#1" in
+  let calls json = json |> member "activations" |> to_list
+    |> List.map (fun activation -> activation |> member "skill_tool_use_id" |> to_string) in
+  check (list string) "initial activation" ["call-projection"] (calls (read ()));
+  record_one ~tool_use_id:"later" config meta;
+  check (list string) "the next request reads newly committed evidence"
+    ["call-projection"; "later"] (calls (read ()));
+  let path = Filename.concat
+      (Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+      "skill-activation-events.jsonl" in
+  let append bytes = Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+      (fun channel -> output_string channel bytes) in
+  append "{\"partial\":";
+  let partial = Fs_compat.load_file path in
+  check (list string) "an uncommitted tail supplies no activation"
+    ["call-projection"; "later"] (calls (read ()));
+  check string "chat reading does not truncate a partial tail" partial (Fs_compat.load_file path);
+  append "\n";
+  let corrupt = Fs_compat.load_file path in
+  let unreadable = read () in
+  check string "a malformed committed event is unavailable, not empty"
+    "unavailable" (unreadable |> member "status" |> to_string);
+  check string "the unavailable read does not rewrite source bytes" corrupt (Fs_compat.load_file path)
 ;;
 
 let test_missing_exact_trace_is_not_recorded () =
@@ -550,6 +634,10 @@ let () =
             test_chat_history_attaches_the_exact_activation
         ; test_case "chat history does not borrow another turn" `Quick
             test_chat_history_marks_an_unmatched_raw_skill_call
+        ; test_case "chat groups selected exact turns and preserves row order" `Quick
+            test_chat_history_groups_only_requested_exact_turns
+        ; test_case "chat reads fresh evidence without repairing partial tails" `Quick
+            test_chat_history_reads_fresh_without_repairing_event_tails
         ; test_case "missing exact trace is not recorded" `Quick
             test_missing_exact_trace_is_not_recorded
         ; test_case "invalid exact trace is rejected" `Quick

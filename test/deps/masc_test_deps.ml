@@ -470,7 +470,8 @@ let cleanup_test_workspace dir =
     | { Unix.st_kind = Unix.S_DIR; _ } ->
       Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
       Unix.rmdir path
-    | _ -> Sys.remove path
+    | { Unix.st_kind = (Unix.S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
+      Sys.remove path
   in
   try rm_rf dir with _ -> ()
 

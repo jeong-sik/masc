@@ -2787,7 +2787,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request child_request |> get)
     |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
     |> get |> Option.get in
-  let guard ()=authorization.before_dispatch () in
+  let guard ()=authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail in
   check (result unit string) "an unchanged fenced ancestor passes the actual dispatch recheck" (Ok ()) (guard ());
   let posts=F.post_count fixture.server and positions=progress fixture in
   let preserve_parent action=Fun.protect
@@ -3282,7 +3282,7 @@ let test_dispatch_rechecks_owner_without_restoring_the_body () = with_fixture (f
     ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request capture |> get)
     |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
     |> get |> Option.get in
-  authorization.before_dispatch () |> get;
+  authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail |> get;
   let posts=F.post_count fixture.server and positions=progress fixture in
   let body=Filename.concat (Store.root fixture.store)
     (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
@@ -3294,7 +3294,7 @@ let test_dispatch_rechecks_owner_without_restoring_the_body () = with_fixture (f
       (Owner.to_json original) |> get))) (fun () ->
     (* The authorization already holds this body's verified canonical value.
        The recheck must still read the current owner and its immutable identity. *)
-    authorization.before_dispatch () |> get;
+    authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail |> get;
     let changed=match Owner.to_json original with
       | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
           key, if key="summary" then `Null else value) fields)
@@ -3916,6 +3916,80 @@ let test_interrupted_original_settles_and_its_range_is_read_again ()=with_fixtur
     check bool "a new provider call judged the range" true (F.post_count fixture.server>posts);
     check (list string) "the new original's answer reached Memory"
       ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir))))
+(* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.2, 3.4 and
+   3.6. An original the worker holds and the host has not run ends when its
+   declaration is replaced. The pass that reads that end does not narrow the
+   next read and does not wait for another signal. *)
+(* The host's attempt for this request ended without a result, so the request
+   has no result and no open attempt. *)
+let await_deferral fixture request_id =
+  let deferred () =
+    match io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id) |> get with
+    | None -> false
+    | Some stored ->
+      (match List.rev (Yojson.Safe.Util.to_list (member "attempts" stored)) with
+       | `Assoc fields::_ -> not (List.mem_assoc "started" fields)
+       | [] | _::_ -> false) in
+  Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+    while not (deferred ()) do Eio.Time.sleep fixture.clock 0.01 done)
+(* The provider is busy, so the host's attempt ends without a result and the
+   request stays with its worker. The declaration is then replaced: the
+   replacement worker lists the request it inherited, and the host ends it and
+   delivers that end. Returns the original that was waiting. *)
+let host_ends_the_original_of_a_replaced_declaration fixture ~sw =
+  fixture.set_response (fun _ ->
+    `Too_many_requests,{|{"error":{"message":"fixture refusal","type":"rate_limit_error"}}|});
+  assert_pending (run_worker fixture);
+  let waiting,waiting_capture=only_original fixture in
+  check bool "the first read took everything unread" true
+    (Source.extent (Capture.source waiting_capture)=Keeper_librarian_range.All_unread);
+  await_deferral fixture waiting.request_id;
+  check int "the provider was asked once and gave no result" 1 (F.post_count fixture.server);
+  fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
+  let replaced=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-replaced\"" | line -> line)
+    |> String.concat "\n" in
+  check bool "the fixture declaration names the run this test replaces" true
+    (replaced<>fixture.declaration true);
+  let deliveries= !(fixture.deliveries) in
+  replace_actual_worker_configuration fixture ~sw replaced;
+  await_delivery fixture ~after:deliveries;
+  check int "the request of the replaced declaration was not sent again" 1 (F.post_count fixture.server);
+  waiting
+let test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again () =
+  with_fixture (fun ~sw fixture ->
+    let waiting=host_ends_the_original_of_a_replaced_declaration fixture ~sw in
+    let wakes=ref 0 in
+    ended_by_one_refusal (run_worker_waking fixture wakes);
+    check int "the pass that read that end asks for the next pass itself" 1 !wakes;
+    (* The woken pass moves the ended original and reads the range again. *)
+    assert_pending (run_worker_waking fixture wakes);
+    check bool "the ended original moved to the settled archive" true
+      (settled_on fixture ~date:(day_of waiting.request_id) waiting);
+    let fresh,fresh_capture=only_original fixture in
+    check bool "a new original read the range" true (fresh.Owner.request_id<>waiting.request_id);
+    check bool "and it read everything unread, not up to the first cut point" true
+      (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
+    check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture));
+    check int "one more provider call judged the range" 2 (F.post_count fixture.server);
+    check (list string) "the new original's answer reached Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
+(* RFC 3.7. The declaration is the request's again when its Keeper reads the
+   end, so the pass reads a refusal under the same declaration: it narrows the
+   next read and asks for no pass. *)
+let test_a_declaration_put_back_before_the_end_is_read_narrows_and_does_not_wake () =
+  with_fixture (fun ~sw fixture ->
+    let waiting=host_ends_the_original_of_a_replaced_declaration fixture ~sw in
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    let wakes=ref 0 in
+    ended_by_one_refusal (run_worker_waking fixture wakes);
+    check int "a refusal under the same declaration asks for no pass" 0 !wakes;
+    assert_pending (run_worker_waking fixture wakes);
+    let fresh,fresh_capture=only_original fixture in
+    check bool "a new original read the range" true (fresh.Owner.request_id<>waiting.request_id);
+    check bool "up to the first cut point" true
+      (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.To_first_cut_point);
+    check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture)))
 (* A pass reads and sends its range, and the provider's refusal reaches the
    next pass. *)
 let provider_refuses_the_read fixture =
@@ -4304,7 +4378,7 @@ let test_legacy_omitted_original_refuses_admission_but_prepares_safe_continuatio
     let authorization=Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path
       ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request request |> get)
       |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail) |> get in
-    (match authorization.before_dispatch () with
+    (match authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail with
      | Error detail -> check bool "actual host dispatch names the omitted input" true
          (Astring.String.is_infix ~affix:"counterpart_observations" detail)
      | Ok () -> fail "actual host dispatch admitted an omitted retained question");
@@ -4499,6 +4573,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_purge_joins_unknown_then_worker_restart_does_not_resubmit Mixed);
   test_case "an original a stopped server interrupted settles and its range is read again" `Quick
     test_interrupted_original_settles_and_its_range_is_read_again;
+  test_case "a replaced declaration ends a waiting original and its range is read whole again" `Quick
+    test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again;
+  test_case "a declaration put back before the end is read narrows and does not wake" `Quick
+    test_a_declaration_put_back_before_the_end_is_read_narrows_and_does_not_wake;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
   test_case "a missing history original automatically continues and commits its exact source" `Quick
     (test_missing_history_recovers_without_operator_submission Atoms);

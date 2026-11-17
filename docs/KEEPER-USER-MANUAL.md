@@ -982,6 +982,11 @@ Arrange a provider or transport that accepts the full input, then explicitly
 change the completed-history Addon's semantic configuration, such as its
 declaration's `run_id`, and apply that configuration. This permits a fresh
 request under the current authority checks; it does not prove improved capacity.
+One installation serves every Keeper, so the change reaches the other Keepers'
+requests too. A completed-history request that its worker already holds and
+the host has not run ends as not allowed once the replacement worker is
+attached. Its Keeper then reads the same range again under the new
+configuration, whole, without waiting for another turn.
 Changing only the provider registry, a comment or `enabled` does not authorize
 retry. Returning to an already-refused configuration remains stopped while
 that original range is relevant. A later actual Memory-backed reader frontier

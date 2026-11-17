@@ -452,7 +452,12 @@ type call_outcome =
 
 type execution_result = { outcome : call_outcome; receipt : Keeper_exact_walk_receipt.t }
 type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
-type dispatch_guard = unit -> (unit, string) result
+type dispatch_veto = Not_now of { detail : string } | Declaration_replaced
+type dispatch_guard = unit -> (unit, dispatch_veto) result
+let declaration_replaced_reason = "the declaration this request was captured for has been replaced"
+let dispatch_veto_detail = function
+  | Not_now { detail } -> detail
+  | Declaration_replaced -> declaration_replaced_reason
 type dispatch = Measurement | Generation
 type runner = before_dispatch:(dispatch -> (unit, string) result) ->
   admission_class:Agent_core.Llm_provider.Admission_class.t ->
@@ -1340,7 +1345,18 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         | None, Some attempt -> Ok attempt
         | None, None -> authorization.with_execution (fun () ->
           Eio.Fiber.check ();
-          let* ()=authorization.before_dispatch () in
+          match authorization.before_dispatch () with
+          | Error Declaration_replaced ->
+            (* The request has no result and no open attempt, and no later run
+               can be granted under the declaration it was captured for. End
+               it; its consumer asks again under the declaration of now. *)
+            deny declaration_replaced_reason
+          | Error (Not_now {detail}) -> Error detail
+          | Ok () ->
+          (* Inside the walk either veto only stops it. The stopped attempt
+             stays deferred and the next run reads the veto at the start. *)
+          let guard_walk () =
+            authorization.before_dispatch () |> Result.map_error dispatch_veto_detail in
           (* The started marker says a generation request may have reached a
              provider, or that a call which sent none is publishing its
              proof. It is written when the call reaches its first generation
@@ -1355,13 +1371,13 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
               | Ok () -> started := true; marker_failure := None; Ok ()
               | Error detail -> marker_failure := Some detail; Error detail in
           let before_dispatch = function
-            | Measurement -> authorization.before_dispatch ()
+            | Measurement -> guard_walk ()
             | Generation ->
               let* () = mark_started () in
               (* The save yields. A retiring incarnation must not send after
                  it returns. A cancelled started attempt remains unknown. *)
               Eio.Fiber.check ();
-              authorization.before_dispatch () in
+              guard_walk () in
           match runner ~before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema
                   ~size_refused:(size_refused_slots ~schema proofs) request with
           | Error unavailable ->

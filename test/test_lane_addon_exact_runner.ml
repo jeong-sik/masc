@@ -1308,10 +1308,12 @@ let test_http_flow_preserves_host_admission_class ?(revoke_while_queued=false) a
     let permitted=ref true and dispatch_checks=ref 0 and guarded=ref [] in
     let authorization : Exact.request_authorization =
       {admission_class; before_dispatch=(fun () -> incr dispatch_checks;
-          if !permitted then Ok () else Error "original configuration changed while awaiting admission");
+          if !permitted then Ok ()
+          else Error (Exact.Not_now {detail="original configuration changed while awaiting admission"}));
        with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let call=match Server_lane_addon_exact.runner ~base_path
-        ~before_dispatch:(fun dispatch -> guarded:=dispatch::!guarded; authorization.before_dispatch ())
+        ~before_dispatch:(fun dispatch -> guarded:=dispatch::!guarded;
+          authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail)
         ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema ~size_refused:[] original with
       | Ok call -> call | Error _ -> fail "actual HTTP runner refused the fixture lane" in
     let validate raw=match Exact.validate_answer ~output:(List.hd package.exact_outputs) original raw with
@@ -1366,7 +1368,8 @@ let test_returned_answer_survives_dispatch_authority_change () =
     publish ~base_path [{F.id="original";base_url=server.base_url}];
     let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
       Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
-        before_dispatch=(fun () -> if !permitted then Ok () else Error "configuration changed");
+        before_dispatch=(fun () -> if !permitted then Ok ()
+          else Error (Exact.Not_now {detail="configuration changed"}));
         with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let original=request "returned-before-reconfiguration" in
     let execute ()=get (Exact.run ~store ~declaration_id ~package ~authorize_request
@@ -1386,7 +1389,8 @@ let test_cli_dispatch_veto_never_advances () =
     let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
       Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
         before_dispatch=(fun () -> incr checks;
-          if !checks=2 then Error "original configuration changed before CLI" else Ok ());
+          if !checks=2 then Error (Exact.Not_now {detail="original configuration changed before CLI"})
+          else Ok ());
         with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let cli_runner : Keeper_lane_cli_oneshot.runner =
       fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
@@ -1407,6 +1411,34 @@ let test_cli_dispatch_veto_never_advances () =
     check int "the allowed run sends once" 1 !calls;
     check bool "the retained answer is delivered" true (Option.is_some (answered_by (execute ())));
     check int "delivery does not send again" 1 !calls)
+
+(* Inside a walk a replaced declaration only stops the walk. The request ends
+   when the next run reads the same veto before it starts an execution. *)
+let test_a_replaced_declaration_stops_a_cli_walk_and_ends_the_request_on_the_next_run () =
+  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ~store ->
+    publish ~base_path ~cli_slots:[F.cli_primary_runtime;F.cli_secondary_runtime] [];
+    let checks=ref 0 and calls=ref 0 in
+    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+      Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
+        before_dispatch=(fun () -> incr checks;
+          if !checks=1 then Ok () else Error Exact.Declaration_replaced);
+        with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
+    let cli_runner : Keeper_lane_cli_oneshot.runner =
+      fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+        incr calls;Ok (Yojson.Safe.to_string question) in
+    let original=request "cli-walk-replaced-declaration" in
+    let execute ()=get (Exact.run ~store ~declaration_id ~package ~authorize_request
+      ~runner:(Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner) original) in
+    (match execute () with
+     | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> ()
+     | Exact.Final _ | Exact.Not_final _ ->
+       fail "a veto before a CLI dispatch stops the walk and leaves the request open");
+    (match execute () with
+     | Exact.Final (Exact.Not_allowed _) -> ()
+     | Exact.Final _ | Exact.Not_final _ ->
+       fail "the next run ends the request whose declaration was replaced");
+    check int "no CLI slot was ever sent to" 0 !calls;
+    check int "the guard was asked at the first start, before the slot, and at the second start" 3 !checks)
 
 let test_cli_stop_before_dispatch_receipt () =
   let module Receipt = Keeper_exact_walk_receipt in
@@ -1633,6 +1665,8 @@ let () =
             (test_http_flow_preserves_host_admission_class ~revoke_while_queued:true Agent_core.Llm_provider.Admission_class.Background)
         ; test_case "returned output survives later configuration changes" `Quick test_returned_answer_survives_dispatch_authority_change
         ; test_case "a CLI authority veto sends nothing and leaves the request open" `Quick test_cli_dispatch_veto_never_advances
+        ; test_case "a replaced declaration stops a CLI walk and ends the request on the next run" `Quick
+            test_a_replaced_declaration_stops_a_cli_walk_and_ends_the_request_on_the_next_run
         ; test_case "a CLI stop before dispatch keeps its visit order" `Quick test_cli_stop_before_dispatch_receipt
         ; test_case "an answer that matches the schema is answered" `Quick test_an_answer_that_matches_the_schema_is_answered
         ; test_case "original response observations follow each visit" `Quick test_original_response_observations_are_bound_to_each_visit

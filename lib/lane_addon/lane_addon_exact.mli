@@ -234,10 +234,30 @@ type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_re
     declared schema. Raising other than [Eio.Cancel.Cancelled] is recorded as
     [Outcome_unknown]. *)
 
-type dispatch_guard = unit -> (unit, string) result
+type dispatch_veto =
+  | Not_now of { detail : string }
+      (** The authority cannot be confirmed now: the declaration is off or
+          unreadable, no worker is attached for it yet, or the owner's own
+          check failed. Nothing is written and the request stays listed. *)
+  | Declaration_replaced
+      (** The declaration the request was captured for has been replaced. A
+          complete fresh reading names exactly one enabled declaration of the
+          request's installation and package, exactly one live worker is
+          attached for the revision that declaration has now, and that
+          revision is not the request's. No later run can grant the request. *)
+
+val dispatch_veto_detail : dispatch_veto -> string
+(** The veto as text, for a log line or a caller that only stops. *)
+
+type dispatch_guard = unit -> (unit, dispatch_veto) result
 (** Fresh execution authority, checked before each actual provider/measurement
-    dispatch. An error stops the walk; it never invalidates an answer already
-    returned by a provider. Not used for local retained terminal observation. *)
+    dispatch. A veto stops the walk; it never invalidates an answer already
+    returned by a provider. Not used for local retained terminal observation.
+    {!run} reads which veto it is only where it would start an execution: the
+    request has no result and no open attempt. [Declaration_replaced] there
+    ends the request as [Not_allowed] and [Not_now] leaves it listed. Inside a
+    walk either veto only stops the walk; the stopped attempt stays deferred
+    and the next run reads the veto at its start. *)
 
 type dispatch = Measurement | Generation
 (** What a call is about to send. [Measurement] is a token-count request: it
@@ -305,7 +325,8 @@ type execution_authority =
     authorization is not serialized into the worker request or a durable
     admission-class audit.
     [before_dispatch] is execution-only: an initial refusal occurs before the
-    started marker, later guard vetoes stop the actual walk. Retained terminal
+    started marker, later guard vetoes stop the actual walk. An initial
+    [Declaration_replaced] ends the request as [Not_allowed]. Retained terminal
     replay uses only original validation and never invokes this guard. *)
 
 module Retained_key : sig

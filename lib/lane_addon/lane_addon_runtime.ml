@@ -636,35 +636,46 @@ let live_reading m access =
   { ready = List.rev ready; unready = List.rev unready }
 
 let authorize_captured_exact_dispatch ~store ~declaration_id ~package_id ~configuration_revision =
+  let not_now detail = Error (Lane_addon_exact.Not_now { detail }) in
   Eio_context.run_on_owner_domain (fun () ->
-    let* m=match Hashtbl.find_opt managers (Lane_addon_store.root store) with
-      | Some m -> Ok m | None -> Error "Original Add-on Runtime owner is unavailable" in
+    match Hashtbl.find_opt managers (Lane_addon_store.root store) with
+    | None -> not_now "Original Add-on Runtime owner is unavailable"
+    | Some m ->
     (* Host cycles already belong to their entry. Re-entering action_mutex can
        deadlock an RPC that is awaiting that cycle. The configuration serializer
        is sufficient for this local admission; release it before provider I/O. *)
     Eio.Mutex.use_ro m.configuration_mutex (fun () ->
-      let* directory=match m.configuration_status with
-        | Some reading -> Ok reading.directory
-        | None -> Error "Original Add-on configuration has not been observed" in
-      let snapshot=offload (fun () -> Lane_addon_config.load ~directory) in
-      let* ()=if snapshot.complete then Ok ()
-        else Error "Original Exact dispatch requires a complete fresh Add-on configuration" in
-      let* declaration=match List.filter (fun (d : Lane_addon_config.declaration) ->
+      match m.configuration_status with
+      | None -> not_now "Original Add-on configuration has not been observed"
+      | Some reading ->
+      let snapshot=offload (fun () -> Lane_addon_config.load ~directory:reading.directory) in
+      if not snapshot.complete
+      then not_now "Original Exact dispatch requires a complete fresh Add-on configuration"
+      else
+      match List.filter (fun (d : Lane_addon_config.declaration) ->
           d.id=declaration_id) snapshot.declarations with
-        | [d] when d.enabled && d.revision=configuration_revision && d.package.id=package_id -> Ok d
-        | [] | [_] | _::_::_ -> Error "Original Exact semantic configuration no longer permits dispatch" in
+      | [] | _::_::_ -> not_now "Original Exact semantic configuration no longer permits dispatch"
+      | [declaration] ->
+      if not (declaration.enabled && declaration.package.id=package_id)
+      then not_now "Original Exact semantic configuration no longer permits dispatch"
+      else
+      (* The worker attached for the declaration as it reads now. A file that
+         was edited and not yet reconciled has none: the request waits. *)
       let live=List.filter (fun (e : entry) ->
         not e.stopping && Option.is_some e.connection
         && (match e.configuration with
           | Some owner -> owner.id=declaration_id && owner.source_path=declaration.source_path
-            && owner.revision=configuration_revision
+            && owner.revision=declaration.revision
           | None -> false)
         (* Last: it serializes both packages, so it runs only for an entry the
            identity checks above already selected. *)
         && same_execution_package declaration.package e.package) (entries m) in
       match live with
-      | [_] -> Eio.Fiber.check (); Ok ()
-      | [] | _::_::_ -> Error "Original Exact configured incarnation is unavailable or ambiguous"))
+      | [] | _::_::_ -> not_now "Original Exact configured incarnation is unavailable or ambiguous"
+      | [_] ->
+        if declaration.revision=configuration_revision
+        then (Eio.Fiber.check (); Ok ())
+        else Error Lane_addon_exact.Declaration_replaced))
 let status_coverage e = {
   source_id = e.instance_id; incarnation = e.instance_id;
   cursor = Some (string_of_int e.seq);

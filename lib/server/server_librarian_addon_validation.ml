@@ -8,6 +8,7 @@ module Namespace = Keeper_librarian_request_namespace
 open Result.Syntax
 let io work = Systhread_host.run work
 let undecided detail = Exact.Undecided {detail}
+let not_now detail = Exact.Not_now {detail}
 let load_original ~store ~scope ~request_id =
   let* record = Owner.load ~store ~scope ~request_id
     |> Result.map_error (fun error -> undecided (Owner.error_to_string error)) in
@@ -49,7 +50,8 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
           let* ()=History.confirm_record capture fresh in
           let* ()=Keeper_librarian_history_resolution_lineage.recheck_predecessors ~store ~require_confirmed:true capture predecessors in
-          Keeper_librarian_runtime.require_counterpart_template (History.preparation capture)) in
+          Keeper_librarian_runtime.require_counterpart_template (History.preparation capture))
+          |> Result.map_error not_now in
         Lane_addon_runtime.authorize_captured_exact_dispatch ~store ~declaration_id
           ~package_id:destination.package_id ~configuration_revision:destination.configuration_revision);
       with_execution=(fun run ->
@@ -88,7 +90,8 @@ let authorize_floor_step ~base_path ~store ~declaration_id ~(package:Lane_addon_
           let* fresh=Option.to_result ~none:"Original floor step disappeared before provider dispatch" fresh in
           let* actual=Step.observe_record_owner ~base_path ~keepers_dir fresh in
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
-          Keeper_librarian_runtime.require_counterpart_template (Step.step step).preparation) in
+          Keeper_librarian_runtime.require_counterpart_template (Step.step step).preparation)
+          |> Result.map_error not_now in
         Lane_addon_runtime.authorize_captured_exact_dispatch ~store ~declaration_id
           ~package_id:destination.package_id ~configuration_revision:destination.configuration_revision);
       with_execution=(fun run ->
@@ -134,10 +137,18 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
             let* fresh=match fresh with Some fresh -> Ok fresh
               | None -> Error "Original Librarian request disappeared before provider dispatch" in
             let* actual=Capture.observe_record_owner ~base_path ~keepers_dir fresh in
-            Capture.owner_matches_json actual (Capture.owner_to_json owner)) in
-          Lane_addon_runtime.authorize_captured_exact_dispatch
+            Capture.owner_matches_json actual (Capture.owner_to_json owner))
+            |> Result.map_error not_now in
+          (* An admission part carries its destination, so nothing re-creates
+             a part the host ends. It waits under a replaced declaration, as
+             it did before the veto had two cases. *)
+          match Lane_addon_runtime.authorize_captured_exact_dispatch
             ~store ~declaration_id ~package_id:destination.package_id
-            ~configuration_revision:destination.configuration_revision);
+            ~configuration_revision:destination.configuration_revision with
+          | Ok () -> Ok ()
+          | Error (Exact.Not_now _ as veto) -> Error veto
+          | Error Exact.Declaration_replaced ->
+            Error (not_now Exact.(dispatch_veto_detail Declaration_replaced)));
         with_execution=(fun run ->
           match Keeper_memory_lane.with_external_effect ~base_path ~keeper_name:(Capture.keeper_id owner) run with
           | Ok result -> result

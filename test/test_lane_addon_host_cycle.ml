@@ -220,6 +220,8 @@ let test_original_exact_semantic_dispatch_authority () =
     let guard ()=Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:original.id
       ~package_id:original.package.id ~configuration_revision:original.revision in
     await clock (fun () -> Result.is_ok (guard ()));
+    let waits = function Error (Exact.Not_now _) -> true | Ok () | Error Exact.Declaration_replaced -> false in
+    let replaced = function Error Exact.Declaration_replaced -> true | Ok () | Error (Exact.Not_now _) -> false in
     let live_instances () =
       Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Inspect (`Assoc [])
       |> Result.map_error Runtime.error_to_string |> unwrap
@@ -232,10 +234,12 @@ let test_original_exact_semantic_dispatch_authority () =
     check bool "raw-source formatting does not change original dispatch authority" true (Result.is_ok (guard ()));
     write source ("enabled=false\n" ^ declaration);
     check bool "Off forbids new provider effects before reconciliation" true (Result.is_error (guard ()));
+    check bool "Off is not a replacement: the original waits" true (waits (guard ()));
     write source declaration;
     check bool "On restores the same semantic original" true (Result.is_ok (guard ()));
     write source ("id=\"quiz\"\nrun_id=\"changed-world\"\nmanifest_path=\"../../package.toml\"\n[binding]\nsources=[]\n");
     check bool "a pending original cannot dispatch under a new semantic revision" true (Result.is_error (guard ()));
+    check bool "an edited file with no worker attached for it is not yet a replacement" true (waits (guard ()));
     ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
     let changed=match (Lane_addon_config.load ~directory).declarations with
       | [d] -> d | [] | _::_::_ -> fail "one replacement declaration" in
@@ -246,11 +250,15 @@ let test_original_exact_semantic_dispatch_authority () =
     await clock (fun () -> not (List.exists (fun instance ->
       text "instance_id" instance = original_instance_id) (live_instances ())));
     check bool "a replacement declaration alone grants no provider authority" true (Result.is_error (changed_guard ()));
+    check bool "between retirement and attachment the old original waits" true (waits (guard ()));
     ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
     await clock (fun () -> Result.is_ok (changed_guard ()));
     check bool "the replacement worker cannot execute the old original" true (Result.is_error (guard ()));
+    check bool "once the replacement worker is attached the old original's declaration is replaced" true
+      (replaced (guard ()));
     write source "invalid TOML = [";
     check bool "an incomplete fresh read grants no dispatch" true (Result.is_error (guard ()));
+    check bool "an unreadable file is not a replacement" true (waits (guard ()));
     write source declaration)
 
 (* Review 5612102961: a submit that lands between the retirement of one
@@ -732,7 +740,8 @@ let test_category_edit_preserves_original_export_and_worker () =
       (match Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:after.id
           ~package_id:after.package.id ~configuration_revision:after.revision with
        | Ok () -> ()
-       | Error detail -> fail ("category edit revoked the original Exact dispatch: " ^ detail));
+       | Error veto ->
+         fail ("category edit revoked the original Exact dispatch: " ^ Exact.dispatch_veto_detail veto));
       let updated = Option.to_result ~none:"category rewrite lost the original export" (current ()) |> unwrap in
       check string "navigation edit preserves the live incarnation" original.instance_id updated.instance_id;
       check bool "navigation edit preserves the exact tool owner" true
@@ -822,7 +831,8 @@ let test_schema_key_order_edit_preserves_original_export_and_worker () =
       (match Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:after.id
           ~package_id:after.package.id ~configuration_revision:after.revision with
        | Ok () -> ()
-       | Error detail -> fail ("schema key order revoked the original Exact dispatch: " ^ detail));
+       | Error veto ->
+         fail ("schema key order revoked the original Exact dispatch: " ^ Exact.dispatch_veto_detail veto));
       let updated = Option.to_result ~none:"schema rewrite lost the original export" (current ()) |> unwrap in
       check string "key order keeps the live incarnation" original.instance_id updated.instance_id;
       admit (); call ();

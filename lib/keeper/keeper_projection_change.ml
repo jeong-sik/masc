@@ -185,8 +185,8 @@ let digest_request ~seen ~tools ~messages =
          let digest =
            { role = message.Agent_core.Types.role
            ; bytes =
-               String.length payload.Keeper_provider_input_snapshot.payload_bytes
-           ; sha256 = payload.Keeper_provider_input_snapshot.payload_sha256
+               String.length (Keeper_provider_input_snapshot.payload_bytes payload)
+           ; sha256 = Keeper_provider_input_snapshot.payload_sha256 payload
            }
          in
          Message_digest_memo.add local_messages message digest;
@@ -202,8 +202,8 @@ let digest_request ~seen ~tools ~messages =
        | Some sha256 -> sha256
        | None ->
          let sha256 =
-           (Keeper_provider_input_snapshot.tool_schema_payload tool)
-             .Keeper_provider_input_snapshot.payload_sha256
+           Keeper_provider_input_snapshot.tool_schema_payload tool
+           |> Keeper_provider_input_snapshot.payload_sha256
          in
          Tool_digest_memo.add local_tools schema sha256;
          fresh := Fresh_tool (schema, sha256) :: !fresh;

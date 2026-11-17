@@ -403,15 +403,13 @@ let latest_snapshot_for_reuse store =
    digest is a C routine that does not yield, and a turn's snapshot hashes
    every message in the request; until 2026-09-05 that ran on the main
    domain once per turn (RFC main-domain-scheduler-latency section 8.8). *)
-type payload =
-  { payload_bytes : string
-  ; payload_sha256 : string
-  }
+type payload = Tool_blob_store.prepared_payload
+
+let payload_bytes = Tool_blob_store.prepared_bytes
+let payload_sha256 = Tool_blob_store.prepared_sha256
 
 let payload_of_string payload_bytes =
-  { payload_bytes
-  ; payload_sha256 = Agent_core_sha256.(digest_string payload_bytes |> to_hex)
-  }
+  Tool_blob_store.prepare_payload ~bytes:payload_bytes
 ;;
 
 let message_payload (message : Agent_core.Types.message) =
@@ -428,14 +426,15 @@ let tool_schema_payload (tool : Agent_core.Tool.t) =
   |> payload_of_string
 ;;
 
-let store_artifact store ~reusable ~mime { payload_bytes = bytes; payload_sha256 = sha256 } =
-  let bytes_length = String.length bytes in
+let store_artifact store ~reusable ~mime payload =
+  let bytes_length = String.length (payload_bytes payload) in
+  let sha256 = payload_sha256 payload in
   match Artifact_map.find_opt (sha256, mime) reusable with
   | Some artifact when artifact.art_bytes = bytes_length -> artifact, reusable
   | Some _ | None ->
     let reference =
       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        Tool_blob_store.put_durable_reuse store ~bytes ~mime)
+        Tool_blob_store.put_prepared_durable_reuse store ~payload ~mime)
     in
     let reference = Tool_output.with_preview reference "" in
     let artifact =

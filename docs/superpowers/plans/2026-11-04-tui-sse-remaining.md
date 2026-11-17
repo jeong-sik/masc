@@ -10,6 +10,22 @@
 
 **Spec:** `docs/rfc/RFC-0480-tui-reads-when-the-server-says-something-changed.md` §4.1 and `docs/rfc/RFC-machine-spectating-goes-through-lanes.md`.
 
+## Status (2026-11-17)
+
+The code of Tasks 1, 2 and 4 is on main; the unchecked measurement and
+commit steps below were not recorded here and stay unchecked.
+
+- Task 1 landed as `lib/server/server_memory_health_broadcast.ml` (per-Keeper
+  row cache cleared before the announcement, #50858, #52206), not the
+  `server_memory_health_runtime` module named below.
+- Task 2 is `lib/server/server_skill_usage_runtime.ml`.
+- Task 3: browser and MSX reads are owed by observations (`browser_observation_owed`,
+  `msx_live_owed`). The receiving half of the old MSX tick protocol stayed in
+  `bin/masc_tui.ml` with nothing sending it; the stack after #52635 removes it.
+- Task 4: #48677 removed the shared cadence and `--refresh`. Background reads go
+  through `bin/masc_tui_owed_read.ml`, where time only re-triggers a read that
+  already failed.
+
 ## Global Constraints
 
 - No polling fallback, new environment variable, full-ledger reread per notification, or screen-wording test.

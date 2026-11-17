@@ -1117,6 +1117,55 @@ let test_inventory_observation_rejects_mixed_parent_and_bad_scope () = with_fixt
   check int "corrupt inventory cannot trigger a fresh provider call" posts (F.post_count fixture.server);
   check bool "corrupt inventory preserves source acknowledgements" true (progress fixture=positions))
 
+let test_librarian_transcript_refuses_foreign_approval_facts () = with_fixture (fun ~sw:_ fixture ->
+  let module Approval = Lane_addon_request_approval in
+  let module Fingerprint = Keeper_approval_request_fingerprint in
+  drive_advanced fixture;
+  let _,capture = only_original fixture in
+  let owner = Capture.physical_owner capture in
+  let gate = match gate_records fixture capture with
+    | [gate] -> gate | [] | _ :: _ :: _ -> fail "expected one complete original gate" in
+  let posts = F.post_count fixture.server and positions = progress fixture in
+  memory_action fixture (fun () ->
+    io (fun () ->
+      Gate.validate ~store:fixture.store ~owner ~capture ~record:gate |> get;
+      let exact = Fingerprint.exact_request ~base_path:fixture.base_path ~keeper_name
+          ~operation:"fixture_media_read" ~input:(`Assoc ["source",`String "foreign media approval"])
+          ~origin:Keeper_approval_origin.unavailable ~task_id:None ~goal_id:None
+          ~continuation_channel:(Keeper_continuation_channel.unrouted "foreign approval fixture") |> get in
+      let intent = Approval.intent ~request_id:gate.request_id ~request_digest:gate.request_digest
+          ~request:exact |> get in
+      let wait = Approval.wait intent ~approval_id:"foreign-media-approval"
+          ~input_hash:(Fingerprint.input_hash exact) |> get in
+      let prefix = Progress.append Progress.captured (Progress.Approval_intended intent) |> get in
+      let prefix = Progress.append prefix (Progress.Approval_wait_retained wait) |> get in
+      let with_foreign = List.fold_left (fun state event ->
+        Result.bind state (fun state -> Progress.append state event))
+          (Ok prefix) (Progress.events gate.progress) |> get in
+      let metadata = match Owner.to_json gate with
+        | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+            key, if key="progress" then Progress.to_json with_foreign else value) fields)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+          fail "owner metadata is not an object" in
+      Store.save_tool_request_owner fixture.store ~scope:gate.scope ~request_id:gate.request_id
+        (Lane_addon_action.canonical metadata |> get) |> get;
+      let changed = match Owner.load ~store:fixture.store ~scope:gate.scope ~request_id:gate.request_id |> owned with
+        | Some record -> record | None -> fail "foreign event erased the original gate" in
+      check string "generic restore keeps the real gate body digest" gate.request_digest changed.request_digest;
+      check json "generic restore keeps the complete gate request" gate.request changed.request;
+      check bool "generic fold preserves the completed phase" true
+        (Progress.phase changed.progress=Progress.phase gate.progress);
+      check bool "generic fold accepts the well-formed foreign approval link" true
+        (match Progress.approval changed.progress with
+         | Some (Progress.Waiting_for_approval (seen,linked)) ->
+           Approval.equal_intent intent seen && Approval.equal_wait wait linked
+         | None | Some (Progress.Intent_pending _) -> false);
+      check (result unit string) "the actual Librarian transcript rejects approval facts"
+        (Error "Unexpected event in original gate journal")
+        (Gate.validate ~store:fixture.store ~owner ~capture ~record:changed)));
+  check int "read-only validation makes no further provider call" posts (F.post_count fixture.server);
+  check bool "read-only validation preserves source acknowledgement" true (progress fixture=positions))
+
 (* A gate request and the parent's publication intent name the parent by ID
    and body digest, so the history body is stored once. The earlier shape
    carried a copy of the parent and has no reader. *)
@@ -7651,6 +7700,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_inventory_observation_reuses_verified_inputs;
   test_case "inventory observation rejects mixed parents and unrelated malformed gates" `Quick
     test_inventory_observation_rejects_mixed_parent_and_bad_scope;
+  test_case "Librarian transcript rejects otherwise valid foreign approval facts" `Quick
+    test_librarian_transcript_refuses_foreign_approval_facts;
   test_case "a gate request names its parent by digest instead of copying it" `Quick
     test_gate_request_names_its_parent_by_digest;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);

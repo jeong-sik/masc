@@ -192,6 +192,7 @@ let advance_events_with ~publish ~store retained events =
   | Ok (Owner.Unconfirmed detail) -> Error (Load_store_unavailable
       ("verifier progress publication unconfirmed; restore original before any effect: " ^ detail))
   | Ok (Owner.Already_stored _) when List.exists (function Progress.Dispatch_intended -> true
+      | Approval_intended _ | Approval_wait_retained _
       | Admission_declined _ | Execution_observed _ | Judgment_retained _
       | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
       | Replacement_observed _ | Commit_intended _ | Commit_uncertain _

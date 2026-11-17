@@ -755,7 +755,184 @@ let test_staged_successor_input_survives_publication_cuts () = with_store (fun r
   Alcotest.(check bool) "a digest cannot address an arbitrary path" true
     (Result.is_error (Store.load_tool_request_body store ~scope:child_scope ~request_digest:"../outside")))
 
+module Approval = Lane_addon_request_approval
+module Fingerprint = Keeper_approval_request_fingerprint
+
+let approval_intent ?(original_id=request_id) ?(input=request) () =
+  let exact = get (Fingerprint.exact_request
+    ~base_path:"/workspace/approval-progress" ~keeper_name:"approval-progress"
+    ~operation:"fixture_media_read" ~input ~origin:Keeper_approval_origin.unavailable
+    ~task_id:None ~goal_id:None
+    ~continuation_channel:(Keeper_continuation_channel.unrouted "progress fixture")) in
+  get (Approval.intent ~request_id:original_id
+    ~request_digest:(get (Owner.request_digest request)) ~request:exact)
+
+let approval_wait intent approval_id =
+  get (Approval.wait intent ~approval_id
+    ~input_hash:(Fingerprint.input_hash (Approval.request intent)))
+
+let same_approval left right =
+  match left,right with
+  | None,None -> true
+  | Some (Progress.Intent_pending a),Some (Progress.Intent_pending b) ->
+    Approval.equal_intent a b
+  | Some (Progress.Waiting_for_approval (a,aw)),Some (Progress.Waiting_for_approval (b,bw)) ->
+    Approval.equal_intent a b && Approval.equal_wait aw bw
+  | None,Some (Progress.Intent_pending _ | Progress.Waiting_for_approval _)
+  | Some (Progress.Intent_pending _ | Progress.Waiting_for_approval _),None
+  | Some (Progress.Intent_pending _),Some (Progress.Waiting_for_approval _)
+  | Some (Progress.Waiting_for_approval _),Some (Progress.Intent_pending _) -> false
+
+let fold_progress history =
+  get (List.fold_left (fun state event ->
+    Result.bind state (fun state -> Progress.append state event)) (Ok Progress.captured) history)
+
+let test_approval_facts_survive_restart_and_lost_ack () = with_store (fun root store ->
+  owned (retain store);
+  let original = load store in
+  let intent = approval_intent () in
+  let intended = stored store original (Progress.Approval_intended intent) in
+  let reopened = load (Store.create ~root) in
+  Alcotest.(check bool) "intent is orthogonal to Captured" true
+    (Progress.phase reopened.progress=Progress.Captured
+     && same_approval (Progress.approval reopened.progress) (Some (Progress.Intent_pending intent)));
+  (match updated (advance store original (Progress.Approval_intended intent)) with
+   | Owner.Already_stored record -> check_events "lost intent ACK restores the exact tail" (events intended) record
+   | Owner.Stored _ | Owner.Unconfirmed _ -> Alcotest.fail "lost intent ACK created a second fact");
+  let wait = approval_wait intent "approval-original" in
+  let waiting = stored store reopened (Progress.Approval_wait_retained wait) in
+  let waiting_again = load (Store.create ~root) in
+  Alcotest.(check bool) "wait retains exact intent and link without admission phase" true
+    (Progress.phase waiting_again.progress=Progress.Captured
+     && same_approval (Progress.approval waiting_again.progress)
+          (Some (Progress.Waiting_for_approval (intent,wait))));
+  (match updated (advance store reopened (Progress.Approval_wait_retained wait)) with
+   | Owner.Already_stored record -> check_events "lost wait ACK restores the exact tail" (events waiting) record
+   | Owner.Stored _ | Owner.Unconfirmed _ -> Alcotest.fail "lost wait ACK created a second link");
+  invalid store waiting_again (Progress.Approval_intended intent);
+  invalid store waiting_again (Progress.Approval_wait_retained wait);
+  let changed = approval_wait intent "approval-replacement" in
+  (match advance store reopened (Progress.Approval_wait_retained changed) with
+   | Error Owner.State_conflict -> ()
+   | Error (Owner.Ownership_error _ | Owner.Invalid_transition _)
+   | Ok (Owner.Stored _ | Owner.Already_stored _ | Owner.Unconfirmed _) ->
+     Alcotest.fail "a lost ACK rebound the original approval ID");
+  owned (retain (Store.create ~root));
+  check_events "idempotent retain preserves both approval facts" (events waiting) (load store);
+  Alcotest.check json "approval facts never rewrite original input" request waiting_again.request)
+
+let test_approval_facts_preserve_every_execution_phase () =
+  let intent = approval_intent () in
+  let wait = approval_wait intent "approval-preserved" in
+  let dispatch = [Progress.Dispatch_intended] in
+  let judged = dispatch @ [Progress.Judgment_retained judgment] in
+  let committing = judged @ [Progress.Commit_intended {before;after}] in
+  let refused = dispatch @ [Progress.Refused {stage=Progress.Execution;evidence=evidence "refused"}] in
+  let successor : Progress.successor = {request_id="original-successor";request_digest=Store.digest "child"} in
+  let histories =
+    ["captured",[];
+     "admission declined before send",dispatch @ [Progress.Admission_declined (evidence "not sent")];
+     "dispatch pending",dispatch;
+     "waiting",dispatch @ [Progress.Execution_observed (Progress.Waiting (evidence "waiting"))];
+     "unknown",dispatch @ [Progress.Execution_observed (Progress.Outcome_unknown (evidence "unknown"))];
+     "absent",dispatch @ [Progress.Execution_observed (Progress.Absent (evidence "absent"))];
+     "judged",judged;
+     "committing",committing;
+     "commit unknown",committing @ [Progress.Commit_uncertain (evidence "commit unknown")];
+     "finished",committing @ [Progress.Commit_observed after];
+     "conflicted",committing @ [Progress.Commit_conflicted (evidence "changed")];
+     "refused before dispatch",[Progress.Refused {stage=Progress.Before_dispatch;evidence=evidence "refused"}];
+     "refused execution",refused;
+     "subdividing",refused @ [Progress.Successor_intended successor];
+     "subdivided",refused @ [Progress.Successor_intended successor;Progress.Successor_observed successor.request_id]] in
+  List.iter (fun prefix ->
+    let approval = Progress.approval (fold_progress prefix) in
+    List.iter (fun (label,history) ->
+      let ordinary = fold_progress history in
+      let state = fold_progress (prefix @ history) in
+      let restored = get (Progress.of_json (Progress.to_json state)) in
+      Alcotest.(check bool) (label ^ ": approval facts preserve execution phase") true
+        (Progress.phase state=Progress.phase ordinary && Progress.phase restored=Progress.phase ordinary);
+      Alcotest.(check bool) (label ^ ": exact approval facts survive strict restore") true
+        (same_approval approval (Progress.approval state)
+         && same_approval approval (Progress.approval restored));
+      Alcotest.(check bool) (label ^ ": generic execution still requires no approval facts") true
+        (Progress.approval ordinary=None)) histories)
+    [[Progress.Approval_intended intent];
+     [Progress.Approval_intended intent;Progress.Approval_wait_retained wait]]
+
+let test_approval_order_and_rebinding_refuse () =
+  let intent = approval_intent () in
+  let wait = approval_wait intent "approval-one" in
+  let other_intent = approval_intent ~original_id:"different-original" () in
+  let other_wait = approval_wait other_intent "approval-other" in
+  let intended = fold_progress [Progress.Approval_intended intent] in
+  let linked = fold_progress [Progress.Approval_intended intent;Progress.Approval_wait_retained wait] in
+  let refuse state event = match Progress.append state event with
+    | Error _ -> () | Ok _ -> Alcotest.fail "invalid approval order or rebind accepted" in
+  refuse Progress.captured (Progress.Approval_wait_retained wait);
+  refuse intended (Progress.Approval_intended intent);
+  refuse intended (Progress.Approval_intended other_intent);
+  refuse intended (Progress.Approval_wait_retained other_wait);
+  let wrong_hash = Store.digest "a different approval input" in
+  Alcotest.(check bool) "fixture changes only the wait input hash" false
+    (String.equal wrong_hash (Approval.wait_input_hash wait));
+  let mismatched = get (Approval.wait_of_json
+    (replace "input_hash" (`String wrong_hash) (Approval.wait_to_json wait))) in
+  Alcotest.(check string) "a well-formed unbound wait keeps the original intent digest"
+    (Approval.intent_digest intent) (Approval.wait_intent_digest mismatched);
+  refuse intended (Progress.Approval_wait_retained mismatched);
+  refuse linked (Progress.Approval_wait_retained wait);
+  refuse linked (Progress.Approval_wait_retained (approval_wait intent "approval-two"));
+  let later =
+    [[Progress.Dispatch_intended];
+     [Progress.Dispatch_intended;Progress.Admission_declined (evidence "definitely not sent")];
+     [Progress.Dispatch_intended;Progress.Execution_observed (Progress.Outcome_unknown (evidence "unknown"))];
+     [Progress.Refused {stage=Progress.Before_dispatch;evidence=evidence "refused"}]] in
+  List.iter (fun history ->
+    refuse (fold_progress history) (Progress.Approval_intended intent);
+    refuse (fold_progress (Progress.Approval_intended intent :: history))
+      (Progress.Approval_wait_retained wait)) later
+
+let test_approval_wire_refuses_malformed_or_mismatched_facts () =
+  let intent = approval_intent () in
+  let wait = approval_wait intent "approval-wire" in
+  let intent_json = Approval.intent_to_json intent in
+  let wait_json = Approval.wait_to_json wait in
+  let intended = `Assoc ["event",`String "approval_intended";"intent",intent_json] in
+  let linked = `Assoc ["event",`String "approval_wait_retained";"wait",wait_json] in
+  let other = approval_intent ~input:(evidence "different complete Gate input") () in
+  let other_link = replace "wait" (Approval.wait_to_json (approval_wait other "approval-wire")) linked in
+  let duplicate = function
+    | `Assoc ((key,value) :: fields) -> `Assoc ((key,value) :: (key,value) :: fields)
+    | `Assoc [] | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Alcotest.fail "fixture expected a nonempty approval object" in
+  let malformed =
+    [[linked];[intended;intended];[intended;linked;linked];[intended;other_link];
+     [intended;replace "wait"
+       (replace "input_hash" (`String (Store.digest "different wire input")) wait_json) linked];
+     [duplicate intended];[replace "intent" (duplicate intent_json) intended];
+     [intended;replace "wait" (duplicate wait_json) linked];
+     [`Assoc ["event",`String "approval_intended"]];
+     [intended;`Assoc ["event",`String "approval_wait_retained"]];
+     [`Assoc ["event",`String "approval_intended";"intent",intent_json;"extra",`Null]];
+     [intended;`Assoc ["event",`String "approval_wait_retained";"wait",wait_json;"extra",`Null]];
+     [replace "event" (`String "approval_invented") intended]] in
+  let valid = get (Progress.of_json (`List [intended;linked])) in
+  Alcotest.(check bool) "wire restores the same exact approval facts" true
+    (same_approval (Some (Progress.Waiting_for_approval (intent,wait))) (Progress.approval valid));
+  List.iter (fun history -> match Progress.of_json (`List history) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "malformed approval journal became valid") malformed
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
+  Alcotest.test_case "approval intent and wait survive restart and lost ACK" `Quick
+    test_approval_facts_survive_restart_and_lost_ack;
+  Alcotest.test_case "approval facts preserve every execution phase without a generic gate" `Quick
+    test_approval_facts_preserve_every_execution_phase;
+  Alcotest.test_case "approval facts require Captured and cannot rebind" `Quick
+    test_approval_order_and_rebinding_refuse;
+  Alcotest.test_case "approval journal strictly decodes immutable facts" `Quick
+    test_approval_wire_refuses_malformed_or_mismatched_facts;
   Alcotest.test_case "staged successor body survives intent/record/ACK cuts and rejects corruption" `Quick
     test_staged_successor_input_survives_publication_cuts;
   Alcotest.test_case "conflicted replacement survives actual partial child publication and lost ACK" `Quick

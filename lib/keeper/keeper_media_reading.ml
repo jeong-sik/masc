@@ -1,4 +1,4 @@
-type kind =
+type kind = Media_reading_kind.t =
   | Audio
   | Document
 

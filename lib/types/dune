@@ -13,6 +13,7 @@
   turn_input_provenance
   runtime_attempt_dispatch
   model_input_front
+  media_reading_kind
   runtime_answerer
   runtime_response_identity
   turn_record

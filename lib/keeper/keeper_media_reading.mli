@@ -2,7 +2,7 @@
     audio or document. Canonical history is never rewritten. A walk shares one
     projector across history and retained host-result consumers. *)
 
-type kind = Audio | Document
+type kind = Media_reading_kind.t = Audio | Document
 
 type reader_identity = private { id : string; revision : string }
 type identity_error = Empty_id | Empty_revision

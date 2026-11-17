@@ -137,10 +137,10 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
     let* retained=Exact.retained_final_of_json ~schema evidence in
     let final=Exact.delivered retained in
     let* ()=match retained with
-      | Exact.Retained_declaration_replaced ->
+      | Exact.Retained_not_allowed {reason=Replaced_declaration} ->
         let* ended=Capture.declaration_ended ~store capture record in
         require ended "Original admission declaration ending is unconfirmed"
-      | Retained_unknown _ | Retained_call _ | Retained_not_allowed _ | Retained_request_id_reused ->
+      | Retained_unknown _ | Retained_call _ | Retained_not_allowed {reason=Permission_refused _} | Retained_request_id_reused ->
         Capture.confirm_final ~store capture final in
     (match final with
      | Exact.Call_final (Answered _) -> Error "Original refusal contains an answered proposal"

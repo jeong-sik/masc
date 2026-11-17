@@ -409,9 +409,9 @@ let check_declaration_ending confirm capture (record:Owner.retained) =
     let* schema=Option.to_result ~none:"Original admission ending lacks its schema" exact.schema in
     let* retained=Exact.retained_final_of_json ~schema evidence in
     (match retained with
-     | Exact.Retained_declaration_replaced -> check ()
+     | Exact.Retained_not_allowed {reason=Replaced_declaration} -> check ()
      | Retained_unknown (Interrupted | Cut | Raised) | Retained_call _
-     | Retained_not_allowed _ | Retained_request_id_reused -> Ok false)
+     | Retained_not_allowed {reason=Permission_refused _} | Retained_request_id_reused -> Ok false)
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false
 let declaration_ended_with ~reads =

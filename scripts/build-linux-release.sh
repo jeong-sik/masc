@@ -284,8 +284,12 @@ docker exec "$container" bash -lc '
   # repository at the public index the macOS jobs already resolve from, then
   # refresh. Fatal on purpose: without a remote index this build cannot be shown
   # to match the lock file.
-  opam repository set-url default https://opam.ocaml.org \
-    || opam repository add default https://opam.ocaml.org
+  #
+  # git+https, not https: a tar repository is unpacked by opam, so the provenance
+  # below could not run git rev-parse inside it and would print unknown on every
+  # build. A git clone keeps the revision readable.
+  opam repository set-url default git+https://github.com/ocaml/opam-repository.git \
+    || opam repository add default git+https://github.com/ocaml/opam-repository.git
   #
   # --repositories only: a bare `opam update` also advances the branch pins
   # taken just above (compact-protocol#main, bisect_ppx#5.2), which would move a

@@ -257,6 +257,36 @@ let test_append_and_read_recent_audit () =
   check string "second newest" "rebind"
     (List.nth recent 1 |> U.member "action" |> U.to_string)
 
+let test_recent_audit_raw_rows_and_limits () =
+  with_temp_dir @@ fun dir ->
+  let store = store_for_dir dir ~guild_id_field:Store.Omit in
+  let path = Filename.concat dir "binding_audit.jsonl" in
+  let exhaustive_projection bytes limit =
+    String.split_on_char '\n' bytes
+    |> List.filter_map (fun line ->
+      let trimmed = String.trim line in
+      if String.equal trimmed "" then None
+      else try Some (Yojson.Safe.from_string trimmed) with Yojson.Json_error _ -> None)
+    |> List.rev |> List.take (max 0 limit) in
+  check int "missing audit remains empty" 0 (List.length (Store.read_recent_audit store ~limit:2));
+  List.iter (fun bytes ->
+    Fs_compat.save_file path bytes;
+    List.iter (fun limit ->
+      check bool "limited read equals exhaustive valid-row projection" true
+        (Store.read_recent_audit store ~limit = exhaustive_projection bytes limit))
+      [-1; 0; 1; 2; 20])
+    [""; "\n \t\n";
+     "1\n{bad\n{\"seq\":2}\nfalse";
+     "{\"seq\":1}\n\n\"same\"\n\"same\"\n[\"tail\"]";
+     "{\"seq\":1}\r\n0\r\nnull\r\n";
+     "{\"seq\":1}\n{\"seq\":2}\n{unfinished"];
+  Sys.remove path; Unix.mkdir path 0o700;
+  check int "nonpositive limit does not open an unreadable path" 0
+    (List.length (Store.read_recent_audit store ~limit:0));
+  (match Store.read_recent_audit store ~limit:1 with
+   | _ -> fail "directory read became an empty audit"
+   | exception (Sys_error _ | Unix.Unix_error _) -> ())
+
 (* Every committed change tells the installed observer which connector moved;
    a rejected one tells nothing (RFC-0480 §3.4). *)
 let test_committed_mutations_announce_their_connector () =
@@ -305,5 +335,7 @@ let () =
           test_case "preserves guild_id policy" `Quick test_audit_guild_id_policy;
           test_case "reads recent audit newest first" `Quick
             test_append_and_read_recent_audit;
+          test_case "raw rows and valid-row limits preserve exhaustive projection" `Quick
+            test_recent_audit_raw_rows_and_limits;
         ] );
     ]

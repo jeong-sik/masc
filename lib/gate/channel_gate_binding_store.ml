@@ -399,36 +399,25 @@ let unbind store ?expected_keeper_name ~channel_id ~actor_name () =
         in
         Ok (updated_bindings, event, ()))
 
-let rec drop_left n xs =
-  if n <= 0 then xs
-  else
-    match xs with
-    | [] -> []
-    | _ :: tl -> drop_left (n - 1) tl
-
 let read_recent_audit store ~limit =
   let path = store.binding_audit_read_path () in
   if limit <= 0 || not (Sys.file_exists path) then
     []
   else
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        let rec loop acc =
-          match input_line ic with
-          | line -> loop (line :: acc)
-          | exception End_of_file -> acc
-        in
-        loop []
-        |> List.filter_map (fun line ->
-               let trimmed = String.trim line in
-               if trimmed = "" then None
-               else
-                 try Some (Yojson.Safe.from_string trimmed) with
-                 | Yojson.Json_error _ -> None)
-        |> List.rev
-        |> fun rows ->
-        let total = List.length rows in
-        if total <= limit then List.rev rows
-        else rows |> drop_left (total - limit) |> List.rev)
+    let lines = Fs_compat.load_lines_rev_locked path in
+    let rec select remaining rows lines =
+      if remaining = 0 then List.rev rows
+      else match lines with
+      | [] -> List.rev rows
+      | line :: rest ->
+        let trimmed = String.trim line in
+        let parsed =
+          if String.equal trimmed "" then None
+          else
+            try Some (Yojson.Safe.from_string trimmed) with
+            | Yojson.Json_error _ -> None in
+        (match parsed with
+         | None -> select remaining rows rest
+         | Some row -> select (remaining - 1) (row :: rows) rest)
+    in
+    select limit [] lines

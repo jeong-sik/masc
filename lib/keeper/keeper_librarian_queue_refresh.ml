@@ -15,6 +15,15 @@ type measurement =
   }
 
 let measurements : ((string * string), measurement) Hashtbl.t = Hashtbl.create 16
+type unread_observation_owner =
+  { token : unit ref
+  ; observation : Keeper_librarian_durable_consumer.unread_observation option
+  }
+(* One scalar observation and its file witnesses per measurement key. A pass
+   receives a fresh publication token, not a busy flag; a newer pass or a
+   forget removes its authority to publish, including cancellation handlers. *)
+let unread_observations : ((string * string), unread_observation_owner) Hashtbl.t =
+  Hashtbl.create 16
 let admission_waits :
     ((string * string), Keeper_librarian_pending.admission) Hashtbl.t = Hashtbl.create 16
 let input_capacities :
@@ -168,6 +177,7 @@ let forget_measurement ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () ->
     Hashtbl.remove measurements key;
+    Hashtbl.remove unread_observations key;
     Hashtbl.remove admission_waits key;
     Hashtbl.remove input_capacities key;
     Hashtbl.remove limited_reads key;
@@ -249,27 +259,45 @@ let forget_input_capacity ~config ~keeper_name =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove input_capacities key)
 ;;
 
-let publish_measurement ~config ~keeper_name ~last_pass ~unread =
+let begin_measurement ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
-  let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
-  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace measurements key measurement);
-  !change_observer ~config ~keeper_name;
-  Keeper_memory_health_input.written
-    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    let observation = Option.bind (Hashtbl.find_opt unread_observations key)
+        (fun previous -> previous.observation) in
+    let owner = {token=ref ();observation} in
+    Hashtbl.replace unread_observations key owner;
+    owner)
 ;;
 
-let measure_unread ~config ~keeper_name =
+let publish_measurement ~owner ~config ~keeper_name ~last_pass ~unread ~observation =
+  let key = measurement_key ~config ~keeper_name in
+  let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
+  let published = Stdlib.Mutex.protect measurements_mu (fun () ->
+    match Hashtbl.find_opt unread_observations key with
+    | Some current when current.token == owner.token ->
+      Hashtbl.replace unread_observations key {owner with observation};
+      Hashtbl.replace measurements key measurement;
+      true
+    | Some _ | None -> false) in
+  if published then (
+    !change_observer ~config ~keeper_name;
+    Keeper_memory_health_input.written
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name);
+  published
+;;
+
+let measure_unread ~owner ~read_unread ~config ~keeper_name =
   try
-    match Keeper_librarian_durable_consumer.unread_turns ~config ~keeper_name with
-    | Ok unread ->
+    match read_unread owner.observation with
+    | Ok (unread, observation) ->
       clear_reported_problem ~config ~keeper_name ~site:Unread_count;
-      Some unread
+      Some unread, observation
     | Error error ->
       let detail = Keeper_librarian_durable_consumer.error_to_string error in
       if should_report_problem ~config ~keeper_name ~site:Unread_count detail
       then
         Log.Keeper.warn ~keeper_name "Librarian unread count unavailable: %s" detail;
-      None
+      None, None
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -278,7 +306,7 @@ let measure_unread ~config ~keeper_name =
     if should_report_problem ~config ~keeper_name ~site:Unread_count ("raised:" ^ detail)
     then
       Log.Keeper.warn ~keeper_name "Librarian unread count raised: %s" detail;
-    None
+    None, None
 ;;
 
 let uncommitted_pass () =
@@ -292,7 +320,8 @@ let uncommitted_pass () =
     | Ok _ | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) -> Not_committed
 ;;
 
-let run_durable_with_consumer ~config ~keeper_name ~consume =
+let run_durable_with_reader ~read_unread ~before_publish ~config ~keeper_name ~consume =
+  let owner = begin_measurement ~config ~keeper_name in
   let recovery_before = recovery_mark_snapshot () in
   let rec drain () =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
@@ -338,11 +367,11 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
   in
   try
     let last_pass = drain () in
-    let unread =
+    let unread, observation =
       match last_pass with
       | Off | Stopped Keeper_librarian_durable_consumer.Keeper_meta_absent ->
         clear_reported_problem ~config ~keeper_name ~site:Unread_count;
-        None
+        None, None
       (* Any other stop reason still leaves the current unread count
          readable, so it is measured rather than reported as a problem.
          Every error constructor is named so a new one fails this match
@@ -378,24 +407,34 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
              | Fragment_store_unreadable _
              | Fragment_line_unreadable _ ))
       | Raised _ ->
-        measure_unread ~config ~keeper_name
+        measure_unread ~owner ~read_unread ~config ~keeper_name
     in
-    publish_measurement ~config ~keeper_name ~last_pass ~unread;
-    note_recovery_wait ~config ~keeper_name ~site:Durable_history ~before:recovery_before
-      ~pending:(match last_pass with
-        | Pending _ -> true
-        | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
-        | Not_committed | Stopped _ | Raised _ -> false);
+    before_publish ();
+    if publish_measurement ~owner ~config ~keeper_name ~last_pass ~unread ~observation then
+      note_recovery_wait ~config ~keeper_name ~site:Durable_history ~before:recovery_before
+        ~pending:(match last_pass with
+          | Pending _ -> true
+          | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+          | Not_committed | Stopped _ | Raised _ -> false);
     last_pass
   with
   | Eio.Cancel.Cancelled _ as exn ->
     (* Do not run another filesystem read in the cancelled context. Replace
        any older success observation before preserving cancellation. *)
-    publish_measurement ~config ~keeper_name ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None;
+    ignore (publish_measurement ~owner ~config ~keeper_name
+      ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None ~observation:None);
     raise exn
   | exn ->
-    publish_measurement ~config ~keeper_name ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None;
+    ignore (publish_measurement ~owner ~config ~keeper_name
+      ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None ~observation:None);
     raise exn
+;;
+
+let run_durable_with_consumer ~config ~keeper_name ~consume =
+  let read_unread previous =
+    Keeper_librarian_durable_consumer.unread_turns_observed ?previous ~config ~keeper_name () in
+  run_durable_with_reader ~read_unread ~before_publish:(fun () -> ())
+    ~config ~keeper_name ~consume
 ;;
 
 let run_durable_with_commit ~config ~keeper_name ~commit =
@@ -1187,6 +1226,11 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
 ;;
 
 module For_testing = struct
+  let run_durable_with_observers ~config ~keeper_name ~consume ~on_checkpoint_load ~before_publish =
+    let read_unread previous =
+      Keeper_librarian_durable_consumer.For_testing.unread_turns_observed_with_load_observer
+        ~on_checkpoint_load ?previous ~config ~keeper_name () in
+    run_durable_with_reader ~read_unread ~before_publish ~config ~keeper_name ~consume
   let run_explicit_admission_with = run_explicit_admission_with
   let read_limit ~config ~keeper_name ~trace_id =
     Option.map (fun limited -> limited.mode) (limited_read ~config ~keeper_name ~trace_id)

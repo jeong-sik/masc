@@ -551,6 +551,113 @@ let test_observed_unread_does_not_cache_absence_or_superseded_heads () =
   expect_unobserved_zero (); expect_unobserved_zero ();
   check int "superseded state is checked afresh" 4 !loads
 
+let with_observed_queue f =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  Fun.protect ~finally:(fun () -> Queue_refresh.forget_measurement ~config ~keeper_name)
+    (fun () -> f config)
+
+let observed_queue_pending () =
+  Ok (Consumer.Pending (Masc.Keeper_librarian_pending.Publication
+    {request_id="observed-queue-original";detail="publication remains unfinished"}))
+
+let run_observed_queue ?(consume=observed_queue_pending) ?(before_publish=(fun () -> ())) config loads =
+  Queue_refresh.For_testing.run_durable_with_observers ~config ~keeper_name ~consume
+    ~on_checkpoint_load:(fun () -> incr loads) ~before_publish
+
+let check_queue_count config atoms =
+  match Queue_refresh.last_measurement ~config ~keeper_name with
+  | Some {unread=Some count;_} ->
+    check int "published atom count" atoms count.atoms;
+    check int "published official count" 0 count.official
+  | Some {unread=None;_} | None -> fail "queue did not publish an available count"
+
+let test_queue_reuses_pending_and_stopped_counts_then_discards_errors () =
+  with_observed_queue @@ fun config ->
+  let trace_id = "trace-queue-observed" in
+  let _messages = unread_fixture config trace_id in
+  let loads = ref 0 in
+  List.iter (fun _ ->
+    match run_observed_queue config loads with
+    | Queue_refresh.Pending _ -> check_queue_count config 2
+    | _ -> fail "pending source changed the phase result") [1;2];
+  ignore (run_observed_queue
+    ~consume:(fun () -> Error (Consumer.Memory_snapshot_unreadable "stopped fixture")) config loads);
+  (match Queue_refresh.last_measurement ~config ~keeper_name with
+   | Some {last_pass=Queue_refresh.Stopped (Consumer.Memory_snapshot_unreadable _);_} -> ()
+   | _ -> fail "unread observation changed the stopped phase");
+  check_queue_count config 2;
+  check int "repeated Pending and stopped observations hydrate once" 1 !loads;
+  let path = Progress.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let bytes = Fs_compat.load_file path in
+  let replace bytes = match Fs_compat.save_file_atomic path bytes with
+    | Ok () -> () | Error detail -> fail detail in
+  replace "{";
+  ignore (run_observed_queue config loads);
+  (match Queue_refresh.last_measurement ~config ~keeper_name with
+   | Some {last_pass=Queue_refresh.Pending _;unread=None;_} -> ()
+   | _ -> fail "fresh progress failure left a prior positive count visible");
+  check int "a position failure stops before checkpoint loading" 1 !loads;
+  replace bytes;
+  ignore (run_observed_queue config loads);
+  check_queue_count config 2;
+  check int "repair reloads because the failed observation discarded its witness" 2 !loads;
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key
+    (Some "false") (fun () ->
+      match run_observed_queue config loads with
+      | Queue_refresh.Off -> () | _ -> fail "disabled pass was not Off");
+  ignore (run_observed_queue config loads);
+  check int "Off discarded the previous observation" 3 !loads
+
+let test_queue_forget_prevents_late_observation_publication () =
+  with_observed_queue @@ fun config ->
+  let _messages = unread_fixture config "trace-queue-forget" in
+  let loads = ref 0 in
+  ignore (run_observed_queue config loads);
+  check int "initial count loads the checkpoint" 1 !loads;
+  ignore (run_observed_queue
+    ~before_publish:(fun () -> Queue_refresh.forget_measurement ~config ~keeper_name) config loads);
+  check int "the retiring pass had reused a verified count" 1 !loads;
+  check bool "a completed old pass cannot recreate a forgotten measurement" true
+    (Option.is_none (Queue_refresh.last_measurement ~config ~keeper_name));
+  ignore (run_observed_queue config loads);
+  check_queue_count config 2;
+  check int "a new owner cannot inherit the retired cached observation" 2 !loads
+
+let test_queue_cancellation_clears_current_but_preserves_newer_observations () =
+  with_observed_queue @@ fun config ->
+  let trace_id = "trace-queue-owner" in
+  let messages = unread_fixture config trace_id in
+  let loads = ref 0 in
+  ignore (run_observed_queue config loads);
+  let cancel () = raise (Eio.Cancel.Cancelled Exit) in
+  let expect_cancel before_publish =
+    match run_observed_queue ~before_publish config loads with
+    | _ -> fail "cancellation did not propagate"
+    | exception Eio.Cancel.Cancelled _ -> () in
+  expect_cancel cancel;
+  (match Queue_refresh.last_measurement ~config ~keeper_name with
+   | Some {last_pass=Queue_refresh.Raised _;unread=None;_} -> ()
+   | _ -> fail "cancelled current pass left a successful observation visible");
+  ignore (run_observed_queue config loads);
+  check int "a later pass is not blocked and reloads after cancellation" 2 !loads;
+  expect_cancel (fun () ->
+    let messages = messages @ [message "newer completed turn"] in
+    save_checkpoint config ~trace_id messages 4;
+    append_boundary config ~trace_id ~turn:4 ~recorded_at:4. messages;
+    ignore (run_observed_queue config loads);
+    cancel ());
+  (match Queue_refresh.last_measurement ~config ~keeper_name with
+   | Some {last_pass=Queue_refresh.Pending _;_} -> ()
+   | _ -> fail "old cancellation overwrote the newer pass result");
+  check_queue_count config 3;
+  check int "newer source loaded exactly once" 3 !loads;
+  ignore (run_observed_queue config loads);
+  check_queue_count config 3;
+  check int "old cancellation did not overwrite the newer cached witness" 3 !loads
+
 let test_failed_commit_and_restart_retry_the_same_range () =
   with_workspace @@ fun config ->
   let trace_id = "trace-retry" in
@@ -5343,6 +5450,12 @@ let () =
             test_observed_unread_detects_boundary_rewrite_truncation_and_restart
         ; test_case "observed unread count never caches absent or superseded heads" `Quick
             test_observed_unread_does_not_cache_absence_or_superseded_heads
+        ; test_case "queue reuses Pending and stopped counts and discards errors" `Quick
+            test_queue_reuses_pending_and_stopped_counts_then_discards_errors
+        ; test_case "queue forget prevents late observation publication" `Quick
+            test_queue_forget_prevents_late_observation_publication
+        ; test_case "queue cancellation preserves only the current owner" `Quick
+            test_queue_cancellation_clears_current_but_preserves_newer_observations
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
         ; test_case "undecodable current routes through write-path quarantine" `Quick

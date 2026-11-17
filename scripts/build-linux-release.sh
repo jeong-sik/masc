@@ -270,6 +270,12 @@ docker exec "$container" bash -lc '
   set -e
   cd /src
   eval "$(opam env --switch=masc)"
+  # The image ships a repo index from its own build date. A dependency the lock
+  # file names can be newer than that index, and --locked then has no candidate
+  # at all (v0.73.1 stopped on "matrix >= 0.2.0 / no matching version"). The
+  # switch step above updates only when this image lacks the OCaml patch
+  # release, so refresh the index unconditionally before resolving.
+  opam update -y
   for attempt in 1 2 3; do
     opam install ./masc.opam --deps-only --with-test --locked -y && break
     if [ "$attempt" -eq 3 ]; then echo "opam install failed after 3 attempts" >&2; exit 1; fi

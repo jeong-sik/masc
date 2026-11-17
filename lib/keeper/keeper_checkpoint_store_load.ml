@@ -34,7 +34,10 @@ let load_agent_core_as ~read_use ~(session_dir : string) ~(session_id : string) 
       | Error e -> Error e
       | Ok bytes ->
         let memo = Objects.create_memo () in
-        (match decode_head_off_scheduler ~session_dir ~memo bytes with
+        let decoded = match read_use with
+          | Read_only -> decode_head_read_only_off_scheduler ~session_dir bytes
+          | Read_for_save _ -> decode_head_off_scheduler ~session_dir ~memo bytes in
+        (match decoded with
          | Error e -> Error (classify_objects_error e)
          | Ok (head, ckpt) ->
            publish_summary_after_parse ~canonical_path:path ~identity_before ~objects:Objects_seen head;

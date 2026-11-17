@@ -49,7 +49,7 @@ let exact_snapshot_of_value ~expected_session_id checkpoint =
 ;;
 
 let exact_snapshot_of_head_bytes ~session_dir ~expected_session_id head_bytes =
-  match decode_head_off_scheduler ~session_dir ~memo:(Objects.create_memo ()) head_bytes with
+  match decode_head_read_only_off_scheduler ~session_dir head_bytes with
   | Error error -> Error (Ref_read_failed (classify_objects_error error))
   | Ok (head, checkpoint) ->
     exact_snapshot_of_checkpoint
@@ -75,7 +75,7 @@ let load_ref_and_head_locked ~session_dir ~expected_session_id =
       match reusable_written_value ~canonical_path ~identity:identity_before with
       | Some checkpoint ->
         Result.map (fun head -> head, checkpoint) (head_of_bytes_off_scheduler head_bytes)
-      | None -> decode_head_off_scheduler ~session_dir ~memo:(Objects.create_memo ()) head_bytes
+      | None -> decode_head_read_only_off_scheduler ~session_dir head_bytes
     in
     (match decoded with
      | Error error -> Error (Ref_read_failed (classify_objects_error error))

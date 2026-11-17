@@ -187,7 +187,7 @@ let judge_canonical ~(session_dir : string) ~(session_id : string) : canonical_j
          | Agent_core_error _
          | Objects_invalid _ ) as error) -> Judged_inconclusive error
     | Ok bytes ->
-      (match decode_head_off_scheduler ~session_dir ~memo:(Objects.create_memo ()) bytes with
+      (match decode_head_read_only_off_scheduler ~session_dir bytes with
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | exception exn -> raised Read_raised exn
        | Ok (_head, checkpoint) -> Judged_decoded checkpoint

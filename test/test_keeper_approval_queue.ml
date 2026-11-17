@@ -3276,6 +3276,76 @@ let retain_approval_reader ~base_path ~request_id ~request ~approval_id =
   store, retained
 ;;
 
+let test_exact_scalar_identity_survives_real_submit_and_original_store () =
+  with_spent_fixture "queue-exact-scalars" (fun ~base_path ~keeper_name ->
+    let input = `Assoc ["count", `Float 1.; "target", `String "exact-scalars"] in
+    let integer_input = `Assoc ["count", `Int 1; "target", `String "exact-scalars"] in
+    let approval_id = submit ~base_path ~keeper_name ~input in
+    let entry = pending_entry_exn approval_id in
+    let request = exact_request_of_entry entry in
+    Alcotest.(check string) "exact capture uses the real submitted hash"
+      entry.input_hash (Exact_request.input_hash request);
+    let matches ~input ~input_hash =
+      Exact_request.matches_entry request ~base_path:entry.audit_base_path
+        ~keeper_name:entry.keeper_name ~operation:entry.tool_name ~input ~input_hash
+        ~origin:entry.origin ~task_id:entry.task_id ~goal_id:entry.goal_id
+        ~continuation_channel:entry.continuation_channel in
+    Alcotest.(check bool) "actual queue entry matches" true
+      (matches ~input:entry.input ~input_hash:entry.input_hash);
+    Alcotest.(check bool) "complete input cannot borrow another scalar's hash" false
+      (matches ~input:integer_input ~input_hash:entry.input_hash);
+    Alcotest.(check bool) "entry hash cannot be forged" false
+      (matches ~input:entry.input ~input_hash:(String.make 64 'f'));
+    let integer_id = submit ~base_path ~keeper_name ~input:integer_input in
+    Alcotest.(check bool) "real submission keeps float and integer requests distinct" false
+      (String.equal approval_id integer_id);
+    let store, retained = retain_approval_reader ~base_path
+        ~request_id:"original-exact-scalars" ~request ~approval_id:(Some approval_id) in
+    (* This reads the actual store record after its canonical envelope has been
+       serialized. The waiting hash came from submit, not a synthetic matcher. *)
+    let record = Original_owner.load_record ~store ~scope:retained.scope
+        ~request_id:retained.request_id |> owner_result
+        |> require_some "persisted scalar original is absent" in
+    let restored_intent, waiting = match Original_progress.approval (Original_owner.Record.progress record) with
+      | Some (Original_progress.Waiting_for_approval (intent, waiting)) ->
+        intent, waiting
+      | None | Some (Original_progress.Intent_pending _) ->
+        Alcotest.fail "original store lost its exact waiting link" in
+    let restored = Original_approval.request restored_intent in
+    Alcotest.(check bool) "original store preserves the complete scalar identity" true
+      (Exact_request.equal_exact_request request restored);
+    Alcotest.(check bool) "original store preserves Float 1.0" true
+      (Yojson.Safe.equal input (Exact_request.input restored));
+    Alcotest.(check string) "persisted wait keeps the actual submission hash"
+      entry.input_hash (Original_approval.wait_input_hash waiting);
+    ignore (reinstall_exn ~base_path);
+    let reloaded_entry = pending_entry_exn approval_id in
+    Alcotest.(check bool) "queue reinstall preserves Float 1.0" true
+      (Yojson.Safe.equal input reloaded_entry.input);
+    Alcotest.(check string) "queue reinstall preserves submitted fingerprint"
+      entry.input_hash reloaded_entry.input_hash;
+    let actual_wait = match Original_approval.wait restored_intent ~approval_id
+        ~input_hash:reloaded_entry.input_hash with
+      | Ok wait -> wait | Error detail -> Alcotest.fail detail in
+    Alcotest.(check bool) "real reloaded queue hash recreates the persisted wait" true
+      (Original_approval.equal_wait waiting actual_wait);
+    let check_found label = function
+      | Queue_result.Exact_found observed ->
+        Alcotest.(check string) label approval_id observed.exact_approval_id;
+        Alcotest.(check bool) "lookup does not decide the request" true
+          (observed.exact_state = Queue_result.Exact_pending)
+      | Queue_result.Exact_absent | Queue_result.Exact_ambiguous _
+      | Queue_result.Known_approval_missing _ | Queue_result.Known_approval_mismatch _ ->
+        Alcotest.fail "submitted float request was not found exactly" in
+    check_found "unlinked lookup finds the actual float row" (exact_lookup restored);
+    check_found "known-ID lookup finds the actual float row"
+      (exact_lookup ~approval_id restored);
+    Alcotest.(check bool) "integer ID cannot redirect the float request" true
+      (exact_lookup ~approval_id:integer_id restored =
+        Queue_result.Known_approval_mismatch
+          {approval_id=integer_id; matching_approval_ids=[approval_id]}))
+;;
+
 let archive_refused_original ~store retained =
   let retained = owner_advance ~store ~expected:retained
       (Original_progress.Refused {stage = Original_progress.Before_dispatch;
@@ -7869,6 +7939,8 @@ let () =
             test_consumed_delivery_named_by_a_gate_wait_survives
         ; Alcotest.test_case "exact lookup preserves all states and known identity" `Quick
             test_exact_lookup_preserves_all_states_and_known_identity
+        ; Alcotest.test_case "exact scalar identity survives submit and original store" `Quick
+            test_exact_scalar_identity_survives_real_submit_and_original_store
         ; Alcotest.test_case "exact lookup requires healthy installed store" `Quick
             test_exact_lookup_requires_healthy_installed_store
         ; Alcotest.test_case "unlinked original intent keeps rejected delivery" `Quick

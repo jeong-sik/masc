@@ -17,9 +17,11 @@ val exact_request :
   (exact_request, string) result
 (** Pure capture. The workspace path must be absolute and is normalized through
     the shared workspace identity rules; no current-directory fallback is used.
-    Canonicalize the complete input, reject duplicate keys/nonfinite numbers,
-    and compute its existing request fingerprint. Origin and continuation
-    channel must round-trip through their strict canonical codecs, even when
+    Sort complete input object fields without coercing numeric representations,
+    reject duplicate keys/nonfinite numbers, and compute its existing request
+    fingerprint. The current wire schema retains the input as opaque JSON text
+    so outer store canonicalization cannot change its numbers. Origin and
+    continuation channel must round-trip through their strict canonical codecs, even when
     supplied through typed constructors. [None] task/goal means none
     was observed, never a lookup of current state. *)
 
@@ -36,7 +38,8 @@ val continuation_channel : exact_request -> Keeper_continuation_channel.t
 val exact_request_to_json : exact_request -> Yojson.Safe.t
 val exact_request_of_json : Yojson.Safe.t -> (exact_request, string) result
 (** Strict current-schema codec: exact fields, canonical nested codecs, complete
-    input and a recomputed hash. No queue, filesystem or runtime is consulted. *)
+    scalar-preserving input JSON text and a recomputed hash. No queue, filesystem
+    or runtime is consulted. *)
 val equal_exact_request : exact_request -> exact_request -> bool
 (** Equal complete captured values, including the physical origin witness.
     This is stricter than the queue's logical-origin matching rule. *)
@@ -46,7 +49,7 @@ val matches_entry :
   input:Yojson.Safe.t -> input_hash:string -> origin:Keeper_approval_origin.t ->
   task_id:string option -> goal_id:string option ->
   continuation_channel:Keeper_continuation_channel.t -> bool
-(** Existing queue identity fields plus complete canonical-input equality.
+(** Existing queue identity fields plus complete scalar-preserving input equality.
     Uses [same_logical_source] for origin and exact typed-channel JSON equality.
     Malformed input refuses. The caller supplies fields, so this pure matcher
     has no dependency on Queue entry/state types. It grants no authority. *)

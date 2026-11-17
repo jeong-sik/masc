@@ -590,7 +590,7 @@ let verdict ~width tone headline reason =
   { tone; text = headline }
   :: (match reason with
       | None -> []
-      | Some reason -> wrapped ~width tone reason)
+      | Some reason -> wrapped_indent ~width ~indent:2 tone reason)
 
 (* The latest verifier scan could not settle this goal, so the judge's last
    word is not what holds it: no judge model runs in these steps, only

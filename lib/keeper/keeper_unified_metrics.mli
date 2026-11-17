@@ -139,7 +139,7 @@ val append_metrics_snapshot :
   turn_cost:float ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   checkpoint_bytes:int option ->
-  message_count:int ->
+  message_count:int option ->
   unit ->
   unit
 

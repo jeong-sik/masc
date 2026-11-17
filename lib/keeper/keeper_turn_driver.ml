@@ -2061,6 +2061,33 @@ let observe_native_attempt ?on_request_observation binding run ~idx ~runtime_id 
   result, checkpoint, effect_disposition, dispatch
 ;;
 
+let read_provider_progress ~base_path ~keeper_name () =
+  try
+    match Keeper_registry.get ~base_path keeper_name with
+    | Some { current_turn_observation = Some obs; _ } ->
+      Some
+        { Keeper_turn_driver_try_provider.last_progress_at = obs.last_progress_at
+        ; active_tool_count = obs.active_tool_count
+          (* The approval registry owns this fact. Read it in the same probe
+             call instead of maintaining another copy on the observation. *)
+        ; awaiting_approval =
+            List.exists
+              (fun (p : Keeper_tool_approval_registry.pending) ->
+                 String.equal p.keeper_name keeper_name)
+              (Keeper_tool_approval_registry.pending
+                 (Keeper_tool_approval_registry.shared ()))
+        }
+    | Some _ | None -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Keeper.warn
+      "progress probe read failed for %s: %s (deadline falls back to elapsed)"
+      keeper_name
+      (Printexc.to_string exn);
+    None
+;;
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -3762,7 +3789,7 @@ let run_named
             ; provider_call_deadline_sec =
                 Keeper_runtime_resolved.provider_call_deadline_sec ()
             ; (* #28417: the deadline is measured against the keeper's live
-                 progress signal, and this closure is the only thing that
+                 progress signal, and this probe is the only thing that
                  reads it. Injected here rather than imported inside
                  [Keeper_turn_driver_try_provider] so the stall decision over
                  there stays pure and unit-testable.
@@ -3771,38 +3798,7 @@ let run_named
                  which degrades the deadline to its pre-#28417 elapsed
                  ceiling instead of cancelling the attempt being watched. *)
               provider_progress_probe =
-                Some
-                  (fun () ->
-                    try
-                      match Keeper_registry.get ~base_path keeper_name with
-                      | Some { current_turn_observation = Some obs; _ } ->
-                        Some
-                          { Keeper_turn_driver_try_provider.last_progress_at =
-                              obs.last_progress_at
-                          ; active_tool_count = obs.active_tool_count
-                            (* Read here rather than carried on the turn
-                               observation: the approval registry already owns
-                               this fact, and a second copy on the observation
-                               would be one more thing to keep in step with
-                               it. Both reads happen in the same probe call,
-                               so they describe the same instant. *)
-                          ; awaiting_approval =
-                              List.exists
-                                (fun (p : Keeper_tool_approval_registry.pending) ->
-                                   String.equal p.keeper_name keeper_name)
-                                (Keeper_tool_approval_registry.pending
-                                   (Keeper_tool_approval_registry.shared ()))
-                          }
-                      | Some _ | None -> None
-                    with
-                    | Eio.Cancel.Cancelled _ as e -> raise e
-                    | exn ->
-                      Log.Keeper.warn
-                        "progress probe read failed for %s: %s (deadline \
-                         falls back to elapsed)"
-                        keeper_name
-                        (Printexc.to_string exn);
-                      None)
+                Some (read_provider_progress ~base_path ~keeper_name)
             ; temperature
             ; accept
             ; hooks
@@ -3872,6 +3868,8 @@ module For_testing = struct
   let official_client_turn_start = official_client_turn_start
 
   let run_result_answered = run_result_answered
+
+  let read_provider_progress = read_provider_progress
 
   let make_deferred_runtime_lane ~assignment_id ~failed_runtime_id
         ~next_runtime_id ~later_runtime_ids ~failure =

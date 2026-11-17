@@ -15,11 +15,16 @@
 
 - 설정 파일만 바뀐 상태는 `Not_now`다. 설치·package·tool이 같은 새 선언과 정확히 하나의 준비된 worker를 확인한 경우에만 `Declaration_replaced`가 된다.
 - Exact의 원본 identity·기존 terminal·실행 proof 복구가 먼저다. 확정된 답과 시작 표시가 있는 요청의 결과는 그대로 보존한다.
-- 현재 실행할 시도가 아직 시작되지 않았고 새 선언이 준비됐으면 host가 `Not_allowed`를 저장한다. host 기록에는 `Dispatch_veto_replaced`를 마지막 determining attempt로 남긴다. 그 앞에는 요청을 끝내지 않은 `Deferred` 기록만 올 수 있다.
-- 소비자는 `Retained_declaration_replaced`라는 host 전용 사유를 읽는다. worker가 돌려주는 final에는 이 사유를 넣지 않는다. 같은 설명 문자열의 일반 `Not_allowed`는 교체 권한이 아니다.
+- 현재 실행할 시도가 아직 시작되지 않았고 새 선언이 준비됐으면 host가 `Not_allowed {reason=Replaced_declaration}`를 저장한다. 종료용 attempt를 따로 추가하지 않으며, 앞서 끝난 `Deferred` 기록은 남을 수 있다.
+- 소비자는 `Retained_not_allowed {reason=Replaced_declaration}`라는 typed host 사유를 읽는다. worker가 돌려주는 final에는 이 사유를 넣지 않는다. 일반 `Permission_refused`는 교체 권한이 아니다.
 - worker 응답과 host 복구가 같은 사유를 남긴다. 원본 request·schema·digest에 묶인 host 기록과 소비자 progress의 사유를 확인한다. 그 뒤 worker가 사라지거나 설정이 되돌아가도 일반 입력 실패로 바뀌지 않는다.
 - history와 floor는 교체로 끝난 요청의 source·Memory·외부 ACK를 옮기지 않는다. 새 실패 범위를 만들지 않고 다음 pass를 깨운다. 앞서 실제 입력 실패로 좁혀 놓은 범위는 보존한다.
-- floor의 교체 step은 기존 정리 경로로 옮긴 뒤 다음 pass를 깨운다. 알 수 없는 결과를 교체 사유로 만들지 않는다.
+- 일반 floor의 교체 step은 기존 정리 경로로 옮긴 뒤 다음 pass를 깨운다. retained Cut 프로그램의 기존 step을 잇는 경로는 별도 후속 수정 범위다. 알 수 없는 결과를 교체 사유로 만들지 않는다.
+
+소비자는 저장된 거절을 복구할 때도 실제 host 종료와 원본에 묶인 실행 proof를 별도로 읽는다.
+과거 `Deferred`의 검증된 `Call_refused` proof는 허용한다. `Call_ended`, 손상되거나 읽을 수 없는 proof,
+다른 원본에 속한 proof는 교체 권한이 아니다. Cut 해소에는 이 허용을 넓히지 않고 완료 proof 부재를 요구한다.
+실제 quota 거절 뒤 선언을 교체하는 회귀와 손상·외부 proof 대조를 작성했으며, 타입·동작 검증은 미실행이다.
 
 독립 리뷰에서 발견한 두 항목을 반영했다. `Memory_replaced`를 받는 실제 capacity callback fixture의 닫힌 match를 추가했고,
 종결 직후 worker 재조회 실패가 일반 refusal로 바뀌던 경계를 host의 저장된 사유로 바꿨다.
@@ -33,8 +38,9 @@
 
 `Captured`·`Admission_wait`는 본문을 읽기 전에 지금 준비된 목적지를 관찰한다.
 교체 관계가 확정되고 원래 Exact 기록과 실행 proof가 모두 없을 때만 `Before_dispatch`로 끝낸다.
-그 증거는 scope·요청 ID·본문 digest·원래 summary와 당시 두 목적지를 묶는다.
-저장된 증거를 읽을 때는 그 값들만 검증하므로 rollback 뒤에도 종결은 유지된다.
+공용 `declaration_replaced` 증거는 당시 `captured`·`current` 두 목적지를 담는다.
+증거를 소유한 불변 원본의 scope·요청 ID·본문 digest·summary binding은 별도로 검증한다.
+저장된 두 목적지의 교체 관계를 검증하므로 rollback 뒤에도 종결은 유지된다.
 worker가 아직 준비되지 않았으면 요청을 그대로 기다리며, 실행 기록을 발견하면 교체를 거부한다.
 
 다른 요청과 연결되지 않고 Gate나 사전 준비 기록도 없는 history 요청은 inventory에서 본문을 읽지 않는다.
@@ -251,4 +257,4 @@ typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 - floor는 열 번째 단위에서 다른 범위의 본문 손상을 건너뛰도록 바꿨다. 선택된 원본의 본문 손상 복구는 남는다. 이미 받은 답의 Gate는 여덟 번째 소스 단위로 이으며 실제 반영 검증은 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
 - `raised`·floor Cut·admission Cut는 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.
-- native stack 발행은 이전 시도에서 GitHub CLI 인증을 얻지 못했다. 연결된 GitHub 읽기 도구의 인증과 CLI/native stack 발행 인증은 다르다.
+- 소스는 native stack #52614에 발행했다. 스택 소스 검토·병합·설치와 기존 요청의 실제 Memory 반영·ACK 확인은 각각 별도 결과로 기록한다.

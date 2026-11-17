@@ -232,9 +232,11 @@ type execution_resume =
           has exited. Code that its Tool handlers started may still be
           running. *)
   | Resume_after_writer_exit of execution_locator
-      (** The process that last wrote the run has exited, so none of the code
-          it started is still running. The host must not pass this for a run
-          whose writer may still be this process. *)
+      (** The process that last wrote the run has exited, so no code in that
+          process can still write the run. Child processes its Tool handlers
+          spawned may outlive it; the settled result says the effect is
+          unknown either way. The host must not pass this for a run whose
+          writer may still be this process. *)
 
 type execution_terminal_outcome =
   | Terminal_succeeded

@@ -383,7 +383,15 @@ type mcp_server =
       ; required : bool
       }
 
-type session_config = { mcp_servers : (string * mcp_server) list }
+type developer_prompt =
+  | Inherit_host
+  | Developer_text of string
+  | Clear_suppressible_context
+
+type session_config =
+  { mcp_servers : (string * mcp_server) list
+  ; developer_prompt : developer_prompt
+  }
 
 let mcp_server_json = function
   | Streamable_http { url; headers; required } ->
@@ -395,19 +403,26 @@ let mcp_server_json = function
       ]
 ;;
 
-(* An empty server map is left off rather than sent as [{}], so a session
-   with no MASC tools asks the host for nothing. *)
-let config_fields { mcp_servers } =
-  match mcp_servers with
+(* Preserve omission: explicit null/blank has different host semantics.
+   An empty MCP map likewise asks the host for nothing. *)
+let config_fields { mcp_servers; developer_prompt } =
+  let servers =
+    match mcp_servers with
+    | [] -> []
+    | servers ->
+      [ "mcpServers"
+      , `Assoc (List.map (fun (name, server) -> name, mcp_server_json server) servers)
+      ]
+  in
+  let developer =
+    match developer_prompt with
+    | Inherit_host -> []
+    | Developer_text text -> [ "developerPrompt", `String text ]
+    | Clear_suppressible_context -> [ "developerPrompt", `Null ]
+  in
+  match servers @ developer with
   | [] -> []
-  | servers ->
-    [ ( "config"
-      , `Assoc
-          [ ( "mcpServers"
-            , `Assoc (List.map (fun (name, server) -> name, mcp_server_json server) servers)
-            )
-          ] )
-    ]
+  | fields -> [ "config", `Assoc fields ]
 ;;
 
 let session_start_request ~id ~command_id ~workspace_root ~model_id ~approval_mode ~config

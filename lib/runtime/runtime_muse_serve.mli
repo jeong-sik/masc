@@ -386,6 +386,7 @@ val emit_stream_event : (stream_event -> unit) option -> stream_event -> unit
 
 val validate_turn
   :  ?session_mode:session_mode
+  -> ?developer_prompt:Runtime_muse_msp.developer_prompt
   -> config
   -> workspace_root:string
   -> prompt:string
@@ -409,6 +410,7 @@ val run_turn
   :  storage:storage
   -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
+  -> ?developer_prompt:Runtime_muse_msp.developer_prompt
   -> ?workspace_origin:workspace_origin
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> last_turn:ended_turn option -> (unit, string) result)
@@ -435,6 +437,13 @@ val run_turn
 
     [storage] says where the host keeps its native files (see {!storage}).
     Native durability and completion notifications remain enabled for both.
+
+    [developer_prompt] defaults to {!Runtime_muse_msp.Inherit_host} and is
+    sent on [session/start] or [session/resume], separately from the turn's
+    user input. Text must be valid UTF-8; trimming and blank/clear semantics
+    belong to the host (see {!Runtime_muse_msp.developer_prompt}). The result
+    does not confirm that the host applied or retained the instructions and
+    must not authorize session reuse on that basis.
 
     [workspace_root] is the absolute directory the session works in.
     [mcp_servers] are added to this session only. A non-empty list requests

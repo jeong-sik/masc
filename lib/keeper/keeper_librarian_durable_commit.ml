@@ -205,14 +205,16 @@ let settle_positions_with ~authority ~store ~record request =
 let settle_positions ~store ~record request =
   settle_positions_with ~authority:Original_publication ~store ~record request
 
-let settle_program ~store ~floor ~program =
+let settle_program_with ~after_settlement ~store ~floor ~program =
   let request=Keeper_librarian_history_resolution_floor.request floor in
   let owner=Request.physical_owner request in
   let* record=Owner.load ~store ~scope:(Request.scope owner) ~request_id:(Request.request_id request) |> owned in
   let* record=Option.to_result ~none:"Cut program leaf is absent before settlement" record in
   let* ()=Request.confirm_record request record in
   let* ()=settle_positions_with ~authority:(Cut_program {floor;program}) ~store ~record request in
+  after_settlement ();
   Keeper_librarian_history_program_settlement.observe ~store ~request ~record ~program
+let settle_program = settle_program_with ~after_settlement:(fun () -> ())
 
 type frontier = Unfinished | Settled
 let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_result
@@ -559,6 +561,7 @@ let settle_refused_with ~before_settlement ~store ~request ~(record : Owner.reta
   Ok record
 let settle_refused = settle_refused_with ~before_settlement:(fun () -> Ok ())
 module For_testing = struct
+  let settle_program = settle_program_with
   let publish = publish_with
   let settle_refused = settle_refused_with
 end

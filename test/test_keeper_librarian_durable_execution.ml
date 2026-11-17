@@ -3054,7 +3054,8 @@ let test_automatic_cut_continuation_commits_and_retains_compact_proof history_ki
       if Sys.file_exists receipts then Sys.remove receipts);
     check bool "compact completion survives raw body and rolling receipt pruning" true
       (Result.is_ok (io (fun () -> Keeper_librarian_history_resolution_selection.check ~config:fixture.config ~keeper_name))))
-let test_cut_owned_full_source_floor ?(production=false) ?(change_semantic=false) history_kind ~refuse_message () =
+let test_cut_owned_full_source_floor ?(production=false) ?(change_semantic=false)
+    ?(interrupt_after_ack=false) history_kind ~refuse_message () =
   let module Floor=Keeper_librarian_history_resolution_floor in
   let module Steps=Keeper_librarian_floor_step_owner in
   let module Step=Keeper_librarian_floor_step_request in
@@ -3222,7 +3223,24 @@ let test_cut_owned_full_source_floor ?(production=false) ?(change_semantic=false
           check bool "a real canonical program before ACK is not source settlement evidence" true
             (Result.is_error (memory_action fixture (fun () -> io (fun () ->
               Settled.observe ~store:fixture.store ~request ~record:leaf ~program:proof))));
-        if production then (
+        if interrupt_after_ack then (
+          let bytes=cut_memory_bytes fixture and posts=F.post_count fixture.server in
+          let interrupted=try
+            ignore (memory_action fixture (fun () -> io (fun () ->
+              Commit.For_testing.settle_program ~after_settlement:(fun () -> raise Exit)
+                ~store:fixture.store ~floor:selected ~program:proof)) |> get);
+            false
+          with Exit -> true in
+          check bool "the real post-ACK path was interrupted before returning completion evidence" true interrupted;
+          check bool "the source ACK persisted before the interruption" true (cut_source_positions fixture<>positions);
+          check bool "the interrupted unit did not retain completion" true
+            ((last_cut_intent fixture original).memory_commit=None);
+          check bool "ordinary Work recovers the same actual program after post-ACK interruption" true
+            (memory_action fixture (fun () -> Resolution_work.run_pending_serialized
+               ~config:fixture.config ~keeper_name) |> Result.map_error Resolution_intent.error_to_string |> get=None);
+          check bool "post-ACK recovery writes no second Memory or range receipt" true (cut_memory_bytes fixture=bytes);
+          check int "post-ACK recovery replays no provider request" posts (F.post_count fixture.server));
+        if production || interrupt_after_ack then (
           let completed=last_cut_intent fixture original in
           check bool "ordinary Work retains actual program completion for the exact refused child" true
             (match completed.memory_commit with
@@ -3329,14 +3347,14 @@ let test_cut_owned_full_source_floor ?(production=false) ?(change_semantic=false
         check bool "steps use the definite leaf's frozen template and complete working context" true
           (step.preparation.prompt=(Capture.preparation request).prompt
            && step.preparation.source_input.working_context=(Capture.preparation request).source_input.working_context)) steps;
-      if not production then check bool "neither floor decisions nor Memory publication ACK the source" true
+      if not (production || interrupt_after_ack) then check bool "neither floor decisions nor Memory publication ACK the source" true
         (cut_source_positions fixture=positions);
       check json "the Cut parent Unknown remains unchanged" parent (io (fun () ->
         Owner.load ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> owned |> Option.get |> Owner.to_json));
       check bool "no wake replays or changes the original host Cut request" true
         (host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
           ~request_id:exact.request_id |> get));
-      if production then (
+      if production || interrupt_after_ack then (
         let completed=last_cut_intent fixture original in
         let first=List.find (fun (_, (index:Step.index)) -> index.header.range.request_id=leaf.request_id
           && index.header.position=0) steps |> fst in
@@ -7268,6 +7286,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_cut_owned_full_source_floor ~production:true Mixed ~refuse_message:false);
   test_case "fresh current configuration completes the retained Cut source without changing pending IDs" `Quick
     (test_cut_owned_full_source_floor ~production:true ~change_semantic:true Mixed ~refuse_message:false);
+  test_case "post-ACK interruption recovers one Cut program and durable completion without replay" `Quick
+    (test_cut_owned_full_source_floor ~interrupt_after_ack:true Mixed ~refuse_message:false);
   test_case "Cut command recovers fence before grant with rebased Memory" `Slow
     test_cut_command_recovers_fence_before_grant_after_memory_rebase;
   test_case "Cut command busy and late proof stay Requested" `Slow

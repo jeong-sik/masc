@@ -78,6 +78,12 @@ val settle_program : store:Lane_addon_store.t ->
     serialized Memory lane and holds no source or Memory lock. *)
 
 module For_testing : sig
+  val settle_program : after_settlement:(unit -> unit) -> store:Lane_addon_store.t ->
+    floor:Keeper_librarian_history_resolution_floor.t ->
+    program:Keeper_memory_os_current.committed_program ->
+    (Keeper_librarian_history_program_settlement.t, string) result
+  (** Same production path. The hook runs after actual ACK/read-position
+      settlement and before a proof is returned or retained by the intent. *)
   val publish : before_settlement:(unit -> unit) ->
     store:Lane_addon_store.t -> config:Workspace.config ->
     request:Keeper_librarian_durable_request.t ->

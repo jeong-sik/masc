@@ -108,7 +108,25 @@ DUNE_BUILD_INFO: NestedRules = {
     "test": Exclude("dune's tests"),
     "vendor": Exclude("libraries vendored into the dune binary; the library is built from otherlibs/build-info/"),
 }
+# 3.25.0 moved the library to otherlibs/dune-build-info and, unlike the two
+# versions above, ships a notice of its own under otherlibs/stdune. That path
+# cannot join DUNE_BUILD_INFO: a key that holds no notice in 3.22.2/3.24.2 is
+# refused there as unused, so the version gets its own table.
+DUNE_BUILD_INFO_3_25_0: NestedRules = {
+    "doc": Exclude("dune's manual"),
+    "otherlibs/stdune": Exclude(
+        "stdune is a separate package; the dune-build-info library declares no libraries"),
+    "src": Exclude(
+        "dune's build-tool sources; dune-build-info is built from otherlibs/dune-build-info"),
+    "test": Exclude("dune's tests"),
+    "vendor": Exclude(
+        "libraries vendored for the dune binary; dune-build-info declares no libraries"),
+}
 H2: NestedRules = {"hpack/test": Exclude("test data"), "lib_test": Exclude("test data")}
+MATRIX: NestedRules = {
+    "packages/matrix/test": Exclude("test data"),
+    "packages/toffee": Exclude("a separate package in the same tarball; the matrix library does not build it"),
+}
 MENHIR_LIB: NestedRules = {
     "coq-menhirlib": Exclude("the Coq library; menhirLib is built from lib/"),
     "fix": Exclude("a library of the menhir generator; menhirLib is built from lib/"),
@@ -117,6 +135,11 @@ MENHIR_LIB: NestedRules = {
 PIAF: NestedRules = {"vendor/multipart_form/LICENSE.md": Ship(
     "vendor/multipart_form builds the linked lib/piaf/multipart_form/piaf_multipart_form.cmxa")}
 PPXLIB: NestedRules = {"bench": Exclude("benchmarks")}
+# lib/uring/dune declares (foreign_archives uring) and builds vendor/liburing
+# with configure+make, copying liburing.a and dlluring.so.2.7 into the library,
+# so the C sources -- and their notices -- are compiled into what we ship.
+URING: NestedRules = {"vendor/liburing": Ship(
+    "lib/uring/dune builds vendor/liburing into the linked liburing.a and dlluring.so")}
 YAML: NestedRules = {
     "vendor/License": Ship("libyaml's C sources in vendor/ build the linked lib/yaml/c/libyaml_c_stubs.a")}
 
@@ -131,12 +154,15 @@ NESTED_NOTICES: Mapping[tuple[str, str], NestedRules] = {
     ("decompress", "1.6.1"): DECOMPRESS,
     ("dune-build-info", "3.22.2"): DUNE_BUILD_INFO,
     ("dune-build-info", "3.24.2"): DUNE_BUILD_INFO,
+    ("dune-build-info", "3.25.0"): DUNE_BUILD_INFO_3_25_0,
     ("h2", "0.13.0"): H2,
     ("h2-eio", "0.13.0"): H2,
+    ("matrix", "0.2.0"): MATRIX,
     ("menhirLib", "20250912"): MENHIR_LIB,
     ("piaf", "0.2.0"): PIAF,
     ("ppxlib", "0.38.0"): PPXLIB,
     ("ppxlib", "0.39.0"): PPXLIB,
+    ("uring", "2.7.0"): URING,
     ("yaml", "3.2.0"): YAML,
 }
 

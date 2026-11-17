@@ -161,6 +161,48 @@ YAML_RULES: Mapping[str, object] = {
 YAML_NESTED: Mapping[tuple[str, str], Mapping[str, object]] = {("yaml", "3.2.0"): YAML_RULES}
 
 
+MATRIX_LICENSE = b"ISC License\n\nCopyright (c) 2026, Matrix contributors\n"
+TERMINFO_LICENSE = b"Compiled terminal descriptions from the ncurses terminal database,\ncopied unchanged as test fixtures.\n"
+TOFFEE_LICENSE = b"ISC License\n\nCopyright (c) 2024, Toffee contributors\n"
+
+
+def matrix_package() -> Package:
+    """The mosaic tarball: one package, a test fixture notice, and a sibling package."""
+    return Package("0.2.0", {"lib/matrix/matrix.cmxa": b"matrix"},
+                   {"LICENSE": MATRIX_LICENSE,
+                    "packages/matrix/lib/matrix.ml": b"let x = 1\n",
+                    "packages/matrix/test/data/terminfo/LICENSE": TERMINFO_LICENSE,
+                    "packages/toffee/LICENSE": TOFFEE_LICENSE})
+
+
+DBI_LICENSE = b"MIT License\n"
+LIBURING_COPYING = b"GNU LESSER GENERAL PUBLIC LICENSE\nVersion 2.1, February 1999\n"
+LIBURING_GPL = b"GNU GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n"
+LIBURING_LICENSE = b"Copyright 2020 Jens Axboe\n"
+LIBURING_DEBIAN = b"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n"
+
+
+def dune_build_info_325_package() -> Package:
+    """dune 3.25.0: the library moved under otherlibs/ and declares no libraries."""
+    return Package("3.25.0", {"lib/dune_build_info/build_info.cmxa": b"build_info"},
+                   {"LICENSE.md": DBI_LICENSE,
+                    "doc/reference/dune-project/authors.rst": b"authors\n",
+                    "otherlibs/stdune/src/LICENSE.md": b"MIT\n",
+                    "src/dune_pkg/COPYING": b"COPYING\n",
+                    "test/blackbox-tests/x/project/LICENSE": b"LICENSE\n",
+                    "vendor/uutf/LICENSE.md": b"MIT\n"})
+
+
+def uring_package() -> Package:
+    """uring 2.7.0: vendor/liburing is compiled into (foreign_archives uring)."""
+    return Package("2.7.0", {"lib/uring/uring.cmxa": b"uring"},
+                   {"LICENSE.md": b"MIT\n",
+                    "vendor/liburing/COPYING": LIBURING_COPYING,
+                    "vendor/liburing/COPYING.GPL": LIBURING_GPL,
+                    "vendor/liburing/LICENSE": LIBURING_LICENSE,
+                    "vendor/liburing/debian/copyright": LIBURING_DEBIAN})
+
+
 class CollectNotices(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
@@ -346,6 +388,53 @@ class CollectNotices(unittest.TestCase):
         nested = {("yaml", "3.2.0"): {**YAML_RULES, "tests/data": notices.Exclude("fixtures")}}
         self.assertIn("yaml.3.2.0: tests/data/COPYING is covered by several NESTED_NOTICES paths: tests, tests/data",
                       self.refusal(nested=nested))
+
+    def test_the_matrix_entry_ships_its_licence_and_excludes_its_siblings(self) -> None:
+        """matrix 0.2.0 shares its tarball: a fixture notice and a package we do not link."""
+        self.switch.packages["matrix"] = matrix_package()
+        self.switch.linked[TARGET].append("lib/matrix/matrix.cmxa")
+        self.assertNotIsInstance(self.produce(nested=notices.NESTED_NOTICES), notices.Refused)
+        matrix = self.manifest()["matrix"]
+        self.assertEqual(["matrix/LICENSE"], [notice["file"] for notice in cast(list[dict[str, str]], matrix["notices"])])
+        self.assertEqual(MATRIX_LICENSE, (self.out / "matrix/LICENSE").read_bytes())
+        self.assertEqual([{"path": "packages/matrix/test/data/terminfo/LICENSE", "why": "test data"},
+                          {"path": "packages/toffee/LICENSE",
+                           "why": "a separate package in the same tarball; the matrix library does not build it"}],
+                         matrix["excluded"])
+        self.assertFalse((self.out / "matrix/packages").exists())
+
+    def test_the_dune_build_info_325_entry_excludes_every_sibling_tree(self) -> None:
+        """3.25.0's library declares no libraries, so none of its siblings ship."""
+        self.switch.packages["dune-build-info"] = dune_build_info_325_package()
+        self.switch.linked[TARGET].append("lib/dune_build_info/build_info.cmxa")
+        self.assertNotIsInstance(self.produce(nested=notices.NESTED_NOTICES), notices.Refused)
+        entry = self.manifest()["dune-build-info"]
+        self.assertEqual(["dune-build-info/LICENSE.md"],
+                         [notice["file"] for notice in cast(list[dict[str, str]], entry["notices"])])
+        self.assertEqual(
+            ["doc/reference/dune-project/authors.rst",
+             "otherlibs/stdune/src/LICENSE.md",
+             "src/dune_pkg/COPYING",
+             "test/blackbox-tests/x/project/LICENSE",
+             "vendor/uutf/LICENSE.md"],
+            sorted(item["path"] for item in cast(list[dict[str, str]], entry["excluded"])))
+        self.assertFalse((self.out / "dune-build-info/vendor").exists())
+
+    def test_the_uring_entry_ships_the_vendored_liburing_notices(self) -> None:
+        """lib/uring/dune compiles vendor/liburing into the linked library."""
+        self.switch.packages["uring"] = uring_package()
+        self.switch.linked[TARGET].append("lib/uring/uring.cmxa")
+        self.assertNotIsInstance(self.produce(nested=notices.NESTED_NOTICES), notices.Refused)
+        uring = self.manifest()["uring"]
+        self.assertEqual(
+            ["uring/LICENSE.md",
+             "uring/vendor/liburing/COPYING",
+             "uring/vendor/liburing/COPYING.GPL",
+             "uring/vendor/liburing/LICENSE",
+             "uring/vendor/liburing/debian/copyright"],
+            [notice["file"] for notice in cast(list[dict[str, str]], uring["notices"])])
+        self.assertEqual(LIBURING_GPL, (self.out / "uring/vendor/liburing/COPYING.GPL").read_bytes())
+        self.assertEqual([], uring["excluded"])
 
     def test_an_existing_output_directory_is_left_alone(self) -> None:
         self.out.mkdir()

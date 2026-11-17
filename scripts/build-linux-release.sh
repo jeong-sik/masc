@@ -270,11 +270,26 @@ docker exec "$container" bash -lc '
   set -e
   cd /src
   eval "$(opam env --switch=masc)"
-  # The image ships a repo index from its own build date. A dependency the lock
-  # file names can be newer than that index, and --locked then has no candidate
-  # at all (v0.73.1 stopped on "matrix >= 0.2.0 / no matching version"). The
-  # switch step above updates only when this image lacks the OCaml patch
-  # release, so refresh the index unconditionally before resolving.
+  # A block that silently runs on the host instead of inside the container is
+  # the failure this assertion exists to stop: candidate 9fbc2b95fb ran its
+  # whole dependency step on the runner that way and reported opam missing.
+  command -v opam >/dev/null || {
+    echo "opam is not on PATH: this block is not running inside the container" >&2
+    exit 1
+  }
+  # The image ships `default` as a local clone with no remote
+  # (git+file:///home/opam/opam-repository), so refreshing it reports "no
+  # changes" forever and a version the lock names but the image predates can
+  # never appear (v0.73.1: matrix >= 0.2.0 / no matching version). Point the
+  # repository at the public index the macOS jobs already resolve from, then
+  # refresh. Fatal on purpose: without a remote index this build cannot be shown
+  # to match the lock file.
+  #
+  # git+https, not https: a tar repository is unpacked by opam, so the provenance
+  # below could not run git rev-parse inside it and would print unknown on every
+  # build. A git clone keeps the revision readable.
+  opam repository set-url default git+https://github.com/ocaml/opam-repository.git \
+    || opam repository add default git+https://github.com/ocaml/opam-repository.git
   #
   # --repositories only: a bare `opam update` also advances the branch pins
   # taken just above (compact-protocol#main, bisect_ppx#5.2), which would move a
@@ -287,6 +302,41 @@ docker exec "$container" bash -lc '
     if [ "$attempt" -eq 3 ]; then echo "opam update failed after 3 attempts" >&2; exit 1; fi
     echo "opam update failed (attempt $attempt); retrying in 15s"
     sleep 15
+  done
+  # Which index this build resolved against. The refresh above makes the
+  # resolution depend on the day it ran, so the artifact needs the same
+  # provenance MASC_BUILD_COMMIT gives the source: without it, nobody can say
+  # which repository revision produced a published tree, and the same commit
+  # cannot be rebuilt deliberately. Recorded, not pinned -- pinning the revision
+  # here would freeze every future build to the index of the day.
+  #
+  # No apostrophe anywhere in this quoted block. The whole block is one
+  # single-quoted argument to bash -lc, so one stray single quote in a comment
+  # ends it early and every later line runs on the HOST instead of inside the
+  # container. That is exactly how v0.73.1 candidate 9fbc2b95fb failed: the
+  # comment on former line 296 contained one, so opam install on former line
+  # 304 ran on the runner, where opam does not exist, and reported
+  # "opam: command not found" three times.
+  #
+  # Not `--all`: the question is which repository this switch selected, not
+  # which ones are defined. Not fatal: these lines only describe what the step
+  # above did, and `set -e` would otherwise turn a failed query into a failed
+  # build after the dependency step had already succeeded.
+  #
+  # `opam repository list` prints the URL only -- the same string on every
+  # build -- so the revision has to come from the checkout itself. Without it
+  # this block would look like provenance while answering nothing.
+  opam repository list || echo "opam repository list failed"
+  repo_root="${OPAMROOT:-$(opam var root 2>/dev/null || echo /root/.opam)}"
+  for name in $(opam repository list --short 2>/dev/null || true); do
+    url=$(opam repository list 2>/dev/null | sed -n "s/^ *[0-9][0-9]* *$name *//p")
+    path=${url#git+file://}
+    path=${path#file://}
+    path=${path#git+}
+    rev=$(git -C "${path}" rev-parse HEAD 2>/dev/null \
+          || git -C "${repo_root}/repo/${name}" rev-parse HEAD 2>/dev/null \
+          || true)
+    echo "opam repository ${name} revision ${rev:-unknown}"
   done
   for attempt in 1 2 3; do
     opam install ./masc.opam --deps-only --with-test --locked -y && break

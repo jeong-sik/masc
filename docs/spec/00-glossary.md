@@ -2662,6 +2662,11 @@ status: reference
   이름 대도 이 Keeper에게 아무것도 주지 않는다. 행과 그 위 요약 줄이 이 한 함수를 읽으므로
   둘이 어긋날 수 없다. 요약 줄은 `attached`·`switched off`·`attached with no tools`·
   `with an unreadable switch`를 센다.
+  경계: 대시보드 keeper 구성 패널의 '정체성' 탭(`identity`,
+  [keeper-config-panel](../../dashboard/src/components/keeper-config-panel.ts))은 이 항목과
+  다른 개념이다 — 키퍼가 소유한 속성을 모은 섹션이고 연결 서비스 계정의 행 상태를 말하지
+  않는다. TUI의 옛 '정체성' 라벨(#51829 이전)과 이름만 겹치므로, '정체성'이라 적을 때는 어느
+  표면의 것인지 함께 적는다.
   → [masc_tui_identity_model](../../bin/masc_tui_identity_model.mli),
   [masc_tui_types](../../bin/masc_tui_types.ml)
 

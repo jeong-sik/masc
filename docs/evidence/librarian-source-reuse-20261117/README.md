@@ -73,3 +73,8 @@ interface or dependency rebuild was used to bypass that error. This proof
 therefore executes the actual load bodies, not the whole Durable_owner or
 Execution modules, inventory scheduler, server or provider. It does not prove
 installed-runtime CPU/RSS recovery or a full product build/regression run.
+
+Original fixture digests from the unchanged provenance are also indexed in
+[current-locations.json](current-locations.json). The accompanying flat digest
+manifest is a derivative of that provenance, not a new captured run. The scoped
+`scripts/check-evidence-locations.py` check verifies all retained original bytes.

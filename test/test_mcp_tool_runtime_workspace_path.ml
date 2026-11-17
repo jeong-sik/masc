@@ -88,7 +88,13 @@ let test_masc_start_on_the_active_workspace_keeps_its_scope () =
         (Mcp_server.Workspace_scope_epoch.equal before.epoch
            (Mcp_server.workspace_scope state).epoch);
       Alcotest.(check bool) "scope not retired" false
-        (Eio.Promise.is_resolved (Mcp_server.workspace_scope_replaced before)))
+        (Eio.Promise.is_resolved (Mcp_server.workspace_scope_replaced before));
+      let spelled = Cases.execute_tool fixture ~name:"masc_start"
+          ~arguments:(`Assoc [ "path", `String (active ^ "/") ]) in
+      Alcotest.(check bool) "another spelling joins" true (Tool_result.is_success spelled);
+      Alcotest.(check bool) "another spelling keeps the scope" true
+        (Mcp_server.Workspace_scope_epoch.equal before.epoch
+           (Mcp_server.workspace_scope state).epoch))
 ;;
 
 (* RFC-0393 D4: identity uniqueness. A name that already names a Keeper is

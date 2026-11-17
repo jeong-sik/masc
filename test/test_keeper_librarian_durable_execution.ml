@@ -2972,7 +2972,8 @@ let test_interrupted_evidence_cannot_release_another_actual_host_cause ~raised (
       let event=match event with
         | Progress.Refused {stage=Execution;_} -> Progress.Refused {stage=Execution;
             evidence=Exact.retained_final_to_json (Exact.Retained_unknown Interrupted)}
-        | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+        | Dispatch_intended | Admission_declined _ | Approval_intended _ | Approval_wait_retained _
+        | Execution_observed _ | Judgment_retained _
         | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
         | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
         | Commit_conflicted _ | Refused {stage=Before_dispatch;_} | Refusal_settled _

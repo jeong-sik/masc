@@ -1660,6 +1660,33 @@ class Journey(StepByStep):
             self.assertEqual(bootstrap().returncode, 0, 'the refused bootstrap had activated the workspace')
             self.assertEqual(declared.read_text(), operators)
 
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_bootstrap_that_a_check_refuses_makes_no_config_root(self):
+        # The checks of the activation come before runtime.toml is placed. A
+        # config root that a refused command left would be taken for the
+        # operator's by a later single-user boot, which then seeds less.
+        asks = '{"enabled":true,"require_token":true,"account_mode":"Multi_account"}'
+        refused = (('the workspace does not ask for accounts', '{"enabled":true,"require_token":true}', 'outside'),
+                   ('the external store is inside the base path', asks, 'inside'))
+        for why, config, store in refused:
+            with self.subTest(why=why), tempfile.TemporaryDirectory() as home:
+                home = str(Path(home).resolve())
+                base = Path(home, 'accounts')
+                (base / '.masc/auth').mkdir(parents=True)
+                (base / '.masc/auth/config.json').write_text(config)
+                Path(home, 'external').mkdir()
+                store = {'outside': home + '/external/external.jsonl', 'inside': str(base / 'external.jsonl')}[store]
+                environment = {key: value for key, value in os.environ.items()
+                               if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+                environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb',
+                                   MASC_HTTP_BASE_URL='http://127.0.0.1:1')
+                # What bootstrap prints is not shown: it can name an invitation.
+                bootstrapped = subprocess.run(
+                    [BINARY, 'auth', 'bootstrap', '--external-store', store, '--base-path', str(base)],
+                    env=environment, capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL)
+                self.assertNotEqual(bootstrapped.returncode, 0, 'the bootstrap went through')
+                self.assertFalse((base / '.masc/config').exists(), 'the refused bootstrap left a config root')
+
     def test_declaration_alone_never_skips_first_preparation(self):
         state = observation('/workspace', [('workspace', 'satisfied'), ('keeper_declaration', 'satisfied')])
         with patch.object(SETUP, 'onboarding_status', return_value=state), \

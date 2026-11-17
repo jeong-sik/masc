@@ -23,7 +23,7 @@
 
 소비자는 저장된 거절을 복구할 때도 실제 host 종료와 원본에 묶인 실행 proof를 별도로 읽는다.
 과거 `Deferred`의 검증된 `Call_refused` proof는 허용한다. `Call_ended`, 손상되거나 읽을 수 없는 proof,
-다른 원본에 속한 proof는 교체 권한이 아니다. Cut 해소에는 이 허용을 넓히지 않고 완료 proof 부재를 요구한다.
+다른 원본에 속한 proof는 교체 권한이 아니다. Cut 해소에는 이 허용을 넓히지 않고 `No_completed_latest`를 요구한다.
 실제 quota 거절 뒤 선언을 교체하는 회귀와 손상·외부 proof 대조를 작성했으며, 타입·동작 검증은 미실행이다.
 
 독립 리뷰에서 발견한 두 항목을 반영했다. `Memory_replaced`를 받는 실제 capacity callback fixture의 닫힌 match를 추가했고,

@@ -317,7 +317,6 @@ type resume_delivery =
 val start_held_context :
   turn_observation:turn_observation option ->
   ?composed_context:composed_context ->
-  ?system_observations_in_developer:Keeper_context_assembly.system_observation list ->
   Agent_core.Types.message list ->
   Keeper_official_client_session_store.held_context list
 (** What a start leaves the new vendor session holding: every context
@@ -352,6 +351,7 @@ val resume_prompt :
   held:Keeper_official_client_session_store.held_context list ->
   turn_observation:turn_observation option ->
   ?composed_context:composed_context ->
+  ?system_observations_in_developer:Keeper_context_assembly.system_observation list ->
   Agent_core.Types.message list ->
   resume_delivery
 (** The user prompt a lane sends when it resumes a vendor session that already

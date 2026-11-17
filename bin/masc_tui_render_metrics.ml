@@ -315,23 +315,25 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   let c4_l1 = "Gate " ^ observation_count (gate_observation state) in
   let c4_l2 = say "보류된 호출 " "Tool holds " ^ observation_count (held_observation state) in
+  let is_failed = function
+    | Read_failed _ | Unavailable _ | Stale _ -> true
+    | Current _ | Not_observed -> false
+  in
+  let failed =
+    is_failed (gate_observation state) || is_failed (held_observation state)
+  in
+  let mark = Unknown.(glyph (if failed then Read_failed else Unread)) in
   let c4_tone, c4_badge =
     match kpis.gate_pending_count, kpis.held_approvals_count with
     | Some 0, Some 0 -> Theme.recede (), (say "정상" "clear", Theme.ok ())
     | Some g, Some h -> Theme.warn (), (Count.grouped (g + h), Theme.warn ())
-    | None, _ | _, None ->
-      (match gate_observation state, held_observation state with
-       | (Read_failed _ | Unavailable _ | Stale _), _
-       | _, (Read_failed _ | Unavailable _ | Stale _) ->
-         Theme.warn (), (Unknown.(glyph Read_failed), Theme.warn ())
-       | Not_observed, Current (_ :: _ as rows)
-       | Current (_ :: _ as rows), Not_observed ->
-         Theme.warn (),
-         (Count.grouped (List.length rows) ^ "+" ^ Unknown.(glyph Unread), Theme.warn ())
-       | Not_observed, (Not_observed | Current [])
-       | Current [], Not_observed
-       | Current _, Current _ ->
-         Theme.recede (), (Unknown.(glyph Unread), Theme.recede ()))
+    | Some n, None | None, Some n ->
+      if n > 0 then Theme.warn (), (Count.grouped n ^ "+" ^ mark, Theme.warn ())
+      else if failed then Theme.warn (), (mark, Theme.warn ())
+      else Theme.recede (), (mark, Theme.recede ())
+    | None, None ->
+      if failed then Theme.warn (), (mark, Theme.warn ())
+      else Theme.recede (), (mark, Theme.recede ())
   in
 
   let rec zip4 r1 r2 r3 r4 =

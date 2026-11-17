@@ -776,27 +776,11 @@ let schedule_keeper_reaction_evidence_dashboard_json
                    @ [ "stimulus_id", `String stimulus_id ])
               | Reaction_evidence_observed
                   (Keeper_reaction_ledger.Evidence_complete evidence) ->
-                let projection_status =
-                  if
-                    evidence.event_queue_ack_seen
-                    && evidence.event_queue_cancelled_seen
-                  then Schedule_contract_values.Reaction_conflicting_terminal_evidence
-                  else if evidence.event_queue_cancelled_seen
-                  then Schedule_contract_values.Reaction_matched_terminal_cancelled
-                  else if evidence.event_queue_ack_seen
-                  then Schedule_contract_values.Reaction_matched_consumed_ack
-                  (* Finished outranks started: both rows are written for the
-                     same stimulus, and the later one is the more complete
-                     reading of what happened. *)
-                  else if Option.is_some evidence.turn_finished
-                  then Schedule_contract_values.Reaction_matched_turn_finished
-                  else if evidence.turn_started_seen
-                  then Schedule_contract_values.Reaction_matched_turn_started
-                  else if evidence.stimulus_seen
-                  then Schedule_contract_values.Reaction_matched_stimulus
-                  else Schedule_contract_values.Reaction_not_found
-                in
-                projection_json projection_status evidence
+                projection_json
+                  (Schedule_occurrence_consumption.reaction_reading_to_status
+                     (Schedule_occurrence_consumption.reaction_reading_of_evidence
+                        evidence))
+                  evidence
               | Reaction_evidence_observed
                   (Keeper_reaction_ledger.Evidence_quarantined
                     { evidence; first_reason }) ->

@@ -2,7 +2,10 @@ defer_loading = true
 name = "masc_schedule_get"
 description = """
 Read the current durable scheduled request by schedule_id. A recurring \
-request may already point at its next occurrence."""
+request may already point at its next occurrence. last_wake.dispatch_receipt \
+is what dispatch recorded when it accepted the last wake and is never \
+rewritten; last_wake.current_consumption is what the target Keeper's reaction \
+ledger shows now."""
 additional_properties = false
 
 [[params]]

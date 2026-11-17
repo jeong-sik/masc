@@ -876,6 +876,9 @@ Keeper 11개, `.masc` 하나. 그 런타임을 설명할 뿐이고 다른 환경
 
 - `last_wake.detail`은 전달 당시의 접수 기록입니다. enqueue나 그 안의
   `awaiting_ack`만으로 현재 소비 여부를 판단할 수 없습니다.
+  `masc_schedule_get`은 같은 기록을 `last_wake.dispatch_receipt`로 돌려줍니다.
+  그 옆의 `last_wake.current_consumption`은 반응 원장을 지금 읽은 값입니다.
+  대시보드의 `keeper_reaction_evidence.projection_status`와 같은 값입니다.
 - `keeper_queue_evidence`는 현재 대기·소비 관측을 schedule instance,
   해당 실행의 예정 시각과 payload digest에 결속합니다.
 - `keeper_reaction_evidence`는 턴 시작·종료와 큐 ACK를 구분합니다.

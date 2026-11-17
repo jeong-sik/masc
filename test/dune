@@ -6681,7 +6681,7 @@
        ; The operator lesson case loads its declaration.
        ../docs/examples/lane-addons/operator-lesson.toml ../addons/operator-lesson/lane.toml
        (glob_files ../addons/operator-lesson/schemas/*.json))
- (libraries alcotest masc masc.browser_lane masc.masc_log masc.otel_spans mcp_protocol yojson unix))
+ (libraries alcotest masc masc.browser_lane masc.fs_compat masc.masc_log masc.otel_spans mcp_protocol yojson unix))
 
 (test
  (name test_lane_addon_declaration)

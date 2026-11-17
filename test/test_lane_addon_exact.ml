@@ -2062,7 +2062,8 @@ let test_preflight_binds_a_link_written_between_its_reads () =
 module Sweep = Server_unowned_exact_sweep
 let sweep store =
   let declaration : Masc.Lane_addon_config.declaration =
-    { id = declaration_id; enabled = true; run_id = "sweep"; manifest_path = "/nonexistent/lane.toml"
+    { id = declaration_id; enabled = true; run_id = "sweep"
+    ; package_source = Masc.Lane_addon_config.Manifest_path; manifest_path = "/nonexistent/lane.toml"
     ; package = { package with id = Server_workspace_memory_addon_validation.package_id }
     ; binding = `Null; revision = "1"; source_revision = "1"; source_path = "/nonexistent/quiz.toml"
     ; max_exact_in_flight = Masc.Lane_addon_config.one_exact_at_a_time } in

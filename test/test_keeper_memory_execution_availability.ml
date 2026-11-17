@@ -12,7 +12,7 @@ let empty : R.tool_execution_snapshot = {serving=[];conflicts=[];unready=[]}
 let declaration ?(extra="") () =
   let manifest=Sys.getenv "MASC_TEST_LIBRARIAN_PACKAGE" in
   let manifest=if Filename.is_relative manifest then Filename.concat (Sys.getcwd ()) manifest else manifest in
-  Lane_addon_config.load_source ~manifest_scope:Lane_addon_config.Operator_declared ~source_path:"/memory-test/keeper-librarian.toml"
+  Lane_addon_config.load_source ~packages:(Config_dir_resolver.packages_dir ~base_path:"/memory-test") ~manifest_scope:Lane_addon_config.Operator_declared ~source_path:"/memory-test/keeper-librarian.toml"
     ~source_text:(Printf.sprintf "id=\"memory-worker\"\nrun_id=\"memory\"\nmanifest_path=%S\n%s\n[binding]\nsources=[]\n" manifest extra)
   |> require
 let observe ?(setting=Env_config_keeper.KeeperMemoryOs.Enabled) ?(route=fun _ -> Ok ()) ~mode declarations =
@@ -79,7 +79,7 @@ let test_real_manifest_parse_error_stays_in_authenticated_diagnostics () =
       "id=\"unrelated\"\nrevision=\"1\"\ntitle=\"Unrelated package\"\ncontributions=[\"observe\"]\nimage=\"fixture\"\ncommand=[\"fixture\"]\n[interface]\nbinding_schema='''%s'''\n" sentinel);
     write (Filename.concat directory "unrelated.toml") (Printf.sprintf
       "id=\"unrelated\"\nrun_id=\"unrelated\"\nmanifest_path=%S\n[binding]\nsources=[]\n" manifest);
-    let declarations=Lane_addon_config.load ~directory in
+    let declarations=Lane_addon_config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory in
     check bool "the real parser retains offending input in its operator diagnostic" true
       (List.exists (fun (issue : Lane_addon_config.issue) ->
         Astring.String.is_infix ~affix:sentinel issue.message) declarations.issues);
@@ -99,7 +99,7 @@ let test_real_manifest_parse_error_stays_in_authenticated_diagnostics () =
     let unlistable=Filename.concat root "not-a-directory" in
     write unlistable "a file";
     let public=A.observe ~setting:Env_config_keeper.KeeperMemoryOs.Enabled
-      ~declarations:(Lane_addon_config.load ~directory:unlistable)
+      ~declarations:(Lane_addon_config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory:unlistable)
       ~route:(fun _ -> fail "invalid configuration cannot admit routes") ~mode:A.Preflight |> A.to_json in
     check bool "private source paths are not public health" false
       (Astring.String.is_infix ~affix:root (Yojson.Safe.to_string public));

@@ -512,6 +512,11 @@ let locks_dirname = "locks"
 let locks_dir ~base_path =
   Filename.concat (masc_root ~base_path) locks_dirname
 
+let packages_dirname = "packages"
+
+let packages_dir ~base_path =
+  Filename.concat (masc_root ~base_path) packages_dirname
+
 let constitution_dirname = "constitution"
 
 let constitution_dir ~base_path =

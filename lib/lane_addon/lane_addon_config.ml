@@ -2,10 +2,13 @@ type exact_in_flight = int
 let one_exact_at_a_time = 1
 let exact_in_flight count = if count >= one_exact_at_a_time then Some count else None
 
+type package_source = Carried of Lane_addon_carried.id | Manifest_path
+
 type declaration = {
   id : string;
   enabled : bool;
   run_id : string;
+  package_source : package_source;
   manifest_path : string;
   package : Lane_addon_types.package;
   binding : Yojson.Safe.t;
@@ -125,8 +128,8 @@ let select_exact_outputs declared = function
         List.mem output.name selected) declared)
   | _ -> Error "exact_outputs requires an array of declared output names"
 
-let decode ~manifest_scope ~source_path ~source_revision ~id fields =
-  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs";
+let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
+  let allowed = ["id"; "enabled"; "run_id"; "package"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs";
     "max_exact_in_flight"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
@@ -147,14 +150,38 @@ let decode ~manifest_scope ~source_path ~source_revision ~id fields =
     | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
     | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> refused in
   let* run_id = text fields "run_id" in
-  let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
-  let manifest_path = absolute_from ~directory manifest_path in
-  let* manifest_path = match manifest_scope with
-    | Operator_declared -> Ok manifest_path
-    | Within_workspace workspace ->
-        Lane_addon_manifest.resolve_in_workspace ~workspace manifest_path
-        |> Option.to_result ~none:Lane_addon_manifest.outside_workspace in
+  (* RFC server-carries-its-exact-worker-packages 3.2: a declaration names
+     either a package this server carries or a manifest path. A carried
+     package resolves only to the folder holding exactly this binary's copy,
+     so its worker speaks this server's Exact protocol. *)
+  let* package_source = match List.assoc_opt "package" fields, List.assoc_opt "manifest_path" fields with
+    | Some _, Some _ -> Error "declaration names both package and manifest_path"
+    | None, None -> Error "declaration requires package or manifest_path"
+    | Some (Otoml.TomlString value), None ->
+        (match Lane_addon_carried.of_name value with
+         | Some carried -> Ok (Carried carried)
+         | None ->
+             Error (Printf.sprintf "package %S is not one this server carries: %s" value
+               (String.concat ", " (List.map Lane_addon_carried.name Lane_addon_carried.all))))
+    | Some ( Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+           | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+           | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+           | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ), None ->
+        Error "package requires the name of a package this server carries"
+    | None, Some _ -> Ok Manifest_path in
+  let* manifest_path = match package_source with
+    | Carried carried ->
+        Lane_addon_carried.installed_manifest ~packages carried
+        |> Result.map_error (Lane_addon_carried.installation_error_to_string carried)
+    | Manifest_path ->
+        let* manifest_path = text fields "manifest_path" in
+        let manifest_path = absolute_from ~directory manifest_path in
+        (match manifest_scope with
+         | Operator_declared -> Ok manifest_path
+         | Within_workspace workspace ->
+             Lane_addon_manifest.resolve_in_workspace ~workspace manifest_path
+             |> Option.to_result ~none:Lane_addon_manifest.outside_workspace) in
   let* package = Lane_addon_manifest.load ~path:manifest_path
     |> Result.map_error Lane_addon_manifest.error_to_string in
   let* package = match List.assoc_opt "tool_hooks" fields with
@@ -199,10 +226,10 @@ let decode ~manifest_scope ~source_path ~source_revision ~id fields =
     |> Yojson.Safe.sort |> Yojson.Safe.to_string
   in
   let revision = Agent_core_sha256.(to_hex (digest_string canonical)) in
-  Ok { id; enabled; run_id; manifest_path; package; binding; revision; source_revision; source_path;
+  Ok { id; enabled; run_id; package_source; manifest_path; package; binding; revision; source_revision; source_path;
        max_exact_in_flight }
 
-let parse_declaration ~manifest_scope ~source_path bytes =
+let parse_declaration ~packages ~manifest_scope ~source_path bytes =
   let failure ?id ~unreadable message =
     Error { issue = {source_path; id; message}; unreadable } in
   try
@@ -214,7 +241,7 @@ let parse_declaration ~manifest_scope ~source_path bytes =
             | Ok id ->
                 try
                   let source_revision = Agent_core_sha256.(to_hex (digest_string bytes)) in
-                  match decode ~manifest_scope ~source_path ~source_revision ~id fields with
+                  match decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields with
                   | Ok declaration -> Ok declaration
                   | Error message -> failure ~id ~unreadable:false message
                 with (Sys_error _ | Unix.Unix_error _) as exn ->
@@ -225,20 +252,20 @@ let parse_declaration ~manifest_scope ~source_path bytes =
        | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> failure ~unreadable:false "declaration requires a TOML table")
   with Otoml.Duplicate_key message -> failure ~unreadable:false message
 
-let load_source ~manifest_scope ~source_path ~source_text =
-  parse_declaration ~manifest_scope ~source_path:(absolute source_path) source_text
+let load_source ~packages ~manifest_scope ~source_path ~source_text =
+  parse_declaration ~packages ~manifest_scope ~source_path:(absolute source_path) source_text
   |> Result.map_error (fun failure -> failure.issue.message)
 
-let read_declaration ~path =
+let read_declaration ~packages ~path =
   let source_path = absolute path in
   match read_document source_path with
   | Error message -> Error {issue={source_path;id=None;message};unreadable=true}
-  | Ok bytes -> parse_declaration ~manifest_scope:Operator_declared ~source_path bytes
+  | Ok bytes -> parse_declaration ~packages ~manifest_scope:Operator_declared ~source_path bytes
 
-let load_file ~path =
-  read_declaration ~path |> Result.map_error (fun failure -> failure.issue.message)
+let load_file ~packages ~path =
+  read_declaration ~packages ~path |> Result.map_error (fun failure -> failure.issue.message)
 
-let load ~directory =
+let load ~packages ~directory =
   let directory = absolute directory in
   let listing = try
     Ok (Sys.readdir directory |> Array.to_list
@@ -261,7 +288,7 @@ let load ~directory =
       { declarations = []; issues = [{source_path = directory; id = None; message}];
         paths = []; complete = false }
   | Ok paths ->
-      let results = List.map (fun path -> path, read_declaration ~path) paths in
+      let results = List.map (fun path -> path, read_declaration ~packages ~path) paths in
       let id_of_result = function
         | Ok (declaration : declaration) -> Some declaration.id
         | Error failure -> failure.issue.id in

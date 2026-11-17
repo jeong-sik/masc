@@ -187,6 +187,11 @@ val tmp_dir : base_path:string -> string
 val locks_dir : base_path:string -> string
 (** [<base_path>/.masc/locks/]. Process and build lock files. *)
 
+val packages_dir : base_path:string -> string
+(** [<base_path>/.masc/packages/]. Installed Lane Add-on package folders: the
+    browser package [masc browser-lane-setup] writes and the Exact worker
+    packages this server carries. *)
+
 val constitution_dir : base_path:string -> string
 (** [<base_path>/.masc/constitution/]. Ledger of the articles this world's
     keepers ratified for themselves (RFC-0442). One world's norms never reach
@@ -308,6 +313,9 @@ val tmp_dirname : string
 
 val locks_dirname : string
 (** The directory {!locks_dir} names below [<base>/.masc]. *)
+
+val packages_dirname : string
+(** The directory {!packages_dir} names below [<base>/.masc]. *)
 
 val constitution_dirname : string
 (** The directory {!constitution_dir} names below [<base>/.masc]. *)

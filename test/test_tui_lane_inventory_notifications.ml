@@ -90,7 +90,7 @@ let test_declaration_addition_drives_the_notification () = with_workspace (fun b
   let directory = Filename.concat base "lane-addons" in
   Unix.mkdir directory 0o700;
   Unix.rename source_path (Filename.concat directory "observer.toml");
-  let declarations = Lane_addon_config.load ~directory in
+  let declarations = Lane_addon_config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:base) ~directory in
   let before = runtime_snapshot config [] in
   let after = Inventory.For_testing.runtime_snapshot ~config ~declarations
       ~inventory:empty_inventory ~browser_observations:[] in

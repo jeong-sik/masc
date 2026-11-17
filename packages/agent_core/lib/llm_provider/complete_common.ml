@@ -870,14 +870,15 @@ let serialize_final_http_request_unadmitted
       (try
          let artifact = Backend_openai_request.build_request_assoc_artifact
              ~stream ~config ~messages ~tools () in
+         let output_token_receipt =
+           Backend_openai_request.request_assoc_output_token_receipt artifact in
          Http_request_stream.encode ~fields:Http_request_stream.Stream_with_usage
            (Backend_openai_request.request_assoc_payload artifact)
          |> Result.map_error (fun error ->
            Http_client.AcceptRejected
              { reason = Http_client.body_injection_error_to_string error })
          |> Result.map (fun body ->
-           http_codec, body,
-           Backend_openai_request.request_assoc_output_token_receipt artifact)
+           http_codec, body, output_token_receipt)
        with Invalid_argument reason -> Error (Http_client.AcceptRejected { reason }))
     | false, (Provider_http_codec.Anthropic_messages | Ollama_chat | Openai_responses
              | Openai_chat | Gemini_generate_content | Glm_chat)

@@ -2,10 +2,10 @@
 
 ## [Unreleased]
 
-
-## [0.73.0] - 2026-11-16
+## [0.73.1] - 2026-11-17
 
 ### 요약
+
 
 1. 이번 0.73.0 은 0.72.0 이후 쌓인 조각 568개(PR 번호 기준)를 담았습니다. 대규모 통합 물결(11-14~11-16, 90+ 병합)과 21-도메인 감사 착수가 포함됩니다.
 2. 릴리스 회귀 관문: 같은 저자·같은 본문 재댓글 가드(#52239)와 그 시험 정합(#52482), TUI lane add-on fixture 의 action_tool 키(#52364), 조용한 채팅의 일정 읽기 시험(#52366)이 해소됐고 잔여 실패는 72→28 로 줄었습니다.
@@ -14,6 +14,7 @@
 5. 저장 공간·Librarian: 완료 턴 전체 재검색 제거(#52502·#52503)와 대형 원본 조기 거절로 서버 비용이 줄었습니다.
 
 ### Upgrade notes
+
 
 - Update the dashboard bundle and restart the TUI no later than the server. A bundle or TUI built before this change requires `exact_run_projection_count`, `exact_run_source_total` and `exact_run_projection_truncated` in the standalone lane snapshot, so it cannot read the Lane inventory from a server that no longer sends them. A bundle or TUI built with this change reads an older server's snapshot and ignores the three fields (#51744).
 - The guest agent's socket path is part of an Apple guest's boot plan, so each running Apple microVM guest is replaced once, at its Keeper's next turn after the upgrade, instead of adopted. Its work volume is kept (#51890).
@@ -81,7 +82,18 @@
 - Local installation no longer certifies stored-state compatibility. Before deploying changed stored-data readers, run the candidate's explicit `validate-stores` audit. `masc start` and `masc restart` do not run the full audit; incompatible history can block Memory writes or Librarian processing after startup (#52419).
 - The local installer no longer accepts `--no-guest-shim`; leaving the shim unchanged is now its default. Refresh explicitly for server/shim changes or `remote_shim_outdated`. The release installer's options and behavior are unchanged (#52429).
 
+
+
+- Deploy the Librarian image and complete mounted package from the same source revision. Updating MASC executables leaves operator-managed Add-on packages and declarations unchanged; keep the old image and package intact and select the new manifest through the declaration owner (#52528).
+- The keeper-librarian package is `0.2.5` with image tag
+  `masc-lane-keeper-librarian:0.2.5`. Its worker accepts the
+  declaration-replacement ending; the worker in an installed `0.2.4` image
+  answers that delivery with an error and keeps the request pending. Build the
+  image and copy the complete package from the same source revision, then
+  select the new manifest through the declaration (#52622).
+
 ### Fresh state required
+
 
 - Turn records carry a required `refused_model_input` key. A turn record
   written before this change does not decode. Empty each Keeper's
@@ -171,7 +183,12 @@
   stored-state guide](../docs/guides/DURABLE-STORE-HARD-CUT.md); this change
   performs no installed-state removal (#52348).
 
+
+
+- Resolve outstanding Librarian chains before changing their captured semantic configuration, or use a separately reviewed and authorized plan to back up and set aside the affected control scopes and matching worker requests. Stop writers and hold the workspace lease for that fresh-state operation. Preserve Memory, queues, receipts, raw histories, cursors, Exact/proofs, settled archives and unrelated worker records. Worker record v2 is unchanged; the package update alone does not require an empty volume (#52528).
+
 ### Added
+
 
 - The account server of a multi-account installation answers the console of a signed-in person at `/accounts/console`, its built files below `/accounts/console/assets/`, and the base of the sheet of its own pages at `/accounts/console/base.css`. The routes are open before a sign-in; the page and its files carry a policy that runs only scripts and sheets of the server. A bundle without the console gets a 503 page in place of it while the server starts and signs people in as before. Nothing links to the address yet. 가이드 없음(문서 없음) (#51718).
 - A person reads the conversations of their own Keeper back: the
@@ -332,7 +349,40 @@
 - Reuse the cached immutable observation snapshot when confirming duplicate broadcasts, preserving missing-row deferral, exact ACK and historical-answer handling, and pending-only wake eligibility (#52489).
 - Import HWPX and DOCX into editable artifact drafts and export merged tables and native column, bar, line and pie charts with embedded workbooks. Preserve missing values, numeric formats, picture bytes and caption text through data edits and re-export (#52514).
 
+
+
+- Import HWP5 files directly into editable artifact drafts in a browser worker. Preserve supported merged tables and native column, bar, line and pie chart data through HWPX/DOCX re-export, and reject protected inputs, corrupt structures and unsupported controls (#52541).
+- Add admin-only complete allocation sample counters and guarded selective callstack lookup for comparing profiles without top-table omissions (#52544).
+- Expose complete raw allocation sample counters and guarded selective stack lookup in the profiler core (#52545).
+- `Agent.execution_store` takes `?host_stop`, a predicate over the host's own
+  stop reasons. When the exception that ends the call is a host stop (wrapped
+  reasons count only when every reason inside is one), the journal is left
+  open as a process death leaves it: no terminal, no terminal disposition, and
+  the writer closes without one. Every other exception closes the scope as
+  before. Nothing passes the predicate yet (#52550).
+- `Llm_provider.Types.tool_failure_kind` has `Writer_exited_tool_error`: the
+  process that wrote the execution journal exited while the handler ran, so
+  the handler never returned, its effect is unknown, and it was not run
+  again. A terminal Tool result of this kind is `Terminal_failed` with
+  `Effect_outcome_unknown`. The librarian input capture codec and the blob
+  maintenance validator accept it, and native repetition recovery does not
+  count it as a handler observation, because the handler returned no output.
+  Nothing produces it yet (#52565).
+- The execution journal has a `Settle_unreturned_tool_attempt` transaction.
+  It closes an open Tool attempt whose handler never returned, with every
+  open node under it (child runs included), children first, using a failed
+  or cancelled terminal; then it materializes the given result and closes
+  the invocation. It rejects any descendant invocation with an attempt but
+  no result, even if its child run was already aborted, while preserving
+  child invocations with recorded results.
+  `abort_run` shares the subtree close. Nothing stages the transaction yet
+  (#52568).
+- Edit imported HTML text, table cells and chart data visually, apply selected changes explicitly, and retain or download unapplied input with its original draft owner (#52647).
+- Add explicit V3 interactive stdin to the exec shim with bounded input/output forwarding, EOF cancellation, and truthful incomplete-output errors (#52685).
+- Lane Add-on host cycles read a worker's `lane_host_requests` listing page by page: an answer may name `next`, the host passes it back as `after`, and one pass walks every page without lowering the number of requests running side by side at a page end (#52728).
+
 ### Changed
+
 
 - TUI: the full reading of a browser, machine or package row in the feature list, and the notices above that list, are drawn in the screen language. The English text is unchanged. (#51620)
 - TUI: the Keeper detail and chat draw the portrait reason, the tool stance effect, the empty log sentence and the empty chat sentence in the screen language. In English the chat header now reads "Context read failed" when the context could not be read, apart from "Context unavailable" for an empty measurement. (#51623)
@@ -691,7 +741,80 @@
 - Link compaction, resume, streaming and diagnostic failure history to the existing runtime decision owners in the contributor guide (#52496).
 - Check that Codex compaction restores recall without reinjecting the retained standing System, and clarify the boundary between shared projection evidence and native instruction/session behavior (#52510).
 
+
+
+- Exercise failed-candidate recovery through Slack, Discord, TUI and journal consumers, and connect reasoning progress checks to the production registry probe and response acceptance. #52558
+- `Agent.execution_store ?resume` takes an `execution_resume`.
+  `Resume_writer_exit_unproven` carries no claim; `Resume_after_writer_exit`
+  says the process that last wrote the run has exited. Both still fail
+  closed on an admitted Tool attempt without a settled result. The Keeper
+  Owner passes `Resume_writer_exit_unproven` (#52567).
+- `Agent.execution_store ~resume:(Resume_after_writer_exit _)` settles an
+  open Tool attempt under an open invocation of a Tool that continues the
+  turn instead of failing: the attempt and its child runs close `Cancelled`,
+  the invocation gets a `Writer_exited_tool_error` result that the next
+  provider request carries, the handler does not run, and recovery is
+  `Retire`. `Resume_writer_exit_unproven`, terminal Tools, invocations
+  closed without a result, and a cut attempt with a descendant Tool
+  invocation that has an attempt but no result still fail closed, including
+  descendants already closed by a child abort. Recorded child results stay
+  valid. RFC
+  restart-resumes-running-chat-operations 4.5, 8, 9 and 10 now say the same
+  (#52570).
+- Reuse immutable request JSON for one scope reread while preserving fresh atomic body reads, SHA checks, current progress and complete binding validation (#52582).
+- Remove duplicate request JSON parsing from the two execution-scope reads within one Librarian admission discovery, preserving recovery and Current publication reconciliation (#52583).
+- RFC restart-resumes-running-chat-operations decides two L4 questions.
+  4.7 ties `Resume_after_writer_exit` to the process image: the registry
+  passes `Prior_writers_exited` only to the first pool's Owners in an image,
+  and the Owner keeps boot-requeued call ids in memory until the resumed
+  call binds. 4.6 stores resume points in a new operation-store table
+  (schema v4). The `Agent.Resume_after_writer_exit` doc now claims only
+  that no code in the exited process can still write the run (#52586).
+- After an unclean exit, the first claim of a native call that restart
+  settlement requeued passes `Resume_after_writer_exit`, so a Tool attempt
+  the exited process left open settles as a typed unknown result instead of
+  failing the operation. The registry gives `Prior_writers_exited` only to
+  the first pool installed for a base path in a process; the Owner keeps the
+  requeued call ids in memory and forgets one when a claim binds it
+  (`Keeper_owner.native_call_writer`). A deferred operation claimed again in
+  the same process still passes `Resume_writer_exit_unproven` (#52587).
+- Build atom counts and lazy opening-digest lookups from one message annotation while preserving the lookup-only API (#52588).
+- Share the count-plus-lookup result inside Librarian range selection and unread counts without changing cut validation or lookup order (#52589).
+- RFC restart-resumes-running-chat-operations 4.6 now records each restart
+  continuation as a typed marker in the call's Core journal, carrying the host
+  checkpoint and written only with a writer-exit claim. Boot settlement stops a
+  call whose checkpoint still equals its last marker. The chat operation store
+  schema stays at v3; the earlier plan to add a table there is withdrawn
+  (#52594).
+- RFC restart-resumes-running-chat-operations 4.6 no longer ends a resumed
+  operation by comparing checkpoints. The journal marker and the progress
+  judgment are withdrawn: a resumed run saves a checkpoint when it appends
+  the cut Tool's unknown result, so the comparison never stops a loop in
+  which the model calls the server-killing Tool again. Operator cancellation
+  breaks the loop, and the next code layer makes a boot-requeued operation
+  cancellable (#52641).
+- RFC restart-resumes-running-chat-operations 4.4 moves the retirement of a
+  turn cut before collection from boot settlement to the claim that picks
+  the operation up, 4.7 puts every Active call left after boot settlement
+  into the writer-exit set, and 4.8 fails an operation whose journal boot
+  settlement cannot read instead of requeueing it. RFC
+  uncollected-provider-turn-is-not-resumed 4.2 follows (#52641).
+- The Keeper status block below a TUI chat wraps between facts instead of cutting runtime IDs and dropping token counts, and shows the same facts in every view (#52643).
+- The TUI chat results view draws tool names whole instead of cutting them at 48 cells (#52646).
+- Build shared-document text selections in one inspection and index generated workbook rows before formatting chart values (#52647).
+- The schedule block below a TUI chat wraps between facts instead of cutting each job to one row, and is headed `예약 Job` before its jobs are read as it is after (#52649).
+- The turn progress row above the TUI chat composer wraps between facts instead of being cut, and the folded-rows key says what it opens (#52651).
+- Add strict restoration that can reuse an immutable history source only when the captured owner and complete source text match, while rechecking each request's preparation, bindings and physical source root (#52652).
+- Share identical history sources within one ordered inventory load while reading every current record and body afresh, preserving validation and stopping on the first failure (#52653).
+- While a turn runs, the fact blocks below a TUI chat keep the rows the previous frame drew, so values that lengthen and shorten do not move the conversation (#52656).
+- Separate MCP protocol channels from locally owned processes so a caller can supply its own input/output flows while retaining process or remote-session ownership; preserve full tool results, response limits, and sampling behavior (#52686).
+- A sentence wider than a row of the fact blocks below a TUI Keeper chat, such as the message of a failed turn, breaks between two words instead of inside one. Names and numbers still break at the cell (#52702).
+- 용어집에서 TUI 서비스 탭과 대시보드 정체성 섹션의 경계를 설명합니다. (#52704)
+- The diff block of a TUI Keeper chat draws the path of a recorded change whole, on as many rows as it needs, instead of shortening it in the middle to keep one row (#52706).
+- The shared Exact worker of the keeper-librarian, workspace-curator, candle-appraiser and hitl-auto-judge packages admits a request when a listing page carrying only that request fits the reply frame, and lists its waiting requests in pages; it no longer answers `capacity_wait` (#52729).
+
 ### Removed
+
 
 - The dashboard no longer reads `glm_replay_reasoning` from a runtime
   declaration; the server stopped sending it in #25581, and the replay policy
@@ -716,7 +839,12 @@
   dashboard view, TUI screen or script read it. `showing` and `entries` are
   unchanged (#27307, #52211).
 
+
+
+- The Lane Add-on host and the Librarian no longer carry a capacity wait for Exact admission, and the four Exact worker packages move to keeper-librarian 0.2.6, workspace-curator 0.1.5, candle-appraiser 0.1.6 and hitl-auto-judge 0.1.2; update the server before selecting them (#52731).
+
 ### Fixed
+
 
 - A Muse turn whose new-session input the host refused with a final
   `modelError` and no quota detail records the refused range, its runtime and
@@ -2172,7 +2300,121 @@
 - Reuse fully verified Librarian ancestor indexes during a preflight scope scan while rechecking current bodies, owner bindings and lineage acknowledgments (#52523).
 - Copy only FSM guard metric series when observing a Keeper, preserving detached snapshots and bucket ordering while avoiding copies of unrelated metrics (#52525).
 
+
+
+- A Librarian gate run whose every unanswered question was refused by destinations for their own state (credit, credential, rate, server or transport) no longer retains a new attempt on every pass while every destination the authority would ask still refuses for its state; a destination that answered since, or was never asked, lets the next attempt proceed (#52392).
+- When a gate destination answers again after refusing, every Keeper of the root whose last durable Librarian pass or explicit admission ended pending is woken once, and each woken pass re-reads its own wait (#52399).
+- A Librarian pass that was running across a destination recovery and ends pending wakes itself instead of waiting for the next signal; a destination-state refusal also counts as recovered when it becomes a refusal of one request, and a failed recovery wake logs a warning instead of discarding the answer that triggered it (#52414).
+- Verify the exact retained original and its fenced continuation before execution, preserving the no-dispatch, no-ACK and no-Memory checks, then verify the existing Memory commit and cursor ACK after execution (#52484).
+- Bound retained checkpoint lineages by LRU over canonical-head and memo-entry encoded bytes, without an entry-count cap that evicts small active Keeper histories; this accounting excludes decoded OCaml records and does not bound the whole heap (#52497).
+- Share a bounded monotonic-timestamp `Model_inference_metrics_kept.t` window cursor across model-metrics REST and SSE readers, and accept windows from 1 through 10080 minutes; requests outside that range now return an error (#52497).
+- Classify pre-permit queue expiry (`Permit_wait_expired` / `Permit_granted_as_deadline_passed`) before `before_dispatch` as a pre-dispatch advance (`Flow_before_dispatch_admission_timed_out`) rather than a bound `Executed_failure`, preventing `Durable_partition_invariant` quarantines on Board attention partitions (#52498).
+- Record HTTP 401/403 exact-lane credential/usage-window refusals in backpressure observation, defer HTTP 5xx exact-lane exhaustion to `Ready` instead of quarantining, and defer pre-claim exact setup refusals in `Keeper_board_attention_worker` via a closed `drain_error` sum type instead of terminating the worker fiber (#52500).
+- Enforce the captured Memory OS facts commit byte budget during Librarian explicit-admission proposal validation (while still allowing net-shrinking proposals on over-budget snapshots), classify all `lane-addons` subdirectories and `.turn-boundaries.jsonl` in `Server_tool_blob_scope`, and treat uninitialized 0-byte `chat-operations.sqlite3` files without WAL/journal/SHM companions as empty during `Tool_blob_sweep` (#52501).
+- Scan lane-addon request, ownership, history resolution and sampling records for embedded tool blob references, preserving blobs that those records alone retain (#52501).
+- Include retained lane-addon evidence and sampling recovery payloads in the reference scan, including raw packet bytes and structured JSON, so a tool blob stays live when only those payloads retain it (#52501).
+- Reject non-public upstream IP literals and DNS resolutions (loopback, RFC1918, link-local, CGNAT, cloud metadata, and IPv4-mapped IPv6) before dialing in `Egress_proxy_net`, require constant-time per-lane `Proxy-Authorization: Basic` credentials across container/microVM egress proxies, and bound upstream connect/header reads (#52517).
+- Close `Execute_script_paths` dynamic/chained `cd`/`sh -c` destination escapes, strip `curl`/`wget` write flags from `Keeper_gate_readonly`, fix `Exec_shim` non-blocking pipe drain and `Masc_exec_ssh_bootstrap` `argv.(0)` forwarding, and block symlink escapes in `Msx_machine_tools` (#52518).
+- Restrict credentialed CORS `Origin` reflection to admitted origins across HTTP/SSE/GraphQL routes and check same-origin authority for anonymous `Permission` mutations. Reject option-shaped repository URLs and refs at HTTP/catalog/Git boundaries, delimit clone/merge arguments, contain repository paths against symlink escapes, and return 404 when a workspace scope is unavailable (#52519).
+- Cover admitted CORS headers and anonymous permission requests with regression cases for foreign origins, POST/PUT/DELETE 401 refusals, GET/HEAD reads, and the explicit anonymous-mutation policy (#52519).
+- Forward WebSocket and unary H2 gRPC bearer identities into MCP execution, enforce MCP SSE and DELETE session ownership, close overloaded WebSocket outbound queues, and show dashboard shell 401/403 responses as an unauthorized state (#52520).
+- Expand workspace `~/` paths against process `HOME` before resolving relative paths, expand account homes through `Runtime_account_home.of_string_under` against the caller's explicit `home`, normalize `..` before `under_persons` containment checks, retry refused browser session issuance and ended-session replacement, and render Google OIDC sign-in forms on `/` and `/accounts/invite` (#52521).
+- Keeper 답변 API 테스트의 공통 요청에 필수 이름을 넣어 Dashboard 타입 검사를 통과시킵니다 (#52526).
+- Compute captured workspace-memory inventory fingerprints only when requested, avoiding unused snapshot serialization and hashing during observation (#52527).
+- Give the Librarian compact-refusal worker its own package revision and image tag, `0.2.4`, so it can be distinguished from an installed pre-refusal `0.2.3` worker (#52528).
+- Route external channel speakers cleanly through `POST /api/v1/gate/message` without false `502` continuation contradictions, return `202 Accepted` for accepted, queued, or running requests, reset Slack rich blocks on failover retry, preserve connector coordinates/`turn_ref`/`conversation_id` across `keeper_surface_post` and replay paths, and validate settled connector surface-post effects in `Keeper_chat_journal_audit` (#52529).
+- Deliver one-shot `Delegate_failed` completion wakes via `Keeper_registry_event_queue.enqueue_stimulus_once_durable_result` in `Keeper_chat_failure_projection.finish` across cancellation, exception, and restart recovery without duplicate boot wakes, and route registered cross-Keeper `masc_keeper_msg` replies onto the caller's event queue (#52530).
+- Project `Cancel_pending` and `Transfer_owner` `transition_outbox` receipts immediately inside paused-work transactions, wake running transfer targets, retain operator `Cancel_accepted` idempotency witnesses separately from `schedule-cancel:` withdrawals, launch missing keepalive lanes on `Resume_owner`, and prevent `Low`-urgency queue starvation (#52531).
+- Drain `Lane_addon_worker` container `stderr` asynchronously with `Invalid_argument`-safe pipe cleanup, wake expired exact-lane provider rests on maintenance beats while honoring `lane.enabled`, enforce UTF-8 length/numeric/array/`additionalProperties=false` consumer exact-output shapes, bound DOS `untilSnapshot`, preserve pending DOS Board announcements across read-only calls, and annotate MSX read-only tools (#52532).
+- After the complete continuity walk proves an input-size refusal and permits a smaller completed source, schedule the next unit on the same serial Memory lane. Held Keepers can continue without a new conversation turn. Quota alone grants no retry, and the existing invalid-output veto remains in force (#52534).
+- Avoid serializing and hashing suppressed waiting-queue rows, and reuse each emitted schedule anchor's exact source reference (#52536).
+- Restore indexed exact tool-latency percentiles so metrics reads avoid scanning retained duration histories after each tool call (#52539).
+- Reduce allocation in missing-path checks by skipping discarded Eio error context while preserving fresh filesystem inspection (#52540).
+- Cancel pending artifact imports, terminate the HWP worker on cancel or close, allow selecting the same file again, and check the shared destination table axes before native conversion (#52552).
+- Serialize `Keeper_identity_switch.set` read-modify-write updates under `Workspace_utils_ops.with_file_lock_r` while emitting `Audit_log.log_action` outside the lock, and query `Repo_git.get_branches` via `git for-each-ref` to exclude symbolic `HEAD` refs structurally while deduplicating normalized branch names in `Repo_store.list_branches` (#52553).
+- Preserve positive integer `omitted` step counts on `t: 'trace'` blocks through `KeeperChatBlockSchema` and `normalizeBlocks`, and guard `quickstart.sh` against pre-existing port listeners and early server process exit during startup (#52554).
+- Preserve Agent Core operation results and original exceptions when optional tracers fail, without replaying completed effects; retain reserved control failures inside cleanup and parallel wrappers. #52556
+- Skip unused reaction-ledger aggregation when refreshing the Tools runtime diagnostics (#52559).
+- Stop allocation-profiler key scanning after collecting the selected stack frames while preserving key bytes (#52560).
+- Suppress automatic titles for untitled native charts in DOCX and HWPX exports while preserving named titles and editable chart data (#52563).
+- Preserve the selected Agent Core execution exception when cleanup diagnostics fail, while propagating new reserved logger failures and retaining the canonical terminal outcome. #52569
+- Avoid retaining encoding-memo byte copies when loading read-only checkpoint snapshots (#52572).
+- Use validated read-only checkpoint loads for Keeper snapshot readers while preserving save memos (#52573).
+- A Goal verification whose run was cancelled, hit an exception, or whose process died now records that run end (cause, run identity, the tool observations it actually made) instead of leaving the original on "no new review was started" forever. The next scan decides from one table: a cancelled or retention-failed run asks again automatically, a raised exception waits for an explicit `request_complete`, and an original left `Dispatch_pending` with no live owner is recorded as owner-less and asks again. A reviewer refusal keeps its existing retryable-refusal rule, and any evidence object the Goal-side view cannot read keeps today's meaning instead of stopping the Goal (#52577).
+- Open private JSONL rewrite staging files under a non-reclaimable `.private_jsonl_prep_*.prep` basename, acquire an exclusive open-file-description `flock` and `dup` lease before linking to `.private_jsonl_*.stage`, and fail closed with `Rewrite_stage_failed` (closing `output` via `close_out_noerr` on flush errors) if stage lease acquisition fails (#52593).
+- Pace Eio `File_lock_eio.with_durable_lock` cross-process `F_TLOCK` retries with `Eio_unix.sleep` instead of busy-yielding, deduplicate `canonical_table_key` canonicalization in `File_lock_eio.with_lock`, and add single-flight OAuth token renewal regression coverage (#52595).
+- A Librarian pass that reads a request the host ended unrun (`not_allowed`)
+  under a replaced keeper-librarian declaration no longer narrows the next
+  read to one turn, and it asks for the next pass itself instead of waiting
+  for the Keeper's next turn. The host's typed replacement reason survives
+  storage, worker restart, declaration rollback and an unavailable current
+  destination. Ordinary permission refusals remain distinct and narrow as
+  before (#52621, #51278).
+- A Librarian request its worker holds no longer waits forever after the
+  keeper-librarian declaration is replaced (a new package revision or a new
+  `run_id`). The host ends a request that has no result and no open attempt
+  as `not_allowed` once the replacement worker is attached, and its Keeper
+  reads the same range again under the new declaration. A declaration that is
+  off, unreadable, or edited with no worker attached yet still leaves the
+  request waiting. The host stores the typed `Replaced_declaration` reason,
+  so a later rollback cannot reinterpret the ending as a generic refusal
+  (#52622, #51278).
+- Subdivided Goal verification attempts whose parent ended without a reviewer receipt (`Owner_exited`, `Run_ended`, or before-dispatch `Authority_moved`) now preserve `Ok None` receipts and their recorded tool observations across `restored_receipt`, `observed_receipt`, and `tool_observations` instead of failing recovery with `Goal terminal observation lacks its original receipt` or `Goal refusal evidence does not match its refusal stage`; `Run_ended` / `Owner_exited` now also authenticate `run = goal_run retained.run` across `restored_receipt` and frontier/child restoration, and `restore_child` rejects grant-less (`explicit_retry = None`) children under a `Raised` parent (#52627).
+- Added regression coverage for `Goal_verifier_worker` and `Goal_verifier_host.needs_recovery` across subdivided `Owner_exited`, `Run_ended`, and before-dispatch `Authority_moved` parent attempts, plus rejection of foreign-run `Owner_exited` refusals and grant-less children under `Raised` parents (#52628).
+- The TUI Keeper list keeps each running turn in one place: priority sorting ranks a running turn's model and tool waits as active, and a running turn sorts by its start time, so rows no longer swap between Active and Waiting as streaming events arrive (#52630).
+- The dashboard overview strip's live dot follows the SSE observer instead of a local 30-second sampler, so a disconnected observer no longer reads as healthy, and the lane swimlane buffer holds a 20-minute window rather than a count sized for polling (#52631).
+- Preserve Gemini tool-result documents, audio, images, JSON and failure state in native function responses when the model declares that capability. Keep direct document support separate; undeclared tool media receives an explicit omission, with the same document view used in preflight (#52636).
+- Preserve explicit HWP, HWPX and DOCX table and cell widths across import and export, retain unresolved width preferences with notices, and remove repeated table-row scans (#52645).
+- The wrapped fact blocks below a TUI chat leave the slash menu its rows and the schedule block its first row on short terminals (#52655).
+- A slow waiting-inventory read reports itself inside the Keeper list's fixed status row instead of a row of its own, so the rows below no longer shift twice each time the read starts and finishes (#52660).
+- Bind cached attachment readings to the selected reader id/revision and exact source identity. STT endpoint/model changes require a new reading, and transcription uses the same declaration snapshot as cache lookup (#52662).
+- Keeper 화면에서 컨텍스트 추정치나 출처를 알 수 없는 값을 실제 요청의 입력량·점유율로 표시하지 않게 했어요. 원본 숫자는 턴 기록과 진단에 보존해요 (#52667).
+- Codex에서 현재 목표나 요청 출처가 바뀔 때 같은 기본 지침을 반복해서 넣지 않도록 했어요. 바뀐 관측은 Developer로 전달하고, 제거된 관측도 명시적으로 알리며 같은 내용을 User 입력에 중복하지 않아요 (#52668).
+- `masc_start` keeps the active workspace's scope when the request path resolves to the same canonical `base_path`, including a worktree path, a trailing slash or a symlink path, instead of creating a new scope and closing every open terminal's observer and fleet streams (#52670).
+- The TUI observer reader appends what it receives to an unbounded local stream and keeps reading the socket, and a single forwarder merges a stream instance's contiguous batches into one `Observer_received`, so a stalled UI loop no longer stops the reader and no longer makes the server drop the session for a full 256-entry queue (#52671).
+- A completed-history Librarian original that no worker has received no
+  longer stops its Keeper's passes after the keeper-librarian declaration is
+  replaced. The Keeper's pass ends such an original before dispatch, asks for
+  the next pass itself, and that pass reads the same range again, whole, under
+  the declaration of then. Under the same declaration the original is admitted
+  as before, and while the Add-on is off it waits as before (#52674, #51278).
+- A person who connects a Claude Code subscription on an account server no
+  longer has the sign-in page open on the server machine, where an approval
+  signed the approver's account in to that person's account home. The
+  sign-in child is handed a browser command that does nothing, and the
+  person opens the link the console shows (#52676).
+- TUI stdout writes go through a single ordered queue drained by a system thread, so a terminal that stops draining its pty no longer blocks the UI loop in `write(2)` for up to 191 seconds; when a frame has not been taken yet the next one is deferred by a frame interval instead of piling up (#52682).
+- Return to stream and lifecycle handling after each ready Observe notification so a later input or cancellation cannot stall behind a second blocking receive (#52685).
+- Correct media regression expectations for structured Gemini text and nonpersistent parsed tool JSON. Keep transmitted bodies, canonical blocks, message envelopes and nested source references under test (#52688).
+- Preserve fully determined absolute table column widths in browser previews and include vertical-merge continuation widths when importing DOCX tables (#52689).
+- Keep empty chart titles editable and show a title prompt only in the editing projection (#52690).
+- Validate local and shared chart text changes before mutating the draft, retaining invalid input for correction (#52690).
+- Keep chart labels readable in narrow previews, fit pie diagrams with wrapping legends, and let other charts scroll inside their previews (#52690).
+- A dropped observation stream reports `관측 상태: 이전 관측 · 스트림 끊김` in the Keeper list's fixed status row, ahead of the waiting-inventory notice, so reconnecting no longer inserts and removes a row and shifts the whole list (#52693).
+- A completed-history Librarian original whose model call was under way when
+  the keeper-librarian declaration was replaced no longer waits for ever. The
+  Keeper pass that reads the cut-off attempt asks for the next pass, and that
+  pass archives the original and reads the same range again, whole, under the
+  declaration of then; this asks the model once more. An attempt cut off
+  under its own declaration, and one that ended in a raised error, wait as
+  before. When the destination of now cannot be read the original waits and
+  the reason is logged (#52695, #51278).
+- Remove eleven rendered TUI text and placement assertions while preserving terminal I/O, refusal decisions and screen/turn epoch ownership checks (#52698).
+- A person's sign-in on an account server whose `PATH` holds no `true`
+  utility in an absolute directory is refused with 503 before a directory is
+  made for it. The server has no command to hand the client in place of a
+  browser there, and the home of a sign-in is made only with that command
+  (#52699).
+- The fact blocks of a TUI Keeper chat write what they did not draw as `외 N` (`N more`) instead of `+N`: the folded lines of a turn, the hint that points at the turn details, and the jobs an opened schedule block had no rows for (#52701).
+- Agent Core Keeper requests archive verified completed tool-call arguments alongside aged results before a size refusal, keeping original bodies recoverable and preserving current calls and signed reasoning (#52705).
+- The TUI Context inspector shows recent turn data before detail reads finish and loads provider input, response history and forecasts only for tabs that use them. Fresh refreshes cannot reuse an older page after a tab change (#52707).
+- Remove four new Keeper list row-order assertions and their dedicated helper under the TUI test policy (#52727).
+- Align browser and machine observation documentation with current notification reads and retained checkpoint requests (#52727).
+- The TUI Goal detail wraps a verdict's reason once, so it no longer leaves one- or two-word rows between full ones (#52739).
+- RFC-0486의 DOS 관전 함수명을 현재 읽기 경로에 맞추고, 이미 끝난 작업이 뒤에 들어간다는 설명을 지웁니다 (#52740).
+
 ### Performance
+
 
 - A Keeper world observation now reads the Goal store once. The in-progress Goal ids it reads feed both the observation's active Goals and the Goal links on claimable Task rows, so the two values no longer come from two separate reads (#51786).
 - The telemetry summary no longer re-parses the newest rows of every keeper
@@ -2290,7 +2532,17 @@
   and the closure check keeps its proofs for the scope (#52471).
 - Share one complete dated-file listing between Keeper telemetry counts and recent summaries, retaining per-file freshness checks and existing cache semantics (#52472).
 
+
+
+- The chat transcript cache is reused across execution domains: compiled redaction patterns are domain-local, so a cache hit now compares the redaction policy's exact values instead of object identity, and only a real secret-policy change reparses the transcript (#52448).
+- Projecting an official history no longer rescans the complete main and internal histories for every selected turn: rows are grouped once per selected trace by exact turn identity, preserving main/internal order, repeated cuts, missing-trace refusal and historical offsets. A 75,752-row trace with 3,774 selected turns drops from about 6.9 s to 0.04 s CPU in the isolated probe (#52502).
+- Share the strict workspace ledger read path with an availability check that skips unused digest and briefing observation (#52678).
+- Check fresh ledger readability on the CPU pool before workspace inventory cache lookup, avoiding unused briefing and digest work (#52679).
+- Finalize streaming request fields before JSON encoding while preserving raw-literal validation and wire bytes (#52719).
+- Avoid reparsing and re-encoding complete OpenAI chat streaming requests while preserving the outgoing seal and output-token receipt (#52720).
+
 ### Documentation
+
 
 - The S1b-3 section of the multi-account plan gains the layer by which
   a person deletes a conversation of their Keeper. The deletion is a
@@ -2573,7 +2825,20 @@
   host, and keeps each operation's restart resume points as a list it can show
   (#52475).
 
+
+
+- The `Eio_guard` mutex comments describe what the two guards actually do. `Eio.Mutex` admits one fiber at a time in every operation, so `with_mutex_ro` is not a shared or read lock: it is `Eio.Mutex.use_ro`, which keeps the critical section cancellable and releases the mutex instead of disabling it when the body raises. The old comments said `with_mutex_ro` "acquires read lock", and two separate reviews read that as a shared lock, which led to an incorrect blocking finding against #52507. Behaviour is unchanged; only the `.ml` and `.mli` comments differ (#52513).
+- The worker-state hard-cut guide separates persistent record version 2 from package and image revisions, so the linked Librarian 0.2.4 instructions use the candidate manifests instead of an obsolete version list (#52547).
+- The glossary gains a Message Request Status entry: the eight `Gate_protocol.message_request_status` values, the `202 Accepted` vs `200 OK` boundary of `POST /api/v1/gate/message`, and how this `Queued` differs from the runner-slot and message-delivery meanings (#52557).
+- The glossary Identity Row State entry now says the 서비스 tab (English Services) after #51829, and cites bin/masc_tui_identity_model.mli for the five identity_row_state values (#52579).
+- RFC-0522 drafts replaying measured provider failures through the production call chain from a local stand-in endpoint (#52581).
+- Added a Draft RFC that designs paged listing of pending Lane Add-on Exact requests without `capacity_wait`, and half-step narrowing of durable Librarian reads that is released once the refused range is read, together with the production measurements behind it (#52585).
+- Clarify the accepted Librarian declaration replacement, admission batch handoff, and received-answer Gate policies (#52618).
+- The glossary Karma entry now cites lib/board/board_votes.ml (where `karma_event` and `build_karma_ledger` live) instead of lib/board_types/board_types.mli, and the Librarian Pass End entry now lists eight pass-end states and ten failure kinds with corrected labels (#52619).
+- The TUI screen grammar RFC gains section 5.5: the fact rows below a Keeper chat wrap between facts instead of being cut, with kind colors in section 7.3 and the held-rows rule in section 8 (#52638).
+
 ### Internal
+
 
 - Seven dashboard harness scripts no longer leave their Vite dev server
   running. They started it through `pnpm exec vite` and ended only the front
@@ -3047,6 +3312,19 @@
   `a-request-reads-its-bearer-once-at-the-door` (#52465).
 - The board duplicate-comment guard fixtures keep identical comments distinct across different authors and assert that a same-author repeat is refused. Three fixtures vary repeated comment bodies; the Keeper turn ACK fixture preserves its same-body distinct-ID coverage with different authors (#52482).
 - `test_legacy_omitted_original_refuses_admission_but_observes_pending` follows the automatic continuation that #52476 introduced. The legacy original is read by its exact request id and kept as the frozen source basis; the guard that refuses its preparation is still asserted, while the new child passes the same guard, reaches Memory once, advances the atom position and acknowledges the original counterpart frontier (#52485, correction to #52476).
+
+
+
+- The compacted-history verdict in muse serving matches every view-event notification kind explicitly instead of relying on a fragile first-event pattern; behavior is unchanged (#52491).
+- CI pins static references to four legacy auth APIs (`find_credential_by_token`, `resolve_agent_from_token`, `check_permission`, `authorize_tool`) in `lib/**/*.ml` outside `lib/auth/`, including whitespace, comments and wrapped aliases. Other helpers/raw comparisons, dynamic reads, dataflow and PPX expansion remain outside this migration guard (#52551).
+- The auth identity TLA+ spec models the layers below the door and checks that every layer names the door's principal (`OneIdentityPerRequest`); a new bug model where a layer reads the token again after a credential changed violates it (#52574).
+- Removed the always-null `retention.background_refresh_interval_s` field from operator snapshot and digest responses along with the tests that only asserted it was null, and corrected cache comments that still named a dashboard poll (#52632).
+- TUI read paths no longer say "poll" where nothing polls: the intent `Poll` became `Join`, the child-content and native-task `read_mode` `Poll` became `Suffix`, `cadence_operation` became `observation_operation`, and the unread MSX poll clock was removed (#52635).
+- `Masc_tui_chat_facts` lays facts out on wrapped rows, drops trailing facts behind a count when rows run out, and cuts a fact wider than a row instead of dropping it (#52639).
+- The chat transcript reports the stream's runtime identity, token usage and stop reason as values instead of formatted strings (#52642).
+- Removed the TUI's MSX tick receiver, which nothing sends to: the `Poll_pending` and `Poll_observing` states, the `Msx_tick_withdrawn`, `Msx_frame_loaded` and `Msx_activity_loaded` messages, the checkpoint block that could never trigger, and the `Masc_tui_msx_tick` client (#52644).
+- The chat turn's progress row is built from a list of facts instead of a joined string, and the context-checkpoint note becomes its own clause (#52650).
+- Read paths that no longer poll drop `poll` from their names: `msx_poll_view`/`invalidate_msx_poll` became `machine_view`/`retire_machine_view`, `launch_dos_live_poll` became `launch_dos_live_read`, `keeper_turns_poll_error` became `keeper_turns_read_error`, and `Poll_failed`/`Poll_kept_back`/`poll_error` became `Read_failed`/`Read_kept_back`/`read_error`. The one visible change is the English `poll failed:` sentence, now `read failed:` (#52726).
 
 ## [0.72.0] - 2026-11-12
 

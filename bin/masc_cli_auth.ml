@@ -438,6 +438,11 @@ let serve_preview ~base_path ~store ~port github =
              "%s answers 503 in this preview: %s.\n%!"
              Server_account_console.page_path
              reason);
+        (* And which providers offer people no model to check. The access
+           is published above. *)
+        List.iter
+          (fun line -> Printf.printf "%s.\n%!" line)
+          (Server_person_integrations.start_lines ~base_path);
         (* The deletions of conversations a stopped preview left end beside
            the routes, as at the start of the account server. *)
         Eio.Fiber.fork ~sw (fun () -> Server_keeper_conversation_purge.resume ~env ~zone ~base_path);

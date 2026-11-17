@@ -7,8 +7,8 @@ import { useEffect, useLayoutEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { ConnectModel, ConnectView, Input, Known } from './connect'
 import type { LoginEnd } from './login'
-import { ProblemNote, fell, sessionEndedWords } from './notes'
-import { integrationName } from './wire'
+import { ProblemNote, fell, noModelWords, sessionEndedWords } from './notes'
+import { checkable, integrationName } from './wire'
 import type { Integration } from './wire'
 
 // ---- what a client printed ----
@@ -96,11 +96,14 @@ function knownWords(known: Known): string {
   }
 }
 
-/** What a Keeper can do with an account of the subscription, said before it is picked. */
-const callsWords = (integration: Integration): string =>
-  integration.calls.kind === 'allowed'
+/** What a Keeper can do with an account of the subscription connected now,
+    said before it is picked. */
+function callsWords(integration: Integration): string {
+  if (integration.calls.kind === 'refused') return '연결은 되지만 이 서버에서는 이 구독으로 Keeper를 실행할 수 없어요.'
+  return checkable(integration)
     ? '연결하고 모델을 확인하면 이 구독으로 Keeper를 실행할 수 있어요.'
-    : '연결은 되지만 이 서버에서는 이 구독으로 Keeper를 실행할 수 없어요.'
+    : `연결은 되지만 지금은 확인할 모델이 없어서, 새로 연결한 계정으로는 Keeper를 실행할 수 없어요. ${noModelWords(integration.withheld)}`
+}
 
 const keys = [
   { key: 'enter', label: 'Enter' },

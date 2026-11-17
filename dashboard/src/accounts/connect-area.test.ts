@@ -16,8 +16,8 @@ import type { LoginEnd } from './login'
 import type { Integration } from './wire'
 
 const integrations: readonly Integration[] = [
-  { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } },
-  { id: 'codex', displayName: '', models: ['gpt-5.5'], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+  { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' } },
+  { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
 ]
 const loginId = 'a'.repeat(64)
 const printed = 'Open https://claude.ai/oauth/authorize?code=true&state=x to sign in.\nPaste code here: '
@@ -85,6 +85,19 @@ function the<T extends Element = HTMLElement>(container: Element, selector: stri
 
 afterEach(() => {
   cleanup()
+})
+
+describe('a subscription with no model to check', () => {
+  it('names each model the server left out, before the subscription is picked', async () => {
+    const bare: Integration = {
+      id: 'claude_code', displayName: 'Claude Code', models: [], calls: { kind: 'allowed' },
+      withheld: [{ model: 'claude-ghost', reason: 'model_undeclared' }, { model: 'claude-notools', reason: 'tools_not_declared' }, { model: 'claude-later', reason: 'unrecognised' }],
+    }
+    const { container } = render(html`<${ConnectArea} model=${counting({ kind: 'choosing' })} integrations=${[bare]} />`)
+    const said = the(container, '.choice .hint').textContent ?? ''
+    expect(['claude-ghost', 'claude-notools', 'claude-later'].map((model) => said.split(model).length - 1)).toEqual([1, 1, 1])
+    expect(await axe(container)).toHaveNoViolations()
+  })
 })
 
 describe('each step', () => {

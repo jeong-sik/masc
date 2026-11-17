@@ -63,13 +63,19 @@ export type CallRefusal =
 /** Whether a Keeper may run on an account of the subscription here. */
 export type Calls = { readonly kind: 'allowed' } | { readonly kind: 'refused'; readonly refusal: CallRefusal }
 
-/**
- * Why a model the operator bound to a subscription is not one a person may
- * name (lib/server/server_person_integrations.ml, `withheld_code`). A code
- * this console does not know is kept apart: the console says the model is
- * left out, and not why.
- */
-export type WithheldReason = 'model_undeclared' | 'tools_not_declared' | 'unrecognised'
+/** The codes this console has words for, of those the server gives for a
+    model the operator bound to a subscription that is not one a person may
+    name (lib/server/server_person_integrations.ml, `withheld_code`): a model
+    with no row, and the refusal of a row a verification ends with today
+    (`Runtime_verification.model_refusal`). */
+const withheldCodes = ['tools_not_declared', 'model_undeclared'] as const
+
+/** Why such a model is left out. A code this console does not know is kept
+    apart: the console says the model is left out, and not why. */
+export type WithheldReason = typeof withheldCodes[number] | 'unrecognised'
+
+/** Every reason, in the order the page says them. */
+export const withheldReasons: readonly WithheldReason[] = [...withheldCodes, 'unrecognised']
 
 /** A model of a subscription that is not in its `models`, and why. */
 export interface Withheld {
@@ -202,14 +208,7 @@ function readCalls(json: Readonly<Record<string, unknown>>): Calls | null {
   }
 }
 
-function readWithheldReason(code: string): WithheldReason {
-  switch (code) {
-    case 'model_undeclared':
-    case 'tools_not_declared':
-      return code
-    default: return 'unrecognised'
-  }
-}
+const readWithheldReason = (code: string): WithheldReason => withheldCodes.find((known) => known === code) ?? 'unrecognised'
 
 function readWithheld(json: unknown): Withheld | null {
   if (!isRecord(json)) return null

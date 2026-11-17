@@ -275,7 +275,10 @@ describe('the checks of a person', () => {
 // ---- the card of an account ----
 
 const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5', 'claude-opus-9'], withheld: [], calls: { kind: 'allowed' } }
-const bare: Integration = { id: 'bare', displayName: '', models: [], withheld: [], calls: { kind: 'allowed' } }
+const bare: Integration = {
+  id: 'bare', displayName: '', models: [], calls: { kind: 'allowed' },
+  withheld: [{ model: 'bare-ghost', reason: 'model_undeclared' }, { model: 'bare-notools', reason: 'tools_not_declared' }],
+}
 const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' } }
 const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: { read: true, value: integrationId } }], runtimes: [] })
 
@@ -333,6 +336,11 @@ describe('the card of an account', () => {
       expect(await axe(container)).toHaveNoViolations()
       cleanup()
     }
+  })
+
+  it('names each model the server left out on an account whose subscription has no model to check', () => {
+    const said = card(showing(undefined), one('bare')).textContent ?? ''
+    expect(['bare-ghost', 'bare-notools'].map((model) => said.split(model).length - 1)).toEqual([1, 1])
   })
 
   it('checks the model the person picked', () => {

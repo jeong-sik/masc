@@ -87,6 +87,19 @@ afterEach(() => {
   cleanup()
 })
 
+describe('a subscription with no model to check', () => {
+  it('names each model the server left out, before the subscription is picked', async () => {
+    const bare: Integration = {
+      id: 'claude_code', displayName: 'Claude Code', models: [], calls: { kind: 'allowed' },
+      withheld: [{ model: 'claude-ghost', reason: 'model_undeclared' }, { model: 'claude-notools', reason: 'tools_not_declared' }, { model: 'claude-later', reason: 'unrecognised' }],
+    }
+    const { container } = render(html`<${ConnectArea} model=${counting({ kind: 'choosing' })} integrations=${[bare]} />`)
+    const said = the(container, '.choice .hint').textContent ?? ''
+    expect(['claude-ghost', 'claude-notools', 'claude-later'].map((model) => said.split(model).length - 1)).toEqual([1, 1, 1])
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
 describe('each step', () => {
   it.each(views)('passes the accessibility rules while %s', async (_name, view) => {
     expect(await axe(drawn(view).container)).toHaveNoViolations()

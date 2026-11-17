@@ -137,6 +137,10 @@ describe('readIntegrations', () => {
       withheld: [{ model: 'claude-notools', reason }],
     })
   })
+  it('reads the models left out in the order they came', () => {
+    const withheld = [{ model: 'claude-ghost', reason: 'model_undeclared' }, { model: 'claude-notools', reason: 'tools_not_declared' }]
+    expect(readIntegrations(one({ withheld }))?.[0]?.withheld).toEqual(withheld)
+  })
   it('reads an empty name and no models as they came', () => {
     expect(readIntegrations(one({ display_name: '', models: [] }))?.[0]).toMatchObject({ displayName: '', models: [] })
   })
@@ -147,7 +151,8 @@ describe('readIntegrations', () => {
     ['a name that is no string', one({ display_name: null })],
     ['a model that is no string', one({ models: ['claude-sonnet-5', 7] })],
     ['an empty model', one({ models: [''] })],
-    ['no list of the models left out', one({ withheld: undefined })],
+    ['no list of the models left out', { integrations: [{ integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], calls: 'allowed' }] }],
+    ['models left out that are no list', one({ withheld: {} })],
     ['a model left out with no name', one({ withheld: [{ reason: 'tools_not_declared' }] })],
     ['a model left out with no reason', one({ withheld: [{ model: 'claude-notools' }] })],
     ['no calls', one({ calls: undefined })],

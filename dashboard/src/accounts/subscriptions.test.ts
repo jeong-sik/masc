@@ -444,8 +444,8 @@ describe('what the panel knows of each account', () => {
     expect(runnable(integrations).map((one) => one.id)).toEqual(['claude_code'])
   })
 
-  it('names no subscription that has no model to check', () => {
-    expect(runnable(integrations.map((one) => ({ ...one, models: [] })))).toEqual([])
+  it('names a subscription the server calls even while it has no model to check', () => {
+    expect(runnable(integrations.map((one) => ({ ...one, models: [] }))).map((one) => one.id)).toEqual(['claude_code'])
   })
 
   it('counts a model as checked only while the server still finds it in its settings', () => {

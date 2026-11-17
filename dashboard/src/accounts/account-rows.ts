@@ -45,12 +45,13 @@ function keeperOn(offered: Integration | null, checked: boolean): KeeperOn {
   return checked ? { kind: 'can_run' } : { kind: 'needs_model' }
 }
 
-/** Whether a Keeper may run on the subscription here: the server calls its
-    models, and it has a model to check. */
-export const runs = (one: Integration): boolean => one.calls.kind === 'allowed' && one.models.length > 0
-
-/** The subscriptions a Keeper may run on here. */
-export const runnable = (integrations: readonly Integration[]): readonly Integration[] => integrations.filter(runs)
+/** The subscriptions a Keeper may run on here: those whose models the server
+    calls. One with no model to check is among them: the rule that leaves a
+    model out is asked of a check and not of a turn
+    (`Runtime_verification.model_refusal`), so a Runtime of a model checked
+    before stays one a Keeper is given. */
+export const runnable = (integrations: readonly Integration[]): readonly Integration[] =>
+  integrations.filter((one) => one.calls.kind === 'allowed')
 
 /** The facts of each account, in the order the server lists the accounts.
     No Runtime is left out: an account is never unlinked
@@ -262,10 +263,10 @@ function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly 
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
   const title = useRef<HTMLHeadingElement>(null)
-  const checkable = offered !== null && runs(offered)
+  const checkable = offered !== null && offered.calls.kind === 'allowed' && offered.models.length > 0
   const couldCheck = useRef(checkable)
-  // A reading after a check can find the subscription no longer one a
-  // Keeper may run on, which takes the pressed button away. The focus then
+  // A reading after a check can find the subscription with no model to
+  // check, or its calls refused, which takes the pressed button away. The focus then
   // goes to the title of the card, not to the body of the page; a focus the
   // person moved elsewhere meanwhile stays.
   useEffect(() => {

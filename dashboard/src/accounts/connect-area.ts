@@ -101,7 +101,7 @@ function callsWords(integration: Integration): string {
   if (integration.calls.kind === 'refused') return '연결은 되지만 이 서버에서는 이 구독으로 Keeper를 실행할 수 없어요.'
   return integration.models.length > 0
     ? '연결하고 모델을 확인하면 이 구독으로 Keeper를 실행할 수 있어요.'
-    : `연결은 되지만 확인할 모델이 없어서 이 구독으로 Keeper를 실행할 수 없어요. ${noModelWords(integration.withheld)}`
+    : `연결은 되지만 지금은 확인할 모델이 없어요. Keeper는 확인한 모델로 실행해요. ${noModelWords(integration.withheld)}`
 }
 
 const keys = [

@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
+import { withheldReasons } from './wire'
 import type { Problem, Withheld, WithheldReason } from './wire'
 
 /** A problem a page shows. A missing session is never shown: the console
@@ -63,8 +64,6 @@ function withheldWords(reason: WithheldReason, models: readonly string[]): strin
     case 'unrecognised': return `이 화면이 모르는 까닭으로 빠진 모델이에요: ${names}.`
   }
 }
-
-const withheldReasons: readonly WithheldReason[] = ['tools_not_declared', 'model_undeclared', 'unrecognised']
 
 /** Why a subscription has no model to check, for the person to pass on to the operator. */
 export function noModelWords(withheld: readonly Withheld[]): string {

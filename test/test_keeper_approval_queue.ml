@@ -2221,7 +2221,12 @@ let test_resolution_is_durable_and_origin_scoped () =
          projected_text
          |> String.split_on_char '\n'
          |> List.rev
-         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> List.find_opt (fun line ->
+            not (String.equal (String.trim line) "")
+            && not (Tool_output.is_marker line))
+         |> (function
+            | Some line -> line
+            | None -> Alcotest.fail "no JSON line in the replay projection")
          |> Yojson.Safe.from_string
        in
        List.iter (fun private_value ->

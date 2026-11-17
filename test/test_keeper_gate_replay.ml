@@ -482,7 +482,12 @@ let test_large_replay_result_stays_reference_only () =
          message.text
          |> String.split_on_char '\n'
          |> List.rev
-         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> List.find_opt (fun line ->
+            not (String.equal (String.trim line) "")
+            && not (Tool_output.is_marker line))
+         |> (function
+            | Some line -> line
+            | None -> Alcotest.fail "no JSON line in the replay projection")
          |> Yojson.Safe.from_string
        in
        (match
@@ -515,7 +520,12 @@ let test_large_replay_result_stays_reference_only () =
          projected
          |> String.split_on_char '\n'
          |> List.rev
-         |> List.find (fun line -> not (String.equal (String.trim line) ""))
+         |> List.find_opt (fun line ->
+            not (String.equal (String.trim line) "")
+            && not (Tool_output.is_marker line))
+         |> (function
+            | Some line -> line
+            | None -> Alcotest.fail "no JSON line in the replay projection")
          |> Yojson.Safe.from_string
        in
        (match

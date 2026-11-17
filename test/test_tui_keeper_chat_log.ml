@@ -14,6 +14,8 @@ let feed decoder chunk =
   |> List.map (fun (item : Live.observed_delta) -> item.seq, item.delta)
 
 module Log = Masc_tui_keeper_chat_log
+open Test_tui_stream_reading_text
+
 module E = Masc.Keeper_chat_events
 module Journal = Masc.Keeper_chat_event_log
 module Outcome = Masc.Keeper_turn_outcome
@@ -1142,7 +1144,7 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       let journal = List.map (fun (seq,event) -> line seq 1000. event) indexed in
       ignore (Log.add_journaled replay journal);
       wire,replay,journal in
-    let tokens log = T.stream_tokens_text ~keeper_name:"keeper.one"
+    let tokens log = stream_tokens_text ~keeper_name:"keeper.one"
       (Some (T.of_log ~now:2000. log)) in
     publish (E.Run_started {run_id="run";thread_id="keeper:keeper.one"});
     publish (E.Text_message_start {message_id="outer";role=E.Assistant});
@@ -1181,7 +1183,7 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       if next_model = "" then
         check string "only the absent model label is unavailable"
           "configured: configured-model"
-          (T.runtime_identity_text ~keeper_name:"keeper.one"
+          (runtime_identity_text ~keeper_name:"keeper.one"
              ~configured_runtime:"configured-model" (Some (T.of_log ~now:2000. log)));
       let activity = T.model_activity (T.of_log ~now:2000. log) in
       check bool "the next response clears its predecessor's stop" false
@@ -1215,8 +1217,8 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
       check (option string) "same provider id in a later sealed scope starts fresh usage"
         (Some "tokens: in 200 · out 9 · cache read 0 · cache write 0") (tokens log);
       check (option string) "later response has usage without the preceding stop reason"
-        (T.stream_tokens_text ~keeper_name:"keeper.one" (Some t))
-        (T.stream_details_text ~keeper_name:"keeper.one" (Some t));
+        (stream_tokens_text ~keeper_name:"keeper.one" (Some t))
+        (stream_details_text ~keeper_name:"keeper.one" (Some t));
       T.drawn t in
     let wire_items = projected wire and replay_items = projected replay in
     check bool "wire and replay agree on content and stable origins" true

@@ -4021,10 +4021,18 @@
  (modules test_tui_overview_tasks)
  (libraries alcotest masc masc.masc_types masc_tui_overview_tasks masc_tui_theme))
 
+; The stream readings as text, for the two tests below that compare them as
+; one line each.
+(library
+ (name test_tui_stream_reading_text)
+ (modules test_tui_stream_reading_text)
+ (libraries masc_tui_keeper_chat_live masc_tui_keeper_chat_transcript))
+
 (test
  (name test_tui_keeper_chat_transcript)
  (modules test_tui_keeper_chat_transcript)
- (libraries masc.runtime masc.masc_types masc.fs_compat eio_main unix
+ (libraries test_tui_stream_reading_text
+  masc.runtime masc.masc_types masc.fs_compat eio_main unix
   masc.keeper_chat_operations
   alcotest
   agent_core
@@ -4072,6 +4080,7 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript
+  test_tui_stream_reading_text
   yojson))
 
 (test

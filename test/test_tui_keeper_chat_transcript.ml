@@ -4,6 +4,8 @@ module Live = Masc_tui_keeper_chat_live
 module Transcript = Masc_tui_keeper_chat_transcript
 module Log = Masc_tui_keeper_chat_log
 
+open Test_tui_stream_reading_text
+
 (* A stated instant rather than the wall clock: the progress row carries the
    turn age, and a test that read the real clock could not name it. *)
 let origin = 1_000_000.
@@ -769,16 +771,16 @@ let test_scoped_text_retires_prior_response_metadata () =
       stop_reason=Some Agent_core.Types.EndTurn};
     Live.Text {text="next response"; response=Unobserved_scope (Some 2)}];
   check (option string) "a distinct text scope retires prior counters and stop" None
-    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+    (stream_details_text ~keeper_name:"keeper.one" (Some t));
   feed t [Live.Stream_details {generation=None;stream_scope=Some 2; usage=None;
     stop_reason=Some Agent_core.Types.MaxTokens};
     Live.Stream_model_started { generation=None;usage = None; message_id = None; stream_scope=Some 2; model="second"}];
   check (option string) "the delayed equal start preserves current stop metadata"
     (Some "stopped: max_tokens")
-    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+    (stream_details_text ~keeper_name:"keeper.one" (Some t));
   check string "the delayed equal start still records the observed model"
     "model: second · configured: configured"
-    (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+    (runtime_identity_text ~keeper_name:"keeper.one"
        ~configured_runtime:"configured" (Some t))
 ;;
 
@@ -1287,7 +1289,7 @@ let test_empty_scoped_text_still_retires_prior_response_metadata () =
   let before = Transcript.drawn t in
   feed t [Live.Text {text=""; response=Unobserved_scope (Some 2)}];
   check (option string) "an empty chunk in a new scope retires prior counters and stop" None
-    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+    (stream_details_text ~keeper_name:"keeper.one" (Some t));
   check bool "the empty chunk writes nothing" true (before = Transcript.drawn t);
   check bool "the empty chunk does not invent an answer in progress" false
     (Transcript.model_activity t = Some Transcript.Activity_answering);
@@ -1295,7 +1297,7 @@ let test_empty_scoped_text_still_retires_prior_response_metadata () =
     stop_reason=Some Agent_core.Types.MaxTokens}];
   check (option string) "a later unscoped stop belongs to the new response alone"
     (Some "stopped: max_tokens")
-    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t))
+    (stream_details_text ~keeper_name:"keeper.one" (Some t))
 ;;
 
 let test_response_stop_preserves_pending_work () =
@@ -1351,7 +1353,7 @@ let test_response_stop_preserves_pending_work () =
 
 let test_the_turn_reports_the_tokens_it_has_spent () =
   let usage ?(keeper_name = "keeper.one") transcript =
-    Transcript.stream_details_text ~keeper_name transcript
+    stream_details_text ~keeper_name transcript
   in
   let counters ?stop_reason usage = Live.Stream_details {generation=None; stream_scope = None; usage = Some usage; stop_reason } in
   check (option string) "nothing is claimed without a transcript" None (usage None);
@@ -1369,10 +1371,8 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
         ; cache_creation_input_tokens = None
         }
     ];
-  (* Counters that were not reported are absent rather than drawn as zero, and
-     the digits are written out: a reader checking this against a bill needs
-     the number, not a rounded stand-in. *)
-  check (option string) "the reported counters are drawn whole"
+  (* Counters that were not reported are absent rather than reported as zero. *)
+  check (option string) "only the reported counters are kept"
     (Some "tokens: in 1200 \xc2\xb7 out 340") (usage (Some t));
   check (option string) "another keeper's transcript reports nothing" None
     (usage ~keeper_name:"keeper.other" (Some t));
@@ -1392,7 +1392,7 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
      so without this clause the screen shows a finished answer and no sign
      that the provider ran out of room. *)
   feed t [ Live.Stream_details {generation=None; stream_scope = None; usage = None; stop_reason = Some Agent_core.Types.MaxTokens } ];
-  check (option string) "why the provider stopped joins the same clause"
+  check (option string) "why the provider stopped is kept beside the counters"
     (Some
        "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096 \xc2\xb7 stopped: max_tokens")
     (usage (Some t));
@@ -1484,7 +1484,7 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
       (Transcript.current_runtime_id t);
     check string "unknown attempt header falls back to labelled configuration"
       "configured: assigned-runtime"
-      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+      (runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t));
     feed t [ Live.Stream_model_started { generation=None; stream_scope = None; message_id = None; model = "new-model"; usage = None } ];
     (* A model name is not a runtime id: the header says which it has. *)
@@ -1492,19 +1492,19 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
       (Transcript.current_runtime_id t);
     check string "the header labels the observed model as a model"
       "model: new-model · configured: assigned-runtime"
-      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+      (runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t));
     feed t [ Live.Runtime_attempt_started
       { runtime_id = None; attempt_index = Some 1 } ];
     check string "same-attempt repeat preserves the observed model"
       "model: new-model · configured: assigned-runtime"
-      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+      (runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t));
     feed t [ Live.Runtime_attempt_started
       { runtime_id = Some "named-runtime"; attempt_index = Some 1 } ];
     check string "a runtime id named for the attempt takes the turn label"
       "turn: named-runtime · configured: assigned-runtime"
-      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+      (runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t));
     (match Transcript.trail t with
      | [ Transcript.Trail_superseded { attempt = 0; runtime_id; _ } ] ->
@@ -1513,7 +1513,7 @@ let test_new_attempt_does_not_inherit_previous_runtime () =
      | _ -> fail "old attempt boundary changed");
     check string "header keeps the runtime named for this attempt"
       "turn: named-runtime · configured: assigned-runtime"
-      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+      (runtime_identity_text ~keeper_name:"keeper.one"
          ~configured_runtime:"assigned-runtime" (Some t)))
     [ Some 1; None ]
 
@@ -2570,7 +2570,7 @@ let test_usage_resets_only_at_response_boundaries () =
   let t = fresh () in
   let usage input output = {Live.input_tokens=input;output_tokens=output;
     cache_read_input_tokens=None;cache_creation_input_tokens=None} in
-  let tokens () = Transcript.stream_tokens_text ~keeper_name:"keeper.one" (Some t) in
+  let tokens () = stream_tokens_text ~keeper_name:"keeper.one" (Some t) in
   let seed () = feed t [Live.Stream_model_started { generation=None;stream_scope = None; message_id=Some "message";
     model="glm";usage=Some (usage (Some 99) (Some 0))};
     Live.Stream_details {generation=None;stream_scope=None; usage=Some (usage None (Some 7));stop_reason=Some Agent_core.Types.StopToolUse}] in
@@ -2585,7 +2585,7 @@ let test_usage_resets_only_at_response_boundaries () =
   check (option string) "a published response boundary may reuse its provider id"
     (Some "tokens: in 200 · out 0") (tokens ());
   check (option string) "reused provider id retains only its new usage, not the previous stop reason"
-    (tokens ()) (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+    (tokens ()) (stream_details_text ~keeper_name:"keeper.one" (Some t));
   feed t [Live.Runtime_attempt_started {runtime_id=Some "retry";attempt_index=Some 1}];
   check (option string) "retry clears prior message counters" None (tokens ());
   seed ();
@@ -2593,7 +2593,7 @@ let test_usage_resets_only_at_response_boundaries () =
     turn_ref="trace#1"};Live.Run_finished;Live.Run_started];
   check (option string) "continuation does not inherit old counters" None (tokens ());
   check (option string) "continuation does not inherit old stop reason" None
-    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+    (stream_details_text ~keeper_name:"keeper.one" (Some t));
   seed ();
   check (option string) "same provider id may start again in a new segment"
     (Some "tokens: in 99 · out 7") (tokens ());
@@ -2739,12 +2739,12 @@ let test_scoped_details_retire_prior_response_usage () =
     Live.Stream_details {generation=None;stream_scope=Some 2;usage=Some incoming;stop_reason=None}];
   check (option string) "detail-only next response has no prior input/cache/stop"
     (Some "tokens: out 8")
-    (Transcript.stream_details_text ~keeper_name:"keeper.one" (Some t));
+    (stream_details_text ~keeper_name:"keeper.one" (Some t));
   feed t [Live.Stream_model_started { generation=None;stream_scope=Some 2;message_id=Some "second";
     model="second-model";usage=Some {initial with output_tokens=Some 0}}];
   check (option string) "late start fills this response without rewinding output"
     (Some "tokens: in 99 · out 8 · cache read 12 · cache write 3")
-    (Transcript.stream_tokens_text ~keeper_name:"keeper.one" (Some t));
+    (stream_tokens_text ~keeper_name:"keeper.one" (Some t));
   feed t [reply_details ~reply:"final response" ();Live.Run_finished];
   check (list string) "missing start before details keeps earlier speech"
     ["text:earlier response";"reply:final response"] (drawn t)

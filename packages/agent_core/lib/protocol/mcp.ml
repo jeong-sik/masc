@@ -45,15 +45,59 @@ module Sdk_client = Mcp_protocol_eio.Generic_client.Make (Stdio_transport)
 
 (* ── Eio stdio transport client ──────────────────────────────────── *)
 
+type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
+  (Mcp_protocol.Sampling.create_message_result, string) result
+
+let valid_response_limit = function
+  | None -> Ok ()
+  | Some bytes when bytes > 0 -> Ok ()
+  | Some _ -> Error "max_response_bytes must be positive"
+;;
+
+module Channel = struct
+  type t = Sdk_client.t
+
+  let create ~input ~output ?max_response_bytes ?sampling_handler () =
+    match valid_response_limit max_response_bytes with
+    | Error detail -> Error detail
+    | Ok () ->
+      let transport = Stdio_transport.create ~stdin:input ~stdout:output
+          ?max_size:max_response_bytes () in
+      let client = Sdk_client.create ~transport () in
+      let client = match sampling_handler with
+        | None -> client
+        | Some handler ->
+          let guarded_handler params =
+            try handler params with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn -> Error (Printexc.to_string exn) in
+          Sdk_client.on_sampling guarded_handler client in
+      Ok client
+
+  let initialize t ~client_version =
+    match Sdk_client.initialize t ~client_name:"agent-core-mcp-client" ~client_version with
+    | Ok _ -> Ok ()
+    | Error detail -> Error (Error.Mcp (InitializeFailed { detail }))
+
+  let list_tools_full t =
+    match Sdk_client.list_tools t with
+    | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
+    | Ok tools -> Ok tools
+
+  let call_tool_full t ~name ~arguments =
+    match Sdk_client.call_tool t ~name ~arguments () with
+    | Error detail -> Error (Error.Mcp (ToolCallFailed { tool_name = name; detail }))
+    | Ok result -> Ok result
+
+  let close = Sdk_client.close
+end
+
 type t =
-  { client : Sdk_client.t
+  { channel : Channel.t
   ; kill : unit -> unit
   ; process_id : int
   ; await_exit : unit -> Eio.Process.exit_status
   }
-
-type sampling_handler = Mcp_protocol.Sampling.create_message_params ->
-  (Mcp_protocol.Sampling.create_message_result, string) result
 
 let text_of_tool_result (r : Sdk_types.tool_result) =
   List.filter_map
@@ -72,10 +116,9 @@ let text_of_tool_result (r : Sdk_types.tool_result) =
     [env] optionally overrides the process environment. *)
 let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env ?cwd
     ?max_response_bytes ?stderr ?sampling_handler () =
-  if Option.fold ~none:false ~some:(fun bytes -> bytes <= 0) max_response_bytes then
-    Error (Error.Mcp (ServerStartFailed
-      { command; detail = "max_response_bytes must be positive" }))
-  else
+  match valid_response_limit max_response_bytes with
+  | Error detail -> Error (Error.Mcp (ServerStartFailed { command; detail }))
+  | Ok () ->
   try
     let r_child_stdin, w_child_stdin = Eio_unix.pipe sw in
     let r_child_stdout, w_child_stdout = Eio_unix.pipe sw in
@@ -92,28 +135,20 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env ?cwd
     in
     Eio.Flow.close r_child_stdin;
     Eio.Flow.close w_child_stdout;
-    let transport =
-      Stdio_transport.create
-        ~stdin:(r_child_stdout :> _ Eio.Flow.source)
-        ~stdout:(w_child_stdin :> _ Eio.Flow.sink)
-        ?max_size:max_response_bytes
-        ()
-    in
-    let client = Sdk_client.create ~transport () in
-    let client = match sampling_handler with
-      | None -> client
-      | Some handler ->
-          let guarded_handler params =
-            try handler params with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Error (Printexc.to_string exn) in
-          Sdk_client.on_sampling guarded_handler client in
     let kill () =
       try Eio.Process.signal proc Sys.sigterm with
       | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ()
     in
-    Ok { client; kill; process_id = Eio.Process.pid proc;
-         await_exit = (fun () -> Eio.Process.await proc) }
+    (match Channel.create
+        ~input:(r_child_stdout :> Eio.Flow.source_ty Eio.Resource.t)
+        ~output:(w_child_stdin :> Eio.Flow.sink_ty Eio.Resource.t)
+        ?max_response_bytes ?sampling_handler () with
+     | Error detail ->
+       kill ();
+       Error (Error.Mcp (ServerStartFailed { command; detail }))
+     | Ok channel ->
+       Ok { channel; kill; process_id = Eio.Process.pid proc;
+            await_exit = (fun () -> Eio.Process.await proc) })
   with
   | Eio.Io _ as exn ->
     Error (Error.Mcp (ServerStartFailed { command; detail = Printexc.to_string exn }))
@@ -153,24 +188,16 @@ let mcp_tool_of_json = function
 ;;
 
 let initialize t ~client_version =
-  match
-    Sdk_client.initialize t.client ~client_name:"agent-core-mcp-client" ~client_version
-  with
-  | Ok _ -> Ok ()
-  | Error detail -> Error (Error.Mcp (InitializeFailed { detail }))
+  Channel.initialize t.channel ~client_version
 ;;
 
 (** Fetch tools from MCP server and return them. *)
 let list_tools_full t =
-  match Sdk_client.list_tools t.client with
-  | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
-  | Ok tools -> Ok tools
+  Channel.list_tools_full t.channel
 ;;
 
 let call_tool_full t ~name ~arguments =
-  match Sdk_client.call_tool t.client ~name ~arguments () with
-  | Error detail -> Error (Error.Mcp (ToolCallFailed { tool_name = name; detail }))
-  | Ok result -> Ok result
+  Channel.call_tool_full t.channel ~name ~arguments
 ;;
 
 (** Close the MCP client and terminate the subprocess. *)
@@ -208,7 +235,7 @@ let request_stop t = t.kill ()
 
 let close t =
   close_with_release
-    ~close_client:(fun () -> Sdk_client.close t.client)
+    ~close_client:(fun () -> Channel.close t.channel)
     ~release:t.kill
     ~report_release_failure
 ;;

@@ -163,6 +163,115 @@ let test_sampling_is_disabled_without_host_handler () =
 
 (* ── managed type ──────────────────────────────────────────────── *)
 
+let channel_server = {|import json, sys
+def send(value):
+    print(json.dumps(value), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        send({"jsonrpc":"2.0", "id":request["id"], "result":{
+            "protocolVersion":request["params"]["protocolVersion"],
+            "capabilities":{"tools":{}}, "serverInfo":{"name":"channel-fixture","version":"1"}}})
+    elif method == "tools/list":
+        send({"jsonrpc":"2.0", "id":request["id"], "result":{"tools":[{
+            "name":"echo", "inputSchema":{"type":"object"},
+            "outputSchema":{"type":"object", "required":["value"]}}]}})
+    elif method == "tools/call":
+        args = request["params"]["arguments"]
+        send({"jsonrpc":"2.0", "id":request["id"], "result":{
+            "content":[{"type":"text","text":args["value"]}],
+            "isError":args["error"], "structuredContent":args}})
+    elif method == "owner/probe":
+        print("owner still open", flush=True)
+|}
+;;
+
+let with_owned_channel_flows f =
+  with_temp_script channel_server (fun path ->
+    with_eio (fun ~sw ~mgr ->
+      let child_input, output = Eio_unix.pipe sw in
+      let input, child_output = Eio_unix.pipe sw in
+      let process = Eio.Process.spawn ~sw mgr
+          ~stdin:(child_input :> Eio.Flow.source_ty Eio.Resource.t)
+          ~stdout:(child_output :> Eio.Flow.sink_ty Eio.Resource.t)
+          ["python3"; path] in
+      Eio.Flow.close child_input;
+      Eio.Flow.close child_output;
+      f ~input:(input :> Eio.Flow.source_ty Eio.Resource.t)
+        ~output:(output :> Eio.Flow.sink_ty Eio.Resource.t);
+      Eio.Flow.close output;
+      match Eio.Process.await process with
+      | `Exited 0 -> ()
+      | `Exited code -> Alcotest.failf "channel fixture exited %d" code
+      | `Signaled signal -> Alcotest.failf "channel fixture signaled %d" signal))
+;;
+
+let channel_or_fail ~input ~output ?max_response_bytes () =
+  match Mcp.Channel.create ~input ~output ?max_response_bytes () with
+  | Ok channel -> channel
+  | Error detail -> Alcotest.fail detail
+;;
+
+let expect_owner_flows_open ~input ~output =
+  Eio.Flow.copy_string "{\"method\":\"owner/probe\"}\n" output;
+  let reader = Eio.Buf_read.of_flow input ~max_size:128 in
+  Alcotest.(check string) "owner can still use both flows"
+    "owner still open" (Eio.Buf_read.line reader)
+;;
+
+let test_channel_preserves_full_results_and_flow_ownership () =
+  with_owned_channel_flows (fun ~input ~output ->
+    let channel = channel_or_fail ~input ~output () in
+    (match Mcp.Channel.initialize channel ~client_version:"channel-test" with
+     | Ok () -> () | Error error -> Alcotest.fail (Error.to_string error));
+    (match Mcp.Channel.list_tools_full channel with
+     | Ok [tool] ->
+       let schema = `Assoc ["type", `String "object";
+         "required", `List [`String "value"]] in
+       Alcotest.(check bool) "output schema is preserved" true
+         (tool.output_schema = Some schema)
+     | Ok _ -> Alcotest.fail "expected exactly one declared tool"
+     | Error error -> Alcotest.fail (Error.to_string error));
+    List.iter (fun (value, is_error) ->
+      let arguments = `Assoc ["value", `String value; "error", `Bool is_error] in
+      match Mcp.Channel.call_tool_full channel ~name:"echo" ~arguments with
+      | Error error -> Alcotest.fail (Error.to_string error)
+      | Ok result ->
+        Alcotest.(check string) "exact response text"
+          value (Mcp.text_of_tool_result result);
+        Alcotest.(check bool) "server error flag is preserved" true
+          (result.is_error = Some is_error);
+        Alcotest.(check bool) "structured content is preserved" true
+          (result.structured_content = Some arguments))
+      ["first response", false; "second\000response", true];
+    Mcp.Channel.close channel;
+    (match Mcp.Channel.call_tool_full channel ~name:"echo" ~arguments:(`Assoc []) with
+     | Error _ -> () | Ok _ -> Alcotest.fail "closed channel accepted a call");
+    expect_owner_flows_open ~input ~output)
+;;
+
+let test_channel_rejects_limit_without_consuming_flows () =
+  with_owned_channel_flows (fun ~input ~output ->
+    List.iter (fun max_response_bytes ->
+      match Mcp.Channel.create ~input ~output ~max_response_bytes () with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "nonpositive response limit was accepted") [0; -1];
+    expect_owner_flows_open ~input ~output)
+;;
+
+let test_channel_enforces_response_limit () =
+  with_owned_channel_flows (fun ~input ~output ->
+    let channel = channel_or_fail ~input ~output ~max_response_bytes:1024 () in
+    (match Mcp.Channel.initialize channel ~client_version:"channel-test" with
+     | Ok () -> () | Error error -> Alcotest.fail (Error.to_string error));
+    let arguments = `Assoc ["value", `String (String.make 600 'x');
+      "error", `Bool false] in
+    (match Mcp.Channel.call_tool_full channel ~name:"echo" ~arguments with
+     | Error _ -> () | Ok _ -> Alcotest.fail "oversized response was accepted");
+    Mcp.Channel.close channel)
+;;
+
 let test_managed_tools_access () =
   let t1 = make_test_tool "alpha" in
   let t2 = make_test_tool "beta" in
@@ -226,6 +335,13 @@ let () =
         ; test_case "callback exception preserves stdio framing" `Quick test_sampling_exception_preserves_stdio
         ; test_case "callback cancellation propagates" `Quick test_sampling_cancellation_propagates
         ; test_case "no handler means no advertised sampling" `Quick test_sampling_is_disabled_without_host_handler ] )
+    ; ( "borrowed_channel"
+      , [ test_case "full results and caller-owned flows" `Quick
+            test_channel_preserves_full_results_and_flow_ownership
+        ; test_case "invalid limit leaves flows untouched" `Quick
+            test_channel_rejects_limit_without_consuming_flows
+        ; test_case "response limit applies to borrowed flows" `Quick
+            test_channel_enforces_response_limit ] )
     ; "managed_type", [ test_case "tools list access" `Quick test_managed_tools_access ]
     ; ( "agent_integration"
       , [ test_case

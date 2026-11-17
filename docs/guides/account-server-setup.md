@@ -97,8 +97,9 @@ masc auth bootstrap --base-path <base> --external-store <absolute path of a new 
   that directory elsewhere. The command refuses any other. Put it outside
   what the backups of the base path copy as well: a backup restored over the
   base path must not take the store back with it.
-- The command writes `<base>/.masc/config/runtime.toml` when the workspace
-  has none, and says so (step 6).
+- The command puts `<base>/.masc/config/runtime.toml` in place before it
+  activates the workspace, and says what it found there (step 6). When it
+  cannot, it activates nothing and the same command runs again.
 - The command prints the link of the first Admin invitation once,
   `https://<host>/accounts/invite#<token>`. The link works once and expires
   after 24 hours. Only a digest of the token is written, so a lost link
@@ -167,10 +168,10 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
 ## 6. Declare what people connect
 
 - `<base>/.masc/config/runtime.toml` declares what people may connect: a
-  provider for each client, with the models of each. `masc auth bootstrap`
-  (step 2) writes the file this release ships when the workspace has none,
-  and keeps a file that is there. It is the file a single-user server
-  writes at its start.
+  provider for each client, with the models of each. Where no entry is at
+  that path, `masc auth bootstrap` (step 2) writes the file this release
+  ships, readable by its owner only. It keeps an entry that is there, a
+  link or a directory included, and does not read it.
 - Edit the file to change what people connect. The account server reads it
   at each request, so an edit needs no restart, and the
   [runtime.toml reference](../RUNTIME-TOML-REFERENCE.md) lists its rows.

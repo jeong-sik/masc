@@ -42,22 +42,38 @@ commit of that binary.
 `config/runtime.toml` of the base has SHA-256
 `99034d9319adcd933ff6695f6637f54461c9248f48ed7624e71ece9ff10e2945`.
 
+The file is staged beside the path, synced, and published by a rename that
+replaces nothing (`Fs_compat.rename_noreplace`), with mode 0600.
+
+## The order of the command
+
+The candidate asks whether a boot asks for the activation, places the file,
+and activates last. A placement that fails refuses the command before the
+activation.
+
+- With the measured binary, which places nothing, `masc auth bootstrap` of a
+  workspace whose `.masc/config` is a regular file ended with exit 0. No
+  earlier step of the command touches that path, so in the candidate the
+  placement is the step that refuses there.
+
 ## Source checks of the candidate
 
 No Dune build ran. The checks below read the candidate's sources.
 
 - Type check with `ocamlc.opt` 5.5.2, replaying the compiler arguments and
   the ppx action that a build of the base recorded, against the `.cmi` files
-  of that build. 13 units passed: the two changed interfaces of `lib/server`
-  and their implementations, the four interfaces that import
-  `Server_runtime_setup_actions`, `bin/masc_cli_auth.mli` and its
-  implementation, `bin/main_eio.ml`, the test support module and
-  `test/test_config_root_embedded_seed.ml`.
-  - Control: the three importing interfaces that the change does not reach
-    compiled to the interface digests of that build.
-  - Negative control: two broken copies failed for their own reason, a
-    `match` on the placement without `Existing_kept` in
-    `bin/masc_cli_auth.ml` and a misspelt constructor in the test.
+  of that build. 17 units passed: `lib/auth/authz_activation` (interface and
+  implementation) and the interface that imports it, the two changed
+  interfaces of `lib/server` with their implementations, the four interfaces
+  that import `Server_runtime_setup_actions`, `bin/masc_cli_auth.mli` and its
+  implementation, `bin/main_eio.ml`, the test support module,
+  `test/test_config_root_embedded_seed.ml` and `test/test_authz_activation.ml`.
+  - Control: the three importing interfaces of `lib/server` that the change
+    does not reach compiled to the interface digests of that build.
+  - Negative control: a copy with two breaks failed for both, a
+    `declare_connections` without the outcome `Published_unsynced` (the match
+    is not exhaustive) and an activation interface without `asked` (unbound
+    value).
 - The reader and the writer share one path by construction:
   `Server_runtime_setup_actions.config` and `masc auth bootstrap` both take
   it from `Server_runtime_setup_actions.config_path`.
@@ -68,15 +84,36 @@ No Dune build ran. The checks below read the candidate's sources.
   the `PATH` and `HOME` of the client lookup, which falls back to the
   configured command.
 
+## Test run
+
+Read once on 2026-11-17.
+
+```sh
+gh workflow run test.yml --ref feat/bootstrap-writes-runtime-toml \
+  -f suite=test_config_root_embedded_seed -f minimal=true
+```
+
+- Workflow `Test`, run 44021898479, an earlier head of the candidate,
+  `ca48ed19bbb0`. Conclusion: success. In that head the command placed the
+  file after the activation, with a write that replaced by rename.
+- `test_config_root_embedded_seed`: 10 cases ran and passed, the three
+  `place_embedded_runtime_toml` cases of that head among them.
+
 ## Unverified
 
-- `masc auth bootstrap` of the candidate from start to end: the line it
-  prints for a written file, a kept file and a failed write, and the file on
-  disk after it.
+- `masc auth bootstrap` of the candidate from start to end. Two cases of
+  `test/test_onboarding_journey.py` run it with the built binary: one reads
+  the file it leaves, the other refuses a workspace where the file cannot
+  go and then runs the command again. They did not run for this record.
+- The outcome `Published_unsynced`. No test makes the sync of the published
+  file fail.
 - A sign-in, a model verification and a Keeper turn with the ids of the
   shipped file. Earlier on the same day they ran with a hand-written
   runtime.toml of other ids, up to the model verification, which the limit of
   the connected account refused.
-- Linux hosts.
 - A workspace whose `config.json` was activated by an earlier build. The
   command refuses it as already active, so it gets the file by hand.
+- A single-user boot of the base path after `masc auth off`. The config root
+  exists by then, so that boot fills in what an existing root gets
+  (`Refill_existing_root`) and not what a new one gets. The same holds today
+  for a workspace whose runtime.toml was written by hand.

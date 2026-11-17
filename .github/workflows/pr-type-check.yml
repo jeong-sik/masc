@@ -194,6 +194,17 @@ jobs:
       - name: Hold raw token reads to the RFC D6 allow-list
         run: python3 -I scripts/ci/raw_token_auth_calls.py
 
+      # The notice collector decides which files a linked opam package must
+      # ship. When the table is wrong the release candidate dies in the Linux
+      # build at `collect-ocaml-notices: ... is a notice below the top of the
+      # source` (RC 4, run 44173709932: dune-build-info 3.25.0 23 paths,
+      # uring 2.7.0 4 paths). That build is the first place the table is
+      # exercised, so a stale entry costs a whole release round trip. The
+      # suite is standard-library only and under a second, so it runs here on
+      # every pull request rather than only in the release build.
+      - name: Test the OCaml notice collector's classification table
+        run: python3 -I scripts/tests/test_collect_ocaml_notices.py
+
       # The path and the key prefix are the ones main-minimal-build.yml
       # saves under; a different path would never match its cache entry.
       - name: Dune build cache location

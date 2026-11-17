@@ -70,7 +70,9 @@ val load_lines_rev_locked : string -> string list
     retaining an unterminated final line in reverse physical-line order.
     Both close with [close_in_noerr]. Neither adds file ownership or kind
     checks. Eio dispatch happens before mutex acquisition, with or without a
-    global filesystem; cancellation is checked after descriptor settlement. *)
+    global filesystem; cancellation is checked after descriptor settlement.
+    Coordination is by canonical path, not across distinct leaf-symlink or
+    hardlink names for one inode. *)
 
 module Locked_read_for_testing : sig
   val load_file : before_read:(Unix.file_descr -> unit) -> string -> string

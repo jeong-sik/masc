@@ -468,7 +468,9 @@ val load_file : string -> string
     [close_in_noerr] and I/O exceptions are unchanged. This follows symlinks
     and adds no ownership or file-kind policy. Inside Eio, dispatch precedes
     the blocking mutex even when no global filesystem is installed; pending
-    cancellation is checked after cleanup. *)
+    cancellation is checked after cleanup. Coordination is by canonical path,
+    including normalized ancestor aliases; distinct leaf-symlink or hardlink
+    names for one inode do not share a mutex. *)
 val load_file_locked : string -> string
 
 (** Read binary physical lines to EOF under that same mutex, in reverse file

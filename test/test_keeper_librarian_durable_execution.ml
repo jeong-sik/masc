@@ -7079,8 +7079,23 @@ let test_two_absent_originals_drain_replaced_endings_before_fresh_selection () =
       (not (List.mem fresh.Owner.request_id ids)
        && Capture.predecessor fresh_request=None
        && Source.extent (Capture.source fresh_request)=Keeper_librarian_range.All_unread);
-    check string "fresh selection preserves the original source obligation"
-      (Capture.source_basis_digest first_request |> get) (Capture.source_basis_digest fresh_request |> get);
+    let original_source=Capture.source first_request and fresh_source=Capture.source fresh_request in
+    (* The first capture prepared the external read before its simulated
+       Memory_replaced return. A fresh capture observes that same preparation
+       as its starting state, while retaining every source and receipt field. *)
+    check bool "the initial capture preceded the pending external preparation" true
+      (Source.external_before original_source<>Source.external_prepared original_source);
+    check bool "fresh selection observes the exact existing external preparation" true
+      (Source.external_before fresh_source=Source.external_prepared original_source);
+    let expected_basis=match Source.basis_json original_source with
+      | `Assoc fields -> `Assoc (List.map (function
+          | "external_before",_ -> "external_before",Keeper_external_read_cursor.observation_to_json
+              (Source.external_prepared original_source)
+          | field -> field) fields)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        fail "the original source basis must be an object" in
+    check json "fresh selection preserves the complete original source obligation"
+      expected_basis (Source.basis_json fresh_source);
     drive_advanced fixture;
     let completed,_=only_original fixture in
     check string "the actual committed answer belongs to that fresh original" fresh.request_id completed.Owner.request_id;

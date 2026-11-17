@@ -990,16 +990,22 @@ let completed_execution_observation record raw_stderr =
 module Stdio_request = struct
   type endpoint = t
 
+  type carrier =
+    | Process of { argv : string list; env : string array }
+    | Guest of
+        { socket : string
+        ; expected : Keeper_guest_socket.expected
+        ; connect_budget_sec : float
+        }
+
   type t =
     { endpoint : endpoint
     ; request : Exec_ssh_protocol.request
-    ; carrier_argv : string list
-    ; host_env : string array
+    ; carrier : carrier
     ; budget_sec : float
     }
 
   type refusal =
-    | Guest_agent_unavailable
     | Docker_unavailable
     | Mode_unavailable of string
     | Invalid_request of string
@@ -1012,18 +1018,21 @@ module Stdio_request = struct
     if not (Float.is_finite timeout_sec) || Float.compare timeout_sec 0.0 <= 0 then
       Error (Invalid_request "interactive request timeout must be finite and greater than zero")
     else
-    let carrier_argv =
+    let prepared_carrier =
       match endpoint.transport with
-      | Microvm { delivery = Agent_socket _; _ } -> Error Guest_agent_unavailable
       | Docker_exec _ -> Error Docker_unavailable
-      | Microvm { delivery = Exec_per_request _; _ } | Openssh _ ->
+      | Microvm _ | Openssh _ ->
         (match carrier endpoint with
-         | Local_process { request; _ } -> Ok request
-         | Guest_agent _ -> Error Guest_agent_unavailable)
+         | Local_process { request; _ } ->
+           Ok (Process { argv = request;
+             env = Env_keeper_scrub.filter_environment (Unix.environment ()) })
+         | Guest_agent { host_socket; expected } ->
+           Ok (Guest { socket = host_socket; expected;
+             connect_budget_sec = float_of_int endpoint.connect_timeout_sec }))
     in
-    match carrier_argv with
+    match prepared_carrier with
     | Error refusal -> Error refusal
-    | Ok carrier_argv ->
+    | Ok prepared_carrier ->
       let mode_check =
         match endpoint.transport, mode with
         | Microvm _, Exec_ssh_protocol.Guest_local ->
@@ -1055,17 +1064,22 @@ module Stdio_request = struct
             match Exec_ssh_protocol.encode_request request ~stdin:"" with
             | Error detail -> Error (Invalid_request detail)
             | Ok _ ->
-              Ok { endpoint; request; carrier_argv;
-                   host_env = Env_keeper_scrub.filter_environment (Unix.environment ());
+              Ok { endpoint; request; carrier = prepared_carrier;
                    budget_sec = local_wall_budget endpoint timeout_sec }
 
   type launch =
-    { argv : string list
-    ; env : string array
+    { carrier : carrier
     ; frame : string
     ; budget_sec : float
     ; acceptance_frame : bool
     }
+
+  type runtime = Process_runtime | Guest_runtime
+
+  let runtime (prepared : t) =
+    match prepared.carrier with
+    | Process _ -> Process_runtime
+    | Guest _ -> Guest_runtime
 
   let probe_answer endpoint =
     match Atomic.get endpoint.shared.probe_answer with
@@ -1100,13 +1114,20 @@ module Stdio_request = struct
           match Exec_ssh_protocol.encode_request request ~stdin:"" with
           | Error detail -> Error (Invalid_request detail)
           | Ok frame ->
-            Ok (use { argv = prepared.carrier_argv; env = Array.copy prepared.host_env;
-                      frame; budget_sec = prepared.budget_sec; acceptance_frame }))
+            let carrier = match prepared.carrier with
+              | Process { argv; env } -> Process { argv; env = Array.copy env }
+              | Guest guest -> Guest guest
+            in
+            Ok (use { carrier; frame; budget_sec = prepared.budget_sec; acceptance_frame }))
 
   type completion =
     { dispatch : dispatch_record
     ; execution : execution_observation
     }
+
+  type terminal =
+    | Local_status of Unix.process_status
+    | Guest_exit of Exec_ssh_protocol.Relay.exit_status
 
   let record_incomplete prepared ~failure ~detail =
     record_dispatch prepared.endpoint.shared ~keeper_name:prepared.endpoint.keeper_name
@@ -1131,28 +1152,47 @@ module Stdio_request = struct
           Error (Response_mismatch "execution receipt mode differs from the prepared request")
         | Ok (Some _) | Ok None -> Ok trailer
 
-  let complete prepared ~status ~raw_stderr ~prior =
+  let complete prepared ~terminal ~raw_stderr ~prior =
     let failed failure detail =
       Dispatch_failed { at = Unix.gettimeofday (); failure; detail }
     in
     let finished status = Payload_finished { at = Unix.gettimeofday (); status } in
-    let response = bound_response prepared raw_stderr in
+    let carrier_result =
+      match prepared.carrier, terminal with
+      | Process _, Local_status status ->
+        (match transport_failure prepared.endpoint status with
+         | Some detail -> Error (Malformed_response detail)
+         | None ->
+           match status with
+           | Unix.WEXITED code -> Ok code
+           | Unix.WSIGNALED signal ->
+             Error (Malformed_response (Printf.sprintf "carrier ended on signal %d" signal))
+           | Unix.WSTOPPED signal ->
+             Error (Malformed_response (Printf.sprintf "carrier stopped on signal %d" signal)))
+      | Guest _, Guest_exit (Exec_ssh_protocol.Relay.Exited code) -> Ok code
+      | Guest _, Guest_exit (Exec_ssh_protocol.Relay.Signaled signal) ->
+        Error (Malformed_response (Printf.sprintf "guest shim ended on signal %d" signal))
+      | Process _, Guest_exit _ | Guest _, Local_status _ ->
+        Error (Response_mismatch "terminal carrier differs from the prepared request")
+    in
+    let response = match carrier_result with
+      | Error detail -> Error detail
+      | Ok _ -> bound_response prepared raw_stderr
+    in
     let dispatch =
-      match transport_failure prepared.endpoint status with
-      | Some detail -> failed Transport_failed detail
-      | None ->
-          match response with
-          | Error (Malformed_response detail) -> failed Transport_failed detail
-          | Error (Response_mismatch detail) -> failed Trailer_disagreement detail
-          | Ok trailer when trailer.timed_out && status = Unix.WEXITED 0 ->
+          match carrier_result, response with
+          | _, Error (Malformed_response detail) -> failed Transport_failed detail
+          | _, Error (Response_mismatch detail) -> failed Trailer_disagreement detail
+          | Ok 0, Ok trailer when trailer.timed_out ->
             failed Remote_timeout (remote_timeout_error prepared.endpoint prepared.request.timeout_sec)
-          | Ok { shim_error = Some detail; _ } when status = Unix.WEXITED 1 ->
+          | Ok 1, Ok { shim_error = Some detail; _ } ->
             failed Shim_refused detail
-          | Ok { exit = Some code; signal = None; shim_error = None; _ }
-              when status = Unix.WEXITED 0 -> finished (Unix.WEXITED code)
-          | Ok { signal = Some signal; exit = None; shim_error = None; _ }
-              when status = Unix.WEXITED 0 -> finished (Unix.WSIGNALED signal)
-          | Ok _ -> failed Trailer_disagreement "transport status and result trailer disagree"
+          | Ok 0, Ok { exit = Some code; signal = None; shim_error = None; _ } ->
+            finished (Unix.WEXITED code)
+          | Ok 0, Ok { signal = Some signal; exit = None; shim_error = None; _ } ->
+            finished (Unix.WSIGNALED signal)
+          | (Ok _ | Error (Malformed_response _ | Response_mismatch _)), Ok _ ->
+            failed Trailer_disagreement "transport status and result trailer disagree"
     in
     let execution =
       match response with

@@ -1,9 +1,11 @@
-(** Owned interactive exec-shim session for OpenSSH and microVM
-    [Exec_per_request]. It never substitutes a carrier or a local payload. *)
+(** Owned interactive exec-shim session for OpenSSH and both microVM
+    carriers. It never substitutes a carrier or a local payload. *)
 type 'e failure =
   | Refused of Keeper_sandbox_remote.Stdio_request.refusal
   | Dispatch_declined of 'e
   | Process_unavailable of Process_eio.stdio_refusal
+  | Guest_unavailable of Keeper_guest_socket.stdio_error
+  | Runtime_unavailable of string
   | Host_timeout
 
 val with_stdio :
@@ -20,15 +22,17 @@ val with_stdio :
     A partial first frame write may have dispatched: receipt evidence changes
     before that write, not after it succeeds.
 
-    Without an active Eio fiber and initialized process runtime, returns
-    [Process_unavailable (Runtime_unavailable _)] before probing or acquiring
-    the lease. [on_receipt] receives [Execution_unavailable Request_not_sent]
+    Without an active Eio fiber, returns [Runtime_unavailable _] before
+    probing or acquiring the lease. Process carriers require the initialized
+    process runtime; guest carriers use the Eio network and clock.
+    [on_receipt] receives [Execution_unavailable Request_not_sent]
     directly outside Eio; notification does not enter Eio cancellation protection.
 
     The callback borrows exact payload stdout and stdin. It must serialize
     writes and stop using both flows before returning. On normal return the
-    process owner closes stdin, deliberately cancelling the shim payload,
-    drains stderr and remaining stdout, then awaits the real carrier status.
+    process owner closes stdin, or the guest socket shuts down its send side,
+    deliberately cancelling the shim payload. It drains stderr and remaining
+    stdout, then awaits the real carrier status or relay Exit chunk.
     [on_stdout_tail] receives every stdout byte the callback left unread;
     [on_stderr_chunk] receives only payload stderr. The callback's value is
     not evidence that the payload exited successfully.

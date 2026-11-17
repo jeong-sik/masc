@@ -115,28 +115,28 @@ let observed completion =
   | Remote.Execution_observed (receipt, trailer) -> receipt, trailer
   | Remote.Execution_unavailable _ -> fail "the real shim's completed receipt was lost"
 
-let assert_unavailable_outside_eio fixture prepared =
+let assert_runtime_unavailable fixture prepared =
   let receipts = ref [] and dispatches = ref 0 in
   let result = invoke prepared
       ~on_dispatch:(fun () -> incr dispatches; Ok ())
       ~on_receipt:(fun receipt -> receipts := receipt :: !receipts)
-      (fun ~input:_ ~output:_ -> fail "non-Eio call borrowed process streams") in
+      (fun ~input:_ ~output:_ -> fail "unavailable runtime lent process streams") in
   (match result with
-   | Error (Stdio.Process_unavailable (Process_eio.Runtime_unavailable _)) -> ()
-   | Error (Stdio.Process_unavailable (Process_eio.Spawn_refused _)
-       | Stdio.Refused _ | Stdio.Dispatch_declined _ | Stdio.Host_timeout)
-   | Ok _ -> fail "non-Eio session did not return its typed runtime refusal");
-  check bool "one unsent receipt outside Eio" true
+   | Error (Stdio.Runtime_unavailable _) -> ()
+   | Error (Stdio.Process_unavailable _
+       | Stdio.Refused _ | Stdio.Dispatch_declined _ | Stdio.Guest_unavailable _ | Stdio.Host_timeout)
+   | Ok _ -> fail "unavailable runtime lost its typed refusal");
+  check bool "one unsent receipt" true
     (!receipts = [Remote.Execution_unavailable Remote.Request_not_sent]);
-  check int "no dispatch callback outside Eio" 0 !dispatches;
-  check (list string) "no probe or carrier outside Eio" [] (log fixture)
+  check int "no dispatch callback" 0 !dispatches;
+  check (list string) "no probe or carrier without runtime" [] (log fixture)
 
 let test_prepare_refusals_do_not_probe () =
   with_fixture @@ fun fixture ->
   List.iter (fun timeout_sec ->
     match Request.prepare ~timeout_sec fixture.endpoint ~argv:["/bin/true"] ~env:[||] ~cwd:None with
     | Error (Request.Invalid_request _) -> ()
-    | Error (Request.Guest_agent_unavailable | Request.Docker_unavailable
+    | Error (Request.Docker_unavailable
         | Request.Mode_unavailable _ | Request.Probe_unavailable _
         | Request.Interactive_unavailable _) | Ok _ ->
       fail "invalid timeout was not refused before effects")
@@ -151,23 +151,26 @@ let test_prepare_refusals_do_not_probe () =
       ~connect_timeout_sec:1 ~max_concurrent_sessions:1
       {prefix=[!self;"--carrier";fixture.dir;"real"];probe_prefix=None;
        container_name="never-dispatch";shim_path= !shim} in
-  check bool "guest-agent refused purely" true
-    (Request.prepare ~timeout_sec:1.0 guest ~argv:["/bin/true"] ~env:[||] ~cwd:None
-     = Error Request.Guest_agent_unavailable);
+  (match Request.prepare ~timeout_sec:1.0 guest ~argv:["/bin/true"] ~env:[||] ~cwd:None with
+   | Ok _ -> ()
+   | Error _ -> fail "guest-agent request must prepare without connecting");
   check bool "Docker refused purely" true
     (Request.prepare ~timeout_sec:1.0 docker ~argv:["/bin/true"] ~env:[||] ~cwd:None
      = Error Request.Docker_unavailable);
   check (list string) "pure refusal launched no carrier" [] (log fixture);
   let prepared = prepare fixture ["/bin/true"] in
   Process_eio.reset_for_testing ();
-  assert_unavailable_outside_eio fixture prepared;
+  assert_runtime_unavailable fixture prepared;
+  (* An active fiber is not a process owner. The finite probe helper has a
+     Unix fallback, so preflight must refuse before that helper is reached. *)
+  Eio_main.run (fun _ -> assert_runtime_unavailable fixture prepared);
   Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
     (* An initialized but ended runtime must not permit a later non-Eio call
        to acquire an endpoint lease or run a probe. *)
     Eio_main.run (fun env ->
       Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
         ~proc_mgr:Posix_spawn_process_mgr.mgr ~clock:(Eio.Stdenv.clock env));
-    assert_unavailable_outside_eio fixture prepared)
+    assert_runtime_unavailable fixture prepared)
 
 let test_probe_refusals_precede_dispatch () =
   List.iter (fun mode -> with_fixture ~mode @@ fun fixture -> with_runtime @@ fun _ ->
@@ -178,9 +181,10 @@ let test_probe_refusals_precede_dispatch () =
         (fun ~input:_ ~output:_ -> fail "incapable peer reached duplex callback") in
     (match result with
      | Error (Stdio.Refused (Request.Interactive_unavailable _ | Request.Probe_unavailable _)) -> ()
-     | Error (Stdio.Refused (Request.Guest_agent_unavailable | Request.Docker_unavailable
+     | Error (Stdio.Refused (Request.Docker_unavailable
           | Request.Mode_unavailable _ | Request.Invalid_request _)
-         | Stdio.Dispatch_declined _ | Stdio.Process_unavailable _ | Stdio.Host_timeout)
+         | Stdio.Dispatch_declined _ | Stdio.Process_unavailable _ | Stdio.Runtime_unavailable _
+         | Stdio.Guest_unavailable _ | Stdio.Host_timeout)
      | Ok _ -> fail "peer capability/probe refusal was lost");
     check int "dispatch hook did not run" 0 !dispatches;
     check (list string) "only the probe ran" ["probe"] (log fixture);
@@ -362,6 +366,122 @@ let test_mismatched_peer_receipts_are_not_authoritative () =
          fail "mismatched version or mode granted execution evidence"))
     ["wrong-major";"wrong-mode"]
 
+(* Scripted guest peer: exercises the real host/MCP ownership path without
+   claiming that this local listener enforced a VM sandbox. *)
+let test_guest_mcp_uses_socket_without_process_runtime () =
+  let module Relay = Exec_ssh_protocol.Relay in
+  with_fixture @@ fun fixture ->
+  Process_eio.reset_for_testing ();
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
+  let socket = Filename.concat fixture.dir "guest.sock" in
+  let expected = Keeper_guest_socket.{uid=502;gid=20} in
+  let endpoint = Remote.of_agent_socket ~base_path:fixture.dir ~keeper_name:"guest-stdio"
+      ~remote_root:fixture.root ~gh_config_dir:fixture.root ~injected_env:[] ~env_allowlist:[]
+      ~connect_timeout_sec:1 ~max_concurrent_sessions:1 ~container_name:"scripted-guest"
+      ~shim_path:!shim ~host_socket:socket ~expected in
+  let prepared = match Request.prepare ~timeout_sec:10. endpoint
+      ~argv:["declared-mcp-service"] ~env:[||] ~cwd:None with
+    | Ok prepared -> prepared | Error _ -> fail "guest preparation failed" in
+  let admitted = ref false and half_closed = ref false and probes = ref 0 and calls = ref 0 in
+  let listening = Eio.Net.listen ~sw ~backlog:4 net (`Unix socket) in
+  let answer peer =
+    let send chunk = Eio.Flow.copy_string (Relay.encode chunk) peer in
+    send (Relay.Hello {relay_version=Relay.version;root_read_only=true;
+      uid=expected.uid;gid=expected.gid;no_new_privs=true});
+    match Relay.request_kind_of_byte (read_exact peer 1).[0] with
+    | Some Relay.Probe ->
+      incr probes;
+      send (Relay.Stdout {|{"name":"masc-exec-shim","version":"3.0.0","capabilities":["interactive_stdin","request_acceptance_frame"]}|});
+      send (Relay.Exit (Relay.Exited 0))
+    | Some Relay.Interactive_run ->
+      check bool "owner admitted before payload frame" true !admitted;
+      let header = read_exact peer 8 in
+      let frame = header ^ read_exact peer (Int64.to_int (String.get_int64_be header 0)) in
+      let request = match Exec_ssh_protocol.decode_request frame with
+        | Ok (request, "") -> request
+        | Ok _ | Error _ -> fail "invalid interactive frame" in
+      check bool "typed interactive contract" true (request.stdin = Exec_ssh_protocol.Interactive);
+      send (Relay.Stderr (Exec_ssh_protocol.render_acceptance_frame request.v));
+      let lines = Eio.Buf_read.of_flow ~max_size:65536 peer in
+      let rec rpc () =
+        if !calls < 2 then (
+          let json = Yojson.Safe.from_string (Eio.Buf_read.line lines) in
+          let member name = Yojson.Safe.Util.member name json in
+          match member "id" with
+          | `Null -> rpc ()
+          | (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+              | `Assoc _ | `List _) as id ->
+            let result = match member "method" with
+              | `String "initialize" ->
+                `Assoc ["protocolVersion",Yojson.Safe.Util.member "protocolVersion" (member "params");
+                  "capabilities",`Assoc ["tools",`Assoc []];
+                  "serverInfo",`Assoc ["name",`String "scripted-guest";"version",`String "1"]]
+              | `String "tools/call" ->
+                incr calls;
+                let arguments = Yojson.Safe.Util.member "arguments" (member "params") in
+                `Assoc ["content",`List [`Assoc ["type",`String "text";"text",`String "full reply"];
+                  `Assoc ["type",`String "image";"mimeType",`String "image/png";"data",`String "AAEC"]];
+                  "isError",`Bool (!calls=2);"structuredContent",arguments;
+                  "_meta",`Assoc ["retained",`Bool true]]
+              | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+              | `Assoc _ | `List _ -> fail "unexpected fixture RPC" in
+            send (Relay.Stdout (Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0";"id",id;"result",result]) ^ "\n"));
+            rpc ())
+      in
+      rpc ();
+      (match Eio.Buf_read.line lines with
+       | _ -> fail "callback returned without closing input"
+       | exception End_of_file -> half_closed := true);
+      send (Relay.Stdout "tail\000");
+      let trailer : Exec_ssh_protocol.trailer =
+        {v=request.v;exit=Some 7;signal=None;timed_out=false;shim_error=None;observed_syscalls=[]} in
+      let execution_receipt : Exec_ssh_protocol.execution_receipt =
+        {mode=request.mode;boundary=Sandbox_applied} in
+      send (Relay.Stderr (Exec_ssh_protocol.render_trailer ~execution_receipt trailer));
+      send (Relay.Exit (Relay.Exited 0))
+    | Some Relay.Run | None -> fail "guest stdio used the finite request path"
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let rec serve () =
+      Eio.Net.accept_fork ~sw listening ~on_error:raise (fun peer _ -> answer peer);
+      serve () in serve ());
+  let receipts = ref [] and tail = Buffer.create 16 in
+  let result = Eio.Time.with_timeout_exn clock 12. (fun () ->
+    invoke prepared ~on_dispatch:(fun () -> admitted := true; Ok ())
+      ~on_stdout_tail:(Buffer.add_string tail)
+      ~on_receipt:(fun receipt -> receipts := receipt :: !receipts)
+      (fun ~input ~output ->
+        let channel = mcp input output in
+        List.iter (fun is_error ->
+          let arguments = `Assoc ["original",`String "guest\000bytes"] in
+          match Mcp.Channel.call_tool_full channel ~name:"echo" ~arguments with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok reply ->
+            check int "both content blocks survive" 2 (List.length reply.content);
+            check (option bool) "isError survives" (Some is_error) reply.is_error;
+            check bool "complete structured response" true (reply.structured_content=Some arguments);
+            check bool "metadata survives" true (reply._meta=Some (`Assoc ["retained",`Bool true])))
+          [false;true];
+        Mcp.Channel.close channel;
+        2)) in
+  (match result with
+   | Error _ -> fail "guest socket did not finish"
+   | Ok (value, completion) ->
+     check int "callback result" 2 value;
+     (match completion.dispatch with
+      | Remote.Payload_finished {status;_} ->
+        check bool "actual guest payload exit" true (status=Unix.WEXITED 7)
+      | Remote.Dispatch_failed _ -> fail "guest terminal lost");
+     check bool "one settled receipt" true (!receipts=[completion.execution]));
+  check int "one control probe" 1 !probes;
+  check int "two dependent calls" 2 !calls;
+  check bool "input closed before final result" true !half_closed;
+  check string "unread tail retained" "tail\000" (Buffer.contents tail);
+  check (list string) "no local carrier process" [] (log fixture)
+
 let () =
   match Array.to_list Sys.argv with
   | _ :: "--carrier" :: dir :: mode :: binary :: args -> carrier dir mode binary args
@@ -373,6 +493,7 @@ let () =
         test_case "probe and capability refusals precede dispatch" `Quick test_probe_refusals_precede_dispatch;
         test_case "typed dispatch decline sends no request" `Quick test_dispatch_decline_sends_no_request;
         test_case "actual shim MCP preserves two full results" `Quick test_actual_shim_mcp_retains_full_results;
+        test_case "guest MCP uses socket without process runtime" `Quick test_guest_mcp_uses_socket_without_process_runtime;
         test_case "raw stdout exceeds capture bounds without rewrite" `Quick test_binary_output_is_neither_capped_nor_rewritten;
         test_case "endpoint lease lasts through session cleanup" `Quick test_lease_lasts_through_carrier_cleanup;
         test_case "primary exception survives receipt callback failure" `Quick test_primary_exception_survives_receipt_failure;

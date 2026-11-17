@@ -1163,12 +1163,11 @@ let phase_facts ~ko ~show_timing ~now t =
       if t.checkpoints = 0 then work
       else
         work
-        @ [ (if ko then
-               Facts.fact ~label:"컨텍스트 체크포인트 " Facts.Amount
-                 (Printf.sprintf "%d번 넘기고 이어감" t.checkpoints)
-             else
-               clause
-                 (Printf.sprintf "continued past %d context checkpoint(s)" t.checkpoints))
+        @ [ clause
+              (Printf.sprintf
+                 (if ko then "컨텍스트 체크포인트 %d번 넘기고 이어감"
+                  else "continued past %d context checkpoint(s)")
+                 t.checkpoints)
           ]
   | Stream_ended -> said ["스트림 끝남"; "결과 확정 중"] ["stream ended; settling the outcome"]
   | Stream_failed message ->

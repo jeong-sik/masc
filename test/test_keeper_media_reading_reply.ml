@@ -6,6 +6,7 @@ open Masc
 module Original = Keeper_media_reading_original
 module Owner = Keeper_media_reading_owner
 module Reply = Keeper_media_reading_reply
+module Transport = Keeper_media_reading_transport
 module Generic = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Store = Lane_addon_store
@@ -275,6 +276,11 @@ let test_opaque_reply_gc () =
     "marker",`String (Output.encode_for_agent_core (Output.Stored dead))] in
   let value = reply (sdk ~structured_content:(Some structured) ()) in
   let stored = owned (Owner.retain_reply ~store:fixture.store ~expected:(dispatched fixture) ~reply:value) |> published in
+  let observation = Remote.Execution_observed
+      ({Exec_ssh_protocol.mode=Observe;boundary=Sandbox_applied},
+       {Exec_ssh_protocol.v=V3;exit=None;signal=None;timed_out=false;
+        shim_error=Some (Output.encode_for_agent_core (Output.Stored dead));observed_syscalls=[41;44]}) in
+  let stored = owned (Owner.retain_transport ~store:fixture.store ~expected:stored ~observation) |> published in
   let run mode = get Tool_blob_maintenance.error_to_string
       (Tool_blob_maintenance.run ~base_path:fixture.base ~scope:Server_tool_blob_scope.scope ~mode) in
   let observed = run Observe_only in
@@ -287,7 +293,9 @@ let test_opaque_reply_gc () =
   check (option string) "untrusted Stored-shaped JSON does not pin other media" None (fetch dead_media.sha256);
   check bool "original official source remains live" true (Option.is_some (fetch fixture.input.sha256));
   check string "real GC leaves complete opaque response readable" (Reply.reply_bytes value)
-    (Reply.reply_bytes (retained_reply fixture stored))
+    (Reply.reply_bytes (retained_reply fixture stored));
+  check bool "real GC retains complete transport evidence without traversing its text" true
+    (owned (Owner.load_transport ~store:fixture.store stored)=Some observation)
 
 let test_actual_channel_reply_survives_late_failure late_failure () =
   with_fixture @@ fun fixture ->
@@ -296,14 +304,17 @@ let test_actual_channel_reply_survives_late_failure late_failure () =
   Process_eio.init ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
     ~proc_mgr:Posix_spawn_process_mgr.mgr ~clock:(Eio.Stdenv.clock env);
   Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
-    let initial = captured fixture and received = ref None in
+    let initial = captured fixture and received = ref None and transport_received = ref None in
     let on_dispatch () =
       let intent = strings (Keeper_media_reading_approval.intent fixture.captured) in
       ignore (advance fixture initial [Progress.Approval_intended intent;Progress.Dispatch_intended]);
       Ok () in
     (match Eio.Cancel.sub (fun cancel ->
       Keeper_sandbox_remote_stdio.with_stdio fixture.prepared ~on_dispatch
-        ~on_receipt:(fun _ -> match late_failure with
+        ~on_receipt:(fun observation ->
+          transport_received := Some observation;
+          ignore (owned (Owner.retain_transport ~store:fixture.store ~expected:(reload fixture) ~observation) |> published);
+          match late_failure with
           | Receipt_failure -> raise Receipt_failed | Cancel_after_reply -> ())
         ~on_stderr_chunk:ignore ~on_stdout_tail:ignore
         (fun ~input ~output ->
@@ -319,7 +330,9 @@ let test_actual_channel_reply_survives_late_failure late_failure () =
            | Error (Owner.Reply_blob_write_failed _) -> ()
            | Ok _
            | Error (Owner.Store_error _ | Invalid_original _ | Store_workspace_mismatch _
-             | Invalid_reply _ | Reply_blob_missing _ | Reply_blob_unavailable _ | Reply_update_error _) ->
+             | Invalid_reply _ | Reply_blob_missing _ | Reply_blob_unavailable _ | Reply_update_error _
+             | Invalid_transport _ | Transport_blob_missing _ | Transport_blob_unavailable _
+             | Transport_blob_write_failed _ | Transport_update_error _) ->
              fail "blob failure was not reported as a retention failure");
           ignore (owned (Owner.retain_reply ~store:fixture.store ~expected:pending ~reply:value) |> published);
           Agent_core.Mcp.Channel.close channel;
@@ -332,7 +345,23 @@ let test_actual_channel_reply_survives_late_failure late_failure () =
      | exception Eio.Cancel.Cancelled _ ->
        (match late_failure with Cancel_after_reply -> () | Receipt_failure -> fail "receipt failure changed into cancellation"));
     let expected = match !received with Some value -> value | None -> fail "MCP returned no result" in
-    let restored = retained_reply fixture (reload fixture) in
+    let reopened = reload fixture in
+    let observation = match !transport_received with Some value -> value | None -> fail "receipt callback was skipped" in
+    check bool "actual callback observation is durably owned after cleanup" true
+      (owned (Owner.load_transport ~store:fixture.store reopened)=Some observation);
+    (match late_failure,observation with
+     | Receipt_failure,Remote.Execution_observed _ -> ()
+     | Cancel_after_reply,Remote.Execution_unavailable (Remote.Transport_unavailable _) -> ()
+     | Receipt_failure,Remote.Execution_unavailable _
+     | Cancel_after_reply,Remote.Execution_observed _
+     | Cancel_after_reply,Remote.Execution_unavailable (Remote.Request_not_sent | Remote.Peer_receipt_missing
+         | Remote.Invalid_receipt _ | Remote.Shim_refused_without_receipt) -> fail "receipt fabricated a cleanup boundary");
+    check bool "transport publication makes no domain commit" true
+      (match Progress.phase (Owner.record reopened).progress with
+       | Progress.Judged _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    let restored = retained_reply fixture reopened in
     check string "full SDK response survives receipt callback failure or cancellation"
       (Reply.reply_bytes expected) (Reply.reply_bytes restored);
     check string "retention retry did not repeat the actual RPC" "1" (read (Filename.concat fixture.remote_root "calls"));
@@ -341,12 +370,134 @@ let test_actual_channel_reply_survives_late_failure late_failure () =
     check int "actual content blocks survive" 2
       (Yojson.Safe.Util.member "content" (Reply.reply_json restored) |> Yojson.Safe.Util.to_list |> List.length))
 
+let test_transport_full_codec () =
+  let open Exec_ssh_protocol in
+  let trailer = {v=V3;exit=None;signal=None;timed_out=false;
+    shim_error=Some "exact\000shim\030detail";observed_syscalls=[41;42;41]} in
+  let observations = List.map (fun boundary ->
+      Remote.Execution_observed ({mode=Observe;boundary},trailer))
+      [Sandbox_applied;Setup_failed;Exec_failed;Child_ack_unavailable;Refused;Refused_socket;Refused_write]
+    @ List.map (fun reason -> Remote.Execution_unavailable reason)
+      [Remote.Request_not_sent;Transport_unavailable Acceptance_not_asked;
+       Transport_unavailable Acceptance_not_read;Transport_unavailable Acceptance_read;
+       Peer_receipt_missing;Invalid_receipt "exact invalid detail";Shim_refused_without_receipt] in
+  List.iter (fun observation ->
+    let captured=strings (Transport.capture observation) in
+    let restored=strings (Transport.restore_bytes (Transport.bytes captured)) in
+    check bool "every typed field and boundary survives" true (Transport.observation restored=observation);
+    let malformed=Yojson.Safe.from_string (Transport.bytes captured) in
+    let duplicate=match malformed with
+      | `Assoc fields -> `Assoc (("schema",`String "keeper-media-reading-transport.v1")::fields)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "transport is not an object" in
+    rejects "duplicate codec key" (Transport.restore_bytes (Yojson.Safe.to_string duplicate));
+    rejects "noncanonical complete bytes" (Transport.restore_bytes (" " ^ Transport.bytes captured))) observations
+
+let test_transport_after_reply_and_no_send () =
+  with_fixture (fun fixture ->
+    let pending=dispatched fixture in
+    check bool "dispatch without receipt is explicitly absent evidence" true
+      (owned (Owner.load_transport ~store:fixture.store pending)=None);
+    let judged=owned (Owner.retain_reply ~store:fixture.store ~expected:pending ~reply:(reply (sdk ()))) |> published in
+    let no_write _ ~bytes:_ ~mime:_=fail "contradictory no-send reached blob writer" in
+    rejects "first no-send fact contradicts an existing reply before storage"
+      (Owner.For_testing.retain_transport ~put_blob:no_write ~store:fixture.store ~expected:judged
+        ~observation:(Remote.Execution_unavailable Remote.Request_not_sent) ());
+    let observation=Remote.Execution_observed
+      ({Exec_ssh_protocol.mode=Effect;boundary=Sandbox_applied},
+       {Exec_ssh_protocol.v=V3;exit=None;signal=Some 15;timed_out=false;shim_error=None;observed_syscalls=[]}) in
+    let recorded=owned (Owner.retain_transport ~store:fixture.store ~expected:judged ~observation) |> published in
+    check bool "post-reply receipt preserves Judged exactly" true
+      (Progress.phase (Owner.record recorded).progress=Progress.phase (Owner.record judged).progress);
+    check bool "exact actual status is retained after reopen" true
+      (owned (Owner.load_transport ~store:fixture.store (reload fixture))=Some observation);
+    rejects "no-send cannot overwrite received reply evidence"
+      (Owner.retain_transport ~store:fixture.store ~expected:recorded
+        ~observation:(Remote.Execution_unavailable Request_not_sent));
+    let bytes=Transport.bytes (strings (Transport.capture observation)) in
+    check string "ordinary opaque JSON" "application/json" (Option.get (Owner.transport_artifact recorded)).mime;
+    check string "stored complete bytes" bytes (read (Filename.concat (Blob.root_dir fixture.blob)
+      (let a=Option.get (Owner.transport_artifact recorded) in Filename.concat (String.sub a.sha256 0 2) a.sha256))));
+  with_fixture (fun fixture ->
+    let initial=captured fixture in
+    let no_write _ ~bytes:_ ~mime:_=fail "precondition reached blob writer" in
+    rejects "possibly-sent receipt before dispatch"
+      (Owner.For_testing.retain_transport ~put_blob:no_write ~store:fixture.store ~expected:initial
+        ~observation:(Remote.Execution_unavailable (Transport_unavailable Acceptance_not_read)) ());
+    let not_sent=Remote.Execution_unavailable Remote.Request_not_sent in
+    let recorded=owned (Owner.retain_transport ~store:fixture.store ~expected:initial ~observation:not_sent) |> published in
+    let intent=strings (Keeper_media_reading_approval.intent fixture.captured) in
+    let progress=strings (Progress.append (Owner.record recorded).progress (Progress.Approval_intended intent)) in
+    let progress=strings (Progress.append progress Progress.Dispatch_intended) in
+    rejects "same observed invocation cannot be dispatched again"
+      (Transport.validate_progress ~original:fixture.captured progress);
+    check bool "true no-send remains available for future-original policy" true
+      (owned (Owner.load_transport ~store:fixture.store recorded)=Some not_sent));
+  with_fixture (fun fixture ->
+    let pending=dispatched fixture in
+    let not_sent=Remote.Execution_unavailable Remote.Request_not_sent in
+    let recorded=owned (Owner.retain_transport ~store:fixture.store ~expected:pending ~observation:not_sent) |> published in
+    let no_write _ ~bytes:_ ~mime:_=fail "reply after no-send reached blob writer" in
+    rejects "a dispatch-pending phase cannot launder a reply after no-send"
+      (Owner.For_testing.retain_reply ~put_blob:no_write ~store:fixture.store ~expected:recorded ~reply:(reply (sdk ())) ()))
+
+let test_transport_publication_and_integrity () =
+  with_fixture (fun fixture ->
+    let pending=dispatched fixture in
+    let observation=Remote.Execution_unavailable (Remote.Transport_unavailable Acceptance_read) in
+    let failed _ ~scope:_ ~request_id:_ _=Error "save failed" in
+    (match owned (Owner.For_testing.retain_transport ~save:failed ~store:fixture.store ~expected:pending ~observation ()) with
+     | Owner.Unconfirmed _ -> () | Stored _ | Already_stored _ -> fail "failure became acknowledgement");
+    check bool "unlinked loose blob is not a receipt" true (owned (Owner.load_transport ~store:fixture.store pending)=None);
+    let lost_ack store ~scope ~request_id json=strings (Store.save_tool_request_owner store ~scope ~request_id json);Error "lost ACK" in
+    (match owned (Owner.For_testing.retain_transport ~save:lost_ack ~store:fixture.store ~expected:pending ~observation ()) with
+     | Owner.Unconfirmed _ -> () | Stored _ | Already_stored _ -> fail "lost ACK became confirmation");
+    let no_blob _ ~bytes:_ ~mime:_=fail "existing receipt rewritten" in
+    let no_save _ ~scope:_ ~request_id:_ _=fail "existing link rewritten" in
+    let restored=owned (Owner.For_testing.retain_transport ~put_blob:no_blob ~save:no_save
+      ~store:fixture.store ~expected:pending ~observation ()) |> published in
+    check bool "same observation is recovered without rerunning transport" true
+      (owned (Owner.load_transport ~store:fixture.store restored)=Some observation);
+    strings (Store.save_tool_request_owner fixture.store ~scope:Owner.scope
+      ~request_id:(Original.request_id fixture.captured) (Generic.to_json (Owner.record pending)));
+    rejects "known receipt cannot silently regress" (Owner.load_transport ~store:fixture.store restored));
+  List.iter (fun corrupt -> with_fixture (fun fixture ->
+    let pending=dispatched fixture in
+    let observation=Remote.Execution_unavailable (Remote.Transport_unavailable Acceptance_not_read) in
+    let recorded=owned (Owner.retain_transport ~store:fixture.store ~expected:pending ~observation) |> published in
+    let artifact=Option.get (Owner.transport_artifact recorded) in
+    let path=Filename.concat (Blob.root_dir fixture.blob) (Filename.concat (String.sub artifact.sha256 0 2) artifact.sha256) in
+    if corrupt then save path "changed" else Unix.unlink path;
+    rejects "linked missing or corrupt receipt is an error" (Owner.load_transport ~store:fixture.store recorded);
+    let no_blob _ ~bytes:_ ~mime:_=fail "damaged receipt repaired without evidence" in
+    rejects "idempotent transport retention never overwrites damage"
+      (Owner.For_testing.retain_transport ~put_blob:no_blob ~store:fixture.store ~expected:pending ~observation ()))) [false;true];
+  with_fixture (fun fixture ->
+    let pending=dispatched fixture in
+    let captured=strings (Transport.capture (Remote.Execution_unavailable (Remote.Transport_unavailable Acceptance_read))) in
+    let artifact=Blob.put_durable fixture.blob ~bytes:(Transport.bytes captured) ~mime:Transport.mime_type in
+    let wrong=get Output.make_error_to_string (Output.make_artifact_ref ~sha256:artifact.sha256
+      ~bytes:(artifact.bytes+1) ~preview:"" ~mime:artifact.mime) in
+    let link=strings (Transport.link ~original:fixture.captured ~captured wrong) in
+    rejects "blob no-send classification must match host link"
+      (Transport.check_value link (strings (Transport.capture (Remote.Execution_unavailable Remote.Request_not_sent))));
+    let json=Transport.link_to_json link in
+    let foreign=match json with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          key,if key="execution_id" then `String "foreign-execution" else value) fields)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "link must be an object" in
+    rejects "complete original execution binding" (Transport.link_of_json ~original:fixture.captured foreign);
+    let recorded=advance fixture pending [Progress.Transport_observed json] in
+    rejects "complete receipt length is checked" (Owner.load_transport ~store:fixture.store recorded))
+
 let () = match Array.to_list Sys.argv with
   | _ :: "--carrier" :: dir :: binary :: args -> carrier dir binary args
   | [program;shim_path] ->
     self := Unix.realpath program; shim := Unix.realpath shim_path;
     Alcotest.run ~argv:[|program|] "media reply ownership"
       ["retention",[
+        test_case "complete transport codec preserves all typed boundaries" `Quick test_transport_full_codec;
+        test_case "transport follows reply without fake commit or replay" `Quick test_transport_after_reply_and_no_send;
+        test_case "transport lost ACK and linked integrity" `Quick test_transport_publication_and_integrity;
         test_case "complete SDK and explicit null survive reload" `Quick test_complete_sdk_and_null;
         test_case "failed publication and lost acknowledgement" `Quick test_link_publication_failures;
         test_case "linked missing corrupt or wrong-length blob refuses" `Quick test_missing_corrupt_and_wrong_length;

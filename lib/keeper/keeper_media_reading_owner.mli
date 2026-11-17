@@ -11,6 +11,11 @@ type error =
   | Reply_blob_unavailable of Tool_blob_store.fetch_error
   | Reply_blob_write_failed of string
   | Reply_update_error of Lane_addon_tool_request_owner.update_error
+  | Invalid_transport of string
+  | Transport_blob_missing of string
+  | Transport_blob_unavailable of Tool_blob_store.fetch_error
+  | Transport_blob_write_failed of string
+  | Transport_update_error of Lane_addon_tool_request_owner.update_error
 
 val error_to_string : error -> string
 val scope : string
@@ -80,7 +85,35 @@ val load_reply :
     phase without its valid reply link, or a missing/corrupt/unreadable linked
     blob, is an error. Neither the SDK decoder nor result interpretation runs. *)
 
+type transport_publication = reply_publication
+val transport_artifact : retained -> Tool_output.artifact_ref option
+val retain_transport :
+  store:Lane_addon_store.t -> expected:retained ->
+  observation:Keeper_sandbox_remote.execution_observation ->
+  (transport_publication, error) result
+(** Retain this invocation's actual on_receipt observation as a complete opaque
+    JSON blob and one Transport_observed link. The phase is unchanged. The
+    caller keeps the workspace lease and serialization through reply and
+    transport publication. Known history must remain a prefix; equal existing
+    evidence is fetched and checked, conflicting evidence is refused. A lost
+    acknowledgement permits retention-only reconciliation, never another RPC.
+    Request_not_sent cannot coexist with a reply. This closes this invocation,
+    not every future original: a fresh request after proven no-send still needs
+    fresh Gate authority. Unknown or denied work grants no such permission. *)
+val load_transport : store:Lane_addon_store.t -> retained ->
+  (Keeper_sandbox_remote.execution_observation option, error) result
+(** Fetch and verify the original-bound complete observation. None means no
+    retained fact. After dispatch it is unknown, not Request_not_sent. Linked
+    missing/corrupt bytes are errors. No fake observation is reconstructed. *)
+
 module For_testing : sig
+  val retain_transport :
+    ?put_blob:(Tool_blob_store.t -> bytes:string -> mime:string -> Tool_output.artifact_ref) ->
+    ?save:(Lane_addon_store.t -> scope:string -> request_id:string -> Yojson.Safe.t ->
+      (unit, string) result) ->
+    store:Lane_addon_store.t -> expected:retained ->
+    observation:Keeper_sandbox_remote.execution_observation -> unit ->
+    (transport_publication, error) result
   val retain_reply :
     ?put_blob:(Tool_blob_store.t -> bytes:string -> mime:string ->
       Tool_output.artifact_ref) ->

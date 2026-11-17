@@ -91,7 +91,7 @@ let validate_progress ~original progress =
     | Progress.Judgment_retained json ->
       let* link = link_of_json ~original json in
       Ok (Some link)
-    | Progress.Approval_intended _ | Progress.Approval_wait_retained _
+    | Progress.Transport_observed _ | Progress.Approval_intended _ | Progress.Approval_wait_retained _
     | Progress.Dispatch_intended | Progress.Admission_declined _
     | Progress.Execution_observed _ | Progress.Preparation_intended _
     | Progress.Preparation_observed _ | Progress.Replacement_intended _

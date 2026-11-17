@@ -509,6 +509,8 @@ let execution_receipt_of_json json =
     | "exec_failed" -> Ok Exec_failed
     | "child_ack_unavailable" -> Ok Child_ack_unavailable
     | "refused" -> Ok Refused
+    | "refused_socket" -> Ok Refused_socket
+    | "refused_write" -> Ok Refused_write
     | _ -> transport_error "execution receipt has unknown boundary"
   in
   Ok { mode; boundary }

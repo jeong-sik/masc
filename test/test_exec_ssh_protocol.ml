@@ -540,7 +540,7 @@ let test_execution_receipts_preserve_process_outcome () =
         (parse_execution_receipt wire = Ok (Some execution_receipt));
       check bool "receipt never rewrites the child status" true
         (parse_trailer wire = Ok trailer))
-      [Sandbox_applied; Setup_failed; Exec_failed; Child_ack_unavailable; Refused])
+      [Sandbox_applied; Setup_failed; Exec_failed; Child_ack_unavailable; Refused; Refused_socket; Refused_write])
     [Effect; Observe; Guest_local];
   check bool "old peer supplies no receipt, not inferred Effect" true
     (parse_execution_receipt (render_trailer trailer) = Ok None);

@@ -924,7 +924,55 @@ let test_approval_wire_refuses_malformed_or_mismatched_facts () =
   List.iter (fun history -> match Progress.of_json (`List history) with
     | Error _ -> () | Ok _ -> Alcotest.fail "malformed approval journal became valid") malformed
 
+let test_transport_fact_is_orthogonal () =
+  let dispatch = [Progress.Dispatch_intended] in
+  let judged = dispatch @ [Progress.Judgment_retained judgment] in
+  let committing = judged @ [Progress.Commit_intended {before;after}] in
+  let refused = dispatch @ [Progress.Refused {stage=Execution;evidence=evidence "refused"}] in
+  let successor : Progress.successor = {request_id="transport-child";request_digest=Store.digest "child"} in
+  let histories = [ []; dispatch; judged; committing;
+    dispatch @ [Progress.Admission_declined `Null];
+    committing @ [Progress.Commit_uncertain `Null];
+    committing @ [Progress.Commit_observed after];
+    committing @ [Progress.Commit_conflicted `Null]; refused;
+    refused @ [Progress.Successor_intended successor];
+    refused @ [Progress.Successor_intended successor;Progress.Successor_observed successor.request_id] ] in
+  let receipt = evidence "actual transport observation" in
+  List.iter (fun history ->
+    let initial=fold_progress history in
+    let late=get (Progress.append initial (Progress.Transport_observed receipt)) in
+    let restored=get (Progress.of_json (Progress.to_json late)) in
+    Alcotest.(check bool) "late transport preserves the actual phase" true
+      (Progress.phase initial=Progress.phase restored);
+    Alcotest.(check bool) "complete fact survives strict roundtrip" true
+      (Progress.transport_observation restored=Some receipt);
+    List.iter (fun value ->
+      Alcotest.(check bool) "same or conflicting second receipt is rejected" true
+        (Result.is_error (Progress.append restored (Progress.Transport_observed value))))
+      [receipt;evidence "changed"] ) histories;
+  let early=get (Progress.append Progress.captured (Progress.Transport_observed receipt)) in
+  let dispatched=get (Progress.append early Progress.Dispatch_intended) in
+  Alcotest.(check bool) "generic transport adds no media-specific dispatch policy" true
+    (Progress.phase dispatched=Progress.Dispatch_pending None
+     && Progress.transport_observation dispatched=Some receipt)
+
+let test_transport_fact_survives_owner_reopen () = with_store (fun root store ->
+  let judged=judge store in
+  let receipt=evidence "cleanup after response" in
+  let recorded=stored store judged (Progress.Transport_observed receipt) in
+  let reopened=load (Store.create ~root) in
+  Alcotest.(check bool) "actual owner stores the post-judgment fact without a commit" true
+    (Progress.phase reopened.progress=Progress.phase judged.progress
+     && Progress.transport_observation reopened.progress=Some receipt);
+  check_events "reopened complete history" (events recorded) reopened;
+  invalid store reopened (Progress.Transport_observed receipt);
+  Alcotest.(check bool) "duplicate receipt object fields are rejected" true
+    (Result.is_error (Progress.of_json (`List [`Assoc ["event",`String "transport_observed";
+      "evidence",`Assoc ["same",`Int 1;"same",`Int 2]]]))))
+
 let () = Alcotest.run "Original Add-on request progress" ["owner",[
+  Alcotest.test_case "transport fact preserves phases without claiming a commit" `Quick test_transport_fact_is_orthogonal;
+  Alcotest.test_case "post-reply transport fact survives owner reopen" `Quick test_transport_fact_survives_owner_reopen;
   Alcotest.test_case "approval intent and wait survive restart and lost ACK" `Quick
     test_approval_facts_survive_restart_and_lost_ack;
   Alcotest.test_case "approval facts preserve every execution phase without a generic gate" `Quick

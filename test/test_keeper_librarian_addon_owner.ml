@@ -785,7 +785,7 @@ let test_absent_destination_ends_the_original_and_is_judged_again ()=
   let first=match observed_originals fixture with [record,_] -> record
     | [] | _::_::_ -> fail "expected one original execution" in
   let uncertain=List.exists (function Progress.Commit_uncertain _ -> true
-    | Approval_intended _ | Approval_wait_retained _
+    | Transport_observed _ | Approval_intended _ | Approval_wait_retained _
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _

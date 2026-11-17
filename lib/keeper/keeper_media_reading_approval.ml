@@ -37,6 +37,7 @@ let validate_progress ~original progress =
     | Progress.Dispatch_intended ->
       if has_intent then Ok true
       else Error "media dispatch has no retained original approval intent"
+    | Progress.Transport_observed _
     | Progress.Admission_declined _ | Progress.Execution_observed _
     | Progress.Judgment_retained _ | Progress.Preparation_intended _
     | Progress.Preparation_observed _ | Progress.Replacement_intended _

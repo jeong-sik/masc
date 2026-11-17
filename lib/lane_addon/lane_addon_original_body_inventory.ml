@@ -35,7 +35,7 @@ let protect_record marked record =
       Ok (Digests.add digest digests)
     (* Approval facts refer back to this original; the approval queue ID is
        not a request-body edge. The current body is already protected above. *)
-    | Approval_intended _ | Approval_wait_retained _
+    | Transport_observed _ | Approval_intended _ | Approval_wait_retained _
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_observed _ | Replacement_observed _ | Commit_intended _ | Commit_uncertain _
     | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _

@@ -358,8 +358,8 @@ let validate_payload ~proofs ~read ~read_body ~owner ~capture ~parent ~record =
          | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
          | Finished _ | Conflicted _ | Rejected _ | Subdivided _ ->
            Error "Acknowledged original gate successor is absent"))
-    | Approval_intended _ | Approval_wait_retained _ ->
-      Error "Unexpected approval fact in original librarian gate journal"
+    | Transport_observed _ | Approval_intended _ | Approval_wait_retained _ ->
+      Error "Unexpected foreign observation in original librarian gate journal"
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
@@ -455,7 +455,7 @@ let rec restore_record_with ~read ~store ~owner ~capture ~visited (record : Owne
     | Successor_observed _ ->
       let* () = require (Option.is_some terminal) "Gate successor ACK precedes its original terminal" in
       Ok (transcript,terminal)
-    | Approval_intended _ | Approval_wait_retained _
+    | Transport_observed _ | Approval_intended _ | Approval_wait_retained _
     | Admission_declined _ | Execution_observed (Absent _) | Commit_intended _ | Commit_uncertain _
     | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _

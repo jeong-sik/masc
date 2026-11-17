@@ -66,7 +66,7 @@
 ; under test, and a full regression run cannot be green until they are fixed
 ; or moved out of `names`:
 ;   test_backend_openai_codec              (serialize 3, 7)
-;   test_snapshot_provider_serialization   (gemini tool_choice Any)
+;   test_snapshot_provider_serialization   gemini 0 (tool_choice Any)
 ;
 
 (tests
@@ -498,7 +498,7 @@
 (test
  (name test_exact_output_resolver_snapshot)
  (modules test_exact_output_resolver_snapshot)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps llm_provider alcotest eio_main))
 
 (test
  (name test_complete_http)
@@ -508,7 +508,7 @@
 (test
  (name test_http_client_cache)
  (modules test_http_client_cache)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock mtime))
+ (libraries agent_core_test_deps llm_provider alcotest eio_main eio.mock mtime))
 
 (test
  (name test_http_client_addresses)

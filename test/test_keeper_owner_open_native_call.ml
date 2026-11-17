@@ -2,9 +2,10 @@
    the cancelled call never reported a terminal disposition. These tests drive
    the Owner with an executor that leaves exactly that state behind and check
    what the Owner settles, what it keeps available, and what it leaves for the
-   next process. An operator interrupt, a raised exception and a reported
-   success close the call as an unknown effect. A stopping Owner and a failure
-   the runner reports on its own leave it for the next process to resume.
+   next process. An operator interrupt, a raised exception, a failure the
+   runner reports on its own and a reported success close the call as an
+   unknown effect. Only a stopping Owner leaves it for the next process to
+   resume.
    Assertions are on typed states, never on message text. *)
 open Alcotest
 open Masc
@@ -162,11 +163,6 @@ let interrupt_running owner id =
 let is_unknown_effect = function
   | Native.Terminal_unacknowledged (_, disposition) -> disposition = unknown_effect_disposition
   | Native.No_native_call | Native.Active _ -> false
-;;
-
-let is_active = function
-  | Native.Active _ -> true
-  | Native.No_native_call | Native.Terminal_unacknowledged _ -> false
 ;;
 
 let is_running (operation : Chat_operation.t) =
@@ -333,47 +329,52 @@ let test_raised_exception_closes_the_call () =
    | None -> fail "the Owner settled but the parent received no runner failure")
 ;;
 
-(* A resumed call that fails before anything is dispatched, such as a
-   checkpoint that cannot be loaded, is the runner's own failure. The call is
-   untouched by this process, so it stays Active and resumable. Closing it as an
-   unknown effect would lose an operation no new attempt ran. *)
-let test_failure_before_dispatch_leaves_the_call_resumable () =
+(* A failure the runner reports on its own, such as a continuation that cannot
+   be loaded, ends the operation with that failure. No restart is coming to
+   resume the call in this process, and a Running row with no child would hold
+   the Keeper's queue until one did, so the call closes as an unknown effect
+   and the next operation runs. *)
+let test_reported_failure_closes_the_call_and_the_queue_moves () =
   Eio_main.run @@ fun env ->
   let clock = env#clock in
   Eio.Switch.run @@ fun sw ->
   let owner_cell = ref None in
-  let ready = ref true in
-  let bound = ref false in
+  let first = ref true in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let operation = match owner_ok (claim ()) with
       | Some operation -> operation
       | None -> fail "the executor claimed nothing" in
-    ready := false;
-    bind_active_call (Option.get !owner_cell) operation;
-    bound := true;
-    Owner.Operation_failed
-      { kind = Chat_operation.Turn_exception
-      ; detail = "continuation could not be loaded"
-      ; outcome_ref = None
-      }
+    if !first
+    then (
+      first := false;
+      bind_active_call (Option.get !owner_cell) operation;
+      Owner.Operation_failed
+        { kind = Chat_operation.Turn_exception
+        ; detail = "continuation could not be loaded"
+        ; outcome_ref = None
+        })
+    else Owner.Operation_succeeded { outcome_ref = "later" }
   in
   let owner =
-    start_owner ~sw ~path:(fresh_store_path ~sw) ~name:"open-native-predispatch"
-      ~runner:(runner ~ready execute)
+    start_owner ~sw ~path:(fresh_store_path ~sw) ~name:"open-native-reported-failure"
+      ~runner:(runner ~ready:(ref true) execute)
   in
   owner_cell := Some owner;
-  let id = operation_id "open-native-predispatch" in
-  let queued = operation_id "open-native-predispatch-queued" in
-  submit owner id "resumed call fails to load";
-  wait_until ~clock ~what:"the failure to be reported" (fun () ->
-    !bound && Option.is_none (Owner.turn_in_flight owner));
-  submit owner queued "waits behind";
-  check bool "the operation is not settled" true (is_running (operation_of owner id));
-  check bool "the call stays active for the next process" true (is_active (native_state owner id));
+  let id = operation_id "open-native-reported-failure" in
+  let next = operation_id "open-native-reported-failure-next" in
+  submit owner id "fails after binding";
+  submit owner next "runs after";
+  let settled = await_terminal ~clock owner id in
+  check bool "fails with the runner's own kind" true
+    (failed_kind settled = Chat_operation.Turn_exception);
+  check bool "the unknown effect stays on record" true (is_unknown_effect (native_state owner id));
   check bool "the Owner is not fenced" false (Owner.operation_projection owner).store_unavailable;
-  (match owner_ok (Owner.cancel_queued_operation owner queued) with
-   | { Chat_operation.state = Chat_operation.Cancelled _; _ } -> ()
-   | operation -> fail ("queued cancel left " ^ Chat_operation.state_to_string operation.state))
+  let ran = await_terminal ~clock owner next in
+  check bool "the next queued operation ran" true
+    (match ran.state with
+     | Chat_operation.Succeeded _ -> true
+     | Chat_operation.Queued | Chat_operation.Running _ | Chat_operation.Failed _
+     | Chat_operation.Cancelled _ -> false)
 ;;
 
 (* The terminal disposition is already on record: settlement is unchanged and
@@ -785,8 +786,8 @@ let () =
             test_runner_reported_cancellation_closes_the_call
         ; test_case "raised exception closes the call" `Quick
             test_raised_exception_closes_the_call
-        ; test_case "failure before dispatch leaves the call resumable" `Quick
-            test_failure_before_dispatch_leaves_the_call_resumable
+        ; test_case "reported failure closes the call and the queue moves" `Quick
+            test_reported_failure_closes_the_call_and_the_queue_moves
         ; test_case "success over an unknown-effect receipt is not recorded" `Quick
             test_success_over_an_unknown_effect_receipt_is_not_recorded
         ; test_case "recorded disposition settles as before" `Quick

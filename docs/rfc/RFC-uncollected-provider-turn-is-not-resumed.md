@@ -152,9 +152,9 @@ claim 이 native 호출을 열기 직전의 준비(`Keeper_direct_native_continu
 4. `Not_uncollected` 면 지금처럼 같은 호출을 이어 한다.
 5. 오류면 `read_execution_terminal` 로 기록을 한 번 더 읽는다.
    - 닫기는 commit 됐는데 writer 닫기가 실패했을 수 있다(`execution_lane_writer.ml:870-877`).
-   - terminal 이 있으면 3 으로 간다. 없으면 그 claim 은 실패하고 호출은 `Active` 로 남는다. 행은 `running` 으로 남고 다음 기동이 다시 판정한다(`restart-resumes-running-chat-operations` §4.4).
+   - terminal 이 있으면 3 으로 간다. 없으면 그 claim 은 실패한다. Owner 가 호출을 「효과 모름」 영수증으로 닫고 작업을 실패로 끝낸다(`restart-resumes-running-chat-operations` §4.3, §4.4).
 
-- 기동 정리 안에서 닫지 않으므로, 닫다가 난 실패가 그 Keeper 의 Owner 를 멈추지 않는다. 다만 호출이 `Active` 로 남으면 그 Keeper 는 다음 기동까지 다른 채팅 작업을 집지 않는다.
+- 기동 정리 안에서 닫지 않으므로, 닫다가 난 실패가 그 Keeper 의 Owner 를 멈추지 않는다. 그 작업은 실패로 끝나고 Keeper 는 다음 작업을 집는다(`restart-resumes-running-chat-operations` §4.3).
 - 새 실패 종류가 필요 없다.
 - 기록을 두 번 읽는다(terminal 읽기, 잠금 아래 다시 읽기). Owner 의 자식 fiber 에서 읽으므로 그동안에도 Owner 는 다른 명령을 받는다.
 
@@ -206,6 +206,7 @@ Keeper 하나가 채팅 작업 하나를 돌리는 동안의 틱이다.
 - `validate_collected_counter` 를 지우지 않는다. 어긋난 기록은 그대로 막는다.
 - 오류 문구로 상태를 가르지 않는다.
 - 모은 체크포인트가 있는 `Active` 호출의 다시 잇기는 바꾸지 않는다. 그 호출이 `Agent.run` 전에 거절되는 경우(저장된 runtime·model 이 바뀜, 체크포인트 복원 실패 등)도 이 RFC 에 넣지 않는다.
+  - 그 claim 이 실패하면 Owner 가 호출을 「효과 모름」 영수증으로 닫고 작업을 실패로 끝낸다(`restart-resumes-running-chat-operations` 4.3, 운영자 결정 2026-11-17).
 
 ## 8. 시험
 
@@ -235,6 +236,3 @@ masc: `restart-resumes-running-chat-operations` §8 의 4.4 시험이 맡는다.
 - 닫힌 기록에 「재기동 뒤 모으기 전이라 닫음」이라는 원인을 남길지.
   - 기록은 이미 `Event.Cancelled {reason; data}` 로 원인을 담을 수 있다(`execution_agent_scope.ml:65-70`).
   - 공개 terminal 증거는 outcome 과 recovery 만 내보내서, 종료 절차의 멈춤·운영자 중단과 같은 모양이다. 남기려면 공개 증거 타입에 필드가 하나 생긴다.
-- 모은 체크포인트가 있는데 `Agent.run` 전에 거절되는 `Active` 호출(7 절)을 어떻게 끝낼지.
-  - `Turn_exception` 이면 Owner 는 호출을 열어 둔다(`active_native_call_policy`, `keeper_owner.ml:957-976`). 기록이 닫히지 않았으면 다음 기동이 다시 큐에 넣는다.
-  - 코드를 읽고 본 흐름이고 재현하지 않았다. 따로 재현한 뒤 정한다.

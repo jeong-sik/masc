@@ -137,6 +137,28 @@ class LibrarianWorker(unittest.TestCase):
             self.assertTrue(all(x["isError"] for x in terminal[:2]))
             self.assertTrue(all(self.output(x)["state"] == "finished" for x in terminal[2:]))
 
+    def test_replacement_ending_survives_worker_restart(self):
+        original = request("durable")
+        ending = {"status": "not_allowed", "cause": "declaration_replaced"}
+        with tempfile.TemporaryDirectory() as directory:
+            self.run_worker(directory, [submit(original), deliver(original, ending)])
+            restored = self.run_worker(directory, [read(original), listing()])
+            self.assertEqual(self.output(restored[0])["result"], ending)
+            self.assertEqual(self.output(restored[1])["requests"], [])
+
+    def test_unknown_or_contradictory_replacement_endings_keep_request_pending(self):
+        original = request("durable")
+        invalid = [
+            {"status": "not_allowed", "cause": "unknown"},
+            {"status": "not_allowed", "cause": "declaration_replaced", "reason": "ordinary refusal"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            for ending in invalid:
+                with self.subTest(ending=ending):
+                    replies = self.run_worker(directory, [submit(original), deliver(original, ending), read(original)])
+                    self.assertTrue(replies[1]["isError"])
+                    self.assertEqual(self.output(replies[2])["state"], "pending")
+
     def test_body_free_admission_refusal_keeps_its_tool_after_restart(self):
         contract = runpy.run_path(str(SERVER))["CONTRACT"]
         from exact_worker import InvalidInput, REQUEST_BODY_REFUSED, Worker

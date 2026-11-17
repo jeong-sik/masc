@@ -320,6 +320,44 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
           Alcotest.fail "expected appended current-schema turn audit")
 ;;
 
+let test_tool_audit_observes_same_count_rotation_and_pruning () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
+  let base_path = Filename.temp_dir "keeper_status_tool_audit_rotation_" "" in
+  Fun.protect
+    ~finally:(fun () -> Eio_guard.disable (); Fs_compat.remove_tree base_path)
+    (fun () ->
+      let config = Workspace.default_config base_path in
+      let keeper_name = "same-count-rotation" in
+      let row name =
+        `Assoc
+          (Keeper_metrics_record.fields Keeper_metrics_record.Turn
+           @ [ "ts", `String "2026-11-17T00:00:00Z"
+             ; "ts_unix", `Float 1_794_873_600.
+             ; "tool_call_count", `Int 1
+             ; "tools_used", `List [ `String name ] ]) in
+      let row_bytes = String.length (Yojson.Safe.to_string (row "old")) + 1 in
+      let location = Keeper_types_support.keeper_store_location config keeper_name
+          Dated_jsonl.Store.Keeper.Metrics in
+      let storage = Keeper_metrics_storage.create ~location ~max_bytes:(2 * row_bytes) in
+      let store = Keeper_metrics_storage.read_store storage in
+      let latest () =
+        match Keeper_status_metrics.latest_tool_audit_snapshot_from_files config ~keeper_name with
+        | Ok (Some snapshot) -> snapshot.latest_tool_names
+        | Ok None -> Alcotest.fail "the retained store has a Turn"
+        | Error error -> Alcotest.fail (Dated_jsonl.read_error_to_string error) in
+      Keeper_metrics_storage.append storage (row "old");
+      Keeper_metrics_storage.append storage (row "mid");
+      Alcotest.(check int) "two rows before pruning" 2 (Dated_jsonl.count_entries store);
+      Alcotest.(check (list string)) "initial latest Turn" ["mid"] (latest ());
+      Keeper_metrics_storage.append storage (row "new");
+      Alcotest.(check int) "rotation and pruning keep two rows" 2 (Dated_jsonl.count_entries store);
+      Alcotest.(check (list string)) "the latest retained Turn changed despite equal count"
+        ["new"] (latest ());
+      Dated_jsonl.close store)
+;;
+
 let test_tool_audit_cache_invalidation_for_recreated_keeper () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -852,6 +890,10 @@ let () =
             "negative snapshot advances from appended rows"
             `Quick
             test_tool_audit_cache_advances_from_negative_by_appended_rows;
+          Alcotest.test_case
+            "same-count rotation observes the latest retained Turn"
+            `Quick
+            test_tool_audit_observes_same_count_rotation_and_pruning;
           Alcotest.test_case
             "recreated Keeper does not inherit deleted audit"
             `Quick

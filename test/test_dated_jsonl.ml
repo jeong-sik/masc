@@ -923,6 +923,103 @@ let test_a_long_row_is_copied_once_not_once_per_read () =
       budget
 ;;
 
+let test_latest_view_keeps_sparse_results_and_reads_only_appends () =
+  let location = temp_store "dated_jsonl_latest_sparse" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "01" (List.init 1024 (fun _ -> {|{"heartbeat":true}|}));
+  let store = Dated_jsonl.open_store location in
+  let visited = ref 0 in
+  let view = Dated_jsonl.latest_view store ~f:(fun entry ->
+    incr visited;
+    match entry with
+    | Dated_jsonl.Parsed json ->
+      (match Yojson.Safe.Util.member "i" json with `Int i -> Some i | _ -> None)
+    | Dated_jsonl.Malformed_json _ -> None) in
+  let read () = match Dated_jsonl.read_latest_view_result view with
+    | Ok value -> value
+    | Error error -> failf "latest view: %s" (Dated_jsonl.read_error_to_string error) in
+  check (option int) "all-heartbeat history has no selected row" None (read ());
+  check int "the first read visited each row" 1024 !visited;
+  check (option int) "unchanged no-match is reusable" None (read ());
+  check int "no unchanged row was revisited" 1024 !visited;
+  let path = day_path dir "2026-01" "01" in
+  Fs_compat.append_file path "{\"heartbeat\":true}\n";
+  check (option int) "an appended heartbeat keeps no-match" None (read ());
+  check int "only the appended row was visited" 1025 !visited;
+  Fs_compat.append_file path "{\"i\":42}\n";
+  check (option int) "an appended selected row becomes latest" (Some 42) (read ());
+  check int "the selected suffix was visited once" 1026 !visited;
+  Fs_compat.append_file path "{\"heartbeat\":true}\n";
+  check (option int) "an unselected suffix keeps this file's prior result" (Some 42) (read ());
+  check int "the old selected row was not visited again" 1027 !visited;
+  let padding = String.make (3 * 8192 + 17) 'x' in
+  Fs_compat.append_file path (Printf.sprintf "{\"heartbeat\":\"%s\"}\n" padding);
+  check (option int) "a multi-chunk suffix keeps the same-file fallback" (Some 42) (read ());
+  check int "the long appended row was visited once" 1028 !visited;
+  Fs_compat.append_file path (Printf.sprintf "{\"i\":43,\"padding\":\"%s\"}\n" padding);
+  check (option int) "a multi-chunk selected suffix wins" (Some 43) (read ());
+  check int "the long selected row was visited once" 1029 !visited
+;;
+
+let test_latest_view_rechecks_replacement_and_unterminated_tail () =
+  let location = temp_store "dated_jsonl_latest_replaced" in
+  let dir = Dated_jsonl.Store.dir location in
+  let path = day_path dir "2026-01" "01" in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun channel -> output_string channel "{\"i\":");
+  let store = Dated_jsonl.open_store location in
+  let view = Dated_jsonl.latest_view store ~f:(function
+    | Dated_jsonl.Parsed json ->
+      (match Yojson.Safe.Util.member "i" json with `Int i -> Some i | _ -> None)
+    | Dated_jsonl.Malformed_json _ -> None) in
+  let read () = match Dated_jsonl.read_latest_view_result view with
+    | Ok value -> value
+    | Error error -> failf "latest view: %s" (Dated_jsonl.read_error_to_string error) in
+  check (option int) "unfinished JSON does not select a value" None (read ());
+  Fs_compat.append_file path "1}";
+  check (option int) "a completed unterminated row is read whole" (Some 1) (read ());
+  Fs_compat.append_file path "\n{\"i\":2}\n";
+  check (option int) "append after an unterminated row rescans safely" (Some 2) (read ());
+  let replacement = Filename.concat dir ".latest-replacement" in
+  Out_channel.with_open_bin replacement (fun channel -> output_string channel "{\"i\":3}\n");
+  Sys.rename replacement path;
+  check (option int) "replacement drops the old file's result" (Some 3) (read ());
+  Out_channel.with_open_bin path (fun _ -> ());
+  check (option int) "a truncated file cannot keep its former match" None (read ());
+  Fs_compat.append_file path "{\"heartbeat\":true}\n";
+  check (option int) "one nonmatching row is cached as None" None (read ());
+  Out_channel.with_open_bin replacement (fun channel -> output_string channel "{\"i\":4}\n");
+  Sys.rename replacement path;
+  check (option int) "replacement invalidates a cached None too" (Some 4) (read ())
+;;
+
+let test_latest_view_checks_cached_older_file_errors () =
+  let location = temp_store "dated_jsonl_latest_old_error" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "01" [ {|{"i":7}|} ];
+  write_dated_file dir "2026-01" "02" (List.init 121 (fun _ -> {|{"heartbeat":true}|}));
+  let store = Dated_jsonl.open_store location in
+  let view = Dated_jsonl.latest_view store ~f:(function
+    | Dated_jsonl.Parsed json ->
+      (match Yojson.Safe.Util.member "i" json with `Int i -> Some i | _ -> None)
+    | Dated_jsonl.Malformed_json _ -> None) in
+  check (option int) "the old file supplies the first match" (Some 7)
+    (match Dated_jsonl.read_latest_view_result view with
+     | Ok value -> value
+     | Error error -> failf "initial latest read: %s" (Dated_jsonl.read_error_to_string error));
+  let path = day_path dir "2026-01" "01" in
+  let target = Filename.concat dir ".old-target" in
+  Sys.rename path target;
+  Unix.symlink target path;
+  match Dated_jsonl.read_latest_view_result view with
+  | Error (Dated_jsonl.Non_regular_file _) -> ()
+  | Error ((Dated_jsonl.Invalid_offset _ | Dated_jsonl.Invalid_date_range _
+           | Dated_jsonl.Not_a_directory _ | Dated_jsonl.Invalid_layout_entry _
+           | Dated_jsonl.Io_error _) as error) ->
+    failf "wrong latest error: %s" (Dated_jsonl.read_error_to_string error)
+  | Ok _ -> fail "a cached result must not hide the old file's symlink"
+;;
+
 let test_load_tail_lines_drops_partial_chunk_prefix () =
   let dir = tmpdir "dated_jsonl_partial_tail" in
   let path = Filename.concat dir "tail.jsonl" in
@@ -1949,6 +2046,12 @@ let () =
             test_read_recent_result_keeps_unterminated_tail_row;
           test_case "strict latest scan crosses chunks" `Quick
             test_find_latest_entry_result_scans_backwards_across_chunks;
+          test_case "strict latest view keeps sparse results and reads appends" `Quick
+            test_latest_view_keeps_sparse_results_and_reads_only_appends;
+          test_case "strict latest view rechecks replacement and incomplete tails" `Quick
+            test_latest_view_rechecks_replacement_and_unterminated_tail;
+          test_case "strict latest view checks cached older-file errors" `Quick
+            test_latest_view_checks_cached_older_file_errors;
           test_case "a backwards scan visits every line once, newest first" `Quick
             test_a_backwards_scan_visits_every_line_once_newest_first;
           test_case "a long row is copied once, not once per read" `Quick

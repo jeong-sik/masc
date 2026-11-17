@@ -24,8 +24,10 @@ function propertyNumber(node: Element | undefined, name: string, absent: number,
 }
 function tableWidth(node: Element | undefined, grid = false): OfficeTableWidth {
   if (!node) return { kind: 'absent' }
-  const value = node.getAttributeNS(ns.word, 'w')
-  if (grid && value === null) return { kind: 'absent' }
+  const stored = node.getAttributeNS(ns.word, 'w')
+  if (grid && stored === null) return { kind: 'absent' }
+  // OOXML defines an omitted w:w as zero, rather than an invalid measurement.
+  const value = stored ?? '0'
   switch (grid ? 'dxa' : node.getAttributeNS(ns.word, 'type') ?? 'dxa') {
     case 'auto': return { kind: 'auto' }
     case 'nil': return { kind: 'auto' }

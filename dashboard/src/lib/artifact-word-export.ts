@@ -228,18 +228,19 @@ export async function artifactWordFile(doc:ArtifactDocument,target:'docx'|'hwpx'
     })
     const sourceCells=complete.flatMap(row=>row.map(cell=>({column:cell.start,columns:cell.count,width:tableSourceWidth(cell.cell)})))
     const geometry=resolveOfficeTableWidths(columns,sourceCells,{...(sourceColumns.length?{columns:[...sourceColumns,...Array.from({length:columns-sourceColumns.length},():OfficeTableWidth=>({kind:'absent'}))]}:{}),table:sourceWidth})
+    const fixedGrid=geometry.kind==='unique'&&geometry.widths.every(width=>width>0)
     const hasWidths=sourceWidth.kind!=='absent'||sourceColumns.some(width=>width.kind!=='absent')||sourceCells.some(cell=>cell.width.kind!=='absent')
     const relative=(width:OfficeTableWidth)=>width.kind==='percent'||width.kind==='auto'
     const relativeWidths=relative(sourceWidth)||sourceColumns.some(relative)||sourceCells.some(cell=>relative(cell.width))
     const unsupportedWidths=[sourceWidth,...sourceColumns,...sourceCells.map(cell=>cell.width)].some(width=>width.kind==='unsupported')
     if(unsupportedWidths)notices.add('표의 일부 너비 단위는 출력에서 자동 배치합니다.')
     if(relativeWidths)notices.add('표의 백분율·자동 너비는 출력 앱에서 배치합니다. HWPX는 열·셀의 절대 너비로 다시 배치합니다.')
-    const widths=geometry.kind==='unique'?officeTableTwips(geometry.widths):hasWidths?undefined:
+    const widths=fixedGrid?officeTableTwips(geometry.widths):hasWidths?undefined:
       Array.from({length:columns},(_,index)=>Math.floor((context.availableWidth??bodyWidth)*(index+1)/columns)-Math.floor((context.availableWidth??bodyWidth)*index/columns))
     if(widths?.some(width=>width<=0))throw new Error('표의 열 너비가 DOCX에서 표현할 수 있는 단위보다 작습니다.')
-    if(hasWidths&&geometry.kind!=='unique')notices.add(geometry.kind==='conflicting'
+    if(hasWidths&&!fixedGrid)notices.add(geometry.kind==='conflicting'
       ?'표의 선호 너비가 서로 달라 DOCX는 자동 배치합니다. HWPX에는 명시적 셀 너비를 보존합니다.'
-      :'표의 내부 열 너비를 모두 알 수 없어 DOCX는 명시적 셀 너비로 자동 배치합니다.')
+      :geometry.kind==='unique'?'표의 0 너비 선호값은 출력에서 자동으로 배치합니다.':'표의 내부 열 너비를 모두 알 수 없어 DOCX는 명시적 셀 너비로 자동 배치합니다.')
     const tableWidth=relative(sourceWidth)?widthOptions(sourceWidth):widths?{size:widths.reduce((sum,width)=>sum+width,0),type:WidthType.DXA}:widthOptions(sourceWidth)
     const output:Block[]=[]
     const caption=node.childNodes.find((child):child is Nodes.Element=>tree.isElementNode(child)&&child.tagName==='caption')
@@ -251,7 +252,7 @@ export async function artifactWordFile(doc:ArtifactDocument,target:'docx'|'hwpx'
       return new TableRow({tableHeader:row.length>0&&row.every(({cell})=>cell.tagName==='th'),children:row.map(({cell,start,count,rowSpan})=>{
         const sourceCell=tableSourceWidth(cell),knownColumns=geometry.widths.slice(start,start+count)
         const knownWidth=geometry.kind!=='conflicting'&&knownColumns.every(width=>width!==null)?knownColumns.reduce<number>((sum,width)=>sum+width!,0):null
-        const exactWidth=sourceCell.kind==='absolute'?sourceCell.hwpUnits:sourceCell.kind==='absent'?knownWidth:null
+        const exactWidth=sourceCell.kind==='absolute'&&sourceCell.hwpUnits>0?sourceCell.hwpUnits:sourceCell.kind==='absent'&&knownWidth!==null&&knownWidth>0?knownWidth:null
         const size=widths?.slice(start,start+count).reduce((a,b)=>a+b,0)
         const width=relative(sourceCell)||size===undefined?widthOptions(sourceCell.kind==='absent'&&exactWidth!==null?{kind:'absolute',hwpUnits:exactWidth}:sourceCell):{size,type:WidthType.DXA}
         const children=blocks(cell.childNodes,{availableWidth:size??(exactWidth===null?context.availableWidth:Math.round(exactWidth/5))})
@@ -261,8 +262,8 @@ export async function artifactWordFile(doc:ArtifactDocument,target:'docx'|'hwpx'
           ...(cell.tagName==='th'?{shading:{type:ShadingType.CLEAR,fill:'E5E7EB'}}:{})})
       })})
     })
-    const wordTable=new Table({width:tableWidth,columnWidths:widths,...(geometry.kind==='unique'&&!relativeWidths&&!unsupportedWidths?{layout:TableLayoutType.FIXED}:{}),rows:wordRows})
-    tables.set(wordTable,{kind:'table',columns,width:sourceWidth.kind==='absolute'?sourceWidth.hwpUnits:sourceWidth.kind==='absent'&&geometry.kind==='unique'?geometry.widths.reduce((sum,width)=>sum+width,0):null,rows:preparedRows})
+    const wordTable=new Table({width:tableWidth,columnWidths:widths,...(fixedGrid&&!relativeWidths&&!unsupportedWidths?{layout:TableLayoutType.FIXED}:{}),rows:wordRows})
+    tables.set(wordTable,{kind:'table',columns,width:sourceWidth.kind==='absolute'&&sourceWidth.hwpUnits>0?sourceWidth.hwpUnits:sourceWidth.kind==='absent'&&fixedGrid?geometry.widths.reduce((sum,width)=>sum+width,0):null,rows:preparedRows})
     output.push(wordTable)
     return output
   }

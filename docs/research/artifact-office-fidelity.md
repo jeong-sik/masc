@@ -19,6 +19,9 @@ Microsoft의 [표 격자 설명](https://learn.microsoft.com/en-us/dotnet/api/do
 [셀 너비 설명](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.tablecellwidth)
 은 선호 너비와 표 배치 알고리즘을 구분한다. 숫자 필드 일치만으로
 실제 글꼴·줄바꿈·페이지 일치를 주장할 수 없다.
+[너비의 생략값](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.tablewidthtype.width)
+은 0이다. 속성 생략을 잘못된 숫자로 거부하면 기존에 읽던 표도
+읽지 못한다. 0 선호값과 확정된 양의 열 너비를 구분해 검사한다.
 [한컴의 HWPX 설명](https://tech.hancom.com/hwpxformat/)에서 본문·
 서식·바이너리 파트와 읽기 순서를 확인했다. 공식 HWP5 PDF는 이번
 웹 도구로 열리지 않았다. 바이트 해석은 공개 원본과 고정 Core 출력도

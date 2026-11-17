@@ -183,3 +183,20 @@ it('keeps a Word automatic table with zero default grid tracks editable and expo
   const hwpx = await nativeHwpx((await artifactHwpxFile(artifact(imported.content))).data)
   expect(hwpx[0]!.cells.every(cell => Number(cell.width) > 0)).toBe(true)
 })
+
+it.each(['tblW', 'tcW', 'pct', 'all'])('reads OOXML omitted width defaults (%s) without rejecting the table', async mode => {
+  const source = await artifactWordFile(artifact('<table><tr><td>A</td><td>B</td></tr></table>'))
+  const zip = await JSZip.loadAsync(source.data), xml = await readOfficeXml(zip, 'word/document.xml')
+  const names = mode === 'all' ? ['tblW', 'tcW'] : [mode === 'pct' ? 'tblW' : mode]
+  for (const name of names) for (const width of xmlDescendants(xml, word, name)) {
+    width.removeAttributeNS(word, 'w')
+    width.setAttributeNS(word, 'w:type', mode === 'pct' ? 'pct' : 'dxa')
+  }
+  const grids = xmlDescendants(xml, word, 'gridCol')
+  if (mode === 'all') for (const column of grids) column.removeAttributeNS(word, 'w')
+  zip.file('word/document.xml', new XMLSerializer().serializeToString(xml))
+  const imported = await importArtifactDocx(await zip.generateAsync({ type: 'uint8array' }))
+  expect(imported.content).toContain('A'); expect(imported.content).toContain('B')
+  await expect(artifactWordFile(artifact(imported.content))).resolves.toHaveProperty('data')
+  await expect(artifactHwpxFile(artifact(imported.content))).resolves.toHaveProperty('data')
+})

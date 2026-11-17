@@ -4028,6 +4028,51 @@ let test_restart_settlement_ends_an_operation_whose_journal_is_unreadable () =
     (Chat_operation.Operation_id.equal next claimed.operation_id)
 ;;
 
+let restart_settlement_observations ~keeper_name ~since_seq =
+  Log.Ring.recent ~since_seq ~module_filter:"Keeper" ()
+  |> List.filter_map (fun (entry : Log.Ring.entry) ->
+    match entry.keeper_name, entry.details with
+    | Some name, `Assoc fields
+      when String.equal name keeper_name
+           && List.assoc_opt "event_kind" fields = Some (`String "keeper_restart_settlement") ->
+      Some (entry.level, fields)
+    | (Some _ | None), _ -> None)
+;;
+
+(* What a restart settlement did reaches the operator log as data: which
+   operations went back to the queue, which ended, and how many journals could
+   not be read. Routine entries stay below the level the log file keeps. *)
+let test_restart_settlement_reports_what_it_did () =
+  let observe ~name ~call_id ~journal_terminal =
+    with_native_restart_store name @@ fun path ->
+    let operation, _call = seed_active_native_call ~path ~name ~call_id ~requeued:false in
+    Eio.Switch.run @@ fun sw ->
+    let owner = start_restart_owner ~sw ~path ~name in
+    let since_seq = (Log.Ring.bounds ()).total - 1 in
+    ignore (Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_exited
+              ~journal_terminal |> owner_ok : Chat_operation.t list);
+    match restart_settlement_observations ~keeper_name:name ~since_seq with
+    | [level, fields] ->
+      check bool "the observation is an Info entry" true (level = Log.Info);
+      `String (Chat_operation.Operation_id.to_string operation.operation_id), fields
+    | [] -> fail "the restart settlement left no observation"
+    | _ :: _ :: _ -> fail "the restart settlement reported more than once"
+  in
+  let id, fields = observe ~name:"observe-requeued"
+      ~call_id:"019a0010-1000-7000-8000-000000000017" ~journal_terminal:(fun _ -> Ok None) in
+  check bool "a journal without a terminal is reported as requeued" true
+    (List.assoc_opt "requeued" fields = Some (`List [id])
+     && List.assoc_opt "failed" fields = Some (`List [])
+     && List.assoc_opt "unreadable_journals" fields = Some (`Int 0));
+  let id, fields = observe ~name:"observe-unreadable"
+      ~call_id:"019a0010-1000-7000-8000-000000000018"
+      ~journal_terminal:(fun _ -> Error "journal unreadable") in
+  check bool "an unreadable journal is reported as failed and counted" true
+    (List.assoc_opt "requeued" fields = Some (`List [])
+     && List.assoc_opt "failed" fields = Some (`List [id])
+     && List.assoc_opt "unreadable_journals" fields = Some (`Int 1))
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -7573,6 +7618,8 @@ let () =
             test_cancel_ends_an_operation_restart_settlement_requeued
         ; test_case "restart settlement ends an operation whose journal is unreadable" `Quick
             test_restart_settlement_ends_an_operation_whose_journal_is_unreadable
+        ; test_case "restart settlement reports what it did" `Quick
+            test_restart_settlement_reports_what_it_did
         ; test_case "operation id stop leaves an autonomous slot holder alone" `Quick
             test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone
         ; test_case

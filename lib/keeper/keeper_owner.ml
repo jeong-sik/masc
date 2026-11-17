@@ -497,11 +497,18 @@ type t =
            that it is free. Owner-fiber-local; every reader and writer below
            runs in the command loop. *)
   ; pending_restart_calls : Chat_operation_store.restart_native_call list ref
+  ; inherited_calls : Call_id_set.t ref
+        (* Calls Active in the store when this Owner started, before it claimed
+           anything, and not bound by a claim since: the Running rows in
+           [pending_restart_calls] and the rows an earlier restart requeued
+           that nothing claimed. Restart settlement empties it.
+           Owner-fiber-local. *)
   ; writer_exited_calls : Call_id_set.t ref
-        (* Calls restart settlement requeued while every earlier writer had
-           exited, not bound by a claim since. Process memory on purpose:
-           "the writer exited" is a fact about this process image, and the
-           next image settles again from the store. Owner-fiber-local. *)
+        (* Inherited calls the restart settlement did not close, admitted
+           while every earlier writer had exited and not bound by a claim
+           since. Process memory on purpose: "the writer exited" is a fact
+           about this process image, and the next image settles again from the
+           store. Owner-fiber-local. *)
   ; failed_at_start : Chat_operation.t list
         (* All durable [Failed] operations, including batch
            members and prior starts, so the transcript and event journal can
@@ -1434,16 +1441,18 @@ let start
           let open Result.Syntax in
           let* recovery = Chat_operation_store.list_failed operation_store in
           let* pending = Chat_operation_store.running_native_calls operation_store in
-          Ok (recovery, pending))
+          let* inherited = Chat_operation_store.active_native_calls operation_store in
+          Ok (recovery, pending, inherited))
         |> Result.map_error owner_error_of_operation_error
-        |> Result.map (fun (recovery, pending) -> projection, recovery, pending))
+        |> Result.map (fun (recovery, pending, inherited) ->
+          projection, recovery, pending, inherited))
   in
   (match startup_result with
    | Error _ as error ->
      (* See startup failure path: preserve the original error; close is best-effort. *)
      ignore (Chat_operation_store.close operation_store : (unit, _) result);
      error
-   | Ok (initial_operation_projection, failed_at_start, pending_restart_calls) ->
+   | Ok (initial_operation_projection, failed_at_start, pending_restart_calls, inherited_calls) ->
   let closed_p, resolve_closed = Eio.Promise.create () in
   let t =
     { keeper_name
@@ -1469,6 +1478,11 @@ let start
     ; on_turn_slot_released
     ; operation_runner
     ; pending_restart_calls = ref pending_restart_calls
+    ; inherited_calls =
+        ref (List.fold_left
+               (fun calls (call : Keeper_native_call.t) ->
+                  Call_id_set.add call.Keeper_native_call.call_id calls)
+               Call_id_set.empty inherited_calls)
     ; writer_exited_calls = ref Call_id_set.empty
     ; failed_at_start
     }
@@ -2036,10 +2050,27 @@ let start
             Eio.Promise.resolve resolve (Error (Operation_rejected Chat_operation_store.Native_call_unsettled));
             loop state)
           else
+            (* An inherited call this settlement does not close was last
+               written by a process that has exited, if the registry says the
+               earlier writers did. That covers the calls this settlement
+               requeues and the ones an earlier restart requeued that nothing
+               claimed, which have no Running row for it to read. [closed] are
+               the calls it closed with their operations. *)
+            let admit_exited_writers ~closed =
+              (match prior_writers with
+               | Prior_writers_exited ->
+                 t.writer_exited_calls :=
+                   Call_id_set.union !(t.writer_exited_calls)
+                     (Call_id_set.diff !(t.inherited_calls) closed)
+               | Prior_writers_unproven -> ());
+              t.inherited_calls := Call_id_set.empty
+            in
             let response =
               try
                 match !(t.pending_restart_calls) with
-                | [] -> Ok []
+                | [] ->
+                  admit_exited_writers ~closed:Call_id_set.empty;
+                  Ok []
                 | pending ->
                   let observations = List.map (fun observed ->
                     let terminal = journal_terminal observed in
@@ -2073,17 +2104,15 @@ let start
                            Ok (List.rev reversed)) with
                          | Error error -> Error (record_operation_error t error)
                          | Ok failed ->
-                           (match prior_writers with
-                            | Prior_writers_exited ->
-                              t.writer_exited_calls := List.fold_left
-                                  (fun calls (observed : Chat_operation_store.restart_native_call) ->
-                                     if List.exists (fun (operation : Chat_operation.t) ->
-                                         Operation_id.equal operation.operation_id
-                                           observed.operation.operation_id) interrupted
-                                     then calls
-                                     else Call_id_set.add observed.call.Keeper_native_call.call_id calls)
-                                  !(t.writer_exited_calls) pending
-                            | Prior_writers_unproven -> ());
+                           admit_exited_writers
+                             ~closed:(List.fold_left
+                                (fun closed (observed : Chat_operation_store.restart_native_call) ->
+                                   if List.exists (fun (operation : Chat_operation.t) ->
+                                       Operation_id.equal operation.operation_id
+                                         observed.operation.operation_id) interrupted
+                                   then Call_id_set.add observed.call.Keeper_native_call.call_id closed
+                                   else closed)
+                                Call_id_set.empty pending);
                            t.pending_restart_calls := [];
                            publish_operation_projection t projection;
                            Keeper_waiting_inventory_broadcast.changed ~base_path:t.base_path
@@ -2413,8 +2442,9 @@ let start
               (* From this bind on, this process writes the call's execution. *)
               (match response with
                | Ok () ->
-                 t.writer_exited_calls :=
-                   Call_id_set.remove call.Keeper_native_call.call_id !(t.writer_exited_calls)
+                 let call_id = call.Keeper_native_call.call_id in
+                 t.writer_exited_calls := Call_id_set.remove call_id !(t.writer_exited_calls);
+                 t.inherited_calls := Call_id_set.remove call_id !(t.inherited_calls)
                | Error _ -> ());
               response
             | Keeper_native_call.Checkpoint _ | Keeper_native_call.Terminal _ -> persist () in

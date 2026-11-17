@@ -3579,6 +3579,18 @@ let running_native_calls store =
     | None -> Ok calls) (Ok []) running in
   Ok (List.rev calls)
 
+(* An Active call lives only on an unsettled execution: a terminal transition
+   refuses one with [Native_call_unsettled]. The operation holding it is
+   Running, or Queued once a restart settlement has requeued it. *)
+let active_native_calls store =
+  let* () = ensure_open store in
+  let* executions = owning_semantic_rows store.db in
+  Ok (List.filter_map (fun (execution : Semantic.t) ->
+    match execution.native_call with
+    | Keeper_native_call.Active call -> Some call
+    | Keeper_native_call.No_native_call | Keeper_native_call.Terminal_unacknowledged _ -> None)
+    executions)
+
 (* Journal I/O happens before this transaction, in the Owner's Eio mailbox.
    Missing observations deliberately leave Active calls Running until the
    application runtime is ready. Supplied observations must still name the

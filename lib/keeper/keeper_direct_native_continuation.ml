@@ -346,8 +346,8 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
   let* resume = match resumed with
     | None -> Ok None
     | Some resumed ->
-      (* Restart settlement knows which calls only exited processes wrote; a
-         deferred operation resumes its call in this process. *)
+      (* Restart settlement knows which calls only exited processes wrote. A
+         call a claim in this process has bound answers [Writer_unproven]. *)
       let* writer = Owner.native_call_writer ~base_path:binding.base_path
           ~keeper_name:binding.keeper_name ~call_id:resumed.call.call_id |> owner in
       Ok (Some (match writer with

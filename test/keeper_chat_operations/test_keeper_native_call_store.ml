@@ -153,6 +153,24 @@ let test_journal_gate_read_failure_keeps_resume () = with_store @@ fun path stor
        (Operation.Operation_id.equal resumed.operation_id operation.operation_id)
    | None -> fail "a read failure interrupted the call")
 
+let test_active_calls_cover_running_and_requeued_operations () = with_store @@ fun _path store operation ->
+  let listed () = List.map (fun (call : Native.t) -> call.call_id) (Store.active_native_calls store |> ok) in
+  check (list string) "an operation without a call lists none" [] (listed ());
+  bind store operation (make_call operation);
+  check (list string) "the Active call of a Running operation is listed" [call_id] (listed ());
+  check int "a restart without a journal terminal interrupts nothing" 0
+    (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> ok));
+  check bool "the restart put the operation back in the queue" true
+    (match Store.get store operation_id |> ok with
+     | Some {Operation.state=Operation.Queued; _} -> true
+     | Some _ | None -> false);
+  check (list string) "the Active call of a requeued operation is still listed" [call_id] (listed ());
+  let resumed = match Store.claim_next store ~now:5. |> ok with
+    | Some operation -> operation
+    | None -> fail "the requeued operation was not claimable" in
+  commit store resumed (Native.Terminal {call_id; disposition=disposition Agent.Retire});
+  check (list string) "a closed call is not listed" [] (listed ())
+
 let test_active_restart_preserves_seed_and_exact_identity () = with_store @@ fun path store operation ->
   let call = make_call operation in
   bind store operation call;
@@ -995,6 +1013,8 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "completed history keeps every call and original trace after reopen" `Quick test_completed_history_keeps_every_call_after_reopen;
   test_case "history shares native Bind commit and rejects retired reactivation" `Quick test_history_uses_the_native_bind_transaction;
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
+  test_case "active calls cover Running and requeued operations" `Quick
+    test_active_calls_cover_running_and_requeued_operations;
   test_case "terminal restart keeps its receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
   test_case "a journal terminal is interrupted at boot instead of requeued" `Quick test_journal_terminal_gates_active_restart;
   test_case "startup preserves Active Running until the journal is observed" `Quick test_startup_defers_active_until_journal_observed;

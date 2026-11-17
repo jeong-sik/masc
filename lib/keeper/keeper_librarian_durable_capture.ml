@@ -9,6 +9,7 @@ module I = Keeper_librarian_input_capture
 module S = Keeper_librarian_input_sources
 module E = Keeper_external_read_cursor
 module W = Keeper_memory_os_types
+module Window = Runtime_model_input_tail_window
 let ( let* ) = Result.bind
 let ( let+ ) value fn = Result.map fn value
 
@@ -269,7 +270,38 @@ type message_manifest = {
   checkpoint:Agent_core.Types.message list option;
   selected_turns:(int * Ids.Turn_ref.t * Agent_core.Types.message list) list;
 }
-type projection_step = Atom_cut of checkpoint * R.atom_cut | Official_cut of official * R.official_line
+(* A source observation can span many turns and attribution scopes. Keep its
+   atom lookup and message groups once, rather than annotating the complete
+   captured history for each cut and each slice. The index owns no authority
+   beyond this immutable checkpoint and does not survive the projection. *)
+type indexed_checkpoint =
+  { checkpoint : checkpoint
+  ; digest_at : int -> string option
+  ; reversed_atoms : Agent_core.Types.message list array
+  }
+
+let index_checkpoint (checkpoint : checkpoint) =
+  let labelled, count = Window.annotate checkpoint.messages in
+  let reversed_atoms = Array.make count [] in
+  List.iter (fun (message, label) -> match label with
+    | Window.Pinned -> ()
+    | Window.Atom atom ->
+      reversed_atoms.(atom) <- message :: reversed_atoms.(atom)) labelled;
+  { checkpoint
+  ; digest_at = Window.atom_opening_digest checkpoint.messages
+  ; reversed_atoms
+  }
+
+let slice_indexed indexed ~start_atom ~end_atom =
+  let first = max 0 start_atom in
+  let after = min (Array.length indexed.reversed_atoms) end_atom in
+  let rec collect atom messages =
+    if atom < first then messages
+    else collect (atom - 1) (List.rev_append indexed.reversed_atoms.(atom) messages)
+  in
+  if first >= after then [] else collect (after - 1) []
+
+type projection_step = Atom_cut of indexed_checkpoint * R.atom_cut | Official_cut of official * R.official_line
 
 module Trace_map = Map.Make (String)
 module Turn_map = Map.Make (struct
@@ -328,7 +360,8 @@ let project_source_with ~include_manifest ~boundaries source =
           | Some (cut_line,cut_recorded_at,cut_turn_ref) ->
             Ok [{R.cut_line;cut_end_atom=atom.range.end_atom;cut_recorded_at;cut_turn_ref}]
           | None -> refuse "Durable atom projection has no endpoint boundary") in
-      Ok (List.map (fun cut -> Atom_cut (atom,cut)) cuts) in
+      let indexed = index_checkpoint atom in
+      Ok (List.map (fun cut -> Atom_cut (indexed,cut)) cuts) in
   let official_steps=match official with None -> [] | Some official ->
     List.map (fun line -> Official_cut (official,line)) official.selected in
   let official_fragments = match official with
@@ -342,17 +375,18 @@ let project_source_with ~include_manifest ~boundaries source =
   let* _,_,_,messages,tools,contexts,sources,turns=List.fold_left (fun result step ->
     let* prev_end,count,tool_count,messages,tools,contexts,sources,turns=result in
     match step with
-    | Atom_cut (atom,cut) ->
+    | Atom_cut (indexed,cut) ->
+      let atom = indexed.checkpoint in
       let trace_id=Keeper_id.Trace_id.to_string atom.trace_id in
       let scopes=Historical.atom_spans ~trace_id
-        ~digest_at:(Runtime_model_input_tail_window.atom_opening_digest atom.messages)
+        ~digest_at:indexed.digest_at
         ~start_atom:prev_end ~end_atom:cut.cut_end_atom ~boundary:(Line_map.find_opt cut.cut_line records) in
       let* count,tool_count,messages,tools,contexts,sources=List.fold_left
         (fun result scope ->
           let* count,tool_count,messages,tools,contexts,sources=result in
           let* slice,selected_sources=match scope.Historical.source with
             | Historical.Atom_span {start_atom;end_atom;_} ->
-              let slice=R.slice atom.messages {atom.range with start_atom;end_atom} in
+              let slice=slice_indexed indexed ~start_atom ~end_atom in
               let+ selected_sources=if not include_manifest then Ok [] else
                 Keeper_librarian_unread.sources_for_atom_range ~trace_id
                   ~history_start_boundary_line:atom.range.history_start_boundary_line

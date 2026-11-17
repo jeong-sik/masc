@@ -530,8 +530,7 @@ type atom_cut =
   }
 
 let cut_lines ~trace_id ~lines ~messages (range : range) =
-  let _labelled, atom_count = Window.annotate messages in
-  let digest_at = Window.atom_opening_digest messages in
+  let atom_count, digest_at = Window.atom_opening_index messages in
   stated_positions ~trace_id (current_history_lines (lines_of_trace ~trace_id lines))
   |> List.filter_map (fun stated ->
     match cut_point ~digest_at ~atom_count stated with

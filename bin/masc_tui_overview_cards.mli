@@ -37,7 +37,7 @@ type chromes =
 val empty_chromes : chromes
 
 val draw :
-  ?chromes:chromes ->
+  chromes:chromes ->
   titles:titles ->
   empty_decisions:string ->
   inner:int ->

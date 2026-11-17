@@ -186,9 +186,10 @@ let overview_capacity_badge (state : state) =
   let text ko en = ui_text state ~ko ~en in
   let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
-  | Masc_tui_fleet_stream.Awaiting_first_reading
+  | Masc_tui_fleet_stream.Awaiting_first_reading ->
+      Some (text "미관측" "unread", Theme.recede ())
   | Unreachable _ | Unavailable _ | Cannot_read _ ->
-      Some (text "미관측" "unread", Theme.warn ())
+      Some (text "관측 불가" "unavailable", Theme.warn ())
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
       let retained =
@@ -367,7 +368,10 @@ let render_overview (state : state) home =
             ; continuation=ui_text state ~ko:"대화" ~en:"Conversations"
             ; capacity=ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
             ; actions=ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed" } in
-          let hk tag = Some (tag, Ansi.bold ^ Theme.accent ()) in
+          let hk tag =
+            if state.keeper_navigation_open then None
+            else Some (tag, Ansi.bold ^ Theme.accent ())
+          in
           let decision_count = List.length all_decisions in
           let chromes : Masc_tui_overview_cards.chromes =
             { decisions =

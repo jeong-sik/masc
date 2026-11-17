@@ -404,9 +404,11 @@ let table_lines ~cells t =
   match readings with
   | [] -> []
   | first :: _ ->
+      let open_tag = " open" in
+      let open_cells = String.length open_tag in
       let with_rate = Table.used_width (cells_for ~with_rate:true first) <= inner in
       let used = Table.used_width (cells_for ~with_rate first) in
-      let bar_cells = min widest_load_bar (inner - used - Table.cell_gap) in
+      let bar_cells = min widest_load_bar (inner - used - Table.cell_gap - open_cells) in
       let maximum_calls =
         List.fold_left
           (fun largest reading ->
@@ -416,6 +418,9 @@ let table_lines ~cells t =
           0 readings
       in
       let show_bar = bar_cells >= narrowest_load_bar && maximum_calls > 0 in
+      let show_open =
+        used + (if show_bar then Table.cell_gap + bar_cells else 0) + open_cells <= inner
+      in
       let gap = String.make Table.cell_gap ' ' in
       let header =
         margin ^ Theme.recede () ^ Table.header_row (cells_for ~with_rate first)
@@ -425,7 +430,7 @@ let table_lines ~cells t =
       let row index reading =
         margin ^ Table.row (cells_for ~with_rate reading)
         ^ (if show_bar then gap ^ load_bar ~cells:bar_cells ~maximum_calls reading else "")
-        ^ if index = 0 then Theme.recede () ^ " open" ^ Ansi.reset else ""
+        ^ if index = 0 && show_open then Theme.recede () ^ open_tag ^ Ansi.reset else ""
       in
       header :: List.mapi row readings
 

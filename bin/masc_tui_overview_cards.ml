@@ -62,7 +62,7 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
-let draw ?(chromes = empty_chromes) ~(titles : titles) ~empty_decisions ~inner
+let draw ~(chromes : chromes) ~(titles : titles) ~empty_decisions ~inner
     ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap

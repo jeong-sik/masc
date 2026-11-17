@@ -110,6 +110,26 @@ let test_declared_endpoint_roots_are_judged_by_their_spelling () =
        "/app/x.py")
 ;;
 
+(* #35934: a reader holds the opened file to the root that admitted the
+   path, so when declared roots nest, the narrowest one is that root,
+   whatever order they are declared in. *)
+let test_the_narrowest_declared_root_admits () =
+  let root_of extra_roots path =
+    Option.map
+      (fun (m : Exec_policy_paths.extra_root_match) -> m.root)
+      (Exec_policy_paths.extra_root_match ~extra_roots path)
+  in
+  let some = Alcotest.(check (option string)) in
+  some "the nested root, declared after the wide one" (Some "/srv/app")
+    (root_of [ "/"; "/srv"; "/srv/app" ] "/srv/app/x.py");
+  some "the nested root, declared first" (Some "/srv/app")
+    (root_of [ "/srv/app"; "/srv"; "/" ] "/srv/app/x.py");
+  some "a path only the wide root covers" (Some "/srv")
+    (root_of [ "/srv/app"; "/srv" ] "/srv/other/y");
+  some "a sibling sharing the prefix is not under the nested root" (Some "/srv")
+    (root_of [ "/srv"; "/srv/app" ] "/srv/application/z")
+;;
+
 let () =
   Alcotest.run "exec policy containment"
     [ ( "request paths"
@@ -126,6 +146,8 @@ let () =
     ; ( "declared endpoint roots"
       , [ Alcotest.test_case "judged by their spelling" `Quick
             test_declared_endpoint_roots_are_judged_by_their_spelling
+        ; Alcotest.test_case "the narrowest root admits" `Quick
+            test_the_narrowest_declared_root_admits
         ] )
     ]
 ;;

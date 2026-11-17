@@ -13,8 +13,8 @@ type extra_root_match = { root : string; path : string }
 
 val extra_root_match :
   ?workdir:string -> extra_roots:string list -> string -> extra_root_match option
-(** {!extra_root_path} that also names the first root in [extra_roots] the
-    path lies within. A reader that opens the path on the endpoint checks
+(** {!extra_root_path} that also names the narrowest root in [extra_roots]
+    the path lies within. A reader that opens the path on the endpoint checks
     what it opened against that root. *)
 
 val extra_root_path :

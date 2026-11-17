@@ -36,12 +36,19 @@ let extra_root_match ?workdir ~extra_roots path =
   | [] -> None
   | _ :: _ ->
       let lexical = normalize_path ?base_dir:workdir path in
-      List.find_map
-        (fun root ->
+      (* The narrowest root that admits the path: a reader holds the opened
+         file to this root, and a wider declared root would admit more than
+         the declaration nearest the path. Roots that admit a path all lie on
+         its ancestor chain, so the longest is the narrowest. *)
+      List.fold_left
+        (fun best root ->
           let root = normalize_path root in
-          if is_within_dir ~dir:root lexical then Some { root; path = lexical }
-          else None)
-        extra_roots
+          if not (is_within_dir ~dir:root lexical) then best
+          else
+            match best with
+            | Some { root = held; _ } when String.length held >= String.length root -> best
+            | Some _ | None -> Some { root; path = lexical })
+        None extra_roots
 
 let extra_root_path ?workdir ~extra_roots path =
   Option.map (fun m -> m.path) (extra_root_match ?workdir ~extra_roots path)

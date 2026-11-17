@@ -45,10 +45,9 @@ let holds_label ~docker ~image digest =
       In_channel.input_all
   with
   | raw, Unix.WEXITED 0 ->
-    (match Yojson.Safe.from_string raw with
-     | `Assoc labels -> List.assoc_opt Lane_addon_carried.image_label labels = Some (`String digest)
-     | _ -> false
-     | exception Yojson.Json_error _ -> false)
+    (match Lane_addon_engine.image_label_of_inspect ~name:Lane_addon_carried.image_label raw with
+     | Ok (Some value) -> String.equal value digest
+     | Ok None | Error _ -> false)
   | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> false
   | exception (Unix.Unix_error _ | Sys_error _) -> false
 

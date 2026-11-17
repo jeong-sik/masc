@@ -48,7 +48,11 @@ let send_to_neovim ~server target =
   match
     (* No shell: the expression carries quotes that a shell would read, and
        there is nothing here that needs a shell's word splitting. *)
-    Unix.create_process "nvim" argv Unix.stdin Unix.stdout Unix.stderr
+    (* The expression's result is not read, and the TUI's frames may still
+       be queued for the terminal; printed there, it would land among them. *)
+    let discard = Unix.openfile "/dev/null" [ Unix.O_WRONLY; Unix.O_CLOEXEC ] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close discard) (fun () ->
+      Unix.create_process "nvim" argv Unix.stdin discard Unix.stderr)
   with
   | exception Unix.Unix_error (error, _, _) ->
       Error (Printf.sprintf "could not run nvim: %s" (Unix.error_message error))

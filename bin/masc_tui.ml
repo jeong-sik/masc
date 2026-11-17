@@ -8849,8 +8849,8 @@ let search_jump ?(backwards = false) state ~query ~after =
    make it a round trip through masc's 8-bit parse of a reply a terminal
    may have given at 16. *)
 let sync_theme_page state =
-  Frame_presenter.sync_scheme ~write:(output_string stdout)
-    ~flush:(fun () -> flush stdout)
+  Frame_presenter.sync_scheme ~write:Masc_tui_terminal_out.write
+    ~flush:Masc_tui_terminal_out.flush
     (match state.theme_choice with
      | None -> None
      | Some _ ->
@@ -13778,8 +13778,8 @@ let write_to_terminal payload =
     | Some _ -> Masc_tui_graphics.tmux_wrapped payload
     | None -> payload
   in
-  output_string stdout payload;
-  flush stdout
+  Masc_tui_terminal_out.write payload;
+  Masc_tui_terminal_out.flush ()
 
 (* Read once: these variables describe where this process started and do not
    change under it. An operator who attaches to its tmux pane from elsewhere
@@ -13798,8 +13798,8 @@ let copy_text_out text =
 (* Cursor movement, SGR and text belong to the tmux pane itself, so they
    must not be wrapped in the passthrough used by the helper above. *)
 let write_terminal_text payload =
-  output_string stdout payload;
-  flush stdout
+  Masc_tui_terminal_out.write payload;
+  Masc_tui_terminal_out.flush ()
 
 (* RFC-msx-surface-focus-mode stage 1: the spectator's pixels ride the
    InteractiveSurface contract. The poll owns [msx_surface_frame]; the
@@ -14586,11 +14586,11 @@ let show_image_link_card state ~origin ~page_url ~copy ~unsaved ~last_open =
       browser_pointer_press := None;
       state.image_cell_view <- Some (Image_cells view);
       state.image_open <- true;
-      output_string stdout (Ansi.clear ^
+      Masc_tui_terminal_out.write (Ansi.clear ^
         (if view.ic_unconfirmed then "! y:copy"
          else if Option.is_some view.ic_unsaved_remote then "s:save y:copy o:open"
          else "y:copy o:open x:other"));
-      flush stdout
+      Masc_tui_terminal_out.flush ()
   | Some (rows, columns) ->
       draw_cell_image state ~terminal_size:(rows, columns) view
 
@@ -14606,11 +14606,11 @@ let update_image_link_card state ~path status =
        | Some terminal_size -> draw_cell_image state ~terminal_size view
        | None ->
            state.image_cell_view <- Some (Image_cells view);
-           output_string stdout (Ansi.clear ^
+           Masc_tui_terminal_out.write (Ansi.clear ^
              (if Option.is_some view.ic_unsaved_remote then "s:save y:copy o:open\r\n"
               else "y:copy o:open x:other\r\n") ^ status
              ^ (if view.ic_save_cancelled then "\r\nSave cancelled; s retries" else ""));
-           flush stdout)
+           Masc_tui_terminal_out.flush ())
   | Some (Image_cells _ | Image_cells_withdrawn _) | None -> ()
 
 let mark_image_save_cancelled state =
@@ -31286,8 +31286,8 @@ let terminal_title_snapshot state =
 let toggle_mouse_tracking () =
   let on = not (Atomic.get mouse_tracking_on) in
   Atomic.set mouse_tracking_on on;
-  output_string stdout (if on then mouse_tracking_enable else mouse_tracking_disable);
-  flush stdout
+  Masc_tui_terminal_out.write (if on then mouse_tracking_enable else mouse_tracking_disable);
+  Masc_tui_terminal_out.flush ()
 
 (* One enable/disable pair for bracketed paste. Without it the terminal
    delivers a paste as the keys it looks like, so every newline in it is
@@ -31302,8 +31302,8 @@ let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
 let enable_bracketed_paste () =
-  output_string stdout bracketed_paste_enable;
-  flush stdout
+  Masc_tui_terminal_out.write bracketed_paste_enable;
+  Masc_tui_terminal_out.flush ()
 
 (* Raw mode, and the keys the record cannot turn off.
 
@@ -31578,11 +31578,15 @@ let main
     (* No tracking-off here. [cleanup] writes the off byte once, at real
        process exit, after the farewell. [suspend] writes it before the stop
        and takes the mode again when the process continues. *)
-    Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
-      ~flush:(fun () -> flush stdout);
+    Frame_presenter.cleanup frame_presenter ~write:Masc_tui_terminal_out.write
+      ~flush:Masc_tui_terminal_out.flush;
     if Terminal_profile.dynamic_title terminal_profile then
-      Terminal_title.clear terminal_title ~write:(output_string stdout)
-        ~flush:(fun () -> flush stdout);
+      Terminal_title.clear terminal_title ~write:Masc_tui_terminal_out.write
+        ~flush:Masc_tui_terminal_out.flush;
+    (* Raw mode and the alternate screen are given back only after every
+       queued byte reached the terminal: a frame still queued would otherwise
+       land on the shell's screen, or in a child process's input. *)
+    Masc_tui_terminal_out.drain ();
     (* Keep the known-loss result so exit cleanup does not write a farewell
        or tracking controls to a terminal that already rejected restoration. *)
     let outcome =
@@ -31605,26 +31609,31 @@ let main
   let cleanup_started = Atomic.make false in
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
+      (* The terminal is being given back for good. A Ctrl-Z now would run
+         [suspend], whose resume takes raw mode and the alternate screen
+         again after this restore, and the shell would inherit them. *)
+      Sys.set_signal Sys.sigtstp Sys.Signal_ignore;
       Console_sink.set_after_write_observer None;
       (* Bound by name: the AST guard pins this call by listing every
          labelled argument as an identifier, so the exit writer is a named
          function rather than an inline closure. *)
       let finish () =
         List.iter
-          (fun warning -> print_endline ("[masc-tui] " ^ Masc_tui_ansi.Terminal_text.single_line warning))
+          (fun warning -> Masc_tui_terminal_out.write
+              ("[masc-tui] " ^ Masc_tui_ansi.Terminal_text.single_line warning ^ "\n"))
           (List.rev !keeper_preference_exit_warnings);
-        print_endline "Goodbye!";
+        Masc_tui_terminal_out.write "Goodbye!\n";
         (* Tracking off after Goodbye: a terminal left in report mode keeps
            swallowing the wheel after this process is gone, and the farewell
            line is the last thing a reader matches on -- a byte after it cannot
            disturb that read. *)
-        output_string stdout mouse_tracking_disable;
-        output_string stdout bracketed_paste_disable;
+        Masc_tui_terminal_out.write mouse_tracking_disable;
+        Masc_tui_terminal_out.write bracketed_paste_disable;
         (* The mode belongs to this program's screen. A shell that inherited it
            would see its own keys reported in a form it does not read. *)
         if Terminal_profile.kitty_keyboard terminal_profile then
-          output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-        flush stdout
+          Masc_tui_terminal_out.write Masc_tui_csi.disable_kitty_keyboard;
+        Masc_tui_terminal_out.drain ()
       in
       Terminal_restore.finish_after_restore ~restore:restore_terminal_outcome
         ~finish
@@ -31680,16 +31689,16 @@ let main
      otherwise leave the wheel dead -- and every row is painted again.
      [enable_bracketed_paste] flushes. *)
   let hand_off_terminal () =
-    output_string stdout mouse_tracking_disable;
-    flush stdout;
+    Masc_tui_terminal_out.write mouse_tracking_disable;
+    Masc_tui_terminal_out.flush ();
     restore_terminal ()
   in
   let take_back_terminal () =
     apply_raw_mode new_term;
-    Frame_presenter.setup frame_presenter ~write:(output_string stdout)
-      ~flush:(fun () -> flush stdout);
+    Frame_presenter.setup frame_presenter ~write:Masc_tui_terminal_out.write
+      ~flush:Masc_tui_terminal_out.flush;
     if Atomic.get mouse_tracking_on then
-      output_string stdout mouse_tracking_enable;
+      Masc_tui_terminal_out.write mouse_tracking_enable;
     enable_bracketed_paste ();
     request_full_repaint 0
   in
@@ -31730,8 +31739,8 @@ let main
      frame. *)
   (* Before the first frame and after session entry, so the at_exit cleanup
      that gives this back is already installed. *)
-  Frame_presenter.setup frame_presenter ~write:(output_string stdout)
-    ~flush:(fun () -> flush stdout);
+  Frame_presenter.setup frame_presenter ~write:Masc_tui_terminal_out.write
+    ~flush:Masc_tui_terminal_out.flush;
   (* The pick, written to the runtime.toml boot reads it back from. Only a
      commit comes here: a preview is a look at a scheme, not a choice of one,
      and storing every row the cursor passes would make Esc a lie.
@@ -31745,14 +31754,14 @@ let main
      Sending it here is what makes a saved choice survive a restart with its
      background rather than only its ink. *)
   sync_theme_page state;
-  output_string stdout mouse_tracking_enable;
+  Masc_tui_terminal_out.write mouse_tracking_enable;
   enable_bracketed_paste ();
   (* Only terminals with an extended profile receive this opt-in. Apple
      Terminal does not implement the protocol; keeping an unsupported control
      sequence off its parser also keeps its crash-sensitive render path small. *)
   if Terminal_profile.kitty_keyboard terminal_profile then
-    output_string stdout Masc_tui_csi.enable_kitty_keyboard;
-  flush stdout;
+    Masc_tui_terminal_out.write Masc_tui_csi.enable_kitty_keyboard;
+  Masc_tui_terminal_out.flush ();
 
   (* Initial load *)
   (* Local workspace state is loaded only after /health proves that this TUI
@@ -32253,15 +32262,15 @@ let main
   install_terminal_probe_publisher input_reader ~publish:apply_terminal_observation;
 
   let restore_music_terminal () =
-    output_string stdout bracketed_paste_disable;
+    Masc_tui_terminal_out.write bracketed_paste_disable;
     if Terminal_profile.kitty_keyboard terminal_profile then
-      output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+      Masc_tui_terminal_out.write Masc_tui_csi.disable_kitty_keyboard;
     hand_off_terminal () in
   let reenter_music_terminal () =
     take_back_terminal ();
     if Terminal_profile.kitty_keyboard terminal_profile then
-      output_string stdout Masc_tui_csi.enable_kitty_keyboard;
-    flush stdout in
+      Masc_tui_terminal_out.write Masc_tui_csi.enable_kitty_keyboard;
+    Masc_tui_terminal_out.flush () in
   music_terminal_handoff := Some (fun () ->
     let root = Filename.concat
       (Common.masc_dir_from_base_path ~base_path:state.local_base_path) Common.tui_music_dirname in
@@ -44825,12 +44834,23 @@ Use relative paths for resources already held in the package. -->
       if state.image_open && not state.msx_open then
         Masc_tui_frame_timing.note_external ~surface:"image" ~write:write_terminal_text
           ~frame_start:Frame_presenter.external_frame_start;
+      (* A failed write left the terminal short of what the presenter
+         recorded; diffing against that record would leave rows wrong. *)
+      if Masc_tui_terminal_out.take_lost () then begin
+        Frame_presenter.invalidate frame_presenter;
+        Render_schedule.request render_schedule Render_schedule.Force
+      end;
       (match
          Render_schedule.take
            ~input_pending:ready_input
            render_schedule
            ~now_ns:(Mtime_clock.elapsed_ns ())
        with
+       (* The terminal has not taken the last frame yet. A new one waits a
+          frame interval instead of queueing behind it, so a terminal that
+          stops reading holds one frame, not one per pass. *)
+       | Render_schedule.Render when Masc_tui_terminal_out.behind () ->
+           Render_schedule.request render_schedule Render_schedule.Background
        (* The terminal belongs to the picture until it is dismissed. A frame
           drawn now would clear the rows it occupies and leave the rest. *)
        | Render_schedule.Render when state.image_open || state.msx_open ->
@@ -44938,12 +44958,12 @@ Use relative paths for resources already held in the package. -->
                      && Option.is_some (task_detail_of_reader (Some value))) then
                apply_clamped_scroll state value) clamped;
            if Terminal_profile.dynamic_title terminal_profile then
-             Terminal_title.present terminal_title ~write:(output_string stdout)
-               ~flush:(fun () -> flush stdout)
+             Terminal_title.present terminal_title ~write:Masc_tui_terminal_out.write
+               ~flush:Masc_tui_terminal_out.flush
                (terminal_title_snapshot state);
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
-             ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
+             ~write:Masc_tui_terminal_out.write ~flush:Masc_tui_terminal_out.flush
              (present_frame frame approval presses panes acting_pane chat_row_actions change_authority
                 ~drawn_detail_reading:!drawn_detail_reading ~drawn_tools_task
                 ~input_pending:asynchronous_input_pending clamped);

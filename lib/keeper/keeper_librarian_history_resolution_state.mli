@@ -65,7 +65,9 @@ val confirm_binding : request:Keeper_librarian_durable_request.t ->
 val confirm_binding_index : index:Keeper_librarian_durable_request.index ->
   original:Lane_addon_tool_request_owner.Record.t -> t -> (unit, string) result
 (** {!confirm_binding} from the record and its index: the fence's source
-    digest is the index's, its owner the index's. Reads no body. *)
+    digest is the index's, its owner the index's. The whole immutable index,
+    including its predecessor, must equal the one in the fence's hashed
+    original record. Current progress may have changed. Reads no body. *)
 val check_unfenced : store:Lane_addon_store.t ->
   request:Keeper_librarian_durable_request.t ->
   original:Lane_addon_tool_request_owner.retained -> (unit, string) result

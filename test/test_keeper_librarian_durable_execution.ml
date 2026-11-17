@@ -3094,6 +3094,165 @@ let prepare_counterpart_only_cut (fixture:fixture) =
       write (Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Main)
         ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
       write (Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Internal) "")
+let test_capacity_refusal_checks_no_host_proof ~frame_refusal () =
+  with_fixture ~history_kind:(if frame_refusal then Atoms else Official) (fun ~sw:_ fixture ->
+    let module Refusal=Keeper_librarian_durable_refusal in
+    if frame_refusal then (
+      let oversized=selected_messages @ [message (String.init oversized_turn_bytes
+        (fun index -> Char.chr (97 + index mod 26)));
+        Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "Oversized answer"]] in
+      save_checkpoint fixture.config ~trace_id oversized 3;
+      io (fun () -> append_boundary fixture.config ~turn:3 ~time:(Time_compat.now ())
+        ~history_at_start:(Boundary.history_at_start_of_messages selected_messages) oversized))
+    else prepare_counterpart_only_cut fixture;
+    fixture.set_response (fun _ -> size_refusal);
+    let refused=if frame_refusal then run_worker fixture else (
+      let deliveries= !(fixture.deliveries) in
+      assert_pending (run_worker fixture);
+      await_delivery fixture ~after:deliveries;
+      run_worker fixture) in
+    (match frame_refusal,refused with
+     | true,Ok (Consumer.Memory_not_committed [_])
+     | false,Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+     | _,Error error -> fail (Consumer.error_to_string error)
+     | _,Ok _ -> fail "the actual input was not refused by the expected owner");
+    let record,request=only_original fixture in
+    let exact=Capture.request request |> get in
+    let schema=Option.to_result ~none:"capacity original schema" exact.Exact.schema |> get in
+    let final=Exact.Call_final (Input_refused Request_body_refused) in
+    let host_path=Filename.concat (Store.root fixture.store)
+      (Store.exact_request_path ~declaration_id:"librarian" ~request_id:exact.request_id) in
+    let proof=proof_path fixture exact in
+    let host_bytes,proof_bytes=io (fun () -> Fs_compat.load_file_opt host_path,Fs_compat.load_file_opt proof) in
+    check bool "only the worker frame refusal lacks host state" true
+      (Option.is_none host_bytes=frame_refusal && Option.is_none proof_bytes=frame_refusal);
+    check (result unit string) "the actual original refusal is confirmed" (Ok ())
+      (io (fun () -> Capture.confirm_final ~store:fixture.store request final));
+    check bool "the actual refusal supplies its named capacity evidence" true
+      ((io (fun () -> Capture.refusal_evidence ~store:fixture.store request final) |> get)
+       .Keeper_exact_walk_failure.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]);
+    if not frame_refusal then
+      check bool "the valid counterpart refusal retains its ordinary abandonment policy" true
+        (Result.is_ok (io (fun () -> Refusal.abandonment ~store:fixture.store ~record ~request)));
+    let memory=cut_memory_bytes fixture and positions=cut_source_positions fixture in
+    let progress_before=Progress.to_json record.progress and posts=F.post_count fixture.server in
+    let restore ()=Eio.Cancel.protect (fun () -> io (fun () ->
+      let file path = function
+        | Some bytes -> write path bytes
+        | None -> if Sys.file_exists path then Sys.remove path in
+      file host_path host_bytes;file proof proof_bytes)) in
+    Fun.protect ~finally:restore (fun () ->
+      io (fun () -> if Sys.file_exists host_path then Sys.remove host_path);
+      let corruptions=Option.to_list (Option.map (fun bytes -> "actual orphan execution proof",bytes) proof_bytes)
+        @ ["unreadable execution proof","{"] in
+      List.iter (fun (label,bytes) ->
+        io (fun () -> write proof bytes);
+        check bool (label ^ " has no host record") true
+          ((io (fun () -> Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian" ~schema exact)
+            |> get)=Exact.Retained_absent);
+        check bool (label ^ " is rejected by the actual proof reader") true
+          (Result.is_error (io (fun () -> Exact.read_latest_original_execution
+            ~store:fixture.store ~declaration_id:"librarian" ~schema exact)));
+        check bool (label ^ " cannot confirm the worker's final") true
+          (Result.is_error (io (fun () -> Capture.confirm_final ~store:fixture.store request final)));
+        check bool (label ^ " supplies no capacity authority") true
+          (Result.is_error (io (fun () -> Capture.refusal_evidence ~store:fixture.store request final)));
+        if not frame_refusal then (
+          check bool (label ^ " cannot authorize abandonment") true
+            (Result.is_error (io (fun () -> Refusal.abandonment ~store:fixture.store ~record ~request)));
+          check bool (label ^ " cannot use the public settlement adapter") true
+            (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+              Commit.settle_refused ~store:fixture.store ~record ~request)))));
+        check bool (label ^ " writes no Memory or receipt") true (cut_memory_bytes fixture=memory);
+        check bool (label ^ " acknowledges no source") true (cut_source_positions fixture=positions);
+        check json (label ^ " preserves the refusal") progress_before
+          (io (fun () -> Owner.load ~store:fixture.store ~scope:record.scope ~request_id:record.request_id
+            |> owned |> Option.get |> fun retained -> Progress.to_json retained.progress));
+        check int (label ^ " starts no provider call") posts (F.post_count fixture.server)) corruptions);
+    check (result unit string) "restoring actual host state confirms the same refusal" (Ok ())
+      (io (fun () -> Capture.confirm_final ~store:fixture.store request final));
+    if not frame_refusal then
+      check bool "restoring actual proof restores the same ordinary abandonment policy" true
+        (Result.is_ok (io (fun () -> Refusal.abandonment ~store:fixture.store ~record ~request)));
+    check int "only the provider refusal called the fixture model" (if frame_refusal then 0 else 1)
+      (F.post_count fixture.server))
+let test_cut_ancestry_rejects_a_truncated_fenced_index () =
+  with_same_binding_cut ~history_kind:Official ~before_capture:prepare_counterpart_only_cut
+    (fun fixture original request _exact _schema ->
+      let module Lineage=Keeper_librarian_history_resolution_lineage in
+      let module Refusal=Keeper_librarian_durable_refusal in
+      assert_pending (run_worker fixture);
+      let middle=Resolution_intent.child (last_cut_intent fixture original) |> Option.get in
+      let load id=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope ~request_id:id
+        |> owned |> Option.get) in
+      let advance record event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:record ~event with
+        | Ok (Owner.Stored record | Already_stored record) -> record
+        | Ok (Unconfirmed detail) -> fail detail
+        | Error error -> fail (Owner.update_error_to_string error)) in
+      (* Simulate the retained journal after a dispatch lost its admission.
+         The real resolver still has to prove host/proof absence and fence it. *)
+      let absent=advance (load middle.request_id) Progress.Dispatch_intended in
+      ignore (advance absent (Progress.Execution_observed (Progress.Absent (`Assoc []))));
+      assert_pending (run_worker fixture);
+      let middle_record=load middle.request_id in
+      let middle_intent=last_cut_intent fixture middle_record in
+      (match middle_intent.origin with
+       | Resolution_intent.Worker_absence -> ()
+       | Same_binding_cut _ -> fail "the intermediate original needs an actual absence resolution");
+      let child=Resolution_intent.child middle_intent |> Option.get in
+      let deliveries= !(fixture.deliveries) in
+      fixture.set_response (fun capture ->
+        check string "only the final descendant reaches the provider" child.request_id (Capture.request_id capture);
+        size_refusal);
+      assert_pending (run_worker fixture);
+      await_delivery fixture ~after:deliveries;
+      (match run_worker fixture with
+       | Error (Consumer.Counterpart_input_capacity_refused _) -> ()
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "the actual descendant did not retain its capacity refusal");
+      let rejected=load child.request_id in
+      let descendant=io (fun () -> Capture.restore ~owner:(Capture.physical_owner request) rejected |> get) in
+      let obligation ()=io (fun () -> Lineage.refusal_obligation ~store:fixture.store descendant) in
+      let check_cut ()=match obligation () |> get with
+        | Lineage.Cut_read_required id -> check string "the intermediate absence preserves the Cut obligation" original.request_id id
+        | No_cut_ancestor -> fail "the actual Cut ancestor disappeared" in
+      check_cut ();
+      let root=Store.root fixture.store in
+      let record_path=Filename.concat (scope_directory fixture original.scope) (Store.digest middle.request_id ^ ".json") in
+      let body_path=Filename.concat root (Store.tool_request_body_path ~scope:original.scope
+        ~request_digest:middle.request_digest) in
+      let record_bytes,body_bytes=io (fun () -> Fs_compat.load_file record_path,Fs_compat.load_file body_path) in
+      let memory=cut_memory_bytes fixture and positions=cut_source_positions fixture in
+      let rejected_before=Owner.to_json rejected and posts=F.post_count fixture.server in
+      Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> io (fun () ->
+        write record_path record_bytes;write body_path body_bytes))) (fun () ->
+        io (fun () -> Sys.remove body_path);
+        check_cut ();
+        let changed=match Yojson.Safe.from_string record_bytes with
+          | `Assoc fields -> `Assoc (List.map (fun (field,value) -> match field,value with
+              | "summary",`Assoc summary -> field,`Assoc (List.map (fun (key,stored) ->
+                  key,if key="predecessor" then `Null else stored) summary)
+              | _ -> field,value) fields)
+          | _ -> fail "the original record is not an object" in
+        check bool "only the intermediate summary is changed" true
+          (Yojson.Safe.to_string changed<>record_bytes);
+        io (fun () -> write record_path (Yojson.Safe.to_string changed));
+        let changed_record=io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+          ~request_id:middle.request_id |> owned |> Option.get) in
+        check bool "the damaged index remains structurally valid" true
+          (Result.is_ok (Capture.index_of_summary changed_record));
+        check bool "the fence rejects the truncated predecessor without reading a pruned body" true
+          (Result.is_error (obligation ()));
+        check bool "a truncated ancestry cannot authorize source abandonment" true
+          (Result.is_error (io (fun () -> Refusal.abandonment ~store:fixture.store ~record:rejected ~request:descendant)));
+        check bool "the public adapter refuses the corrupted ancestry" true
+          (Result.is_error (memory_action fixture (fun () -> io (fun () ->
+            Commit.settle_refused ~store:fixture.store ~record:rejected ~request:descendant))));
+        check bool "no empty Memory or receipt is written" true (cut_memory_bytes fixture=memory);
+        check bool "no original source is acknowledged" true (cut_source_positions fixture=positions);
+        check json "the descendant refusal is unchanged" rejected_before (Owner.to_json (load child.request_id));
+        check int "the corrupt ancestry dispatches no provider request" posts (F.post_count fixture.server));
+      check_cut ())
 let test_root_cut_cannot_use_the_public_refusal_adapter () =
   with_same_binding_cut ~history_kind:Official ~before_capture:prepare_counterpart_only_cut
     (fun fixture original request exact schema ->
@@ -4217,8 +4376,8 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     (Error "History resolution child changed its original source or owner")
     (with_summary_value child_id "source_basis_digest" (String.make 64 '0') resolution_pass);
   check (result unit string) "the unchanged pair passes again" (Ok ()) (resolution_pass ());
-  check (result unit string) "a parent index with another source basis breaks the lineage"
-    (Error "History resolution child changed its original source or owner")
+  check (result unit string) "a parent index with another source basis differs from its fence"
+    (Error "History fence immutable binding differs; publication remains blocked")
     (with_summary_value original.request_id "source_basis_digest" (String.make 64 '0') lineage);
   check (result unit string) "the unchanged parent index passes again" (Ok ()) (lineage ());
   check bool "a record whose index differs from its body is refused where the body is read" true
@@ -6632,6 +6791,12 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_cut_command_busy_and_late_proof_keep_requested;
   test_case "counterpart Cut capacity refusal cannot abandon the original read obligation" `Slow
     test_counterpart_cut_capacity_refusal_preserves_original_obligation;
+  test_case "a Cut obligation survives an absence-fenced ancestor with a truncated summary" `Slow
+    test_cut_ancestry_rejects_a_truncated_fenced_index;
+  test_case "an actual worker frame refusal requires actual host proof absence" `Slow
+    (test_capacity_refusal_checks_no_host_proof ~frame_refusal:true);
+  test_case "an actual orphan capacity proof cannot impersonate a no-host frame refusal" `Slow
+    (test_capacity_refusal_checks_no_host_proof ~frame_refusal:false);
   test_case "an actual unfenced root Cut cannot use the public refusal adapter" `Slow
     test_root_cut_cannot_use_the_public_refusal_adapter;
   test_case "a Cut fence without an intent blocks ordinary, direct and queued fresh history" `Quick

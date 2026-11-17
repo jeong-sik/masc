@@ -199,11 +199,15 @@ let confirm_binding ~request ~(original:Owner.retained) fence =
     && fence.source_sha256 = source_sha256
     && fence.physical_owner = Request.owner_to_json (Request.physical_owner request))
     "History fence immutable binding differs; publication remains blocked"
-(* The same binding from the record and its index, without the body. Whoever
-   reads the body binds the index to it. *)
+(* The fence retains the immutable index checked with the original body.
+   Reusing it keeps the predecessor bound even after that body is pruned. *)
 let confirm_binding_index ~(index:Request.index) ~original fence =
   let module Record=Owner.Record in
-  require (fence.scope=Record.scope original && fence.request_id=Record.request_id original
+  let* captured=Owner.decode_published ~directory_name:(sha fence.scope)
+    ~file_name:(sha fence.request_id ^ ".json") fence.original_record in
+  let* captured_index=Request.index_of_summary captured in
+  require (index=captured_index
+    && fence.scope=Record.scope original && fence.request_id=Record.request_id original
     && fence.request_digest=Record.request_digest original
     && fence.source_sha256=index.source_digest
     && fence.physical_owner=Request.owner_to_json index.owner)

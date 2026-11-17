@@ -15,9 +15,11 @@ val refusal_evidence : store:Lane_addon_store.t -> target:(unit -> (target, stri
   Lane_addon_exact.final -> (Keeper_exact_walk_failure.t, string) result
 (** What a final shows about reading less. Only an [Input_refused] final naming
     a request body, input capacity or context refusal can show it, and only then
-    is [target] called; [Invalid_request] and every other final show nothing. With no host record, the worker's frame refusal
-    ([Lane_addon_exact.refused_before_host]) is itself the evidence. With a host
-    terminal, the latest completed execution must end in this same final, and
+    is [target] called; [Invalid_request] and every other final show nothing.
+    With no host record, the worker's frame refusal
+    ([Lane_addon_exact.refused_before_host]) also requires the actual reader to
+    confirm execution proof absence. Orphan or unreadable proof refuses.
+    With a host terminal, the latest completed execution must end in this same final, and
     its receipt supplies the walk's evidence, and only when that evidence is a
     named input refusal with no independent failure mixed in. Anything else,
     including an open host record, shows nothing. *)
@@ -52,10 +54,13 @@ val confirm : observe:(unit -> (Lane_addon_exact.retained_observation, string) r
 (** The rule every original consumer confirms a final with, and the deploy
     check judges an original's Exact files with. [observe] reads the original's
     Exact record. Without one, only a final where
-    {!Lane_addon_exact.refused_before_host} holds is confirmed. An open record
+    {!Lane_addon_exact.refused_before_host} holds and [latest] reports no
+    completed execution can be confirmed. Its store reader must reject an
+    orphan or unreadable proof. An open record
     confirms nothing. A terminal must deliver this final, and a [Call_final]
     then also needs the latest completed execution to have ended in it:
-    [latest] reads that execution. Independently, an actual retained typed
+    [latest] reads that execution and checks the no-host frame exception.
+    Independently, an actual retained typed
     declaration-ending cause requires the strict latest read and
     {!require_declaration_ending_latest}, even when the worker's delivered
     Not_allowed JSON carries only its public detail. Worker wording does not
@@ -73,9 +78,10 @@ val confirm_final : store:Lane_addon_store.t -> target -> Lane_addon_exact.final
     An actual typed declaration ending also requires the strict latest-proof
     check above before any consumer may treat its original as settled.
     Worker Finished JSON grants nothing, except a final where
-    {!Lane_addon_exact.refused_before_host} holds, for a request the host never
-    retained: the worker refuses a request no listing reply can carry before the
-    host sees it, and that final holds no answer. *)
+    {!Lane_addon_exact.refused_before_host} holds, with both the host record
+    and execution proof absent: the worker
+    refuses a request no listing reply can carry before the host sees it, and
+    that final holds no answer. Orphan or unreadable proof refuses. *)
 
 val decode : schema:Yojson.Safe.t ->
   observe:(unit -> (Lane_addon_exact.retained_observation, string) result) ->

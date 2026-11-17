@@ -860,20 +860,45 @@ let serialize_final_http_request_unadmitted
       ~messages
       ~tools
   =
-  Result.bind
-    (serialize_http_request_parts
-       ~stream
-       ~anthropic_serialization_policy:Resolve_nonexact_anthropic_thinking_control
-       ~config
-       ~messages
-       ~tools)
+  let parts =
+    match stream, Provider_http_codec.of_config config with
+    | true, Provider_http_codec.Openai_chat ->
+      (* The builder already owns the request tree and its output receipt.
+         Finalize streaming fields there instead of encoding the whole tree
+         only to parse and encode it again. Literal validation stays in the
+         encoder; the digest is still taken from the final transmitted bytes. *)
+      (try
+         let artifact = Backend_openai_request.build_request_assoc_artifact
+             ~stream ~config ~messages ~tools () in
+         Http_request_stream.encode ~fields:Http_request_stream.Stream_with_usage
+           (Backend_openai_request.request_assoc_payload artifact)
+         |> Result.map_error (fun error ->
+           Http_client.AcceptRejected
+             { reason = Http_client.body_injection_error_to_string error })
+         |> Result.map (fun body ->
+           Provider_http_codec.Openai_chat, body,
+           Backend_openai_request.request_assoc_output_token_receipt artifact)
+       with Invalid_argument reason -> Error (Http_client.AcceptRejected { reason }))
+    | false, (Provider_http_codec.Anthropic_messages | Ollama_chat | Openai_responses
+             | Openai_chat | Gemini_generate_content | Glm_chat)
+    | true, (Provider_http_codec.Anthropic_messages | Ollama_chat | Openai_responses
+            | Gemini_generate_content | Glm_chat) ->
+      Result.bind
+        (serialize_http_request_parts
+           ~stream
+           ~anthropic_serialization_policy:Resolve_nonexact_anthropic_thinking_control
+           ~config
+           ~messages
+           ~tools)
+        (fun (http_codec, body, output_token_receipt) ->
+           let final_body =
+             if stream then finalize_stream_body ~http_codec body else Ok body in
+           Result.map (fun body -> http_codec, body, output_token_receipt) final_body)
+  in
+  Result.map
     (fun (http_codec, body, output_token_receipt) ->
-       (* The stream fields are part of the bytes sent, so the digest is taken
-          after they are in. *)
-       let final_body = if stream then finalize_stream_body ~http_codec body else Ok body in
-       Result.map
-         (fun body -> seal_serialized ~http_codec ~body ~output_token_receipt)
-         final_body)
+       seal_serialized ~http_codec ~body ~output_token_receipt)
+    parts
 ;;
 
 let serialization_observation

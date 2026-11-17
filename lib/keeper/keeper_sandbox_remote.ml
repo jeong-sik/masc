@@ -541,101 +541,11 @@ let append_error stderr error =
   else stderr ^ "\n" ^ error
 ;;
 
-let rs = Char.chr 0x1e
-
-let split_final_trailer stderr =
-  match String.rindex_opt stderr rs with
-  | None -> Error "no result trailer delimiter"
-  | Some close_i when close_i <> String.length stderr - 1 ->
-    Error "bytes followed the final result trailer delimiter"
-  | Some close_i ->
-    (match String.rindex_from_opt stderr (close_i - 1) rs with
-     | None -> Error "result trailer has no opening delimiter"
-     | Some open_i ->
-       let trailer = String.sub stderr open_i (close_i - open_i + 1) in
-       let payload_stderr = String.sub stderr 0 open_i in
-       Ok (payload_stderr, trailer))
-;;
-
-let trailer_tail_limit = 64 * 1024
-
-(* The front of a stderr stream is held only while it could still become the
-   acceptance frame, and only for a request that asked for one. *)
-type stderr_head =
-  | Head_released
-  | Awaiting_head of string
-
-type stderr_stream =
-  { callback : (string -> unit) option
-  ; mutable tail : string
-  ; mutable head : stderr_head
-  ; on_accepted : unit -> unit
-  }
-
-(* The trailer is the final RS-delimited frame, so its opening delimiter is the
-   second-to-last RS of the completed stream, and every byte before that RS is
-   payload no matter what arrives next. Returns how much of [text] can be handed
-   to the caller now. Holding the whole tail back instead would delay a stderr
-   line until the process exits, and [gh auth login] writes its one-time code to
-   stderr and then waits for the browser: a code delivered at exit arrives after
-   the login it was needed for has already timed out. *)
-let releasable_prefix_len text =
-  match String.rindex_opt text rs with
-  | None -> String.length text
-  | Some last ->
-    (match String.rindex_from_opt text (last - 1) rs with
-     | None -> last
-     | Some second_last -> second_last)
-;;
-
-let stream_payload_chunk stream chunk =
-  let combined = stream.tail ^ chunk in
-  (* The tail limit still bounds the retained region when payload bytes carry an
-     RS of their own; a trailer is orders of magnitude below it. *)
-  let release =
-    max (releasable_prefix_len combined) (String.length combined - trailer_tail_limit)
-  in
-  if release > 0
-  then (
-    Option.iter
-      (fun callback -> callback (String.sub combined 0 release))
-      stream.callback;
-    stream.tail <- String.sub combined release (String.length combined - release))
-  else stream.tail <- combined
-;;
-
-let stream_stderr_chunk stream chunk =
-  match stream.head with
-  | Head_released -> stream_payload_chunk stream chunk
-  | Awaiting_head held ->
-    let head = held ^ chunk in
-    (match Exec_ssh_protocol.split_acceptance_head head with
-     | Exec_ssh_protocol.Head_pending -> stream.head <- Awaiting_head head
-     | Exec_ssh_protocol.Head_payload ->
-       stream.head <- Head_released;
-       stream_payload_chunk stream head
-     | Exec_ssh_protocol.Head_frame { preamble; rest; _ } ->
-       stream.head <- Head_released;
-       stream.on_accepted ();
-       let payload = preamble ^ rest in
-       if payload <> "" then stream_payload_chunk stream payload)
-;;
-
-(* The process ended while the front was still undecided: those bytes are
-   payload, less a frame the wire cut off. *)
-let settle_stderr_head stream =
-  match stream.head with
-  | Head_released -> ()
-  | Awaiting_head held ->
-    stream.head <- Head_released;
-    let payload = Exec_ssh_protocol.settle_acceptance_head held in
-    if payload <> "" then stream_payload_chunk stream payload
-;;
-
-let flush_stderr_payload stream payload =
-  if payload <> "" then Option.iter (fun callback -> callback payload) stream.callback;
-  stream.tail <- ""
-;;
+module Stderr = Keeper_sandbox_remote_stderr
+let split_final_trailer = Stderr.split_final_trailer
+let stream_stderr_chunk = Stderr.stream_chunk
+let settle_stderr_head = Stderr.settle_head
+let flush_stderr_payload = Stderr.flush_payload
 
 (* ── Runner ──────────────────────────────────────────────────────────── *)
 
@@ -1077,6 +987,185 @@ let completed_execution_observation record raw_stderr =
       { failure = Local_timeout | Transport_failed | Trailer_disagreement; _ } -> None
 ;;
 
+module Stdio_request = struct
+  type endpoint = t
+
+  type t =
+    { endpoint : endpoint
+    ; request : Exec_ssh_protocol.request
+    ; carrier_argv : string list
+    ; host_env : string array
+    ; budget_sec : float
+    }
+
+  type refusal =
+    | Guest_agent_unavailable
+    | Docker_unavailable
+    | Mode_unavailable of string
+    | Invalid_request of string
+    | Probe_unavailable of string
+    | Interactive_unavailable of
+        { major : Exec_ssh_protocol.major; capabilities : string list }
+
+  let prepare ?(mode = Exec_ssh_protocol.Effect) ~timeout_sec endpoint
+      ~argv ~env ~cwd =
+    if not (Float.is_finite timeout_sec) || Float.compare timeout_sec 0.0 <= 0 then
+      Error (Invalid_request "interactive request timeout must be finite and greater than zero")
+    else
+    let carrier_argv =
+      match endpoint.transport with
+      | Microvm { delivery = Agent_socket _; _ } -> Error Guest_agent_unavailable
+      | Docker_exec _ -> Error Docker_unavailable
+      | Microvm { delivery = Exec_per_request _; _ } | Openssh _ ->
+        (match carrier endpoint with
+         | Local_process { request; _ } -> Ok request
+         | Guest_agent _ -> Error Guest_agent_unavailable)
+    in
+    match carrier_argv with
+    | Error refusal -> Error refusal
+    | Ok carrier_argv ->
+      let mode_check =
+        match endpoint.transport, mode with
+        | Microvm _, Exec_ssh_protocol.Guest_local ->
+          Error (Mode_unavailable microvm_guest_local_unavailable_reason)
+        | (Microvm _ | Docker_exec _),
+            (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Observe)
+        | Docker_exec _, Exec_ssh_protocol.Guest_local
+        | Openssh _,
+            (Exec_ssh_protocol.Effect | Exec_ssh_protocol.Observe | Exec_ssh_protocol.Guest_local) ->
+          Ok ()
+      in
+      match mode_check with
+      | Error refusal -> Error refusal
+      | Ok () ->
+        match wire_env endpoint env with
+        | Error detail -> Error (Invalid_request detail)
+        | Ok env ->
+          let injected = injected_env endpoint in
+          let env = injected @ List.filter (fun (name, _) -> not (List.mem_assoc name injected)) env in
+          let remote_root = workspace_root endpoint in
+          match remote_cwd endpoint (Option.value cwd ~default:remote_root) with
+          | Error detail -> Error (Invalid_request detail)
+          | Ok cwd ->
+            let request : Exec_ssh_protocol.request =
+              { v = Exec_ssh_protocol.V3; argv; env; cwd; remote_root;
+                timeout_sec; stdin = Exec_ssh_protocol.Interactive; mode;
+                acceptance_frame = false }
+            in
+            match Exec_ssh_protocol.encode_request request ~stdin:"" with
+            | Error detail -> Error (Invalid_request detail)
+            | Ok _ ->
+              Ok { endpoint; request; carrier_argv;
+                   host_env = Env_keeper_scrub.filter_environment (Unix.environment ());
+                   budget_sec = local_wall_budget endpoint timeout_sec }
+
+  type launch =
+    { argv : string list
+    ; env : string array
+    ; frame : string
+    ; budget_sec : float
+    ; acceptance_frame : bool
+    }
+
+  let probe_answer endpoint =
+    match Atomic.get endpoint.shared.probe_answer with
+    | Some answer -> Ok answer
+    | None ->
+      match run_probe endpoint with
+      | Error detail -> Error (Probe_unavailable detail)
+      | Ok _ ->
+        match Atomic.get endpoint.shared.probe_answer with
+        | Some answer -> Ok answer
+        | None -> Error (Probe_unavailable "probe completed without a decoded answer")
+
+  let with_lease prepared use =
+    Eio.Switch.run (fun sw ->
+      Eio.Semaphore.acquire prepared.endpoint.shared.semaphore;
+      Eio.Switch.on_release sw (fun () ->
+        Eio.Semaphore.release prepared.endpoint.shared.semaphore);
+      match probe_answer prepared.endpoint with
+      | Error refusal -> Error refusal
+      | Ok answer ->
+        let supported =
+          match answer.major with
+          | Exec_ssh_protocol.V2 -> false
+          | Exec_ssh_protocol.V3 ->
+            List.mem Exec_ssh_protocol.interactive_stdin_capability answer.capabilities
+        in
+        if not supported then
+          Error (Interactive_unavailable { major = answer.major; capabilities = answer.capabilities })
+        else
+          let acceptance_frame = acceptance_requested_of_probe ~v:answer.major (Some answer) in
+          let request = { prepared.request with acceptance_frame } in
+          match Exec_ssh_protocol.encode_request request ~stdin:"" with
+          | Error detail -> Error (Invalid_request detail)
+          | Ok frame ->
+            Ok (use { argv = prepared.carrier_argv; env = Array.copy prepared.host_env;
+                      frame; budget_sec = prepared.budget_sec; acceptance_frame }))
+
+  type completion =
+    { dispatch : dispatch_record
+    ; execution : execution_observation
+    }
+
+  let record_incomplete prepared ~failure ~detail =
+    record_dispatch prepared.endpoint.shared ~keeper_name:prepared.endpoint.keeper_name
+      (Dispatch_failed { at = Unix.gettimeofday (); failure; detail })
+
+  type response_failure =
+    | Malformed_response of string
+    | Response_mismatch of string
+
+  let bound_response prepared raw_stderr =
+    match split_final_trailer raw_stderr with
+    | Error detail -> Error (Malformed_response detail)
+    | Ok (_, trailer_bytes) ->
+      match Exec_ssh_protocol.parse_trailer trailer_bytes with
+      | Error detail -> Error (Malformed_response detail)
+      | Ok trailer when trailer.v <> prepared.request.v ->
+        Error (Response_mismatch "result trailer major differs from the prepared request")
+      | Ok trailer ->
+        match Exec_ssh_protocol.parse_execution_receipt trailer_bytes with
+        | Error detail -> Error (Malformed_response detail)
+        | Ok (Some receipt) when receipt.mode <> prepared.request.mode ->
+          Error (Response_mismatch "execution receipt mode differs from the prepared request")
+        | Ok (Some _) | Ok None -> Ok trailer
+
+  let complete prepared ~status ~raw_stderr ~prior =
+    let failed failure detail =
+      Dispatch_failed { at = Unix.gettimeofday (); failure; detail }
+    in
+    let finished status = Payload_finished { at = Unix.gettimeofday (); status } in
+    let response = bound_response prepared raw_stderr in
+    let dispatch =
+      match transport_failure prepared.endpoint status with
+      | Some detail -> failed Transport_failed detail
+      | None ->
+          match response with
+          | Error (Malformed_response detail) -> failed Transport_failed detail
+          | Error (Response_mismatch detail) -> failed Trailer_disagreement detail
+          | Ok trailer when trailer.timed_out && status = Unix.WEXITED 0 ->
+            failed Remote_timeout (remote_timeout_error prepared.endpoint prepared.request.timeout_sec)
+          | Ok { shim_error = Some detail; _ } when status = Unix.WEXITED 1 ->
+            failed Shim_refused detail
+          | Ok { exit = Some code; signal = None; shim_error = None; _ }
+              when status = Unix.WEXITED 0 -> finished (Unix.WEXITED code)
+          | Ok { signal = Some signal; exit = None; shim_error = None; _ }
+              when status = Unix.WEXITED 0 -> finished (Unix.WSIGNALED signal)
+          | Ok _ -> failed Trailer_disagreement "transport status and result trailer disagree"
+    in
+    let execution =
+      match response with
+      | Error (Response_mismatch detail) ->
+        Execution_unavailable (Invalid_receipt detail)
+      | Error (Malformed_response _) -> prior
+      | Ok _ ->
+        Option.value (completed_execution_observation dispatch raw_stderr) ~default:prior
+    in
+    record_dispatch prepared.endpoint.shared ~keeper_name:prepared.endpoint.keeper_name dispatch;
+    { dispatch; execution }
+end
+
 type stdout_mode = Text_paths | Binary_bytes
 
 (* How one request came back. [Wire_status] is the transport process's own
@@ -1211,13 +1300,10 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                  Option.iter (fun emit -> emit chunk) on_stdout_chunk), (fun () -> ())) in
            let stderr_path_stream = Option.map path_stream on_stderr_chunk in
            let stderr_stream =
-             { callback = Option.map fst stderr_path_stream
-             ; tail = ""
-             ; head = (if acceptance_frame then Awaiting_head "" else Head_released)
-             ; on_accepted =
-                 (fun () ->
-                   observation := Execution_unavailable (Transport_unavailable Acceptance_read))
-             }
+             Stderr.create ?callback:(Option.map fst stderr_path_stream)
+               ~acceptance_frame
+               ~on_accepted:(fun () ->
+                 observation := Execution_unavailable (Transport_unavailable Acceptance_read)) ()
            in
            let rewrite text =
              match t.transport with
@@ -1312,7 +1398,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            | None ->
            match split_final_trailer raw_stderr with
            | Error detail ->
-             flush_stderr_payload stderr_stream stderr_stream.tail;
+             flush_stderr_payload stderr_stream (Stderr.tail stderr_stream);
              Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
              let failure, error =
                if local_timed_out
@@ -1329,9 +1415,9 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                   ~prefix_stderr:(rewrite raw_stderr) error)
            | Ok (payload_stderr, trailer_bytes) ->
              let streamed_payload =
-               match split_final_trailer stderr_stream.tail with
+               match split_final_trailer (Stderr.tail stderr_stream) with
                | Ok (payload, _) -> payload
-               | Error _ -> stderr_stream.tail
+               | Error _ -> (Stderr.tail stderr_stream)
              in
              flush_stderr_payload stderr_stream streamed_payload;
              Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;

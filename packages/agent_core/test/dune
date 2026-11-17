@@ -7,1414 +7,52 @@
   (re_export agent_core_strings)
   (re_export llm_provider)
   (re_export eio)
-  (re_export alcotest)
-  (re_export qcheck)
+  (re_export eio.unix)
+  (re_export eio_main)
+  (re_export yojson)
+  (re_export unix)
+  (re_export str)
+  (re_export fmt)
+  (re_export uri)
+  (re_export cohttp)
+  (re_export cohttp-eio)
+  (re_export cstruct)
+  (re_export mcp_protocol)
   (re_export  masc.agent_core.digest)
-  (re_export jsonu)
-  (re_export yojson)))
+  (re_export optint)
+  (re_export re)
+  (re_export mirage-crypto-rng.unix)
+  (re_export ppx_deriving_yojson.runtime)))
 
 (executable
- (name agent_core_test_deps)
- (modules agent_core_test_deps)
- (flags (:standard -w -a)))
+ (name test_local_llm)
+ (modules test_local_llm)
+ (libraries agent_core_test_deps agent_core eio eio_main yojson))
 
 (executable
- (name test_metrics_aggregating)
- (libraries agent_core_test_deps)
- (modules test_metrics_aggregating)
- (flags (:standard -w -a)))
+ (name model_catalog_standalone_probe)
+ (modules model_catalog_standalone_probe)
+ (libraries agent_core_test_deps llm_provider))
 
 (executable
- (name test_util)
- (libraries agent_core_test_deps)
- (modules test_util)
- (flags (:standard -w -a)))
+ (name openrouter_live_proof)
+ (modules openrouter_live_proof)
+ (libraries agent_core_test_deps llm_provider eio eio_main yojson))
 
 (executable
- (name test_llm_provider_mock)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock)
- (flags (:standard -w -a)))
+ (name anthropic_live_proof)
+ (modules anthropic_live_proof)
+ (libraries agent_core_test_deps llm_provider eio eio_main))
 
 (executable
- (name test_be_cached)
- (libraries agent_core_test_deps)
- (modules test_be_cached)
- (flags (:standard -w -a)))
+ (name capability_resolution_dump)
+ (modules capability_resolution_dump)
+ (libraries agent_core_test_deps llm_provider))
 
-(executable
- (name test_image_describe)
- (libraries agent_core_test_deps)
- (modules test_image_describe)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_prompt_only)
- (libraries agent_core_test_deps)
- (modules test_agent_prompt_only)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_cached_chats)
- (libraries agent_core_test_deps)
- (modules test_agent_cached_chats)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_summary_blocks)
- (libraries agent_core_test_deps)
- (modules test_agent_summary_blocks)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_shell)
- (libraries agent_core_test_deps)
- (modules test_agent_shell)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_tool_echo)
- (libraries agent_core_test_deps)
- (modules test_agent_tool_echo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_stream_chat)
- (libraries agent_core_test_deps)
- (modules test_agent_stream_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_full_state)
- (libraries agent_core_test_deps)
- (modules test_agent_full_state)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_full_state_alt)
- (libraries agent_core_test_deps)
- (modules test_agent_full_state_alt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_full_state_tests_util)
- (libraries agent_core_test_deps)
- (modules test_agent_full_state_tests_util)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_steps)
- (libraries agent_core_test_deps)
- (modules test_agent_steps)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_input_request)
- (libraries agent_core_test_deps)
- (modules test_agent_input_request)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_input_response)
- (libraries agent_core_test_deps)
- (modules test_agent_input_response)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_input_usage)
- (libraries agent_core_test_deps)
- (modules test_agent_input_usage)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_input_usage_alt)
- (libraries agent_core_test_deps)
- (modules test_agent_input_usage_alt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_agent_message_archive)
- (libraries agent_core_test_deps)
- (modules test_agent_message_archive)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_chat)
- (libraries agent_core_test_deps)
- (modules test_be_openai_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_openai_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_chat_zero_data)
- (libraries agent_core_test_deps)
- (modules test_be_openai_chat_zero_data)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_chat_images)
- (libraries agent_core_test_deps)
- (modules test_be_openai_chat_images)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_images_generate)
- (libraries agent_core_test_deps)
- (modules test_be_openai_images_generate)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_images_edit)
- (libraries agent_core_test_deps)
- (modules test_be_openai_images_edit)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_images_edit_ai)
- (libraries agent_core_test_deps)
- (modules test_be_openai_images_edit_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_images_variation)
- (libraries agent_core_test_deps)
- (modules test_be_openai_images_variation)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_responses)
- (libraries agent_core_test_deps)
- (modules test_be_openai_responses)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_responses_images)
- (libraries agent_core_test_deps)
- (modules test_be_openai_responses_images)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_local_files)
- (libraries agent_core_test_deps)
- (modules test_be_openai_local_files)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_chat)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_tools)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_stream)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_stream)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_style)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_fragments)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_fragments)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_backoff)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_backoff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_chat)
- (libraries agent_core_test_deps)
- (modules test_be_google_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_google_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_tools)
- (libraries agent_core_test_deps)
- (modules test_be_google_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_style)
- (libraries agent_core_test_deps)
- (modules test_be_google_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_tool_input)
- (libraries agent_core_test_deps)
- (modules test_be_google_tool_input)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_tool_input_ai)
- (libraries agent_core_test_deps)
- (modules test_be_google_tool_input_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_google_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_gcp_options)
- (libraries agent_core_test_deps)
- (modules test_be_gcp_options)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_cost_mode)
- (libraries agent_core_test_deps)
- (modules test_be_cost_mode)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_messages)
- (libraries agent_core_test_deps)
- (modules test_be_messages)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_chat_fragments)
- (libraries agent_core_test_deps)
- (modules test_be_chat_fragments)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_image_generation)
- (libraries agent_core_test_deps)
- (modules test_be_image_generation)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_telemetry)
- (libraries agent_core_test_deps)
- (modules test_be_telemetry)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_drive)
- (libraries agent_core_test_deps)
- (modules test_be_google_drive)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_drive_ai)
- (libraries agent_core_test_deps)
- (modules test_be_google_drive_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_sheets)
- (libraries agent_core_test_deps)
- (modules test_be_google_sheets)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_sheets_ai)
- (libraries agent_core_test_deps)
- (modules test_be_google_sheets_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_forms)
- (libraries agent_core_test_deps)
- (modules test_be_google_forms)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_forms_ai)
- (libraries agent_core_test_deps)
- (modules test_be_google_forms_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_gcp_options_default)
- (libraries agent_core_test_deps)
- (modules test_be_gcp_options_default)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_gcp_options_default_ai)
- (libraries agent_core_test_deps)
- (modules test_be_gcp_options_default_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_prompts)
- (libraries agent_core_test_deps)
- (modules test_be_prompts)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_local_files)
- (libraries agent_core_test_deps)
- (modules test_be_local_files)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_xai_chat)
- (libraries agent_core_test_deps)
- (modules test_be_xai_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_xai_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_xai_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_xai_chat_stream)
- (libraries agent_core_test_deps)
- (modules test_be_xai_chat_stream)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_xai_tools)
- (libraries agent_core_test_deps)
- (modules test_be_xai_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_xai_style)
- (libraries agent_core_test_deps)
- (modules test_be_xai_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_xai_tool_input)
- (libraries agent_core_test_deps)
- (modules test_be_xai_tool_input)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_xai_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_xai_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_mistral_chat)
- (libraries agent_core_test_deps)
- (modules test_be_mistral_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_mistral_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_mistral_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_mistral_tools)
- (libraries agent_core_test_deps)
- (modules test_be_mistral_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_mistral_style)
- (libraries agent_core_test_deps)
- (modules test_be_mistral_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_mistral_tool_input)
- (libraries agent_core_test_deps)
- (modules test_be_mistral_tool_input)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_mistral_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_mistral_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_ollama_chat)
- (libraries agent_core_test_deps)
- (modules test_be_ollama_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_ollama_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_ollama_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_ollama_tools)
- (libraries agent_core_test_deps)
- (modules test_be_ollama_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_ollama_style)
- (libraries agent_core_test_deps)
- (modules test_be_ollama_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_ollama_tool_input)
- (libraries agent_core_test_deps)
- (modules test_be_ollama_tool_input)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_ollama_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_ollama_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_azure_chat)
- (libraries agent_core_test_deps)
- (modules test_be_azure_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_azure_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_azure_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_azure_tools)
- (libraries agent_core_test_deps)
- (modules test_be_azure_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_azure_style)
- (libraries agent_core_test_deps)
- (modules test_be_azure_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_azure_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_azure_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_azure_tool_input)
- (libraries agent_core_test_deps)
- (modules test_be_azure_tool_input)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_azure_tool_input_ai)
- (libraries agent_core_test_deps)
- (modules test_be_azure_tool_input_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_azure_stream)
- (libraries agent_core_test_deps)
- (modules test_be_azure_stream)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_be_backup)
- (libraries agent_core_test_deps)
- (modules test_be_be_backup)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_session_cache)
- (libraries agent_core_test_deps)
- (modules test_be_session_cache)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_model_preferences)
- (libraries agent_core_test_deps)
- (modules test_be_model_preferences)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_local_env)
- (libraries agent_core_test_deps)
- (modules test_be_local_env)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_local_env_ai)
- (libraries agent_core_test_deps)
- (modules test_be_local_env_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_error_recovery)
- (libraries agent_core_test_deps)
- (modules test_be_error_recovery)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_error_recovery_ai)
- (libraries agent_core_test_deps)
- (modules test_be_error_recovery_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_streaming_events)
- (libraries agent_core_test_deps)
- (modules test_be_streaming_events)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_streaming_events_ai)
- (libraries agent_core_test_deps)
- (modules test_be_streaming_events_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_multi_provider)
- (libraries agent_core_test_deps)
- (modules test_be_multi_provider)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_multi_provider_ai)
- (libraries agent_core_test_deps)
- (modules test_be_multi_provider_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_provider_capabilities)
- (libraries agent_core_test_deps)
- (modules test_be_provider_capabilities)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_provider_capabilities_ai)
- (libraries agent_core_test_deps)
- (modules test_be_provider_capabilities_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_routing)
- (libraries agent_core_test_deps)
- (modules test_be_routing)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_routing_ai)
- (libraries agent_core_test_deps)
- (modules test_be_routing_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_nested_backends)
- (libraries agent_core_test_deps)
- (modules test_be_nested_backends)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_nested_backends_ai)
- (libraries agent_core_test_deps)
- (modules test_be_nested_backends_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_provider_order)
- (libraries agent_core_test_deps)
- (modules test_be_provider_order)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_provider_order_ai)
- (libraries agent_core_test_deps)
- (modules test_be_provider_order_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_no_lock)
- (libraries agent_core_test_deps)
- (modules test_be_no_lock)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_no_lock_ai)
- (libraries agent_core_test_deps)
- (modules test_be_no_lock_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_max_messages)
- (libraries agent_core_test_deps)
- (modules test_be_max_messages)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_fallback_retry)
- (libraries agent_core_test_deps)
- (modules test_be_fallback_retry)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_fallback_retry_ai)
- (libraries agent_core_test_deps)
- (modules test_be_fallback_retry_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_aliases)
- (libraries agent_core_test_deps)
- (modules test_be_aliases)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_aliases_ai)
- (libraries agent_core_test_deps)
- (modules test_be_aliases_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_nested_backends_b)
- (libraries agent_core_test_deps)
- (modules test_be_nested_backends_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_nested_backends_b_ai)
- (libraries agent_core_test_deps)
- (modules test_be_nested_backends_b_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_nested_backends_c)
- (libraries agent_core_test_deps)
- (modules test_be_nested_backends_c)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_nested_backends_c_ai)
- (libraries agent_core_test_deps)
- (modules test_be_nested_backends_c_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_retry_clock)
- (libraries agent_core_test_deps)
- (modules test_be_retry_clock)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_retry_clock_ai)
- (libraries agent_core_test_deps)
- (modules test_be_retry_clock_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_responses_state)
- (libraries agent_core_test_deps)
- (modules test_be_openai_responses_state)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_responses_state_ai)
- (libraries agent_core_test_deps)
- (modules test_be_openai_responses_state_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_responses_reasoning)
- (libraries agent_core_test_deps)
- (modules test_be_openai_responses_reasoning)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_responses_reasoning_ai)
- (libraries agent_core_test_deps)
- (modules test_be_openai_responses_reasoning_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_responses_images_ai)
- (libraries agent_core_test_deps)
- (modules test_be_openai_responses_images_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_tool_messages)
- (libraries agent_core_test_deps)
- (modules test_be_openai_tool_messages)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_tool_messages_ai)
- (libraries agent_core_test_deps)
- (modules test_be_openai_tool_messages_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_thinking)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_thinking)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_thinking_ai)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_thinking_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_tool_result)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_tool_result)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_anthropic_tool_result_ai)
- (libraries agent_core_test_deps)
- (modules test_be_anthropic_tool_result_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_drive_files)
- (libraries agent_core_test_deps)
- (modules test_be_google_drive_files)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_drive_files_ai)
- (libraries agent_core_test_deps)
- (modules test_be_google_drive_files_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_json_schema)
- (libraries agent_core_test_deps)
- (modules test_be_json_schema)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_json_schema_ai)
- (libraries agent_core_test_deps)
- (modules test_be_json_schema_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_drive_about)
- (libraries agent_core_test_deps)
- (modules test_be_google_drive_about)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_google_drive_about_ai)
- (libraries agent_core_test_deps)
- (modules test_be_google_drive_about_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_multimodal_fragments)
- (libraries agent_core_test_deps)
- (modules test_be_multimodal_fragments)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_multimodal_fragments_ai)
- (libraries agent_core_test_deps)
- (modules test_be_multimodal_fragments_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_files)
- (libraries agent_core_test_deps)
- (modules test_be_openai_files)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_openai_files_ai)
- (libraries agent_core_test_deps)
- (modules test_be_openai_files_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_field_null)
- (libraries agent_core_test_deps)
- (modules test_be_field_null)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_field_null_ai)
- (libraries agent_core_test_deps)
- (modules test_be_field_null_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_head_parameters)
- (libraries agent_core_test_deps)
- (modules test_be_head_parameters)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_head_parameters_ai)
- (libraries agent_core_test_deps)
- (modules test_be_head_parameters_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_session_memory)
- (libraries agent_core_test_deps)
- (modules test_be_session_memory)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_session_memory_ai)
- (libraries agent_core_test_deps)
- (modules test_be_session_memory_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_session_cache_ttl)
- (libraries agent_core_test_deps)
- (modules test_be_session_cache_ttl)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_session_cache_ttl_ai)
- (libraries agent_core_test_deps)
- (modules test_be_session_cache_ttl_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_proactive)
- (libraries agent_core_test_deps)
- (modules test_be_proactive)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_proactive_ai)
- (libraries agent_core_test_deps)
- (modules test_be_proactive_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_proactive_google_sheets)
- (libraries agent_core_test_deps)
- (modules test_be_proactive_google_sheets)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_proactive_google_sheets_ai)
- (libraries agent_core_test_deps)
- (modules test_be_proactive_google_sheets_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_o365_chat)
- (libraries agent_core_test_deps)
- (modules test_be_o365_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_o365_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_o365_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_o365_tools)
- (libraries agent_core_test_deps)
- (modules test_be_o365_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_o365_style)
- (libraries agent_core_test_deps)
- (modules test_be_o365_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_o365_tool_input)
- (libraries agent_core_test_deps)
- (modules test_be_o365_tool_input)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_o365_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_o365_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_oauth_drive)
- (libraries agent_core_test_deps)
- (modules test_be_oauth_drive)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_oauth_drive_ai)
- (libraries agent_core_test_deps)
- (modules test_be_oauth_drive_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_oauth_sheets)
- (libraries agent_core_test_deps)
- (modules test_be_oauth_sheets)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_oauth_sheets_ai)
- (libraries agent_core_test_deps)
- (modules test_be_oauth_sheets_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_oauth_forms)
- (libraries agent_core_test_deps)
- (modules test_be_oauth_forms)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_oauth_forms_ai)
- (libraries agent_core_test_deps)
- (modules test_be_oauth_forms_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_cognition)
- (libraries agent_core_test_deps)
- (modules test_be_cognition)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_cognition_ai)
- (libraries agent_core_test_deps)
- (modules test_be_cognition_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_cognition_search)
- (libraries agent_core_test_deps)
- (modules test_be_cognition_search)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_cognition_search_ai)
- (libraries agent_core_test_deps)
- (modules test_be_cognition_search_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_graph_chat)
- (libraries agent_core_test_deps)
- (modules test_be_graph_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_graph_tools)
- (libraries agent_core_test_deps)
- (modules test_be_graph_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_graph_style)
- (libraries agent_core_test_deps)
- (modules test_be_graph_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_graph_tool_input)
- (libraries agent_core_test_deps)
- (modules test_be_graph_tool_input)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_graph_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_graph_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_graph_tool_input_ai)
- (libraries agent_core_test_deps)
- (modules test_be_graph_tool_input_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_groq_chat)
- (libraries agent_core_test_deps)
- (modules test_be_groq_chat)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_groq_chat_opt_out)
- (libraries agent_core_test_deps)
- (modules test_be_groq_chat_opt_out)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_groq_tools)
- (libraries agent_core_test_deps)
- (modules test_be_groq_tools)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_groq_style)
- (libraries agent_core_test_deps)
- (modules test_be_groq_style)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_groq_tool_input)
- (libraries agent_core_test_deps)
- (modules test_be_groq_tool_input)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_groq_style_ai)
- (libraries agent_core_test_deps)
- (modules test_be_groq_style_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_groq_live)
- (libraries agent_core_test_deps)
- (modules test_be_groq_live)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_groq_live_ai)
- (libraries agent_core_test_deps)
- (modules test_be_groq_live_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_hybrid_prompt)
- (libraries agent_core_test_deps)
- (modules test_be_hybrid_prompt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_hybrid_prompt_ai)
- (libraries agent_core_test_deps)
- (modules test_be_hybrid_prompt_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_hybrid_prompt_cache)
- (libraries agent_core_test_deps)
- (modules test_be_hybrid_prompt_cache)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_hybrid_prompt_cache_ai)
- (libraries agent_core_test_deps)
- (modules test_be_hybrid_prompt_cache_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_model_preferences_fallback)
- (libraries agent_core_test_deps)
- (modules test_be_model_preferences_fallback)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_model_preferences_fallback_ai)
- (libraries agent_core_test_deps)
- (modules test_be_model_preferences_fallback_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_json_to_xml)
- (libraries agent_core_test_deps)
- (modules test_be_json_to_xml)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_json_to_xml_ai)
- (libraries agent_core_test_deps)
- (modules test_be_json_to_xml_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_agent_bean)
- (libraries agent_core_test_deps)
- (modules test_be_agent_bean)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_agent_bean_ai)
- (libraries agent_core_test_deps)
- (modules test_be_agent_bean_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_chat_draft)
- (libraries agent_core_test_deps)
- (modules test_be_chat_draft)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_chat_draft_ai)
- (libraries agent_core_test_deps)
- (modules test_be_chat_draft_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_messages_ai)
- (libraries agent_core_test_deps)
- (modules test_be_messages_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_chat_fragments_ai)
- (libraries agent_core_test_deps)
- (modules test_be_chat_fragments_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_image_generation_ai)
- (libraries agent_core_test_deps)
- (modules test_be_image_generation_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_telemetry_ai)
- (libraries agent_core_test_deps)
- (modules test_be_telemetry_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_be_local_files_ai)
- (libraries agent_core_test_deps)
- (modules test_be_local_files_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_backend_openai_codec)
- (libraries agent_core_test_deps)
- (modules test_backend_openai_codec)
- (flags (:standard -w -a)))
-
-(executable
- (name test_backend_anthropic_codec)
- (libraries agent_core_test_deps)
- (modules test_backend_anthropic_codec)
- (flags (:standard -w -a)))
-
-(executable
- (name test_backend_google_codec)
- (libraries agent_core_test_deps)
- (modules test_backend_google_codec)
- (flags (:standard -w -a)))
-
-(executable
- (name test_backend_codec_common)
- (libraries agent_core_test_deps)
- (modules test_backend_codec_common)
- (flags (:standard -w -a)))
-
-(executable
- (name test_snapshot_provider_serialization)
- (libraries agent_core_test_deps)
- (modules test_snapshot_provider_serialization)
- (flags (:standard -w -a)))
-
-(executable
- (name test_backend_openai_codec_ai)
- (libraries agent_core_test_deps)
- (modules test_backend_openai_codec_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_backend_anthropic_codec_ai)
- (libraries agent_core_test_deps)
- (modules test_backend_anthropic_codec_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_backend_google_codec_ai)
- (libraries agent_core_test_deps)
- (modules test_backend_google_codec_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_backend_codec_common_ai)
- (libraries agent_core_test_deps)
- (modules test_backend_codec_common_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_snapshot_provider_serialization_ai)
- (libraries agent_core_test_deps)
- (modules test_snapshot_provider_serialization_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_registry)
- (libraries agent_core_test_deps)
- (modules test_tool_registry)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_bean)
- (libraries agent_core_test_deps)
- (modules test_tool_bean)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_call_capture)
- (libraries agent_core_test_deps)
- (modules test_tool_call_capture)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_capture)
- (libraries agent_core_test_deps)
- (modules test_tool_result_capture)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_call_describe)
- (libraries agent_core_test_deps)
- (modules test_tool_call_describe)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_describe)
- (libraries agent_core_test_deps)
- (modules test_tool_result_describe)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_json)
- (libraries agent_core_test_deps)
- (modules test_tool_json)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_json_ai)
- (libraries agent_core_test_deps)
- (modules test_tool_json_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_shrink)
- (libraries agent_core_test_deps)
- (modules test_tool_result_shrink)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_shrink_ai)
- (libraries agent_core_test_deps)
- (modules test_tool_result_shrink_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_eio_exception)
- (libraries agent_core_test_deps)
- (modules test_tool_eio_exception)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_eio_exception_ai)
- (libraries agent_core_test_deps)
- (modules test_tool_eio_exception_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_audit)
- (libraries agent_core_test_deps)
- (modules test_tool_result_audit)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_audit_ai)
- (libraries agent_core_test_deps)
- (modules test_tool_result_audit_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_audit_json)
- (libraries agent_core_test_deps)
- (modules test_tool_result_audit_json)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_audit_json_ai)
- (libraries agent_core_test_deps)
- (modules test_tool_result_audit_json_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_structured)
- (libraries agent_core_test_deps)
- (modules test_tool_result_structured)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_structured_ai)
- (libraries agent_core_test_deps)
- (modules test_tool_result_structured_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_audit_ai_xml)
- (libraries agent_core_test_deps)
- (modules test_tool_result_audit_ai_xml)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_audit_xml)
- (libraries agent_core_test_deps)
- (modules test_tool_result_audit_xml)
- (flags (:standard -w -a)))
-
-(executable
- (name test_tool_result_audit_xml_ai)
- (libraries agent_core_test_deps)
- (modules test_tool_result_audit_xml_ai)
- (flags (:standard -w -a)))
-
-(executable
+(test
  (name test_resource_scoped_execution)
- (libraries agent_core_test_deps)
  (modules test_resource_scoped_execution)
- (flags (:standard -w -a)))
+ (libraries agent_core_test_deps agent_core alcotest))
 
 ; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
 ; ---- (1) compile failures — not wired until bodies are fixed ----
@@ -1434,3863 +72,720 @@
 (tests
  (names
   test_metrics_aggregating
-  test_util
-  test_llm_provider_mock
-  test_be_cached
-  test_image_describe
-  test_agent_prompt_only
-  test_agent_cached_chats
-  test_agent_summary_blocks
-  test_agent_shell
-  test_agent_tool_echo
-  test_agent_stream_chat
-  test_agent_full_state
-  test_agent_full_state_alt
-  test_agent_full_state_tests_util
-  test_agent_steps
-  test_agent_input_request
-  test_agent_input_response
-  test_agent_input_usage
-  test_agent_input_usage_alt
-  test_agent_message_archive
-  test_be_openai_chat
-  test_be_openai_chat_opt_out
-  test_be_openai_chat_zero_data
-  test_be_openai_chat_images
-  test_be_openai_images_generate
-  test_be_openai_images_edit
-  test_be_openai_images_edit_ai
-  test_be_openai_images_variation
-  test_be_openai_responses
-  test_be_openai_responses_images
-  test_be_openai_local_files
-  test_be_anthropic_chat
-  test_be_anthropic_chat_opt_out
-  test_be_anthropic_tools
-  test_be_anthropic_stream
-  test_be_anthropic_style
-  test_be_anthropic_style_ai
-  test_be_anthropic_fragments
-  test_be_anthropic_backoff
-  test_be_google_chat
-  test_be_google_chat_opt_out
-  test_be_google_tools
-  test_be_google_style
-  test_be_google_tool_input
-  test_be_google_tool_input_ai
-  test_be_google_style_ai
-  test_be_gcp_options
-  test_be_cost_mode
-  test_be_messages
-  test_be_chat_fragments
-  test_be_image_generation
-  test_be_telemetry
-  test_be_google_drive
-  test_be_google_drive_ai
-  test_be_google_sheets
-  test_be_google_sheets_ai
-  test_be_google_forms
-  test_be_google_forms_ai
-  test_be_gcp_options_default
-  test_be_gcp_options_default_ai
-  test_be_prompts
-  test_be_local_files
-  test_be_xai_chat
-  test_be_xai_chat_opt_out
-  test_be_xai_chat_stream
-  test_be_xai_tools
-  test_be_xai_style
-  test_be_xai_tool_input
-  test_be_xai_style_ai
-  test_be_mistral_chat
-  test_be_mistral_chat_opt_out
-  test_be_mistral_tools
-  test_be_mistral_style
-  test_be_mistral_tool_input
-  test_be_mistral_style_ai
-  test_be_ollama_chat
-  test_be_ollama_chat_opt_out
-  test_be_ollama_tools
-  test_be_ollama_style
-  test_be_ollama_tool_input
-  test_be_ollama_style_ai
-  test_be_azure_chat
-  test_be_azure_chat_opt_out
-  test_be_azure_tools
-  test_be_azure_style
-  test_be_azure_style_ai
-  test_be_azure_tool_input
-  test_be_azure_tool_input_ai
-  test_be_azure_stream
-  test_be_be_backup
-  test_be_session_cache
-  test_be_model_preferences
-  test_be_local_env
-  test_be_local_env_ai
-  test_be_error_recovery
-  test_be_error_recovery_ai
-  test_be_streaming_events
-  test_be_streaming_events_ai
-  test_be_multi_provider
-  test_be_multi_provider_ai
-  test_be_provider_capabilities
-  test_be_provider_capabilities_ai
-  test_be_routing
-  test_be_routing_ai
-  test_be_nested_backends
-  test_be_nested_backends_ai
-  test_be_provider_order
-  test_be_provider_order_ai
-  test_be_no_lock
-  test_be_no_lock_ai
-  test_be_max_messages
-  test_be_fallback_retry
-  test_be_fallback_retry_ai
-  test_be_aliases
-  test_be_aliases_ai
-  test_be_nested_backends_b
-  test_be_nested_backends_b_ai
-  test_be_nested_backends_c
-  test_be_nested_backends_c_ai
-  test_be_retry_clock
-  test_be_retry_clock_ai
-  test_be_openai_responses_state
-  test_be_openai_responses_state_ai
-  test_be_openai_responses_reasoning
-  test_be_openai_responses_reasoning_ai
-  test_be_openai_responses_images_ai
-  test_be_openai_tool_messages
-  test_be_openai_tool_messages_ai
-  test_be_anthropic_thinking
-  test_be_anthropic_thinking_ai
-  test_be_anthropic_tool_result
-  test_be_anthropic_tool_result_ai
-  test_be_google_drive_files
-  test_be_google_drive_files_ai
-  test_be_json_schema
-  test_be_json_schema_ai
-  test_be_google_drive_about
-  test_be_google_drive_about_ai
-  test_be_multimodal_fragments
-  test_be_multimodal_fragments_ai
-  test_be_openai_files
-  test_be_openai_files_ai
-  test_be_field_null
-  test_be_field_null_ai
-  test_be_head_parameters
-  test_be_head_parameters_ai
-  test_be_session_memory
-  test_be_session_memory_ai
-  test_be_session_cache_ttl
-  test_be_session_cache_ttl_ai
-  test_be_proactive
-  test_be_proactive_ai
-  test_be_proactive_google_sheets
-  test_be_proactive_google_sheets_ai
-  test_be_o365_chat
-  test_be_o365_chat_opt_out
-  test_be_o365_tools
-  test_be_o365_style
-  test_be_o365_tool_input
-  test_be_o365_style_ai
-  test_be_oauth_drive
-  test_be_oauth_drive_ai
-  test_be_oauth_sheets
-  test_be_oauth_sheets_ai
-  test_be_oauth_forms
-  test_be_oauth_forms_ai
-  test_be_cognition
-  test_be_cognition_ai
-  test_be_cognition_search
-  test_be_cognition_search_ai
-  test_be_graph_chat
-  test_be_graph_tools
-  test_be_graph_style
-  test_be_graph_tool_input
-  test_be_graph_style_ai
-  test_be_graph_tool_input_ai
-  test_be_groq_chat
-  test_be_groq_chat_opt_out
-  test_be_groq_tools
-  test_be_groq_style
-  test_be_groq_tool_input
-  test_be_groq_style_ai
-  test_be_groq_live
-  test_be_groq_live_ai
-  test_be_hybrid_prompt
-  test_be_hybrid_prompt_ai
-  test_be_hybrid_prompt_cache
-  test_be_hybrid_prompt_cache_ai
-  test_be_model_preferences_fallback
-  test_be_model_preferences_fallback_ai
-  test_be_json_to_xml
-  test_be_json_to_xml_ai
-  test_be_agent_bean
-  test_be_agent_bean_ai
-  test_be_chat_draft
-  test_be_chat_draft_ai
-  test_be_messages_ai
-  test_be_chat_fragments_ai
-  test_be_image_generation_ai
-  test_be_telemetry_ai
-  test_be_local_files_ai
+  test_modality
+  test_inline_reasoning_split
+  test_capabilities
+  test_agent_card
+  test_agent_lifecycle
+  test_agent_pipeline
+  test_agent_periodic_cleanup
+  test_agent_race
+  test_agent_core
+  test_agent_stream
+  test_agent_turn
+  test_agent_tools_index
+  test_api_dispatch
+  test_tool_execution
+  test_async_agent
   test_backend_openai_codec
-  test_backend_anthropic_codec
-  test_backend_google_codec
-  test_backend_codec_common
+  test_provider_agnostic_reasoning_replay
+  test_backend_glm_coverage
+  test_backend_gemini
   test_snapshot_provider_serialization
-  test_backend_openai_codec_ai
-  test_backend_anthropic_codec_ai
-  test_backend_google_codec_ai
-  test_backend_codec_common_ai
-  test_snapshot_provider_serialization_ai
-  test_tool_registry
-  test_tool_bean
-  test_tool_call_capture
-  test_tool_result_capture
-  test_tool_call_describe
-  test_tool_result_describe
-  test_tool_json
-  test_tool_json_ai
-  test_tool_result_shrink
-  test_tool_result_shrink_ai
-  test_tool_eio_exception
-  test_tool_eio_exception_ai
-  test_tool_result_audit
-  test_tool_result_audit_ai
-  test_tool_result_audit_json
-  test_tool_result_audit_json_ai
-  test_tool_result_structured
-  test_tool_result_structured_ai
-  test_tool_result_audit_ai_xml
-  test_tool_result_audit_xml
-  test_tool_result_audit_xml_ai
-  test_resource_scoped_execution)
- (modules agent_core_test_deps
+  test_thinking_control_dialects
+  test_body_timeout
+  test_cache
+  test_canonical_tool
+  test_capabilities_wiring
+  test_checkpoint
+  test_checkpoint_objects
+  test_clone
+  test_complete_ext
+  test_context
+  test_context_concurrency
+  test_context_flow_proof
+  test_discovery
+  test_discovery_http
+  test_e2e_v024
+  test_eio_cancellability
+  test_elicitation
+  test_error
+  test_error_domain
+  test_eval_stats
+  test_event_bus
+  test_event_envelope
+  test_execution_json
+  test_schema_surface_index
+  test_fs_result
+  test_gemini_edge_cases
+  test_harness
+  test_harness_deep
+  test_hooks
+  test_hooks_integration
+  test_http_client
+  test_initial_messages
+  test_injection
+  test_integration
+  test_llm_cache
+  test_llm_provider_error
+  test_log
+  test_mcp
+  test_mcp_coverage
+  test_mcp_deep
+  test_mcp_integration
+  test_mcp_session
+  test_metrics
+  test_model_catalog_default
+  test_model_catalog_composition
+  test_request_pricing_snapshot
+  test_model_identifiers
+  test_multimodal
+  test_multivendor_events
+  test_multivendor_live
+  test_otel_export
+  test_otel_tracer
+  test_pipeline
+  test_pipeline_common_coverage
+  test_pipeline_deep
+  test_pipeline_illegal_hook
+  test_periodic_suffix
+  test_pipeline_metrics
+  test_provider
+  test_provider_admission
+  test_provider_failure_attribution
+  test_provider_catalog_coverage
+  test_provider_config
+  test_provider_runtime_binding
+  test_provider_registry
+  test_raw_trace
+  test_raw_trace_deep
+  test_retry
+  test_session
+  test_session_advanced
+  test_session_resume
+  test_sessions_cov2
+  test_sessions_types
+  test_sessions_types_deep
+  test_skill_document
+  test_skill_registry
+  test_stream_accumulator
+  test_streaming_cov
+  test_streaming_edge_cases
+  test_streaming_coverage
+  test_streaming_keepalive_idle
+  test_streaming_openai
+  test_streaming_summary
+  test_structured
+  test_structured_coverage
+  test_structured_deep
+  test_structured_ext
+  test_structured_stream
+  test_tool
+  test_tool_input_schema_fidelity
+  test_tool_input_validation
+  test_tool_schema_decode_boundary
+  test_tracing
+  test_trajectory
+  test_trajectory_unit
+  test_turn_params
+  test_usage_accumulation
+  test_types
+  test_util)
+ (modules
+  model_catalog_test_support
+  provider_mock
   test_metrics_aggregating
-  test_util
-  test_llm_provider_mock
-  test_be_cached
-  test_image_describe
-  test_agent_prompt_only
-  test_agent_cached_chats
-  test_agent_summary_blocks
-  test_agent_shell
-  test_agent_tool_echo
-  test_agent_stream_chat
-  test_agent_full_state
-  test_agent_full_state_alt
-  test_agent_full_state_tests_util
-  test_agent_steps
-  test_agent_input_request
-  test_agent_input_response
-  test_agent_input_usage
-  test_agent_input_usage_alt
-  test_agent_message_archive
-  test_be_openai_chat
-  test_be_openai_chat_opt_out
-  test_be_openai_chat_zero_data
-  test_be_openai_chat_images
-  test_be_openai_images_generate
-  test_be_openai_images_edit
-  test_be_openai_images_edit_ai
-  test_be_openai_images_variation
-  test_be_openai_responses
-  test_be_openai_responses_images
-  test_be_openai_local_files
-  test_be_anthropic_chat
-  test_be_anthropic_chat_opt_out
-  test_be_anthropic_tools
-  test_be_anthropic_stream
-  test_be_anthropic_style
-  test_be_anthropic_style_ai
-  test_be_anthropic_fragments
-  test_be_anthropic_backoff
-  test_be_google_chat
-  test_be_google_chat_opt_out
-  test_be_google_tools
-  test_be_google_style
-  test_be_google_tool_input
-  test_be_google_tool_input_ai
-  test_be_google_style_ai
-  test_be_gcp_options
-  test_be_cost_mode
-  test_be_messages
-  test_be_chat_fragments
-  test_be_image_generation
-  test_be_telemetry
-  test_be_google_drive
-  test_be_google_drive_ai
-  test_be_google_sheets
-  test_be_google_sheets_ai
-  test_be_google_forms
-  test_be_google_forms_ai
-  test_be_gcp_options_default
-  test_be_gcp_options_default_ai
-  test_be_prompts
-  test_be_local_files
-  test_be_xai_chat
-  test_be_xai_chat_opt_out
-  test_be_xai_chat_stream
-  test_be_xai_tools
-  test_be_xai_style
-  test_be_xai_tool_input
-  test_be_xai_style_ai
-  test_be_mistral_chat
-  test_be_mistral_chat_opt_out
-  test_be_mistral_tools
-  test_be_mistral_style
-  test_be_mistral_tool_input
-  test_be_mistral_style_ai
-  test_be_ollama_chat
-  test_be_ollama_chat_opt_out
-  test_be_ollama_tools
-  test_be_ollama_style
-  test_be_ollama_tool_input
-  test_be_ollama_style_ai
-  test_be_azure_chat
-  test_be_azure_chat_opt_out
-  test_be_azure_tools
-  test_be_azure_style
-  test_be_azure_style_ai
-  test_be_azure_tool_input
-  test_be_azure_tool_input_ai
-  test_be_azure_stream
-  test_be_be_backup
-  test_be_session_cache
-  test_be_model_preferences
-  test_be_local_env
-  test_be_local_env_ai
-  test_be_error_recovery
-  test_be_error_recovery_ai
-  test_be_streaming_events
-  test_be_streaming_events_ai
-  test_be_multi_provider
-  test_be_multi_provider_ai
-  test_be_provider_capabilities
-  test_be_provider_capabilities_ai
-  test_be_routing
-  test_be_routing_ai
-  test_be_nested_backends
-  test_be_nested_backends_ai
-  test_be_provider_order
-  test_be_provider_order_ai
-  test_be_no_lock
-  test_be_no_lock_ai
-  test_be_max_messages
-  test_be_fallback_retry
-  test_be_fallback_retry_ai
-  test_be_aliases
-  test_be_aliases_ai
-  test_be_nested_backends_b
-  test_be_nested_backends_b_ai
-  test_be_nested_backends_c
-  test_be_nested_backends_c_ai
-  test_be_retry_clock
-  test_be_retry_clock_ai
-  test_be_openai_responses_state
-  test_be_openai_responses_state_ai
-  test_be_openai_responses_reasoning
-  test_be_openai_responses_reasoning_ai
-  test_be_openai_responses_images_ai
-  test_be_openai_tool_messages
-  test_be_openai_tool_messages_ai
-  test_be_anthropic_thinking
-  test_be_anthropic_thinking_ai
-  test_be_anthropic_tool_result
-  test_be_anthropic_tool_result_ai
-  test_be_google_drive_files
-  test_be_google_drive_files_ai
-  test_be_json_schema
-  test_be_json_schema_ai
-  test_be_google_drive_about
-  test_be_google_drive_about_ai
-  test_be_multimodal_fragments
-  test_be_multimodal_fragments_ai
-  test_be_openai_files
-  test_be_openai_files_ai
-  test_be_field_null
-  test_be_field_null_ai
-  test_be_head_parameters
-  test_be_head_parameters_ai
-  test_be_session_memory
-  test_be_session_memory_ai
-  test_be_session_cache_ttl
-  test_be_session_cache_ttl_ai
-  test_be_proactive
-  test_be_proactive_ai
-  test_be_proactive_google_sheets
-  test_be_proactive_google_sheets_ai
-  test_be_o365_chat
-  test_be_o365_chat_opt_out
-  test_be_o365_tools
-  test_be_o365_style
-  test_be_o365_tool_input
-  test_be_o365_style_ai
-  test_be_oauth_drive
-  test_be_oauth_drive_ai
-  test_be_oauth_sheets
-  test_be_oauth_sheets_ai
-  test_be_oauth_forms
-  test_be_oauth_forms_ai
-  test_be_cognition
-  test_be_cognition_ai
-  test_be_cognition_search
-  test_be_cognition_search_ai
-  test_be_graph_chat
-  test_be_graph_tools
-  test_be_graph_style
-  test_be_graph_tool_input
-  test_be_graph_style_ai
-  test_be_graph_tool_input_ai
-  test_be_groq_chat
-  test_be_groq_chat_opt_out
-  test_be_groq_tools
-  test_be_groq_style
-  test_be_groq_tool_input
-  test_be_groq_style_ai
-  test_be_groq_live
-  test_be_groq_live_ai
-  test_be_hybrid_prompt
-  test_be_hybrid_prompt_ai
-  test_be_hybrid_prompt_cache
-  test_be_hybrid_prompt_cache_ai
-  test_be_model_preferences_fallback
-  test_be_model_preferences_fallback_ai
-  test_be_json_to_xml
-  test_be_json_to_xml_ai
-  test_be_agent_bean
-  test_be_agent_bean_ai
-  test_be_chat_draft
-  test_be_chat_draft_ai
-  test_be_messages_ai
-  test_be_chat_fragments_ai
-  test_be_image_generation_ai
-  test_be_telemetry_ai
-  test_be_local_files_ai
+  test_modality
+  test_inline_reasoning_split
+  test_capabilities
+  test_agent_card
+  test_agent_lifecycle
+  test_agent_pipeline
+  test_agent_periodic_cleanup
+  test_agent_race
+  test_agent_core
+  test_agent_stream
+  test_agent_turn
+  test_agent_tools_index
+  test_api_dispatch
+  test_tool_execution
+  test_async_agent
   test_backend_openai_codec
-  test_backend_anthropic_codec
-  test_backend_google_codec
-  test_backend_codec_common
+  test_provider_agnostic_reasoning_replay
+  test_backend_glm_coverage
+  test_backend_gemini
   test_snapshot_provider_serialization
-  test_backend_openai_codec_ai
-  test_backend_anthropic_codec_ai
-  test_backend_google_codec_ai
-  test_backend_codec_common_ai
-  test_snapshot_provider_serialization_ai
-  test_tool_registry
-  test_tool_bean
-  test_tool_call_capture
-  test_tool_result_capture
-  test_tool_call_describe
-  test_tool_result_describe
-  test_tool_json
-  test_tool_json_ai
-  test_tool_result_shrink
-  test_tool_result_shrink_ai
-  test_tool_eio_exception
-  test_tool_eio_exception_ai
-  test_tool_result_audit
-  test_tool_result_audit_ai
-  test_tool_result_audit_json
-  test_tool_result_audit_json_ai
-  test_tool_result_structured
-  test_tool_result_structured_ai
-  test_tool_result_audit_ai_xml
-  test_tool_result_audit_xml
-  test_tool_result_audit_xml_ai
-  test_resource_scoped_execution)
+  test_thinking_control_dialects
+  test_body_timeout
+  test_cache
+  test_canonical_tool
+  test_capabilities_wiring
+  test_checkpoint
+  test_checkpoint_objects
+  test_clone
+  test_complete_ext
+  test_context
+  test_context_concurrency
+  test_context_flow_proof
+  test_discovery
+  test_discovery_http
+  test_e2e_v024
+  test_eio_cancellability
+  test_elicitation
+  test_error
+  test_error_domain
+  test_eval_stats
+  test_event_bus
+  test_event_envelope
+  test_execution_json
+  test_schema_surface_index
+  test_fs_result
+  test_gemini_edge_cases
+  test_harness
+  test_harness_deep
+  test_hooks
+  test_hooks_integration
+  test_http_client
+  test_initial_messages
+  test_injection
+  test_integration
+  test_llm_cache
+  test_llm_provider_error
+  test_log
+  test_mcp
+  test_mcp_coverage
+  test_mcp_deep
+  test_mcp_integration
+  test_mcp_session
+  test_metrics
+  test_model_catalog_default
+  test_model_catalog_composition
+  test_request_pricing_snapshot
+  test_model_identifiers
+  test_multimodal
+  test_multivendor_events
+  test_multivendor_live
+  test_otel_export
+  test_otel_tracer
+  test_pipeline
+  test_pipeline_common_coverage
+  test_pipeline_deep
+  test_pipeline_illegal_hook
+  test_periodic_suffix
+  test_pipeline_metrics
+  test_provider
+  test_provider_admission
+  test_provider_failure_attribution
+  test_provider_catalog_coverage
+  test_provider_config
+  test_provider_runtime_binding
+  test_provider_registry
+  test_raw_trace
+  test_raw_trace_deep
+  test_retry
+  test_session
+  test_session_advanced
+  test_session_resume
+  test_sessions_cov2
+  test_sessions_types
+  test_sessions_types_deep
+  test_skill_document
+  test_skill_registry
+  test_stream_accumulator
+  test_streaming_cov
+  test_streaming_edge_cases
+  test_streaming_coverage
+  test_streaming_keepalive_idle
+  test_streaming_openai
+  test_streaming_summary
+  test_structured
+  test_structured_coverage
+  test_structured_deep
+  test_structured_ext
+  test_structured_stream
+  test_tool
+  test_tool_input_schema_fidelity
+  test_tool_input_validation
+  test_tool_schema_decode_boundary
+  test_tracing
+  test_trajectory
+  test_trajectory_unit
+  test_turn_params
+  test_usage_accumulation
+  test_types
+  test_util)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
  (deps ../docs/example-capability-manifest.json ../models.toml)
  (action
   (run %{test})))
 
-(executable
+; The recursive execution foundation is deliberately private until AGENT_CORE owns
+; its production writer. This regression suite uses Dune's library-internal
+; alias only inside the repository; no installed Agent_core API exposes it.
+
+(test
  (name test_execution_journal)
- (libraries agent_core_test_deps)
  (modules test_execution_journal)
- (flags (:standard -w -a)))
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-; Spike reference: dune's rule for which artifacts are kept in _build. Used
-; by the study plan in docs/evidence/studies/2026-11-13-execution-journal-spike/README.md.
-(executable
- (name test_dune_artifact_rule)
- (libraries agent_core_test_deps)
- (modules test_dune_artifact_rule)
- (flags (:standard -w -a)))
+(test
+ (name test_execution_codec_executor)
+ (modules test_execution_codec_executor)
+ (libraries agent_core_test_deps agent_core alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-(executable
- (name test_execution_journal_helper)
- (libraries agent_core_test_deps)
- (modules test_execution_journal_helper)
- (flags (:standard -w -a)))
-
-; Reference implementation kept for the spike; see
-; docs/evidence/studies/2026-11-13-execution-journal-spike/README.md.
-(executable
- (name test_execution_journal_helper_std)
- (libraries agent_core_test_deps)
- (modules test_execution_journal_helper_std)
- (flags (:standard -w -a)))
-
-(executable
+(test
  (name test_execution_event_store)
- (libraries agent_core_test_deps alcotest  masc.agent_core.digest eio_main)
  (modules test_execution_event_store)
- (flags (:standard -w -a)))
+ (libraries agent_core_test_deps agent_core llm_provider alcotest  masc.agent_core.digest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-(executable
- (name test_prompt_cache)
- (libraries agent_core_test_deps)
- (modules test_prompt_cache)
- (flags (:standard -w -a)))
+(test
+ (name test_execution_projection)
+ (modules test_execution_projection)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-(executable
- (name test_prompt_cache_ai)
- (libraries agent_core_test_deps)
- (modules test_prompt_cache_ai)
- (flags (:standard -w -a)))
+(test
+ (name test_agent_host_stop)
+ (modules test_agent_host_stop)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-(executable
- (name test_snapshot_provider_tree)
- (libraries agent_core_test_deps)
- (modules test_snapshot_provider_tree)
- (flags (:standard -w -a)))
+(test
+ (name test_agent_cleanup_diagnostics)
+ (modules test_agent_cleanup_diagnostics)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (deps ../models.toml))
 
-(executable
- (name test_snapshot_provider_tree_ai)
- (libraries agent_core_test_deps)
- (modules test_snapshot_provider_tree_ai)
- (flags (:standard -w -a)))
+(test
+ (name test_agent_uncollected_turn)
+ (modules test_agent_uncollected_turn)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-(executable
- (name test_http_request_stream)
- (libraries agent_core_test_deps)
- (modules test_http_request_stream)
- (flags (:standard -w -a)))
+(test
+ (name test_agent_ambient_execution)
+ (modules test_agent_ambient_execution)
+ (libraries agent_core_test_deps agent_core alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-(executable
- (name test_http_request_stream_ai)
- (libraries agent_core_test_deps)
- (modules test_http_request_stream_ai)
- (flags (:standard -w -a)))
+(test
+ (name test_execution_lane_writer)
+ (modules test_execution_lane_writer)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-; Spike reference for MASC test snapshots as cursor-paginated lists.
-(executable
- (name test_snapshot_provider_cursor_list)
- (libraries agent_core_test_deps)
- (modules test_snapshot_provider_cursor_list)
- (flags (:standard -w -a)))
+; QCheck-based property tests
 
-; Spike reference for MASC test snapshots as raw event streams.
-(executable
- (name test_snapshot_provider_raw_stream)
- (libraries agent_core_test_deps)
- (modules test_snapshot_provider_raw_stream)
- (flags (:standard -w -a)))
+(tests
+ (names
+  test_context_properties
+  test_property
+  test_property_advanced
+  test_tool_set)
+ (modules
+  test_context_properties
+  test_property
+  test_property_advanced
+  test_tool_set)
+ (libraries agent_core_test_deps agent_core alcotest qcheck-core qcheck-alcotest)
+ (deps ../models.toml)
+ (action
+  (run %{test})))
 
-; Candidate fault-judgment contract; see
-; docs/evidence/research/RFC-one-slot-fault-judgment-for-every-walk.md §4.
-(executable
- (name test_fault_judgment)
- (libraries agent_core_test_deps)
- (modules test_fault_judgment)
- (flags (:standard -w -a)))
+; Tests with extra dependencies — kept as individual stanzas
+; so the grouped (tests (names ...)) above does not need to pull
+; them into the rest of the suite.
 
-; Candidate fault-judgment contract with three candidates; see
-; docs/evidence/research/RFC-one-slot-fault-judgment-for-every-walk.md §4.
-(executable
- (name test_fault_judgment_three_candidates)
- (libraries agent_core_test_deps)
- (modules test_fault_judgment_three_candidates)
- (flags (:standard -w -a)))
+(test
+ (name test_streaming)
+ (modules test_streaming)
+ (libraries agent_core_test_deps agent_core alcotest))
 
-; Stable output snapshots for fast concurrent non-AI mock backends; see
-; docs/evidence/studies/2026-11-13-mock_backend-snapshots/README.md.
-(executable
- (name test_mock_backend_snapshots)
- (libraries agent_core_test_deps)
- (modules test_mock_backend_snapshots)
- (flags (:standard -w -a)))
+(test
+ (name test_provider_complete)
+ (modules test_provider_complete)
+ (deps ../models.toml)
+ (libraries agent_core_test_deps llm_provider alcotest eio_main))
 
-; Property test with randomized inputs; see
-; docs/evidence/studies/2026-11-13-mock_backend-snapshots/README.md.
-(executable
- (name test_mock_backend_property)
- (libraries agent_core_test_deps)
- (modules test_mock_backend_property)
- (flags (:standard -w -a)))
+(test
+ (name test_output_token_receipt)
+ (modules test_output_token_receipt)
+ (deps ../models.toml)
+ (libraries agent_core_test_deps llm_provider alcotest))
 
-; QCheck property test that rational and decimal presentations of the same
-; value stay equal after both full-AI and non-AI conversions. See
-; docs/evidence/studies/2026-11-13-mock_backend-snapshots/README.md.
-(executable
- (name test_mock_backend_qcheck)
- (libraries agent_core_test_deps qcheck)
- (modules test_mock_backend_qcheck)
- (flags (:standard -w -a)))
+(test
+ (name test_input_token_count)
+ (modules test_input_token_count)
+ (libraries agent_core_test_deps llm_provider alcotest))
 
-; QCheck property test that the execution-journal connector keeps;
-; see docs/evidence/studies/2026-11-13-execution-journal-spike/README.md.
-(executable
- (name test_execution_journal_qcheck)
- (libraries agent_core_test_deps qcheck)
- (modules test_execution_journal_qcheck)
- (flags (:standard -w -a)))
+(test
+ (name test_anthropic_input_token_count)
+ (modules test_anthropic_input_token_count)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
 
-(executable
- (name test_agent_input_request_ai)
- (libraries agent_core_test_deps)
- (modules test_agent_input_request_ai)
- (flags (:standard -w -a)))
+(test
+ (name test_prepared_completion_request_window)
+ (modules test_prepared_completion_request_window)
+ (libraries agent_core_test_deps llm_provider alcotest eio_main eio.mock))
 
-(executable
- (name test_async_heavy)
- (libraries agent_core_test_deps)
- (modules test_async_heavy)
- (flags (:standard -w -a)))
+(test
+ (name test_complete_admitted_window)
+ (modules test_complete_admitted_window)
+ (libraries agent_core_test_deps llm_provider alcotest eio_main eio.mock))
 
-(executable
- (name test_async_heavy_ai)
- (libraries agent_core_test_deps)
- (modules test_async_heavy_ai)
- (flags (:standard -w -a)))
+(test
+ (name test_exact_fit_call_window)
+ (modules test_exact_fit_call_window)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
 
+; Candidate_fault table (RFC-one-slot-fault-judgment-for-every-walk.md §4
+; step 1). #38913 added the file without a stanza, so it never compiled.
+(test
+ (name test_candidate_fault)
+ (modules test_candidate_fault)
+ (libraries agent_core_test_deps llm_provider))
+
+(test
+ (name test_exact_output_single_surface)
+ (modules test_exact_output_single_surface)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_exact_output_flow)
+ (modules test_exact_output_flow)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+
+(test
+ (name test_exact_output_renderers)
+ (modules test_exact_output_renderers)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_exact_output_resolver_snapshot)
+ (modules test_exact_output_resolver_snapshot)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_complete_http)
+ (modules test_complete_http)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+
+(test
+ (name test_http_client_cache)
+ (modules test_http_client_cache)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock mtime))
+
+(test
+ (name test_http_client_addresses)
+ (modules test_http_client_addresses)
+ (libraries agent_core_test_deps llm_provider alcotest eio_main))
+
+(test
+ (name test_http_client_request_not_delivered)
+ (modules test_http_client_request_not_delivered)
+ (libraries
+  agent_core_test_deps
+  llm_provider
+  alcotest
+  eio_main
+  eio.unix
+  tls
+  tls-eio
+  x509
+  mirage-crypto-rng
+  mirage-crypto-rng.unix
+  domain-name
+  ipaddr
+  ptime))
+
+; Own stanza: needs the mock clock/flow to drive deadline arithmetic without
+; wall-clock sleeping, and runs entirely on Eio_mock.Backend (no real IO).
+
+(test
+ (name test_sse_budget_anchor)
+ (modules test_sse_budget_anchor)
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
+
+; A slot granted as a waiter's deadline passes is owned, not dropped: the
+; mock clock orders the timer's wake-up ahead of the grant's.
+(test
+ (name test_slot_scheduler_deadline_ownership)
+ (modules test_slot_scheduler_deadline_ownership)
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
+
+; How a freed slot is shared between Priority and Standard waiters.
+(test
+ (name test_slot_scheduler_priority)
+ (modules test_slot_scheduler_priority)
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
+
+; Changing a scheduler's allowance while slots are held and waiters queue.
+(test
+ (name test_slot_scheduler_reconfigure)
+ (modules test_slot_scheduler_reconfigure)
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
+
+(test
+ (name test_slot_scheduler_queue_watch)
+ (modules test_slot_scheduler_queue_watch)
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
+
+(test
+ (name test_under_deadline)
+ (modules test_under_deadline)
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
+
+(test
+ (name test_tls_config_cache)
+ (modules test_tls_config_cache)
+ (libraries agent_core_test_deps llm_provider alcotest))
+
+(test
+ (name test_llm_provider_cov)
+ (modules test_llm_provider_cov)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_stop_reason_ssot)
+ (modules test_stop_reason_ssot)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_anthropic_reconcile)
+ (modules test_anthropic_reconcile)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_overflow_wire_e2e)
+ (modules test_overflow_wire_e2e)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_canonical_projections)
+ (modules test_canonical_projections)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_telemetry_event)
+ (modules test_telemetry_event)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_telemetry_pipeline)
+ (modules test_telemetry_pipeline)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_observability_default)
+ (modules test_observability_default)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_agent_advanced)
+ (modules test_agent_advanced)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_tool_results_appended_at)
+ (modules test_tool_results_appended_at)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+
+(test
+ (name test_api)
+ (modules test_api)
+ (libraries agent_core_test_deps agent_core alcotest))
+
+(test
+ (name test_full_pipeline_cov)
+ (modules test_full_pipeline_cov)
+ (libraries agent_core_test_deps agent_core alcotest cohttp-eio eio eio_main yojson))
+
+(test
+ (name test_event_integration)
+ (modules test_event_integration)
+ (libraries agent_core_test_deps agent_core alcotest cohttp-eio eio eio_main unix yojson))
+
+(test
+ (name test_agent_cancellation_tla_parity)
+ (modules test_agent_cancellation_tla_parity)
+ (libraries agent_core_test_deps agent_core alcotest))
+
+(tests
+ (names test_runtime_store_unit test_runtime_types)
+ (modules test_runtime_store_unit test_runtime_types)
+ (libraries agent_core_test_deps agent_core alcotest unix yojson)
+ (action
+  (run %{test})))
+
+(test
+ (name test_streaming_cut_cleanup)
+ (modules test_streaming_cut_cleanup)
+ (libraries agent_core_test_deps llm_provider alcotest eio eio_main))
+
+; Loopback listeners that accept and stay silent: the phase before the
+; response headers must end at a budget, TLS handshake included.
+(test
+ (name test_stream_pre_header_budget)
+ (modules test_stream_pre_header_budget)
+ (libraries agent_core_test_deps llm_provider alcotest cstruct eio eio_main))
+
+; A loopback listener that accepts and stays silent: the sync path ends the
+; wait for the response headers at the provider's connect budget.
+(test
+ (name test_complete_sync_connect_budget)
+ (modules test_complete_sync_connect_budget)
+ (libraries agent_core_test_deps llm_provider alcotest cstruct eio eio_main))
+
+(test
+ (name test_otel_tracer_fiber)
+ (modules test_otel_tracer_fiber)
+ (libraries agent_core_test_deps agent_core alcotest eio_main))
+
+(test
+ (name test_tls_cancellability)
+ (modules test_tls_cancellability)
+ (libraries
+  agent_core_test_deps
+  alcotest
+  eio
+  eio_main
+  tls
+  tls-eio
+  x509
+  mirage-crypto-rng.unix
+  domain-name
+  ptime))
+
+(test
+ (name test_media_document_admission)
+ (modules test_media_document_admission)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest fmt yojson))
+
+; Contract of the response body flow cohttp-eio returns: a chunk read in
+; several pieces arrives intact. Runs entirely on Eio_mock (no real IO).
+
+(test
+ (name test_cohttp_eio_body_flow)
+ (modules test_cohttp_eio_body_flow)
+ (libraries alcotest eio eio.mock cohttp-eio cstruct uri))
+
+(test
+ (name test_secret_redactor)
+ (modules test_secret_redactor)
+ (libraries llm_provider alcotest))
+
+; Compile these external consumers against the installed/public CMI boundary.
+; They must not import the private implementation modules behind Agent_core.
+(tests
+ (names test_public_tool_schedule test_public_pre_execution_gate)
+ (modules test_public_tool_schedule test_public_pre_execution_gate)
+ (libraries masc.agent_core))
+
+; Test assertions match the one case they check; see warning 4 in the root dune.
 (env
- (env-vars
-  (AGENT_CORE_TEST_237_MAX_MESSAGES 1)
-  (AGENT_CORE_TEST_237_SYSTEM_EVENT_TYPE "237.system-event")
-  (AGENT_CORE_TEST_237_SYSTEM_EVENT_QUEUE "237.system-event-queue")
-  (AGENT_CORE_TEST_237_SYSTEM_EVENT_BACKLOG 4)
-  (AGENT_CORE_TEST_237_SYSTEM_EVENT_BACKLOG_AI 8)))
+ (_
+  (flags
+   (:standard -w -4))))
+
+(test
+ (name test_glm_thinking_contract)
+ (modules test_glm_thinking_contract)
+ (libraries agent_core_test_deps llm_provider alcotest)
+ (deps ../models.toml))
+
+(test
+ (name test_response_replay)
+ (modules test_response_replay)
+ (libraries llm_provider alcotest))
+
+(test
+ (name test_response_phase_replay)
+ (modules test_response_phase_replay)
+ (libraries llm_provider alcotest yojson))
+
 
 (test
  (name test_agent_input_request)
- (package agent_core)
- (libraries test_agent_input_request))
+ (modules test_agent_input_request)
+ (libraries agent_core_base alcotest)
+ (flags (:standard -open Agent_core_base)))
 
 (test
- (name test_llm_provider_mock)
- (package agent_core))
+ (name test_cohere_schema_wire)
+ (modules test_cohere_schema_wire)
+ (libraries agent_core_test_deps alcotest))
 
 (test
- (name test_async_heavy)
- (package agent_core))
+ (name test_responses_reasoning_content)
+ (modules test_responses_reasoning_content)
+ (libraries agent_core llm_provider alcotest yojson))
 
 (test
- (name test_async_heavy_ai)
- (package agent_core))
-
-(executable
- (name test_agent_input_request_alt)
- (libraries agent_core_test_deps)
- (modules test_agent_input_request_alt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_shell)
- (libraries agent_core_test_deps)
- (modules test_probe_shell)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_sigint)
- (libraries agent_core_test_deps)
- (modules test_probe_sigint)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_signal_kill)
- (libraries agent_core_test_deps)
- (modules test_probe_signal_kill)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_nested_catch)
- (libraries agent_core_test_deps)
- (modules test_probe_nested_catch)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_nested_shell)
- (libraries agent_core_test_deps)
- (modules test_probe_nested_shell)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_throw)
- (libraries agent_core_test_deps)
- (modules test_probe_throw)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_kill_order)
- (libraries agent_core_test_deps)
- (modules test_probe_kill_order)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_deep_fiber)
- (libraries agent_core_test_deps)
- (modules test_probe_deep_fiber)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_cgroup)
- (libraries agent_core_test_deps)
- (modules test_probe_cgroup)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_cgroup_fail)
- (libraries agent_core_test_deps)
- (modules test_probe_cgroup_fail)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_reaper)
- (libraries agent_core_test_deps)
- (modules test_probe_reaper)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_reaper_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_reaper_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_eio_lifecycle)
- (libraries agent_core_test_deps)
- (modules test_probe_eio_lifecycle)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_eio_lifecycle_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_eio_lifecycle_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_children_example)
- (libraries agent_core_test_deps)
- (modules test_probe_children_example)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_children_example_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_children_example_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_child_signals)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_child_signals_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_child_signals_kill)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_kill)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_child_signals_kill_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_kill_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_two_children)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_two))
-
-(executable
- (name test_probe_two_children_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_two_ai))
-
-(executable
- (name test_probe_two_children_b)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_two_b))
-
-(executable
- (name test_probe_two_children_b_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_two_b))
-
-(executable
- (name test_probe_two_children_c)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_two))
-
-(executable
- (name test_probe_two_children_c_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_child_signals_two_ai))
-
-(executable
- (name test_probe_reaper_clone)
- (libraries agent_core_test_deps)
- (modules test_probe_reaper_clone)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_reaper_clone_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_reaper_clone_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_reaper_clone_publish)
- (libraries agent_core_test_deps)
- (modules test_probe_reaper_clone_publish)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_reaper_clone_publish_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_reaper_clone_ai))
-
-(executable
- (name test_probe_deep_fiber_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_deep_fiber_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_deep_fiber_eio)
- (libraries agent_core_test_deps)
- (modules test_probe_deep_fiber_eio)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_deep_fiber_eio_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_deep_fiber_ai))
-
-(executable
- (name test_probe_signalfd_test)
- (libraries agent_core_test_deps)
- (modules test_probe_signalfd_test)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_signalfd_test_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_signalfd_test_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_canary)
- (libraries agent_core_test_deps)
- (modules test_probe_canary)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_canary_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_canary_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_kill_backstop)
- (libraries agent_core_test_deps)
- (modules test_probe_kill_backstop)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_kill_backstop_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_kill_backstop_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stop)
- (libraries agent_core_test_deps)
- (modules test_probe_stop)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stop_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stop_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_passfd)
- (libraries agent_core_test_deps)
- (modules test_probe_not_passfd))
-
-(executable
- (name test_probe_passfd_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_not_passfd_ai))
-
-(executable
- (name test_probe_passfd_b)
- (libraries agent_core_test_deps)
- (modules test_probe_not_passfd_b))
-
-(executable
- (name test_probe_passfd_b_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_not_passfd_b_ai))
-
-(executable
- (name test_probe_passfd_c)
- (libraries agent_core_test_deps)
- (modules test_probe_not_passfd_c))
-
-(executable
- (name test_probe_passfd_c_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_not_passfd_c_ai))
-
-(executable
- (name test_probe_xattrs)
- (libraries agent_core_test_deps)
- (modules test_probe_xattrs)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_xattrs_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_xattrs_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_b)
- (flags (:standard -w -a)))
- turn(test_probe_fs_just_watch_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_b_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_b_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_c)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_c)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_c_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_c_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_d)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_d)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_d_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_d_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_e)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_c)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_just_watch_e_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_just_watch_c_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_b_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_b_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_c)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_c)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_c_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_c_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_d)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_d)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_d_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_d_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_e)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_e)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_e_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_e_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_f)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_f)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_f_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_f_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_g)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_g)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_g_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_g_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_h)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_h)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_h_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_h_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_i)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_i)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_i_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_i_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_j)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_j)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_j_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_j_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_k)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_k)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_k_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_k_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_l)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_l)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_l_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_l_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_m)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_m)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_m_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_m_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test probe_fs_watch_fail_open_h)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_h)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_n)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_n)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_n_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_n_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_o)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_o)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_o_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_o_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_p)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_p)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_p_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_p_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_q)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_q)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_q_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_q_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_r)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_r)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_r_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_r_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_s)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_s)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_s_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_s_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_t)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_t)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_t_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_t_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_u)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_u)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_u_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_u_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_v)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_v)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_v_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_v_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_w)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_w)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_w_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_w_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_x)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_x)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_x_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_x_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_y)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_y)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_y_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_y_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_z)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_z)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_z_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_z_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_aa)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_aa)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_aa_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_aa_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_bb)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_bb)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_bb_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_bb_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_cc)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_cc)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_cc_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_cc_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_dd)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_dd)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_dd_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_dd_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ee)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ee)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ee_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ee_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ff)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ff_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ff_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_gg)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_gg)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_gg_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_gg_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_hh)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_hh)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_hh_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_hh_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ii)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ii)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ii_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ii_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_jj)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_jj)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_jj_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_jj_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_kk)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_kk)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_kk_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_kk_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ll)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ll_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ll_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_mm)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_mm)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_mm_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_mm_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_nn)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_nn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_nn_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_nn_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_oo)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_oo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_oo_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_oo_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_pp)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_pp)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_pp_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_pp_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_qq)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_qq)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_qq_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_qq_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_rr)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_rr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_rr_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_rr_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ss)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ss)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ss_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ss_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_tt)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_tt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_tt_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_tt_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_uu)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_uu)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_uu_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_uu_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_vv)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_vv)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_vv_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_vv_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ww)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ww)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ww_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ww_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_xx)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_xx)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_xx_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_xx_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_yy)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_yy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_yy_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_yy_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_zz)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_zz)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_zz_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_zz_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_aaa)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_aaa)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_aaa_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_aaa_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_bbb)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_bbb)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_bbb_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_bbb_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ccc)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ccc)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ccc_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ccc_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ddd)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ddd)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ddd_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ddd_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_eee)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_eee)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_eee_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_eee_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_fff)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_fff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_fff_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_fff_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ggg)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ggg)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ggg_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ggg_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_hhh)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_hhh)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_hhh_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_hhh_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_iii)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_iii)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_iii_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_iii_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_jjj)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_jjj)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_jjj_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_jjj_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_kkk)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_kkk)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_kkk_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_kkk_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_lll)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_lll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_lll_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_lll_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_mmm)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_mmm)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_mmm_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_mmm_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_nnn)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_nnn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_nnn_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_nnn_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ooo)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ooo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ooo_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ooo_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ppp)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ppp)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ppp_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ppp_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_qqq)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_qqq)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_qqq_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_qqq_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_rrr)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_rrr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_rrr_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_rrr_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_sss)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_sss)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_sss_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_sss_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ttt)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ttt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ttt_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ttt_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_uuu)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_uuu)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_uuu_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_uuu_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_vvv)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_vvv)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_vvv_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_vvv_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_www)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_www)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_www_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_www_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_xxx)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_xxx)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_xxx_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_xxx_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_yyy)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_yyy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_yyy_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_yyy_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_zzz)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_zzz)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_zzz_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_zzz_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_aaaa)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_aaaa)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_aaaa_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_aaaa_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_bbbb)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_bbbb)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_bbbb_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_bbbb_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_cccc)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_cccc)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_cccc_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_cccc_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_dddd)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_dddd)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_dddd_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_dddd_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_eeee)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_eeee)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_eeee_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_eeee_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ffff)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ffff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ffff_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ffff_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_gggg)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_gggg)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_gggg_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_gggg_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_hhhh)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_hhhh)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_hhhh_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_hhhh_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_iiii)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_iiii)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_iiii_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_iiii_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_jjjj)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_jjjj)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_jjjj_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_jjjj_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_kkkk)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_kkkk)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_llll)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_llll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_llll_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_llll_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_mmmm)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_mmmm)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_mmmm_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_mmmm_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_nnnn)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_nnnn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_nnnn_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_nnnn_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_oooo)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_oooo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_oooo_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_oooo_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test probe_fs_watch_fail_open_pppp)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_pppp)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_pppp_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_pppp_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_qqqq)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_qqqq)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_qqqq_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_qqqq_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_rrrr)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_rrrr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_rrrr_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_rrrr_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ssss)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ssss)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ssss_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ssss_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_tttt)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_tttt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_tttt_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_tttt_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_uuuu)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_uuuu)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_uuuu_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_uuuu_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_vvvv)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_vvvv)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_vvvv_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_vvvv_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_wwww)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_wwww)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_wwww_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_wwww_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_xxxx)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_xxxx)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_xxxx_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_xxxx_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_yyyy)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_yyyy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_yyyy_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_yyyy_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_zzzz)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_zzzz)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_zzzz_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_zzzz_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_aaaaa)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_aaaaa)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_aaaaa_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_aaaaa_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_bbbbb)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_bbbbb)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_bbbbb_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_bbbbb_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ccccc)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ccccc)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ccccc_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ccccc_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ddddd)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ddddd)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ddddd_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ddddd_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_eeeee)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_eeeee)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_eeeee_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_eeeee_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_fffff)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_fffff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_fffff_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_fffff_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ggggg)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ggggg)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ggggg_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ggggg_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_hhhhh)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_hhhhh)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_hhhhh_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_hhhhh_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_iiiii)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_iiiii)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_jjjjj)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_jjjjj)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_kkkkk)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_kkkkk)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_lllll)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_lllll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_lllll_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_lllll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_mmmmm)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_mmmmm)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_mmmmm_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_mmmmm)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_nnnnn)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_nnnnn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_nnnnn_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_nnnnn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ooooo)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ooooo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ooooo_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ooooo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ppppp)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ppppp)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ppppp_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ppppp)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_qqqqq)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_qqqqq)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_qqqqq_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_qqqqq)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_rrrrr)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_rrrrr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_rrrrr_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_rrrrr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_sssss)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_sssss)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_sssss_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_sssss)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ttttt)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ttttt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_ttttt_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_ttttt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_uuuuu)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_uuuuu)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_uuuuu_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_uuuuu)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_vvvvv)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_vvvvv)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_vvvvv_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_vvvvv)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_wwwww)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_wwwww)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_wwwww_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_wwwww)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_xxxxx)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_xxxxx)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_yyyyy)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_yyyyy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_yyyyy_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_yyyyy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_zzzzz)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_zzzzz)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_zzzzz_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_zzzzz)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6aaaa)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6aaaa)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6bbbb)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6bbbb)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6cccc)
- (libraries agent_core_deps)
- (modules test_probe_fs_watch_fail_open_6cccc)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6dddd)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6dddd)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6eeee)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6eeee)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6ffff)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6ffff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6gggg)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6ffff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6hhhh)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6hhhh)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6iiii)
- (libraries agent_core_test_deps)
- (  modules test_probe_fs_watch_fail_open_6iiii)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6jjjj)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6jjjj)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6kkkk)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6kkkk)
- state=full_runtest=full
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6llll)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6llll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6mmmm)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_fail_open_6mmmm)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6nnnn)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6nnnn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6oooo)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6oooo)
- (flags 체크 (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6pppp)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6qqqq)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6qqqq)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6rrrr)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6rrrr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watchga_gc_fail_open_6ssss)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6ssss)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6tttt)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6tttt)
- ( CI (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6uuuu)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6uuuu)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6vvvv)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6vvvv)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6wwww)
- (libraries agent_core_test_deps)
- (m)))
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6xxxx)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6xxxx)
- (flags (:standard -w -a)))
-
-(executable
- (name test commit
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_6yyyy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_6zzzz)
- (libraries agent_core_test)라면
- (modules test_probe_fs_watch_fail_open_6zzzz)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7aaaa)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7aaaa)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7bbbb)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7ffff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7cccc)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7cccc)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7dddd)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7dddd)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7eeee)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_fail_open_7eeee)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7ffff)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7ffff)
- (flags (:standard -a -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7gggg)
- (libraries agent_core_test_deps)
- (n)))
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7hhhh)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7hhhh)
- (flags (:standard -w -a)))
-
-(executable
- (the name test_probe_fs_watch_fail_open_7iiii)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7iiii)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7jjjj)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7jjjj)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7kkkk)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7kkkk)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7llll)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7llll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs Ford 7mmmm)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7mmmm)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7nnnn)
- (libraries agent_core_test_fix)
- (modules test_probe_fs_watch_fail_open_7nnnn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7oooo)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7oooo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7pppp)
- (github libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7pppp)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7qqqq)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7qqqq)
- (flags (:standard -w -a)))
-
-(executable
- (n없이ame test_probe_fs_watch_fail_open_7rrrr)
- (libraries agent_core_test_deps)
- (modules test contra)ires agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7rrrr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7ssss)
- (libraries agent_core_test_deps)
- (monitor))
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7tttt)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7tttt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7uuuu)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_fail_open_7uuuu)
- (flags (:standard -w -w -a)))
- (libraries agent_core_test_deps)
-
-(executable
- (name test_probe_fs_watch_fail_open_7vvvv)
- (libraries agent_core_test_communication))
- (modules test_probe_fs_watch_fail_open_7vvvv)
- (modules test_probe_fs_watch_fail_open_7vvvv)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7wwww)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7wwww)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7xxxx)
- (libraries agent_core_test_deps)
- (modules test_probe_fs result)ires agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7xxxx)
- (stanza (mark "agent_core"))
-
-(executable
- (name test_probe_fs_watch_fail_open_7yyyy)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7yyyy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7zzzz)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7zzzz)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7aaaa_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7aaaa_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7bbbb_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7bbbb_b)
- (flags (:standard -w -a)))
-
-(executable
- (modules test_probe_fs_watch_fail_open_7cccc_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7cccc_b)
- (libraries agent_core_test_deps)
- (display test_probe_fs_watch_fail_open_7cccc_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7dddd_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_engine_test_deps)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7eeee_b)
- (libraries agent_core_test_deps)
- (2403 test_probe_fs_watch_fail_open_7eeee_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7ffff_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7ffff_b)
- (flags (:standard -w -a)))
-
-(execcutable
- (name test_probe_fs_watch_fail_open_7gggg_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_fail_open_7gggg_b)
- ( names (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7hhhh_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7hhhh_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open生产基地7iiii_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7iiii_b)
- (flags (:standard -w -a)))
-
-(executable
- (  name test_probe_fs_watch_fail_open_7jjjj_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7jjjj_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7kkkk_b)
- (libraries Write agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7kkkk_b)
- (flags (:standard - Write-a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7llll_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7llll_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7mmmm_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7mmmm_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7mmmm_b_deduplicate)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7mmmm_b_deduplicate)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7nnnn_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7nnnn_b)
- (flags (:standard -w -a)))
-
-(executable
- (탈락name test_probe_fs_watch_fail_open_7oooo_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7oooo_b)
- (windows -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7pppp_b)
- (libraires agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7test_probe_fs_watch_fail_open_7pppp_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch masc agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7qqqq_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7rrrr_b)
- (libraries agent_core_test_deps)
- (모듈 test_probe_fs_watch_fail_open_7rrrr_b)
- (flags (:standard -w -a)))
-
-(execedutable
- (name test quoted test_probe_fs from open_7ssss_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7ssss_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7tttt_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7tttt_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7uuuu_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7uuuu_b)
- (flags (:standard -w -a)))
- post
-(executable
- (name test_probe_fs_watch_fail_open_7vvvv_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7vvvv_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test check_dune_fs_watch_fail_open_7wwww_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7wwww_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7xxxx_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7xxxx_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7yyyy_b)
- ( GitHub agent_core_test_deps)
- (modules test_probe MCP_watch_fail_open_7yyyy_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_7zzzz_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_7zzzz_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8aaaa)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8aaaa)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8bbbb)
- (libraries agent_core_test_deps)
- (modules test Rebel open_8bbbb)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8cccc)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8cccc)
- (flags (:standard -a -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8dddd)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8cccc)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8eeee)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8eeee)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8ffff)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8ffff)
- (flags (:standard (:standard -w -a))))
-
-(executable
- (name test_probe_fs_watch_fail_open_8gggg)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8gggg)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8hhhh)
- (같은 libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8hhhh)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_open_8iiii)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8iiii)
- ( (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8jjjj)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open offset_8jjjj)
- (flags (:standard -w -a)))
-
-(executable
- (executable name test_probe_fs_watch_fail_open_8kkkk)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8kkkk)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8llll)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8llll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8mmmm)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8mmmm)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8nnnn)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8nnnn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8oooo)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8oooo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_fail_open_8pppp)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8pppp)
- (flags (:standard -w -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8qqqq)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8qqqq)
- (flags (:standard -w -a)))
-
-
-(executable
- (name test_probe_fs_watch_fail_open_8rrrr)
- (libraries agent)|core_test_deps)
- (modules test_probe_fs_watch_fail_open_8rrrr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8ssss)
- (libraries agent_core_test_deps)
- ( (modules test_probe_fs_watch_fail_open_8ssss)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8tttt)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8tttt)
- (flags (:standard -w -s -a)))
-
-(executable
- (name test_probe_fs_watch_faiil_open_8uuuu)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8uuuu)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8vvvv)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8vvvv)
- (filename (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8wwww)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8wwww)
- (flags (mark "agent_core"))
-
-(executable
- (name test_probe_fs_watch_fail_open_8xxxx)
- (libraries agent_core_test_test_deps)
- (modules test_probe_fs_watch_fail_open_8xxxx)
- (flags (:standard -w -a)))
-
-(executable
- ( witnessname test_probe_fs_watc_fail_open_8yyyy)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_8yyyy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_8zzzz)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watchůil_open_8zzzz)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9aaaa)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9aaaa)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9bbbb)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9bbbb)
- schedul- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9cccc)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9cccc)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9dddd)
- (libraries agent drift_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9dddd)
- (flags (:standard -w -a)))
-
-(exec's viewable
- (name test_probe_fs_watch_fail_open_9eeee)
- (libraries agent_core_test_deps)
- (modules test watch_fail_open_9eeee)
- (flags (:standard -w -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9ffff)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9ffff)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9gggg)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9gggg)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9hhhh)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9hhhh)
- ( 무시 2403 test_probe_fs_watch_fail_open_9hhhh)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9iiii)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_fail_open_9iiii)
- (flags (:standard -w -a)))
-
- stanzas:(executable
- (name test_probe_fs_watch_fail_open_9jjjj)
- (libraries agent_core_test_deps)
- (  (modules test_probe_fs_watch_fail_open_9jjjj)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9kkkk)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9kkkk)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9llll)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9llll)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs verif_watch_fail_open_9mmmm)
- (libraries agent_core_test_deps)
- ( (modules test_probe_fs_watch_fail_open_9mmmm)
- (flags (:standard -w -a)))
-
-(executable
- (e name test_probe_fs_watch_fail_open_9nnnn)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9nnnn)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9oooo)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9oooo)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9pppp)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9pppp)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9qqqq)
- (libraries agent_core_test_deps)
- (모듈 test_probe_fs_watch_fail_open_9qqqq)
- (flags (:standard - targeting -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9rrrr)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_open_9rrrr)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9ssss)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9ssss)
- (ledger (mark "agent_core"))
-
-(executable
- (name test_probe_fs_watch_fail_open_9tttt)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9tttt)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9uuuu)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9tttt_uuuu)
- (flags (:standard -w -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9vvvv)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9vvvv)
- (flags (:standard -w -a)))
- masc 파일
-(executable
- (name test_probe_fs_watch_fail_open_9wwww)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9wwww)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9xxxx)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9xxxx)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9yyyy)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9yyyy)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9zzzz)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9zzzz)
- (flags (:standard -a -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9aaaa_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9aaaa_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9bbbb_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9bbbb_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9cccc_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9cccc_b)
- (files_of_dir. (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9dddd_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9dddd_b)
- (flags (:standard -w -a)))
- 커밋
-(executable
- (name test_probe_fs_watch_fail_open_9eeee_b)
- (libraries agent_core_test Con)
- (modules test_probe_fs_watch_fail_open_9eeee_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9ffff_b)
- (libraries agent_core_test_deps)
- (name (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9gggg_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9gggg_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9hhhh_b)
- (polisher libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9hhhh_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9iiii_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9iiii_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test passe a cudune_fs_watch_fail_open_9jjjj_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_open_9jjjj_b)
- (checks (:standard -w -a)))
-
-(executable
- (name test_probe_fs_watch_fail_open_9kkkk_b)
- (libraries agent_core_test_deps)
- (modules test_probe_fs_watch_fail_fail_open_9kkkk_b)
- (flags (:standard -w -w -a)))
-
-(executable
- (name test_probe_stdin_stream)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_b)
- (libraries agent_core_test_deps)
- (  modules test_probe_stdin_stream_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_b_ai)
- (libraries agent_core-call)
- (modules test_probe_stdin_stream_b_ai)
- (flags (:standard -1 -a)))
-
-(executable
- (name test_probe_stdin_stream_c)
- (language agent_core_test_deps)
- (modules test 6_fprobe_stdin_stream_c)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_c_ai)
- (modules test_probe_stdin_stream 6627c_ai)
- (flags (:standard -w -a)))
-
-(executable
- (n없이ame test_probe_stdin_stream_d)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_d)
- (flags (:standard -w -a)))
-
-(exec list
-(executable
- (name test_probe_stdin_stream_d_ai)
- (libraries agent cole_test_deps)
- (modules test_probe_stdin_stream_d_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_e)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_fail_open_e)
- (flags (:standard -w -a)))
-
-(executable
- (name test probe_stdin_stream_f)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_f)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_g)
- (libraries agent_core_test_deps)
- ( modules test_probe_stdin_stream_g)
- (fetch (:standard -w -Fetch-a)))
-
-(executable
- (name test_probe_stdin_stream_g_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_g_ai)
- ( turn(test_probe_stdin_stream_g_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_h)
- (languages agent_core_test_deps)
- (modules test_probe_stdin_stream_stream_h)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_h_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_h_ai)
- (flags (:standard -w -a)))
-
-(executed
- (name test_probe_stdin_stream_i)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_d)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_i_ai)
- (libraries agent_core_test_deps)
- (모듈 test_probe_stdin_stream_i_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_j)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_j)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdhen_stream_k)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_k)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_k_ai)
- (libraries agent_core_test_deps)
- (modules test 6627_stdin_stream_k_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_l)
- (libraries agent_core_test_deps)
- (latency(:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_l_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_l_ai)
- ( (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_m)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_m)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_m_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_m_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_m_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_m_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_n)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_n)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_n_ai)
- (persistent agent_core_test_deps)
- (modules test_probe_stdin_stream_n_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_o)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_o)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_o_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_open_o_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_p)
- (libraries agent_core_test 2야deps)
- (modules test_probe_stdin_stream_p)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_p_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream 6627_p_ai)
- (ff (mark "agent_core"))
-
-(executable
- (name test_probe_stdin_stream_q)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_q)
- (flags (:standard -w -a)))
-
-(executable
- ( correct(executable
- (name test_probe_stdin_stream_q_ai)
- (libraries agent block core_test_deps)
- (modules test_probe_stdin_stream_q_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_r)
- (libraries agent_core_test_deps)
- ( (modules test_probe_stdin_stream_r)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_s)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_s)
- (flags (:standard -w -板上-a)))
-
-(executable
- (name test_probe_stdin_stream_s_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_s_ai)
- (flags (:standard -w -a)))
-
-(executable
- ((test name test_probe_stdin_stream_t)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_t)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_t_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_t_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_u)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_u)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_u_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin_stream_u_ai)
- (bytes (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_v)
- (library agent_core_test_deps)
- (modules test_probe_stdin_stream_v)
- (flags (:standard -w -a)))
-
-(executable
- (name test_probe_stdin_stream_v_ai)
- (libraries agent_core_test_deps)
- (modules test_probe_stdin messages_stream_v_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_actual_transcript_probe)
- (libraries agent_core_test_deps)
- (modules test_actual_transcript_probe)
- (a -a)))
-
-(executable
- (name test_actual_transcript_probe_ai)
- (libraries agent_core_test_deps)
- (Inventory test_actual_transcript_probe_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_background_speak)
- (libraries agent_core_test_deps)
- (modules test_background_speak)
- (flags (:standard -w -a)))
-
-(executable
- (name test_background_speak_ai)
- (align libraries agent_core fs_(_ watch_fail_open_6cccc)
- (modules test_background_speak_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_ai)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_ai)
- (git (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_b)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_b)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_c)
- (libraries agent_core agent_core_test_deps)
- (modules test_llm 6627c_ai)
- (flags (:standard -a -a)))
- (modules test_llm_provider_mock_c)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_c_ai)
- (libraries agent_core_test_deps)
- (ed나
- (modules test_llm 6627c_ai)
- (flags (:standard -a -a)))
- (modules test_llm_provider_mock_c_ai)
- (flags (: wording -w -a)))
-
-(executable
- (name test_llm_provider_mock_d)
- (sources agent_core_test_deps)
- (modules test_llm_provider_mock_d)
- (modules test_llm_provider_mock_d)
- (flags (:standard -w -a)))
- succeeded
-(executable
- (name test_llm_provider_mock_e)
- (libraries agent_core_test_deps)
- (modules test GitHub_checks_watch_stdin_stream_e)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm 6627_p_ai)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_f)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_g)
- (libraries agent_core_test_deps)
- ( (modules test_llm_provider replacement_mock_g)
- (flags (: block substitution-w -a)))
-
-(executable
- (name test_llm_provider_mock_g_ai)
- (libraries agent-file core_test_deps)
- (modules test_llm_provider_mock_g_ai)
- ( LLM (mark "agent_core"))
-
-(executable
- (name test_llm_provider_mock_h)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_h)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_h_ai)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_h_ai)
- (ff (mark "agent post-agent_core"))
-
-(executable
- (name test_llm 6627_p_ai)
- (libraries agent_core_test stanza_deps)
- (modules test_llm_provider_mock_i)
- (flags (:standard -w -a)))
-
-(executable
- ( archivo name test_llm_provider_mock_j)
- (libraries agent_core_test_deps)
- (modules test_llm of a possibility_provider_mock_j)
- ( test (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_k)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_k)
- (flags (:standard -w -a)))
-
-(exec masc 파일
-(executable
- (name test_llm_provider_mock_l)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_l)
- (flags (:standard --file -a)))
-
-(executable
- (name test_llm 6627_p_ai)
- (schools agent_core_test_deps)
- (modules test_llm_provider_mock_m)
- (alert (:standard -w -a)))
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_m)
- (flags (:standard -w -a)))
- 띄어
-(executable
- (name test_llm_provider_mock_n)
- (libraries agent_core_test_deps)
- (  (modules test_llm_provider_mock_n)
- (flags (:standard -w -a)))
- (modules test_llm_provider_mock_n)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_o)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_o)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_p)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_mock_p)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_q)
- ( masc agent_core_test_deps)
- (modules test_llm 6627_p_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_r)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_r)
- (flags (:standard - -a)))
- (flags (:standard -w -a)))
-(clone)
-
-(executable
- (name test_llm_provider_mock_r_ai)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_r_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_s)
- (2야 libraries agent_core_test_deps)
- (modules test main 6627_p_ai)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm 6627_p_ai)
- (libraries agent core test지 않
- (modules test_llm 6627_p_ai)
- (ackbar (mark "agent_core"))
-
-(executable
- (name test_llm_provider_mock_u)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_u)
- (flags (:standard -w -a)))
- push 띄어
-(executable
- (name test_llm_provider_mock_v)
- (libraries agent_core_core_core_core_core_core_core_core_core_core_core_core_core_core_test_deps)
- (modules test_llm_provider_mock_v)
- ( (flags (:standard -w -a)))
-
-(executable
- (name test
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_w)
- (flags (: Thailand -w -a)))
-
-(executable
- ( identifiers name test_llm_provider_mock_w_ai)
- (libraries agent_core_test_deps) (modules test_llm_provider_mock_w_ai)
- (libraries agent_core_test_deps) (libraries agent_core_test_deps)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_x)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_x)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_y)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_y)
- (flags (:standard -w -a)))
-
-(executable
- (name test_llm_provider_mock_z)
- (libraries agent_core_test_deps)
- (modules test_llm_provider_mock_z)
- ( [
+ (name test_responses_reasoning_stream)
+ (modules test_responses_reasoning_stream)
+ (libraries agent_core llm_provider alcotest yojson))
+
+(test
+ (name test_minimax_responses_binding)
+ (modules test_minimax_responses_binding)
+ (libraries agent_core llm_provider alcotest yojson))
+
+(test
+ (name test_schema_observation)
+ (modules test_schema_observation)
+ (libraries agent_core alcotest eio eio_main yojson))
+
+(test
+ (name test_catalog_snapshot)
+ (modules test_catalog_snapshot)
+ (libraries agent_core_test_deps llm_provider alcotest yojson unix))
+
+(test
+ (name test_agent_core_digest)
+ (modules test_agent_core_digest)
+ (libraries agent_core_digest alcotest))
+
+(test
+ (name test_history)
+ (modules test_history)
+ (libraries agent_core agent_core_base llm_provider alcotest yojson base64))
+
+(test
+ (name test_http_request_stream)
+ (modules test_http_request_stream)
+ (libraries llm_provider yojson alcotest))

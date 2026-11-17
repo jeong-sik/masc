@@ -215,10 +215,11 @@ let resume ~store ~config ~reserved ~original ~step =
     let* child=check_child {record;step} intended in
     let* actual=retain ~store child in
     let* ()=match Progress.replacement record.progress with
-      | Some (Preparation_pending _) -> confirm_unconfirmed ~store {record=actual;step=child}
+      | Some (Preparation_pending _) ->
+        let* ()=confirm_unconfirmed ~store {record=actual;step=child} in
+        let+ _=advance ~store record (Progress.Replacement_observed intended.request_id) in ()
       | Some (Preparation_confirmed _) -> Ok ()
       | None -> Error "Replacement intent disappeared" in
-    let* _=advance ~store record (Progress.Replacement_observed intended.request_id) in
     (* Rejoin the whole confirmed graph. An older acknowledged child may
        already have a strictly proved successor; observing that publication
        still returns its own immutable intended ID, never the newer leaf. *)

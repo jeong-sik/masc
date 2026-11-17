@@ -3322,6 +3322,24 @@ let test_cut_owned_full_source_floor ?(production=false) ?(change_semantic=false
          let old=io (fun () -> Owner.load ~store:fixture.store ~scope:parent.scope ~request_id:parent.request_id |> owned |> Option.get) in
          let intended=match Progress.replacement old.progress with Some (Preparation_confirmed intended) -> intended
            | None | Some (Preparation_pending _) -> fail "child ran before the parent's exact publication ACK" in
+         (match replacement with
+          | Some Replacement_ack_saved ->
+            let posts=F.post_count fixture.server and memory=cut_memory_bytes fixture
+              and positions=cut_source_positions fixture in
+            let repeated=memory_action fixture (fun () -> Keeper_librarian_retained_step_replacement.resume
+              ~store:fixture.store ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ())
+              ~original:old ~step:old_step) |> get in
+            check string "a confirmed publication keeps its same child while the actual provider is pending"
+              intended.request_id repeated;
+            let reread=io (fun () -> Owner.load ~store:fixture.store ~scope:parent.scope ~request_id:parent.request_id
+              |> owned |> Option.get) in
+            check json "confirmed reobservation appends no second publication ACK or other parent event"
+              (Owner.to_json old) (Owner.to_json reread);
+            check int "confirmed reobservation sends no additional provider question" posts (F.post_count fixture.server);
+            check bool "confirmed reobservation writes no Memory or range receipt" true (cut_memory_bytes fixture=memory);
+            check bool "confirmed reobservation advances no source ACK" true (cut_source_positions fixture=positions)
+          | None | Some (Captured_question | Host_ended_question | Replacement_intent_saved | Replacement_child_saved
+            | Replacement_intent_rollback | Later_captured_question) -> ());
          let dispatched=match replacement with
            | Some Replacement_intent_rollback ->
              let retained=io (fun () -> Owner.load ~store:fixture.store ~scope:parent.scope ~request_id:intended.request_id

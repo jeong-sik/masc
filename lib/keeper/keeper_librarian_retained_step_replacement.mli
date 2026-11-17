@@ -26,8 +26,11 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
 (** Eio entry point. Under the actual ready same-owner Runtime serializer,
     retain the complete new question in the parent's replacement CAS before its
     body; strictly reread the child before the exact ACK. Resume a saved intent's
-    same ID/body, even after rollback or another semantic change. Only a real
-    Before_dispatch ending or typed host Replaced_declaration qualifies.
+    same ID/body, even after rollback or another semantic change. A confirmed
+    publication is strictly reobserved without appending another ACK, and keeps
+    its own child ID even if that child has advanced or has a proved successor.
+    Only a real Before_dispatch ending or typed host Replaced_declaration
+    qualifies.
     Unknown, permission refusals, answers, Gate work and Cut releases do not.
     No provider, Memory publication, source ACK, archive or scheduler call. *)
 val validate_payload :

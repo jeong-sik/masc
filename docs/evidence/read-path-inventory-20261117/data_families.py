@@ -10,13 +10,18 @@ Variable segments:
 - below the top level, a directory with more than WIDE_DIR_CHILDREN
   subdirectories has `<*>` children (top-level store names stay)
 - a path deeper than MAX_FAMILY_SEGMENTS keeps its first segments and its file name
-- a segment equal to a directory name under `keepers/` is `<keeper>`
+- below the top level, a directory segment equal to a directory name under
+  `keepers/` is `<keeper>`; top-level store names stay even when a Keeper
+  directory has the same name (`tool_usage`)
+- directly under `keepers/`, a file whose stem (text before the first dot) is
+  such a name keeps only its suffix: `keepers/<keeper>.decisions.jsonl`
 - uuids, long hex, dates, day numbers and long digit runs get typed placeholders
 
 Outputs, both sorted by total bytes:
 - --out: one row per family
 - --stores-out: one row per store, the top-level name, or
   `keepers/<keeper>/<name>` under keepers/
+No output names a file: a path would carry Keeper names and trace ids.
 """
 
 from __future__ import annotations
@@ -53,7 +58,6 @@ class FileMeta:
     name: str
     size: int
     mtime: float
-    rel_path: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,30 +65,35 @@ class FamilyStats:
     files: int
     total_bytes: int
     max_bytes: int
-    max_path: str
     changed_files: int
     changed_bytes: int
     newest_mtime: float
 
 
-EMPTY_STATS = FamilyStats(0, 0, 0, "", 0, 0, 0.0)
+EMPTY_STATS = FamilyStats(0, 0, 0, 0, 0, 0.0)
 
 
-def normalize_segment(segment: str, keeper_names: frozenset[str]) -> str:
-    if segment in keeper_names:
-        return "<keeper>"
+def normalize_segment(segment: str) -> str:
     out = segment
     for pattern, placeholder in SEGMENT_RULES:
         out = pattern.sub(placeholder, out)
     return out
 
 
-def dir_segment(name: str, wide: bool, keeper_names: frozenset[str]) -> str:
-    if name in keeper_names:
+def dir_segment(name: str, *, family: str, wide: bool, keeper_names: frozenset[str]) -> str:
+    if family and name in keeper_names:
         return "<keeper>"
     if wide:
         return "<*>"
-    return normalize_segment(name, keeper_names)
+    return normalize_segment(name)
+
+
+def file_segment(name: str, *, family: str, keeper_names: frozenset[str]) -> str:
+    if family == "keepers":
+        stem, dot, rest = name.partition(".")
+        if stem in keeper_names:
+            return "<keeper>" + dot + normalize_segment(rest)
+    return normalize_segment(name)
 
 
 def store_of(family: str) -> str:
@@ -106,7 +115,7 @@ def walk(root: Path, keeper_names: frozenset[str]) -> Iterator[FileMeta]:
         subdirs = [e for e in entries if e.is_dir(follow_symlinks=False)]
         wide = bool(family) and len(subdirs) > WIDE_DIR_CHILDREN
         for entry in subdirs:
-            segment = dir_segment(entry.name, wide, keeper_names)
+            segment = dir_segment(entry.name, family=family, wide=wide, keeper_names=keeper_names)
             child_family = f"{family}/{segment}" if family else segment
             stack.append((Path(entry.path), child_family, store_of(child_family)))
         for entry in entries:
@@ -117,12 +126,11 @@ def walk(root: Path, keeper_names: frozenset[str]) -> Iterator[FileMeta]:
             except OSError:
                 continue
             yield FileMeta(
-                store=store or normalize_segment(entry.name, keeper_names),
+                store=store or normalize_segment(entry.name),
                 rel_dir_family=family,
-                name=entry.name,
+                name=file_segment(entry.name, family=family, keeper_names=keeper_names),
                 size=st.st_size,
                 mtime=st.st_mtime,
-                rel_path=os.path.relpath(entry.path, root),
             )
 
 
@@ -134,15 +142,14 @@ def add(stats: FamilyStats, meta: FileMeta, changed_since: float) -> FamilyStats
         files=stats.files + 1,
         total_bytes=stats.total_bytes + meta.size,
         max_bytes=meta.size if bigger else stats.max_bytes,
-        max_path=meta.rel_path if bigger else stats.max_path,
         changed_files=stats.changed_files + (1 if changed else 0),
         changed_bytes=stats.changed_bytes + (meta.size if changed else 0),
         newest_mtime=max(stats.newest_mtime, meta.mtime),
     )
 
 
-def family_key(meta: FileMeta, keeper_names: frozenset[str]) -> str:
-    name = normalize_segment(meta.name, keeper_names)
+def family_key(meta: FileMeta) -> str:
+    name = meta.name
     parts = meta.rel_dir_family.split("/") if meta.rel_dir_family else []
     if len(parts) >= MAX_FAMILY_SEGMENTS:
         parts = [*parts[: MAX_FAMILY_SEGMENTS - 1], "..."]
@@ -153,13 +160,13 @@ def write_table(path: Path, rows: dict[str, FamilyStats], key_name: str) -> None
     ordered = sorted(rows.items(), key=lambda kv: kv[1].total_bytes, reverse=True)
     with path.open("w", encoding="utf-8") as handle:
         handle.write(
-            f"{key_name}\tfiles\ttotal_mb\tmax_mb\tchanged24h_files\tchanged24h_mb\tnewest_utc\tmax_path\n"
+            f"{key_name}\tfiles\ttotal_mb\tmax_mb\tchanged24h_files\tchanged24h_mb\tnewest_utc\n"
         )
         for key, s in ordered:
             newest = datetime.fromtimestamp(s.newest_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
             handle.write(
                 f"{key}\t{s.files}\t{s.total_bytes / BYTES_PER_MB:.2f}\t{s.max_bytes / BYTES_PER_MB:.2f}"
-                f"\t{s.changed_files}\t{s.changed_bytes / BYTES_PER_MB:.2f}\t{newest}\t{s.max_path}\n"
+                f"\t{s.changed_files}\t{s.changed_bytes / BYTES_PER_MB:.2f}\t{newest}\n"
             )
 
 
@@ -180,7 +187,7 @@ def main(argv: list[str], now: datetime) -> int:
     families: dict[str, FamilyStats] = {}
     stores: dict[str, FamilyStats] = {}
     for meta in walk(root, keeper_names):
-        key = family_key(meta, keeper_names)
+        key = family_key(meta)
         families[key] = add(families.get(key, EMPTY_STATS), meta, changed_since)
         stores[meta.store] = add(stores.get(meta.store, EMPTY_STATS), meta, changed_since)
     write_table(out, families, "family")

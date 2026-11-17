@@ -2,18 +2,36 @@
 """List every file-read call site in MASC production OCaml sources.
 
 Scans `lib/` and `bin/` `.ml` files (tests are out of scope) after blanking
-comments and string literals, and writes one TSV row per primitive match.
+comments and string literals, and writes one TSV row per primitive per line:
+a line that calls one primitive twice (`In_channel.with_open_text p
+In_channel.input_all`) is one read.
 
 Each primitive carries attributes read from its implementation on
 origin/main 0542d471eedf5 (2026-11-17):
 - shape: whole | lines | slice | stream | tail | range | dir | meta | db
-- mech: where the blocking read runs
-    systhread_host  Fs_compat wrapper; inside an Eio fiber it hops to the
-                    single Systhread_host domain, outside Eio it runs inline
-    read_pool       Dated_jsonl job via Domain_pool_ref.submit_io_or_inline
-    caller          blocks the calling domain (Stdlib channel, Unix, Sys, SQLite)
-    eio             eio_posix: open/stat/readdir on a systhread, read inline
+- mech: how the blocking call runs (lib/core/systhread_host.mli:24-34,
+  lib/core/domain_pool_ref.ml:47-55)
+    systhread_host  Fs_compat wrapper that calls Systhread_host.run. masc pool
+                    work (Executor_pool_ref.in_worker_context, inherited by
+                    forked fibers) runs it on a system thread of its own
+                    domain; another Eio fiber hands it to the single host
+                    domain; outside Eio it runs inline
+    read_pool       Dated_jsonl tail read through Domain_pool_ref.submit_io_or_inline:
+                    from a fiber that is not pool work it is a pool job of
+                    weight 0.05; inside pool work it runs inline, on the
+                    calling fiber of that worker domain
+    caller          runs on the calling fiber: Stdlib channels, Unix, Sys,
+                    SQLite, and Dated_jsonl range/fold readers. Every fiber of
+                    that domain waits for the system call
+    eio             Eio.Path, or Fs_compat.file_exists inside a fiber
+                    (Eio.Path.stat): eio_posix runs the system call on a
+                    system thread of the calling domain
 - lock: per-path append mutex held during the read, when the wrapper takes it
+- tree: lib or bin (bin is the TUI and CLI executables)
+- layer: wrapper when the site is inside a wrapper library (lib/fs_compat,
+  lib/dated_jsonl, lib/core/safe_ops.ml). Such a site implements a wrapper
+  whose callers are rows of their own, except for wrapper functions this list
+  does not name (private jsonl readers), which are counted only inside
 
 The enclosing binding is the nearest preceding `let`/`and` with indentation
 of at most two spaces; it locates the site, it does not name the caller.
@@ -59,13 +77,14 @@ PRIMITIVES: tuple[Primitive, ...] = (
     prim("fs.fold_appended_lines", r"\bFs_compat\.fold_appended_lines\b", "stream", "systhread_host", "append_mutex"),
     prim("fs.fold_jsonl_lines", r"\bFs_compat\.fold_jsonl_lines\b", "stream+parse", "systhread_host", "append_mutex"),
     prim("fs.read_dir", r"\bFs_compat\.(read_dir|list_dir)\w*", "dir", "systhread_host"),
-    prim("fs.meta", r"\bFs_compat\.(file_exists|is_directory|is_regular_file|stat|lstat|file_size)\w*", "meta", "systhread_host"),
+    prim("fs.file_exists", r"\bFs_compat\.file_exists\b", "meta", "eio"),
+    prim("fs.meta", r"\bFs_compat\.(is_directory|is_regular_file|stat|lstat|file_size)\w*", "meta", "systhread_host"),
     prim("safe.read_json", r"\bSafe_ops\.read_json\w*", "whole+parse", "systhread_host"),
     prim("safe.read_file", r"\bSafe_ops\.read_file\w*", "whole", "systhread_host"),
     prim("safe.list_dir", r"\bSafe_ops\.list_dir\w*", "dir", "systhread_host"),
     prim("dj.read_recent", r"\bDated_jsonl\.(read_recent|read_range_recent)\w*", "tail", "read_pool"),
     prim("dj.load_tail", r"\bDated_jsonl\.load_tail\w*", "tail", "read_pool"),
-    prim("dj.range", r"\bDated_jsonl\.(read_range|iter_range|iter_all|fold_range|fold_file|iter_json_file|iter_non_empty_lines)\w*", "range", "read_pool"),
+    prim("dj.range", r"\bDated_jsonl\.(read_range|iter_range|iter_all|fold_range|fold_file|iter_json_file|iter_non_empty_lines)\w*", "range", "caller"),
     prim("dj.list", r"\bDated_jsonl\.list_\w*", "dir", "caller"),
     prim("yojson.from_file", r"\bYojson\.Safe\.(from_file|from_channel|seq_from_file|seq_from_channel)\b", "whole+parse", "caller"),
     prim("eio.load", r"\bEio\.Path\.(load|with_open_in|open_in)\b", "whole", "eio"),
@@ -157,6 +176,9 @@ def blank_comments_and_strings(source: str) -> str:
     return "".join(out)
 
 
+WRAPPER_LIBRARIES = ("lib/fs_compat/", "lib/dated_jsonl/", "lib/core/safe_ops.ml")
+
+
 @dataclass(frozen=True, slots=True)
 class Site:
     path: str
@@ -165,6 +187,14 @@ class Site:
     binding: str
     primitive: Primitive
     hints: tuple[str, ...]
+
+    @property
+    def tree(self) -> str:
+        return self.path.split("/", 1)[0]
+
+    @property
+    def layer(self) -> str:
+        return "wrapper" if self.path.startswith(WRAPPER_LIBRARIES) else "call"
 
 
 def group_of(rel: str) -> str:
@@ -205,11 +235,15 @@ def scan_file(root: Path, path: Path) -> Iterator[Site]:
     spans = binding_spans(lines)
     for index, text in enumerate(lines):
         taken: list[tuple[int, int]] = []
+        found: set[str] = set()
         for primitive in PRIMITIVES:
             for m in primitive.pattern.finditer(text):
                 if any(a <= m.start() < b for a, b in taken):
                     continue
                 taken.append((m.start(), m.end()))
+                if primitive.pid in found:
+                    continue
+                found.add(primitive.pid)
                 start, name = (0, "<toplevel>")
                 for span_start, span_name in spans:
                     if span_start > index:
@@ -231,11 +265,11 @@ def main(argv: list[str]) -> int:
     files = sorted(p for d in ("lib", "bin") for p in (root / d).rglob("*.ml"))
     sites = [site for f in files for site in scan_file(root, f)]
     with out.open("w", encoding="utf-8") as handle:
-        handle.write("path\tline\tgroup\tbinding\tprimitive\tshape\tmech\tlock\thints\n")
+        handle.write("path\tline\tgroup\tbinding\tprimitive\tshape\tmech\tlock\thints\ttree\tlayer\n")
         for s in sites:
             handle.write(
                 f"{s.path}\t{s.line}\t{s.group}\t{s.binding}\t{s.primitive.pid}\t{s.primitive.shape}"
-                f"\t{s.primitive.mech}\t{s.primitive.lock}\t{','.join(s.hints) or '-'}\n"
+                f"\t{s.primitive.mech}\t{s.primitive.lock}\t{','.join(s.hints) or '-'}\t{s.tree}\t{s.layer}\n"
             )
     by_primitive = Counter(s.primitive.pid for s in sites)
     print(f"files={len(files)} sites={len(sites)}")

@@ -1053,6 +1053,48 @@ let test_opening_digest_names_the_first_message_of_each_atom () =
   | None -> Alcotest.fail "atom 0 exists"
 ;;
 
+let test_opening_index_counts_atoms_and_defers_encoding () =
+  let histories =
+    [ []
+    ; [ user 0; extra_context; assistant 1; tool 1 ]
+    ; [ tool 0; tool 1; user 2; tool 2 ]
+    ; [ message ~role:Types.System "pinned"
+      ; message ~origin:Types.Historical_system_context ~role:Types.Assistant "orphan"
+      ; user 1
+      ]
+    ]
+  in
+  List.iter
+    (fun history ->
+       let labelled, expected_count = Window.annotate history in
+       let count, digest_at = Window.atom_opening_index history in
+       Alcotest.(check int) "the index retains annotate's actual count" expected_count count;
+       for atom = -1 to count do
+         let expected =
+           List.find_opt
+             (fun (_message, label) ->
+                match label with Window.Pinned -> false | Atom index -> index = atom)
+             labelled
+           |> Option.map (fun (message, _label) ->
+             Agent_core.Checkpoint.message_to_json message |> Yojson.Safe.to_string
+             |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex)
+         in
+         Alcotest.(check (option string)) "exact opening-message bytes" expected (digest_at atom)
+       done)
+    histories;
+  let invalid =
+    { (assistant 0) with
+      content = [ Types.ToolUse { id = "fixture"; name = "fixture"; input = `Float nan } ]
+    }
+  in
+  let count, digest_at = Window.atom_opening_index [ invalid ] in
+  Alcotest.(check int) "construction does not encode the invalid opener" 1 count;
+  Alcotest.(check (option string)) "out of bounds does not encode it" None (digest_at 1);
+  match digest_at 0 with
+  | _ -> Alcotest.fail "the existing writer error must occur at lookup"
+  | exception Yojson.Json_error _ -> ()
+;;
+
 (* No carried atom still observes the boundary after the offered history. *)
 let test_a_window_without_an_atom_observes_the_history_end () =
   let history = atoms 5 in
@@ -1133,6 +1175,8 @@ let () =
             `Quick test_chained_cut_keeps_the_whole_history_as_denominator
         ; Alcotest.test_case "opening digest names the first message of each atom"
             `Quick test_opening_digest_names_the_first_message_of_each_atom
+        ; Alcotest.test_case "opening index counts atoms and defers encoding"
+            `Quick test_opening_index_counts_atoms_and_defers_encoding
         ; Alcotest.test_case "an empty window observes the history end" `Quick
             test_a_window_without_an_atom_observes_the_history_end
         ; Alcotest.test_case "dropping unsent reasoning widens the window"

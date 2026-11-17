@@ -181,8 +181,7 @@ let annotate (messages : Agent_core.Types.message list) :
 
    Partial application does the labelling once; each lookup encodes and
    hashes one message. *)
-let atom_opening_digest (messages : Agent_core.Types.message list) =
-  let labelled, _atom_count = annotate messages in
+let digest_for_labelled labelled =
   let openers_rev, _next =
     List.fold_left
       (fun (openers, next) (message, label) ->
@@ -202,6 +201,16 @@ let atom_opening_digest (messages : Agent_core.Types.message list) =
           (Agent_core.Checkpoint.message_to_json openers.(atom))
       in
       Some Agent_core_sha256.(digest_string encoded |> to_hex))
+;;
+
+let atom_opening_index messages =
+  let labelled, atom_count = annotate messages in
+  atom_count, digest_for_labelled labelled
+;;
+
+let atom_opening_digest messages =
+  let labelled, _atom_count = annotate messages in
+  digest_for_labelled labelled
 ;;
 
 let first_atom_at_or_after messages ~message_index =

@@ -30,10 +30,22 @@ val register_web_search_runner :
     Without it a declared installation's web-search request ends its cycle
     with [no_web_search_runner]. *)
 val authorize_captured_exact_dispatch : store:Lane_addon_store.t -> declaration_id:string ->
-  package_id:string -> configuration_revision:string -> (unit, string) result
+  package_id:string -> configuration_revision:string ->
+  (unit, Lane_addon_exact.dispatch_veto) result
 (** On the existing Runtime owner, confirm a complete fresh enabled declaration,
     its semantic revision and the live configured incarnation before a new host
-    Exact provider effect. Inspect under the configuration serializer only;
+    Exact provider effect. [Declaration_replaced] when the fresh reading is
+    complete, exactly one declaration has this id, it is enabled and of this
+    package, exactly one entry that is not stopping holds a connection made
+    from that declaration's file for the revision the file has now and runs
+    the package the file names, and that revision is not
+    [configuration_revision]. An entry holds its connection from the moment
+    its worker is created. The guards that call this run in the host cycle of
+    a worker that finished starting, and one installation has one entry at a
+    time, so the entry found is the caller's own. Every other refusal is
+    [Not_now]: a declaration that is off, unreadable or of another package,
+    and a file that was edited while its worker is not attached yet.
+    Inspect under the configuration serializer only;
     never reacquire the action serializer or hold either across provider work.
     The runner calls this again after admission/measurement yields and before
     each dispatch. Does not revalidate or discard a returned provider answer,

@@ -42,7 +42,7 @@ parser messages and source paths remain in the authenticated Lane inventory.
 to establish completed work. Full health aggregates actionable missing
 dependencies as degraded while intentional Off remains explicit in each row.
 
-## Prepare package version 0.2.4
+## Prepare package version 0.2.5
 
 Use the repository version containing
 [`addons/keeper-librarian/lane.toml`](../../addons/keeper-librarian/lane.toml),
@@ -50,7 +50,7 @@ its `server.py` and both bundled schemas. Prepare this image through the package
 image workflow, then load it into the container engine used by MASC:
 
 ```sh
-docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.4 addons
+docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.5 addons
 ```
 
 The build context is `addons`, because the image contains the shared
@@ -64,7 +64,7 @@ host-created empty state under its declared owner identity. For another
 configured engine, import the same image into that engine before attaching.
 
 Place the complete package in an operator-managed, versioned location readable
-by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.4/` works
+by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.5/` works
 with this declaration when the resolved config root is
 `<base-path>/.masc/config`:
 
@@ -72,7 +72,7 @@ with this declaration when the resolved config root is
 id = "keeper-librarian"
 run_id = "keeper-librarian"
 enabled = true
-manifest_path = "../../packages/keeper-librarian-0.2.4/lane.toml"
+manifest_path = "../../packages/keeper-librarian-0.2.5/lane.toml"
 
 [binding]
 sources = []
@@ -89,6 +89,16 @@ Resolve a relative manifest from the actual declaration directory if
 or manual attachment by inventing a second installation.
 
 ### Upgrade an existing installation
+
+Version 0.2.5 accepts the ending the host delivers for a request whose
+declaration was replaced: `{"status":"not_allowed","cause":"declaration_replaced"}`
+([#52621](https://github.com/jeong-sik/masc/pull/52621),
+[#52622](https://github.com/jeong-sik/masc/pull/52622)). The `exact_worker.py`
+in an installed 0.2.4 image answers that delivery with an error and keeps the
+request pending. Selecting 0.2.5 is itself a declaration change, and its
+replacement worker is the 0.2.5 worker, so that worker receives those endings.
+A declaration change that keeps the 0.2.4 image, such as a new `run_id`, does
+not deliver them.
 
 Version 0.2.4 gives the compact `refuse_body` command introduced in
 [#52504](https://github.com/jeong-sik/masc/pull/52504) its own package revision and

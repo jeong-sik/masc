@@ -384,6 +384,10 @@ let with_fixture ?(history_kind=Atoms) f =
         set_enabled fixture false;
         Memory_lane.For_testing.reset ())))))))))))
 
+(* A guard's own failed read, and a declaration that is off, say nothing
+   about a replacement: the request waits. *)
+let guard_waits before_dispatch = match before_dispatch () with
+  | Error (Exact.Not_now _) -> true | Ok () | Error Exact.Declaration_replaced -> false
 let assert_pending = function
   | Ok (Consumer.Pending _) -> ()
   | Ok (Consumer.Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
@@ -869,15 +873,40 @@ let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
   check int "no gate record stays for validation" 0 (List.length (gate_records fixture capture));
   check int "already consumed source never creates another provider request" posts (F.post_count fixture.server))
 
-let test_retained_answer_with_invalid_working_context_recovers () = with_fixture (fun ~sw:_ fixture ->
-  let output capture = match answer capture with
+(* The object has the required wire shape, but its source reference is not
+   one of the aliases in the captured input. The domain refuses organization
+   without refusing the Memory answer. Extra fields test the earlier wire
+   boundary separately. *)
+let answer_with_invalid_working_context ~extra_fields capture = match answer capture with
     | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
-      if key="working_contexts" then key,`List [`Assoc [
+      if key="working_contexts" then key,`List [`Assoc ([
         "merge_contexts",`List [];"sources",`List [`String "fixture-source"];
-        "context",`String "original context";"next_steps",`List [];
-        "completeness",`String "current"]]
+        "context",`String "original context";"next_steps",`List []] @ extra_fields)]
       else key,value) fields)
-    | _ -> fail "fixture answer is not an object" in
+    | _ -> fail "fixture answer is not an object"
+let test_working_context_with_an_unallowed_field_is_not_an_answer () = with_fixture (fun ~sw:_ fixture ->
+  let output=answer_with_invalid_working_context
+    ~extra_fields:["completeness",`String "current"] in
+  fixture.set_response (fun capture -> `OK,F.openai_response (output capture));
+  let before=progress fixture and delivered= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:delivered;
+  let _,capture=only_original fixture in
+  (match latest fixture capture with
+   | Exact.Completed_latest {execution={outcome=Call_ended (Invalid_output _);_};_} -> ()
+   | No_completed_latest
+   | Completed_latest {execution={outcome=Call_ended (Answered _ | Input_refused _ | Output_limit_reached _)
+       | Call_refused _;_};_} -> fail "an unallowed nested field must not become an answered original");
+  (match run_worker fixture with
+   | Ok (Consumer.Memory_not_committed [_]) -> ()
+   | Ok (Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending _
+       | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
+       fail "the invalid wire answer must end the pass as one refusal"
+   | Error error -> fail (Consumer.error_to_string error));
+  no_memory fixture;
+  check bool "a wire shape refusal consumes no original source" true (progress fixture=before))
+let test_retained_answer_with_invalid_working_context_recovers () = with_fixture (fun ~sw:_ fixture ->
+  let output=answer_with_invalid_working_context ~extra_fields:[] in
   fixture.set_response (fun capture -> `OK,F.openai_response (output capture));
   let before=progress fixture and delivered= !(fixture.deliveries) in
   assert_pending (run_worker fixture);
@@ -889,8 +918,8 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
     | Exact.Completed_latest {execution={outcome=Call_ended (Answered _ as answer);_};_} -> Exact.Call_final answer
     | _ -> fail "actual original answer and proof were not retained" in
   let wire=Exact.final_to_json final in
-  check bool "strict consumer schema rejects the additional nested field" true
-    (Result.is_error (Exact.final_of_json ~schema wire));
+  check bool "the original answer has the required wire shape" true
+    (Result.is_ok (Exact.final_of_json ~schema wire));
   let decoded=io (fun () -> Capture.decode_final ~store:fixture.store capture wire) |> get in
   check json "recovery preserves the exact host answer" wire (Exact.final_to_json decoded);
   let proposal=Capture.validate_proposal capture (output capture) |> get in
@@ -902,7 +931,9 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
         if key="slot" then key,`String "different-slot" else key,value) fields)
     | _ -> fail "final is not an object" in
   check bool "a different worker result cannot borrow the host answer" true
-    (io (fun () -> Result.is_error (Capture.decode_final ~store:fixture.store capture changed)));
+    (io (fun () -> Result.is_error (Result.bind
+      (Capture.decode_final ~store:fixture.store capture changed)
+      (Capture.confirm_final ~store:fixture.store capture))));
   check bool "a different schema cannot observe this original" true
     (io (fun () -> Result.is_error (Exact.observe_retained ~store:fixture.store
       ~declaration_id:"librarian" ~schema:(`Assoc []) exact)));
@@ -919,7 +950,9 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
   io (fun () -> Store.save_exact_request empty_store ~declaration_id:"librarian"
     ~request_id:exact.request_id host |> get);
   check bool "a terminal without its execution proof cannot recover" true
-    (io (fun () -> Result.is_error (Capture.decode_final ~store:empty_store capture wire)));
+    (io (fun () -> Result.is_error (Result.bind
+      (Capture.decode_final ~store:empty_store capture wire)
+      (Capture.confirm_final ~store:empty_store capture))));
   let invalid_memory=match output capture with
     | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
         if key="new_claims" then key,`List [new_claim ""] else key,value) fields)
@@ -2787,19 +2820,20 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request child_request |> get)
     |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
     |> get |> Option.get in
-  let guard ()=authorization.before_dispatch () in
+  let guard ()=authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail in
   check (result unit string) "an unchanged fenced ancestor passes the actual dispatch recheck" (Ok ()) (guard ());
   let posts=F.post_count fixture.server and positions=progress fixture in
   let preserve_parent action=Fun.protect
     ~finally:(fun () -> Eio.Cancel.protect (fun () -> io (fun () -> write parent_body parent_bytes))) action in
   preserve_parent (fun () ->
     io (fun () -> Sys.remove parent_body);
-    check bool "a missing ancestor body refuses actual dispatch" true (Result.is_error (guard ())));
+    check bool "a missing ancestor body refuses actual dispatch" true (guard_waits authorization.before_dispatch));
   preserve_parent (fun () ->
     let corrupted=Bytes.of_string parent_bytes in
     Bytes.set corrupted 0 (if Bytes.get corrupted 0='{' then '[' else '{');
     io (fun () -> write parent_body (Bytes.to_string corrupted));
-    check bool "same-length ancestor corruption refuses actual dispatch" true (Result.is_error (guard ())));
+    check bool "same-length ancestor corruption refuses actual dispatch" true
+      (guard_waits authorization.before_dispatch));
   let proof=io (fun () -> Lineage.verify_predecessors ~store:fixture.store
     ~require_confirmed:true child_request |> get) in
   let copied=io (fun () -> Capture.restore ~owner:(Capture.physical_owner request) child |> get) in
@@ -2832,7 +2866,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   check (result unit string) "preflight proves the restored summary again" (Ok ()) (payload_lineage ~indexes ());
   check bool "a changed ancestor summary refuses actual dispatch" true
     (with_summary_value original.request_id "source_digest" (String.make 64 '0')
-      (fun () -> Result.is_error (guard ())));
+      (fun () -> guard_waits authorization.before_dispatch));
   check (result unit string) "restoring the ancestor lets the same authorization recheck again" (Ok ()) (guard ());
   (* The resolution pass reads a waiting pair as two records and their
      indexes, and neither body. *)
@@ -3044,7 +3078,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       inspect ~require_confirmed:true child |> get;
       (match authorize child with
        | Ok (Some authorization) -> check bool "Off still refuses actual dispatch after local ACK" true
-           (Result.is_error (authorization.before_dispatch ()))
+           (guard_waits authorization.before_dispatch)
        | Error (Exact.Unowned {reason}) -> fail reason
        | Error (Exact.Undecided {detail}) -> fail detail
        | Ok None -> fail "history request lost its actual host namespace");
@@ -3282,7 +3316,7 @@ let test_dispatch_rechecks_owner_without_restoring_the_body () = with_fixture (f
     ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request capture |> get)
     |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
     |> get |> Option.get in
-  authorization.before_dispatch () |> get;
+  authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail |> get;
   let posts=F.post_count fixture.server and positions=progress fixture in
   let body=Filename.concat (Store.root fixture.store)
     (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
@@ -3294,7 +3328,7 @@ let test_dispatch_rechecks_owner_without_restoring_the_body () = with_fixture (f
       (Owner.to_json original) |> get))) (fun () ->
     (* The authorization already holds this body's verified canonical value.
        The recheck must still read the current owner and its immutable identity. *)
-    authorization.before_dispatch () |> get;
+    authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail |> get;
     let changed=match Owner.to_json original with
       | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
           key, if key="summary" then `Null else value) fields)
@@ -3303,7 +3337,7 @@ let test_dispatch_rechecks_owner_without_restoring_the_body () = with_fixture (f
     io (fun () -> Store.save_tool_request_owner fixture.store ~scope:original.scope
       ~request_id:original.request_id changed |> get);
     check bool "a changed owner summary refuses the previously validated body" true
-      (Result.is_error (authorization.before_dispatch ()));
+      (guard_waits authorization.before_dispatch);
     check int "dispatch authorization calls no model" posts (F.post_count fixture.server);
     check bool "dispatch authorization acknowledges no source position" true (progress fixture=positions)))
 
@@ -3916,6 +3950,116 @@ let test_interrupted_original_settles_and_its_range_is_read_again ()=with_fixtur
     check bool "a new provider call judged the range" true (F.post_count fixture.server>posts);
     check (list string) "the new original's answer reached Memory"
       ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir))))
+(* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.2, 3.4 and
+   3.6. An original the worker holds and the host has not run ends when its
+   declaration is replaced. The pass that reads that end does not narrow the
+   next read and does not wait for another signal. *)
+(* The host's attempt for this request ended without a result, so the request
+   has no result and no open attempt. *)
+let await_deferral fixture request_id =
+  let deferred () =
+    match io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id) |> get with
+    | None -> false
+    | Some stored ->
+      member "final" stored = `Null
+      && (match List.rev (Yojson.Safe.Util.to_list (member "attempts" stored)) with
+          | `Assoc fields::_ -> not (List.mem_assoc "started" fields)
+          | [] | _::_ -> false) in
+  Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+    while not (deferred ()) do Eio.Time.sleep fixture.clock 0.01 done)
+(* The fixture declaration under another [run_id]: the same installation,
+   package and tool with another semantic revision. *)
+let replaced_declaration fixture =
+  let replaced=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-replaced\"" | line -> line)
+    |> String.concat "\n" in
+  check bool "the fixture declaration names the run a test replaces" true (replaced<>fixture.declaration true);
+  replaced
+(* The provider is busy, so the host's attempt ends without a result and the
+   request stays with its worker. The declaration is then replaced: the
+   replacement worker lists the request it inherited, and the host ends it and
+   delivers that end. Returns the original that was waiting. *)
+let host_ends_the_original_of_a_replaced_declaration fixture ~sw =
+  fixture.set_response (fun _ ->
+    `Too_many_requests,{|{"error":{"message":"fixture refusal","type":"rate_limit_error"}}|});
+  assert_pending (run_worker fixture);
+  let waiting,waiting_capture=only_original fixture in
+  check bool "the first read took everything unread" true
+    (Source.extent (Capture.source waiting_capture)=Keeper_librarian_range.All_unread);
+  await_deferral fixture waiting.request_id;
+  check int "the provider was asked once and gave no result" 1 (F.post_count fixture.server);
+  fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
+  let deliveries= !(fixture.deliveries) in
+  replace_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
+  await_delivery fixture ~after:deliveries;
+  check int "the request of the replaced declaration was not sent again" 1 (F.post_count fixture.server);
+  waiting
+(* RFC 3.2. A floor step's guard gives the Runtime's answer as it is, and a
+   failed read of the step's own record is not an answer about the
+   declaration. *)
+let test_a_floor_step_guard_tells_a_replaced_declaration_from_a_failed_read () =
+  with_fixture (fun ~sw fixture ->
+    provider_refuses_one_turn fixture size_refusal;
+    let candidate,request=candidate_and_request fixture in
+    fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+    ignore (finished (descend fixture candidate));
+    let record,step=first_step_request fixture request in
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    let authorization=Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
+      ~store:fixture.store ~declaration_id:"librarian" ~package step
+      |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail)
+      |> get |> Option.get in
+    authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail |> get;
+    replace_actual_worker_configuration fixture ~sw (replaced_declaration fixture);
+    check bool "under a replaced declaration the step's guard says so" true
+      (match authorization.before_dispatch () with
+       | Error Exact.Declaration_replaced -> true | Ok () | Error (Exact.Not_now _) -> false);
+    (* The stored record now names another request body, so the guard's own
+       reload refuses it before the declaration is read. *)
+    let changed=match Owner.to_json record with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+          key, if key="request_digest" then `String (String.make 64 '0') else value) fields)
+      | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ | `List _ ->
+        fail "the retained step is not an object" in
+    check bool "the fixture changes the step's stored digest" true (changed<>Owner.to_json record);
+    io (fun () -> Store.save_tool_request_owner fixture.store ~scope:record.scope
+      ~request_id:record.request_id changed |> get);
+    check bool "a step record that cannot be confirmed is not a replaced declaration" true
+      (guard_waits authorization.before_dispatch))
+let test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again () =
+  with_fixture (fun ~sw fixture ->
+    let waiting=host_ends_the_original_of_a_replaced_declaration fixture ~sw in
+    let wakes=ref 0 in
+    ended_by_one_refusal (run_worker_waking fixture wakes);
+    check int "the pass that read that end asks for the next pass itself" 1 !wakes;
+    (* The woken pass moves the ended original and reads the range again. *)
+    assert_pending (run_worker_waking fixture wakes);
+    check bool "the ended original moved to the settled archive" true
+      (settled_on fixture ~date:(day_of waiting.request_id) waiting);
+    let fresh,fresh_capture=only_original fixture in
+    check bool "a new original read the range" true (fresh.Owner.request_id<>waiting.request_id);
+    check bool "and it read everything unread, not up to the first cut point" true
+      (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
+    check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture));
+    check int "one more provider call judged the range" 2 (F.post_count fixture.server);
+    check (list string) "the new original's answer reached Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir)))
+(* RFC 3.4. A stored replacement ending remains that ending even when the
+   original declaration is restored before its Keeper reads it. *)
+let test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending () =
+  with_fixture (fun ~sw fixture ->
+    let waiting=host_ends_the_original_of_a_replaced_declaration fixture ~sw in
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    let wakes=ref 0 in
+    ended_by_one_refusal (run_worker_waking fixture wakes);
+    check int "the recorded replacement ending asks for the next pass" 1 !wakes;
+    assert_pending (run_worker_waking fixture wakes);
+    let fresh,fresh_capture=only_original fixture in
+    check bool "a new original read the range" true (fresh.Owner.request_id<>waiting.request_id);
+    check bool "rollback does not narrow the next read" true
+      (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
+    check bool "the next passes commit it" true (advanced (run_until_done ~wakes fixture)))
 (* A pass reads and sends its range, and the provider's refusal reaches the
    next pass. *)
 let provider_refuses_the_read fixture =
@@ -4304,7 +4448,7 @@ let test_legacy_omitted_original_refuses_admission_but_prepares_safe_continuatio
     let authorization=Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path
       ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request request |> get)
       |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail) |> get in
-    (match authorization.before_dispatch () with
+    (match authorization.before_dispatch () |> Result.map_error Exact.dispatch_veto_detail with
      | Error detail -> check bool "actual host dispatch names the omitted input" true
          (Astring.String.is_infix ~affix:"counterpart_observations" detail)
      | Ok () -> fail "actual host dispatch admitted an omitted retained question");
@@ -4438,6 +4582,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_dispatch_rechecks_owner_without_restoring_the_body;
   test_case "proved original survives invalid working context on resume" `Quick
     test_retained_answer_with_invalid_working_context_recovers;
+  test_case "an unallowed working-context field ends before Memory publication" `Quick
+    test_working_context_with_an_unallowed_field_is_not_an_answer;
   test_case "retained source aliases preserve runtime physical-root checks" `Quick test_retained_source_root_alias;
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
@@ -4499,6 +4645,12 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_purge_joins_unknown_then_worker_restart_does_not_resubmit Mixed);
   test_case "an original a stopped server interrupted settles and its range is read again" `Quick
     test_interrupted_original_settles_and_its_range_is_read_again;
+  test_case "a floor step guard tells a replaced declaration from a failed read" `Quick
+    test_a_floor_step_guard_tells_a_replaced_declaration_from_a_failed_read;
+  test_case "a replaced declaration ends a waiting original and its range is read whole again" `Quick
+    test_a_replaced_declaration_ends_a_waiting_original_and_its_range_is_read_whole_again;
+  test_case "a declaration put back before the end is read preserves the recorded ending" `Quick
+    test_a_declaration_put_back_before_the_end_is_read_preserves_the_ending;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
   test_case "a missing history original automatically continues and commits its exact source" `Quick
     (test_missing_history_recovers_without_operator_submission Atoms);

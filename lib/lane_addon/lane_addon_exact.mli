@@ -110,7 +110,8 @@ type final =
   | Not_allowed of { reason : not_allowed_reason }
       (** The effective package does not permit this output, the host has no
           original for the request, or the declaration the request was
-          captured for was replaced before it ran. A newly refused
+          captured for was replaced while the request had no result and no
+          call under way. A newly refused
           request retains this final result, even after the selection changes.
           A refusal to deliver an already retained answer leaves that original
           answer intact; it can be delivered when the output is selected again. *)
@@ -234,10 +235,34 @@ type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_re
     declared schema. Raising other than [Eio.Cancel.Cancelled] is recorded as
     [Outcome_unknown]. *)
 
-type dispatch_guard = unit -> (unit, string) result
+type dispatch_veto =
+  | Not_now of { detail : string }
+      (** The authority cannot be confirmed now: the declaration is off or
+          unreadable, no worker is attached for it yet, or the owner's own
+          check failed. Read where a run would start an execution, nothing
+          is written and the request stays listed. *)
+  | Declaration_replaced
+      (** The declaration the request was captured for has been replaced. A
+          complete fresh reading names exactly one enabled declaration of the
+          request's installation and package, exactly one live worker is
+          attached for the revision that declaration has now, and that
+          revision is not the request's. Read where a run would start an
+          execution, the request ends as [Not_allowed], and it stays ended
+          when the declaration is put back. *)
+
+val dispatch_veto_detail : dispatch_veto -> string
+(** The veto as text, for a log line or a caller that only stops. *)
+
+type dispatch_guard = unit -> (unit, dispatch_veto) result
 (** Fresh execution authority, checked before each actual provider/measurement
-    dispatch. An error stops the walk; it never invalidates an answer already
-    returned by a provider. Not used for local retained terminal observation. *)
+    dispatch. A veto stops the walk; it never invalidates an answer already
+    returned by a provider. Not used for local retained terminal observation.
+    {!run} reads which veto it is only where it would start an execution: the
+    request has no result and no open attempt. [Declaration_replaced] there
+    ends the request as [Not_allowed {reason=Replaced_declaration}] and
+    [Not_now] leaves it listed. Inside a
+    walk either veto only stops the walk; the stopped attempt stays deferred
+    and the next run reads the veto at its start. *)
 
 type dispatch = Measurement | Generation
 (** What a call is about to send. [Measurement] is a token-count request: it
@@ -305,7 +330,9 @@ type execution_authority =
     authorization is not serialized into the worker request or a durable
     admission-class audit.
     [before_dispatch] is execution-only: an initial refusal occurs before the
-    started marker, later guard vetoes stop the actual walk. Retained terminal
+    started marker, later guard vetoes stop the actual walk. An initial
+    [Declaration_replaced] ends the request as
+    [Not_allowed {reason=Replaced_declaration}]. Retained terminal
     replay uses only original validation and never invokes this guard. *)
 
 module Retained_key : sig
@@ -552,8 +579,9 @@ val run :
     started marker is written and before the generation request is sent.
 
     [Error] when [declaration_id] cannot own an add-on lane, when the
-    record cannot be read or written, or when the authority is
-    [Undecided]. Nothing is delivered then. A returned
+    record cannot be read or written, when the authority is
+    [Undecided], or when the guard answers [Not_now] where the run would
+    start an execution. Nothing is delivered then. A returned
     call's original host proof is saved and strictly confirmed before outcome
     publication. Confirmed proof plus its original started marker permits
     publication-only recovery without resolving or invoking a runner. Missing
@@ -561,7 +589,8 @@ val run :
     A call cancelled after the first generation guard wrote the marker leaves
     its attempt started, even when the request was not sent yet. A call
     cancelled before that leaves the request retained with no started attempt,
-    and the next run tries it again. A call that ends without a generation
+    and the next run reads the guard for it again: the request is tried, or
+    ended when its declaration was replaced. A call that ends without a generation
     dispatch writes the marker before its proof. A marker save that reports a
     failure stops the call before its dispatch and is an [Error]. An exception
     from the runner's resolution step propagates; nothing was sent and no

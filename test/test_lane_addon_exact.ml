@@ -1381,6 +1381,48 @@ let test_an_unowned_retained_answer_is_refused_and_kept () =
     check bool "the original answer is delivered once it is owned again" true (answered_with question (execute ()));
     check int "one provider call across the refusal" 1 !sends)
 
+(* RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.2: a
+   request with no result and no open attempt ends when its declaration was
+   replaced, whether it never ran or only has a deferred attempt. *)
+let replaced_declaration_ends ~steps ~deferred_first id =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let original=request id in
+    let veto=ref (if deferred_first then None else Some Exact.Declaration_replaced) and checks=ref 0 in
+    let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+      Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
+        with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ());
+        before_dispatch=(fun () -> incr checks;
+          match !veto with Some veto -> Error veto | None -> Ok ())} in
+    let runner,sends,_=counting_runner store (ref steps) in
+    let execute ()=require (Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original) in
+    let replacement_ending = function
+      | Exact.Final (Exact.Not_allowed {reason=Replaced_declaration}) -> true
+      | Exact.Final _ | Exact.Not_final _ -> false in
+    if deferred_first then begin
+      check bool "the lane has no slot, so the first run defers" true
+        (match execute () with Exact.Not_final _ -> true | Exact.Final _ -> false);
+      veto:=Some Exact.Declaration_replaced
+    end;
+    check bool "the request ends with the typed replacement reason" true (replacement_ending (execute ()));
+    check int "no provider was asked" 0 !sends;
+    check bool "the host record holds that result" true
+      (match require (Exact.observe_retained ~store ~declaration_id ~schema original) with
+       | Exact.Retained_terminal (Retained_not_allowed {reason=Replaced_declaration}) -> true
+       | Retained_absent | Retained_open | Retained_terminal _ -> false);
+    let before= !checks in
+    veto:=None;
+    check bool "a guard that allows later does not reinterpret it" true (replacement_ending (execute ()));
+    check int "a finished record does not ask the guard" before !checks;
+    check int "and still no provider was asked" 0 !sends)
+
+let test_a_replaced_declaration_ends_a_request_that_never_ran () =
+  replaced_declaration_ends ~steps:[] ~deferred_first:false "replaced-never-ran"
+
+let test_a_replaced_declaration_ends_a_deferred_request () =
+  replaced_declaration_ends ~steps:[Unavailable Exact.Lane_unconfigured] ~deferred_first:true
+    "replaced-after-deferral"
+
 let test_execution_guard_is_not_retained_delivery_authority () =
   with_root (fun root ->
     let store=Store.create ~root in
@@ -1401,7 +1443,8 @@ let test_execution_guard_is_not_retained_delivery_authority () =
         validate_output=(fun _ -> Ok ());
         before_dispatch=(fun () ->
           check bool "lifecycle registration precedes initial authority" true !active;incr checks;
-          if !permit then Ok () else Error "original semantic configuration changed")} in
+          if !permit then Ok ()
+          else Error (Exact.Not_now {detail="original semantic configuration changed"}))} in
     let runner,sends,_=counting_runner store (ref [Answer question]) in
     let execute ()=Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original in
     check bool "a semantic revision veto does not resolve a provider" true (Result.is_error (execute ()));
@@ -2003,6 +2046,10 @@ let () =
         ; test_case "an unowned request ends as not_allowed" `Quick test_an_unowned_request_ends_as_not_allowed
         ; test_case "an unowned retained answer is refused and kept" `Quick test_an_unowned_retained_answer_is_refused_and_kept
         ; test_case "execution authority does not gate retained local delivery" `Quick test_execution_guard_is_not_retained_delivery_authority
+        ; test_case "a replaced declaration ends a request that never ran" `Quick
+            test_a_replaced_declaration_ends_a_request_that_never_ran
+        ; test_case "a replaced declaration ends a deferred request" `Quick
+            test_a_replaced_declaration_ends_a_deferred_request
         ; test_case "worker wire cannot select admission policy" `Quick test_worker_cannot_select_admission_policy ] )
     ; ( "deploy preflight"
       , [ test_case "a refused record is deleted with its link and observations" `Quick

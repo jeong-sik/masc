@@ -452,7 +452,11 @@ type call_outcome =
 
 type execution_result = { outcome : call_outcome; receipt : Keeper_exact_walk_receipt.t }
 type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
-type dispatch_guard = unit -> (unit, string) result
+type dispatch_veto = Not_now of { detail : string } | Declaration_replaced
+type dispatch_guard = unit -> (unit, dispatch_veto) result
+let dispatch_veto_detail = function
+  | Not_now { detail } -> detail
+  | Declaration_replaced -> not_allowed_reason_detail Replaced_declaration
 type dispatch = Measurement | Generation
 type runner = before_dispatch:(dispatch -> (unit, string) result) ->
   admission_class:Agent_core.Llm_provider.Admission_class.t ->
@@ -1340,13 +1344,27 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         | None, Some attempt -> Ok attempt
         | None, None -> authorization.with_execution (fun () ->
           Eio.Fiber.check ();
-          let* ()=authorization.before_dispatch () in
+          match authorization.before_dispatch () with
+          | Error Declaration_replaced ->
+            (* The request has no result and no open attempt, and the
+               declaration it was captured for was replaced. End it: an ended
+               request stays ended when that declaration is put back, and its
+               consumer asks again under the declaration of now. *)
+            let refusal=Not_allowed {reason=Replaced_declaration} in
+            let* ()=save {previous with final=Some refusal} in
+            Ok (Final refusal)
+          | Error (Not_now {detail}) -> Error detail
+          | Ok () ->
+          (* Inside the walk either veto only stops it. The stopped attempt
+             stays deferred and the next run reads the veto at the start. *)
+          let guard_walk () =
+            authorization.before_dispatch () |> Result.map_error dispatch_veto_detail in
           (* The started marker says a generation request may have reached a
              provider, or that a call which sent none is publishing its
              proof. It is written when the call reaches its first generation
              dispatch: after any provider admission wait, before the request
              is sent. A call cut off while it waited leaves no marker, so the
-             next run tries the request again. *)
+             next run reads the guard for the request again. *)
           let started = ref false and marker_failure = ref None in
           let mark_started () =
             if !started then Ok ()
@@ -1355,13 +1373,13 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
               | Ok () -> started := true; marker_failure := None; Ok ()
               | Error detail -> marker_failure := Some detail; Error detail in
           let before_dispatch = function
-            | Measurement -> authorization.before_dispatch ()
+            | Measurement -> guard_walk ()
             | Generation ->
               let* () = mark_started () in
               (* The save yields. A retiring incarnation must not send after
                  it returns. A cancelled started attempt remains unknown. *)
               Eio.Fiber.check ();
-              authorization.before_dispatch () in
+              guard_walk () in
           match runner ~before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema
                   ~size_refused:(size_refused_slots ~schema proofs) request with
           | Error unavailable ->

@@ -1,5 +1,6 @@
 (** What a refusal that ended a completed-history original says about the next
-    read. The rule alone, on values. *)
+    read. The rule alone, on values; [test_keeper_librarian_durable_execution]
+    runs the pass that applies it. *)
 open Alcotest
 open Masc
 module Refusal = Keeper_librarian_durable_refusal

@@ -58,6 +58,10 @@ val load : path:string -> (entry list, error) result
     schema versions, malformed field types, duplicate JSON fields, and
     duplicate override keys are rejected as typed errors. *)
 
+val of_string : string -> (entry list, error) result
+(** Decode the same persistence envelope from already captured bytes. Does
+    not reopen a source path or change the active prompt registry. *)
+
 val filename : string
 (** Name of the overrides file, in the MASC directory and in every saved
     preset directory. *)

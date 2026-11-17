@@ -241,6 +241,13 @@ val persisted_entries : unit -> Prompt_override_persistence.entry list
     any key, and a preset autosave taken in that state captured nothing to
     restore. *)
 
+val with_override_snapshot : (unit -> 'a) -> 'a
+(** Read a durable override snapshot while cooperating in-process override
+    mutations are excluded. The callback must not mutate overrides or acquire
+    a Runtime configuration lock. A combined configuration reader acquires
+    its Runtime lock before this scope. This is not a cross-process file
+    lock and does not exclude direct filesystem edits. *)
+
 val quarantined_entries : unit -> Prompt_override_persistence.entry list
 (** The saved overrides this process is not applying. *)
 

@@ -124,11 +124,15 @@ let record_with_clock ~activation_clock ~config ~keeper_name ~trace_id (activati
     let current = log.ledger in
     match List.find_opt (exact_key_equal activation) current.activations with
     | Some existing ->
-      let expected = match activation_clock,activation.invocation with
-        | Original_activation_clock,Nested_composition_invocation _ ->
-          {activation with activated_at=existing.activated_at}
-        | Exact_activation_clock,_
-        | Original_activation_clock,(Instruction_invocation _ | Composition_invocation _) -> activation in
+      (* [activated_at] is the wall clock of this write, not part of what the
+         activation is. A second write of the same invocation therefore differs
+         from the recorded one only in that timestamp, and comparing it as-is
+         turned a repeat into [Invocation_id_collision]. The key already
+         matched the recorded activation, so the recorded time stands and the
+         remaining fields decide whether this is the same frame or a real
+         collision. *)
+      let expected = {activation with activated_at=existing.activated_at} in
+      ignore activation_clock;
       if Yojson.Safe.equal (activation_to_yojson (recorded_part existing))
           (activation_to_yojson (recorded_part expected))
       then Ok (current, Already_recorded existing)

@@ -24,6 +24,10 @@ let select_queue_entry ~base_path ~keeper_name ~now ~ready =
 ;;
 
 module AQ = Masc.Keeper_approval_queue
+
+let replay_evidence ?(retained_artifacts = []) artifact_ref =
+  { Masc.Keeper_approval_queue_result.artifact_ref; retained_artifacts }
+;;
 module Rules = Masc.Keeper_approval_queue_rules
 module Rule_types = Keeper_approval_queue_rules_types
 
@@ -2016,11 +2020,15 @@ let test_resolution_is_durable_and_origin_scoped () =
        let replay_output_ref =
          store_replay_artifact ~base_path replay_output
        in
+       let private_output = "private MCP original, including user-only content" in
+       let private_ref = store_replay_artifact ~base_path private_output in
+       let retained_artifacts = [ private_ref ] in
        (match
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied replay_output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                (replay_evidence ~retained_artifacts replay_output_ref))
         with
         | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
         | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
@@ -2030,12 +2038,19 @@ let test_resolution_is_durable_and_origin_scoped () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied replay_output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                (replay_evidence ~retained_artifacts replay_output_ref))
         with
         | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> ()
         | Ok Masc.Keeper_approval_queue_result.Replay_recorded ->
           Alcotest.fail "identical replay outcome was rewritten as new"
         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+       (match AQ.record_consumed_resolution_replay ~base_path ~id
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                (replay_evidence replay_output_ref)) with
+        | Error (Masc.Keeper_approval_queue_result.Grant_replay_outcome_conflict _) -> ()
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error)
+        | Ok _ -> Alcotest.fail "same model projection cannot erase private retained roots");
        let different_ref =
          store_replay_artifact ~base_path "different outcome"
        in
@@ -2043,7 +2058,7 @@ let test_resolution_is_durable_and_origin_scoped () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed different_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed (replay_evidence different_ref))
         with
         | Error (Masc.Keeper_approval_queue_result.Grant_replay_outcome_conflict actual_id) ->
           Alcotest.(check string) "conflict identifies approval" id actual_id
@@ -2093,6 +2108,10 @@ let test_resolution_is_durable_and_origin_scoped () =
          "current sidecar carries no raw legacy output field"
          true
          (replay_outcome_wire |> member "output" = `Null);
+       Alcotest.(check yojson) "private roots are separate and have no preview"
+         (`List [ Tool_output.normalized_artifact_ref_to_json
+                    (Tool_output.with_preview private_ref "") ])
+         (replay_outcome_wire |> member "retained_artifacts");
        let fresh_replay_message =
          let input =
            Masc.Keeper_gate_replay.resolution_input
@@ -2138,14 +2157,30 @@ let test_resolution_is_durable_and_origin_scoped () =
        (match AQ.approved_resolution_delivery ~base_path ~id with
         | Ok
             { state = Masc.Keeper_approval_queue_result.Resolution_consumed
-            ; replay_outcome = Some (Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+            ; replay_outcome = Some (Masc.Keeper_approval_queue_result.Replay_applied
+                { artifact_ref = output_ref; retained_artifacts })
             ; _
             } ->
           Alcotest.(check string)
             "replay output identity survives restart"
             replay_output_ref.sha256
-            output_ref.sha256
+            output_ref.sha256;
+          Alcotest.(check (list string)) "private roots survive restart"
+            [ private_ref.sha256 ]
+            (List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256)
+               retained_artifacts);
+          Alcotest.(check (list string)) "private previews stay empty after restart"
+            [ "" ]
+            (List.map (fun (reference : Tool_output.artifact_ref) -> reference.preview)
+               retained_artifacts)
         | Ok _ -> Alcotest.fail "restart lost the consumed replay outcome"
+        | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+       (match AQ.record_consumed_resolution_replay ~base_path ~id
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+                (replay_evidence ~retained_artifacts replay_output_ref)) with
+        | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> ()
+        | Ok Masc.Keeper_approval_queue_result.Replay_recorded ->
+          Alcotest.fail "restart rewrote identical private replay roots"
         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
        let retry_message =
          Masc.Keeper_gate_replay.user_message_with_hitl_resolution
@@ -2189,6 +2224,10 @@ let test_resolution_is_durable_and_origin_scoped () =
          |> List.find (fun line -> not (String.equal (String.trim line) ""))
          |> Yojson.Safe.from_string
        in
+       List.iter (fun private_value ->
+         Alcotest.(check bool) "private roots and bytes never reach model replay"
+           false (String_util.contains_substring projected_text private_value))
+         [ private_ref.sha256; private_output ];
        Alcotest.(check string)
          "provider-only projection preserves the exact replay artifact identity"
          replay_output_ref.sha256
@@ -2723,7 +2762,7 @@ let test_consumed_delivery_with_acknowledged_wake_leaves_the_store () =
        AQ.record_consumed_resolution_replay
          ~base_path
          ~id:approval_id
-         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence output_ref))
      with
      | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
      | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> Alcotest.fail "outcome was already recorded"
@@ -2748,6 +2787,167 @@ let test_consumed_delivery_with_acknowledged_wake_leaves_the_store () =
       true
       (Option.is_none second.replay_projection_error);
     Alcotest.(check int) "nothing left to retire" 0 second.retired_deliveries)
+;;
+
+let test_replay_retirement_repairs_public_artifact_owner () =
+  with_spent_fixture "queue-replay-public-owner" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "official replay" ] in
+    let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+    consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+    let store = Tool_blob_store.create ~base_path in
+    let media_bytes = "%PDF-public replay bytes" in
+    let media_ref = Tool_blob_store.put_durable store ~bytes:media_bytes ~mime:"application/pdf" in
+    let private_ref = Tool_blob_store.put_durable store
+        ~bytes:"private original MCP envelope" ~mime:"application/json" in
+    let public_ref = Tool_blob_store.put_durable store
+        ~mime:Tool_output.artifact_manifest_mime
+        ~bytes:(Tool_output.artifact_manifest_to_json ~content:"public document result"
+          ~structured_content:(Tool_output.normalized_artifact_ref_to_json media_ref)
+          |> Yojson.Safe.to_string) in
+    let outcome = Masc.Keeper_approval_queue_result.Replay_applied
+        (replay_evidence ~retained_artifacts:[private_ref; public_ref; media_ref] public_ref) in
+    (match AQ.record_consumed_resolution_replay ~base_path ~id:approval_id ~outcome with
+     | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
+     | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded -> Alcotest.fail "new replay was already recorded"
+     | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+    acknowledge_wake ~base_path ~keeper_name;
+    let sidecar = AQ.For_testing.replay_results_store_path ~base_path in
+    let sidecar_before = Fs_compat.load_file sidecar in
+    let chat_path = Chat_store.chat_path ~base_dir:base_path ~keeper_name in
+    let original_chat = Fs_compat.load_file chat_path in
+    (* The effect and wake are already settled. An unavailable transcript
+       must leave the replay result's existing owner in place. *)
+    Chat_store.purge_transcript chat_path ~remove:Unix.unlink;
+    Unix.mkdir chat_path 0o700;
+    let failed = reinstall_exn ~base_path in
+    Alcotest.(check int) "chat failure retains the sidecar owner" 0 failed.retired_deliveries;
+    Alcotest.(check int) "repair never replays the consumed service" 0 failed.replayed_deliveries;
+    (match failed.delivery_retirement_error with
+     | Some error -> Alcotest.(check string) "retirement exposes the failed owner path" chat_path error.path
+     | None -> Alcotest.fail "chat owner failure was hidden");
+    check_delivery_kept ~base_path approval_id;
+    Alcotest.(check string) "failed handoff preserves exact replay sidecar"
+      sidecar_before (Fs_compat.load_file sidecar);
+    Chat_store.purge_transcript chat_path ~remove:Unix.rmdir;
+    Fs_compat.save_file chat_path original_chat;
+    let repaired = reinstall_exn ~base_path in
+    Alcotest.(check int) "durable chat root permits retirement" 1 repaired.retired_deliveries;
+    Alcotest.(check int) "successful repair does not replay the service" 0 repaired.replayed_deliveries;
+    Alcotest.(check bool) "repair clears the retirement diagnostic" true
+      (Option.is_none repaired.delivery_retirement_error);
+    check_delivery_retired ~base_path approval_id;
+    let chat_refs = Chat_store.load_all ~base_dir:base_path ~keeper_name
+      |> List.filter_map (fun message -> Option.bind message.Chat_store.approval_lifecycle
+          (fun lifecycle -> lifecycle.artifact_ref)) in
+    Alcotest.(check bool) "chat owns the exact public manifest" true
+      (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = public_ref.sha256) chat_refs);
+    Alcotest.(check bool) "chat does not expose the private original root" false
+      (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = private_ref.sha256) chat_refs);
+    (* Official sessions can outlive the audit window. The canonical chat
+       ledger remains a root even with an mtime far before that window. *)
+    Unix.utimes chat_path 0.0 0.0;
+    ignore (Server_runtime_startup_maintenance.prune_shared_jsonl_stores
+      ~days:1 ~masc_root:(Common.masc_dir_from_base_path ~base_path));
+    Alcotest.(check bool) "audit retention does not remove canonical chat" true
+      (Sys.file_exists chat_path);
+    for _pass = 1 to 2 do
+      match Tool_blob_maintenance.run ~base_path ~scope:Server_tool_blob_scope.scope
+          ~mode:Tool_blob_maintenance.Delete_previous_candidates with
+      | Ok report -> Alcotest.(check (list string)) "complete fixture GC scope" [] report.unclassified
+      | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
+    done;
+    let retained reference expected = match Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256 with
+      | Ok (Some bytes) -> Alcotest.(check string) "public bytes survive sidecar retirement" expected bytes
+      | Ok None -> Alcotest.fail "retirement orphaned public replay bytes"
+      | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error) in
+    retained media_ref media_bytes;
+    (match Tool_blob_store.fetch store ~sha256:public_ref.sha256 with
+     | Ok (Some _) -> ()
+     | Ok None -> Alcotest.fail "chat-owned manifest was collected"
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
+    (match Tool_blob_store.fetch store ~sha256:private_ref.sha256 with
+     | Ok None -> ()
+     | Ok (Some _) -> Alcotest.fail "public ownership retained a private original"
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)))
+;;
+
+let test_replay_retirement_confirms_visible_existing_rows () =
+  List.iter (fun correction ->
+    with_spent_fixture (if correction then "queue-confirm-correction" else "queue-confirm-replay")
+      (fun ~base_path ~keeper_name ->
+        let input = `Assoc [ "target", `String "visible unconfirmed replay" ] in
+        let approval_id, _ = approve_with_wake ~base_path ~keeper_name ~input in
+        consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+        let output_ref = store_replay_artifact ~base_path "canonical public result" in
+        let outcome = Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence output_ref) in
+        (match AQ.record_consumed_resolution_replay ~base_path ~id:approval_id ~outcome with
+         | Ok _ -> ()
+         | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.grant_error_to_string error));
+        let project outcome = match AQ.ensure_replay_chat_projection ~base_path ~keeper_name
+            ~approval_id ~tool_name:(Some "external-effect") ~outcome with
+          | Ok () -> () | Error detail -> Alcotest.fail detail in
+        if correction then project (Masc.Keeper_approval_queue_result.Replay_failed
+          (replay_evidence (store_replay_artifact ~base_path "stale projection")));
+        let chat_path = Chat_store.chat_path ~base_dir:base_path ~keeper_name in
+        let before = Fs_compat.load_file chat_path in
+        project outcome;
+        let complete = Fs_compat.load_file chat_path in
+        let suffix = String.sub complete (String.length before) (String.length complete - String.length before) in
+        Alcotest.(check bool) "fixture produced the canonical replay row" true (suffix <> "");
+        Chat_store.purge_transcript chat_path ~remove:Unix.unlink;
+        Fs_compat.save_file chat_path before;
+        let failed_append : Fs_compat.durable_append_io_for_testing =
+          { write = Unix.write
+          ; ftruncate = (fun _ _ -> raise (Unix.Unix_error (Unix.EIO, "ftruncate", "fixture rollback")))
+          ; fsync = (fun _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "fixture append"))) } in
+        (match Fs_compat.reconcile_private_file_durable_locked_with_append_io_for_testing
+            ~append_io:failed_append chat_path
+            (fun _ -> Fs_compat.Append_confirmed (suffix, ())) with
+         | Fs_compat.Private_file_failed _ | Private_file_failed_with_cleanup_failure _ -> ()
+         | Private_file_succeeded _ | Private_file_succeeded_with_cleanup_failure _ ->
+           Alcotest.fail "fixture failed to create an unconfirmed append");
+        Alcotest.(check string) "failed rollback leaves the complete row visible"
+          complete (Fs_compat.load_file chat_path);
+        acknowledge_wake ~base_path ~keeper_name;
+        let sidecar = AQ.For_testing.replay_results_store_path ~base_path in
+        let sidecar_before = Fs_compat.load_file sidecar in
+        let install append_io =
+          AQ.For_testing.reset_runtime_state ();
+          match AQ.For_testing.install_persistence_with_replay_confirmation_io ~append_io ~base_path with
+          | Ok report -> report
+          | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error) in
+        let confirmations = ref 0 in
+        let confirmation_io : Fs_compat.durable_append_io_for_testing =
+          { write = Unix.write; ftruncate = Unix.ftruncate
+          ; fsync = (fun _ -> incr confirmations;
+              raise (Unix.Unix_error (Unix.EIO, "fsync", "fixture confirmation"))) } in
+        let failed = install confirmation_io in
+        Alcotest.(check bool) "existing row requires data confirmation" true (!confirmations > 0);
+        Alcotest.(check int) "unconfirmed existing row retains sidecar" 0 failed.retired_deliveries;
+        Alcotest.(check bool) "confirmation failure is reported" true
+          (Option.is_some failed.delivery_retirement_error);
+        Alcotest.(check string) "confirmation failure leaves exact sidecar"
+          sidecar_before (Fs_compat.load_file sidecar);
+        check_delivery_kept ~base_path approval_id;
+        confirmations := 0;
+        let confirmed : Fs_compat.durable_append_io_for_testing =
+          { write = Unix.write; ftruncate = Unix.ftruncate
+          ; fsync = (fun fd ->
+              incr confirmations;
+              let visible_sidecar = In_channel.with_open_bin sidecar In_channel.input_all in
+              Alcotest.(check string) "old owner remains until data sync"
+                sidecar_before visible_sidecar;
+              Unix.fsync fd) } in
+        let repaired = install confirmed in
+        Alcotest.(check bool) "retry confirms the held data descriptor" true (!confirmations > 0);
+        Alcotest.(check int) "confirmed row permits retirement" 1 repaired.retired_deliveries;
+        Alcotest.(check int) "confirmation retry does not replay service" 0 repaired.replayed_deliveries;
+        Alcotest.(check bool) "confirmation retry clears diagnostic" true
+          (Option.is_none repaired.delivery_retirement_error);
+        Alcotest.(check string) "confirmation neither rewrites nor duplicates the row"
+          complete (Fs_compat.load_file chat_path);
+        check_delivery_retired ~base_path approval_id))
+    [ false; true ]
 ;;
 
 let test_consumed_delivery_with_queued_wake_survives_a_restart () =
@@ -5285,6 +5485,66 @@ let test_malformed_replay_sidecar_is_scoped_and_preserved () =
          (In_channel.with_open_bin sidecar_path In_channel.input_all))
 ;;
 
+let test_replay_sidecar_private_roots_codec () =
+  let module Codec = Masc.Keeper_approval_queue_codec in
+  let module Result = Masc.Keeper_approval_queue_result in
+  let reference digest preview =
+    match Tool_output.make_artifact_ref ~sha256:(String.make 64 digest)
+        ~bytes:3 ~preview ~mime:"application/json" with
+    | Ok reference -> reference
+    | Error _ -> Alcotest.fail "invalid test artifact reference"
+  in
+  let output_ref = reference 'a' "" in
+  let private_ref = reference 'b' "private preview" in
+  let sidecar outcome = `Assoc
+      [ "version", `Int 1
+      ; "outcomes", `List [ `Assoc
+          [ "approval_id", `String "private-roots"; "outcome", outcome ] ] ] in
+  let decode outcome = Codec.replay_results_of_yojson (sidecar outcome) in
+  let check_evidence expected outcome =
+    match decode outcome with
+    | Error detail -> Alcotest.fail detail
+    | Ok outcomes ->
+      let evidence = match Set_util.StringMap.find "private-roots" outcomes with
+        | Result.Replay_applied evidence
+        | Result.Replay_applied_with_warning evidence
+        | Result.Replay_failed evidence
+        | Result.Replay_indeterminate evidence -> evidence in
+      Alcotest.(check (list string)) "decoded private root identities" expected
+        (List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256)
+           evidence.retained_artifacts);
+      List.iter (fun (reference : Tool_output.artifact_ref) ->
+        Alcotest.(check string) "private root has no preview" "" reference.preview)
+        evidence.retained_artifacts
+  in
+  let evidence = replay_evidence ~retained_artifacts:[ private_ref ] output_ref in
+  List.iter (fun outcome ->
+    let wire = Codec.resolution_replay_outcome_to_yojson outcome in
+    check_evidence [ private_ref.sha256 ] wire;
+    Alcotest.(check bool) "private preview is not persisted" false
+      (String_util.contains_substring (Yojson.Safe.to_string wire) "private preview"))
+    [ Result.Replay_applied evidence; Result.Replay_applied_with_warning evidence
+    ; Result.Replay_failed evidence; Result.Replay_indeterminate evidence ];
+  let old_fields =
+    [ "kind", `String "applied"
+    ; "output_ref", Tool_output.normalized_artifact_ref_to_json output_ref ] in
+  check_evidence [] (`Assoc old_fields);
+  check_evidence [] (`Assoc (old_fields @ [ "retained_artifacts", `List [] ]));
+  let malformed =
+    [ `Null; `String "not a reference list"; `List [ `Null ]
+    ; `List [ `Assoc [ "_blob", `Assoc
+          [ "sha256", `String "invalid"; "bytes", `Int 3
+          ; "mime", `String "application/json"; "preview", `String "" ] ] ] ] in
+  List.iter (fun retained ->
+    match decode (`Assoc (old_fields @ [ "retained_artifacts", retained ])) with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail "malformed private root was silently accepted") malformed;
+  match decode (`Assoc (old_fields @
+      [ "retained_artifacts", `List []; "retained_artifacts", `List [] ])) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "duplicate private roots field was accepted"
+;;
+
 let test_replay_sidecar_rejects_raw_output_wire () =
   let base_path = temp_dir () in
   Fun.protect
@@ -5363,7 +5623,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id:approval_id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence output_ref))
         with
         | Error (Masc.Keeper_approval_queue_result.Grant_replay_projection_unavailable { path; _ }) ->
           Alcotest.(check string)
@@ -6227,7 +6487,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
           AQ.record_consumed_resolution_replay
             ~base_path
             ~id:approval_id
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied canonical_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence canonical_ref))
         with
         | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
         | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded | Error _ ->
@@ -6264,7 +6524,7 @@ let test_canonical_replay_repairs_stale_chat_receipt_once () =
             ~keeper_name
             ~approval_id
             ~tool_name:(Some "external-effect")
-            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed stale_ref)
+            ~outcome:(Masc.Keeper_approval_queue_result.Replay_failed (replay_evidence stale_ref))
         with
         | Error _ -> ()
         | Ok () -> Alcotest.fail "stale replay displaced the correction");
@@ -7046,7 +7306,7 @@ let test_replay_outcome_preserves_durable_delivery_identity_for_log_deltas () =
        AQ.record_consumed_resolution_replay
          ~base_path
          ~id:approval_id
-         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied output_ref)
+         ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_evidence output_ref))
      with
      | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
      | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
@@ -7347,6 +7607,14 @@ let () =
             `Quick
             test_consumed_delivery_with_acknowledged_wake_leaves_the_store
         ; Alcotest.test_case
+            "replay retirement repairs the public chat artifact owner"
+            `Quick
+            test_replay_retirement_repairs_public_artifact_owner
+        ; Alcotest.test_case
+            "replay retirement confirms visible ordinary and correction rows"
+            `Quick
+            test_replay_retirement_confirms_visible_existing_rows
+        ; Alcotest.test_case
             "consumed delivery with queued wake survives a restart"
             `Quick
             test_consumed_delivery_with_queued_wake_survives_a_restart
@@ -7474,6 +7742,10 @@ let () =
             "malformed replay sidecar is preserved"
             `Quick
             test_malformed_replay_sidecar_is_scoped_and_preserved
+        ; Alcotest.test_case
+            "private replay roots are strict and separate from model evidence"
+            `Quick
+            test_replay_sidecar_private_roots_codec
         ; Alcotest.test_case
             "raw replay output wire is rejected"
             `Quick

@@ -264,31 +264,40 @@ let replay_artifact_identity artifact_ref =
   Tool_output.with_preview artifact_ref ""
 ;;
 
-let persist_replay_effect ~base_path = function
+let persist_replay_effect ~base_path ~retained_artifacts ~model_artifact =
+  let evidence artifact_ref : Keeper_approval_queue_result.replay_evidence =
+    { artifact_ref = replay_artifact_identity artifact_ref
+    ; retained_artifacts = List.map replay_artifact_identity retained_artifacts
+    }
+  in
+  let persist payload = match model_artifact with
+    | Some reference -> Ok reference
+    | None -> persist_replay_evidence ~base_path payload in
+  function
   | Effect_applied output ->
     Result.map
       (fun output_ref ->
          Keeper_approval_queue_result.Replay_applied
-           (replay_artifact_identity output_ref))
-      (persist_replay_evidence ~base_path output)
+           (evidence output_ref))
+      (persist output)
   | Effect_applied_with_warning detail ->
     Result.map
       (fun detail_ref ->
          Keeper_approval_queue_result.Replay_applied_with_warning
-           (replay_artifact_identity detail_ref))
-      (persist_replay_evidence ~base_path detail)
+           (evidence detail_ref))
+      (persist detail)
   | Effect_failed detail ->
     Result.map
       (fun detail_ref ->
          Keeper_approval_queue_result.Replay_failed
-           (replay_artifact_identity detail_ref))
-      (persist_replay_evidence ~base_path detail)
+           (evidence detail_ref))
+      (persist detail)
   | Effect_indeterminate detail ->
     Result.map
       (fun detail_ref ->
          Keeper_approval_queue_result.Replay_indeterminate
-           (replay_artifact_identity detail_ref))
-      (persist_replay_evidence ~base_path detail)
+           (evidence detail_ref))
+      (persist detail)
 ;;
 
 module Repair_map = Map.Make (String)
@@ -296,6 +305,8 @@ module Repair_map = Map.Make (String)
 type pending_repair =
   { operation : string
   ; replay_effect : effect_outcome
+  ; retained_artifacts : Tool_output.artifact_ref list
+  ; model_artifact : Tool_output.artifact_ref option
   ; terminal_effect_receipt :
       Keeper_tool_execution.terminal_effect_receipt option
   }
@@ -438,6 +449,8 @@ let replayed_outcome
       ~approval_id
       ~operation
       ?terminal_effect_receipt
+      ?(retained_artifacts = [])
+      ?model_artifact
       replay_effect
   =
   let terminal_effect_receipt =
@@ -446,8 +459,8 @@ let replayed_outcome
   remember_pending_repair
     ~base_path
     ~approval_id
-    { operation; replay_effect; terminal_effect_receipt };
-  match persist_replay_effect ~base_path replay_effect with
+    { operation; replay_effect; retained_artifacts; model_artifact; terminal_effect_receipt };
+  match persist_replay_effect ~base_path ~retained_artifacts ~model_artifact replay_effect with
   | Error detail ->
     replay_execution
       ?terminal_effect_receipt
@@ -471,13 +484,13 @@ let replayed_outcome
        project_replay_outcome_to_chat ~base_path ~approval_id replay_outcome;
        let outcome =
          match replay_outcome with
-         | Keeper_approval_queue_result.Replay_applied output_ref ->
+         | Keeper_approval_queue_result.Replay_applied { artifact_ref = output_ref; _ } ->
            Applied { operation; output_ref; journal }
-         | Keeper_approval_queue_result.Replay_applied_with_warning detail_ref ->
+         | Keeper_approval_queue_result.Replay_applied_with_warning { artifact_ref = detail_ref; _ } ->
            Applied_with_warning { operation; detail_ref; journal }
-         | Keeper_approval_queue_result.Replay_failed detail_ref ->
+         | Keeper_approval_queue_result.Replay_failed { artifact_ref = detail_ref; _ } ->
            Failed { operation; detail_ref; journal }
-         | Keeper_approval_queue_result.Replay_indeterminate detail_ref ->
+         | Keeper_approval_queue_result.Replay_indeterminate { artifact_ref = detail_ref; _ } ->
            Indeterminate { operation; detail_ref; journal }
        in
        replay_execution ?terminal_effect_receipt outcome)
@@ -488,6 +501,8 @@ let settle_replay_effect
       ~approval_id
       ~(request : Keeper_approval_queue_result.approved_resolution_request)
       ?terminal_effect_receipt
+      ?(retained_artifacts = [])
+      ?model_artifact
       ~operation
       replay_effect
   =
@@ -499,7 +514,7 @@ let settle_replay_effect
   remember_pending_repair
     ~base_path
     ~approval_id
-    { operation; replay_effect; terminal_effect_receipt };
+    { operation; replay_effect; retained_artifacts; model_artifact; terminal_effect_receipt };
   match retire_stale_grant ~base_path ~approval_id request with
   | Error detail ->
     replay_execution
@@ -515,6 +530,8 @@ let settle_replay_effect
       ~approval_id
       ~operation
       ?terminal_effect_receipt
+      ~retained_artifacts
+      ?model_artifact
       replay_effect
 ;;
 
@@ -527,19 +544,19 @@ let durable_replay_execution
   =
   let verified =
     match replay_outcome with
-    | Keeper_approval_queue_result.Replay_applied output_ref ->
+    | Keeper_approval_queue_result.Replay_applied { artifact_ref = output_ref; _ } ->
       Result.map
         (fun _ -> `Applied output_ref)
         (retrieve_replay_artifact ~base_path output_ref)
-    | Keeper_approval_queue_result.Replay_applied_with_warning detail_ref ->
+    | Keeper_approval_queue_result.Replay_applied_with_warning { artifact_ref = detail_ref; _ } ->
       Result.map
         (fun _ -> `Applied_with_warning detail_ref)
         (retrieve_replay_artifact ~base_path detail_ref)
-    | Keeper_approval_queue_result.Replay_failed detail_ref ->
+    | Keeper_approval_queue_result.Replay_failed { artifact_ref = detail_ref; _ } ->
       Result.map
         (fun _ -> `Failed detail_ref)
         (retrieve_replay_artifact ~base_path detail_ref)
-    | Keeper_approval_queue_result.Replay_indeterminate detail_ref ->
+    | Keeper_approval_queue_result.Replay_indeterminate { artifact_ref = detail_ref; _ } ->
       Result.map
         (fun _ -> `Indeterminate detail_ref)
         (retrieve_replay_artifact ~base_path detail_ref)
@@ -683,6 +700,11 @@ let canonical_evidence_fingerprint evidence =
   payload_fingerprint (replay_evidence_json ~include_journal:false evidence)
 ;;
 
+let replay_artifact_block evidence =
+  Agent_core.Types.Text
+    (Tool_output.encode_for_agent_core (Tool_output.Stored evidence.artifact_ref))
+;;
+
 let approval_input evidence =
   let fingerprint = canonical_evidence_fingerprint evidence in
   match Keeper_approval_input_admission.identity
@@ -690,7 +712,8 @@ let approval_input evidence =
   | Error _ as error -> error
   | Ok identity ->
     Ok (identity, Agent_core.Types.make_message ~origin:Recovery_instruction ~role:User
-          [Text (replay_evidence_fragment ~include_journal:false evidence)])
+          [Text (replay_evidence_fragment ~include_journal:false evidence);
+           replay_artifact_block evidence])
 ;;
 
 let canonical_replay_evidence_fragment evidence =
@@ -711,7 +734,10 @@ let replay_model_message
   in
   { (resolved_model_message ~user_message
        (canonical_replay_evidence_fragment replay_evidence))
-    with replay_evidence = [ replay_evidence ] }
+    with replay_evidence = [ replay_evidence ]
+       ; resolution_blocks =
+           [ Agent_core.Types.Text (canonical_replay_evidence_fragment replay_evidence)
+           ; replay_artifact_block replay_evidence ] }
 ;;
 
 let append_model_evidence ~approval_id ~user_message = function
@@ -786,7 +812,8 @@ let append_model_evidence ~approval_id ~user_message = function
 
 let append_model_evidence_block evidence blocks =
   blocks
-  @ [ Agent_core.Types.Text (canonical_replay_evidence_fragment evidence) ]
+  @ [ Agent_core.Types.Text (canonical_replay_evidence_fragment evidence)
+    ; replay_artifact_block evidence ]
 ;;
 
 let project_model_inputs ~base_path:_ evidence messages =
@@ -1101,6 +1128,7 @@ let replay_approved_effect_with_receipt
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ?continuation_channel
       ?gate_context
+      ?identity_transports
       ~(grant : Keeper_gate.cycle_grant)
       ~approval_id
       ()
@@ -1116,12 +1144,14 @@ let replay_approved_effect_with_receipt
          ~base_path:config.base_path
          ~approval_id
      with
-     | Some { operation; replay_effect; terminal_effect_receipt } ->
+     | Some { operation; replay_effect; retained_artifacts; model_artifact; terminal_effect_receipt } ->
        replayed_outcome
          ~base_path:config.base_path
          ~approval_id
          ~operation
          ?terminal_effect_receipt
+         ~retained_artifacts
+         ?model_artifact
          replay_effect
      | None ->
        (match Keeper_approval_queue_result.resolution_absence_of_grant_error error with
@@ -1169,12 +1199,14 @@ let replay_approved_effect_with_receipt
          ~base_path:config.base_path
          ~approval_id
      with
-     | Some { operation; replay_effect; terminal_effect_receipt } ->
+     | Some { operation; replay_effect; retained_artifacts; model_artifact; terminal_effect_receipt } ->
        replayed_outcome
          ~base_path:config.base_path
          ~approval_id
          ~operation
          ?terminal_effect_receipt
+         ~retained_artifacts
+         ?model_artifact
          replay_effect
      | None ->
        replayed_outcome
@@ -1233,6 +1265,8 @@ let replay_approved_effect_with_receipt
         settle_effect
           ?terminal_effect_receipt
           ~operation
+          ~retained_artifacts:execution.Keeper_tool_execution.retained_artifacts
+          ?model_artifact:execution.model_artifact
           (summarize_execution ~operation execution)
     in
     let replay ?terminal_effect_receipt_of_args operation decode run =
@@ -1249,8 +1283,8 @@ let replay_approved_effect_with_receipt
         run_effect ?terminal_effect_receipt operation (fun () -> run args)
     in
     (match find_pending_repair ~base_path:config.base_path ~approval_id with
-     | Some { operation; replay_effect; terminal_effect_receipt } ->
-       settle_effect ?terminal_effect_receipt ~operation replay_effect
+     | Some { operation; replay_effect; retained_artifacts; model_artifact; terminal_effect_receipt } ->
+       settle_effect ?terminal_effect_receipt ~retained_artifacts ?model_artifact ~operation replay_effect
      | None ->
        (match replayable_of_operation request.tool_name with
      | None -> replay_execution Not_applicable
@@ -1331,6 +1365,7 @@ let replay_approved_effect_with_receipt
      | Some Replay_identity ->
        replay identity_operation identity_of_gate_input (fun call ->
          Keeper_identity_gate.replay_call_with_outcome
+           ?transports:identity_transports
            ~config
            ~meta
            ?continuation_channel

@@ -235,21 +235,44 @@ val effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_
 
 val call_error_to_string : call_error -> string
 
+type call_projection = private
+  { tool_result : Agent_core.Types.tool_result
+  ; model_artifact : Tool_output.artifact_ref option
+      (** Complete model-visible result, already durable. [None] means the
+          result is inline. Private received envelopes never enter this field. *)
+  }
+
 val tool_result_of_call :
   base_path:string ->
   inline_ceiling_bytes:int ->
+  accepts_image_input:bool ->
+  retain_artifacts:(Tool_output.artifact_ref list -> unit) ->
   (Mcp_client.tool_result, call_error) result ->
-  Agent_core.Types.tool_result
+  call_projection
 (** The model's view of one call. A transport or server failure is
     recoverable only when the failure proves the effect never began
     ({!effect_disposition_of_call_error}). An unknown outcome is not
     recoverable merely because the remote tool claims to be read-only.
 
-    No answer is longer than [inline_ceiling_bytes]. When the whole answer
-    would be, the service's text is stored under [base_path] and the answer
-    carries its reference in that text's place; MASC's own sentence about the
-    call stays inline. If the store cannot keep the text, the answer says so
-    instead, and a completed call is reported as completed. *)
+    Received content, structured content and error flag are stored durably
+    before projection. [retain_artifacts] registers every stored root with
+    the exact execution owner; raw result references never enter model text
+    or metadata. Audience filtering and native media projection are shared
+    with replay. Native images require [accepts_image_input] and a supported
+    MIME type. Other media become individually readable durable byte artifacts,
+    owned by a public manifest containing only references this producer created.
+    External declarations of either internal manifest or private receipt MIME
+    are stored as ordinary binary bytes; their original MIME stays in the
+    description and raw receipt and grants no retention authority.
+    An exact manifest marker remains in both the fallback and authoritative
+    blocks, so history alone retains those children after execution logs retire.
+    A tool-reported error uses byte references for all visible media because
+    its error carrier has no native blocks. Original MIME values stay in the
+    model-facing descriptions. Text exceeding [inline_ceiling_bytes] becomes a reference to
+    only model-visible text, present in both the summary and authoritative
+    blocks beside native media. Storage or projection failure after receipt
+    is nonrecoverable with unknown effect, never proof that the call had no
+    effect. Transport error retry safety keeps its phase-based contract. *)
 
 val for_turn : base_path:string -> keeper_name:string -> offering
 (** Every attached provider's tools, for one turn.

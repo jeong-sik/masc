@@ -84,7 +84,7 @@ let offered ?read_only remote_name =
 (* A transport that records what it was asked and answers whatever the test
    set. Nothing here reaches a network. *)
 let recording_transport ?(modern = false) ?(get_read_only_hint = true)
-    ?(call_text = "PK-1") ?(call_is_error = false) () =
+    ?(call_text = "PK-1") ?call_content ?structured_content ?(call_is_error = false) () =
   let sent = ref [] in
   let post ~url ~headers ~body =
     sent := (url, headers, body) :: !sent;
@@ -106,8 +106,10 @@ let recording_transport ?(modern = false) ?(get_read_only_hint = true)
           ; "annotations", `Assoc [ "readOnlyHint", `Bool hint ] ] in
         `Assoc [ "tools", `List [ tool "getJiraIssue" get_read_only_hint; tool "editJiraIssue" false ] ]
       | `String "tools/call" -> `Assoc
-          [ "content", `List [ `Assoc [ "type", `String "text"; "text", `String call_text ] ]
+          ([ "content", Option.value call_content
+               ~default:(`List [ `Assoc [ "type", `String "text"; "text", `String call_text ] ])
           ; "isError", `Bool call_is_error ]
+          @ match structured_content with None -> [] | Some value -> ["structuredContent", value])
       | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> `Null
     in
     let result = match modern, result with
@@ -174,14 +176,20 @@ let transports_of_post send =
   let post : Mcp_client.post = { deadline_s = 60.; send = (fun ~deadline:_ -> send) } in
   { Identity_tools.mcp_post = post; token_post = never_token_post; discover = never_discover }
 
-let execute ?post ?(inline_ceiling_bytes = Common.max_tool_result_wire_bytes)
+let invocation () =
+  Agent_core.Tool_contract.Invocation.create ~tool_use_id:"identity-call-fixture" ~turn:1
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+    ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1;
+                execution_mode = Agent_core.Tool_contract.Serial }
+
+let execute ?post ?(invocation = invocation ()) ?(accepts_image_input = false) ?(inline_ceiling_bytes = Common.max_tool_result_wire_bytes)
     ~base_path tool_fixture arguments =
   let config = Masc.Workspace.default_config base_path in
   let tool =
-    Gate.agent_tool ?transports:(Option.map transports_of_post post) ~config
+    Gate.agent_tool ?transports:(Option.map transports_of_post post) ~accepts_image_input ~config
       ~meta:(meta ()) ~inline_ceiling_bytes:(fun () -> inline_ceiling_bytes) tool_fixture
   in
-  Agent_core.Base.Tool.execute tool arguments
+  Agent_core.Base.Tool.execute ~invocation tool arguments
 
 (* An explicitly allowed external call still needs a bounded transport. *)
 let test_without_a_clock_the_call_is_refused_not_unbounded () =
@@ -193,7 +201,7 @@ let test_without_a_clock_the_call_is_refused_not_unbounded () =
       ~inline_ceiling_bytes:(fun () -> Common.max_tool_result_wire_bytes)
       (offered ~read_only:true "getJiraIssue")
   in
-  match Agent_core.Base.Tool.execute tool (`Assoc [ ("key", `String "PK-1") ]) with
+  match Agent_core.Base.Tool.execute ~invocation:(invocation ()) tool (`Assoc [ ("key", `String "PK-1") ]) with
   | Ok output ->
       Alcotest.failf "a call with no clock ran: %s" output.Agent_core.Types.content
   | Error err ->
@@ -377,8 +385,8 @@ let test_a_large_answer_reaches_the_model_as_a_reference () =
   | _, Error error ->
       Alcotest.failf "an allowed read failed: %s" error.Agent_core.Types.message
 
-(* MASC's sentence about a failed call is what the model acts on next, so it
-   stays inline; only the service's text goes behind the reference. *)
+(* The exact marker keeps the warning inline in its preview, and the stored
+   result includes the same warning with the complete service reply. *)
 let test_a_large_failure_keeps_the_warning_inline () =
   let answer = oversized_answer () in
   match allowed_call ~call_text:answer ~call_is_error:true () with
@@ -398,7 +406,7 @@ let test_a_large_failure_keeps_the_warning_inline () =
         | Some cut -> String.sub message 0 cut
         | None -> message
       in
-      check str "the stored body is the service's text" answer
+      check str "the stored body includes the complete retry warning" (answer ^ "\n" ^ retry_warning)
         (stored_body ~base_path marker)
 
 let block_the_blob_store ~base_path =
@@ -407,17 +415,17 @@ let block_the_blob_store ~base_path =
   Out_channel.with_open_bin root (fun channel ->
     Out_channel.output_string channel "a file where the store's directory goes")
 
-(* A store that cannot keep the answer must not make a completed call look
-   like one that can simply be sent again. *)
-let test_an_unstorable_answer_reports_the_call_as_completed () =
+(* A received answer is not independent proof of an external effect. A
+   local storage failure must not make the call safe to repeat. *)
+let test_an_unstorable_answer_preserves_unknown_effect () =
   let answer = oversized_answer () in
   match allowed_call ~before_call:block_the_blob_store ~call_text:answer ~call_is_error:false () with
   | _, Ok output ->
       Alcotest.failf "an unstored answer reached the model as %d bytes"
         (String.length output.Agent_core.Types.content)
   | _, Error error ->
-      check Alcotest.bool "the model is told the call completed" true
-        (contains ~needle:"the service completed the call" error.Agent_core.Types.message);
+      check Alcotest.bool "storage failure leaves effect unknown" true
+        (error.Agent_core.Types.error_class = Some Agent_core.Types.Unknown);
       check Alcotest.bool "the model is not told to retry" false
         error.Agent_core.Types.recoverable
 
@@ -500,10 +508,9 @@ let test_a_reported_error_reaches_the_observers_without_the_services_words () =
   check Alcotest.bool "without the words" false
     (contains ~needle:words failure.Tool_result.message)
 
-(* The tool-call row is written from what the model is given, and here the
-   model is given an error: the service completed the call, but its answer
-   could not be kept. The observers read the same, with the effect proven. *)
-let test_an_answer_that_cannot_be_kept_reaches_the_observers_as_post_effect () =
+(* The tool-call row and observers preserve the same unknown effect when
+   an answer arrived but its durable copy could not be kept. *)
+let test_an_answer_that_cannot_be_kept_reaches_the_observers_as_unknown () =
   let (_, answer), observed =
     observed_calls (fun () ->
         allowed_call ~before_call:block_the_blob_store
@@ -517,8 +524,8 @@ let test_an_answer_that_cannot_be_kept_reaches_the_observers_as_post_effect () =
   let call = the_one_observed_call observed in
   check str "as failed, like the row" "failed" (Tool_result.string_of_disposition call);
   let failure = failure_of call in
-  check str "after the effect"
-    (Tool_result.failure_effect_disposition_to_string Tool_result.Proven_post_effect)
+  check str "effect unknown"
+    (Tool_result.failure_effect_disposition_to_string Tool_result.Effect_outcome_unknown)
     (Tool_result.failure_effect_disposition_to_string
        failure.Tool_result.effect_disposition)
 
@@ -534,7 +541,7 @@ let test_a_call_that_was_never_sent_reaches_the_observers_as_pre_effect () =
   in
   let answer, observed =
     observed_calls (fun () ->
-        Agent_core.Base.Tool.execute tool (`Assoc [ ("key", `String "PK-1") ]))
+        Agent_core.Base.Tool.execute ~invocation:(invocation ()) tool (`Assoc [ ("key", `String "PK-1") ]))
   in
   (match answer with
    | Ok output ->
@@ -891,9 +898,609 @@ let test_the_decoder_is_strict () =
       `String "not an approval"
     ]
 
+let mcp_media_content ~text =
+  `List
+    [ `Assoc ["type", `String "text"; "text", `String text]
+    ; `Assoc ["type", `String "text"; "text", `String "user-only-secret";
+        "annotations", `Assoc ["audience", `List [`String "user"]]]
+    ; `Assoc ["type", `String "image"; "mimeType", `String "image/png";
+        "data", `String "cHJpdmF0ZSBpbWFnZQ==";
+        "annotations", `Assoc ["audience", `List [`String "user"]]]
+    ; `Assoc ["type", `String "image"; "mimeType", `String "image/png";
+        "data", `String "aW1hZ2UgYnl0ZXM="]
+    ; `Assoc ["type", `String "audio"; "mimeType", `String "audio/wav; rate=16000";
+        "data", `String "YXVkaW8gYnl0ZXM="]
+    ; `Assoc ["type", `String "resource"; "resource", `Assoc
+        ["uri", `String "fixture:report"; "mimeType", `String "application/pdf";
+         "blob", `String "JVBERi0="]]
+    ]
+
+let output_ok = function
+  | Ok output -> output
+  | Error error -> Alcotest.fail error.Agent_core.Types.message
+
+let fetch_reference ~base_path (reference : Tool_output.artifact_ref) =
+  match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:reference.sha256 with
+  | Ok (Some bytes) -> bytes
+  | Ok None -> Alcotest.fail "retained artifact is absent"
+  | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+
+let public_artifact_body ~base_path (reference : Tool_output.artifact_ref) =
+  let body = fetch_reference ~base_path reference in
+  if reference.mime = Tool_output.artifact_manifest_mime then
+    match Tool_output.artifact_manifest_of_json (Yojson.Safe.from_string body) with
+    | Tool_output.Decoded_artifact_manifest {content; _} -> content
+    | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ ->
+      Alcotest.fail "public result is not a canonical manifest"
+  else body
+
+let visible_body ~base_path text =
+  match Tool_output.decode_from_agent_core text with
+  | Tool_output.Not_marker -> text
+  | Tool_output.Invalid_marker {detail} -> Alcotest.fail detail
+  | Tool_output.Decoded reference -> public_artifact_body ~base_path reference
+
+let raw_reference references =
+  match List.filter (fun (reference : Tool_output.artifact_ref) ->
+      reference.mime = "application/vnd.masc.mcp-result+json") references with
+  | [reference] -> reference
+  | _ -> Alcotest.fail "expected one retained raw MCP result"
+
+let assert_media ~native_image blocks =
+  let blocks = Option.value blocks ~default:[] in
+  check Alcotest.bool "native image follows the frozen runtime capability" native_image
+    (List.mem (Llm_provider.Types.Image {media_type="image/png";
+       source=Llm_provider.Types.Base64 "aW1hZ2UgYnl0ZXM="}) blocks);
+  check Alcotest.bool "PDF is a byte artifact, not unsupported native input" false
+    (List.mem (Llm_provider.Types.Document {media_type="application/pdf";
+       source=Llm_provider.Types.Base64 "JVBERi0="}) blocks);
+  check Alcotest.bool "user-only text is absent from model blocks" false
+    (List.exists (function Llm_provider.Types.Text text -> contains ~needle:"user-only-secret" text
+      | _ -> false) blocks)
+
+let save_fixture_history ~base_path messages =
+  let path = Filename.concat
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path) Common.keepers_runtime_dirname)
+    (keeper_name ^ "/mcp-history.json") in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path (Yojson.Safe.to_string
+    (`List (List.map Agent_core.History.message_to_json messages)))
+
+let rec remove_fixture_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Array.iter (fun name -> remove_fixture_tree (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Unix.unlink path
+
+let check_history_owns_public_media ~base_path ~raw ~public_ref =
+  let manifest = fetch_reference ~base_path public_ref |> Yojson.Safe.from_string in
+  let children = match Tool_output.artifact_manifest_of_json manifest with
+    | Tool_output.Decoded_artifact_manifest {artifact_refs; _} -> artifact_refs
+    | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ ->
+      Alcotest.fail "history must own a canonical public manifest" in
+  check Alcotest.int "public manifest owns exactly the three published byte references" 3
+    (List.length children);
+  check Alcotest.bool "private raw receipt is not a public child" false
+    (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = raw.Tool_output.sha256) children);
+  (* Retire every execution/approval/chat owner in this isolated fixture.
+     Only the actual serialized history remains as a public-result owner. *)
+  let config = Masc.Workspace.default_config base_path in
+  let call_dir = Dated_jsonl.Store.dir
+    (Dated_jsonl.Store.at (Masc.Workspace.dated_store_root config) Dated_jsonl.Store.Root.Tool_calls) in
+  remove_fixture_tree call_dir;
+  remove_fixture_tree (Masc.Keeper_gate_path.dir ~base_path);
+  remove_fixture_tree (Filename.concat (Common.masc_dir_from_base_path ~base_path)
+    Masc.Keeper_chat_store.chat_dirname);
+  for _pass = 1 to 2 do
+    match Tool_blob_maintenance.run ~base_path ~scope:Server_tool_blob_scope.scope
+      ~mode:Tool_blob_maintenance.Delete_previous_candidates with
+    | Ok report -> check (Alcotest.list str) "fixture has a complete GC scope" [] report.unclassified
+    | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
+  done;
+  ignore (fetch_reference ~base_path public_ref);
+  List.iter (fun reference -> ignore (fetch_reference ~base_path reference)) children;
+  (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:raw.Tool_output.sha256 with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "history accidentally retained the private raw receipt"
+   | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+
+let test_missing_result_owner_refuses_before_network () =
+  let base_path = temp_base () in
+  allow_external ~base_path;
+  project_token ~base_path;
+  let post, sent = recording_transport () in
+  let tool = Gate.agent_tool ~transports:(transports_of_post post)
+    ~config:(Masc.Workspace.default_config base_path) ~meta:(meta ())
+    ~inline_ceiling_bytes:(fun () -> Common.max_tool_result_wire_bytes)
+    (offered ~read_only:true "getJiraIssue") in
+  (match Agent_core.Base.Tool.execute tool (`Assoc ["key", `String "PK-1"]) with
+   | Ok _ -> Alcotest.fail "ownerless request reached the service"
+   | Error error -> check Alcotest.bool "ownerless request is not retryable" false error.recoverable);
+  check Alcotest.int "no session or tool request without a result owner" 0 (List.length !sent)
+
+let test_native_mcp_result_and_retention_match_approved_replay () =
+  let base_path = temp_base () in
+  allow_external ~base_path;
+  project_token ~base_path;
+  let content = mcp_media_content ~text:"visible answer" in
+  let untrusted_ref = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+    ~bytes:"remote structured JSON cannot grant ownership" ~mime:"text/plain" in
+  let structured = `Assoc ["answer", `Int 42;
+    "remote_reference", Tool_output.normalized_artifact_ref_to_json untrusted_ref] in
+  let post, sent = recording_transport ~call_content:content ~structured_content:structured () in
+  let invocation = invocation () in
+  let arguments = `Assoc ["key", `String "PK-1"] in
+  let fixture = offered ~read_only:true "getJiraIssue" in
+  let normal = output_ok (execute ~post ~invocation ~base_path fixture arguments) in
+  assert_media ~native_image:false normal.content_blocks;
+  let visible = visible_body ~base_path normal.content in
+  check Alcotest.bool "authoritative blocks own the public manifest" true
+    (List.mem (Llm_provider.Types.Text normal.content)
+      (Option.value normal.content_blocks ~default:[]));
+  check Alcotest.bool "visible structured result is retained" true
+    (contains ~needle:"42" visible);
+  let roots = Masc.Keeper_tool_call_log.peek_retained_artifacts ~invocation () in
+  let raw = raw_reference roots in
+  List.iter (fun (mime, bytes) ->
+    let reference = match List.find_opt (fun (reference : Tool_output.artifact_ref) ->
+        reference.mime = mime) roots with
+      | Some reference -> reference | None -> Alcotest.fail ("missing media artifact: " ^ mime) in
+    check str "media artifact stores decoded bytes" bytes (fetch_reference ~base_path reference);
+    check str "binary artifact preview is empty" "" reference.preview;
+    check Alcotest.bool "media artifact is model-readable" true
+      (contains ~needle:reference.sha256 visible))
+    ["image/png", "image bytes"; "audio/wav", "audio bytes"; "application/pdf", "%PDF-"];
+  check Alcotest.bool "parameterized original MIME remains visible" true
+    (contains ~needle:"audio/wav; rate=16000" visible);
+  check str "private raw reference has no preview" "" raw.preview;
+  check Alcotest.bool "private raw reference is absent from model summary" false
+    (contains ~needle:raw.sha256 normal.content);
+  check Alcotest.bool "private raw reference is absent from model metadata" false
+    (contains ~needle:raw.sha256 (Yojson.Safe.to_string (Option.value normal._meta ~default:`Null)));
+  let original = Yojson.Safe.from_string (fetch_reference ~base_path raw) in
+  check Alcotest.bool "raw owner retains full audience content" true
+    (member "content" original = Some content);
+  check Alcotest.bool "raw owner retains structured result" true
+    (member "structuredContent" original = Some structured);
+  check Alcotest.bool "raw owner retains remote error flag" true
+    (member "isError" original = Some (`Bool false));
+  check Alcotest.int "ordinary request sent once" 1 (List.length (tool_calls sent));
+  (* Exercise the real post-tool hook, not a manually assembled retention row. *)
+  let module Log = Masc.Keeper_tool_call_log in
+  Fun.protect ~finally:(fun () -> Log.reset_for_testing ();
+      Masc.Keeper_execution_join.For_testing.clear ()) (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Log.init ~base_path ();
+    let hooks = Masc.Keeper_hooks_agent_core.make_hooks
+      ~config:(Masc.Workspace.default_config base_path) ~meta_ref:(ref (meta ()))
+      ~turn_ctx_cell:(Log.create_turn_ctx_cell ()) ~trace_id:"identity-retention" ~keeper_turn_id:1 () in
+    ignore ((Option.get hooks.Agent_core.Hooks.post_tool_use)
+      (Agent_core.Hooks.PostToolUse { invocation; tool_name=fixture.schema.name; input=arguments;
+        output=Ok normal; result_bytes=String.length normal.content; duration_ms=1. }));
+    let rows = match Log.read_recent ~keeper_name () with
+      | Ok rows -> rows | Error (Log.Index_unavailable detail) -> Alcotest.fail detail in
+    let refs = List.concat_map Tool_output.normalized_artifact_refs_in_json rows in
+    check Alcotest.bool "durable tool-call row retains the raw artifact" true
+      (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = raw.sha256) refs);
+    let status = Option.get (Masc.Keeper_runtime_trust_timeline.latest_tool_call_json ~keeper_name) in
+    let status_refs = Tool_output.normalized_artifact_refs_in_json status in
+    check Alcotest.bool "status does not expose the private audit handle" false
+      (contains ~needle:raw.sha256 (Yojson.Safe.to_string status));
+    check Alcotest.int "status keeps visible media and manifest references" 4 (List.length status_refs);
+    check Alcotest.int "carrier is cleared only after log commit" 0
+      (List.length (Log.peek_retained_artifacts ~invocation ())));
+  let public_ref = match Tool_output.decode_from_agent_core normal.content with
+    | Tool_output.Decoded reference -> reference
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> Alcotest.fail "missing public manifest" in
+  let history_blocks = Option.map (List.map (function
+    | Llm_provider.Types.Text text -> Agent_core.Types.Text text
+    | _ -> Alcotest.fail "text-only runtime received native media")) normal.content_blocks in
+  save_fixture_history ~base_path
+    [Agent_core.Types.make_message ~role:Tool [Agent_core.Types.ToolResult
+      {tool_use_id="identity-call-fixture"; content=normal.content; content_blocks=history_blocks;
+       outcome=Tool_succeeded; json=None}]];
+  check_history_owns_public_media ~base_path ~raw ~public_ref;
+  (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:untrusted_ref.sha256 with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "remote structured content acquired manifest ownership"
+   | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
+  let replay_base = temp_base () in
+  let config, keeper, _, grant, call = approved_identity_call ~base_path:replay_base fixture arguments in
+  let replay_post, replay_sent = recording_transport ~call_content:content ~structured_content:structured () in
+  let replayed = Gate.replay_call_with_outcome ~transports:(transports_of_post replay_post)
+    ~config ~meta:keeper ~gate_grant:grant call in
+  (match replayed.Masc.Keeper_tool_execution.disposition with
+   | Tool_result.Completed () -> ()
+   | Tool_result.Deferred () | Tool_result.Failed _ -> Alcotest.fail replayed.raw_output);
+  check str "normal and approved replay use identical model text" normal.content replayed.raw_output;
+  check Alcotest.bool "normal and replay preserve identical native blocks" true
+    (normal.content_blocks = replayed.content_blocks);
+  check str "normal and replay retain the same raw content address" raw.sha256
+    (raw_reference replayed.retained_artifacts).sha256;
+  check Alcotest.int "approved request sent once" 1 (List.length (tool_calls replay_sent))
+
+let test_large_mcp_text_keeps_native_media_and_filters_private_text () =
+  let base_path = temp_base () in
+  allow_external ~base_path;
+  project_token ~base_path;
+  let content = mcp_media_content ~text:(oversized_answer ()) in
+  let post, sent = recording_transport ~call_content:content () in
+  let invocation = invocation () in
+  let output = output_ok (execute ~post ~invocation ~accepts_image_input:true ~base_path
+      (offered ~read_only:true "getJiraIssue") (`Assoc ["key", `String "PK-1"])) in
+  assert_media ~native_image:true output.content_blocks;
+  let allowed = visible_body ~base_path output.content in
+  check Alcotest.bool "visible text remains readable" true (contains ~needle:(oversized_answer ()) allowed);
+  check Alcotest.bool "private text never enters model-readable text blob" false
+    (contains ~needle:"user-only-secret" allowed);
+  (match output.content_blocks with
+   | Some (Llm_provider.Types.Text marker :: _) ->
+     check str "authoritative blocks include the text artifact" output.content marker
+   | Some [] | None | Some _ -> Alcotest.fail "media result lost its text artifact");
+  check Alcotest.int "raw, audio, PDF and allowed text have owners" 4
+    (List.length (Masc.Keeper_tool_call_log.peek_retained_artifacts ~invocation ()));
+  check Alcotest.int "externalization never repeats the request" 1 (List.length (tool_calls sent))
+
+let test_unsupported_image_format_is_a_byte_reference () =
+  let base_path = temp_base () in
+  allow_external ~base_path; project_token ~base_path;
+  let content = `List [`Assoc ["type", `String "image"; "mimeType", `String "image/svg+xml";
+      "data", `String "PHN2Zy8+"]] in
+  let post, sent = recording_transport ~call_content:content () in
+  let invocation = invocation () in
+  let output = output_ok (execute ~post ~invocation ~accepts_image_input:true ~base_path
+      (offered ~read_only:true "getJiraIssue") (`Assoc ["key", `String "PK-1"])) in
+  let blocks = Option.value output.content_blocks ~default:[] in
+  check Alcotest.bool "unsupported image format is not passed natively" true
+    (List.for_all (function Llm_provider.Types.Text _ -> true | _ -> false) blocks);
+  let roots = Masc.Keeper_tool_call_log.peek_retained_artifacts ~invocation () in
+  let reference = match List.find_opt (fun (reference : Tool_output.artifact_ref) ->
+      reference.mime = "image/svg+xml") roots with
+    | Some reference -> reference | None -> Alcotest.fail "unsupported image bytes were lost" in
+  check str "SVG remains readable by its original content address" "<svg/>"
+    (fetch_reference ~base_path reference);
+  check Alcotest.bool "SVG reference reaches the model" true
+    (contains ~needle:reference.sha256 (visible_body ~base_path output.content));
+  check Alcotest.int "format projection sends only once" 1 (List.length (tool_calls sent))
+
+let test_generic_mcp_resources_keep_bytes_and_public_ownership () =
+  let base_path = temp_base () in
+  allow_external ~base_path; project_token ~base_path;
+  let content = `List
+    [ `Assoc ["type", `String "resource"; "resource", `Assoc
+        ["uri", `String "fixture:archive"; "mimeType", `String "application/zip";
+         "blob", `String "YmluYXJ5IGJ5dGVz"]]
+    ; `Assoc ["type", `String "resource"; "resource", `Assoc
+        ["uri", `String "fixture:empty"; "blob", `String ""]]
+    ] in
+  let post, sent = recording_transport ~call_content:content () in
+  let invocation = invocation () in
+  let output = output_ok (execute ~post ~invocation ~base_path
+    (offered ~read_only:true "getJiraIssue") (`Assoc ["key", `String "PK-1"])) in
+  let public_ref = match Tool_output.decode_from_agent_core output.content with
+    | Tool_output.Decoded reference -> reference
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> Alcotest.fail "generic resources lost their manifest" in
+  let visible, children = match fetch_reference ~base_path public_ref
+    |> Yojson.Safe.from_string |> Tool_output.artifact_manifest_of_json with
+    | Tool_output.Decoded_artifact_manifest {content; artifact_refs; _} -> content, artifact_refs
+    | Tool_output.Not_artifact_manifest | Tool_output.Invalid_artifact_manifest _ ->
+      Alcotest.fail "generic resource manifest is invalid" in
+  check Alcotest.int "both generic resources are public children" 2 (List.length children);
+  List.iter (fun (mime, bytes) ->
+    let reference = List.find (fun (reference : Tool_output.artifact_ref) -> reference.mime = mime) children in
+    check str "generic resource bytes survive exactly" bytes (fetch_reference ~base_path reference);
+    check str "binary preview is empty" "" reference.preview)
+    ["application/zip", "binary bytes"; "application/octet-stream", ""];
+  check Alcotest.bool "resource URI remains visible" true (contains ~needle:"fixture:archive" visible);
+  check Alcotest.bool "missing MIME remains explicit" true
+    (contains ~needle:"fixture:empty (MIME unspecified)" visible);
+  check Alcotest.bool "generic public manifest is in authoritative blocks" true
+    (List.mem (Llm_provider.Types.Text output.content) (Option.value output.content_blocks ~default:[]));
+  let raw = raw_reference (Masc.Keeper_tool_call_log.peek_retained_artifacts ~invocation ()) in
+  check Alcotest.bool "generic manifest does not publish its raw receipt" false
+    (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = raw.sha256) children);
+  check Alcotest.int "generic resources require one external call" 1 (List.length (tool_calls sent))
+
+let test_manifest_storage_failure_preserves_received_effect_uncertainty () =
+  let base_path = temp_base () in
+  let store = Tool_blob_store.create ~base_path in
+  let root = Tool_blob_store.root_dir store in
+  let saved_root = root ^ ".fixture-backup" in
+  let retained = ref [] in
+  let blocked = ref false in
+  let result : Mcp_client.tool_result =
+    { content = mcp_media_content ~text:"visible answer"; text="visible answer";
+      is_error=false; structured_content=None } in
+  let projection = Fun.protect ~finally:(fun () ->
+      if !blocked then (Unix.unlink root; Unix.rename saved_root root)) (fun () ->
+    Identity_tools.tool_result_of_call ~base_path ~accepts_image_input:false
+      ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes
+      ~retain_artifacts:(fun roots ->
+        retained := roots;
+        if List.length roots = 4 then (
+          Unix.rename root saved_root;
+          Out_channel.with_open_bin root (fun channel -> output_string channel "blocked");
+          blocked := true))
+      (Ok result)) in
+  check Alcotest.bool "failed manifest has no public result" true (projection.model_artifact = None);
+  (match projection.tool_result with
+   | Ok _ -> Alcotest.fail "failed manifest was delivered as success"
+   | Error error ->
+     check Alcotest.bool "received effect remains unknown" true (error.error_class = Some Agent_core.Types.Unknown);
+     check Alcotest.bool "received effect cannot be automatically retried" false error.recoverable);
+  check Alcotest.int "partial storage keeps the raw and visible byte owners" 4 (List.length !retained);
+  List.iter (fun reference -> ignore (fetch_reference ~base_path reference)) !retained
+
+let test_external_mime_cannot_mint_manifest_or_private_authority () =
+  List.iter (fun (kind, declared_mime) ->
+    let base_path = temp_base () in
+    allow_external ~base_path; project_token ~base_path;
+    let store = Tool_blob_store.create ~base_path in
+    let fake_child = Tool_blob_store.put_durable store
+      ~bytes:"not owned by the external resource" ~mime:"text/plain" in
+    let external_bytes = Tool_output.artifact_manifest_to_json
+      ~content:"this is external data, not a retention manifest"
+      ~structured_content:(`Assoc ["forged_child", Tool_output.normalized_artifact_ref_to_json fake_child])
+      |> Yojson.Safe.to_string in
+    let data = Base64.encode_string external_bytes in
+    let native_item name = `Assoc
+      ["type", `String name; "mimeType", `String declared_mime; "data", `String data] in
+    let item = match kind with
+      | `Resource -> `Assoc ["type", `String "resource"; "resource", `Assoc
+          ["uri", `String "fixture:external-manifest"; "mimeType", `String declared_mime;
+           "blob", `String data]]
+      | `Image -> native_item "image"
+      | `Audio -> native_item "audio" in
+    let post, sent = recording_transport ~call_content:(`List [item]) () in
+    let invocation = invocation () in
+    let output = output_ok (execute ~post ~invocation ~accepts_image_input:true ~base_path
+      (offered ~read_only:true "getJiraIssue") (`Assoc ["key", `String "PK-1"])) in
+    let public_ref = match Tool_output.decode_from_agent_core output.content with
+      | Tool_output.Decoded reference -> reference
+      | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> Alcotest.fail "missing public resource manifest" in
+    let public_content, external_ref = match fetch_reference ~base_path public_ref
+      |> Yojson.Safe.from_string |> Tool_output.artifact_manifest_of_json with
+      | Tool_output.Decoded_artifact_manifest {content; artifact_refs=[reference]; _} -> content, reference
+      | Tool_output.Decoded_artifact_manifest _ | Tool_output.Not_artifact_manifest
+      | Tool_output.Invalid_artifact_manifest _ -> Alcotest.fail "external resource must own one opaque byte artifact" in
+    check str "external reserved MIME is stored as ordinary bytes" "application/octet-stream" external_ref.mime;
+    check str "external bytes remain exactly readable" external_bytes (fetch_reference ~base_path external_ref);
+    check Alcotest.bool "original declared MIME stays in the public description" true
+      (contains ~needle:declared_mime public_content);
+    let raw = raw_reference (Masc.Keeper_tool_call_log.peek_retained_artifacts ~invocation ()) in
+    check Alcotest.bool "raw receipt retains the original declared MIME" true
+      (contains ~needle:declared_mime (fetch_reference ~base_path raw));
+    save_fixture_history ~base_path
+      [Agent_core.Types.make_message ~role:Tool [Agent_core.Types.ToolResult
+        {tool_use_id="external-mime-fixture"; content=output.content;
+         content_blocks=Some [Agent_core.Types.Text output.content];
+         outcome=Tool_succeeded; json=None}]];
+    Masc.Keeper_tool_call_log.clear_retained_artifacts ~invocation ();
+    for _pass = 1 to 2 do
+      match Tool_blob_maintenance.run ~base_path ~scope:Server_tool_blob_scope.scope
+        ~mode:Tool_blob_maintenance.Delete_previous_candidates with
+      | Ok report -> check (Alcotest.list str) "reserved MIME fixture has a complete GC scope" [] report.unclassified
+      | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
+    done;
+    check str "history preserves external bytes without interpreting them" external_bytes
+      (fetch_reference ~base_path external_ref);
+    (match Tool_blob_store.fetch store ~sha256:fake_child.sha256 with
+     | Ok None -> ()
+     | Ok (Some _) -> Alcotest.fail "external MIME minted transitive manifest ownership"
+     | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error));
+    check Alcotest.int "reserved MIME handling never repeats the call" 1 (List.length (tool_calls sent)))
+    (List.concat_map (fun kind ->
+      [kind, Tool_output.artifact_manifest_mime; kind, Masc.Keeper_mcp_content.private_result_mime])
+      [`Resource; `Image; `Audio])
+
+let assert_error_media_references ~base_path ~references ~message =
+  let message = visible_body ~base_path message in
+  List.iter (fun (mime, bytes) ->
+    let reference = match List.find_opt (fun (reference : Tool_output.artifact_ref) ->
+        reference.mime = mime) references with
+      | Some reference -> reference | None -> Alcotest.fail ("error result lost media: " ^ mime) in
+    check str "error media bytes remain readable" bytes (fetch_reference ~base_path reference);
+    check Alcotest.bool "error carries each visible media reference" true
+      (contains ~needle:reference.sha256 message))
+    ["image/png", "image bytes"; "audio/wav", "audio bytes"; "application/pdf", "%PDF-"];
+  check Alcotest.bool "error never exposes raw envelope reference" false
+    (contains ~needle:(raw_reference references).sha256 message);
+  let private_sha = (Agent_core.History.stored_of_raw "private image").sha256 in
+  check Alcotest.bool "error does not reference a user-only media body" false
+    (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = private_sha) references);
+  match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:private_sha with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "user-only media was separately published"
+  | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+
+let test_received_mcp_failures_keep_unknown_effect_and_never_retry () =
+  List.iter (fun (content, is_error, block_store) ->
+    let base_path = temp_base () in
+    allow_external ~base_path; project_token ~base_path;
+    if block_store then block_the_blob_store ~base_path;
+    let post, sent = recording_transport ~call_content:content ~call_is_error:is_error () in
+    let invocation = invocation () in
+    let result, observed = observed_calls (fun () -> execute ~post ~invocation ~accepts_image_input:true ~base_path
+      (offered ~read_only:true "getJiraIssue") (`Assoc ["key", `String "PK-1"])) in
+    (match result with
+     | Ok _ -> Alcotest.fail "unusable received result became success"
+     | Error error ->
+       check Alcotest.bool "received failure is nonrecoverable" false error.recoverable;
+       check Alcotest.bool "received failure has unknown error class" true
+         (error.error_class = Some Agent_core.Types.Unknown);
+       check Alcotest.bool "failed result does not expose private text" false
+         (contains ~needle:"user-only-secret" error.message));
+    let failed = failure_of (the_one_observed_call observed) in
+    check Alcotest.bool "received failure cannot prove an effect phase" true
+      (failed.effect_disposition = Tool_result.Effect_outcome_unknown);
+    check Alcotest.int "one external request even after local failure" 1 (List.length (tool_calls sent));
+    let retained = Masc.Keeper_tool_call_log.peek_retained_artifacts ~invocation () in
+    check Alcotest.int "raw reply and visible error media retain their owners"
+      (if block_store then 0 else if is_error then 5 else 1) (List.length retained);
+    if is_error then (match result with
+      | Error error -> assert_error_media_references ~base_path ~references:retained ~message:error.message
+      | Ok _ -> Alcotest.fail "remote error became success");
+    let replay_base = temp_base () in
+    let config, keeper, _, grant, call = approved_identity_call ~base_path:replay_base
+      (offered ~read_only:true "getJiraIssue") (`Assoc ["key", `String "PK-1"]) in
+    if block_store then block_the_blob_store ~base_path:replay_base;
+    let replay_post, replay_sent = recording_transport ~call_content:content ~call_is_error:is_error () in
+    let replayed = Gate.replay_call_with_outcome ~transports:(transports_of_post replay_post)
+      ~config ~meta:keeper ~gate_grant:grant call in
+    (match replayed.Masc.Keeper_tool_execution.disposition with
+     | Tool_result.Failed class_ -> check Alcotest.bool "replay runtime failure" true
+         (class_ = Tool_result.Runtime_failure)
+     | Tool_result.Completed () | Tool_result.Deferred () ->
+       Alcotest.fail "replay lost the received-result failure");
+    check Alcotest.bool "replay also retains unknown external effect" true
+      (replayed.failure_effect_disposition = Tool_result.Effect_outcome_unknown);
+    check Alcotest.bool "replay error never exposes user-only data" false
+      (contains ~needle:"user-only-secret" replayed.raw_output);
+    check Alcotest.int "replay sends once after projection/storage/error response" 1
+      (List.length (tool_calls replay_sent));
+    check Alcotest.int "replay failure retains raw and visible media roots"
+      (if block_store then 0 else if is_error then 5 else 1) (List.length replayed.retained_artifacts);
+    if is_error then assert_error_media_references ~base_path:replay_base
+      ~references:replayed.retained_artifacts ~message:replayed.raw_output)
+    [ `List [`Assoc ["type", `String "unknown"; "text", `String "user-only-secret"]], false, false
+    ; mcp_media_content ~text:"visible failure", true, false
+    ; mcp_media_content ~text:"visible answer", false, true
+    ]
+
+let test_host_replay_retains_mcp_artifacts_across_settlement_and_repair () =
+  let module Replay = Masc.Keeper_gate_replay in
+  let module Result = Masc.Keeper_approval_queue_result in
+  List.iter (fun (is_error, fault) ->
+    let base_path = temp_base () in
+    let config, keeper, approval_id, grant, _ = approved_identity_call ~base_path
+      (offered ~read_only:true "getJiraIssue") (`Assoc ["key", `String "PK-1"]) in
+    let content = mcp_media_content ~text:"visible host replay" in
+    let structured = `Assoc ["answer", `Int 42] in
+    let post, sent = recording_transport ~call_content:content
+      ~structured_content:structured ~call_is_error:is_error () in
+    let replay () = Replay.replay_approved_effect_with_receipt ~config ~meta:keeper
+      ~publication_recovery:{ provider = Masc.Keeper_publication_recovery_availability.non_runtime_provider;
+        keeper_name }
+      ~turn_sandbox_factory:None ~identity_transports:(transports_of_post post)
+      ~grant ~approval_id () in
+    let first = match fault with
+      | `None -> replay ()
+      | `Evidence -> Replay.For_testing.with_replay_evidence_persister
+          (fun ~base_path:_ _ -> Error "fixture evidence storage unavailable") replay
+      | `Journal ->
+        let path = Queue.For_testing.replay_results_store_path ~base_path in
+        let backup = path ^ ".fixture-backup" in
+        let existed = Sys.file_exists path in
+        if existed then Unix.rename path backup;
+        Unix.mkdir path 0o700;
+        Fun.protect ~finally:(fun () ->
+          Unix.rmdir path;
+          if existed then Unix.rename backup path) replay in
+    (match fault, first.Replay.outcome with
+     | (`None | `Evidence), (Replay.Applied _ | Replay.Indeterminate _) -> ()
+     | `Journal, Replay.Repair_required { stage = Replay.Replay_journal; _ } -> ()
+     | _ -> Alcotest.failf "unexpected replay settlement: %s"
+         (Replay.outcome_to_string first.outcome));
+    check Alcotest.int "the external effect ran exactly once before repair" 1
+      (List.length (tool_calls sent));
+    let settled = replay () in
+    (match is_error, settled.outcome with
+     | false, Replay.Applied _ | true, Replay.Indeterminate _ -> ()
+     | _ -> Alcotest.failf "repaired effect changed its outcome: %s"
+         (Replay.outcome_to_string settled.outcome));
+    check Alcotest.int "repair never repeats the external effect" 1
+      (List.length (tool_calls sent));
+    let read_evidence () =
+      match Queue.approved_resolution_delivery ~base_path ~id:approval_id with
+      | Ok { state = Result.Resolution_consumed; replay_outcome = Some outcome; _ } ->
+        (match is_error, outcome with
+         | false, Result.Replay_applied evidence
+         | true, Result.Replay_indeterminate evidence -> evidence
+         | _ -> Alcotest.fail "durable replay has the wrong effect disposition")
+      | Ok _ -> Alcotest.fail "actual replay did not settle its consumed approval"
+      | Error error -> Alcotest.fail (Result.grant_error_to_string error) in
+    let evidence = read_evidence () in
+    check Alcotest.int "raw receipt, public manifest and media have a durable owner" 5
+      (List.length evidence.retained_artifacts);
+    let raw = raw_reference evidence.retained_artifacts in
+    let raw_json = Yojson.Safe.from_string (fetch_reference ~base_path raw) in
+    check Alcotest.bool "replay raw receipt preserves the full received content" true
+      (member "content" raw_json = Some content);
+    check Alcotest.bool "replay raw receipt preserves structured content" true
+      (member "structuredContent" raw_json = Some structured);
+    check Alcotest.bool "replay raw receipt preserves the remote error flag" true
+      (member "isError" raw_json = Some (`Bool is_error));
+    check str "Gate owns the producer manifest directly" Tool_output.artifact_manifest_mime
+      evidence.artifact_ref.mime;
+    let delivered = public_artifact_body ~base_path evidence.artifact_ref in
+    assert_error_media_references ~base_path ~references:evidence.retained_artifacts
+      ~message:delivered;
+    check Alcotest.bool "model result omits audience-restricted text" false
+      (contains ~needle:"user-only-secret" delivered);
+    let model = Replay.append_model_evidence ~approval_id ~user_message:"continue"
+      settled.outcome in
+    check Alcotest.bool "model replay instruction omits the private raw root" false
+      (contains ~needle:raw.sha256 model.text);
+    let sidecar = Yojson.Safe.from_file
+      (Queue.For_testing.replay_results_store_path ~base_path) in
+    check Alcotest.bool "private roots are in the actual Gate sidecar" true
+      (List.exists (fun (reference : Tool_output.artifact_ref) -> reference.sha256 = raw.sha256)
+         (Tool_output.normalized_artifact_refs_in_json sidecar));
+    let live = match Tool_blob_maintenance.live_references ~base_path
+      ~scope:Server_tool_blob_scope.scope with
+      | Ok live -> live
+      | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error) in
+    let live_digests = Tool_blob_maintenance.fold_live_sha256 live ~init:[]
+      ~f:(fun digests digest -> digest :: digests) in
+    List.iter (fun (reference : Tool_output.artifact_ref) ->
+      check Alcotest.bool "the production GC scan retains every replay artifact" true
+        (List.mem reference.sha256 live_digests))
+      (evidence.artifact_ref :: evidence.retained_artifacts);
+    Queue.For_testing.reset_runtime_state ();
+    install_queue ~base_path;
+    let reloaded = read_evidence () in
+    check Alcotest.bool "private replay roots survive a registry restart" true
+      (reloaded = evidence);
+    ignore (replay ());
+    check Alcotest.int "restart reads the durable result without resending" 1
+      (List.length (tool_calls sent));
+    let canonical = match model.replay_evidence with
+      | [public_evidence] ->
+        (match Replay.approval_input public_evidence with
+         | Ok (_, message) -> message
+         | Error error -> Alcotest.fail (Masc.Keeper_approval_input_admission.error_to_string error))
+      | [] | _ :: _ :: _ -> Alcotest.fail "host replay has no singular public evidence" in
+    save_fixture_history ~base_path [canonical];
+    Queue.For_testing.reset_runtime_state ();
+    check_history_owns_public_media ~base_path ~raw ~public_ref:evidence.artifact_ref)
+    [false, `None; true, `None; false, `Evidence; true, `Evidence;
+     false, `Journal; true, `Journal]
+
 let () =
   Alcotest.run "keeper_identity_gate"
-    [ ( "routing",
+    [ ( "native MCP results",
+        [ Alcotest.test_case "missing result owner refuses before network" `Quick
+            test_missing_result_owner_refuses_before_network;
+          Alcotest.test_case "normal and approved replay preserve media bytes and durable roots" `Quick
+            test_native_mcp_result_and_retention_match_approved_replay;
+          Alcotest.test_case "externalized text keeps media and filters private content" `Quick
+            test_large_mcp_text_keeps_native_media_and_filters_private_text;
+          Alcotest.test_case "unsupported image formats retain readable bytes" `Quick
+            test_unsupported_image_format_is_a_byte_reference;
+          Alcotest.test_case "generic resources retain bytes and public manifest ownership" `Quick
+            test_generic_mcp_resources_keep_bytes_and_public_ownership;
+          Alcotest.test_case "failed manifest keeps the received effect unknown" `Quick
+            test_manifest_storage_failure_preserves_received_effect_uncertainty;
+          Alcotest.test_case "external MIME cannot mint retention or private authority" `Quick
+            test_external_mime_cannot_mint_manifest_or_private_authority;
+          Alcotest.test_case "received errors retain unknown effects without retry" `Quick
+            test_received_mcp_failures_keep_unknown_effect_and_never_retry;
+          Alcotest.test_case "host replay retains artifacts through settlement repair and restart" `Quick
+            test_host_replay_retains_mcp_artifacts_across_settlement_and_repair;
+        ] );
+      ( "routing",
         [ Alcotest.test_case "without a clock the call is refused, not unbounded"
             `Quick test_without_a_clock_the_call_is_refused_not_unbounded;
           Alcotest.test_case "silence defers durably" `Quick
@@ -927,8 +1534,8 @@ let () =
             `Quick test_a_large_answer_reaches_the_model_as_a_reference;
           Alcotest.test_case "a large failure keeps the warning inline"
             `Quick test_a_large_failure_keeps_the_warning_inline;
-          Alcotest.test_case "an unstorable answer reports the call as completed"
-            `Quick test_an_unstorable_answer_reports_the_call_as_completed;
+          Alcotest.test_case "an unstorable answer preserves unknown effect"
+            `Quick test_an_unstorable_answer_preserves_unknown_effect;
           Alcotest.test_case "a small answer stays inline" `Quick
             test_a_small_answer_stays_inline;
         ] );
@@ -939,8 +1546,8 @@ let () =
             "a reported error reaches the observers without the service's words"
             `Quick
             test_a_reported_error_reaches_the_observers_without_the_services_words;
-          Alcotest.test_case "an answer that cannot be kept is post-effect" `Quick
-            test_an_answer_that_cannot_be_kept_reaches_the_observers_as_post_effect;
+          Alcotest.test_case "an answer that cannot be kept has unknown effect" `Quick
+            test_an_answer_that_cannot_be_kept_reaches_the_observers_as_unknown;
           Alcotest.test_case "a call that was never sent is pre-effect" `Quick
             test_a_call_that_was_never_sent_reaches_the_observers_as_pre_effect;
           Alcotest.test_case "a deferral reaches the observers as deferred" `Quick

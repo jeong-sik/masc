@@ -124,11 +124,13 @@ let transports_of_post send =
 
 let execute_offered ?(post = never_post) ~base_path
     (offered : Identity_tools.offered_tool) arguments =
-  Identity_tools.tool_result_of_call ~base_path
-    ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes
+  let retained = ref [] in
+  Identity_tools.tool_result_of_call ~base_path ~retain_artifacts:(fun roots -> retained := roots)
+    ~accepts_image_input:false ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes
     (Identity_tools.run_call ~transports:(transports_of_post post) ~config:(Masc.Workspace.default_config base_path)
        ~keeper_name:"acme-daycare" ~provider:offered.Identity_tools.provider
        ~remote_name:offered.Identity_tools.remote_name ~arguments ())
+  |> fun projection -> projection.Identity_tools.tool_result
 
 (* ── the on/off switch ───────────────────────────────────────────────── *)
 
@@ -1493,10 +1495,13 @@ let test_post_send_401_does_not_refresh_and_repeat () =
    | Ok _ -> Alcotest.fail "post-send 401 became success");
   check Alcotest.int "tool request was sent only once" 1 !calls
 
-(* The model's view of an answer far below the ceiling: nothing is stored. *)
+(* An isolated owner for the model view and any raw reply artifacts. *)
 let small_answer_view answer =
-  Identity_tools.tool_result_of_call ~base_path:(Filename.get_temp_dir_name ())
-    ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes answer
+  let retained = ref [] in
+  Identity_tools.tool_result_of_call ~base_path:(temp_base ())
+    ~retain_artifacts:(fun roots -> retained := roots)
+    ~accepts_image_input:false ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes answer
+  |> fun projection -> projection.Identity_tools.tool_result
 
 let test_tool_error_does_not_authorize_retry () =
   let result : Mcp_client.tool_result =

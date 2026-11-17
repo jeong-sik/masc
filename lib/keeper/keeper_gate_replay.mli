@@ -88,8 +88,8 @@ type model_evidence
 type model_message = private
   { text : string
   ; resolution_blocks : Agent_core.Types.content_block list
-      (** The fragments [text] appends after the original user input, one
-          [Text] block each in input order. A structured input already holds
+      (** The fragments [text] appends after the original user input, plus
+          exact public artifact markers that retain replay payloads. A structured input already holds
           the original, so it appends these blocks instead of [text]. *)
   ; resolutions : Keeper_event_queue.hitl_resolution list
       (** Every observed resolution, including repair/absence states that
@@ -142,7 +142,8 @@ val append_model_evidence_block :
   Agent_core.Types.content_block list
 (** Append the same canonical replay reference to a structured user input.
     This keeps replay evidence live when a multimodal goal uses [goal_blocks]
-    instead of the string [goal]. *)
+    instead of the string [goal]. A separate exact marker owns the public
+    artifact and its manifest children after the approval sidecar retires. *)
 
 (** Stable canonical input and identity from the durable result. Replay
     journal disposition is deliberately excluded: recovery is the same input. *)
@@ -249,13 +250,20 @@ val replay_approved_effect_with_receipt :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?identity_transports:Keeper_identity_tools.transports ->
   grant:Keeper_gate.cycle_grant ->
   approval_id:string ->
   unit ->
   replay_execution
 (** Replay exactly once and retain the typed connector-post receipt needed by
     turn finalization. [replay_approved_effect] is the outcome-only projection
-    for callers that do not own a turn boundary. *)
+    for callers that do not own a turn boundary. Identity replay retains its
+    received artifacts in the private replay-results owner alongside the
+    model-facing evidence reference. Persistence repair keeps those roots
+    without repeating the remote effect. A producer's typed public artifact
+    is reused directly, preserving its manifest ownership of child media.
+    [identity_transports], when supplied,
+    replaces only the identity producer's transport dependencies. *)
 
 val replay_resolution_inputs :
   config:Workspace.config ->

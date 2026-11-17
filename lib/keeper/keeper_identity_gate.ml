@@ -275,7 +275,8 @@ let observed_failure ~tool_name ~start_time ~class_ ~effect_disposition =
 (* [read] is what the model is given for the same [answer]. The tool-call row
    is written from that, so the observers read it too: a service that
    completed the call while MASC could not keep the answer for the model is a
-   failure to the Keeper, and the effect is proven to have happened. *)
+   failure to the Keeper. A remote success flag does not prove the external
+   effect, so a local projection failure leaves that effect unknown. *)
 let observed_of_call_result ~tool_name ~start_time ~answer ~read =
   match answer with
   | Error call_error ->
@@ -301,11 +302,12 @@ let observed_of_call_result ~tool_name ~start_time ~answer ~read =
           ~tool_name
           ~start_time
           ~class_:call_failure_class
-          ~effect_disposition:Tool_result.Proven_post_effect)
+          ~effect_disposition:Tool_result.Effect_outcome_unknown)
 ;;
 
 let agent_tool
       ?transports
+      ?(accepts_image_input = false)
       ?clock
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -328,17 +330,21 @@ let agent_tool
       ~read_only:offered.Keeper_identity_tools.read_only
       ()
   in
-  let read_answer answer =
-    Keeper_identity_tools.tool_result_of_call
+  let read_answer ~invocation answer =
+    let previous = Keeper_tool_call_log.peek_retained_artifacts ~invocation () in
+    Keeper_identity_tools.tool_result_of_call ~accepts_image_input
+      ~retain_artifacts:(fun roots ->
+        Keeper_tool_call_log.set_retained_artifacts ~invocation (previous @ roots))
       ~base_path:config.Workspace.base_path
       ~inline_ceiling_bytes:(inline_ceiling_bytes ())
       answer
+    |> fun projection -> projection.Keeper_identity_tools.tool_result
   in
   let tool_name = offered.Keeper_identity_tools.schema.Agent_core.Types.name in
   let observe result =
     Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some result)
   in
-  let gated arguments =
+  let gated invocation arguments =
     let start_time = Tool_timing.start () in
     (* Provider annotations are hints, not authority to bypass this lane. *)
       let provider = offered.Keeper_identity_tools.provider in
@@ -396,7 +402,7 @@ let agent_tool
            }
        | Keeper_gate.Allow authorization ->
          let answer = send arguments in
-         let read = read_answer answer in
+         let read = read_answer ~invocation answer in
          observe (observed_of_call_result ~tool_name ~start_time ~answer ~read);
          (match read with
           | Ok output ->
@@ -412,33 +418,42 @@ let agent_tool
   in
   Agent_core.Base.Tool.of_schema
     offered.Keeper_identity_tools.schema
-    (Agent_core.Base.Tool.ignoring_execution_env gated)
+    (fun env arguments ->
+      match Agent_core.Tool.Execution_env.invocation env with
+      | Some invocation -> gated invocation arguments
+      | None ->
+        let start_time = Tool_timing.start () in
+        observe (observed_failure ~tool_name ~start_time
+          ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect);
+        Error { Agent_core.Types.message =
+            "this attached call has no execution identity to retain its result; nothing was sent"
+          ; recoverable = false; error_class = Some Agent_core.Types.Deterministic })
 ;;
 
-let execution_of_call_result result =
-  match result with
-  | Ok (answer : Mcp_client.tool_result) ->
-    if answer.Mcp_client.is_error
-    then
-      (* A failed tool may have applied an effect before reporting its error. *)
-      Keeper_tool_execution.failure
-        ~class_:call_failure_class
-        ~effect_disposition:reported_error_effect
-        (Mcp_client.model_text answer)
-    else Keeper_tool_execution.success (Mcp_client.model_text answer)
-  | Error call_error ->
-    (* The disposition is the call's own statement of what it proves; the
-       model-facing result reads the same one for retry safety. *)
-    Keeper_tool_execution.failure
-      ~class_:call_failure_class
-      ~effect_disposition:
-        (Keeper_identity_tools.effect_disposition_of_call_error call_error)
-      (Keeper_identity_tools.call_error_to_string call_error)
+let execution_of_call_result ~base_path ~inline_ceiling_bytes result =
+  let retained = ref [] in
+  let projection = Keeper_identity_tools.tool_result_of_call ~base_path ~inline_ceiling_bytes
+    ~accepts_image_input:false
+    ~retain_artifacts:(fun roots -> retained := roots) result in
+  let execution = match projection.tool_result with
+    | Ok output -> Keeper_tool_execution.success_with_blocks
+        ~content_blocks:output.Agent_core.Types.content_blocks output.content
+    | Error error ->
+      let effect_disposition = match result with
+        | Error call_error -> Keeper_identity_tools.effect_disposition_of_call_error call_error
+        | Ok _ -> reported_error_effect in
+      Keeper_tool_execution.failure ~class_:call_failure_class ~effect_disposition
+        error.Agent_core.Types.message in
+  let execution = match projection.model_artifact with
+    | None -> execution
+    | Some reference -> Keeper_tool_execution.with_model_artifact reference execution in
+  Keeper_tool_execution.with_retained_artifacts !retained execution
 ;;
 
 let replay_call_with_outcome
       ?transports
       ?clock
+      ?(inline_ceiling_bytes = Common.max_tool_result_wire_bytes)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?continuation_channel
@@ -499,7 +514,7 @@ let replay_call_with_outcome
      | Keeper_gate.Allow authorization ->
        Keeper_tool_execution.with_gate_authorization
          authorization
-         (execution_of_call_result
+         (execution_of_call_result ~base_path:config.Workspace.base_path ~inline_ceiling_bytes
             (send_call
                ?transports
                ?clock

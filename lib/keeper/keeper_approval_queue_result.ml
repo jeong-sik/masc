@@ -83,11 +83,16 @@ type approved_resolution_state =
   | Resolution_unconsumed
   | Resolution_consumed
 
+type replay_evidence =
+  { artifact_ref : Tool_output.artifact_ref
+  ; retained_artifacts : Tool_output.artifact_ref list
+  }
+
 type resolution_replay_outcome =
-  | Replay_applied of Tool_output.artifact_ref
-  | Replay_applied_with_warning of Tool_output.artifact_ref
-  | Replay_failed of Tool_output.artifact_ref
-  | Replay_indeterminate of Tool_output.artifact_ref
+  | Replay_applied of replay_evidence
+  | Replay_applied_with_warning of replay_evidence
+  | Replay_failed of replay_evidence
+  | Replay_indeterminate of replay_evidence
 
 type approved_resolution_delivery =
   { request : approved_resolution_request

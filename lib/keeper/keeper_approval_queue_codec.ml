@@ -65,27 +65,25 @@ let approval_decision_to_yojson = function
     `Assoc [ "kind", `String "reject"; "reason", `String reason ]
 ;;
 
-let resolution_replay_outcome_to_yojson = function
-  | Replay_applied output_ref ->
-    `Assoc
-      [ "kind", `String "applied"
-      ; "output_ref", Tool_output.normalized_artifact_ref_to_json output_ref
-      ]
-  | Replay_applied_with_warning detail_ref ->
-    `Assoc
-      [ "kind", `String "applied_with_warning"
-      ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
-      ]
-  | Replay_failed detail_ref ->
-    `Assoc
-      [ "kind", `String "failed"
-      ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
-      ]
-  | Replay_indeterminate detail_ref ->
-    `Assoc
-      [ "kind", `String "indeterminate"
-      ; "detail_ref", Tool_output.normalized_artifact_ref_to_json detail_ref
-      ]
+let resolution_replay_outcome_to_yojson outcome =
+  let kind, field, evidence = match outcome with
+    | Replay_applied evidence -> "applied", "output_ref", evidence
+    | Replay_applied_with_warning evidence -> "applied_with_warning", "detail_ref", evidence
+    | Replay_failed evidence -> "failed", "detail_ref", evidence
+    | Replay_indeterminate evidence -> "indeterminate", "detail_ref", evidence
+  in
+  let retained = match evidence.retained_artifacts with
+    | [] -> []
+    | references ->
+      [ "retained_artifacts", `List
+          (List.map (fun reference ->
+             Tool_output.normalized_artifact_ref_to_json
+               (Tool_output.with_preview reference "")) references) ]
+  in
+  `Assoc
+    ([ "kind", `String kind
+     ; field, Tool_output.normalized_artifact_ref_to_json evidence.artifact_ref
+     ] @ retained)
 ;;
 
 (* [request_context] is the Auto Judge / HITL summary input: request-local
@@ -523,51 +521,35 @@ let resolution_replay_outcome_of_yojson ~surface = function
   | `Assoc fields ->
     let open Result.Syntax in
     let* kind = required_string ~surface "kind" fields in
+    let evidence field =
+      let* () = reject_unknown_fields ~surface
+          ~allowed:[ "kind"; field; "retained_artifacts" ] fields in
+      let* artifact_ref = replay_artifact_ref_of_yojson ~surface field fields in
+      let* retained_artifacts = match List.assoc_opt "retained_artifacts" fields with
+        (* Older replay rows own only their model projection. *)
+        | None -> Ok []
+        | Some (`List values) ->
+          let rec decode acc = function
+            | [] -> Ok (List.rev acc)
+            | value :: rest ->
+              let* reference = replay_artifact_ref_of_yojson ~surface
+                  "retained_artifacts[]" [ "retained_artifacts[]", value ] in
+              decode (Tool_output.with_preview reference "" :: acc) rest
+          in
+          decode [] values
+        | Some _ -> Error (surface ^ ".retained_artifacts must be an array")
+      in
+      Ok { artifact_ref; retained_artifacts }
+    in
     (match kind with
      | "applied" ->
-       let* () =
-         reject_unknown_fields
-           ~surface
-           ~allowed:[ "kind"; "output_ref" ]
-           fields
-       in
-       let* output_ref =
-         replay_artifact_ref_of_yojson ~surface "output_ref" fields
-       in
-       Ok (Replay_applied output_ref)
+       Result.map (fun evidence -> Replay_applied evidence) (evidence "output_ref")
      | "applied_with_warning" ->
-       let* () =
-         reject_unknown_fields
-           ~surface
-           ~allowed:[ "kind"; "detail_ref" ]
-           fields
-       in
-       let* detail_ref =
-         replay_artifact_ref_of_yojson ~surface "detail_ref" fields
-       in
-       Ok (Replay_applied_with_warning detail_ref)
+       Result.map (fun evidence -> Replay_applied_with_warning evidence) (evidence "detail_ref")
      | "failed" ->
-       let* () =
-         reject_unknown_fields
-           ~surface
-           ~allowed:[ "kind"; "detail_ref" ]
-           fields
-       in
-       let* detail_ref =
-         replay_artifact_ref_of_yojson ~surface "detail_ref" fields
-       in
-       Ok (Replay_failed detail_ref)
+       Result.map (fun evidence -> Replay_failed evidence) (evidence "detail_ref")
      | "indeterminate" ->
-       let* () =
-         reject_unknown_fields
-           ~surface
-           ~allowed:[ "kind"; "detail_ref" ]
-           fields
-       in
-       let* detail_ref =
-         replay_artifact_ref_of_yojson ~surface "detail_ref" fields
-       in
-       Ok (Replay_indeterminate detail_ref)
+       Result.map (fun evidence -> Replay_indeterminate evidence) (evidence "detail_ref")
      | other ->
        Error
          (Printf.sprintf

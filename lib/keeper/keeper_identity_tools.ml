@@ -436,62 +436,161 @@ let call_error_to_string = function
   | Mcp { error; _ } -> Mcp_client.error_to_string error
 ;;
 
-(* A service's words are as long as the service makes them; MASC's sentence
-   about them is not. When the whole answer is over the lane's inline
-   ceiling, the service's part is stored and named by reference while MASC's
-   sentence stays inline, so what to do next is never behind a reference.
-   Kept whole, an official client spills it to a file under its own
-   configuration directory that no Keeper sandbox can read: one Confluence
-   page came back at 52,480 characters on 2026-11-04 and the Keeper never
-   read it. *)
-let fit_inline ~base_path ~inline_ceiling_bytes ~compose remote =
-  let whole = compose remote in
-  if String.length whole <= inline_ceiling_bytes
-  then Ok whole
-  else
-    (* The whole answer is already over the ceiling, so the service's part is
-       stored whatever its own length. *)
-    Result.map compose
-      (Tool_projection.maybe_externalize ~base_path ~threshold_bytes:0 remote)
+type call_projection =
+  { tool_result : Agent_core.Types.tool_result
+  ; model_artifact : Tool_output.artifact_ref option
+  }
+
+let external_blob_mime declared =
+  let mime = Tool_blob_media_store.blob_mime declared in
+  if String.equal mime Tool_output.artifact_manifest_mime
+     || String.equal mime Keeper_mcp_content.private_result_mime
+  then "application/octet-stream"
+  else mime
 ;;
 
-let unstored_reply ~remote (error : Tool_projection.externalization_error) =
-  Printf.sprintf "[the service's %d-byte reply could not be stored: %s]"
-    (String.length remote)
-    (String.trim error.Tool_projection.message)
-;;
-
-let tool_result_of_call ~base_path ~inline_ceiling_bytes answer =
-  let fit = fit_inline ~base_path ~inline_ceiling_bytes in
+(* Raw received data belongs to the execution trace, never the model view.
+   Register each durable root immediately, including when later projection fails. *)
+let tool_result_of_call ~base_path ~inline_ceiling_bytes ~accepts_image_input ~retain_artifacts answer =
+  let roots = ref [] in
+  let model_artifact = ref None in
+  let store ~mime bytes =
+    Cancel_safe.protect
+      ~on_exn:(fun exn -> Error (Printexc.to_string exn))
+      (fun () ->
+        let reference = Tool_blob_store.put_durable
+          (Tool_blob_store.create ~base_path) ~bytes ~mime in
+        let reference = Tool_output.with_preview reference "" in
+        roots := reference :: !roots;
+        retain_artifacts (List.rev !roots);
+        Ok reference)
+  in
+  let store_model ~mime ~preview bytes =
+    Result.map (fun reference ->
+      let reference = Tool_output.with_preview reference preview in
+      model_artifact := Some reference;
+      Tool_output.encode_for_agent_core (Tool_output.Stored reference))
+      (store ~mime bytes)
+  in
+  let fit ~compose remote =
+    let whole = compose remote in
+    if String.length whole <= inline_ceiling_bytes then Ok whole
+    else store_model ~mime:"text/plain" ~preview:(String.trim (compose "")) whole
+  in
   let failed_with ~recoverable ~error_class ~compose remote =
     match fit ~compose remote with
     | Ok message -> failed ~recoverable ~error_class message
-    | Error error ->
-      failed ~recoverable ~error_class (compose (unstored_reply ~remote error))
+    | Error detail ->
+      failed ~recoverable ~error_class
+        (compose (Printf.sprintf "[the service's %d-byte reply could not be stored: %s]"
+          (String.length remote) detail))
   in
-  match answer with
+  let received_failure detail =
+    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
+      ("the service returned an answer, but its model projection could not be retained: "
+       ^ detail ^ "; the effect is unknown, so check its state before retrying")
+  in
+  let tool_result = match answer with
   | Ok (result : Mcp_client.tool_result) ->
-    let remote = Mcp_client.model_text result in
-    if result.Mcp_client.is_error
-    then
-      (* An error reported by the tool does not prove that no effect occurred. *)
-      failed_with ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
-        ~compose:(fun text ->
-          text ^ "\nThe service may have applied an effect; check its state before retrying.")
-        remote
-    else (
-      match fit ~compose:Fun.id remote with
-      | Ok content ->
-        Ok { Agent_core.Types.content; content_blocks = None; _meta = None }
-      | Error error ->
-        (* The call completed; only the copy for the model is missing. *)
-        failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
-          (Printf.sprintf
-             "the service completed the call, but its %d-byte answer could not \
-              be stored for you to read (%s); sending the call again repeats any \
-              effect it had"
-             (String.length remote)
-             (String.trim error.Tool_projection.message)))
+    let raw = `Assoc
+      ([ "content", result.content; "isError", `Bool result.is_error ]
+       @ match result.structured_content with
+         | None -> [] | Some value -> ["structuredContent", value]) in
+    let kept_raw = store ~mime:Keeper_mcp_content.private_result_mime
+      (Yojson.Safe.to_string raw) in
+    (match kept_raw with
+     | Error detail -> received_failure detail
+     | Ok _ ->
+       match Keeper_mcp_content.project result with
+       | Error detail -> received_failure detail
+       | Ok projection ->
+           let artifact_bytes ~description ~mime bytes =
+             Result.map (fun reference ->
+               let text = description ^ "\n"
+                 ^ Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+               Llm_provider.Types.Text text, Some (text, reference))
+               (store ~mime:(external_blob_mime mime) bytes)
+           in
+           let artifact_block ~media_type source =
+             let bytes = match source with
+               | Llm_provider.Types.Base64 data ->
+                 Result.map_error (fun (`Msg _) -> "MCP media bytes are invalid base64") (Base64.decode data)
+               | Llm_provider.Types.Url _ | Llm_provider.Types.File_id _ ->
+                 Error "MCP media result has no inline bytes to retain" in
+             Result.bind bytes (fun bytes ->
+               artifact_bytes ~description:(Printf.sprintf "MCP media (%s):" media_type)
+                 ~mime:media_type bytes)
+           in
+           let project_native block = match block with
+             | Llm_provider.Types.Image {media_type; source} ->
+               if accepts_image_input && not result.is_error
+                  && List.mem media_type Runtime_official_client_tool.official_client_image_media_types
+               then Ok (block, None)
+               else artifact_block ~media_type source
+             | Llm_provider.Types.Audio {media_type; source}
+             | Llm_provider.Types.Document {media_type; source} -> artifact_block ~media_type source
+             | Llm_provider.Types.Text _ | Llm_provider.Types.Thinking _
+             | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _
+             | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _ -> Ok (block, None)
+           in
+           let project_block = function
+             | Keeper_mcp_content.Native_block block -> project_native block
+             | Keeper_mcp_content.Binary_resource {uri; mime_type; bytes} ->
+               let mime, description = match mime_type with
+                 | Some mime_type -> mime_type,
+                     Printf.sprintf "MCP resource %s (%s):" uri mime_type
+                 | None -> "application/octet-stream",
+                     Printf.sprintf "MCP resource %s (MIME unspecified):" uri in
+               artifact_bytes ~description ~mime bytes
+           in
+           let rec project_blocks kept references = function
+             | [] -> Ok (List.rev kept, List.rev references)
+             | block :: rest -> Result.bind (project_block block) (fun (block, reference) ->
+                 project_blocks (block :: kept)
+                   (match reference with None -> references | Some text -> text :: references) rest)
+           in
+           let blocks = Option.value projection.content_blocks ~default:[] in
+           (match project_blocks [] [] blocks with
+            | Error detail -> received_failure detail
+            | Ok (blocks, references) ->
+              let full_content = String.concat "\n" (projection.content :: List.map fst references) in
+              let warning = "The service may have applied an effect; check its state before retrying." in
+              let compose text = if result.is_error then text ^ "\n" ^ warning else text in
+              let rendered = match references with
+                | [] -> fit ~compose full_content
+                | _ :: _ ->
+                  let manifest = Tool_output.artifact_manifest_to_json
+                    ~content:(compose full_content)
+                    ~structured_content:(`Assoc ["media", `List
+                      (List.map (fun (_, reference) ->
+                        Tool_output.normalized_artifact_ref_to_json reference) references)]) in
+                  store_model ~mime:Tool_output.artifact_manifest_mime
+                    ~preview:(if result.is_error then warning else "")
+                    (Yojson.Safe.to_string manifest)
+              in
+              (match rendered with
+               | Error detail -> received_failure detail
+               | Ok content ->
+                 if result.is_error then
+                   (* An error has no native block carrier. The exact marker
+                      owns visible children; its body and preview keep the warning. *)
+                   failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown) content
+                 else
+                   let content_blocks =
+                     match !model_artifact with
+                     | None -> (match blocks with [] -> None | _ -> Some blocks)
+                     | Some _ ->
+                       let native = List.filter (function
+                           | Llm_provider.Types.Text _ -> false
+                           | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _
+                           | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _
+                           | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Image _
+                           | Llm_provider.Types.Audio _ | Llm_provider.Types.Document _ -> true) blocks in
+                       if String.length full_content > inline_ceiling_bytes
+                       then Some (Llm_provider.Types.Text content :: native)
+                       else Some (blocks @ [Llm_provider.Types.Text content])
+                   in
+                   Ok { Agent_core.Types.content; content_blocks; _meta = None })))
   | Error (Precondition message) ->
     failed_with ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       ~compose:Fun.id message
@@ -545,6 +644,8 @@ let tool_result_of_call ~base_path ~inline_ceiling_bytes answer =
               is unknown: read the service's state before sending it again"
              detail)
          detail)
+  in
+  { tool_result; model_artifact = !model_artifact }
 ;;
 
 let store_tokens ~base_path ~keeper_name ~(provider : Provider.t)

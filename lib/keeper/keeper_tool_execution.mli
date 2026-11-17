@@ -28,6 +28,10 @@ type terminal_effect_receipt =
 
 type t = private
   { retained_artifacts : Tool_output.artifact_ref list
+  ; model_artifact : Tool_output.artifact_ref option
+      (** An already durable, complete public result. Replay may own this
+          reference directly; [None] means no producer-owned artifact exists.
+          Private audit receipts must never be assigned here. *)
   ; raw_output : string
   ; data : Yojson.Safe.t option
   ; content_blocks : Llm_provider.Types.content_block list option
@@ -124,6 +128,16 @@ val with_retained_artifacts : Tool_output.artifact_ref list -> t -> t
 (** Preserve producer-validated artifact roots in the execution carrier,
     including failed results whose Tool_result payload has no retention field.
     This changes no result data, disposition or effect evidence. *)
+
+val with_model_artifact : Tool_output.artifact_ref -> t -> t
+(** Attach the producer's complete public result without changing its effect
+    disposition. The referenced body includes any composed failure warning.
+    Deferred executions have no final public result and remain unchanged. *)
+
+val success_with_blocks :
+  content_blocks:Llm_provider.Types.content_block list option -> string -> t
+(** A completed producer result with an opaque summary and authoritative
+    model-facing content blocks. Does not infer structured JSON or metadata. *)
 
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
     handler. [failure_effect_disposition] lets a producer preserve a phase it

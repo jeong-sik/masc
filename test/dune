@@ -7618,3 +7618,5 @@
 (include stanzas/bench_os_mutex_cost.inc)
 
 (include stanzas/test_schedule_authority.inc)
+
+(include stanzas/test_keeper_mcp_content.inc)

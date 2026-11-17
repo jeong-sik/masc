@@ -23,6 +23,22 @@ val ensure_resolution_chat_projection :
   base_path:string -> keeper_name:string -> approval_id:string ->
   tool_name:string option -> decision:decision -> (unit, string) result
 
+val reconcile_replay_chat_projection :
+  base_path:string -> keeper_name:string -> approval_id:string ->
+  tool_name:string option -> outcome:resolution_replay_outcome ->
+  (Keeper_chat_store.append_once_result, string) result
+(** Commit or validate the exact replay lifecycle row, including its public
+    artifact reference. Existing rows are data-fsynced under their held
+    descriptor. Cleanup uses this receipt before releasing its owner. *)
+
+module For_testing : sig
+  val reconcile_replay_chat_projection :
+    append_io:Fs_compat.durable_append_io_for_testing ->
+    base_path:string -> keeper_name:string -> approval_id:string ->
+    tool_name:string option -> outcome:resolution_replay_outcome ->
+    (Keeper_chat_store.append_once_result, string) result
+end
+
 val ensure_replay_chat_projection :
   base_path:string -> keeper_name:string -> approval_id:string ->
   tool_name:string option -> outcome:resolution_replay_outcome ->

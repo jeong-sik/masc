@@ -168,6 +168,10 @@ module For_testing : sig
     after_pending_publish:(unit -> unit) ->
     (install_report, install_error) result
   (** Pause the production two-map publication while its authority lock is held. *)
+  val install_persistence_with_replay_confirmation_io :
+    append_io:Fs_compat.durable_append_io_for_testing -> base_path:string ->
+    (install_report, install_error) result
+  (** Replace only the existing replay chat row's data confirmation I/O. *)
   val pending_store_path : base_path:string -> string
   val pending_log_path : base_path:string -> string
   val replay_results_store_path : base_path:string -> string

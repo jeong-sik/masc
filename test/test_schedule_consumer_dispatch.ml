@@ -4636,7 +4636,8 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
      Keeper_approval_queue.record_consumed_resolution_replay
        ~base_path
        ~id:approval_id
-       ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_result_ref ()))
+       ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+           { artifact_ref = replay_result_ref (); retained_artifacts = [] })
    with
    | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
    | Ok Masc.Keeper_approval_queue_result.Replay_already_recorded ->
@@ -4723,7 +4724,8 @@ let test_projection_failure_keeps_spent_replay_queued () =
      Keeper_approval_queue.record_consumed_resolution_replay
        ~base_path
        ~id:approval_id
-       ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied (replay_result_ref ()))
+       ~outcome:(Masc.Keeper_approval_queue_result.Replay_applied
+           { artifact_ref = replay_result_ref (); retained_artifacts = [] })
    with
    | Ok Masc.Keeper_approval_queue_result.Replay_recorded -> ()
    | Ok _ | Error _ -> fail "fixture replay outcome was not recorded");

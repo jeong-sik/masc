@@ -61,6 +61,12 @@ module For_testing = struct
     install_persistence_internal ~after_load:(fun () -> ()) ~after_pending_publish ~base_path
   ;;
 
+  let install_persistence_with_replay_confirmation_io ~append_io ~base_path =
+    install_persistence_internal_with_replay_projection
+      ~replay_projection:(Keeper_approval_queue_projection.For_testing.reconcile_replay_chat_projection ~append_io)
+      ~after_load:(fun () -> ()) ~after_pending_publish:(fun () -> ()) ~base_path
+  ;;
+
   let pending_store_path = pending_store_path
   let replay_results_store_path = replay_results_store_path
   let always_allowed_store_path ~base_path = rules_path ~base_path ()

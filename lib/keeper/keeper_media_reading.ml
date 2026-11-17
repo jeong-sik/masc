@@ -3,7 +3,6 @@ type kind =
   | Document
 
 type reader =
-  deadline:Monotonic_deadline.t ->
   kind:kind ->
   media_type:string ->
   bytes:string ->
@@ -32,7 +31,7 @@ let audio_extension media_type =
    trip through a temporary file that is removed whether the call answers or
    not. Cancellation is not caught: [Fun.protect] removes the file and the
    exception continues. *)
-let transcribe_bytes ~deadline ~media_type ~bytes =
+let transcribe_bytes ~media_type ~bytes =
   match Filename.temp_file "keeper-media-" (audio_extension media_type) with
   | exception Sys_error detail ->
     Log.Keeper.warn "media reading: temp file failed: %s" detail;
@@ -49,17 +48,11 @@ let transcribe_bytes ~deadline ~media_type ~bytes =
           Log.Keeper.warn "media reading: temp write failed: %s" detail;
           Error "temp_write_failed"
         | () ->
-          (match Voice_bridge.transcribe_audio ~audio_file:path ~deadline () with
+          (match Voice_bridge.transcribe_audio ~audio_file:path () with
            | Error detail ->
-             (* A chain stopped by the shared deadline says so in its first
-                word; anything else is an endpoint failure. *)
-             if Monotonic_deadline.passed deadline
-             then Error "budget_spent"
-             else (
-               (* The free-text chain error goes to the operator log only; the
-                  model sees the closed reason. *)
-               Log.Keeper.warn "media reading: STT failed: %s" detail;
-               Error "stt_failed")
+             (* The free-text chain error goes to the operator log only. *)
+             Log.Keeper.warn "media reading: STT failed: %s" detail;
+             Error "stt_failed"
            | Ok json ->
              (match Json_util.get_string json "status", Json_util.get_string json "text" with
               | Some "transcribed", Some text when String.trim text <> "" -> Ok text
@@ -82,9 +75,9 @@ let pdf_reason = function
   | Verification_pdf_inspection.Storage_failed _ -> "extraction_failed"
 ;;
 
-let extract_pdf ~base_path ~budget_sec ~deadline ~bytes =
+let extract_pdf ~base_path ~bytes =
   match
-    Verification_pdf_inspection.extract_text ~deadline ~budget_sec ~base_path ~bytes ()
+    Verification_pdf_inspection.extract_text ~base_path ~bytes ()
   with
   | Error error -> Error (pdf_reason error)
   | Ok pages ->
@@ -97,15 +90,12 @@ let extract_pdf ~base_path ~budget_sec ~deadline ~bytes =
     else Ok joined
 ;;
 
-let production_reader ~base_path ~budget_sec ~deadline ~kind ~media_type ~bytes =
+let production_reader ~base_path ~kind ~media_type ~bytes =
   match kind with
-  | Audio ->
-    if Monotonic_deadline.passed deadline
-    then Error "budget_spent"
-    else transcribe_bytes ~deadline ~media_type ~bytes
+  | Audio -> transcribe_bytes ~media_type ~bytes
   | Document ->
     if String.lowercase_ascii media_type = "application/pdf"
-    then extract_pdf ~base_path ~budget_sec ~deadline ~bytes
+    then extract_pdf ~base_path ~bytes
     else Error "no_document_reader"
 ;;
 
@@ -254,41 +244,27 @@ let reference_text ~kind ~media_type ~source =
    the walk share [memo], so an attachment is read at most once per walk,
    whether the reading succeeded or not (docs/KEEPER-MEDIA-FALLBACK-H5.md §3).
    The next turn builds a new projector, which is where an unavailable
-   attachment is retried. The deadline starts when the walk first has to run
-   a reader, not when the walk starts: provider attempts before the first
-   text-only candidate do not spend the reading budget. *)
+   attachment is retried. A newly encountered attachment reaches its reader
+   regardless of the time spent on earlier reads or provider attempts. *)
 type projector =
   { base_path : string option
   ; media_store : Agent_core.History.media_store
   ; keeper_name : string
   ; read : reader
-  ; start_deadline : unit -> Monotonic_deadline.t
-  ; mutable deadline : Monotonic_deadline.t option
   ; memo : (kind * string * string, (string, string) result) Hashtbl.t
   }
 
-let projector ?base_path ~media_store ~keeper_name ~start_deadline ~read () =
+let projector ?base_path ~media_store ~keeper_name ~read () =
   { base_path
   ; media_store
   ; keeper_name
   ; read
-  ; start_deadline
-  ; deadline = None
   ; memo = Hashtbl.create 4
   }
 ;;
 
-let projector_deadline projector =
-  match projector.deadline with
-  | Some deadline -> deadline
-  | None ->
-    let deadline = projector.start_deadline () in
-    projector.deadline <- Some deadline;
-    deadline
-;;
-
 let read_stored projector ~kind ~media_type stored =
-  let { base_path; media_store; keeper_name; read; memo; _ } = projector in
+  let { base_path; media_store; keeper_name; read; memo } = projector in
   (* The digest names the reading, so the bytes are read from the store only
      when no reading exists. Memoize the raw result: its consumer owns the
      attribution to history, a retained receipt, or another original. *)
@@ -301,14 +277,10 @@ let read_stored projector ~kind ~media_type stored =
       match load_reading ~base_path ~keeper_name ~kind ~media_type ~sha with
       | Some reading -> Ok reading
       | None ->
-        let deadline = projector_deadline projector in
         (match
-           if Monotonic_deadline.passed deadline
-           then Error "budget_spent"
-           else
-             match media_store.get stored with
-             | Ok bytes -> read ~deadline ~kind ~media_type ~bytes
-             | Error error -> Error (media_error_reason error)
+           match media_store.get stored with
+           | Ok bytes -> read ~kind ~media_type ~bytes
+           | Error error -> Error (media_error_reason error)
          with
          | Ok reading when String.trim reading <> "" ->
            store_reading ~base_path ~keeper_name ~kind ~media_type ~sha ~text:reading;
@@ -364,9 +336,9 @@ let project projector ~needs_projection blocks =
   projected, List.rev !replaced
 ;;
 
-let project_blocks ?base_path ~media_store ~keeper_name ~needs_projection ~deadline ~read blocks =
+let project_blocks ?base_path ~media_store ~keeper_name ~needs_projection ~read blocks =
   project
-    (projector ?base_path ~media_store ~keeper_name ~start_deadline:(fun () -> deadline) ~read ())
+    (projector ?base_path ~media_store ~keeper_name ~read ())
     ~needs_projection
     blocks
 ;;

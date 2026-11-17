@@ -69,16 +69,13 @@ val inspect :
 val extract_text :
   ?max_pages:int ->
   ?max_extracted_bytes:int ->
-  deadline:Monotonic_deadline.t ->
-  budget_sec:float ->
   base_path:string ->
   bytes:string ->
   unit ->
   (string list, error) result
 (** The text half of {!inspect}: one string per page, no rendering, no image
-    policy. The caller's [deadline] is shared by every Poppler call of the
-    extraction and nothing here starts another clock; [budget_sec] is only the
-    figure a {!Poppler_budget_spent} reports. Same source cap, private owned
+    policy. This extraction owns the same Poppler subprocess time limit as
+    {!inspect}; earlier document reads cannot consume it. Same source cap, private owned
     directory (removed on release), scrubbed environment, extracted-text cap
     and dependency check as {!inspect}. *)
 
@@ -87,4 +84,9 @@ module For_testing : sig
     budget_sec:float -> base_path:string -> max_image_bytes:int -> bytes:string ->
     unit -> (t, error) result
   (** The real subprocess inspection with a short test-only shared deadline. *)
+
+  val extract_text_with_budget :
+    budget_sec:float -> base_path:string -> bytes:string ->
+    unit -> (string list, error) result
+  (** The real text extraction with a short test-only subprocess limit. *)
 end

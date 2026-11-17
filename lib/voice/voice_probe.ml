@@ -10,9 +10,9 @@ include Voice_bridge_core
 
 open Result.Syntax
 
-let transcribe_via_http_stt ?deadline endpoint ~audio_file ~model =
+let transcribe_via_http_stt endpoint ~audio_file ~model =
   let* api_key = Voice_endpoint_key.resolve endpoint in
-  Voice_bridge_transport.transcribe_via_http_stt ?deadline endpoint ~api_key ~audio_file ~model
+  Voice_bridge_transport.transcribe_via_http_stt endpoint ~api_key ~audio_file ~model
 ;;
 let transcribe_via_command = Voice_bridge_transport.transcribe_via_command
 let list_voices_via_http endpoint =
@@ -80,7 +80,7 @@ let available_stt_endpoints (stt : Voice_config.stt_config) =
   stt.Voice_config.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
 ;;
 
-let transcribe_audio ~audio_file ?language_code ?deadline () =
+let transcribe_audio ~audio_file ?language_code () =
   match Voice_config.load_detailed () with
   | Error (Voice_config.Invalid msg) ->
     (* An explicit voice config exists but is broken: surface the
@@ -96,23 +96,11 @@ let transcribe_audio ~audio_file ?language_code ?deadline () =
     Error "voice config has no [stt] section, so STT is not set up"
   | Ok { Voice_config.stt = Some stt; _ } ->
     let endpoints = available_stt_endpoints stt in
-    let deadline_passed () =
-      match deadline with
-      | Some deadline -> Monotonic_deadline.passed deadline
-      | None -> false
-    in
     let rec try_endpoints attempted = function
       | [] ->
         Error
           (Printf.sprintf
              "all enabled STT endpoints failed: %s"
-             (String.concat " | " (List.rev attempted)))
-      | _ :: _ when deadline_passed () ->
-        (* A shared deadline is one budget for the whole chain: once it is
-           spent no further endpoint is started. *)
-        Error
-          (Printf.sprintf
-             "budget_spent: the STT deadline passed before every endpoint was tried: %s"
              (String.concat " | " (List.rev attempted)))
       | endpoint :: rest ->
         (* Asked the way this endpoint answers. The command kinds were wired
@@ -145,10 +133,10 @@ let transcribe_audio ~audio_file ?language_code ?deadline () =
             with_model (fun model ->
               Result.map
                 (fun transcript -> transcript, None)
-                (transcribe_via_command ?deadline endpoint ~audio_file ~model))
+                (transcribe_via_command endpoint ~audio_file ~model))
           | Over_http ->
             with_model (fun model ->
-              match transcribe_via_http_stt ?deadline endpoint ~audio_file ~model with
+              match transcribe_via_http_stt endpoint ~audio_file ~model with
               | Ok json ->
                 Result.map
                   (fun text -> text, Json_util.get_string json "language_code")

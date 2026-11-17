@@ -206,12 +206,13 @@ let inspect_with_budget ~poppler_budget_sec ?(max_pages = max_pages) ?(max_total
            pages;diagnostics=List.rev !diagnostics}
 
 (* The text half of [inspect] with no rendering, no image policy and no review
-   slot. The caller owns the deadline: one deadline serves every Poppler call
-   of this extraction, and nothing here starts a new clock. *)
-let extract_text ?(max_pages = max_pages) ?(max_extracted_bytes = max_extracted_bytes)
-    ~deadline ~budget_sec ~base_path ~bytes () =
+   slot. Each extraction owns its subprocess deadline; time spent reading a
+   different attachment cannot prevent this document from being opened. *)
+let extract_text_with_budget ?(max_pages = max_pages) ?(max_extracted_bytes = max_extracted_bytes)
+    ~budget_sec ~base_path ~bytes () =
   with_source ~base_path ~bytes @@ fun ~root ~source ->
   let diagnostics = ref [] in
+  let deadline = Monotonic_deadline.after ~seconds:budget_sec in
   let run = make_runner ~deadline ~budget_sec ~root ~diagnostics in
   let xml_path = Filename.concat root "pages.xhtml" in
   let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
@@ -222,6 +223,10 @@ let extract_text ?(max_pages = max_pages) ?(max_extracted_bytes = max_extracted_
   then Error (Too_many_pages {pages=page_count;limit=max_pages})
   else Ok (List.map (fun (_, _, text) -> text) descriptions)
 
+let extract_text ?max_pages ?max_extracted_bytes ~base_path ~bytes () =
+  extract_text_with_budget ?max_pages ?max_extracted_bytes
+    ~budget_sec:poppler_budget_sec ~base_path ~bytes ()
+
 let inspect ?max_pages ?max_total_image_bytes ?max_extracted_bytes
     ~base_path ~max_image_bytes ~bytes () =
   inspect_with_budget ~poppler_budget_sec ?max_pages ?max_total_image_bytes
@@ -230,4 +235,7 @@ let inspect ?max_pages ?max_total_image_bytes ?max_extracted_bytes
 module For_testing = struct
   let inspect_with_budget ~budget_sec ~base_path ~max_image_bytes ~bytes () =
     inspect_with_budget ~poppler_budget_sec:budget_sec ~base_path ~max_image_bytes ~bytes ()
+
+  let extract_text_with_budget ~budget_sec ~base_path ~bytes () =
+    extract_text_with_budget ~budget_sec ~base_path ~bytes ()
 end

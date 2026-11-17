@@ -252,8 +252,7 @@ let test_extract_text_returns_pages_without_rendering () =
   with_fake_poppler ~pdftotext:two_page_xhtml ~pdftoppm:"exit 1\n"
     (fun ~base_path ~text_started:_ ~render_started ->
       match
-        Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:30.) ~budget_sec:30.
-          ~base_path ~bytes:two_page_pdf ()
+        Pdf.extract_text ~base_path ~bytes:two_page_pdf ()
       with
       | Error error -> failf "extract_text must succeed: %s" (Pdf.error_to_string error)
       | Ok pages ->
@@ -261,27 +260,27 @@ let test_extract_text_returns_pages_without_rendering () =
         check bool "the renderer was never started" false (Sys.file_exists render_started);
         check (list string) "the capture directory was removed" [] (leftover_capture_dirs base_path))
 
-let test_extract_text_does_not_start_after_the_deadline () =
+let test_extract_text_refuses_an_exhausted_operation () =
   with_fake_poppler ~pdftotext:two_page_xhtml ~pdftoppm:"exit 1\n"
     (fun ~base_path ~text_started ~render_started:_ ->
       match
-        Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:0.) ~budget_sec:7.
+        Pdf.For_testing.extract_text_with_budget ~budget_sec:0.
           ~base_path ~bytes:two_page_pdf ()
       with
       | Error (Pdf.Poppler_budget_spent { program; budget_sec }) ->
         check string "the first tool is the one refused" "pdftotext" program;
-        check (float 0.) "the budget reported is the one the caller gave" 7. budget_sec;
+        check (float 0.) "the reported budget belongs to this extraction" 0. budget_sec;
         check bool "no process was started" false (Sys.file_exists text_started);
         check (list string) "the capture directory was removed" [] (leftover_capture_dirs base_path)
       | Error error -> fail (Pdf.error_to_string error)
       | Ok _ -> fail "a spent deadline must not extract")
 
-let test_extract_text_stops_a_slow_tool_at_the_callers_deadline () =
+let test_extract_text_stops_a_slow_tool_at_its_own_deadline () =
   with_fake_poppler ~pdftotext:("/bin/sleep 5\n" ^ two_page_xhtml) ~pdftoppm:"exit 1\n"
     (fun ~base_path ~text_started:_ ~render_started:_ ->
       let started = Unix.gettimeofday () in
       (match
-         Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:0.5) ~budget_sec:0.5
+         Pdf.For_testing.extract_text_with_budget ~budget_sec:0.5
            ~base_path ~bytes:two_page_pdf ()
        with
        | Error (Pdf.Poppler_budget_spent { program; _ }) ->
@@ -304,12 +303,11 @@ let stored_pdf_block (media_store : Agent_core.History.media_store) raw =
       ~source:(Agent_core.Types.Stored stored)
   | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
 
-let project_pdf ~base_path ~budget_sec =
+let project_pdf ~base_path =
   let media_store = Agent_core.History.Memory_store.create () in
   Masc.Keeper_media_reading.project_blocks ~media_store
     ~base_path ~keeper_name:"h5-pdf" ~needs_projection:(fun _ -> true)
-    ~deadline:(Monotonic_deadline.after ~seconds:budget_sec)
-    ~read:(Masc.Keeper_media_reading.production_reader ~base_path ~budget_sec)
+    ~read:(Masc.Keeper_media_reading.production_reader ~base_path)
     [ stored_pdf_block media_store two_page_pdf ]
 
 let text_of = function
@@ -324,17 +322,17 @@ let contains ~needle haystack =
 let test_h5_production_pdf_reader_projects_the_document_text () =
   with_fake_poppler ~pdftotext:two_page_xhtml ~pdftoppm:"exit 1\n"
     (fun ~base_path ~text_started:_ ~render_started ->
-      let text = text_of (project_pdf ~base_path ~budget_sec:30.) in
+      let text = text_of (project_pdf ~base_path) in
       check bool "the page text reached the projection" true (contains ~needle:"Page One" text);
       check bool "status is read" true (contains ~needle:"status=read" text);
       check bool "nothing was rendered" false (Sys.file_exists render_started))
 
-let test_h5_production_pdf_reader_marks_a_spent_budget_unavailable () =
-  with_fake_poppler ~pdftotext:("/bin/sleep 5\n" ^ two_page_xhtml) ~pdftoppm:"exit 1\n"
+let test_h5_production_pdf_reader_marks_extraction_failure_unavailable () =
+  with_fake_poppler ~pdftotext:"exit 7\n" ~pdftoppm:"exit 1\n"
     (fun ~base_path ~text_started:_ ~render_started:_ ->
-      let text = text_of (project_pdf ~base_path ~budget_sec:0.5) in
+      let text = text_of (project_pdf ~base_path) in
       check bool "marked unavailable" true (contains ~needle:"status=unavailable" text);
-      check bool "with the budget reason" true (contains ~needle:"budget_spent" text);
+      check bool "with the extraction failure reason" true (contains ~needle:"extraction_failed" text);
       check bool "no extracted text invented" false (contains ~needle:"Page One" text))
 
 (* H5-S2, real Poppler. One page, one fact that exists only in the PDF text:
@@ -380,8 +378,7 @@ let test_h5_real_poppler_extracts_the_pdf_only_fact () =
   else
     with_base_path (fun base_path ->
       match
-        Pdf.extract_text ~deadline:(Monotonic_deadline.after ~seconds:60.) ~budget_sec:60.
-          ~base_path ~bytes:h5_ledger_pdf ()
+        Pdf.extract_text ~base_path ~bytes:h5_ledger_pdf ()
       with
       | Error error -> failf "the fixture must extract: %s" (Pdf.error_to_string error)
       | Ok pages ->
@@ -398,8 +395,7 @@ let test_h5_real_poppler_reaches_the_projection () =
       let blocks =
         Masc.Keeper_media_reading.project_blocks ~media_store
           ~base_path ~keeper_name:"h5-real-pdf" ~needs_projection:(fun _ -> true)
-          ~deadline:(Monotonic_deadline.after ~seconds:60.)
-          ~read:(Masc.Keeper_media_reading.production_reader ~base_path ~budget_sec:60.)
+          ~read:(Masc.Keeper_media_reading.production_reader ~base_path)
           [ stored_pdf_block media_store h5_ledger_pdf ]
       in
       let text = text_of blocks in
@@ -430,14 +426,14 @@ let () =
             test_the_two_refusals_do_not_read_alike
         ; test_case "extract_text returns pages without rendering" `Quick
             test_extract_text_returns_pages_without_rendering
-        ; test_case "extract_text does not start after the deadline" `Quick
-            test_extract_text_does_not_start_after_the_deadline
-        ; test_case "extract_text stops a slow tool at the caller's deadline" `Quick
-            test_extract_text_stops_a_slow_tool_at_the_callers_deadline
+        ; test_case "extract_text refuses an exhausted operation" `Quick
+            test_extract_text_refuses_an_exhausted_operation
+        ; test_case "extract_text stops a slow tool at its own deadline" `Quick
+            test_extract_text_stops_a_slow_tool_at_its_own_deadline
         ; test_case "H5 production PDF reader projects the document text" `Quick
             test_h5_production_pdf_reader_projects_the_document_text
-        ; test_case "H5 production PDF reader marks a spent budget unavailable" `Quick
-            test_h5_production_pdf_reader_marks_a_spent_budget_unavailable
+        ; test_case "H5 production PDF reader marks extraction failure unavailable" `Quick
+            test_h5_production_pdf_reader_marks_extraction_failure_unavailable
         ; test_case "H5 real Poppler extracts the PDF-only fact" `Quick
             test_h5_real_poppler_extracts_the_pdf_only_fact
         ; test_case "H5 real Poppler reaches the projection" `Quick

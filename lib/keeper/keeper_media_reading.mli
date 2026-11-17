@@ -23,27 +23,24 @@ type kind =
   | Document
 
 type reader =
-  deadline:Monotonic_deadline.t ->
   kind:kind ->
   media_type:string ->
   bytes:string ->
   (string, string) result
-(** [Error reason] is a closed, short reason; it is shown to the model. The
-    [deadline] is shared by every reader call of one projection: a reader that
-    can stop must stop at it, and it must not start a clock of its own. *)
+(** [Error reason] is a short unavailable reason shown to the model. Each
+    reader owns its transport or subprocess resource limits; time spent on
+    earlier attachments or provider calls never prevents a later read. *)
 
 val reader_version : string
 (** Part of the stored record; bump when reading semantics change. *)
 
-val production_reader : base_path:string -> budget_sec:float -> reader
+val production_reader : base_path:string -> reader
 (** Audio goes through {!Voice_bridge.transcribe_audio} (the configured STT
-    endpoint chain) from a temporary file, with the shared [deadline]: the chain
-    starts no new clock per endpoint, caps each call by the time left, starts no
-    endpoint once the deadline has passed, and a call it stopped is marked
-    [budget_spent].
+    endpoint chain) from a temporary file. The STT transport retains its
+    configured per-call limits and cancellation handling.
 
-    A PDF goes through {!Verification_pdf_inspection.extract_text} with the
-    shared [deadline]; [budget_sec] is only what its budget error reports. Other
+    A PDF goes through {!Verification_pdf_inspection.extract_text}, whose
+    subprocess limit belongs to that one document extraction. Other
     document types answer [Error "no_document_reader"]. *)
 
 val store_dirname : string
@@ -62,13 +59,11 @@ val projector :
   ?base_path:string ->
   media_store:Agent_core.History.media_store ->
   keeper_name:string ->
-  start_deadline:(unit -> Monotonic_deadline.t) ->
   read:reader ->
   unit ->
   projector
-(** [start_deadline] is called once, when the walk first has to run the
-    reader, and every later reader call of the walk shares that deadline. A
-    walk that only meets stored readings never starts it. *)
+(** Construct the memo shared by this walk's consumers. The walk owns no
+    elapsed-time allowance for reads. *)
 
 val read_stored :
   projector ->
@@ -77,15 +72,14 @@ val read_stored :
   Agent_core.History.stored ->
   (string, string) result
 (** Read one stored attachment through the projector's existing reader,
-    successful-reading store and lazy shared deadline. The result is raw
+    successful-reading store. The result is raw
     reader text or an unavailable reason, with no source-attribution wrapper;
     each consumer names its own original in the text it presents.
 
     Calls through this function and {!project} share the same result for a
     (kind, media type, source digest) during this walk, including errors. Only
-    successful nonempty readings are stored for another walk. A stored reading
-    needs no deadline; otherwise an expired deadline returns [Error
-    "budget_spent"] without reading bytes or calling the reader. Empty reader
+    successful nonempty readings are stored for another walk. An attachment
+    without a reading reaches its reader regardless of earlier work. Empty reader
     output returns [Error "empty_reading"]. Cancellation propagates and is not
     memoized as an unavailable result. *)
 
@@ -99,19 +93,15 @@ val project :
     count of blocks replaced per modality name (audio, document), including
     nested tool-result blocks. Tool-result identity, outcome, JSON and original
     text are preserved; only the attached blocks are projected. Other block
-    kinds are unchanged. A
-    stored reading is used without consulting the deadline; when the reader
-    would have to run and the deadline has passed, the reader is not called
-    and the attachment is marked unavailable with reason [budget_spent]. *)
+    kinds are unchanged. A stored reading is reused without calling the
+    reader. *)
 
 val project_blocks :
   ?base_path:string ->
   media_store:Agent_core.History.media_store ->
   keeper_name:string ->
   needs_projection:(kind -> bool) ->
-  deadline:Monotonic_deadline.t ->
   read:reader ->
   Agent_core.Types.content_block list ->
   Agent_core.Types.content_block list * (string * int) list
-(** {!project} through a projector of its own, with [deadline] as that
-    projector's deadline: one call is one walk. *)
+(** {!project} through a projector of its own: one call is one walk. *)

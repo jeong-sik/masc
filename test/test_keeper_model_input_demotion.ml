@@ -1182,8 +1182,7 @@ let signed_request_media_uses_the_exact_reading_prefix () =
   let make_projection reading calls =
     let projector = Masc.Keeper_media_reading.projector ~media_store:test_media_store
       ~keeper_name:"signed-request-media"
-      ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.)
-      ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> incr calls; Ok reading) () in
+      ~read:(fun ~kind:_ ~media_type:_ ~bytes:_ -> incr calls; Ok reading) () in
     fun messages -> Ok (List.map (fun (message : Types.message) ->
       let content, _ = Masc.Keeper_media_reading.project projector
         ~needs_projection:(function Masc.Keeper_media_reading.Document -> true | Audio -> false)

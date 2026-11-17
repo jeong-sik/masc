@@ -37,10 +37,10 @@ type turn_transcript = Keeper_chat_projection.turn_transcript = {
 let transcript_of_messages = Keeper_chat_projection.transcript_of_messages
 let turn_transcript_to_json = Keeper_chat_projection.turn_transcript_to_json
 
-let exact_transcript_row_identity line =
+let exact_transcript_row_json line =
   let open Result.Syntax in
   match Yojson.Safe.from_string line with
-  | `Assoc fields ->
+  | `Assoc fields as json ->
       let keys = List.map fst fields in
       let* () =
         if List.length keys = List.length (List.sort_uniq String.compare keys)
@@ -56,7 +56,7 @@ let exact_transcript_row_identity line =
       let* () = match List.assoc_opt "turn_ref" fields with
         | None -> Ok ()
         | Some json -> Result.map (fun _ -> ()) (Ids.Turn_ref.of_yojson json) in
-      Result.map (fun _ -> ())
+      Result.map (fun _ -> json)
         (Keeper_chat_delivery_identity.delivery_provenance_of_fields fields)
   | _ -> Error "transcript row is not an object"
   | exception Yojson.Json_error detail -> Error detail
@@ -72,11 +72,10 @@ let load_turn_transcript_result ~base_dir ~keeper_name ~turn_ref =
     let* messages_rev = List.fold_left
         (fun state (row : Keeper_chat_history_page.row) ->
           let* messages = state in
-          let* () = exact_transcript_row_identity row.line
+          let* json = exact_transcript_row_json row.line
             |> Result.map_error (fun detail ->
                  Keeper_chat_history_page.Invalid_row { offset = row.offset; detail }) in
-          match parse_transcript_row_strict ~path ~redaction ~position:(Byte_offset row.offset) row.line with
-          | `Blank -> Ok messages
+          match parse_transcript_json_strict ~path ~redaction ~position:(Byte_offset row.offset) json with
           | `Message message -> Ok (message :: messages)
           | `Unreadable err ->
               Error (Keeper_chat_history_page.Invalid_row { offset = row.offset; detail = strict_decode_error_to_string err }))

@@ -266,7 +266,12 @@ let confirm_index (capture:t) record =
   let* stored=index_of_summary record in
   let* actual=index capture in
   require ((stored:index)=actual) "Original history index differs from its request"
-let decode ~owner ~digest json =
+let source_of_text source_text =
+  let* source_json=parse source_text in
+  let* source=Source.of_json source_json |> Result.map_error Source.error_to_string in
+  let+ ()=require (Yojson.Safe.to_string (Source.to_json source)=source_text)
+    "Original history source text is not its complete canonical encoding" in source
+let decode_with_source ~source_of_text ~owner ~digest json =
   let* f=header_fields json in
   let* ()=require (value "schema" f=`Int 2 && value "kind" f=`String "completed-history-execution")
     "Unknown original history schema or kind" in
@@ -275,21 +280,20 @@ let decode ~owner ~digest json =
   let* destination=destination_of_json (value "destination" f) in
   let* predecessor=predecessor_of_json (value "predecessor" f) in
   let* source_text=text (value "source_text" f) in
-  let* source_json=parse source_text in
-  let* source=Source.of_json source_json |> Result.map_error Source.error_to_string in
-  let* ()=require (Yojson.Safe.to_string (Source.to_json source)=source_text)
-    "Original history source text is not its complete canonical encoding" in
+  let* source=source_of_text source_text in
   let* preparation=preparation_of_json ~source_input:(Source.input source) (value "preparation" f) in
   let capture={id;owner;destination;source;source_text;predecessor;preparation;digest=""} in
   let* ()=validate_source_binding capture in
   let* ()=equal json (to_json capture) "Original history request encoding differs" in
   let+ digest=match digest with Some digest -> Ok digest | None -> Owner.request_digest json in
   {capture with digest}
+let decode ~owner ~digest json =
+  decode_with_source ~source_of_text ~owner ~digest json
 let of_json ~owner json = decode ~owner ~digest:None json
-let restore_payload ~owner (record:Owner.retained) =
+let restore_payload_with_source ~source_of_text ~owner (record:Owner.retained) =
   (* The record's digest named the body [Owner.load] verified, and [decode]
      requires that body to be this request's canonical encoding. *)
-  let* capture=decode ~owner ~digest:(Some record.request_digest) record.request in
+  let* capture=decode_with_source ~source_of_text ~owner ~digest:(Some record.request_digest) record.request in
   let id=capture.id and destination=capture.destination in
   let* ()=require (record.scope=scope owner && record.request_id=id
     && record.installation_id=destination.installation_id && record.package_id=destination.package_id
@@ -301,8 +305,17 @@ let restore_payload ~owner (record:Owner.retained) =
       let* stored=index_of_summary (Owner.listed record) in
       confirm_index_binding capture stored in
   capture
+let restore_payload ~owner record =
+  restore_payload_with_source ~source_of_text ~owner record
 let restore ~owner record =
   let* capture=restore_payload ~owner record in
+  let+ ()=confirm_source_root capture in capture
+let restore_reusing_source ~previous ~owner record =
+  let source_of_text source_text =
+    if owner=previous.owner && String.equal source_text previous.source_text
+    then Ok previous.source
+    else source_of_text source_text in
+  let* capture=restore_payload_with_source ~source_of_text ~owner record in
   let+ ()=confirm_source_root capture in capture
 let confirm_record capture (record:Owner.retained) =
   let* ()=confirm_source_root capture in

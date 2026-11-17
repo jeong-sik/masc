@@ -1164,7 +1164,10 @@ module Final_response_bytes = struct
 end
 
 (* Everything [Final_response_bytes] passes up when the connection delivers
-   [arrivals] one read at a time and then ends. *)
+   [arrivals] one read at a time and then ends. Only the [let%test] blocks
+   below name it, and the release profile strips those, so there it is an
+   unused top-level value -- warning 32, which that profile raises to an
+   error. This is the same shape f9ed390a91 fixed before. *)
 let passed_up_from arrivals =
   let arrivals = ref arrivals in
   let read buffer =
@@ -1185,6 +1188,7 @@ let passed_up_from arrivals =
   in
   try drain () with
   | End_of_file -> Buffer.contents passed_up
+[@@warning "-32"]
 ;;
 
 let%test "interim heads are dropped wherever the connection splits its bytes" =

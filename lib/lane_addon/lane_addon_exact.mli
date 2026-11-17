@@ -511,6 +511,33 @@ val recover_retained : store:Lane_addon_store.t -> declaration_id:string ->
     In Eio, protect the complete system-thread call from cancellation so
     publication and confirmation finish before returning its observation. *)
 
+type replacement_pending =
+  | Replacement_claim_busy
+  | Declaration_current
+  | Declaration_unavailable of { detail : string }
+  | Execution_unresolved
+type replacement_reconciliation =
+  | Reconciled_terminal of retained_final
+  | Reconciliation_pending of replacement_pending
+val reconcile_replaced : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> package:Lane_addon_types.package ->
+  authorize_request:execution_authority -> request ->
+  (replacement_reconciliation, recovery_error) result
+(** End only an original whose actual trusted initial guard confirms
+    [Declaration_replaced]. This has no runner, worker or provider port. Try the
+    same canonical claim as [run]; busy is not exclusion. Strictly recover the
+    original and its bound proofs first, preserving every actual terminal and
+    completed call. An unresolved started generation is never a no-send grant.
+    Only an absent original or a record containing closed deferrals can acquire
+    the existing typed [Replaced_declaration] ending. Permission failures never
+    synthesize an ending. Same/not-ready authority leaves it pending.
+    Publication enters the original's real execution lifetime, rechecks its
+    authority, and strictly reads back the saved record and proofs before
+    returning the terminal. A changed authority during publication is an error,
+    with no permission to submit or declare the original unexecuted. Caller
+    holds the workspace lease and domain owner; blocking store work is joined
+    through the existing offload boundary. *)
+
 val confirm_original_schema : declaration_id:string -> schema:Yojson.Safe.t -> request ->
   (unit, string) result
 (** The check {!recover_retained} makes of the caller's own schema before it

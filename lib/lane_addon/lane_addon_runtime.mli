@@ -231,6 +231,22 @@ val call_captured_tool_request : config:Workspace.config ->
     an original request. The host caller still restores physical input authority
     and publishes its dispatch intent first. No model is called by this port;
     the request worker only retains or reads its original host request. *)
+val reconcile_captured_exact_replacement : config:Workspace.config ->
+  access:Lane_addon_sources.access -> reserved:string list -> export:tool_export ->
+  original:Lane_addon_tool_request_owner.Record.t -> request:Lane_addon_exact.request ->
+  (Lane_addon_exact.replacement_reconciliation, tool_call_error) result
+(** Trusted ending-only host boundary. Under the actual complete configured
+    destination's configuration/action serializers, confirm this original's
+    logical owner, ID, retained record and complete Exact body through the
+    registered host authority. The complete request must hold its captured
+    schema; there is no current-package schema fallback. The current declaration
+    may be a new semantic revision of that same installation/package/tool. After releasing those
+    serializers, reconcile under the real Exact claim and freshly recheck the
+    original's physical owner, input binding and Runtime replacement authority.
+    No worker RPC, runner or model is invoked. No caller-supplied current
+    revision or refusal payload grants an ending. Existing unknowns and actual
+    terminals keep their evidence; no Memory or source ACK is authorized. *)
+
 val call_exported_tool_with_principal : principal:Lane_addon_call_context.principal option ->
   config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
   export:tool_export -> arguments:Yojson.Safe.t ->

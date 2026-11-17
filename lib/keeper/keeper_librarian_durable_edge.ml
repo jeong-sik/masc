@@ -55,6 +55,15 @@ let call ~config ~reserved ~(expected : Request.destination) ~(original : Retain
 let confirm_destination ~config ~reserved (destination:Request.destination) =
   Submit.confirm_destination ~config ~reserved ~label:"history" destination
 
+let reconcile_replacement ~config ~reserved ~original ~request =
+  let* export=resolve ~config ~reserved
+    |> Result.map_error (fun detail -> Submit.Rejected detail) in
+  let* export=Option.to_result
+    ~none:(Submit.Unavailable "Completed-history Librarian Addon is not attached") export in
+  Runtime.reconcile_captured_exact_replacement ~config ~reserved ~export
+    ~access:Lane_addon_sources.Operator_configuration ~original ~request
+  |> Result.map_error Submit.error_of_runtime
+
 let observe_destination ~config ~reserved destination =
   let+ _,current=Submit.destination_relation ~config ~reserved ~label:"history" destination in
   current

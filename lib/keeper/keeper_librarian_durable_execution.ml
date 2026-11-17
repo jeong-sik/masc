@@ -580,15 +580,15 @@ let rec consume_one ~config ~keeper_name ~wake =
     match validate_lineage ~store ~fenced ~read:originals listed with
     | Error detail -> error detail
     | Ok superseded ->
-    (* A host may already have ended an independent waiting original while a
-       linked declaration replacement still owns an older source. Recover only
-       that no-Memory ending before counting frontiers; ordinary resume could
-       dispatch or publish here. Changed progress requires a new inventory. *)
+    (* Recover a host ending, or reconcile a real replaced-declaration ending,
+       before arbitrating multiple waiting frontiers. Only this ending port
+       is safe here: ordinary resume could dispatch or publish. Changed
+       progress requires a new inventory. *)
     let rec recover_ending = function
       | [] -> Ok None
       | ((record,_) as original)::rest ->
         if fenced (Record.request_id record) then recover_ending rest else
-        let* recovered=Owner.recover_terminal_ending ~store ~config ~original
+        let* recovered=Owner.recover_terminal_ending ~store ~config ~reserved ~original
           |> Result.map_error Owner.error_to_string in
         match recovered with
         | Owner.No_ending -> recover_ending rest

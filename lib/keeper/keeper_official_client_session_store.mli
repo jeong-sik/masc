@@ -169,6 +169,9 @@ type context_delivery =
     standing Keeper System prompt sent to Codex as Developer context. *)
 type carried_context =
   | Context_block of Prompt_block_id.t
+      (** Codex also uses [Keeper_instructions], absent from carriers, for
+          the exact issued base plus native posture delivery basis. Other
+          blocks retain their exact source digests. *)
   | Context_section of Keeper_context_layers.source
       (** A whole section, or for a section with rows
           ({!Keeper_context_layers.Head_and_rows}) its head and tail. *)

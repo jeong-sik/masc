@@ -92,6 +92,15 @@ System을 포함한 canonical source가 바뀌면 새 세션을 선택할 수 �
 Muse가 Start turn text에 합치는 instruction frame과 Codex의 Developer role은 서로
 다른 전송 계약이다. 둘을 같은 native System 설정이라고 부르지 않는다.
 
+Codex의 분해 가능한 issued System은 base와 현재 standing 관측의 전달을 따로
+계획한다. 정확한 base와 native posture의 정산된 receipt가 있으면 새 operation이나
+Goal은 명시적으로 이전 관측을 대체하는 Developer snapshot으로 보낸다. 같은 관측을
+User 본문에 중복하지 않으며, Completion Authority 같은 턴별 관측은 계속 전달한다.
+주입 ACK 전에 turn/start를 보내지 않고, 완료 정산 전에 새 receipt를 보유 증거로
+쓰지 않는다. issuer가 불명확하거나 base의 전달 근거가 없으면 전체 System을 갱신한다.
+native compaction용 developerInstructions는 현재 전체 System을 그대로 유지한다.
+알려진 compaction의 재구성 계약과 단순 token estimate/window-fill 관측은 구분한다.
+
 이력 조사의 [기존 projection 증거 설명 정정](../evidence/2026-10-24-goal-stable-system/official-resume-repair.md#native-adapter-boundary-clarification--2026-11-16)은
 이 범위를 분명히 한다. Goal·승인 관측의 권위와 순서, 관측 제거와 미확정 ACK를 보존하는
 전달 계약 없이 `base_text`만 해시하거나 지시문 주입을 없애는 수리를 하지 않는다.

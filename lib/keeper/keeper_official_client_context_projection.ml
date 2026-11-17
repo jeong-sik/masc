@@ -828,8 +828,16 @@ let rec rendered_messages = function
   | sent :: rest -> ((sent_item sent).message,None,Carried_source (sent_item sent).source) :: rendered_messages rest
 ;;
 
-let resume_prompt ~goal ~held ~turn_observation ?composed_context messages =
-  let carried = carried_context ~turn_observation ~composed_context messages in
+let resume_prompt ~goal ~held ~turn_observation ?composed_context
+    ?(system_observations_in_developer = []) messages =
+  let carried = carried_context ~turn_observation ~composed_context messages
+    |> List.filter (fun item -> match item.source with
+      | Issued_system_observation block ->
+        not (List.exists (fun observation ->
+          let current_block, text = Keeper_context_assembly.observation_block observation in
+          Prompt_block_id.equal block current_block && item.held.sha256 = sha256_hex text)
+          system_observations_in_developer)
+      | Turn_observation _ | Message_context -> true) in
   let deliveries = List.map (fun item -> item, carried_delivery ~held item) carried in
   let sent = List.filter_map (fun (_, delivery) -> match delivery with
     | Sent sent -> Some sent

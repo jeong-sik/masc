@@ -427,7 +427,7 @@ let test_output_is_drained_after_the_host_leaves () =
   check_exit_zero ~what:"the relay" pid;
   check string "the program wrote everything" "done" (read_file marker)
 
-let request ~root argv =
+let request ?(stdin = Exec_ssh_protocol.Framed 0L) ~root argv =
   match
     Exec_ssh_protocol.encode_request
       { Exec_ssh_protocol.v = Exec_ssh_protocol.V3
@@ -436,7 +436,7 @@ let request ~root argv =
       ; cwd = root
       ; remote_root = root
       ; timeout_sec = deadline_sec
-      ; stdin_len = 0L
+      ; stdin
       ; mode = Exec_ssh_protocol.Effect
       ; acceptance_frame = true
       }
@@ -449,6 +449,71 @@ let payload_exit outcome =
   match Exec_ssh_protocol.parse_trailer outcome.stderr with
   | Ok trailer -> trailer.Exec_ssh_protocol.exit
   | Error message -> fail message
+
+let test_real_shim_exchanges_interactive_bytes_through_the_relay () =
+  with_temp_dir @@ fun dir ->
+  let root = Unix.realpath dir in
+  let config = Filename.concat root "shim.conf" in
+  write_file ~perm:0o644 config
+    (Printf.sprintf "remote_root=%s\nscratch_root=%s\n" root root);
+  let env = Array.append base_env
+      [| Printf.sprintf "%s=%s" Exec_ssh_protocol.shim_config_env_var config |] in
+  let host, pid = start_relay ~program:!shim_binary ~env in
+  let closed = ref false and reaped = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if not !closed then Unix.close host;
+      if not !reaped then (
+        (try Unix.kill pid Sys.sigkill with
+         | Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+        (try ignore (Unix.waitpid [] pid) with
+         | Unix.Unix_error (Unix.ECHILD, _, _) -> ())))
+  @@ fun () ->
+  let (_ : Relay.hello) = read_hello host in
+  let first = "a\000\255z" and second = "b\030\000\254yz" in
+  send host
+    (kind_byte Relay.Run ^ request ~root ~stdin:Exec_ssh_protocol.Interactive
+       [ "/bin/sh"; "-c"
+       ; "dd bs=1 count=4 2>/dev/null; printf ready; \
+          dd bs=1 count=6 2>/dev/null; exit 7" ]);
+  send host first;
+  let first_stdout = Buffer.create 16 in
+  let rec await_first_response chunks =
+    if Buffer.length first_stdout >= String.length first + String.length "ready"
+    then List.rev chunks
+    else
+      let header = read_exact host header_bytes in
+      let length = Int32.to_int (String.get_int32_be header 1) in
+      match decode_all (header ^ read_exact host length) with
+      | [ (Relay.Stdout bytes as chunk) ] ->
+        Buffer.add_string first_stdout bytes;
+        await_first_response (chunk :: chunks)
+      | [ (Relay.Stderr _ as chunk) ] -> await_first_response (chunk :: chunks)
+      | [ Relay.Exit _ ] -> fail "the shim ended before the second input"
+      | [ Relay.Hello _ ] | [] | _ :: _ :: _ -> fail "unexpected relay chunk"
+  in
+  let initial_chunks = await_first_response [] in
+  check string "the first response arrives while stdin remains open"
+    (first ^ "ready") (Buffer.contents first_stdout);
+  (* The second input does not exist in the framed request and is sent only
+     after the first response, as a stdio peer would do. *)
+  send host second;
+  let outcome = outcome_of (initial_chunks @ decode_all (read_until_eof host)) in
+  Unix.close host;
+  closed := true;
+  let status = wait_exit pid in
+  reaped := true;
+  check bool "the relay finishes" true (status = Unix.WEXITED 0);
+  check string "NUL, record separator and non-UTF8 bytes survive both exchanges"
+    (first ^ "ready" ^ second) outcome.stdout;
+  check (option int) "the payload's real exit is preserved" (Some 7) (payload_exit outcome);
+  check (list exit_status) "the relay reports the shim's own exit"
+    [ Relay.Exited 0 ] outcome.exits;
+  check bool "the relay exit follows the complete trailer" true outcome.last_is_exit;
+  match Exec_ssh_protocol.split_acceptance_head outcome.stderr with
+  | Exec_ssh_protocol.Head_frame _ -> ()
+  | Exec_ssh_protocol.Head_pending | Exec_ssh_protocol.Head_payload ->
+    fail "the real interactive shim did not acknowledge the request"
 
 (* The real shim behind serve: two connections at once and a probe. *)
 let test_serve_runs_the_real_shim () =
@@ -578,5 +643,7 @@ let () =
             test_output_is_drained_after_the_host_leaves
         ] )
     ; ( "serve"
-      , [ test_case "runs the real shim" `Quick test_serve_runs_the_real_shim ] )
+      , [ test_case "runs the real shim" `Quick test_serve_runs_the_real_shim
+        ; test_case "real shim exchanges interactive binary input through the relay" `Quick
+            test_real_shim_exchanges_interactive_bytes_through_the_relay ] )
     ]

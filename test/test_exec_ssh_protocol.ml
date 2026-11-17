@@ -11,7 +11,7 @@ let req = Exec_ssh_protocol.{ v = Exec_ssh_protocol.newest
                             ; cwd = "/srv/masc/playground/keeper-a"
                             ; remote_root = "/srv/masc/playground"
                             ; timeout_sec = 300.0
-                            ; stdin_len = 0L
+                            ; stdin = Framed 0L
                             ; mode = Exec_ssh_protocol.Effect
                             ; acceptance_frame = false }
 
@@ -83,7 +83,7 @@ let test_hostile_bytes_roundtrip () =
   Bytes.blit_string "\x1e record sep \x1e \x00 \xff" 0 big 42 18;
   let stdin = Bytes.unsafe_to_string big in
   let r = { req with argv = ["\xff\xfe invalid utf8"]
-                   ; stdin_len = Int64.of_int (String.length stdin) } in
+                   ; stdin = Framed (Int64.of_int (String.length stdin)) } in
   let framed = Exec_ssh_protocol.encode_request r ~stdin in
   match framed with
   | Error e -> fail e
@@ -92,6 +92,7 @@ let test_hostile_bytes_roundtrip () =
      | Error e -> fail e
      | Ok (r', stdin') ->
        check (list string) "hostile argv" r.argv r'.argv;
+       check bool "the framed byte count survives" true (r'.stdin = r.stdin);
        check string "stdin bytes" stdin stdin')
 
 let test_frame_version_gated () =
@@ -247,6 +248,136 @@ let json_of_frame framed =
   (* The JSON sits after the 8-byte length prefix; the fixtures carry no
      stdin, so the rest of the frame is the JSON. *)
   Yojson.Safe.from_string (String.sub framed 8 (String.length framed - 8))
+
+let frame_with_request_json json ~stdin =
+  let body = json ^ stdin in
+  let frame = Bytes.create (8 + String.length body) in
+  Bytes.set_int64_be frame 0 (Int64.of_int (String.length body));
+  Bytes.blit_string body 0 frame 8 (String.length body);
+  Bytes.to_string frame
+
+let test_interactive_header_keeps_live_bytes_outside_the_frame () =
+  List.iter (fun mode ->
+    let request = { req with stdin = Exec_ssh_protocol.Interactive; mode } in
+    match Exec_ssh_protocol.encode_request request ~stdin:"" with
+    | Error message -> fail message
+    | Ok frame ->
+      (match json_of_frame frame with
+       | `Assoc fields ->
+         check bool "streaming is explicit" true
+           (List.assoc_opt "stdin_stream" fields = Some (`Bool true));
+         (* A framed-only peer requires stdin_len. Omitting it makes a stale
+            capability observation a refusal, rather than an empty-stdin run. *)
+         check bool "no framed length a peer could mistake for empty input" false
+           (List.mem_assoc "stdin_len" fields)
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+         fail "the request header is not an object");
+      check int64 "the prefix covers only the complete JSON header"
+        (Int64.of_int (String.length frame - 8))
+        (Bytes.get_int64_be (Bytes.of_string frame) 0);
+      (match Exec_ssh_protocol.decode_request frame with
+       | Error message -> fail message
+       | Ok (decoded, initial) ->
+         check bool "interactive mode survives" true
+           (decoded.stdin = Exec_ssh_protocol.Interactive);
+         check bool "execution mode survives" true (decoded.mode = mode);
+         check string "the initial frame contains no child input" "" initial);
+      match Exec_ssh_protocol.decode_request (frame ^ "\x00\xffsecond input") with
+      | Ok _ -> fail "whole-frame decoding consumed live channel bytes"
+      | Error message -> check bool "trailing bytes are a transport error" true
+          (contains "remote_ssh_transport_error" message))
+    Exec_ssh_protocol.[ Effect; Observe; Guest_local ]
+
+let test_framed_headers_keep_their_length_field () =
+  List.iter (fun v ->
+    match Exec_ssh_protocol.encode_request { req with v } ~stdin:"" with
+    | Error message -> fail message
+    | Ok frame ->
+      (match json_of_frame frame with
+       | `Assoc fields ->
+         check bool "framed zero length remains explicit" true
+           (List.assoc_opt "stdin_len" fields = Some (`Int 0));
+         check bool "framed input carries no streaming marker" false
+           (List.mem_assoc "stdin_stream" fields)
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+         fail "the request header is not an object");
+      match Exec_ssh_protocol.decode_request frame with
+      | Error message -> fail message
+      | Ok (decoded, initial) ->
+        check bool "empty framed input stays framed" true
+          (decoded.stdin = Exec_ssh_protocol.Framed 0L);
+        check string "empty framed payload" "" initial)
+    Exec_ssh_protocol.[ V2; V3 ]
+
+let interactive_request_json input_fields =
+  {|{"v":3,"argv":[],"env":[],"cwd":"","remote_root":"","timeout_sec":1.0,"mode":"effect",|}
+  ^ input_fields ^ "}"
+
+let test_interactive_initial_payload_is_refused () =
+  let payload = "\x00\xff\x1einitial input" in
+  (match Exec_ssh_protocol.encode_request
+      { req with stdin = Exec_ssh_protocol.Interactive } ~stdin:payload with
+   | Ok _ -> fail "interactive encoding accepted a framed initial payload"
+   | Error message -> check bool "encoding refuses the ambiguous payload" true
+       (contains "remote_ssh_transport_error" message));
+  let frame = frame_with_request_json
+      (interactive_request_json {|"stdin_stream":true|}) ~stdin:payload in
+  match Exec_ssh_protocol.decode_request frame with
+  | Ok _ -> fail "interactive decoding accepted bytes inside the initial frame"
+  | Error message -> check bool "decoding refuses the ambiguous payload" true
+      (contains "remote_ssh_transport_error" message)
+
+let test_input_headers_are_unambiguous () =
+  List.iter (fun (label, fields) ->
+    let frame = frame_with_request_json (interactive_request_json fields) ~stdin:"" in
+    match Exec_ssh_protocol.decode_request frame with
+    | Ok _ -> failf "%s was accepted as child input" label
+    | Error message -> check bool (label ^ " is a transport error") true
+        (contains "remote_ssh_transport_error" message))
+    [ "framed and interactive", {|"stdin_len":0,"stdin_stream":true|}
+    ; "interactive and framed", {|"stdin_stream":true,"stdin_len":0|}
+    ; "duplicate stream marker", {|"stdin_stream":true,"stdin_stream":true|}
+    ; "contradictory stream markers", {|"stdin_stream":true,"stdin_stream":false|}
+    ; "duplicate framed length", {|"stdin_len":0,"stdin_len":0|}
+    ; "false stream marker", {|"stdin_stream":false|}
+    ; "null stream marker", {|"stdin_stream":null|}
+    ; "string stream marker", {|"stdin_stream":"true"|}
+    ; "numeric stream marker", {|"stdin_stream":1|}
+    ; "no input representation", {|"unrelated":0|}
+    ]
+
+let test_v2_refuses_interactive_input () =
+  (match Exec_ssh_protocol.encode_request
+      { req with v = Exec_ssh_protocol.V2; stdin = Interactive } ~stdin:"" with
+   | Ok _ -> fail "a V2 peer was sent interactive input"
+   | Error message -> check bool "encoding names version skew" true
+       (contains "remote_ssh_version_error" message));
+  let json =
+    {|{"v":2,"argv":[],"env":[],"cwd":"","remote_root":"","timeout_sec":1.0,"stdin_stream":true}|} in
+  match Exec_ssh_protocol.decode_request (frame_with_request_json json ~stdin:"") with
+  | Ok _ -> fail "a V2 header granted interactive input"
+  | Error message -> check bool "decoding names version skew" true
+      (contains "remote_ssh_version_error" message)
+
+let test_interactive_input_requires_a_capable_v3_probe () =
+  List.iter (fun (label, version, capabilities, expected) ->
+    let wire = Yojson.Safe.to_string (`Assoc
+        [ "name", `String "masc-exec-shim"
+        ; "version", `String version
+        ; "capabilities", `List (List.map (fun value -> `String value) capabilities)
+        ]) in
+    match Exec_ssh_protocol.parse_probe wire with
+    | Error message -> fail message
+    | Ok probe -> check bool label expected
+        (Exec_ssh_protocol.supports_interactive_stdin probe))
+    [ "V3 without the capability", "3.0.0", [], false
+    ; "V3 with another capability", "3.0.0", ["interactive_stdin_extra"], false
+    ; "capable V3", "3.0.0", [Exec_ssh_protocol.interactive_stdin_capability], true
+    ; "capable stamped V3", "3.0.0+fixture", [Exec_ssh_protocol.interactive_stdin_capability], true
+    ; "V2 cannot grant streaming", "2.4.1", [Exec_ssh_protocol.interactive_stdin_capability], false
+    ; "unknown major cannot grant streaming", "4.0.0", [Exec_ssh_protocol.interactive_stdin_capability], false
+    ; "unreadable major cannot grant streaming", "bad", [Exec_ssh_protocol.interactive_stdin_capability], false
+    ]
 
 (* A v2 frame is a v3 frame without [mode], and it means Effect: the shim
    one release behind reads it, and this build reads what such a shim's
@@ -718,6 +849,17 @@ let () =
                ; test_case "mode strings are closed" `Quick test_mode_strings_are_closed
                ; test_case "stdin_len mismatch is transport error" `Quick
                    test_frame_stdin_len_mismatch_is_transport_error ]
+    ; "interactive stdin",
+      [ test_case "the header leaves live bytes outside the frame" `Quick
+          test_interactive_header_keeps_live_bytes_outside_the_frame
+      ; test_case "framed headers keep their length field" `Quick
+          test_framed_headers_keep_their_length_field
+      ; test_case "an initial payload is refused" `Quick
+          test_interactive_initial_payload_is_refused
+      ; test_case "input headers are unambiguous" `Quick test_input_headers_are_unambiguous
+      ; test_case "V2 refuses interactive input" `Quick test_v2_refuses_interactive_input
+      ; test_case "only a capable V3 probe grants interactive input" `Quick
+          test_interactive_input_requires_a_capable_v3_probe ]
     ; "trailer", [ test_case "execution receipts preserve process outcome" `Quick
                      test_execution_receipts_preserve_process_outcome
                  ; test_case "roundtrip" `Quick test_trailer_roundtrip

@@ -16,6 +16,8 @@ type mode =
   | Observe
   | Guest_local
 
+type stdin = Framed of int64 | Interactive
+
 type request =
   { v : major
   ; argv : string list
@@ -23,7 +25,7 @@ type request =
   ; cwd : string
   ; remote_root : string
   ; timeout_sec : float
-  ; stdin_len : int64
+  ; stdin : stdin
   ; mode : mode
   ; acceptance_frame : bool
   }
@@ -95,6 +97,13 @@ let major_of_probe (p : probe) : (major, string) result =
 let observe_capability = "observe"
 let user_notif_capability = "user_notif"
 let request_acceptance_capability = "request_acceptance_frame"
+let interactive_stdin_capability = "interactive_stdin"
+
+let supports_interactive_stdin probe =
+  match major_of_probe probe with
+  | Ok V3 -> List.mem interactive_stdin_capability probe.capabilities
+  | Ok V2 | Error _ -> false
+
 let github_token_env_names =
   [ "GH_TOKEN"
   ; "GITHUB_TOKEN"
@@ -172,8 +181,10 @@ let json_of_request (r : request) : Yojson.Safe.t =
      ; "cwd", `String (b64_encode r.cwd)
      ; "remote_root", `String (b64_encode r.remote_root)
      ; "timeout_sec", `Float r.timeout_sec
-     ; "stdin_len", `Intlit (Int64.to_string r.stdin_len)
      ]
+     @ (match r.stdin with
+        | Framed length -> [ "stdin_len", `Intlit (Int64.to_string length) ]
+        | Interactive -> [ "stdin_stream", `Bool true ])
      @ (match r.v with
         | V2 -> []
         | V3 -> [ "mode", `String (mode_to_string r.mode) ])
@@ -194,6 +205,14 @@ let asks_acceptance_of_v2 (r : request) =
 
 let encode_request (r : request) ~stdin : (string, string) result =
   let stdin_bytes = String.length stdin in
+  let* () = match r.v, r.stdin with
+    | V2, Interactive -> version_error "interactive stdin requires v3"
+    | (V2 | V3), Framed length when length <> Int64.of_int stdin_bytes ->
+      transport_error "request stdin_len (%Ld) does not match the stdin payload (%d bytes)"
+        length stdin_bytes
+    | V3, Interactive when stdin_bytes <> 0 ->
+      transport_error "interactive stdin cannot carry an initial payload"
+    | (V2 | V3), Framed _ | V3, Interactive -> Ok () in
   match classify_float r.timeout_sec with
   | FP_nan | FP_infinite ->
     transport_error "request timeout_sec is not finite (%F)" r.timeout_sec
@@ -205,10 +224,6 @@ let encode_request (r : request) ~stdin : (string, string) result =
         "a v2 frame cannot ask for the %s box: the endpoint's shim speaks v2 and runs \
          every request unboxed"
         (mode_to_string r.mode)
-    else if r.stdin_len <> Int64.of_int stdin_bytes then
-      transport_error
-        "request stdin_len (%Ld) does not match the stdin payload (%d bytes)"
-        r.stdin_len stdin_bytes
     else begin
       let json = Yojson.Safe.to_string (json_of_request r) in
       let json_len = String.length json in
@@ -368,7 +383,20 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
   in
   let* remote_root = b64_decode ~what:"remote_root" remote_root_json in
   let* timeout_sec = member ~what "timeout_sec" fields >>= expect_float ~what "timeout_sec" in
-  let* stdin_len = member ~what "stdin_len" fields >>= expect_int64 ~what "stdin_len" in
+  let* stdin =
+    (* An old decoder requires stdin_len. Omitting it on an interactive
+       request makes stale capability observations fail before child spawn. *)
+    match List.filter (fun (name, _) -> name = "stdin_len" || name = "stdin_stream") fields with
+    | ["stdin_len", value] ->
+      let* length = expect_int64 ~what "stdin_len" value in
+      if length < 0L then transport_error "request stdin_len is negative (%Ld)" length
+      else Ok (Framed length)
+    | ["stdin_stream", `Bool true] ->
+      (match v with V3 -> Ok Interactive | V2 -> version_error "interactive stdin requires v3")
+    | [] -> transport_error "request must declare stdin_len or stdin_stream"
+    | [_] -> transport_error "request stdin_stream must be true"
+    | _ :: _ :: _ -> transport_error "request input declaration is ambiguous or duplicated"
+  in
   (* v2 has no [mode] and means [Effect]; a v2 frame that carries one is a
      frame from a build that does not know what v2 is, refused by name. v3
      requires it. *)
@@ -396,10 +424,8 @@ let request_of_json (json : Yojson.Safe.t) : (request, string) result =
   (match classify_float timeout_sec with
    | FP_nan | FP_infinite ->
      transport_error "request timeout_sec is not finite (%F)" timeout_sec
-   | FP_normal | FP_subnormal | FP_zero -> if Int64.compare stdin_len 0L < 0 then
-       transport_error "request stdin_len is negative (%Ld)" stdin_len
-     else
-       Ok { v; argv; env; cwd; remote_root; timeout_sec; stdin_len; mode
+   | FP_normal | FP_subnormal | FP_zero ->
+       Ok { v; argv; env; cwd; remote_root; timeout_sec; stdin; mode
           ; acceptance_frame })
 
 let decode_request (frame : string) : (request * string, string) result =
@@ -425,13 +451,14 @@ let decode_request (frame : string) : (request * string, string) result =
         let* r = request_of_json json in
         let stdin = String.sub frame jend (n - jend) in
         let actual = Int64.of_int (String.length stdin) in
-        if r.stdin_len <> actual then
+        match r.stdin with
+        | Framed length when length <> actual ->
           transport_error
-            "stdin_len mismatch: JSON declares %Ld bytes but the frame carries %Ld \
-             (refusing a truncated read)"
-            r.stdin_len actual
-        else
-          Ok (r, stdin)
+            "stdin_len mismatch: JSON declares %Ld bytes but the frame carries %Ld (refusing a truncated read)"
+            length actual
+        | Interactive when actual <> 0L ->
+          transport_error "interactive stdin cannot carry an initial payload"
+        | Framed _ | Interactive -> Ok (r, stdin)
     end
   end
 

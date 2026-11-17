@@ -1176,7 +1176,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
         ; cwd
         ; remote_root = request_root
         ; timeout_sec
-        ; stdin_len = Int64.of_int (String.length stdin)
+        ; stdin = Exec_ssh_protocol.Framed (Int64.of_int (String.length stdin))
         ; mode
         ; acceptance_frame
         }

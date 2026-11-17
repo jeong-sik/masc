@@ -13,6 +13,19 @@ external set_pdeathsig : unit -> unit = "ocaml_prctl_set_pdeathsig"
    runtime's own table. *)
 external host_signal_number : int -> int = "ocaml_shim_host_signal_number"
 
+external channel_hung_up : Unix.file_descr -> bool = "ocaml_shim_channel_hung_up"
+external set_nonblock_flags : Unix.file_descr -> int = "ocaml_shim_set_nonblock"
+external restore_flags : Unix.file_descr -> int -> unit = "ocaml_shim_restore_flags"
+
+let with_nonblocking fd f =
+  let flags = set_nonblock_flags fd in
+  Fun.protect ~finally:(fun () ->
+    try restore_flags fd flags with Unix.Unix_error _ -> ()) f
+
+(* The existing grace for pipes held by descendants after their leader is
+   reaped also bounds final delivery. It is cleanup, not a renewed call budget. *)
+let drain_grace_sec = 1.0
+
 (* The box (RFC-0422). [observe_support_abi] is the Landlock ABI the kernel
    enforces, 0 where the shim cannot box a payload (no Landlock, no seccomp,
    or not Linux). [restrict_self scratch deny_fs deny_net] is applied in the
@@ -853,9 +866,9 @@ let spawn ?(before_exec = fun () -> ()) ?observe_sock
            first -- keeping it open would not corrupt this single
            exchange, but it would leave an extra live reference on the
            end the child uses, and a fd this process has no business
-           holding once the handoff is done. The fd is non-blocking so
-           the supervise select loop can treat readable == one available
-           notification. *)
+           holding once the handoff is done. The supervisor is the sole
+           receiver. Readiness admits one receive; O_NONBLOCK does not make
+           seccomp's receive ioctl nonblocking. *)
         let listener_fd =
           match observe_sock with
           | None -> Unix.stdin
@@ -875,9 +888,7 @@ let spawn ?(before_exec = fun () -> ()) ?observe_sock
                    scratch, and reads the exact boundary receipt from
                    [boundary_r]. *)
                 match Shim_fdpass.recv_fd parent_end with
-                | fd ->
-                  Unix.set_nonblock fd;
-                  fd
+                | fd -> fd
                 | exception (Failure _ | Unix.Unix_error _) -> Unix.stdin)
         in
         let handles =
@@ -935,7 +946,6 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
   (* After the payload is reaped, pipes are drained until EOF, bounded by
      this grace so an escaped daemon (double-fork + setsid defeats pgid
      kills by design) holding the pipes open cannot hang the shim. *)
-  let drain_grace_sec = 1.0 in
   let send_to_pgid sig_ =
     try Unix.kill (-pid) sig_ with
     | Unix.Unix_error _ -> () in
@@ -1048,32 +1058,16 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
     then out_open := pump ~dst_dead:out_dead stdout_r Unix.stdout;
     if !err_open && List.memq stderr_r rdy_r
     then err_open := pump ~dst_dead:err_dead stderr_r Unix.stderr;
-    (* task-1575 phase 3: drain every pending notification, reply EPERM,
-       record the syscall number. Loop on EAGAIN — the listener is
-       non-blocking so readable could mean one or more. Stop on ENOTCONN /
-       EBADF (peer closed = child exited) or when the C-side send fails:
-       the reviewer's concern about draining beyond [seen > 64] in the old
-       loop is addressed by reading until the queue is empty, not by a
-       magic ceiling. *)
+    (* This is the listener's sole receiver. One readiness-backed receive
+       per iteration: RECV can block on an empty queue despite O_NONBLOCK.
+       A withdrawn notification or interruption leaves observation active;
+       the next select also services input, output, cancellation and timeout. *)
     if !observe_active && List.memq listener_fd rdy_r
     then (
-      let rec drain_loop () =
-        match drain_one listener_fd with
-        | -2 ->
-          (* Queue empty (EAGAIN): the listener is non-blocking, so this is
-             the normal end of a drain burst. Keep observing — the select
-             loop calls back when the next notification arrives. *)
-          ()
-        | -1 ->
-          (* RECV failed with ENOTCONN/EBADF (child gone) or SEND failed
-             (payload side broken). Stop observing and release the fd. *)
-          (observe_active := false;
-           Unix.close listener_fd)
-        | syscall_no ->
-          (observed := syscall_no :: !observed;
-           drain_loop ())
-      in
-      drain_loop ()
+      match drain_one listener_fd with
+      | -2 -> ()
+      | -1 -> observe_active := false; Unix.close listener_fd
+      | syscall_no -> observed := syscall_no :: !observed
     );
     if (not !chan_eof) && List.memq Unix.stdin rdy_r
     then (
@@ -1136,10 +1130,254 @@ let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
      shape a completion verdict rejected: vrf-75b5116cabdef13de98a595b19a8295d). *)
   trailer_of_status ~v ~timed_out:!timed_out ~observed_syscalls:(List.rev !observed) st
 
+(* One fixed-size buffer per direction. A slow peer stops reads from that
+   direction; no string accumulator grows with a live interactive stream. *)
+module Stream_pending = struct
+  type t = { bytes : bytes; mutable first : int; mutable past : int }
+  let create () = { bytes = Bytes.create max_drain_bytes_per_pump; first = 0; past = 0 }
+  let length t = t.past - t.first
+  let empty t = t.first = t.past
+  let clear t = t.first <- 0; t.past <- 0
+  let space t = Bytes.length t.bytes - length t
+  let compact t =
+    if t.first > 0 then begin
+      let count = length t in
+      Bytes.blit t.bytes t.first t.bytes 0 count;
+      t.first <- 0;
+      t.past <- count
+    end
+  let append t text =
+    compact t;
+    let count = String.length text in
+    if count > space t then invalid_arg "control frame exceeds supervisor buffer";
+    Bytes.blit_string text 0 t.bytes t.past count;
+    t.past <- t.past + count
+  let read t fd =
+    compact t;
+    let count = Unix.read fd t.bytes t.past (space t) in
+    t.past <- t.past + count;
+    count
+  let write t fd =
+    let count = Unix.single_write fd t.bytes t.first (length t) in
+    t.first <- t.first + count;
+    if empty t then clear t
+end
+
+type interactive_output_failure = Output_peer_closed | Output_drain_incomplete
+
+(* Unlike a framed input, the channel is both payload input and cancellation
+   authority. poll(HUP) remains active when the input buffer is full, so a
+   child that never reads stdin cannot hide its caller's disappearance. *)
+let supervise_interactive ~v ~pid ~stdin_w ~stdout_r ~stderr_r
+    ~listener_fd ~timeout_sec ~acceptance_frame =
+  let module Pending = Stream_pending in
+  let input = Pending.create () in
+  let output = Pending.create () in
+  let errors = Pending.create () in
+  if acceptance_frame then Pending.append errors (Exec_ssh_protocol.render_acceptance_frame v);
+  let input_open = ref true in
+  let stdout_open = ref true and stderr_open = ref true in
+  let output_dead = ref false and errors_dead = ref false in
+  let channel_closed = ref false in
+  let observe_active = ref (listener_fd <> Unix.stdin) in
+  let observed = ref [] in
+  let status = ref None in
+  let reaped_at = ref None in
+  let timed_out = ref false in
+  let kill_started = ref false in
+  let kill_remaining = ref [] in
+  let grace_until = ref None in
+  let output_failure = ref None in
+  let deadline = Shim_clock.elapsed_seconds () +. timeout_sec in
+  let close_if_open flag fd =
+    if !flag then begin
+      flag := false;
+      try Unix.close fd with Unix.Unix_error (Unix.EBADF, _, _) -> ()
+    end
+  in
+  let fail_output failure =
+    match !output_failure with None -> output_failure := Some failure | Some _ -> () in
+  let signal_group signal =
+    try Unix.kill (-pid) signal with Unix.Unix_error (Unix.ESRCH, _, _) -> () in
+  let rec step_kill now =
+    match !kill_remaining with
+    | [] -> ()
+    | Sigterm_pgid :: rest ->
+      signal_group Sys.sigterm; kill_remaining := rest; step_kill now
+    | Sigkill_pgid :: rest ->
+      signal_group Sys.sigkill; kill_remaining := rest; step_kill now
+    | Wait_grace seconds :: rest ->
+      (match !grace_until with
+       | None -> grace_until := Some (now +. seconds)
+       | Some until when now >= until ->
+         grace_until := None; kill_remaining := rest; step_kill now
+       | Some _ -> ())
+  in
+  let start_kill trigger =
+    if !status = None && not !kill_started then begin
+      kill_started := true;
+      kill_remaining := kill_policy trigger;
+      close_if_open input_open stdin_w;
+      Pending.clear input;
+      step_kill (Shim_clock.elapsed_seconds ())
+    end
+  in
+  let cancel_channel () =
+    channel_closed := true;
+    close_if_open input_open stdin_w;
+    Pending.clear input;
+    start_kill On_eof
+  in
+  let poll_child () =
+    match !status with
+    | Some _ -> ()
+    | None ->
+      (match Unix.waitpid [Unix.WNOHANG] pid with
+       | 0, _ -> ()
+       | _, child_status ->
+         status := Some child_status;
+         reaped_at := Some (Shim_clock.elapsed_seconds ());
+         close_if_open input_open stdin_w;
+         Pending.clear input;
+         signal_group Sys.sigkill
+       | exception Unix.Unix_error (Unix.EINTR, _, _) -> ())
+  in
+  let read_output fd open_ dead pending =
+    try
+      if !dead then begin
+        (* Keep a cancelled child's pipe writable until its group is reaped. *)
+        Pending.clear pending;
+        let count = Pending.read pending fd in
+        Pending.clear pending;
+        if count = 0 then close_if_open open_ fd
+      end else if Pending.read pending fd = 0 then close_if_open open_ fd
+    with Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+  in
+  let write_output fd dead pending =
+    try Pending.write pending fd with
+    | Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+    | Unix.Unix_error ((Unix.EPIPE | Unix.ECONNRESET), _, _) ->
+      dead := true;
+      Pending.clear pending;
+      fail_output Output_peer_closed;
+      start_kill On_eof
+  in
+  let unfinished () =
+    !status = None || !stdout_open || !stderr_open
+    || not (Pending.empty output) || not (Pending.empty errors) in
+  let finish () =
+    (* Unexpected I/O exceptions still release the exact child and all pipes. *)
+    signal_group Sys.sigkill;
+    (match !status with
+     | Some _ -> ()
+     | None ->
+       (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+       let rec reap () =
+         match Unix.waitpid [] pid with
+         | _, child_status -> status := Some child_status
+         | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap () in
+       reap ());
+    close_if_open input_open stdin_w;
+    close_if_open stdout_open stdout_r;
+    close_if_open stderr_open stderr_r
+  in
+  Fun.protect ~finally:finish (fun () ->
+    with_nonblocking Unix.stdout (fun () ->
+    with_nonblocking Unix.stderr (fun () ->
+    while unfinished () do
+      let now = Shim_clock.elapsed_seconds () in
+      if not !channel_closed && channel_hung_up Unix.stdin then cancel_channel ();
+      if !status = None && not !kill_started && now >= deadline then begin
+        timed_out := true;
+        start_kill On_timeout
+      end;
+      step_kill now;
+      poll_child ();
+      (match !reaped_at with
+       | Some reaped when now -. reaped >= drain_grace_sec && unfinished () ->
+         (* This also bounds sinks the caller left open without reading. An
+            incomplete stream is a shim failure, not the child's successful exit. *)
+         fail_output Output_drain_incomplete;
+         close_if_open stdout_open stdout_r;
+         close_if_open stderr_open stderr_r;
+         Pending.clear output;
+         Pending.clear errors
+       | Some _ | None -> ());
+      if unfinished () then begin
+        let reads =
+          (if !stdout_open && (!output_dead || Pending.space output > 0) then [stdout_r] else [])
+          @ (if !stderr_open && (!errors_dead || Pending.space errors > 0) then [stderr_r] else [])
+          @ (if !observe_active then [listener_fd] else [])
+          @ (if not !channel_closed && !input_open && Pending.space input > 0 then [Unix.stdin] else []) in
+        let writes =
+          (if !input_open && not (Pending.empty input) then [stdin_w] else [])
+          @ (if not !output_dead && not (Pending.empty output) then [Unix.stdout] else [])
+          @ (if not !errors_dead && not (Pending.empty errors) then [Unix.stderr] else []) in
+        (* The original supervisor's quantum also polls hangup while every
+           payload queue is backpressured. It does not renew either deadline. *)
+        let wait = match !status, !kill_started with
+          | None, false -> min 0.2 (max 0.0 (deadline -. now))
+          | None, true | Some _, (false | true) -> 0.2 in
+        let wait = match !grace_until with
+          | None -> wait | Some until -> min wait (max 0.0 (until -. now)) in
+        let readable, writable, _ =
+          try Unix.select reads writes [] wait with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> [], [], [] in
+        if !observe_active && List.memq listener_fd readable then begin
+          (* NOTIF_RECV is blocking; consume only the ready notification,
+             then return to stream and lifecycle work before receiving again. *)
+          match drain_one listener_fd with
+          | -2 -> ()
+          | -1 -> observe_active := false
+          | syscall -> observed := syscall :: !observed
+        end;
+        if !stdout_open && List.memq stdout_r readable then
+          read_output stdout_r stdout_open output_dead output;
+        if !stderr_open && List.memq stderr_r readable then
+          read_output stderr_r stderr_open errors_dead errors;
+        if !input_open && List.memq Unix.stdin readable then
+          (try if Pending.read input Unix.stdin = 0 then cancel_channel () with
+           | Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ());
+        if !input_open && List.memq stdin_w writable then
+          (try Pending.write input stdin_w with
+           | Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+           | Unix.Unix_error (Unix.EPIPE, _, _) ->
+             close_if_open input_open stdin_w; Pending.clear input);
+        if not !output_dead && List.memq Unix.stdout writable then
+          write_output Unix.stdout output_dead output;
+        if not !errors_dead && List.memq Unix.stderr writable then
+          write_output Unix.stderr errors_dead errors
+      end
+    done;
+    let child_status = match !status with
+      | Some child_status -> child_status
+      | None -> assert false in
+    trailer_of_status ~v ~timed_out:!timed_out ~observed_syscalls:(List.rev !observed) child_status,
+    !output_failure)))
+
+(* A final control frame must not hang after the supervisor has released the
+   child. Each write reuses the cleanup grace duration with its own deadline.
+   A partial/unwritten trailer is no receipt; the caller exits nonzero. *)
+let write_control_frame fd text =
+  try with_nonblocking fd (fun () ->
+    let deadline = Shim_clock.elapsed_seconds () +. drain_grace_sec in
+    let rec write offset =
+      if offset = String.length text then true
+      else if Shim_clock.elapsed_seconds () >= deadline then false
+      else match Unix.single_write_substring fd text offset (String.length text - offset) with
+        | 0 -> false
+        | count -> write (offset + count)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> write offset
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          let wait = max 0.0 (deadline -. Shim_clock.elapsed_seconds ()) in
+          (try ignore (Unix.select [] [fd] [] wait) with
+           | Unix.Unix_error (Unix.EINTR, _, _) -> ());
+          write offset
+    in write 0)
+  with Unix.Unix_error _ -> false
+
 let emit_trailer_stderr ?execution_receipt (t : Exec_ssh_protocol.trailer) =
-  let s = Exec_ssh_protocol.render_trailer ?execution_receipt t in
-  try write_all Unix.stderr s 0 (String.length s) with
-  | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
+  write_control_frame Unix.stderr (Exec_ssh_protocol.render_trailer ?execution_receipt t)
 
 (* Written once the request was read, checked and its child forked, before
    the supervise loop relays any payload byte, so it is the first thing on
@@ -1150,8 +1388,7 @@ let emit_acceptance_frame ~v =
   (* The frame is advisory and the child is already forked: a stderr that
      cannot be written must not end the run before supervision cleans up. The
      host reads a missing frame as not accepted, which is the safe side. *)
-  try write_all Unix.stderr s 0 (String.length s) with
-  | Unix.Unix_error _ -> ()
+  ignore (write_control_frame Unix.stderr s : bool)
 
 (* [v] is the request's major once a request has been read; before that --
    a frame that did not decode -- there is no caller version to echo, and
@@ -1159,13 +1396,13 @@ let emit_acceptance_frame ~v =
 let shim_fail ?(v = Exec_ssh_protocol.newest) ?execution_receipt msg =
   (* Trailer to our stderr, then exit 1: a shim failure must never be
      indistinguishable from a payload exit 0. *)
-  emit_trailer_stderr ?execution_receipt
+  ignore (emit_trailer_stderr ?execution_receipt
     Exec_ssh_protocol.{ v
                       ; exit = None
                       ; signal = None
                       ; timed_out = false
                       ; shim_error = Some msg
-                      ; observed_syscalls = [] };
+                      ; observed_syscalls = [] } : bool);
   exit 1
 
 (* The jail this one call runs in, decided from what the host allows and what
@@ -1312,8 +1549,10 @@ let run () =
                  shim_fail ~boundary:Child_ack_unavailable
                    (Printf.sprintf "%s: spawn failed: %s" shim_error_code
                       (Printexc.to_string exn)) in
-             if req.Exec_ssh_protocol.acceptance_frame then emit_acceptance_frame ~v;
-             let trailer, boundary =
+             (match req.Exec_ssh_protocol.stdin with
+              | Framed _ when req.acceptance_frame -> emit_acceptance_frame ~v
+              | Framed _ | Interactive -> ());
+             let (trailer, output_failure), boundary =
                Fun.protect
                  ~finally:(fun () ->
                    Unix.close boundary_r;
@@ -1323,14 +1562,26 @@ let run () =
                       | Unix.Unix_error _ -> ());
                    cleanup ())
                  (fun () ->
-                   let trailer =
-                     supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
-                       ~listener_fd:listener_fd
-                       ~timeout_sec:req.Exec_ssh_protocol.timeout_sec in
-                   trailer, read_child_boundary boundary_r)
+                   let result = match req.Exec_ssh_protocol.stdin with
+                     | Framed _ ->
+                       supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+                         ~listener_fd ~timeout_sec:req.timeout_sec, None
+                     | Interactive ->
+                       supervise_interactive ~v ~pid ~stdin_w ~stdout_r ~stderr_r
+                         ~listener_fd ~timeout_sec:req.timeout_sec
+                         ~acceptance_frame:req.acceptance_frame in
+                   result, read_child_boundary boundary_r)
              in
-             emit_trailer_stderr ~execution_receipt:(receipt boundary) trailer;
-             exit 0)))
+             let trailer, shim_exit = match output_failure with
+               | None -> trailer, 0
+               | Some reason ->
+                 let detail = match reason with
+                   | Output_peer_closed -> "peer closed an output stream"
+                   | Output_drain_incomplete -> "output did not drain after child exit" in
+                 { trailer with exit = None; signal = None;
+                   shim_error = Some ("interactive_output_incomplete: " ^ detail) }, 1 in
+             let delivered = emit_trailer_stderr ~execution_receipt:(receipt boundary) trailer in
+             exit (if delivered then shim_exit else 1))))
 
 (* Capabilities are what this host can do, read when asked, so a probe on a
    kernel without Landlock says so and the runner never sends it a box. *)
@@ -1353,7 +1604,7 @@ let probe () =
     ; capabilities =
       (if observe_supported () then [ observe_capability ] else [])
       @ (if user_notif_supported () then [ user_notif_capability ] else [])
-      @ [ request_acceptance_capability ]
+      @ [ request_acceptance_capability; interactive_stdin_capability ]
     ; release = (if Shim_build_id.release = "" then None else Some Shim_build_id.release)
     ; boot_id = kernel_boot_id ()
     }

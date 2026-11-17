@@ -57,6 +57,7 @@ shim_sources=(
   lib/exec_shim/exec_shim.mli
   lib/exec_shim/prctl_stub.c
   lib/exec_shim/observe_stub.c
+  lib/exec_shim/stream_stub.c
   lib/exec_shim/monotonic_stub.c
   lib/exec_shim/shim_clock.ml
   lib/exec_shim/shim_clock.mli

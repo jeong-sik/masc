@@ -1,0 +1,84 @@
+(include_subdirs no)
+
+(library
+ (name embedded_exact_addons)
+ (public_name masc.embedded_exact_addons)
+ (modules
+  embedded_keeper_librarian
+  embedded_workspace_curator
+  embedded_candle_appraiser
+  embedded_hitl_auto_judge
+  embedded_exact_worker_shared)
+ (wrapped false))
+
+; The Exact worker packages this server carries (RFC
+; server-carries-its-exact-worker-packages 3.1), written into the binary the
+; way embedded_browser_addon carries addons/browser. -m plain produces
+;   val read : string -> string option
+;   val file_list : string list
+; with each path relative to the crunched directory.
+;
+; Each rule runs in a sandbox that holds only its declared dependencies, so
+; ocaml-crunch sees exactly the carried files: every .toml, .json and .py file
+; under the package and its Dockerfile. A README, an editor's backup file or a
+; Finder's .DS_Store in the source directory is not a dependency, so it is not
+; in the sandbox and never reaches an operator's machine.
+
+(rule
+ (target embedded_keeper_librarian.ml)
+ (deps
+  (sandbox always)
+  (glob_files_rec ../../addons/keeper-librarian/*.{toml,json,py})
+  ../../addons/keeper-librarian/Dockerfile)
+ (action
+  (with-stdout-to
+   %{target}
+   (run ocaml-crunch -m plain ../../addons/keeper-librarian))))
+
+(rule
+ (target embedded_workspace_curator.ml)
+ (deps
+  (sandbox always)
+  (glob_files_rec ../../addons/workspace-curator/*.{toml,json,py})
+  ../../addons/workspace-curator/Dockerfile)
+ (action
+  (with-stdout-to
+   %{target}
+   (run ocaml-crunch -m plain ../../addons/workspace-curator))))
+
+(rule
+ (target embedded_candle_appraiser.ml)
+ (deps
+  (sandbox always)
+  (glob_files_rec ../../addons/candle-appraiser/*.{toml,json,py})
+  ../../addons/candle-appraiser/Dockerfile)
+ (action
+  (with-stdout-to
+   %{target}
+   (run ocaml-crunch -m plain ../../addons/candle-appraiser))))
+
+(rule
+ (target embedded_hitl_auto_judge.ml)
+ (deps
+  (sandbox always)
+  (glob_files_rec ../../addons/hitl-auto-judge/*.{toml,json,py})
+  ../../addons/hitl-auto-judge/Dockerfile)
+ (action
+  (with-stdout-to
+   %{target}
+   (run ocaml-crunch -m plain ../../addons/hitl-auto-judge))))
+
+; The modules every carried worker image copies beside its package
+; (addons/<package>/Dockerfile). The sandbox holds only these two files, so
+; crunching the addons directory carries nothing else.
+
+(rule
+ (target embedded_exact_worker_shared.ml)
+ (deps
+  (sandbox always)
+  ../../addons/exact_worker.py
+  ../../addons/protocol.py)
+ (action
+  (with-stdout-to
+   %{target}
+   (run ocaml-crunch -m plain ../../addons))))

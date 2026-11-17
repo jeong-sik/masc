@@ -177,10 +177,14 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   owner.
 - The sign-in of the client runs on the server, and the console shows what
   it prints. The person opens the link in a browser of their own. Claude
-  Code then gives a code to paste into the console; Codex and Muse Code
-  print a code to enter or confirm on the page the link opens. The server
-  hands the client no browser of its own machine: an approval made there
-  would sign in the account of whoever sits at the server.
+  Code waits for a code typed into the console; Codex and Muse Code print a
+  code to enter or confirm on the page the link opens.
+- The server sets `BROWSER` for that client to a command that does nothing,
+  the `true` of its own `PATH`. Claude Code 2.1.326 runs the command in
+  place of a browser of the server, where an approval would sign in the
+  account of whoever sits there. A server whose `PATH` holds no `true` in
+  an absolute directory answers the sign-in of a person with 503 and makes
+  no directory for it.
 - `GET /api/v1/auth/integrations` tells a signed-in person which
   subscriptions and models they may connect. A multi-account process calls
   the models of Claude Code. It refuses those of Codex and Muse for their

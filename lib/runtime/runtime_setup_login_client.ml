@@ -9,7 +9,7 @@ type t =
           (** The start the access allowed when the login home was prepared. *)
       }
 type observation = Authenticated | Login_completed | Credential_captured
-type browser = Host_browser | No_host_browser
+type browser = Host_browser | Idle_command of string
 open Result.Syntax
 
 let filesystem action =
@@ -134,13 +134,17 @@ let idle_command = "true"
    approval to a port of this machine, so whoever approves it in a browser of
    this machine signs their own account in to the home of this login, whoever
    started the login. A child handed a command that opens nothing shows this
-   machine nothing: the one who signs in opens the link the child prints,
-   whose approval gives a code to paste back. *)
-let without_host_browser environment =
-  let binding = browser_variable ^ "=" in
+   machine nothing: the one who signs in opens the link the child prints, and
+   the child reads a code from its input.
+
+   The command is found before a login is prepared, so a machine that has
+   none refuses the sign-in with nothing made for it. *)
+let host_browser = Host_browser
+
+let no_host_browser ?(getenv = Sys.getenv_opt) () =
   match
     Eio_guard.run_in_systhread ~label:"setup-login-browser-command" (fun () ->
-      Executable_path.absolute_on_path idle_command)
+      Executable_path.absolute_on_path ~getenv idle_command)
   with
   | None ->
     Error
@@ -148,18 +152,26 @@ let without_host_browser environment =
          "PATH holds no %s utility in an absolute directory, so this sign-in has no \
           command to give the official client in place of the browser of this machine."
          idle_command)
-  | Some command ->
+  | Some command -> Ok (Idle_command command)
+
+let browser_command = function
+  | Host_browser -> None
+  | Idle_command command -> Some command
+
+(* One binding, whatever the client's own environment carries: a client that
+   reads the last of two would run the other one. *)
+let handed browser environment =
+  match browser with
+  | Host_browser -> environment
+  | Idle_command command ->
+    let binding = browser_variable ^ "=" in
     let others =
       Array.to_list environment
       |> List.filter (fun entry -> not (String.starts_with ~prefix:binding entry))
     in
-    Ok (Array.of_list ((binding ^ command) :: others))
+    Array.of_list ((binding ^ command) :: others)
 
-let environment ~browser login =
-  let* environment = client_environment login in
-  match browser with
-  | Host_browser -> Ok environment
-  | No_host_browser -> without_host_browser environment
+let environment ~browser login = Result.map (handed browser) (client_environment login)
 
 let is_pty = function Native _ -> false | Antigravity_home _ -> true
 

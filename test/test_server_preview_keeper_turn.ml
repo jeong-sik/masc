@@ -532,6 +532,22 @@ let test_turn () =
           (List.assoc_opt
              "access-control-allow-origin"
              (Login.stream_cors_headers (Login.Operator { actor = "operator" }) from_elsewhere));
+        (* A person signs in from another machine, so their client is handed
+           a command in place of the browser of this one (issue #52675); the
+           operator's client keeps the browser. *)
+        let browser_command owner =
+          match Login.sign_in_browser owner with
+          | Ok browser -> Runtime_setup_login_client.browser_command browser
+          | Error detail -> Alcotest.fail detail
+        in
+        Alcotest.(check bool)
+          "a person's sign-in is handed a command in place of the browser"
+          true
+          (Option.is_some (browser_command (Login.Person alice.person)));
+        Alcotest.(check (option string))
+          "the operator's sign-in keeps the browser of this machine"
+          None
+          (browser_command (Login.Operator { actor = "operator" }));
         let bob, bob_runtime =
           join zone ~base_path ~name:"bob" ~hex:'b' ~integration:"claude_code"
             ~client:Runtime_setup_login_client.Claude ~model:"claude-sonnet-5"

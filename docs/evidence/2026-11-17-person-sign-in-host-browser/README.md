@@ -86,16 +86,25 @@ No Dune build ran. The checks below read the candidate's sources.
   (7 checks). On the macOS host `absolute_on_path "true"` is
   `/usr/bin/true`.
 
+## Test run
+
+Dispatched after this record was first written, and read once on 2026-11-17.
+
+```sh
+gh workflow run test.yml --ref fix/person-login-opens-no-host-browser \
+  -f suite=test_runtime_setup_login_client,test_lsp_process_manager -f minimal=true
+```
+
+- Workflow `Test`, run 44014905280, head `1a1c79ad166d`. Conclusion: failure.
+- `test_lsp_process_manager`: 14 cases ran and passed, the new
+  `absolute lookup passes over relative entries` among them.
+- `test_runtime_setup_login_client`: 8 cases ran and 7 passed, the new
+  `a remote sign-in is handed no browser of this machine` among them.
+  `Antigravity reauthentication has no prior login` failed at
+  `Accounts.create`, before the call this change touches (issue #52681).
+
 ## Unverified
 
-- The two changed test executables did not run. The selected behavior command
-  is below; it was not dispatched when this record was written, and a run is
-  evidence only with its head, ref, suites and conclusion.
-
-  ```sh
-  gh workflow run test.yml --ref fix/person-login-opens-no-host-browser \
-    -f suite=test_runtime_setup_login_client,test_lsp_process_manager -f minimal=true
-  ```
 - A sign-in that ends with an approved code pasted into the console of an
   account server. It needs a person's approval at the vendor.
 - An opener that asks LaunchServices without starting a process. The sandbox

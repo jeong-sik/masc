@@ -26,7 +26,7 @@ let run ~client ~cli_path ~account_home =
        open its browser. *)
     (match
        Runtime_setup_login_client.environment
-         ~browser:Runtime_setup_login_client.Host_browser login
+         ~browser:Runtime_setup_login_client.host_browser login
      with
      | Error detail ->
        prerr_endline ("Sign-in environment: " ^ detail);

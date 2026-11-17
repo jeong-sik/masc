@@ -29,7 +29,7 @@ let values env key =
 let value env key = List.nth_opt (values env key) 0
 
 (* The sign-in a terminal of this machine starts. *)
-let host_environment login = Login.environment ~browser:Login.Host_browser login
+let host_environment login = Login.environment ~browser:Login.host_browser login
 
 let isolated_native_login () = fixture (fun root _ ->
   List.iter (fun (client, id, variable, argv) ->
@@ -56,18 +56,39 @@ let isolated_native_login () = fixture (fun root _ ->
    an executable file at an absolute path, in place of the browser of this
    machine. The sign-in a terminal of this machine starts is not handed it. *)
 let a_remote_sign_in_is_handed_no_browser_of_this_machine () = fixture (fun root _ ->
+  let browser = Login.no_host_browser () |> ok in
+  let command = match Login.browser_command browser with
+    | Some command -> command
+    | None -> fail "a remote sign-in is handed no command" in
+  check bool "the command is spelled from the root" false (Filename.is_relative command);
+  check bool "the command is a regular file" true ((Unix.stat command).st_kind = Unix.S_REG);
+  Unix.access command [ Unix.X_OK ];
+  check (option string) "a sign-in at this machine is handed none" None
+    (Login.browser_command Login.host_browser);
   List.iter (fun (client, id) ->
     let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
-    let remote = Login.environment ~browser:Login.No_host_browser login |> ok in
-    (match values remote "BROWSER" with
-     | [ command ] ->
-       check bool "the command is spelled from the root" false (Filename.is_relative command);
-       check bool "the command is a regular file" true ((Unix.stat command).st_kind = Unix.S_REG);
-       Unix.access command [ Unix.X_OK ];
-       check bool "a sign-in at this machine is not handed that command" false
-         (List.mem command (values (host_environment login |> ok) "BROWSER"))
-     | commands -> failf "one browser command expected, %d handed" (List.length commands)))
+    check (list string) "the child is handed that command once" [ command ]
+      (values (Login.environment ~browser login |> ok) "BROWSER");
+    check bool "a sign-in at this machine is not handed that command" false
+      (List.mem command (values (host_environment login |> ok) "BROWSER")))
     [ Login.Codex, "codex-remote"; Login.Claude, "claude-remote"; Login.Muse, "muse-remote" ])
+
+(* The command is the [true] an absolute directory of PATH holds. A machine
+   that has none has nothing to hand over, and the answer needs no login: the
+   server asks before it prepares one, so a refusal leaves no home behind. *)
+let the_browser_command_comes_from_path_or_the_sign_in_is_refused () = fixture (fun root _ ->
+  let asked path =
+    Login.no_host_browser
+      ~getenv:(fun name -> if String.equal name "PATH" then path else None) () in
+  let tools = Filename.concat root "tools" in
+  Unix.mkdir tools 0o700;
+  check bool "no PATH" true (Result.is_error (asked None));
+  check bool "a directory that holds none" true (Result.is_error (asked (Some tools)));
+  let utility = Filename.concat tools "true" in
+  Out_channel.with_open_bin utility (fun out -> output_string out "#!/bin/sh\n");
+  Unix.chmod utility 0o700;
+  check (option string) "the one a directory of PATH holds" (Some utility)
+    (Login.browser_command (asked (Some tools) |> ok)))
 
 (* runtime.toml as setup saves it from a reference: the provider's
    account-home is the reference's path. *)
@@ -276,6 +297,8 @@ let () = run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
   test_case "a remote sign-in is handed no browser of this machine" `Quick
     a_remote_sign_in_is_handed_no_browser_of_this_machine;
+  test_case "the browser command comes from PATH or the sign-in is refused" `Quick
+    the_browser_command_comes_from_path_or_the_sign_in_is_refused;
   test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;
   test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;

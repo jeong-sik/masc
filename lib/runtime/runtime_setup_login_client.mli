@@ -7,15 +7,24 @@ type native = Runtime_account_home_layout.client = Codex_home | Claude_home | Mu
 type t
 type observation = Authenticated | Login_completed | Credential_captured
 
-(** Whether the sign-in may open a browser on the machine it runs on. *)
-type browser =
-  | Host_browser
-      (** The client decides, as it does when a terminal of this machine
-          starts it. *)
-  | No_host_browser
-      (** The client is given a browser command that does nothing. The one who
-          signs in is at another machine and opens the link the client
-          prints. *)
+(** What a sign-in child is handed for the browser it would start. *)
+type browser
+
+val host_browser : browser
+(** Nothing: the client decides, as it does when a terminal of this machine
+    starts it. *)
+
+val no_host_browser : ?getenv:(string -> string option) -> unit -> (browser, string) result
+(** A command that does nothing, for a sign-in that someone at another machine
+    started: they open the link the client prints. The command is the [true]
+    utility that an absolute directory of [PATH] holds, and the result is an
+    error when [PATH] holds none. [getenv] reads [PATH]; it is the environment
+    of this process unless given. Ask before {!prepare}, so a refusal leaves
+    no home behind. *)
+
+val browser_command : browser -> string option
+(** The command a child is handed in place of the browser of this machine, and
+    [None] for {!host_browser}. *)
 
 val prepare : runtime_root:string -> account_id:string -> client:client ->
   existing:Runtime_setup_accounts.binding option -> (t, string) result
@@ -31,13 +40,10 @@ val account_home : runtime_root:string -> account_id:string -> client:client ->
 val home_dir : t -> string
 val argv : cli_path:string -> t -> string list
 val environment : browser:browser -> t -> (string array, string) result
-(** The environment of the login child. With [No_host_browser] it binds
-    [BROWSER] once, to the [true] utility that an absolute directory of [PATH]
-    holds, and is an error when [PATH] holds none: the child then has no
-    command to run in place of the browser of this machine. Claude Code hands
-    the browser of the machine a link whose approval returns to a port of
-    that machine, so an approval there signs the approver's account in to
-    the home of the login. *)
+(** The environment of the login child. A command of [browser] is bound once,
+    as [BROWSER]. Claude Code hands the browser of the machine a link whose
+    approval returns to a port of that machine, so an approval there signs the
+    approver's account in to the home of the login. *)
 val is_pty : t -> bool
 val saved_login_check : t -> (unit -> (bool, string) result) option
 (** Antigravity runs its full interactive client, so its newly saved login

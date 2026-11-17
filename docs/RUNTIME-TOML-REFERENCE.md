@@ -2,12 +2,12 @@
 status: reference
 ---
 
-# Runtime TOML Reference — providers, models, bindings, lanes
+# Runtime TOML Reference — providers, models, bindings, lanes, media readers
 
 Key-by-key reference for the provider-to-lane axis of
 `<base-path>/.masc/config/runtime.toml`: `[providers.<id>]`, `[models.<id>]`,
 binding tables `[<provider>.<model>]`, `[runtime]` lanes, exact-output lanes,
-and `[runtime.assignments]`.
+`[runtime.assignments]`, and `[[media_readers]]` declarations.
 
 Related documents, so this one does not repeat them:
 
@@ -358,3 +358,55 @@ Runtime (not load-time): an exact-output slot whose provider lacks
 (#36979, #38573) — `connect-timeout-s` alone never qualifies — and a
 `slots` entry that newly adds such a gap is refused already at save time
 (rule 3, #38779); gaps the file already has are grandfathered.
+
+## 10. `[[media_readers]]` — external reader declarations
+
+These rows declare audio/document readers in the same immutable Runtime
+configuration snapshot. Loading or saving a row does not start its command,
+probe a service, choose a reader, or read a document. External execution and
+its original-request/Gate lifecycle are separate integration work.
+
+```toml
+[[media_readers]]
+id = "office-reader"
+revision = "office-reader-v1"
+kind = "document"
+media_types = ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+adapter = "markitdown_mcp"
+command = "python3"
+args = ["-m", "markitdown_mcp"]
+```
+
+The service must be installed in the eventual Keeper execution environment.
+This example does not install it or establish a working DOCX route.
+
+| Required field | Meaning |
+| --- | --- |
+| `id` | Nonblank declaration identity, unique across the list. A different revision does not make a duplicate ID valid. |
+| `revision` | Nonblank declaration revision. It does not authenticate installed code, dependencies, or an account. |
+| `kind` | Exactly `audio` or `document`, the current media-reading kinds. |
+| `media_types` | Exact nonblank strings, preserved without normalization or a built-in format whitelist. An empty list declares no supported media types. |
+| `adapter` | Exactly `markitdown_mcp`, the currently declared adapter. |
+| `command` | Nonblank, NUL-free executable string for the eventual Keeper environment. The loader does not expand `~`, split a shell command, or check host existence. |
+| `args` | String array. Order, whitespace and empty arguments are preserved; NUL is refused. |
+
+Omitting the section or writing `media_readers = []` declares no readers. An
+array of inline tables is equivalent to the array-of-tables form. A singleton
+table such as `[media_readers.docx]`, unknown keys/kinds/adapters, wrong field
+types and duplicate IDs are refused. `media_readers` is a reserved provider ID.
+
+Different IDs may declare the same kind and MIME. Every row remains present;
+list order confers no priority. A later request owner must pin an explicit
+declaration or report ambiguity before any effect. Changing command/arguments
+while retaining an ID and revision cannot establish cache equivalence.
+
+`Runtime.media_reader_declarations ()` returns `None` before publication and
+`Some []` for a valid published empty list. A captured list keeps its original
+rows after another configuration is published. Failed validation does not
+publish a partial list. Successful configuration saves and restore operations
+use the same atomic loaded state as the rest of Runtime.
+
+Sources: `lib/types/media_reading_kind.mli`,
+`lib/runtime/runtime_schema.mli`, `lib/runtime/runtime_toml_media_readers.ml`,
+`lib/runtime/runtime.ml`, and
+`lib/runtime_toml_namespace/runtime_toml_namespace.ml`.

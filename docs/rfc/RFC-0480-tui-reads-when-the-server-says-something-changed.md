@@ -263,9 +263,9 @@ PR 열의 번호 중 #47994·#47997 만 병합됐고 나머지(#48003 부터 #48
 
 ## 8. 결정이 필요한 것
 
-상태가 Implemented 여도 1번은 아직 열려 있다. 주기 읽기를 지운 뒤로 알림 하나를 잃으면 그 화면은 다음 변경이나 재연결까지 멈춘다.
+상태가 Implemented 여도 1번은 아직 열려 있다. 2번은 정했다. 주기 읽기를 지운 뒤로 알림 하나를 잃으면 그 화면은 다음 변경이나 재연결까지 멈춘다.
 
 1. SSE 버퍼에 들어가기 전에 실패한 알림(§3.4 끝)을 클라이언트가 알 방법. 서버가 실패를 세는 것만으로는 화면이 멈춘 것을 메우지 못한다.
-2. ask follow-up 관찰을 언제 끝낼지. 지금은 답이 기록된 뒤 2초 tick 이 관찰을 다시 연다.
+2. ask follow-up 관찰을 언제 끝낼지. 정함(#48677): 2초 tick 은 없어졌다. 서버 변경이 오면 follow-up 이 끝나지 않은 동안만 읽기를 빚진다(`owe_push_owned_revalidation` 의 `ask_followup_unfinished`). follow-up 이 끝나면 더 읽지 않는다.
 
 정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0486 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 는 그리는 값 비교, Add-ons 는 열린 instance 만. Skill 원장 쓰기는 Keeper 이름을 받는다.

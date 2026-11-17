@@ -14,6 +14,7 @@ import { formatOfficeChartSeries } from './artifact-office-chart-format'
 import { officeXmlCharacter } from './artifact-office-text'
 import { parseOfficeTableWidth, resolveOfficeTableWidths, type OfficeTableWidth } from './artifact-office-table-width'
 import { officeTableTwips, type PreparedOfficeBlock, type PreparedOfficeTable } from './artifact-office-prepared'
+import { hwpxTableLimits } from './artifact-hwpx-template'
 import type { ArtifactDocument } from '../api/published-artifacts'
 
 // A4 portrait, 1 inch margins. OOXML uses twentieths of a point (twips).
@@ -40,7 +41,15 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
   const parsed=parse(source),notices=new Set<string>(),numbering:INumberingOptions['config'][number][]=[]
   const charts:OfficeChart[]=[]
   const tables=new Map<Table,PreparedOfficeTable>()
-  const tableSourceWidth=(node:Nodes.Element)=>parseOfficeTableWidth(attr(node,'style'),attr(node,'width'))
+  const sourceWidths=new Map<Nodes.Element,OfficeTableWidth>()
+  const tableSourceWidth=(node:Nodes.Element):OfficeTableWidth=>{
+    const known=sourceWidths.get(node)
+    if(known)return known
+    const width=parseOfficeTableWidth(attr(node,'style'),attr(node,'width'))
+    sourceWidths.set(node,width)
+    return width
+  }
+  const columnSpan=(node:Nodes.Element,attribute:string)=>Math.min(hwpxTableLimits.columns,Math.max(1,integer(attr(node,attribute),1)))
   const prepared=(blocks:readonly Block[]):PreparedOfficeBlock[]=>blocks.map(block=>{
     if(block instanceof Paragraph)return {kind:'paragraph'}
     const table=tables.get(block)
@@ -153,7 +162,7 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
       let column=0
       return row.map(cell=>{
         while((occupied.get(column)??0)>rowIndex)column++
-        const count=Math.max(1,integer(attr(cell,'colspan'),1))
+        const count=columnSpan(cell,'colspan')
         if(!Number.isSafeInteger(column+count)||column+count>bodyWidth)throw new Error('표의 열을 인쇄 영역에 배치할 수 없습니다.')
         const requested=integer(attr(cell,'rowspan'),1),rowSpan=requested===0?groupEnds[rowIndex]!-rowIndex:Math.min(Math.max(1,requested),groupEnds[rowIndex]!-rowIndex)
         for(let offset=0;offset<count;offset++){
@@ -164,37 +173,72 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
         return {cell,start,count,rowSpan}
       })
     })
-    if(columns===0)return []
     const sourceWidth=tableSourceWidth(node),sourceColumns:OfficeTableWidth[]=[]
     for(const group of node.childNodes.filter((child):child is Nodes.Element=>tree.isElementNode(child)&&child.tagName==='colgroup')){
-      for(const column of group.childNodes.filter((child):child is Nodes.Element=>tree.isElementNode(child)&&child.tagName==='col')){
-        const count=Math.max(1,integer(attr(column,'span'),1))
-        if(count>columns-sourceColumns.length)throw new Error('표의 열 너비 개수가 셀 격자보다 많습니다.')
-        sourceColumns.push(...Array.from({length:count},()=>tableSourceWidth(column)))
+      const children=group.childNodes.filter((child):child is Nodes.Element=>tree.isElementNode(child)&&child.tagName==='col')
+      const groupWidth=tableSourceWidth(group)
+      if(children.length===0)sourceColumns.push(...Array.from({length:columnSpan(group,'span')},()=>groupWidth))
+      for(const column of children){
+        const width=tableSourceWidth(column)
+        sourceColumns.push(...Array.from({length:columnSpan(column,'span')},()=>width.kind==='absent'||width.kind==='auto'?groupWidth:width))
       }
     }
-    const sourceCells=layout.flatMap(row=>row.map(cell=>({column:cell.start,columns:cell.count,width:tableSourceWidth(cell.cell)})))
+    columns=Math.max(columns,sourceColumns.length)
+    if(columns===0)return []
+    // Column declarations and ragged rows may leave real empty cells. Include
+    // them in both the Word producer and its nested geometry projection.
+    const spans=new Map<number,{start:number;end:number;until:number}>()
+    const complete=layout.map((row,rowIndex)=>{
+      for(const [start,span] of spans)if(span.until<=rowIndex)spans.delete(start)
+      const intervals=[...Array.from(spans.values(),span=>({start:span.start,end:span.end,cell:null})),
+        ...row.map(cell=>({start:cell.start,end:cell.start+cell.count,cell}))].sort((a,b)=>a.start-b.start)
+      const filled:typeof row=[]
+      let at=0
+      const gap=(end:number)=>{
+        while(at<end){
+          const count=Math.min(hwpxTableLimits.columns,end-at)
+          filled.push({cell:tree.createElement(row.length>0&&row.every(({cell})=>cell.tagName==='th')?'th':'td',html.NS.HTML,[]),start:at,count,rowSpan:1})
+          at+=count
+        }
+      }
+      for(const interval of intervals){
+        if(interval.start<at)throw new Error('서로 겹치는 표 셀을 Word로 옮길 수 없습니다.')
+        gap(interval.start)
+        if(interval.cell){
+          filled.push(interval.cell)
+          if(interval.cell.rowSpan>1)spans.set(interval.start,{start:interval.start,end:interval.end,until:rowIndex+interval.cell.rowSpan})
+        }
+        at=interval.end
+      }
+      gap(columns)
+      return filled
+    })
+    const sourceCells=complete.flatMap(row=>row.map(cell=>({column:cell.start,columns:cell.count,width:tableSourceWidth(cell.cell)})))
     const geometry=resolveOfficeTableWidths(columns,sourceCells,{...(sourceColumns.length?{columns:[...sourceColumns,...Array.from({length:columns-sourceColumns.length},():OfficeTableWidth=>({kind:'absent'}))]}:{}),table:sourceWidth})
     const hasWidths=sourceWidth.kind!=='absent'||sourceColumns.some(width=>width.kind!=='absent')||sourceCells.some(cell=>cell.width.kind!=='absent')
+    const relative=(width:OfficeTableWidth)=>width.kind==='percent'||width.kind==='auto'
+    const relativeWidths=relative(sourceWidth)||sourceColumns.some(relative)||sourceCells.some(cell=>relative(cell.width))
+    if(relativeWidths)notices.add('표의 백분율·자동 너비는 출력 앱에서 배치합니다. HWPX는 열·셀의 절대 너비로 다시 배치합니다.')
     const widths=geometry.kind==='unique'?officeTableTwips(geometry.widths):hasWidths?undefined:
       Array.from({length:columns},(_,index)=>Math.floor((context.availableWidth??bodyWidth)*(index+1)/columns)-Math.floor((context.availableWidth??bodyWidth)*index/columns))
+    if(widths?.some(width=>width<=0))throw new Error('표의 열 너비가 DOCX에서 표현할 수 있는 단위보다 작습니다.')
     if(hasWidths&&geometry.kind!=='unique')notices.add(geometry.kind==='conflicting'
       ?'표의 선호 너비가 서로 달라 DOCX는 자동 배치합니다. HWPX에는 명시적 셀 너비를 보존합니다.'
       :'표의 내부 열 너비를 모두 알 수 없어 DOCX는 명시적 셀 너비로 자동 배치합니다.')
-    const tableWidth=widths?{size:widths.reduce((sum,width)=>sum+width,0),type:WidthType.DXA}:widthOptions(sourceWidth)
+    const tableWidth=relative(sourceWidth)?widthOptions(sourceWidth):widths?{size:widths.reduce((sum,width)=>sum+width,0),type:WidthType.DXA}:widthOptions(sourceWidth)
     const output:Block[]=[]
     const caption=node.childNodes.find((child):child is Nodes.Element=>tree.isElementNode(child)&&child.tagName==='caption')
     if(caption)output.push(paragraph(caption.childNodes))
     const preparedRows:PreparedOfficeTable['rows'][number][]=[]
-    const wordRows=layout.map(row=>{
+    const wordRows=complete.map(row=>{
       const projected:PreparedOfficeTable['rows'][number][number][]=[]
       preparedRows.push(projected)
       return new TableRow({tableHeader:row.length>0&&row.every(({cell})=>cell.tagName==='th'),children:row.map(({cell,start,count,rowSpan})=>{
         const sourceCell=tableSourceWidth(cell),knownColumns=geometry.widths.slice(start,start+count)
         const knownWidth=geometry.kind!=='conflicting'&&knownColumns.every(width=>width!==null)?knownColumns.reduce<number>((sum,width)=>sum+width!,0):null
-        const exactWidth=sourceCell.kind==='absolute'?sourceCell.hwpUnits:knownWidth
+        const exactWidth=sourceCell.kind==='absolute'?sourceCell.hwpUnits:sourceCell.kind==='absent'?knownWidth:null
         const size=widths?.slice(start,start+count).reduce((a,b)=>a+b,0)
-        const width=size===undefined?widthOptions(sourceCell.kind==='absent'&&exactWidth!==null?{kind:'absolute',hwpUnits:exactWidth}:sourceCell):{size,type:WidthType.DXA}
+        const width=relative(sourceCell)||size===undefined?widthOptions(sourceCell.kind==='absent'&&exactWidth!==null?{kind:'absolute',hwpUnits:exactWidth}:sourceCell):{size,type:WidthType.DXA}
         const children=blocks(cell.childNodes,{availableWidth:size??(exactWidth===null?context.availableWidth:Math.round(exactWidth/5))})
         if(!(children.at(-1) instanceof Paragraph))children.push(new Paragraph({}))
         projected.push({column:start,columns:count,rows:rowSpan,width:exactWidth,children:prepared(children)})
@@ -202,8 +246,8 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
           ...(cell.tagName==='th'?{shading:{type:ShadingType.CLEAR,fill:'E5E7EB'}}:{})})
       })})
     })
-    const wordTable=new Table({width:tableWidth,columnWidths:widths,...(geometry.kind==='unique'?{layout:TableLayoutType.FIXED}:{}),rows:wordRows})
-    tables.set(wordTable,{kind:'table',columns,width:geometry.kind==='unique'?geometry.widths.reduce((sum,width)=>sum+width,0):sourceWidth.kind==='absolute'?sourceWidth.hwpUnits:null,rows:preparedRows})
+    const wordTable=new Table({width:tableWidth,columnWidths:widths,...(geometry.kind==='unique'&&!relativeWidths?{layout:TableLayoutType.FIXED}:{}),rows:wordRows})
+    tables.set(wordTable,{kind:'table',columns,width:sourceWidth.kind==='absolute'?sourceWidth.hwpUnits:sourceWidth.kind==='absent'&&geometry.kind==='unique'?geometry.widths.reduce((sum,width)=>sum+width,0):null,rows:preparedRows})
     output.push(wordTable)
     return output
   }

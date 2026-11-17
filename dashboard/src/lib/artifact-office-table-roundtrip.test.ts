@@ -103,3 +103,32 @@ it('rejects sub-twip grids rather than widening a narrow explicit column', () =>
   expect(officeTableTwips([1002, 1002, 1002])).toEqual([200, 201, 200])
   expect(() => officeTableTwips([1, 1000])).toThrow('단위보다 작습니다')
 })
+
+it('keeps percentage and auto preferences distinct from absolute grid widths', async () => {
+  const content = '<table style="width:100%"><colgroup><col style="width:20pt"><col style="width:30pt"></colgroup><tr><td style="width:auto">A</td><td style="width:40%">B</td></tr></table>'
+  const file = await artifactWordFile(artifact(content)), xml = await readOfficeXml(await JSZip.loadAsync(file.data), 'word/document.xml')
+  const tableWidth = xmlDescendants(xml, word, 'tblW')[0]!, cells = xmlDescendants(xml, word, 'tcW')
+  expect([tableWidth.getAttributeNS(word, 'w'), tableWidth.getAttributeNS(word, 'type')]).toEqual(['5000', 'pct'])
+  expect(cells.map(cell => [cell.getAttributeNS(word, 'w'), cell.getAttributeNS(word, 'type')])).toEqual([['0', 'auto'], ['2000', 'pct']])
+  expect(xmlDescendants(xml, word, 'tblLayout')).toHaveLength(0)
+  expect(file.notices.some(notice => notice.includes('백분율'))).toBe(true)
+})
+
+it('uses declared columns and leaves valid trailing columns empty in both formats', async () => {
+  for (const content of [
+    '<table><colgroup span="2" style="width:20pt"></colgroup><tr><td>A</td><td>B</td></tr></table>',
+    '<table><colgroup><col span="2" style="width:20pt"></colgroup><tr><td>A</td></tr></table>',
+  ]) {
+    const wordFile = await artifactWordFile(artifact(content)), xml = await readOfficeXml(await JSZip.loadAsync(wordFile.data), 'word/document.xml')
+    expect(xmlDescendants(xml, word, 'gridCol').map(col => col.getAttributeNS(word, 'w'))).toEqual(['400', '400'])
+    expect(xmlDescendants(xml, word, 'tc')).toHaveLength(2)
+    const hwpx = await nativeHwpx((await artifactHwpxFile(artifact(content))).data)
+    expect(hwpx[0]!.cells.map(cell => cell.width)).toEqual(['2000', '2000'])
+  }
+})
+
+it('refuses a nested default grid that cannot fit in its parent cell in integer twips', async () => {
+  const content = '<table style="width:0.05pt"><tr><td style="width:0.05pt"><table><tr><td>A</td><td>B</td></tr></table></td></tr></table>'
+  await expect(artifactWordFile(artifact(content))).rejects.toThrow('단위보다 작습니다')
+  await expect(artifactHwpxFile(artifact(content))).rejects.toThrow('단위보다 작습니다')
+})

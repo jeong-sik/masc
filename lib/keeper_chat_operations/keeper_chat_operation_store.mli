@@ -531,6 +531,12 @@ val running_native_calls : t -> (restart_native_call list, error) result
 (** Exact Running operations with Active native calls. The Owner reads these
     before journal I/O; they grant no dispatch authority. *)
 
+val active_native_calls : t -> (Keeper_native_call.t list, error) result
+(** The Active native call of every unsettled execution, whether its operation
+    is Running or a restart settlement put it back in the queue. The Owner
+    reads these when it starts, before it claims anything; they grant no
+    dispatch authority. *)
+
 val settle_running_without_executor_with_journal_terminal :
   observations:(restart_native_call *
     (Agent_core.Agent.execution_terminal_disposition option, string) result) list ->

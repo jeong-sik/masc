@@ -3854,6 +3854,120 @@ let test_startup_settlement_with_unproven_writers_keeps_calls_unproven () =
     | Owner.Writer_exited -> fail "a pool that may share this process with the writer proved it exited")
 ;;
 
+let with_native_restart_store name f =
+  Eio_main.run @@ fun _env ->
+  let path = Filename.temp_file ("keeper-owner-" ^ name ^ "-") ".sqlite3" in
+  Unix.unlink path;
+  Fun.protect ~finally:(fun () -> if Sys.file_exists path then Unix.unlink path) (fun () -> f path)
+;;
+
+(* A store file as a process that died inside a native call leaves it: one
+   claimed operation holding an Active call. [requeued] also runs the restart
+   settlement of an earlier start, which found no journal terminal and put the
+   operation back in the queue with its call still Active. *)
+let seed_active_native_call ~path ~name ~call_id ~requeued =
+  let operation_id = operation_id ("kmsg-" ^ name) in
+  let seed = Keeper_chat_operation_store.open_or_create ~path |> Result.get_ok in
+  ignore (Keeper_chat_operation_store.submit seed ~now:10. ~operation_id
+    ~source:operation_source ~input:(operation_input "native input") |> Result.get_ok);
+  let operation = Keeper_chat_operation_store.claim_next seed ~now:11. |> Result.get_ok |> Option.get in
+  let checkpoint = Keeper_checkpoint_ref.of_persisted
+    ~trace_id:(Keeper_id.Trace_id.of_string (name ^ "-trace") |> Result.get_ok)
+    ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes (name ^ " seed")) |> Result.get_ok in
+  let locator = Agent_core.Agent.execution_locator_of_yojson
+    (`Assoc ["version", `Int 1; "run_id", `String ("execution-run-" ^ name)]) |> Result.get_ok in
+  let call = Keeper_native_call.create ~call_id ~runtime_id:"native.primary"
+    ~operation_digest:operation.execution_digest ~api:(Keeper_native_call.New_input {seed_message_count=0})
+    ~seed_checkpoint:checkpoint ~locator |> Result.get_ok in
+  Keeper_chat_operation_store.update_direct_native_call seed ~now:12. ~operation_id
+    ~execution_digest:operation.execution_digest
+    (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call}) |> Result.get_ok;
+  if requeued then
+    check int "the earlier restart interrupts nothing" 0
+      (List.length (Keeper_chat_operation_store.settle_running_without_executor seed
+         ~cause:Keeper_chat_operation_store.After_process_restart ~now:13. |> Result.get_ok));
+  Keeper_chat_operation_store.close seed |> Result.get_ok;
+  operation, call
+;;
+
+let start_restart_owner ~sw ~path ~name =
+  Owner.start ~base_path:(Filename.dirname path) ~sw
+    ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
+    ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
+    ~now:(fun () -> 20.) ~operation_runner:None ~on_turn_slot_released:None
+    ~keeper_name:name ~initial_meta:(Some (make_meta name)) |> owner_ok
+;;
+
+let check_native_call_writer owner (call : Keeper_native_call.t) label expected =
+  match Owner.native_call_writer owner ~call_id:call.call_id |> owner_ok, expected with
+  | Owner.Writer_exited, Owner.Writer_exited | Owner.Writer_unproven, Owner.Writer_unproven -> ()
+  | Owner.Writer_exited, Owner.Writer_unproven | Owner.Writer_unproven, Owner.Writer_exited ->
+    fail label
+;;
+
+(* Two restarts in a row. The first requeued the call and the server went down
+   again before any claim, so the second start finds the operation Queued and
+   its settlement has no Running row to read a journal for. *)
+let test_startup_proves_the_writers_of_a_call_an_earlier_restart_requeued () =
+  with_native_restart_store "requeued-twice" @@ fun path ->
+  let operation, call = seed_active_native_call ~path ~name:"requeued-twice"
+      ~call_id:"019a0010-1000-7000-8000-000000000012" ~requeued:true in
+  Eio.Switch.run @@ fun sw ->
+  let owner = start_restart_owner ~sw ~path ~name:"requeued-twice" in
+  check_native_call_writer owner call
+    "an inherited call was proven before settlement" Owner.Writer_unproven;
+  let journal_reads = ref 0 in
+  check int "nothing was Running, so nothing is interrupted" 0
+    (List.length (Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_exited
+       ~journal_terminal:(fun _ -> incr journal_reads; Ok None) |> owner_ok));
+  check int "the journal of a Queued operation is not read again" 0 !journal_reads;
+  check_native_call_writer owner call
+    "a call still queued from an earlier restart was not proven exited" Owner.Writer_exited;
+  let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+  check bool "Owner claims the requeued operation" true
+    (Chat_operation.Operation_id.equal operation.operation_id resumed.operation_id);
+  let observed = Owner.direct_native_call owner ~operation_id:operation.operation_id |> owner_ok in
+  Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
+    ~execution_digest:operation.execution_digest ~observed ~call |> owner_ok;
+  check_native_call_writer owner call
+    "binding the resumed call left it proven exited" Owner.Writer_unproven
+;;
+
+let test_startup_keeps_an_earlier_requeued_call_unproven_without_writer_evidence () =
+  with_native_restart_store "requeued-unproven" @@ fun path ->
+  let _operation, call = seed_active_native_call ~path ~name:"requeued-unproven"
+      ~call_id:"019a0010-1000-7000-8000-000000000013" ~requeued:true in
+  Eio.Switch.run @@ fun sw ->
+  let owner = start_restart_owner ~sw ~path ~name:"requeued-unproven" in
+  check int "nothing is interrupted" 0
+    (List.length (Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_unproven
+       ~journal_terminal:(fun _ -> Ok None) |> owner_ok));
+  check_native_call_writer owner call
+    "a pool that may share this process with the writer proved it exited" Owner.Writer_unproven
+;;
+
+(* The evidence covers calls no claim in this process has bound. A claim that
+   binds an inherited call before the settlement completes keeps it unproven,
+   whichever order the composition runs the two in. *)
+let test_a_call_bound_before_settlement_stays_unproven () =
+  with_native_restart_store "bound-before-settlement" @@ fun path ->
+  let operation, call = seed_active_native_call ~path ~name:"bound-before-settlement"
+      ~call_id:"019a0010-1000-7000-8000-000000000014" ~requeued:true in
+  Eio.Switch.run @@ fun sw ->
+  let owner = start_restart_owner ~sw ~path ~name:"bound-before-settlement" in
+  let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
+  check bool "Owner claims the requeued operation" true
+    (Chat_operation.Operation_id.equal operation.operation_id resumed.operation_id);
+  let observed = Owner.direct_native_call owner ~operation_id:operation.operation_id |> owner_ok in
+  Owner.bind_direct_native_call owner ~operation_id:operation.operation_id
+    ~execution_digest:operation.execution_digest ~observed ~call |> owner_ok;
+  check int "the settlement has nothing to interrupt" 0
+    (List.length (Owner.complete_restart_settlement owner ~prior_writers:Owner.Prior_writers_exited
+       ~journal_terminal:(fun _ -> Ok None) |> owner_ok));
+  check_native_call_writer owner call
+    "a call this process bound before settlement was admitted as exited" Owner.Writer_unproven
+;;
+
 let test_startup_interrupts_running_without_requeue () =
   Eio_main.run @@ fun _env ->
   let path = Filename.temp_file "keeper-owner-restart-" ".sqlite3" in
@@ -7389,6 +7503,12 @@ let () =
         ; test_case "native restart and stale callback preserve Owner progress" `Quick test_startup_requeues_exact_native_call
         ; test_case "restart settlement with unproven writers keeps calls unproven" `Quick
             test_startup_settlement_with_unproven_writers_keeps_calls_unproven
+        ; test_case "a call an earlier restart requeued is proven after the next restart" `Quick
+            test_startup_proves_the_writers_of_a_call_an_earlier_restart_requeued
+        ; test_case "an earlier requeued call stays unproven without writer evidence" `Quick
+            test_startup_keeps_an_earlier_requeued_call_unproven_without_writer_evidence
+        ; test_case "a call bound before restart settlement stays unproven" `Quick
+            test_a_call_bound_before_settlement_stays_unproven
         ; test_case "operation id stop leaves an autonomous slot holder alone" `Quick
             test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone
         ; test_case

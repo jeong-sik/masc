@@ -319,10 +319,10 @@ claim 이 native 호출을 열기 직전의 준비(`keeper_direct_native_continu
 
 - 셋째 사실은 지금 코드 모양일 뿐이고 타입이 막지 않는다. 같은 이미지에서 앞 pool 의 switch 가 끝난 뒤 pool 을 다시 설치하면 깨진다. 시험 프로세스 하나가 pool 을 여러 번 설치한다(`test/test_keeper_native_reconcile_after_dispatch.ml` 126·326·396·481).
 - registry 가 base path 마다 「이 이미지에서 기동 정리를 했다」를 프로세스 메모리에 적는다. 첫 pool 의 Owner 에만 `Prior_writers_exited` 를 넘긴다. 그 밖에는 `Prior_writers_unproven` 이다.
-- Owner 는 `Prior_writers_exited` 일 때, 기동 정리 명령이 끝나는 때 저장소에 남은 `Active` 호출의 id 를 모두 메모리 집합에 둔다(`keeper_owner.ml:2033`, 2076-2086). 행이 `queued` 든 `running` 이든 같다. 이번 기동이 다시 큐에 넣은 호출과, 앞선 기동이 다시 넣었는데 아직 집히지 않은 호출이 함께 든다.
+- Owner 는 뜰 때, 첫 작업을 집기 전에 저장소의 `Active` 호출 id 를 모두 읽어 둔다(`Keeper_chat_operation_store.active_native_calls`). 행이 `queued` 든 `running` 이든 같다. `Prior_writers_exited` 면 첫 기동 정리 명령이 끝날 때, 읽어 둔 호출 가운데 그 정리가 닫지 않았고 claim 이 묶지 않은 것을 메모리 집합에 둔다. 이번 기동이 다시 큐에 넣은 호출과, 앞선 기동이 다시 넣었는데 아직 집히지 않은 호출이 함께 든다.
   - 지금 코드(#52587)는 이번 기동에 `running` 이던 행의 호출만 넣는다(`keeper_owner.ml:1436`, `keeper_chat_operation_store.ml:3557-3580`). 기동 정리가 다시 큐에 넣은 작업이 claim 되기 전에 서버가 또 재기동하면, 그 행은 `queued` 이고 호출은 `Active` 다. 다음 기동은 그 호출을 집합에 넣지 않는다. claim 은 `Resume_writer_exit_unproven` 을 넘기고, 끊긴 Tool 이 있는 작업은 `Effect_outcome_unknown` 으로 실패한다. 모으기 전에 끊긴 턴은 retire 를 받지 못한다(4.4).
-  - 집합은 이때 한 번 정하고 그 뒤로는 더하지 않는다. 나중에 읽은 `Active` 목록으로 채우면 이 이미지가 묶은 호출이 든다.
-  - 집합은 Owner 가 첫 작업을 집기 전에 정해진다. Owner 는 Keeper registry 항목이 healthy 일 때만 작업을 집는다(`keeper_owner.ml:1831-1839`, `server_routes_http_keeper_stream.ml:2996-3006`). 서버는 기동 정리를 끝낸 뒤에 Keeper 를 띄운다(`server_runtime_bootstrap.ml:1021-1025`, 1155-1164). 이 순서는 타입이 아니라 기동 코드의 모양이다. 시험으로 고정한다(§8).
+  - 집합은 이때 한 번 정하고 그 뒤로는 더하지 않는다. 기동 정리 명령을 다시 불러도 더하지 않는다. 나중에 읽은 `Active` 목록으로 채우면 이 이미지가 묶은 호출이 든다.
+  - 집합은 기동 순서에 기대지 않는다. Owner 가 뜬 뒤에 이 이미지가 묶은 새 호출은 읽어 둔 목록에 없다. 읽어 둔 호출을 claim 이 기동 정리보다 먼저 묶으면 Bind 가 그 id 를 목록에서 지운다. 서버는 기동 정리를 끝낸 뒤에 Keeper 를 띄우지만(`server_runtime_bootstrap.ml:1021-1025`, 1155-1164), 그 순서가 바뀌어도 집합에 이 이미지가 묶은 호출은 들지 않는다. 시험으로 고정한다(§8).
 - claim 이 그 집합의 호출을 열면 `Resume_after_writer_exit` 를 넘긴다(`keeper_direct_native_continuation.ml:346-356`). 4.4 의 retire 도 그 집합의 호출에만 한다. 같은 호출을 이어 하는 Bind 에서 그 id 를 지운다(`keeper_owner.ml:2416-2417`). 그 뒤로는 이 이미지가 writer 다. 이 이미지가 같은 호출을 다시 열면 `Resume_writer_exit_unproven` 이다.
 - 집합은 저장하지 않는다. 이미지가 끝나면 같이 사라지고, 다음 이미지의 기동 정리가 처음부터 다시 판정한다.
 - 이 근거는 이미지 안의 코드만 다룬다. journal 을 쓸 수 있는 것은 그 코드뿐이다. Tool 이 띄운 자식 프로세스는 비정상 종료 뒤에 남을 수 있다(§10). 남아도 「결과 모름」 문구는 사실이다.
@@ -443,7 +443,7 @@ masc:
 - 같은 경우들을 비정상 종료로 → 결과가 위 시험과 같다. 이 RFC 의 핵심 시험이다.
 - 연속 재기동 둘, 그 사이 체크포인트가 그대로 → 두 번째 기동도 이어 한다.
 - 기동 정리가 다시 넣은 작업이 claim 전에 다시 재기동 → 다음 기동의 첫 claim 도 `Resume_after_writer_exit`.
-- 기동 정리가 끝나기 전 → Owner 는 작업을 집지 않는다. Keeper registry 항목이 healthy 가 아니다.
+- claim 이 기동 정리보다 먼저 묶은 호출 → 기동 정리 뒤에도 `Resume_writer_exit_unproven`.
 - 같은 Keeper 의 다른 작업이 먼저 돌아 canonical 을 바꾼 뒤 → 이어 하는 작업은 retained 체크포인트에서 연다. 이어 한 작업이 끝난 뒤 canonical 이 담는 턴은 §10 의 결정 뒤에 고정한다.
 - 멈춤과 운영자 중단이 두 순서로 → `Turn_cancelled`.
 - 멈춘 Owner → 새 자식 0개, `Bind` 거절. 같은 Keeper 에 새 Owner 를 만들면 기동 정리부터 돈다.

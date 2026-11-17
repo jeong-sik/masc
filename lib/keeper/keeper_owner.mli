@@ -180,8 +180,9 @@ type prior_writers =
     call's execution. *)
 type native_call_writer =
   | Writer_exited
-      (** Restart settlement requeued this call under [Prior_writers_exited],
-          and no claim in this process has bound it since. *)
+      (** The call was Active in the store when this Owner started, restart
+          settlement completed under [Prior_writers_exited] without closing
+          it, and no claim in this process has bound it since. *)
   | Writer_unproven
 
 type operation_acceptance =
@@ -423,8 +424,11 @@ val complete_restart_settlement :
     including compositions without a live operation runner. A failed
     startup Store commit closes this actor; the registry fences its exact
     handle as unavailable, independently of other Keepers. Under
-    [Prior_writers_exited] the calls it requeues answer [Writer_exited] in
-    {!native_call_writer} until a claim binds them. *)
+    [Prior_writers_exited] every call that was Active when this Owner started,
+    that the first completion does not close and that no claim has bound
+    answers [Writer_exited] in {!native_call_writer} until a claim binds it:
+    the calls this completion requeues, and the calls an earlier restart
+    requeued that nothing claimed. A repeat completion admits none. *)
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result

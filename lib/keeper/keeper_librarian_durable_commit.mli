@@ -77,6 +77,14 @@ module For_testing : sig
   (** Same production path. Hook runs after actual Memory receipts are proven
       and before source ACK/read-position settlement, so tests can interrupt or
       fault the real filesystem without fabricating domain success. *)
+  val settle_refused : before_settlement:(unit -> (unit, string) result) ->
+    store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->
+    record:Lane_addon_tool_request_owner.retained -> diagnosis:Yojson.Safe.t ->
+    (Lane_addon_tool_request_owner.retained, string) result
+  (** Same refusal path. The hook runs after actual range receipts and before
+      ACK/read-position settlement. Returning an error preserves the refusal
+      record so the next ordinary call can recover the same receipt-backed
+      settlement, including a frontier the interrupted hook already ACKed. *)
 end
 
 val settle_refused : store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->

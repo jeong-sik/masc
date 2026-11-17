@@ -1875,7 +1875,7 @@ let test_answered_history_gate_follows_replacement ~foreign_installation () =
 (* An official turn can have no turn-tagged fragments while its independent
    counterpart sources still have unread evidence. Exercise the configured
    Addon path, including the actual receipt and both source acknowledgements. *)
-let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
+let test_counterpart_only_provider_capacity_refusal_is_source_preserving ~recover_partial_ack () =
   with_fixture ~history_kind:Official (fun ~sw fixture ->
     let content = "begin counterpart\n" ^ String.make 65536 'x' ^ "\nend counterpart" in
     let speaker : Keeper_chat_store.speaker =
@@ -1952,12 +1952,51 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let restored=Source.of_json source_json |> Result.map_error Source.error_to_string |> get in
     check json "the whole refused original survives strict restoration" source_json (Source.to_json restored);
     check int "only one actual provider request was refused" 1 (F.post_count fixture.server);
+    let receipt_revision=if not recover_partial_ack then None else (
+      let module Refusal=Keeper_librarian_durable_refusal in
+      let completed=Refusal.inventory [rejected,original] |> get in
+      let stop=Refusal.retained_stop ~store:fixture.store ~completed ~record:rejected ~request:original
+        |> get |> Option.to_result ~none:"fixture has no actual permanent refusal stop" |> get in
+      let diagnosis=Refusal.diagnosis stop
+        |> Option.to_result ~none:"fixture has no typed permanent refusal diagnosis" |> get in
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      let main=Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Main in
+      let internal=Keeper_turn_fragments.path ~session_dir Keeper_turn_fragments.Internal in
+      check bool "the fixture has a real fragment prefix to prune" true
+        (io (fun () -> Option.fold ~none:false ~some:(fun bytes -> bytes<>"")
+          (Fs_compat.load_file_opt main)));
+      let interrupted="fixture interrupted after range receipts and external ACK" in
+      let result=memory_action fixture (fun () -> io (fun () ->
+        Commit.For_testing.settle_refused ~store:fixture.store ~request:original ~record:rejected ~diagnosis
+          ~before_settlement:(fun () ->
+            check bool "only actual refusal range receipts permit the partial ACK" true
+              (Commit.receipt_state original |> get);
+            Keeper_external_read_cursor.acknowledge
+              ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get;
+            let unchanged=Keeper_librarian_official_progress.read
+              ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+              |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get in
+            check bool "official history is still unacknowledged at the interruption" true (unchanged=before);
+            write main "";write internal "";
+            check bool "the official fragment prefix was actually pruned" true
+              (Fs_compat.load_file_opt main=Some "" && Fs_compat.load_file_opt internal=Some "");
+            Error interrupted))) in
+      (match result with Error detail -> check string "the real refusal settlement was interrupted" interrupted detail
+       | Ok _ -> fail "the injected refusal settlement unexpectedly completed");
+      let pending,_=only_original fixture in
+      check bool "partial ACK records no final refusal settlement" true
+        (Option.is_none (Progress.settlement pending.progress));
+      check bool "partial ACK advances only the external frontier" true
+        (Keeper_external_read_cursor.observation_offset (cursor ())=1 && official ()=before);
+      Some (io (fun () -> Option.map (fun (snapshot:Current.t) -> snapshot.revision) (current fixture.keepers_dir)))) in
     (* The operator chose to end a permanent over-capacity refusal rather than
        block its destination for ever: the next wake abandons exactly that
        range, with a typed diagnosis, and the destination is free again. *)
     (match run_worker fixture with
      | Ok _ -> ()
      | Error error -> fail (Consumer.error_to_string error));
+    Option.iter (fun revision -> check bool "ordinary refusal recovery repeats no Memory effect" true
+      (revision=io (fun () -> Option.map (fun (snapshot:Current.t) -> snapshot.revision) (current fixture.keepers_dir)))) receipt_revision;
     (* A settled original leaves its scope for the settled day: the archive
        holds its progress, and nothing is left to retain or read. *)
     check int "a settled refusal leaves no retained original" 0 (List.length (observed_originals fixture));
@@ -6202,7 +6241,9 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
   test_case "counterpart-only capacity refusal preserves source and ACK" `Quick
-    test_counterpart_only_provider_capacity_refusal_is_source_preserving;
+    (test_counterpart_only_provider_capacity_refusal_is_source_preserving ~recover_partial_ack:false);
+  test_case "a receipt-proved refusal recovers partial ACK after fragment pruning" `Quick
+    (test_counterpart_only_provider_capacity_refusal_is_source_preserving ~recover_partial_ack:true);
   test_case "a different equal chat row cannot release the original refusal" `Quick
     test_refusal_does_not_accept_a_different_equal_chat_row;
   test_case "a host replacement survives its ready worker disappearing" `Quick

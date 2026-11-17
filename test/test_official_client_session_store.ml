@@ -786,7 +786,7 @@ let test_restart_recovery_and_transient_release () =
       check bool "transient evidence" true (record.failure = failure);
       check string "release epoch" next_owner_epoch record.owner_epoch
     | None -> fail "transient release evidence was not persisted"))
-    [Pre_dispatch_failed; Transient_spawn_failed]
+    [Pre_dispatch_failed; Spawn_resources_busy]
 ;;
 
 let test_exact_recovery_restart () =
@@ -1807,7 +1807,7 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:6.
       |> Result.get_ok in
     let released = release_transient ~base_path ~keeper_name ~expected:guarded
-      ~failure:Transient_spawn_failed ~released_at:7. |> Result.get_ok in
+      ~failure:Spawn_resources_busy ~released_at:7. |> Result.get_ok in
     check bool "transient spawn failure preserves verified unchanged source"
       true (validate_unchanged_context ~expected:(Some released)
         ~snapshot_sha256 = Ok ());

@@ -971,7 +971,7 @@ let test_incomplete_prompt_is_not_reported () =
   let missing = Filename.temp_file "missing-antigravity-" ".sh" in
   Sys.remove missing;
   (match run_fixture ~on_prompt_sent:(fun () -> incr sent) missing with
-   | Error (Runtime_antigravity.Spawn_failed _) -> ()
+   | Error (Runtime_antigravity.Spawn_refused _) -> ()
    | _ -> fail "missing CLI did not fail at spawn");
   check int "spawn failure does not report transmission" 0 !sent;
   with_fixture ~stdin:Close_unread [] (fun path ->

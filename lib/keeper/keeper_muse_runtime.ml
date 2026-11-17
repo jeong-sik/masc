@@ -108,7 +108,7 @@ let model_input_refusal_of_error (error : Serve.error) =
           | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
       ; _
       }
-  | Serve.Invalid_config _ | Serve.Spawn_failed _ | Serve.Turn_input_write_failed _
+  | Serve.Invalid_config _ | Serve.Spawn_refused _ | Serve.Turn_input_write_failed _
   | Serve.Protocol_error _ | Serve.Rpc_error _ | Serve.Capability_not_granted _
   | Serve.Session_not_durable | Serve.Session_model_mismatch _
   | Serve.Session_workspace_mismatch _ | Serve.Session_approval_mode_mismatch _
@@ -147,9 +147,10 @@ let runtime_error_to_core_error ?(now = Time_compat.now ()) ?catalog (error : Se
   match error with
   | Serve.Invalid_config detail -> config_error ~field:provider_name detail
   | Serve.Session_not_durable -> config_error ~field:"session_durability" (Serve.error_to_string error)
-  | Serve.Spawn_failed detail ->
+  | Serve.Spawn_refused refusal ->
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable { provider = provider_name; detail })
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = provider_name; detail = Process_eio.spawn_refusal_to_string refusal })
   | Serve.Turn_input_write_failed _ ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -333,14 +334,15 @@ let runtime_error_to_core_error ?(now = Time_compat.now ()) ?catalog (error : Se
 let recovery_failure_of_runtime_error ?current (error : Serve.error) =
   match current with
   | Some Session_store.State_persistence_failed -> Session_store.State_persistence_failed
-  | None | Some (Session_store.Pre_dispatch_failed) | Some (Session_store.Transient_spawn_failed)
+  | None | Some (Session_store.Pre_dispatch_failed) | Some (Session_store.Spawn_resources_busy)
+  | Some (Session_store.Spawn_refused_same_input)
   | Some (Session_store.Owner_stopped_turn) | Some (Session_store.Retryable_turn_failed)
   | Some (Session_store.Transport_interrupted) | Some (Session_store.Protocol_failed)
   | Some (Session_store.Provider_rejected) | Some (Session_store.Input_rejected _)
   | Some (Session_store.Host_hook_failed) | Some (Session_store.Process_restarted)
   | Some (Session_store.Vendor_session_full _) ->
   match error with
-  | Serve.Spawn_failed _ -> Session_store.Transient_spawn_failed
+  | Serve.Spawn_refused refusal -> Session_store.recovery_failure_of_spawn_refusal refusal
   | Serve.Turn_input_write_failed _
   | Serve.Turn_cancelled
   | Serve.Runtime_shutting_down
@@ -393,9 +395,9 @@ let recovery_failure_for_attempt ~current ~admission error =
   | Session_store.State_persistence_failed, _, _ -> current
   | _, Not_dispatched, (Serve.Timeout {turn_accepted=false; _} | Serve.Capability_not_granted _) ->
     Session_store.Pre_dispatch_failed
-  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, Serve.Timeout { turn_accepted = true;_})
-  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, (Serve.Session_not_durable | (Serve.Turn_cancelled | (Serve.Runtime_shutting_down | (Serve.Invalid_config _ | (Serve.Spawn_failed _ | (Serve.Turn_input_write_failed _ | (Serve.Protocol_error _ | (Serve.Rpc_error _ | (Serve.Session_model_mismatch _ | (Serve.Session_workspace_mismatch _ | (Serve.Session_approval_mode_mismatch _ | (Serve.Auth_required _ | (Serve.Turn_failed _ | (Serve.Unsupported_server_request _ | Serve.Process_exited _)))))))))))))))
-  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), (Dispatched | Acknowledged), _) -> recovery_failure_of_runtime_error ~current error
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Spawn_resources_busy | Session_store.Spawn_refused_same_input | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, Serve.Timeout { turn_accepted = true;_})
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Spawn_resources_busy | Session_store.Spawn_refused_same_input | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, (Serve.Session_not_durable | (Serve.Turn_cancelled | (Serve.Runtime_shutting_down | (Serve.Invalid_config _ | (Serve.Spawn_refused _ | (Serve.Turn_input_write_failed _ | (Serve.Protocol_error _ | (Serve.Rpc_error _ | (Serve.Session_model_mismatch _ | (Serve.Session_workspace_mismatch _ | (Serve.Session_approval_mode_mismatch _ | (Serve.Auth_required _ | (Serve.Turn_failed _ | (Serve.Unsupported_server_request _ | Serve.Process_exited _)))))))))))))))
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Spawn_resources_busy | Session_store.Spawn_refused_same_input | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), (Dispatched | Acknowledged), _) -> recovery_failure_of_runtime_error ~current error
 ;;
 
 (* Whether a failed attempt can no longer claim it was effect-free. Before the
@@ -420,7 +422,7 @@ let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) 
         | Serve.Turn_failed _ | Serve.Auth_required _ -> false
         | Serve.Invalid_config _
         | Serve.Session_not_durable
-        | Serve.Spawn_failed _
+        | Serve.Spawn_refused _
         | Serve.Turn_input_write_failed _
         | Serve.Protocol_error _
         | Serve.Rpc_error _
@@ -438,7 +440,7 @@ let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) 
      | Serve.Rpc_error _ -> false
      | Serve.Invalid_config _
      | Serve.Session_not_durable
-     | Serve.Spawn_failed _
+     | Serve.Spawn_refused _
      | Serve.Turn_input_write_failed _
      | Serve.Protocol_error _
      | Serve.Capability_not_granted _
@@ -457,7 +459,7 @@ let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) 
      | Serve.Turn_input_write_failed _ -> true
      | Serve.Invalid_config _
      | Serve.Session_not_durable
-     | Serve.Spawn_failed _
+     | Serve.Spawn_refused _
      | Serve.Protocol_error _
      | Serve.Rpc_error _
      | Serve.Capability_not_granted _
@@ -1807,7 +1809,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                        | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
                    ; _
                    }
-               | Serve.Invalid_config _ | Serve.Spawn_failed _
+               | Serve.Invalid_config _ | Serve.Spawn_refused _
                | Serve.Turn_input_write_failed _ | Serve.Protocol_error _
                | Serve.Rpc_error _ | Serve.Capability_not_granted _
                | Serve.Session_not_durable | Serve.Session_model_mismatch _

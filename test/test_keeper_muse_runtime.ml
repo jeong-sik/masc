@@ -373,9 +373,22 @@ let test_refusals_of_the_session_start_fresh_next () =
        (Llm_provider.Error.ProviderTerminal
           { kind = Llm_provider.Http_client.Session_conflict; provider = "muse_serve"; _ }) -> ()
    | error -> failf "lease held is a session conflict: %s" (Agent_core.Error.to_string error));
-  (* A spawn that never started the host changed nothing on its session. *)
-  check bool "spawn failure releases the claim" true
-    (disposition (Serve.Spawn_failed "ENOENT") = Store.Transient)
+  (* A spawn that never started the host changed nothing on its session.
+     Whether the claim is released for another try depends on whether the
+     same request can pass later (#28072). *)
+  check bool "a shortage releases the claim" true
+    (disposition
+       (Serve.Spawn_refused
+          (Process_eio.Spawn_failed { executable = "muse"; error = Unix.EAGAIN }))
+     = Store.Transient);
+  check bool "a missing executable is fatal" true
+    (disposition (Serve.Spawn_refused (Process_eio.Executable_not_found "muse"))
+     = Store.Fatal);
+  check bool "an argv over the limit is fatal" true
+    (disposition
+       (Serve.Spawn_refused
+          (Process_eio.Spawn_failed { executable = "muse"; error = Unix.E2BIG }))
+     = Store.Fatal)
 ;;
 
 let test_error_projection () =

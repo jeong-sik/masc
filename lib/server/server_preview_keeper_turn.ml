@@ -128,7 +128,7 @@ let claude_failure : Runtime_claude_code.error -> Conversation.failure = functio
   | Runtime_claude_code.Subscription_required _ -> Conversation.Not_signed_in
   | Runtime_claude_code.Quota_blocked _ -> Conversation.No_quota
   | Runtime_claude_code.Timeout _ -> Conversation.Silent
-  | Runtime_claude_code.Spawn_failed _ -> Conversation.Not_started
+  | Runtime_claude_code.Spawn_refused _ -> Conversation.Not_started
   | Runtime_claude_code.Invalid_config _ -> Conversation.Configuration_refused
   | Runtime_claude_code.Turn_failed_with_observation _
   | Runtime_claude_code.Protocol_error _
@@ -158,7 +158,7 @@ let codex_failure (failure : Runtime_codex_app_server.error) : Conversation.fail
     match failure with
     | Runtime_codex_app_server.Subscription_required _ -> Conversation.Not_signed_in
     | Runtime_codex_app_server.Timeout _ -> Conversation.Silent
-    | Runtime_codex_app_server.Spawn_failed _ -> Conversation.Not_started
+    | Runtime_codex_app_server.Spawn_refused _ -> Conversation.Not_started
     | Runtime_codex_app_server.Invalid_config _ -> Conversation.Configuration_refused
     | Runtime_codex_app_server.Reasoning_effort_admission_failed _
     | Runtime_codex_app_server.Turn_input_write_failed _

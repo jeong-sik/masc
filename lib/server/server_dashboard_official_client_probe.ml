@@ -73,7 +73,7 @@ let empty_client_json = `Assoc [ "user_agent", `Null ]
 
 let codex_failure_status = function
   | Runtime_codex_app_server.Invalid_config _ -> "invalid_config"
-  | Spawn_failed _ | Process_exited _ -> "cli_unavailable"
+  | Spawn_refused _ | Process_exited _ -> "cli_unavailable"
   | Subscription_required _ -> "login_required"
   | Timeout _ -> "timeout"
   | Protocol_error _ | Rpc_error _ | Unsupported_server_request _
@@ -94,7 +94,7 @@ let codex_failure_status = function
 
 let claude_failure_status = function
   | Runtime_claude_code.Invalid_config _ -> "invalid_config"
-  | Spawn_failed _ | Process_exited _ -> "cli_unavailable"
+  | Spawn_refused _ | Process_exited _ -> "cli_unavailable"
   | Subscription_required _ -> "login_required"
   | Timeout _ -> "timeout"
   | Protocol_error _ | Unsupported_control_request _ -> "protocol_error"

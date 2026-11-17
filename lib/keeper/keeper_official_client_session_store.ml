@@ -34,7 +34,8 @@ type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
 
 type recovery_failure =
   | Pre_dispatch_failed
-  | Transient_spawn_failed
+  | Spawn_resources_busy
+  | Spawn_refused_same_input
   | Owner_stopped_turn
   | Retryable_turn_failed
   | Transport_interrupted
@@ -45,6 +46,14 @@ type recovery_failure =
   | State_persistence_failed
   | Process_restarted
   | Vendor_session_full of vendor_session_activity
+
+(* Which recovery failure a refused spawn is, from whether the same request
+   can succeed later on its own. *)
+let recovery_failure_of_spawn_refusal refusal =
+  match Process_eio.spawn_refusal_outlook refusal with
+  | Process_eio.Same_input_fails_again -> Spawn_refused_same_input
+  | Process_eio.Resources_may_free -> Spawn_resources_busy
+;;
 
 type failure_disposition =
   | Transient
@@ -58,7 +67,10 @@ type failure_disposition =
    adjudicate, and routing it to Recovery_required blocked every later turn for
    that keeper until someone resolved it by hand (#28012). *)
 let failure_disposition = function
-  | Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed -> Transient
+  | Pre_dispatch_failed | Spawn_resources_busy | Owner_stopped_turn | Retryable_turn_failed -> Transient
+  (* The same argv, env and cwd fail the same way again: retrying spends a
+     turn per attempt and changes nothing until an operator does (#28072). *)
+  | Spawn_refused_same_input -> Fatal
   | Transport_interrupted
   | Protocol_failed
   | Host_hook_failed
@@ -586,7 +598,8 @@ let settlement_opt_of_yojson = function
 
 let recovery_failure_to_string = function
   | Pre_dispatch_failed -> "pre_dispatch_failed"
-  | Transient_spawn_failed -> "transient_spawn_failed"
+  | Spawn_resources_busy -> "spawn_resources_busy"
+  | Spawn_refused_same_input -> "spawn_refused_same_input"
   | Owner_stopped_turn -> "owner_stopped_turn"
   | Retryable_turn_failed -> "retryable_turn_failed"
   | Transport_interrupted -> "transport_interrupted"
@@ -604,7 +617,8 @@ let recovery_failure_to_string = function
 
 let recovery_failure_of_string = function
   | "pre_dispatch_failed" -> Ok Pre_dispatch_failed
-  | "transient_spawn_failed" -> Ok Transient_spawn_failed
+  | "spawn_resources_busy" -> Ok Spawn_resources_busy
+  | "spawn_refused_same_input" -> Ok Spawn_refused_same_input
   | "owner_stopped_turn" -> Ok Owner_stopped_turn
   | "retryable_turn_failed" -> Ok Retryable_turn_failed
   | "transport_interrupted" -> Ok Transport_interrupted
@@ -1433,7 +1447,7 @@ let commit_if_input_recovery_current
         { phase =
             Recovery_required
               { failure =
-                  ( Pre_dispatch_failed | Transient_spawn_failed
+                  ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input
                   | Owner_stopped_turn | Retryable_turn_failed
                   | Transport_interrupted | Protocol_failed | Provider_rejected
                   | Input_rejected _ | Host_hook_failed | State_persistence_failed
@@ -1537,7 +1551,7 @@ let plan_claim ~expected ~client_kind ~runtime_id =
         { phase =
             Recovery_required
               { failure =
-                  ( Pre_dispatch_failed | Transient_spawn_failed
+                  ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input
                   | Owner_stopped_turn | Retryable_turn_failed
                   | Transport_interrupted | Protocol_failed | Provider_rejected
                   | Host_hook_failed | State_persistence_failed
@@ -2008,11 +2022,11 @@ let host_last_turn_after_release ~phase failure host_last_turn =
     (match failure, host_last_turn with
      | Retryable_turn_failed, Unobserved_after { dispatched = Some turn_id; _ } ->
        Reported (Some ({ turn_id; ending = Host_uncompleted } : host_ended_turn))
-     | (Pre_dispatch_failed | Transient_spawn_failed), Unobserved_after { reported; _ } ->
+     | (Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input), Unobserved_after { reported; _ } ->
        Reported reported
      | Retryable_turn_failed
        , (Unobserved_after { dispatched = None; _ } | Not_reported | Reported _ | Retry_after _)
-     | (Pre_dispatch_failed | Transient_spawn_failed), (Not_reported | Reported _ | Retry_after _)
+     | (Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input), (Not_reported | Reported _ | Retry_after _)
      | ( ( Owner_stopped_turn | Transport_interrupted | Protocol_failed | Provider_rejected
          | Input_rejected _ | Host_hook_failed | State_persistence_failed | Process_restarted
          | Vendor_session_full _ )
@@ -2042,7 +2056,7 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
       ( Ready | Start _ | Active _ | Recovery_required _ | Settled _
       | Turn_inflight { turn_id = None; _ } ) ->
       Error "retryable official-client terminal requires an acknowledged turn identity"
-    | (Pre_dispatch_failed, _) | (Transient_spawn_failed, _) | (Owner_stopped_turn, _)
+    | (Pre_dispatch_failed, _) | (Spawn_resources_busy, _) | (Spawn_refused_same_input, _) | (Owner_stopped_turn, _)
     | (Transport_interrupted, _) | (Protocol_failed, _) | (Provider_rejected, _)
     | (Input_rejected _, _) | (Host_hook_failed, _) | (State_persistence_failed, _)
     | (Process_restarted, _) | (Vendor_session_full _, _) -> Ok (previous_settlement, max 0 (expected.turn_count - 1)) in
@@ -2150,11 +2164,11 @@ let resolve_recovery ~base_path ~keeper_name ~expected ~recovery_id ~resolution
            no previous settlement worth returning to. *)
         (match recovery.failure, recovery.previous_settlement with
          | Vendor_session_full _, (Some _ | None) -> Error Retry_previous_unavailable
-         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , None ) -> Error Retry_previous_unavailable
-         | ( ( Pre_dispatch_failed | Transient_spawn_failed | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
+         | ( ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input | Owner_stopped_turn | Retryable_turn_failed | Transport_interrupted
              | Protocol_failed | Provider_rejected | Input_rejected _ | Host_hook_failed
              | State_persistence_failed | Process_restarted )
            , Some settlement ) -> Ok (Some settlement, current.turn_count - 1))

@@ -71,11 +71,14 @@ let runtime_error_to_core_error = function
          { message = Printf.sprintf "Antigravity turn timed out after %.3fs" seconds
          ; phase = None
          })
-  | Runtime_antigravity.Spawn_failed detail
   | Runtime_antigravity.Process_exited detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "antigravity_cli"; detail })
+  | (Runtime_antigravity.Spawn_refused _ | Runtime_antigravity.Spawn_capacity_busy _) as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "antigravity_cli"; detail = Runtime_antigravity.error_to_string error })
   | Runtime_antigravity.Protocol_error { stage; detail } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
@@ -90,7 +93,9 @@ let runtime_error_to_core_error = function
 ;;
 
 let recovery_failure_of_runtime_error = function
-  | Runtime_antigravity.Spawn_failed _ -> Session_store.Transient_spawn_failed
+  | Runtime_antigravity.Spawn_refused refusal ->
+    Session_store.recovery_failure_of_spawn_refusal refusal
+  | Runtime_antigravity.Spawn_capacity_busy _ -> Session_store.Spawn_resources_busy
   | Runtime_antigravity.Child_fd_ceiling_exceeded _ ->
     (* Killed mid-turn for file-table safety: Ambiguous, needs a look —
        a sick workspace (operator cleans) or system pressure (passes). *)

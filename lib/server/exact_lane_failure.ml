@@ -97,6 +97,13 @@ let candidate rejection =
       | Exact.Token_capacity_rejected (Exact.Capacity_evidence_not_yet_valid _
           | Exact.Capacity_evidence_expired _ | Exact.Capacity_boundary_unknown _)) -> Transient
 
+(* A spawn the same request cannot pass waits on the operator; a shortage
+   passes on its own (#28072). *)
+let spawn_refusal refusal =
+  match Process_eio.spawn_refusal_outlook refusal with
+  | Process_eio.Same_input_fails_again -> Configuration_refused
+  | Process_eio.Resources_may_free -> Transient
+
 let codex_error = function
   | Runtime_codex_app_server.Invalid_config _
   | Runtime_codex_app_server.Subscription_required _
@@ -130,7 +137,6 @@ let codex_error = function
   | Runtime_codex_app_server.Reasoning_effort_admission_failed _
   | Runtime_codex_app_server.Account_read_failed _
   | Runtime_codex_app_server.Turn_failed {codex_error_info=None;_}
-  | Runtime_codex_app_server.Spawn_failed _
   | Runtime_codex_app_server.Turn_input_write_failed _
   | Runtime_codex_app_server.Protocol_error _
   | Runtime_codex_app_server.Stopped_by_host _
@@ -138,13 +144,13 @@ let codex_error = function
   | Runtime_codex_app_server.Runtime_shutting_down
   | Runtime_codex_app_server.Process_exited _
   | Runtime_codex_app_server.Timeout _ -> Transient
+  | Runtime_codex_app_server.Spawn_refused refusal -> spawn_refusal refusal
 
 let claude_error = function
   | Runtime_claude_code.Invalid_config _
   | Runtime_claude_code.Subscription_required _
   | Runtime_claude_code.Unsupported_control_request _ -> Configuration_refused
   | Runtime_claude_code.Context_window_exceeded _ -> Input_refused Context_overflow
-  | Runtime_claude_code.Spawn_failed _
   | Runtime_claude_code.Protocol_error _
   | Runtime_claude_code.Turn_transport_interrupted _
   | Runtime_claude_code.Turn_failed _
@@ -154,6 +160,7 @@ let claude_error = function
   | Runtime_claude_code.Process_exited _
   | Runtime_claude_code.Unhandled_exception _
   | Runtime_claude_code.Timeout _ -> Transient
+  | Runtime_claude_code.Spawn_refused refusal -> spawn_refusal refusal
 
 let antigravity_error = function
   | Runtime_antigravity.Invalid_config _ -> Configuration_refused
@@ -166,13 +173,14 @@ let antigravity_error = function
      pass with the pressure, so it stays transient. *)
   | Runtime_antigravity.Child_fd_ceiling_exceeded { count = None; _ } -> Transient
   | Runtime_antigravity.Child_fd_ceiling_exceeded { count = Some _; _ } -> Configuration_refused
-  | Runtime_antigravity.Spawn_failed _
   | Runtime_antigravity.Protocol_error _
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Process_exited _
   | Runtime_antigravity.Unhandled_exception _
-  | Runtime_antigravity.Timeout _ -> Transient
+  | Runtime_antigravity.Timeout _
+  | Runtime_antigravity.Spawn_capacity_busy _ -> Transient
+  | Runtime_antigravity.Spawn_refused refusal -> spawn_refusal refusal
 
 let muse_error = function
   | Runtime_muse_serve.Invalid_config _
@@ -189,7 +197,6 @@ let muse_error = function
     else Configuration_refused
   | Runtime_muse_serve.Turn_failed error ->
     if error.Runtime_muse_msp.retryable then Transient else Configuration_refused
-  | Runtime_muse_serve.Spawn_failed _
   | Runtime_muse_serve.Turn_input_write_failed _
   | Runtime_muse_serve.Protocol_error _
   | Runtime_muse_serve.Rpc_error _
@@ -197,6 +204,7 @@ let muse_error = function
   | Runtime_muse_serve.Runtime_shutting_down
   | Runtime_muse_serve.Process_exited _
   | Runtime_muse_serve.Timeout _ -> Transient
+  | Runtime_muse_serve.Spawn_refused refusal -> spawn_refusal refusal
 
 let cli_failure = function
   (* Not called before the time its provider stated. The same request may

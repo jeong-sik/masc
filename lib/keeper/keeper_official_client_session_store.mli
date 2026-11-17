@@ -45,7 +45,12 @@ type recovery_failure =
   | Pre_dispatch_failed
       (** Local preparation failed before entering the provider process; the
           claim can be released without an ambiguous effect recovery fence. *)
-  | Transient_spawn_failed
+  | Spawn_resources_busy
+      (** The child could not start for a shortage that passes (descriptors,
+          memory, process slots, a full spawn gate). Transient. *)
+  | Spawn_refused_same_input
+      (** The child could not start and the same request fails again until
+          someone changes it. Fatal. *)
   | Owner_stopped_turn
   | Retryable_turn_failed
   | Transport_interrupted
@@ -70,6 +75,8 @@ type failure_disposition =
   | Fatal
 
 val failure_disposition : recovery_failure -> failure_disposition
+
+val recovery_failure_of_spawn_refusal : Process_eio.spawn_refusal -> recovery_failure
 
 (** Wire label of a failure; the inverse of the decoder used by [of_yojson].
     Projections (dashboard) reuse this instead of restating labels. *)

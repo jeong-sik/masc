@@ -91,7 +91,7 @@ type package_source =
 
 ### 3.3 설치가 package 와 이미지를 놓는다 (D3)
 
-`masc exact-addon-setup --base-path <base>` 를 새로 둔다. 두 설치 스크립트가 `browser-lane-setup` 옆에서 부른다.
+`masc exact-addon-setup --base-path <base>` 를 새로 둔다. `scripts/install-local-build.sh` 는 `browser-lane-setup` 다음에 늘 부른다. 릴리스 설치(`scripts/install.sh`)는 `--declared` 로 부른다. workspace 선언이 `package` 로 부르는 것만 설치하므로, Exact Add-on 을 쓰지 않는 workspace 는 이미지를 만들지 않는다(사용자 11-17 결정).
 
 - 실은 package 마다 `<base>/.masc/packages/<id>-<revision>/` 를 쓴다. 폴더가 이미 있고 digest 가 같으면 아무것도 하지 않는다. digest 가 다르면 쓰지 않고 실패로 알린다. 같은 revision 이름에 다른 내용이 있다는 뜻이기 때문이다.
 - 폴더는 한 번 쓰면 바꾸지 않는다. 도는 worker 가 마운트한 폴더가 발밑에서 바뀌지 않는다.

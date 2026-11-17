@@ -54,6 +54,8 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 
 `masc exact-addon-setup --base-path <base-path>`가 네 폴더를 쓰고, 각 manifest가 적은 Docker 이미지를
 만든다. `scripts/install-local-build.sh`는 설치 끝에 이 명령을 부른다.
+`--declared`를 주면 workspace의 선언이 `package`로 부르는 package만 설치한다. 선언은 서버와 같은 규칙으로
+읽고, 폴더가 아직 없어도 이름은 센다. 릴리스 설치(`scripts/install.sh`)는 설치마다 이렇게 부른다.
 
 - 폴더가 없을 때만 쓴다. 이미 있는 폴더는 다시 쓰지 않는다. 파일이 다른 폴더는 그 파일 이름을 적어 알린다.
 - 이미지는 `Dockerfile`과 공용 모듈 `exact_worker.py`·`protocol.py`로 만든다. package 자기 파일은 이미지에

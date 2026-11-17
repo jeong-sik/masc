@@ -155,6 +155,13 @@ val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
     except a final where {!Lane_addon_exact.refused_before_host} holds, for a
     request the host never retained: the worker refuses a request no listing
     reply can carry before the host sees it, and that final holds no answer. *)
+val confirm_retained_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.retained_final ->
+  (unit, string) result
+(** Reobserve the physical owner/epoch and confirm the complete retained host
+    evidence through {!Keeper_librarian_original_final.confirm_retained_final}.
+    Inventory settlement must use this port before choosing behavior from a
+    retained cause; matching only the delivered worker final loses that cause.
+    No Memory, source ACK, Cut release or new dispatch authority is granted. *)
 val refusal_evidence : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
   (Keeper_exact_walk_failure.t, string) result
 (** What a refused original shows about reading less. Only an [Input_refused]

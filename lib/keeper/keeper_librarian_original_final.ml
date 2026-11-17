@@ -57,11 +57,13 @@ type unconfirmed = Terminal_absent | Terminal_unresolved | Terminal_differs
   | Latest_incomplete | Latest_ordinal_invalid | Latest_differs | Latest_refused
 type verdict = Confirmed | Unconfirmed of unconfirmed
 
-let require_declaration_ending_latest = function
+let require_nonanswer_latest detail = function
   | Exact.No_completed_latest
   | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} -> Ok ()
   | Completed_latest {execution={outcome=Exact.Call_ended _;_};_} ->
-    Error "Original declaration replacement has a completed host call result"
+    Error detail
+let require_declaration_ending_latest latest =
+  require_nonanswer_latest "Original declaration replacement has a completed host call result" latest
 
 let declaration_replaced ~store {exact;schema;declaration_id} (record:Owner.retained) =
   match Lane_addon_request_progress.phase record.progress with
@@ -105,7 +107,10 @@ let confirm ~(observe : unit -> (Exact.retained_observation, string) result)
   let* ()=match actual with
     | Exact.Retained_not_allowed {reason=Replaced_declaration} ->
       let* latest=latest () in require_declaration_ending_latest latest
-    | Retained_call _ | Retained_unknown _ | Retained_not_allowed {reason=Permission_refused _}
+    | Retained_unknown Interrupted ->
+      let* latest=latest () in
+      require_nonanswer_latest "Interrupted original has a completed host call result" latest
+    | Retained_call _ | Retained_unknown (Cut | Raised) | Retained_not_allowed {reason=Permission_refused _}
     | Retained_request_id_reused -> Ok () in
   match final with
   | Exact.Call_final expected ->
@@ -135,6 +140,22 @@ let confirm_final ~store {exact;schema;declaration_id} final =
       ~observe:(fun () -> Exact.observe_retained ~store ~declaration_id ~schema exact)
       ~latest:(fun () -> Exact.read_latest_original_execution ~store ~declaration_id ~schema exact)
       final in
+  match verdict with
+  | Confirmed -> Ok ()
+  | Unconfirmed reason -> Error (unconfirmed_detail reason)
+
+let confirm_retained_final ~store {exact;schema;declaration_id} retained =
+  let observe () =
+    let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
+    let+ ()=match observed with
+      | Exact.Retained_terminal actual ->
+        equal (Exact.retained_final_to_json retained) (Exact.retained_final_to_json actual)
+          "Original retained evidence differs from its actual typed host terminal"
+      | Retained_absent | Retained_open -> Ok () in
+    observed in
+  let* verdict=confirm ~observe
+      ~latest:(fun () -> Exact.read_latest_original_execution ~store ~declaration_id ~schema exact)
+      (Exact.delivered retained) in
   match verdict with
   | Confirmed -> Ok ()
   | Unconfirmed reason -> Error (unconfirmed_detail reason)

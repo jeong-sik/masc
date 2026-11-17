@@ -50,6 +50,23 @@ val retain : store:Lane_addon_store.t -> Keeper_librarian_durable_request.t ->
     failure never proves absence or permits a replacement request ID. A linked
     replacement must match its predecessor's complete publication intent. *)
 type listed = Lane_addon_tool_request_owner.Record.t * Keeper_librarian_durable_request.index
+type terminal_ending_recovery =
+  | No_ending
+  | Ending_retained of Lane_addon_tool_request_owner.Record.t
+val recover_terminal_ending : store:Lane_addon_store.t -> config:Workspace.config ->
+  original:listed -> (terminal_ending_recovery, error) result
+(** Retain only an actual host [Replaced_declaration] or [Interrupted] ending
+    for a dispatch-pending original. The caller first validates the complete
+    scope inventory and supplies a waiting original with no Gate or replacement
+    publication. This port validates the immutable body, current physical
+    owner, acknowledged predecessor, absence of a fence and strict host proofs
+    before the original's refusal CAS and readback. Other host states return
+    [No_ending], without worker/provider calls, publication, source ACK or a
+    replacement ID. Open/absent host state needs no body read. [Ending_retained]
+    is a lifecycle observation, never Finished or Memory completion. The caller
+    wakes the same serialized lane and ends its current unit; a fresh inventory
+    decides settlement and which source remains to be read. Uncertain writes
+    and changed observations grant no settlement or continued use of old counts. *)
 val discover : store:Lane_addon_store.t -> base_path:string -> keepers_dir:string ->
   keeper_id:string -> (listed list, error) result
 (** Every original of the physical scope as its record and the index in that

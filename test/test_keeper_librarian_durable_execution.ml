@@ -2953,6 +2953,100 @@ let cut_memory_bytes fixture = io (fun () ->
     Current.journal_path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
     Current.durable_range_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
     Current.publication_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name])
+let test_interrupted_evidence_cannot_release_another_actual_host_cause ~raised () =
+  let check_mismatch fixture (original:Owner.retained) request cause =
+    let exact=Capture.request request |> get in
+    let schema=Option.to_result ~none:"unknown original lacks its schema" exact.Exact.schema |> get in
+    let actual=Exact.Retained_unknown cause in
+    check bool "the regression is an unlinked complete unread capture" true
+      (Capture.predecessor request=None && Source.extent (Capture.source request)=Keeper_librarian_range.All_unread);
+    check bool "no fence can mask the retained-cause regression" true
+      (io (fun () -> Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get)=None);
+    check bool "the configured host produced the actual unknown cause" true
+      ((io (fun () -> Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian" ~schema exact) |> get)
+       = Exact.Retained_terminal actual);
+    io (fun () -> Capture.confirm_retained_final ~store:fixture.store request actual |> get);
+    (match io (fun () -> Commit.validate ~store:fixture.store ~request ~record:original) |> get with
+     | Commit.Unfinished -> () | Settled -> fail "the actual Cut/Raised cause must remain unfinished");
+    let progress=List.fold_left (fun result event ->
+      let event=match event with
+        | Progress.Refused {stage=Execution;_} -> Progress.Refused {stage=Execution;
+            evidence=Exact.retained_final_to_json (Exact.Retained_unknown Interrupted)}
+        | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+        | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
+        | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
+        | Commit_conflicted _ | Refused {stage=Before_dispatch;_} | Refusal_settled _
+        | Successor_intended _ | Successor_observed _ | Observer _ -> event in
+      Result.bind result (fun progress -> Progress.append progress event))
+      (Ok Progress.captured) (Progress.events original.progress) |> get in
+    (* Only the retained consumer row is damaged. The actual host terminal,
+       schema, request, source and execution evidence are not fabricated. *)
+    let metadata=match Owner.record_to_json (Owner.listed original) with
+      | `Assoc fields -> `Assoc (List.map (fun (name,value) ->
+          name,if name="progress" then Progress.to_json progress else value) fields)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        fail "the original owner metadata is not an object" in
+    let damaged_record=Owner.decode_published
+      ~directory_name:(Filename.basename (scope_directory fixture original.scope))
+      ~file_name:(Store.digest original.request_id ^ ".json") metadata |> get in
+    let damaged=Owner.rebind original damaged_record
+      |> Option.to_result ~none:"damaged consumer row changed its immutable binding" |> get in
+    io (fun () -> Store.save_tool_request_owner fixture.store ~scope:original.scope
+      ~request_id:original.request_id metadata |> get);
+    let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture
+    and posts=F.post_count fixture.server and wakes=ref 0 in
+    let ids ()=List.map (fun ((record:Owner.retained),_) -> record.request_id) (observed_originals fixture) in
+    let before_ids=ids () and before_record=Owner.record_to_json (Owner.listed damaged) in
+    check bool "the typed request port rejects another unknown cause" true
+      (Result.is_error (io (fun () -> Capture.confirm_retained_final ~store:fixture.store request
+        (Exact.Retained_unknown Interrupted))));
+    check bool "direct inventory validation rejects the mismatched retained cause" true
+      (Result.is_error (io (fun () -> Commit.validate ~store:fixture.store ~request ~record:damaged)));
+    (match memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+      ~wake:(fun () -> incr wakes)) with
+     | Error (Consumer.Original_publication_blocked _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "mismatched Interrupted evidence reached archive or source reselection");
+    check bool "the mismatched original is not archived" false
+      (settled_on fixture ~date:(day_of original.request_id) original);
+    check (list string) "no replacement or fresh root ID is retained" before_ids (ids ());
+    let current,_=only_original fixture in
+    check json "the contradictory row is preserved for repair" before_record (Owner.record_to_json (Owner.listed current));
+    check bool "the actual host cause remains unchanged" true
+      ((io (fun () -> Exact.observe_retained ~store:fixture.store ~declaration_id:"librarian" ~schema exact) |> get)
+       = Exact.Retained_terminal actual);
+    check bool "the mismatch changes no atom, official or external ACK" true (cut_source_positions fixture=positions);
+    check bool "the mismatch writes no Memory, journal or receipts" true (cut_memory_bytes fixture=memory);
+    check int "the mismatch schedules no fresh pass" 0 !wakes;
+    check int "the mismatch invokes no provider" posts (F.post_count fixture.server) in
+  if not raised then
+    with_same_binding_cut (fun fixture original request _exact _schema ->
+      check_mismatch fixture original request Exact.Cut)
+  else with_fixture (fun ~sw:_ fixture ->
+    let original,request=retain_absent_history_original ~failed_selection:false fixture in
+    let exact=Capture.request request |> get in
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    (* Exercise the real configured authority and Exact exception producer.
+       Only the call failure after its actual Generation guard is injected. *)
+    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+      Ok (fun ~validate:_ -> before_dispatch Exact.Generation |> get;
+        raise (Failure "fixture call raised after the actual dispatch marker")) in
+    (match Exact.run ~store:fixture.store ~declaration_id:"librarian" ~package ~runner
+      ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path) exact |> get with
+     | Exact.Final Outcome_unknown -> () | Final (Call_final _ | Not_allowed _ | Request_id_reused) | Not_final _ ->
+       fail "the real host did not retain its raised call");
+    (match memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original:(Durable_owner.Read (original,request))
+      ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "a retained Raised cause cannot send an RPC")
+      ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "a retained Raised cause cannot publish")
+      ~wake:(fun () -> ())) |> Result.map_error Durable_owner.error_to_string |> get with
+     | Waited (Worker_unknown,_) -> ()
+     | Waited ((Worker_pending | Worker_unreachable | Missing_after_dispatch | Journal_recheck),_)
+     | Resumed _ | Original_replaced _ -> fail "the actual raised cause did not stay pending");
+    let original=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+      ~request_id:original.request_id |> owned |> Option.get) in
+    check_mismatch fixture original request Exact.Raised)
 let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () =
   with_same_binding_cut ~history_kind (fun fixture original request exact _schema ->
     let positions=cut_source_positions fixture and posts=F.post_count fixture.server in
@@ -4823,8 +4917,82 @@ let test_history_fence_uncertain_publication_still_blocks () = with_fixture (fun
    | History_fence_stored | History_fence_already_stored | History_fence_owner_changed ->
      fail "post-replacement error was reported as a confirmed fence");
   refuse_fenced_resume fixture original request)
+(* A deferred host attempt has neither a result nor an open started marker. *)
+let await_deferral fixture request_id =
+  let deferred () =
+    match io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id) |> get with
+    | None -> false
+    | Some stored ->
+      member "final" stored = `Null
+      && (match List.rev (Yojson.Safe.Util.to_list (member "attempts" stored)) with
+          | `Assoc fields::_ -> not (List.mem_assoc "started" fields)
+          | [] | _::_ -> false) in
+  Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+    while not (deferred ()) do Eio.Time.sleep fixture.clock 0.01 done)
+let stopped_incarnation="0123456789abcdef0123456789abcdef"
+let mark_stopped_incarnation fixture (exact:Exact.request) = io (fun () ->
+  let fields=match Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id |> get with
+    | Some (`Assoc fields) -> fields
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None ->
+      fail "expected the retained host request" in
+  let attempts=match List.assoc_opt "attempts" fields with
+    | Some (`List attempts) -> attempts
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None ->
+      fail "expected the host attempt history" in
+  let earlier=match List.rev attempts with
+    | `Assoc ["started",`String started_by]::earlier when started_by<>stopped_incarnation -> List.rev earlier
+    | [] | _::_ -> fail "the open attempt must be started by this process with no outcome" in
+  Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id
+    (`Assoc (List.map (fun (key,value) -> key,
+      if key="attempts" then `List (earlier @ [`Assoc ["started",`String stopped_incarnation]]) else value) fields))
+  |> get)
+type competing_ending = Replaced_waiter | Interrupted_waiter
+let retain_competing_waiter fixture request ending =
+  let root,root_request=memory_action fixture (fun () ->
+    Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination ->
+        let owner=Capture.physical_owner request in
+        (* A later independent capture can show a different file-source budget.
+           Keep the actual source/coverage, and let the real preparation factory
+           make a distinct question so the HTTP fixture binds its exact owner. *)
+        let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ())
+          ~source_lines:["Independent waiting root fixture source"] (Source.input (Capture.source request)) |> get in
+        let root_request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+          ~owner ~destination ~source:(Capture.source request) ~preparation ()) |> get in
+        let original_exact=Capture.request request |> get and root_exact=Capture.request root_request |> get in
+        check bool "the provider question identifies the independent retained root" true
+          (original_exact.system<>root_exact.system || original_exact.messages<>root_exact.messages);
+        let root=Durable_owner.retain ~store:fixture.store root_request
+          |> Result.map_error Durable_owner.error_to_string |> get in
+        Ok (root,root_request))) |> get in
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  fixture.set_response (fun capture ->
+    check string "only the independent root is submitted during setup" root.request_id (Capture.request_id capture);
+    ignore (Eio.Promise.try_resolve signal ());
+    match ending with
+    | Replaced_waiter -> `Too_many_requests,{|{"error":{"message":"fixture refusal","type":"rate_limit_error"}}|}
+    | Interrupted_waiter -> Eio.Promise.await release;`OK,F.openai_response (answer capture));
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    (match memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original:(Durable_owner.Read (root,root_request))
+      ~call:(Keeper_librarian_durable_edge.call ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ()))
+      ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "setup cannot publish the waiting root")
+      ~wake:(fun () -> ())) |> Result.map_error Durable_owner.error_to_string |> get with
+     | Waited (Worker_pending,_) -> ()
+     | Waited ((Worker_unknown | Worker_unreachable | Missing_after_dispatch | Journal_recheck),_)
+     | Resumed _ | Original_replaced _ -> fail "the independent root was not admitted to its actual worker");
+    Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> Eio.Promise.await arrived);
+    (match ending with
+     | Replaced_waiter -> await_deferral fixture root.request_id
+     | Interrupted_waiter ->
+       (* Simulate the stopped incarnation on the real in-flight host record,
+          then join its cancellation. The actual next host run names Interrupted. *)
+       mark_stopped_incarnation fixture (Capture.request root_request |> get);
+       (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () -> ()) with
+        | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error)));
+    root,root_request)
 type linked_recovery = Ended_only | Intent_only | Child_before_ack
-let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () = with_fixture (fun ~sw fixture ->
+let test_linked_replacement_preserves_the_resolution_protocol ?competing_ending ~cut ~recovery () = with_fixture (fun ~sw fixture ->
   let parent,parent_request=retain_absent_history_original ~failed_selection:false fixture in
   let expected=(fence_preview fixture parent_request).expected in
   io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name ~request_id:parent.request_id
@@ -4856,17 +5024,100 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
     let child=advance child Progress.Dispatch_intended in
     advance child (Progress.Refused {stage=Execution;
       evidence=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Cut)})) in
+  let competing=Option.map (retain_competing_waiter fixture request) competing_ending in
   let positions=progress fixture in
   let replacement=fixture.declaration true |> String.split_on_char '\n'
     |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-linked-replacement\"" | line -> line)
     |> String.concat "\n" in
   replace_actual_worker_configuration fixture ~sw replacement;
+  Option.iter (fun ((root:Owner.retained),root_request) ->
+    let root_exact=Capture.request root_request |> get in
+    let schema=Option.to_result ~none:"waiting root lacks its schema" root_exact.Exact.schema |> get in
+    let expected=match competing_ending with
+      | Some Replaced_waiter -> Exact.Retained_not_allowed {reason=Replaced_declaration}
+      | Some Interrupted_waiter -> Exact.Retained_unknown Interrupted
+      | None -> fail "competing root has no ending fixture" in
+    Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+      let rec wait ()=match io (fun () -> Exact.observe_retained ~store:fixture.store
+          ~declaration_id:"librarian" ~schema root_exact) |> get with
+        | Exact.Retained_terminal actual -> check bool "the actual host produced the named ending" true (actual=expected)
+        | Retained_absent | Retained_open -> Eio.Time.sleep fixture.clock 0.01;wait () in
+      wait ());
+    (* Match the incident: the old linked child already ended, but the
+       independent root's domain owner still only knows worker Waiting. *)
+    (match memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original:(Durable_owner.Read (child,request))
+      ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "the linked ending cannot send an RPC")
+      ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "the linked ending cannot publish")
+      ~wake:(fun () -> ())) |> Result.map_error Durable_owner.error_to_string |> get with
+     | Original_replaced _ -> () | Waited _ | Resumed _ -> fail "the linked child did not end before dispatch");
+    let root=io (fun () -> Owner.load ~store:fixture.store ~scope:root.scope ~request_id:root.request_id |> owned |> Option.get) in
+    check bool "the independent owner's ending has not yet been recovered" true
+      (match Progress.phase root.progress with Dispatch_pending _ -> true
+       | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)) competing;
+  let completion_provider_ids=ref [] in
+  fixture.set_response (fun capture ->
+    completion_provider_ids:=Capture.request_id capture:: !completion_provider_ids;
+    `OK,F.openai_response (answer capture));
+  let ending_posts=F.post_count fixture.server in
+  let ending_memory=cut_memory_bytes fixture and ending_positions=cut_source_positions fixture in
   let wakes=ref 0 in
+  let refuse_damaged_competing_proof ()=Option.iter (fun ((root:Owner.retained),root_request) ->
+    let path=proof_path fixture (Capture.request root_request |> get) in
+    let original_proof=io (fun () -> Fs_compat.load_file_opt path) in
+    let restore_proof ()=match original_proof with
+      | Some bytes -> write path bytes
+      | None -> if Sys.file_exists path then Sys.remove path in
+    let state ()=List.map (fun ((record:Owner.retained),_) -> Owner.record_to_json (Owner.listed record))
+      (observed_originals fixture) in
+    let before_records=state () and before_memory=cut_memory_bytes fixture
+    and before_positions=cut_source_positions fixture and before_wakes= !wakes in
+    let before_intents=(view ()).intents in
+    let damages=[
+      (fun () -> write path "{malformed actual original proof"),restore_proof;
+      (fun () -> if Sys.file_exists path then Sys.remove path; Unix.mkdir path 0o700),
+        (fun () -> Unix.rmdir path;restore_proof ())] in
+    List.iter (fun (damage,restore) ->
+      io damage;
+      Fun.protect ~finally:(fun () -> io restore) (fun () ->
+        (match memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+          ~wake:(fun () -> incr wakes)) with
+         | Error (Consumer.Original_publication_blocked _) -> ()
+         | Error error -> fail (Consumer.error_to_string error)
+         | Ok _ -> fail "a damaged competing proof reached archive or fresh capture");
+        check (list json) "proof failure preserves every original record" before_records (state ());
+        check bool "proof failure leaves the independent root unarchived" false
+          (settled_on fixture ~date:(day_of root.request_id) root);
+        check bool "proof failure preserves Memory and all publication files" true (cut_memory_bytes fixture=before_memory);
+        check bool "proof failure preserves atom, official and external ACK" true (cut_source_positions fixture=before_positions);
+        check bool "proof failure preserves the original resolution obligation" true ((view ()).intents=before_intents);
+        check int "proof failure schedules no pass" before_wakes !wakes;
+        check int "proof failure sends no model request" ending_posts (F.post_count fixture.server))) damages) competing in
+  (* The first check guards the new ending-only ingress; the second guards a
+     later inventory after the ending is durable but before any archive. *)
+  refuse_damaged_competing_proof ();
   (match memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
     ~wake:(fun () -> incr wakes)) with
-   | Ok (Consumer.Memory_not_committed _) -> ()
+   | Ok (Consumer.Memory_not_committed _) when Option.is_none competing -> ()
+   | Ok (Consumer.Pending _) when Option.is_some competing -> ()
    | Error error -> fail (Consumer.error_to_string error)
    | Ok _ -> fail "a linked continuation did not retain its declaration ending");
+  Option.iter (fun ((root:Owner.retained),root_request) ->
+    let current=io (fun () -> Owner.load ~store:fixture.store ~scope:root.scope ~request_id:root.request_id |> owned |> Option.get) in
+    let schema=Option.get (Capture.request root_request |> get).Exact.schema in
+    check bool "the independent root retains the actual host ending, not a commit" true
+      (match Progress.phase current.progress,competing_ending with
+       | Rejected {stage=Execution;evidence},Some Replaced_waiter ->
+         (Exact.retained_final_of_json ~schema evidence |> get) = Exact.Retained_not_allowed {reason=Replaced_declaration}
+       | Rejected {stage=Execution;evidence},Some Interrupted_waiter ->
+         (Exact.retained_final_of_json ~schema evidence |> get) = Exact.Retained_unknown Interrupted
+       | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+         | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _),
+         (None | Some (Replaced_waiter | Interrupted_waiter)) -> false);
+    check bool "the ending-only unit did not archive the root using old counts" false
+      (settled_on fixture ~date:(day_of root.request_id) root)) competing;
+  refuse_damaged_competing_proof ();
   let actual=io (fun () -> Owner.load ~store:fixture.store ~scope:child.scope ~request_id:child.request_id |> owned |> Option.get) in
   check bool "a linked original has a host-confirmed declaration ending" true
     (io (fun () -> Keeper_librarian_declaration_replacement.ended ~store:fixture.store
@@ -4884,8 +5135,10 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
     (Progress.phase actual.progress=Progress.phase child.progress
       && Option.is_some (Progress.settlement actual.progress));
   check int "the retained ending wakes the serialized lane once" 1 !wakes;
-  check int "ending alone sends no new model request" 0 (F.post_count fixture.server);
+  check int "ending alone sends no new model request" ending_posts (F.post_count fixture.server);
   check bool "ending alone advances no source" true (progress fixture=positions);
+  check bool "ending recovery writes no Memory, journal or receipts" true (cut_memory_bytes fixture=ending_memory);
+  check bool "ending recovery changes no atom, official or external ACK" true (cut_source_positions fixture=ending_positions);
   check bool "ending is not the operator resolution's Memory completion" true
     ((view ()).completion=Resolution_work.Not_observed);
   let intended_id=match recovery with
@@ -4958,9 +5211,12 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
            ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request successor |> get))));
     check bool "staged publication preserves the one parent intent" true
       (Progress.replacement parent.progress=Some (Progress.Preparation_pending intended));
-    check int "an interrupted publication has no provider effect" 0 (F.post_count fixture.server);
+    check int "an interrupted publication has no provider effect after the ending" ending_posts (F.post_count fixture.server);
     Some request_id in
   drive_advanced fixture;
+  Option.iter (fun ((root:Owner.retained),_) ->
+    check bool "fresh inventory archives only the ended independent root" true
+      (settled_on fixture ~date:(day_of root.request_id) root)) competing;
   let view=view () in
   let completed_id=match view.completion with
     | Resolution_work.Memory_committed {request_id} -> request_id
@@ -4981,8 +5237,16 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
      | Finished _ -> true
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
      | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
-  check int "only the new linked request reaches the provider" 1 (F.post_count fixture.server);
+  check int "only the new linked request reaches the provider after the ending" (ending_posts+1) (F.post_count fixture.server);
+  check (list string) "the sole new provider call names the retained linked descendant"
+    [completed_id] !completion_provider_ids;
   check bool "source positions advance only after the descendant commit" false (progress fixture=positions);
+  let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source completed_request)) in
+  let external_cursor=io (fun () -> Keeper_external_read_cursor.observe
+    ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+  check bool "the real descendant commit ACKs the exact original external frontier" true
+    (Keeper_external_read_cursor.observation_matches_preparation external_cursor
+      ~after:through ~through ~atom:None ~official:None);
   check int "the original resolution retains committed range receipts" 1
     (List.length (List.filter (fun intent -> Option.is_some intent.Resolution_intent.memory_commit) view.intents));
   check bool "the fenced parent and ended child remain available to completion recovery" true
@@ -6506,7 +6770,6 @@ let run_until_done ?(wakes=ref 0) fixture =
   go 16
 (* RFC-0500. The attempt a stopped server leaves: started by another
    incarnation, with no outcome and no proof. *)
-let stopped_incarnation="0123456789abcdef0123456789abcdef"
 let test_interrupted_original_settles_and_its_range_is_read_again ()=with_fixture (fun ~sw:_ fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   let hold=Atomic.make true in
@@ -6518,22 +6781,7 @@ let test_interrupted_original_settles_and_its_range_is_read_again ()=with_fixtur
     let record,capture=only_original fixture in
     let exact=Capture.request capture |> get in
     (* Written before the cut, so no host pass reads this process's marker. *)
-    io (fun () ->
-      let fields=match Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id |> get with
-        | Some (`Assoc fields) -> fields
-        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None ->
-          fail "expected the retained host request" in
-      let attempts=match List.assoc_opt "attempts" fields with
-        | Some (`List attempts) -> attempts
-        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None ->
-          fail "expected the host attempt history" in
-      let earlier=match List.rev attempts with
-        | `Assoc ["started",`String started_by]::earlier when started_by<>stopped_incarnation -> List.rev earlier
-        | [] | _::_ -> fail "the open attempt must be started by this process with no outcome" in
-      Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id
-        (`Assoc (List.map (fun (key,value) -> key,
-          if key="attempts" then `List (earlier @ [`Assoc ["started",`String stopped_incarnation]]) else value) fields))
-      |> get);
+    mark_stopped_incarnation fixture exact;
     Atomic.set hold false;
     (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () -> ()) with
      | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
@@ -6550,19 +6798,6 @@ let test_interrupted_original_settles_and_its_range_is_read_again ()=with_fixtur
    3.6. An original the worker holds and the host has not run ends when its
    declaration is replaced. The pass that reads that end does not narrow the
    next read and does not wait for another signal. *)
-(* The host's attempt for this request ended without a result, so the request
-   has no result and no open attempt. *)
-let await_deferral fixture request_id =
-  let deferred () =
-    match io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id) |> get with
-    | None -> false
-    | Some stored ->
-      member "final" stored = `Null
-      && (match List.rev (Yojson.Safe.Util.to_list (member "attempts" stored)) with
-          | `Assoc fields::_ -> not (List.mem_assoc "started" fields)
-          | [] | _::_ -> false) in
-  Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
-    while not (deferred ()) do Eio.Time.sleep fixture.clock 0.01 done)
 (* The fixture declaration under another [run_id]: the same installation,
    package and tool with another semantic revision. *)
 let replaced_declaration ?(enabled=true) fixture =
@@ -7729,8 +7964,16 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_cut_replacement_releases_unread_source_and_survives_rollback;
   test_case "a replacement does not release an original Raised outcome" `Quick
     test_replaced_raised_original_stays_unknown;
+  test_case "retained Interrupted cannot archive an actual host Cut" `Quick
+    (test_interrupted_evidence_cannot_release_another_actual_host_cause ~raised:false);
+  test_case "retained Interrupted cannot archive an actual host Raised" `Quick
+    (test_interrupted_evidence_cannot_release_another_actual_host_cause ~raised:true);
   test_case "a linked Captured keeps resolution completion after ending and rollback" `Quick
     (test_linked_replacement_preserves_the_resolution_protocol ~cut:false ~recovery:Ended_only);
+  test_case "a confirmed source child survives an independent host-replaced waiting root" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~competing_ending:Replaced_waiter ~cut:false ~recovery:Ended_only);
+  test_case "a confirmed source child survives an independent interrupted waiting root" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~competing_ending:Interrupted_waiter ~cut:false ~recovery:Ended_only);
   test_case "a linked Cut keeps resolution completion after ending and rollback" `Quick
     (test_linked_replacement_preserves_the_resolution_protocol ~cut:true ~recovery:Ended_only);
   test_case "a linked Captured recovers the same full child intent" `Quick

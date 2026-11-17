@@ -408,6 +408,9 @@ let refusal_evidence ~store capture final =
 let confirm_final ~store capture final =
   let* target=host_proof_target capture in
   Final.confirm_final ~store target final
+let confirm_retained_final ~store capture retained =
+  let* target=host_proof_target capture in
+  Final.confirm_retained_final ~store target retained
 let validate_proposal capture output =
   Runtime.validate_durable_proposal capture.preparation output |> Result.map_error (function
     | Runtime.Preparation_invalid detail -> detail

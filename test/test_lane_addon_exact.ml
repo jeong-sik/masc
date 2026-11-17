@@ -328,6 +328,18 @@ let test_a_request_in_flight_is_not_run_twice () =
       (fun () ->
         Eio.Promise.await entered;
         let same_root = Store.create ~root in
+        let alias_path=root ^ "-alias" in
+        Unix.symlink root alias_path;
+        List.iter (fun alias_root ->
+          let alias=Store.create ~root:alias_root in
+          check bool "an alias cannot acquire a second execution claim" true
+            (match require (Exact.with_cut_exclusion ~store:alias ~declaration_id ~schema (request "r7")
+                ~use:(fun _ -> fail "an entered host call must exclude recovery")
+                |> Result.map_error Exact.describe_recovery_error) with
+             | Exact.Cut_busy -> true
+             | Cut_not_retained _ | Cut_excluded _ -> false))
+          [Filename.concat root ".";alias_path;Filename.concat (Filename.concat alias_path "missing") ".."];
+        check bool "claim lookup creates no missing suffix" false (Sys.file_exists (Filename.concat root "missing"));
         let unused, _, _ = counting_runner same_root (ref []) in
         second := Some (run_request same_root unused (request "r7"));
         during := attempts same_root "r7";
@@ -1971,6 +1983,113 @@ let test_preflight_and_the_sweep_skip_a_staged_write () =
         [swept.Sweep.removed_exact_records; swept.removed_proofs; swept.removed_observations];
       check (list bool) "the staged writes stay" [true; true; true] (List.map Sys.file_exists staged))
 
+let cut_original store original =
+  let cancelled ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    Ok (fun ~validate:_ -> require (before_dispatch Exact.Generation);raise (Eio.Cancel.Cancelled Exit)) in
+  (match Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:cancelled original with
+   | _ -> fail "the fixture cancels after its real started marker"
+   | exception Eio.Cancel.Cancelled Exit -> ());
+  let unused,_,_=counting_runner store (ref []) in
+  check bool "the joined original becomes host Cut without another call" true
+    (run_request store unused original=Exact.Final Exact.Outcome_unknown)
+
+let exclusion store original use =
+  Eio_unix.run_in_systhread (fun () -> Exact.with_cut_exclusion ~store ~declaration_id ~schema original ~use)
+  |> Result.map_error Exact.describe_recovery_error |> require
+
+let test_cut_exclusion_is_scoped_and_never_replays () = with_root (fun root ->
+  let store=Store.create ~root and original=request "excluded-cut" in
+  cut_original store original;
+  let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
+  let escaped=ref None in
+  let result=exclusion store original (fun witness ->
+    escaped:=Some witness;
+    let evidence=Exact.confirm_cut_exclusion ~store ~declaration_id ~schema original witness
+      |> Result.map_error Exact.describe_recovery_error |> require in
+    check int "the witness names the actual latest attempt" 1 evidence.attempt_ordinal;
+    check string "the identity is the original" original.request_id evidence.key.request_id;
+    check bool "another input cannot use the active witness" true
+      (Result.is_error (Exact.confirm_cut_exclusion ~store ~declaration_id ~schema
+        (request ~message:"another input" original.request_id) witness));
+    let unused,_,_=counting_runner store (ref []) in
+    check bool "the claim remains held through the consumer callback" true
+      (run_request store unused original=Exact.Not_final Exact.Attempt_in_progress);
+    check bool "recovery only observes while this callback owns the claim" true
+      (require (Exact.recover_retained ~store ~declaration_id ~schema original
+        |> Result.map_error Exact.describe_recovery_error)=Exact.Retained_terminal (Exact.Retained_unknown Exact.Cut));
+    (match Exact.with_cut_exclusion ~store ~declaration_id ~schema original ~use:Fun.id with
+     | Ok Exact.Cut_busy -> ()
+     | Ok (Cut_not_retained _ | Cut_excluded _) | Error _ -> fail "nested exclusion acquired the same original");
+    Error "consumer did not publish") in
+  check bool "a consumer failure remains the consumer's result" true
+    (result=Exact.Cut_excluded (Error "consumer did not publish"));
+  let witness=Option.get !escaped in
+  check bool "an escaped witness has expired" true
+    (Result.is_error (Exact.confirm_cut_exclusion ~store ~declaration_id ~schema original witness));
+  check bool "the original Unknown remains byte-for-byte unchanged" true
+    (before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id));
+  (match exclusion store original (fun _ -> raise (Eio.Cancel.Cancelled Exit)) with
+   | _ -> fail "callback cancellation must propagate"
+   | exception Eio.Cancel.Cancelled Exit -> ());
+  (match exclusion store original (fun witness ->
+     Exact.confirm_cut_exclusion ~store ~declaration_id ~schema original witness) with
+   | Exact.Cut_excluded (Ok _) -> ()
+   | Cut_busy | Cut_not_retained _ | Cut_excluded (Error _) -> fail "cancelled callback did not release its claim"))
+
+let test_cut_exclusion_refuses_other_terminals_and_changed_evidence () = with_root (fun root ->
+  let store=Store.create ~root in
+  let missing=request "not-retained-cut" in
+  let save original attempts final = require (Store.save_exact_request store ~declaration_id
+    ~request_id:original.Exact.request_id (`Assoc ["declaration_id",`String declaration_id;
+      "request_id",`String original.request_id;"digest",`String (Exact.digest original);
+      "request",Exact.request_to_json original;"attempts",`List attempts;"final",final])) in
+  let opened=request "open-original" in
+  save opened [other_process_marker] `Null;
+  let interrupted=request "interrupted-original" in
+  save interrupted [other_process_marker] `Null;
+  let unused,_,_=counting_runner store (ref []) in
+  ignore (run_request store unused interrupted);
+  let answered=request "answered-original" in
+  let answering,_,_=counting_runner store (ref [Answer question]) in
+  ignore (run_request store answering answered);
+  let raised=request "raised-original" in
+  let raising ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    Ok (fun ~validate:_ -> require (before_dispatch Exact.Generation);raise Exit) in
+  ignore (run_request store raising raised);
+  let denied=request ~output:"undeclared" "denied-original" in
+  ignore (run_request store unused denied);
+  List.iter (fun original -> match exclusion store original (fun _ -> fail "a non-Cut reached the exclusion callback") with
+    | Exact.Cut_not_retained _ -> ()
+    | Cut_busy | Cut_excluded _ -> fail "a non-Cut acquired recovery authority")
+    [missing;opened;interrupted;answered;raised;denied];
+  let original=request "changed-cut" in
+  cut_original store original;
+  let before=Option.get (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)) in
+  let field name value = match before with `Assoc fields ->
+    `Assoc (List.map (fun (key,old) -> key,(if key=name then value else old)) fields)
+    | _ -> fail "original Exact object" in
+  (match exclusion store original (fun witness ->
+     check bool "another original cannot use this witness" true (Result.is_error
+       (Exact.confirm_cut_exclusion ~store ~declaration_id ~schema (request ~message:"different" original.request_id) witness));
+     require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id
+       (field "attempts" (`List [])));
+     check bool "changed record evidence refuses the effect boundary" true
+       (Result.is_error (Exact.confirm_cut_exclusion ~store ~declaration_id ~schema original witness))) with
+   | Exact.Cut_excluded () -> ()
+   | Cut_busy | Cut_not_retained _ -> fail "the retained Cut did not enter its exclusive callback");
+  require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id before);
+  let completed=request "completed-elsewhere" in
+  let answer,_,_=counting_runner store (ref [Answer question]) in
+  ignore (run_request store answer completed);
+  let proof=Yojson.Safe.from_file (link_file store completed) in
+  require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id before);
+  let path=link_file store original in
+  let bytes=Yojson.Safe.to_string proof in
+  Out_channel.with_open_bin path (fun channel -> output_string channel bytes);
+  check bool "a proof of another original rejects the whole guarded read" true
+    (Result.is_error (Exact.with_cut_exclusion ~store ~declaration_id ~schema original ~use:(fun _ ->
+      fail "conflicting proof reached recovery callback"))))
+
 let () =
   run "lane add-on exact requests"
     [ ( "retention"
@@ -1992,6 +2111,9 @@ let () =
         ; test_case "an undeclared output is not allowed" `Quick test_an_undeclared_output_is_not_allowed
         ; test_case "selection hides but preserves a retained answer" `Quick test_selection_hides_but_preserves_a_retained_answer
         ; test_case "a request in flight is not run twice" `Quick test_a_request_in_flight_is_not_run_twice
+        ; test_case "Cut exclusion is scoped and never replays" `Quick test_cut_exclusion_is_scoped_and_never_replays
+        ; test_case "Cut exclusion refuses other terminals and changed evidence" `Quick
+            test_cut_exclusion_refuses_other_terminals_and_changed_evidence
         ; test_case "a cancelled call leaves its attempt started" `Quick test_a_cancelled_call_leaves_its_attempt_started
         ; test_case "a call cut off before its dispatch is tried again" `Quick
             test_a_call_cut_off_before_its_dispatch_is_tried_again

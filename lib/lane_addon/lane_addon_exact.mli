@@ -544,6 +544,45 @@ val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity
     stored request and hashes it once. Run the blocking read on a system
     thread in Eio. *)
 
+type cut_exclusion
+(** A callback-scoped witness of the actual original claim and its terminal
+    Cut. This does not prove remote provider termination or grant retry,
+    Memory or source ACK authority. Keep domain effects and strict readback
+    inside the callback under the workspace lease and serialized owner.
+    Join any work using this witness before leaving the callback; do not
+    pass it to detached work or reuse it outside that scope. *)
+type cut_exclusion_evidence = private {
+  key : Retained_key.t;
+  attempt_ordinal : int;
+  record_sha256 : string;
+  proof_sha256 : string option;
+}
+(** Bound immutable observations, not a persisted source-unconsumed grant.
+    Hashes cover canonical JSON. [proof_sha256 = None] means the proof file
+    was absent, after checking the record and latest execution binding. *)
+type 'a cut_exclusion_outcome =
+  | Cut_busy
+  | Cut_not_retained of retained_observation
+  | Cut_excluded of 'a
+val with_cut_exclusion : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> use:(cut_exclusion -> 'a) ->
+  ('a cut_exclusion_outcome, recovery_error) result
+(** Try the same claim as run/recover_retained without waiting. Busy returns
+    Cut_busy, never an observation mistaken for exclusion. Validate the full
+    request, schema, attempts and proof link; only retained terminal Cut with
+    no completed latest execution enters use. Other states return
+    Cut_not_retained; unreadable or contradictory evidence is an error.
+    All three claim users resolve existing store-root ancestors to the same
+    physical path without creating missing directories. The caller's lease
+    must keep that store root stable for the callback's lifetime.
+    Performs no publication, runner, worker or provider call. Offload the
+    whole blocking callback scope in Eio, preserving cancellation and join. *)
+val confirm_cut_exclusion : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> cut_exclusion ->
+  (cut_exclusion_evidence, recovery_error) result
+(** Recheck identity, evidence and witness lifetime in its callback before
+    a domain effect. Expired, foreign or changed witnesses refuse. *)
+
 val recovery_of_files : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> record:Yojson.Safe.t option ->
   proof:Yojson.Safe.t option -> (Yojson.Safe.t option, string) result

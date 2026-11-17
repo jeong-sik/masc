@@ -1074,6 +1074,16 @@ type latest_original_execution =
 (* The latest completed attempt the original's record and proof link show,
    with the schema [original_schema] checked. [proof] reads the link. It is
    called after the record checks, which is when a store read reads it. *)
+let latest_attempt_ordinal (record:record) =
+  let rec last ordinal = function
+    | Delivery_refused _ :: earlier -> last (ordinal-1) earlier
+    | [] | (Started _ | Deferred _ | Completed_call _ | Unknown_interrupted
+        | Unknown_cut | Unknown_raised _ | Reused) :: _ -> ordinal in
+  let length=List.length record.attempts in
+  match record.final with
+  | Some (Call_final _ | Outcome_unknown | Request_id_reused) -> last length (List.rev record.attempts)
+  | None | Some (Not_allowed _) -> length
+
 let latest_bound ~store ~declaration_id ~schema bound ~record ~proof =
   let request = Digested.request bound in
   let proofs () =
@@ -1089,15 +1099,7 @@ let latest_bound ~store ~declaration_id ~schema bound ~record ~proof =
     let* _=validate_record ~request ~schema:None record in
     let* proofs=proofs () in
     let* ()=bind_proofs record proofs in
-    let rec last_execution_ordinal ordinal = function
-      | Delivery_refused _ :: earlier -> last_execution_ordinal (ordinal - 1) earlier
-      | [] | (Started _ | Deferred _ | Completed_call _ | Unknown_interrupted
-          | Unknown_cut | Unknown_raised _ | Reused) :: _ -> ordinal in
-    let length=List.length record.attempts in
-    let attempt_ordinal = match record.final with
-      | Some (Call_final _ | Outcome_unknown | Request_id_reused) ->
-          last_execution_ordinal length (List.rev record.attempts)
-      | None | Some (Not_allowed _) -> length in
+    let attempt_ordinal=latest_attempt_ordinal record in
     match selected_proof ~attempt_ordinal proofs with
     | None -> Ok No_completed_latest
     | Some (retained_schema,execution) ->
@@ -1141,6 +1143,25 @@ let claim key =
     if Hashtbl.mem in_flight key then false else (Hashtbl.replace in_flight key (); true))
 
 let release key = Mutex.protect in_flight_lock (fun () -> Hashtbl.remove in_flight key)
+
+(* Resolve existing parents before lexical missing suffixes, including .. .
+   All claim users share this key; an alias must not acquire a second claim. *)
+let rec claim_root path =
+  match Unix.realpath path with
+  | root -> Ok root
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
+    let parent=Filename.dirname path in
+    if parent=path then Error "Exact claim root has no existing ancestor" else
+    let+ parent=claim_root parent in
+    (match Filename.basename path with
+     | "." -> parent
+     | ".." -> Filename.dirname parent
+     | name -> Filename.concat parent name)
+  | exception Unix.Unix_error (error,call,path) -> Error (call ^ " " ^ path ^ ": " ^ Unix.error_message error)
+  | exception Sys_error detail -> Error detail
+let claim_key ~store ~declaration_id ~request_id =
+  Systhread_host.run ~label:"addon-exact-claim-root" (fun () ->
+    let+ root=claim_root (Lane_addon_store.root store) in root,declaration_id,request_id)
 
 let finish_record prior = function
   | Call_ended final ->
@@ -1197,7 +1218,7 @@ let recover_retained ~store ~declaration_id ~schema request =
      mismatch is permanent. *)
   let* schema = invalid (original_schema ~declaration_id ~schema request) in
   let bound = Digested.make request in
-  let key = Lane_addon_store.root store, declaration_id, request.request_id in
+  let* key = unreadable (claim_key ~store ~declaration_id ~request_id:request.request_id) in
   (* [observe_retained] already reports [recovery_error], so a concurrent claim
      is forwarded unchanged instead of being folded into one class. *)
   if not (claim key) then observe_retained_classified ~store ~declaration_id ~schema bound
@@ -1216,6 +1237,61 @@ let recover_retained ~store ~declaration_id ~schema request =
           ~request_id:request.request_id
           (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
         observe_retained_classified ~store ~declaration_id ~schema bound)
+
+type cut_exclusion_evidence = {
+  key:Retained_key.t; attempt_ordinal:int; record_sha256:string; proof_sha256:string option;
+}
+type cut_exclusion = {
+  claim_key:string*string*string; bound:Digested.t; schema:Yojson.Safe.t;
+  evidence:cut_exclusion_evidence; active:bool Atomic.t;
+}
+type 'a cut_exclusion_outcome = Cut_busy | Cut_not_retained of retained_observation | Cut_excluded of 'a
+let exclusion_hash wire =
+  let+ canonical=invalid (Lane_addon_action.canonical wire) in
+  Lane_addon_store.digest (Yojson.Safe.to_string canonical)
+let cut_snapshot ~store ~declaration_id ~schema bound =
+  let request=Digested.request bound in
+  let* wire=unreadable (Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id) in
+  let* proof=unreadable (load_proof_wire ~store ~declaration_id bound) in
+  let* observed=invalid (observe_record ~declaration_id ~schema request wire) in
+  let* latest=invalid (latest_bound ~store ~declaration_id ~schema bound ~record:wire ~proof:(fun () -> Ok proof)) in
+  match observed,latest with
+  | Retained_terminal (Retained_unknown Cut),No_completed_latest ->
+    let* wire=invalid (Option.to_result ~none:"Cut original has no retained record" wire) in
+    let* record=invalid (bound_record ~declaration_id bound wire) in
+    let* record_sha256=exclusion_hash wire in
+    let+ proof_sha256=match proof with None -> Ok None | Some wire -> Result.map Option.some (exclusion_hash wire) in
+    observed,Some {key=Retained_key.of_request ~declaration_id request;
+      attempt_ordinal=latest_attempt_ordinal record;record_sha256;proof_sha256}
+  | Retained_terminal (Retained_unknown Cut),Completed_latest _ ->
+    invalid (Error "Cut original has a completed latest execution")
+  | (Retained_absent | Retained_open | Retained_terminal (Retained_call _
+      | Retained_unknown (Interrupted | Raised) | Retained_not_allowed _
+      | Retained_request_id_reused)),
+      (No_completed_latest | Completed_latest _) -> Ok (observed,None)
+let with_cut_exclusion ~store ~declaration_id ~schema request ~use =
+  let* schema=invalid (original_schema ~declaration_id ~schema request) in
+  let bound=Digested.make request in
+  let* key=unreadable (claim_key ~store ~declaration_id ~request_id:request.request_id) in
+  if not (claim key) then Ok Cut_busy else
+  let active=Atomic.make true in
+  Fun.protect ~finally:(fun () -> Atomic.set active false;release key) (fun () ->
+    let* observed,evidence=cut_snapshot ~store ~declaration_id ~schema bound in
+    match evidence with
+    | None -> Ok (Cut_not_retained observed)
+    | Some evidence -> Ok (Cut_excluded (use {claim_key=key;bound;schema;evidence;active})))
+let confirm_cut_exclusion ~store ~declaration_id ~schema request witness =
+  let require condition detail=if condition then Ok () else invalid (Error detail) in
+  let* ()=require (Atomic.get witness.active) "Exact Cut exclusion witness has expired" in
+  let* schema=invalid (original_schema ~declaration_id ~schema request) in
+  let bound=Digested.make request in
+  let* key=unreadable (claim_key ~store ~declaration_id ~request_id:request.request_id) in
+  let* ()=require (key=witness.claim_key && Digested.digest bound=Digested.digest witness.bound
+    && Yojson.Safe.equal schema witness.schema) "Exact Cut exclusion belongs to another original" in
+  let* _,evidence=cut_snapshot ~store ~declaration_id ~schema bound in
+  let* ()=require (Atomic.get witness.active && evidence=Some witness.evidence)
+    "Exact Cut exclusion evidence changed" in
+  Ok witness.evidence
 
 let recovery_of_files ~store ~declaration_id ~schema request ~record ~proof =
   let* schema = original_schema ~declaration_id ~schema request in
@@ -1256,7 +1332,7 @@ type execution_authority =
 
 let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~authorize_request request =
   let request_id = request.request_id in
-  let key = Lane_addon_store.root store, declaration_id, request_id in
+  let* key = claim_key ~store ~declaration_id ~request_id in
   (* Identity precedes permission: even a refused request owns its id. *)
   if not (claim key) then Ok (Not_final Attempt_in_progress)
   else Fun.protect ~finally:(fun () -> release key) (fun () ->

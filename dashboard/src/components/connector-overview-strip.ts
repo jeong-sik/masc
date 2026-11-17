@@ -22,48 +22,15 @@ import { HeartbeatStreakChip } from './common/heartbeat-streak-chip'
 import { HeartbeatUptimeChip } from './common/heartbeat-uptime-chip'
 import { LivePulseDot } from './common/live-pulse-dot'
 import { Sparkline } from './common/sparkline'
-import { recordHeartbeat, useHeartbeatHistory, lastHeartbeatTickMs, rollingUptimeSeries, type HeartbeatState } from '../lib/heartbeat-history'
+import { recordHeartbeat, useHeartbeatHistory, rollingUptimeSeries, type HeartbeatState } from '../lib/heartbeat-history'
 
 /** Sampling cadence for the heartbeat ring buffer. Chosen so 45 bars
     cover ~22 minutes of history — matches Uptime Kuma's default
     "last 45 checks at 30s interval" visual rhythm. */
 const HEARTBEAT_SAMPLE_MS = 30_000
 
-// Wall-clock tick for the live-pulse indicator — updates every second so
-// the dot can flip from live to stale without needing a prop change.
-// Kept module-scope so every StatusSummaryLine instance shares one timer
-// instead of N — but refcounted via `useLivePulseTicker`, so the
-// interval only runs while at least one StatusSummaryLine is mounted.
-// Previously the timer started at module-import time and never stopped,
-// firing 1 Hz even on views that never rendered the strip.
-const livePulseNowMs = signal<number>(Date.now())
-let livePulseTimer: number | null = null
-let livePulseSubscribers = 0
-
-function startLivePulseTicker(): void {
-  if (livePulseTimer != null || typeof window === 'undefined') return
-  livePulseTimer = window.setInterval(() => { livePulseNowMs.value = Date.now() }, 1000)
-}
-
-function stopLivePulseTicker(): void {
-  if (livePulseTimer == null || typeof window === 'undefined') return
-  window.clearInterval(livePulseTimer)
-  livePulseTimer = null
-}
-
-function useLivePulseTicker(): void {
-  useEffect(() => {
-    livePulseSubscribers += 1
-    startLivePulseTicker()
-    return () => {
-      livePulseSubscribers = Math.max(0, livePulseSubscribers - 1)
-      if (livePulseSubscribers === 0) stopLivePulseTicker()
-    }
-  }, [])
-}
-
 /** Pure: derive the heartbeat state for a connector from the gate info
-    that the overview strip already polls. No extra network calls. */
+    that the overview strip already holds. No extra network calls. */
 function deriveHeartbeatState(
   connector: GateConnectorInfo | null,
 ): HeartbeatState {
@@ -560,21 +527,13 @@ function StatusSummaryLine({ summary, connectors }: { summary: ConnectorStripSum
   // One quiet aggregate sentence — always on, never loud. Sits between
   // the loud banners (celebration / incident) and the action row, so the
   // operator always has baseline numbers even when neither banner fires.
-  useLivePulseTicker()
-  const now = livePulseNowMs.value
-  const lastTick = lastHeartbeatTickMs.value
   const offlineLabel = formatOfflineConnectorLabel(offlineConnectorNames(connectors))
   return html`
     <div
       class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-[var(--color-fg-disabled)]"
       data-strip-summary
     >
-      <${LivePulseDot}
-        lastTickMs=${lastTick}
-        nowMs=${now}
-        sampleIntervalMs=${HEARTBEAT_SAMPLE_MS}
-        testId="overview-strip-live"
-      />
+      <${LivePulseDot} testId="overview-strip-live" />
       <span>
         <span class="font-semibold text-[var(--color-fg-primary)]" data-strip-summary-configured>${summary.configuredCount}/${summary.connectorTotal}</span>
         <span> configured</span>

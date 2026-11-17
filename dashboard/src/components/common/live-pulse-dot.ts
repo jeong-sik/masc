@@ -1,19 +1,15 @@
-// LivePulseDot — tiny pulsing dot that answers "is polling still live?".
+// LivePulseDot — tiny pulsing dot that answers "is the live stream connected?".
 //
-// Reference UIs (Datadog host-list "live" column, Grafana dashboard
-// refresh indicator, GitHub Status page): a pulsing green dot beside
-// the section header says "data under this header is being refreshed
-// right now". When the dot stops pulsing (stale) or goes idle (never
-// sampled), the operator immediately sees that the view is frozen —
-// a frozen heartbeat strip looks identical to a legitimately stable
-// one, so this indicator is the only surface that tells them apart.
-//
-// Pure classifier — a test pins the threshold math so a future change
-// to HEARTBEAT_SAMPLE_MS doesn't silently break the stale banding.
+// The dashboard learns about changes over one SSE observer stream
+// (dashboard-observer.ts). While that stream is admitted the data under the
+// header follows the server; when it drops, the view stays on its last read
+// until the stream is admitted again. A silent stream is closed by its idle
+// deadline, so "admitted" alone says whether the view is following.
 
 import { html } from 'htm/preact'
+import { dashboardObserverReady } from '../../dashboard-observer-state'
 
-type LivePulseState = 'live' | 'stale' | 'idle'
+type LivePulseState = 'live' | 'idle'
 
 interface LivePulseView {
   state: LivePulseState
@@ -22,55 +18,27 @@ interface LivePulseView {
   label: string
 }
 
-/** Pure: classify the pulse state from the last-tick timestamp.
-    - `idle`: sampler has never fired (null). Grey dot, no pulse.
-    - `live`: last tick within 2× the sample interval — the operator's
-      view is fresh. Green dot, breathing pulse.
-    - `stale`: last tick older than 2× interval — sampler is frozen or
-      tab was backgrounded. Amber dot, no pulse.
-    2× threshold mirrors Datadog's "missed one expected heartbeat →
-    still healthy; missed two → something's wrong" convention, tolerant
-    of one-off scheduling jitter. */
-export function classifyLivePulse(
-  lastTickMs: number | null,
-  nowMs: number,
-  sampleIntervalMs: number,
-): LivePulseView {
-  if (lastTickMs === null) {
-    return { state: 'idle', label: 'Live polling · 샘플 대기 중' }
-  }
-  const ageMs = nowMs - lastTickMs
-  if (ageMs > sampleIntervalMs * 2) {
-    const ageSec = Math.max(1, Math.floor(ageMs / 1000))
-    return { state: 'stale', label: `Live polling · 샘플 멈춤 (${ageSec}s ago)` }
-  }
-  return { state: 'live', label: 'Live polling · 샘플링 정상' }
+/** Pure: `live` while the observer stream is admitted, `idle` otherwise. */
+export function classifyLivePulse(ready: boolean): LivePulseView {
+  return ready
+    ? { state: 'live', label: '실시간 연결 · 서버 변경을 받는 중' }
+    : { state: 'idle', label: '실시간 연결 끊김 · 다시 연결하는 중' }
 }
 
 const DOT_BASE = 'inline-block h-2 w-2 rounded-full'
 
 const DOT_TONE: Record<LivePulseState, string> = {
   live: 'bg-[var(--ok-10)] animate-pulse shadow-[0_0_6px_rgb(var(--ok-glow)/0.6)]',
-  stale: 'bg-[var(--warn-10)]',
-  idle: 'bg-[var(--color-bg-hover)]',
+  idle: 'bg-[var(--warn-10)]',
 }
 
 interface LivePulseDotProps {
-  lastTickMs: number | null
-  nowMs: number
-  sampleIntervalMs: number
   class?: string
   testId?: string
 }
 
-export function LivePulseDot({
-  lastTickMs,
-  nowMs,
-  sampleIntervalMs,
-  class: cx,
-  testId,
-}: LivePulseDotProps) {
-  const view = classifyLivePulse(lastTickMs, nowMs, sampleIntervalMs)
+export function LivePulseDot({ class: cx, testId }: LivePulseDotProps) {
+  const view = classifyLivePulse(dashboardObserverReady.value)
   const tone = DOT_TONE[view.state]
   return html`<span
     class=${`${DOT_BASE} ${tone} ${cx ?? ''}`}

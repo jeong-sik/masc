@@ -145,13 +145,13 @@ val retire_uncollected_turn :
 claim 이 native 호출을 열기 직전의 준비(`Keeper_direct_native_continuation.prepare`)에 한 단계를 더한다. 자리를 claim 으로 둔 근거와 닫은 뒤의 순서는 `restart-resumes-running-chat-operations` §4.4 다. 기동 정리(`journal_terminal`)는 바꾸지 않는다. 지금처럼 기록을 읽기만 한다.
 
 1. native 호출의 최신 체크포인트 참조(`call.checkpoint`)에서 `turn_count` 를 읽는다. 참조가 이 값을 이미 담는다(`keeper_checkpoint_ref.mli:4-8`). 체크포인트를 열 필요가 없다.
-   - Owner 는 체크포인트를 쓸 때마다 이 참조를 옮긴다. 순서는 내용 보관 → Owner store commit → agent_core 진행이다(`keeper_direct_native_continuation.ml:365-376`, 460-464). store 는 `synchronous=EXTRA` 다(`keeper_chat_operation_store.ml:802-806`).
+   - Owner 는 체크포인트를 쓸 때마다 이 참조를 옮긴다. 순서는 내용 보관 → Owner store commit → agent_core 진행이다(`keeper_direct_native_continuation.ml:375-386`, 446-474). store 는 `synchronous=EXTRA` 다(`keeper_chat_operation_store.ml:802-806`).
    - 그래서 턴 k 의 provider 시도가 열렸으면, 참조는 턴 k-1 의 마지막 체크포인트(`turn_count = k`)이거나 그 뒤의 것이다.
 2. writer 가 끝났다고 증명된 호출이면 `retire_uncollected_turn` 을 부른다(`restart-resumes-running-chat-operations` §4.7). 준비가 그 호출을 복원할 때 쓰는 것과 같은 runtime·디렉터리·locator 와 seed 체크포인트의 Agent 이름을 넘긴다.
 3. `Retired` 면 그 disposition 을 호출의 terminal 로 적는다. 같은 claim 이 `call.checkpoint` 에서 새 native 호출을 연다.
 4. `Not_uncollected` 면 지금처럼 같은 호출을 이어 한다.
 5. 오류면 `read_execution_terminal` 로 기록을 한 번 더 읽는다.
-   - 닫기는 commit 됐는데 writer 닫기가 실패했을 수 있다(`execution_lane_writer.ml:887-893`).
+   - 닫기는 commit 됐는데 writer 닫기가 실패했을 수 있다(`execution_lane_writer.ml:870-877`).
    - terminal 이 있으면 3 으로 간다. 없으면 그 claim 은 실패하고 호출은 `Active` 로 남는다.
 
 - 실패는 그 작업 하나에서 끝난다. 기동 정리 안에서 닫지 않으므로, 닫다가 난 실패가 그 Keeper 의 Owner 를 멈추지 않는다.

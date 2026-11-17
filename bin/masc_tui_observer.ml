@@ -1283,12 +1283,18 @@ let feed t chunk =
   Masc_tui_sse_lines.feed t.lines chunk |> List.concat_map (feed_line t)
 
 let merge_batches batches =
+  (* Each run of one instance gathers its deliveries newest first and is
+     reversed once, so joining N batches costs O(total deliveries). *)
   let same = Option.equal String.equal in
-  List.fold_left
-    (fun merged (instance, deliveries) ->
-      match merged with
-      | (last_instance, last) :: rest when same instance last_instance ->
-          (last_instance, last @ deliveries) :: rest
-      | [] | _ :: _ -> (instance, deliveries) :: merged)
-    [] batches
-  |> List.rev
+  let close (instance, reversed) = instance, List.rev reversed in
+  let runs, open_run =
+    List.fold_left
+      (fun (runs, open_run) (instance, deliveries) ->
+        match open_run with
+        | Some (open_instance, reversed) when same instance open_instance ->
+            runs, Some (open_instance, List.rev_append deliveries reversed)
+        | Some run -> close run :: runs, Some (instance, List.rev deliveries)
+        | None -> runs, Some (instance, List.rev deliveries))
+      ([], None) batches
+  in
+  List.rev (match open_run with Some run -> close run :: runs | None -> runs)

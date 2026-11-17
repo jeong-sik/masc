@@ -20592,6 +20592,11 @@ let reconcile_observer_recovery state ~refresh_inflight ~mailbox =
   | (Workspace_identity_unread | Workspace_identity_match | Workspace_identity_mismatch _), _, _
   | Workspace_identity_match_unconfirmed _, None, _ -> stop_observer_recovery state
 
+(* The server replays at most this many events to a reconnecting client
+   (Sse.max_buffer_size's upper clamp). *)
+let observer_backlog_limit = 1000
+exception Observer_backlog_exceeded
+
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
    through the mailbox; the render fiber owns all state. The fiber ends with
@@ -20651,10 +20656,19 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                    forwarder hands all collected so far to the UI as one
                    batch, which the UI already reads as one. *)
                 let received = Eio.Stream.create max_int in
+                let backlog = Atomic.make 0 in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
-                  | decoded -> Eio.Stream.add received (Some (!instance_id, decoded))
+                  | decoded ->
+                      (* Past what the server can replay, holding more gains
+                         nothing: the stream is closed, and the reopen
+                         resumes from the last applied cursor or revalidates
+                         after the gap. *)
+                      if Atomic.fetch_and_add backlog (List.length decoded) + List.length decoded
+                         > observer_backlog_limit
+                      then raise Observer_backlog_exceeded;
+                      Eio.Stream.add received (Some (!instance_id, decoded))
                 in
                 let rec collected acc =
                   match Eio.Stream.take_nonblocking received with
@@ -20669,6 +20683,8 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                     | None -> [], `Ended
                     | Some batch -> collected [ batch ]
                   in
+                  ignore (Atomic.fetch_and_add backlog
+                    (- List.fold_left (fun n (_, d) -> n + List.length d) 0 batches));
                   List.iter (fun batch ->
                       enqueue_async mailbox (Observer_msg (Observer_received (owner, batch))))
                     (Masc_tui_observer.merge_batches batches);
@@ -20689,6 +20705,10 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                 !observed)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Observer_backlog_exceeded ->
+          Error (Masc_tui_http.Transport_failed
+            (Printf.sprintf "the screen fell %d events behind the observer stream"
+               observer_backlog_limit))
       | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))
     in
     enqueue_async mailbox (Observer_msg (Observer_closed (owner, workspace, result)))

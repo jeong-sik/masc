@@ -675,6 +675,46 @@ run의 head_sha가 `63e74a56dd679c30c7e8c101e207ed7e7419a2ac`이며 success였�
 실제 PDF·STT·provider·ACK·GC·재시작·여러 Keeper 연속 실행은 여전히 남아 있다.
 이 단위는 원래 25개 요구나 어느 규모 단계를 완료 처리하지 않는다.
 
+## 11월 17일 후속: 실행 결과와 Gemini 문서 투영
+
+앞 절의 미실행·진행 중 표기는 당시 관측이다. 뒤이어 확인한 결과는
+[후속 증거 기록](../evidence/2026-11-17-farm-document-followup/README.md)에
+run·job·이벤트 head·실제 checkout을 나눠 남겼다.
+`PR type-check (dune build @check)`의 Document9 run 43999474674,
+Document10 run 43999490080, Schedule top run 43996952266은 type-check job이
+success다. 실제 checkout은 각각 `bca8d3132915`, `3a888cfc0c57`,
+`e75ad559ffb3`인 합성 merge commit이다. Schedule 하위 두 run의 전체 상태는
+success지만 type-check job은 skipped였다. 하위 두 층을 따로 타입 검사한
+증거로 세지 않는다.
+
+실제 Keeper `ocaml-agent-ic`의 원래 실행 operation은 Succeeded로 끝났고,
+[실행 댓글](https://github.com/jeong-sik/masc/pull/52620#issuecomment-6935761315)에
+exact `4ccdd5083ab9560175928a4af3b47fb158a2296d`의 maintained suite 두 개가
+12개·51개, 실패·skip 0으로 보고됐다. 실제 compiler는 OCaml 5.5.1이다.
+저장소의 5.5.2 환경 통과로 바꾸어 쓰지 않는다. 원시 build 로그 둘은 크기·해시가 일치했다. 첫 run 로그의 전달 바이트는
+선언된 크기·해시와 다르고, 두 번째 run 로그는 아직 받지 못했다. 재실행 없이
+보존된 원본 파일의 재전달을 요청했다. 따라서 실행 로그 직접 검증은 미완료다. PDF·STT·provider 실호출,
+설치와 여러 Keeper의 연속 실행을 이 두 suite의 결과로 대신하지 않는다.
+
+소스 리뷰에서 Gemini의 직접 `project_history`가 문서 capability=false여도
+Document를 남기고 실제 요청 builder만 생략 문구로 바꾸는 불일치를 확인했다.
+PR #52636의 `b88ffb072fde1d0fbda5aab092e224b3f2761a04`는 같은 document
+admission을 history 투영에 적용한다. 기존 등록 시험의 표에 Gemini 사용자·중첩
+ToolResult와 capability false·true 조합을 추가했다. 네 조합을 독립 시험 4개로
+세지 않으며, 아직 이 후속 동작을 실행한 증거는 없다. 4파일의 5.5.2 구문 검사와
+독립 소스 검토는 통과했다. 준비된 body hash나 서명 영수증이 깨졌다는 증거는
+찾지 못했으며, 기존 thoughtSignature 대상·인접성 검사는 보존한다.
+
+또한 Outbox 인터페이스의 낡은 shared deadline 설명을 고쳤다. projector의
+공유 deadline이 없어졌지만 가변 Hashtbl memo는 남는다. 불변성이나 새 동시성
+안전성을 증명한 변경으로 설명하지 않는다.
+
+Schedule PR #52611·#52613·#52615는 02:12:54~56 UTC에 다른 경로로
+병합됐음을 각 PR에서 확인했다. 공유 계정만으로 실행 세션은 알 수 없으며,
+이 작성 세션은 Ready 전환·병합·설치를 하지 않았다. Document는 기존 10층 뒤에
+후속 1층을 붙여 Draft로 게시했다. 선언형 외부 reader는 현재 코드의 STT/PDF
+직접 연결과 별개로 남아 있으며, Gate와 원본 결과 소유권을 포함한 계약부터 준비한다.
+
 ## 원래 25개 요구의 현재 위치
 
 아래 조각은 원래 계획 §8의 핵심 연결이다. 전체 연결과 의존·결정은 원래 표를 따른다.
@@ -697,7 +737,7 @@ run의 head_sha가 `63e74a56dd679c30c7e8c101e207ed7e7419a2ac`이며 success였�
 | 13. Identity·MCP·Artifact·Wiki·Web Renderer·Search·Browser 완전 지원 | WIM-S01·S02·S04·S08, CMG-S15 | WIM-S04 후보가 MCP 결과의 일반/승인 경로와 보관 소유자를 연결. 실제 호출은 미실행 | 실제 MCP non-text 결과가 도구 소비자·저장·후속 입력에 보존됨. 각 외부 도구의 자격·실패·재접속·산출물 확인은 따로 필요 |
 | 14. 프롬프트·Keeper 설정을 포함한 세계 Export/Import | WIM-S09~S12, SP-S11·S12·S14·S15 | 현재 round-trip 동작 미확인 | 세계 묶음을 다른 위치에 import한 뒤 설정·identity·참조·권한 대조와 재기동. 파일 복사 성공만으로 판정하지 않음 |
 | 15. 모델에 가는 글과 설정을 TOML·Markdown 등으로 외부화 | WIM-S13~S16, TLJ-S14a·S14b, X08 | 이번 수리는 전체 문자열 외부화를 수행하지 않음 | 모델 입력·도구 설명·화면 문구별 소유 정본, 텍스트 변경 후 실제 소비 결과. 타입/wire 식별자와 자연어 본문 범위를 구분 |
-| 16. 에이전트 개발을 전제로 CI·검사 병목 완화 | OD-S07·S09~S12·S14, POC-S14 | 작은 소스 단위와 독립 리뷰 사용. Document9·Schedule3 native Draft 게시와 원격 readback 완료. 실제 CI 실패는 소유 층에서 수리하고 다음 단위를 진행 | ready→review, fix→rereview, freeze→검증 시간과 미완료 표본. 기존 release 필수 검증을 빠뜨리지 않고 병목이 줄었는지 측정 |
+| 16. 에이전트 개발을 전제로 CI·검사 병목 완화 | OD-S07·S09~S12·S14, POC-S14 | 작은 소스 단위와 독립 리뷰 사용. Document11 native Draft 게시와 원격 readback. Schedule3은 외부 병합을 관측. 실제 CI 실패는 소유 층에서 수리하고 다음 단위를 진행 | ready→review, fix→rereview, freeze→검증 시간과 미완료 표본. 기존 release 필수 검증을 빠뜨리지 않고 병목이 줄었는지 측정 |
 | 17. MultiModal과 외부 도구 해석 | WIM-S03~S07 | WIM-S03 후보에 문서·혼합 투영, 중첩 ToolResult, canonical 복원 사례 작성 | 같은 후보에서 실제 PDF/STT·provider failover·재시작 실행. active tool round의 문서, connector 첨부, video·외부 reader는 별도 남음 |
 | 18. 일관되고 편한 TUI 조작 | OD-S02·S03a·S03b | 이번 실행의 키 조작·화면 흐름 미확인 | 키 입력→요청·저장 상태·결정의 일관성, 실제 사용 관측. 문구·행 순서 snapshot으로 대체하지 않음 |
 | 19. File I/O 병목 | SP-S01·S03·S04·S09·S10a·S10c, CA-S11a~S11c, POC-S16 | Schedule 수리는 정확성 후보이며 I/O 절감 후보가 아님 | store 크기·동시 writer별 읽고 쓴 바이트와 지연 측정. Board·Task·이력 경로의 전후 비교 |

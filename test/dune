@@ -7667,3 +7667,5 @@
 (include stanzas/test_keeper_media_original_preflight.inc)
 
 (include stanzas/test_lane_addon_request_approval.inc)
+
+(include stanzas/test_keeper_media_reading_reply.inc)

@@ -1746,7 +1746,13 @@ let test_receipt_proved_partial_ack_keeps_source_locks_without_rereading_prefix 
       check bool "external ACK can precede atom settlement" true (progress fixture=positions);
       (* Memory now owns the read prefix; acknowledgement must not need a
          second copy of it after retention has pruned the checkpoint. *)
-      save_checkpoint fixture.config ~trace_id [] 1) in
+      let turn=Ids.Turn_ref.absolute_turn (Source.input (Capture.source request)).turn_ref in
+      save_checkpoint fixture.config ~trace_id [] turn;
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      io (fun () -> Checkpoint.with_agent_core_exact_snapshot ~session_dir ~session_id:trace_id
+        (fun snapshot -> check int "the canonical prefix was actually pruned" 0
+          (List.length (Checkpoint.exact_snapshot_messages snapshot)))
+        |> Result.map_error Checkpoint.checkpoint_ref_load_error_to_string |> get)) in
     (match result with
      | Ok (Durable_owner.Resumed (Finished completed,_)) ->
        check string "the same original finishes the partial settlement" original.request_id completed.Owner.request_id

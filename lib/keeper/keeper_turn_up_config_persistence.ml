@@ -66,6 +66,11 @@ type 'a publication =
   | Commit_then_publish of warning list * (unit -> 'a)
   | Rollback of 'a
 
+type declaration_error =
+  | Invalid_keeper_name of string
+  | Invalid_declaration of Keeper_types_profile.keeper_toml_load_error
+  | Configuration_error of error
+
 let revision_to_yojson = function
   | Missing -> `Assoc [ "state", `String "missing" ]
   | Sha256 value ->
@@ -160,6 +165,11 @@ let error_to_string = function
     ^ ")"
   | Publication_exception { path; detail } ->
     Printf.sprintf "keeper manifest publication raised (path %s): %s" path detail
+
+let declaration_error_to_string = function
+  | Invalid_keeper_name detail -> detail
+  | Invalid_declaration error -> keeper_toml_load_error_to_string error
+  | Configuration_error error -> error_to_string error
 
 let warning_to_yojson = function
   | Runtime_config_parent_sync_unconfirmed detail ->
@@ -438,16 +448,11 @@ let strict_write_result = function
           Fs_compat.atomic_replace_failure) as failure) ->
     Error (Io_error (Fs_compat.atomic_replace_failure_to_string failure))
 
-let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot ~restore_runtime
+let persist_manifest_with_publication_using ~write_manifest ~with_lock ~restore_snapshot ~restore_runtime
     ~read_revision
     ~expected_revision ~(config : Workspace.config)
-    ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) ~publish () =
-  let path = manifest_path ~config ~keeper_name:meta.name in
-  let instructions_result =
-    if String.trim meta.instructions = ""
-    then Error "keeper instructions are required"
-    else Ok ()
-  in
+    ~keeper_name ~instructions_result ~publish () =
+  let path = manifest_path ~config ~keeper_name in
   let transaction () =
     match with_lock path (fun () ->
     match
@@ -455,7 +460,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
         ~runtime_config_path:
           (Config_dir_resolver.runtime_toml_path_for_base_path
              ~base_path:config.base_path)
-        ~keeper_name:meta.name
+        ~keeper_name
         (fun runtime_transaction ->
       let open Result.Syntax in
       let* () = instructions_result |> Result.map_error (fun error -> Io_error error) in
@@ -501,7 +506,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
       in
       let journal_record : Keeper_config_journal.record =
         { tx_id = Printf.sprintf "tx-%.0f" (Time_compat.now () *. 1000.0)
-        ; keeper_name = meta.name
+        ; keeper_name
         ; manifest_before =
             (match snapshot with
              | Absent -> Keeper_config_journal.Manifest_absent
@@ -601,20 +606,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
         | Error reconciliation -> Error reconciliation
       in
       let manifest_written, write_result =
-        let manifest_written, written =
-          match write_manifest with
-          | Some write -> true, write path
-          | None -> if created
-          then
-            true,
-            Keeper_toml_loader.create_keeper_toml_file_strict_staged
-              ~path
-              (full_fields parsed meta)
-          else
-            let edits = explicit_edits parsed in
-            if edits = [] then false, Ok ()
-            else true, Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits
-        in
+        let manifest_written, written = write_manifest ~created path in
         manifest_written, strict_write_result written
       in
       match write_result with
@@ -671,7 +663,7 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
              if manifest_written
              then
                Keeper_memory_health_input.written
-                 ~keepers_dir:(Filename.dirname path) ~keeper_id:meta.name;
+                 ~keepers_dir:(Filename.dirname path) ~keeper_id:keeper_name;
              let* () = clear_journal () in
              Ok { value = after_commit (); warnings = write_warnings @ publication_warnings }
          in
@@ -702,9 +694,37 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
       } ->
     Ok { value; warnings = write_warnings @ lock_warnings }
   in
-  match validate_keeper_name meta.name with
+  match validate_keeper_name keeper_name with
   | Error detail -> Error (Io_error detail)
   | Ok () -> transaction ()
+
+let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot
+    ~restore_runtime ~read_revision ~expected_revision ~config
+    ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) ~publish () =
+  let write_manifest ~created path =
+    match write_manifest with
+    | Some write -> true, write path
+    | None ->
+      if created
+      then
+        true,
+        Keeper_toml_loader.create_keeper_toml_file_strict_staged
+          ~path (full_fields parsed meta)
+      else
+        let edits = explicit_edits parsed in
+        if edits = [] then false, Ok ()
+        else
+          true,
+          Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits
+  in
+  let instructions_result =
+    if String.trim meta.instructions = ""
+    then Error "keeper instructions are required"
+    else Ok ()
+  in
+  persist_manifest_with_publication_using ~write_manifest ~with_lock
+    ~restore_snapshot ~restore_runtime ~read_revision ~expected_revision ~config
+    ~keeper_name:meta.name ~instructions_result ~publish ()
 
 let persist_with_publication ~expected_revision ~config ~parsed ~meta ~publish () =
   persist_with_publication_using
@@ -746,6 +766,32 @@ let commit_configuration ~expected_revision ~config
   | Error _ as error -> error
   | Ok { value = Error detail; _ } -> Error (Io_error detail)
   | Ok { value = Ok value; warnings } -> Ok { value; warnings }
+;;
+
+let commit_declaration ~expected_revision ~config ~keeper_name ~content ~publish () =
+  match validate_keeper_name keeper_name with
+  | Error detail -> Error (Invalid_keeper_name detail)
+  | Ok () ->
+    let path = manifest_path ~config ~keeper_name in
+    match materialization_defaults_of_content ~path content with
+    | Error error -> Error (Invalid_declaration error)
+    | Ok _ ->
+      persist_manifest_with_publication_using
+        ~write_manifest:(fun ~created:_ path ->
+          true, Fs_compat.save_file_atomic_strict_staged path content)
+        ~with_lock:with_manifest_lock
+        ~restore_snapshot:restore_snapshot_unlocked
+        ~restore_runtime:Runtime.restore_keeper_assignment_transaction
+        ~read_revision:revision_of_path_unlocked
+        ~expected_revision ~config ~keeper_name ~instructions_result:(Ok ())
+        ~publish:(fun transaction outcome ->
+          let revision : config_revision =
+            { manifest = outcome.revision
+            ; runtime_assignment = Runtime.keeper_assignment_revision transaction
+            }
+          in
+          Commit_then_publish ([], fun () -> publish outcome revision)) ()
+      |> Result.map_error (fun error -> Configuration_error error)
 ;;
 
 let persist ~expected_revision ~config ~parsed ~meta () =

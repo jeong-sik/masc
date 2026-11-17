@@ -237,6 +237,12 @@ val error_to_string : error -> string
     cause from {!error_to_string}, then the request being reconciled. *)
 val unverified_retry_notice : request_id:string -> error -> string
 
+(** Whether this terminal can hear a Keeper's waiting inventory change: only
+    an owned, live observer stream carries the event. *)
+type inventory_hearing =
+  | Observer_stream_live
+  | No_observer_stream
+
 (** When the watcher sends the next reconcile of an unverified request. *)
 type reconcile_pace =
   | Reconcile_now
@@ -246,8 +252,18 @@ type reconcile_pace =
       (** A reconcile came back unverified without a new frame. The next one
           waits for the Keeper's waiting inventory to change, which the server
           announces when the queue moves or its store fence rises or lifts. *)
+  | Reconcile_when_operator_asks
+      (** As above, but no observer stream is live to carry that change. The
+          request stays held, the operator is told so, and the next reconcile
+          waits for [/reconcile] or a reopened stream. *)
 
-val reconcile_pace : attempt_was_reconcile:bool -> progressed:bool -> reconcile_pace
+val reconcile_pace :
+  attempt_was_reconcile:bool -> progressed:bool -> hearing:inventory_hearing -> reconcile_pace
+
+(** [held_for_operator_notice ~request_id] is the status line for
+    {!Reconcile_when_operator_asks}: the request is held and [/reconcile]
+    checks it again. *)
+val held_for_operator_notice : request_id:string -> string
 val protocol_error : ?acceptance_observed:bool -> stream_error -> error
 val error_acceptance_observed : error -> bool
 val error_certainty : ?was_unverified:bool -> error -> error_certainty

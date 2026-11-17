@@ -413,9 +413,14 @@ let unverified_retry_notice ~request_id error =
   Printf.sprintf "%s; reconciling exact request %s before NEXT"
     (error_to_string error |> terminal_safe_text) request_id
 
+type inventory_hearing =
+  | Observer_stream_live
+  | No_observer_stream
+
 type reconcile_pace =
   | Reconcile_now
   | Reconcile_after_inventory_change
+  | Reconcile_when_operator_asks
 
 (* The re-POST of the same id is the server's idempotent reconcile: it
    subscribes to an operation it holds and admits one it does not. One
@@ -423,11 +428,21 @@ type reconcile_pace =
    back unverified without one new frame learned nothing, and sending it again
    at once would learn nothing either (#36205: twenty POSTs a second against a
    fenced store), so the next one waits for the Keeper's waiting inventory to
-   move. *)
-let reconcile_pace ~attempt_was_reconcile ~progressed =
-  match attempt_was_reconcile, progressed with
-  | false, (true | false) | true, true -> Reconcile_now
-  | true, false -> Reconcile_after_inventory_change
+   move. Only the observer stream carries that change, so without a live
+   stream there is nothing to wait for: the request stays held and the
+   operator is asked to send the next reconcile. *)
+let reconcile_pace ~attempt_was_reconcile ~progressed ~hearing =
+  match attempt_was_reconcile, progressed, hearing with
+  | false, (true | false), (Observer_stream_live | No_observer_stream)
+  | true, true, (Observer_stream_live | No_observer_stream) -> Reconcile_now
+  | true, false, Observer_stream_live -> Reconcile_after_inventory_change
+  | true, false, No_observer_stream -> Reconcile_when_operator_asks
+
+let held_for_operator_notice ~request_id =
+  Printf.sprintf
+    "Outcome of %s is still unverified, and no observer stream is open to hear \
+     the Keeper's queue change; NEXT stays held. Run /reconcile to check it again"
+    request_id
 
 (* A reconciliation read asks "what happened to the operation". 401 and 403 do
    not answer that question: the request stopped before the handler, so the

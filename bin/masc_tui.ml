@@ -3055,19 +3055,27 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
    asks the server to resume from the log's last seq instead. *)
 exception Rejected_keeper_live_stream
 
-(* How many waiting-inventory changes this terminal has heard for each Keeper.
-   A watcher holding an unverified request waits on it instead of a timer:
-   the server announces a change when the Keeper's queue moves or its store
-   fence rises or lifts (#36205). An observer stream that (re)opens may have
-   missed changes for every Keeper, so it moves them all. Both counts only
-   grow, so their sum does too. The main loop writes and watcher fibers read,
-   so the state is one immutable value swapped atomically. *)
+(* How many waiting-inventory changes this terminal has heard for each Keeper,
+   and whether it can hear one now. A watcher holding an unverified request
+   waits on it instead of a timer: the server announces a change when the
+   Keeper's queue moves or its store fence rises or lifts (#36205), and only a
+   live observer stream carries that announcement. An observer stream that
+   (re)opens may have missed changes for every Keeper, so it moves them all;
+   [/reconcile] moves one Keeper by hand. Both counts only grow, so their sum
+   does too. The main loop writes and watcher fibers read, so the state is one
+   immutable value swapped atomically. *)
 module Waiting_inventory_heard = struct
   module Keepers = Map.Make (String)
 
-  type heard = { reopened : int; changed : int Keepers.t }
+  type heard =
+    { reopened : int
+    ; changed : int Keepers.t
+    ; hearing : Keeper_chat.inventory_hearing
+    }
 
-  let heard = Atomic.make { reopened = 0; changed = Keepers.empty }
+  let heard =
+    Atomic.make
+      { reopened = 0; changed = Keepers.empty; hearing = Keeper_chat.No_observer_stream }
   let moved = Eio.Condition.create ()
 
   let rec update f =
@@ -3087,15 +3095,46 @@ module Waiting_inventory_heard = struct
   let stream_reopened () =
     update (fun heard -> { heard with reopened = heard.reopened + 1 })
 
-  (* A Keeper this terminal has heard nothing about has heard zero changes. *)
-  let generation keeper =
-    let heard = Atomic.get heard in
+  (* The main loop calls this every pass with what its observer state says;
+     only a change wakes the watchers. *)
+  let observe_hearing hearing =
+    let same =
+      match (Atomic.get heard).hearing, hearing with
+      | Keeper_chat.Observer_stream_live, Keeper_chat.Observer_stream_live
+      | Keeper_chat.No_observer_stream, Keeper_chat.No_observer_stream -> true
+      | Keeper_chat.Observer_stream_live, Keeper_chat.No_observer_stream
+      | Keeper_chat.No_observer_stream, Keeper_chat.Observer_stream_live -> false
+    in
+    if not same then update (fun heard -> { heard with hearing })
+
+  let hearing () = (Atomic.get heard).hearing
+
+  let generation_of heard keeper =
     heard.reopened
     + (match Keepers.find_opt keeper heard.changed with Some count -> count | None -> 0)
+
+  (* A Keeper this terminal has heard nothing about has heard zero changes. *)
+  let generation keeper = generation_of (Atomic.get heard) keeper
 
   let await_after keeper seen =
     Eio.Condition.loop_no_mutex moved (fun () ->
       if generation keeper > seen then Some () else None)
+
+  type news =
+    | Heard_news
+    | Stream_lost
+
+  (* Waits for a change the observer stream announces. A stream that closes
+     meanwhile can announce nothing more, so the wait ends with [Stream_lost]
+     instead of outliving it. *)
+  let await_news keeper seen =
+    Eio.Condition.loop_no_mutex moved (fun () ->
+      let heard = Atomic.get heard in
+      if generation_of heard keeper > seen then Some Heard_news
+      else
+        match heard.hearing with
+        | Keeper_chat.Observer_stream_live -> None
+        | Keeper_chat.No_observer_stream -> Some Stream_lost)
 end
 
 let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_post ~follow_kept_back ~enqueue ~control_generation ~admission_intent ~mailbox ~port ~log request =
@@ -3239,13 +3278,26 @@ let post_keeper_chat_watching ~expected_workspace ~check_request ~start_first_po
                    (Masc.Keeper_chat_event_log.replay_position_to_wire
                       (resume_position ())))
             in
+            (* Held for the operator: no stream will announce the change, so
+               only [/reconcile] or a reopened stream sends the next one. *)
+            let hold_for_operator () =
+              enqueue_async mailbox
+                (Keeper_msg (Keeper_chat_stream_unavailable
+                   ( request
+                   , Keeper_chat.held_for_operator_notice
+                       ~request_id:request.Keeper_chat.request_id )));
+              Waiting_inventory_heard.await_after keeper_name inventory_seen
+            in
             (match
                Keeper_chat.reconcile_pace ~attempt_was_reconcile:was_unverified
-                 ~progressed
+                 ~progressed ~hearing:(Waiting_inventory_heard.hearing ())
              with
              | Keeper_chat.Reconcile_now -> ()
              | Keeper_chat.Reconcile_after_inventory_change ->
-                 Waiting_inventory_heard.await_after keeper_name inventory_seen);
+                 (match Waiting_inventory_heard.await_news keeper_name inventory_seen with
+                  | Waiting_inventory_heard.Heard_news -> ()
+                  | Waiting_inventory_heard.Stream_lost -> hold_for_operator ())
+             | Keeper_chat.Reconcile_when_operator_asks -> hold_for_operator ());
             watch ~first_post:false ~since_seq:(resume_position ()) true
         | (Ok (Keeper_chat.Turn_completed
                  { turn_outcome =
@@ -16151,7 +16203,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
     | Copy_latest_reply | Set_embeds _ | Open_changes | Toggle_acting_pane
     | Show_acting_pane_tab _ | Acting_pane_tab_unknown _ | Set_acting_pane_call_order _
     | Acting_pane_call_order_unknown _ | Scroll_acting_pane _ | Acting_pane_scroll_unknown _
-    | Switch_keeper _ | Switch_keeper_missing_name | Queue _ | Run_next | Priority _
+    | Switch_keeper _ | Switch_keeper_missing_name | Queue _ | Run_next | Reconcile_held | Priority _
     | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _ | Steer_turn _
     | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status | Memory_sync
     | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _ | Measurement_missing_sha
@@ -16187,7 +16239,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | Toggle_acting_pane | Show_acting_pane_tab _ | Acting_pane_tab_unknown _
       | Set_acting_pane_call_order _ | Acting_pane_call_order_unknown _ | Scroll_acting_pane _
       | Acting_pane_scroll_unknown _ | Switch_keeper _ | Switch_keeper_missing_name | Queue _
-      | Run_next | Priority _ | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _
+      | Run_next | Reconcile_held | Priority _ | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _
       | Steer_turn _ | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status | Memory_sync
       | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _
       | Measurement_missing_sha | Inspect_context | View_image _ | View_image_missing_path
@@ -16645,6 +16697,29 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       notice ~kind:Notice_failure
         (let ko = state.ui_language = Lang_ko in
          kept_back ~ko ~request:(Kept_request.Command "/run-next") (workspace_identity_unconfirmed ~ko) Queued_input_kept)
+  | Masc_tui_command.Reconcile_held ->
+      Masc_tui_message_input.clear state.msg_input;
+      (match state.msg_target_keeper_name with
+       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | Some name ->
+         let held =
+           List.filter (fun (entry : inflight) ->
+               String.equal entry.sent_request.Keeper_chat.keeper_name name
+               && (match entry.phase with
+                   | Turn_reconciling -> true
+                   | Turn_preflight _ | Turn_streaming -> false))
+             state.msg_inflight
+         in
+         (match held with
+          | [] -> notice ~kind:Notice_failure "No request with an unverified outcome is held for this Keeper"
+          | _ :: _ ->
+            (* The watcher holding the request waits on this Keeper's count;
+               moving it sends the next reconcile once (#36205). *)
+            Waiting_inventory_heard.keeper_changed name;
+            notice ~kind:Notice_reply
+              (Printf.sprintf "Checking %s again"
+                 (String.concat ", "
+                    (List.map (fun (entry : inflight) -> entry.sent_request.Keeper_chat.request_id) held)))))
   | Masc_tui_command.Run_next ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name with
@@ -24130,6 +24205,7 @@ let handle_composer_key state ~base_path ~mailbox key =
         | Masc_tui_command.Interrupt_turn
         | Masc_tui_command.Interrupt_keeper_turn _
          | Masc_tui_command.Run_next
+         | Masc_tui_command.Reconcile_held
          | Masc_tui_command.Priority _
          | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
@@ -44724,6 +44800,14 @@ Use relative paths for resources already held in the package. -->
 
       reconcile_observer_machine state ~host:server_peer_host ~port:state.port
         ~mailbox:async_messages;
+      (* Only an owned, live observer stream carries waiting-inventory
+         changes; a watcher holding an unverified request reads this to know
+         whether waiting for one can end (#36205). *)
+      Waiting_inventory_heard.observe_hearing
+        (match state.observer with
+         | Observer_live _ -> Keeper_chat.Observer_stream_live
+         | Observer_off | Observer_opening | Observer_closed_before_answer _
+         | Observer_closed_after_live _ -> Keeper_chat.No_observer_stream);
       launch_owed_machine_live state ~mailbox:async_messages;
       launch_owed_lanes state ~mailbox:async_messages;
       launch_owed_lane_addons state ~mailbox:async_messages;

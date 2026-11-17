@@ -1247,17 +1247,29 @@ let test_reader_unauthenticated () =
 
 (* #36205: the reconcile is paced by what the server says, never by a timer.
    A fresh unverified answer is reconciled at once; a reconcile that came back
-   unverified with no new frame waits for the Keeper's inventory to move. *)
+   unverified with no new frame waits for the Keeper's inventory to move, and
+   only a live observer stream can carry that move. Without one the request is
+   held for the operator. *)
 let test_reconcile_pace_waits_only_when_nothing_moved () =
-  let pace = Chat.reconcile_pace in
-  check bool "the first unverified answer is reconciled at once" true
-    (pace ~attempt_was_reconcile:false ~progressed:false = Chat.Reconcile_now
-     && pace ~attempt_was_reconcile:false ~progressed:true = Chat.Reconcile_now);
-  check bool "a reconcile that delivered a frame is followed at once" true
-    (pace ~attempt_was_reconcile:true ~progressed:true = Chat.Reconcile_now);
-  check bool "a reconcile that learned nothing waits for the inventory" true
-    (pace ~attempt_was_reconcile:true ~progressed:false
-     = Chat.Reconcile_after_inventory_change)
+  let pace ~hearing = Chat.reconcile_pace ~hearing in
+  List.iter
+    (fun hearing ->
+      check bool "the first unverified answer is reconciled at once" true
+        (pace ~hearing ~attempt_was_reconcile:false ~progressed:false = Chat.Reconcile_now
+         && pace ~hearing ~attempt_was_reconcile:false ~progressed:true = Chat.Reconcile_now);
+      check bool "a reconcile that delivered a frame is followed at once" true
+        (pace ~hearing ~attempt_was_reconcile:true ~progressed:true = Chat.Reconcile_now))
+    [ Chat.Observer_stream_live; Chat.No_observer_stream ];
+  check bool "a reconcile that learned nothing waits for the inventory it can hear" true
+    (pace ~hearing:Chat.Observer_stream_live ~attempt_was_reconcile:true ~progressed:false
+     = Chat.Reconcile_after_inventory_change);
+  check bool "without an observer stream it is held for the operator" true
+    (pace ~hearing:Chat.No_observer_stream ~attempt_was_reconcile:true ~progressed:false
+     = Chat.Reconcile_when_operator_asks);
+  let notice = Chat.held_for_operator_notice ~request_id:"tui-held" in
+  let has needle = String_util.string_contains_substring ~needle notice in
+  check bool "the held notice names the request and the action" true
+    (has "tui-held" && has "/reconcile" && has "NEXT stays held")
 
 let test_unverified_retry_notice_names_the_cause () =
   let notice error = Chat.unverified_retry_notice ~request_id:"tui-01" error in

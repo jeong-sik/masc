@@ -46,6 +46,12 @@ val scheduler_stop_reason : Masc.Tui_decode.scheduler_probe option -> string opt
 
 val section_pills_line : ko:bool -> cols:int -> active:metrics_section -> string
 
+val engine_graph_capacity : cols:int -> state -> int option
+(** How many [/health] samples the engine graphs keep at this terminal width
+    ([Some]) while Telemetry's engine section is on screen and its cards draw
+    them; [None] otherwise, when nothing is sampled (RFC tui-one-screen-grammar
+    section 5.6). *)
+
 type session_entry = {
   event : event;
   run : int;  (** How many identical neighbours folded into this one. *)

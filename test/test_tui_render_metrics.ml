@@ -636,6 +636,29 @@ let test_the_fleet_section_escapes_the_probe_word () =
   let output = drawn (Render_metrics.render_section_fleet ~cols:90 state) in
   check bool "the probe row carries no escape" false (contains output escape)
 
+(* The engine graphs read [/health] only while Telemetry's engine section is
+   on screen and its cards have room to draw them; anywhere else the loop
+   samples nothing (RFC tui-one-screen-grammar section 5.6). *)
+let test_the_engine_graphs_sample_only_on_the_engine_view () =
+  let wide = 160 and compact = 100 in
+  let state = make_state () in
+  let sampled () = Option.is_some (Render_metrics.engine_graph_capacity ~cols:wide state) in
+  check bool "another screen" false (sampled ());
+  state.Types.view <- Types.Metrics;
+  check bool "Usage without Telemetry" false (sampled ());
+  state.Types.usage_telemetry_open <- true;
+  state.Types.metrics_section <- Types.Section_fleet;
+  check bool "the engine section" true (sampled ());
+  check bool "the compact summaries draw numbers only" false
+    (Option.is_some (Render_metrics.engine_graph_capacity ~cols:compact state));
+  state.Types.metrics_section <- Types.Section_resources;
+  check bool "the work section" false (sampled ());
+  state.Types.metrics_section <- Types.Section_tools;
+  check bool "the memory and Gate section" false (sampled ());
+  state.Types.metrics_section <- Types.Section_fleet;
+  state.Types.usage_telemetry_open <- false;
+  check bool "Telemetry closed again" false (sampled ())
+
 (* The TUI session log as [state.events] holds it, newest first. The newest
    event is the long kind the loader writes when the feed closes: the subject
    first, then the cause, then what to do. *)
@@ -727,6 +750,8 @@ let () =
             test_a_probe_that_raised_is_marked_failed
         ; test_case "a stopped probe writes its reason in the body" `Quick
             test_a_stopped_probe_writes_its_reason_in_the_body
+        ; test_case "the engine graphs sample only on the engine view" `Quick
+            test_the_engine_graphs_sample_only_on_the_engine_view
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
         ; test_case "a declared keeper is not counted as paused" `Quick
             test_a_declared_keeper_is_not_counted_as_paused

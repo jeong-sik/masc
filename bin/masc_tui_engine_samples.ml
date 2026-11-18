@@ -115,7 +115,10 @@ let shown t ~now ~capacity =
   | Some session ->
     { t with session = Some { session with ring = Ring.resize ~capacity session.ring } }
 
-let hidden t = { t with session = None }
+let hidden t =
+  match t.session with
+  | None -> t
+  | Some _ -> { t with session = None }
 
 let slot_time session slot = session.origin +. (Float.of_int slot *. interval_s)
 

@@ -310,6 +310,33 @@ let test_refused_keys_stay_in_place_at_common_widths () =
         rows)
     languages
 
+(* The Keeper roster spells its row by hand from strings, so no role keeps a
+   moving key off it: a key put back on the roster's list reaches zone 5 with
+   nothing else to stop it. The keys below move on the roster -- the cursor,
+   the view and order cycles, in and out, the folds, reload and quit -- and
+   the roster gives none of them another meaning. [l] reads logs there, so it
+   is not among them. *)
+let roster_moving_atoms = [ "j"; "k"; "v"; "o"; "Enter"; "Right"; "Left"; "Esc"; "r"; "q" ]
+
+let test_the_keeper_roster_names_no_moving_key () =
+  List.iter
+    (fun (language, lang) ->
+      let state = state_in lang in
+      state.T.view <- T.Keepers T.Keeper_list;
+      let atoms =
+        Footer.advertised_key_atoms
+          (Masc_tui_render_prim.keeper_control_hints ~keys:Masc_tui_render_prim.Roster_keys
+             state None)
+      in
+      check bool ("the roster " ^ language ^ " names a key that acts") true (atoms <> []);
+      List.iter
+        (fun atom ->
+          check bool
+            (Printf.sprintf "the roster %s does not name %s" language atom)
+            false (List.mem atom atoms))
+        roster_moving_atoms)
+    languages
+
 let () =
   run "tui footer moves"
     [ ( "zone 5",
@@ -322,6 +349,8 @@ let () =
             test_the_answer_editor_names_its_save_and_cancel
         ; test_case "the board read row names no moving key" `Quick
             test_the_board_read_row_names_no_moving_key
+        ; test_case "the keeper roster names no moving key" `Quick
+            test_the_keeper_roster_names_no_moving_key
         ; test_case "the sheet still names the moving keys" `Quick
             test_the_sheet_still_names_the_moving_keys
         ; test_case "every row keeps the help door" `Quick test_every_row_keeps_the_help_door

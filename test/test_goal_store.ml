@@ -2199,7 +2199,8 @@ let test_audit_ledger_writes_after_a_torn_tail () =
   let before_delivery = Fs_compat.load_file path in
   write (before_delivery ^ fragment);
   let events = match Goal_store.upsert_goal_with_events config ~actor:"creator"
-      ~title:"delivery after a torn tail" ~metric:"proof" ~target_value:"1" () with
+      ~title:"delivery after a torn tail" ~measure:(Goal_measure_fixture.done_when "1")
+      ~procedure:"proof" () with
     | Ok (_, _, events) -> events
     | Error error -> fail (write_error_msg error) in
   (match Goal_store.flush_pending_events config with

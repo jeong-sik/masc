@@ -2452,7 +2452,10 @@ let keeper_plain_page_rows state ~terminal_rows ~cols =
   match state.keeper_list_view, state.keeper_story with
   | Keeper_list_model.Plain, None ->
       let projection = keeper_plain_projection state ~terminal_rows ~cols ~now:(Unix.gettimeofday ()) in
-      Some (max 1 (List.length projection.kpp_window))
+      (* A page keeps the stop the reader stopped on (RFC
+         tui-one-screen-grammar §3.1), as every other list's page does. The
+         whole window moved it off screen with nothing to say so. *)
+      Some (Masc_tui_scroll.page_step ~height:(List.length projection.kpp_window))
   | (Keeper_list_model.Plain | Keeper_list_model.By_state | Keeper_list_model.By_cause
     | Keeper_list_model.By_time | Keeper_list_model.By_memory | Keeper_list_model.By_age
     | Keeper_list_model.By_runtime | Keeper_list_model.Day_wall), Some _

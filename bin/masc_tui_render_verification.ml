@@ -321,10 +321,10 @@ let render_verification_list (state : state) =
    | None -> ());
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
-            state.view));
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
+            ~has_rows:(shown > 0) state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 (* Complete judgement metadata is a physical document. Rows that fit keep
@@ -791,9 +791,9 @@ let render_harness_list (state : state) =
   let tail = Buffer.create 256 in
   box_bottom tail cols;
   Buffer.add_string tail
-    (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
-         state.view));
+    (footer_line_keys state ~max_cells:cols
+       ~keys:(Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
+         ~has_rows:(shown > 0) state.view));
   (* Drawing and cursor/page movement consume the same state-owned bound.
      The timestamp makes six head rows and two tail rows; aggregate ledger
      rows are part of the selected detail document instead. *)

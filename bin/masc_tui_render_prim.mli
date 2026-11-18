@@ -200,6 +200,17 @@ val footer_line :
     its keys use the ordinary item fitter. Quit and input-recovery notices
     keep their existing priority. It does not authorize an action. *)
 
+val footer_line_keys :
+  ?help_door:bool ->
+  ?status:Masc_tui_footer.status_item list ->
+  ?position:string ->
+  ?recovery_in_slot:recovery_row option ->
+  ?choices:string ->
+  Masc_tui_types.state -> max_cells:int -> keys:Masc_tui_footer.key_row -> string
+(** {!footer_line} for a row of typed keys: a key that does not answer on the
+    screen as drawn keeps its place, drawn without the key emphasis. The
+    navigation trace hears only the keys that answer. *)
+
 val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
@@ -338,6 +349,22 @@ val surface_chrome :
 (** [sidebar] reserves its width from [cols] and draws beside the body,
     above the full-width footer. The body must wrap for the remaining width.
     A complete recovery notice may use the existing bottom row. *)
+
+val surface_chrome_keys :
+  overflow:overflow ->
+  ?help_door:bool ->
+  ?frame:chrome_frame ->
+  ?status:Masc_tui_footer.status_item list ->
+  ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
+  Masc_tui_types.state ->
+  terminal_rows:int ->
+  cols:int ->
+  surface_key:string ->
+  title:string ->
+  keys:Masc_tui_footer.key_row ->
+  body:(budget:int -> chrome_body -> unit) ->
+  Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+(** {!surface_chrome} whose footer is drawn by {!footer_line_keys}. *)
 
 val connection_badge : Masc_tui_types.state -> string
 (** What a title row adds to the top row's connection word: that the event

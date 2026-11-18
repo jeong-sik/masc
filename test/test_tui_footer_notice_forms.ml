@@ -20,7 +20,7 @@ let max_width = 200
 let row_at ~status width =
   let line =
     Masc_tui_footer.line ~ko:false ~status ~dim:"" ~reset:"" ~max_cells:width ~port:8935
-      ~hints ()
+      ~hints:(Masc_tui_footer.Written hints) ()
     |> Masc_tui_theme.strip_sgr
   in
   match String.split_on_char '\n' line with
@@ -137,7 +137,7 @@ let fallback = "Resize to confirm quit"
 let marked_and_plain_row_with ~preferred_action ~status width =
   let line =
     Masc_tui_footer.line ~ko:false ~preferred_action ~action_text:fallback ~status ~dim:""
-      ~reset:"" ~max_cells:width ~port:8935 ~hints ()
+      ~reset:"" ~max_cells:width ~port:8935 ~hints:(Masc_tui_footer.Written hints) ()
   in
   match String.split_on_char '\n' line with
   | [ row; "" ] -> (row, Masc_tui_theme.strip_sgr row)

@@ -395,9 +395,9 @@ let render_system_logs (state : state) =
          (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
             ~has_rows:(total_entries > 0) state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
@@ -1127,9 +1127,9 @@ let render_acting (state : state) =
      land on there, and the dispatcher refuses both. *)
   let cursor_rows = state.acting_filter <> Acting.Turns && shown > 0 in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
             ~has_rows:cursor_rows ~has_reading:cursor_rows Acting));
   let clamped = match state.acting_filter with
     | Acting.Turns -> Acting scroll

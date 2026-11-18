@@ -357,11 +357,11 @@ let render_repository_list (state : state) =
     here_row ~cols state ~path:[]
       ~readings:[ Terminal_text.single_line state.workspace ] ~position:None
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
-    ~title
-    ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~has_rows:(shown > 0)
-              ~has_reading:(Option.is_some (selected_repository_reading state))
-              state.view)
+  surface_chrome_keys ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+    ~surface_key:"repositories" ~title
+    ~keys:(Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~has_rows:(shown > 0)
+             ~has_reading:(Option.is_some (selected_repository_reading state))
+             state.view)
     ~body:(fun ~budget c ->
       let geometry =
         repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in
@@ -1092,10 +1092,10 @@ let render_changes_list (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (* The footer is the key table's (for_surface Changes); never a literal here. *)
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
-            Changes));
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
+            ~has_rows:(shown > 0) Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 

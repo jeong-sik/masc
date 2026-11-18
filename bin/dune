@@ -828,9 +828,12 @@
  ; reader looks up what one means. masc_tui_keeper_list_model names the
  ; Keepers views the v key walks. masc_tui_fetched answers whether a Code
  ; file read is current, which decides if the footer names h and l.
+ ; masc_tui_footer owns the key row a list footer hands over with each key's
+ ; answer.
  (libraries
   masc
   masc_tui_types
+  masc_tui_footer
   masc_tui_volume_gc
   masc_tui_fetched
   masc_tui_keeper_mark

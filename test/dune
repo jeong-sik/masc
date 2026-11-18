@@ -3908,7 +3908,7 @@
 (test
  (name test_tui_footer_row_need)
  (modules test_tui_footer_row_need)
- (libraries alcotest masc_tui_keys masc_tui_types))
+ (libraries alcotest masc_tui_keys masc_tui_types masc_tui_footer masc_tui_theme))
 
 (test
  (name test_tui_runtime_config_receipt)

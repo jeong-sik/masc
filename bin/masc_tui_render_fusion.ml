@@ -276,10 +276,10 @@ let render_fusion_list (state : state) =
        for _ = List.length drawn + 1 to summary_rows do box_empty buf cols done);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
-            Fusion));
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
+            ~has_rows:(shown > 0) Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 (* The panel as marks, one per model, filled where the model answered.

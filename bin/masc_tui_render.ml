@@ -595,8 +595,8 @@ and render_memory_facts_list (state : state) =
          | Some _ ->
            Render_memory.Facts_loaded { total; filter_label; query_label }) ]
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
-    ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~lang:state.ui_language ~cols ~has_rows:(total > 0))
+  surface_chrome_keys ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
+    ~title ~keys:(Masc_tui_keys.footer_row_memory_facts ~lang:state.ui_language ~cols ~has_rows:(total > 0))
     ~body:(fun ~budget c ->
       Render_memory.render_memory_facts_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected

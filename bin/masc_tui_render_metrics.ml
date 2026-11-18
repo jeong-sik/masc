@@ -125,17 +125,37 @@ let format_megawords words =
   else if mw >= 1.0 then Printf.sprintf "%.1f MW" mw
   else Printf.sprintf "%.0f kW" (words /. 1000.0)
 
-(* The probe's state in words. A word from a server newer than this build is
-   drawn as it came behind [?] (RFC tui-one-screen-grammar section 7.1). That
-   word and a stopped probe's reason come off the wire, so both are escaped
-   here, where the three rows that ask for them cannot each forget. *)
+(* The probe's state in one word, without a stopped probe's reason: the
+   word a card edge carries (RFC tui-one-screen-grammar section 2). *)
+let scheduler_probe_state_word ~ko = function
+  | Scheduler_lag.Not_started -> if ko then "시작 전" else "not started"
+  | Scheduler_lag.Running -> if ko then "실행 중" else "running"
+  | Scheduler_lag.Stopped _ -> if ko then "멈춤" else "stopped"
+  | Scheduler_lag.Cancelled -> if ko then "취소됨" else "cancelled"
+
+(* Why a probe stopped: the exception it raised, as the server sent it. It is
+   data, so a card writes it in its body, where it is not dropped whole when
+   the edge is narrow, as a status word is. *)
+let scheduler_stop_reason = function
+  | Some (Decode.Probe_reported (Scheduler_lag.Stopped reason)) ->
+      Some (Terminal_text.single_line reason)
+  | Some
+      ( Decode.Probe_reported
+          Scheduler_lag.(Not_started | Running | Cancelled)
+      | Decode.Probe_unknown _ )
+  | None -> None
+
+(* The probe's state in words, with a stopped probe's reason. A word from a
+   server newer than this build is drawn as it came behind [?] (RFC
+   tui-one-screen-grammar section 7.1). That word and a stopped probe's
+   reason come off the wire, so both are escaped here, where the rows that
+   ask for them cannot each forget. *)
 let scheduler_probe_word ~ko = function
-  | Decode.Probe_reported Scheduler_lag.Not_started ->
-      if ko then "시작 전" else "not started"
-  | Decode.Probe_reported Scheduler_lag.Running -> if ko then "실행 중" else "running"
-  | Decode.Probe_reported (Scheduler_lag.Stopped reason) ->
-      (if ko then "멈춤: " else "stopped: ") ^ Terminal_text.single_line reason
-  | Decode.Probe_reported Scheduler_lag.Cancelled -> if ko then "취소됨" else "cancelled"
+  | Decode.Probe_reported state as probe -> (
+      let word = scheduler_probe_state_word ~ko state in
+      match scheduler_stop_reason (Some probe) with
+      | Some reason -> word ^ ": " ^ reason
+      | None -> word)
   | Decode.Probe_unknown word -> "? " ^ Terminal_text.single_line word
 
 let scheduler_probe_text ~ko = function
@@ -159,18 +179,20 @@ let scheduler_probe_symbol : Decode.scheduler_probe option -> Masc_tui_card.symb
       Masc_tui_card.Mark Masc_tui_value.Mark.Paused
 
 (* The probe as a card's status: the mark says which kind of state it is and
-   the word says which one. A word this build does not know reads [?] and the
-   word as it came (RFC tui-one-screen-grammar section 7.1); no probe at all
-   is the [?] alone. [tone] is the colour the samples give the card. A failed
-   probe takes the colour its mark means instead, so a card with no stalls
-   does not draw a failure in the colour of one that is fine. *)
+   the word says which one. A stopped probe's reason is not a state word; the
+   card's body writes it (scheduler_stop_reason). A word this build does not
+   know reads [?] and the word as it came (RFC tui-one-screen-grammar section
+   7.1); no probe at all is the [?] alone. [tone] is the colour the samples
+   give the card. A failed probe takes the colour its mark means instead, so
+   a card with no stalls does not draw a failure in the colour of one that is
+   fine. *)
 let scheduler_probe_status ~ko ~tone probe : Masc_tui_card.status =
   let symbol = scheduler_probe_symbol probe in
   let word =
     match probe with
     | None -> ""
     | Some (Decode.Probe_unknown word) -> Terminal_text.single_line word
-    | Some (Decode.Probe_reported _ as reported) -> scheduler_probe_word ~ko reported
+    | Some (Decode.Probe_reported state) -> scheduler_probe_state_word ~ko state
   in
   let tone =
     match symbol with
@@ -254,7 +276,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   (* Reserve readable text cells inside the border and padding. Below this
      width use the compact summaries, not four boxes of clipped labels. *)
   let minimum_card_text_cells = 32 in
-  let render_card ?status ?count ~title_style name line1 line2 =
+  let render_card ?status ?count ~title_style name rows =
     let style =
       { Masc_tui_card.border = Theme.recede ()
       ; focused_border = Theme.border_focus ()
@@ -265,7 +287,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     Masc_tui_card.render ~ko ~style ~width:card_w ~height:4
       { Masc_tui_card.edge =
           { Masc_tui_card.name; key = None; status; count; focus = Masc_tui_card.Unfocused }
-      ; body = (fun ~cells:_ -> [ line1; line2 ]) }
+      ; body = (fun ~cells:_ -> rows) }
   in
   let gc_opt =
     Option.bind state.server_identity (fun id -> id.Decode.sid_gc)
@@ -314,10 +336,20 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let heap = say "힙 " "Heap " ^ Unknown.glyph identity_gap in
       (heap, say "워커 " "Workers " ^ domains, heap ^ " · " ^ workers)
   in
-  let c2_l1, c2_l2, c2_tone, c2_status = match sched_opt with
+  (* The probe's state is the card's status, on its edge, so the body does
+     not write the probe again. A stopped probe's reason is data, the last
+     row of the body. With no samples it has the second row to itself. With
+     samples still in the producer window it is the third, which the card
+     cuts and counts on its bottom edge; a stopped probe takes no new
+     samples, so the window empties and the reason moves up. *)
+  let stop_reason =
+    Option.to_list
+      (scheduler_stop_reason (Option.bind sched_opt (fun s -> s.ssch_probe)))
+  in
+  let c2_l1, c2_rest, c2_tone, c2_status = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
       ( say "지연 표본 없음" "No latency samples",
-        say "프로브: " "Probe: " ^ scheduler_probe_text ~ko s.ssch_probe,
+        stop_reason,
         Theme.recede (),
         scheduler_probe_status ~ko ~tone:(Theme.recede ()) s.ssch_probe )
     | Some s ->
@@ -326,7 +358,8 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       (Printf.sprintf (if ko then "p95 %.3fms · 최대 %.3fms" else "p95 %.3fms · max %.3fms")
          s.ssch_p95_ms s.ssch_max_ms,
        Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
-         (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls),
+         (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls)
+       :: stop_reason,
        tone,
        scheduler_probe_status ~ko ~tone:badge_tone s.ssch_probe)
     (* One condition -- no scheduler reading at all -- so both halves of the
@@ -334,7 +367,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     | None ->
       let mark = Unknown.glyph identity_gap in
       ( "p95 " ^ mark,
-        say "표본 " "Samples " ^ mark,
+        [ say "표본 " "Samples " ^ mark ],
         Theme.recede (),
         { Masc_tui_card.symbol = Masc_tui_card.Unknown identity_gap
         ; word = ""
@@ -346,12 +379,15 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let c3_l1, c3_l2, c3_count, c3_status = match kpis.tasks with
     | Some count ->
       let total = Task_flow.total_count count in
+      (* The total is the card's count, on its edge. The meter measures the
+         done tasks against it and writes the done count alone, as the
+         Engine card's meter writes the live size against the heap above. *)
       let done_line =
         if card_cells >= minimum_card_text_cells && total > 0 then
           Chart.meter ~width:card_cells ~value:count.completed
             ~max_value:(max 1 total)
             ~label:(say "완료" "Done")
-            ~suffix:(Printf.sprintf "%s/%s" (Count.grouped count.completed) (Count.grouped total))
+            ~suffix:(Count.grouped count.completed)
             ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
             ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
         else
@@ -426,10 +462,11 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   if card_cells >= minimum_card_text_cells then
     zip4
-      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE") c1_l1 c1_l2)
-      (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2)
-      (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2)
-      (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") c4_l1 c4_l2)
+      (render_card ~title_style:(Theme.info ()) (say "엔진" "ENGINE") [ c1_l1; c1_l2 ])
+      (render_card ~status:c2_status ~title_style:c2_tone (say "스케줄러 지연" "SCHEDULER LAG")
+         (c2_l1 :: c2_rest))
+      (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
+      (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
   else
     [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
         (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_compact

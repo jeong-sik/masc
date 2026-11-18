@@ -5,6 +5,7 @@ module Value = Masc_tui_value
 type count =
   | Whole of int
   | Partial of { loaded : int; total : int }
+  | At_least of int
 
 type symbol =
   | Mark of Value.Mark.t
@@ -101,6 +102,7 @@ let symbol_glyph = function
 let count_text ~ko = function
   | Whole rows -> Value.Count.grouped rows
   | Partial { loaded; total } -> Value.Count.partial ~ko ~loaded ~total
+  | At_least rows -> Value.Count.lower_bound rows
 
 (* Zone 2's position counts a focused list, so its card does not. A focused
    card that is not a list keeps its count: zone 2 counts something else. *)

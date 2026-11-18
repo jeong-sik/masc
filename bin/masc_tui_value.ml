@@ -331,7 +331,9 @@ module Count = struct
 
   let reading ~ko noun count = written ~ko noun count (grouped count)
 
-  let at_least ~ko noun count = written ~ko noun count ("≥" ^ grouped count)
+  let lower_bound count = "≥" ^ grouped count
+
+  let at_least ~ko noun count = written ~ko noun count (lower_bound count)
 
   (* The word ahead of the server's total when a list is read in part. *)
   let whole ~ko = if ko then "전체" else "of"

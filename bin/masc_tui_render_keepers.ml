@@ -2671,6 +2671,31 @@ let render_keeper_axes (state : state) =
            - fleet.fs_reaction_capacity_shortfall)
            fleet.fs_target_reaction_capacity
        in
+       (* The blocker and the task-owner count, each once: the task-owner
+          blocker carries its count in the blocker's place, and a count beside
+          another blocker, or with none, stays in the counts row. *)
+       let causes =
+         Masc_tui_fleet_line.cause_rows ~blocker:fleet.fs_blocker
+           (Masc_tui_fleet_line.owner_count fleet)
+       in
+       let blocker_reading =
+         List.filter_map
+           (function
+             | (Masc_tui_fleet_line.Blocker_alone _ | Masc_tui_fleet_line.Blocker_with_owners _)
+               as row ->
+                 Some (Masc_tui_fleet_summary.Blocker, Masc_tui_fleet_line.cause_row_text ~ko row)
+             | Masc_tui_fleet_line.Owners_alone _ -> None)
+           causes
+       in
+       let owners_alone =
+         List.filter_map
+           (function
+             | Masc_tui_fleet_line.Owners_alone _ as row ->
+                 Some (Masc_tui_fleet_line.cause_row_text ~ko row)
+             | Masc_tui_fleet_line.Blocker_alone _ | Masc_tui_fleet_line.Blocker_with_owners _ ->
+                 None)
+           causes
+       in
        (* [select] keeps a prefix, so the last reading is the first a narrow
           screen drops. The proactive interval goes last: it is a setting the
           operator chose, the same on every scan, while the counts and the
@@ -2679,9 +2704,7 @@ let render_keeper_axes (state : state) =
          [ Masc_tui_fleet_summary.Running, running
          ; Masc_tui_fleet_summary.Turn_capacity, turn_capacity
          ]
-         @ (match Masc_tui_fleet_line.blocker_text ~ko fleet with
-           | None -> []
-           | Some text -> [ Masc_tui_fleet_summary.Blocker, text ])
+         @ blocker_reading
          @ [ ( Masc_tui_fleet_summary.Proactive_interval
              , Masc_tui_fleet_line.proactive_text ~ko fleet ) ]
        in
@@ -2710,13 +2733,14 @@ let render_keeper_axes (state : state) =
        let entry label n =
          if n > 0 then [ Printf.sprintf "%s %d" label n ] else []
        in
-       (* The owner count keeps its place in the row and brings its own
-          shortfall, which is the only reading that says the scan came up
-          short: an unread Keeper does not move the fleet status. *)
+       (* An owner count the blocker above does not carry keeps its place in
+          the row and brings its own shortfall, which is the only reading that
+          says the scan came up short: an unread Keeper does not move the
+          fleet status. *)
        let counts =
          failing_entry
          @ entry (text "일시정지" "paused") fleet.fs_paused_count
-         @ Option.to_list (Masc_tui_fleet_line.owner_scan_text ~ko fleet)
+         @ owners_alone
          @ entry (text "판정 대기" "awaiting verdict") fleet.fs_completion_authority_pending_count
        in
        if counts <> [] then

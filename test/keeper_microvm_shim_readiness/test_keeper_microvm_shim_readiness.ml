@@ -26,12 +26,17 @@ let recovery_area base area =
   Filename.concat (recovery_root base)
     (Filename.concat "fs-publication-recovery/lanes/microvm-shim-config" area)
 
-let install base bytes =
+(* The bytes exactly as given: a shim built from any source. *)
+let install_built base bytes =
   mkdir (shim_dir base);
   write (binary base) bytes;
   Unix.chmod (binary base) 0o700;
   let digest = Agent_core_sha256.(digest_string bytes |> to_hex) in
   write (sidecar base) (digest ^ "  " ^ Shim.shim_binary_name ^ "\n")
+
+(* A shim built from this source carries its relay declaration (#52968). *)
+let install base bytes =
+  install_built base (bytes ^ "\000" ^ Exec_ssh_protocol.Relay.version_declaration ^ "\000")
 
 let corrupt base =
   write (sidecar base) (String.make 64 '0' ^ "  " ^ Shim.shim_binary_name ^ "\n")
@@ -335,6 +340,28 @@ let test_cancellation_during_failed_recovery_propagates () = with_fixture (fun ~
   Alcotest.(check bool) "cancellation survives recovery error" true cancelled;
   value (verify fs base))
 
+(* #52968: the 0.73.1 release shim speaks relay 1 and declares nothing; a
+   shim declaring relay 1 is the same refusal with the version named. Both
+   are refused with the sidecar verified and without one, and the refusal is
+   not cached: reinstalling the current shim is observed by the next call. *)
+let expect_relay_refused ~installed = function
+  | Error (Ready.Verification_failed (Ready.Shim_relay_version_mismatch {installed = got; required})) ->
+    Alcotest.(check int) "required is this host's relay" Exec_ssh_protocol.Relay.version required;
+    Alcotest.(check bool) "installed is what the bytes declare" true (got = installed)
+  | Error error -> Alcotest.fail (Ready.error_message error)
+  | Ok () -> Alcotest.fail "a shim speaking another relay authorized the endpoint"
+
+let test_stale_relay_shim_is_refused_until_reinstalled () = with_fixture (fun ~fs base ->
+  install_built base "release shim from before the declaration";
+  value (initialize fs base);
+  expect_relay_refused ~installed:Shim.No_relay_version (verify fs base);
+  install_built base "relay-1 shim MASC_EXEC_SHIM_RELAY_VERSION=1; bytes";
+  expect_relay_refused ~installed:(Shim.Relay_version 1) (verify fs base);
+  Unix.unlink (sidecar base);
+  expect_relay_refused ~installed:(Shim.Relay_version 1) (verify fs base);
+  install base "reinstalled current shim";
+  value (verify fs base))
+
 let () = Alcotest.run "microvm startup and endpoint shim readiness"
   ["actual fixture filesystem", [
     Alcotest.test_case "startup config once and conflicting payload" `Quick test_startup_config_is_written_once;
@@ -354,5 +381,6 @@ let () = Alcotest.run "microvm startup and endpoint shim readiness"
     Alcotest.test_case "guest backend and base isolate cache authority" `Quick test_cache_key_includes_guest_backend_and_base;
     Alcotest.test_case "forget invalidates every matching base" `Quick test_forget_clears_matching_guest_across_bases;
     Alcotest.test_case "hand-built shim remains allowed" `Quick test_hand_built_unverified_policy_is_preserved;
+    Alcotest.test_case "stale relay shim refused until reinstalled" `Quick test_stale_relay_shim_is_refused_until_reinstalled;
     Alcotest.test_case "cached readiness preserves caller cancellation" `Quick test_cancelled_caller_cannot_reuse_cached_success;
     Alcotest.test_case "failed recovery preserves caller cancellation" `Quick test_cancellation_during_failed_recovery_propagates]]

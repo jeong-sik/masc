@@ -15,7 +15,7 @@ let affects_trust = function
   | Keeper { change =
       (Turn_preview | Chat | Native_tasks | Child_content | Memory_journal | Async_requests | Asks); _ }
   | Store (Schedule | Pending_confirms | Goals | Skill_catalog | Lane_addon_exports)
-  | Dataset (Repositories | Verification_requests | Harness_verdicts | Goals
+  | Dataset (Repositories | Backlog | Verification_requests | Harness_verdicts | Goals
       | Keeper_metrics _ | Skill_activations _ | Skill_catalog | Clients
       | Account_emails | Provider_usage | Keeper_costs | Workspace_health
       | Lanes | Machine_live _ | Play_room _ | Lane_addons _
@@ -44,7 +44,7 @@ let affects_execution input =
   | Dataset (Runtime_config | Connectors | Runtime_probe | Provider_standing | Runtime_metrics)
   | Telemetry_gap {source = Some Execution_receipt; _} -> true
   | Keeper {change = (Memory_journal | Async_requests); _}
-  | Dataset (Repositories | Harness_verdicts | Account_emails | Provider_usage
+  | Dataset (Repositories | Backlog | Harness_verdicts | Account_emails | Provider_usage
       | Workspace_health | Lanes | Machine_live _ | Play_room _ | Lane_addons _
       | Browser_observation _ | Keeper_oauth_attempts _ | Memory_health _
       | World_memory | Play_seats | Dashboard_observation _)

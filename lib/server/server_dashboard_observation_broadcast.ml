@@ -78,7 +78,7 @@ let observations = function
   | Dataset Clients -> workspace [`Ide_presence]
   | Dataset Repositories -> workspace [`Ide_presence; `Ide_events]
   | Dataset Connectors -> workspace [`Gate]
-  | Dataset (Goals | Harness_verdicts | Lanes | Machine_live _ | Play_room _
+  | Dataset (Backlog | Goals | Harness_verdicts | Lanes | Machine_live _ | Play_room _
       | Lane_addons _ | Browser_observation _ | Keeper_oauth_attempts _
       | World_memory | Play_seats | Dashboard_observation _) -> []
 ;;

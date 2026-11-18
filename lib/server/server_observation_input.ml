@@ -79,7 +79,7 @@ let dataset fields =
   match Workspace_dataset_event.of_fields fields with
   | Error _ | Ok (Workspace_dataset_event.Dashboard_observation _) -> None
   | Ok (Workspace_dataset_event.(
-      (Repositories | Verification_requests | Harness_verdicts | Goals
+      (Repositories | Backlog | Verification_requests | Harness_verdicts | Goals
       | Runtime_config | Connectors | Keeper_metrics _ | Skill_activations _
       | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
       | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes

@@ -27,7 +27,7 @@ let components_of_input input =
     | Store Runtime_config | Dataset Runtime_config -> [Telemetry]
     | Keeper {change = Turn | Turn_preview | Chat
         | Native_tasks | Child_content | Memory_journal | Async_requests; _}
-    | Dataset (Repositories | Verification_requests | Harness_verdicts | Goals
+    | Dataset (Repositories | Backlog | Verification_requests | Harness_verdicts | Goals
         | Connectors | Keeper_metrics _ | Skill_activations _ | Skill_catalog
         | Clients | Account_emails | Provider_usage | Provider_standing
         | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics

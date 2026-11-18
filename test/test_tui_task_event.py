@@ -82,7 +82,13 @@ class TaskHandler(FixtureHandler):
         server.observer_ready.set()
         while (event := server.events.get()) is not None:
             cursor, kind = event
-            if kind == "loss":
+            if kind == "backlog":
+                payload = {
+                    "type": "workspace_dataset_changed",
+                    "dataset": "backlog",
+                    "ts_unix": 1.0,
+                }
+            elif kind == "loss":
                 payload = {
                     "type": "agent_core:relay_subscription_loss",
                     "event_type": "relay_subscription_loss",
@@ -126,7 +132,7 @@ class TaskHandler(FixtureHandler):
 class TaskEventTest(unittest.TestCase):
     binary = ""
 
-    def test_task_snapshot_reloads_local_work_without_polling(self) -> None:
+    def test_backlog_alert_reloads_local_work_without_polling(self) -> None:
         self.exercise_local_work(hold_observer=False)
 
     def test_observer_open_covers_the_initial_read_gap(self) -> None:
@@ -257,7 +263,7 @@ class TaskEventTest(unittest.TestCase):
                 wait_until(server.observer_ready.is_set, "observer did not open")
                 server.set_phase("changed")
                 write_task("updated-task-marker-after-event", 2)
-                server.events.put((1, "execution"))
+                server.events.put((1, "backlog"))
                 wait_until(
                     lambda: server.count("changed", "observer-event-written") == 1,
                     "task event was not sent",
@@ -269,14 +275,14 @@ class TaskEventTest(unittest.TestCase):
                 )
 
                 write_task("duplicate-must-not-trigger-marker", 3)
-                server.events.put((1, "execution"))
+                server.events.put((1, "backlog"))
                 wait_until(
                     lambda: server.count("changed", "observer-event-written") == 2,
                     "duplicate event was not sent",
                 )
                 drain_for(1.0)
                 self.assertNotIn(b"duplicate-must-not-trigger-marker", output)
-                server.events.put((2, "execution"))
+                server.events.put((2, "backlog"))
                 wait_until(
                     lambda: b"duplicate-must-not-trigger-marker" in output,
                     "new cursor did not refresh local work",
@@ -289,29 +295,39 @@ class TaskEventTest(unittest.TestCase):
                     "observer source loss did not refresh local work",
                     timeout=6.0,
                 )
-                write_task("full-execution-snapshot-marker", 5)
+                # The execution projection is the web's; neither of its
+                # alerts reads the TUI's Work.
+                write_task("execution-alert-must-not-trigger-marker", 5)
                 server.events.put((4, "full"))
-                wait_until(
-                    lambda: b"full-execution-snapshot-marker" in output,
-                    "full execution snapshot did not refresh local work",
-                    timeout=6.0,
-                )
-                write_task("FULL-execution-snapshot-marker", 6, preserve_stat=True)
                 server.events.put((5, "execution"))
                 wait_until(
-                    lambda: b"FULL-execution-snapshot-marker" in output,
+                    lambda: server.count("changed", "observer-event-written") == 6,
+                    "execution alerts were not sent",
+                )
+                drain_for(1.5)
+                self.assertNotIn(b"execution-alert-must-not-trigger-marker", output)
+                server.events.put((6, "backlog"))
+                wait_until(
+                    lambda: b"execution-alert-must-not-trigger-marker" in output,
+                    "a backlog alert did not refresh local work",
+                    timeout=6.0,
+                )
+                write_task("EXECUTION-alert-must-not-trigger-marker", 6, preserve_stat=True)
+                server.events.put((7, "backlog"))
+                wait_until(
+                    lambda: b"EXECUTION-alert-must-not-trigger-marker" in output,
                     "same-stat task replacement stayed stale after an event",
                     timeout=6.0,
                 )
                 server.events.put(None)
-                write_task("RECO-execution-snapshot-marker", 7, preserve_stat=True)
+                write_task("RECONNECT-alert-must-not-trigger-marker", 7, preserve_stat=True)
                 wait_until(
-                    lambda: server.count("changed", "observer-resumed-5") >= 1,
-                    "observer did not resume from cursor 5 without a polling tick",
+                    lambda: server.count("changed", "observer-resumed-7") >= 1,
+                    "observer did not resume from cursor 7 without a polling tick",
                     timeout=8.0,
                 )
                 wait_until(
-                    lambda: b"RECO-execution-snapshot-marker" in output,
+                    lambda: b"RECONNECT-alert-must-not-trigger-marker" in output,
                     "reconnect did not refresh a same-stat task replacement",
                     timeout=6.0,
                 )

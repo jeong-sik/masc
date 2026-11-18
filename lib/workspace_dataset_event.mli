@@ -37,6 +37,13 @@ val browser_scope_of_fields :
 type dataset =
   | Repositories
       (** The repository catalog, read by [GET /api/v1/repositories]. *)
+  | Backlog
+      (** The task backlog and the Goal task links, at their commit
+          boundary. The TUI's Work, Verification, Goal, Planning, tool
+          surface and open source Task reads carry them. No server surface
+          recomputes on it: the same commit already invalidates the
+          execution cache. A file edited outside the server is not
+          announced. *)
   | Verification_requests
       (** The verification request store, read by the Verification queue. *)
   | Keeper_metrics of { keeper : string }
@@ -143,6 +150,7 @@ val event_type : string
 module Kind : sig
   type t =
     | Repositories
+    | Backlog
     | Verification_requests
     | Keeper_metrics
     | Harness_verdicts

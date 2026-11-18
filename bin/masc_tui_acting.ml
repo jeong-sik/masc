@@ -472,7 +472,8 @@ let actor_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_roster_change Observer.Every_row_changed
   | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _
   | Observer.Dataset_changed
-      ( Masc.Workspace_dataset_event.Repositories | Masc.Workspace_dataset_event.Verification_requests
+      ( Masc.Workspace_dataset_event.Repositories | Masc.Workspace_dataset_event.Backlog
+      | Masc.Workspace_dataset_event.Verification_requests
       | Masc.Workspace_dataset_event.Harness_verdicts | Masc.Workspace_dataset_event.Goals
       | Masc.Workspace_dataset_event.Runtime_config | Masc.Workspace_dataset_event.Connectors
       | Masc.Workspace_dataset_event.Skill_catalog | Masc.Workspace_dataset_event.Clients
@@ -546,6 +547,7 @@ let label_of_event ~ko (event : Observer.event) =
   | Observer.Workspace_store_changed Observer.Skill_catalog -> say "스킬 카탈로그" "skill catalog"
   | Observer.Workspace_store_changed Observer.Lane_addon_exports -> say "Lane Add-on 도구" "lane add-on exports"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> say "저장소" "repositories"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Backlog -> say "작업 목록" "task backlog"
   | Observer.Gate_connector_changed _ -> say "커넥터" "connector"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts -> say "하네스" "harness"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients -> say "클라이언트" "clients"
@@ -757,6 +759,8 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
       { at; actor = Actor_server; glyph = Quiet; label; detail = say "Lane Add-on 이 내보내는 도구가 바뀜" "a Lane Add-on's exported tools changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories ->
       { at; actor = Actor_server; glyph = Quiet; label; detail = say "저장소 목록이 바뀜" "the repository catalog changed" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Backlog ->
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "작업 목록이 바뀜" "the task backlog changed" }
   | Observer.Gate_connector_changed { connector } ->
       { at; actor = Actor_server; glyph = Quiet; label; detail = say "커넥터 " "connector " ^ connector ^ say " 바뀜" " changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts ->

@@ -3439,6 +3439,7 @@
 (include stanzas/test_keeper_skill_activations_read.inc)
 (include stanzas/test_gate_connector_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
+(include stanzas/test_backlog_announce.inc)
 (include stanzas/test_keeper_metrics_announce.inc)
 (include stanzas/test_keeper_oauth_attempts_announce.inc)
 (include stanzas/test_memory_health_input_announce.inc)

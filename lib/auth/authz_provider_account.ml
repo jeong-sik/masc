@@ -99,6 +99,11 @@ let shown (state : Authz_state.t) user_id =
           | Some (Authz_purge_state.Account_pending | Authz_purge_state.Account_purged) -> None
           | Some (Authz_purge_state.Account_failed { failed_stage }) -> shown (Some (Stayed failed_stage))
           | None ->
+            (* A reduction held on the credential with no purge record is
+               read as a removal whose start was given up: a purge is the
+               one reduction written on a credential. [Credential_replace]
+               ({!Authz_external_store.Change}) has no writer; with one,
+               this label is wrong for its reductions. *)
             (match Authz_state.revocation state (Subject.Credential provider_account_id) with
              | Revocation_state.Pending -> shown (Some Start_given_up)
              | Revocation_state.Not_pending -> shown None)))

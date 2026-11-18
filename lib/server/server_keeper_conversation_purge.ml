@@ -88,7 +88,7 @@ let logged (conversation : Conversation.conversation) what detail =
 
 (* The Runtime of the person on the account the conversation began on gives
    the CLI and the home its turns ran with. *)
-let execution_of (person : Login.person) ~base_path provider_account_id =
+let execution_of in_call (person : Login.person) ~base_path provider_account_id =
   let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
   match
     List.find_opt
@@ -100,9 +100,9 @@ let execution_of (person : Login.person) ~base_path provider_account_id =
   | Some (runtime_id, (_ : Authz_runtime_state.runtime)) ->
     (match
        Login.person_runtime
+         in_call
          person
          ~base_path
-         ~provider_account_id
          ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string runtime_id))
      with
      | Error (Login.Refused ((`Bad_request | `Not_found | `Service_unavailable), sentence)) ->
@@ -124,13 +124,13 @@ let execution_of (person : Login.person) ~base_path provider_account_id =
 (* Claude Code purges the project the turns of the conversation started in,
    on the home of the account they ran on. Anything that keeps it from
    exiting 0 leaves the copy [may_remain]. *)
-let purge_vendor_copy ~env (person : Login.person) ~base_path ~records conversation =
+let purge_vendor_copy ~env in_call (person : Login.person) ~base_path ~records conversation =
   let kept detail =
     logged conversation "the copy of the vendor may remain" detail;
     Event.May_remain
   in
   let provider_account_id = conversation.Conversation.provider_account_id in
-  match execution_of person ~base_path provider_account_id with
+  match execution_of in_call person ~base_path provider_account_id with
   | Error detail -> kept detail
   | Ok (execution : Runtime_execution.claude_code) ->
     (match
@@ -184,7 +184,7 @@ let vendor_copy ~since ~reach ~purge =
 
 (* The third to the fifth step: the copy of the vendor, the directory, and
    the record of the end. *)
-let finish ~env (person : Login.person) ~base_path ~records conversation ~since =
+let finish ~env in_call (person : Login.person) ~base_path ~records conversation ~since =
   let reach () =
     match Conversation.client_reach records conversation with
     | Ok reach -> Some reach
@@ -194,7 +194,7 @@ let finish ~env (person : Login.person) ~base_path ~records conversation ~since 
   in
   let vendor_copy =
     vendor_copy ~since ~reach ~purge:(fun () ->
-      purge_vendor_copy ~env person ~base_path ~records conversation)
+      purge_vendor_copy ~env in_call person ~base_path ~records conversation)
   in
   let named = conversation_of person conversation.Conversation.conversation_id in
   let ended written ~then_ =
@@ -230,8 +230,8 @@ let delete ~env ~(person : Login.person) ~base_path conversation_id =
     Error (Record_unavailable error)
   | Ok None -> Error Not_found
   | Ok (Some conversation) ->
-    Login.one_call_of conversation.Conversation.provider_account_id ~busy:Account_busy (fun () ->
-      let finish since = finish ~env person ~base_path ~records conversation ~since in
+    Login.one_call_of conversation.Conversation.provider_account_id ~busy:Account_busy (fun in_call ->
+      let finish since = finish ~env in_call person ~base_path ~records conversation ~since in
       let start since =
         match Authz_purge.start person.zone ~user_id:person.user_id (target person conversation_id) with
         | Ok () -> finish since
@@ -283,9 +283,12 @@ let resume_one ~env ~zone ~base_path ~owner ~namespace conversation_id =
       "The deletion of conversation %s was not resumed: its owner has no conversation of the id"
       id
   | Ok (Some conversation) ->
-    let ended since = Result.map Option.some (finish ~env person ~base_path ~records conversation ~since) in
+    let ended in_call since =
+      Result.map Option.some (finish ~env in_call person ~base_path ~records conversation ~since)
+    in
     (match
-       Login.one_call_of conversation.Conversation.provider_account_id ~busy:Account_busy (fun () ->
+       Login.one_call_of conversation.Conversation.provider_account_id ~busy:Account_busy (fun in_call ->
+         let ended = ended in_call in
          match status_of person conversation_id with
          | Some (Purges.Pending { earlier_vendor_copy = None }) -> ended After_stop
          | Some (Purges.Pending { earlier_vendor_copy = Some copy }) -> ended (After_failure copy)

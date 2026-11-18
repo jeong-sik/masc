@@ -232,6 +232,17 @@ type refusal =
   | Not_the_account_home of Authz_types.Provider_account_id.t
       (** The account was captured from another home than the one of this
           account of the person. *)
+  | Not_the_account_key of Authz_types.Provider_account_id.t
+      (** The account does not carry the key the log gives this account of
+          the person. A key account carries the key of the file of the
+          generation its records say
+          ({!Runtime_account_home_layout.key_file}), read by the capture
+          itself ({!Runtime_official_account.capture_on_key}). A login
+          account, and an account no record links yet, carries no key of a
+          file. The file is spelled under the runtime root of the person
+          the request is for. For an account asked for as one's own it
+          comes after the check of the owner, so it says nothing of an
+          account of another person. *)
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; reason : Authz_provider_account.unavailable

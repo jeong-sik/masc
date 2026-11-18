@@ -1452,7 +1452,7 @@ let test_turn () =
            Login.one_call_of
              (get (Provider_account_id.of_string alice.account_id))
              ~busy:"the call of the test did not start"
-             (fun () -> Ok (renew alice (only_keeper "keeper-alice")))
+             (fun (_ : Login.in_call) -> Ok (renew alice (only_keeper "keeper-alice")))
          with
          | Ok answer ->
            check_reply
@@ -1692,7 +1692,7 @@ let test_turn () =
            Login.one_call_of
              (get (Provider_account_id.of_string bob.account_id))
              ~busy:"the call of the test did not start"
-             (fun () -> Ok (delete bob his_conversation))
+             (fun (_ : Login.in_call) -> Ok (delete bob his_conversation))
          with
          | Ok answer ->
            check_reply
@@ -1837,7 +1837,7 @@ let test_turn () =
            Login.one_call_of
              (get (Provider_account_id.of_string alice.account_id))
              ~busy:"the call of the test did not start"
-             (fun () -> Ok (resume ()))
+             (fun (_ : Login.in_call) -> Ok (resume ()))
          with
          | Ok () -> ()
          | Error busy -> Alcotest.fail busy);
@@ -1920,11 +1920,15 @@ let test_turn () =
         (* Another person names the account and is told it is not theirs,
            the answer of an account that is not there. *)
         (match
-           Login.person_runtime
-             bob.person
-             ~base_path
-             ~provider_account_id:dave_account
-             ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string dave_runtime))
+           Login.one_call_of
+             dave_account
+             ~busy:(Login.Refused (`Service_unavailable, "the call of the test did not start"))
+             (fun in_call ->
+                Login.person_runtime
+                  in_call
+                  bob.person
+                  ~base_path
+                  ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string dave_runtime)))
          with
          | Error (Login.Refused (`Not_found, (_ : string))) -> ()
          | Error (Login.Refused ((`Bad_request | `Service_unavailable), detail)) ->

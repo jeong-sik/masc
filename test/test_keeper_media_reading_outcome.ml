@@ -167,9 +167,131 @@ let test_pending_carrier_keeps_all_originals_and_freezes_once () = with_fixture 
   check int "reading does not acknowledge the original host receipt" 1
     (List.length (Outbox.receipt_ids snapshot)))
 
+let document ?(media_type=mime) source =
+  Agent_core.Types.document_block ~media_type ~source:(Agent_core.Types.Stored source)
+
+let nested_result ~text blocks : Agent_core.Types.content_block =
+  ToolResult {tool_use_id="prepared-media-call";content=text;
+    outcome=Tool_succeeded;json=Some (`Assoc ["original_result", `Bool true]);
+    content_blocks=Some blocks}
+
+let prepared_blocks prepared blocks =
+  get M.preparation_error_to_string (M.project_prepared prepared blocks)
+
+let test_prepared_pending_is_one_immutable_observation () = with_fixture (fun base media stored ->
+  let original = captured base media stored "selected-pending" in
+  let pending = M.Pending
+      ({original=M.original_reference original;disposition=Awaiting_approval "first-approval"},
+       [{original=M.original_reference original;
+         disposition=Ambiguous_approvals ["second-approval";"third-approval"]}]) in
+  let current = ref pending and effects = ref 0 and observations = ref 0 in
+  let selections = ref 0 and reads = ref 0 in
+  let projector = builtin ~media ~selections ~reads
+      ~source_reader:(fun ~kind:_ ~media_type:_ _ -> incr observations; M.Use_builtin) in
+  let stored_block = document stored in
+  let nested = nested_result ~text:"original result" [stored_block] in
+  let audio_selected = ref false in
+  let prepared = M.prepare projector
+      ~source_reader:(fun ~kind:_ ~media_type:_ _ -> incr effects; M.Owned !current)
+      ~needs_projection:(function M.Document -> true | Audio -> !audio_selected)
+      [[stored_block;nested];[stored_block]] in
+  check int "one selected identity reaches its owner only once" 1 !effects;
+  check int "explicit preparation uses the admitted port" 0 !observations;
+  check int "pending originals bypass builtin selection" 0 !selections;
+  current := M.Unavailable (M.External_failed M.Declarations_unavailable);
+  audio_selected := true;
+  let audio = Agent_core.Types.audio_block ~media_type:"audio/wav"
+      ~source:(Agent_core.Types.Stored stored) in
+  let input = [Agent_core.Types.Text "changed argument context";
+    nested_result ~text:"materialized result marker" [stored_block];audio] in
+  let first, counts = prepared_blocks prepared input in
+  let second, _ = prepared_blocks prepared input in
+  check bool "reconstruction reuses the complete captured pending outcome" true (first = second);
+  check (list (pair string int)) "captured modality decisions stay fixed"
+    ["document",1] counts;
+  (match first with
+   | [Agent_core.Types.Text "changed argument context"; ToolResult result; kept_audio] ->
+     check string "result materialization is preserved" "materialized result marker" result.content;
+     check string "tool identity stays with its media" "prepared-media-call" result.tool_use_id;
+     check bool "tool outcome and JSON remain unchanged" true
+       (result.outcome=Tool_succeeded && result.json=Some (`Assoc ["original_result",`Bool true]));
+     check bool "unselected audio remains canonical" true (kept_audio=audio);
+     (match result.content_blocks with
+      | Some [Text text] -> check bool "all original and approval identities survive"
+          true (String_util.contains_substring text (Yojson.Safe.to_string (M.outcome_to_json pending)))
+      | _ -> fail "nested selected media was not projected")
+   | _ -> fail "prepared projection changed the selected bundle structure");
+  check int "pure reconstruction never invokes the owner again" 1 !effects;
+  check int "pure reconstruction never reads a builtin source" 0 !reads)
+
+let test_prepared_sources_use_complete_identity_and_refuse_new_sources () =
+  with_fixture (fun _base media stored ->
+    let other_length = get H.stored_error_to_string
+        (H.stored ~sha256:stored.sha256 ~bytes:(stored.bytes+1)) in
+    let other_digest = H.stored_of_raw "different selected source" in
+    let document_block = document stored in
+    let audio_block = Agent_core.Types.audio_block ~media_type:mime
+        ~source:(Agent_core.Types.Stored stored) in
+    let selected = [document_block; document ~media_type:"application/alternate" stored;
+      document other_length; document other_digest; audio_block; document_block] in
+    let calls = ref [] and current = ref (M.Unavailable (M.External_failed M.Reader_not_started)) in
+    let projector = M.projector ~media_store:media ~keeper_name:keeper
+        ~resolve:(fun ~kind:_ ~media_type:_ -> fail "owned unavailable results must not select a reader") () in
+    let prepared = M.prepare projector ~needs_projection:(fun _ -> true)
+        ~source_reader:(fun ~kind ~media_type source ->
+          calls := (kind,media_type,source.H.sha256,source.bytes) :: !calls;
+          M.Owned !current) [selected] in
+    check int "kind, MIME, length and digest each distinguish a source" 5 (List.length !calls);
+    current := M.Unavailable (M.External_failed M.Declarations_unavailable);
+    let blocks, _ = prepared_blocks prepared selected in
+    check bool "unavailable results keep their captured reason" true
+      (List.for_all (function Agent_core.Types.Text text ->
+        String_util.contains_substring text "reader_not_started"
+        && not (String_util.contains_substring text "reader_declarations_unavailable")
+        | _ -> false) blocks);
+    let unseen = H.stored_of_raw "not selected in this request" in
+    (match M.project_prepared prepared [document unseen] with
+     | Error (M.Source_not_prepared {kind;media_type;source}) ->
+       check bool "missing source remains typed and exact" true
+         (kind=M.Document && media_type=mime && source=unseen)
+     | Ok _ -> fail "an unprepared source entered the request");
+    check int "an unprepared source does not invoke or retry any reader" 5 (List.length !calls))
+
+let test_prepared_success_retains_original_request_reference () = with_fixture (fun base media stored ->
+  let original = captured base media stored "selected-success" in
+  let reading = get (fun _ -> "nonempty original reading required")
+      (M.reading_of_original ~original ~text:"reading from retained SDK reply") in
+  let current = ref (M.Read reading) and calls = ref 0 in
+  let projector = M.projector ~media_store:media ~keeper_name:keeper
+      ~source_reader:(fun ~kind:_ ~media_type:_ _ -> incr calls; M.Owned !current)
+      ~resolve:(fun ~kind:_ ~media_type:_ -> fail "owned reading cannot select a builtin reader") () in
+  let blocks = [document stored] in
+  let prepared = M.prepare projector ~needs_projection:(fun _ -> true) [blocks] in
+  let observed, _ = M.project projector ~needs_projection:(fun _ -> true) blocks in
+  current := M.Unavailable (M.External_failed M.Declarations_unavailable);
+  let frozen, _ = prepared_blocks prepared blocks in
+  let again, _ = prepared_blocks prepared blocks in
+  check bool "history and prepared history share the attributed representation" true
+    (observed=frozen && frozen=again);
+  let original_json = Yojson.Safe.Util.member "original_request" (M.outcome_to_json (M.Read reading)) in
+  (match frozen with
+   | [Agent_core.Types.Text text] ->
+     check bool "history preserves request, original digest and execution reference" true
+       (String_util.contains_substring text (Yojson.Safe.to_string original_json));
+     check bool "history preserves the interpreted content" true
+       (String_util.contains_substring text reading.text)
+   | _ -> fail "prepared successful reading was not projected");
+  check int "only preparation and explicit observation consult the owner" 2 !calls)
+
 let () = run "keeper_media_reading_outcome"
   ["owner boundary",[
     test_case "owned observation precedes builtin memo" `Quick test_owner_observation_precedes_cached_selection;
     test_case "history observe and retained effect ports stay distinct" `Quick test_observe_and_effect_ports_are_distinct;
     test_case "mixed pending carrier retains identities and freezes once" `Quick
-      test_pending_carrier_keeps_all_originals_and_freezes_once]]
+      test_pending_carrier_keeps_all_originals_and_freezes_once;
+    test_case "selected pending outcome is immutable across reconstruction" `Quick
+      test_prepared_pending_is_one_immutable_observation;
+    test_case "prepared source identity and missing source are explicit" `Quick
+      test_prepared_sources_use_complete_identity_and_refuse_new_sources;
+    test_case "successful prepared history retains its original request" `Quick
+      test_prepared_success_retains_original_request_reference]]

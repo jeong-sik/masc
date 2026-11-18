@@ -172,6 +172,38 @@ val project :
     sources are not fetched. Tool identity, outcome, JSON and original text
     remain unchanged. Returns replaced counts by modality. *)
 
+type prepared
+type preparation_error =
+  | Source_not_prepared of
+      { kind : kind; media_type : string; source : Agent_core.History.stored }
+
+val preparation_error_to_string : preparation_error -> string
+(** Internal projection failure; this does not describe a reader invocation. *)
+
+val prepare :
+  ?source_reader:source_reader ->
+  projector ->
+  needs_projection:(kind -> bool) ->
+  Agent_core.Types.content_block list list -> prepared
+(** Prepare only the selected request bundle on its owning fiber. Each selected
+    Stored Audio/Document identity (kind, media type, digest and byte length),
+    including nested ToolResult media, reaches {!read_stored} once. The complete
+    outcomes and modality decisions are immutable afterwards: pending approvals,
+    unavailable readings and successes all remain the same during request
+    reconstruction. Cancellation propagates. This value belongs to one request,
+    not a later request or a new approval observation. URL/file-id sources are
+    not fetched. *)
+
+val project_prepared :
+  prepared ->
+  Agent_core.Types.content_block list ->
+  ((Agent_core.Types.content_block list * (string * int) list), preparation_error) result
+(** Pure projection using the prepared request's modality decisions and outcomes.
+    Argument and result text may differ during prefix reconstruction; original
+    media identities must still belong to the prepared bundle. An unprepared
+    selected Stored source returns [Source_not_prepared], without reader
+    selection, owner observation, storage access or a new effect. *)
+
 val project_blocks :
   ?base_path:string ->
   media_store:Agent_core.History.media_store ->

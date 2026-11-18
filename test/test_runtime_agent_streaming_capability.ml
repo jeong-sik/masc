@@ -593,6 +593,164 @@ let sequential_requests_close_their_own_attempts () =
        = [ `Int 0, `String "cancelled"; `Int 1, `String "success" ])
   | Runtime_agent.Failed_before_dispatch _ -> fail "two requests left no attempt"
 
+type media_entry = Structured_run | Stored_continuation | Direct_build | Direct_resume
+type media_projection = Reading_projection | Unchanged_projection | No_projection
+
+let media_runtime_config ~base_url ~media_store ~tools =
+  let caps = { Llm_provider.Capabilities.openai_compat_chat_capabilities with
+    supports_native_streaming = false; supports_multimodal_inputs = false;
+    supports_image_input = false; supports_audio_input = false;
+    supports_video_input = false; supports_document_input = false } in
+  let provider_cfg = Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture" ~model_id
+      ~base_url ~request_path:"/v1/chat/completions"
+      ~model_capabilities_override:caps () in
+  Runtime_agent.default_config ~media_store ~name:"media-projection-admission-fixture"
+    ~provider_cfg ~system_prompt ~tools
+
+let media_projection_admission entry projection () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  install_catalog ~sw ~supports_native_streaming:false ();
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply json_response) in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let raw = "canonical document bytes remain in the media store" in
+  let stored = match media_store.put ~media_type:"application/pdf" ~raw with
+    | Ok stored -> stored
+    | Error error -> fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
+  let document = Agent_core.Types.document_block ~media_type:"application/pdf"
+      ~source:(Agent_core.Types.Stored stored) in
+  let input = Agent_core.Types.user_msg_blocks [document] in
+  let context = Keeper_context_core.create ~eio:true ~system_prompt in
+  let checkpoint = Keeper_context_core.append context input
+      |> Keeper_context_core.resume_checkpoint_of_context in
+  let checkpoint_before = Agent_core.Checkpoint.to_json checkpoint in
+  let reading = "prepared document reading reaches the text-only provider" in
+  let projections = ref 0 in
+  let project messages =
+    incr projections;
+    check bool "projection receives the original Stored document" true
+      (List.exists (fun (message : Agent_core.Types.message) ->
+        List.mem document message.content) messages);
+    let messages = match projection with
+      | Reading_projection -> List.map (fun (message : Agent_core.Types.message) ->
+          {message with content=List.map (fun block ->
+            if block = document then Agent_core.Types.Text reading else block) message.content}) messages
+      | Unchanged_projection -> messages
+      | No_projection -> fail "raw admission cannot invoke a projection" in
+    Agent_core.History.to_wire_messages media_store messages
+      |> Result.map_error (fun error -> Agent_core.Error.Media error) in
+  let config = media_runtime_config ~base_url:server.base_url ~media_store ~tools:[] in
+  let config = {config with model_input_projection=(match projection with
+    | Reading_projection | Unchanged_projection -> Some project
+    | No_projection -> None)} in
+  check bool "fixture's selected model cannot accept documents" false
+    (Runtime_agent.provider_caps_of_config config.provider_cfg).supports_document_input;
+  let agent_ref = ref None in
+  let from_runtime result =
+    Result.map (fun (result : Runtime_agent.run_result) -> result.response) result
+    |> Result.map_error Runtime_agent.run_failure_error in
+  let built build = match build () with
+    | Ok agent -> agent_ref := Some agent; agent
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  let outcome = Eio.Time.with_timeout_exn env#clock
+      Exact_output_fixture.fixture_wait_seconds (fun () -> match entry with
+    | Structured_run -> from_runtime
+        (Runtime_agent.run_blocks ~sw ~net:env#net ~config ~agent_ref
+           ~execution_capture:(Runtime_agent.execution_capture config) [document])
+    | Stored_continuation -> from_runtime
+        (Runtime_agent.continue_from_checkpoint ~sw ~net:env#net ~config ~checkpoint ~agent_ref
+           ~execution_capture:(Runtime_agent.execution_capture config) ())
+    | Direct_build ->
+      let agent = built (fun () -> Runtime_agent.build ~sw ~net:env#net ~config) in
+      Agent_core.Agent.run_blocks ~sw agent [document]
+    | Direct_resume ->
+      let agent = built (fun () -> Runtime_agent.resume_from_checkpoint ~sw ~net:env#net ~config ~checkpoint) in
+      Agent_core.Agent.Advanced.continue ~sw ~api_strategy:Agent_core.Agent.Sync
+        ~on_tool_boundary:(fun _ -> Agent_core.Agent.Advanced.Continue) agent
+      |> Result.map (function
+        | Agent_core.Agent.Advanced.Completed completion -> completion.response
+        | Agent_core.Agent.Advanced.Terminal_tool_completed completion -> completion.receipt.response
+        | Agent_core.Agent.Advanced.Yielded _ -> fail "no tool boundary can yield this fixture")) in
+  (match projection, outcome with
+   | Reading_projection, Ok response ->
+     check string "projected request receives its actual provider response" answer
+       (Llm_provider.Types.text_of_content response.content)
+   | (Unchanged_projection | No_projection),
+       Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field; _})) ->
+     check string "media rejection retains the existing capability error" "multimodal_input" field
+   | (Reading_projection | Unchanged_projection | No_projection), Error error ->
+     fail (Agent_core.Error.to_string error)
+   | (Unchanged_projection | No_projection), Ok _ -> fail "unsupported document reached the provider");
+  check int "only a supported final projection is dispatched"
+    (match projection with Reading_projection -> 1 | Unchanged_projection | No_projection -> 0)
+    (Exact_output_fixture.post_count server);
+  check int "preflight never runs the selected projection itself"
+    (match projection with Reading_projection | Unchanged_projection -> 1 | No_projection -> 0)
+    !projections;
+  List.iter (fun body ->
+    check bool "actual HTTP carries the prepared reading" true
+      (String_util.contains_substring body reading);
+    check bool "actual HTTP excludes the retained document bytes" false
+      (String_util.contains_substring body (Base64.encode_string raw)))
+    (Exact_output_fixture.request_bodies server);
+  Option.iter (fun agent ->
+    check bool "canonical Agent state keeps its original Stored document" true
+      (List.exists (fun (message : Agent_core.Types.message) -> List.mem document message.content)
+         (Agent_core.Agent.state agent).messages)) !agent_ref;
+  check bool "the caller's checkpoint is unchanged" true
+    (checkpoint_before = Agent_core.Checkpoint.to_json checkpoint)
+
+let projected_tool_media_is_validated_on_the_next_request () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  install_catalog ~sw ~supports_native_streaming:false ();
+  let replies = ref 0 in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun _ _ ->
+        incr replies;
+        `OK, if !replies = 1 then
+          {|{"id":"image-call","model":"stream-dispatch-fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"media-tool","type":"function","function":{"name":"image_result","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}|}
+        else json_response)) in
+  let executions = ref 0 in
+  let image = Llm_provider.Types.image_block ~media_type:"image/png"
+      ~source:(Llm_provider.Types.Base64
+        "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAgCAYAAACinX6EAAAAS0lEQVR4nO3QMQ0AIAwAsInABja4UbwbV0PGkqVHDTRW3ur09mkVAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAwPyADyLYbQCQNiXPAAAAAElFTkSuQmCC") in
+  let tool = Agent_core.Tool.create ~name:"image_result" ~description:"Return an image fixture"
+      ~parameters:[] (fun _ ->
+        incr executions;
+        Ok {Agent_core.Types.content="the image result";content_blocks=Some [image];_meta=None}) in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let projections = ref 0 in
+  let project messages =
+    incr projections;
+    Agent_core.History.to_wire_messages media_store messages
+      |> Result.map_error (fun error -> Agent_core.Error.Media error) in
+  let config = media_runtime_config ~base_url:server.base_url ~media_store ~tools:[tool] in
+  let config = {config with model_input_projection=Some project} in
+  let agent_ref = ref None in
+  let outcome = Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds
+      (fun () ->
+        Runtime_agent.run ~sw ~net:env#net ~config ~agent_ref
+          ~execution_capture:(Runtime_agent.execution_capture config) "Read an image result."
+        |> Result.map_error Runtime_agent.run_failure_error) in
+  (match outcome with
+   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field; _})) ->
+     check string "new nested media is refused by the existing capability floor" "multimodal_input" field
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "the second request bypassed projected media admission");
+  check int "the text request executes the tool exactly once" 1 !executions;
+  check int "each request has its own final projected input check" 2 !projections;
+  check int "unsupported nested image never reaches a second HTTP request" 1
+    (Exact_output_fixture.post_count server);
+  let agent = match !agent_ref with Some agent -> agent | None -> fail "the first request must build an agent" in
+  check bool "the failed projection keeps the original tool media in canonical history" true
+    (List.exists (fun (message : Agent_core.Types.message) ->
+      Llm_provider.Types.content_has_image message.content) (Agent_core.Agent.state agent).messages)
+
 let () =
   run "runtime agent streaming capability"
     (List.map
@@ -621,6 +779,20 @@ let () =
              cancelled_turn_closes_its_attempt_as_cancelled
          ; test_case "sequential requests close their own attempts" `Quick
              sequential_requests_close_their_own_attempts ]
+       ; "projected media admission",
+         List.concat_map (fun (name, entry) ->
+           [test_case (name ^ ": canonical document can become supported text") `Quick
+              (media_projection_admission entry Reading_projection)
+           ;test_case (name ^ ": unsupported projected document is refused before HTTP") `Quick
+              (media_projection_admission entry Unchanged_projection)])
+           ["structured run",Structured_run; "checkpoint continuation",Stored_continuation;
+            "direct build",Direct_build; "direct resume",Direct_resume]
+         @ [test_case "raw structured input keeps canonical admission" `Quick
+              (media_projection_admission Structured_run No_projection)
+           ;test_case "raw continuation keeps canonical admission" `Quick
+              (media_projection_admission Stored_continuation No_projection)
+           ;test_case "new tool-result media is checked before the next request" `Quick
+              projected_tool_media_is_validated_on_the_next_request]
        ; "completed media and original tool admission",
          List.map (fun (name, entry) -> test_case name `Quick
            (completed_media_and_tools entry))

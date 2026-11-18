@@ -57,8 +57,12 @@ request.
 The retained-host carrier reads on its owning fiber before encoding or sizing.
 It then freezes the exact receipt snapshot and output for that run; retries
 do not invoke the reader again or acknowledge the host's original result.
-History projections use only the observational producer port. Activating new
-reader effects for final selected history is still separate work.
+Early history projections use the declared reader's observation port. Agent Core
+requests prepare declared readings only after selecting their carried history,
+then reuse those outcomes during prefix inspection; see
+[selected-history media preparation](2026-11-17-farm-selected-history-media.md).
+Official-client history projection continues using that observation port;
+existing built-in extraction can still perform I/O.
 
 Validation is source review and full-file syntax parsing. Authored cases cover
 original inventory precedence, explicit observation/effect ports, mixed pending

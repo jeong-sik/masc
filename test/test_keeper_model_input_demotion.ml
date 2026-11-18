@@ -1095,8 +1095,9 @@ let with_signed_argument_store f =
     (fun () -> f ~base_path (Tool_blob_store.create ~base_path))
 ;;
 
-let signed_argument_view ?frozen_arguments ?materialize ?current_turn_results ?finished_turn_results
-    ?(project_request_media = fun messages -> Ok messages) ~base_path ~store ~config messages =
+let signed_argument_result ?frozen_arguments ?materialize ?current_turn_results ?finished_turn_results
+    ?(prepare_request_media = fun _selected -> Ok (fun messages -> Ok messages))
+    ~base_path ~store ~config messages =
   let atom_count = snd (Window.annotate messages) in
   let completed_arguments = match frozen_arguments with
     | None -> Some (bind_arguments ~completed_before:atom_count ~seed:messages messages)
@@ -1109,8 +1110,8 @@ let signed_argument_view ?frozen_arguments ?materialize ?current_turn_results ?f
     | Some materialize -> materialize
     | None -> fun ~pending projected ->
       (Demotion.materialize ~store ~addresses ~pending projected).messages in
-  match Signed_provider.For_testing.request_view
-    ~project_request_media
+  Signed_provider.For_testing.request_view
+    ~prepare_request_media
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ?completed_arguments ?finished_turn_results
     ~tools:signed_argument_tools ~provider_config:config ~measure_message_bytes
@@ -1125,7 +1126,12 @@ let signed_argument_view ?frozen_arguments ?materialize ?current_turn_results ?f
     ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary {end_atom = atom_count})
     ~materialize
     messages
-  with
+;;
+
+let signed_argument_view ?frozen_arguments ?materialize ?current_turn_results ?finished_turn_results
+    ?prepare_request_media ~base_path ~store ~config messages =
+  match signed_argument_result ?frozen_arguments ?materialize ?current_turn_results
+      ?finished_turn_results ?prepare_request_media ~base_path ~store ~config messages with
   | Ok view -> view
   | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
 ;;
@@ -1189,7 +1195,7 @@ let signed_call_keeps_its_own_arguments () = with_signed_argument_store @@ fun ~
     views
 ;;
 
-(* The callback fixture below uses the actual H5 reader/cache. Runtime modality
+(* The callback fixture below uses the actual H5 preparation and reader/cache. Runtime modality
    selection is covered by the failover tests; here the actual Anthropic
    producer and serializer own the signed-prefix decision. *)
 let signed_request_media_uses_the_exact_reading_prefix () =
@@ -1198,7 +1204,7 @@ let signed_request_media_uses_the_exact_reading_prefix () =
   let pdf = Types.document_block ~media_type:"application/pdf"
       ~source:(stored_source ~media_type:"application/pdf" "signed-request-pdf") in
   let canonical_prefix = [{ (signed_user "read the attached report") with content = [pdf] }] in
-  let make_projection ~revision reading calls =
+  let make_preparation ~revision reading calls =
     let identity = match Masc.Keeper_media_reading.reader_identity
         ~id:"signed-request-fixture" ~revision with
       | Ok identity -> identity
@@ -1208,20 +1214,28 @@ let signed_request_media_uses_the_exact_reading_prefix () =
       ~keeper_name:"signed-request-media"
       ~resolve:(fun ~kind:_ ~media_type:_ -> Ok (Masc.Keeper_media_reading.reader ~identity
         ~read:(fun ~bytes:_ -> incr calls; Ok reading))) () in
-    fun messages -> Ok (List.map (fun (message : Types.message) ->
-      let content, _ = Masc.Keeper_media_reading.project projector
+    fun selected ->
+      let prepared = Masc.Keeper_media_reading.prepare projector
         ~needs_projection:(function Masc.Keeper_media_reading.Document -> true | Audio -> false)
-        message.content in
-      { message with content }) messages) in
+        (List.map (fun (message : Types.message) -> message.content) selected) in
+      Ok (fun messages ->
+        List.fold_right (fun (message : Types.message) rest ->
+          let open Result.Syntax in
+          let* content, _ = Masc.Keeper_media_reading.project_prepared prepared message.content
+            |> Result.map_error (fun error -> Agent_core.Error.Internal
+                (Masc.Keeper_media_reading.preparation_error_to_string error)) in
+          let+ rest = rest in
+          { message with content } :: rest) messages (Ok [])) in
   let calls = ref 0 in
-  let project_request_media = make_projection ~revision:"recorded" "recorded PDF reading" calls in
-  let projected_prefix = match project_request_media canonical_prefix with
+  let prepare_request_media = make_preparation ~revision:"recorded" "recorded PDF reading" calls in
+  let projected_prefix = match Result.bind (prepare_request_media canonical_prefix)
+      (fun project -> project canonical_prefix) with
     | Ok messages -> messages
     | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
   let signed = stamp_signed_call ~config ~prefix:projected_prefix ~id:"signed-media" (`Assoc []) in
   let canonical = canonical_prefix @ [signed; tool_message ~id:"signed-media" "done"] in
   let before = List.map Agent_core.Checkpoint.message_to_json canonical in
-  let view = signed_argument_view ~project_request_media ~base_path ~store ~config canonical in
+  let view = signed_argument_view ~prepare_request_media ~base_path ~store ~config canonical in
   Alcotest.(check int) "producer and repeated prefix inspection share one attachment read" 1 !calls;
   Alcotest.(check bool) "canonical stored document and signed response are unchanged" true
     (view.carried = canonical && List.map Agent_core.Checkpoint.message_to_json canonical = before);
@@ -1234,7 +1248,7 @@ let signed_request_media_uses_the_exact_reading_prefix () =
        (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error));
   let changed_calls = ref 0 in
   let changed = signed_argument_view
-      ~project_request_media:(make_projection ~revision:"changed" "different PDF reading" changed_calls)
+      ~prepare_request_media:(make_preparation ~revision:"changed" "different PDF reading" changed_calls)
       ~base_path ~store ~config canonical in
   Alcotest.(check int) "changed request reading is evaluated once" 1 !changed_calls;
   (match Agent_core.Llm_provider.Backend_anthropic.retained_prefix_reasoning_indices
@@ -1252,6 +1266,152 @@ let signed_request_media_uses_the_exact_reading_prefix () =
       Yojson.Safe.Util.member "type" block = `String "thinking") blocks));
   Alcotest.(check bool) "failed exact prefix never rewrites canonical reasoning" true
     (changed.carried = canonical && List.map Agent_core.Checkpoint.message_to_json canonical = before)
+;;
+
+(* This port deliberately has no reader memo: one preparation captures the
+   live reading, then changes it before any projection. Candidate, baseline
+   and protected-prefix work must keep the first reading while preserving the
+   actual Anthropic signature. A repeated preparation would change the wire. *)
+let signed_request_media_prepares_once_before_prefix_rechecks () =
+  with_signed_argument_store @@ fun ~base_path store ->
+  let config = signed_argument_config () in
+  let pdf = Types.document_block ~media_type:"application/pdf"
+      ~source:(stored_source ~media_type:"application/pdf" "prepare-once-document") in
+  let document = { (signed_user "read this document") with content = [pdf] } in
+  let original_reading = "first retained document reading" in
+  let project reading messages =
+    List.map (fun (message : Types.message) ->
+      { message with content = List.map (fun block ->
+          if block = pdf then Types.text_block reading else block) message.content }) messages in
+  let input = long_arguments "arguments before the media-bound signature" in
+  let prefix = [document] @ argument_cycle ~id:"before-signed-media" input in
+  let signed = stamp_signed_call ~config ~prefix:(project original_reading prefix)
+      ~id:"signed-preparation" (`Assoc []) in
+  let canonical = prefix @ [signed; tool_message ~id:"signed-preparation" "done"] in
+  let checkpoint_before = List.map Agent_core.Checkpoint.message_to_json canonical in
+  let current_reading = ref original_reading in
+  let preparations = ref 0 in
+  let projections = ref 0 in
+  let prepare_request_media selected =
+    incr preparations;
+    Alcotest.(check bool) "preparation receives the selected original document" true
+      (List.mem document selected);
+    let captured = !current_reading in
+    current_reading := "a later observation must not replace the prepared reading";
+    Ok (fun messages ->
+      incr projections;
+      Ok (project captured messages)) in
+  let view = signed_argument_view ~prepare_request_media ~base_path ~store ~config canonical in
+  Alcotest.(check int) "one selected request prepares exactly once" 1 !preparations;
+  Alcotest.(check bool) "signed-prefix handling actually reuses the projection" true
+    (!projections > 1);
+  Alcotest.(check bool) "earlier argument prefix remains protected" true
+    view.argument_prefix_protected;
+  let inputs = assert_signed_argument_wire ~config ~reasoning_index:3 view.projected_carried in
+  Alcotest.(check bool) "the protected original argument reaches the provider wire" true
+    (inputs = [input; `Assoc []]);
+  Alcotest.(check bool) "every comparison uses the prepared reading" true
+    (List.mem { document with content = [Types.text_block original_reading] }
+       view.projected_carried);
+  Alcotest.(check bool) "preparation and fallback preserve canonical history" true
+    (checkpoint_before = List.map Agent_core.Checkpoint.message_to_json canonical)
+;;
+
+let signed_materializer_fallback_cannot_prepare_an_unseen_document () =
+  with_signed_argument_store @@ fun ~base_path store ->
+  let module Media = Masc.Keeper_media_reading in
+  let config = signed_argument_config () in
+  let original_bytes = "document selected before prefix inspection" in
+  let unseen_bytes = "document inserted only by fallback materialization" in
+  let pdf bytes = Types.document_block ~media_type:"application/pdf"
+      ~source:(stored_source ~media_type:"application/pdf" bytes) in
+  let document = { (signed_user "read the original document") with content = [pdf original_bytes] } in
+  let unseen = pdf unseen_bytes in
+  let identity = match Media.reader_identity ~id:"frozen-materializer-reader" ~revision:"one" with
+    | Ok identity -> identity
+    | Error (Media.Empty_id | Media.Empty_revision) -> Alcotest.fail "reader identity is valid" in
+  let reading = "the original document's retained reading" in
+  let projector read = Media.projector ~media_store:test_media_store
+      ~keeper_name:"signed-materializer-media"
+      ~resolve:(fun ~kind:_ ~media_type:_ -> Ok (Media.reader ~identity ~read)) () in
+  let needs_projection = function Media.Document -> true | Audio -> false in
+  (* Mint real prefix provenance independently of the measured preparation.
+     The candidate's fresh projector has no cached reading from this setup. *)
+  let recorded = projector (fun ~bytes:_ -> Ok reading) in
+  let recorded_view messages = List.map (fun (message : Types.message) ->
+      let content, _ = Media.project recorded ~needs_projection message.content in
+      {message with content}) messages in
+  let input = long_arguments "the protected argument before the signed response" in
+  let call = List.hd (argument_cycle ~id:"before-fallback" input) in
+  (* Result demotion remains pending after argument protection is disabled,
+     so the custom materializer is reached again on the fallback path. *)
+  let result = tool_message ~id:"before-fallback" (String.make 6000 'r') in
+  let prefix = [document; call; result] in
+  let signed = stamp_signed_call ~config ~prefix:(recorded_view prefix)
+      ~id:"signed-fallback" (`Assoc []) in
+  let canonical = prefix @ [signed; tool_message ~id:"signed-fallback" "done"] in
+  ignore (assert_signed_argument_wire ~config ~reasoning_index:3
+      (recorded_view canonical) : Yojson.Safe.t list);
+  let checkpoint_before = List.map Agent_core.Checkpoint.message_to_json canonical in
+  let reads = ref 0 in
+  let reader = projector (fun ~bytes ->
+    incr reads;
+    Alcotest.(check string) "only the initially selected source reaches the reader"
+      original_bytes bytes;
+    Ok reading) in
+  let preparations = ref 0 in
+  let projections = ref 0 in
+  let rejected_source = ref None in
+  let prepare_request_media selected =
+    incr preparations;
+    let prepared = Media.prepare reader ~needs_projection
+        (List.map (fun (message : Types.message) -> message.content) selected) in
+    Ok (fun messages ->
+      incr projections;
+      let rec project acc = function
+        | [] -> Ok (List.rev acc)
+        | (message : Types.message) :: rest ->
+          (match Media.project_prepared prepared message.content with
+           | Ok (content, _) -> project ({message with content} :: acc) rest
+           | Error error ->
+             rejected_source := Some error;
+             Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+               {field="media.prepared_projection"; detail=Media.preparation_error_to_string error}))) in
+      project [] messages) in
+  let materializations = ref 0 in
+  let addresses = Demotion.create_address_memo () in
+  let materialize ~pending messages =
+    incr materializations;
+    let materialized = (Demotion.materialize ~store ~addresses ~pending messages).messages in
+    let extra =
+      if !materializations = 1 then assistant "custom materializer changed the message shape"
+      else { (assistant "") with content = [unseen] } in
+    let changed = materialized @ [extra] in
+    Alcotest.(check bool) "custom materializer forces the result-only fallback" true
+      (Option.is_none (Demotion.capture_materialized ~pending ~before:messages ~after:changed));
+    changed in
+  let outcome = signed_argument_result ~materialize ~prepare_request_media
+      ~base_path ~store ~config canonical in
+  (match outcome with
+   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field; detail})) ->
+     Alcotest.(check string) "unprepared media retains its Config boundary"
+       "media.prepared_projection" field;
+     (match !rejected_source with
+      | Some (Media.Source_not_prepared {kind; media_type; source}) ->
+        Alcotest.(check bool) "the rejected source is the new document" true
+          (kind = Media.Document && media_type = "application/pdf"
+           && source = Agent_core.History.stored_of_raw unseen_bytes);
+        Alcotest.(check string) "typed preparation failure supplies the detail"
+          (Media.preparation_error_to_string (Media.Source_not_prepared {kind; media_type; source})) detail
+      | None -> Alcotest.fail "Config error did not originate from frozen media projection")
+   | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+   | Ok _ -> Alcotest.fail "fallback admitted an unprepared document");
+  Alcotest.(check int) "prefix fallback never prepares another bundle" 1 !preparations;
+  Alcotest.(check int) "fallback's unseen document starts no reader" 1 !reads;
+  Alcotest.(check bool) "signed prefix really reached a later materialization" true
+    (!materializations > 1 && !projections > 1);
+  Alcotest.(check bool) "failed fallback leaves canonical history intact" true
+    (checkpoint_before = List.map Agent_core.Checkpoint.message_to_json canonical)
 ;;
 
 let signed_prefix_protects_only_earlier_argument_occurrences () =
@@ -3011,6 +3171,10 @@ let () =
             signed_call_keeps_its_own_arguments
         ; Alcotest.test_case "request media uses the actual signed reading prefix" `Quick
             signed_request_media_uses_the_exact_reading_prefix
+        ; Alcotest.test_case "selected media prepares once across signed prefix rechecks" `Quick
+            signed_request_media_prepares_once_before_prefix_rechecks
+        ; Alcotest.test_case "custom materializer fallback cannot read an unprepared document" `Quick
+            signed_materializer_fallback_cannot_prepare_an_unseen_document
         ; Alcotest.test_case "signed prefix protects earlier occurrences and demotes later identical records" `Quick
             signed_prefix_protects_only_earlier_argument_occurrences
         ; Alcotest.test_case "signed prefix reproduces actual previously demoted arguments" `Quick

@@ -116,6 +116,12 @@ type config = Runtime_agent_context.config = {
       (** Holds the media of the agent's history; passed to every agent this
           config creates or resumes. Built by {!Tool_blob_media_store}. *)
   model_input_projection : Agent_core.Agent.model_input_projection option;
+      (** With [Some], the projection owns the outgoing history selection and
+          media resolution. {!build} and {!resume_from_checkpoint} validate its
+          returned provider messages against the captured input capabilities
+          before request measurement or dispatch. Canonical media may remain
+          unsupported when the projection sends a supported reading instead.
+          With [None], run entry points retain canonical-input validation. *)
   serialization_executor : Agent_core.Agent.serialization_executor option;
   pre_dispatch_serialization_observer :
     Agent_core.Agent.pre_dispatch_serialization_observer option;
@@ -455,7 +461,9 @@ val build :
   config:config ->
   (Agent_core.Agent.t, Agent_core.Error.t) result
 (** Builds an [Agent_core.Agent.t] from a {!config} ready for a
-    fresh run over the HTTP provider transport. *)
+    fresh run over the HTTP provider transport. A supplied model-input
+    projection is checked on every returned provider-message bundle, including
+    nested tool-result media, against this build's input capability snapshot. *)
 
 val resume_from_checkpoint :
   sw:Eio.Switch.t ->
@@ -465,7 +473,9 @@ val resume_from_checkpoint :
   (Agent_core.Agent.t, Agent_core.Error.t) result
 (** Resumes from a persisted checkpoint.  Uses
     [Runtime_agent_context.prepare_resume] to reconcile
-    [checkpoint.turn_count] with the current config. *)
+    [checkpoint.turn_count] with the current config. The supplied projection
+    receives the original checkpoint history and has the same final-message
+    capability check as {!build}; validation does not rewrite the checkpoint. *)
 
 val run :
   sw:Eio.Switch.t ->
@@ -510,7 +520,9 @@ val run_blocks :
 (** Runs an Agent Core agent against structured user-authored content blocks.
     [on_event] follows the same streaming-capability rule as {!run}.
     [input_metadata] (default empty) is stamped on the User message AGENT_CORE
-    appends for these blocks. *)
+    appends for these blocks. With a model-input projection, modality admission
+    checks its actual returned provider messages; without one, the canonical
+    initial/checkpoint history and these blocks are checked before building. *)
 
 val continue_from_checkpoint :
   sw:Eio.Switch.t ->
@@ -529,4 +541,5 @@ val continue_from_checkpoint :
     message. The checkpoint must already contain the caller-authored request and
     every completed tool result. This is for same-turn continuation after a
     typed incomplete provider terminal, not for starting a new Keeper turn.
-    [on_event] follows the same streaming-capability rule as {!run}. *)
+    [on_event] follows the same streaming-capability rule as {!run}. Modality
+    admission uses the same projected-versus-canonical boundary as {!run_blocks}. *)

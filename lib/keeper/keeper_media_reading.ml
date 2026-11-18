@@ -452,11 +452,15 @@ let unavailable_text ~kind ~media_type ~sha ~reason =
 ;;
 
 let read_text ~kind ~media_type ~sha (reading : reading) =
+  let original = Option.fold ~none:""
+      ~some:(fun original -> "\nOriginal request: "
+        ^ Yojson.Safe.to_string (original_reference_json original)) reading.original in
   Printf.sprintf
-    "%s\nReader: %s\nReading of the attachment (derived by an automatic reader, original kept in the \
+    "%s\nReader: %s%s\nReading of the attachment (derived by an automatic reader, original kept in the \
      conversation history):\n%s"
     (header ~kind ~media_type ~sha ~status:"read")
     (Yojson.Safe.to_string (identity_json reading.reader))
+    original
     reading.text
 ;;
 
@@ -558,23 +562,25 @@ let read_stored ?source_reader projector ~kind ~media_type source =
     | Error failure -> Unavailable failure
 ;;
 
-let project projector ~needs_projection blocks =
+let project_with ~read_stored ~needs_projection blocks =
+  let open Result.Syntax in
   let replaced : (string * int) list ref = ref [] in
   let project_one ~kind ~media_type ~source block =
     if not (needs_projection kind)
-    then block
+    then Ok block
     else (
       (let name = kind_to_string kind in
        let prev = Option.value ~default:0 (List.assoc_opt name !replaced) in
        replaced := (name, prev + 1) :: List.remove_assoc name !replaced);
       match (source : Agent_core.Types.media_source) with
-      | Agent_core.Types.Url _ -> Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"url")
+      | Agent_core.Types.Url _ -> Ok (Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"url"))
       | Agent_core.Types.File_id _ ->
-        Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"file_id")
+        Ok (Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"file_id"))
       | Agent_core.Types.Stored stored ->
+        let+ outcome = read_stored ~kind ~media_type stored in
         let sha = stored.Agent_core.History.sha256 in
         let text =
-          match read_stored projector ~kind ~media_type stored with
+          match outcome with
           | Read reading -> read_text ~kind ~media_type ~sha reading
           | Unavailable failure -> unavailable_text ~kind ~media_type ~sha ~reason:(failure_to_string failure)
           | Pending _ as pending ->
@@ -591,7 +597,8 @@ let project projector ~needs_projection blocks =
       project_one ~kind:Document ~media_type ~source block
     | Agent_core.Types.ToolResult
         { tool_use_id; content; outcome; json; content_blocks = Some nested } ->
-      let content_blocks = match List.map project_block nested with
+      let+ nested = project_blocks [] nested in
+      let content_blocks = match nested with
         | [] -> None
         | blocks -> Some blocks in
       Agent_core.Types.ToolResult { tool_use_id; content; outcome; json; content_blocks }
@@ -599,10 +606,85 @@ let project projector ~needs_projection blocks =
     | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
     | Agent_core.Types.ToolUse _
     | Agent_core.Types.ToolResult { content_blocks = None; _ }
-    | Agent_core.Types.Image _ -> block
+    | Agent_core.Types.Image _ -> Ok block
+  and project_blocks acc = function
+    | [] -> Ok (List.rev acc)
+    | block :: rest ->
+      let* projected = project_block block in
+      project_blocks (projected :: acc) rest
   in
-  let projected = List.map project_block blocks in
+  let+ projected = project_blocks [] blocks in
   projected, List.rev !replaced
+;;
+
+type no_projection_error = |
+
+let project projector ~needs_projection blocks =
+  let read ~kind ~media_type source : (outcome, no_projection_error) result =
+    Ok (read_stored projector ~kind ~media_type source) in
+  match project_with ~read_stored:read ~needs_projection blocks with
+  | Ok projected -> projected
+  | Error _ -> .
+;;
+
+module Prepared_sources = Map.Make (struct
+  type t = kind * string * string * int
+  let compare = Stdlib.compare
+end)
+
+type prepared =
+  { audio : bool
+  ; document : bool
+  ; outcomes : outcome Prepared_sources.t
+  }
+
+type preparation_error =
+  | Source_not_prepared of
+      { kind : kind; media_type : string; source : Agent_core.History.stored }
+
+let preparation_error_to_string = function
+  | Source_not_prepared _ -> "selected media source was not prepared for this request"
+;;
+
+let prepared_key ~kind ~media_type (source : Agent_core.History.stored) =
+  kind, media_type, source.sha256, source.bytes
+;;
+
+let prepare ?source_reader projector ~needs_projection bundle =
+  let audio = needs_projection Audio and document = needs_projection Document in
+  let selected = function Audio -> audio | Document -> document in
+  let prepare_one outcomes ~kind ~media_type ~source =
+    if not (selected kind) then outcomes
+    else match (source : Agent_core.Types.media_source) with
+      | Url _ | File_id _ -> outcomes
+      | Stored source ->
+        let key = prepared_key ~kind ~media_type source in
+        if Prepared_sources.mem key outcomes then outcomes
+        else
+          let outcome = read_stored ?source_reader projector ~kind ~media_type source in
+          Prepared_sources.add key outcome outcomes
+  in
+  let rec prepare_block outcomes (block : Agent_core.Types.content_block) =
+    match block with
+    | Audio { media_type; source } -> prepare_one outcomes ~kind:Audio ~media_type ~source
+    | Document { media_type; source } -> prepare_one outcomes ~kind:Document ~media_type ~source
+    | ToolResult { content_blocks = Some nested; _ } ->
+      List.fold_left prepare_block outcomes nested
+    | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+    | ToolResult { content_blocks = None; _ } | Image _ -> outcomes
+  in
+  let outcomes = List.fold_left (List.fold_left prepare_block) Prepared_sources.empty bundle in
+  { audio; document; outcomes }
+;;
+
+let project_prepared prepared blocks =
+  let needs_projection = function Audio -> prepared.audio | Document -> prepared.document in
+  let read ~kind ~media_type source =
+    match Prepared_sources.find_opt (prepared_key ~kind ~media_type source) prepared.outcomes with
+    | Some outcome -> Ok outcome
+    | None -> Error (Source_not_prepared { kind; media_type; source })
+  in
+  project_with ~read_stored:read ~needs_projection blocks
 ;;
 
 let project_blocks ?base_path ~media_store ~keeper_name ~needs_projection ~resolve blocks =

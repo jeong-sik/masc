@@ -395,7 +395,7 @@ let add_unique_string value values =
   if List.exists (String.equal value) values then values else values @ [ value ]
 
 let rec required_modalities_of_content_blocks
-    (blocks : Agent_core.Types.content_block list) =
+    (blocks : 'source Agent_core.Types.content_block_with list) =
   List.fold_left
     (fun acc block ->
        match block with
@@ -416,9 +416,9 @@ let rec required_modalities_of_content_blocks
        | Agent_core.Types.ToolResult { content_blocks = None; _ } -> acc)
     [] blocks
 
-let content_blocks_of_messages (messages : Agent_core.Types.message list) =
+let content_blocks_of_messages (messages : 'source Agent_core.Types.message_with list) =
   List.concat_map
-    (fun (message : Agent_core.Types.message) -> message.content)
+    (fun (message : 'source Agent_core.Types.message_with) -> message.content)
     messages
 
 let checkpoint_messages = function
@@ -658,7 +658,7 @@ let media_degrade_note ~(runtime_id : string) (dropped : (string * int) list) :
 let validate_content_blocks_against_capabilities
     ~(provider_label : string)
     (caps : Llm_provider.Capabilities.capabilities)
-    (blocks : Agent_core.Types.content_block list) =
+    (blocks : 'source Agent_core.Types.content_block_with list) =
   let required = required_modalities_of_content_blocks blocks in
   let supported = supported_modalities_of_capabilities caps in
   if caps_admit_required_modalities caps required then Ok ()
@@ -859,6 +859,21 @@ let validate_content_blocks_for_config
   validate ~checkpoint_messages:(checkpoint_messages agent_core_checkpoint)
     ~initial_messages:config.initial_messages ~goal_blocks
 
+(* A projection owns which canonical messages become this request. Validate
+   its actual wire result, without resolving or projecting a second time.
+   History and wire share [content_block_with], so the same complete modality
+   scan and capability predicate cover both, including nested tool results. *)
+let validated_model_input_projection (config : config) =
+  Option.map (fun project ->
+    let caps = input_capabilities_for_config config in
+    let label = provider_label config.provider_cfg in
+    fun messages ->
+      let open Result.Syntax in
+      let* projected = project messages in
+      let+ () = validate_content_blocks_against_capabilities
+          ~provider_label:label caps (content_blocks_of_messages projected) in
+      projected) config.model_input_projection
+
 (* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
    the turn's required input modalities and the candidate runtimes' declared
    capabilities — no I/O, no provider liveness (liveness-aware skipping is
@@ -1032,6 +1047,7 @@ let build_agent
         (transport_for_provider ~sw ~net ?clock
            ?body_timeout_s:config.body_timeout_s ())
     in
+    let config = {config with model_input_projection = validated_model_input_projection config} in
     Ok (Runtime_agent_context.create_agent ~net ~config ~transport ())
 
 let build ~sw ~net ~config = build_agent ~sw ~net ~config ~wrap_transport:Fun.id
@@ -1109,7 +1125,7 @@ let resume_agent
            ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~context_fit_admission:prepared_resume.context_fit_admission
-           ?model_input_projection:config.model_input_projection
+           ?model_input_projection:(validated_model_input_projection config)
            ?pre_dispatch_serialization_observer:
              config.pre_dispatch_serialization_observer
            ?serialization_executor:config.serialization_executor
@@ -1209,10 +1225,10 @@ let run_blocks_internal_in_scope
     (goal_blocks : Agent_core.Types.content_block list)
   : (run_result, run_failure) result =
   match
-    validate_content_blocks_for_config
-      ?agent_core_checkpoint
-      ~config
-      goal_blocks
+    (match config.model_input_projection with
+     | Some _ -> Ok ()
+     | None -> validate_content_blocks_for_config
+         ?agent_core_checkpoint ~config goal_blocks)
   with
   | Error err -> Error (run_failure_of_capture execution_capture err)
   | Ok () ->

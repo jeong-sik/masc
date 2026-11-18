@@ -36,7 +36,7 @@ For each screen, `idle.json` records:
 - `rss_mb` when the window ends, and `row_changes`: the rows that changed most, with the first column that changed and the text there;
 - `frames`: the frames the TUI recorded in the window through `MASC_TUI_FRAME_TIMING`, with build and present times, bytes presented and surface tags. The TUI keeps only its first 512 frames per phase. When the window reaches past them, `covered` is false and the counts are a lower bound;
 - with `--probes N`, `key_latency_ms` for N Down and N Up presses, each timed from the write to the first byte back. A press is skipped while the screen is still drawing, and a press that draws nothing within 1 s is not counted;
-- with `--png-font FONT` (needs Pillow), `<screen>.png`: the screen at the window start drawn with that font. Use a font that has the glyphs of the workspace's language.
+- with `--png-font FONT` (needs Pillow), `<screen>.png`: the screen at the window start drawn with that font. Use a font that has the glyphs of the workspace's language. Repeat `--png-font` to add fallback fonts: the first sets the cell size and each glyph uses the first font that has it. Many monospace fonts lack braille, so graph rows draw blank without a fallback that has it (on macOS, `/System/Library/Fonts/Apple Symbols.ttf`).
 
 ```sh
 python3 scripts/harness/tui/summary.py "$IDLE_OUT"

@@ -4,7 +4,7 @@
 
 usage: idle.py --tui BIN --out DIR --base-path DIR --upstream-port PORT
                [--size 160x46] [--idle 20] [--steps a,b] [--relay-port 0]
-               [--record DIR] [--probes 0] [--png-font FONT]
+               [--record DIR] [--probes 0] [--png-font FONT ...]
 
 One fresh TUI process per screen. It starts against readonly_proxy.py, which
 forwards reads to --upstream-port (a live server or frozen_server.py), the
@@ -183,7 +183,7 @@ class Options:
     relay_port: int
     record: Path | None
     probes: int
-    png_font: Path | None
+    png_fonts: tuple[Path, ...]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -202,8 +202,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--record', type=Path, default=None,
                         help='new directory where the relay keeps every answer for frozen_server.py')
     parser.add_argument('--probes', type=int, default=0, help='Down and Up presses timed after each window')
-    parser.add_argument('--png-font', type=Path, default=None,
-                        help='monospace font file; draws each screen to <name>.png at the window start (needs Pillow)')
+    parser.add_argument('--png-font', type=Path, action='append', default=[],
+                        help='monospace font file; draws each screen to <name>.png at the window start (needs '
+                             'Pillow). Repeat it to add fallbacks: the first sets the cell size, and each glyph '
+                             'uses the first font that has it')
     return parser
 
 
@@ -219,7 +221,7 @@ def parse_options(argv: Sequence[str] | None) -> Options | str:
     relay_port: int = args.relay_port
     record: Path | None = args.record
     probes: int = args.probes
-    png_font: Path | None = args.png_font
+    png_fonts: tuple[Path, ...] = tuple(args.png_font)
     if not (tui.is_file() and os.access(tui, os.X_OK)):
         return f'--tui {tui} is not an executable file'
     if tui.resolve().name == SERVER_BINARY:
@@ -242,15 +244,15 @@ def parse_options(argv: Sequence[str] | None) -> Options | str:
     if unknown:
         return f'unknown step {", ".join(unknown)}; known: {", ".join(STEP_NAMES)}'
     cell = (DEFAULT_CELL_WIDTH_PX, DEFAULT_CELL_HEIGHT_PX)
-    if png_font is not None:
-        measured = png_cell_size(png_font)
+    if png_fonts:
+        measured = png_cell_size(png_fonts[0])
         if isinstance(measured, str):
             return f'--png-font: {measured}'
         cell = measured
     geometry = Geometry(int(sized.group(1)), int(sized.group(2)), cell[0], cell[1])
     steps = tuple(STEP_NAMES[name] for name in names) if names else STEPS
     return Options(tui.resolve(), out, base_path.resolve(), geometry, idle_s, steps,
-                   upstream_port, relay_port, record, probes, png_font)
+                   upstream_port, relay_port, record, probes, png_fonts)
 
 
 @dataclass(frozen=True, slots=True)
@@ -539,9 +541,9 @@ def run_screen(step: Step, options: Options, tui: Path, relay_port: int, env: Ma
         settle(child, vte, STEP_QUIET_S, STEP_LIMIT_S)
         result |= {'keys': [entry.report() for entry in sent], 'keys_ok': all(entry.ok for entry in sent),
                    'top_rows': [vte.row_text(row) for row in range(min(TOP_ROWS, vte.rows))]}
-        if options.png_font is not None:
+        if options.png_fonts:
             png_path = options.out / f'{step.name}.png'
-            failed = render_png(vte, png_path, options.png_font)
+            failed = render_png(vte, png_path, options.png_fonts)
             result['png'] = png_path.name if failed is None else {'error': failed}
         window = idle_window(child, vte, options.idle_s)
         result |= window.report()

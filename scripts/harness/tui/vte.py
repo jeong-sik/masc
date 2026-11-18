@@ -14,6 +14,7 @@ It is optional: nothing here imports Pillow unless it is called.
 import codecs
 from dataclasses import dataclass, replace
 from pathlib import Path
+from collections.abc import Sequence
 import unicodedata
 
 type Rgb = tuple[int, int, int]
@@ -361,14 +362,35 @@ def png_cell_size(font_path: Path, font_size: int = PNG_FONT_SIZE) -> tuple[int,
     return round(font.getlength('M')), ascent + descent + PNG_LINE_GAP
 
 
-def render_png(vte: Vte, path: Path, font_path: Path, font_size: int = PNG_FONT_SIZE) -> str | None:
-    """Draw the grid to `path`; None once written, else why it was not."""
-    size = png_cell_size(font_path, font_size)
+def render_png(vte: Vte, path: Path, font_paths: Sequence[Path], font_size: int = PNG_FONT_SIZE) -> str | None:
+    """Draw the grid to `path`; None once written, else why it was not.
+
+    The first font sets the cell size. Each glyph is drawn with the first font
+    that has it, so a fallback font fills in what the first one lacks (a
+    monospace font often has no braille, and a graph row would draw blank).
+    A glyph no font has is drawn with the first font."""
+    if not font_paths:
+        return 'no font given'
+    size = png_cell_size(font_paths[0], font_size)
     if isinstance(size, str):
         return size
     from PIL import Image, ImageDraw, ImageFont
     cell_w, cell_h = size
-    font = ImageFont.truetype(str(font_path), font_size)
+    fonts: list[ImageFont.FreeTypeFont] = []
+    for font_path in font_paths:
+        try:
+            fonts.append(ImageFont.truetype(str(font_path), font_size))
+        except OSError as exc:
+            return f'{font_path}: {exc}'
+    chosen: dict[str, ImageFont.FreeTypeFont] = {}
+
+    def font_for(text: str) -> ImageFont.FreeTypeFont:
+        found = chosen.get(text)
+        if found is None:
+            # A font without the glyph draws an empty mask.
+            found = next((f for f in fonts if f.getmask(text).getbbox() is not None), fonts[0])
+            chosen[text] = found
+        return found
     image = Image.new('RGB', (vte.columns * cell_w + 2 * PNG_PAD, vte.rows * cell_h + 2 * PNG_PAD), DEFAULT_BG)
     draw = ImageDraw.Draw(image)
     for row in range(vte.rows):
@@ -381,7 +403,7 @@ def render_png(vte: Vte, path: Path, font_path: Path, font_size: int = PNG_FONT_
             if cell.wide_tail or cell.text in (' ', ''):
                 continue
             ink = mix(fg, bg, FAINT_MIX) if cell.pen.faint else fg
-            draw.text((x, y + 2), cell.text, font=font, fill=ink)
+            draw.text((x, y + 2), cell.text, font=font_for(cell.text), fill=ink)
             if cell.pen.underline:
                 draw.line((x, y + cell_h - 2, x + cell_w - 1, y + cell_h - 2), fill=ink)
     try:

@@ -88,6 +88,7 @@ vi.mock('./board-state', () => ({
   commentSubmitting: { value: false },
   replyingTo: { value: null },
   loadPostDetail: vi.fn(),
+  refreshPostDetail: vi.fn(),
   submitComment: vi.fn(),
   authorAvatar: (author: string) => `@${author}`,
   kindBadgeColor: () => '',
@@ -125,7 +126,7 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, detailLoading, loadPostDetail } from './board-state'
+import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, detailLoading, loadPostDetail, refreshPostDetail } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment, BoardPost } from '../../types/core'
 
@@ -328,6 +329,9 @@ describe('CommentThread', () => {
 
     expect(voteComment).toHaveBeenCalledWith('c1', 'up')
     expect(screen.getByText('4')).toBeInTheDocument()
+    // The re-read after a vote goes through the refresh that leaves another open post alone.
+    await waitFor(() => expect(refreshPostDetail).toHaveBeenCalledExactlyOnceWith('post-1'))
+    expect(loadPostDetail).not.toHaveBeenCalled()
   })
 
   it('marks the current comment vote as pressed', () => {
@@ -711,6 +715,7 @@ describe('PostDetail', () => {
     await waitFor(() => {
       expect(votePost).toHaveBeenCalledWith('post-1', 'up')
     })
+    await waitFor(() => expect(refreshPostDetail).toHaveBeenCalledExactlyOnceWith('post-1'))
   })
 
   it('renders permalink, trackback, context inference, and X share actions on the full post detail route', async () => {

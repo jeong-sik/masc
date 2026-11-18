@@ -766,6 +766,7 @@ describe('loadPostDetail', () => {
       comments: [comment('root', null), comment('older-parent', 'root'), comment('new-reply', 'older-parent')],
       commentPage: { offset: 40, total: 45, revision: 'after-reply' },
     })
+    detailPostId.value = 'p1'
     commentText.value = 'Reply to the older page'
     await submitComment('p1', 'older-parent')
     expect(commentPost).toHaveBeenCalledWith('p1', expect.any(String), 'Reply to the older page', 'older-parent')
@@ -773,6 +774,29 @@ describe('loadPostDetail', () => {
     expect(detailComments.value.map(comment => [comment.id, comment.parent_id])).toEqual([
       ['root', null], ['older-parent', 'root'], ['new-reply', 'older-parent'],
     ])
+  })
+
+  it('keeps the open thread when a comment on another post finishes late', async () => {
+    // #52951: the operator submits on A, opens B, and only then A's request ends.
+    const threadOf = (id: string): BoardComment => ({ id: `comment-of-${id}`, post_id: id,
+      author: 'keeper', content: id, created_at: '2026-09-30T00:00:00Z' })
+    vi.mocked(fetchBoardPost).mockImplementation(async id => ({
+      ...makePost({ id }), comments: [threadOf(id)], commentPage: { offset: 0, total: 1 },
+    }))
+    let finishSubmit = (): void => {}
+    vi.mocked(commentPost).mockImplementation(() => new Promise(resolve => {
+      finishSubmit = () => resolve({})
+    }))
+    await loadPostDetail('post-a', null)
+    commentText.value = 'written on A'
+    const submitted = submitComment('post-a')
+    await loadPostDetail('post-b', null)
+    finishSubmit()
+    await submitted
+    expect(commentPost).toHaveBeenCalledWith('post-a', expect.any(String), 'written on A', undefined)
+    expect(detailPostId.value).toBe('post-b')
+    expect(detailPost.value?.id).toBe('post-b')
+    expect(detailComments.value.map(row => row.id)).toEqual(['comment-of-post-b'])
   })
 
   it('leaves detailPost.closed undefined for an open post', async () => {

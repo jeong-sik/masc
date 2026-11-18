@@ -19,17 +19,6 @@ val default_http_request_path :
     next to [api_key], and hidden from the dashboard's provider header list.
     Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
-type catalog_row_refusal =
-  | Catalog_row_not_declared of string
-      (** [catalog-provider] names no AGENT_CORE catalog provider row. *)
-  | Catalog_row_beside_own_row of string
-      (** The provider's own id is a catalog row and it declares [catalog-provider] too. *)
-
-val check_catalog_row : Runtime_schema.provider -> (unit, catalog_row_refusal) result
-(** Whether the catalog row this provider speaks as exists in the current
-    declarations, read the same way every catalog lookup in this module reads
-    it. A provider with no [catalog-provider] always passes: its id is the row
-    or it has none. *)
 
 val http_protocol_metadata : Runtime_schema.provider ->
   ((Llm_provider.Provider_config.provider_kind * string), string) result
@@ -52,6 +41,32 @@ val create_construction : unit -> construction
     filters native-only, empty, disabled and unresolved cases before unused
     HTTP declarations would be forced; direct adapter callers own validation.
     Create another owner when selecting from newly published catalogs. *)
+
+(** Why a provider's [catalog-provider] is refused. *)
+type catalog_provider_refusal =
+  | Names_no_row  (** It names no AGENT_CORE catalog provider row. *)
+  | Beside_own_row
+      (** The provider's own id is a catalog provider row; one provider speaks
+          as one row. *)
+  | Names_alias of string
+      (** It names an alias or another spelling of the row with this id. The
+          catalog lookup accepts it, but an exact-output target matches the
+          row id as written, so the slot would be left out. *)
+  | Beside_kind
+      (** The provider states [kind] too, which the catalog row answers. *)
+
+val catalog_provider_refusal_text :
+  provider_id:string -> catalog_provider:string -> catalog_provider_refusal -> string
+
+val check_catalog_row
+  :  construction:construction
+  -> Runtime_schema.provider
+  -> (unit, string * catalog_provider_refusal) result
+(** Whether the catalog can answer for the row this provider speaks as, read
+    from the same declarations [construction] materializes the binding from,
+    and the way every catalog lookup in this module reads it. [Error] carries
+    the [catalog-provider] the provider wrote. A provider with no
+    [catalog-provider] always passes: its id is the row or it has none. *)
 
 type provider_materialization = private
   { provider_config : Llm_provider.Provider_config.t

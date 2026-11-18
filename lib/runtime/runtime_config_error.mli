@@ -7,13 +7,15 @@ type drop_reason =
   | Provider_disabled of string
   | Provider_not_declared of string
   | Model_not_declared of string
-  | Catalog_provider_not_declared of { provider_id : string; catalog_provider : string }
-      (** The provider's [catalog-provider] names no AGENT_CORE catalog provider row. *)
-  | Catalog_provider_beside_own_row of { provider_id : string; catalog_provider : string }
-      (** The provider's own id is a catalog provider row and it also declares
-          [catalog-provider]; one provider speaks as one row. Both
-          [Catalog_provider_*] cases are fatal at {!Runtime.load_list} like the
-          [*_not_declared] pair. *)
+  | Catalog_provider_refused of
+      { provider_id : string
+      ; catalog_provider : string
+      ; refusal : Runtime_adapter.catalog_provider_refusal
+      }
+      (** The binding's provider declares a [catalog-provider] the catalog
+          cannot answer for. Fatal at {!Runtime.load_list} like the
+          [*_not_declared] pair. A provider no enabled binding names is not
+          checked, as an unused [providers.x] row is not. *)
   | Execution_unbuildable of string
       (** Why a binding did not become a runtime. Closed so consumers decide per
           case instead of matching the rendered text: the [*_not_declared] pair

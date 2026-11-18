@@ -54,7 +54,7 @@ def checkpoint(n):
     value.update(version=11, session_id=TRACE, agent_name=NAME, model='test-model',
                  messages=[], usage=usage, turn_count=n, created_at=(1000000000000+n)/1000.,
                  tools=[], disable_parallel_tool_use=False, cache_system_prompt=False,
-                 context={}, mcp_sessions=[], response_format={'type': 'off'})
+                 context={}, response_format={'type': 'off'})
     return json.dumps(value, sort_keys=True).encode()
 
 

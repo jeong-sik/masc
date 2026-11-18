@@ -78,7 +78,7 @@ let checkpoint_with_session_id session_id : Agent_core.Checkpoint.t =
   ; response_format = Agent_core.Types.Off
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create_sync ()
-  ; pending_input = None; mcp_sessions = []
+  ; pending_input = None
   ; working_context = None
   }
 

@@ -58,7 +58,7 @@ let checkpoint model messages =
     ; enable_thinking = None; preserve_thinking = None
     ; response_format = Agent_core.Types.Off; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync (); pending_input = None
-    ; mcp_sessions = []; working_context = Some (`Assoc [])
+    ; working_context = Some (`Assoc [])
     }
 
 let tool_call =

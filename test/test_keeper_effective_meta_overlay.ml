@@ -1030,7 +1030,7 @@ let test_status_message_count_reads_the_head () =
     ; tool_choice = None; disable_parallel_tool_use = false; temperature = None; top_p = None
     ; top_k = None; min_p = None; enable_thinking = None; preserve_thinking = None
     ; response_format = Agent_core.Types.Off; reasoning_effort = None; cache_system_prompt = false
-    ; context = Agent_core.Context.create_sync (); pending_input = None; mcp_sessions = []
+    ; context = Agent_core.Context.create_sync (); pending_input = None
     ; working_context = None }
   in
   ignore

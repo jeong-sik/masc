@@ -27,7 +27,6 @@ let checkpoint messages : Checkpoint.t =
   ; cache_system_prompt = false
   ; context = Context.create_sync ()
   ; pending_input = None
-  ; mcp_sessions = []
   ; working_context = None
   }
 ;;

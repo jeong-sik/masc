@@ -31,7 +31,7 @@ let checkpoint () =
     top_p = None; top_k = None; min_p = None; reasoning_effort = None;
     enable_thinking = None; preserve_thinking = None; response_format = Off;
     cache_system_prompt = false; context = Agent_core.Context.create_sync ();
-    pending_input = None; mcp_sessions = []; working_context = None }
+    pending_input = None; working_context = None }
 
 let rec remove path =
   match Unix.lstat path with

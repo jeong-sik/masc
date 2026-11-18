@@ -507,7 +507,6 @@ let checkpoint_fields_around_messages cp =
     ; "disable_parallel_tool_use", `Bool cp.disable_parallel_tool_use
     ; "cache_system_prompt", `Bool cp.cache_system_prompt
     ; "context", Context.to_json cp.context
-    ; "mcp_sessions", Mcp_session.info_list_to_json cp.mcp_sessions
     ; "pending_input", (match cp.pending_input with None -> `Null | Some p -> Agent_input_request.pending_to_json p)
     ; ( "working_context"
       , match cp.working_context with
@@ -548,15 +547,6 @@ let decode_current_json json =
                    "Checkpoint.of_json: %s"
                    (Context.decode_error_to_string error)
              }))
-    and* mcp_sessions =
-      match json |> member "mcp_sessions" with
-      | `List _ as lst -> Mcp_session.info_list_of_json lst
-      | _ ->
-        Error
-          (Error.Serialization
-             (JsonParseError
-                { detail = "Checkpoint.of_json: mcp_sessions must be a JSON array or null"
-                }))
     and* response_format = response_format_of_json (json |> member "response_format") in
     let* reasoning_effort =
       reasoning_effort_option_of_json
@@ -601,7 +591,6 @@ let decode_current_json json =
       ; reasoning_effort
       ; cache_system_prompt = json |> member "cache_system_prompt" |> to_bool
       ; context
-      ; mcp_sessions
       ; working_context
       ; pending_input
       }

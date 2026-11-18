@@ -474,7 +474,7 @@ let test_a_decoded_seed_keeps_the_cut () =
     ; top_k = None; min_p = None; reasoning_effort = None; enable_thinking = None
     ; preserve_thinking = None; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false; context = Agent_core.Context.create_sync ()
-    ; pending_input = None; mcp_sessions = []; working_context = None }
+    ; pending_input = None; working_context = None }
   in
   let snapshot value =
     match Keeper_checkpoint_store.exact_snapshot_of_value ~expected_session_id:trace_id value with

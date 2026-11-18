@@ -280,8 +280,9 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
     no account. A server asks it before it takes the call of the account, so
     a turn the log refuses here holds no call and is not told whether one
     runs. A turn it lets through and a record then takes back does take the
-    call: {!authorize} refuses it inside, before a key of the account is
-    read.
+    call: {!authorize} refuses it inside. By then a server has read the key
+    file of a key account to make its runtime; no client is started with
+    the key.
     It gives nothing a client starts on: {!authorize} judges the request
     again inside the call, on the state of that time, with the account.
 

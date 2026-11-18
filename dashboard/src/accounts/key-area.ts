@@ -94,9 +94,16 @@ interface AreaProps {
 }
 
 /** The form stays the same form while a key is on its way, so what the
-    person typed and the button they pressed stay where they are. */
+    person typed and the button they pressed stay where they are. The field
+    of the key has no name, and the form posts: a submission the page does
+    not handle carries no key, and nothing of it is in an address. */
 function Form({ model, integrations, view }: AreaProps & { readonly view: Extract<AddView, { kind: 'open' | 'sending' }> }): VNode {
   const field = useRef<HTMLInputElement>(null)
+  // The one subscription there is when the form opens is picked for the
+  // person. A list that changes under the open form picks nothing: the
+  // person chose among what they saw, and a subscription they did not choose
+  // gets no key.
+  const only = useRef(integrations.length === 1 ? integrations[0]?.id ?? null : null).current
   const sending = view.kind === 'sending'
   const onSubmit = (event: Event): void => {
     event.preventDefault()
@@ -108,14 +115,14 @@ function Form({ model, integrations, view }: AreaProps & { readonly view: Extrac
     void model.add(picked, key).then((kept) => { if (kept === 'dropped' && input.value === key) input.value = '' })
   }
   return html`
-    <form class="connect-form" onSubmit=${onSubmit}>
+    <form class="connect-form" method="post" onSubmit=${onSubmit}>
       <fieldset>
         <legend>key 를 넣을 구독</legend>
         <ul class="choices">
           ${integrations.map((integration) => html`
             <li key=${integration.id}>
               <label class="choice">
-                <input type="radio" name="integration" value=${integration.id} required defaultChecked=${integrations.length === 1} />
+                <input type="radio" name="integration" value=${integration.id} required defaultChecked=${integration.id === only} />
                 <span class="choice-title">${integrationName(integration)}</span>
               </label>
             </li>
@@ -124,7 +131,7 @@ function Form({ model, integrations, view }: AreaProps & { readonly view: Extrac
       </fieldset>
       <div class="field">
         <label for="key-value">API key</label>
-        <input ref=${field} id="key-value" name="key" type="password" required autocomplete="off" spellcheck=${false}
+        <input ref=${field} id="key-value" type="password" required autocomplete="off" spellcheck=${false}
           readonly=${sending} aria-describedby="key-notes" />
         <ul id="key-notes" class="hint">
           ${notes.map((note) => html`<li key=${note}>${note}</li>`)}

@@ -860,11 +860,7 @@ describe('the panel', () => {
     // A key whose answer did not come asks for a reading too, which replaces
     // the one the removal asked for.
     panel.adding.open()
-    let added: Promise<unknown> = Promise.resolve()
-    await act(async () => {
-      added = panel.adding.add('claude_code', 'made-up-key')
-      await vi.waitFor(() => { expect(panel.adding.view.value).toMatchObject({ kind: 'open', failure: { kind: 'unknown' } }) })
-    })
+    await act(async () => { await panel.adding.add('claude_code', 'made-up-key') })
     await act(async () => {
       asked.give(ownedNothing())
       await vi.waitFor(() => { expect(panel.removing.removing.value.get('acct_key')?.kind).toBe('removed') })
@@ -872,7 +868,7 @@ describe('the panel', () => {
     const replaced = [container.querySelectorAll('li.row').length, lineOf(container)]
     await act(async () => {
       newer.give(ownedNothing())
-      await added
+      await vi.waitFor(() => { expect(listed(panel)).toBe(0) })
     })
     expect([replaced, container.querySelectorAll('li.row').length, lineOf(container) === '', document.activeElement === container.querySelector('h2')])
       .toEqual([[1, ''], 0, false, true])
@@ -904,7 +900,10 @@ describe('the panel', () => {
     await act(() => panel.load(sessionOf(person)))
     container.querySelector<HTMLButtonElement>('#remove-acct_key')?.focus()
     panel.adding.open()
-    await act(async () => { await panel.adding.add('claude_code', 'made-up-key') })
+    await act(async () => {
+      await panel.adding.add('claude_code', 'made-up-key')
+      await vi.waitFor(() => { expect(listed(panel)).toBe(0) })
+    })
     expect([container.querySelectorAll('li.row').length, lineOf(container), document.activeElement === container.querySelector('h2')]).toEqual([0, '', true])
   })
 

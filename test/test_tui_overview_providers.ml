@@ -463,7 +463,10 @@ let test_trend_is_built_from_the_answer () =
   check bool "daily chart has its fixed full-limit axis" true
     (List.exists (contains ~affix:"100%") plot);
   check bool "zero and missing report have distinct baseline marks" true
-    (List.exists (contains ~affix:("0   " ^ none)) plot);
+    (List.exists
+       (fun line -> contains ~affix:"0 " line && contains ~affix:none line
+                    && contains ~affix:"0% \xe2\x94\x94" line)
+       plot);
   check bool "a report retains its own timestamp, not response time" true
     (match Masc_tui_usage_trend.latest row with
      | Some sample -> Float.equal sample.observed_at generated_at

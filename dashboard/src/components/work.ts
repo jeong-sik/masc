@@ -7,7 +7,7 @@ import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
-import { tasks, keepers, executionTaskTotal } from '../store'
+import { tasks, keepers, executionTaskTotal, nextExecutionObservation, refreshExecution } from '../store'
 import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
 import { isUnambiguousGoalId } from '../lib/goal-identity'
@@ -1406,7 +1406,7 @@ function WorkSurfaceV2() {
 
   const [view, setView] = useState<WorkView>(readStoredWorkView)
   const [openSet, setOpenSet] = useState<Set<string>>(new Set())
-  const [claimed, setClaimed] = useState<Set<string>>(new Set())
+  const [claimed, setClaimed] = useState<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     setOpenSet(prev => {
@@ -1420,25 +1420,36 @@ function WorkSurfaceV2() {
   }, [displayGoals, allTasks])
 
   const claimTask = useCallback((taskId: string) => {
-    // Optimistically flag the task as claimed so the row updates instantly,
-    // then persist through masc_transition. On failure, roll the flag back so
-    // the board does not lie about an unpersisted claim (the pre-existing bug:
-    // the claim only lived in local state and vanished on refresh). On success
-    // the server emits a task_resource notification and the tasks signal
-    // refreshes over SSE with the real assignee, superseding this flag.
-    setClaimed(prev => {
+    // The row is drawn claimed from the click, before the server has said so.
+    // That drawing has an end: the read sent after the claim being accepted,
+    // or, when that read is not accepted, the first observation accepted
+    // after it. From there the row is what the server says, so a task
+    // released elsewhere later is drawn released.
+    const setFlag = (on: boolean) => setClaimed(prev => {
+      if (prev.has(taskId) === on) return prev
       const next = new Set(prev)
-      next.add(taskId)
+      if (on) next.add(taskId)
+      else next.delete(taskId)
       return next
     })
-    void claimTaskAction(taskId).catch((err: unknown) => {
-      setClaimed(prev => {
-        const next = new Set(prev)
-        next.delete(taskId)
-        return next
-      })
-      showToast(`claim 실패: ${errorToString(err)}`, 'error')
-    })
+    setFlag(true)
+    void claimTaskAction(taskId).then(
+      () => refreshExecution({ force: true })
+        // That read is sent after the claim. When it is not accepted (it
+        // failed, or a newer observation replaced it) the tasks on screen may
+        // still be the ones read before the claim, so the flag waits for the
+        // next observation the store accepts. That one normally follows the
+        // claim. One made before it can still be accepted until the claim's
+        // own invalidation arrives (and past it on the server path of
+        // #53144); the row then reads as claimable until a later read is
+        // accepted.
+        .catch(() => nextExecutionObservation())
+        .then(() => setFlag(false)),
+      (err: unknown) => {
+        setFlag(false)
+        showToast(`claim 실패: ${errorToString(err)}`, 'error')
+      },
+    )
   }, [])
 
   const claimedTasks = useMemo(() => {

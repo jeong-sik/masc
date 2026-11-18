@@ -161,6 +161,8 @@ export const executionTaskTotal = signal<number | null>(null)
 export const executionWorkspaceRevision = signal(0)
 // Accepted roster observations drive retries without changing workspace identity.
 export const keeperRosterObservationRevision = signal(0)
+// Callers waiting for the next execution observation this client accepts.
+let executionObservationWaiters: Array<() => void> = []
 export const executionLoaded = signal(false)
 export const executionLoading = signal(false)
 export const executionError = signal<string | null>(null)
@@ -1467,6 +1469,10 @@ export function hydrateExecutionSnapshot(
   } else {
     executionReadRecovery.succeeded()
   }
+  // Told last, so a waiter is released exactly when this returns true.
+  const observationWaiters = executionObservationWaiters
+  executionObservationWaiters = []
+  for (const resolve of observationWaiters) resolve()
   return true
 }
 
@@ -1483,6 +1489,14 @@ export function isInitializingExecutionPayload(data: DashboardExecutionResponse)
 const executionReadRecovery = createReadRecovery()
 
 class ExecutionRefreshUnavailable extends ObservationPending {}
+
+/** Resolves once the store accepts another execution observation, read or
+ *  pushed: `hydrateExecutionSnapshot` returned true, so `tasks` and the other
+ *  execution signals hold what it said. An observation the store refuses (an
+ *  older generation, a reconnect still in progress) does not resolve it. */
+export function nextExecutionObservation(): Promise<void> {
+  return new Promise(resolve => { executionObservationWaiters.push(resolve) })
+}
 
 async function doFetchExecution(): Promise<void> {
   executionReadRecovery.started()

@@ -586,9 +586,13 @@ let validate_selection_with ~include_manifest ~boundaries ~source original =
 let validate_selection ~boundaries ~source original =
   let+ _,_,_=validate_selection_with ~include_manifest:false ~boundaries ~source original in ()
 
+let boundary_prefix ~boundaries original =
+  held_prefix ~changed:"Original completed-turn boundary prefix changed"
+    boundary_line_json original.boundary_span boundaries
+let confirm_boundary_prefix ~boundaries original =
+  let+ _=boundary_prefix ~boundaries original in ()
 let materialize_sources ~boundaries ~messages ~traces original =
-  let* boundaries=held_prefix ~changed:"Original completed-turn boundary prefix changed"
-    boundary_line_json original.boundary_span boundaries in
+  let* boundaries=boundary_prefix ~boundaries original in
   let live_checkpoint (held:Held.checkpoint) = match messages with
     | None -> refuse "Original checkpoint lock observation is missing"
     | Some messages ->

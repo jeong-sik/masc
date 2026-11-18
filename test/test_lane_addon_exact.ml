@@ -1604,9 +1604,14 @@ let test_runner_free_replacement_completed_and_latest_proof_priority () = with_r
   ignore (consumer_run store runner completed);
   let wire=Option.get (original_wire store completed) in
   let proof=original_proof store completed in
+  let proof_bytes ()=let instance_id,request_id=proof_address completed in
+    In_channel.with_open_bin
+      (Filename.concat (Store.root store) (Store.host_result_path ~instance_id ~request_id)) In_channel.input_all in
+  let original_proof_bytes=proof_bytes () and permission_checks=ref 0 in
   let lost=replace_wire_field "final" `Null (replace_wire_field "attempts" (`List [other_process_marker]) wire) in
   require (Store.save_exact_request store ~declaration_id ~request_id:completed.request_id lost);
-  let denied ~store:_ ~declaration_id:_ ~package:_ _=Error (Exact.Unowned {reason="later permission changed"}) in
+  let denied ~store:_ ~declaration_id:_ ~package:_ _=
+    incr permission_checks;Error (Exact.Unowned {reason="later permission changed"}) in
   check bool "actual completed proof recovers before newer permission" true
     (match require (reconcile_replacement ~package:{consumer_package with exact_outputs=[]}
       store denied completed) with
@@ -1614,8 +1619,23 @@ let test_runner_free_replacement_completed_and_latest_proof_priority () = with_r
      | Reconciled_terminal (Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
          | Retained_unknown _ | Retained_not_allowed _ | Retained_request_id_reused)
      | Reconciliation_pending _ -> false);
-  check bool "actual completed terminal was durably recovered" true (original_wire store completed=Some wire);
+  (* Recovery replaces the Started marker with the completed attempt and
+     canonicalizes its bound request. Every record field must survive; object
+     member order is not part of that original identity. *)
+  let recovered=Option.get (original_wire store completed) in
+  check (testable Yojson.Safe.pp Yojson.Safe.equal) "actual completed terminal was durably recovered"
+    (require (Masc.Lane_addon_action.canonical wire))
+    (require (Masc.Lane_addon_action.canonical recovered));
+  check bool "the reconstructed record retains the actual typed completed terminal" true
+    (match require (Eio_unix.run_in_systhread (fun () -> Exact.observe_retained ~store ~declaration_id
+      ~schema:(Option.get completed.schema) completed)) with
+     | Exact.Retained_terminal (Retained_call (Answered {output;_})) -> Exact.checked_json output=question
+     | Retained_absent | Retained_open
+     | Retained_terminal (Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+         | Retained_unknown _ | Retained_not_allowed _ | Retained_request_id_reused) -> false);
   check bool "completed proof unchanged" true (original_proof store completed=proof);
+  check string "completed proof bytes unchanged" original_proof_bytes (proof_bytes ());
+  check int "actual completed recovery does not consult newer permission" 0 !permission_checks;
   check int "only the original fixture dispatch ran" 1 !sends;
   let deferred=request "runner-free-deferral" in
   let runner,_,_=counting_runner store (ref [Refused (Exact.Provider_unavailable {detail="actual deferred call"})]) in

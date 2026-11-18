@@ -91,8 +91,8 @@ val observations_cited : input -> Keeper_memory_os_types.evidence -> Yojson.Safe
 
 (** A new claim that continues a dropped memory, both by exact memory id.
     The librarian named the old one with [supersedes]; the parser checked
-    that it exists and is in [dropped]. Recorded as a [Revised] event on the
-    old id after the snapshot commits (RFC-0418). *)
+    that it exists and is in [dropped]. The commit that applies it records it
+    as a revision link in its journal row. *)
 type revision = Keeper_memory_os_types.revision =
   { superseded : string
   ; superseded_by : string

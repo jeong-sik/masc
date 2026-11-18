@@ -238,7 +238,7 @@ let test_grouped_sources_and_compact_results ~limited () =
   check bool "final projection retained" true (List.exists (fun row -> member "status" row=`String "selection_completed") logs);
   let events=match Masc.Keeper_memory_os_events.read ~keepers_dir ~keeper_id with Ok rows -> rows | Error _ -> fail "events unreadable" in
   let retrieved=List.filter_map (function _,Ok event -> (match event.Masc.Keeper_memory_os_events.kind with
-    | Retrieved _ -> Some event.memory_id | Retracted | Revised _ -> None) | _,Error _ -> fail "invalid event") events in
+    | Retrieved _ -> Some event.memory_id) | _,Error _ -> fail "invalid event") events in
   check (list string) "only delivered ordinary identities get Retrieved events"
     (if limited then [second] else [second;third]) retrieved
 let test_negative_or_readded_evidence_changes ~readd () =

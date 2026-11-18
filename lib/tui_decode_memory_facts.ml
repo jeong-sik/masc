@@ -95,8 +95,9 @@ let memory_fact_count ~complete snapshot scope =
        | Some ordinary, Some source, Some dropped -> Some (ordinary + source + dropped)
        | None, _, _ | _, None, _ | _, _, None -> None)
 
-(* The server computes these from the keeper's memory-events sidecar and
-   never stores them (RFC-0418). This side shows the record as it is. *)
+(* The server computes these from the keeper's memory-events sidecar and its
+   memory journal and never stores them (RFC-0418). This side shows the record
+   as it is. *)
 let decode_memory_fact_events json =
   let* retrieved_count = required_int_field json "retrieved_count" in
   let* retrieved_distinct_days = required_int_field json "retrieved_distinct_days" in

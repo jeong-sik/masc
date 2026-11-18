@@ -1,6 +1,7 @@
-(* Memory use events (RFC-0418): the sidecar codec, append and read, and the
-   projection a consumer builds from them. No strength or score is stored, so
-   every number here is recomputed from the events the test wrote. *)
+(* Memory use events (RFC-0418): the retrieval sidecar codec, append and read,
+   and the projection a consumer builds from it and the journal lineage. No
+   strength or score is stored, so every number here is recomputed from the
+   events and lineage the test supplies. *)
 
 open Alcotest
 module Events = Masc.Keeper_memory_os_events
@@ -29,10 +30,10 @@ let retrieved ?trace_id ?memory_id ~at query =
   event ?trace_id ?memory_id ~at (Events.Retrieved { query })
 ;;
 
-let retracted ?memory_id ~at () = event ?memory_id ~at Events.Retracted
+let link superseded superseded_by : Types.revision = { superseded; superseded_by }
 
-let revised ~memory_id ~at superseded_by =
-  event ~memory_id ~at (Events.Revised { superseded_by })
+let summaries ?(revisions = []) ?(retractions = []) ~memory_ids events =
+  Events.summaries_for ~memory_ids ~revisions ~retractions events
 ;;
 
 let require_ok what = function
@@ -74,8 +75,7 @@ let test_round_trip_each_kind () =
        let back = Events.event_of_json (Events.event_to_json e) |> require_ok "decode" in
        check event_testable "round trip" e back)
     [ retrieved ~at:1000. "deploy needs assets"
-    ; retracted ~at:1001. ()
-    ; revised ~memory_id:id_b ~at:1002. id_a
+    ; retrieved ~memory_id:id_b ~at:1002. "another fact"
     ; retrieved ~trace_id:"" ~at:1003. "no turn"
     ]
 ;;
@@ -87,13 +87,7 @@ let test_wire_carries_the_kind_payload () =
   in
   check (list string) "retrieved fields"
     [ "kind"; "memory_id"; "query"; "recorded_at"; "trace_id" ]
-    (fields (Events.event_to_json (retrieved ~at:1. "q")));
-  check (list string) "retracted has no payload field"
-    [ "kind"; "memory_id"; "recorded_at"; "trace_id" ]
-    (fields (Events.event_to_json (retracted ~at:1. ())));
-  check (list string) "revised fields"
-    [ "kind"; "memory_id"; "recorded_at"; "superseded_by"; "trace_id" ]
-    (fields (Events.event_to_json (revised ~memory_id:id_b ~at:1. id_a)))
+    (fields (Events.event_to_json (retrieved ~at:1. "q")))
 ;;
 
 let with_field json key value =
@@ -125,19 +119,26 @@ let test_decoder_rejects_and_names () =
        (Events.event_of_json (with_field base "memory_id" (`String "m1"))));
   check_names "blank query" "query"
     (require_error "blank" (Events.event_of_json (with_field base "query" (`String "  "))));
-  let removed = Events.event_to_json (retracted ~at:1000. ()) in
-  check_names "retraction accepts no tool payload" "tool"
-    (require_error "obsolete payload"
-       (Events.event_of_json (with_field removed "tool" (`String "keeper_memory_retract"))));
-  check_names "the old cited kind is not a retraction alias" "kind"
-    (require_error "obsolete kind"
-       (Events.event_of_json (with_field removed "kind" (`String "cited"))));
   check_names "non-object" "expected"
-    (require_error "list" (Events.event_of_json (`List [])));
-  let revised_json = Events.event_to_json (revised ~memory_id:id_b ~at:1. id_a) in
-  check_names "successor must be a memory id" "superseded_by"
-    (require_error "successor"
-       (Events.event_of_json (with_field revised_json "superseded_by" (`String "new"))))
+    (require_error "list" (Events.event_of_json (`List [])))
+;;
+
+(* Revisions and retractions are journal lineage now (#37433). The rows
+   earlier builds appended after a commit are not read as events. *)
+let test_commit_rows_of_earlier_builds_are_rejected () =
+  let common =
+    [ "recorded_at", `Float 1.; "memory_id", `String id_b; "trace_id", `String "t" ]
+  in
+  check_names "revised row" "kind"
+    (require_error "revised"
+       (Events.event_of_json
+          (`Assoc
+             (("kind", `String "revised")
+              :: ("superseded_by", `String id_a)
+              :: common))));
+  check_names "retracted row" "kind"
+    (require_error "retracted"
+       (Events.event_of_json (`Assoc (("kind", `String "retracted") :: common))))
 ;;
 
 (* ---------- sidecar ---------- *)
@@ -162,8 +163,8 @@ let test_append_then_read_in_order () =
   let keeper_id = "keeper" in
   let written =
     [ retrieved ~at:1000. "first"
-    ; retracted ~at:1001. ()
-    ; revised ~memory_id:id_b ~at:1002. id_a
+    ; retrieved ~memory_id:id_b ~at:1001. "second"
+    ; retrieved ~memory_id:id_c ~at:1002. "third"
     ]
   in
   List.iter
@@ -182,8 +183,8 @@ let test_append_all_writes_every_valid_event_in_order () =
   let keeper_id = "keeper" in
   let written =
     [ retrieved ~at:1000. "first"
-    ; retracted ~at:1001. ()
-    ; revised ~memory_id:id_b ~at:1002. id_a
+    ; retrieved ~memory_id:id_b ~at:1001. "second"
+    ; retrieved ~memory_id:id_c ~at:1002. "third"
     ]
   in
   check int "nothing comes back" 0
@@ -202,7 +203,7 @@ let test_append_cuts_a_torn_tail_first () =
   output_string oc
     (kept_line ^ "\n" ^ String.sub kept_line 0 (String.length kept_line / 2));
   close_out oc;
-  let next = retracted ~at:2. () in
+  let next = retrieved ~at:2. "next" in
   (match Events.append ~keepers_dir ~keeper_id next with
    | Ok () -> ()
    | Error error -> fail (Events.append_error_to_string error));
@@ -264,14 +265,15 @@ let test_append_refuses_what_read_would_refuse () =
 let test_retraction_and_following_retrieval_are_counted () =
   with_temp_keepers @@ fun keepers_dir ->
   let keeper_id = "keeper" in
-  let rows = [ Events.event_to_json (retracted ~at:2. ());
-               Events.event_to_json (retrieved ~at:3. "kept") ] in
-  List.iter (Fs_compat.append_jsonl
-      (Events.path_for_keepers_dir ~keepers_dir ~keeper_id)) rows;
+  (match Events.append ~keepers_dir ~keeper_id (retrieved ~at:3. "kept") with
+   | Ok () -> ()
+   | Error error -> fail (Events.append_error_to_string error));
   let read = read_ok ~keepers_dir ~keeper_id in
-  check int "all rows are accounted for" 2 (List.length read);
-  let summary = Events.summaries_for ~memory_ids:[id_a] (events_only read) |> List.hd in
-  check int "the retraction is counted" 1 summary.retracted_count;
+  check int "all rows are accounted for" 1 (List.length read);
+  let summary =
+    summaries ~retractions:[ id_a ] ~memory_ids:[id_a] (events_only read) |> List.hd
+  in
+  check int "the journal retraction is counted" 1 summary.retracted_count;
   check int "the following retrieval is counted" 1 summary.retrieved_count
 ;;
 
@@ -282,7 +284,7 @@ let test_append_all_returns_only_the_failures () =
     Events.append_all ~keepers_dir ~keeper_id
       [ retrieved ~at:1. "first"
       ; retrieved ~memory_id:"not-an-id" ~at:2. "bad"
-      ; retracted ~at:3. ()
+      ; retrieved ~at:3. "third"
       ]
   in
   check int "one failure back" 1 (List.length failures);
@@ -313,15 +315,11 @@ let test_summary_counts_only_this_fact () =
     ; retrieved ~at:(10. *. day +. 500.) "one again"
     ; retrieved ~at:(12. *. day +. 1.) "later day"
     ; retrieved ~memory_id:id_b ~at:(13. *. day) "another fact"
-    ; retracted ~at:(11. *. day) ()
-    ; retracted ~memory_id:id_c ~at:(11. *. day) ()
-    ; revised ~memory_id:id_b ~at:(14. *. day) id_a
-    ; revised ~memory_id:id_c ~at:(14. *. day) id_a
-    ; revised ~memory_id:id_c ~at:(15. *. day) id_a
-    ; revised ~memory_id:id_a ~at:(16. *. day) id_b
     ]
   in
-  let s = Events.summaries_for ~memory_ids:[id_a] events |> List.hd in
+  let revisions = [ link id_b id_a; link id_c id_a; link id_c id_a; link id_a id_b ] in
+  let retractions = [ id_a; id_c ] in
+  let s = summaries ~revisions ~retractions ~memory_ids:[id_a] events |> List.hd in
   check int "retrieved count" 3 s.retrieved_count;
   check int "two UTC days, not three retrievals" 2 s.retrieved_distinct_days;
   check (option (float 0.0)) "last retrieval is the latest" (Some (12. *. day +. 1.))
@@ -332,8 +330,8 @@ let test_summary_counts_only_this_fact () =
 
 let test_summary_json_names_every_field () =
   let s =
-    Events.summaries_for ~memory_ids:[id_a]
-      [ retrieved ~at:(10. *. day) "q"; revised ~memory_id:id_b ~at:1. id_a ]
+    summaries ~revisions:[ link id_b id_a ] ~memory_ids:[id_a]
+      [ retrieved ~at:(10. *. day) "q" ]
     |> List.hd
   in
   let json = Events.summary_to_json s in
@@ -347,14 +345,17 @@ let test_summary_json_names_every_field () =
   check bool "last_retrieved_at is the time" true (field "last_retrieved_at" = `Float (10. *. day));
   check bool "retracted_count" true (field "retracted_count" = `Int 0);
   check bool "revised_from lists the predecessor" true (field "revised_from" = `List [ `String id_b ]);
-  match Events.summary_to_json (List.hd (Events.summaries_for ~memory_ids:[id_c] [])) with
+  match Events.summary_to_json (List.hd (summaries ~memory_ids:[id_c] [])) with
   | `Assoc fields -> check bool "never retrieved is null, not zero" true (List.assoc "last_retrieved_at" fields = `Null)
   | _ -> fail "summary json is not an object"
 ;;
 
 let test_summary_of_an_unused_fact_is_empty () =
-  let s = Events.summaries_for ~memory_ids:[id_c]
-      [ retrieved ~at:1. "q"; retracted ~at:2. () ] |> List.hd in
+  let s =
+    summaries ~revisions:[ link id_a id_b ] ~retractions:[ id_a ] ~memory_ids:[id_c]
+      [ retrieved ~at:1. "q" ]
+    |> List.hd
+  in
   check int "no retrievals" 0 s.retrieved_count;
   check int "no days" 0 s.retrieved_distinct_days;
   check (option (float 0.0)) "never retrieved" None s.last_retrieved_at;
@@ -362,29 +363,24 @@ let test_summary_of_an_unused_fact_is_empty () =
   check (list string) "no predecessors" [] s.revised_from
 ;;
 
-(* The previous per-fact scan is the oracle for the shared index. Keep it
-   independent of the index's map and sets, including the self-revision rule. *)
-let reference_summary ~memory_id events : Events.summary =
+(* A per-fact scan is the oracle for the shared index. Keep it independent of
+   the index's map and sets, including the self-revision rule. *)
+let reference_summary ~memory_id ~revisions ~retractions events : Events.summary =
   let open Events in
-  let own, others = List.partition
-      (fun (event : event) -> String.equal event.memory_id memory_id) events in
   let times = List.filter_map (fun (event : event) ->
     match event.kind with
-    | Retrieved _ -> Some event.recorded_at
-    | Retracted | Revised _ -> None) own in
+    | Retrieved _ when String.equal event.memory_id memory_id -> Some event.recorded_at
+    | Retrieved _ -> None) events in
   { retrieved_count = List.length times
   ; retrieved_distinct_days = List.map (fun at -> int_of_float (Float.floor (at /. day))) times
       |> List.sort_uniq Int.compare |> List.length
   ; last_retrieved_at = List.fold_left (fun latest at ->
       Some (match latest with None -> at | Some seen -> Float.max seen at)) None times
-  ; retracted_count = List.filter (fun (event : event) ->
-      match event.kind with
-      | Retracted -> true
-      | Retrieved _ | Revised _ -> false) own |> List.length
-  ; revised_from = List.filter_map (fun (event : event) ->
-      match event.kind with
-      | Revised { superseded_by } when String.equal superseded_by memory_id -> Some event.memory_id
-      | Revised _ | Retrieved _ | Retracted -> None) others |> List.sort_uniq String.compare
+  ; retracted_count = List.filter (String.equal memory_id) retractions |> List.length
+  ; revised_from = List.filter_map (fun (link : Types.revision) ->
+      if String.equal link.superseded_by memory_id
+         && not (String.equal link.superseded memory_id)
+      then Some link.superseded else None) revisions |> List.sort_uniq String.compare
   }
 ;;
 
@@ -399,43 +395,44 @@ let test_summary_index_matches_per_fact_scan () =
   let events =
     [ retrieved ~at:(3. *. day +. 1.) "latest first"
     ; retrieved ~memory_id:id_b ~at:day "another fact"
-    ; revised ~memory_id:id_c ~at:1. id_a
-    ; retracted ~at:1. ()
     ; retrieved ~at:(-1.) "before UTC epoch"
     ; retrieved ~at:0. "next UTC day"
     ; retrieved ~at:(day -. 1.) "same UTC day"
     ; retrieved ~at:(3. *. day +. 1.) "duplicate retrieval still counts"
-    ; revised ~memory_id:id_b ~at:2. id_a
-    ; revised ~memory_id:id_c ~at:3. id_a
-    ; revised ~memory_id:id_a ~at:4. id_a
-    ; revised ~memory_id:id_a ~at:5. id_b
-    ; revised ~memory_id:id_c ~at:6. id_d
-    ; retracted ~at:1. ()
-    ; retracted ~memory_id:id_c ~at:8. ()
     ; retrieved ~memory_id:id_b ~at:(day +. 1.) "same day, another fact"
     ]
   in
-  List.iter (fun rows ->
+  let revisions =
+    [ link id_c id_a; link id_b id_a; link id_c id_a; link id_a id_a; link id_a id_b
+    ; link id_c id_d ]
+  in
+  let retractions = [ id_a; id_a; id_c ] in
+  List.iter (fun (rows, revisions, retractions) ->
     List.iter (fun memory_ids ->
       check (list summary_testable) "selected summaries preserve requested order and duplicates"
-        (List.map (fun memory_id -> reference_summary ~memory_id rows) memory_ids)
-        (Events.summaries_for ~memory_ids rows))
+        (List.map (fun memory_id -> reference_summary ~memory_id ~revisions ~retractions rows)
+           memory_ids)
+        (summaries ~revisions ~retractions ~memory_ids rows))
       [[]; [id_a]; [id_b]; [id_a; id_b; id_c; id_d; absent];
        [absent; id_d; id_a; id_a]];
-    let current = Events.summaries_for ~memory_ids:[id_a] rows |> List.hd in
+    let current = summaries ~revisions ~retractions ~memory_ids:[id_a] rows |> List.hd in
     check int "duplicates still count as retrievals" 5 current.retrieved_count;
     check int "UTC days include the negative timestamp day" 3 current.retrieved_distinct_days;
+    check int "each journal retraction counts" 2 current.retracted_count;
     check (list string) "self revisions are excluded, predecessors sorted and deduplicated"
       [id_b; id_c] current.revised_from;
     check (list string) "a successor need not own any event"
-      [id_c] (List.hd (Events.summaries_for ~memory_ids:[id_d] rows)).revised_from;
-    let next = Events.summaries_for ~memory_ids:[id_a] [retrieved ~at:0. "new capture"] in
+      [id_c]
+      (List.hd (summaries ~revisions ~retractions ~memory_ids:[id_d] rows)).revised_from;
+    let next = summaries ~memory_ids:[id_a] [retrieved ~at:0. "new capture"] in
     check summary_testable "new captures do not keep previous history"
-      (reference_summary ~memory_id:id_a [retrieved ~at:0. "new capture"])
+      (reference_summary ~memory_id:id_a ~revisions:[] ~retractions:[]
+         [retrieved ~at:0. "new capture"])
       (List.hd next);
     check summary_testable "a later capture does not replace earlier results"
-      (reference_summary ~memory_id:id_a rows) current)
-    [events; List.rev events]
+      (reference_summary ~memory_id:id_a ~revisions ~retractions rows) current)
+    [ events, revisions, retractions
+    ; List.rev events, List.rev revisions, List.rev retractions ]
 ;;
 
 let () =
@@ -446,6 +443,8 @@ let () =
         ; test_case "each kind round-trips" `Quick test_round_trip_each_kind
         ; test_case "a line carries only its kind payload" `Quick test_wire_carries_the_kind_payload
         ; test_case "the decoder rejects and names the field" `Quick test_decoder_rejects_and_names
+        ; test_case "commit rows of earlier builds are rejected" `Quick
+            test_commit_rows_of_earlier_builds_are_rejected
         ] )
     ; ( "sidecar"
       , [ test_case "append then read in order" `Quick test_append_then_read_in_order
@@ -454,7 +453,7 @@ let () =
         ; test_case "an append cuts a torn tail first" `Quick test_append_cuts_a_torn_tail_first
         ; test_case "a missing file is no events" `Quick test_missing_sidecar_reads_as_no_events
         ; test_case "an unreadable line stays in the list" `Quick test_unreadable_line_stays_in_the_list
-        ; test_case "a retraction and the retrieval after it are counted" `Quick
+        ; test_case "a journal retraction and a sidecar retrieval are both counted" `Quick
             test_retraction_and_following_retrieval_are_counted
         ; test_case "append refuses what read would refuse" `Quick
             test_append_refuses_what_read_would_refuse

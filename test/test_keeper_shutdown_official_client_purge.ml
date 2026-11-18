@@ -300,7 +300,10 @@ candidates = ["codex.gpt5", "agy.gemini", "muse.muse-spark"]
     (Sys.file_exists identity_dir)
 ;;
 
+(* The purge runs in the server, the process that writes the stores and
+   keeps their facts in memory. *)
 let () =
+  Dated_jsonl.keep_facts_in_this_process ();
   run "Keeper shutdown official-client purge"
     [ ( "official-client homes"
       , [ test_case "purge removes the Antigravity HOME and prepare lock" `Quick

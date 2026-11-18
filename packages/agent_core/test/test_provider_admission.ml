@@ -1065,6 +1065,31 @@ let test_a_full_walk_waits_in_every_queue_and_keeps_the_first_permit () =
   check (pair int int) "every permit returned" (0, 0) (active a, active b)
 ;;
 
+(* Two slots of one lane can name the same account. The walk then stands in
+   that account's queue twice; one stand takes the freed permit and the other
+   leaves the queue without a second permit. *)
+let test_two_candidates_on_one_account_take_one_seat () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let a = seat_config "http://seat-one-account.test:1" in
+  let a_again = seat_config "http://seat-one-account.test:1" in
+  let _, held_seat = Provider_admission.take_first_seat (0, a) [] in
+  let taken =
+    Eio.Fiber.pair
+      (fun () -> Provider_admission.take_first_seat (0, a) [ 1, a_again ])
+      (fun () ->
+        await_queued ~clock ~config:a 2;
+        Provider_admission.release_seat held_seat)
+    |> fst
+  in
+  let (_ : int), seat = taken in
+  check int "the other stand left the queue" 0 (queued a);
+  check int "one permit held" 1 (active a);
+  Provider_admission.release_seat seat;
+  check int "every permit returned" 0 (active a)
+;;
+
 let test_a_permit_granted_after_the_first_goes_back () =
   Eio_main.run
   @@ fun env ->
@@ -1207,6 +1232,10 @@ let () =
             "a full walk waits in every queue and keeps the first permit"
             `Quick
             test_a_full_walk_waits_in_every_queue_and_keeps_the_first_permit
+        ; test_case
+            "two candidates on one account take one seat"
+            `Quick
+            test_two_candidates_on_one_account_take_one_seat
         ; test_case
             "a permit granted after the first goes back"
             `Quick

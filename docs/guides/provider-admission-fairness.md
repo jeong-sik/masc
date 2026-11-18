@@ -106,6 +106,11 @@ max-concurrent = 4
   binding that names a missing `[providers.<id>]` row does. So does a provider
   whose own id is already a catalog row.
 - An official client (`claude-code`, `codex-app-server`, …) may not declare it.
+- A lane slot the catalog cannot admit — an account without `catalog-provider`,
+  a mistyped id — is left out at boot, and the lane runs with the slots that
+  remain. The deployment preflight refuses the same runtime.toml and names
+  the lane, the slot's position and id, and what to write, so an install does
+  not quietly shorten a lane.
 - The admission wait record carries the catalog row in its provider field, so
   `masc:provider_admission:waited` no longer separates these accounts by
   provider.

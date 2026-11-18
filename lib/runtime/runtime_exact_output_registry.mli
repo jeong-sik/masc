@@ -175,11 +175,12 @@ val check_publication
   -> ?excused_lane_ids:string list
   -> lanes:Runtime_schema.exact_output_lane_decl list
   -> Agent_core.Exact_output.resolver_snapshot
-  -> (unit, publication_error) result
+  -> (rejected_slot list, publication_error) result
 (** The admission {!publish} runs for the same arguments, without publishing
-    and without the publication lock: [Error] is what {!publish} would refuse.
-    The deployment preflight asks it for a runtime.toml before the build that
-    would publish from it is installed. *)
+    and without the publication lock: [Error] is what {!publish} would refuse,
+    and [Ok] carries the slots it would publish without, in lane and position
+    order. The deployment preflight asks it for a runtime.toml before the build
+    that would publish from it is installed. *)
 
 val unpublish : unit -> (unit, publication_error) result
 (** Revoke the current registry for future lookups after owner configuration
@@ -240,6 +241,9 @@ val rejected_target_bindings
 (** Declared targets the resolver snapshot of [t] excluded because their
     provider or model has no catalog row. *)
 
+val resolver_snapshot : t -> Agent_core.Exact_output.resolver_snapshot
+(** The resolver snapshot [t] admitted its lanes against. *)
+
 val declared_lanes : t -> Runtime_schema.exact_output_lane_decl list
 (** Every lane table runtime.toml declares, built-in and add-on, in file
     order, before admission dropped anything. *)
@@ -254,13 +258,13 @@ val declared_lane
     sibling was rejected. *)
 
 val diagnose_rejected_slot
-  :  t
+  :  Agent_core.Exact_output.resolver_snapshot
   -> rejected_slot
   -> configured_runtime:(string -> (string * string) option)
   -> rejected_slot_diagnosis
 (** Why a slot was rejected, for the boot report. A target the overlay
     declares but whose binding the resolver rejected is named first, read
-    from the snapshot this registry holds; otherwise [configured_runtime]
+    from the resolver snapshot the slot was admitted against; otherwise [configured_runtime]
     decides, answering with the runtime's [(provider_id, api_name)] when the
     id is an enabled runtime.toml runtime. The caller supplies that lookup
     because this module sits below [Runtime]. *)

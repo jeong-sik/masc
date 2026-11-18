@@ -238,7 +238,7 @@ let publish_exact_output_registry_from_observation (observation : Runtime.config
 ;;
 
 let check_exact_output_registry ?config_root () =
-  let lanes, catalog, _runtimes = exact_output_lanes_and_catalog ?config_root () in
+  let lanes, catalog, runtimes = exact_output_lanes_and_catalog ?config_root () in
   let resolver_snapshot = exact_output_resolver_snapshot catalog in
   match
     Runtime_exact_output_registry.check_publication
@@ -251,7 +251,16 @@ let check_exact_output_registry ?config_root () =
     raise
       (exact_output_registry_refused
          (Runtime_exact_output_registry.publication_error_to_string error))
-  | Ok () -> ()
+  | Ok [] -> ()
+  | Ok (_ :: _ as rejected) ->
+    (* Boot publishes without these slots and keeps serving, so a running
+       server is not stopped by one line of config. An install is refused
+       instead: the lane would be shorter than runtime.toml says. *)
+    raise
+      (exact_output_registry_refused
+         (String.concat
+            "; "
+            (Runtime.rejected_exact_slot_refusals ~runtimes resolver_snapshot rejected)))
 ;;
 
 let install_domain_pool_references ?read domain_pool =

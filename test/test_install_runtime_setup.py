@@ -2174,10 +2174,12 @@ class CompiledRuntimeSetup(unittest.TestCase):
                 # Setup rewrites the slots and keeps the seed's output budget.
                 budget = dict(max_output_tokens=8192)
                 self.assertEqual(librarian(runtime), dict(slots=[http_id], cli_slots=[], **budget))
+                # A cli slot runs within the seats its binding declares, and
+                # this client declares none, so setup makes it the default
+                # and leaves the lane on the connection it already had.
                 client = spec('claude_code')
-                client_id = SETUP.render(client, BINARY, base_path=base)[0]
                 SETUP.configure(BINARY, base, client)
-                self.assertEqual(librarian(runtime), dict(slots=[], cli_slots=[client_id], **budget))
+                self.assertEqual(librarian(runtime), dict(slots=[http_id], cli_slots=[], **budget))
             with tempfile.TemporaryDirectory(prefix='runtime-seed-two-') as tmp:
                 base, runtime = seeded(tmp)
                 models = [spec(), dict(spec(), model='second-owned-model')]

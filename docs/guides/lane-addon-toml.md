@@ -411,6 +411,7 @@ max_output_tokens = 8192
 
 - 첫 키는 설치 선언의 `id`, 둘째 키는 출력 이름이다. 선언 `id` 가 bare key 가 아니면 따옴표로 감싼다.
 - 표의 키와 규칙은 `[runtime.exact_output_lanes.<lane>]` 와 같다. `enabled`, `slots`, `cli_slots`, `max_output_tokens`, `thinking` 을 쓰고, body deadline 이 없는 provider 의 slot 과 output-schema 채널이 없는 CLI slot 은 같은 방식으로 거절된다.
+- `cli_slots` 의 runtime 은 binding 에 `max-concurrent` 를 적는다. CLI slot 하나는 이 기계에서 뜨는 프로세스라서, lane 은 적힌 수만큼만 띄운다. 없으면 로드가 거절된다.
 - add-on lane 은 필수가 아니다. `enabled = false` 로 꺼도 서버는 시작하고, 그 lane 은 `Exact_lane_off` 로 답한다.
 - `runtime.toml` 은 설치 선언보다 먼저 읽힌다. 그래서 선언에 없는 이름의 표도 로드된다. 선언된 출력에 표가 없으면 그 lane 은 `Exact_lane_unconfigured` 로 답한다.
 - TUI Lanes 목록의 패키지 행은 출력마다 상태를 보여 준다: bound(slot 이 있음), unbound(표가 없음), off, 그리고 패키지가 선언하지 않은 이름의 표. `[ / ]` 로 출력을 고르고 `e` 를 누르면 그 출력의 표가 runtime.toml 편집기에서 열린다. 표가 아직 없으면 그렇다고 알려 주고, 거기서 `e` 로 표를 더한다.

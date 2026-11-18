@@ -83,6 +83,7 @@ tools-support = true
 [models.verifier.capabilities]
 supports-image-input = true
 [official.verifier]
+max-concurrent = 2
 [runtime]
 default = "official.verifier"
 [runtime.exact_output_lanes.verifier_exact]

@@ -856,7 +856,9 @@ api-name = "verifier-fixture"
 max-context = 400000
 tools-support = true
 [official.verifier]
+max-concurrent = 2
 [native_only.verifier]
+max-concurrent = 2
 [providers.http]
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1/v1"

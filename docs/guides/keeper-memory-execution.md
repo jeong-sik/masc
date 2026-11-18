@@ -249,7 +249,9 @@ slots = ["<an admitted exact target from this deployment>"]
 Those slot strings are placeholders, not defaults. Choose current admitted
 targets from the deployment's runtime configuration. An intentional
 official-client fallback uses the existing `cli_slots` field and an enabled
-official-client runtime ID. An accepted CLI ID is still checked at execution;
+official-client runtime ID. The binding of that runtime declares
+`max-concurrent`, the number of client processes the lane may run at once;
+without it the file does not load. An accepted CLI ID is still checked at execution;
 route admission does not establish account quota, credentials or connectivity.
 Keep the existing built-in `librarian_exact` route for its other consumers.
 

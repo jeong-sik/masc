@@ -33,7 +33,9 @@ let test_an_answer_that_arrived_as_the_window_passed_is_the_result () =
   Eio.Promise.resolve arrive "the answer";
   match Eio.Promise.await_exn work with
   | Ok answer -> check string "the answer that arrived is the result" "the answer" answer
-  | Error message -> failf "an answer that arrived as the window passed was dropped: %s" message
+  | Error error ->
+    failf "an answer that arrived as the window passed was dropped: %s"
+      (Pool.request_error_to_string error)
 ;;
 
 let test_an_answer_that_never_arrives_is_a_timeout () =
@@ -51,8 +53,10 @@ let test_an_answer_that_never_arrives_is_a_timeout () =
   in
   Eio_mock.Clock.set_time clock window_s;
   match Eio.Promise.await_exn work with
-  | Error message ->
-    check string "the timeout names the window" "Pool.request: timeout after 1.0s" message
+  | Error (Pool.Timed_out { after_seconds }) ->
+    check (float 0.0) "the timeout names the window" window_s after_seconds
+  | Error error ->
+    failf "expected a timeout, got %s" (Pool.request_error_to_string error)
   | Ok () -> fail "nothing arrived, yet the wait did not end as a timeout"
 ;;
 
@@ -89,7 +93,9 @@ let test_a_body_that_ended_as_the_idle_window_passed_is_the_body () =
   | Ok (body, progress) ->
     check string "the body that ended is the result" "the body" body;
     check int "its bytes were counted" 8 progress.Pool.bytes_received
-  | Error (message, _) -> failf "a body that ended as the window passed was dropped: %s" message
+  | Error (error, _) ->
+    failf "a body that ended as the window passed was dropped: %s"
+      (Pool.request_error_to_string error)
 ;;
 
 (* The same order on the connect window: the client's creation finishes

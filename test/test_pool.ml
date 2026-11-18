@@ -250,8 +250,9 @@ let test_idle_steady_stream_completes () =
     (match p.first_byte_at_sec with
      | Some _ -> ()
      | None -> Alcotest.fail "expected first_byte_at_sec set")
-  | Error (msg, _) ->
-    Alcotest.fail (Printf.sprintf "expected Ok, got Error %s" msg)
+  | Error (error, _) ->
+    Alcotest.fail (Printf.sprintf "expected Ok, got Error %s"
+      (Masc_http_client.Pool.request_error_to_string error))
 
 let test_stream_without_body_retention () =
   Eio_main.run @@ fun env ->
@@ -270,7 +271,8 @@ let test_stream_without_body_retention () =
   | Ok ((), progress) ->
     Alcotest.(check int) "all bytes still delivered" (4096 * 1024) !delivered;
     Alcotest.(check int) "progress remains observable" !delivered progress.bytes_received
-  | Error (message, _) -> Alcotest.fail message
+  | Error (error, _) ->
+    Alcotest.fail (Masc_http_client.Pool.request_error_to_string error)
 
 let test_idle_silent_from_start_cancels () =
   Eio_main.run @@ fun env ->
@@ -290,12 +292,14 @@ let test_idle_silent_from_start_cancels () =
       body
   in
   match result with
-  | Error (msg, p) ->
-    Alcotest.(check bool) "idle-timeout message present"
-      true (Astring.String.is_prefix ~affix:"idle timeout" msg);
+  | Error (Masc_http_client.Pool.Idle_timed_out { after_seconds }, p) ->
+    Alcotest.(check (float 0.0)) "the idle window is the verdict" 0.2 after_seconds;
     Alcotest.(check int) "zero bytes received" 0 p.bytes_received;
     Alcotest.(check (option (float 0.001))) "no first_byte_at_sec"
       None p.first_byte_at_sec
+  | Error (error, _) ->
+    Alcotest.fail ("expected idle timeout, got "
+      ^ Masc_http_client.Pool.request_error_to_string error)
   | Ok (_, _) ->
     Alcotest.fail "expected idle timeout, got Ok"
 
@@ -319,13 +323,15 @@ let test_idle_mid_stream_silence_cancels () =
       body
   in
   match result with
-  | Error (msg, p) ->
-    Alcotest.(check bool) "idle-timeout message present"
-      true (Astring.String.is_prefix ~affix:"idle timeout" msg);
+  | Error (Masc_http_client.Pool.Idle_timed_out { after_seconds }, p) ->
+    Alcotest.(check (float 0.0)) "the idle window is the verdict" 0.2 after_seconds;
     Alcotest.(check int) "early chunk bytes counted" 5 p.bytes_received;
     (match p.first_byte_at_sec with
      | Some _ -> ()
      | None -> Alcotest.fail "expected first_byte_at_sec for early chunk")
+  | Error (error, _) ->
+    Alcotest.fail ("expected mid-stream idle timeout, got "
+      ^ Masc_http_client.Pool.request_error_to_string error)
   | Ok (_, _) ->
     Alcotest.fail "expected mid-stream idle timeout, got Ok"
 
@@ -348,16 +354,18 @@ let test_total_timeout_reports_progress_snapshot () =
            body)
       (fun () ->
          Eio.Time.sleep clock 0.05;
-         Error ("total timeout after 0.1s", !progress_ref))
+         Error (Masc_http_client.Pool.Timed_out { after_seconds = 0.05 }, !progress_ref))
   in
   match result with
-  | Error (msg, p) ->
-    Alcotest.(check bool) "total-timeout message present"
-      true (Astring.String.is_prefix ~affix:"total timeout" msg);
+  | Error (Masc_http_client.Pool.Timed_out { after_seconds }, p) ->
+    Alcotest.(check (float 0.0)) "the total window is the verdict" 0.05 after_seconds;
     Alcotest.(check int) "early bytes preserved" 5 p.bytes_received;
     (match p.first_byte_at_sec with
      | Some _ -> ()
      | None -> Alcotest.fail "expected first_byte_at_sec for early chunk")
+  | Error (error, _) ->
+    Alcotest.fail ("expected total timeout, got "
+      ^ Masc_http_client.Pool.request_error_to_string error)
   | Ok (_, _) ->
     Alcotest.fail "expected total timeout, got Ok"
 
@@ -482,18 +490,18 @@ let test_request_timeout_bounds_never_returning_transport () =
   let clock = Eio.Stdenv.clock env in
   let started = Eio.Time.now clock in
   let result =
-    Masc_http_client.For_testing.with_request_timeout ~clock ~timeout_sec:0.02
+    Masc_http_client.Pool.For_testing.with_request_timeout ~clock ~timeout_seconds:0.02
       (fun () ->
          Eio.Time.sleep clock 60.0;
          Ok ())
   in
   let elapsed = Eio.Time.now clock -. started in
   (match result with
-   | Error message ->
-     Alcotest.(check bool)
-       "timeout is explicit"
-       true
-       (Astring.String.is_prefix ~affix:"Pool.request: timeout after" message)
+   | Error (Masc_http_client.Pool.Timed_out { after_seconds }) ->
+     Alcotest.(check (float 0.0)) "the timeout names its window" 0.02 after_seconds
+   | Error error ->
+     Alcotest.fail ("expected a timeout, got "
+       ^ Masc_http_client.Pool.request_error_to_string error)
    | Ok () -> Alcotest.fail "never-returning transport must time out");
   Alcotest.(check bool) "deadline settles promptly" true (elapsed < 0.5)
 

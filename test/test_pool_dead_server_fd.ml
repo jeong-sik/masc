@@ -23,9 +23,39 @@ let closed_port () =
        | Unix.ADDR_INET (_, port) -> port
        | Unix.ADDR_UNIX _ -> failwith "expected inet sockaddr")
 
-let error_message = function
+let request_error = function
   | Ok _ -> Alcotest.fail "expected Error from a dead server"
-  | Error msg -> msg
+  | Error (error : Masc_http_client.Pool.request_error) -> error
+
+let error_message result =
+  Masc_http_client.Pool.request_error_to_string (request_error result)
+
+let string_error_message = function
+  | Ok _ -> Alcotest.fail "expected Error from establishment"
+  | Error (message : string) -> message
+
+(* The refusal a closed port produces: this request tried TCP and every
+   address refused it. *)
+let is_tcp (failure : Masc_http_client.Pool.connect_failure) =
+  match failure with
+  | Tcp_failure _ -> true
+  | No_addresses | Dns_failure _ | Establishment_timeout | Client_failure _ -> false
+
+let is_tcp_refusal (error : Masc_http_client.Pool.request_error) =
+  match error with
+  | Connect_failed { failure; _ } -> is_tcp failure
+  | Connect_held_back _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+    | Exchange_failed _ | Invalid_request _ ->
+    false
+
+(* A request the pool refused without a socket because an earlier connect to
+   the same origin failed. *)
+let held_back_failure (error : Masc_http_client.Pool.request_error) =
+  match error with
+  | Connect_held_back { failure; retry_in_seconds; origin = _ } ->
+    Some (failure, retry_in_seconds)
+  | Connect_failed _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+    | Exchange_failed _ | Invalid_request _ -> None
 
 let test_dead_server_fd_flat () =
   Eio_main.run @@ fun env ->
@@ -46,18 +76,25 @@ let test_dead_server_fd_flat () =
      The warm-up is asserted like the rest: if the first request stopped
      failing at TCP, the loop below would be measuring a different thing. *)
   let warm_up =
-    error_message (Masc_http_client.Pool.request pool ~method_:`GET ~url ())
+    request_error (Masc_http_client.Pool.request pool ~method_:`GET ~url ())
   in
   Alcotest.(check bool) "the warm-up request is refused like the rest" true
-    (Astring.String.is_prefix ~affix:"TCP connect failed:" warm_up);
+    (is_tcp_refusal warm_up);
+  Alcotest.(check bool) "with no backoff the next request is not held back" true
+    (match warm_up with
+     | Connect_failed { retry = Retry_unblocked; _ } -> true
+     | Connect_failed { retry = Retry_in _; _ }
+     | Connect_held_back _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+     | Exchange_failed _ | Invalid_request _ ->
+       false);
   Alcotest.(check bool) "and the refusal reads as one line" false
-    (String.contains warm_up '\n');
+    (String.contains (Masc_http_client.Pool.request_error_to_string warm_up) '\n');
   let fd_before = (Fd_accountant.fd_snapshot ()).fd_open in
   for _ = 1 to 50 do
-    let msg = error_message
+    let error = request_error
       (Masc_http_client.Pool.request pool ~method_:`GET ~url ()) in
     Alcotest.(check bool) "every request attempts TCP, with no backoff"
-      true (Astring.String.is_prefix ~affix:"TCP connect failed:" msg)
+      true (is_tcp_refusal error)
   done;
   Alcotest.(check int) "disabled backoff stores no failures" 0
     (Masc_http_client.Pool.For_testing.connect_failure_count pool);
@@ -84,17 +121,27 @@ let test_backoff_fast_fails_without_socket () =
   in
   let pool = Masc_http_client.Pool.create ~sw ~env ~config () in
   let url = Printf.sprintf "http://127.0.0.1:%d/" (closed_port ()) in
-  let first = Masc_http_client.Pool.request pool ~method_:`GET ~url () in
-  let first_msg = error_message first in
+  let first = request_error (Masc_http_client.Pool.request pool ~method_:`GET ~url ()) in
   Alcotest.(check bool) "first failure is a connect failure"
+    true (is_tcp_refusal first);
+  Alcotest.(check bool) "first failure says the origin is held for the cooldown"
     true
-    (Astring.String.is_prefix ~affix:"TCP connect failed:" first_msg);
+    (match first with
+     | Connect_failed { retry = Retry_in seconds; _ } -> Float.equal seconds 30.0
+     | Connect_failed { retry = Retry_unblocked; _ }
+     | Connect_held_back _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+     | Exchange_failed _ | Invalid_request _ ->
+       false);
   let fd_mid = (Fd_accountant.fd_snapshot ()).fd_open in
-  let second = Masc_http_client.Pool.request pool ~method_:`GET ~url () in
-  Alcotest.(check bool) "second request fast-fails from backoff"
-    true
-    (Astring.String.is_prefix ~affix:"connect backoff:"
-       (error_message second));
+  let second = request_error (Masc_http_client.Pool.request pool ~method_:`GET ~url ()) in
+  (match held_back_failure second with
+   | Some (failure, retry_in_seconds) ->
+     Alcotest.(check bool) "the held-back request carries the refusal it is held for"
+       true (is_tcp failure);
+     Alcotest.(check bool) "and the seconds left of the cooldown" true
+       (retry_in_seconds > 0.0 && retry_in_seconds <= 30.0)
+   | None -> Alcotest.failf "second request was not held back: %s"
+       (Masc_http_client.Pool.request_error_to_string second));
   let fd_after = (Fd_accountant.fd_snapshot ()).fd_open in
   (match fd_mid, fd_after with
    | Some mid, Some after_ ->
@@ -115,9 +162,7 @@ let test_backoff_expires_and_retries () =
   Eio.Time.sleep (Eio.Stdenv.clock env) 0.3;
   let retry = Masc_http_client.Pool.request pool ~method_:`GET ~url () in
   Alcotest.(check bool) "after cooldown the probe runs again"
-    false
-    (Astring.String.is_prefix ~affix:"connect backoff:"
-       (error_message retry))
+    true (is_tcp_refusal (request_error retry))
 
 let test_probe_success_still_creates_client () =
   Eio_main.run @@ fun env ->
@@ -144,7 +189,7 @@ let test_probe_success_still_creates_client () =
     Masc_http_client.Pool.request pool ~clock:(Eio.Stdenv.clock env)
       ~timeout_seconds:1.0 ~method_:`GET ~url ()
   in
-  ignore (result : (Masc_http_client.Pool.response, string) result);
+  ignore (result : (Masc_http_client.Pool.response, Masc_http_client.Pool.request_error) result);
   let stats = Masc_http_client.Pool.stats pool in
   Alcotest.(check int) "piaf client created after successful probe" 1
     stats.create_count_total;
@@ -185,12 +230,12 @@ let test_establishment_errors () =
   let no_create () = Alcotest.fail "failed probe reached Piaf creation" in
   Alcotest.(check string) "empty DNS result"
     "DNS resolution failed: no stream addresses"
-    (error_message (establish ~resolve:(fun () -> [])
+    (string_error_message (establish ~resolve:(fun () -> [])
       ~connect:no_connect ~create:no_create));
   let dns_error = Unix.Unix_error (Unix.EHOSTUNREACH, "getaddrinfo", "host") in
   Alcotest.(check string) "DNS error preserves cause"
     ("DNS resolution failed: " ^ Printexc.to_string dns_error)
-    (error_message (establish ~resolve:(fun () -> raise dns_error)
+    (string_error_message (establish ~resolve:(fun () -> raise dns_error)
       ~connect:no_connect ~create:no_create));
   (* Eio's printer breaks an [Io] error's context onto its own line; the
      message it goes into is one line. *)
@@ -199,7 +244,7 @@ let test_establishment_errors () =
       "connecting to %s" "tcp:127.0.0.1:8935"
   in
   let refused_with_context =
-    error_message (establish ~resolve:(fun () -> [()])
+    string_error_message (establish ~resolve:(fun () -> [()])
       ~connect:(fun () -> raise with_context) ~create:no_create)
   in
   Alcotest.(check bool) "an Eio error's context stays on the message's line" false
@@ -210,10 +255,10 @@ let test_establishment_errors () =
   let resource_error = Unix.Unix_error (Unix.EMFILE, "socket", "") in
   Alcotest.(check string) "resource exhaustion is not reported as refusal"
     ("TCP connect failed: " ^ Printexc.to_string resource_error)
-    (error_message (establish ~resolve:(fun () -> [()])
+    (string_error_message (establish ~resolve:(fun () -> [()])
       ~connect:(fun () -> raise resource_error) ~create:no_create));
   Alcotest.(check string) "Piaf failure preserves cause" "TLS failure"
-    (error_message (establish ~resolve:(fun () -> [()])
+    (string_error_message (establish ~resolve:(fun () -> [()])
       ~connect:(fun () -> ()) ~create:(fun () -> Error "TLS failure")));
   Alcotest.(check (result string string)) "later address can connect"
     (Ok "created")
@@ -239,7 +284,7 @@ let test_later_address_after_client_failure () =
     [1; 2] (List.rev !attempts);
   Alcotest.(check string) "all client failures preserve the last cause"
     "TLS failure at 3"
-    (error_message (establish ~create:(fun address ->
+    (string_error_message (establish ~create:(fun address ->
       Error (Printf.sprintf "TLS failure at %d" address))))
 
 let test_establishment_deadline () =
@@ -249,7 +294,7 @@ let test_establishment_deadline () =
     Masc_http_client.Pool.For_testing.establish_connection
       ~clock ~timeout_seconds:0.05 ~resolve ~connect ~create in
   let check_timeout label result =
-    Alcotest.(check string) label "connect timeout" (error_message result)
+    Alcotest.(check string) label "connect timeout" (string_error_message result)
   in
   check_timeout "DNS uses establishment deadline"
     (establish ~resolve:Eio.Fiber.await_cancel
@@ -305,7 +350,7 @@ let test_establishment_cancellation () =
   Alcotest.(check bool) "cancellation reaches active establishment stage"
     true !cancelled;
   Alcotest.(check string) "outer cancellation is not a probe failure"
-    "outer cancellation" (error_message result)
+    "outer cancellation" (string_error_message result)
 
 (* Each accepted socket has its own switch. Completion is published after
    that switch closes, so FD measurements exclude server-side socket races.
@@ -406,7 +451,7 @@ let test_cancelled_tls_fd_flat () =
           | Eio.Cancel.Cancelled _ as exn -> incr cancelled; raise exn)
         (fun () ->
           Eio.Stream.take started;
-          Error "cancelled after TLS started") in
+          Error (Masc_http_client.Pool.Exchange_failed "cancelled after TLS started")) in
       Alcotest.(check string) "caller cancels a live TLS handshake"
         "cancelled after TLS started" (error_message result);
       (* The server's EOF proves the client close happened before returning
@@ -475,9 +520,16 @@ let test_establishment_timeout_during_tls () =
         (fun () ->
           Eio.Stream.take started;
           Eio_mock.Clock.set_time mock_clock deadline) in
-      Alcotest.(check string) "configured establishment timeout during real TLS"
-        (Printf.sprintf "connect timeout: https://127.0.0.1:%d" port)
-        (error_message result);
+      Alcotest.(check bool) "configured establishment timeout during real TLS" true
+        (match request_error result with
+         | Connect_failed { failure = Establishment_timeout; origin; retry = Retry_in _ } ->
+           origin.port = port
+         | Connect_failed
+             { failure = (No_addresses | Dns_failure _ | Tcp_failure _ | Client_failure _); _ }
+         | Connect_failed { retry = Retry_unblocked; _ }
+         | Connect_held_back _ | Timed_out _ | Idle_timed_out _ | Body_limit_exceeded _
+         | Exchange_failed _ | Invalid_request _ ->
+           false);
       (* Published after the server sees EOF and closes its own socket. *)
       Eio.Stream.take completed;
       Eio.Switch.check sw)
@@ -486,9 +538,12 @@ let test_establishment_timeout_during_tls () =
   Alcotest.(check int) "timeout records a connect failure" 1
     (Pool.For_testing.connect_failure_count pool);
   let before_ = fd_count () in
-  let backoff = error_message (Pool.request pool ~method_:`GET ~url ()) in
+  let backoff = request_error (Pool.request pool ~method_:`GET ~url ()) in
   Alcotest.(check bool) "timeout activates configured cooldown" true
-    (Astring.String.is_prefix ~affix:"connect backoff:" backoff);
+    (match held_back_failure backoff with
+     | Some (Establishment_timeout, _) -> true
+     | Some ((No_addresses | Dns_failure _ | Tcp_failure _ | Client_failure _), _)
+     | None -> false);
   Alcotest.(check int) "backoff started no new TLS handshake" 1 !handshakes;
   Alcotest.(check int) "backoff opened no descriptor" before_ (fd_count ());
   for _ = 1 to 50 do
@@ -581,7 +636,7 @@ let test_healthy_reuse_and_scope_shutdown ~explicit () =
       let pool = Masc_http_client.Pool.create ~sw:pool_sw ~env:pool_env () in
       for _ = 1 to 2 do
         match Masc_http_client.Pool.request pool ~method_:`GET ~url () with
-        | Error msg -> Alcotest.fail msg
+        | Error error -> Alcotest.fail (Masc_http_client.Pool.request_error_to_string error)
         | Ok response -> Alcotest.(check string) "healthy response" "ok" response.body
       done;
       let stats = Masc_http_client.Pool.stats pool in

@@ -279,13 +279,14 @@
 (test
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
- (deps fixtures/librarian_statements_golden.json ../config/prompts/librarian.md)
+ (deps fixtures/librarian_statements_golden.json (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main mtime.clock.os))
 
 (test
  (name test_keeper_librarian_cancellation)
  (modules test_keeper_librarian_cancellation)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main))
 
@@ -390,6 +391,7 @@
 (test
  (name test_verifier_official_client)
  (modules test_verifier_official_client)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))
 
 (test
@@ -427,10 +429,7 @@
 (test
  (name test_workspace_memory_curator_lane)
  (modules test_workspace_memory_curator_lane)
- (deps ../config/prompts/workspace_memory_curator.md
-       ../config/prompts/workspace_memory_briefing.md
-       ../config/prompts/keeper.md
-       (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py)
+ (deps (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps masc.server exact_output_fixture))
 
 (test
@@ -1334,6 +1333,7 @@
 (test
  (name test_keeper_event_queue_state_v2)
  (modules test_keeper_event_queue_state_v2)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc_test_deps))
 
 (test
@@ -1442,6 +1442,7 @@
 (test
  (name test_keeper_effective_meta_overlay)
  (modules test_keeper_effective_meta_overlay)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   masc_test_deps
   masc.embedded_config))
@@ -1636,6 +1637,7 @@
 (test
  (name test_fusion_metrics)
  (modules test_fusion_metrics)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps masc.fusion_core))
 
 (test
@@ -1659,6 +1661,7 @@
 (test
  (name test_keeper_librarian_cli_lane)
  (modules test_keeper_librarian_cli_lane)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   masc_test_deps
   exact_output_fixture
@@ -1671,6 +1674,7 @@
 (test
  (name test_keeper_librarian_message_floor)
  (modules test_keeper_librarian_message_floor)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   masc_test_deps
   exact_output_fixture
@@ -2226,7 +2230,7 @@
   masc.agent_core.digest
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json
-  ../config/prompts/keeper.fleet.diagnose.md))
+  (source_tree %{workspace_root}/config/prompts)))
 
 (test
  (name test_dashboard_namespace_truth)
@@ -2439,6 +2443,7 @@
 (test
  (name test_keeper_board_turn_ack)
  (modules test_keeper_board_turn_ack)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps exact_output_fixture eio_main unix))
 
 ; Production Board-attention adapter proof over the provider-neutral AGENT_CORE lane.
@@ -2451,6 +2456,7 @@
 (test
  (name test_keeper_librarian_exact_lane_preference)
  (modules test_keeper_librarian_exact_lane_preference)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
 ; The exact-execution lease guard and exact-disposition recovery suites lived
@@ -2563,7 +2569,7 @@
 (test
  (name test_completion_trust_harness)
  (modules test_completion_trust_harness)
- (deps (source_tree ../config/prompts))
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))
 
 ; Scheduled internal automation domain guardrails.
@@ -3819,7 +3825,7 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries browser_addon_fixture masc_test_deps masc.runtime masc.browser_lane masc.lane_addon_call_context)
- (deps ../config/prompts/keeper.vision.output.md ../config/prompts/keeper.vision.request_header.md ../bin/masc_native_addon_launcher.exe))
+ (deps ../bin/masc_native_addon_launcher.exe (source_tree %{workspace_root}/config/prompts)))
 
 (rule
  (alias runtest-browser-native-screenshot)
@@ -5513,6 +5519,7 @@
 (test
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest yojson masc masc_test_deps eio eio_main fs_compat unix))
 
 (test
@@ -5523,6 +5530,7 @@
 (test
  (name test_keeper_task_skill_block)
  (modules test_keeper_task_skill_block)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   alcotest
   masc
@@ -6390,6 +6398,7 @@
 (test
  (name test_workspace_memory_execution_capture)
  (modules test_workspace_memory_execution_capture)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry unix))
 
 (test
@@ -6794,7 +6803,7 @@
  (modules test_workspace_curator_addon_commit)
  (deps ../addons/workspace-curator/lane.toml
        ../addons/workspace-curator/schemas/classification.json
-       ../addons/workspace-curator/schemas/briefing.json)
+       ../addons/workspace-curator/schemas/briefing.json (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps masc.server mcp_protocol))
 
 (test
@@ -7440,9 +7449,7 @@
 (test
  (name test_keeper_librarian_addon_owner)
  (modules test_keeper_librarian_addon_owner)
- (deps ../config/prompts/librarian.md
-       ../config/prompts/keeper.md
-       (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py)
+ (deps (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id))
 
 (test
@@ -7453,7 +7460,7 @@
 (test
  (name test_keeper_librarian_durable_preparation)
  (modules test_keeper_librarian_durable_preparation)
- (deps ../config/prompts/librarian.md)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest astring masc_test_deps masc agent_core))
 
 (test
@@ -7469,9 +7476,7 @@
 (test
  (name test_keeper_librarian_durable_execution)
  (modules test_keeper_librarian_durable_execution)
- (deps ../config/prompts/librarian.md
-       ../config/prompts/keeper.md
-       (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py)
+ (deps (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
  (libraries masc masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
 
 ; Not a test: prints one Librarian pass's allocation and stored bytes per

@@ -1,5 +1,5 @@
 (test
  (name test_keeper_memory_recall_flow)
  (modules test_keeper_memory_recall_flow)
- (deps ../config/prompts/keeper.memory.recall.md)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc alcotest masc_test_deps eio_main))

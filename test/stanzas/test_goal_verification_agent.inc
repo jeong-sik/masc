@@ -6,6 +6,7 @@
 (test
  (name test_goal_verification_agent)
  (modules test_goal_verification_agent)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   eio.mock
   masc_test_deps

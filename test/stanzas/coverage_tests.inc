@@ -73,4 +73,5 @@
   test_field_validation
   test_tool_args_envelope
  )
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))

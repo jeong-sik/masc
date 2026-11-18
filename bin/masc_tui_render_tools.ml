@@ -852,15 +852,21 @@ let tools_selection_document ~cols state =
   | Some profile ->
       let reference = profile.esp_reference in
       let name = Terminal_text.single_line profile.esp_name in
+      (* Where the Skill comes from is one fact in three parts, so it takes
+         one row: the list below gets the two rows the parts used to take
+         each. A row too long for the frame wraps rather than cutting an
+         identity. *)
+      let field ko en value = ui_text state ~ko ~en ^ " " ^ value in
       named_again ~selection_row:(skill_selection_prefix state ^ name)
         ~title:(Ansi.bold, "Action Skill: " ^ name)
-      @ [ Ansi.dim, "Source: " ^ Terminal_text.single_line
-            (Skill_reference.identity_source_id_to_string reference.identity)
-        ; Ansi.dim, "Package: " ^ Terminal_text.single_line
-            (Skill_reference.identity_package_id_to_string reference.identity)
-        ; Ansi.dim, "Revision: " ^ Masc_tui_value.Hash.short (Terminal_text.single_line
-            (Skill_reference.content_revision_to_string reference.content_revision))
-        ]
+      @ [ Ansi.dim,
+          String.concat " · "
+            [ field "출처" "Source" (Terminal_text.single_line
+                (Skill_reference.identity_source_id_to_string reference.identity));
+              field "패키지" "Package" (Terminal_text.single_line
+                (Skill_reference.identity_package_id_to_string reference.identity));
+              field "리비전" "Revision" (Masc_tui_value.Hash.short (Terminal_text.single_line
+                (Skill_reference.content_revision_to_string reference.content_revision))) ] ]
 
 (* The Effective Keeper Surface's diagnostics: what the runtime says about
    itself, the two digests and the byte budgets. [hash] draws a digest: its

@@ -275,6 +275,17 @@ val refusal_to_string : refusal -> string
 (** Authorizes [sealed] for [request] by the access the process published. *)
 val authorize : request -> 'client sealed -> ('client authorized, refusal) result
 
+(** What the log says of a turn of a person's Keeper, judged before the
+    account it would run on is read: the part of {!authorize} that looks at
+    no account. A server asks it before it takes the call of the account, so
+    a turn the log refuses holds no call and is not told whether one runs.
+    It gives nothing a client starts on: {!authorize} judges the request
+    again inside the call, on the state of that time, with the account.
+
+    [Ok ()] for a request that is no [Keeper_turn], and in a single-user
+    process: {!authorize} judges those whole. *)
+val admit : request -> (unit, refusal) result
+
 (** Authorizes a Muse account for [request] by the access the process
     published, by the rule of {!authorize}. *)
 val authorize_muse : request -> 'where muse_account -> ('where muse_authorized, refusal) result

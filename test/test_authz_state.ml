@@ -2116,16 +2116,17 @@ let test_account_purges () =
     (availability_word state ~by:bob first_account);
   (* The start of a purge that wrote its intent and no record (design 8.3):
      the log has no purge of the account, and its owner does not spend it. *)
-  spent_by
-    "an account whose purge start was given up"
-    (S.hold_revocations
-       state
-       [ held
-           ~event:Authz_external_store.Change.Purge
-           (Authz_records.Subject.Credential key_account)
-       ])
-    ~owner:"blocked"
-    ~another:"another's";
+  let given_up =
+    S.hold_revocations
+      state
+      [ held ~event:Authz_external_store.Change.Purge (Authz_records.Subject.Credential key_account) ]
+  in
+  spent_by "an account whose purge start was given up" given_up ~owner:"blocked" ~another:"another's";
+  (* The start that was given up blocks its own account and no other. *)
+  Alcotest.(check string)
+    "another account, while that start is given up"
+    "spent"
+    (availability_word given_up ~by:user first_account);
   refused_as
     "another's account"
     state

@@ -8,10 +8,12 @@
     conversation of the Keeper (plan S1b-3).
 
     {b Records.} The Keeper record names the Runtime, and the Runtime record
-    names the account. The runtime is the workspace provider that the login
-    receipt of the account names, with the home of that account and the
-    binding whose Runtime id on the account is the one the Keeper record names
-    ({!Server_setup_account_login.person_runtime}).
+    names the account. The runtime is the workspace provider of the
+    integration of the account, with the home of that account and the binding
+    whose Runtime id on the account is the one the Keeper record names
+    ({!Server_setup_account_login.person_runtime}). The login receipt names
+    the integration of a login account, and the record that linked it the
+    integration of a key account, whose key file the runtime also carries.
 
     {b Authorization.} The route decides nothing itself.
     {!Runtime_account_access.authorize} decides a [Keeper_turn] on the
@@ -32,10 +34,13 @@
       own instructions. Codex keeps no rollout or history of the thread.
 
     The client may be silent for 120 seconds. One call of an account runs at
-    a time ({!Server_setup_account_login.one_call_of}). The runtime is made
-    and the turn is authorized inside that call, so a turn while another
-    call of the account runs is told so before anything of the account is
-    read. The authorization log keeps no record of a turn.
+    a time ({!Server_setup_account_login.one_call_of}). The log is asked
+    first which Runtime and which account the Keeper is on, and whether it
+    gives the turn ({!Runtime_account_access.admit}): a turn the log refuses
+    takes no call. The runtime is made and the turn is authorized inside the
+    call, so a turn while another call of the account runs is told so before
+    a receipt, the runtime table or a key file of the account is read. The
+    authorization log keeps no record of a turn.
 
     {b The conversation} (Claude Code). A Keeper has one conversation at a
     time ({!Server_keeper_conversation}), and its first turn starts one on
@@ -69,15 +74,18 @@ val max_message_bytes : int
     - 400: the body is not that, the message is blank or longer than
       {!max_message_bytes}, the Runtime is neither a Claude Code nor a Codex
       Runtime, or the runtime of its account does not load.
-    - 403: {!Runtime_account_access.authorize} refused the turn, or the
-      client would start with tools that reach the homes of other people.
-      The scope of [pat] not covering the turn is one refusal.
+    - 403: {!Runtime_account_access.admit} or
+      {!Runtime_account_access.authorize} refused the turn, or the client
+      would start with tools that reach the homes of other people. The scope
+      of [pat] not covering the turn is one refusal, and it is answered
+      whether a call of the account runs or not.
     - 404: the Keeper is not the person's, or the account of its Runtime has
-      no login of theirs.
+      no login and no key of theirs.
     - 409: the Keeper has no Runtime, a call of the account runs, the owner
       gave the Keeper another Runtime meanwhile, the account is not signed in
-      to a subscription, or the conversation of the Keeper began on another
-      account.
+      to a subscription, the key file of a key account is not there
+      ([key_missing]) or is not read as a key ([key_unreadable]), or the
+      conversation of the Keeper began on another account.
     - 429: the subscription has no quota left.
     - 504: the client was silent for 120 seconds.
     - 500, 502 or 503: the client did not start, or ended without an answer;

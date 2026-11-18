@@ -19,6 +19,11 @@ val braille_pair : left:int -> right:int -> string
     ["⣶"], ["⣾"], ["⣿"]). *)
 
 val braille_bar_mark : level:int -> string
+
+val braille_bar_rows : rows:int -> level:int -> string list
+(** A column [rows] cells tall drawn to [level] dots, top cell first. The
+    base cell holds levels 1 to 4, the next one up 5 to 8, and so on; a cell
+    the column does not reach is the blank Braille cell. *)
 (** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
     ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. Level [1], ["⣀"], is the baseline a
     measured zero draws. *)

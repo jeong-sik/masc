@@ -1229,12 +1229,14 @@ val cleanup_atomic_orphans
     When the append fails, nothing is kept to be written later. Bytes a
     write had already put in a regular file are removed again, with two
     exceptions that the [Sys_error] message names: removing them failed,
-    or another writer changed the file during the call, in which case
-    they are left so that nothing of the other writer's is removed. The
-    two gaps left against a writer in another process are described in
-    [Fd_append_whole].
+    or the file is not as long as this call alone would have left it, in
+    which case nothing is removed, so another writer's bytes are not cut. What
+    remains possible against a writer in another process is described in
+    [Fd_append_whole]. A regular file must be readable as well as
+    writable.
     @raise Sys_error when the path cannot be examined, opened or
-    written. The message starts with the path. *)
+    written. The message starts with the file's canonical path (the
+    symlinks of its directory resolved), which can differ from [path]. *)
 val append_file : string -> string -> unit
 
 (** Append whole lines to file: [lines] is one or more lines, each ending
@@ -1243,7 +1245,7 @@ val append_file : string -> string -> unit
     raw bytes were appended), a newline is written before the lines, so
     the unfinished bytes stay a line of their own and every appended line
     is read whole. The file's last byte is read on each call to decide
-    that. Bytes a failed {!append_file} or {!append_lines} left in place
+    that. Bytes a failed {!append_file} or {!append_lines} did not remove
     are such unfinished bytes. A FIFO or another non-regular file has no
     last byte to read, and the lines are written to it as they are.
     @raise Sys_error when the path cannot be examined, opened, read or
@@ -2454,8 +2456,10 @@ val append_fd_durable_for_testing :
 val append_jsonl : string -> Yojson.Safe.t -> unit
 
 (** [append_jsonl_batch path jsons] writes multiple JSON entries to [path]
-    under one hold of the path lock, as one append that is rolled back
-    as a whole when it fails. More efficient than calling [append_jsonl]
+    under one hold of the path lock, as one append. When it fails and its
+    bytes cannot be taken back (see {!append_file}), the entries written
+    before the failure stay in the file, and writing the batch again
+    repeats them. More efficient than calling [append_jsonl]
     repeatedly when batching pending entries. Uses the same joined-thread
     and commit acknowledgement boundary as {!append_jsonl}.
     No-op if [jsons] is empty. *)

@@ -129,8 +129,98 @@ let installed_manifest ~packages id =
 
 let installation_error_to_string id = function
   | Not_installed { folder } ->
-    Printf.sprintf "the %s package this server carries is not installed: %s does not exist" (name id) folder
+    Printf.sprintf "the %s package this server carries is not installed: %s does not exist; \
+                    masc exact-addon-setup writes it" (name id) folder
   | Differs { folder; detail } ->
     Printf.sprintf "%s is not the %s package this server carries: %s" folder (name id) detail
   | Carried_package_invalid detail ->
     Printf.sprintf "the %s package this server carries has no usable revision: %s" (name id) detail
+
+type folder_outcome = Written | Already_installed
+
+type install_error =
+  | Folder_differs of { folder : string; detail : string }
+  | Folder_unwritable of { folder : string; reason : string }
+  | No_usable_revision of string
+
+(* Readable by the container's user, as the folders operators copied by hand. *)
+let folder_permissions = 0o755
+
+let write_files root files =
+  List.iter (fun file ->
+      let path = Filename.concat root file.path in
+      Fs_compat.mkdir_p (Filename.dirname path);
+      Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel file.contents))
+    files
+
+let leave_behind staged =
+  match Fs_compat.remove_tree staged with
+  | () -> None
+  | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+    Some (staged ^ " was left behind: " ^ io_detail exn)
+
+let install ~packages id =
+  match folder ~packages id with
+  | Error detail -> Error (No_usable_revision detail)
+  | Ok folder ->
+    let manifest = Filename.concat folder manifest_name in
+    let placed () = match read_placed folder with
+      | Absent -> Error (Folder_unwritable { folder; reason = "it does not exist after it was written" })
+      | Unusable detail -> Error (Folder_differs { folder; detail })
+      | Files files ->
+        (match first_difference (package_files id) files with
+         | None -> Ok (manifest, Already_installed)
+         | Some detail -> Error (Folder_differs { folder; detail })) in
+    match read_placed folder with
+    | Unusable _ | Files _ -> placed ()
+    | Absent ->
+      (* Written beside the folder and renamed into place: rename does not
+         replace a folder that holds files, so a folder written meanwhile
+         is compared instead. *)
+      let staged = Filename.concat packages
+          (Printf.sprintf ".%s.%s.staged" (Filename.basename folder) (Random_id.uuid_v7 ())) in
+      match
+        Fs_compat.mkdir_p packages;
+        Unix.mkdir staged folder_permissions;
+        write_files staged (package_files id);
+        Unix.rename staged folder
+      with
+      | () -> Ok (manifest, Written)
+      | exception Unix.Unix_error ((Unix.EEXIST | Unix.ENOTEMPTY), "rename", _) ->
+        (match leave_behind staged with
+         | None -> placed ()
+         | Some reason -> Error (Folder_unwritable { folder; reason }))
+      | exception ((Unix.Unix_error _ | Sys_error _) as exn) ->
+        let reason = match leave_behind staged with
+          | None -> io_detail exn
+          | Some left -> io_detail exn ^ "; " ^ left in
+        Error (Folder_unwritable { folder; reason })
+
+let install_error_to_string id = function
+  | Folder_differs { folder; detail } ->
+    Printf.sprintf "%s is not the %s package this server carries: %s; it is left as it is"
+      folder (name id) detail
+  | Folder_unwritable { folder; reason } ->
+    Printf.sprintf "the %s package was not written to %s: %s" (name id) folder reason
+  | No_usable_revision detail ->
+    Printf.sprintf "the %s package this server carries has no usable revision: %s" (name id) detail
+
+let image_label = "masc.lane.carried.digest"
+
+let dockerfile_name = "Dockerfile"
+
+let image_inputs id =
+  List.filter (fun file -> String.equal file.path dockerfile_name) (package_files id) @ shared_files
+  |> List.sort by_path
+
+(* Length-prefixed, so no two different input lists encode alike. *)
+let image_digest id =
+  let buffer = Buffer.create 65536 in
+  List.iter (fun file ->
+      Buffer.add_string buffer file.path;
+      Buffer.add_char buffer '\000';
+      Buffer.add_string buffer (string_of_int (String.length file.contents));
+      Buffer.add_char buffer '\000';
+      Buffer.add_string buffer file.contents)
+    (image_inputs id);
+  Agent_core_sha256.(to_hex (digest_string (Buffer.contents buffer)))

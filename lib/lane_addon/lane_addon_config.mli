@@ -93,6 +93,14 @@ val load_source :
     from [declarations] and reported, without selecting an arbitrary winner. *)
 val load : packages:string -> directory:string -> snapshot
 
+val declared_carried : directory:string -> Lane_addon_carried.id list * issue list
+(** The carried packages the declarations in [directory] name with [package],
+    in {!Lane_addon_carried.all} order. Each declaration's package choice is
+    read by the same rule as {!load}, without resolving it, so a package
+    whose folder is not installed is named too. The issues are the
+    declarations whose choice cannot be read, or [directory] when it cannot
+    be listed. A missing [directory] names nothing. *)
+
 val browser_source : declaration -> Browser_lane.Backend.t option
 (** The browser source [declaration]'s worker serves, [None] for an MCP tool
     package. *)

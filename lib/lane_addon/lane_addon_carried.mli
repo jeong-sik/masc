@@ -47,3 +47,39 @@ val installed_manifest : packages:string -> id -> (string, installation_error) r
     other non-regular entry in the folder makes it differ. *)
 
 val installation_error_to_string : id -> installation_error -> string
+
+(** {1 Installing}
+
+    [masc exact-addon-setup] writes each folder and builds each image (RFC
+    3.3). The image holds only the shared modules; the worker reads the
+    package's own files from its folder, mounted at [/addon]. *)
+
+type folder_outcome =
+  | Written  (** The folder did not exist; this call wrote it. *)
+  | Already_installed  (** The folder already held the carried files. *)
+
+type install_error =
+  | Folder_differs of { folder : string; detail : string }
+      (** The folder holds other files. It is never rewritten: a worker can
+          have it mounted, and the same revision name with other contents
+          means one of the two is not this server's package. *)
+  | Folder_unwritable of { folder : string; reason : string }
+  | No_usable_revision of string
+
+val install : packages:string -> id -> (string * folder_outcome, install_error) result
+(** Write {!folder} when it does not exist: the files go into a folder beside
+    it, which is then renamed into place, so a half-written folder never has
+    the package's name. The answer is the folder's [lane.toml] path. *)
+
+val install_error_to_string : id -> install_error -> string
+
+val image_label : string
+(** The image label that holds {!image_digest}. *)
+
+val image_inputs : id -> file list
+(** What the package's image is built from, laid out as its build context,
+    in path order: its [Dockerfile] and {!shared_files}. *)
+
+val image_digest : id -> string
+(** SHA-256 of {!image_inputs}: each path, the length of its bytes, and the
+    bytes. *)

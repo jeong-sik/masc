@@ -489,7 +489,9 @@ let write_goal_task_links_result_internal
   let notify_after_settlement ~failed =
     match task_mutation_notification, failed with
     | Notify_on_failure, false -> ()
-    | Notify_on_failure, true | Notify_always, _ -> notify_task_mutation ()
+    | Notify_on_failure, true | Notify_always, _ ->
+        Workspace_backlog.announce_committed config;
+        notify_task_mutation ()
   in
   protect_goal_link_settlement (fun () ->
     match write_primary () with

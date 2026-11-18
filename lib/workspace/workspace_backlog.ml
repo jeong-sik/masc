@@ -393,6 +393,17 @@ let publish_under_backlog_lease config ~action publish =
     point, so revision monotonicity is structural instead of a convention
     spread across every caller. Callers pass the snapshot they read, with
     mutated [tasks], and never hand-bump. *)
+(* Who hears that the task backlog or its Goal links committed, with the
+   workspace that holds them. Installed by the dataset feed; a commit with
+   no listener installed announces nothing. *)
+let committed_observer : (base_path:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ -> ())
+
+let install_committed_observer observer = Atomic.set committed_observer observer
+
+let announce_committed (config : Workspace_utils_backend_setup.config) =
+  (Atomic.get committed_observer) ~base_path:config.base_path
+
 let write_backlog_result ?after_commit config backlog =
   if backlog.version = max_int then
     Error
@@ -474,6 +485,7 @@ let write_backlog_result ?after_commit config backlog =
       primary_commit.mirror_error;
     clear_backlog_cache_for primary_path;
     clear_backlog_cache_for recovery_path;
+    announce_committed config;
     let mutation_observer_error =
       try
         (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
@@ -569,6 +581,7 @@ let repair_backlog_copies_result config backlog =
       protect_backlog_commit_settlement (fun () ->
         clear_backlog_cache_for primary_path;
         clear_backlog_cache_for recovery_path;
+        announce_committed config;
         try (Atomic.get Workspace_hooks.on_task_mutation_fn) (); Ok () with
         | Eio.Cancel.Cancelled _ as error -> raise error
         | error -> Error (Printexc.to_string error))

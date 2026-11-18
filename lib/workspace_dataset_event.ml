@@ -16,6 +16,7 @@ type browser_observation = { scope : browser_scope; revision : string }
 
 type dataset =
   | Repositories
+  | Backlog
   | Verification_requests
   | Keeper_metrics of { keeper : string }
   | Harness_verdicts
@@ -46,6 +47,7 @@ type dataset =
 module Kind = struct
   type t =
     | Repositories
+    | Backlog
     | Verification_requests
     | Keeper_metrics
     | Harness_verdicts
@@ -76,6 +78,7 @@ module Kind = struct
 
   let to_wire = function
     | Repositories -> "repositories"
+    | Backlog -> "backlog"
     | Verification_requests -> "verification_requests"
     | Keeper_metrics -> "keeper_metrics"
     | Harness_verdicts -> "harness_verdicts"
@@ -110,6 +113,7 @@ end
 
 let kind = function
   | Repositories -> Kind.Repositories
+  | Backlog -> Kind.Backlog
   | Verification_requests -> Kind.Verification_requests
   | Keeper_metrics _ -> Kind.Keeper_metrics
   | Harness_verdicts -> Kind.Harness_verdicts
@@ -246,7 +250,7 @@ let browser_observation_of_fields fields =
   Ok { scope; revision }
 
 let keeper_field = function
-  | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
+  | Repositories | Backlog | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
   | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing | Keeper_costs
   | Workspace_health | Runtime_probe | Runtime_metrics | Lanes | World_memory | Play_seats -> []
   | Machine_live { machine } | Play_room { machine } ->
@@ -285,6 +289,7 @@ let of_fields fields =
     (match Kind.of_wire name with
      | None -> Error (event_type ^ " names an unknown dataset " ^ name)
      | Some Kind.Repositories -> Ok Repositories
+     | Some Kind.Backlog -> Ok Backlog
      | Some Kind.Verification_requests -> Ok Verification_requests
      | Some Kind.Keeper_metrics ->
        Result.map (fun keeper -> Keeper_metrics { keeper }) (keeper_of_fields name fields)
@@ -355,6 +360,7 @@ let announce_lane_addon ~base_path ~instance_id ~visibility =
 
 let install_store_observers () =
   Repo_store.install_written_observer (fun ~base_path -> announce ~base_path Repositories);
+  Workspace_backlog.install_committed_observer (fun ~base_path -> announce ~base_path Backlog);
   Keeper_oauth_pending.install_change_observer (fun ~base_path ~keeper ->
     announce ~base_path (Keeper_oauth_attempts { keeper }));
   Workspace_agent_record.install_rows_changed_observer (fun config ->

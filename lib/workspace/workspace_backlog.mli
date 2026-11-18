@@ -89,6 +89,15 @@ type write_backlog_outcome =
   ; post_commit_error : string option
   }
 
+val install_committed_observer : (base_path:string -> unit) -> unit
+(** Who hears that the task backlog or a Goal's task links committed. Called
+    after the commit and the cache clear, before the task mutation hook. The
+    dataset feed installs it to announce [Backlog]. *)
+
+val announce_committed : Workspace_utils_backend_setup.config -> unit
+(** Tell the installed observer that [config]'s backlog or Goal links
+    committed. The Goal link store calls it at its own commit boundary. *)
+
 val write_backlog_result :
   ?after_commit:(unit -> unit) ->
   Workspace_utils_backend_setup.config ->

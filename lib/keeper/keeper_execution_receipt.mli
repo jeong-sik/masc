@@ -208,8 +208,8 @@ type operator_disposition_reason =
       continuation or task reference bound to a session that no longer
       matches pairs with [Disp_operator_action_required]; a claim another
       turn of this process holds pairs with [Disp_retry_later]; a task
-      reference this client cannot carry pairs with
-      [Disp_fail_open_next_runtime]. *)
+      reference this client cannot carry, or a continuation bound to another
+      candidate's runtime, pairs with [Disp_fail_open_next_runtime]. *)
   | Reason_provider_attempt_effect_fenced
   (** The provider attempt did not prove whether an effect occurred. Paired
       with [Disp_effect_review_required]: the Keeper keeps running and a

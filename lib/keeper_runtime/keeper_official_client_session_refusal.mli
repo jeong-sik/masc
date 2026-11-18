@@ -13,8 +13,11 @@
 type t =
   | Gate_continuation_unresumable
       (** A Gate continuation names a vendor session, turn, runtime or tool
-          surface that the stored session no longer holds. The continuation
-          is bound to that session, so no candidate can take it. *)
+          surface that the stored session no longer holds. Only the
+          continuation's own runtime reaches this check
+          ({!Continuation_on_other_runtime} answers every other candidate
+          first), so the mismatch is a fact of the stored session, which no
+          candidate changes. *)
   | Gate_context_frontier_missing
       (** A Gate continuation would resume a vendor session that has no
           acknowledged canonical-context frontier, so unchanged history
@@ -31,7 +34,15 @@ type t =
           replaying it as user input (Antigravity). Another candidate can. *)
   | Task_reference_unbound
       (** The historical task reference is not bound to the operation's
-          original vendor session. *)
+          original vendor session. The check compares the continuation
+          checkpoint with the reference's original turn; neither depends on
+          the candidate, so every candidate meets it. *)
+  | Continuation_on_other_runtime
+      (** A Gate or checkpoint continuation is bound to the official-client
+          runtime that settled its vendor session, and this lane candidate is
+          another runtime. The turn driver refuses it before the runtime
+          adapter runs, so no task reference or Gate session check is reached.
+          The candidate that is the continuation's runtime can take it. *)
 
 val all : t list
 (** Every constructor, in declaration order. *)
@@ -47,8 +58,12 @@ val to_string : t -> string
 
 (** What the lane walk does after this refusal. *)
 type lane_step =
-  | Next_candidate  (** the refusal is a limit of this candidate's client *)
-  | Stop_lane  (** the refusal is a fact of the session; every candidate meets it *)
+  | Next_candidate
+      (** the refusal is a fact of this candidate: its client or its runtime
+          identity *)
+  | Stop_lane
+      (** the refusal is a fact of the session or of this process; every
+          candidate that reaches the check meets it *)
 
 val lane_step : t -> lane_step
 

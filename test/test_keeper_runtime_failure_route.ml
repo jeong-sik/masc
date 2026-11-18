@@ -277,13 +277,14 @@ let test_task_skill_resolution_is_config_mismatch () =
 
 (* #38402: an official-client session refusal is not a configuration
    mismatch. The route and the lane walk answer from the same per-constructor
-   decision: a task reference this client cannot carry moves to the next
-   candidate and rotates; every other refusal stops the lane and exhausts.
+   decision: a task reference this client cannot carry, or a continuation
+   bound to another candidate's runtime, moves to the next candidate and
+   rotates; every other refusal stops the lane and exhausts.
    The expected pair is written per constructor, without a wildcard. *)
 let test_official_client_session_refusal_route_and_walk () =
   let module Refusal = Keeper_official_client_session_refusal in
   let expected = function
-    | Refusal.Task_reference_unsupported ->
+    | Refusal.Task_reference_unsupported | Refusal.Continuation_on_other_runtime ->
       KFR.Rotate_now { rotate = KFR.Admission }, true
     | Refusal.Gate_continuation_unresumable
     | Refusal.Gate_context_frontier_missing

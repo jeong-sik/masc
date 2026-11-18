@@ -3358,7 +3358,7 @@ let () =
       R.Disp_operator_action_required, R.Reason_official_client_session_refused
     | Refusal.Claim_held_by_this_process ->
       R.Disp_retry_later, R.Reason_official_client_session_refused
-    | Refusal.Task_reference_unsupported ->
+    | Refusal.Task_reference_unsupported | Refusal.Continuation_on_other_runtime ->
       R.Disp_fail_open_next_runtime, R.Reason_official_client_session_refused
   in
   List.iter

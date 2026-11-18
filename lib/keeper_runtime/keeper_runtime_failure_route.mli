@@ -127,8 +127,8 @@ type rotate_class =
           policy refusal — a reasoning-effort ladder, an explicit disable —
           are all [Admission], a fact about this candidate's binding, not the
           request), as is an official-client task reference this candidate's
-          client cannot carry
-          ({!Keeper_official_client_session_refusal.Next_candidate}); the
+          client cannot carry, or a continuation bound to another candidate's
+          runtime ({!Keeper_official_client_session_refusal.Next_candidate}); the
           driver's [attempt_rejected_should_try_next] /
           [candidate_access_should_try_next] /
           {!Keeper_official_client_session_refusal.should_try_next} move the

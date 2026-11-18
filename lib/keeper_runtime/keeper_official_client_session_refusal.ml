@@ -5,6 +5,7 @@ type t =
   | Claim_held_by_this_process
   | Task_reference_unsupported
   | Task_reference_unbound
+  | Continuation_on_other_runtime
 
 type Agent_core.Error.carrier += Official_client_session_refused of t
 
@@ -15,6 +16,7 @@ let all =
   ; Claim_held_by_this_process
   ; Task_reference_unsupported
   ; Task_reference_unbound
+  ; Continuation_on_other_runtime
   ]
 ;;
 
@@ -25,6 +27,7 @@ let code = function
   | Claim_held_by_this_process -> "official_client_session_claim_held"
   | Task_reference_unsupported -> "official_client_task_reference_unsupported"
   | Task_reference_unbound -> "official_client_task_reference_unbound"
+  | Continuation_on_other_runtime -> "official_client_continuation_on_other_runtime"
 ;;
 
 let of_code value = List.find_opt (fun refusal -> String.equal (code refusal) value) all
@@ -46,6 +49,9 @@ let to_string = function
     "this client cannot replace task-reference context without replaying it as user input"
   | Task_reference_unbound ->
     "historical task reference is not bound to this operation's original vendor session"
+  | Continuation_on_other_runtime ->
+    "official-client continuation is bound to another lane candidate's runtime; this \
+     candidate cannot resume it"
 ;;
 
 type lane_step =
@@ -53,7 +59,7 @@ type lane_step =
   | Stop_lane
 
 let lane_step = function
-  | Task_reference_unsupported -> Next_candidate
+  | Task_reference_unsupported | Continuation_on_other_runtime -> Next_candidate
   | Gate_continuation_unresumable
   | Gate_context_frontier_missing
   | Gate_canonical_context_changed

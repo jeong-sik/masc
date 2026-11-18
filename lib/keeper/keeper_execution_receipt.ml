@@ -192,9 +192,12 @@ let operator_disposition (receipt : t)
        (* Another turn of this process holds the claim; a later cycle finds
           it released. *)
        Disp_retry_later, Reason_official_client_session_refused
-     | Keeper_official_client_session_refusal.Task_reference_unsupported ->
-       (* A limit of this client alone: the lane walks on to the next
-          candidate, and this receipt is reached only when none was left. *)
+     | Keeper_official_client_session_refusal.Task_reference_unsupported
+     | Keeper_official_client_session_refusal.Continuation_on_other_runtime ->
+       (* A fact of this candidate alone (its client cannot carry the
+          reference, or it is not the continuation's runtime): the lane walks
+          on to the next candidate, and this receipt is reached only when none
+          was left. *)
        Disp_fail_open_next_runtime, Reason_official_client_session_refused)
   | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
     (* Same-turn replay stays forbidden, and the runtime lifecycle selects a

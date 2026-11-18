@@ -452,10 +452,11 @@ let route_of_error_family (err : Agent_core.Error.t) : route =
      | Some (_ : Keeper_task_skill_resolution_error.t) -> exhaust Config_mismatch
      | None ->
        (* An official-client session refusal routes by what the lane walk
-          does with it (#38402): a task reference this client cannot carry
-          is a fact about this candidate, and the walk moves on; every other
-          refusal is a fact about the durable session, which every candidate
-          of the turn meets. *)
+          does with it (#38402): a task reference this client cannot carry,
+          or a continuation bound to another candidate's runtime, is a fact
+          about this candidate, and the walk moves on; every other refusal is
+          a fact about the durable session, which every candidate that reaches
+          it meets. *)
        (match Keeper_official_client_session_refusal.of_core_error internal with
         | Some refusal ->
           (match Keeper_official_client_session_refusal.lane_step refusal with

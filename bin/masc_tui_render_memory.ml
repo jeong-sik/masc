@@ -1367,11 +1367,10 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
   (* The context divider needs a row only when the detail itself is shown. *)
   let fixed_rows = base.sc_chrome - Masc_tui_frame.chrome_rows in
-  (* Keep the selected Keeper and neighbouring rows together where they fit;
-     an overflowing list also needs its window line. *)
+  (* Keep the selected Keeper and neighbouring rows together where they fit.
+     Where the list stands is on the title row, so no row is kept for it. *)
   let count = List.length keepers in
-  let visible_floor = min 3 count in
-  let list_rows = if count = 0 then 1 else visible_floor + (if count > visible_floor then 1 else 0) in
+  let list_rows = if count = 0 then 1 else min 3 count in
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
@@ -1643,8 +1642,11 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
         (* The last row it can draw says what is under the fold, in the
            window the list below and the other reading panes draw. *)
         fact_detail_prefix parts (kept - 1)
-        @ [ Printf.sprintf (if state.ui_language = Lang_ko then "      외 %d · Enter:전체 사실" else "      %d more · Enter for the whole fact")
-              (total_detail_lines - (kept - 1)) ]
+        @ [ "      "
+            ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko)
+                (total_detail_lines - (kept - 1))
+            ^ (if state.ui_language = Lang_ko then " · Enter:전체 사실"
+               else " · Enter for the whole fact") ]
   in
   (* A budgeted detail that drew nothing also spends no divider. Returning
      that row to the list keeps tiny viewports full. *)

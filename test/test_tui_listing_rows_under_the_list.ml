@@ -1,15 +1,13 @@
-(* Three lists draw rows under themselves. Verification draws the row naming
-   which list it is reading and where in it, the armed approval, the server's
-   last refusal, and -- when the join has them -- why the queue could not be
-   read, that it came from a snapshot, and which waited-on ids name no record;
-   Changes draws a preview and a scroll row; Logs draws the scroll row alone.
-   The frame and the keypress read one layout for how many rows the list gets,
-   so that layout has to count them; a row it misses is a row the footer is
-   pushed out by, and finish_surface drops the last row first.
+(* Lists draw rows under themselves. Verification draws the row naming which
+   list it is reading, the armed approval, the server's last refusal, and --
+   when the join has them -- why the queue could not be read, that it came
+   from a snapshot, and which waited-on ids name no record; Changes draws a
+   preview. Where a list stands is on the title row, so none of them keeps a
+   row for it. The frame and the keypress read one layout for how many rows
+   the list gets, so that layout has to count them; a row it misses is a row
+   the footer is pushed out by, and finish_surface drops the last row first.
 
-   Verification's view row carries the window text a cut page used to draw on
-   a line of its own, so the two are one row and the surface reserves no
-   separate scroll row. It is drawn once a read has answered and not before,
+   Verification's view row is drawn once a read has answered and not before,
    which is why the count is zero on a state that has not read. *)
 
 open Masc_tui_types

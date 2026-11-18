@@ -66,11 +66,12 @@ let browser_lane_connection_rows (view : Browser_lane_view.t) =
     "  Activity refresh failed · " ^ Terminal_text.single_line detail) view.activity_error) @ inventory
 
 let browser_lane_fixed_rows ~connection_rows view =
-  (* Status, selection, tab, URL, divider and text position are always drawn.
-     A source hint contributes a row only when the selected node has one, and
-     a refused gesture its rows until the next input. Connection observations,
+  (* Status, selection, tab, URL and divider are always drawn. Where the text
+     stands is on the title row, and its keys are on the footer. A source
+     hint contributes a row only when the selected node has one, and a
+     refused gesture its rows until the next input. Connection observations,
      pending/settled activities and refresh failures take their projected rows. *)
-  6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
+  5 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
   + List.length (Browser_lane_view.unserved_rows view)
   + List.length connection_rows
 
@@ -303,9 +304,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         c.push_styled ~style:Ansi.reset ("  " ^ Browser_lane_layout.line lines index)
       done;
       Option.iter c.position
-        (Masc_tui_value.Position.window ~first:scroll ~shown:room ~total);
-      c.push_styled ~style:(Theme.recede ())
-        "  j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane")
+        (Masc_tui_value.Position.window ~first:scroll ~shown:room ~total))
 
 let browser_history_fixed_rows = 5
 

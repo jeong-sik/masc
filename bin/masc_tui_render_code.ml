@@ -221,7 +221,7 @@ let code_notes_viewport (state : state) =
     else cols
   in
   (List.length (code_notes_rows state ~cols:pane_cols),
-   max 1 (code_pane_content_height state - 1))
+   max 1 (code_pane_content_height state))
 
 (* These are tool-call bytes, not a reconstruction of today's checkout.
    Repeat the marker on wrapped rows so a narrow pane retains each side. *)
@@ -373,7 +373,7 @@ let code_history_pane_cols () =
 
 let code_history_viewport (state : state) =
   (List.length (code_history_rows state ~cols:(code_history_pane_cols ())),
-   max 1 (code_pane_content_height state - 1))
+   max 1 (code_pane_content_height state))
 
 (* The diff is drawn through the whole pane height with no row of its own
    above it, so its window is [code_pane_content_height]. A diff that has not
@@ -777,10 +777,11 @@ let render_code (state : state) =
      else if notes_showing then
        let rendered = code_notes_rows state ~cols:pane_cols in
        let total = List.length rendered in
-       let height = max 1 (content_height - 1) in
+       (* Where the notes stand is on the title row, so they keep every row
+          of the pane. *)
+       let height = max 1 content_height in
        let scroll = max 0 (min state.code_notes_scroll (max 0 (total - height))) in
        hand ~first:scroll ~shown:height ~total;
-       if content_height > 1 then box_empty pane_buf pane_cols;
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with
@@ -876,10 +877,9 @@ let render_code (state : state) =
      else if history_showing then
        let rendered = code_history_rows state ~cols:pane_cols in
        let total = List.length rendered in
-       let height = max 1 (content_height - 1) in
+       let height = max 1 content_height in
        let scroll = Masc_tui_scroll.normalize ~count:total ~height:1 state.code_history_scroll in
        hand ~first:scroll ~shown:height ~total;
-       if content_height > 1 then box_empty pane_buf pane_cols;
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with

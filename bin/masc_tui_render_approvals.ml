@@ -1287,11 +1287,6 @@ let render_question_reader (state : state) =
     | Some line -> Buffer.add_string buf (line ^ "\n")
     | None -> box_empty buf cols
   done;
-  box_divider buf cols;
-  box_line buf cols
-    (if Option.is_some state.ask_text_entry then "  Writing answer · Enter saves locally before you send"
-     else
-       "  PgUp/PgDn or wheel to read");
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:(question_hints state));
   finish_surface state ~surface_key:"approval-questions" ~rows:terminal_rows ~cols buf

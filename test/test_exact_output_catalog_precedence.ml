@@ -707,10 +707,12 @@ let test_addon_lane_serves_required_service () =
     | Error (Registry.Required_lane_unavailable { lane_id }) ->
       Alcotest.(check string) label required lane_id
     | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
-    | Ok () -> Alcotest.fail (label ^ " must not satisfy the required service")
+    | Ok (_ : Registry.rejected_slot list) ->
+      Alcotest.fail (label ^ " must not satisfy the required service")
   in
   (match admission [ lane (addon required) [ replacement_target ] ] with
-   | Ok () -> ()
+   | Ok [] -> ()
+   | Ok (_ :: _) -> Alcotest.fail "the attested Addon lane must admit its slot"
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error));
   refused "a correctly named Addon table nobody attested"
     (admission ~served:[] [ lane (addon required) [ replacement_target ] ]);

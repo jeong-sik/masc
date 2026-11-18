@@ -431,7 +431,7 @@ let admit_publication ~required_lane_ids ~addon_served_lane_ids ~excused_lane_id
 
 let check_publication ?(required_lane_ids = []) ?(addon_served_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
   admit_publication ~required_lane_ids ~addon_served_lane_ids ~excused_lane_ids ~lanes resolver_snapshot
-  |> Result.map (fun (_admitted_lanes, _rejected_slots) -> ())
+  |> Result.map (fun (_admitted_lanes, rejected_slots) -> rejected_slots)
 ;;
 
 let publish ?(runtime_observations = []) ?(required_lane_ids = []) ?(addon_served_lane_ids = []) ?(excused_lane_ids = []) ~lanes resolver_snapshot =
@@ -628,6 +628,8 @@ let rejected_target_bindings registry =
   Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
 ;;
 
+let resolver_snapshot registry = registry.resolver_snapshot
+
 let declared_lanes registry = registry.declared_lanes
 
 let declared_lane registry ~lane_id =
@@ -637,9 +639,9 @@ let declared_lane registry ~lane_id =
     registry.declared_lanes
 ;;
 
-let diagnose_rejected_slot registry (slot : rejected_slot) ~configured_runtime =
+let diagnose_rejected_slot resolver_snapshot (slot : rejected_slot) ~configured_runtime =
   let rejected_bindings =
-    Exact_output.resolver_rejected_target_bindings registry.resolver_snapshot
+    Exact_output.resolver_rejected_target_bindings resolver_snapshot
     |> List.map (fun (binding : Exact_output.rejected_target_binding) -> binding.target_ref)
   in
   classify_rejected_slot

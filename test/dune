@@ -3328,6 +3328,8 @@
 
 (include stanzas/test_keeper_meta_config_not_durable.inc)
 
+(include stanzas/test_keeper_stored_meta.inc)
+
 (include stanzas/test_keeper_mutex_coverage.inc)
 
 (include stanzas/test_keeper_request_wire_observation.inc)
@@ -4854,7 +4856,7 @@
 (test
  (name test_tui_chart_shares)
  (modules test_tui_chart_shares)
- (libraries alcotest masc_tui_chart))
+ (libraries alcotest masc_tui_braille masc_tui_chart masc_tui_theme))
 
 (test
  (name test_tui_render_metrics)
@@ -5351,6 +5353,7 @@
 (include stanzas/test_exact_lane_original_reconciliation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)
 (include stanzas/test_exact_output_runtime_deadline.inc)
+(include stanzas/test_account_provider_catalog_row.inc)
 
 ; The tool-call quality benchmark reads its case set and evidence fixture from
 ; repo-root JSON (benchmarks/data, test/fixtures) rather than from sandbox

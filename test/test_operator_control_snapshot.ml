@@ -327,6 +327,120 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         true
         Yojson.Safe.Util.(persisted_keeper |> member "last_turn_usage" = `Null))
 
+(* RFC #52975 L1. The Keeper row takes the stored meta from the Keeper's Owner
+   when the Owner stands for the meta file, and it is then the row the file
+   gives. masc_keeper_up leaves an Owner whose memory holds what the Keeper
+   declares; the snapshot stores none of that, so a row built from the Owner's
+   own value would not be the file's row.
+
+   An age is the read's own clock minus a time in the meta, so two reads
+   never agree on one. The three ages are left out and every other field is
+   compared. *)
+let row_ages = [ "last_turn_ago_s"; "last_proactive_ago_s"; "last_activity_ago_s" ]
+
+let test_keeper_row_from_the_owner_is_the_row_from_the_file () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      init_runtime_default_for_snapshot base_dir;
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
+        [ "base", Masc_test_deps.live_sandbox_image_tag ];
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
+      Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
+      let keeper_ctx : _ Keeper_tool_surface.context =
+        {
+          config;
+          agent_name = "owner";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
+        }
+      in
+      let keeper_name = "row-source" in
+      let ok, _ =
+        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
+          ~args:
+            (`Assoc
+              [
+                ("sandbox_profile", `String "docker");
+                ("sandbox_image", `String "base");
+                ("name", `String keeper_name);
+                ("instructions", `String "Answer from the Owner");
+                ("activation_mode", `String "on_demand");
+              ])
+      in
+      Alcotest.(check bool) "keeper up ok" true ok;
+      ignore
+        (Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           keeper_name);
+      (* The registry would answer for the Keeper's live state from its own
+         entry once the Owner is set aside. Neither read below has one. *)
+      Keeper_registry.For_testing.clear ();
+      let base_path = config.base_path in
+      let owner =
+        match Keeper_owner_registry.get ~base_path ~keeper_name with
+        | Ok owner -> owner
+        | Error error ->
+          Alcotest.fail (Keeper_owner_registry.lookup_error_to_string error)
+      in
+      let stored =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "expected keeper meta"
+        | Error err -> Alcotest.fail err
+      in
+      (match (Keeper_owner.projection owner).meta with
+       | Some held ->
+         Alcotest.(check bool)
+           "the Owner holds an activation mode the snapshot does not store"
+           false
+           (held.activation_mode = stored.activation_mode)
+       | None -> Alcotest.fail "the Owner holds no meta");
+      let row () =
+        Operator_control.invalidate_snapshot_cache ();
+        let json =
+          Operator_control.snapshot_json ~view:"summary"
+            ~include_keepers:true ~include_messages:false
+            (operator_ctx env sw config "owner")
+        in
+        match
+          Yojson.Safe.Util.(json |> member "keepers" |> member "items" |> to_list)
+          |> List.find_opt (fun row ->
+                 Yojson.Safe.Util.(row |> member "name" |> to_string) = keeper_name)
+        with
+        | Some (`Assoc fields) ->
+          Yojson.Safe.to_string
+            (`Assoc (List.filter (fun (key, _) -> not (List.mem key row_ages)) fields))
+        | Some _ | None -> Alcotest.fail "expected the keeper's row in the snapshot"
+      in
+      let from_owner = row () in
+      Keeper_owner_projection.remove ~base_path ~keeper_name owner;
+      let from_file =
+        Fun.protect
+          ~finally:(fun () ->
+            Keeper_owner_projection.install ~base_path ~keeper_name owner)
+          row
+      in
+      Alcotest.(check string)
+        "the row from the Owner is the row from the file"
+        from_file
+        from_owner)
+
 let health_projection_meta ~total_turns =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -999,6 +1113,12 @@ let () =
             "snapshot keeps context unobserved and usage separate"
             `Quick
             test_snapshot_keeps_context_unobserved_and_usage_separate
+        ] );
+      ( "keeper row source"
+      , [ Alcotest.test_case
+            "the row from the Owner is the row from the file"
+            `Quick
+            test_keeper_row_from_the_owner_is_the_row_from_the_file
         ] );
       ( "tool host attention"
       , [ Alcotest.test_case

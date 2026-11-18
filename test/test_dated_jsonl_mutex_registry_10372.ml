@@ -1,15 +1,19 @@
 (** Pin the file-scope mutex registry contract.
 
-    The registry forces every store rooted at the same canonical
-    [base_dir] to share one mutex.  An explicit [?mutex] argument
-    overrides the registry for isolated callers.
+    The writers of one store directory take one mutex, whichever spelling
+    reached the directory.  A handle asks for the mutex on each write, and
+    the registry keeps it under the name the file system gives the
+    directory.
 
     Tests pin:
 
-    1. Same [base_dir] → physically identical mutex.
-    2. Different [base_dir] → distinct mutexes.
-    3. Explicit [?mutex] bypasses the registry.
-    4. Trailing-slash variants normalize to the same mutex.
+    1. Different directories → distinct mutexes.
+    2. A [Reader] leaves no registry entry and reads the store's rows.
+    3. Two spellings share the mutex exactly when the file system says they
+       are one directory: a trailing slash, a symbolic link at the root or
+       below it, a relative path, a different letter case.
+    4. A handle opened before its directory existed takes the directory's
+       mutex once it is there; a directory that exists is asked about once.
     5. Behavioural: concurrent appends through two store
        instances at the same dir produce all-parseable lines,
        even with payloads larger than [PIPE_BUF]. *)
@@ -52,27 +56,180 @@ let test_different_base_dir_distinct_mutex () =
   check bool "distinct base_dir → distinct mutex" false
     (D.For_testing.cross_context_mutex a == D.For_testing.cross_context_mutex b)
 
-(* --- 3. explicit ?cross_context_mutex bypasses the registry --------- *)
+(* --- 3. a reader takes no registry entry ------------------------- *)
 
-let test_explicit_mutex_overrides_registry () =
-  let location = temp_store "djmr_explicit" in
+let test_reader_takes_no_registry_entry () =
+  let location = temp_store "djmr_reader" in
   let dir = D.Store.dir location in
-  let registry_mutex = D.For_testing.cross_context_mutex_for_base_dir dir in
-  let injected = Cross_context_mutex.create () in
-  let store = D.open_store ~cross_context_mutex:injected location in
-  check bool "explicit mutex used verbatim" true
-    (D.For_testing.cross_context_mutex store == injected);
-  check bool "explicit mutex differs from registry entry" false
-    (D.For_testing.cross_context_mutex store == registry_mutex)
+  let month = Filename.concat dir "2026-02" in
+  Fs_compat.mkdir_p month;
+  Fs_compat.append_file (Filename.concat month "01.jsonl") "{\"i\":1}\n";
+  let reader = D.Reader.open_store location in
+  check string "the reader names the store's directory" dir (D.Reader.base_dir reader);
+  (match D.Reader.read_recent_lines_result reader 10 with
+   | Ok rows ->
+     check
+       (list (pair string string))
+       "the reader reads the store's rows"
+       [ Filename.concat month "01.jsonl", "{\"i\":1}" ]
+       rows
+   | Error error -> failf "the reader failed: %s" (D.read_error_to_string error));
+  (match D.Reader.read_recent_result reader 10 with
+   | Ok rows -> check int "the parsed read returns the row" 1 (List.length rows)
+   | Error error -> failf "the reader failed: %s" (D.read_error_to_string error));
+  check bool "opening and reading through a reader leaves no registry entry" false
+    (D.For_testing.in_registry location);
+  let store = D.open_store location in
+  check bool "opening the store takes none either" false
+    (D.For_testing.in_registry location);
+  D.append store (`Assoc [ "i", `Int 2 ]);
+  check bool "a write through the store takes the entry" true
+    (D.For_testing.in_registry location)
 
-(* --- 4. trailing-slash variants share the mutex -------- *)
+(* --- 3. spellings of one directory share the mutex ---- *)
+
+let mutex_of handle = D.For_testing.cross_context_mutex handle
+
+let shares_mutex a b = mutex_of (D.open_store a) == mutex_of (D.open_store b)
+
+(* What the registry has to agree with. The device and inode of a directory
+   do not come from its name. *)
+let one_directory a b =
+  let identity location =
+    let stat = Unix.stat (D.Store.dir location) in
+    stat.Unix.st_dev, stat.Unix.st_ino
+  in
+  identity a = identity b
+
+let made location =
+  Fs_compat.mkdir_p (D.Store.dir location);
+  location
 
 let test_trailing_slash_normalizes () =
-  let location = temp_store "djmr_slash" in
-  let dir = D.Store.dir location in
-  let a = D.open_store location in
-  check bool "trailing slash normalises to same mutex" true
-    (D.For_testing.cross_context_mutex a == D.For_testing.cross_context_mutex_for_base_dir (dir ^ "/"))
+  let root = tmpdir "djmr_slash" in
+  check bool "a directory that does not exist yet" true
+    (shares_mutex (store_under root) (store_under (root ^ "/")));
+  ignore (made (store_under root) : D.Store.location);
+  check bool "and once it exists" true
+    (shares_mutex (store_under root) (store_under (root ^ "/")))
+
+(* A second spelling of [real]: a symbolic link beside it. *)
+let alias_of real =
+  let alias = real ^ "-alias" in
+  Unix.symlink real alias;
+  alias
+
+let test_symlinked_root_shares_the_mutex () =
+  let real = tmpdir "djmr_symlink" in
+  let alias = alias_of real in
+  let through_real = made (store_under real) in
+  let through_alias = store_under alias in
+  check bool "the two spellings are one directory" true
+    (one_directory through_real through_alias);
+  check bool "the root and a link to it reach one mutex" true
+    (shares_mutex through_real through_alias);
+  check string "the directory through the root is spelled with the root"
+    (Filename.concat real "audit")
+    (D.Store.dir through_real);
+  check string "the directory through the link is spelled with the link"
+    (Filename.concat alias "audit")
+    (D.Store.dir through_alias);
+  check bool "another store under the link has its own mutex" false
+    (shares_mutex through_real D.Store.(at (root_of_masc_dir alias) Root.Events))
+
+(* Neither store directory exists when the mutex is asked for. The nearest
+   ancestor that exists decides. *)
+let test_directory_that_does_not_exist_yet_shares_the_mutex () =
+  let real = tmpdir "djmr_absent_root" in
+  let alias = alias_of real in
+  let below spelling = Filename.concat (Filename.concat spelling "not-made") "state" in
+  check bool "a root below the directory and below the link reach one mutex" true
+    (shares_mutex (store_under (below real)) (store_under (below alias)))
+
+(* A link anywhere on the way is followed, not only one at the root. *)
+let test_link_below_the_root_reaches_the_directory () =
+  let root = tmpdir "djmr_link_below" in
+  let masc_root = D.Store.root_of_masc_dir root in
+  let keeper name = D.Store.keeper masc_root ~keeper:name D.Store.Keeper.Metrics in
+  let through_name = made (keeper "first") in
+  let keepers = Filename.dirname (Filename.dirname (D.Store.dir through_name)) in
+  Unix.symlink (Filename.concat keepers "first") (Filename.concat keepers "second");
+  let through_link = keeper "second" in
+  check bool "the two spellings are one directory" true
+    (one_directory through_name through_link);
+  check bool "a Keeper directory that is a link reaches the mutex of its target" true
+    (shares_mutex through_name through_link)
+
+(* The Keeper piece of a location is whatever the caller spelled, and the
+   prune pass spells it as the directory entry is. Whether [alpha] and
+   [Alpha] are one directory is the file system's answer: yes where letter
+   case is folded (APFS as installed), no where it is not (ext4). The
+   registry gives the same answer on both. *)
+let test_letter_case_follows_the_file_system () =
+  let root = D.Store.root_of_masc_dir (tmpdir "djmr_case") in
+  let keeper name = D.Store.keeper root ~keeper:name D.Store.Keeper.Metrics in
+  let lower = made (keeper "alpha") in
+  let upper = made (keeper "Alpha") in
+  check bool "the two spellings share a mutex exactly when they are one directory"
+    (one_directory lower upper)
+    (shares_mutex lower upper)
+
+(* One relative spelling names a different directory in each working
+   directory, so it is not remembered apart from the directory it was read
+   in. *)
+let test_relative_root_shares_the_mutex () =
+  let first = tmpdir "djmr_relative_first" in
+  let second = tmpdir "djmr_relative_second" in
+  let relative = "state" in
+  let started_in = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () -> Sys.chdir started_in)
+    (fun () ->
+      Sys.chdir first;
+      ignore (made (store_under relative) : D.Store.location);
+      check bool "a relative root and its absolute spelling reach one mutex" true
+        (shares_mutex (store_under relative) (store_under (Filename.concat first relative)));
+      Sys.chdir second;
+      ignore (made (store_under relative) : D.Store.location);
+      check bool "the same relative root in another directory is another store" false
+        (shares_mutex (store_under relative) (store_under (Filename.concat first relative)));
+      check bool "and it is the store of that directory" true
+        (shares_mutex (store_under relative) (store_under (Filename.concat second relative))))
+
+(* --- 4. when the file system is asked ------------------ *)
+
+(* The handles of a Keeper's stores are kept for the life of the process. A
+   handle opened before its directory existed must not stay with the mutex
+   its spelling had then. *)
+let test_handle_opened_early_follows_the_directory () =
+  let real = tmpdir "djmr_late" in
+  let alias = real ^ "-late-alias" in
+  let through_real = D.open_store (made (store_under real)) in
+  let through_alias = D.open_store (store_under alias) in
+  check bool "before the link is made the spellings are two stores" false
+    (mutex_of through_alias == mutex_of through_real);
+  Unix.symlink real alias;
+  check bool "the handle opened before takes the directory's mutex" true
+    (mutex_of through_alias == mutex_of through_real)
+
+(* A directory that exists is asked about once: a write is on the path of
+   every row, and [realpath] is a system call for each piece of the path.
+   The price is stated here. A spelling keeps the answer of its first use
+   while the process runs, also when the link is pointed somewhere else. *)
+let test_existing_directory_is_asked_about_once () =
+  let first = tmpdir "djmr_once_first" in
+  let second = tmpdir "djmr_once_second" in
+  let alias = alias_of first in
+  ignore (made (store_under first) : D.Store.location);
+  ignore (made (store_under second) : D.Store.location);
+  check bool "the link reaches the store it points at" true
+    (shares_mutex (store_under alias) (store_under first));
+  Unix.unlink alias;
+  Unix.symlink second alias;
+  check bool "the spelling keeps the answer of its first use" true
+    (shares_mutex (store_under alias) (store_under first));
+  check bool "and does not take the new target's" false
+    (shares_mutex (store_under alias) (store_under second))
 
 (* --- 5. concurrent appends produce all-parseable lines  *)
 
@@ -210,10 +367,24 @@ let () =
         [
           test_case "different base_dir distinct mutex" `Quick
             test_different_base_dir_distinct_mutex;
-          test_case "explicit ?mutex bypasses registry" `Quick
-            test_explicit_mutex_overrides_registry;
+          test_case "a reader takes no registry entry" `Quick
+            test_reader_takes_no_registry_entry;
           test_case "trailing slash normalises" `Quick
             test_trailing_slash_normalizes;
+          test_case "a symlinked root shares the mutex" `Quick
+            test_symlinked_root_shares_the_mutex;
+          test_case "a directory that does not exist yet shares the mutex" `Quick
+            test_directory_that_does_not_exist_yet_shares_the_mutex;
+          test_case "a link below the root reaches the directory" `Quick
+            test_link_below_the_root_reaches_the_directory;
+          test_case "letter case follows the file system" `Quick
+            test_letter_case_follows_the_file_system;
+          test_case "a relative root shares the mutex" `Quick
+            test_relative_root_shares_the_mutex;
+          test_case "a handle opened early follows the directory" `Quick
+            test_handle_opened_early_follows_the_directory;
+          test_case "an existing directory is asked about once" `Quick
+            test_existing_directory_is_asked_about_once;
         ] );
       ( "concurrent-append",
         [

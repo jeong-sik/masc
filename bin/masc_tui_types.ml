@@ -13723,7 +13723,7 @@ let keeper_turns_projection_complete ~current = function
           && List.for_all (fun item ->
             item.Tui_decode.kwi_source <> Tui_decode.Waiting_source_read_error
             && item.kwi_source <> Tui_decode.Waiting_source_observation_unavailable)
-              row.kwr_waiting_on) waiting) rows
+              row.kwr_waiting_heads) waiting) rows
   | Ok { Tui_decode.waiting = (Tui_decode.Keeper_waiting_fleet_unreported _
                              | Tui_decode.Keeper_waiting_unavailable _); _ }
   | Error _ -> false

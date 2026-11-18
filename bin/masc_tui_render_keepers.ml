@@ -288,7 +288,8 @@ let keeper_waiting_failure_reasons ~ko errors =
 
 let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
   match row.waiting with
-  | Keeper_list_model.Waiting_observed { Tui_decode.kwr_waiting_on = (first :: rest as items); _ } ->
+  | Keeper_list_model.Waiting_observed
+      { Tui_decode.kwr_waiting_heads = (first :: _ as items); kwr_waiting_count; _ } ->
       (* A delegate result's operator sentence includes the other Keeper and
          its outcome. Do not hide that behind an earlier scheduled wake. *)
       let item =
@@ -298,11 +299,11 @@ let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
         | Some result -> result
         | None -> first
       in
+      let others = kwr_waiting_count - 1 in
       Some (keeper_waiting_item_text item
-        ^ (match rest with
-           | [] -> ""
-           | _ -> Printf.sprintf (if ko then " (외 %d)" else " (%d more)") (List.length rest)))
-  | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
+        ^ (if others > 0 then Printf.sprintf (if ko then " (외 %d)" else " (%d more)") others
+           else ""))
+  | Keeper_list_model.Waiting_observed { kwr_waiting_heads = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
 (* The rest of the path the Keeper's next dispatch takes, for a Keeper whose
@@ -706,15 +707,15 @@ let grid_tail_cells (grid : Grid.t) =
   + Grid.due_cells
   + if grid.mem_cells > 0 then 1 + grid.mem_cells else 0
 
-(* The mock's [okd]: the ok colour, receded along the WCAG-verified Oklab
-   progress ramp rather than stacking SGR dim on [Theme.ok]. *)
-let grid_receded_ok () = Theme.progress ~t:0.70
-
+(* A recovered Keeper is sound now, so it draws the success colour (RFC
+   tui-one-screen-grammar section 7.2: one colour per state). Colour alone
+   does not tell it from one that never failed: only the By_cause view's mark
+   and its Recovered group say it recovered, and the other views draw both
+   with the same ok mark. *)
 let grid_gutter_style = function
   | Grid.Failing { resting = false } -> Theme.warn ()
   | Grid.Failing { resting = true } | Grid.Paused | Grid.Other -> Theme.recede ()
-  | Grid.Recovered -> grid_receded_ok ()
-  | Grid.Sound -> Theme.ok ()
+  | Grid.Recovered | Grid.Sound -> Theme.ok ()
 
 let grid_gutter view verdict =
   "  " ^ grid_gutter_style verdict ^ Ansi.bold
@@ -834,24 +835,29 @@ let grid_librarian memory =
      | Memory_reading.Row_refused -> Memory_reading.pass_cell memory)
 
 (* The strip column of the memory and age views: the unread turns as a
-   segmented bar against [peak_lag] on a ground of dots, in the info colour
-   when requests skip atoms. A reading without a row leaves it to the ● cell. *)
+   segmented bar against [peak_lag] on a ground of dots. A reading without a
+   row leaves it to the ● cell. *)
 let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
   let cells = Grid.strip_cells grid in
   let ground count = Theme.recede () ^ grid_repeat count Keeper_mark.grid_dot_mark ^ Ansi.reset in
   match memory with
   | Memory_reading.Row { lag = Memory_reading.Lag turns; gap; _ } ->
       let filled = Grid.lag_fill ~cells ~peak:peak_lag turns in
-      let cell_style =
+      (* Lag against the largest lag is a size, not a limit, so the fill
+         draws in the foreground. A stalled librarian whose requests skip
+         atoms, measured or not, is the anomaly, and the bar takes the
+         warning colour the memory axis gives the same gap (RFC
+         tui-one-screen-grammar section 7.3). *)
+      let tone =
         match gap with
-        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured ->
-            fun ~index:_ ~width:_ -> Theme.info ()
-        | Memory_reading.No_gap ->
-            fun ~index:_ ~width:_ -> Theme.recede ()
+        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured -> Theme.warn ()
+        | Memory_reading.No_gap -> ""
       in
-      Masc_tui_chart.meter_bar ~width:cells ~cell_style
-        ~track_style:(Theme.recede ()) ~reset:Ansi.reset ~value:filled
-        ~max_value:(max 1 cells) ()
+      tone
+      ^ Masc_tui_chart.meter_bar ~width:cells ~scale:Masc_tui_chart.Relative
+          ~track_style:(Theme.recede ()) ~reset:Ansi.reset ~value:filled
+          ~max_value:(max 1 cells) ()
+      ^ Ansi.reset
   | Memory_reading.Row { lag = Memory_reading.Lag_unmeasured; _ } ->
       Theme.recede () ^ Keeper_mark.unknown_mark ^ Ansi.reset ^ ground (cells - 1)
   | Memory_reading.Unknown | Memory_reading.No_row | Memory_reading.Refused _ ->
@@ -1552,8 +1558,8 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Group_state attention -> keeper_state_heading_style attention
   | Keeper_list_model.Group_cause (Keeper_list_model.Cause_named _ | Keeper_list_model.Cause_unnamed) ->
       Theme.warn ()
-  | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered -> grid_receded_ok ()
-  | Keeper_list_model.Group_cause Keeper_list_model.Not_failing -> Theme.ok ()
+  | Keeper_list_model.Group_cause
+      (Keeper_list_model.Cause_recovered | Keeper_list_model.Not_failing) -> Theme.ok ()
   | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused -> Theme.recede ()
   | Keeper_list_model.Group_due (Keeper_list_model.Due_late | Keeper_list_model.Due_held) ->
       Theme.warn ()
@@ -3669,11 +3675,20 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             let ratio = observation.ratio in
             let pct = Float.of_int (Observation_layout.percentage_tenths ratio) /. 10.0 in
             let bar_width = Layout.keeper_context_bar_width ~inner_width:header_width in
+            (* The context window is a declared limit: a turn past it is
+               refused, so each cell takes the colour of its place in it. *)
+            let bar =
+              Masc_tui_chart.meter_bar ~width:bar_width
+                ~value:(Observation_layout.percentage_tenths ratio)
+                ~max_value:Observation_layout.percentage_tenths_full
+                ~scale:(Masc_tui_chart.Declared_limit (Theme.limit_paint ()))
+                ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+            in
             add_row context_label
               (Printf.sprintf
                  (if ko then "%s%.1f%%%s  %s  %s / %s 토큰"
                   else "%s%.1f%%%s  %s  %s / %s tokens")
-                 (ctx_color ratio) pct Ansi.reset (ctx_bar ratio bar_width)
+                 (ctx_color ratio) pct Ansi.reset bar
                  (Masc_tui_message_layout.compact_count observation.tokens)
                  (Masc_tui_message_layout.compact_count observation.maximum));
             add_row (t "관측 시각:" "Observed:") (Terminal_text.short_timestamp observation.observed_at);

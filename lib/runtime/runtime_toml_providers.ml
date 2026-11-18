@@ -461,6 +461,7 @@ let provider_keys =
   [ "enabled"; "display-name"; "provider-name"; "protocol"; "endpoint"; "command"
   ; "is-non-interactive"; "credentials"; "capabilities"; "healthcheck"; "headers"
   ; "kind"; "max-context"; "account-home"; "request-path"; "model-set"; usage_read_key
+  ; Runtime_schema.catalog_provider_key
   ; Runtime_schema.connect_timeout_s_key; Runtime_schema.exact_body_timeout_s_key
   ; Runtime_schema.admission_priority_run_limit_key
   ] @ antigravity_cli_option_keys @ antigravity_forbidden_option_keys
@@ -520,6 +521,29 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
            Ok (Some value)
          | Http _ | Cli _ -> Error (error (path ^ ".request-path")
              "request-path must be an HTTP endpoint-relative absolute path without query or fragment"))
+    in
+    (* Which AGENT_CORE catalog row an HTTP account speaks as. Whether that row
+       exists is the catalog's to say, so it is checked where the catalog is
+       read (Runtime_instance.materialize_binding); here only its shape. An
+       official client speaks no catalog wire row, so it may not name one. *)
+    let catalog_provider_result =
+      let key = Runtime_schema.catalog_provider_key in
+      match typed_find "a string" path tbl key Otoml.get_string with
+      | Error errors -> Error errors
+      | Ok None -> Ok None
+      | Ok (Some value) ->
+        (match transport with
+         | Http _
+           when value <> ""
+                && String.equal (String.trim value) value
+                && not (String.exists (function '\000'..'\032' | '\127' -> true | _ -> false) value) ->
+           Ok (Some value)
+         | Http _ ->
+           Error (error (path ^ "." ^ key)
+             (key ^ " must be a catalog provider id: non-empty, one line, no spaces"))
+         | Cli _ ->
+           Error (error (path ^ "." ^ key)
+             (key ^ " names an AGENT_CORE catalog wire row, which an official client does not speak")))
     in
     let account_home_result =
       match typed_find "a string" path tbl "account-home" Otoml.get_string with
@@ -648,6 +672,7 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
         let* is_non_interactive = is_non_interactive_result in
         let* wire_kind = wire_kind_result in
         let* request_path = request_path_result in
+        let* catalog_provider = catalog_provider_result in
         let* account_home = account_home_result in
         let* usage_read = usage_read_result in
           let enabled = match enabled_opt with Some value -> value | None -> true in
@@ -658,6 +683,7 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
             ; protocol
             ; api_format
             ; wire_kind
+            ; catalog_provider
             ; request_path
             ; transport
             ; is_non_interactive

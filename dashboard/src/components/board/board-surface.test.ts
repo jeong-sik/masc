@@ -10,7 +10,7 @@ import {
   BoardSurface,
   normalizeBoardDetailWidth,
 } from './board-surface'
-import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary, keepers } from '../../store'
+import { boardPosts, boardLoading, boardListReadFailed, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, boardOffset, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
 import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment, votePost } from '../../api/board'
@@ -259,6 +259,7 @@ describe('BoardSurface Component', () => {
     })
     boardPosts.value = []
     boardLoading.value = false
+    boardListReadFailed.value = false
     boardHasMore.value = false
     boardLoadingMore.value = false
     boardSortMode.value = 'recent'
@@ -305,6 +306,31 @@ describe('BoardSurface Component', () => {
     await waitFor(() => expect(refreshBoard).toHaveBeenCalled())
     expect(deleteBoardPost).toHaveBeenCalledExactlyOnceWith(post.id)
     expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'warning')
+  })
+
+  it('says the selected thread was not read, and reads it again on request', async () => {
+    // #52959: after a failed read the thread panel said the post had no comments.
+    const post = makePost({ id: 'unread-thread', title: 'Unread thread', author: 'keeper' })
+    const reply = { id: 'recovered', post_id: post.id, parent_id: null, author: 'keeper',
+      content: 'Recovered comment', created_at: post.created_at }
+    boardPosts.value = [post]
+    selectedBoardPostId.value = post.id
+    vi.mocked(fetchBoardPost).mockReset().mockRejectedValueOnce(new Error('temporary transport failure'))
+      .mockResolvedValue({ ...post, comments: [reply], commentPage: { offset: 0, total: 1 } } as any)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      render(h(BoardSurface, {}))
+      await waitFor(() => expect(detailReadPhase.value).toBe('failed'))
+      const panel = screen.getByTestId('bd-thread-detail')
+      const unread = within(panel).getByTestId('error-state')
+      expect(panel.querySelector('[data-feedback-kind="empty"]')).toBeNull()
+
+      await fireEvent.click(within(unread).getByRole('button'))
+
+      await waitFor(() => expect(panel.querySelectorAll('.board-comment')).toHaveLength(1))
+      expect(within(panel).queryByTestId('error-state')).toBeNull()
+      expect(vi.mocked(fetchBoardPost).mock.calls).toEqual([[post.id], [post.id]])
+    } finally { warn.mockRestore() }
   })
 
   it('keeps the selected thread visible for a pending decision without a success refresh', async () => {
@@ -510,6 +536,30 @@ describe('BoardSurface Component', () => {
     boardLoading.value = true
     render(h(BoardSurface, null))
     expect(screen.getByText(/게시판 불러오는 중/)).toBeInTheDocument()
+  })
+
+  it('says the list could not be read, and reads it again, where an empty board would be drawn', () => {
+    boardListReadFailed.value = true
+    render(h(BoardSurface, null))
+
+    const failure = within(screen.getByTestId('error-state'))
+    expect(failure.getByText('게시판을 불러오지 못했습니다')).toBeInTheDocument()
+    expect(screen.queryByText('아직 게시글이 없습니다')).toBeNull()
+    // "전체 0개" would count a board that was never read.
+    expect(screen.queryByText('전체 0개')).toBeNull()
+
+    vi.mocked(refreshBoard).mockClear()
+    fireEvent.click(failure.getByRole('button', { name: '다시 시도' }))
+    expect(refreshBoard).toHaveBeenCalledOnce()
+  })
+
+  it('shows the read in progress while a failed list is read again', () => {
+    boardListReadFailed.value = true
+    boardLoading.value = true
+    render(h(BoardSurface, null))
+
+    expect(screen.getByText(/게시판 불러오는 중/)).toBeInTheDocument()
+    expect(screen.queryByTestId('error-state')).toBeNull()
   })
 
   it('renders article category for a tech exploration post', () => {
@@ -804,6 +854,38 @@ describe('BoardSurface Component', () => {
     expect(fetchBoardPost).toHaveBeenCalledTimes(2)
   })
 
+  it('says a post outside the loaded list could not be read, and reads it again on request', async () => {
+    // A write on this post re-reads it; the post is drawn from that read alone.
+    const post = makePost({ id: 'outside-the-list', title: 'Post on a later page', author: 'keeper' })
+    boardPosts.value = []
+    route.value = { tab: 'board', params: { post: post.id } } as any
+    let readable = true
+    vi.mocked(fetchBoardPost).mockReset().mockImplementation(async () => {
+      if (!readable) throw new Error('temporary transport failure')
+      return { ...post, comments: [], commentPage: { offset: 0, total: 0 } } as any
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      render(h(BoardSurface, null))
+      await waitFor(() => expect(detailReadPhase.value).toBe('loaded'))
+      expect(await screen.findByText('Post on a later page')).toBeInTheDocument()
+
+      readable = false
+      await loadPostDetail(post.id)
+
+      const failure = within(await screen.findByTestId('error-state'))
+      expect(failure.getByText('글을 불러오지 못했습니다')).toBeInTheDocument()
+      expect(screen.queryByText('글을 찾지 못했습니다')).toBeNull()
+
+      readable = true
+      await fireEvent.click(failure.getByRole('button', { name: '다시 시도' }))
+
+      expect(await screen.findByText('Post on a later page')).toBeInTheDocument()
+      expect(detailReadPhase.value).toBe('loaded')
+      expect(screen.queryByTestId('error-state')).toBeNull()
+    } finally { warn.mockRestore() }
+  })
+
   it('reuses a pending focused read across visits instead of starting another transport', async () => {
     const post = makePost({ id: 'pending-focus-revisit', title: 'Pending focused post', author: 'keeper' })
     const reply = { id: 'pending-focused-comment', post_id: post.id, parent_id: null, author: 'keeper', content: 'Pending read completed comment', created_at: post.created_at }
@@ -1094,6 +1176,66 @@ describe('BoardSurface Component', () => {
     )
   })
 
+  describe('input typed while the composer waits for the answer', () => {
+    // #52958: the answer emptied the fields as they stood when it arrived.
+    function heldAnswer(): { promise: Promise<never>; arrive: () => void } {
+      let arrive = (): void => {}
+      const promise = new Promise<never>(resolve => { arrive = () => resolve(undefined as never) })
+      return { promise, arrive }
+    }
+
+    it('keeps a body typed after the post was sent and clears the title that was sent', async () => {
+      const answer = heldAnswer()
+      vi.mocked(createPost).mockReturnValueOnce(answer.promise)
+      render(h(BoardSurface, null))
+      const title = screen.getByTestId('bd-composer-title') as HTMLInputElement
+      const body = screen.getByTestId('bd-composer-body') as HTMLTextAreaElement
+
+      fireEvent.input(title, { target: { value: 'first post' } })
+      fireEvent.input(body, { target: { value: 'first body' } })
+      fireEvent.click(screen.getByTestId('bd-composer-send'))
+      fireEvent.input(body, { target: { value: 'body of the next post' } })
+      answer.arrive()
+
+      await waitFor(() => expect(title.value).toBe(''))
+      expect(createPost).toHaveBeenCalledExactlyOnceWith('first post', 'first body', 'dashboard-user', { hearth: undefined })
+      expect(body.value).toBe('body of the next post')
+    })
+
+    it('clears a post the operator left as sent', async () => {
+      const answer = heldAnswer()
+      vi.mocked(createPost).mockReturnValueOnce(answer.promise)
+      render(h(BoardSurface, null))
+      const title = screen.getByTestId('bd-composer-title') as HTMLInputElement
+      const body = screen.getByTestId('bd-composer-body') as HTMLTextAreaElement
+
+      fireEvent.input(title, { target: { value: 'only post' } })
+      fireEvent.input(body, { target: { value: 'only body' } })
+      fireEvent.click(screen.getByTestId('bd-composer-send'))
+      answer.arrive()
+
+      await waitFor(() => expect(title.value).toBe(''))
+      expect(body.value).toBe('')
+    })
+
+    it('keeps a mention typed after the previous one was sent', async () => {
+      const answer = heldAnswer()
+      vi.mocked(dispatchOperatorAction).mockReturnValueOnce(answer.promise)
+      render(h(BoardSurface, null))
+
+      fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+      fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+      const body = screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement
+      fireEvent.input(body, { target: { value: '@sangsu check the queue' } })
+      fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
+      fireEvent.input(body, { target: { value: '@sangsu and one more thing' } })
+      answer.arrive()
+
+      await waitFor(() => expect(showToast).toHaveBeenCalledWith('Message sent.', 'success'))
+      expect(body.value).toBe('@sangsu and one more thing')
+    })
+  })
+
   it('submits the mobile mention quick composer through the keeper message action', () => {
     const dispatchMock = vi.mocked(dispatchOperatorAction)
     render(h(BoardSurface, null))
@@ -1327,6 +1469,89 @@ describe('BoardSurface Component', () => {
       .toContain(`${PAGE_SIZE} / ${PAGE_SIZE + 1}`)
     fireEvent.click(screen.getByRole('button', { name: /더 보기/ }))
     expect(feedVisibleLimit.value).toBe(PAGE_SIZE * 2)
+  })
+
+  describe('a search that matches none of the loaded posts', () => {
+    const loadedPosts = () => [
+      makePost({ id: 'loaded-1', title: 'first loaded post', body: 'content', author: 'keeper', post_kind: 'direct' }),
+      makePost({ id: 'loaded-2', title: 'second loaded post', body: 'content', author: 'keeper', post_kind: 'direct' }),
+    ]
+    const search = (query: string) => {
+      fireEvent.input(screen.getByRole('searchbox', { name: '게시글 본문 필터' }), { target: { value: query } })
+    }
+
+    it('reads the next page and shows the post found there', async () => {
+      // #52957: the post the operator looks for is on a page that is not loaded yet.
+      boardPosts.value = loadedPosts()
+      boardOffset.value = 2
+      boardHasMore.value = true
+      const older = makePost({ id: 'older-1', title: 'needle in an older post', body: 'content', author: 'keeper', post_kind: 'direct' })
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        const nextPage = url.includes('/api/v1/dashboard/board?') && url.includes('offset=2')
+        return new Response(JSON.stringify(nextPage ? { posts: [older], has_more: false, total: 3 } : { posts: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }))
+
+      render(h(BoardSurface, null))
+      search('needle')
+      expect(screen.queryByTestId('bd-unified-feed')).not.toBeInTheDocument()
+
+      fireEvent.click(screen.getByTestId('bd-search-more'))
+
+      expect(await within(await screen.findByTestId('bd-unified-feed')).findByText('needle in an older post')).toBeInTheDocument()
+      expect(boardPosts.value.map(post => post.id)).toEqual(['loaded-1', 'loaded-2', 'older-1'])
+    })
+
+    it('offers no next page when the server holds no more posts', () => {
+      boardPosts.value = loadedPosts()
+      boardHasMore.value = false
+
+      render(h(BoardSurface, null))
+      search('needle')
+
+      expect(screen.queryByTestId('bd-unified-feed')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('bd-search-more')).not.toBeInTheDocument()
+    })
+
+    it('holds the next-page button while a page is on the wire', () => {
+      boardPosts.value = loadedPosts()
+      boardHasMore.value = true
+      boardLoadingMore.value = true
+
+      render(h(BoardSurface, null))
+      search('needle')
+
+      expect(screen.getByTestId('bd-search-more')).toBeDisabled()
+    })
+
+    it('says how many loaded posts were searched when none of them matches', () => {
+      boardPosts.value = loadedPosts()
+      boardHasMore.value = true
+
+      render(h(BoardSurface, null))
+      search('needle')
+
+      expect(screen.getByTestId('bd-search-miss').textContent).toBe('불러온 글 2개 중에는 일치하는 글이 없습니다')
+    })
+
+    it('says the match is in a hidden category instead of saying nothing matched', () => {
+      // A loaded post matches, but its category is hidden: "no match" would be false.
+      boardPosts.value = [
+        ...loadedPosts(),
+        makePost({ id: 'status-1', title: 'needle in a status post', body: 'content', author: 'keeper', post_kind: 'automation' }),
+      ]
+      boardHiddenCategories.value = new Set(['system', 'notice'])
+      boardHasMore.value = true
+
+      render(h(BoardSurface, null))
+      search('needle')
+
+      expect(screen.queryByTestId('bd-unified-feed')).not.toBeInTheDocument()
+      expect(screen.getByTestId('bd-search-miss').textContent).toBe('불러온 글 3개 중 일치하는 1개는 숨긴 분류에 있습니다')
+    })
   })
 
   it('lets unified feed pagination collapse after expansion', () => {

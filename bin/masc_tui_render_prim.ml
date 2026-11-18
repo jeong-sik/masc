@@ -3374,10 +3374,11 @@ let planning_rollup_clauses ~cols (rollup : planning_rollup) =
   if total_goals = 0 then (count, [])
   else
     let bar_width = if cols < 90 then 8 else 12 in
+    (* Goals done out of all goals is a completion ratio, not a limit. *)
     let progress_bar =
       Printf.sprintf "[%s] %2d%% (%d/%d)"
         (Masc_tui_context_bars.ratio_bar ~width:bar_width
-           ~numerator:rollup.pr_done ~denominator:total_goals)
+           ~numerator:rollup.pr_done ~denominator:total_goals ~scale:Chart.Relative)
         (rollup.pr_done * 100 / total_goals) rollup.pr_done total_goals
     in
     let counter phase glyph name value =
@@ -5039,9 +5040,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                  (Inspector.format_tokens maximum)
                  (float tokens /. float maximum *. 100.)
                  (Inspector.format_tokens (max 0 (maximum - tokens))))
+            (* The shaping ceiling is the turn's context window, a declared
+               limit: each cell takes the colour of its place in it. *)
             @ [ "  "
                 ^ Context_bars.ratio_bar ~width:bar_width ~numerator:tokens
                     ~denominator:maximum
+                    ~scale:(Chart.Declared_limit (Theme.limit_paint ()))
               ]
         | Some tokens, (None | Some _) ->
             [ Printf.sprintf "  %s input tokens; window not observed"
@@ -5138,7 +5142,6 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             transmitted total Ansi.reset share Ansi.dim measured Ansi.reset
         ; "  "
           ^ Context_bars.reach_bar ~width:bar_width ~transmitted ~total
-              ~sent_style:(Theme.info ())
         ; "  "
           ^ Context_bars.reach_pointer ~label ~width:bar_width ~transmitted
               ~total

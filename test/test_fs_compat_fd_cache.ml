@@ -5,8 +5,8 @@
     RFC-0108 §3.2 must continue to hold. We re-run RFC-0108's
     canonical stress cases (16-thread concurrent records, 4 KB
     PIPE_BUF-busting records, multibyte boundary) against the
-    cached path and additionally verify the lifecycle helpers
-    ([close_all_cached_writers], [reset_fd_cache_for_testing]). *)
+    cached path and additionally verify the lifecycle helper
+    ([reset_fd_cache_for_testing]). *)
 
 open Alcotest
 
@@ -632,7 +632,7 @@ let test_append_lands_after_another_writers_row () =
 
 (* A file that became shorter during the failed call is left as it is: the
    rollback does not grow it back to its old length. *)
-let test_shorter_file_is_not_grown_back () =
+let test_file_found_shorter_is_left_as_it_is () =
   let path = failed_append_file "shorter.jsonl" in
   let writes = ref 0 in
   let io =
@@ -693,6 +693,72 @@ let test_interrupted_rollback_is_finished () =
     [ "interrupted-before-cut.jsonl", false; "interrupted-after-cut.jsonl", true ]
 ;;
 
+(* The length read that follows an interrupted truncation is interrupted
+   too. The rollback still knows that its truncation was interrupted, so the
+   file found at its old length is reported as rolled back. *)
+let test_interrupted_length_read_keeps_the_interrupted_truncation () =
+  let path = failed_append_file "interrupted-twice.jsonl" in
+  let truncated = ref false in
+  let length_read_interrupted = ref false in
+  let io =
+    { (io_failing_after 4) with
+      truncate =
+        (fun fd length ->
+          if !truncated
+          then Unix.ftruncate fd length
+          else (
+            truncated := true;
+            Unix.ftruncate fd length;
+            interrupt "ftruncate"))
+    ; end_offset =
+        (fun fd ->
+          if !truncated && not !length_read_interrupted
+          then (
+            length_read_interrupted := true;
+            interrupt "lseek")
+          else Whole.unix_io.end_offset fd)
+    }
+  in
+  (match run_on_own_descriptor ~io ~start:Whole.Anywhere path row_a with
+   | Error (Whole.Write_failed { rollback = Whole.Rolled_back { bytes = 4 }; _ }) -> ()
+   | other -> failf "expected 4 bytes rolled back, got: %s" (describe other));
+  check bool "the length read was interrupted" true !length_read_interrupted;
+  check string "the file is as it was" row_0 (read_all path)
+;;
+
+(* The file is back at its old length, and not by this call's truncation:
+   another writer cut the bytes. The call did not remove them and says so. *)
+let test_bytes_another_writer_cut_are_not_reported_as_removed () =
+  let path = failed_append_file "cut-by-another.jsonl" in
+  let size_before = String.length row_0 in
+  let writes = ref 0 in
+  let io =
+    { Whole.unix_io with
+      write =
+        (fun fd content offset length ->
+          incr writes;
+          if !writes > 1
+          then (
+            Unix.truncate path size_before;
+            no_space ())
+          else Unix.single_write_substring fd content offset (min length 4))
+    }
+  in
+  (match run_on_own_descriptor ~io ~start:Whole.Anywhere path row_a with
+   | Error
+       (Whole.Write_failed
+         { rollback =
+             Whole.Not_rolled_back
+               { bytes = 4
+               ; reason = Whole.Changed_by_another_writer { expected_size; size }
+               }
+         ; _
+         })
+     when expected_size = size_before + 4 && size = size_before -> ()
+   | other -> failf "expected the bytes reported as not removed: %s" (describe other));
+  check string "the file is as the other writer left it" row_0 (read_all path)
+;;
+
 exception Stop_writing
 
 (* An exception that is not a system error leaves the append as it is, after
@@ -743,22 +809,31 @@ let test_child_process_does_not_inherit_the_descriptor () =
   let path = Filename.concat (tmpdir "fd_cache_cloexec") "out.fifo" in
   Unix.mkfifo path 0o600;
   let reader = Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
-  let target = Whole.open_target path in
-  let child =
-    Unix.create_process "sleep" [| "sleep"; "60" |] Unix.stdin Unix.stdout Unix.stderr
-  in
-  Unix.close (Whole.descriptor target);
   Fun.protect
-    ~finally:(fun () ->
-      Unix.kill child Sys.sigkill;
-      ignore (Unix.waitpid [] child : int * Unix.process_status);
-      Unix.close reader)
+    ~finally:(fun () -> Unix.close reader)
     (fun () ->
-      match Unix.select [ reader ] [] [] 5.0 with
-      | [], _, _ -> fail "a writer is still open after this process closed its own"
-      | _ :: _, _, _ ->
-        let read = Unix.read reader (Bytes.create 1) 0 1 in
-        check int "the reader is at the end of the stream" 0 read)
+      let target = Whole.open_target path in
+      let child =
+        Fun.protect
+          ~finally:(fun () -> Unix.close (Whole.descriptor target))
+          (fun () ->
+            Unix.create_process
+              "sleep"
+              [| "sleep"; "60" |]
+              Unix.stdin
+              Unix.stdout
+              Unix.stderr)
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.kill child Sys.sigkill;
+          ignore (Unix.waitpid [] child : int * Unix.process_status))
+        (fun () ->
+          match Unix.select [ reader ] [] [] 5.0 with
+          | [], _, _ -> fail "a writer is still open after this process closed its own"
+          | _ :: _, _, _ ->
+            let read = Unix.read reader (Bytes.create 1) 0 1 in
+            check int "the reader is at the end of the stream" 0 read))
 ;;
 
 let wait_until condition =
@@ -821,6 +896,459 @@ let test_fifo_open_waits_and_holds_up_no_other_path () =
       let count = Unix.read reader received 0 64 in
       check string "the row reached the reader" row_a (Bytes.sub_string received 0 count))
 ;;
+
+(* A signal the process handles interrupts the open that waits for a FIFO's
+   reader. The open is made again and the append goes on waiting. *)
+let test_interrupted_fifo_open_is_made_again () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let fifo = Filename.concat (tmpdir "fd_cache_fifo_interrupted") "out.fifo" in
+  Unix.mkfifo fifo 0o600;
+  let previous = Sys.signal Sys.sigusr1 (Sys.Signal_handle (fun _ -> ())) in
+  (* Only the appending thread takes the signal. *)
+  let (_ : int list) = Thread.sigmask Unix.SIG_BLOCK [ Sys.sigusr1 ] in
+  let outcome = Atomic.make None in
+  let writer =
+    Thread.create
+      (fun () ->
+        let (_ : int list) = Thread.sigmask Unix.SIG_UNBLOCK [ Sys.sigusr1 ] in
+        Atomic.set
+          outcome
+          (Some
+             (match Fs_compat.append_lines fifo row_a with
+              | () -> Ok ()
+              | exception Sys_error message -> Error message)))
+      ()
+  in
+  Thread.delay 0.2;
+  Unix.kill (Unix.getpid ()) Sys.sigusr1;
+  Thread.delay 0.2;
+  let still_waiting = Option.is_none (Atomic.get outcome) in
+  let reader = Unix.openfile fifo [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close reader;
+      let (_ : int list) = Thread.sigmask Unix.SIG_UNBLOCK [ Sys.sigusr1 ] in
+      Sys.set_signal Sys.sigusr1 previous)
+    (fun () ->
+      Thread.join writer;
+      check bool "the append still waited after the signal" true still_waiting;
+      check
+        (option (result unit string))
+        "the append succeeded"
+        (Some (Ok ()))
+        (Atomic.get outcome))
+;;
+
+let kind_swap_seconds = 0.3
+
+(* The path changes between a regular file and a device while it is opened
+   again and again. Whatever [open_target] returns was opened the way its
+   kind needs: a regular file can be read, anything else is write-only. *)
+let test_open_matches_the_kind_under_a_changing_path () =
+  let dir = tmpdir "fd_cache_kind_swap" in
+  let regular = Filename.concat dir "regular" in
+  Out_channel.with_open_bin regular (fun channel -> output_string channel "r\n");
+  let path = Filename.concat dir "swapped" in
+  let staged = Filename.concat dir "swapped.next" in
+  Unix.symlink regular path;
+  let stop = Atomic.make false in
+  let swapper =
+    Thread.create
+      (fun () ->
+        let to_regular = ref false in
+        while not (Atomic.get stop) do
+          Unix.symlink (if !to_regular then regular else "/dev/null") staged;
+          Unix.rename staged path;
+          to_regular := not !to_regular
+        done)
+      ()
+  in
+  let byte = Bytes.create 1 in
+  let readable fd =
+    match Unix.read fd byte 0 1 with
+    | (_ : int) -> true
+    | exception Unix.Unix_error (Unix.EBADF, _, _) -> false
+  in
+  let wrong = ref 0 in
+  let deadline = Unix.gettimeofday () +. kind_swap_seconds in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set stop true;
+      Thread.join swapper)
+    (fun () ->
+      while Unix.gettimeofday () < deadline do
+        let target = Whole.open_target path in
+        let fd = Whole.descriptor target in
+        let is_regular_file =
+          match (Unix.fstat fd).Unix.st_kind with
+          | Unix.S_REG -> true
+          | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+            -> false
+        in
+        let as_its_kind_needs =
+          match target with
+          | Whole.Regular_file _ -> is_regular_file && readable fd
+          | Whole.Stream _ -> (not is_regular_file) && not (readable fd)
+        in
+        Unix.close fd;
+        if not as_its_kind_needs then incr wrong
+      done);
+  check int "targets opened another way than their kind needs" 0 !wrong
+;;
+
+(* The places of the cache. Descriptors are counted from outside, as the
+   entries of [/dev/fd]: the cache has no counter to read. *)
+let open_descriptors () = Array.length (Sys.readdir "/dev/fd")
+
+(* [Fd_cache.max_entries]. *)
+let cache_bound = 32
+let numbered_path dir i = Filename.concat dir (Printf.sprintf "p_%02d.jsonl" i)
+
+let fill_cache dir =
+  for i = 1 to cache_bound do
+    Fs_compat.append_jsonl (numbered_path dir i) (`Int i)
+  done
+;;
+
+(* Reads what is in the FIFO and says whether its stream then ends: it does
+   once no descriptor has the FIFO open for writing. *)
+let stream_ended reader =
+  let buffer = Bytes.create 256 in
+  let rec drain () =
+    match Unix.select [ reader ] [] [] 5.0 with
+    | [], _, _ -> false
+    | _ :: _, _, _ ->
+      (match Unix.read reader buffer 0 (Bytes.length buffer) with
+       | 0 -> true
+       | (_ : int) -> drain ())
+  in
+  drain ()
+;;
+
+let hold_until release =
+  while not (Atomic.get release) do
+    Thread.delay 0.005
+  done
+;;
+
+let test_cache_closes_the_writers_it_drops () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_dropped" in
+  let before = open_descriptors () in
+  fill_cache dir;
+  for i = cache_bound + 1 to cache_bound + 8 do
+    Fs_compat.append_jsonl (numbered_path dir i) (`Int i)
+  done;
+  check int "descriptors the cache holds" cache_bound (open_descriptors () - before);
+  Fs_compat.reset_fd_cache_for_testing ();
+  check int "descriptors after the cache was emptied" 0 (open_descriptors () - before)
+;;
+
+(* A writer that is lent is never closed, so more than the bound are open
+   while more than the bound are lent. They are closed as they come back. *)
+let test_cache_returns_to_its_bound () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_many_lent" in
+  let leases = cache_bound + 8 in
+  let before = open_descriptors () in
+  let lent = Atomic.make 0 in
+  let release = Atomic.make false in
+  let holders =
+    List.init leases (fun i ->
+      Thread.create
+        (fun () ->
+          Fs_compat.with_cached_writer_for_testing (numbered_path dir i) (fun _ ->
+            Atomic.incr lent;
+            hold_until release))
+        ())
+  in
+  let all_lent = wait_until (fun () -> Atomic.get lent = leases) in
+  let while_lent = open_descriptors () - before in
+  Atomic.set release true;
+  List.iter Thread.join holders;
+  check bool "every writer was lent at once" true all_lent;
+  check int "descriptors while all are lent" leases while_lent;
+  check int "descriptors after they came back" cache_bound (open_descriptors () - before)
+;;
+
+(* A writer the cache drops while it is lent stays open for its caller and
+   is closed when the caller returns it. *)
+let test_writer_dropped_while_lent_is_closed_when_it_comes_back () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let path = Filename.concat (tmpdir "fd_cache_dropped_while_lent") "out.jsonl" in
+  let before = open_descriptors () in
+  let while_lent =
+    Fs_compat.with_cached_writer_for_testing path (fun _ ->
+      Fs_compat.reset_fd_cache_for_testing ();
+      open_descriptors () - before)
+  in
+  check int "descriptors while the dropped writer is lent" 1 while_lent;
+  check int "descriptors after it came back" 0 (open_descriptors () - before)
+;;
+
+(* An open that fails took a place in the cache while it ran. The place is
+   free again afterwards: the cache still fills to its bound. *)
+let test_failed_open_gives_its_place_back () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_failed_open" in
+  let plain_file = Filename.concat dir "plain" in
+  Out_channel.with_open_bin plain_file (fun channel -> output_string channel "x");
+  for _ = 1 to cache_bound do
+    match Fs_compat.append_lines (Filename.concat plain_file "x.jsonl") row_a with
+    | () -> fail "the append was expected to fail"
+    | exception Sys_error _ -> ()
+  done;
+  let before = open_descriptors () in
+  fill_cache dir;
+  check int "descriptors the cache holds" cache_bound (open_descriptors () - before)
+;;
+
+(* The two oldest writers are FIFOs, so their readers tell which one the
+   cache closed. *)
+let test_eviction_takes_the_least_recently_used_writer () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_lru_order" in
+  let fifo name =
+    let path = Filename.concat dir name in
+    Unix.mkfifo path 0o600;
+    path, Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0
+  in
+  let first, first_reader = fifo "first.fifo" in
+  let second, second_reader = fifo "second.fifo" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close first_reader;
+      Unix.close second_reader)
+    (fun () ->
+      let before = open_descriptors () in
+      Fs_compat.append_lines first row_a;
+      Fs_compat.append_lines second row_a;
+      for i = 3 to cache_bound do
+        Fs_compat.append_jsonl (numbered_path dir i) (`Int i)
+      done;
+      (* [first] is used again, which leaves [second] the least recently
+         used. *)
+      Fs_compat.append_lines first row_b;
+      Fs_compat.append_jsonl (numbered_path dir (cache_bound + 1)) (`Int 0);
+      check
+        int
+        "one writer was closed for the new path"
+        cache_bound
+        (open_descriptors () - before);
+      check bool "it was the least recently used one" true (stream_ended second_reader))
+;;
+
+(* Several callers open one path at the same time: the FIFO has no reader,
+   so each of them waits in an open of its own. One of the descriptors is
+   cached and the others are closed. *)
+let test_callers_opening_one_path_together_share_one_writer () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let fifo = Filename.concat (tmpdir "fd_cache_shared_open") "out.fifo" in
+  Unix.mkfifo fifo 0o600;
+  let callers = 6 in
+  let before = open_descriptors () in
+  let lent = Atomic.make 0 in
+  let release = Atomic.make false in
+  let holders =
+    List.init callers (fun _ ->
+      Thread.create
+        (fun () ->
+          Fs_compat.with_cached_writer_for_testing fifo (fun _ ->
+            Atomic.incr lent;
+            hold_until release))
+        ())
+  in
+  Thread.delay 0.2;
+  let none_lent_without_a_reader = Atomic.get lent = 0 in
+  let reader = Unix.openfile fifo [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close reader)
+    (fun () ->
+      let all_lent = wait_until (fun () -> Atomic.get lent = callers) in
+      let while_lent = open_descriptors () - before in
+      Atomic.set release true;
+      List.iter Thread.join holders;
+      let after = open_descriptors () - before in
+      Fs_compat.reset_fd_cache_for_testing ();
+      check bool "the opens waited for the reader" true none_lent_without_a_reader;
+      check bool "every caller got the writer" true all_lent;
+      check int "the reader and one writer, while every caller holds it" 2 while_lent;
+      check int "the reader and one writer, after they returned" 2 after;
+      check
+        bool
+        "no writer is open once the cache is emptied"
+        true
+        (stream_ended reader))
+;;
+
+(* Two callers wait in the open of one FIFO. Then its directory can no
+   longer be searched, so the caller that finds the other's writer cached
+   cannot check that writer against the path, and fails. The descriptor it
+   opened itself is closed. (A superuser can still search the directory;
+   both callers then succeed and nothing is left open either.) *)
+let test_open_that_cannot_be_cached_is_closed () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_unsearchable" in
+  let fifo = Filename.concat dir "out.fifo" in
+  (* A second name of the FIFO, in a directory that stays searchable. *)
+  let other_name = Filename.concat (tmpdir "fd_cache_other_name") "out.fifo" in
+  Unix.mkfifo fifo 0o600;
+  Unix.link fifo other_name;
+  let holders =
+    List.init 2 (fun _ ->
+      Thread.create
+        (fun () ->
+          match Fs_compat.with_cached_writer_for_testing fifo (fun _ -> ()) with
+          | () -> ()
+          | exception Sys_error _ -> ())
+        ())
+  in
+  Thread.delay 0.2;
+  Unix.chmod dir 0o000;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod dir 0o755)
+    (fun () ->
+      let reader = Unix.openfile other_name [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+      Fun.protect
+        ~finally:(fun () -> Unix.close reader)
+        (fun () ->
+          List.iter Thread.join holders;
+          Fs_compat.reset_fd_cache_for_testing ();
+          check
+            bool
+            "no writer is open once the cache is emptied"
+            true
+            (stream_ended reader)))
+;;
+
+let descriptor_limit = 100
+
+(* Opens descriptors until the process may open no more. *)
+let use_up_descriptors () =
+  let rec fill held =
+    match Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 with
+    | fd -> fill (fd :: held)
+    | exception Unix.Unix_error (Unix.EMFILE, _, _) -> held
+  in
+  ignore (fill [] : Unix.file_descr list)
+;;
+
+let probe_failed name message =
+  prerr_endline (name ^ ": " ^ message);
+  exit 3
+;;
+
+(* Run in a process whose descriptor limit is [descriptor_limit]: the cache
+   is full, its least recently used writer is lent, and no descriptor is
+   left. A new path still opens, because the cache closes a writer that is
+   not lent before it opens the new one. *)
+let descriptor_limit_probe dir =
+  let name = "descriptor limit probe" in
+  let lent = Atomic.make false in
+  let release = Atomic.make false in
+  let holder =
+    Thread.create
+      (fun () ->
+        Fs_compat.with_cached_writer_for_testing (numbered_path dir 1) (fun _ ->
+          Atomic.set lent true;
+          hold_until release))
+      ()
+  in
+  if not (wait_until (fun () -> Atomic.get lent))
+  then probe_failed name "the first writer was not lent";
+  for i = 2 to cache_bound do
+    Fs_compat.append_jsonl (numbered_path dir i) (`Int i)
+  done;
+  use_up_descriptors ();
+  let outcome =
+    match Fs_compat.append_jsonl (numbered_path dir (cache_bound + 1)) (`Int 0) with
+    | () -> Ok ()
+    | exception Sys_error message -> Error message
+  in
+  Atomic.set release true;
+  Thread.join holder;
+  match outcome with
+  | Ok () -> exit 0
+  | Error message -> probe_failed name message
+;;
+
+(* The same with two new paths whose opens are in flight together: they are
+   FIFOs without a reader. Each open made room for itself. *)
+let descriptor_limit_two_opens_probe dir =
+  let fifos =
+    List.map
+      (fun name ->
+        let path = Filename.concat dir name in
+        Unix.mkfifo path 0o600;
+        path)
+      [ "first.fifo"; "second.fifo" ]
+  in
+  fill_cache dir;
+  (* One descriptor is set aside for each FIFO's reader. *)
+  let set_aside = List.map (fun _ -> Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0) fifos in
+  use_up_descriptors ();
+  let appends =
+    List.map
+      (fun fifo ->
+        let outcome = Atomic.make None in
+        let thread =
+          Thread.create
+            (fun () ->
+              Atomic.set
+                outcome
+                (Some
+                   (match Fs_compat.append_lines fifo row_a with
+                    | () -> Ok ()
+                    | exception Sys_error message -> Error message)))
+            ()
+        in
+        thread, outcome)
+      fifos
+  in
+  Thread.delay 0.3;
+  let readers =
+    List.map2
+      (fun fifo descriptor ->
+        Unix.close descriptor;
+        Unix.openfile fifo [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0)
+      fifos
+      set_aside
+  in
+  List.iter (fun (thread, _) -> Thread.join thread) appends;
+  List.iter Unix.close readers;
+  match
+    List.filter_map
+      (fun (_, outcome) ->
+        match Atomic.get outcome with
+        | Some (Ok ()) -> None
+        | Some (Error message) -> Some message
+        | None -> Some "the append did not end")
+      appends
+  with
+  | [] -> exit 0
+  | messages ->
+    probe_failed "descriptor limit probe, two opens" (String.concat "; " messages)
+;;
+
+let test_at_the_descriptor_limit ~probe () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_descriptor_limit" in
+  let script =
+    Printf.sprintf
+      "set +o posix && builtin ulimit -S -n %d && exec %s %s %s"
+      descriptor_limit
+      (Filename.quote (Unix.realpath Sys.executable_name))
+      probe
+      (Filename.quote dir)
+  in
+  match Unix.system ("/bin/bash -c " ^ Filename.quote script) with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WEXITED code -> failf "the probe exited with %d" code
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failf "the probe got signal %d" signal
+;;
+
+let descriptor_limit_probe_flag = "--descriptor-limit-probe"
+let descriptor_limit_two_opens_probe_flag = "--descriptor-limit-two-opens-probe"
 
 (* #52974. A line append starts at a line start. When the file ends in the
    middle of a line, the append writes a newline first, so the unfinished
@@ -967,45 +1495,64 @@ let test_unreadable_end_writes_nothing () =
   check string "nothing was written" row_0 (read_all path)
 ;;
 
-(* A file that keeps its length and still gives no last byte is reported:
-   the append does not look at it for ever. *)
-let test_missing_last_byte_writes_nothing () =
+(* A last byte that cannot be read is not known to be a newline, so the row
+   starts on a new line. The append does not fail and does not read on. *)
+let test_unreadable_last_byte_starts_a_new_line () =
   let path = line_start_file "no-last-byte.jsonl" in
   write_through_another_descriptor path row_0;
   let io = { Whole.unix_io with last_byte = (fun _ ~size:_ -> None) } in
   (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
-   | Error (Whole.Last_byte_missing { size }) when size = String.length row_0 -> ()
-   | other -> failf "expected the missing last byte reported, got: %s" (describe other));
-  check string "nothing was written" row_0 (read_all path)
-;;
-
-(* The file became shorter between the length and the last-byte read, as it
-   does when another process takes back its failed append. The end is read
-   again and the row goes after what is there now. *)
-let test_shorter_file_is_observed_again () =
-  let path = line_start_file "shorter-during-read.jsonl" in
-  write_through_another_descriptor path row_0;
-  let first = ref true in
-  let io =
-    { Whole.unix_io with
-      end_offset =
-        (fun fd ->
-          let size = Whole.unix_io.end_offset fd in
-          if !first
-          then (
-            first := false;
-            Unix.truncate path 3);
-          size)
-    }
-  in
-  (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
    | Ok () -> ()
    | other -> failf "expected the append to succeed, got: %s" (describe other));
-  check
-    string
-    "the row starts on a new line after what is left"
-    (String.sub row_0 0 3 ^ "\n" ^ row_a)
-    (read_all path)
+  check string "the row follows an empty line" (row_0 ^ "\n" ^ row_a) (read_all path)
+;;
+
+(* Another descriptor cuts the file between the length read and the
+   last-byte read, as a process does that takes back its failed append. *)
+let io_cutting_after_the_first_length_read path ~cut_to =
+  let first = ref true in
+  { Whole.unix_io with
+    end_offset =
+      (fun fd ->
+        let size = Whole.unix_io.end_offset fd in
+        if !first
+        then (
+          first := false;
+          Unix.truncate path cut_to);
+        size)
+  }
+;;
+
+(* The byte the append asked for is gone, and what the file ends with now is
+   not read again: the row goes on a new line, unless the file is empty. *)
+let test_file_cut_while_its_end_is_read () =
+  List.iter
+    (fun (name, cut_to, left) ->
+      let path = line_start_file name in
+      write_through_another_descriptor path (row_0 ^ row_b);
+      let io = io_cutting_after_the_first_length_read path ~cut_to in
+      (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
+       | Ok () -> ()
+       | other ->
+         failf "%s: expected the append to succeed, got: %s" name (describe other));
+      check string name (left ^ row_a) (read_all path))
+    [ "cut-mid-line.jsonl", 3, String.sub row_0 0 3 ^ "\n"
+    ; "cut-to-a-line-start.jsonl", String.length row_0, row_0 ^ "\n"
+    ; "cut-to-nothing.jsonl", 0, ""
+    ]
+;;
+
+(* A write that fails after such a cut is taken back from the end the file
+   had when the row was written, not from the length read before the cut. *)
+let test_failed_append_after_a_cut_is_taken_back () =
+  let path = line_start_file "cut-then-failed.jsonl" in
+  write_through_another_descriptor path (row_0 ^ row_b);
+  let cutting = io_cutting_after_the_first_length_read path ~cut_to:3 in
+  let io = { (io_failing_after 4) with end_offset = cutting.Whole.end_offset } in
+  (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
+   | Error (Whole.Write_failed { rollback = Whole.Rolled_back { bytes = 4 }; _ }) -> ()
+   | other -> failf "expected 4 bytes rolled back, got: %s" (describe other));
+  check string "the file is as the cut left it" (String.sub row_0 0 3) (read_all path)
 ;;
 
 (* Each call is made again after [EINTR], and the row is still written once. *)
@@ -1152,13 +1699,21 @@ let tests () =
             `Quick
             test_append_lands_after_another_writers_row
         ; test_case
-            "a file that became shorter is not grown back"
+            "a file found shorter is left as it is"
             `Quick
-            test_shorter_file_is_not_grown_back
+            test_file_found_shorter_is_left_as_it_is
         ; test_case
             "an interrupted truncation is finished"
             `Quick
             test_interrupted_rollback_is_finished
+        ; test_case
+            "an interrupted length read keeps the interrupted truncation"
+            `Quick
+            test_interrupted_length_read_keeps_the_interrupted_truncation
+        ; test_case
+            "bytes another writer cut are not reported as removed"
+            `Quick
+            test_bytes_another_writer_cut_are_not_reported_as_removed
         ; test_case
             "another exception passes through after the rollback"
             `Quick
@@ -1175,6 +1730,52 @@ let tests () =
             "a FIFO open waits for its reader and holds up no other path"
             `Quick
             test_fifo_open_waits_and_holds_up_no_other_path
+        ; test_case
+            "an interrupted FIFO open is made again"
+            `Quick
+            test_interrupted_fifo_open_is_made_again
+        ; test_case
+            "a target is opened the way its kind needs while the path changes"
+            `Quick
+            test_open_matches_the_kind_under_a_changing_path
+        ] )
+    ; ( "cache places"
+      , [ test_case
+            "the cache closes the writers it drops"
+            `Quick
+            test_cache_closes_the_writers_it_drops
+        ; test_case
+            "the cache returns to its bound after more writers were lent"
+            `Quick
+            test_cache_returns_to_its_bound
+        ; test_case
+            "a writer dropped while it is lent is closed when it comes back"
+            `Quick
+            test_writer_dropped_while_lent_is_closed_when_it_comes_back
+        ; test_case
+            "a failed open gives its place back"
+            `Quick
+            test_failed_open_gives_its_place_back
+        ; test_case
+            "eviction takes the least recently used writer"
+            `Quick
+            test_eviction_takes_the_least_recently_used_writer
+        ; test_case
+            "callers that open one path together share one writer"
+            `Quick
+            test_callers_opening_one_path_together_share_one_writer
+        ; test_case
+            "an open that cannot be cached is closed"
+            `Quick
+            test_open_that_cannot_be_cached_is_closed
+        ; test_case
+            "a new path opens at the descriptor limit"
+            `Quick
+            (test_at_the_descriptor_limit ~probe:descriptor_limit_probe_flag)
+        ; test_case
+            "two new paths open together at the descriptor limit"
+            `Quick
+            (test_at_the_descriptor_limit ~probe:descriptor_limit_two_opens_probe_flag)
         ] )
     ; ( "line start"
       , [ test_case
@@ -1226,13 +1827,17 @@ let tests () =
             `Quick
             test_unreadable_end_writes_nothing
         ; test_case
-            "a missing last byte writes nothing"
+            "a last byte that cannot be read starts a new line"
             `Quick
-            test_missing_last_byte_writes_nothing
+            test_unreadable_last_byte_starts_a_new_line
         ; test_case
-            "a file that became shorter is observed again"
+            "a file cut while its end is read gets the row on a new line"
             `Quick
-            test_shorter_file_is_observed_again
+            test_file_cut_while_its_end_is_read
+        ; test_case
+            "a failed row after such a cut is taken back from the new end"
+            `Quick
+            test_failed_append_after_a_cut_is_taken_back
         ; test_case
             "interrupted calls are made again"
             `Quick
@@ -1253,5 +1858,9 @@ let () =
   match Sys.argv with
   | [| _; "--file-size-limit-probe"; path; bytes |] ->
     file_size_limit_probe path (int_of_string bytes)
+  | [| _; flag; dir |] when String.equal flag descriptor_limit_probe_flag ->
+    descriptor_limit_probe dir
+  | [| _; flag; dir |] when String.equal flag descriptor_limit_two_opens_probe_flag ->
+    descriptor_limit_two_opens_probe dir
   | _ -> tests ()
 ;;

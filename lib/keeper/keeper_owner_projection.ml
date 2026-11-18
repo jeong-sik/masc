@@ -34,3 +34,14 @@ let lookup ~base_path ~keeper_name =
   | None -> Owner_absent
   | Some owner -> Owner_projection (Keeper_owner.projection owner)
 ;;
+
+(* The projection is read before the flag. A write that ends unsettled between
+   the two reads is then seen, and the reader goes to the file. *)
+let meta_the_file_holds ~base_path ~keeper_name =
+  let key = key ~base_path ~keeper_name in
+  match Owner_map.find_opt key (Atomic.get owners) with
+  | None -> None
+  | Some owner ->
+    let meta = (Keeper_owner.projection owner).Keeper_owner_reducer.meta in
+    if Keeper_owner.meta_write_unsettled owner then None else meta
+;;

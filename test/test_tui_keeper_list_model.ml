@@ -69,7 +69,11 @@ let waiting ?(state = Model.Keeper_waiting_blocked) ?(items = []) name : Decode.
   ; kwr_waiting_count = List.length items
   ; kwr_since = None
   ; kwr_due_at = None
-  ; kwr_waiting_on = items
+  ; kwr_source_counts =
+      List.fold_left (fun counts (item : Decode.waiting_item) ->
+        let count = Option.value ~default:0 (List.assoc_opt item.kwi_source counts) in
+        (item.kwi_source, count + 1) :: List.remove_assoc item.kwi_source counts) [] items
+  ; kwr_waiting_heads = items
   }
 
 let approval name : Decode.keeper_tool_approval =

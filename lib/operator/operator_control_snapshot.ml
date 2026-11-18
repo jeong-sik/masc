@@ -207,7 +207,10 @@ let keepers_json
           results.(idx)
           <- (try
                 let t0 = Time_compat.now () in
-                match Keeper_meta_store.read_meta config name with
+                match
+                  Keeper_stored_meta.read config name ~read_file:(fun () ->
+                    Keeper_meta_store.read_meta config name)
+                with
                 | Error detail ->
                   Keeper_unread
                     { Keeper_snapshot_unread.name

@@ -1,6 +1,6 @@
 import { h } from 'preact'
 import type { TurnAnchor } from '../keeper-turn-inspector'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
@@ -23,8 +23,14 @@ vi.mock('../common/card', () => ({
   SurfaceCard: ({ children }: { children?: any }) => h('div', {}, children),
 }))
 
+// Every comment row draws one TimeAgo, so its draw count is the comment rows' draw count.
+const drawCounts = vi.hoisted(() => ({ timeAgo: 0 }))
+
 vi.mock('../common/time-ago', () => ({
-  TimeAgo: ({ timestamp }: { timestamp: string }) => h('span', {}, timestamp),
+  TimeAgo: ({ timestamp }: { timestamp: string }) => {
+    drawCounts.timeAgo += 1
+    return h('span', {}, timestamp)
+  },
 }))
 
 vi.mock('../common/markdown', () => ({
@@ -75,7 +81,25 @@ vi.mock('../common/input', () => ({
   TextArea: (props: Record<string, unknown>) => h('textarea', props),
 }))
 
-vi.mock('./board-state', () => ({
+interface DraftFixture { text: string; replyingTo: string | null; submitting: boolean }
+// The per-post drafts live in a real signal so the screen follows them as it does in the app.
+const draftFixture = vi.hoisted(() => ({
+  drafts: null as { value: ReadonlyMap<string, DraftFixture> } | null,
+}))
+
+function putDraft(postId: string, draft: Partial<DraftFixture>): void {
+  const drafts = draftFixture.drafts
+  if (!drafts) throw new Error('the board-state mock has not been loaded')
+  const next = new Map(drafts.value)
+  next.set(postId, { text: '', replyingTo: null, submitting: false, ...draft })
+  drafts.value = next
+}
+
+vi.mock('./board-state', async () => {
+  const { signal } = await import('@preact/signals')
+  const drafts = signal<ReadonlyMap<string, DraftFixture>>(new Map())
+  draftFixture.drafts = drafts
+  return {
   detailComments: { value: [] },
   detailCommentPage: { value: { offset: 0, total: 0 } },
   detailLoading: { value: false },
@@ -84,10 +108,12 @@ vi.mock('./board-state', () => ({
   detailPostId: { value: null },
   detailFocusedCommentId: { value: null },
   loadOlderPostComments: vi.fn(),
-  commentText: { value: '' },
-  commentSubmitting: { value: false },
-  replyingTo: { value: null },
+  commentDraft: (postId: string) =>
+    drafts.value.get(postId) ?? { text: '', replyingTo: null, submitting: false },
+  setCommentText: vi.fn(),
+  setReplyingTo: vi.fn(),
   loadPostDetail: vi.fn(),
+  refreshPostDetail: vi.fn(),
   submitComment: vi.fn(),
   authorAvatar: (author: string) => `@${author}`,
   kindBadgeColor: () => '',
@@ -102,7 +128,8 @@ vi.mock('./board-state', () => ({
   },
   boardPostKind: () => 'direct',
   refreshBoard: vi.fn(),
-}))
+  }
+})
 
 // Stub the shared turn-inspector drawer so the board affordance can be tested
 // without the real KeeperTurnInspector self-fetching turn records. Renders the
@@ -119,13 +146,14 @@ vi.mock('../keeper-turn-inspector-drawer', () => ({
 }))
 
 import {
+  CommentForm,
   CommentThread,
   PostDetail,
   buildCommentDescendantCounts,
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, detailLoading, loadPostDetail } from './board-state'
+import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, detailLoading, detailReadPhase, loadPostDetail, refreshPostDetail, setCommentText, setReplyingTo, submitComment } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment, BoardPost } from '../../types/core'
 
@@ -137,7 +165,85 @@ afterEach(() => {
   detailPostId.value = null
   detailFocusedCommentId.value = null
   detailLoading.value = false
+  detailReadPhase.value = 'idle'
   detailCommentPage.value = { offset: 0, total: 0 }
+  if (draftFixture.drafts) draftFixture.drafts.value = new Map()
+})
+
+// #52955: the draft, the comment it answers and the in-flight state belong to one post.
+describe('comment drafts on screen', () => {
+  const thread = [
+    { id: 'c1', post_id: 'post-a', parent_id: null, author: 'first', content: 'first comment', created_at: '2026-04-02T00:00:00Z' },
+    { id: 'c2', post_id: 'post-a', parent_id: null, author: 'second', content: 'second comment', created_at: '2026-04-02T00:01:00Z' },
+    { id: 'c3', post_id: 'post-a', parent_id: null, author: 'third', content: 'third comment', created_at: '2026-04-02T00:02:00Z' },
+  ] as BoardComment[]
+  const replyForm = (container: Element, commentId: string) =>
+    container.querySelector(`[data-reply-form="${commentId}"]`)
+
+  it('shows the post form the draft of its own post and writes to that post', () => {
+    putDraft('post-a', { text: 'written on A' })
+
+    const other = render(h(CommentForm, { postId: 'post-b' }))
+    expect(other.container.querySelector('textarea')?.value).toBe('')
+    other.unmount()
+
+    const own = render(h(CommentForm, { postId: 'post-a' }))
+    const textarea = own.container.querySelector('textarea')
+    expect(textarea?.value).toBe('written on A')
+    fireEvent.input(textarea!, { target: { value: 'written on A, continued' } })
+    expect(setCommentText).toHaveBeenCalledExactlyOnceWith('post-a', 'written on A, continued')
+    fireEvent.click(screen.getByRole('button', { name: '등록' }))
+    expect(submitComment).toHaveBeenCalledExactlyOnceWith('post-a')
+  })
+
+  it('opens the reply form under the comment the draft answers, on that post only', () => {
+    putDraft('post-a', { text: 'reply for c1', replyingTo: 'c1' })
+
+    const other = render(h(CommentThread, { comments: thread, postId: 'post-b' }))
+    expect(replyForm(other.container, 'c1')).toBeNull()
+    other.unmount()
+
+    const own = render(h(CommentThread, { comments: thread, postId: 'post-a' }))
+    expect(replyForm(own.container, 'c1')?.querySelector('textarea')?.value).toBe('reply for c1')
+    expect(replyForm(own.container, 'c2')).toBeNull()
+
+    fireEvent.click(within(replyForm(own.container, 'c1') as HTMLElement).getByRole('button', { name: '등록' }))
+    expect(submitComment).toHaveBeenCalledExactlyOnceWith('post-a', 'c1')
+    fireEvent.click(screen.getAllByRole('button', { name: '답글' })[0]!)
+    expect(setReplyingTo).toHaveBeenCalledExactlyOnceWith('post-a', 'c2')
+  })
+
+  it('follows the draft when the comment it answers changes', () => {
+    putDraft('post-a', { replyingTo: 'c1' })
+    const { container } = render(h(CommentThread, { comments: thread, postId: 'post-a' }))
+    expect(replyForm(container, 'c1')).not.toBeNull()
+
+    act(() => { putDraft('post-a', { replyingTo: 'c3' }) })
+
+    expect(replyForm(container, 'c1')).toBeNull()
+    expect(replyForm(container, 'c3')).not.toBeNull()
+  })
+
+  it('holds the reply toggles of the thread while the post has a comment on the wire', () => {
+    putDraft('post-a', { text: 'reply for c1', replyingTo: 'c1', submitting: true })
+    render(h(CommentThread, { comments: thread, postId: 'post-a' }))
+
+    // Changing the target clears the text, and a failed submit keeps the text it sent.
+    for (const toggle of screen.getAllByRole('button', { name: /^(답글|취소)$/ })) {
+      expect(toggle).toBeDisabled()
+    }
+  })
+
+  it('draws the reply form and not the comment rows again when the text changes', () => {
+    putDraft('post-a', { text: 'r', replyingTo: 'c1' })
+    const { container } = render(h(CommentThread, { comments: thread, postId: 'post-a' }))
+    const drawnBefore = drawCounts.timeAgo
+
+    act(() => { putDraft('post-a', { text: 're', replyingTo: 'c1' }) })
+
+    expect(replyForm(container, 'c1')?.querySelector('textarea')?.value).toBe('re')
+    expect(drawCounts.timeAgo).toBe(drawnBefore)
+  })
 })
 
 describe('CommentThread', () => {
@@ -328,6 +434,9 @@ describe('CommentThread', () => {
 
     expect(voteComment).toHaveBeenCalledWith('c1', 'up')
     expect(screen.getByText('4')).toBeInTheDocument()
+    // The re-read after a vote goes through the refresh that leaves another open post alone.
+    await waitFor(() => expect(refreshPostDetail).toHaveBeenCalledExactlyOnceWith('post-1'))
+    expect(loadPostDetail).not.toHaveBeenCalled()
   })
 
   it('marks the current comment vote as pressed', () => {
@@ -668,6 +777,23 @@ describe('PostDetail', () => {
     expect(screen.queryByText('🔒 닫힘')).not.toBeInTheDocument()
   })
 
+  it('says the thread was not read, and reads it again on request, after a failed read', () => {
+    // #52959: after a failed read the full detail said the post had no comments.
+    const post: BoardPost = { id: 'unread-thread', author: 'writer', title: 'Unread thread',
+      body: 'Body', tags: [], votes: 0, comment_count: 3,
+      created_at: '2026-04-02T00:00:00Z', updated_at: '2026-04-02T00:00:00Z' }
+    detailPostId.value = post.id
+    detailReadPhase.value = 'failed'
+    const { container } = render(h(PostDetail, { post }))
+
+    const unread = container.querySelector('[data-feedback-kind="recoverable"]')
+    expect(unread).not.toBeNull()
+    expect(screen.queryByText('아직 댓글이 없습니다')).not.toBeInTheDocument()
+    vi.mocked(loadPostDetail).mockClear()
+    fireEvent.click(within(unread as HTMLElement).getByRole('button'))
+    expect(loadPostDetail).toHaveBeenCalledExactlyOnceWith(post.id, null)
+  })
+
   it('does not cast from an unreadable vote state on the full post', () => {
     const post: BoardPost = { id: 'unknown-vote', author: 'writer', title: 'Readable post',
       body: 'Body', tags: [], votes: 7, comment_count: 0,
@@ -711,6 +837,7 @@ describe('PostDetail', () => {
     await waitFor(() => {
       expect(votePost).toHaveBeenCalledWith('post-1', 'up')
     })
+    await waitFor(() => expect(refreshPostDetail).toHaveBeenCalledExactlyOnceWith('post-1'))
   })
 
   it('renders permalink, trackback, context inference, and X share actions on the full post detail route', async () => {

@@ -31,8 +31,10 @@ let settle_durable_remove path = function
 (** The one durable snapshot write: normal serializer plus atomic durable
     commit.  The Owner write path ([replace_snapshot]) is its only caller;
     every reader in this module decodes and never writes. *)
+let snapshot_payload meta = meta |> meta_to_json |> Yojson.Safe.pretty_to_string
+
 let persist_snapshot ?ownership_root path meta =
-  let payload = meta |> meta_to_json |> Yojson.Safe.pretty_to_string in
+  let payload = snapshot_payload meta in
   Keeper_fs.save_bytes_durable_atomic ?ownership_root path payload
   |> settle_durable_replace path
 ;;
@@ -189,6 +191,33 @@ let evict_cached_parsed_meta ~path =
     Hashtbl.remove parsed_meta_cache path)
 ;;
 
+(* The bytes-to-meta half of a snapshot read. The file reader and the
+   in-memory read-back below share it, so both repair, parse and decode the
+   same way. *)
+type decoded_snapshot =
+  | Decoded of Keeper_meta_contract.keeper_meta
+  | Not_json of string
+  | Not_current_schema of string
+
+let decode_snapshot_content ~context content =
+  match Safe_ops.parse_json_off_fiber ~context content with
+  | Error detail -> Not_json detail
+  | Ok json ->
+    (match meta_of_json json with
+     | Ok meta -> Decoded meta
+     | Error detail -> Not_current_schema detail)
+;;
+
+let snapshot_read_back (written : Keeper_meta_contract.keeper_meta) =
+  match
+    decode_snapshot_content
+      ~context:("snapshot of keeper " ^ written.name)
+      (snapshot_payload written)
+  with
+  | Decoded meta -> Ok meta
+  | Not_json detail | Not_current_schema detail -> Error detail
+;;
+
 let read_meta_file_path_presence path : (meta_presence, string) result =
   (* A reader decodes and never writes: the per-Keeper Owner is the only
      writer of this file, and it writes through [meta_to_json], whose every
@@ -234,20 +263,18 @@ let read_meta_file_path_presence path : (meta_presence, string) result =
        then Log.Keeper.info "keeper meta parse recovered for %s" path;
        Ok (Meta_present meta)
      | None ->
-       (match Safe_ops.parse_json_off_fiber ~context:path content with
-        | Error e ->
+       (match decode_snapshot_content ~context:path content with
+        | Not_json detail ->
           evict_cached_parsed_meta ~path;
-          Error e
-        | Ok json ->
-          (match meta_of_json json with
-           | Ok meta ->
-             store_cached_parsed_meta ~path ~content meta;
-             if Problem_report_state.note_recovered ~site:Meta_read ~path
-             then Log.Keeper.info "keeper meta parse recovered for %s" path;
-             Ok (Meta_present meta)
-           | Error detail ->
-             evict_cached_parsed_meta ~path;
-             fail_open detail)))
+          Error detail
+        | Decoded meta ->
+          store_cached_parsed_meta ~path ~content meta;
+          if Problem_report_state.note_recovered ~site:Meta_read ~path
+          then Log.Keeper.info "keeper meta parse recovered for %s" path;
+          Ok (Meta_present meta)
+        | Not_current_schema detail ->
+          evict_cached_parsed_meta ~path;
+          fail_open detail))
 ;;
 
 let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =

@@ -388,6 +388,18 @@ val report_exact_output_registry : runtimes:t list -> Runtime_exact_output_regis
     diagnosed, because it was built from an earlier text). The rule-3 slots
     and lanes themselves are named by {!warn_exact_slot_degradation}. *)
 
+val rejected_exact_slot_refusals
+  :  runtimes:t list
+  -> Agent_core.Exact_output.resolver_snapshot
+  -> Runtime_exact_output_registry.rejected_slot list
+  -> string list
+(** One sentence per slot that a publication against [resolver_snapshot] goes
+    without: its lane, position and id, why it is left out, and what to
+    write. They are the words {!report_exact_output_registry} logs, and a
+    rule-3 slot is named for its missing whole-request deadline. A slot's
+    binding is read from [runtimes]. The deployment preflight refuses a
+    runtime.toml with these. *)
+
 val warn_exact_slot_degradation : exact_slot_degradation -> unit
 (** One WARN per exact slot rule 3 leaves out and one per lane it empties.
     Boot logs it before publishing, so it is said even when the registry

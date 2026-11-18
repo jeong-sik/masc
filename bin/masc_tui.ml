@@ -8363,11 +8363,10 @@ let launch_verification_load state ~mailbox =
    [None] is a surface with no row cursor, or one whose rows only exist once
    the frame is built. Those keep the keys they already have: Activity has g
    and G, the Keeper log and Tools have their own Home and End. *)
-type row_list = {
-  rl_count : int;  (** rows the list holds *)
-  rl_cursor : int;  (** the row the cursor is on *)
+type row_list = Masc_tui_list_moves.row_list = {
+  rl_count : int;
+  rl_cursor : int;
   rl_place : int -> unit;
-      (** put the cursor on a row and move the window to show it *)
 }
 
 (* The task whose detail is on screen, which is not the same as a detail id
@@ -8466,8 +8465,8 @@ let row_list (state : state) : row_list option =
   else
   match state.view with
   | Keepers Keeper_list ->
-      (* Search, Home/End and the page keys choose a row, which a folded
-         group opens to show. *)
+      (* Search chooses a Keeper row, which a folded group opens to show.
+         The move keys walk the stops instead ([list_moves]). *)
       windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
         (choose_keeper_row state)
   | Lanes ->
@@ -8886,23 +8885,16 @@ let search_row_cursor state =
 let place_row_cursor state index =
   Option.iter (fun r -> r.rl_place index) (row_list state)
 
-(* Home and End over a surface's list, and the page keys between them. All
-   three name a row rather than stepping to one, so all three go through the
-   one record and the window follows the way it does for a landed search.
-   A surface with no row list is left to the keys it already has. *)
-let move_list_to_edge (state : state) ~(to_bottom : bool) =
-  match row_list state with
-  | None -> ()
-  | Some { rl_count = 0; _ } -> ()
-  | Some r ->
-      r.rl_place (if to_bottom then Masc_tui_scroll.cursor_last ~count:r.rl_count else 0)
+(* The list the six move keys walk (RFC tui-one-screen-grammar §3.1). The
+   choice lives in [Masc_tui_list_moves], which a test links; this only hands
+   it the surface's rows, which need the frame's geometry. *)
+module Cursor_move = Masc_tui_scroll.Cursor_move
 
-let move_list_by_rows (state : state) ~delta =
-  match row_list state with
-  | None | Some { rl_count = 0; _ } -> ()
-  | Some r ->
-      r.rl_place
-        (Masc_tui_scroll.cursor_move ~count:r.rl_count ~delta r.rl_cursor)
+let list_moves (state : state) =
+  Masc_tui_list_moves.moves state ~rows:(fun () -> row_list state)
+
+let move_list (state : state) move =
+  Option.iter (fun moves -> moves move) (list_moves state)
 
 
 (* Standalone rows never scroll, so an action notice only has to be retained
@@ -38735,28 +38727,14 @@ Use relative paths for resources already held in the package. -->
                | Some _ ->
                    state.repository_changes_diff_scroll <-
                      Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:1
-               | None ->
-                   let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.repository_changes_cursor
-                       ~scroll:state.repository_changes_scroll
-                   in
-                   state.repository_changes_cursor <- cursor;
-                   state.repository_changes_scroll <- scroll)
+               | None -> move_list state Cursor_move.Line_down)
 
             | ("k" | "up" | "wheel-up") ->
               (match state.repository_changes_diff_path with
                | Some _ ->
                    state.repository_changes_diff_scroll <-
                      max 0 (state.repository_changes_diff_scroll - 1)
-               | None ->
-                   let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.repository_changes_cursor
-                       ~scroll:state.repository_changes_scroll
-                   in
-                   state.repository_changes_cursor <- cursor;
-                   state.repository_changes_scroll <- scroll)
+               | None -> move_list state Cursor_move.Line_up)
 
             | ("\r" | "\n" | "right") -> (
               match state.repository_changes_diff_path with
@@ -38965,10 +38943,8 @@ Use relative paths for resources already held in the package. -->
                    state.repository_changes_diff_scroll <-
                      if String.equal key "home" then 0 else clamped_scroll_end
                | None ->
-                   (match row_list state with
-                    | Some list when list.rl_count > 0 ->
-                        list.rl_place (if String.equal key "home" then 0 else list.rl_count - 1)
-                    | Some _ | None -> ()))
+                   move_list state
+                     (if String.equal key "home" then Cursor_move.To_top else Cursor_move.To_end))
 
             | ("pageup" | "pagedown") as page_key ->
               (* A surface page at a time, as the shared page arm moved the
@@ -38990,13 +38966,9 @@ Use relative paths for resources already held in the package. -->
                    state.repository_changes_diff_scroll <-
                      Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.repository_changes_diff_scroll
                | None ->
-                   let cursor, scroll =
-                     move_row_cursor state ~delta:(direction * page)
-                       ~cursor:state.repository_changes_cursor
-                       ~scroll:state.repository_changes_scroll
-                   in
-                   state.repository_changes_cursor <- cursor;
-                   state.repository_changes_scroll <- scroll)
+                   move_list state
+                     (if direction > 0 then Cursor_move.Page_down page
+                      else Cursor_move.Page_up page))
             | "r" | "R" ->
               refresh_shared_sources ();
               refresh_repository_changes state ~mailbox:async_messages;
@@ -40879,7 +40851,8 @@ Use relative paths for resources already held in the package. -->
            state.keeper_navigation_open <- true;
            state.keeper_message_focus <- Left_pane
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
-           Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
+           move_list state
+             (if key = "k" || key = "up" then Cursor_move.Line_up else Cursor_move.Line_down)
        | Some ("p" | "P") when state.view = Overview ->
            Masc_tui_home.open_approvals state
              ~navigate:(goto_surface ~from_reference:true state ~mailbox:async_messages)
@@ -42080,8 +42053,8 @@ Use relative paths for resources already held in the package. -->
           than the first row -- the rest read oldest first and take the plain
           meaning. A surface [surface_list_count] cannot count falls through
           to whatever else claims the key. *)
-       | Some ("home" | "end") when Option.is_some (row_list state) ->
-           move_list_to_edge state ~to_bottom:(key = Some "end")
+       | Some ("home" | "end") when Option.is_some (list_moves state) ->
+           move_list state (if key = Some "end" then Cursor_move.To_end else Cursor_move.To_top)
        | Some ("pageup" | "pagedown") ->
            let page =
              if state.view = Planning && state.planning_mode = Planning_list
@@ -42096,6 +42069,13 @@ Use relative paths for resources already held in the package. -->
                Option.value
                  (Masc_tui_render_keepers.keeper_plain_page_rows state ~terminal_rows ~cols)
                  ~default:(surface_page_rows state)
+             else if state.view = Overview then
+               (* The destinations the frame draws, as the frame sizes them. *)
+               let terminal_rows, _ = get_terminal_size () in
+               let body = Masc_tui_home.home_body (Masc_tui_home.prepare state)
+                   ~scroll:state.home_decision_scroll
+                   ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+               Masc_tui_scroll.page_step ~height:(List.length body.hb_rows)
              else if state.view = Repositories then
                let _, cols = get_terminal_size () in
                Masc_tui_render.repository_studio_content_height state ~cols
@@ -42124,6 +42104,9 @@ Use relative paths for resources already held in the package. -->
              else surface_page_rows state
            in
            let direction = if key = Some "pagedown" then 1 else -1 in
+           let page_move page =
+             if direction > 0 then Cursor_move.Page_down page else Cursor_move.Page_up page
+           in
            (match state.view with
             | Planning when state.planning_mode = Planning_list
                             && Masc_tui_overview_tasks.is_focused state.task_focus
@@ -42173,14 +42156,10 @@ Use relative paths for resources already held in the package. -->
                     else Masc_tui_scroll.page_up ~count ~height)
                      (planning_scroll_value state.planning_scroll))
             | Code ->
-                move_list_by_rows state ~delta:(direction * page)
+                move_list state (page_move page)
             | Board ->
                 (match state.board_mode with
-                 | Board_list ->
-                     let count = List.length (board_posts state) in
-                     state.board_cursor <-
-                       max 0
-                         (min (count - 1) (state.board_cursor + (direction * page)))
+                 | Board_list -> move_list state (page_move page)
                  | Board_read _ ->
                      (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
@@ -42191,13 +42170,7 @@ Use relative paths for resources already held in the package. -->
                  | Board_compose -> ())
             | Fusion ->
                 (match state.fusion_mode with
-                 | Fusion_list ->
-                     let count =
-                       List.length (Masc_tui_fusion_model.fusion_list_entries state)
-                     in
-                     state.fusion_cursor <-
-                       max 0
-                         (min (count - 1) (state.fusion_cursor + (direction * page)))
+                 | Fusion_list -> move_list state (page_move page)
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <-
                        Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.fusion_scroll)
@@ -42207,39 +42180,19 @@ Use relative paths for resources already held in the package. -->
                   state.schedule_scroll <-
                     (if direction > 0 then Masc_tui_scroll.page_down ~count ~height
                      else Masc_tui_scroll.page_up ~count ~height) state.schedule_scroll
-                else
-                  let count =
-                    match state.schedules with
-                    | None -> 0
-                    | Some snapshot -> List.length snapshot.scs_rows
-                  in
-                  state.schedule_cursor <-
-                    max 0
-                      (min (count - 1)
-                         (state.schedule_cursor + (direction * page)))
+                else move_list state (page_move page)
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
                     Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.verification_detail_scroll
                 else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(direction * page)
-                      ~cursor:state.verification_cursor
-                      ~scroll:state.verification_scroll
-                  in
-                  state.verification_cursor <- cursor;
-                  state.verification_scroll <- scroll
+                  move_list state (page_move page)
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
                     Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.harness_detail_scroll
                 else
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(direction * page)
-                      ~cursor:state.harness_cursor ~scroll:state.harness_scroll
-                  in
-                  state.harness_cursor <- cursor;
-                  state.harness_scroll <- scroll
+                  move_list state (page_move page)
             (* Presets draw their detail from the same scroll prompts do, and
                the key reached only prompts: a preset longer than its pane
                showed its first screen and nothing past it. *)
@@ -42276,7 +42229,7 @@ Use relative paths for resources already held in the package. -->
             | Keepers Keeper_detail when state.detail_tab = Detail_items ->
                 move_item_browser state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
-                move_list_by_rows state ~delta:(direction * page)
+                move_list state (page_move page)
             (* Identity as well: the drawing keeps the cursor's row in view,
                so a page key that only scrolled was pulled straight back. *)
             | Keepers Keeper_detail when state.detail_tab = Detail_identity ->
@@ -42302,13 +42255,7 @@ Use relative paths for resources already held in the package. -->
                      Metrics_tail.page_up ~entry_count ~content_height
                        state.log_scroll)
              | Clients ->
-                 let cursor, scroll =
-                   move_row_cursor state ~delta:(direction * page)
-                     ~cursor:state.clients_surface_cursor
-                     ~scroll:state.clients_surface_scroll
-                 in
-                 state.clients_surface_cursor <- cursor;
-                 state.clients_surface_scroll <- scroll
+                 move_list state (page_move page)
              | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
@@ -42343,8 +42290,7 @@ Use relative paths for resources already held in the package. -->
                             Masc_tui_scroll.ensure_visible
                               ~cursor:state.lane_runs_cursor ~height
                               state.lane_runs_scroll)
-                 | Lanes_overview ->
-                     move_list_by_rows state ~delta:(direction * page))
+                 | Lanes_overview -> move_list state (page_move page))
              | Metrics ->
                  let page = Masc_tui_scroll.page_step ~height:state.metrics_content_height in
                  state.metrics_scroll <-
@@ -42357,15 +42303,15 @@ Use relative paths for resources already held in the package. -->
              (* The surfaces whose page key used to be silent. Each has a
                 row list, so a page moves the cursor and the window follows --
                 the same move Home and End make, by a page rather than to an
-                edge. [move_list_by_rows] finds the list itself and answers
+                edge. [move_list] finds the list itself and answers
                 to nothing when there is none; the arm below is where there
                 is none. *)
              | Keepers (Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
-             | Approvals | Planning | Memory | Repositories
+             | Overview | Approvals | Planning | Memory | Repositories
              | Changes | Connectors | Runtime | System_logs ->
-                 move_list_by_rows state ~delta:(direction * page)
+                 move_list state (page_move page)
              (* Two panes, two meanings: the list moves a cursor like the
-                arm above, the reading scrolls. [move_list_by_rows] finds the
+                arm above, the reading scrolls. [move_list] finds the
                 list only while the list is focused, so the reading's own
                 page is spelled here rather than left silent. *)
              | Resources ->
@@ -42376,7 +42322,7 @@ Use relative paths for resources already held in the package. -->
                   | Left_pane ->
                       let entries = Masc_tui_render_resources.list_page_size state
                           ~rows:(surface_rows state) in
-                      move_list_by_rows state ~delta:(direction * entries))
+                      move_list state (page_move entries))
              | Tools ->
                  let count, height = tools_scroll_viewport state in
                  move_tools_task
@@ -42390,9 +42336,8 @@ Use relative paths for resources already held in the package. -->
                  state.acting_scroll <- Masc_tui_scroll.step_uncounted
                    ~delta:(direction * page) state.acting_scroll;
                  if state.acting_scroll = 0 then state.acting_unseen <- 0
-             (* Overview's two panes are handled earlier; Config's panes
-                carry cursors of their own. *)
-             | Overview | Config -> ())
+             (* Config's panes carry cursors of their own. *)
+             | Config -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore,
           and D, twice, for the delete. Its save key is n, answered inside
@@ -43009,30 +42954,11 @@ Use relative paths for resources already held in the package. -->
                     let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.down ~count ~height:1 state.code_history_scroll)
-                  else
-                    match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
-                        let cursor =
-                          Masc_tui_scroll.cursor_down
-                            ~count:(Array.length rows)
-                            state.code_file_cursor
-                        in
-                        state.code_file_cursor <- cursor;
-                        state.code_file_scroll <-
-                          Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render_code.code_pane_content_height state)
-                            state.code_file_scroll
-                    (* No rows to move a cursor through. *)
-                    | Some (_, Goal_confirmation_read.Absent) | None
-                    | Some (_, Goal_confirmation_read.Loading)
-                    | Some (_, Goal_confirmation_read.Stale (_, _))
-                    | Some (_, Goal_confirmation_read.Failed _) -> ())
-                else
-                  state.code_cursor <-
-                    Masc_tui_scroll.cursor_down
-                      ~count:(List.length (code_entries state))
-                      state.code_cursor
-            | Keepers Keeper_list -> step_keeper_list_stop state ~delta:1
+                  (* The open file's rows, or nothing while it is read
+                     or failed: the walk's row list says which. *)
+                  else move_list state Cursor_move.Line_down)
+                else move_list state Cursor_move.Line_down
+            | Keepers Keeper_list -> move_list state Cursor_move.Line_down
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -43124,9 +43050,7 @@ Use relative paths for resources already held in the package. -->
                 end
             | Board ->
                 (match state.board_mode with
-                 | Board_list ->
-                     if state.board_cursor < List.length (board_posts state) - 1 then
-                       state.board_cursor <- state.board_cursor + 1
+                 | Board_list -> move_list state Cursor_move.Line_down
                  | Board_read post_id ->
                      (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
@@ -43147,61 +43071,28 @@ Use relative paths for resources already held in the package. -->
                        task_list_user_focus state (
                          Masc_tui_overview_tasks.move state.tasks state.task_focus
                            Masc_tui_overview_tasks.Next)
-                 | Planning_list ->
-                     let goals =
-                       match state.planning with
-                       | None -> []
-                       | Some p ->
-                           planning_visible_goals ~filter:state.planning_filter
-                             ~sort:state.planning_sort p.pl_goals
-                     in
-                     if state.planning_cursor < List.length goals - 1 then
-                       state.planning_cursor <- state.planning_cursor + 1
+                 | Planning_list -> move_list state Cursor_move.Line_down
                  | Planning_detail _ ->
                      state.planning_scroll <- Planning_scroll_offset
                        (Masc_tui_types.scroll_down_from (planning_scroll_value state.planning_scroll) ~by:1))
             | Fusion ->
                 (match state.fusion_mode with
-                 | Fusion_list ->
-                     let count =
-                       List.length (Masc_tui_fusion_model.fusion_list_entries state)
-                     in
-                     if state.fusion_cursor < count - 1 then
-                       state.fusion_cursor <- state.fusion_cursor + 1
+                 | Fusion_list -> move_list state Cursor_move.Line_down
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <- Masc_tui_types.scroll_down_from state.fusion_scroll ~by:1)
             | Schedules ->
                 if Option.is_some (schedule_detail_on_screen state) then
                   state.schedule_scroll <- Masc_tui_types.scroll_down_from state.schedule_scroll ~by:1
-                else
-                  let count =
-                    match state.schedules with
-                    | None -> 0
-                    | Some snapshot -> List.length snapshot.scs_rows
-                  in
-                  if state.schedule_cursor < count - 1 then
-                    state.schedule_cursor <- state.schedule_cursor + 1
+                else move_list state Cursor_move.Line_down
             | Overview -> ()
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
                     Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:1
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.verification_cursor
-                       ~scroll:state.verification_scroll
-                   in
-                   state.verification_cursor <- cursor;
-                   state.verification_scroll <- scroll)
+                  move_list state Cursor_move.Line_down
             | Clients ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:1
-                    ~cursor:state.clients_surface_cursor
-                    ~scroll:state.clients_surface_scroll
-                in
-                state.clients_surface_cursor <- cursor;
-                state.clients_surface_scroll <- scroll
+                move_list state Cursor_move.Line_down
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
@@ -43215,45 +43106,17 @@ Use relative paths for resources already held in the package. -->
                       in
                      state.lane_runs_cursor <- cursor;
                      state.lane_runs_scroll <- scroll)
-                 | Lanes_overview ->
-                     move_list_by_rows state ~delta:1)
+                 | Lanes_overview -> move_list state Cursor_move.Line_down)
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <- Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:1
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.harness_cursor ~scroll:state.harness_scroll
-                   in
-                   state.harness_cursor <- cursor;
-                   state.harness_scroll <- scroll)
-            | Memory ->
-                if Option.is_some state.memory_facts_keeper then begin
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.memory_facts_cursor
-                      ~scroll:state.memory_facts_scroll
-                  in
-                  state.memory_facts_cursor <- cursor;
-                  state.memory_facts_scroll <- scroll
-                end
-                else begin
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:1
-                      ~cursor:state.memory_health_cursor
-                      ~scroll:state.memory_health_scroll
-                  in
-                  state.memory_health_cursor <- cursor;
-                  state.memory_health_scroll <- scroll
-                end
+                  move_list state Cursor_move.Line_down
+            (* Memory's row list is the facts of the Keeper open in it, or
+               the health rows when none is. *)
+            | Memory -> move_list state Cursor_move.Line_down
             | Repositories ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:1
-                    ~cursor:state.repositories_cursor
-                    ~scroll:state.repositories_scroll
-                in
-                state.repositories_cursor <- cursor;
-                state.repositories_scroll <- scroll
+                move_list state Cursor_move.Line_down
             | Changes -> (
                 (* An open diff owns the scroll keys: the list is behind it and
                    moving both would put the cursor somewhere the operator
@@ -43262,32 +43125,14 @@ Use relative paths for resources already held in the package. -->
                 | Some _ ->
                     state.changes_diff_scroll <- Masc_tui_types.scroll_down_from state.changes_diff_scroll ~by:1
                 | None ->
-                    let cursor, scroll =
-                      move_row_cursor state ~delta:1 ~cursor:state.changes_cursor
-                        ~scroll:state.changes_scroll
-                    in
-                    state.changes_cursor <- cursor;
-                    state.changes_scroll <- scroll)
+                    move_list state Cursor_move.Line_down)
             | Connectors ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
-                 in
-                 state.connectors_cursor <- cursor;
-                 state.connectors_scroll <- scroll)
+                move_list state Cursor_move.Line_down
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then
                   state.runtime_detail_scroll <- Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:1
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:state.runtime_cursor
-                       ~scroll:state.runtime_surface_scroll
-                   in
-                   if cursor <> state.runtime_cursor then
-                     Masc_tui_types.dismiss_runtime_lane_notice state;
-                   state.runtime_cursor <- cursor;
-                   state.runtime_surface_scroll <- scroll)
+                  move_list state Cursor_move.Line_down
             | Tools ->
                 let count, height = tools_scroll_viewport state in
                 move_tools_task (Masc_tui_scroll.down ~count ~height state.tools_scroll)
@@ -43313,13 +43158,7 @@ Use relative paths for resources already held in the package. -->
                 if state.resource_focus = Right_pane then
                   move_resource_document state (Masc_tui_scroll.Position.By 1)
                 else
-                  let total =
-                    match visible_resources state with
-                    | Some rows -> List.length rows
-                    | None -> 0
-                  in
-                  if state.resources_cursor < total - 1 then
-                    state.resources_cursor <- state.resources_cursor + 1
+                  move_list state Cursor_move.Line_down
             | Acting -> state.acting_scroll <- Masc_tui_types.scroll_down_from state.acting_scroll ~by:1
             | Metrics ->
                 state.metrics_scroll <-
@@ -43329,12 +43168,7 @@ Use relative paths for resources already held in the package. -->
                   edit_system_logs_page state (fun page -> {page with lp_detail_scroll=
                     Masc_tui_types.scroll_down_from page.lp_detail_scroll ~by:1})
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:1
-                       ~cursor:(system_logs_page state).lp_cursor
-                       ~scroll:(system_logs_page state).lp_scroll
-                   in
-                   edit_system_logs_page state (fun page -> {page with lp_cursor=cursor;lp_scroll=scroll}))
+                  move_list state Cursor_move.Line_down
             (* The picker's own arm takes these keys. *)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())
@@ -43355,30 +43189,11 @@ Use relative paths for resources already held in the package. -->
                     let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
                       Masc_tui_scroll.up ~count ~height:1 state.code_history_scroll)
-                  else
-                    match Masc_tui_fetched.current state.code_file with
-                    | Some (_, Masc_tui_fetched.Ready { cfd_rows = rows; _ }) ->
-                        let cursor =
-                          Masc_tui_scroll.cursor_up
-                            ~count:(Array.length rows)
-                            state.code_file_cursor
-                        in
-                        state.code_file_cursor <- cursor;
-                        state.code_file_scroll <-
-                          Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render_code.code_pane_content_height state)
-                            state.code_file_scroll
-                    (* No rows to move a cursor through. *)
-                    | Some (_, Goal_confirmation_read.Absent) | None
-                    | Some (_, Goal_confirmation_read.Loading)
-                    | Some (_, Goal_confirmation_read.Stale (_, _))
-                    | Some (_, Goal_confirmation_read.Failed _) -> ())
-                else
-                  state.code_cursor <-
-                    Masc_tui_scroll.cursor_up
-                      ~count:(List.length (code_entries state))
-                      state.code_cursor
-            | Keepers Keeper_list -> step_keeper_list_stop state ~delta:(-1)
+                  (* The open file's rows, or nothing while it is read
+                     or failed: the walk's row list says which. *)
+                  else move_list state Cursor_move.Line_up)
+                else move_list state Cursor_move.Line_up
+            | Keepers Keeper_list -> move_list state Cursor_move.Line_up
             | Keepers Keeper_detail ->
                 if
                   Masc_tui_roster_pane.arrows_go_left
@@ -43467,9 +43282,7 @@ Use relative paths for resources already held in the package. -->
                 end
             | Board ->
                 (match state.board_mode with
-                 | Board_list ->
-                     if state.board_cursor > 0 then
-                       state.board_cursor <- state.board_cursor - 1
+                 | Board_list -> move_list state Cursor_move.Line_up
                  | Board_read post_id ->
                      (match Masc_tui_types.board_read_focus state ~cols:terminal_columns with
                       | Left_pane ->
@@ -43489,46 +43302,29 @@ Use relative paths for resources already held in the package. -->
                        task_list_user_focus state (
                          Masc_tui_overview_tasks.move state.tasks state.task_focus
                            Masc_tui_overview_tasks.Previous)
-                 | Planning_list ->
-                     if state.planning_cursor > 0 then
-                       state.planning_cursor <- state.planning_cursor - 1
+                 | Planning_list -> move_list state Cursor_move.Line_up
                  | Planning_detail _ ->
                      state.planning_scroll <- Planning_scroll_offset
                        (max 0 (planning_scroll_value state.planning_scroll - 1)))
             | Fusion ->
                 (match state.fusion_mode with
-                 | Fusion_list ->
-                     if state.fusion_cursor > 0 then
-                       state.fusion_cursor <- state.fusion_cursor - 1
+                 | Fusion_list -> move_list state Cursor_move.Line_up
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      if state.fusion_scroll > 0 then
                        state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
                 if Option.is_some (schedule_detail_on_screen state) then
                   state.schedule_scroll <- max 0 (state.schedule_scroll - 1)
-                else if state.schedule_cursor > 0 then
-                  state.schedule_cursor <- state.schedule_cursor - 1
+                else move_list state Cursor_move.Line_up
             | Overview -> ()
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
                     max 0 (state.verification_detail_scroll - 1)
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.verification_cursor
-                       ~scroll:state.verification_scroll
-                   in
-                   state.verification_cursor <- cursor;
-                   state.verification_scroll <- scroll)
+                  move_list state Cursor_move.Line_up
             | Clients ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:(-1)
-                    ~cursor:state.clients_surface_cursor
-                    ~scroll:state.clients_surface_scroll
-                in
-                state.clients_surface_cursor <- cursor;
-                state.clients_surface_scroll <- scroll
+                move_list state Cursor_move.Line_up
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
@@ -43542,80 +43338,33 @@ Use relative paths for resources already held in the package. -->
                       in
                      state.lane_runs_cursor <- cursor;
                      state.lane_runs_scroll <- scroll)
-                 | Lanes_overview ->
-                     move_list_by_rows state ~delta:(-1))
+                 | Lanes_overview -> move_list state Cursor_move.Line_up)
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
                     max 0 (state.harness_detail_scroll - 1)
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.harness_cursor ~scroll:state.harness_scroll
-                   in
-                   state.harness_cursor <- cursor;
-                   state.harness_scroll <- scroll)
-            | Memory ->
-                if Option.is_some state.memory_facts_keeper then begin
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.memory_facts_cursor
-                      ~scroll:state.memory_facts_scroll
-                  in
-                  state.memory_facts_cursor <- cursor;
-                  state.memory_facts_scroll <- scroll
-                end
-                else begin
-                  let cursor, scroll =
-                    move_row_cursor state ~delta:(-1)
-                      ~cursor:state.memory_health_cursor
-                      ~scroll:state.memory_health_scroll
-                  in
-                  state.memory_health_cursor <- cursor;
-                  state.memory_health_scroll <- scroll
-                end
+                  move_list state Cursor_move.Line_up
+            (* Memory's row list is the facts of the Keeper open in it, or
+               the health rows when none is. *)
+            | Memory -> move_list state Cursor_move.Line_up
             | Repositories ->
-                let cursor, scroll =
-                  move_row_cursor state ~delta:(-1)
-                    ~cursor:state.repositories_cursor
-                    ~scroll:state.repositories_scroll
-                in
-                state.repositories_cursor <- cursor;
-                state.repositories_scroll <- scroll
+                move_list state Cursor_move.Line_up
             | Changes -> (
                 match state.changes_diff_row with
                 | Some _ ->
                     state.changes_diff_scroll <-
                       max 0 (state.changes_diff_scroll - 1)
                 | None ->
-                    let cursor, scroll =
-                      move_row_cursor state ~delta:(-1)
-                        ~cursor:state.changes_cursor
-                        ~scroll:state.changes_scroll
-                    in
-                    state.changes_cursor <- cursor;
-                    state.changes_scroll <- scroll)
+                    move_list state Cursor_move.Line_up)
             | Connectors ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
-                 in
-                 state.connectors_cursor <- cursor;
-                 state.connectors_scroll <- scroll)
+                move_list state Cursor_move.Line_up
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then
                   state.runtime_detail_scroll <-
                     max 0 (state.runtime_detail_scroll - 1)
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:state.runtime_cursor
-                       ~scroll:state.runtime_surface_scroll
-                   in
-                   if cursor <> state.runtime_cursor then
-                     Masc_tui_types.dismiss_runtime_lane_notice state;
-                   state.runtime_cursor <- cursor;
-                   state.runtime_surface_scroll <- scroll)
+                  move_list state Cursor_move.Line_up
             | Tools ->
                 if state.tools_scroll > 0 || tools_task_following_end state then begin
                   let count, height = tools_scroll_viewport state in
@@ -43640,8 +43389,7 @@ Use relative paths for resources already held in the package. -->
             | Resources ->
                 if state.resource_focus = Right_pane then
                   move_resource_document state (Masc_tui_scroll.Position.By (-1))
-                else if state.resources_cursor > 0 then
-                  state.resources_cursor <- state.resources_cursor - 1
+                else move_list state Cursor_move.Line_up
             | Metrics ->
                 state.metrics_scroll <- max 0 (state.metrics_scroll - 1)
             | Acting ->
@@ -43654,12 +43402,7 @@ Use relative paths for resources already held in the package. -->
                   edit_system_logs_page state (fun page -> {page with lp_detail_scroll=
                     max 0 (page.lp_detail_scroll - 1)})
                 else
-                  (let cursor, scroll =
-                     move_row_cursor state ~delta:(-1)
-                       ~cursor:(system_logs_page state).lp_cursor
-                       ~scroll:(system_logs_page state).lp_scroll
-                   in
-                   edit_system_logs_page state (fun page -> {page with lp_cursor=cursor;lp_scroll=scroll}))
+                  move_list state Cursor_move.Line_up
             (* The picker's own arm takes these keys. *)
             | Keepers Keeper_runtime_pick -> ()
             | Keepers Keeper_message -> ())

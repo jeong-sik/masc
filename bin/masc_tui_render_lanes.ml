@@ -447,11 +447,6 @@ let inventory_row_detail_lines ~ko ~width ~selected_output
   @ Page_reading.rows ~max_cells (Masc_tui_lane_inventory.detail_lines ~ko row)
   @ output_lines
 
-let rec take_rows remaining acc = function
-  | _ when remaining <= 0 -> List.rev acc
-  | [] -> List.rev acc
-  | row :: rest -> take_rows (remaining - 1) (row :: acc) rest
-
 (* Editing takes the pane while it is open. A long CLI tail otherwise sits
    below the lane matrix and can put the acting cursor outside the frame. *)
 let render_exact_lane_provider_editor (state : state) editor =
@@ -851,19 +846,25 @@ let render_lanes_overview (state : state) =
         ~lines:listing
     else listing in
   let detail_height = projection.lop_detail_height in
+  let detail_cells = max 1 (detail_width - panel_padding) in
+  let row_detail row =
+    match Masc_tui_types.standalone_lane_of_inventory_row state row with
+    | Some lane -> standalone_lane_summary_lines state ~width:detail_cells ~standing:(standing row) lane
+    | None ->
+        inventory_row_summary_lines state ~width:detail_cells ~standing:(standing row)
+          ~selected_output:(Masc_tui_types.lanes_exact_output_name state row) row in
   let detail = match selected_inventory_lane state with
     | None -> [Theme.recede (), ui_text state ~ko:"목록에서 기능을 선택하세요." ~en:"Select a capability in the list."]
-    | Some row ->
-        (match selected_standalone_lane state with
-         | Some lane -> standalone_lane_summary_lines state ~width:(max 1 (detail_width - panel_padding))
-             ~standing:(standing row) lane
-         | None -> inventory_row_summary_lines state ~width:(max 1 (detail_width - panel_padding))
-             ~standing:(standing row)
-             ~selected_output:(Masc_tui_types.lanes_exact_output_name state row) row) in
+    | Some row -> row_detail row in
+  (* As tall as the longest feature's detail (RFC tui-one-screen-grammar §8):
+     sized by the selected feature, the card's bottom edge moved with j and
+     k, and so did the notices drawn under a stacked card. *)
   let visible_detail =
-    if List.length detail <= detail_height then detail else
-      take_rows (max 0 (detail_height - 1)) [] detail
-      @ (if detail_height > 0 then [Theme.info (), ui_text state ~ko:"… d: 전체 관측·설정 근거" ~en:"… d: full observation and configuration evidence"] else []) in
+    Masc_tui_detail_height.fit ~budget:detail_height ~rows:inventory ~detail:row_detail
+      ~too_tall:(Masc_tui_detail_height.Cut_with
+                   (Theme.info (), ui_text state ~ko:"… d: 전체 관측·설정 근거"
+                                     ~en:"… d: full observation and configuration evidence"))
+      ~blank:(Ansi.reset, "") detail in
   let detail = List.map (fun (style, line) -> style ^ line ^ Ansi.reset) visible_detail in
   let detail = if projection.lop_boxed then
       studio_panel ~width:detail_width

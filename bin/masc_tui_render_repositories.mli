@@ -11,6 +11,13 @@ val repository_studio_content_height :
 (** The repository list's actual viewport, including the selected context panel.
     Keyboard page and cursor movement use the same geometry as rendering. *)
 
+val repository_detail_rows :
+  Masc_tui_types.state -> cols:int -> budget:int -> cursor:int -> int
+(** The rows the selected repository's detail card takes, edges included; 0
+    when nothing is selected or the body has no room for it. The tallest
+    detail among the loaded repositories sets it, so it is the same for every
+    [cursor] of one list (RFC tui-one-screen-grammar §8). *)
+
 val repository_changes_content_height :
   Masc_tui_types.state -> cols:int -> budget:int -> cursor:int -> int
 (** Visible change rows after the selected record's context and errors. *)

@@ -3470,6 +3470,7 @@
 
 (include stanzas/test_workspace_agent_record.inc)
 
+(include stanzas/test_tui_list_moves.inc)
 (include stanzas/test_tui_local_keeper_meta_moved.inc)
 
 (include stanzas/test_workspace_heartbeat_outcome.inc)
@@ -4687,7 +4688,8 @@
 (test
  (name test_tui_keeper_list_model)
  (modules test_tui_keeper_list_model)
- (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control))
+ (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control
+  masc_tui_scroll))
 
 (include stanzas/test_tui_keeper_axis_row.inc)
 

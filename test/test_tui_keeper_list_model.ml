@@ -438,7 +438,11 @@ let test_stops_open_each_group_with_its_heading () =
 
 let test_steps_stop_on_headings_and_hold_at_the_ends () =
   let stops = Model.stops ~view:Model.By_state ~folded:[] grouped in
-  let step delta stop = Option.map stop_label (Model.step_stop ~delta stops stop) in
+  let step delta stop =
+    let move =
+      if delta > 0 then Masc_tui_scroll.Cursor_move.Line_down else Masc_tui_scroll.Cursor_move.Line_up
+    in
+    Option.map stop_label (Model.move_stop move stops stop) in
   Alcotest.(check (option string)) "down from a heading reaches its first row" (Some "row 0")
     (step 1 (Model.Stop_heading attention_group));
   Alcotest.(check (option string)) "down from a group's last row reaches the next heading"
@@ -451,7 +455,35 @@ let test_steps_stop_on_headings_and_hold_at_the_ends () =
     (step 1 (Model.Stop_row 4));
   Alcotest.(check (option string)) "a folded group's row is not a stop" None
     (Option.map stop_label
-       (Model.step_stop ~delta:1 (Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped) (Model.Stop_row 2)))
+       (Model.move_stop Masc_tui_scroll.Cursor_move.Line_down
+          (Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped) (Model.Stop_row 2)))
+
+(* Home, End and the page keys count the same stops j and k do (RFC
+   tui-one-screen-grammar §3.1). Home from inside the list is the first
+   heading, never a row of a folded group, and a page past an end holds there. *)
+let test_edge_and_page_keys_count_the_stops () =
+  let folded = Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped in
+  let move stops move stop = Option.map stop_label (Model.move_stop move stops stop) in
+  let open Masc_tui_scroll.Cursor_move in
+  Alcotest.(check (option string)) "Home is the first heading" (Some "heading attention")
+    (move folded To_top (Model.Stop_row 4));
+  Alcotest.(check (option string)) "End is the last row" (Some "row 4")
+    (move folded To_end (Model.Stop_heading attention_group));
+  Alcotest.(check (option string)) "a page counts headings as stops"
+    (Some "heading failing") (move folded (Page_down 2) (Model.Stop_row 0));
+  Alcotest.(check (option string)) "a page up past the top holds on the first stop"
+    (Some "heading attention") (move folded (Page_up 9) (Model.Stop_row 3));
+  Alcotest.(check (option string)) "a page down past the end holds on the last stop"
+    (Some "row 4") (move folded (Page_down 9) (Model.Stop_row 3));
+  let world = Model.stops ~view:Model.By_memory ~folded:[] grouped in
+  Alcotest.(check bool) "Home in a World view is the World row" true
+    (Model.move_stop To_top world (Model.Stop_row 3) = Some Model.Stop_world);
+  Alcotest.(check bool) "a stop the list does not hold moves nowhere" true
+    (Model.move_stop To_top folded (Model.Stop_row 2) = None);
+  List.iter (fun key ->
+    Alcotest.(check bool) "a single stop answers every key with itself" true
+      (Model.move_stop key [ Model.Stop_world ] Model.Stop_world = Some Model.Stop_world))
+    [ Line_down; Line_up; Page_down 2; Page_up 2; To_top; To_end ]
 
 let test_group_jumps_reach_the_nearest_heading () =
   let stops = Model.stops ~view:Model.By_state ~folded:[] grouped in
@@ -793,7 +825,8 @@ let test_world_is_a_distinct_non_keeper_stop () =
     Alcotest.(check bool) "world placement cannot become row zero" true
       (Model.placement ~view grouped Model.Stop_world = Some (Some Model.Focus_world, 0));
     Alcotest.(check bool) "down from world reaches first heading" true
-      (Model.step_stop ~delta:1 stops Model.Stop_world = Some (Model.Stop_heading attention_group)))
+      (Model.move_stop Masc_tui_scroll.Cursor_move.Line_down stops Model.Stop_world
+       = Some (Model.Stop_heading attention_group)))
     [Model.By_memory; Model.By_age];
   Alcotest.(check bool) "other views reject world placement" true
     (Model.placement ~view:Model.By_state grouped Model.Stop_world = None)
@@ -853,6 +886,8 @@ let () =
             test_stops_open_each_group_with_its_heading
         ; Alcotest.test_case "steps stop on headings and hold at the ends" `Quick
             test_steps_stop_on_headings_and_hold_at_the_ends
+        ; Alcotest.test_case "edge and page keys count the stops" `Quick
+            test_edge_and_page_keys_count_the_stops
         ; Alcotest.test_case "group jumps reach the nearest heading" `Quick
             test_group_jumps_reach_the_nearest_heading
         ; Alcotest.test_case "the current stop follows focus, folds and the cursor" `Quick

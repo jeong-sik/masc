@@ -19,7 +19,8 @@ val render_keeper_list :
 
 val keeper_plain_page_rows :
   Masc_tui_types.state -> terminal_rows:int -> cols:int -> int option
-(** The number of canonical list stops in Plain's actual visible window,
+(** The stops one page key moves in Plain: the stops in its actual visible
+    window, less the one a page keeps ({!Masc_tui_scroll.page_step}),
     measured by the same header, selected-card and variable row-height
     projection as the renderer. At least one for keyboard progress in a
     window too short for a row. [None] for other views or an open Story,

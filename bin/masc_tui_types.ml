@@ -13509,8 +13509,10 @@ let resting_keeper_name (state : state) =
   else Option.map (fun (keeper : keeper) -> keeper.k_name)
     (List.nth_opt (keepers_for_selection state) state.keeper_cursor)
 
-(* A row chosen by name or position is that row, not the heading above it,
-   and on the Keepers list a folded group opens so the chosen row is drawn. *)
+(* A row chosen by name -- a search hit, a link, a press -- is that row, not
+   the heading above it, and on the Keepers list a folded group opens so the
+   chosen row is drawn. The move keys place stops instead
+   ([move_keeper_list_stop]) and never open a group. *)
 let choose_keeper_row (state : state) index =
   state.keeper_list_focus <- None;
   state.keeper_cursor <- index;
@@ -13529,11 +13531,14 @@ let place_keeper_list_stop (state : state) stop =
       state.keeper_cursor <- cursor)
     (Masc_tui_keeper_list_model.placement ~view:state.keeper_list_view (keeper_list_reading state).klr_groups stop)
 
-let step_keeper_list_stop (state : state) ~delta =
+(* Every move key on the Keeper list lands here, over the same stops. A
+   stop is placed, never chosen: a folded group stays folded, which only the
+   heading's Enter and Esc change (RFC tui-one-screen-grammar §3.1). *)
+let move_keeper_list_stop (state : state) move =
   Option.iter
     (fun current ->
       Option.iter (place_keeper_list_stop state)
-        (Masc_tui_keeper_list_model.step_stop ~delta (keeper_list_stops state) current))
+        (Masc_tui_keeper_list_model.move_stop move (keeper_list_stops state) current))
     (keeper_list_stop state)
 
 let jump_keeper_list_group (state : state) direction =

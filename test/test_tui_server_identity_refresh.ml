@@ -336,6 +336,21 @@ let test_chat_file_observation_retains_its_read_epoch () =
       Alcotest.(check bool) "resize keeps the selected file visible without another key" true
         (has (draw ()) "file-11.ml");
       state.repository_changes_scroll <- 0;
+      (* Every other change has a record above the list. The list keeps one
+         height whichever is selected (RFC tui-one-screen-grammar §8): a
+         record that came and went with j and k moved every row. *)
+      List.iter (fun budget ->
+        let heights = List.mapi (fun cursor _ ->
+          Masc_tui_render_repositories.repository_changes_content_height state ~cols:80
+            ~budget ~cursor) paths in
+        Alcotest.(check (list int)) (Printf.sprintf "one list height at budget %d" budget)
+          (List.map (fun _ -> List.hd heights) heights) heights)
+        [ budget; 40 ];
+      Alcotest.(check (list bool)) "the record shows for recorded changes only"
+        [ true; false; true ]
+        (List.map (fun cursor ->
+           Masc_tui_render_repositories.repository_changes_context_visible state ~cols:80
+             ~budget:40 ~cursor) [ 0; 1; 2 ]);
       List.iteri (fun cursor path ->
         let height = Masc_tui_render_repositories.repository_changes_content_height state ~cols:80 ~budget ~cursor in
         state.repository_changes_cursor <- cursor;

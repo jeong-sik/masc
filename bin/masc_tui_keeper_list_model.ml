@@ -716,9 +716,10 @@ let placement ~view groups = function
         (fun first -> Some (Focus_heading { heading; cursor_at = first }), first)
         (List.find_index (( = ) (Some heading)) groups)
 
-let step_stop ~delta stops current =
+let move_stop move stops current =
   Option.bind (List.find_index (( = ) current) stops) (fun index ->
-    List.nth_opt stops (max 0 (min (List.length stops - 1) (index + delta))))
+    List.nth_opt stops
+      (Masc_tui_scroll.cursor_apply ~count:(List.length stops) move index))
 
 let group_jump direction stops current =
   let is_heading = function Stop_heading _ -> true | Stop_world | Stop_row _ -> false in

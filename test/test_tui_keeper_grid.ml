@@ -139,26 +139,6 @@ let test_a_strip_half_hour_draws_one_mark () =
   Alcotest.(check string) "a half hour this build cannot list" "─"
     (mark Masc_tui_keeper_next_run.Wakes_unknown)
 
-(* A frame waits for [short_span_next_change]; the cell must not read
-   differently before then, or time would leave it stale (RFC
-   tui-one-screen-grammar §8). *)
-let test_a_short_span_does_not_change_before_its_next_change () =
-  let step = 0.05 in
-  List.iter
-    (fun span ->
-      let next = Grid.short_span_next_change span in
-      Alcotest.(check bool) "the next change is later" true (next > span);
-      let rec walk at =
-        if at < next then begin
-          Alcotest.(check string) "the same reading until then" (Grid.short_span span)
-            (Grid.short_span at);
-          walk (at +. step)
-        end
-      in
-      walk span)
-    [ 0.; 0.4; 0.5; 12.7; 89.4; 89.5; 90.; 149.4; 149.6; 5_999.; 35_999.6; 172_799.4;
-      400_000. ]
-
 let () =
   Alcotest.run "tui_keeper_grid"
     [ ( "verdict"
@@ -180,9 +160,5 @@ let () =
     ; ( "strip"
       , [ Alcotest.test_case "a strip half hour draws one mark" `Quick
             test_a_strip_half_hour_draws_one_mark
-        ] )
-    ; ( "short span"
-      , [ Alcotest.test_case "no change before the next change" `Quick
-            test_a_short_span_does_not_change_before_its_next_change
         ] )
     ]

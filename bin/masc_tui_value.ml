@@ -12,6 +12,17 @@ module Redraw = struct
       | Some _ | None -> Domain.DLS.set earliest (Some at)
 
   let next_change () = Domain.DLS.get earliest
+
+  let holds ~now ~until =
+    let holding = now <= until in
+    if holding then note_change_at until;
+    holding
+
+  (* The earlier noting is put back whether [measure] returns or raises, so a
+     measurement can neither add a change nor drop one noted before it. *)
+  let measuring measure =
+    let noted = Domain.DLS.get earliest in
+    Fun.protect ~finally:(fun () -> Domain.DLS.set earliest noted) measure
 end
 
 module Instant = struct
@@ -125,54 +136,74 @@ module Ongoing = struct
     else if seconds >= Float.of_int longest_whole_seconds then longest_whole_seconds
     else int_of_float seconds
 
-  let text seconds =
-    let whole = whole_seconds seconds in
-    if whole < seconds_per_minute then Printf.sprintf "%ds" whole
-    else if whole < seconds_per_hour then Printf.sprintf "%dm" (whole / seconds_per_minute)
-    else if whole < seconds_per_day then
-      Printf.sprintf "%dh%02dm" (whole / seconds_per_hour)
-        (whole mod seconds_per_hour / seconds_per_minute)
-    else if whole < days_with_hours then
-      Printf.sprintf "%dd%02dh" (whole / seconds_per_day)
-        (whole mod seconds_per_day / seconds_per_hour)
-    else Printf.sprintf "%dd" (whole / seconds_per_day)
+  (* A ladder reads whole seconds, and [step] is the unit it counts in at a
+     length: the time between two of its readings there. *)
+  type ladder =
+    { read : int -> string
+    ; step : int -> int
+    }
 
-  (* The unit the reading counts in at this length: the step between two
-     readings. *)
-  let step whole =
-    if whole < seconds_per_minute then 1
-    else if whole < seconds_per_day then seconds_per_minute
-    else if whole < days_with_hours then seconds_per_hour
-    else seconds_per_day
+  let two_units =
+    { read =
+        (fun whole ->
+          if whole < seconds_per_minute then Printf.sprintf "%ds" whole
+          else if whole < seconds_per_hour then Printf.sprintf "%dm" (whole / seconds_per_minute)
+          else if whole < seconds_per_day then
+            Printf.sprintf "%dh%02dm" (whole / seconds_per_hour)
+              (whole mod seconds_per_hour / seconds_per_minute)
+          else if whole < days_with_hours then
+            Printf.sprintf "%dd%02dh" (whole / seconds_per_day)
+              (whole mod seconds_per_day / seconds_per_hour)
+          else Printf.sprintf "%dd" (whole / seconds_per_day))
+    ; step =
+        (fun whole ->
+          if whole < seconds_per_minute then 1
+          else if whole < seconds_per_day then seconds_per_minute
+          else if whole < days_with_hours then seconds_per_hour
+          else seconds_per_day)
+    }
 
-  let reading_floor seconds =
+  let one_unit =
+    { read =
+        (fun whole ->
+          if whole < seconds_per_minute then Printf.sprintf "%ds" whole
+          else if whole < seconds_per_hour then Printf.sprintf "%dm" (whole / seconds_per_minute)
+          else if whole < seconds_per_day then Printf.sprintf "%dh" (whole / seconds_per_hour)
+          else Printf.sprintf "%dd" (whole / seconds_per_day))
+    ; step =
+        (fun whole ->
+          if whole < seconds_per_minute then 1
+          else if whole < seconds_per_hour then seconds_per_minute
+          else if whole < seconds_per_day then seconds_per_hour
+          else seconds_per_day)
+    }
+
+  let text_on ladder seconds = ladder.read (whole_seconds seconds)
+
+  let reading_floor_on ladder seconds =
     let whole = whole_seconds seconds in
-    let step = step whole in
+    let step = ladder.step whole in
     Float.of_int (whole / step * step)
 
-  let next_change seconds =
+  let next_change_on ladder seconds =
     let whole = whole_seconds seconds in
     if whole >= longest_whole_seconds then None
     else
-      let step = step whole in
+      let step = ladder.step whole in
       Some (Float.of_int ((whole / step + 1) * step))
 
-  let note_since ~now at =
+  let since_on ladder ~now at =
     let seconds = now -. at in
     if Float.is_finite seconds then
-      let from = Float.max 0. seconds in
-      Option.iter (fun next -> Redraw.note_change_at (at +. next)) (next_change from)
+      Option.iter
+        (fun next -> Redraw.note_change_at (at +. next))
+        (next_change_on ladder (Float.max 0. seconds));
+    text_on ladder seconds
 
-  let since ~now at =
-    note_since ~now at;
-    text (now -. at)
-
-  let age ~now seconds = since ~now (now -. seconds)
-
-  let until ~now at =
+  let until_on ladder ~now at =
     let seconds = at -. now in
     (if Float.is_finite seconds && seconds > 0. then begin
-       let floor = reading_floor seconds in
+       let floor = reading_floor_on ladder seconds in
        (* Below its first second the countdown already reads [0s], as every
           moment after it does. *)
        if floor > 0. then Redraw.note_change_at (at -. floor);
@@ -180,7 +211,22 @@ module Ongoing = struct
           coming ("in 5m" against "late 1m"), so its arrival is a change too. *)
        Redraw.note_change_at at
      end);
-    text seconds
+    text_on ladder seconds
+
+  let text = text_on two_units
+  let next_change = next_change_on two_units
+  let reading_floor = reading_floor_on two_units
+  let since = since_on two_units
+  let age ~now seconds = since ~now (now -. seconds)
+  let until = until_on two_units
+
+  module Narrow = struct
+    let text = text_on one_unit
+    let next_change = next_change_on one_unit
+    let reading_floor = reading_floor_on one_unit
+    let since = since_on one_unit
+    let until = until_on one_unit
+  end
 end
 
 module Mark = struct

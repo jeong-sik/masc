@@ -260,20 +260,16 @@ let said ~ko (row : scheduled) =
   | what, who -> Printf.sprintf "%s \xc2\xb7 %s" what who
 ;;
 
-(* How long the operator has not answered. Coarse on purpose: the row exists
-   because the wait is long, and minutes past the first day are noise. *)
+(* How long the operator has not answered, in one unit (RFC
+   tui-one-screen-grammar §6.2): the row exists because the wait is long, and
+   minutes past the first day are noise. A stamp ahead of the clock has not
+   started its wait yet. *)
 let waited_since ~ko ~now since =
-  Masc_tui_value.Ongoing.note_since ~now since;
-  let seconds = now -. since in
-  if Float.compare seconds 0.0 <= 0
+  if Masc_tui_value.Redraw.holds ~now ~until:since
   then (if ko then "방금" else "just now")
   else (
-    let whole = int_of_float seconds in
-    if whole >= 86_400
-    then Printf.sprintf (if ko then "%dd 동안 대기" else "%dd waiting") (whole / 86_400)
-    else if whole >= 3_600
-    then Printf.sprintf (if ko then "%dh 동안 대기" else "%dh waiting") (whole / 3_600)
-    else Printf.sprintf (if ko then "%dm 동안 대기" else "%dm waiting") (whole / 60))
+    let span = Masc_tui_value.Ongoing.Narrow.since ~now since in
+    if ko then span ^ " 동안 대기" else span ^ " waiting")
 ;;
 
 (* When the task was claimed, started or submitted, in the zone the panel was
@@ -297,19 +293,12 @@ let updated ~ko ~now since_iso =
   match Time_codec.parse_rfc3339_opt since_iso with
   | None -> ""
   | Some since ->
-    Masc_tui_value.Ongoing.note_since ~now since;
-    let seconds = now -. since in
-    if Float.compare seconds 0.0 <= 0
+    if Masc_tui_value.Redraw.holds ~now ~until:since
     then (if ko then "방금 갱신" else "updated just now")
     else (
-      let whole = int_of_float seconds in
-      if whole >= 86_400
-      then Printf.sprintf (if ko then "갱신 %dd 전" else "updated %dd ago") (whole / 86_400)
-      else if whole >= 3_600
-      then Printf.sprintf (if ko then "갱신 %dh 전" else "updated %dh ago") (whole / 3_600)
-      else Printf.sprintf (if ko then "갱신 %dm 전" else "updated %dm ago") (whole / 60))
+      let span = Masc_tui_value.Ongoing.Narrow.since ~now since in
+      if ko then "갱신 " ^ span ^ " 전" else "updated " ^ span ^ " ago")
 ;;
-
 let overlay ~ko ~now ~localtime ~cols t =
   let say korean english = if ko then korean else english in
   let quiet text = { tone = Quiet; text = "  " ^ text; goes_to = Nowhere } in

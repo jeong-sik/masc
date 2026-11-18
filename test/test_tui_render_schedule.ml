@@ -427,6 +427,31 @@ let test_an_ongoing_length_renders_on_the_second_it_changes () =
           86_399.5; 86_400.; 90_061.3; 8_639_999.5; 8_640_000. ])
     frame_instants
 
+(* The same for the narrow one-unit ladder a short column draws ([45s], [3m],
+   [1h], [2d]) and the countdown it draws in the due column. *)
+let test_a_narrow_length_renders_on_the_second_it_changes () =
+  List.iter
+    (fun now ->
+      List.iter
+        (fun span ->
+          let at = now -. span in
+          Redraw.begin_frame ();
+          ignore (Ongoing.Narrow.since ~now at);
+          check_first_change_second ~settle:0.
+            ~label:(Printf.sprintf "narrow %.3f s ago at %.3f" span now)
+            ~now ~reading:(fun t -> Ongoing.Narrow.text (t -. at)))
+        [ 0.; 1.7; 59.999; 60.; 89.5; 3_599.2; 3_600.; 7_322.; 86_399.5; 90_061.3 ];
+      List.iter
+        (fun left ->
+          let at = now +. left in
+          Redraw.begin_frame ();
+          ignore (Ongoing.Narrow.until ~now at);
+          check_first_change_second ~settle:0.001
+            ~label:(Printf.sprintf "narrow %.3f s left at %.3f" left now)
+            ~now ~reading:(fun t -> Ongoing.Narrow.text (at -. t)))
+        [ 1.5; 60.4; 3_661.7; 86_400.5; 190_000. ])
+    frame_instants
+
 (* The same for a countdown ("in 3m"): what is left shrinks, and its reading
    turns when what is left drops below the reading's floor. *)
 let test_a_countdown_renders_on_the_second_it_changes () =
@@ -489,6 +514,8 @@ let () =
             test_an_ongoing_length_renders_on_the_second_it_changes
         ; test_case "a countdown renders on the second it changes" `Quick
             test_a_countdown_renders_on_the_second_it_changes
+        ; test_case "a narrow length renders on the second it changes" `Quick
+            test_a_narrow_length_renders_on_the_second_it_changes
         ; test_case "finished lengths ask time for nothing" `Quick
             test_finished_lengths_ask_time_for_nothing
         ; test_case "time alone renders at most once a second" `Quick

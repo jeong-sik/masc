@@ -786,8 +786,8 @@
  (name masc_tui_answering)
  (wrapped false)
  (modules masc_tui_answering)
- ; masc_tui_message_layout owns the span ladder both this and [age_text] read.
- ; masc_tui_value owns the running mark.
+ ; masc_tui_message_layout measures and fits the row's text.
+ ; masc_tui_value owns the running mark and the ladder of a length still going.
  (libraries masc masc_tui_message_layout masc_tui_value))
 
 (library
@@ -3575,10 +3575,12 @@
  (wrapped false)
  (modules masc_tui_presented))
 
+; masc_tui_value so a notice shown for a while notes when it leaves.
 (library
  (name masc_tui_action_notice)
  (wrapped false)
- (modules masc_tui_action_notice))
+ (modules masc_tui_action_notice)
+ (libraries masc_tui_value))
 
 (library
  (name masc_tui_input_reader)

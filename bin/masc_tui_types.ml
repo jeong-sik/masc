@@ -3349,14 +3349,40 @@ type chat_schedule_proximity =
   | Schedule_elapsed | Schedule_soon | Schedule_today | Schedule_later | Schedule_unknown
   | Schedule_pending | Schedule_running | Schedule_failed | Schedule_settled
 
+let chat_schedule_soon_band_s = 3600.
+
+(* The local midnight that starts the day [at] falls on. [Unix.mktime] reads
+   the zone's own day, so a day that gains or loses an hour still starts at
+   its midnight. A breakdown it cannot turn back into an instant has no start
+   to give. *)
+let local_day_start at =
+  let day = Unix.localtime at in
+  match Unix.mktime { day with Unix.tm_hour = 0; tm_min = 0; tm_sec = 0 } with
+  | start, _ -> Some start
+  | exception Unix.Unix_error _ -> None
+
+(* A row moves to the next band as the clock runs, with no new data: Later
+   becomes Today at the start of the due day, both become Soon an hour before
+   the due moment, and Soon becomes Elapsed at it. Each band notes the instant
+   it ends, so the frame that draws the row is redrawn then (RFC
+   tui-one-screen-grammar §8). *)
 let chat_schedule_proximity ~now = function
   | None -> Schedule_unknown
   | Some due when due <= now -> Schedule_elapsed
-  | Some due when due -. now <= 3600. -> Schedule_soon (* one-hour display band *)
   | Some due ->
-      let today = Unix.localtime now and day = Unix.localtime due in
-      if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
-      else Schedule_later
+      Masc_tui_value.Redraw.note_change_at due;
+      if due -. now <= chat_schedule_soon_band_s then Schedule_soon
+      else begin
+        Masc_tui_value.Redraw.note_change_at (due -. chat_schedule_soon_band_s);
+        let today = Unix.localtime now and day = Unix.localtime due in
+        if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
+        else begin
+          (match local_day_start due with
+           | Some start when start > now -> Masc_tui_value.Redraw.note_change_at start
+           | Some _ | None -> ());
+          Schedule_later
+        end
+      end
 
 (* The Keepers whose event queue a schedule row reads: its target, the
    Keeper its reaction names, the one a transferred occurrence waits with,
@@ -9932,13 +9958,6 @@ type state = {
   mutable acting_pane_changes_loss_followup: acting_pane_key option;
   (* When the answer on screen landed, so the tab can say how old it is. *)
   mutable acting_pane_changes_at: float option;
-  (* Derived display phase for the selected long name in the narrow roster.
-     The main loop advances it only while that roster is visible. *)
-  (* The frame the running-turn mark is on. The main loop advances it only
-     while some turn is actually running, so a screen with nothing running
-     is a screen that stops repainting -- the animation costs nothing when
-     there is nothing to say. [-1] is "not animating": the mark falls back
-     to its still form rather than freezing on an arbitrary quarter. *)
   (* The candle's step. The main loop advances it only while the last frame
      drew the candle (Masc_tui_emblem_screen.drawn) and puts it back to [-1]
      when none did, so a screen without it stops repainting. *)
@@ -18127,48 +18146,43 @@ let selected_acting_entry state =
    tab's status took between five and sixteen seconds (measured 2026-09-12),
    which is long enough to be read as a stall and keyed at. The footer's
    answering badge spends its elapsed seconds for the same reason. *)
-let pending_seconds_floor = 2
+let pending_seconds_floor = 2.
 
-let loading_notice ?elapsed_s what =
-  match elapsed_s with
+(* [elapsed] is the read's own pending time, to the nanosecond: a count
+   already cut to whole seconds would put both the floor's instant and the
+   next change up to a second late. *)
+let loading_notice ?elapsed what =
+  match elapsed with
   | Some seconds when seconds >= pending_seconds_floor ->
       Printf.sprintf "(%s\xe2\x80\xa6 %s)" what
-        (Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ()) (float_of_int seconds))
+        (Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ()) seconds)
   | Some seconds ->
       (* The seconds appear when the read reaches the floor, with no new
          data, so that is when time next changes this text (RFC
          tui-one-screen-grammar §8). *)
       Masc_tui_value.Redraw.note_change_at
-        (Unix.gettimeofday () +. float_of_int (pending_seconds_floor - seconds));
+        (Unix.gettimeofday () +. (pending_seconds_floor -. seconds));
       Printf.sprintf "(%s\xe2\x80\xa6)" what
   | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
 
-let nanoseconds_per_second = 1_000_000_000L
-
-(* One step of the /about candle, the one thing on a masc screen that moves
-   without new data. It is the picture /about opens with and it arrives at a
-   still final frame, so it costs nothing once it has arrived. State marks do
-   not move and time text changes on second boundaries (RFC
-   tui-one-screen-grammar §7.2, §8). *)
+(* The /about candle steps once this often. It is the one thing on a masc
+   screen that moves without new data, and it arrives at a still final frame,
+   so it costs nothing once it has arrived. State marks do not move and time
+   text changes on second boundaries (RFC tui-one-screen-grammar §7.2, §8). *)
 let motion_step_ns = 150_000_000L
 
-(* How far the candle has gone after [frame] steps; a negative frame is one
-   that has not started. *)
-let motion_elapsed_seconds frame =
-  Int64.to_float (Int64.mul (Int64.of_int (Int.max 0 frame)) motion_step_ns)
-  /. Int64.to_float nanoseconds_per_second
+let nanoseconds_per_second = 1e9
 
-(* How long a read has been pending, in whole seconds. [now_ns] is an argument
-   so the answer is the same every time it is asked with the same reading, and
-   the stamp is the read's own rather than the state's: the Sandbox tab's status
-   and its container logs are two reads and can be pending at once.
+(* How long a read has been pending, in seconds. [now_ns] is an argument so
+   the answer is the same every time it is asked with the same reading, and
+   the stamp is the read's own rather than the state's: the Sandbox tab's
+   status and its container logs are two reads and can be pending at once.
 
    No clamp, because a monotonic reading cannot go backwards. A wall clock can,
    and the clamp that used to be here turned that into a silent zero. *)
-let pending_elapsed_s ~now_ns started_ns =
+let pending_elapsed ~now_ns started_ns =
   Option.map
-    (fun since ->
-      Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
+    (fun since -> Int64.to_float (Int64.sub now_ns since) /. nanoseconds_per_second)
     started_ns
 
 let pending_detail_read (state : state) ~tab ~keeper =

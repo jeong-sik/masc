@@ -206,17 +206,14 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
         mine @ others
     | None -> running
   in
-  let live_finishes =
-    List.filter
-      (fun (_, finished_at) -> now -. finished_at <= finish_glow_ttl_seconds)
-      finishes
-  in
   (* A finished row leaves when its glow runs out, with no new data, so that
      is a time the overlay next changes (RFC tui-one-screen-grammar §8). *)
-  List.iter
-    (fun (_, finished_at) ->
-      Masc_tui_value.Redraw.note_change_at (finished_at +. finish_glow_ttl_seconds))
-    live_finishes;
+  let live_finishes =
+    List.filter
+      (fun (_, finished_at) ->
+        Masc_tui_value.Redraw.holds ~now ~until:(finished_at +. finish_glow_ttl_seconds))
+      finishes
+  in
   let name_width =
     let widest =
       List.fold_left

@@ -364,7 +364,10 @@ let native_progress_details ?(include_elapsed=false) (activity : tool_activity) 
   match native_progress_summary activity, activity.native_progress with
   | Some summary, Some progress ->
       let summary = match include_elapsed, progress.elapsed with
-        | true, Some elapsed -> summary ^ " · updated +" ^ Masc_tui_message_layout.span_text elapsed
+        (* The call's length when this update came, taken while the call was
+           still going: it reads on the ladder of the provider elapsed beside
+           it (RFC tui-one-screen-grammar §6.2). *)
+        | true, Some elapsed -> summary ^ " · updated +" ^ Masc_tui_value.Ongoing.text elapsed
         | false, _ | true, None -> summary in
       let bytes = Option.fold ~none:[]
           ~some:(fun count -> [Printf.sprintf "%d bytes observed" count]) progress.output_bytes in

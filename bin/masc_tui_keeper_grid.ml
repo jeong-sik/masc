@@ -112,7 +112,7 @@ let due_text ~now ~localtime = function
   | Masc_tui_keeper_next_run.No_schedule -> ""
   | Masc_tui_keeper_next_run.Scheduled_at at ->
       if at -. now < day_seconds then clock_text ~localtime at
-      else Masc_tui_value.Ongoing.until ~now at
+      else Masc_tui_value.Ongoing.Narrow.until ~now at
   | Masc_tui_keeper_next_run.Late_since _ -> Mark.grid_late_word
   | Masc_tui_keeper_next_run.Held_current _ -> Mark.grid_held_word
   | Masc_tui_keeper_next_run.Held_as_of _ -> Mark.grid_held_word ^ Mark.unknown_mark
@@ -169,29 +169,6 @@ let short_span seconds =
   else
     Printf.sprintf "%dd"
       (int_of_float (Float.round (float_of_int hours /. float_of_int hours_per_day)))
-;;
-
-(* [short_span] rounds the seconds first, so below [seconds_ceiling] its
-   reading turns half a second past each whole second, and above it where the
-   rounded seconds reach a half minute: half a second before it. Past ten
-   hours it turns less often, on some of those same instants. *)
-let half_second = 0.5
-let minute_turn_offset = (float_of_int minute_seconds /. 2.) -. half_second
-
-let short_span_next_change seconds =
-  let seconds = Float.max 0. seconds in
-  if seconds < float_of_int seconds_ceiling then Float.floor (seconds +. half_second) +. half_second
-  else
-    let minute = float_of_int minute_seconds in
-    (Float.floor ((seconds +. minute -. minute_turn_offset) /. minute) *. minute)
-    +. minute_turn_offset
-;;
-
-let short_since ~now at =
-  let seconds = now -. at in
-  if Float.is_finite seconds then
-    Masc_tui_value.Redraw.note_change_at (at +. short_span_next_change seconds);
-  short_span seconds
 ;;
 
 let dated_clock_text ~now ~localtime at =

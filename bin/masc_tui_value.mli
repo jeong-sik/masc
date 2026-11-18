@@ -24,6 +24,19 @@ module Redraw : sig
   (** The earliest instant noted since {!begin_frame}, [None] when the frame
       drew no text that changes with time. Read in the domain that built the
       frame. *)
+
+  val holds : now:float -> until:float -> bool
+  (** Whether a reading that lasts until the instant [until] still holds at
+      [now] ([now <= until]): a notice shown for a while, a clause added once
+      a stream has been quiet for a time. A frame that words a text one way
+      while it holds and another way after asks this, and while it holds
+      [until] is noted ({!note_change_at}), since without new data that text
+      changes then. *)
+
+  val measuring : (unit -> 'a) -> 'a
+  (** Run a computation whose text is measured and not drawn, such as the
+      widest of every row's sentence, offscreen rows included. What it notes
+      is forgotten: only drawn text asks for a redraw. *)
 end
 
 (** A moment, drawn in the time zone of the machine the TUI runs on. *)
@@ -110,14 +123,6 @@ module Ongoing : sig
       reads differently ({!Redraw.note_change_at}). A moment ahead of [now]
       (clocks that disagree) reads [0s]. *)
 
-  val note_since : now:float -> float -> unit
-  (** Note when the length from a past moment next reads differently on this
-      ladder, without reading it. For a narrow cell that draws the same length
-      in one truncated unit ([45s], [3m], [1h], [2d]; RFC tui-one-screen-grammar
-      §6.2): each change of such a reading falls on a change of this ladder,
-      so its frame is never late, and early at most once a minute below a day
-      and once an hour below a hundred days. *)
-
   val age : now:float -> float -> string
   (** {!since} for a length measured on another clock, such as the monotonic
       age of a pending read: [age ~now seconds] reads [seconds] and notes when
@@ -128,6 +133,29 @@ module Ongoing : sig
       reads differently and when the moment arrives, since a screen words an
       arrived moment differently. A moment already passed reads [0s] and
       notes nothing. *)
+
+  (** The same lengths in a narrow column, in one unit cut down to a whole
+      count: [45s], [3m], [1h], [2d] (RFC tui-one-screen-grammar §6.2). A
+      column reads every row on this ladder or none. *)
+  module Narrow : sig
+    val text : float -> string
+    (** Whole seconds below a minute, whole minutes below an hour, whole hours
+        below a day, then whole days. A span at or below zero, or one that is
+        not a number, reads [0s]. *)
+
+    val next_change : float -> float option
+    (** As {!Ongoing.next_change}, for {!text}: the next whole second, minute,
+        hour or day. *)
+
+    val reading_floor : float -> float
+    (** As {!Ongoing.reading_floor}, for {!text}. *)
+
+    val since : now:float -> float -> string
+    (** As {!Ongoing.since}, read with {!text}. *)
+
+    val until : now:float -> float -> string
+    (** As {!Ongoing.until}, read with {!text}. *)
+  end
 end
 
 (** The mark ahead of a state word. One mark has one meaning on every screen

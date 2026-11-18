@@ -309,8 +309,8 @@ let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
    phase runs turns. Matches [Tui_decode.keeper_path_rest] with no wildcards.
    [Stated_by_provider] vs [Bounded_by_masc] distinguishes whether the reset
    time came from the provider or is MASC's upper bound.
-   Times are rendered as relative spans via [Message_layout.span_text]; if
-   already in the past, time is omitted. *)
+   A reset time reads as a countdown ([Masc_tui_value.Ongoing.until]); one
+   already in the past is omitted. *)
 type path_rest =
   | Path_serving of string  (* The runtime the next dispatch goes to. *)
   | Path_resting of string  (* The rest the next dispatch waits out. *)
@@ -862,7 +862,7 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
 let grid_digest ~now memory =
   let text =
     match Memory_reading.digest_at memory with
-    | Memory_reading.Measured at -> Grid.short_since ~now at
+    | Memory_reading.Measured at -> Masc_tui_value.Ongoing.Narrow.since ~now at
     | Memory_reading.Unmeasured -> Masc_tui_theme.Glyph.no_value
     | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown | Memory_reading.Row_absent
     | Memory_reading.Row_refused -> ""
@@ -934,7 +934,9 @@ let grid_fact_ages (grid : Grid.t) memory =
 let grid_saved ~now memory =
   match Memory_reading.updated_at memory with
   | Memory_reading.Measured at ->
-      fit_width (Keeper_mark.grid_saved_mark ^ " " ^ Grid.short_since ~now at) Grid.now_cells
+      fit_width
+        (Keeper_mark.grid_saved_mark ^ " " ^ Masc_tui_value.Ongoing.Narrow.since ~now at)
+        Grid.now_cells
   | Memory_reading.No_snapshot | Memory_reading.Row_absent ->
       grid_fitted Grid.now_cells
         (grid_quiet (Masc_tui_theme.Glyph.no_value ^ " " ^ Keeper_mark.grid_no_snapshot_word))
@@ -1029,7 +1031,7 @@ let grid_failure_since ~now ~room (runtime : keeper_runtime option) trail =
       if Message_layout.display_width worded <= room then worded else clock
   | Masc_tui_keeper_pulse.Failing_unrecorded, Keeper_trail.Trail_failed { ended_at = Some at; _ }
     when at <= now ->
-      Grid.short_since ~now at ^ " " ^ Keeper_mark.grid_ago_word
+      Masc_tui_value.Ongoing.since ~now at ^ " " ^ Keeper_mark.grid_ago_word
   | ( (Masc_tui_keeper_pulse.Failing_unrecorded | Masc_tui_keeper_pulse.Not_failing)
     , (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ) -> ""
 
@@ -1838,7 +1840,8 @@ let matrix_keeper_row matrix ~now row =
       | Keeper_trail.Matrix_unknown -> Theme.recede () ^ "?" in
     fit_width (failure ^ head ^ Ansi.reset) matrix.matrix_cell_cells) matrix.matrix_ids in
   let last = match Keeper_list_model.trail_of_row row with
-    | Keeper_trail.Trail_failed { ended_at = Some at; _ } when at <= now -> Grid.short_since ~now at
+    | Keeper_trail.Trail_failed { ended_at = Some at; _ } when at <= now ->
+        Masc_tui_value.Ongoing.Narrow.since ~now at
     | Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound -> "?" in
   let pulse = Option.bind runtime (fun r -> r.Tui_decode.kr_recent_turns)
     |> Masc_tui_keeper_pulse.half_hours ~now ~count:matrix.matrix_pulse_slots
@@ -2763,14 +2766,17 @@ let render_keeper_axes (state : state) =
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   (* Measured over every reading rather than the rows on screen, so the
-     columns do not move while a reader scrolls. *)
+     columns do not move while a reader scrolls. The measured sentence is not
+     drawn, so the ages it reads ask for no redraw; the rows drawn below note
+     their own. *)
   let failure_sentence_cells (row : Keeper_list_model.row) =
-    let age ended_at =
-      Option.map (fun _ -> widest_age_text) (keeper_trail_age ~now:now_unix ended_at)
-    in
-    match keeper_row_trail_sentence ~age row with
-    | Some sentence -> Message_layout.display_width sentence
-    | None -> 0
+    Masc_tui_value.Redraw.measuring (fun () ->
+      let age ended_at =
+        Option.map (fun _ -> widest_age_text) (keeper_trail_age ~now:now_unix ended_at)
+      in
+      match keeper_row_trail_sentence ~age row with
+      | Some sentence -> Message_layout.display_width sentence
+      | None -> 0)
   in
   let has_failing_keeper =
     List.exists (fun row -> failure_sentence_cells row > 0) model_rows
@@ -4137,7 +4143,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let loading_row ?started_ns what =
       Ansi.dim ^ "  "
       ^ Masc_tui_types.loading_notice
-          ?elapsed_s:(Masc_tui_types.pending_elapsed_s ~now_ns started_ns)
+          ?elapsed:(Masc_tui_types.pending_elapsed ~now_ns started_ns)
           what
       ^ Ansi.reset
     in

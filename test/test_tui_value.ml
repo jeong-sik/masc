@@ -122,19 +122,19 @@ let test_a_hash_keeps_its_head () =
   Alcotest.(check string) "a value shorter than the cut" "0b9c" (Hash.short "0b9c")
 
 
-(* Every instant at which the ongoing reading of a growing span differs from
+(* Every instant at which the [text] reading of a growing span differs from
    the reading just before it, sampled every quarter second from [first] up to
    [last]. *)
-let reading_changes ~first ~last =
+let reading_changes ?(text = Ongoing.text) ~first ~last () =
   let step = 0.25 in
   let rec walk at previous changes =
     if at > last then List.rev changes
     else
-      let reading = Ongoing.text at in
+      let reading = text at in
       walk (at +. step) reading
         (if String.equal reading previous then changes else at :: changes)
   in
-  walk first (Ongoing.text first) []
+  walk first (text first) []
 
 let seconds_per_minute = 60.
 let seconds_per_day = 86_400.
@@ -142,7 +142,7 @@ let seconds_per_day = 86_400.
 (* RFC tui-one-screen-grammar §6.2 and §10: a length past a minute changes at
    most once a minute, so time alone redraws it at most once a minute. *)
 let test_a_length_past_a_minute_changes_at_most_once_a_minute () =
-  let changes = reading_changes ~first:seconds_per_minute ~last:(2. *. seconds_per_day) in
+  let changes = reading_changes ~first:seconds_per_minute ~last:(2. *. seconds_per_day) () in
   let rec gaps = function
     | a :: (b :: _ as rest) -> (b -. a) :: gaps rest
     | [ _ ] | [] -> []
@@ -243,6 +243,87 @@ let test_a_frame_notes_its_earliest_change () =
   Alcotest.(check (option (float 1e-9))) "a passed moment changes no more" None
     (Redraw.next_change ())
 
+(* The narrow ladder ([45s], [3m], [1h], [2d]) is the same rule cut to one
+   unit: past a minute it changes at most once a minute (RFC
+   tui-one-screen-grammar §6.2, §10). *)
+let test_a_narrow_length_past_a_minute_changes_at_most_once_a_minute () =
+  let changes =
+    reading_changes ~text:Ongoing.Narrow.text ~first:seconds_per_minute
+      ~last:(2. *. seconds_per_day) ()
+  in
+  let rec gaps = function
+    | a :: (b :: _ as rest) -> (b -. a) :: gaps rest
+    | [ _ ] | [] -> []
+  in
+  Alcotest.(check bool) "the reading changes past a minute" true (List.length changes > 1);
+  List.iter
+    (fun gap ->
+      Alcotest.(check bool) "two changes are at least a minute apart" true
+        (gap >= seconds_per_minute))
+    (gaps changes)
+
+(* A frame waits for the narrow ladder's [next_change]; the cell reads the
+   same until then and differs from then. *)
+let test_a_narrow_next_change_is_the_first_instant_the_reading_differs () =
+  List.iter
+    (fun span ->
+      match Ongoing.Narrow.next_change span with
+      | None -> Alcotest.fail "a readable span always changes again"
+      | Some next ->
+          Alcotest.(check bool) "it is later than the span" true (next > span);
+          Alcotest.(check bool) "the reading differs from then" false
+            (String.equal (Ongoing.Narrow.text span) (Ongoing.Narrow.text next));
+          Alcotest.(check bool) "and not before" true
+            (String.equal (Ongoing.Narrow.text span) (Ongoing.Narrow.text (next -. 0.001))))
+    [ 0.; 0.4; 59.2; 60.; 61.; 89.5; 3599.9; 3600.; 7322.; 86_399.; 86_400.5;
+      123. *. seconds_per_day ];
+  List.iter
+    (fun left ->
+      let floor = Ongoing.Narrow.reading_floor left in
+      Alcotest.(check bool) "a countdown reads the same at its floor" true
+        (String.equal (Ongoing.Narrow.text left) (Ongoing.Narrow.text floor));
+      Alcotest.(check bool) "and differently just below it" false
+        (String.equal (Ongoing.Narrow.text left) (Ongoing.Narrow.text (floor -. 0.001))))
+    [ 1.5; 59.9; 60.; 125.3; 3600.; 7322.; 86_400.5 ]
+
+(* A reading that lasts until an instant (a notice shown for twelve seconds,
+   a clause added after two quiet seconds) notes that instant while it holds,
+   and nothing once it has ended. *)
+let test_a_reading_that_holds_notes_when_it_ends () =
+  Redraw.begin_frame ();
+  Alcotest.(check bool) "before the instant it holds" true
+    (Redraw.holds ~now:1000. ~until:1012.);
+  Alcotest.(check (option (float 1e-9))) "and the frame notes the instant" (Some 1012.)
+    (Redraw.next_change ());
+  Redraw.begin_frame ();
+  Alcotest.(check bool) "on the instant it still holds" true
+    (Redraw.holds ~now:1012. ~until:1012.);
+  Redraw.begin_frame ();
+  Alcotest.(check bool) "after the instant it has ended" false
+    (Redraw.holds ~now:1012.5 ~until:1012.);
+  Alcotest.(check (option (float 1e-9))) "and an ended reading notes nothing" None
+    (Redraw.next_change ())
+
+(* Text that is measured and not drawn asks for no redraw, and a measurement
+   leaves what the frame noted before it in place. *)
+let test_a_measurement_notes_nothing () =
+  Redraw.begin_frame ();
+  let width =
+    Redraw.measuring (fun () -> String.length (Ongoing.since ~now:1000.25 995.5))
+  in
+  Alcotest.(check int) "the measurement returns its answer" 2 width;
+  Alcotest.(check (option (float 1e-9))) "a frame that only measured notes nothing" None
+    (Redraw.next_change ());
+  ignore (Ongoing.since ~now:1000.25 900.);
+  ignore (Redraw.measuring (fun () -> Ongoing.since ~now:1000.25 995.5));
+  Alcotest.(check (option (float 1e-9))) "a drawn change survives a measurement"
+    (Some 1020.) (Redraw.next_change ());
+  (match Redraw.measuring (fun () -> ignore (Ongoing.since ~now:1000.25 995.5); raise Exit) with
+   | () -> Alcotest.fail "the measurement raised"
+   | exception Exit -> ());
+  Alcotest.(check (option (float 1e-9))) "and a measurement that raises" (Some 1020.)
+    (Redraw.next_change ())
+
 let () =
   Alcotest.run "tui_value"
     [ ( "instant distance",
@@ -280,5 +361,13 @@ let () =
             test_the_clock_changes_on_the_next_minute
         ; Alcotest.test_case "a frame notes its earliest change" `Quick
             test_a_frame_notes_its_earliest_change
+        ; Alcotest.test_case "a narrow length past a minute, at most once a minute" `Quick
+            test_a_narrow_length_past_a_minute_changes_at_most_once_a_minute
+        ; Alcotest.test_case "a narrow next change is when the reading differs" `Quick
+            test_a_narrow_next_change_is_the_first_instant_the_reading_differs
+        ; Alcotest.test_case "a reading that holds notes when it ends" `Quick
+            test_a_reading_that_holds_notes_when_it_ends
+        ; Alcotest.test_case "a measurement notes nothing" `Quick
+            test_a_measurement_notes_nothing
         ] )
     ]

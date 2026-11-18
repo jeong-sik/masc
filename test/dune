@@ -5481,7 +5481,7 @@
 (test
  (name test_tui_action_notice)
  (modules test_tui_action_notice)
- (libraries masc_tui_action_notice))
+ (libraries masc_tui_action_notice masc_tui_value))
 
 (test
  (name test_tui_rejection_evidence)
@@ -5817,6 +5817,11 @@
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
  (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer masc_tui_identity_input masc_tui_render_identity masc_tui_owed_read))
+
+(test
+ (name test_tui_chat_schedule_proximity)
+ (modules test_tui_chat_schedule_proximity)
+ (libraries alcotest masc_tui_types masc_tui_value unix))
 
 (test
  (name test_tui_loading_notice)
@@ -7237,7 +7242,8 @@
  (modules test_tui_model_content_activity)
  (libraries alcotest astring yojson masc masc.masc_types masc.agent_core masc.runtime masc.server masc.ag_ui
   native_tool_outcome_fixture masc_tui_keeper_chat_projection
-  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript))
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
+  masc_tui_value))
 
 (test
  (name test_tui_child_content)

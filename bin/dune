@@ -2174,6 +2174,7 @@
   masc_tui_keeper_next_run
   masc_tui_keeper_pulse
   masc_tui_message_layout
+  masc_tui_theme
   unix))
 
 (library

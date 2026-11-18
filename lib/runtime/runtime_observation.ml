@@ -117,8 +117,11 @@ type runtime_metrics_capture = {
   turn_id : int option;
   mutable next_attempt_index : int;
   mutable attempts_rev : runtime_attempt list;
+  mutable interrupted : interrupted_attempt list;
   streaming : streaming_metrics_capture;
 }
+
+and interrupted_attempt = { interrupted_index : int; interrupted_latency_ms : int }
 
 let update_first_attempt_if ~predicate ~update attempts_rev =
   let rec loop = function
@@ -164,8 +167,7 @@ let identity_fields stage ~observation_id ~runtime_id =
   ]
 
 let log_runtime_attempt_terminal (capture : runtime_metrics_capture)
-    (attempt : runtime_attempt) =
-  let outcome = if Option.is_some attempt.error then "failure" else "success" in
+    ~outcome (attempt : runtime_attempt) =
   let details = `Assoc
     (identity_fields Runtime_execution
        ~observation_id:capture.observation_id ~runtime_id:capture.runtime_id
@@ -202,7 +204,72 @@ let ensure_terminal_attempt (capture : runtime_metrics_capture)
       capture.attempts_rev <- terminal :: capture.attempts_rev;
       terminal
   in
-  log_runtime_attempt_terminal capture terminal
+  let outcome = match terminal.error with Some _ -> "failure" | None -> "success" in
+  log_runtime_attempt_terminal capture ~outcome terminal
+
+(* #52969: a request closes the attempt it opened, found by its own index. *)
+type attempt_handle = { owner : runtime_metrics_capture; index : int }
+
+type attempt_terminal =
+  | Attempt_succeeded of { latency_ms : int option }
+  | Attempt_failed of { latency_ms : int option; error : string }
+  | Attempt_cancelled of { latency_ms : int option }
+
+let cancelled_attempt_error = "provider request cancelled before it returned"
+
+let close_attempt { owner; index } terminal =
+  let latency_ms, error, outcome =
+    match terminal with
+    | Attempt_succeeded { latency_ms } -> latency_ms, None, "success"
+    | Attempt_failed { latency_ms; error } -> latency_ms, Some error, "failure"
+    | Attempt_cancelled { latency_ms } ->
+      latency_ms, Some cancelled_attempt_error, "cancelled"
+  in
+  let closed = ref None in
+  owner.attempts_rev <-
+    List.map
+      (fun attempt ->
+         match Int.equal attempt.attempt_index index with
+         | false -> attempt
+         | true ->
+           let terminal = { attempt with latency_ms; error } in
+           closed := Some terminal;
+           terminal)
+      owner.attempts_rev;
+  (* A handle comes only from [open_attempt] on [owner], so the index is
+     always present. *)
+  Option.iter (log_runtime_attempt_terminal owner ~outcome) !closed
+
+let interrupt_attempt { owner; index } ~latency_ms =
+  owner.interrupted <-
+    { interrupted_index = index; interrupted_latency_ms = latency_ms }
+    :: owner.interrupted
+
+let settle_interrupted_attempts capture terminal_of =
+  let interrupted = List.rev capture.interrupted in
+  capture.interrupted <- [];
+  List.iter
+    (fun { interrupted_index; interrupted_latency_ms } ->
+       close_attempt { owner = capture; index = interrupted_index }
+         (terminal_of ~latency_ms:(Some interrupted_latency_ms)))
+    interrupted
+
+let open_attempt capture =
+  (* The request that was cut off returned nothing to the run, or the run
+     would have ended with its error before sending another. *)
+  settle_interrupted_attempts capture (fun ~latency_ms ->
+    Attempt_cancelled { latency_ms });
+  let index = capture.next_attempt_index in
+  capture.next_attempt_index <- index + 1;
+  capture.attempts_rev <-
+    { attempt_index = index
+    ; model_id = public_runtime_model_label
+    ; model_label = None
+    ; latency_ms = None
+    ; error = None
+    }
+    :: capture.attempts_rev;
+  { owner = capture; index }
 
 let host_acceptance_to_json = function
   | None -> `Null
@@ -243,7 +310,11 @@ let record_host_acceptance ?keeper_name ?turn_id
        observation.observation_id outcome);
   { observation with host_acceptance = Some acceptance }
 
-let record_attempt_terminal = ensure_terminal_attempt
+let record_attempt_terminal capture ~model_id:_ ~latency_ms ~error =
+  close_attempt (open_attempt capture)
+    (match error with
+     | None -> Attempt_succeeded { latency_ms }
+     | Some error -> Attempt_failed { latency_ms; error })
 
 let capture_has_attempts (capture : runtime_metrics_capture) =
   match capture.attempts_rev with
@@ -269,6 +340,7 @@ let runtime_metrics_for_candidates ~runtime_id ?keeper_name ?turn_id () =
     ; turn_id
     ; next_attempt_index = 0
     ; attempts_rev = []
+    ; interrupted = []
     ; streaming = empty_streaming_capture ()
     }
   in

@@ -76,8 +76,19 @@ label retains the existing public redaction policy.
 
 An Agent Core run records one `runtime_execution_terminal` for every provider
 request that enters its transport (`attempt_details_source=runtime_agent_transport`).
-A run that fails after such a request returns those attempts with its error, so
-the failure joins its execution terminals by `observation_id`. Only a run that
+Each request closes the attempt it opened, by that attempt's own index. A
+request that returns closes with `outcome=success` or `outcome=failure`. A
+request that is cancelled waits for the run to end, because Agent Core arms the
+body deadline outside the transport and turns it into the run's error after
+the request is cancelled:
+
+- The run returns an error: the attempt closes with `outcome=failure`, that
+  error, and the time the request ran. A sync body timeout ends this way.
+- The run completes, sends another request, or is cancelled (a cancelled turn
+  or a stall watchdog): the attempt closes with `outcome=cancelled`.
+
+A run that fails after a request returns its attempts with its error, so the
+failure joins its execution terminals by `observation_id`. Only a run that
 fails before any request (configuration, admission, clock) has no capture.
 
 An error returned without its execution capture has typed `Uncaptured_failure`

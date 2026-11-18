@@ -189,9 +189,13 @@ val provider_label : Llm_provider.Provider_config.t -> string
 
 type execution_capture
 (** One run's provider attempts. The run's transport opens an attempt for
-    every request it receives and closes it when the request returns or
-    raises. A caller that may abandon the run (a cancelled attempt fiber)
-    keeps its own handle so it can still read the attempts the run made. *)
+    every request it receives and closes that attempt by its handle when the
+    request returns or raises. A cancelled request (a body deadline, a
+    cancelled turn) is only interrupted there; the run closes it when it
+    ends: with the run's error, or as cancelled when the run completes or is
+    cancelled. Every request therefore has exactly one terminal event.
+    A caller that may abandon the run (a cancelled attempt fiber) keeps its
+    own handle so it can still read the attempts the run made. *)
 
 val execution_capture :
   ?keeper_name:string -> ?turn_id:int -> config -> execution_capture
@@ -211,7 +215,10 @@ type run_failure = private
 
 val run_failure_of_capture :
   execution_capture -> Agent_core.Error.t -> run_failure
-(** Classifies [error] by whether [capture] holds an attempt. *)
+(** Closes every interrupted attempt in [capture] with [error], then
+    classifies [error] by whether [capture] holds an attempt. AGENT_CORE turns
+    a body deadline into [error] after cancelling the request, so [error] is
+    that request's terminal. *)
 
 val run_failure_error : run_failure -> Agent_core.Error.t
 
@@ -358,6 +365,11 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
+  (** The run's transport wrapper: each request opens its own attempt in the
+      capture and closes it by that attempt's handle. *)
+  val capture_provider_attempts :
+    execution_capture -> Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
+
   (** The transport kind recorded on an unhandled runner exception; [None]
       when the exception is not known to be a transport failure. *)
   val transport_error_kind_of_exception :

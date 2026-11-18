@@ -199,14 +199,7 @@ let transport_for_provider
      the tool-lane resolver and per-request patching, not at transport
      construction. stream_idle_timeout_s rides on the agent options, not here
      (see the note above). *)
-  Ok
-    (Some
-       (observed_http_transport
-          ~sw
-          ~net
-          ?clock
-          ?body_timeout_s
-          ()))
+  observed_http_transport ~sw ~net ?clock ?body_timeout_s ()
 
 (* Typed field first (RFC-0371 B12), then the config name. The id is not
    parsed out of the "runtime:<id>/runtime" spelling in the human-facing
@@ -220,17 +213,14 @@ let runtime_id_of_config (config : config) =
    transport below records every provider request into it, so a failed run
    reports the attempts it made and only a run that never reached the
    transport can fail without a capture. *)
-type execution_capture =
-  { capture : Runtime_observation.runtime_metrics_capture
-  ; metrics : Llm_provider.Metrics.t
-  }
+type execution_capture = Runtime_observation.runtime_metrics_capture
 
 let execution_capture ?keeper_name ?turn_id (config : config) =
-  let capture, metrics =
+  let capture, _metrics =
     Runtime_observation.runtime_metrics_for_candidates
       ~runtime_id:(runtime_id_of_config config) ?keeper_name ?turn_id ()
   in
-  { capture; metrics }
+  capture
 
 let transport_attempt_details_source = "runtime_agent_transport"
 
@@ -245,8 +235,14 @@ let run_failure_error = function
   | Failed_before_dispatch error -> error
   | Failed_after_dispatch { error; runtime_observation = _ } -> error
 
-(* No model answered a failed run, so the observation selects none. *)
-let run_failure_of_capture { capture; metrics = _ } error =
+(* No model answered a failed run, so the observation selects none. A
+   request a body deadline cut off is still interrupted here: AGENT_CORE
+   turned the deadline into [error] outside the transport, so that error is
+   the request's terminal. *)
+let run_failure_of_capture capture error =
+  Runtime_observation.settle_interrupted_attempts capture (fun ~latency_ms ->
+    Runtime_observation.Attempt_failed
+      { latency_ms; error = Agent_core.Error.to_string error });
   match Runtime_observation.capture_has_attempts capture with
   | false -> Failed_before_dispatch error
   | true ->
@@ -260,8 +256,13 @@ let run_failure_of_capture { capture; metrics = _ } error =
             ()
       }
 
-let completed_runtime_observation { capture; metrics = _ } ~usage_scope
-    (config : config) =
+let settle_cancelled_attempts capture =
+  Runtime_observation.settle_interrupted_attempts capture (fun ~latency_ms ->
+    Runtime_observation.Attempt_cancelled { latency_ms })
+
+(* A run that completes after a cut-off request returned no error for it. *)
+let completed_runtime_observation capture ~usage_scope (config : config) =
+  settle_cancelled_attempts capture;
   Runtime_observation.runtime_observation_with_metrics
     ~selected_model:(Some config.model_id)
     ~capture
@@ -276,27 +277,33 @@ let provider_attempt_error error =
   Llm_provider.Error.to_string (Llm_provider.Error.of_http_error error)
 
 (* An attempt opens when the request enters the transport and closes when the
-   transport returns or raises. Cancellation leaves it open: the request was
-   handed over and no terminal was observed. *)
-let observe_provider_attempt { capture; metrics } ~model_id ~response_of invoke =
-  metrics.Llm_provider.Metrics.on_request_start ~model_id;
+   transport returns or raises. A cancellation only interrupts it: AGENT_CORE
+   arms the body deadline outside this transport, so the deadline cancels
+   this request and becomes the run's error after it. The run settles the
+   attempt when it ends, with that error or as cancelled. *)
+let observe_provider_attempt capture ~response_of invoke =
+  let attempt = Runtime_observation.open_attempt capture in
   let started_at = Unix.gettimeofday () in
-  let close error =
-    Runtime_observation.record_attempt_terminal capture ~model_id
-      ~latency_ms:(Some (int_of_float (elapsed_ms_since started_at)))
-      ~error
-  in
+  let latency_ms () = int_of_float (elapsed_ms_since started_at) in
   match invoke () with
   | outcome ->
-    close
+    let latency_ms = Some (latency_ms ()) in
+    Runtime_observation.close_attempt attempt
       (match response_of outcome with
-       | Ok _ -> None
-       | Error error -> Some (provider_attempt_error error));
+       | Ok _ -> Runtime_observation.Attempt_succeeded { latency_ms }
+       | Error error ->
+         Runtime_observation.Attempt_failed
+           { latency_ms; error = provider_attempt_error error });
     outcome
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    let bt = Printexc.get_raw_backtrace () in
+    Runtime_observation.interrupt_attempt attempt ~latency_ms:(latency_ms ());
+    Printexc.raise_with_backtrace exn bt
   | exception exn ->
     let bt = Printexc.get_raw_backtrace () in
-    close (Some (Printexc.to_string exn));
+    Runtime_observation.close_attempt attempt
+      (Runtime_observation.Attempt_failed
+         { latency_ms = Some (latency_ms ()); error = Printexc.to_string exn });
     Printexc.raise_with_backtrace exn bt
 
 let capture_provider_attempts execution_capture
@@ -305,7 +312,6 @@ let capture_provider_attempts execution_capture
   { invoke_sync =
       (fun (req : Llm_provider.Llm_transport.completion_request) ->
         observe_provider_attempt execution_capture
-          ~model_id:req.config.Llm_provider.Provider_config.model_id
           ~response_of:(fun outcome ->
             outcome.Llm_provider.Completion_outcome.result
               .Llm_provider.Llm_transport.response)
@@ -314,7 +320,6 @@ let capture_provider_attempts execution_capture
       (fun ?on_telemetry ~on_event
            (req : Llm_provider.Llm_transport.completion_request) ->
         observe_provider_attempt execution_capture
-          ~model_id:req.config.Llm_provider.Provider_config.model_id
           ~response_of:(fun outcome ->
             outcome.Llm_provider.Completion_outcome.result)
           (fun () -> transport.invoke_stream ?on_telemetry ~on_event req));
@@ -973,6 +978,7 @@ let prefer_cooperative_probe_error probe_error advanced_result =
 ;;
 
 module For_testing = struct
+  let capture_provider_attempts = capture_provider_attempts
   let transport_error_kind_of_exception = transport_error_kind_of_exception
   let decide_clock_for_idle = decide_clock_for_idle
   let required_modalities_of_content_blocks = required_modalities_of_content_blocks
@@ -1021,18 +1027,12 @@ let build_agent
   with
   | Error _ as e -> e
   | Ok clock ->
-    (match
-       transport_for_provider
-         ~sw
-         ~net
-         ?clock
-         ?body_timeout_s:config.body_timeout_s
-         ()
-     with
-     | Error _ as e -> e
-     | Ok transport ->
-      let transport = Option.map wrap_transport transport in
-      Ok (Runtime_agent_context.create_agent ~net ~config ?transport ()))
+    let transport =
+      wrap_transport
+        (transport_for_provider ~sw ~net ?clock
+           ?body_timeout_s:config.body_timeout_s ())
+    in
+    Ok (Runtime_agent_context.create_agent ~net ~config ~transport ())
 
 let build ~sw ~net ~config = build_agent ~sw ~net ~config ~wrap_transport:Fun.id
 
@@ -1093,19 +1093,14 @@ let resume_agent
   with
   | Error _ as e -> e
   | Ok clock ->
-    (match
-       transport_for_provider
-         ~sw
-         ~net
-         ?clock
-         ?body_timeout_s:config.body_timeout_s
-         ()
-     with
-     | Error _ as e -> e
-     | Ok transport ->
-      let transport = Option.map wrap_transport transport in
+    let transport =
+      wrap_transport
+        (transport_for_provider ~sw ~net ?clock
+           ?body_timeout_s:config.body_timeout_s ())
+    in
       let prepared_resume =
-        Runtime_agent_context.prepare_resume ~config ~checkpoint ~transport
+        Runtime_agent_context.prepare_resume ~config ~checkpoint
+          ~transport:(Some transport)
       in
       Log.Runtime_agent.info
         "%s: resume checkpoint_turn_count=%d"
@@ -1124,7 +1119,7 @@ let resume_agent
       |> Result.map_error (fun error ->
         Agent_core.Error.Config (Agent_core.Error.InvalidConfig
           {field="checkpoint.reasoning_replay";
-           detail=Agent_core.Agent_checkpoint.resume_error_to_string error})))
+           detail=Agent_core.Agent_checkpoint.resume_error_to_string error}))
 
 let resume_from_checkpoint ~sw ~net ~config ~checkpoint =
   resume_agent ~sw ~net ~config ~checkpoint ~wrap_transport:Fun.id
@@ -1517,7 +1512,11 @@ let run_blocks_internal_in_scope
       Log.Runtime_agent.debug "agent errored: %s" detail;
       Error (run_failure_of_capture execution_capture err))
   with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn ->
+    (* The turn was cancelled: no run error will close a cut-off request. *)
+    let bt = Printexc.get_raw_backtrace () in
+    settle_cancelled_attempts execution_capture;
+    Printexc.raise_with_backtrace exn bt
   | exn ->
     let bt = Printexc.get_backtrace () in
     let detail =

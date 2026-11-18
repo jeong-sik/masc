@@ -449,6 +449,150 @@ let missing_admission_map_has_no_occurrence_identity () =
        | Ok _ -> () | Error error -> fail error.message);
       check bool "unknown metadata does not block the tool" true !ran)
 
+(* #52969: the [runtime_execution_terminal] rows one capture emitted. *)
+let terminal_rows ~since_seq observation_id =
+  Log.Ring.recent ~since_seq ~module_filter:"Telemetry" ~order:`Oldest_first ()
+  |> List.filter (fun (row : Log.Ring.entry) ->
+    Yojson.Safe.Util.member "event" row.details = `String "runtime_execution_terminal"
+    && Yojson.Safe.Util.member "observation_id" row.details = `String observation_id)
+
+let row_field key (row : Log.Ring.entry) = Yojson.Safe.Util.member key row.details
+
+let fixture_config ~name base_url =
+  let provider_cfg = Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture" ~model_id
+    ~base_url ~request_path:"/v1/chat/completions" () in
+  Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+    ~name ~provider_cfg ~system_prompt ~tools:[]
+
+let body_deadline_s = 0.3
+let body_deadline_floor_ms = 200
+
+(* Agent Core arms the body deadline outside the run's transport, so the
+   deadline cancels the request first and becomes the run's error after it.
+   The attempt still closes once, with that error and the time it ran. *)
+let sync_body_timeout_closes_its_attempt_with_the_timeout () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  install_catalog ~sw ~supports_native_streaming:false ();
+  Log.set_level Log.Info;
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+    (Exact_output_fixture.Delay_then_reply
+       (Exact_output_fixture.fixture_wait_seconds, json_response)) in
+  let config = fixture_config ~name:"body-timeout" server.base_url in
+  let config = { config with body_timeout_s = Some body_deadline_s } in
+  let result = Eio.Time.with_timeout_exn env#clock
+    Exact_output_fixture.fixture_wait_seconds (fun () ->
+      Runtime_agent.run ~sw ~net:env#net ~config
+        ~execution_capture:(Runtime_agent.execution_capture config) goal) in
+  match result with
+  | Error (Runtime_agent.Failed_after_dispatch { runtime_observation; error }) ->
+    (match runtime_observation.attempts with
+     | [ attempt ] ->
+       check (option string) "the attempt carries the run's timeout error"
+         (Some (Agent_core.Error.to_string error)) attempt.error;
+       check bool "the attempt keeps the time the request ran" true
+         (match attempt.latency_ms with
+          | Some latency_ms -> latency_ms >= body_deadline_floor_ms
+          | None -> false)
+     | attempts -> failf "one request, %d attempts" (List.length attempts));
+    (match terminal_rows ~since_seq runtime_observation.observation_id with
+     | [ row ] ->
+       check bool "the terminal reports a failure" true
+         (row_field "outcome" row = `String "failure")
+     | rows -> failf "one request, %d terminal events" (List.length rows));
+    check int "one request reached the provider" 1 (Exact_output_fixture.post_count server)
+  | Error (Runtime_agent.Failed_before_dispatch error) ->
+    failf "a timed-out request lost its capture: %s" (Agent_core.Error.to_string error)
+  | Ok _ -> fail "a request past its body deadline must fail the run"
+
+let cancelled_turn_closes_its_attempt_as_cancelled () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  install_catalog ~sw ~supports_native_streaming:false ();
+  Log.set_level Log.Info;
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+    (Exact_output_fixture.Delay_then_reply
+       (Exact_output_fixture.fixture_wait_seconds, json_response)) in
+  let config = fixture_config ~name:"turn-cancel" server.base_url in
+  let capture = Runtime_agent.execution_capture config in
+  let ended = Eio.Time.with_timeout_exn env#clock
+    Exact_output_fixture.fixture_wait_seconds (fun () ->
+      Eio.Fiber.first
+        (fun () ->
+           match Runtime_agent.run ~sw ~net:env#net ~config ~execution_capture:capture goal with
+           | Ok _ | Error _ -> `Run_returned)
+        (fun () ->
+           Eio.Promise.await server.first_request_arrived;
+           `Turn_cancelled)) in
+  check bool "the turn was cancelled while its request was in flight" true
+    (ended = `Turn_cancelled);
+  match Runtime_agent.run_failure_of_capture capture (Agent_core.Error.Internal "turn cancelled") with
+  | Runtime_agent.Failed_after_dispatch { runtime_observation; error = _ } ->
+    (match runtime_observation.attempts with
+     | [ attempt ] ->
+       check bool "the cancelled attempt is closed" true
+         (Option.is_some attempt.error && Option.is_some attempt.latency_ms)
+     | attempts -> failf "one request, %d attempts" (List.length attempts));
+    (match terminal_rows ~since_seq runtime_observation.observation_id with
+     | [ row ] ->
+       check bool "the terminal reports a cancellation" true
+         (row_field "outcome" row = `String "cancelled")
+     | rows -> failf "one request, %d terminal events" (List.length rows))
+  | Runtime_agent.Failed_before_dispatch _ ->
+    fail "a cancelled request lost its capture"
+
+let sequential_requests_close_their_own_attempts () =
+  Eio_main.run @@ fun _env ->
+  Log.set_level Log.Info;
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
+  let config = fixture_config ~name:"sequential-attempts" "http://127.0.0.1:9" in
+  let capture = Runtime_agent.execution_capture config in
+  let response : Agent_core.Types.api_response =
+    { id = "reply-1"; model = model_id; unreadable_tool_uses = []; stop_reason = EndTurn
+    ; usage = None; content = [ Agent_core.Types.Text answer ]; telemetry = None } in
+  let calls = ref 0 in
+  let first_entered, enter_first = Eio.Promise.create () in
+  let transport = Runtime_agent.For_testing.capture_provider_attempts capture
+    (Llm_provider.Llm_transport.custom
+       { complete_sync = (fun _ ->
+           incr calls;
+           (match !calls with
+            | 1 -> Eio.Promise.resolve enter_first (); Eio.Fiber.await_cancel ()
+            | _ -> ());
+           { response = Ok response; latency_ms = None })
+       ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _ -> Ok response) }) in
+  let request : Llm_provider.Llm_transport.completion_request =
+    { config = config.provider_cfg; messages = []; tools = []; admitted_http_body = None
+    ; capture_id = None; observe_http_status = None; observe_wire_chunk = None
+    ; request_wire_observer = None; stream_idle_timeout_s = None
+    ; first_event_timeout_s = None; body_timeout_s = None } in
+  let first =
+    Eio.Fiber.first
+      (fun () -> ignore (transport.invoke_sync request); `Returned)
+      (fun () -> Eio.Promise.await first_entered; `Cut_off) in
+  check bool "the first request was cut off" true (first = `Cut_off);
+  ignore (transport.invoke_sync request);
+  match Runtime_agent.run_failure_of_capture capture (Agent_core.Error.Internal "inspect") with
+  | Runtime_agent.Failed_after_dispatch { runtime_observation; error = _ } ->
+    (match runtime_observation.attempts with
+     | [ cut_off; returned ] ->
+       check bool "the cut-off request closed its own attempt" true
+         (cut_off.attempt_index = 0 && Option.is_some cut_off.error);
+       check bool "the second request closed its own attempt" true
+         (returned.attempt_index = 1 && Option.is_none returned.error
+          && Option.is_some returned.latency_ms)
+     | attempts -> failf "two requests, %d attempts" (List.length attempts));
+    let rows = terminal_rows ~since_seq runtime_observation.observation_id in
+    check bool "one terminal per request, in request order" true
+      (List.map (fun row -> row_field "attempt_index" row, row_field "outcome" row) rows
+       = [ `Int 0, `String "cancelled"; `Int 1, `String "success" ])
+  | Runtime_agent.Failed_before_dispatch _ -> fail "two requests left no attempt"
+
 let () =
   run "runtime agent streaming capability"
     (List.map
@@ -470,6 +614,13 @@ let () =
              ~observe:true ~durable_execution:false);
           test_case "refused JSON completion publishes no response" `Quick
             failed_completion_has_no_progress]
+       ; "execution capture attempts",
+         [ test_case "a sync body timeout closes its attempt with the timeout" `Quick
+             sync_body_timeout_closes_its_attempt_with_the_timeout
+         ; test_case "a cancelled turn closes its attempt as cancelled" `Quick
+             cancelled_turn_closes_its_attempt_as_cancelled
+         ; test_case "sequential requests close their own attempts" `Quick
+             sequential_requests_close_their_own_attempts ]
        ; "completed media and original tool admission",
          List.map (fun (name, entry) -> test_case name `Quick
            (completed_media_and_tools entry))

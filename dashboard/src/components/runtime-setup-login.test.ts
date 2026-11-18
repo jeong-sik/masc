@@ -165,6 +165,70 @@ it('explicitly retries a different recovered account without replacing choices b
   expect(api.discoverSetupModels).toHaveBeenLastCalledWith({ integration_id: 'codex', account_ref: account }, expect.anything())
 })
 
+// #53002: the default connection of the account and a fallback of another
+// provider are chosen, and the same account logs in again.
+function renderChosenDefaultAndFallback() {
+  const chosen = {
+    ...inventory('codex', 'codex-app-server'),
+    integrations: [['codex', 'codex-app-server'], ['other', 'openai-compatible-http']].map(([id, protocol]) => (
+      { id, display_name: id, protocol, setup_support: 'existing_connection' })),
+    account_groups: [{ id: '1'.repeat(32), integration_ids: ['codex'], runtime_ids: ['codex.luna'] }],
+    runtimes: [['codex', 'codex-app-server'], ['other', 'openai-compatible-http']].map(([id, protocol]) => (
+      { id: `${id}.luna`, provider_id: id!, display_name: id!, protocol: protocol!, model: 'luna', endpoint: null })),
+  }
+  render(html`<${RuntimeSetupPicker} inventory=${chosen} onSaved=${vi.fn()} />`)
+  fireEvent.click(screen.getByLabelText(/연결 codex\.luna/))
+  fireEvent.click(screen.getByLabelText(/연결 other\.luna/))
+  fireEvent.change(screen.getByLabelText('공급자'), { target: { value: 'codex' } })
+}
+async function expectDefaultAndFallbackSaved() {
+  const order = screen.getByRole('list', { name: '기본 모델과 대체 순서' }).querySelectorAll('li')
+  expect([...order].map(row => row.textContent)).toEqual([
+    expect.stringMatching(/^기본 · .*연결 codex\.luna/), expect.stringMatching(/^대체 1 · .*연결 other\.luna/)])
+  fireEvent.click(screen.getByText('검증 후 선택 저장'))
+  await waitFor(() => expect(api.saveSetupSelections).toHaveBeenCalledOnce())
+  expect(vi.mocked(api.saveSetupSelections).mock.calls[0]![1]).toMatchObject([
+    { kind: 'existing', id: 'codex.luna' }, { kind: 'existing', id: 'other.luna' }])
+}
+// A login's result reaches the picker on its stream, or as the receipt read
+// after that stream dropped mid-login.
+const resultPaths = ['its stream', 'the receipt read after its stream dropped'] as const
+function loginEndsAs(account_ref: string, path: typeof resultPaths[number]) {
+  vi.mocked(login.streamSetupLogin).mockImplementation(async (source, emit) => {
+    emit({ event: 'started', login_id: id, integration_id: source.integration_id, account_ref: previous })
+    if (path !== 'its stream') throw new Error('Login result not received')
+    emit({ event: 'complete', source: { integration_id: source.integration_id, account_ref }, authentication: 'authenticated' })
+  })
+  vi.mocked(login.fetchLoginReceipt).mockResolvedValue({ login_id: id, integration_id: 'codex', status: 'complete',
+    account_ref, authentication: 'authenticated', invocation_verified: false })
+}
+function expectResultCameOn(path: typeof resultPaths[number]) {
+  expect(login.fetchLoginReceipt).toHaveBeenCalledTimes(path === 'its stream' ? 0 : 1)
+}
+it.each(resultPaths)('logging the selected account in again keeps the default and the fallback when the result comes on %s', async path => {
+  renderChosenDefaultAndFallback()
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  loginEndsAs(previous, path)
+  fireEvent.click(screen.getByText('선택한 계정 다시 로그인'))
+  // The login just ran, so the account's models are read again.
+  await waitFor(() => expect(api.discoverSetupModels).toHaveBeenCalledTimes(2))
+  await screen.findByText(/이 계정으로 모델 목록을 읽었습니다/)
+  expect(login.streamSetupLogin).toHaveBeenCalledWith({ integration_id: 'codex', account_ref: previous }, expect.anything(), expect.anything())
+  expectResultCameOn(path)
+  await expectDefaultAndFallbackSaved()
+})
+it.each(resultPaths)('a login that ends as another account drops the connections chosen with the earlier one when the result comes on %s', async path => {
+  renderChosenDefaultAndFallback()
+  fireEvent.click(screen.getByText('서버 계정 선택 후 모델 목록 확인')); await screen.findByLabelText('Selected Model')
+  loginEndsAs(account, path)
+  fireEvent.click(screen.getByText('선택한 계정 다시 로그인'))
+  await waitFor(() => expect(api.discoverSetupModels).toHaveBeenLastCalledWith({ integration_id: 'codex', account_ref: account }, expect.anything()))
+  await screen.findByText(/이 계정으로 모델 목록을 읽었습니다/)
+  expectResultCameOn(path)
+  expect((screen.getByLabelText(/연결 codex\.luna/) as HTMLInputElement).checked).toBe(false)
+  expect((screen.getByLabelText(/연결 other\.luna/) as HTMLInputElement).checked).toBe(true)
+})
+
 it.each([['codex', 'codex-app-server'], ['claude', 'claude-code']])('%s account replacement clears hidden sibling connections but preserves another account', async (client, protocol) => {
   const first = `${client}-one`, sibling = `${client}-two`, other = `${client}-other`
   const grouped = {

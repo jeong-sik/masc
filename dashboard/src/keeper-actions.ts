@@ -207,13 +207,20 @@ async function stopKeeperChatOperation(
   signal: AbortSignal | undefined,
 ): Promise<KeeperThreadCancelOutcome> {
   let refused: unknown
+  let cancelTaken = false
   try {
     await (signal ? cancelKeeperChatOperation(name, id, { signal }) : cancelKeeperChatOperation(name, id))
+    cancelTaken = true
+  } catch (err) {
+    refused = err
+  }
+  if (cancelTaken) {
+    // The server took the cancel. Forgetting the operation here is local
+    // bookkeeping: it is kept out of the try so that nothing it does can read
+    // as a refusal and send an interrupt after a cancel that succeeded.
     removeTrackedKeeperChatOperation(id)
     releaseLiveSendRequest(id)
     return { kind: 'cancelled' }
-  } catch (err) {
-    refused = err
   }
   // Only this refusal says the operation is out of the queue. After any other
   // one it may still be queued, so a turn that is not running leaves the
@@ -1262,7 +1269,9 @@ async function handoffCancelledStreamToOperationHydration(
   const settled = hydrateTrackedKeeperChatOperation(request)
   // Resuming the watch starts the Keeper's action error from nothing, in the
   // same task the stop answered in. Said before that, the reason the turn is
-  // still running would never reach the screen.
+  // still running would never reach the screen. A watch that returns before
+  // it clears anything, because another watch of this operation is already
+  // running, leaves the error as it was, and the reason is written the same.
   if (stopFailure !== null) setRecordValue(keeperActionErrors, request.keeperName, stopFailure)
   await settled
 }

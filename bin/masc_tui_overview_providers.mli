@@ -162,6 +162,7 @@ val section :
     the header counts still cover every account. *)
 
 val section_cards :
+  ko:bool ->
   providers:Masc_tui_types.overview_providers_reading ->
   runtimes:Masc_tui_types.overview_quota_reading ->
   account_emails:Masc_tui_types.overview_account_emails_reading ->
@@ -176,7 +177,8 @@ val section_cards :
     exhaustion and its email, with the bars sized to the card. Every card in
     one section shares the same label, gauge and percent column measurement,
     computed at the narrowest paired card's content width, so neighbouring
-    accounts read on the same axes. Labels larger
+    accounts read on the same axes. [ko] is the language of what a card's
+    edges say. Labels larger
     than the viewport described by [width] and [rows] retain the ends where
     their boundaries are known and mark omissions instead of expanding an
     unbounded number of rows. Below 20 columns, the label bound uses 20 columns

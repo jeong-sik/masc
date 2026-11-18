@@ -783,7 +783,7 @@
  (name masc_tui_card)
  (wrapped false)
  (modules masc_tui_card)
- (libraries masc_tui_message_layout masc_tui_theme))
+ (libraries masc_tui_message_layout masc_tui_theme masc_tui_value))
 
 (library
  (name masc_tui_overview_cards)

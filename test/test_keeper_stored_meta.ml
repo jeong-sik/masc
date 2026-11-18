@@ -21,6 +21,7 @@ module Registry = Masc.Keeper_owner_registry
 module Projection = Masc.Keeper_owner_projection
 module Board_address = Masc.Keeper_board_address
 module List_row = Masc.Keeper_tool_surface_ops
+module Usage = Masc.Keeper_usage_resolution
 
 (* A Keeper list row resolves the default runtime id, which fails closed when
    no runtime is loaded (RFC-0206 §2.1). Minimal catalog, loaded once for the
@@ -145,6 +146,72 @@ let busy_meta name : Meta.keeper_meta =
           }
       ; last_turn_id = 9
       ; message_scope_ack_id = Some "row-17"
+      }
+  }
+;;
+
+(* The stored fields that have a structure of their own, filled: the usage
+   cursor and the last usage resolution, a cost with a reading (written as an
+   object, where a bare sum is written as a number), an operator pause with
+   its reason, and the Keeper's id. The resolver and the cost module build
+   their values, so each is one the server can hold. *)
+let accounted_meta name : Meta.keeper_meta =
+  let meta = busy_meta name in
+  let sample : Usage.sample =
+    { input_tokens = 1_200
+    ; output_tokens = 340
+    ; cache_creation_input_tokens = 16
+    ; cache_read_input_tokens = 900
+    ; cost_usd = Some 0.125
+    }
+  in
+  let resolution, cursor =
+    Usage.resolve
+      ~cursor:None
+      ~basis:
+        (Usage.Conversation_counter
+           { runtime_id = "runtime-a"
+           ; conversation_id = "conversation-7"
+           ; position = Usage.Fresh
+           })
+      ~observation:(Some sample)
+      ~observed_at:(1_700_000_050.0 +. (0.1 +. 0.2))
+  in
+  let cursor =
+    match cursor with
+    | Some cursor -> cursor
+    | None -> Alcotest.fail "the usage resolver kept no cursor for a fresh counter"
+  in
+  let total_cost_usd =
+    match
+      Keeper_cost_coverage.observe
+        meta.runtime.usage.total_cost_usd
+        (Keeper_cost_coverage.Priced 0.125)
+    with
+    | Ok cost -> cost
+    | Error error ->
+      Alcotest.failf "cost fixture failed: %s" (Keeper_cost_coverage.error_to_string error)
+  in
+  (match Keeper_cost_coverage.to_json total_cost_usd with
+   | `Assoc _ -> ()
+   | _ -> Alcotest.fail "the cost fixture is written as a bare number");
+  let keeper_id =
+    match Keeper_id.Uid.of_string "keeper-3f2b8c1e-5d47-4a9b-8e6f-0123456789ab" with
+    | Ok keeper_id -> keeper_id
+    | Error detail -> Alcotest.failf "keeper id fixture failed: %s" detail
+  in
+  { meta with
+    paused = true
+  ; latched_reason =
+      Some
+        (Keeper_latched_reason.Operator_paused
+           { operator_actor = Keeper_latched_reason.Keeper_down })
+  ; keeper_id = Some keeper_id
+  ; runtime =
+      { meta.runtime with
+        usage = { meta.runtime.usage with total_cost_usd }
+      ; usage_cursor = Some cursor
+      ; last_usage_resolution = Some resolution
       }
   }
 ;;
@@ -798,6 +865,65 @@ let test_write_that_raised_sends_readers_to_the_file () =
       (fun () -> check_readers_get_the_file config name owner)
 ;;
 
+(* {1 An Owner meta that has no read-back} *)
+
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+(* The warnings that say a Keeper's meta has no read-back. The ring is the
+   log's in-process sink. *)
+let no_read_back_warnings name ~since =
+  Log.Ring.recent ~limit:1000 ~since_seq:since ~module_filter:"Keeper" ()
+  |> List.filter (fun (entry : Log.Ring.entry) ->
+    entry.level = Log.Warn
+    && Option.equal String.equal entry.keeper_name (Some name)
+    && Astring.String.is_infix ~affix:"does not read back" entry.message)
+  |> List.length
+;;
+
+(* The encoder writes [agent_core_env] as the Owner holds it and the decoder
+   refuses a key that comes twice, so the snapshot of this meta does not
+   decode. The Owner cannot stand for a file read then. Every read goes to
+   the file and hands out the file's answer, and the reason is logged once
+   for the meta, not once for each read. *)
+let test_meta_without_a_read_back_is_read_from_its_file () =
+  with_workspace
+  @@ fun ~clock:_ config ->
+  let name = "stored-meta-no-read-back" in
+  declare config name ~addressed:true;
+  let held = { (fixture_meta name) with agent_core_env = [ "TWICE", "1"; "TWICE", "2" ] } in
+  (match Store.snapshot_read_back held with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "the fixture meta reads back, so this case shows nothing");
+  Eio.Switch.run
+  @@ fun sw ->
+  let owner =
+    start_owner ~sw config ~store:accepting ~keeper_name:name ~initial_meta:(Some held)
+  in
+  with_installed config name owner
+  @@ fun () ->
+  (match
+     Projection.meta_the_file_holds
+       ~base_path:config.Workspace.base_path
+       ~keeper_name:name
+   with
+   | Some standing ->
+     Alcotest.(check (list (pair string string)))
+       "the Owner stands for the file with the meta it was started with"
+       held.agent_core_env
+       standing.agent_core_env
+   | None -> Alcotest.fail "the Owner does not stand for the file");
+  let before = latest_log_seq () in
+  check_the_file_answer_is_handed_out config name;
+  Alcotest.(check int)
+    "said once for the meta, however many reads it sent to the file"
+    1
+    (no_read_back_warnings name ~since:before)
+;;
+
 (* {1 The premise for an Owner that has written nothing} *)
 
 (* Such an Owner holds what the decoder gave for a file of another process.
@@ -818,6 +944,8 @@ let test_read_back_of_a_decoded_meta_is_that_meta () =
       check_same_meta label decoded (read_back label decoded))
     [ "a new Keeper's meta", fixture_meta "stored-meta-new"
     ; "a meta with its stored fields filled", busy_meta "stored-meta-busy"
+    ; ( "a meta with its usage accounting, a pause and an id"
+      , accounted_meta "stored-meta-accounted" )
     ; ( "a meta that holds TOML values"
       , { (busy_meta "stored-meta-configured") with
           mention_targets = [ "ops" ]
@@ -828,9 +956,14 @@ let test_read_back_of_a_decoded_meta_is_that_meta () =
     ];
   let name = "stored-meta-foreign-file" in
   let label = "a meta decoded from a file of another process" in
-  ignore (leave_foreign_snapshot config (busy_meta name) : string);
+  ignore (leave_foreign_snapshot config (accounted_meta name) : string);
   match Store.read_meta config name with
-  | Ok (Some decoded) -> check_same_meta label decoded (read_back label decoded)
+  | Ok (Some decoded) ->
+    Alcotest.(check bool)
+      (label ^ ": the file's usage cursor was decoded")
+      true
+      (Option.is_some decoded.runtime.usage_cursor);
+    check_same_meta label decoded (read_back label decoded)
   | Ok None -> Alcotest.fail "the fixture file holds no meta"
   | Error detail -> Alcotest.failf "the fixture file did not read: %s" detail
 ;;
@@ -883,6 +1016,10 @@ let () =
             "a meta write that raised"
             `Quick
             test_write_that_raised_sends_readers_to_the_file
+        ; Alcotest.test_case
+            "an Owner meta that has no read-back"
+            `Quick
+            test_meta_without_a_read_back_is_read_from_its_file
         ] )
     ; ( "read-back premise"
       , [ Alcotest.test_case

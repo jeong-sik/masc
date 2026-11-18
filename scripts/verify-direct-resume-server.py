@@ -222,7 +222,7 @@ def main():
             raise AssertionError('Effect receipt escaped isolated base')
         if effect.read_bytes() != b'one real filesystem effect\n':
             raise AssertionError('Actual filesystem bytes differ')
-        rows = [json.loads(line) for path in (base / '.masc/tool_calls').rglob('*.jsonl') for line in path.read_text().splitlines()]
+        rows = [json.loads(line) for path in (base / '.masc/tool_calls').rglob('*.jsonl') for line in path.read_text().splitlines() if line.strip()]
         writes = [row for row in rows if row.get('keeper') == keeper and row.get('tool') == 'Write']
         if len(writes) != 1 or recorded_call_outcome(writes[0]) is not RecordedCallOutcome.SUCCEEDED:
             raise AssertionError('Expected one successful durable Write execution')

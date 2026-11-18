@@ -332,6 +332,18 @@ module Count = struct
   let reading ~ko noun count = written ~ko noun count (grouped count)
 
   let at_least ~ko noun count = written ~ko noun count ("≥" ^ grouped count)
+
+  (* The word ahead of the server's total when a list is read in part. *)
+  let whole ~ko = if ko then "전체" else "of"
+
+  (* Two facts of the same rank (RFC section 6.5). *)
+  let joiner = " \xc2\xb7 "
+
+  let partial ~ko ~loaded ~total =
+    grouped loaded ^ joiner ^ whole ~ko ^ " " ^ grouped total
+
+  let more ~ko count =
+    if ko then "외 " ^ grouped count else grouped count ^ " more"
 end
 
 module Hash = struct
@@ -352,10 +364,9 @@ module Position = struct
   (* The mark for a value that is absent (RFC section 6.4). *)
   let nothing_selected = "\xe2\x80\x94"
 
-  let text ~whole = function
+  let text ~ko = function
     | Row { at = 0; total } -> nothing_selected ^ "/" ^ Count.grouped total
     | Row { at; total } -> Count.grouped at ^ "/" ^ Count.grouped total
     | Partial { at; loaded; total } ->
-        Count.grouped at ^ "/" ^ Count.grouped loaded ^ " \xc2\xb7 " ^ whole
-        ^ " " ^ Count.grouped total
+        Count.grouped at ^ "/" ^ Count.partial ~ko ~loaded ~total
 end

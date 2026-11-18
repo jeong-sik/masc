@@ -151,9 +151,10 @@ type before =
    all. What the file ends with is then not known, and reading again would
    only know it until the next cut. The append writes a newline first unless
    the file is empty now: its row never joins an unfinished line, and at
-   worst an empty line is left, which the readers of these files skip. The
-   length is read again so that a failed write is taken back from the end
-   the file has now. *)
+   worst an empty line is left. [Fs_compat.load_jsonl] and the [Dated_jsonl]
+   reads pass over an empty line; a reader that splits the file into lines
+   itself has to as well. The length is read again so that a failed write is
+   taken back from the end the file has now. *)
 let observe_once ~io ~start fd =
   let size = io.end_offset fd in
   match start with

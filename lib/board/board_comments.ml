@@ -82,6 +82,48 @@ let duplicate_comment_error_unlocked store pid ~author_id ~parent_cid ~content =
     (List.find_opt repeats (live_comments_unlocked store pid))
 ;;
 
+(* A reply names a comment of the post it is written on: a row the thread read
+   of that post lists. The thread read pages one post's comments and the Keeper
+   wake for a reply looks its parent up in that same list, so a parent held by
+   another post, or by none, leaves a reply neither of them can place.
+
+   Membership follows the thread read, not the comment cap: a timed comment
+   stays a parent for as long as the listing shows it, which is until the
+   sweeper removes its row.
+
+   One refusal covers a comment of another post and an id that names no
+   comment. Telling the two apart would tell a writer of this post whether an
+   id is a comment of a post it may not read. Stored replies of the first kind
+   were written through masc_board_comment with an id read on a neighbouring
+   thread, so the message says where a reply goes instead of calling the id
+   made up.
+
+   Runs under the store lock; does not mutate anything. *)
+let require_reply_parent_unlocked store pid parent_cid =
+  match parent_cid with
+  | None -> Ok ()
+  | Some parent ->
+    let wanted = Comment_id.to_string parent in
+    let asked = Post_id.to_string pid in
+    let listed =
+      Hashtbl.mem store.comments wanted
+      &&
+      match Hashtbl.find_opt store.comments_by_post asked with
+      | None -> false
+      | Some keys -> List.exists (String.equal wanted) keys
+    in
+    if listed
+    then Ok ()
+    else
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "parent_id is not a comment in the listing of post %s. A reply goes \
+               on the post whose masc_board_post_get listing returned its parent: \
+               reply there, or leave parent_id out to comment on post %s"
+              asked asked))
+;;
+
 let add_comment_with_audience
       store
       ~reader
@@ -126,6 +168,7 @@ let add_comment_with_audience
         | None -> Error (Post_not_found post_id)
         | Some post ->
           let* () = Board_comment_admission.validate_parent ~reader ~post_id ~audience post in
+          let* () = require_reply_parent_unlocked store pid parent_cid in
           (match comment_count_cap_error_unlocked store pid with
            | Some msg -> Error (Validation_error msg)
            | None ->
@@ -170,6 +213,15 @@ let add_comment_with_audience
              later participant routing. Check before the append while holding
              the same lock that serializes the posts source. *)
           let* () = require_posts_source_readable store in
+          (* Staging read the parent before this lock was held, and a sweep
+             that ran in between may have removed it for its TTL. The sweep
+             holds this persistence lock for its whole pass, so a parent that
+             is listed here stays listed until the reply is committed.
+             Refusing here means such a reply is never written. *)
+          let* () =
+            with_lock store (fun () ->
+              require_reply_parent_unlocked store pid parent_cid)
+          in
           let* receipt = append_comment store ~reader comment in
           let committed = with_lock store (fun () ->
               (* Commit from a fresh read: the post can change or vanish
@@ -181,6 +233,10 @@ let add_comment_with_audience
               | None -> Error (Post_not_found post_id)
               | Some post ->
                 let* () = Board_comment_admission.validate_parent ~reader ~post_id ~audience post in
+                (* Read again from the model this commit publishes, like the
+                   checks around it. The sweep is not what this guards
+                   against: the check before the append already covers it. *)
+                let* () = require_reply_parent_unlocked store pid parent_cid in
                 (match comment_count_cap_error_unlocked store pid with
                  | Some msg -> Error (Validation_error msg)
                  | None ->

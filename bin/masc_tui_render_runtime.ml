@@ -1327,7 +1327,7 @@ let usage_lines ~cols ~rows (state : state) =
   let open Masc.Tui_decode_usage in
   let text = Overview_providers.text_for_viewport ~columns:(framed_inner_width cols) ~rows in
   let scopes () =
-    match Overview_providers.section_cards
+    match Overview_providers.section_cards ~ko:(state.ui_language = Lang_ko)
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
             ~show_limit_exhausted:state.usage_show_limit_exhausted

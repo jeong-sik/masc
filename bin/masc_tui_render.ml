@@ -162,30 +162,42 @@ let operator_actions_reading (state : state) =
      retained @ sections @ operator_notice_sections state)
 
 (* Requests and capacity have separate observation paths. In particular a
-   working HTTP connection does not make a retained fleet reading current. *)
-let overview_capacity_badge (state : state) =
-  let text ko en = ui_text state ~ko ~en in
+   working HTTP connection does not make a retained fleet reading current.
+
+   The capacity card's status. The mark follows the same reading the colour
+   already followed: a retained reading is stale, a fleet that needs the
+   operator is the operator's turn, a grade that is not ok needs a look.
+   With no reading the mark stands alone, as on every other card: RFC
+   tui-one-screen-grammar section 6.4 keeps "not observed" out of a value's
+   place, and the card's body already says why. *)
+let overview_capacity_status (state : state) : Masc_tui_card.status =
   let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
-      Some (text "미관측" "unread", Theme.recede ())
+      { Masc_tui_card.symbol = Masc_tui_card.Unknown Masc_tui_value.Unknown.Unread
+      ; word = ""
+      ; tone = Theme.recede () }
   | Unreachable _ | Unavailable _ | Cannot_read _ ->
-      Some (text "관측 불가" "unavailable", Theme.warn ())
+      { Masc_tui_card.symbol = Masc_tui_card.Unknown Masc_tui_value.Unknown.Read_failed
+      ; word = ""
+      ; tone = Theme.warn () }
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
       let retained =
         Option.is_some trouble || state.workspace_identity <> Workspace_identity_match
       in
       let grade = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
-      let grade_style =
-        if retained then Theme.warn ()
-        else if fleet.fs_operator_action_required then Theme.bad ()
-        else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status) then Theme.warn ()
-        else Theme.ok ()
+      let mark, tone =
+        if retained then Masc_tui_value.Mark.Caution, Theme.warn ()
+        else if fleet.fs_operator_action_required then Masc_tui_value.Mark.Yours, Theme.bad ()
+        else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status) then
+          Masc_tui_value.Mark.Caution, Theme.warn ()
+        else Masc_tui_value.Mark.Settled, Theme.ok ()
       in
-      Some
-        ( Printf.sprintf "%d/%d %s" fleet.fs_running_count fleet.fs_bootable_count grade
-        , grade_style )
+      { Masc_tui_card.symbol = Masc_tui_card.Mark mark
+      ; word =
+          Printf.sprintf "%d/%d %s" fleet.fs_running_count fleet.fs_bootable_count grade
+      ; tone }
 
 let overview_capacity_lines ?(cells = 48) (state : state) =
   let text ko en = ui_text state ~ko ~en in
@@ -347,41 +359,35 @@ let render_overview (state : state) home =
       let card_rows =
         if List.length body.hb_rows <> body.hb_total then None
         else
-          let titles : Masc_tui_overview_cards.titles =
-            { decisions=ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
-            ; continuation=ui_text state ~ko:"대화" ~en:"Conversations"
-            ; capacity=ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
-            ; actions=ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed" } in
-          let hk tag =
+          let key tag =
             if state.keeper_navigation_open then None
             else Some (tag, Ansi.bold ^ Theme.accent ())
           in
-          let decision_count = List.length all_decisions in
-          let chromes : Masc_tui_overview_cards.chromes =
+          (* Every card counts the rows it lists; none of them owns the
+             keyboard yet, so each writes its count. *)
+          let rows_of rows = Some (Masc_tui_card.Whole (List.length rows)) in
+          let edges : Masc_tui_overview_cards.edges =
             { decisions =
-                { Masc_tui_card.hotkey = hk "p "
-                ; badge =
-                    Some
-                      ( (if decision_count = 0 then ui_text state ~ko:"대기 없음" ~en:"clear"
-                         else string_of_int decision_count)
-                      , if decision_count = 0 then Theme.recede () else Theme.warn () )
-                }
+                { Masc_tui_card.name = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
+                ; key = key "p"; status = None; count = rows_of all_decisions
+                ; focus = Masc_tui_card.Unfocused }
             ; continuation =
-                { Masc_tui_card.hotkey = None
-                ; badge = Some (string_of_int (List.length continuation), Theme.recede ())
-                }
+                { Masc_tui_card.name = ui_text state ~ko:"대화" ~en:"Conversations"
+                ; key = None; status = None; count = rows_of continuation
+                ; focus = Masc_tui_card.Unfocused }
             ; capacity =
-                { Masc_tui_card.hotkey = hk "m "
-                ; badge = overview_capacity_badge state
-                }
+                { Masc_tui_card.name = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
+                ; key = key "m"; status = Some (overview_capacity_status state); count = None
+                ; focus = Masc_tui_card.Unfocused }
             ; actions =
-                { Masc_tui_card.hotkey = hk "v "
-                ; badge = Some (string_of_int (List.length operator_rows), Theme.bad ())
-                }
+                { Masc_tui_card.name =
+                    ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
+                ; key = key "v"; status = None; count = rows_of operator_rows
+                ; focus = Masc_tui_card.Unfocused }
             }
           in
           let status ~cells = overview_capacity_lines ~cells state in
-          Masc_tui_overview_cards.draw ~chromes ~titles
+          Masc_tui_overview_cards.draw ~ko:(state.ui_language = Lang_ko) ~edges
             ~empty_decisions:(ui_text state ~ko:"대기 중인 요청이 없습니다." ~en:"No decision is waiting on you.")
             ~inner:inner_cols ~rows:available
             ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)

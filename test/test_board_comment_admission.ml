@@ -279,6 +279,82 @@ let test_exact_repeat_is_refused base =
   expect_repeat "durable comment still blocks the repeat after a restart"
     (repeat_message parent ~author:"outsider" first) (append restarted parent "same words")
 
+(* The refusal a reply gets when its parent is not a comment of its post. *)
+let parent_refusal label = function
+  | Error (Board.Validation_error message) -> message
+  | Error error -> Alcotest.fail (label ^ ": " ^ Board.show_board_error error)
+  | Ok _ -> Alcotest.fail (label ^ ": the reply was stored")
+
+(* A reply hangs under a comment of the post it is written on. A client that
+   had two threads open sent post B with a comment of post A as the parent
+   (#52951), and callers of masc_board_comment did the same with an id read on
+   another thread. Stored, that reply has no parent row in the thread it
+   belongs to, and the Keeper event for it names a comment the thread does not
+   hold. *)
+let test_reply_parent_belongs_to_post base =
+  let store = fresh base in
+  let first = post store ~content:"first thread" () in
+  let second = post store ~content:"second thread" () in
+  let on_first = require (append store first "comment on the first thread") in
+  let on_first_id = Board.Comment_id.to_string on_first.id in
+  let nowhere_id = Board.Comment_id.to_string (Board.Comment_id.generate ()) in
+  let path = Board.comments_path store in
+  let before = bytes path in
+  let on_another_post =
+    parent_refusal "parent on another post"
+      (append_under store second ~parent_id:on_first_id "reply sent with the other thread's parent")
+  in
+  let on_no_post =
+    parent_refusal "parent that names no comment"
+      (append_under store second ~parent_id:nowhere_id "reply under a comment nobody wrote")
+  in
+  (* A writer of the second post may not be a reader of the first: the answer
+     must not say whether the id is a comment somewhere. *)
+  Alcotest.(check string) "one refusal for a comment elsewhere and for no comment"
+    on_another_post on_no_post;
+  same_bytes "refused replies write nothing" before path;
+  Alcotest.(check int) "refused replies are not in the model" 1 (Hashtbl.length store.comments);
+  let reply = require (append_under store first ~parent_id:on_first_id "reply on its own thread") in
+  Alcotest.(check (option string)) "a reply on its own thread keeps its parent" (Some on_first_id)
+    (Option.map Board.Comment_id.to_string reply.parent_id)
+
+(* The parent is listed when the reply stages and gone when the reply is
+   admitted to persistence: a sweep that queued first removes it for its TTL.
+   The reply is refused before its row is appended. A refusal after the append
+   would have rewritten the comments file to take the row out again. *)
+let test_parent_swept_while_reply_waits_for_persistence base =
+  let store = fresh base in
+  let thread = post store () in
+  let parent = require (append store thread "comment whose time runs out") in
+  let parent_id = Board.Comment_id.to_string parent.id in
+  Hashtbl.replace store.comments parent_id { parent with expires_at = 1.0 };
+  let path = Board.comments_path store in
+  let before = bytes path in
+  let swept, reply =
+    Eio.Switch.run (fun sw ->
+      let swept_done, resolve_swept = Eio.Promise.create () in
+      let reply_done, resolve_reply = Eio.Promise.create () in
+      Board.with_persist_lock store (fun () ->
+        (* Each fiber runs until it waits for this lock, and the mutex admits
+           waiters in arrival order: the sweep, then the reply, which has
+           already staged against the listed parent. *)
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve resolve_swept (Board.sweep store));
+        Eio.Fiber.fork ~sw (fun () ->
+          Eio.Promise.resolve resolve_reply
+            (append_under store thread ~parent_id "reply written as its parent expires"));
+        Alcotest.(check bool) "the sweep waits for persistence" false
+          (Eio.Promise.is_resolved swept_done);
+        Alcotest.(check bool) "the reply waits behind the sweep" false
+          (Eio.Promise.is_resolved reply_done));
+      Eio.Promise.await swept_done, Eio.Promise.await reply_done)
+  in
+  Alcotest.(check int) "the sweep removed the parent" 1 (snd swept);
+  ignore (parent_refusal "parent swept before the reply was admitted" reply);
+  same_bytes "the refused reply was never written" before path;
+  Alcotest.(check int) "neither the parent nor the reply is in the model" 0
+    (Hashtbl.length store.comments)
+
 let with_fixture f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -305,4 +381,7 @@ let () = match Array.to_list Sys.argv with
        "known append before parent cleanup", test_known_append_parent_cleanup;
        "policy refusal plus parent cleanup", test_refused_policy_parent_cleanup;
        "accepted sub-board deletion keeps comments available", test_deleted_sub_board_keeps_comment_available;
-       "exact repeat of a comment is refused", test_exact_repeat_is_refused]]
+       "exact repeat of a comment is refused", test_exact_repeat_is_refused;
+       "reply parent belongs to the post", test_reply_parent_belongs_to_post;
+       "parent swept while the reply waits for persistence",
+       test_parent_swept_while_reply_waits_for_persistence]]

@@ -229,6 +229,17 @@ module Count : sig
   (** {!reading} for a lower bound: [≥3 tasks], [작업 ≥3개]. A list read
       in part holds this many and may hold more (RFC tui-one-screen-grammar,
       section 6.3). *)
+
+  val partial : ko:bool -> loaded:int -> total:int -> string
+  (** A list read in part: the rows read, then how many the server holds,
+      [50 · 전체 2,000] and [50 · of 2,000]. The word ahead of the total is the
+      one {!Position.text} writes, so a card edge and the position on the
+      same screen say a partial read the same way (RFC tui-one-screen-grammar,
+      section 2). *)
+
+  val more : ko:bool -> int -> string
+  (** Rows that were cut off, not where the reader is: [외 3], [3 more]
+      (RFC tui-one-screen-grammar, section 6.3). *)
 end
 
 (** A digest, such as a revision or a SHA-256. *)
@@ -248,9 +259,10 @@ module Position : sig
             the row's place. *)
     | Partial of { at : int; loaded : int; total : int }
         (** A list read in part: the selected row among the rows read, and
-            how many the server holds: [1/50 · whole 8,347]. *)
+            how many the server holds: [1/50 · 전체 8,347],
+            [1/50 · of 8,347]. *)
 
-  val text : whole:string -> t -> string
-  (** [whole] is the word ahead of the server's total, in the screen's
-      language. *)
+  val text : ko:bool -> t -> string
+  (** [7/29], or [1/50 · 전체 8,347] and [1/50 · of 8,347] for a list read in
+      part. *)
 end

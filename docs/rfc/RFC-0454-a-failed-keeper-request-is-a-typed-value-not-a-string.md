@@ -247,7 +247,7 @@ end
 | P1a | D1 중 `Terminal_effect_failed` 의 `diagnostic` 을 `Keeper_terminal_effect_detail.t` 로 (생성자 목록은 `lib/keeper_runtime/keeper_terminal_effect_detail.mli` 가 정본) | `keeper_internal_error.ml`, 새 detail 모듈, composition surface, bundle, handler, official-client host, recovery worker, `keeper_agent_run.ml`, `keeper_tools_agent_core.ml`, `runtime_official_client_tool` | 사고 composition 재현 테스트에서 실패 객체가 escape 되지 않은 객체로 직렬화된다 |
 | P1b | D1 중 `Provider_attempt_effect_fenced`·`Tool_correction_lost` 의 원인 + `Boundary_observation_failed` 의 원인 + `Keeper_request_failure_core` 투영 + `diagnostic` 을 읽는 TUI 갱신 | `keeper_internal_error.ml`, 새 core 투영 모듈, `keeper_terminal_effect_detail.ml`, `keeper_turn_driver.ml`, `keeper_official_client_host.ml`, `keeper_tool_composition_surface.ml`, `bin/masc_tui_keeper_chat_history.ml` | 사고 에러의 JSON 에 escape 된 JSON 문자열이 0개. TUI 의 host-shutdown 표시가 유지된다 |
 | P2 | D2·D3 + 런타임 typed 원인 + wire 다섯 곳 + composition 실패 객체의 `cause`/`settled` 노드 중복과 `settled` 크기 경계 | `keeper_turn.ml`, stream, `keeper_chat_store.ml`, owner registry, `keeper_codex_runtime.ml`, surface read, broadcast, Slack·Discord | §2.2 생산자 표의 각 경로마다 fixture → 생성자 고정. 옛 row·저널 hard cut 테스트 |
-| P3 | D5 TUI | `bin/masc_tui*.ml` | PTY 시나리오: 사고 에러가 3줄 이하 |
+| P3 | D5 TUI | `bin/masc_tui*.ml` | 실패 원인과 요청 신원이 TUI에 전달되는지 확인 |
 | P4 | D5 대시보드 | `dashboard/` | 컴포넌트 테스트 + 브라우저 스크린샷 |
 | P5 | agent-core 안의 `Internal` 문자열 생산자를 typed 로 | `packages/agent_core/` | `Core_internal` 로 떨어지는 경로 0개 |
 

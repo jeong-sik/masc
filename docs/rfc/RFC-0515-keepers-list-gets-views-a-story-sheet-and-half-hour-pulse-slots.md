@@ -363,7 +363,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 
 ## 3. 층
 
-한 스택으로 쌓는다. 밑동은 이 RFC 다. 층 하나는 한 가지 결과이고 OCaml 약 300줄 이하다.
+한 스택으로 쌓는다. 밑동은 이 RFC 다. 층 하나는 한 가지 결과를 낸다.
 
 | 층 | 결과 | 바뀌는 곳 |
 | --- | --- | --- |
@@ -388,9 +388,9 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | S3b | 지난 턴 · wake · digest 를 시간순 한 목록으로 | 새 모듈 `bin/masc_tui_keeper_feed.ml(i)`, `masc_tui_keeper_last_wake` 를 `masc_tui_keeper_wakes` 로 바꾸고 일정 행마다 가진 wake 를 모두 새것부터 내줌, story 쪽 |
 | W1 | 월드 줄 고르기와 월드 창 | `bin/masc_tui_render_keepers.ml`, 월드 줄 모듈 |
 
-- V2 · V3 · V6 은 main 에 있다. 그 뒤는 G1 → G2 → G3 → G4 → A1 → V8 → V4 → V5 → W1 순서다. G1 이 격자를 한 번 만들고, 뒤 층은 열 값만 더한다(E16). A1 은 `Keeper_memory_age_bins.t` 를 바꾸는 hard cut 이라 서버 · TUI · dashboard 가 한 PR 에서 함께 컴파일돼야 한다. 그래서 300줄 기준을 넘을 수 있다. 서버와 TUI 를 같이 깐다. S 층은 V 층과 따로 main 위에 올린다.
+- V2 · V3 · V6 은 main 에 있다. 그 뒤는 G1 → G2 → G3 → G4 → A1 → V8 → V4 → V5 → W1 순서다. G1 이 격자를 한 번 만들고, 뒤 층은 열 값만 더한다(E16). A1 은 `Keeper_memory_age_bins.t` 를 바꾸는 hard cut 이라 서버 · TUI · dashboard 가 한 PR 에서 함께 컴파일돼야 한다. 서버와 TUI 를 같이 깐다. S 층은 V 층과 따로 main 위에 올린다.
 - P1 · P2 는 보기와 무관하게 지금 화면을 고친다. 그래서 R0 · P1 · P2 를 한 스택으로 먼저 착지하고, V1 부터는 그 뒤에 새로 쌓는다(E14). 어느 스택이든 맨 위 PR 로 한 번에 병합한다(`docs/guides/NATIVE-GITHUB-STACKS.md`).
-- P1 은 서버 저장 · 행 JSON · 디코더 · TUI 칸이 hard cut 으로 함께 바뀌어야 해서 300줄 기준을 넘었다(+707 · −577).
+- P1 은 서버 저장 · 행 JSON · 디코더 · TUI 칸을 같은 층에서 바꿨다.
 - `docs/guides/TUI-KEYS.md` 는 생성 문서다. 키나 범례를 바꾼 층이 생성기 출력과 맞춘다.
 
 ## 4. 하지 않는 것

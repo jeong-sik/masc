@@ -92,7 +92,6 @@ mli 의 30+ helper export 는 "*Exposed for targeted tests*" / "*Exposed for reg
 
 ### 3.3 Non-goals
 
-- godfile cap raise (분리 완료 후 자연 축소 기대).
 - `run_keeper_cycle` 의 *행위* 변경 (semantics-preserving extraction only).
 - `Agent_sdk.Agent.run` 호출 형태 변경.
 
@@ -254,16 +253,12 @@ PR-3 (retry loop body) 가 *전체 LOC delta 의 60%+ 차지* — 별도 RFC sub
 
 - [ ] `keeper_unified_turn_phase_gate.ml(i)` 생성.
 - [ ] `run_keeper_cycle` 가 `decide_and_record` + 3 outcome match 로 변환.
-- [ ] `dune build @check` 통과.
-- [ ] `dune build @runtest` 통과 (기존 keeper turn integration test).
-- [ ] *fundamental-check.yml* 의 모든 lint 통과 (no-inline-* + godfile-size).
-- [ ] `wc -l lib/keeper/keeper_unified_turn.ml` 감소 ≥ 100 LOC.
-- [ ] `gh pr ready` 전 *Best Programmer self-review* 수행 (workflow-pr.md §체크리스트).
+- [ ] 세 갈래의 Keeper 턴 처리와 종료 의미를 보존.
 
 ### 6.2 Phase 완료 정의
 
 - *Active*: PR-1 머지 후 status 갱신.
-- *Implemented*: PR-2/3/4 모두 머지 + `run_keeper_cycle` 최종 LOC < 700 (orchestrator only).
+- *Implemented*: PR-2/3/4를 병합하고 `run_keeper_cycle`에는 단계 조율을 남긴다.
 - 본 RFC 의 `implementation_prs` frontmatter 에 머지 PR 번호 append.
 
 ---

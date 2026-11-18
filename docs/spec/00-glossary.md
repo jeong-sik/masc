@@ -2885,8 +2885,8 @@ status: reference
 
 **Goal Creation Input Check (목표 생성 입력 검증)**
 : 새 Goal 생성 입력의 제목·측정 조건·마감일을 검증하는 입력 불변식 계약(#41399).
-  RFC-0387 B1의 측정 가능한 성공 조건(`metric` 및 `target_value`) 필수 선언에 더해,
-  새 Goal 생성의 모든 진입 경로에서 빈 제목(`title` 누락 또는 공백 문자열)을 거절하며
+  새 Goal은 측정 가능한 성공 조건(`measure`)과 비어 있지 않은 측정 절차(`procedure`)를 요구한다(RFC-0387 B1).
+  생성의 모든 진입 경로에서 빈 제목(`title` 누락 또는 공백 문자열)을 거절하며
   알 수 없는 ID 단독 지정 시 `"Untitled goal"`로 기본 명명하던 폴백을 금지한다. 또한
   `YYYY-MM-DD`로 읽을 수 없는 마감일(`due_date`)은 생성과 수정(`upsert_goal` 업데이트) 모두
   `Rejected`로 거절하고 아무것도 쓰지 않는다. 읽을 수 있는 마감일은 UTC 역일 기준 당일

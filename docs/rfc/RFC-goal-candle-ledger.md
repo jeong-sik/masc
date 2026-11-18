@@ -5,7 +5,7 @@ status: Draft
 created: 2026-09-29
 updated: 2026-11-01
 author: claude
-related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-list", "0267", "0362", "0387", "0435"]
+related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-list", "0267", "0387", "0435"]
 ---
 
 # RFC: Goal 을 끝내면 Candle 을 받고, 초상화 장신구를 산다
@@ -14,7 +14,7 @@ related: ["every-lane-is-one-row-in-one-registry", "exact-lane-walks-one-slot-li
 
 - 다루는 것: Candle 원장, Goal 완료 때의 지급, 기한 초과 감액, 기여자별 분배, 잔액이 시간이 지나며 줄어드는 규칙, 장신구 구매와 착용.
 - 다루지 않는 것: Goal 의 phase(진행 단계) 흐름과 검증. Tool·Skill·모델 구입과 현상금 Task 는 후속 RFC 로 미룬다.
-- 관련 문서: `RFC-0267`(Task 와 Goal 의 연결), `RFC-0362`(Goal owner), `RFC-0387`(Goal 완료 검증), `RFC-0435`(keeper 재화가 행동을 바꾸는지 재는 설계), `RFC-every-lane-is-one-row-in-one-registry`(새 lane 의 등록).
+- 관련 문서: `RFC-0267`(Task 와 Goal 의 연결), `RFC-0387`(Goal 완료 검증), `RFC-0435`(keeper 재화가 행동을 바꾸는지 재는 설계), `RFC-every-lane-is-one-row-in-one-registry`(새 lane 의 등록).
 - 근거 기준: `origin/main` = `f632782f8c` (2026-09-29). 줄 번호는 이 커밋 기준이다. 데이터는 같은 날 이 컴퓨터에서 도는 서버의 `<base-path>/.masc` 에서 읽었다.
 - 표시: **[사실]** 은 코드나 데이터에서 확인한 것이다. **[제안]** 은 이 RFC 가 정하려는 것이다.
 

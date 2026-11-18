@@ -14,7 +14,7 @@ related: ["0056"]
 
 ## §1 Context
 
-Ratchet cap 3,350 lines. Top 5 keeper files all exceed 50% of cap:
+The May 2026 inventory found four large Keeper entry points and a registry with several responsibilities:
 
 | File | Lines | Entry function | Entry lines | % of file |
 |------|-------|----------------|-------------|-----------|
@@ -171,7 +171,6 @@ Estimated scope:
   internal implementation details.
 - **Behavioral changes** — pure refactoring, no logic changes.
 - **Cross-module dependency restructuring** — that's Wave A–C territory.
-- **Lint enforcement of line counts** — ratchet tracking only.
 
 ## §7 Test requirements
 

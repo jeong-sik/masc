@@ -250,7 +250,7 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 | L5(선택) | `Detailed` 둘째 줄에 시도 목록, `runtime_path_rest` 디코딩 | 캡처 |
 
 - 층마다 `gh stack` 의 한 PR 이고 Draft 다. 한 PR 은 토큰 2만 이하로 둔다.
-- L2 부터는 층마다 범위를 먼저 알리고 승인받은 뒤 시작한다.
+- 후속 층의 범위는 [RFC-0511 §3](RFC-0511-the-rest-of-the-keeper-pulse-sheet-lands-as-four-independent-stacks.md#3-바뀌는-것)에서 정한다.
 
 ## 6. 서버 후속(2단계)
 

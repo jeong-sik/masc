@@ -14,9 +14,7 @@ across feature components, including **two distinct same-named `StatusPill`** (`
 — removed 2026-09-16 in #36813 — and `harness-health-sections.ts`). Every keeper-v2 surface port re-rolls these atoms, so the divergence
 compounds. This doc defines the converged `<Pill>` and the migration policy.
 
-Why a doc and not an RFC: this is an additive, test-guarded design-system convergence with no
-behavior change to existing callers. (The RFC-0270 slot is occupied by an unrelated open PR; we use a
-design doc to avoid a numbering collision. Promote to an RFC if the team wants stronger authority.)
+The component convergence preserves the behavior of existing callers.
 
 ## The three existing primitives (two styling lineages)
 

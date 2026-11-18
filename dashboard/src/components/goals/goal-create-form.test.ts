@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/preact'
 import '@testing-library/jest-dom'
 import { h } from 'preact'
-import { createGoal, showGoalCreate, resetGoalCreateForm, goalCreateError, goalCreating, goalCreateOutcomes, _testResetGoalCreateOutcomes } from './goal-create-state'
+import { createGoal, type GoalCreateInput, showGoalCreate, resetGoalCreateForm, goalCreateError, goalCreating, goalCreateOutcomes, _testResetGoalCreateOutcomes } from './goal-create-state'
 import { GoalCreateForm, resetGoalCreateFormLocal } from './goal-create-form'
 import { executionWorkspaceAuthority } from '../../store'
 import { clearStoredToken, currentStoredTokenRevision, setStoredToken } from '../../api/core'
@@ -29,6 +29,19 @@ vi.mock('../common/toast', () => ({ showToast: api.showToast }))
 
 function fillField(id: string, value: string) {
   fireEvent.input(screen.getByTestId(id), { target: { value } })
+}
+function chooseOption(id: string, value: string) {
+  fireEvent.change(screen.getByTestId(id), { target: { value } })
+}
+function fillProcedure(value: string) {
+  fireEvent.input(screen.getByLabelText(/측정 방법/), { target: { value } })
+}
+const countDraft: Pick<GoalCreateInput, 'measure' | 'procedure'> = {
+  measure: { kind: 'count', noun: 'merged PRs', total: '3' }, procedure: 'Count merged PRs linked to the Goal.' }
+function fillCriterion() {
+  fillField('goal-create-total', countDraft.measure.kind === 'count' ? countDraft.measure.total : '')
+  fillField('goal-create-noun', countDraft.measure.kind === 'count' ? countDraft.measure.noun : '')
+  fillProcedure(countDraft.procedure)
 }
 
 const ownedWorkspace = { currentWorkspace: { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' },
@@ -127,23 +140,60 @@ describe('GoalCreateForm side panel', () => {
     expect(submit).toBeDisabled()
     fillField('goal-create-title-input', 'Keep the scheduler responsive')
     expect(submit).toBeDisabled()
-    fillField('goal-create-metric', 'scheduler p99 over 24 hours')
+    chooseOption('goal-create-measure-kind', 'quantity')
+    fillField('goal-create-target', '400')
     expect(submit).toBeDisabled()
-    fillField('goal-create-target', '   ')
+    fillField('goal-create-unit', '   ')
     expect(submit).toBeDisabled()
-    fillField('goal-create-target', '400 ms or less')
+    fillField('goal-create-unit', 'ms')
+    expect(submit).toBeDisabled()
+    fillProcedure('Read scheduler p99 over 24 hours from the trace summary.')
     expect(submit).not.toBeDisabled()
-    expect(screen.getByLabelText(/측정 지표/)).toBeRequired()
-    expect(screen.getByLabelText(/목표 값/)).toBeRequired()
+    expect(screen.getByLabelText(/단위/)).toBeRequired()
+    expect(screen.getByLabelText(/측정 방법/)).toBeRequired()
     expect(api.callMcpToolAtIdentity).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['a count that is not a whole number', 'goal-create-total', '2.5', '개수는 1 이상의 정수로 입력하세요'],
+    ['a count of zero', 'goal-create-total', '0', '개수는 1 이상의 정수로 입력하세요'],
+  ])('says why %s keeps creation off', (_case, field, value, message) => {
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'A goal')
+    fillCriterion()
+    fillField(field, value)
+    expect(screen.getByTestId('goal-create-measure-error')).toHaveTextContent(message)
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+  })
+
+  it('says why a target that is not a number keeps creation off', () => {
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'A goal')
+    chooseOption('goal-create-measure-kind', 'quantity')
+    fillField('goal-create-unit', 'ms')
+    fillField('goal-create-target', '400ms')
+    fillProcedure('Read p99 from the trace summary.')
+    expect(screen.getByTestId('goal-create-measure-error')).toHaveTextContent('목표 수치를 숫자로 입력하세요')
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
+  })
+
+  it.each([
+    ['count', 'goal-create-total', '2.5', '개수는 1 이상의 정수로 입력하세요'],
+    ['quantity', 'goal-create-target', '400ms', '목표 수치를 숫자로 입력하세요'],
+  ] as const)('says why a %s number does not read before its label is typed', (kind, field, value, message) => {
+    render(h(GoalCreateForm, ownedWorkspace))
+    fillField('goal-create-title-input', 'A goal')
+    if (kind === 'quantity') chooseOption('goal-create-measure-kind', 'quantity')
+    fillField(field, value)
+    expect(screen.getByTestId('goal-create-measure-error')).toHaveTextContent(message)
+    expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
   })
 
   it('rechecks an owned store refusal when the submit event fires', () => {
     let unavailable = false
     render(h(GoalCreateForm, { source: { kind: 'ready' }, isStoreUnavailableNow: () => unavailable }))
     fillField('goal-create-title-input', 'A goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     expect(screen.getByTestId('goal-create-submit')).not.toBeDisabled()
     unavailable = true
     fireEvent.click(screen.getByTestId('goal-create-submit'))
@@ -153,24 +203,32 @@ describe('GoalCreateForm side panel', () => {
   it('submits the operator criterion under the real tool field names and refreshes goals', async () => {
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', '  No dropped events  ')
-    fillField('goal-create-metric', '  dropped event count in 24h  ')
+    chooseOption('goal-create-measure-kind', 'quantity')
+    chooseOption('goal-create-direction', 'at_most')
     fillField('goal-create-target', '  0  ')
+    fillField('goal-create-unit', '  dropped events in 24h  ')
+    fillProcedure('  Count dropped events in the 24h event log.  ')
     fillField('goal-create-priority', '2')
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.refreshGoals).toHaveBeenCalledOnce())
     expect(api.callMcpToolAtIdentity).toHaveBeenCalledExactlyOnceWith('masc_goal_upsert', expect.objectContaining({
       id: expect.stringMatching(/^goal-/), if_absent: true,
       expected_workspace: { base_path: '/workspace-a', masc_root: '/workspace-a/.masc' },
-      title: 'No dropped events', metric: 'dropped event count in 24h',
-      target_value: '0', priority: 2,
+      title: 'No dropped events',
+      measure: { kind: 'quantity', unit: 'dropped events in 24h', direction: 'at_most', target: 0 },
+      procedure: 'Count dropped events in the 24h event log.', priority: 2,
     }), { revision: expect.any(Number), actor: expect.any(String) }, expect.any(Function), expect.any(Function), expect.any(Function))
+    // masc_goal_upsert refuses unknown fields (additionalProperties: false).
+    expect(api.callMcpToolAtIdentity.mock.calls[0]?.[1]).not.toHaveProperty('metric')
+    expect(api.callMcpToolAtIdentity.mock.calls[0]?.[1]).not.toHaveProperty('target_value')
     expect(showGoalCreate.value).toBe(false)
     expect(goalCreating.value).toBe(false)
     showGoalCreate.value = true
     await screen.findByTestId('goal-create-panel')
     expect(screen.getByTestId('goal-create-title-input')).toHaveValue('')
-    expect(screen.getByTestId('goal-create-metric')).toHaveValue('')
-    expect(screen.getByTestId('goal-create-target')).toHaveValue('')
+    expect(screen.getByTestId('goal-create-measure-kind')).toHaveValue('count')
+    expect(screen.getByTestId('goal-create-total')).toHaveValue('')
+    expect(screen.getByLabelText(/측정 방법/)).toHaveValue('')
     expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
   })
 
@@ -179,20 +237,21 @@ describe('GoalCreateForm side panel', () => {
     api.callMcpToolAtIdentity.mockRejectedValueOnce(new Error('criterion cannot be persisted'))
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Verify continuity')
-    fillField('goal-create-metric', 'successful ten-turn runs')
-    fillField('goal-create-target', 'all configured runtimes')
+    fillField('goal-create-total', '46')
+    fillField('goal-create-noun', 'successful ten-turn runs')
+    fillProcedure('Count ten-turn runs that kept their memory across turns.')
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(screen.getByTestId('goal-create-error')).toHaveTextContent('생성 전에 요청이 거절'))
     expect(showGoalCreate.value).toBe(true)
-    expect(screen.getByTestId('goal-create-metric')).toHaveValue('successful ten-turn runs')
-    expect(screen.getByTestId('goal-create-target')).toHaveValue('all configured runtimes')
+    expect(screen.getByTestId('goal-create-noun')).toHaveValue('successful ten-turn runs')
+    expect(screen.getByTestId('goal-create-total')).toHaveValue('46')
     expect(api.refreshGoals).not.toHaveBeenCalled()
-    fillField('goal-create-target', '47 successful runs of ten turns each')
+    fillField('goal-create-total', '47')
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.refreshGoals).toHaveBeenCalledOnce())
     expect(api.callMcpToolAtIdentity).toHaveBeenLastCalledWith('masc_goal_upsert', expect.objectContaining({
-      title: 'Verify continuity', metric: 'successful ten-turn runs',
-      target_value: '47 successful runs of ten turns each', priority: 3,
+      title: 'Verify continuity', measure: { kind: 'count', noun: 'successful ten-turn runs', total: 47 },
+      procedure: 'Count ten-turn runs that kept their memory across turns.', priority: 3,
     }), expect.any(Object), expect.any(Function), expect.any(Function), expect.any(Function))
   })
 
@@ -202,8 +261,7 @@ describe('GoalCreateForm side panel', () => {
     let unavailable = false
     render(h(GoalCreateForm, { source: { kind: 'ready' }, isStoreUnavailableNow: () => unavailable }))
     fillField('goal-create-title-input', 'Captured goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.captureArtifactWorkspace).toHaveBeenCalledTimes(1))
     unavailable = true
@@ -223,8 +281,7 @@ describe('GoalCreateForm side panel', () => {
     })
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Actor-owned draft')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
     setCanonicalDashboardActor('actor-b')
@@ -237,7 +294,7 @@ describe('GoalCreateForm side panel', () => {
     expect(screen.queryByTestId('goal-create-outcome')).toBeNull()
     expect(screen.getByTestId('goal-create-earlier-outcome')).not.toHaveTextContent(sentId)
     expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
-    await expect(createGoal({ title: 'Actor-owned draft', metric: 'metric', targetValue: 'target', priority: 3 }))
+    await expect(createGoal({ title: 'Actor-owned draft', ...countDraft, priority: 3 }))
       .resolves.toBe(false)
     expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1)
     expect(api.refreshGoals).not.toHaveBeenCalled()
@@ -253,8 +310,7 @@ describe('GoalCreateForm side panel', () => {
     })
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'One managed Goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
     setCanonicalDashboardActor('dashboard')
@@ -274,8 +330,7 @@ describe('GoalCreateForm side panel', () => {
     api.captureArtifactWorkspace.mockImplementationOnce(() => new Promise(resolve => { resolveWorkspace = resolve }))
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Managed workspace read')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.captureArtifactWorkspace).toHaveBeenCalledTimes(1))
     setCanonicalDashboardActor('dashboard')
@@ -296,8 +351,7 @@ describe('GoalCreateForm side panel', () => {
     })
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Refused owner')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
     setCanonicalDashboardActor(null, { tokenRevision: currentStoredTokenRevision(), rejected: true })
@@ -315,10 +369,9 @@ describe('GoalCreateForm side panel', () => {
     recordManagedCredentialRefusal(currentStoredTokenRevision())
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'New draft')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
-    await expect(createGoal({ title: 'New draft', metric: 'metric', targetValue: 'target', priority: 3 })).resolves.toBe(false)
+    await expect(createGoal({ title: 'New draft', ...countDraft, priority: 3 })).resolves.toBe(false)
     expect(api.callMcpToolAtIdentity).not.toHaveBeenCalled()
   })
 
@@ -327,10 +380,9 @@ describe('GoalCreateForm side panel', () => {
     noteManagedCredentialRefusalObservation(currentStoredTokenRevision())
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'New draft')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
-    await expect(createGoal({ title: 'New draft', metric: 'metric', targetValue: 'target', priority: 3 })).resolves.toBe(false)
+    await expect(createGoal({ title: 'New draft', ...countDraft, priority: 3 })).resolves.toBe(false)
     expect(api.callMcpToolAtIdentity).not.toHaveBeenCalled()
   })
 
@@ -354,7 +406,7 @@ describe('GoalCreateForm side panel', () => {
       expect(recoveryCurrent()).toBe(result === 'same')
       throw new Error('refused')
     })
-    await createGoal({ title: 'Recovery', metric: 'metric', targetValue: 'target', priority: 3 }, () => false, () => view)
+    await createGoal({ title: 'Recovery', ...countDraft, priority: 3 }, () => false, () => view)
     expect(recovered).toBe(result === 'same')
     expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1)
     expect(api.captureArtifactWorkspace).toHaveBeenCalledTimes(2)
@@ -366,8 +418,7 @@ describe('GoalCreateForm side panel', () => {
     api.captureArtifactWorkspace.mockImplementationOnce(() => new Promise(resolve => { resolveWorkspace = resolve }))
     const { rerender } = render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Captured goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.captureArtifactWorkspace).toHaveBeenCalledTimes(1))
     rerender(h(GoalCreateForm, { currentWorkspace: { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' },
@@ -384,8 +435,7 @@ describe('GoalCreateForm side panel', () => {
     api.mcpStructuredContentFromError.mockReturnValue({ status: 'error', error_code: 'validation_error', message: 'criterion is required' })
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Refused goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(screen.getByTestId('goal-create-error')).toHaveTextContent('criterion is required'))
     expect(screen.getByTestId('goal-create-submit')).not.toBeDisabled()
@@ -399,8 +449,7 @@ describe('GoalCreateForm side panel', () => {
     const workspace = { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }
     render(h(GoalCreateForm, { currentWorkspace: workspace, isWorkspaceCurrent: () => true }))
     fillField('goal-create-title-input', 'Uncertain goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(screen.getByTestId('goal-create-error')).toHaveTextContent('생성 결과를 확인하지 못했습니다'))
     expect(screen.getByTestId('goal-create-submit')).toBeDisabled()
@@ -421,8 +470,7 @@ describe('GoalCreateForm side panel', () => {
     })
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Original workspace draft')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
     ;(executionWorkspaceAuthority as { value: unknown }).value =
@@ -445,8 +493,7 @@ describe('GoalCreateForm side panel', () => {
     })
     const { rerender } = render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Workspace A goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
     rerender(h(GoalCreateForm, { currentWorkspace: { basePath: '/workspace-b', mascRoot: '/workspace-b/.masc' },
@@ -463,8 +510,7 @@ describe('GoalCreateForm side panel', () => {
   it('retains a successful receipt when the current workspace is unconfirmed', async () => {
     render(h(GoalCreateForm, { source: { kind: 'unconfirmed' } }))
     fillField('goal-create-title-input', 'Unconfirmed view goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(goalCreating.value).toBe(false))
     expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1)
@@ -480,8 +526,7 @@ describe('GoalCreateForm side panel', () => {
     api.callMcpToolAtIdentity.mockRejectedValueOnce(new Error('connection closed'))
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Old connection goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(screen.getByTestId('goal-create-error')).toHaveTextContent('생성 결과를 확인하지 못했습니다'))
     ;(executionWorkspaceAuthority as { value: unknown }).value =
@@ -500,8 +545,7 @@ describe('GoalCreateForm side panel', () => {
     api.refreshGoals.mockRejectedValueOnce(new Error('refresh unavailable'))
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Created goal')
-    fillField('goal-create-metric', 'metric')
-    fillField('goal-create-target', 'target')
+    fillCriterion()
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(showGoalCreate.value).toBe(false))
     expect(goalCreateError.value).toBeNull()
@@ -522,8 +566,9 @@ describe('GoalCreateForm side panel', () => {
       }))
     render(h(GoalCreateForm, ownedWorkspace))
     fillField('goal-create-title-input', 'Old draft')
-    fillField('goal-create-metric', 'old metric')
-    fillField('goal-create-target', '10')
+    fillField('goal-create-total', '10')
+    fillField('goal-create-noun', 'old items')
+    fillProcedure('Count the old items.')
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     expect(goalCreating.value).toBe(true)
     await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(1))
@@ -531,8 +576,9 @@ describe('GoalCreateForm side panel', () => {
     showGoalCreate.value = true
     await screen.findByTestId('goal-create-panel')
     fillField('goal-create-title-input', 'New draft')
-    fillField('goal-create-metric', 'new metric')
-    fillField('goal-create-target', '20')
+    fillField('goal-create-total', '20')
+    fillField('goal-create-noun', 'new items')
+    fillProcedure('Count the new items.')
     fireEvent.click(screen.getByTestId('goal-create-submit'))
     await waitFor(() => expect(api.callMcpToolAtIdentity).toHaveBeenCalledTimes(2))
     if (outcome === 'created') resolveOld()
@@ -542,8 +588,8 @@ describe('GoalCreateForm side panel', () => {
     expect(goalCreating.value).toBe(true)
     expect(goalCreateError.value).toBeNull()
     expect(screen.getByTestId('goal-create-title-input')).toHaveValue('New draft')
-    expect(screen.getByTestId('goal-create-metric')).toHaveValue('new metric')
-    expect(screen.getByTestId('goal-create-target')).toHaveValue('20')
+    expect(screen.getByTestId('goal-create-noun')).toHaveValue('new items')
+    expect(screen.getByTestId('goal-create-total')).toHaveValue('20')
     resolveNew()
     await waitFor(() => expect(showGoalCreate.value).toBe(false))
     await waitFor(() => expect(goalCreating.value).toBe(false))

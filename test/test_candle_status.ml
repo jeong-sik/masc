@@ -88,8 +88,8 @@ let row : Candle_event.t =
         ; goal_created_at = time "2026-08-01T00:00:00Z"
         ; due_date = None
         ; title = ""
-        ; metric = None
-        ; target_value = None
+        ; measure = Goal_measure_fixture.measure
+        ; procedure = "read the fixture"
         ; linked_task_ids = []
         }
   }

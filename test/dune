@@ -464,7 +464,7 @@
 (test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
- (libraries alcotest agent_core masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
+ (libraries goal_measure_fixture masc.goal_measure alcotest agent_core masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
 
 (test
  (name test_keeper_effective_tool_surface)
@@ -1222,7 +1222,7 @@
   test_exec_command_gate_log_sink
   )
  (deps (source_tree %{workspace_root}/config/prompts))
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
  masc.prompt_registry
  masc_test_deps masc_schedule bigstringaf masc.keeper_checkpoint_ref
   ;; The workspace file-save HTTP fixture creates real role-scoped tokens.
@@ -1444,7 +1444,7 @@
  (name test_keeper_effective_meta_overlay)
  (modules test_keeper_effective_meta_overlay)
  (deps (source_tree %{workspace_root}/config/prompts))
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
   masc_test_deps
   masc.embedded_config))
 
@@ -1755,7 +1755,7 @@
 (test
  (name test_goal_timeline_projection)
  (modules test_goal_timeline_projection)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 
 ; Goal_due: the one reading of a Goal's due date (the UTC instant it falls due).
 
@@ -1763,6 +1763,11 @@
  (name test_goal_due)
  (modules test_goal_due)
  (libraries alcotest masc.masc_goal ptime))
+
+(library
+ (name goal_measure_fixture)
+ (modules goal_measure_fixture)
+ (libraries masc.goal_measure))
 
 (test
  (name test_goal_measure)
@@ -1775,7 +1780,7 @@
 (test
  (name test_goal_task_assignment)
  (modules test_goal_task_assignment)
- (libraries masc_test_deps unix))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps unix))
 
 ; Group 2: Property-based tests (QCheck)
 
@@ -2193,7 +2198,7 @@
   test_prompt_preset
   test_managed_assets_sync_from_binary
  test_board_core_payload)
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
   uucp
   masc.toml_line_editor
   ; The fallback descendant fixture uses the monotonic deadline owner.
@@ -2241,7 +2246,7 @@
 (test
  (name test_dashboard_http_core)
  (modules test_dashboard_http_core)
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
   masc.masc_candle
   masc.masc_candle_runtime
   masc.masc_candle_store
@@ -2265,7 +2270,7 @@
 (test
  (name test_dashboard_goals_trust_reads)
  (modules test_dashboard_goals_trust_reads)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 
 ; Exercise the private immutable state with its production source and interface
 ; without publishing it from masc.server.
@@ -2711,7 +2716,7 @@
  (name keeper_tool_matrix_cases_lib)
  (wrapped false)
  (modules test_keeper_tool_matrix_cases test_mcp_tool_matrix_cases)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 
 ; Special: Custom compiler flags
 
@@ -4950,7 +4955,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
+ (libraries goal_measure_fixture masc.goal_measure alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
 
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:
@@ -5143,13 +5148,13 @@
 (test
  (name test_tui_planning_detail)
  (modules test_tui_planning_detail)
- (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched yojson))
+ (libraries goal_measure_fixture masc.goal_measure alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched yojson))
 
 ; #39571: a Goal at work past its due date stands apart from one due later.
 (test
  (name test_tui_planning_due)
  (modules test_tui_planning_due)
- (libraries alcotest masc masc.masc_goal masc_tui_planning_due ptime))
+ (libraries goal_measure_fixture masc.goal_measure alcotest masc masc.masc_goal masc_tui_planning_due ptime))
 
 (test
  (name test_tui_roster_pane)
@@ -6417,7 +6422,7 @@
 (test
  (name test_fusion_decision)
  (modules test_fusion_decision)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 (include stanzas/test_onboarding_status.inc)
 (include stanzas/test_onboarding_journey.inc)
 (include stanzas/test_sandbox_readiness.inc)
@@ -6794,7 +6799,7 @@
  (modules test_candle_appraiser_contract)
  (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py ../addons/exact_worker.py
   (source_tree %{workspace_root}/config/prompts))
- (libraries masc_test_deps masc.server masc_candle masc_candle_runtime masc_process mcp_protocol eio_main yojson unix))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps masc.server masc_candle masc_candle_runtime masc_process mcp_protocol eio_main yojson unix))
 
 (test
  (name test_workspace_curator_addon_contract)
@@ -7122,7 +7127,7 @@
 (test
  (name test_goal_suspension)
  (modules test_goal_suspension)
- (libraries masc masc_goal masc_types masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
+ (libraries goal_measure_fixture masc.goal_measure masc masc_goal masc_types masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
 
 (test
  (name test_goal_suspension_projection)
@@ -7459,7 +7464,7 @@
 (test
  (name test_keeper_librarian_input_capture)
  (modules test_keeper_librarian_input_capture)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 
 (test
  (name test_keeper_librarian_durable_preparation)
@@ -7496,7 +7501,7 @@
  (name test_keeper_addon_deferred_runtime)
  (modules test_keeper_addon_deferred_runtime)
  (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py ../addons/exact_worker.py)
- (libraries masc_test_deps masc_candle masc_candle_runtime mcp_protocol masc.skill_config))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps masc_candle masc_candle_runtime mcp_protocol masc.skill_config))
 
 ; Completion review keeps the original lookup through actual provider refusal.
 (test

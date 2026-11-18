@@ -59,7 +59,7 @@ let keeper_meta () =
 let test_task_create_goal_link_write_failure_returns_typed_failure () =
   with_test_env (fun config ->
     (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:"goal-a" ~title:"Goal A"
-             ~metric:"m" ~target_value:"1" () with
+             ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
      | Ok _ -> ()
      | Error error -> fail ("Goal upsert failed: " ^ Goal_store.write_error_to_string error));
     make_path_unwritable (Workspace_goal_index.goal_task_links_path config);
@@ -145,7 +145,7 @@ let test_task_create_failure_route_splits_workflow_from_runtime () =
 let test_unavailable_goal_is_runtime_failure_without_mutation () =
   List.iter (fun break_recovery -> with_test_env (fun config ->
     (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:"goal-a" ~title:"Goal A"
-       ~metric:"m" ~target_value:"1" () with
+       ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
      | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
     let goal_path = Goal_store.goals_path config in
     let corrupt path = Out_channel.with_open_text path (fun oc -> output_string oc "{broken") in

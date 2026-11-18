@@ -4,8 +4,8 @@ type goal = {
   id : string;
   criterion_revision : string;
   title : string;
-  metric : string option;
-  target_value : string option;
+  measure : Goal_measure.t;
+  procedure : string;
   due_date : string option;
   priority : int;
   phase : Goal_phase.t;
@@ -18,8 +18,8 @@ type goal = {
 type criterion = Criterion of {
   revision : string;
   title : string;
-  metric : string option;
-  target_value : string option;
+  measure : Goal_measure.t;
+  procedure : string;
 }
 
 type event_kind = Created | Updated | Phase | Edited

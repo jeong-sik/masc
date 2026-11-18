@@ -9,8 +9,8 @@ type goal = {
   id : string;
   criterion_revision : string;
   title : string;
-  metric : string option;
-  target_value : string option;
+  measure : Goal_measure.t;
+  procedure : string;
   due_date : string option;
   priority : int;
   phase : Goal_phase.t;
@@ -23,47 +23,48 @@ type goal = {
 type criterion = Criterion of {
   revision : string;
   title : string;
-  metric : string option;
-  target_value : string option;
+  measure : Goal_measure.t;
+  procedure : string;
 }
 
 let criterion_of_goal (goal : goal) =
   Criterion { revision = goal.criterion_revision; title = goal.title;
-              metric = goal.metric; target_value = goal.target_value }
+              measure = goal.measure; procedure = goal.procedure }
 
 let criterion_equal (Criterion left) (Criterion right) =
   String.equal left.revision right.revision
   && String.equal left.title right.title
-  && Option.equal String.equal left.metric right.metric
-  && Option.equal String.equal left.target_value right.target_value
+  && Goal_measure.equal left.measure right.measure
+  && String.equal left.procedure right.procedure
 
 let criterion_to_yojson (Criterion c) =
   `Assoc [ "revision", `String c.revision; "title", `String c.title;
-           "metric", Json_util.string_opt_to_json c.metric;
-           "target_value", Json_util.string_opt_to_json c.target_value ]
+           "measure", Goal_measure.to_yojson c.measure;
+           "procedure", `String c.procedure ]
 
 let criterion_of_yojson = function
   | `Assoc fields as json ->
-      let expected = [ "revision"; "title"; "metric"; "target_value" ] in
+      let expected = [ "revision"; "title"; "measure"; "procedure" ] in
       if List.length fields <> List.length expected
          || List.sort String.compare (List.map fst fields)
             <> List.sort String.compare expected then
-        Error "criterion: expected exactly revision, title, metric and target_value"
+        Error "criterion: expected exactly revision, title, measure and procedure"
       else
-        let optional_string name =
-          match Json_util.assoc_member_opt name json with
-          | Some `Null -> Ok None
-          | Some (`String value) -> Ok (Some value)
-          | _ -> Error ("criterion: invalid " ^ name)
-        in
         (match Json_util.assoc_member_opt "revision" json,
-               Json_util.assoc_member_opt "title" json with
-         | Some (`String revision), Some (`String title)
-           when String.trim revision <> "" ->
-             let* metric = optional_string "metric" in
-             let* target_value = optional_string "target_value" in
-             Ok (Criterion { revision; title; metric; target_value })
-         | _ -> Error "criterion: revision and title must be strings; revision must not be blank")
+               Json_util.assoc_member_opt "title" json,
+               Json_util.assoc_member_opt "measure" json,
+               Json_util.assoc_member_opt "procedure" json with
+         | Some (`String revision), Some (`String title), Some measure_json,
+           Some (`String procedure)
+           when String.trim revision <> "" && String.trim procedure <> "" ->
+             let* measure =
+               Result.map_error (fun reason -> "criterion: " ^ reason)
+                 (Goal_measure.of_yojson measure_json)
+             in
+             Ok (Criterion { revision; title; measure; procedure })
+         | _ ->
+           Error "criterion: revision, title and procedure must be strings; \
+                  revision and procedure must not be blank")
   | _ -> Error "criterion: expected object"
 
 type event_kind = Created | Updated | Phase | Edited
@@ -115,8 +116,8 @@ let goal_to_yojson (goal : goal) =
       ("id", `String goal.id);
       ("criterion_revision", `String goal.criterion_revision);
       ("title", `String goal.title);
-      ("metric", Json_util.string_opt_to_json goal.metric);
-      ("target_value", Json_util.string_opt_to_json goal.target_value);
+      ("measure", Goal_measure.to_yojson goal.measure);
+      ("procedure", `String goal.procedure);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("priority", `Int goal.priority);
       ("phase", `String (Goal_phase.to_string goal.phase));
@@ -183,8 +184,8 @@ let accepted_goal_fields =
   [ "id"
   ; "criterion_revision"
   ; "title"
-  ; "metric"
-  ; "target_value"
+  ; "measure"
+  ; "procedure"
   ; "due_date"
   ; "priority"
   ; "phase"
@@ -259,13 +260,34 @@ let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
                 rejected ~field:"priority"
                   (Printf.sprintf "goal %S: priority must be an int 1-5" id)
           in
+          (* RFC a-goal-states-its-measure-as-a-typed-value §6: a row without
+             a typed [measure] is refused; no reader converts it. *)
+          let* measure =
+            match Json_util.assoc_member_opt "measure" json with
+            | Some measure_json ->
+                (match Goal_measure.of_yojson measure_json with
+                 | Ok measure -> Ok measure
+                 | Error detail ->
+                     rejected ~field:"measure"
+                       (Printf.sprintf "goal %S: %s" id detail))
+            | None ->
+                rejected ~field:"measure"
+                  (Printf.sprintf "goal %S has no measure" id)
+          in
+          let* procedure =
+            match Json_util.assoc_member_opt "procedure" json with
+            | Some (`String value) when String.trim value <> "" -> Ok value
+            | _ ->
+                rejected ~field:"procedure"
+                  (Printf.sprintf "goal %S: procedure must be a non-blank string" id)
+          in
           Ok
             {
               id;
               criterion_revision;
               title;
-              metric = Json_util.get_string json "metric";
-              target_value = Json_util.get_string json "target_value";
+              measure;
+              procedure;
               due_date = Json_util.get_string json "due_date";
               priority;
               phase;

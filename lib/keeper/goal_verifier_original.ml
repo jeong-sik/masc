@@ -29,13 +29,11 @@ let render_prompt ~subject ~measurement ~lookup_schemas ~root_layout ~submitted_
   let* lookup_section = Prompt_registry.render_prompt_template Prompt_names.goal_verification_lookup
     ["lookup_tools", String.concat ", " lookup_schemas;
      "lookup_root_layout", root_lines; "submitted_sources", submitted_sources] in
-  let Goal_store.Criterion {title; metric; target_value; revision=_} = subject.A.criterion in
-  let declared = function
-    | Some text when String.trim text <> "" -> text
-    | Some _ | None -> "(not declared)" in
+  let Goal_store.Criterion {title; measure; procedure; revision=_} = subject.A.criterion in
   Prompt_registry.render_prompt_template Prompt_names.goal_verification_proof
-    ["goal_title", title; "metric", declared metric;
-     "target_value", declared target_value;
+    ["goal_title", title;
+     "measure", Yojson.Safe.to_string (Goal_measure.to_yojson measure);
+     "procedure", procedure;
      "reported_measurement", (Goal_measurement.observation_to_yojson measurement
        |> Yojson.Safe.to_string);
      "lookup_section", lookup_section]

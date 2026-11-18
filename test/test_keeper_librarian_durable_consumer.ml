@@ -249,7 +249,7 @@ let historical_task task_id goal_id target =
     | Ok id -> id | Error detail -> fail detail in
   Task_context.Task {task_id;goals=Ok [{Task_context.goal_id;phase=Goal_phase.Executing;
     criterion=Goal_store.Criterion {revision="original-" ^ goal_id;title=goal_id;
-      metric=Some "count";target_value=Some target}}]}
+      measure=Goal_measure_fixture.done_when target;procedure="count"}}]}
 
 let observed_task_ids contexts = List.filter_map (fun (entry : Historical.t) ->
   match entry.scope.attribution with

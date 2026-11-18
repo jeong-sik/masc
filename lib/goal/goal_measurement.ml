@@ -236,10 +236,6 @@ let record config ~goal_id ~criterion_revision ~observed_value ~evidence ~actor 
         if not (String.equal goal.criterion_revision criterion_revision) then
           Ok (goal, Error (Conflict "goal_measurement: success criterion changed"))
         else
-          match goal.metric, goal.target_value with
-          | None, _ | _, None ->
-              Ok (goal, Error (Conflict "goal_measurement: Goal has no declared metric and target"))
-          | Some _, Some _ ->
               Workspace_utils.with_file_lock config (path config) (fun () ->
                 let recorded =
                   let* previous = load config in

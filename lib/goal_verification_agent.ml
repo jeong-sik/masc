@@ -4,8 +4,8 @@
     application-owned LLM agent, not a Keeper, with no Keeper identity, task
     action, or lifecycle. It drains the durable [Proof_pending] rows the gate
     persists BEFORE any model call, written before the phase enters
-    [Verifying] (B3), asks one question of each — did the goal's declared
-    metric reach its declared target value — through
+    [Verifying] (B3), asks one question of each — did the value read by the
+    goal's declared procedure reach its declared measure — through
     {!Goal_verifier_worker.run} (so provider selection is the
     [verifier_exact] exact-output lane with frozen-order failover), and
     commits the verdict through the typed internal boundary

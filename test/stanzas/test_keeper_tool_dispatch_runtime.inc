@@ -4,7 +4,7 @@
  (deps
   ../bin/masc_native_addon_launcher.exe
   ../skills/browser-live-follow-read/SKILL.md (source_tree %{workspace_root}/config/prompts))
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
   browser_addon_fixture
   mtime
   mtime.clock.os

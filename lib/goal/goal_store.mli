@@ -40,8 +40,8 @@ type goal = Goal_document.goal = {
   id : string;
   criterion_revision : string;
   title : string;
-  metric : string option;
-  target_value : string option;
+  measure : Goal_measure.t;
+  procedure : string;
   due_date : string option;
   priority : int;
   phase : Goal_phase.t;
@@ -56,8 +56,8 @@ type goal = Goal_document.goal = {
 type criterion = Criterion of {
   revision : string;
   title : string;
-  metric : string option;
-  target_value : string option;
+  measure : Goal_measure.t;
+  procedure : string;
 }
 
 val criterion_of_goal : goal -> criterion
@@ -382,7 +382,7 @@ type upsert_precondition = Unconditional | Require_absent
 
 val upsert_goal_with_events :
   Workspace_utils.config -> actor:string -> ?id:string -> ?title:string ->
-  ?metric:string -> ?target_value:string -> ?due_date:string -> ?priority:int ->
+  ?measure:Goal_measure.t -> ?procedure:string -> ?due_date:string -> ?priority:int ->
   ?precondition:upsert_precondition ->
   unit -> (goal * [ `created | `updated of goal ] * pending_event list, write_error) result
 (** Creates a new goal when [id] is omitted (mints [goal-<ms>-<4 hex digits>]
@@ -392,7 +392,7 @@ val upsert_goal_with_events :
     changed. Multiple decoded rows for the resolved ID return
     {!Goal_identity_ambiguous} without a write. Every accepted upsert commits a new store version, including an
     update whose editable fields are unchanged. An edit to the title,
-    [metric] or [target_value] moves a
+    [measure] or [procedure] moves a
     [Verifying], [Awaiting_confirmation] or [Completed] goal back to
     [Executing]. Suspended Goals stay suspended with restore target [Executing].
     An edit to [due_date] or [priority] moves no phase.
@@ -402,13 +402,13 @@ val upsert_goal_with_events :
     - [due_date] that {!Goal_due.read} cannot read, on a create and on an
       update alike. Nothing is written. [None] leaves the stored due date as
       it is; there is no way to clear one here.
-    - RFC-0387 B1: [metric] and [target_value] are both required (non-blank)
+    - RFC-0387 B1: [measure] and a non-blank [procedure] are both required
       whenever the upsert creates a new row — including an explicit
       previously-unknown [id]. The create/update split is decided inside the
       write lock on the freshly decoded state, so an undecodable store is
       {!Store_unavailable}, never this one.
-    - An actual change to an existing row's [title], [metric] or
-      [target_value] requires all three effective fields to be non-blank.
+    - An actual change to an existing row's [title], [measure] or
+      [procedure] requires a non-blank title and procedure.
       Omitted fields retain their stored values. The merged criterion is
       checked inside the write lock before minting its revision or writing
       events. This is an input invariant, not semantic feasibility admission.

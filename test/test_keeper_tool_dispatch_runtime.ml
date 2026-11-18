@@ -9526,8 +9526,8 @@ let composable_output_probes =
              (Goal_store.upsert_goal_with_events ~actor:"test"
                 config
                 ~title:"composable output probe goal"
-                ~metric:"probes covered"
-                ~target_value:"1"
+                ~measure:(Goal_measure_fixture.done_when "1")
+                ~procedure:"probes covered"
                 ~priority:2
                 ());
            `Assoc [])

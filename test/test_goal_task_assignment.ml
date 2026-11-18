@@ -45,7 +45,7 @@ let with_test_env f =
 
 let make_goal config ~id =
   match Goal_store.upsert_goal_with_events ~actor:"test" config ~id ~title:("Goal " ^ id)
-          ~metric:"m" ~target_value:"1" () with
+          ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
   | Ok _ -> ()
   | Error error -> failf "Goal upsert %s failed: %s" id (Goal_store.write_error_to_string error)
 ;;

@@ -1824,8 +1824,8 @@ let test_config_snapshot_carries_open_goals_without_a_task () =
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   let goal id title phase metric : Goal_store.goal =
-    { Goal_store.id; criterion_revision = "revision-" ^ id; title; metric = Some metric
-    ; target_value = Some "1"; due_date = None; priority = 3; phase
+    { Goal_store.id; criterion_revision = "revision-" ^ id; title; measure = Goal_measure_fixture.done_when "1"
+    ; procedure = metric; due_date = None; priority = 3; phase
     ; last_review_note = None; last_review_at = None
     ; created_at = "2026-10-22T00:00:00Z"; updated_at = "2026-10-22T00:00:00Z" }
   in

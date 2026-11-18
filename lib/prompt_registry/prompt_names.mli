@@ -27,8 +27,8 @@ val goal_criterion_review_system : string
 val goal_criterion_review_criterion : string
 (** The read-only surface the Goal proof judge holds, described to it. A
     surface the judge is never told about is a surface it never uses. *)
-(** Goal completion proof review (RFC-0387 B3): did the goal's declared
-    metric reach its declared target value? *)
+(** Goal completion proof review (RFC-0387 B3): did the value read by the
+    goal's declared procedure reach its declared measure? *)
 
 val verification_lookup_producer_tree : string
 val verification_lookup_producer_namespace : string
@@ -73,7 +73,7 @@ val keeper_observation_rejected_digest_row : string
 (** The instruction attached to the skills named by the current task. *)
 
 (** Goal success-criterion viability review (RFC-0387 B2): is the declared
-    metric/target reachable in principle? *)
+    measure reachable in principle by its procedure? *)
 
 val librarian : string
 

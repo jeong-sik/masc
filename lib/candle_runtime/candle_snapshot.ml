@@ -18,8 +18,8 @@ let event ~at ~linked_task_ids (goal : Goal_store.goal) (verdict : Goal_verifica
           ; goal_created_at
           ; due_date = goal.due_date
           ; title = goal.title
-          ; metric = goal.metric
-          ; target_value = goal.target_value
+          ; measure = goal.measure
+          ; procedure = goal.procedure
           ; linked_task_ids
           }
     }

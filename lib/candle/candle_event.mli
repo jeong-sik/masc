@@ -94,8 +94,8 @@ type body =
                 not. The Goal's due-date reader (Goal_due) is the one place
                 that says what it means, so the ledger does not interpret it. *)
       ; title : string
-      ; metric : string option
-      ; target_value : string option
+      ; measure : Goal_measure.t
+      ; procedure : string
       ; linked_task_ids : string list  (** The Tasks linked to the Goal when it passed. *)
       }
   | Payout_owed of

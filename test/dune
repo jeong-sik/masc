@@ -4407,7 +4407,8 @@
   agent_core
   masc_tui_acting
   masc_tui_message_layout
-  masc_tui_observer))
+  masc_tui_observer
+  masc_tui_value))
 
 (test
  (name test_tui_observer)

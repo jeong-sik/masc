@@ -683,8 +683,9 @@
  (modules masc_tui_acting)
  ; masc for the call log's disposition vocabulary, which the observer types
  ; the live rows with and the fold carries through unchanged.
+ ; masc_tui_value for the width of the receipt-time column.
  (libraries masc masc.browser_lane masc_tui_message_layout masc_tui_observer masc_tui_theme
-  masc_tui_words agent_core))
+  masc_tui_value masc_tui_words agent_core))
 
 (library
  (name masc_tui_keeper_chat_queue)

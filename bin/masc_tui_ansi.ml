@@ -826,6 +826,12 @@ module Terminal_text = struct
   let clock_timestamp text =
     moment_of_iso ~unreadable:Masc.Tui_terminal_text.clock_timestamp_for_terminal
       (Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second) text
+  (* The cells a column of [clock_timestamp] rows reserves. A moment on
+     another day carries its date, so the column is as wide as that form,
+     not as wide as a clock: the Acting screen sized it from "00:00:00", and
+     a row from the day before overflowed its frame and lost its seconds. *)
+  let clock_timestamp_cells =
+    Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_second
 end
 
 (** Task status icon *)

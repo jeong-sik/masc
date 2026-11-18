@@ -1737,8 +1737,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                              it was read from: this screen has no turn
                              record to take a scale from, and the timeline
                              header says it reads at the fleet figure. *)
-                          "%-8s delivery  %-20s \xe2\x89\x88%6s tok %9s turn#%d %s"
-                          (time_of delivery.delivered_at)
+                          "%-*s delivery  %-20s \xe2\x89\x88%6s tok %9s turn#%d %s"
+                          Terminal_text.clock_timestamp_cells (time_of delivery.delivered_at)
                           skill
                           (Masc_tui_context_inspector.format_tokens
                              (Masc_tui_token_scale.estimate
@@ -1753,8 +1753,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                      (fun (act :
                              Masc.Keeper_skill_activation_ledger.action) ->
                         ( act.observed_at,
-                          Printf.sprintf "%-8s action    %-20s turn#%d %s"
-                            (time_of act.observed_at)
+                          Printf.sprintf "%-*s action    %-20s turn#%d %s"
+                            Terminal_text.clock_timestamp_cells (time_of act.observed_at)
                             (Terminal_text.single_line
                                (Masc.Tool_display.list_label act.tool_name))
                             act.agent_core_turn

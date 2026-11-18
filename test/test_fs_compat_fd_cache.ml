@@ -325,10 +325,11 @@ let io_failing_after budget =
   }
 ;;
 
-let failing_append ~budget path content =
+let failing_append ?(start = Fs_compat_internal.Fd_append_whole.Anywhere) ~budget path content =
   match
     Fs_compat.append_file_unix_with_io_for_testing
       ~io:(io_failing_after budget)
+      ~start
       path
       content
   with
@@ -388,7 +389,13 @@ let test_failed_rollback_is_reported () =
       truncate = (fun _ _ -> raise (Unix.Unix_error (Unix.EIO, "ftruncate", "")))
     }
   in
-  (match Fs_compat.append_file_unix_with_io_for_testing ~io path row_a with
+  (match
+     Fs_compat.append_file_unix_with_io_for_testing
+       ~io
+       ~start:Fs_compat_internal.Fd_append_whole.Anywhere
+       path
+       row_a
+   with
    | () -> fail "the append was expected to fail"
    | exception Sys_error message ->
      check
@@ -397,6 +404,147 @@ let test_failed_rollback_is_reported () =
        true
        (String.starts_with ~prefix:(Fs_compat.canonical_append_mutex_path_for_testing path) message));
   check string "the partial bytes are still there" (row_0 ^ String.sub row_a 0 4) (read_all path)
+;;
+
+(* #52974. A line append starts at a line start. When the file ends in the
+   middle of a line, the append writes a newline first, so the unfinished
+   bytes stay a line of their own and the new row is read whole. Before, the
+   row was written right after them and both were lost as one broken line. *)
+
+module Whole = Fs_compat_internal.Fd_append_whole
+
+(* Bytes written through a descriptor other than the cached one, the way a
+   writer that died part-way leaves them. *)
+let write_through_another_descriptor path content =
+  Out_channel.with_open_gen
+    [ Open_append; Open_creat; Open_binary ]
+    0o644
+    path
+    (fun channel -> output_string channel content)
+;;
+
+let line_start_file name =
+  Fs_compat.reset_fd_cache_for_testing ();
+  Filename.concat (tmpdir "fd_cache_line_start") name
+;;
+
+let unfinished = "{\"ro"
+
+let test_line_append_after_unfinished_line_on_open () =
+  let path = line_start_file "open.jsonl" in
+  write_through_another_descriptor path (row_0 ^ unfinished);
+  Fs_compat.append_jsonl path (`Int 1);
+  check
+    string
+    "the unfinished bytes keep their own line"
+    (row_0 ^ unfinished ^ "\n1\n")
+    (read_all path)
+;;
+
+let test_line_append_notices_bytes_from_another_descriptor () =
+  let path = line_start_file "other-descriptor.jsonl" in
+  Fs_compat.append_jsonl path (`Int 1);
+  write_through_another_descriptor path unfinished;
+  Fs_compat.append_jsonl path (`Int 2);
+  check
+    string
+    "the end is read again when the size changed"
+    ("1\n" ^ unfinished ^ "\n2\n")
+    (read_all path)
+;;
+
+let test_line_append_at_a_line_start_adds_nothing () =
+  let path = line_start_file "line-start.jsonl" in
+  Fs_compat.append_jsonl path (`Int 1);
+  Fs_compat.append_jsonl path (`Int 2);
+  Fs_compat.reset_fd_cache_for_testing ();
+  Fs_compat.append_jsonl path (`Int 3);
+  check string "no blank line between rows" "1\n2\n3\n" (read_all path)
+;;
+
+(* The raw append is a byte append: a row written in two calls stays one row. *)
+let test_raw_append_continues_the_line () =
+  let path = line_start_file "raw.jsonl" in
+  Fs_compat.append_file path "{\"i\":";
+  Fs_compat.append_file path "1}\n";
+  Fs_compat.append_jsonl path (`Int 2);
+  check string "raw bytes are not split" "{\"i\":1}\n2\n" (read_all path)
+;;
+
+let test_line_append_after_raw_unfinished_bytes () =
+  let path = line_start_file "raw-unfinished.jsonl" in
+  Fs_compat.append_file path unfinished;
+  Fs_compat.append_jsonl path (`Int 2);
+  check string "the row starts on a new line" (unfinished ^ "\n2\n") (read_all path)
+;;
+
+let test_line_append_after_failed_rollback () =
+  let path = failed_append_file "after-failed-rollback.jsonl" in
+  let io =
+    { (io_failing_after 4) with
+      truncate = (fun _ _ -> raise (Unix.Unix_error (Unix.EIO, "ftruncate", "")))
+    }
+  in
+  (match
+     Fs_compat.append_file_unix_with_io_for_testing ~io ~start:Whole.At_line_start path row_a
+   with
+   | () -> fail "the append was expected to fail"
+   | exception Sys_error _ -> ());
+  Fs_compat.append_jsonl path (`Int 2);
+  check
+    string
+    "the bytes the rollback could not remove keep their own line"
+    (row_0 ^ String.sub row_a 0 4 ^ "\n2\n")
+    (read_all path)
+;;
+
+let test_append_lines_after_unfinished_line () =
+  let path = line_start_file "append-lines.jsonl" in
+  write_through_another_descriptor path (row_0 ^ unfinished);
+  Fs_compat.append_lines path (row_a ^ row_b);
+  Fs_compat.append_lines path row_a2;
+  check
+    string
+    "one newline before the first batch, none before the second"
+    (row_0 ^ unfinished ^ "\n" ^ row_a ^ row_b ^ row_a2)
+    (read_all path)
+;;
+
+let test_line_append_to_a_new_file () =
+  let path = line_start_file "new.jsonl" in
+  Fs_compat.append_lines path row_a;
+  check string "an empty file gets the lines alone" row_a (read_all path)
+;;
+
+let test_empty_line_append_writes_nothing () =
+  let path = line_start_file "empty-content.jsonl" in
+  write_through_another_descriptor path unfinished;
+  Fs_compat.append_lines path "";
+  check string "no newline is added for empty content" unfinished (read_all path)
+;;
+
+(* The newline and the row are one write: when it fails, neither stays. *)
+let test_failed_line_append_removes_its_newline_too () =
+  let path = line_start_file "newline-rolled-back.jsonl" in
+  write_through_another_descriptor path (row_0 ^ unfinished);
+  failing_append ~start:Whole.At_line_start ~budget:3 path row_a;
+  check string "the file is as it was" (row_0 ^ unfinished) (read_all path)
+;;
+
+let test_unreadable_end_writes_nothing () =
+  let path = line_start_file "unreadable-end.jsonl" in
+  write_through_another_descriptor path row_0;
+  let io =
+    { Whole.unix_io with
+      observe_end = (fun _ -> raise (Unix.Unix_error (Unix.EIO, "read", "")))
+    }
+  in
+  (match
+     Fs_compat.append_file_unix_with_io_for_testing ~io ~start:Whole.At_line_start path row_a
+   with
+   | () -> fail "the append was expected to fail"
+   | exception Sys_error _ -> ());
+  check string "nothing was written" row_0 (read_all path)
 ;;
 
 let () =
@@ -451,6 +599,52 @@ let () =
             "a failed rollback is reported and the bytes stay"
             `Quick
             test_failed_rollback_is_reported
+        ] )
+    ; ( "line start"
+      , [ test_case
+            "a row after unfinished bytes found on open starts a new line"
+            `Quick
+            test_line_append_after_unfinished_line_on_open
+        ; test_case
+            "bytes from another descriptor are noticed"
+            `Quick
+            test_line_append_notices_bytes_from_another_descriptor
+        ; test_case
+            "a row at a line start gets no extra newline"
+            `Quick
+            test_line_append_at_a_line_start_adds_nothing
+        ; test_case
+            "the raw append continues an unfinished line"
+            `Quick
+            test_raw_append_continues_the_line
+        ; test_case
+            "a row after raw unfinished bytes starts a new line"
+            `Quick
+            test_line_append_after_raw_unfinished_bytes
+        ; test_case
+            "a row after a failed rollback starts a new line"
+            `Quick
+            test_line_append_after_failed_rollback
+        ; test_case
+            "append_lines starts a batch on a new line"
+            `Quick
+            test_append_lines_after_unfinished_line
+        ; test_case
+            "a new file gets the lines alone"
+            `Quick
+            test_line_append_to_a_new_file
+        ; test_case
+            "empty content writes nothing"
+            `Quick
+            test_empty_line_append_writes_nothing
+        ; test_case
+            "a failed row removes its leading newline too"
+            `Quick
+            test_failed_line_append_removes_its_newline_too
+        ; test_case
+            "an unreadable file end writes nothing"
+            `Quick
+            test_unreadable_end_writes_nothing
         ] )
     ]
 ;;

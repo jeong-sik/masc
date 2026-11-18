@@ -7,10 +7,11 @@ Scope: current JSONL writer substrates and store inventory under `<base-path>/.m
 
 | Substrate | Current contract | Used for | Evidence |
 | --- | --- | --- | --- |
-| `Fs_compat.append_jsonl` | Creates parent dir, serializes appends through a per-path `Stdlib.Mutex`, writes `json + "\n"` to the path's cached `O_APPEND` descriptor. A write that fails part-way is truncated away again, and nothing is buffered for a later append or close. No fsync. | Single-file append stores and `Dated_jsonl` day files. | `lib/fs_compat/fs_compat_private_file_update.ml` |
-| `Fs_compat.append_file` | Shares the same per-path mutex registry, cached descriptor and failed-write rollback as `append_jsonl`, but accepts raw string content. | Board posts/comments/votes, keeper single-file logs via support helpers. | `lib/fs_compat/fs_compat_owned_file.ml`, `lib/keeper/keeper_types_support.ml` |
+| `Fs_compat.append_jsonl` | Creates parent dir, serializes appends through a per-path `Stdlib.Mutex`, writes `json + "\n"` to the path's cached `O_APPEND` descriptor. A write that fails part-way is truncated away again, and nothing is buffered for a later append or close. The row starts at a line start: the writer reads the file's last byte, and when the file ends in the middle of a line it writes a newline before the row. No fsync. | Single-file append stores and `Dated_jsonl` day files. | `lib/fs_compat/fs_compat_private_file_update.ml` |
+| `Fs_compat.append_lines` | Shares the per-path mutex registry, cached descriptor, failed-write rollback and line-start rule of `append_jsonl`, and accepts one or more lines the caller already encoded, each ending in a newline. | Keeper single-file logs via `Keeper_types_support.append_jsonl_line`, task metrics, activity graph events, workspace memory log, connector name directories. | `lib/fs_compat/fs_compat_owned_file.ml`, `lib/fs_compat/fd_append_whole.ml` |
+| `Fs_compat.append_file` | Shares the same per-path mutex registry, cached descriptor and failed-write rollback, and appends raw bytes right after the file's last byte. No line-start rule. | No production caller writes lines through it; tests use it to build a row in pieces. | `lib/fs_compat/fs_compat_owned_file.ml` |
 | `Dated_jsonl` & `Dated_jsonl.Store` | Date-split `base_dir/YYYY-MM/DD.jsonl`, base-dir mutex registry, append guard hook, recent/range reads, malformed JSON read skip. Appends delegate to `Fs_compat.append_jsonl`. `Dated_jsonl.Store` registers date-sharded stores so the daily maintenance loop prunes them under a single `MASC_JSONL_RETENTION_DAYS` (`[maintenance] jsonl_retention_days`, default `30` days) policy. | Audit, telemetry, tool usage, keeper receipts, tool calls, runtime events, gate events, verifications, board dated posts, activity graph. | `lib/dated_jsonl/dated_jsonl.ml` |
-| `Keeper_types_support.append_jsonl_line` | Optional size rotation, UTF-8 repair, then raw `Fs_compat.append_file`. | Keeper memory/decision/policy/feedback/manifest single-file logs. | `lib/keeper/keeper_types_support.ml` |
+| `Keeper_types_support.append_jsonl_line` | Optional size rotation, UTF-8 repair, then `Fs_compat.append_lines`. | Keeper memory/decision/policy/feedback/manifest single-file logs. | `lib/keeper/keeper_types_support.ml` |
 
 ## Store Inventory
 
@@ -32,12 +33,14 @@ Scope: current JSONL writer substrates and store inventory under `<base-path>/.m
 
 ## Contract Invariants
 
-1. `Fs_compat.append_jsonl` and `Fs_compat.append_file` serialize mixed writes to the same path with one per-path mutex registry.
+1. `Fs_compat.append_jsonl`, `Fs_compat.append_lines` and `Fs_compat.append_file` serialize mixed writes to the same path with one per-path mutex registry.
 2. `Dated_jsonl.open_store` instances for equivalent base dirs share the same mutex, including trailing-slash variants.
 3. `Dated_jsonl.append` writes through `Fs_compat.append_jsonl`, keeps `YYYY-MM/DD.jsonl`, and does not poison the base-dir mutex after append failure.
 4. `Dated_jsonl.read_recent`, `iter_all`, and `read_range` skip malformed JSON lines instead of failing the whole read.
-5. Keeper single-file helpers preserve rotation and UTF-8 repair before delegating to `append_file`.
+5. Keeper single-file helpers preserve rotation and UTF-8 repair before delegating to `append_lines`.
 6. Board post/comment/reaction JSONL files remain snapshot files after mutation flush, while create paths may append.
 7. Board vote rows preserve the original cast timestamp across append and rewrite.
 8. Goal event rows reach `goal_events.jsonl` through one durable locked JSONL transaction, and a retried outbox delivery does not write an `event_id` that is already in the file.
 9. Trajectory append stays per `(keeper, trace_id)` path and remains append-only.
+10. A failed `append_jsonl`, `append_lines` or `append_file` leaves the file as it was. Bytes of a write that stopped part-way are removed, and nothing reaches the file later.
+11. `append_jsonl` and `append_lines` start at a line start. Bytes an earlier writer left without a newline stay a line of their own. They are not cut: readers of these files take a last line without a newline as a row when it parses, so cutting would remove a row a reader may already have shown. The durable private JSONL family (`append_private_jsonl_durable_*`) differs on purpose: there the bytes after the last newline are not a row, and its writers cut them.

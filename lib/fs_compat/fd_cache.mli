@@ -1,10 +1,11 @@
 (** Per-path bounded LRU descriptor cache for the JSONL append
     write-path. RFC-0162 §3.4.
 
-    Each path keeps one descriptor opened
-    [O_APPEND | O_CREAT | O_RDWR | O_CLOEXEC], reused across calls.
-    It is readable because a line append reads the file's last byte
-    through it.
+    Each path keeps one descriptor opened by
+    {!Fd_append_whole.open_target}, reused across calls: a regular
+    file [O_APPEND | O_CREAT | O_RDWR | O_CLOEXEC], readable because
+    a line append reads the file's last byte through it, and
+    anything else (a FIFO, a device) write-only.
     The cache holds a descriptor and not an [out_channel]: a channel
     keeps the bytes of a failed write in its buffer and writes them
     with the next append or when it is closed. The
@@ -28,8 +29,10 @@
     Evicts the least-recently-used inactive writer when
     the bound is exceeded. Active writers are leased until [f] returns,
     so LRU eviction cannot close a descriptor while a caller is
-    still writing to it. Opening the file fails with [Sys_error]. *)
-val with_writer : string -> (Unix.file_descr -> 'a) -> 'a
+    still writing to it.
+    @raise Sys_error when the path cannot be examined or opened. The
+    message starts with the path. *)
+val with_writer : string -> (Fd_append_whole.target -> 'a) -> 'a
 
 (** [invalidate path] closes and drops the cached writer for
     [path] when present (a no-op otherwise). Call it after the inode at

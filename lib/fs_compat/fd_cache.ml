@@ -1,7 +1,7 @@
 (* RFC-0162 §3.4. See [fd_cache.mli] for the contract. *)
 
 type cached_writer =
-  { fd : Unix.file_descr
+  { target : Fd_append_whole.target
   ; mutable last_used : float
   ; mutable active : int
   ; mutable close_on_release : bool
@@ -13,7 +13,7 @@ let max_entries = 32
 
 (* The descriptor has no user-space buffer, so closing it writes nothing. *)
 let close_silently w =
-  try Unix.close w.fd with
+  try Unix.close (Fd_append_whole.descriptor w.target) with
   | Unix.Unix_error _ -> ()
 ;;
 
@@ -24,7 +24,7 @@ let drop_cached_writer_locked path w =
 
 (* Evict the inactive writer with the smallest [last_used], closing its fd.
    Caller must already hold [mu]. Active writers are never closed under a
-   caller still using the returned channel. *)
+   caller still using the lent descriptor. *)
 let evict_lru_locked () =
   let oldest = ref None in
   Hashtbl.iter
@@ -44,14 +44,22 @@ let evict_lru_locked () =
      | None -> ())
 ;;
 
+(* [Sys_error] with the path first is what [Stdlib.open_out_gen] raised for
+   an open failure before the cache held descriptors; the append callers
+   document and catch [Sys_error]. Every path error leaves the cache in
+   that shape. *)
+let sys_error path error = Sys_error (path ^ ": " ^ Unix.error_message error)
+
 let writer_matches_path path w =
-  try
-    let opened = Unix.fstat w.fd in
+  match
+    let opened = Unix.fstat (Fd_append_whole.descriptor w.target) in
     let current = Unix.stat path in
     opened.Unix.st_dev = current.Unix.st_dev
     && opened.Unix.st_ino = current.Unix.st_ino
   with
-  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> false
+  | same -> same
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> false
+  | exception Unix.Unix_error (error, _, _) -> raise (sys_error path error)
 ;;
 
 (* Caller must already hold [mu]. *)
@@ -65,21 +73,11 @@ let get_or_open_locked path now =
     w
   | None ->
     if Hashtbl.length cached >= max_entries then evict_lru_locked ();
-    (* [Sys_error] with the path first is what [Stdlib.open_out_gen] raised
-       here before; the append callers document and catch [Sys_error].
-       [O_RDWR]: a line append reads the file's last byte through this
-       descriptor. *)
-    let fd =
-      try
-        Unix.openfile
-          path
-          [ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CREAT; Unix.O_CLOEXEC ]
-          0o644
-      with
-      | Unix.Unix_error (error, _, _) ->
-        raise (Sys_error (path ^ ": " ^ Unix.error_message error))
+    let target =
+      try Fd_append_whole.open_target path with
+      | Unix.Unix_error (error, _, _) -> raise (sys_error path error)
     in
-    let w = { fd; last_used = now; active = 0; close_on_release = false } in
+    let w = { target; last_used = now; active = 0; close_on_release = false } in
     Hashtbl.add cached path w;
     w
 ;;
@@ -103,7 +101,7 @@ let with_writer path f =
            inactive fd eviction, never persisted annotation semantics. *)
         w.last_used <- Unix.gettimeofday ();
         if w.active = 0 && w.close_on_release then close_silently w))
-    (fun () -> f w.fd)
+    (fun () -> f w.target)
 ;;
 
 let invalidate path =

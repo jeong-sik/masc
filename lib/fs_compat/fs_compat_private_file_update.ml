@@ -773,7 +773,7 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
     Buffer.add_char buf '\n';
     append_lines_unix path (Buffer.contents buf)
   in
-  (* Keep the path lock and cached-channel lease wholly inside the job.
+  (* Keep the path lock and cached-descriptor lease wholly inside the job.
      The joined result is also the caller's commit-acknowledgement boundary:
      do not add [on_systhread]'s post-write cancellation check here. *)
   match execution_context () with

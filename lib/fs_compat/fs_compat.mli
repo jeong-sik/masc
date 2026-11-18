@@ -1223,12 +1223,18 @@ val cleanup_atomic_orphans
   -> unit
   -> atomic_orphan_cleanup_report
 
-(** Append string to file. The file gets all of the string or stays as it
-    was: bytes of a write that failed part-way are removed again, and
-    nothing is kept to be written later. The string goes right after the
-    file's last byte, whatever that byte is. A writer of lines uses
-    {!append_lines}.
-    @raise Sys_error when the file cannot be opened or written. *)
+(** Append string to file, right after the file's last byte, whatever
+    that byte is. A writer of lines uses {!append_lines}.
+
+    When the append fails, nothing is kept to be written later. Bytes a
+    write had already put in a regular file are removed again, with two
+    exceptions that the [Sys_error] message names: removing them failed,
+    or another writer changed the file during the call, in which case
+    they are left so that nothing of the other writer's is removed. The
+    two gaps left against a writer in another process are described in
+    [Fd_append_whole].
+    @raise Sys_error when the path cannot be examined, opened or
+    written. The message starts with the path. *)
 val append_file : string -> string -> unit
 
 (** Append whole lines to file: [lines] is one or more lines, each ending
@@ -1237,8 +1243,11 @@ val append_file : string -> string -> unit
     raw bytes were appended), a newline is written before the lines, so
     the unfinished bytes stay a line of their own and every appended line
     is read whole. The file's last byte is read on each call to decide
-    that.
-    @raise Sys_error when the file cannot be opened, read or written. *)
+    that. Bytes a failed {!append_file} or {!append_lines} left in place
+    are such unfinished bytes. A FIFO or another non-regular file has no
+    last byte to read, and the lines are written to it as they are.
+    @raise Sys_error when the path cannot be examined, opened, read or
+    written. *)
 val append_lines : string -> string -> unit
 
 (** Check if file exists. *)
@@ -2445,7 +2454,8 @@ val append_fd_durable_for_testing :
 val append_jsonl : string -> Yojson.Safe.t -> unit
 
 (** [append_jsonl_batch path jsons] writes multiple JSON entries to [path]
-    in a single lock and write. More efficient than calling [append_jsonl]
+    under one hold of the path lock, as one append that is rolled back
+    as a whole when it fails. More efficient than calling [append_jsonl]
     repeatedly when batching pending entries. Uses the same joined-thread
     and commit acknowledgement boundary as {!append_jsonl}.
     No-op if [jsons] is empty. *)

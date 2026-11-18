@@ -358,7 +358,8 @@ let invalidate_cached_writer path =
 let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
 let with_cached_writer_for_testing path f =
-  Fd_cache.with_writer (canonical_append_mutex_path path) f
+  Fd_cache.with_writer (canonical_append_mutex_path path) (fun target ->
+    f (Fd_append_whole.descriptor target))
 
 (* The rest of [fd], from its current position to its end. The buffer starts
    at the length the file reports and one chunk serves every read, so a file

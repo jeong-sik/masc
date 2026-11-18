@@ -306,16 +306,17 @@ let append_path_mutex_count_for_testing () =
 
 let canonical_append_mutex_path_for_testing = canonical_append_mutex_path
 
-(* A failed append leaves the file as it was: [Fd_append_whole.run] removes
-   the bytes a partial write added, and the cached descriptor holds no
-   buffer that a later append or a close could write out (#52980).
+(* No byte of a failed append reaches the file later: the cached descriptor
+   holds no buffer that a later append or a close could write out (#52980).
+   [Fd_append_whole.run] removes the bytes a partial write added when they
+   are the file's last and nobody else's, and says so when it left them.
    With [~start:At_line_start] the content does not join onto a line an
    earlier writer left unfinished (#52974). *)
 let append_file_unix_with_io ~io ~start (path : string) (content : string) : unit =
   let canonical = canonical_append_mutex_path path in
   with_append_path_mutex canonical (fun () ->
-    Fd_cache.with_writer canonical (fun fd ->
-      match Fd_append_whole.run ~io ~start ~fd content with
+    Fd_cache.with_writer canonical (fun target ->
+      match Fd_append_whole.run ~io ~start target content with
       | Ok () -> ()
       | Error
           (Fd_append_whole.Write_failed
@@ -329,6 +330,7 @@ let append_file_unix_with_io ~io ~start (path : string) (content : string) : uni
         Printexc.raise_with_backtrace exception_ backtrace
       | Error
           (( Fd_append_whole.End_unreadable _
+           | Fd_append_whole.End_moved
            | Fd_append_whole.Write_failed
                { write_failure =
                    Fd_write_all.No_progress _ | Fd_write_all.Unix_error _

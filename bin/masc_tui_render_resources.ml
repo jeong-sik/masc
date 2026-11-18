@@ -290,9 +290,7 @@ let render_resources (state : state) =
     let period = match state.resource_day with
       | None -> if ko then "모든 날짜" else "all dates"
       | Some day ->
-          Printf.sprintf
-            (if ko then "%04d-%02d-%02d (이 장비 시각)" else "%04d-%02d-%02d local")
-            day.year day.month day.day in
+          Masc_tui_value.Local_day.text day ^ (if ko then " (이 장비 시각)" else " local") in
     let today = Catalog.local_day (Unix.gettimeofday ()) in
     let unchecked = match resource_unchecked_today state ~day:today with
       | None -> Theme.muted () ^ (if ko then "모름" else "unknown")

@@ -130,17 +130,20 @@ let unit_suffix = function
   | Series.Series_hour -> "/h"
   | Series.Series_day -> "/d"
 
+(* An hour bucket starts at a moment, and reads in the operator's zone like
+   every other moment, the heading's "as of" among them (RFC
+   tui-one-screen-grammar §6.1). A day bucket is a UTC day the server chose:
+   it starts at 09:00 in Seoul, so it is no local day and says UTC. The card
+   drew both in UTC under an "as of" in local time, nine hours apart. *)
 let time_text series_width start =
-  let moment = Unix.gmtime start in
   match series_width with
   | Series.Series_hour ->
-      Printf.sprintf "%02d-%02d %02d:00" (moment.Unix.tm_mon + 1) moment.Unix.tm_mday
-        moment.Unix.tm_hour
-  | Series.Series_day ->
-      Printf.sprintf "%02d-%02d" (moment.Unix.tm_mon + 1) moment.Unix.tm_mday
+      Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute
+        ~now:(Unix.gettimeofday ()) start
+  | Series.Series_day -> Masc_tui_value.Utc_day.month_day (Masc_tui_value.Utc_day.of_moment start)
 
 let time_header = function
-  | Series.Series_hour -> "HOUR (UTC)"
+  | Series.Series_hour -> "HOUR"
   | Series.Series_day -> "DAY (UTC)"
 
 let totals buckets =
@@ -169,7 +172,7 @@ let span_text window =
   span_name window
   ^
   match width window with
-  | Series.Series_hour -> " · per UTC hour"
+  | Series.Series_hour -> " · per hour"
   | Series.Series_day -> " · per UTC day"
 
 (* The first of the wordings that fits [cells]; the last one is cut to [cells]

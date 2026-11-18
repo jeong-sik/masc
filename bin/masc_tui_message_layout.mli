@@ -128,17 +128,12 @@ type markdown_source =
     A growing reply keeps only its closed top-level blocks. Other live rows can
     change non-append-only facts and continue to bypass every render cache. *)
 
-type timeline_bucket = {
-  tb_year : int;
-  tb_month : int;
-  tb_day : int;
-  tb_hour : int;
-  tb_is_dst : bool;
-}
+type timeline_bucket = Masc_tui_value.Local_hour.t
 (** One local civil hour on the conversation timeline. Calendar fields, rather
-    than a formatted label, are the grouping authority. [tb_is_dst] keeps the
-    repeated hour at a daylight-saving transition from being merged with the
-    hour that preceded it and marks the daylight occurrence in its label. *)
+    than a formatted label, are the grouping authority. Its daylight-saving
+    flag keeps the repeated hour at a daylight-saving transition from being
+    merged with the hour that preceded it and marks the daylight occurrence
+    in its label. *)
 
 (** Which way a fact moved in one Memory journal revision. *)
 type journal_sign = Journal_added | Journal_removed

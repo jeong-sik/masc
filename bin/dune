@@ -370,6 +370,7 @@
  (modules masc_tui_usage_trend)
  (libraries
   masc
+  masc_tui_value
   masc_tui_ansi
   masc_tui_braille
   masc_tui_chart
@@ -639,7 +640,7 @@
  (name masc_tui_resource_catalog)
  (wrapped false)
  (modules masc_tui_resource_catalog)
- (libraries masc_tui_mcp masc masc.time_codec unix yojson  masc.agent_core.digest))
+ (libraries masc_tui_mcp masc masc.time_codec masc_tui_value unix yojson  masc.agent_core.digest))
 
 (library
  (name masc_tui_artifact_checks)
@@ -2415,7 +2416,7 @@
  (wrapped false)
  (modules masc_tui_palette)
  (libraries masc.runtime masc_tui_overview_providers masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows masc_tui_task_dispatch
-  masc_tui_message_layout masc_tui_code_lexer masc_tui_lane_addons masc unix))
+  masc_tui_message_layout masc_tui_code_lexer masc_tui_lane_addons masc_tui_value masc unix))
 
 (library
  (name masc_tui_task_document)

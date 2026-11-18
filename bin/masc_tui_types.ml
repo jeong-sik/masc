@@ -3350,16 +3350,6 @@ type chat_schedule_proximity =
 
 let chat_schedule_soon_band_s = 3600.
 
-(* The local midnight that starts the day [at] falls on. [Unix.mktime] reads
-   the zone's own day, so a day that gains or loses an hour still starts at
-   its midnight. A breakdown it cannot turn back into an instant has no start
-   to give. *)
-let local_day_start at =
-  let day = Unix.localtime at in
-  match Unix.mktime { day with Unix.tm_hour = 0; tm_min = 0; tm_sec = 0 } with
-  | start, _ -> Some start
-  | exception Unix.Unix_error _ -> None
-
 (* A row moves to the next band as the clock runs, with no new data: Later
    becomes Today at the start of the due day, both become Soon an hour before
    the due moment, and Soon becomes Elapsed at it. Each band notes the instant
@@ -3373,10 +3363,10 @@ let chat_schedule_proximity ~now = function
       if due -. now <= chat_schedule_soon_band_s then Schedule_soon
       else begin
         Masc_tui_value.Redraw.note_change_at (due -. chat_schedule_soon_band_s);
-        let today = Unix.localtime now and day = Unix.localtime due in
-        if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
-        else begin
-          (match local_day_start due with
+        match Masc_tui_value.Instant.day_of ~now due with
+        | Masc_tui_value.Instant.Same_day -> Schedule_today
+        | Masc_tui_value.Instant.Same_year | Masc_tui_value.Instant.Other_year -> begin
+          (match Masc_tui_value.Instant.day_start due with
            | Some start when start > now -> Masc_tui_value.Redraw.note_change_at start
            | Some _ | None -> ());
           Schedule_later

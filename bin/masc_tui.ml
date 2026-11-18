@@ -24426,10 +24426,7 @@ let handle_composer_key state ~base_path ~mailbox key =
    a terminal escape could arrive, and it arrives as spaces instead. *)
 (* A paste filename pairs the wall-clock minute with a random suffix. The
    publication step refuses to replace an existing name if that suffix collides. *)
-let spill_stamp () =
-  let time = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%04d%02d%02d-%02d%02d" (time.Unix.tm_year + 1900)
-    (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min
+let spill_stamp () = Masc_tui_value.Instant.file_stamp (Unix.gettimeofday ())
 
 let spill_nonce () =
   (* Keep the existing short filename; [write_file] refuses any collision. *)

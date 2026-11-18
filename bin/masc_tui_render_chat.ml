@@ -753,14 +753,8 @@ let clock_of_local_time (time : Unix.tm) =
   Masc_tui_value.Instant.clock_within_day Masc_tui_value.Instant.To_second time
 ;;
 
-let bucket_of_local_time (time : Unix.tm) =
-  ({ tb_year = time.Unix.tm_year + 1900;
-     tb_month = time.Unix.tm_mon + 1;
-     tb_day = time.Unix.tm_mday;
-     tb_hour = time.Unix.tm_hour;
-     tb_is_dst = time.Unix.tm_isdst;
-   }
-    : Message_layout.timeline_bucket)
+let bucket_of_local_time (time : Unix.tm) : Message_layout.timeline_bucket =
+  Masc_tui_value.Local_hour.of_tm time
 ;;
 
 let keeper_message_clock at = clock_of_local_time (Unix.localtime at)

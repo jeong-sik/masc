@@ -89,13 +89,7 @@ type markdown_source =
     }
   | Markdown_streaming
 
-type timeline_bucket = {
-  tb_year : int;
-  tb_month : int;
-  tb_day : int;
-  tb_hour : int;
-  tb_is_dst : bool;
-}
+type timeline_bucket = Masc_tui_value.Local_hour.t
 
 type journal_sign = Journal_added | Journal_removed
 
@@ -1799,29 +1793,18 @@ let metadata_row ~(previous : entry option) ~inner_width ~indent (entry : entry)
       ; action = Action_none
       }
 
-let same_timeline_bucket left right =
-  Int.equal left.tb_year right.tb_year
-  && Int.equal left.tb_month right.tb_month
-  && Int.equal left.tb_day right.tb_day
-  && Int.equal left.tb_hour right.tb_hour
-  && Bool.equal left.tb_is_dst right.tb_is_dst
-
 let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
   match entry.timeline_bucket with
   | None -> None
   | Some bucket
     when Option.exists
            (fun (previous : entry) ->
-             Option.exists (same_timeline_bucket bucket)
+             Option.exists (Masc_tui_value.Local_hour.equal bucket)
                previous.timeline_bucket)
            previous ->
       None
   | Some bucket ->
-      let label =
-        Printf.sprintf "%04d-%02d-%02d \xc2\xb7 %02d:00" bucket.tb_year
-          bucket.tb_month bucket.tb_day bucket.tb_hour
-        ^ (if bucket.tb_is_dst then " DST" else "")
-      in
+      let label = Masc_tui_value.Local_hour.heading bucket in
       (* Triple-dash (U+2504), not the solid line: the origin heading under
          [Origin_row] now ends in a solid rule to its clock, and two solid
          rules a row apart read as one kind of break. This pane already

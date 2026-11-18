@@ -1193,7 +1193,7 @@ let provider_history_lines ~cols ~rows (state : state) =
           state.provider_history_days (Terminal_text.single_line reason) ]
   | Provider_history_read trend ->
       let days = trend.Masc_tui_usage_trend.days in
-      let as_of = Unix.gmtime trend.generated_at in
+      let as_of = Masc_tui_value.Utc_day.of_moment trend.generated_at in
       let scopes =
         match state.overview_providers with
         | Providers_read reading -> reading.puws_accounts
@@ -1265,9 +1265,7 @@ let provider_history_lines ~cols ~rows (state : state) =
           else
             "Daily values (UTC)" ::
             List.map (fun (day, sample) ->
-              Printf.sprintf "%04d-%02d-%02d %s"
-                (day.Unix.tm_year + 1900) (day.Unix.tm_mon + 1) day.Unix.tm_mday
-                (daily_value sample))
+              Masc_tui_value.Utc_day.date day ^ " " ^ daily_value sample)
               (Masc_tui_usage_trend.dated_samples trend row)
             |> List.concat_map wrap in
         let body = full_name @ wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
@@ -1296,12 +1294,14 @@ let provider_history_lines ~cols ~rows (state : state) =
           List.init height (fun index -> prefix ^ row left index ^ "  " ^ row right index)
           @ [""] @ arrange rest
         | row :: rest -> List.map (fun line -> prefix ^ line) (chart row) @ [""] @ arrange rest in
-      let first = Unix.gmtime (trend.generated_at -. float_of_int (days - 1) *. 86400.0) in
+      let first =
+        Masc_tui_value.Utc_day.of_moment (trend.generated_at -. float_of_int (days - 1) *. 86400.0)
+      in
       (Printf.sprintf
          " Quota scope trend (%d UTC days) · latest report per day · as of %s"
          days (runtime_moment_text trend.generated_at))
-      :: Printf.sprintf " %02d-%02d → %02d-%02d UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use"
-           (first.Unix.tm_mon + 1) first.Unix.tm_mday (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
+      :: Printf.sprintf " %s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use"
+           (Masc_tui_value.Utc_day.month_day first) (Masc_tui_value.Utc_day.month_day as_of)
       :: " ↓ below zero · ↑ above limit"
       :: (match trend.unreadable_reports with
           | 0 -> []

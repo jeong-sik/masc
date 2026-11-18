@@ -802,10 +802,7 @@ let render_section_resources ~cols (state : state) =
               [ Printf.sprintf (if ko then "    외 %s명" else "    %s more")
                   (Count.grouped omitted) ]))
   in
-  let day_label at =
-    let tm = Unix.gmtime at in
-    Printf.sprintf "%02d-%02d" (tm.Unix.tm_mon + 1) tm.tm_mday
-  in
+  let day_label at = Masc_tui_value.Utc_day.month_day (Masc_tui_value.Utc_day.of_moment at) in
   let daily_title = match state.task_flow with
     | Some flow when flow.Task_flow.daily <> [] ->
       let first = List.hd flow.Task_flow.daily in
@@ -827,7 +824,8 @@ let render_section_resources ~cols (state : state) =
     | None -> [ no_snapshot ]
     | Some flow ->
       let rows =
-        [ say "날짜" "day", (fun (day : Task_flow.day) -> (Unix.gmtime day.d_start).Unix.tm_mday)
+        [ say "날짜" "day", (fun (day : Task_flow.day) ->
+              Masc_tui_value.Utc_day.day_of_month (Masc_tui_value.Utc_day.of_moment day.d_start))
         ; say "새 작업" "created", (fun (day : Task_flow.day) -> day.d_created)
         ; say "완료" "completed", (fun (day : Task_flow.day) -> day.d_completed)
         ; say "취소" "cancelled", (fun (day : Task_flow.day) -> day.d_cancelled) ]

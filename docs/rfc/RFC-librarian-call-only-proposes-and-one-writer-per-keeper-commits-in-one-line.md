@@ -453,18 +453,24 @@ type ask =
 ### 6.2 답
 
 ```ocaml
-type new_fact = { claim : string; category : Category.t; basis : Basis.t; from_units : string list }
+type new_fact = { claim : string; category : Category.t; observation : Observation.t; from_units : string list }
 type op =
   | Add of new_fact
   | Drop of { ref_ : string; reason : string }
   | Merge of { refs : string list; into : new_fact }
   | Revise of { ref_ : string; into : new_fact }
 type answer = { question : Question_id.t; ops : op list; working_state : Keep | Set of string }
-type rejection = Not_json | Schema_violation | Echo_mismatch | Empty_or_partial
+type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Empty_or_partial
 ```
 
 - 답은 바뀌는 것만 적는다. 답이 이름 붙이지 않은 fact 는 그대로 남는다.
 - 답 전체를 버리는 이유는 `rejection` 넷뿐이다. op 하나의 흠은 그 op 만 반영하지 않고 줄에 적는다(§8.2).
+- 답의 새 fact 는 관측한 것만이다. 대화에서 읽었거나 Board 에서 읽었다. 파생 fact 는 Keeper 의 직접 쓰기(§8.5)만 만든다. 지금과 같다.
+- wire 모양은 `lib/librarian/librarian_answer.mli` 가 정한다. object 마다 field 집합이 정확히 맞아야 한다. 새 fact 의 `basis` 는 Memory 에 실린 fact 의 `basis` 와 같은 모양이다. 모델은 읽은 모양대로 쓴다.
+- 답 글은 JSON 문서 하나다. code fence 나 앞뒤의 말이 붙으면 `Not_json` 이다. 고쳐서 읽지 않는다. slot 이 그렇게 답하는 비율은 채점기가 알린다.
+- 검사 순서는 고정이다. 문서의 field 집합, 되돌려 적은 반쪽 둘이 문자열인가, 그 반쪽이 물은 질문의 것인가, 그다음이 하던 일과 op 다. 다른 질문의 답은 다른 흠이 있어도 `Echo_mismatch` 다.
+- `Empty_or_partial` 은 빈 글이다. provider 가 중간에 끊은 답은 묻기 층이 이 값으로 바꾼다. 끊긴 것을 아는 곳이 거기다.
+- 답이 적은 이름(`m3`, 단위 이름)은 codec 이 그대로 둔다. 질문의 표에 없는 이름은 계획이 그 op 만 빼는 이유다(§8.2).
 - `Read_item_alone` 의 답에서는 `Add` 와 `working_state = Keep` 만 받는다. 그 밖은 반영하지 않고 `Not_valid_alone` 으로 줄에 적는다. Memory 와 하던 일을 보지 않은 답이 그것을 지우거나 갈아 쓸 수는 없다.
 
 ### 6.3 크기는 provider 가 잰다
@@ -807,6 +813,9 @@ type log_line =
 1. **계획**(순수 함수). `Plan.of_answer ~question ~facts ~removed_since answer` 가 `(facts', effects)` 를 돌려준다.
 2. **쓰기 전 상태 확인.** `memory-current.json` 을 읽어 sha 를 낸다. 마지막 줄의 `after`(또는 `Started.snapshot`)와 같아야 한다. 다르면 `Stopped (Log_diverged _)` 로 가고 쓰지 않는다(`authoritative_read_only`).
 3. **인코딩.** 지금 쓰는 스냅샷 codec 으로 새 envelope 을 만든다. `revision + 1` 이고 `after = sha256 bytes` 다. `Skip` 이나 효과 없는 답은 바이트를 그대로 두고 `after = basis` 다. 읽은 자리가 움직였으므로 줄은 쓴다.
+   - envelope 은 `revision`, `updated_at`, `source`, `facts`, `change` 다. 지운 이유(`removal`)는 담지 않는다. 그것은 줄에만 있다.
+   - `source.kind` 는 `Read` 와 `Make_room` 에서 `librarian`, `Remember` 와 `Supersede` 에서 `explicit_write`, `Retract` 에서 `explicit_retract` 다. `change` 는 `effects` 에서 만든다.
+   - 바이트는 `test_keeper_memory_snapshot_golden` 이 고정한다.
 4. **덧붙이기.** 아는 끝 offset 에서 `Committed` 줄을 덧붙이고 fsync 한다. **여기가 반영된 시점이다.**
 5. **스냅샷.** `memory-current.json.tmp` 를 쓰고 fsync, rename, 디렉터리 fsync 를 한다. `after = basis` 면 건너뛴다.
 6. **알림.** 메모리의 view(`covers_through`, `covered`, `working_state`)를 바꾸고 부른 쪽에 답한다.
@@ -1744,15 +1753,17 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | 층 | 넣는 것 | 확인 |
 |---|---|---|
 | L0 | 이 RFC, 연구 기록, 근거 폴더(상태 표와 검사 스크립트, 모델과 결과, 자리 재생, slot 결과 분류 표) | 독립 리뷰 판정. 상태 표와 slot 결과 표의 검사 스크립트를 돌린 결과를 근거 폴더에 적는다. 표가 OCaml 의 `match` 가 되는 L5·L6 부터는 컴파일러가 빠진 쌍을 잡는다 |
-| L1 | 평가 틀. 프롬프트보다 먼저 고정한다. 만든 질문의 고정 corpus(합성 자료만), hash 로 못 박은 채점기(slot 별 유효율, 되돌려 적기, op 적용률, 변화율, merge 뒤 보존), 스냅샷 codec 의 golden fixture | 채점기 hash 를 RFC 에 적는다. fixture 가 지금 codec 과 바이트로 같다 |
+| L1a | 답의 타입과 codec(§6.2), 질문 id 의 반쪽 둘, 스냅샷 codec 의 golden fixture | 네 op 의 왕복. 글로 고정한 wire 모양. 답 전체를 버리는 이유 넷과 op 하나의 흠. fixture 가 지금 codec 과 바이트로 같다 |
+| L1b | 순수 계획 `Plan.of_answer`(§8.2): 이름 풀기, 거절 집합, 근거 잃은 fact. `keeper_memory_os_disposition_core` 를 쓰는 쪽의 타입으로 고쳐 쓴다 | 계획 규칙마다 시험. 거둔 op 가 번호로 돌아온다. `Merge` 가 원본과 새 fact 를 함께 잃지 않는다 |
+| L1c | 평가 틀. 프롬프트보다 먼저 고정한다. 만든 질문의 고정 corpus(합성 자료만), hash 로 못 박은 채점기(slot 별 유효율, 되돌려 적기, op 적용률, 변화율, merge 뒤 보존) | 채점기 hash 를 RFC 에 적는다 |
 | L2 | Agent-Core 의 끝맺음 타입 다섯(§7.2). `Context_overflow` 는 status 와 무관하게 자기 타입, 창에서 멈춘 응답은 자기 생성자, `Invalid_request` 는 400·422 만, `Incomplete_output` 은 stop reason 을 싣는다, 창 넘침 code 를 문서로 정한 provider 에만 속한 codec 이 그 code 로 `Context_overflow` 를 만든다 | 생성자마다 분류 시험. `classify` 에 와일드카드가 없다. 선언한 slot 마다 창을 넘는 질문을 한 번 보내고, 돌아온 타입 있는 결과를 slot 별 표로 PR 에 붙인다. 그 표가 크기를 타입으로 말하는 slot 과 그렇지 않은 slot 을 가른다. 말하지 않는 slot 은 거절하는지 말이 없는지를 열 하나로 적는다 |
 | L3a | 턴 기록: 줄 타입(자기 모듈 타입만), codec, 끝을 확인하는 덧붙임, 끝자리, slice. Agent-Core 턴 경로에 건다(받아들일 때 `Opened`, 끝날 때 `Closed`, 프로세스 시작 때 닫기와 `Log_started`). 받아들임과 프로세스 시작 단계는 줄 앞에서 head 의 열린 메시지를 닫는다. 옛 경계 파일 옆에 쓴다 | 속성 시험 T1(§13 F1). 끝나는 길마다 `Closed` 가 정확히 하나. kill 시험(도중에 저장하고 죽은 턴의 메시지가 `Process_exited` 단위에 든다). 닫는 저장이 실패한 턴의 메시지가 다음 턴의 `unattributed` 에 든다. 끝이 결과를 기다리는 tool 요청인 이력을 닫은 뒤에도 다음 턴이 지금처럼 시작한다. 덧붙임 실패 시험. 줄 codec 모듈이 Goal·Task 저장소에 의존하지 않는다. 턴 기록과 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L3b | official-client runtime 넷: fragment 바이트 끝자리(찢긴 꼬리는 길이를 읽기 전에 자른다), chat 과 외부 행의 끝자리, 받아들일 때의 근거 | runtime 마다 같은 기능 시험. fragment 범위가 그 턴의 줄과 정확히 같다 |
 | L3c | reset: head 를 줄이는 제품 경로 둘(이력 지우기의 갈래 다섯, recovering purge)이 함수 하나를 지난다(조건 확인, 줄, head 순서). session 을 지우는 정지가 지우기 전에 줄을 쓴다. CLI purge 를 compare-and-swap 으로 옮긴다. 함수는 줄 앞에서 head 의 열린 메시지를 닫는다. 줄 뒤에 head 변경이 일어났는지는 가리지 않는다. 알리지 않은 reset 을 줄 쓰는 쪽이 적는다 | 줄을 쓰고 죽는 시험과 head 변경이 오류를 돌려주는 시험이 같은 결과를 낸다: 다음 단위가 `after` 에서 시작하고, 건너뛴 메시지가 없다. 도중에 저장하고 죽은 턴 뒤의 지우기와 recovering purge 에서, 버린 메시지가 열려 있던 것까지 `Reset` 줄의 `closed_before` 에 있다. 닫는 저장이 실패하면 줄도 head 변경도 없다. session 을 지우는 정지 뒤에 `Unannounced` 줄이 있고, 덧붙임이 실패하면 session 이 남는다. 덧붙임이 실패하면 head 가 그대로인 시험, 줄과 head 변경 사이에 턴이 받아들여지지 않는 시험, 지우기의 갈래마다 줄 시험 |
 | L3d | `turn-boundaries.jsonl` 을 읽던 곳 열을 턴 기록으로 옮긴다(§19.2 d). 그 뒤 옛 파일 쓰기를 멈춘다 | 옮긴 독자마다 다시 쓴 시험. 요청 seed 가 같은 atom 에서 풀린다 |
 | L4 | lane 선언: Librarian 의 built-in lane 과 그 표, 풀린 lane 값(질문 쪽 값과 slot 별 key), `lane_held` | 로드 시험. 선언이 같으면 값이 같고, slot 하나의 창이 바뀌면 값이 다르다 |
-| L5 | **전환.** 반영 기록(줄, 덧붙임, 꼬리 읽기, boot 표), 순수 계획(거절 집합, 근거 잃은 fact. `keeper_memory_os_disposition_core` 를 쓰는 쪽의 타입으로 고쳐 쓴다), 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다 |
-| L6 | 묻기: 질문 만들기와 싣기, 답 해석, slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1 채점기를 slot 마다 돌린 결과를 붙인다 |
+| L5 | **전환.** 반영 기록(줄, 덧붙임, 꼬리 읽기, boot 표), 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다 |
+| L6 | 묻기: 질문 만들기와 싣기, slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1 채점기를 slot 마다 돌린 결과를 붙인다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |
 | L9 | 화면과 경보: health 절, `keeper-memory-health` 행, TUI 해석, 수준 함수 | 생성자마다 해석 시험. health JSON 에 자유 글이 없다 |
@@ -2027,7 +2038,6 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | Librarian 의 프롬프트를 파일에서 읽는 경우, 그 파일이 바뀐 것을 알리는 신호가 있는지 | 없으면 손으로 고친 프롬프트는 재시작 때 보인다. 설계는 그렇게 적었다 | 묻기 층(L6) |
 | Codex 가 tool 을 쓰지 않고 알린 창 넘침이 생성 전의 거절인지. Codex 에는 응답을 냈는지 알리는 칸이 없다. 지금 코드의 읽기(`refused_for_input_size`)를 따랐다 | 생성 뒤의 넘침이면 `Window_reached` 여야 한다. `Input_too_large` 로 읽으면 한 항목에서 그 slot 이 「입력이 크다」 쪽에 선다 | 폭과 바닥 층(L7). slot 마다 창을 넘는 질문을 한 번 보내 타입 있는 결과를 기록한다 |
 | 운영 lane 의 slot 가운데 Agent-Core 가 보내기 전에 세는 것이 어느 것인지, 창 넘침 code 를 문서로 정한 provider 가 어느 것인지. opencode 와 tinker slot 이 어느 wire codec 을 쓰는지도 읽지 않았다. 코드에서 provider 쪽 넘침을 타입으로 만드는 codec 이 GLM 하나라는 것만 확인했다 | 크기를 타입으로 말하지 않는 slot 이 운영 lane 에 남으면 그 lane 은 한 항목 아래의 단계에 닿지 않고 E4 나 W1 에서 선다 | Agent-Core 층(L2)의 slot 별 측정 표 |
-| 스냅샷 파일이 `removal` 값을 담는지. `removal` 에 생성자가 하나 는다 | 담는다면 「스냅샷의 바이트 모양이 그대로다」가 옛 파일을 읽는 쪽으로만 맞다 | 평가 틀(L1)의 golden fixture |
 | slot 결과 표의 생성자 163개 가운데 실제로 Exact 경로에 닿는 것이 어느 것인지. 표는 타입에서 만들었고 호출 경로를 따라가지 않았다 | 닿지 않는 생성자의 행은 쓰이지 않을 뿐이다. 닿는데 갈래가 틀린 행은 폭을 잘못 줄이거나 줄이지 않는다 | 끝맺음 타입 층(L2)과 묻기 층(L6). 생성자마다 분류 시험 |
 | 계정별 Claude API provider 는 catalog 행이 없어 Exact slot 이 되지 못한다는 것. 다른 작업이 찾은 사실이고 여기서 확인하지 않았다(#53022) | Librarian lane 에 그런 provider 를 선언할 수 없다 | 그 작업의 RFC |
 

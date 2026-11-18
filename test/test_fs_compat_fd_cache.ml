@@ -366,6 +366,10 @@ let failed_append_file name =
 
 let test_failed_append_without_bytes_leaves_nothing () =
   let path = failed_append_file "no-bytes.jsonl" in
+  let io = io_failing_after 0 in
+  (match run_on_own_descriptor ~io ~start:Whole.Anywhere path row_a with
+   | Error (Whole.Write_failed { rollback = Whole.Nothing_written; _ }) -> ()
+   | other -> failf "expected nothing written, got: %s" (describe other));
   fail_append ~budget:0 path row_a;
   check string "file after the failed append" row_0 (read_all path);
   Fs_compat.append_file path row_b;
@@ -446,7 +450,7 @@ let test_failed_rollback_is_reported () =
     | Error
         (Whole.Write_failed
           { rollback =
-              Whole.Left_in_place
+              Whole.Not_rolled_back
                 { bytes = 4
                 ; reason =
                     Whole.Rollback_error
@@ -509,7 +513,7 @@ let test_another_writers_row_survives_a_failed_append () =
    | Error
        (Whole.Write_failed
          { rollback =
-             Whole.Left_in_place
+             Whole.Not_rolled_back
                { bytes = 4
                ; reason = Whole.Changed_by_another_writer { expected_size = e; size = s }
                }
@@ -585,7 +589,7 @@ let test_stream_is_written_as_it_is () =
        | Error
            (Whole.Write_failed
              { rollback =
-                 Whole.Left_in_place { bytes = 2; reason = Whole.Not_a_regular_file }
+                 Whole.Not_rolled_back { bytes = 2; reason = Whole.Not_a_regular_file }
              ; _
              }) -> ()
        | other -> failf "expected 2 bytes left in the FIFO, got: %s" (describe other));
@@ -596,6 +600,226 @@ let test_stream_is_written_as_it_is () =
         "the row and the two bytes of the failed one arrived"
         (row_a ^ String.sub row_b 0 2)
         (Bytes.sub_string received 0 count))
+;;
+
+(* The descriptor is [O_APPEND]: a row another writer added after this call
+   looked at the end of the file is not written over. *)
+let test_append_lands_after_another_writers_row () =
+  let lands_after name start io_for =
+    let path = failed_append_file name in
+    (match run_on_own_descriptor ~io:(io_for path) ~start path row_a with
+     | Ok () -> ()
+     | other -> failf "expected the append to succeed, got: %s" (describe other));
+    check string "both rows are whole" (row_0 ^ row_b ^ row_a) (read_all path)
+  in
+  lands_after "after-length.jsonl" Whole.Anywhere (fun path ->
+    { Whole.unix_io with
+      end_offset =
+        (fun fd ->
+          let size = Whole.unix_io.end_offset fd in
+          append_as_another_writer path row_b;
+          size)
+    });
+  lands_after "after-last-byte.jsonl" Whole.At_line_start (fun path ->
+    { Whole.unix_io with
+      last_byte =
+        (fun fd ~size ->
+          let byte = Whole.unix_io.last_byte fd ~size in
+          append_as_another_writer path row_b;
+          byte)
+    })
+;;
+
+(* A file that became shorter during the failed call is left as it is: the
+   rollback does not grow it back to its old length. *)
+let test_shorter_file_is_not_grown_back () =
+  let path = failed_append_file "shorter.jsonl" in
+  let writes = ref 0 in
+  let io =
+    { Whole.unix_io with
+      write =
+        (fun fd content offset length ->
+          incr writes;
+          if !writes > 1
+          then no_space ()
+          else (
+            let written = Unix.single_write_substring fd content offset (min length 4) in
+            Unix.truncate path 3;
+            written))
+    }
+  in
+  let expected_size = String.length row_0 + 4 in
+  (match run_on_own_descriptor ~io ~start:Whole.Anywhere path row_a with
+   | Error
+       (Whole.Write_failed
+         { rollback =
+             Whole.Not_rolled_back
+               { bytes = 4
+               ; reason = Whole.Changed_by_another_writer { expected_size = e; size = 3 }
+               }
+         ; _
+         })
+     when e = expected_size -> ()
+   | other -> failf "expected nothing removed from a shorter file: %s" (describe other));
+  check string "the file keeps its three bytes" (String.sub row_0 0 3) (read_all path)
+;;
+
+let interrupt name = raise (Unix.Unix_error (Unix.EINTR, name, ""))
+
+(* A truncation that was interrupted is judged by the file's length: whether
+   it had cut the file or not, the bytes end up removed and reported so. *)
+let test_interrupted_rollback_is_finished () =
+  List.iter
+    (fun (name, cut_before_interrupt) ->
+      let path = failed_append_file name in
+      let first = ref true in
+      let io =
+        { (io_failing_after 4) with
+          truncate =
+            (fun fd length ->
+              if !first
+              then (
+                first := false;
+                if cut_before_interrupt then Unix.ftruncate fd length;
+                interrupt "ftruncate")
+              else Unix.ftruncate fd length)
+        }
+      in
+      (match run_on_own_descriptor ~io ~start:Whole.Anywhere path row_a with
+       | Error (Whole.Write_failed { rollback = Whole.Rolled_back { bytes = 4 }; _ }) ->
+         ()
+       | other -> failf "expected 4 bytes rolled back, got: %s" (describe other));
+      check string "the file is as it was" row_0 (read_all path))
+    [ "interrupted-before-cut.jsonl", false; "interrupted-after-cut.jsonl", true ]
+;;
+
+exception Stop_writing
+
+(* An exception that is not a system error leaves the append as it is, after
+   the bytes written before it were taken back. *)
+let test_other_exception_passes_through () =
+  let path = failed_append_file "other-exception.jsonl" in
+  let writes = ref 0 in
+  let io =
+    { Whole.unix_io with
+      write =
+        (fun fd content offset length ->
+          incr writes;
+          if !writes > 1
+          then raise Stop_writing
+          else Unix.single_write_substring fd content offset (min length 4))
+    }
+  in
+  let append = Fs_compat.append_file_unix_with_io_for_testing ~io ~start:Whole.Anywhere in
+  (match append path row_a with
+   | () -> fail "the append was expected to fail"
+   | exception Stop_writing -> ());
+  check string "the bytes written before it are removed" row_0 (read_all path)
+;;
+
+let test_open_failure_names_the_path () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let plain_file = Filename.concat (tmpdir "fd_cache_open_failure") "plain" in
+  Out_channel.with_open_bin plain_file (fun channel -> output_string channel "x");
+  let path = Filename.concat plain_file "x.jsonl" in
+  match
+    Fs_compat.append_file_unix_with_io_for_testing
+      ~io:Whole.unix_io
+      ~start:Whole.At_line_start
+      path
+      row_a
+  with
+  | () -> fail "the append was expected to fail"
+  | exception Sys_error message ->
+    let prefix = Fs_compat.canonical_append_mutex_path_for_testing path ^ ": " in
+    if not (String.starts_with ~prefix message)
+    then failf "the error does not start with the path: %s" message
+;;
+
+(* The descriptor is close-on-exec, so a child process does not hold the
+   file open. A FIFO shows it: its reader sees the end of the stream only
+   when no process has it open for writing any more. *)
+let test_child_process_does_not_inherit_the_descriptor () =
+  let path = Filename.concat (tmpdir "fd_cache_cloexec") "out.fifo" in
+  Unix.mkfifo path 0o600;
+  let reader = Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+  let target = Whole.open_target path in
+  let child =
+    Unix.create_process "sleep" [| "sleep"; "60" |] Unix.stdin Unix.stdout Unix.stderr
+  in
+  Unix.close (Whole.descriptor target);
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.kill child Sys.sigkill;
+      ignore (Unix.waitpid [] child : int * Unix.process_status);
+      Unix.close reader)
+    (fun () ->
+      match Unix.select [ reader ] [] [] 5.0 with
+      | [], _, _ -> fail "a writer is still open after this process closed its own"
+      | _ :: _, _, _ ->
+        let read = Unix.read reader (Bytes.create 1) 0 1 in
+        check int "the reader is at the end of the stream" 0 read)
+;;
+
+let wait_until condition =
+  let deadline = Unix.gettimeofday () +. 10.0 in
+  let rec poll () =
+    if condition ()
+    then true
+    else if Unix.gettimeofday () > deadline
+    then false
+    else (
+      Thread.delay 0.01;
+      poll ())
+  in
+  poll ()
+;;
+
+(* A FIFO is opened for writing only, so the open waits for a reader. That
+   wait belongs to the FIFO's path: an append to another file goes through. *)
+let test_fifo_open_waits_and_holds_up_no_other_path () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_fifo_wait" in
+  let fifo = Filename.concat dir "out.fifo" in
+  let other = Filename.concat dir "other.jsonl" in
+  Unix.mkfifo fifo 0o600;
+  let fifo_result = Atomic.make None in
+  let other_result = Atomic.make None in
+  let appending path row result =
+    Thread.create
+      (fun () ->
+        Atomic.set
+          result
+          (Some
+             (match Fs_compat.append_lines path row with
+              | () -> Ok ()
+              | exception Sys_error message -> Error message)))
+      ()
+  in
+  let finished result = Option.is_some (Atomic.get result) in
+  let fifo_writer = appending fifo row_a fifo_result in
+  Thread.delay 0.2;
+  let fifo_waited = not (finished fifo_result) in
+  let other_writer = appending other row_b other_result in
+  let other_went_through = wait_until (fun () -> finished other_result) in
+  (* Opening the reader lets the FIFO writer go on, whatever was seen above.
+     The reader does not wait itself: a writer that failed never opens. *)
+  let reader = Unix.openfile fifo [ Unix.O_RDONLY; Unix.O_NONBLOCK ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close reader)
+    (fun () ->
+      Thread.join fifo_writer;
+      Thread.join other_writer;
+      check bool "the FIFO open waited for a reader" true fifo_waited;
+      check bool "the append to another file did not wait for it" true other_went_through;
+      let succeeded name outcome =
+        check (option (result unit string)) name (Some (Ok ())) (Atomic.get outcome)
+      in
+      succeeded "the append to the FIFO succeeded" fifo_result;
+      succeeded "the append to the other file succeeded" other_result;
+      let received = Bytes.create 64 in
+      let count = Unix.read reader received 0 64 in
+      check string "the row reached the reader" row_a (Bytes.sub_string received 0 count))
 ;;
 
 (* #52974. A line append starts at a line start. When the file ends in the
@@ -739,12 +963,112 @@ let test_unreadable_end_writes_nothing () =
       end_offset = (fun _ -> raise (Unix.Unix_error (Unix.EIO, "lseek", "")))
     }
   in
-  let moved = { Whole.unix_io with last_byte = (fun _ ~size:_ -> None) } in
-  List.iter
-    (fun io ->
-      ignore (failing_append ~start:Whole.At_line_start ~io path row_a : string);
-      check string "nothing was written" row_0 (read_all path))
-    [ unreadable; moved ]
+  ignore (failing_append ~start:Whole.At_line_start ~io:unreadable path row_a : string);
+  check string "nothing was written" row_0 (read_all path)
+;;
+
+(* A file that keeps its length and still gives no last byte is reported:
+   the append does not look at it for ever. *)
+let test_missing_last_byte_writes_nothing () =
+  let path = line_start_file "no-last-byte.jsonl" in
+  write_through_another_descriptor path row_0;
+  let io = { Whole.unix_io with last_byte = (fun _ ~size:_ -> None) } in
+  (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
+   | Error (Whole.Last_byte_missing { size }) when size = String.length row_0 -> ()
+   | other -> failf "expected the missing last byte reported, got: %s" (describe other));
+  check string "nothing was written" row_0 (read_all path)
+;;
+
+(* The file became shorter between the length and the last-byte read, as it
+   does when another process takes back its failed append. The end is read
+   again and the row goes after what is there now. *)
+let test_shorter_file_is_observed_again () =
+  let path = line_start_file "shorter-during-read.jsonl" in
+  write_through_another_descriptor path row_0;
+  let first = ref true in
+  let io =
+    { Whole.unix_io with
+      end_offset =
+        (fun fd ->
+          let size = Whole.unix_io.end_offset fd in
+          if !first
+          then (
+            first := false;
+            Unix.truncate path 3);
+          size)
+    }
+  in
+  (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
+   | Ok () -> ()
+   | other -> failf "expected the append to succeed, got: %s" (describe other));
+  check
+    string
+    "the row starts on a new line after what is left"
+    (String.sub row_0 0 3 ^ "\n" ^ row_a)
+    (read_all path)
+;;
+
+(* Each call is made again after [EINTR], and the row is still written once. *)
+let test_interrupted_calls_are_made_again () =
+  let path = line_start_file "interrupted.jsonl" in
+  write_through_another_descriptor path (row_0 ^ unfinished);
+  let pending = ref [ "lseek"; "read"; "write" ] in
+  let interrupted_once name =
+    if List.mem name !pending
+    then (
+      pending := List.filter (fun other -> not (String.equal other name)) !pending;
+      interrupt name)
+  in
+  let io =
+    { Whole.write =
+        (fun fd content offset length ->
+          interrupted_once "write";
+          Whole.unix_io.write fd content offset length)
+    ; end_offset =
+        (fun fd ->
+          interrupted_once "lseek";
+          Whole.unix_io.end_offset fd)
+    ; last_byte =
+        (fun fd ~size ->
+          interrupted_once "read";
+          Whole.unix_io.last_byte fd ~size)
+    ; truncate = Whole.unix_io.truncate
+    }
+  in
+  (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
+   | Ok () -> ()
+   | other -> failf "expected the append to succeed, got: %s" (describe other));
+  check (list string) "every call was interrupted once" [] !pending;
+  check
+    string
+    "the row is there once, on a new line"
+    (row_0 ^ unfinished ^ "\n" ^ row_a)
+    (read_all path)
+;;
+
+let test_newline_and_row_are_one_write () =
+  let path = line_start_file "one-write.jsonl" in
+  write_through_another_descriptor path unfinished;
+  let lengths = ref [] in
+  let io =
+    { Whole.unix_io with
+      write =
+        (fun fd content offset length ->
+          lengths := length :: !lengths;
+          Whole.unix_io.write fd content offset length)
+    }
+  in
+  (match run_on_own_descriptor ~io ~start:Whole.At_line_start path row_a with
+   | Ok () -> ()
+   | other -> failf "expected the append to succeed, got: %s" (describe other));
+  check (list int) "one write carries both" [ 1 + String.length row_a ] !lengths
+;;
+
+let test_batch_starts_on_a_new_line () =
+  let path = line_start_file "batch.jsonl" in
+  write_through_another_descriptor path unfinished;
+  Fs_compat.append_jsonl_batch path [ `Int 1; `Int 2 ];
+  check string "the batch starts on a new line" (unfinished ^ "\n1\n2\n") (read_all path)
 ;;
 
 let tests () =
@@ -823,6 +1147,34 @@ let tests () =
             "a FIFO is written as it is and nothing is taken back"
             `Quick
             test_stream_is_written_as_it_is
+        ; test_case
+            "a row another writer added meanwhile is not written over"
+            `Quick
+            test_append_lands_after_another_writers_row
+        ; test_case
+            "a file that became shorter is not grown back"
+            `Quick
+            test_shorter_file_is_not_grown_back
+        ; test_case
+            "an interrupted truncation is finished"
+            `Quick
+            test_interrupted_rollback_is_finished
+        ; test_case
+            "another exception passes through after the rollback"
+            `Quick
+            test_other_exception_passes_through
+        ; test_case
+            "an open failure names the path"
+            `Quick
+            test_open_failure_names_the_path
+        ; test_case
+            "a child process does not inherit the descriptor"
+            `Quick
+            test_child_process_does_not_inherit_the_descriptor
+        ; test_case
+            "a FIFO open waits for its reader and holds up no other path"
+            `Quick
+            test_fifo_open_waits_and_holds_up_no_other_path
         ] )
     ; ( "line start"
       , [ test_case
@@ -873,6 +1225,26 @@ let tests () =
             "an end that cannot be read writes nothing"
             `Quick
             test_unreadable_end_writes_nothing
+        ; test_case
+            "a missing last byte writes nothing"
+            `Quick
+            test_missing_last_byte_writes_nothing
+        ; test_case
+            "a file that became shorter is observed again"
+            `Quick
+            test_shorter_file_is_observed_again
+        ; test_case
+            "interrupted calls are made again"
+            `Quick
+            test_interrupted_calls_are_made_again
+        ; test_case
+            "the newline and the row are one write"
+            `Quick
+            test_newline_and_row_are_one_write
+        ; test_case
+            "a batch starts on a new line"
+            `Quick
+            test_batch_starts_on_a_new_line
         ] )
     ]
 ;;

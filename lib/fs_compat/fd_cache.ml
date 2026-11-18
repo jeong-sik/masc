@@ -62,37 +62,62 @@ let writer_matches_path path w =
   | exception Unix.Unix_error (error, _, _) -> raise (sys_error path error)
 ;;
 
-(* Caller must already hold [mu]. *)
-let get_or_open_locked path now =
-  (match Hashtbl.find_opt cached path with
-   | Some w when not (writer_matches_path path w) -> drop_cached_writer_locked path w
-   | Some _ | None -> ());
+(* Caller must already hold [mu]. The cached writer whose descriptor still
+   names the file at [path]; one that no longer does is dropped. *)
+let find_current_locked path =
   match Hashtbl.find_opt cached path with
+  | Some w when writer_matches_path path w -> Some w
   | Some w ->
-    w.last_used <- now;
-    w
+    drop_cached_writer_locked path w;
+    None
+  | None -> None
+;;
+
+(* Caller must already hold [mu]. *)
+let lease_locked w =
+  (* NDT-OK: fd-cache recency is runtime resource metadata only; append
+     ordering and file contents are determined by caller writes. *)
+  w.last_used <- Unix.gettimeofday ();
+  w.active <- w.active + 1;
+  w
+;;
+
+(* The open runs outside [mu]. Opening a FIFO waits for its reader, and
+   that wait holds up the appends of this path only. *)
+let open_writer path =
+  let target =
+    try Fd_append_whole.open_target path with
+    | Unix.Unix_error (error, _, _) -> raise (sys_error path error)
+  in
+  { target; last_used = 0.0; active = 0; close_on_release = false }
+;;
+
+let lease path =
+  match
+    Stdlib.Mutex.protect mu (fun () ->
+      Option.map lease_locked (find_current_locked path))
+  with
+  | Some w -> w
   | None ->
-    if Hashtbl.length cached >= max_entries then evict_lru_locked ();
-    let target =
-      try Fd_append_whole.open_target path with
-      | Unix.Unix_error (error, _, _) -> raise (sys_error path error)
-    in
-    let w = { target; last_used = now; active = 0; close_on_release = false } in
-    Hashtbl.add cached path w;
-    w
+    let opened = open_writer path in
+    Stdlib.Mutex.protect mu (fun () ->
+      match find_current_locked path with
+      | exception exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        close_silently opened;
+        Printexc.raise_with_backtrace exception_ backtrace
+      | Some w ->
+        (* Another caller cached a writer for this path during the open. *)
+        close_silently opened;
+        lease_locked w
+      | None ->
+        if Hashtbl.length cached >= max_entries then evict_lru_locked ();
+        Hashtbl.add cached path opened;
+        lease_locked opened)
 ;;
 
 let with_writer path f =
-  let w =
-    Stdlib.Mutex.protect mu (fun () ->
-      (* NDT-OK: fd-cache recency is runtime resource metadata only; append
-         ordering and file contents are determined by caller writes. *)
-      let now = Unix.gettimeofday () in
-      let w = get_or_open_locked path now in
-      w.last_used <- now;
-      w.active <- w.active + 1;
-      w)
-  in
+  let w = lease path in
   Fun.protect
     ~finally:(fun () ->
       Stdlib.Mutex.protect mu (fun () ->

@@ -29,9 +29,11 @@
     Evicts the least-recently-used inactive writer when
     the bound is exceeded. Active writers are leased until [f] returns,
     so LRU eviction cannot close a descriptor while a caller is
-    still writing to it.
+    still writing to it. A path that has no cached writer is opened
+    outside the cache's own lock, so an open that waits (a FIFO without
+    a reader) holds up no other path.
     @raise Sys_error when the path cannot be examined or opened. The
-    message starts with the path. *)
+    message starts with [path] as it was given. *)
 val with_writer : string -> (Fd_append_whole.target -> 'a) -> 'a
 
 (** [invalidate path] closes and drops the cached writer for

@@ -169,9 +169,9 @@ let test_the_fact_browser_names_only_keys_that_answer () =
 
 (* What a row keeps at one width: its items with the colour marks taken off,
    the cut marker included. *)
-let kept ?status ~max_cells row =
+let kept ?status ?(refused_keys = Masc_tui_footer.Shown_dim) ~max_cells row =
   Masc_tui_footer.line ?status ~ko:false ~key_style:"\027[1m" ~dim:"" ~reset:"\027[0m"
-    ~max_cells ~hints:row ()
+    ~refused_keys ~max_cells ~hints:row ()
   |> Masc_tui_theme.strip_sgr
   |> String.trim
   |> Masc_tui_footer.split_on_double_space
@@ -231,6 +231,25 @@ let test_a_row_is_whole_or_the_answering_keys_alone () =
   check_whole_or_answering "Goals empty" (Keys.planning_goal_list_actions ~has_rows:false);
   check_whole_or_answering "Workspace without a reading"
     (Keys.footer_actions ~detail_open:false ~has_rows:true ~has_reading:false T.Repositories)
+
+(* With colours off the row's dim is nothing, so a refused key drawn in its
+   place would look like a key that acts. Such a row is the answering keys'
+   own at every width, however much room is left. *)
+let test_a_row_whose_dim_marks_nothing_names_only_keys_that_answer () =
+  let check_actions name actions =
+    let row = Keys.footer_row ~lang actions in
+    List.iter
+      (fun max_cells ->
+        check (list string)
+          (Printf.sprintf "%s at %d cells" name max_cells)
+          (kept ~max_cells (answering_keys_alone actions))
+          (kept ~refused_keys:Masc_tui_footer.Left_out ~max_cells row))
+      (wide :: widths)
+  in
+  List.iter
+    (fun (name, surface, _, _) -> check_actions (name ^ " empty") (actions ~has_rows:false surface))
+    surfaces;
+  check_actions "Goals empty" (Keys.planning_goal_list_actions ~has_rows:false)
 
 (* The notices are what a refused key put aside: measured before this rule, on
    the empty Goal list at 90 and 100 cells, a refused [Right / Enter] counted as
@@ -432,6 +451,8 @@ let () =
             test_the_trace_hears_only_the_keys_that_answer
         ; test_case "a refused key stays in the dim" `Quick
             test_a_refused_key_stays_in_the_dim
+        ; test_case "a row whose dim marks nothing names only keys that answer" `Quick
+            test_a_row_whose_dim_marks_nothing_names_only_keys_that_answer
         ; test_case "an empty approvals queue names only the keys that act"
             `Quick test_an_empty_approvals_queue_names_only_the_keys_that_act
         ; test_case "an approval row brings the keys that decide" `Quick

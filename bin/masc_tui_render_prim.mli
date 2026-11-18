@@ -209,8 +209,13 @@ val footer_line_keys :
   Masc_tui_types.state -> max_cells:int -> keys:Masc_tui_footer.key_row -> string
 (** {!footer_line} for a row of typed keys: a key that does not answer on the
     screen as drawn keeps its place in the row's dim when every key fits, and
-    is the first to go when the row is cut. The navigation trace hears only
-    the keys that answer. *)
+    is the first to go when the row is cut. With colours off the dim marks
+    nothing, so such a key is left out at every width. The navigation trace
+    hears only the keys that answer.
+
+    {!footer_line} stays for rows still written by hand. Each goes when its
+    screen builds zone 5 from its action list (RFC tui-one-screen-grammar
+    3.5); then this is the only entry. *)
 
 val keeper_split_threshold_cols : int
 

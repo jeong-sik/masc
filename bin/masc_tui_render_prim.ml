@@ -887,6 +887,9 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
     ~help_key_answers:door_answers ~key_style:(Ansi.bold ^ Theme.accent ())
+    ~refused_keys:
+      (if Masc_tui_theme.colors_enabled then Masc_tui_footer.Shown_dim
+       else Masc_tui_footer.Left_out)
     ~ko:(state.ui_language = Lang_ko)
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item

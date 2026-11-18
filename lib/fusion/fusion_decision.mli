@@ -17,10 +17,12 @@ val parse : Yojson.Safe.t -> (proposal, string) result
 val record : config:Workspace.config -> keeper:string -> turn_ref:Ids.Turn_ref.t ->
   proposal -> (recorded, error) result
 val read : config:Workspace.config -> run_id:string -> (Yojson.Safe.t list, error) result
-(** Reads every discovered event file under its canonical append mutex, then
-    strictly parses outside that mutex. Malformed nonblank rows, including
-    an unterminated final row, remain storage failures; a valid final row is
-    included. There is no history cap or malformed-row fallback. *)
+(** Reads every discovered event file under its canonical append mutex and
+    shared lock, then strictly parses outside them. Bytes after a file's last
+    newline are an append that never finished: they are not a row, whatever
+    they read as, and the next append to that file cuts them. A malformed
+    nonblank newline-terminated row remains a storage failure. There is no
+    history cap or malformed-row fallback. *)
 val read_for_keeper : config:Workspace.config -> keeper:string -> run_id:string ->
   (Yojson.Safe.t list, error) result
 val read_to_yojson : (Yojson.Safe.t list, error) result -> Yojson.Safe.t

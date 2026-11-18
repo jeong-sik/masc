@@ -1037,7 +1037,7 @@ let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
   { keeper_id
   ; turn_ref = Ids.Turn_ref.make
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~absolute_turn:meta.runtime.usage.total_turns
+      ~absolute_turn:meta.runtime.last_turn_id
   ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
   ; keeper_instructions = meta.instructions

@@ -8,6 +8,38 @@ open Fs_compat_internal
 module Atomic_orphan_size_class = Atomic_orphan_size_class
 module Durable_file_identity = Durable_file_identity
 
+module Input : sig
+  (** Own one channel across chunk reads and callbacks. Admission and final
+      [close_in_noerr] use one captured canonical data-path mutex key; the body
+      runs outside the mutex on its caller's context. The opener receives the
+      path and must open it synchronously, without Eio effects or mutex reentry,
+      settling rejected descriptors itself. The body borrows the channel and
+      must not close or retain it. No content snapshot, admission/tail policy,
+      per-chunk reopening or arbitrary inode-alias coordination is added.
+      Acquisition/handoff and cleanup are cancellation-protected; normal reads
+      check cancellation after cleanup, and body failures keep their backtrace. *)
+  val with_open :
+    path:string -> open_input:(string -> in_channel) ->
+    (in_channel -> 'a) -> 'a
+  val with_open_result :
+    path:string -> open_input:(string -> (in_channel, 'error) result) ->
+    (in_channel -> ('a, 'error) result) -> ('a, 'error) result
+
+  module For_testing : sig
+    val with_open :
+      before_close:(in_channel -> unit) ->
+      path:string -> open_input:(string -> in_channel) ->
+      (in_channel -> 'a) -> 'a
+    val with_open_result :
+      before_close:(in_channel -> unit) ->
+      path:string -> open_input:(string -> (in_channel, 'error) result) ->
+      (in_channel -> ('a, 'error) result) -> ('a, 'error) result
+    val path_mutex_available : string -> bool
+    (** [before_close] runs under the actual path mutex; the real close follows
+        even if this probe raises. No same-path mutex reentry is permitted. *)
+  end
+end
+
 (** #9921: raised by mutating [Fs_compat] entry points
     ([append_file], [save_file], [mkdir_p]) when the target path falls
     under [HOME] and the process is a test executable. Defense in depth

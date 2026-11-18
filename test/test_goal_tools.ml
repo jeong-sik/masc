@@ -141,7 +141,7 @@ let goal_files config =
    Returns the id the rows carry. *)
 let seed_rows_without_criterion_revision config =
   let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Goal before the hard cut"
-      ~metric:"goals" ~target_value:"1" () with
+      ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"goals" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   let row = match Goal_store.goal_to_yojson goal with
     | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
@@ -159,7 +159,7 @@ let test_goal_list_preserves_source_failure () =
   let list () = Tool_workspace.dispatch (workspace_ctx config)
     ~name:"masc_goal_list" ~args:(`Assoc []) in
   let _goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Visible source"
-      ~metric:"goals" ~target_value:"1" () with
+      ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"goals" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let path = Goal_store.goals_path config in
@@ -213,8 +213,8 @@ let test_goal_transition_unavailable_store () =
    [not_found]. *)
 let test_goal_transition_unknown_goal_not_found () =
   with_workspace @@ fun config ->
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Present goal" ~metric:"goals"
-           ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Present goal" ~measure:(Goal_measure_fixture.done_when "1")
+           ~procedure:"goals" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let error = expect_error (Tool_workspace.dispatch (workspace_ctx config)
       ~name:"masc_goal_transition"
@@ -231,7 +231,7 @@ let test_goal_upsert_unavailable_store () =
   let result = Tool_workspace.dispatch (workspace_ctx config)
       ~name:"masc_goal_upsert"
       ~args:(`Assoc [ "title", `String "New goal on a broken store"
-                    ; "metric", `String "goals"; "target_value", `String "1" ]) in
+                    ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1"); "procedure", `String "goals" ]) in
   check_unavailable_envelope config ~reason:"schema_rejected"
     ~field:(`String "criterion_revision") ~mirror_status:"mirror_rejected"
     ~mirror_goal_count:`Null ~reset_step:"repair_field" (expect_unavailable result);
@@ -248,8 +248,8 @@ let test_goal_upsert_and_list () =
       ~args:
         (`Assoc
             [ "title", `String "Ship Goal Surface"
-            ; "metric", `String "deploys shipped"
-            ; "target_value", `String "1"
+            ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+            ; "procedure", `String "deploys shipped"
             ; "priority", `Int 2
             ])
   in
@@ -301,7 +301,7 @@ let test_goal_upsert_and_list () =
 (* A goal in [phase], for fixtures. Creation makes Executing goals; the
    phase is then seeded through a Goal transaction. *)
 let upsert_goal_in_phase config ~title phase =
-  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"m" ~target_value:"1" () with
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"m" () with
   | Error error -> Error error
   | Ok (goal, _, _) when goal.Goal_store.phase = phase -> Ok goal
   | Ok (goal, _, _) ->
@@ -347,8 +347,8 @@ let test_goal_list_filters_by_phase () =
 let test_goal_list_includes_rollup () =
   with_workspace
   @@ fun config ->
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Executing goal" ~metric:"m"
-           ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Executing goal" ~measure:(Goal_measure_fixture.done_when "1")
+           ~procedure:"m" () with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
   (match upsert_goal_in_phase config ~title:"Verifying goal" Goal_phase.Verifying with
@@ -374,8 +374,8 @@ let test_goal_list_includes_rollup () =
 let test_goal_list_ignores_blank_optional_filters () =
   with_workspace
   @@ fun config ->
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Blank filter goal" ~metric:"m"
-           ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Blank filter goal" ~measure:(Goal_measure_fixture.done_when "1")
+           ~procedure:"m" () with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
   let listed =
@@ -452,8 +452,8 @@ let test_goal_creation_emits_an_event () =
     match
       upsert
         [ "title", `String "Close the goal ledger"
-        ; "metric", `String "goals counted"
-        ; "target_value", `String "1"
+        ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+        ; "procedure", `String "goals counted"
         ]
     with
     | Some result -> parse_json_result result
@@ -532,8 +532,8 @@ let test_goal_creation_survives_event_recording_failure () =
   let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
   Unix.mkdir path 0o700;
   let created = call_goal_tool config "masc_goal_upsert"
-      [ "title", `String "Committed shared Goal"; "metric", `String "artifacts"
-      ; "target_value", `String "1" ] in
+      [ "title", `String "Committed shared Goal"; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+      ; "procedure", `String "artifacts" ] in
   check_event_recordings "the missing creation is explicit"
     [ "goal_created", "failed" ] created;
   let recording = List.hd (event_recordings created) in
@@ -562,7 +562,7 @@ let test_goal_upsert_checks_expected_workspace () =
     `Assoc [ "base_path", `String base_path; "masc_root", `String root ] in
   let fields =
     [ "id", `String "goal-bound"; "title", `String "Workspace-bound goal"
-    ; "metric", `String "measurement"; "target_value", `String "1" ] in
+    ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1"); "procedure", `String "measurement" ] in
   let call extra =
     Tool_workspace.dispatch (workspace_ctx config) ~name:"masc_goal_upsert"
       ~args:(`Assoc (fields @ extra)) in
@@ -608,8 +608,8 @@ let test_metadata_edit_survives_event_recording_failure () =
       | None -> fail (name ^ " not handled") in
     (* The overdue fixture is created with a future date and backdated by update. *)
     let created = call "masc_goal_upsert"
-        [ "title", `String "Overdue shared Goal"; "metric", `String "artifacts"
-        ; "target_value", `String "1"; "due_date", `String "2026-09-23" ] in
+        [ "title", `String "Overdue shared Goal"; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+        ; "procedure", `String "artifacts"; "due_date", `String "2026-09-23" ] in
     check_event_recordings "creation reports its actual append"
       [ "goal_created", "recorded" ] created;
     let goal_id = get_string_field created "goal_id" in
@@ -664,14 +664,14 @@ let test_criterion_edit_reports_each_failed_event () =
     | Some result -> parse_json_result result
     | None -> fail (name ^ " not handled") in
   let created = call "masc_goal_upsert"
-      [ "title", `String "Revise a pending criterion"; "metric", `String "artifacts"
-      ; "target_value", `String "1" ] in
+      [ "title", `String "Revise a pending criterion"; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+      ; "procedure", `String "artifacts" ] in
   let goal_id = get_string_field created "goal_id" in
   ignore (call "masc_goal_transition"
     [ "goal_id", `String goal_id; "action", `String "request_complete" ]);
   let path, saved, before = block_goal_event_path config in
   let updated = call "masc_goal_upsert"
-      [ "id", `String goal_id; "target_value", `String "2"; "due_date", `String "2099-01-01" ] in
+      [ "id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "2"); "due_date", `String "2099-01-01" ] in
   check_event_recordings "each missing row is reported after the criterion changed"
     [ "goal_updated", "failed"; "goal_phase", "failed"; "goal_edited", "failed" ] updated;
   List.iter (fun row ->
@@ -694,14 +694,16 @@ let test_criterion_edit_reports_each_failed_event () =
   List.iter (fun bytes ->
     match Yojson.Safe.Util.(Yojson.Safe.from_string bytes |> member "goals" |> to_list) with
     | [ goal ] ->
-      check string "the criterion was committed" "2" (get_string_field goal "target_value");
+      check string "the criterion was committed"
+        (Yojson.Safe.to_string (Goal_measure.to_yojson (Goal_measure_fixture.done_when "2")))
+        (Yojson.Safe.to_string (Yojson.Safe.Util.member "measure" goal));
       check string "the due date was committed" "2099-01-01" (get_string_field goal "due_date");
       check string "the phase was committed" "executing" (get_string_field goal "phase")
     | _ -> fail "both stores must retain the Goal") [ primary; mirror ];
   check string "failed appends preserved prior history" before (Fs_compat.load_file saved);
   Unix.rmdir path;
   Unix.rename saved path;
-  let repeated = call "masc_goal_upsert" [ "id", `String goal_id; "target_value", `String "2" ] in
+  let repeated = call "masc_goal_upsert" [ "id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "2") ] in
   check_event_recordings "the later receipt describes its own snapshot while replaying older intents"
     [ "goal_updated", "recorded" ] repeated;
   let replayed = Fs_compat.load_file path |> String.split_on_char '\n'
@@ -747,8 +749,8 @@ let test_goal_due_date_and_priority_edits_are_recorded () =
   let created =
     upsert
       [ "title", `String "Dated later"
-      ; "metric", `String "goals counted"
-      ; "target_value", `String "1"
+      ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+      ; "procedure", `String "goals counted"
       ]
   in
   let goal_id = get_string_field created "goal_id" in
@@ -819,8 +821,8 @@ let test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds () =
       Goal_store.upsert_goal_with_events ~actor:"test"
         config
         ~title:"Dated later"
-        ~metric:"goals counted"
-        ~target_value:"1"
+        ~measure:(Goal_measure_fixture.done_when "1")
+        ~procedure:"goals counted"
         ()
     with
     | Ok created -> created
@@ -858,8 +860,8 @@ let short_row_fields =
 ;;
 
 let seed_listed_goal config ~title =
-  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"goals"
-          ~target_value:"1" () with
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~measure:(Goal_measure_fixture.done_when "1")
+          ~procedure:"goals" () with
   | Ok (goal, _, _) -> goal
   | Error error -> fail (Goal_store.write_error_to_string error)
 ;;
@@ -902,7 +904,7 @@ let test_goal_list_detailed_returns_whole_rows () =
       (fun field ->
          check bool ("a whole row carries " ^ field) true
            (List.mem_assoc field (Yojson.Safe.Util.to_assoc row)))
-      [ "metric"; "target_value"; "verification"; "criterion_review"; "measurement" ]
+      [ "measure"; "procedure"; "verification"; "criterion_review"; "measurement" ]
   | _ -> fail "expected one listed goal"
 ;;
 
@@ -988,8 +990,8 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     true
     (String_util.contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
   let goal, _kind, _ =
-    match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Existing goal" ~metric:"m"
-            ~target_value:"1" () with
+    match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Existing goal" ~measure:(Goal_measure_fixture.done_when "1")
+            ~procedure:"m" () with
     | Ok payload -> payload
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
@@ -1107,8 +1109,8 @@ let test_callers_share_a_goal_without_private_delivery () =
   check string "shared creation still requires a measurable criterion" "validation_error"
     (get_string_field incomplete "error_code");
   let created = call creator "masc_goal_upsert"
-      [ "title", `String "Ship together"; "metric", `String "verified artifacts"
-      ; "target_value", `String "1"; "due_date", `String "2026-09-23" ] in
+      [ "title", `String "Ship together"; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "1")
+      ; "procedure", `String "verified artifacts"; "due_date", `String "2026-09-23" ] in
   let goal_id = get_string_field created "goal_id" in
   let initial = shared_row "created Goal" (member "goal" created) in
   check string "a new shared Goal is executing" "executing"
@@ -1122,7 +1124,7 @@ let test_callers_share_a_goal_without_private_delivery () =
     (get_string_field rejected "error_code");
   let edited = call collaborator "masc_goal_upsert"
       [ "id", `String goal_id; "title", `String "Ship verified artifacts together"
-      ; "metric", `String "independently verified artifacts"; "target_value", `String "2" ]
+      ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "2"); "procedure", `String "independently verified artifacts" ]
     |> member "goal" |> shared_row "edited Goal" in
   check string "another caller edits the same Goal" goal_id (get_string_field edited "id");
   check string "metadata edit preserves execution" "executing" (get_string_field edited "phase");
@@ -1131,7 +1133,10 @@ let test_callers_share_a_goal_without_private_delivery () =
   let visible = listed creator in
   List.iter (fun field -> check string ("creator sees shared " ^ field)
       (get_string_field edited field) (get_string_field visible field))
-    [ "title"; "metric"; "target_value"; "due_date" ];
+    [ "title"; "procedure"; "due_date" ];
+  check string "creator sees the shared measure"
+    (Yojson.Safe.to_string (Yojson.Safe.Util.member "measure" edited))
+    (Yojson.Safe.to_string (Yojson.Safe.Util.member "measure" visible));
   let requested = call collaborator "masc_goal_transition"
       [ "goal_id", `String goal_id; "action", `String "request_complete" ] in
   check string "another caller requests verification" "verifying"
@@ -1176,7 +1181,10 @@ let test_callers_share_a_goal_without_private_delivery () =
     (get_string_field update_payload "actor");
   List.iter (fun field -> check string ("update event retains edited " ^ field)
       (get_string_field edited field) (get_string_field update_payload field))
-    [ "title"; "metric"; "target_value"; "criterion_revision" ];
+    [ "title"; "procedure"; "criterion_revision" ];
+  check string "update event retains the edited measure"
+    (Yojson.Safe.to_string (Yojson.Safe.Util.member "measure" edited))
+    (Yojson.Safe.to_string (Yojson.Safe.Util.member "measure" update_payload));
   let phases = history
     |> List.filter (fun event -> get_string_field event "event_type" = "goal_phase")
     |> List.map (fun event -> let payload = member "payload" event in
@@ -1227,8 +1235,8 @@ let test_goal_completion_accepts_goal_without_tasks () =
   @@ fun config ->
   let goal, _, _ =
     match
-      Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Direct completion" ~metric:"m"
-        ~target_value:"1" ()
+      Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Direct completion" ~measure:(Goal_measure_fixture.done_when "1")
+        ~procedure:"m" ()
     with
     | Ok payload -> payload
     | Error error -> fail (Goal_store.write_error_to_string error)
@@ -1244,8 +1252,8 @@ let test_goal_completion_ignores_open_task_count () =
   @@ fun config ->
   let goal, _, _ =
     match
-      Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Open task completion" ~metric:"m"
-        ~target_value:"1" ()
+      Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Open task completion" ~measure:(Goal_measure_fixture.done_when "1")
+        ~procedure:"m" ()
     with
     | Ok payload -> payload
     | Error error -> fail (Goal_store.write_error_to_string error)
@@ -1271,8 +1279,8 @@ let test_goal_completion_ignores_metric_text () =
       Goal_store.upsert_goal_with_events ~actor:"test"
         config
         ~title:"Metric completion"
-        ~metric:"coverage %"
-        ~target_value:"80%"
+        ~measure:(Goal_measure_fixture.done_when "80%")
+        ~procedure:"coverage %"
         ()
     with
     | Ok payload -> payload
@@ -1305,7 +1313,7 @@ let test_confirmation_uses_token_bound_operator () =
 let test_memory_confirmation_reports_backend_unavailable () =
   with_workspace @@ fun config ->
   let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Proof backend unavailable"
-    ~metric:"observed artifacts" ~target_value:"1" () with
+    ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"observed artifacts" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   ignore (request_complete config goal.id);
   ignore (prove_complete config goal.id);
@@ -1354,7 +1362,7 @@ let test_memory_confirmation_reports_backend_unavailable () =
 let test_operator_confirmation_binds_current_proof () =
   with_workspace @@ fun config ->
   let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Human confirmed goal"
-    ~metric:"observed artifacts" ~target_value:"1" () with
+    ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"observed artifacts" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   ignore (request_complete config goal.id);
   check string "verifier cannot complete" "awaiting_confirmation"
@@ -1439,7 +1447,7 @@ let test_operator_confirmation_binds_current_proof () =
   ignore (prove_complete config goal.id);
   (match confirm () with Error _ -> () | Ok _ -> fail "new request accepted old confirmation binding");
   (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal.id ~title:"Changed criterion"
-     ~metric:"observed artifacts" ~target_value:"2" () with
+     ~measure:(Goal_measure_fixture.done_when "2") ~procedure:"observed artifacts" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   (match confirm () with Error _ -> () | Ok _ -> fail "changed criterion accepted stale proof")
 ;;
@@ -1449,7 +1457,7 @@ let test_operator_confirmation_binds_current_proof () =
 
 let goal_awaiting_confirmation config title =
   let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title
-    ~metric:"observed artifacts" ~target_value:"1" () with
+    ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"observed artifacts" () with
     | Ok value -> value | Error error -> fail (Goal_store.write_error_to_string error) in
   ignore (request_complete config goal.id);
   check string "the verifier proves it" "awaiting_confirmation"

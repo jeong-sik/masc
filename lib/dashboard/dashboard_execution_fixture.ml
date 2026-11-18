@@ -389,7 +389,7 @@ let execution_smoke_fixture_json () =
                 ("context_ratio", `Float 0.91);
                 ("context_tokens", `Int 245000);
                 ("model", `String "runtime");
-                ("active_model", `String "runtime");
+                ("runtime_trust", `Assoc [ ("active_model", `String "runtime") ]);
                 ("updated_at", `String generated_at);
                 ("created_at", `String generated_at);
               ];

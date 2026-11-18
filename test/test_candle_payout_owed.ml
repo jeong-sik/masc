@@ -14,8 +14,8 @@ let make_goal () : Goal_store.goal =
   { Goal_store.id = "goal-1"
   ; criterion_revision = "rev-1"
   ; title = "Ship the ledger"
-  ; metric = Some "tests"
-  ; target_value = Some "10"
+  ; measure = Goal_measure_fixture.done_when "10"
+  ; procedure = "tests"
   ; due_date = None
   ; priority = 3
   ; phase = Goal_phase.Awaiting_confirmation
@@ -35,8 +35,8 @@ let make_verdict ?(request_id = "req-1") ?(recorded_at = "2026-09-28T06:32:00Z")
       Goal_store.Criterion
         { revision = "rev-1"
         ; title = "Ship the ledger"
-        ; metric = Some "tests"
-        ; target_value = Some "10"
+        ; measure = Goal_measure_fixture.done_when "10"
+        ; procedure = "tests"
         }
   ; verification_run_id = "run-1"
   ; authority = Masc_domain.System_llm_agent { agent_run_id = "test-verifier" }
@@ -231,7 +231,7 @@ let test_first_recovery_failure_preserves_owed_on_repair () =
         { goal_id = "goal-1"; request_id = "req-1"; verification_run_id = "run-1"
         ; criterion_revision = "rev-1"; passed_at = time "2026-09-28T06:32:00Z"
         ; goal_created_at = time "2026-09-20T01:00:00Z"; due_date = None
-        ; title = "Ship the ledger"; metric = Some "tests"; target_value = Some "10"
+        ; title = "Ship the ledger"; measure = Goal_measure_fixture.done_when "10"; procedure = "tests"
         ; linked_task_ids = [] }
     }
   in

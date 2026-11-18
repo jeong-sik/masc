@@ -6,7 +6,7 @@ type stage =
   | Queued_at of string
   | Missing
   | Turn_started
-  | Turn_ended
+  | Turn_ended of Keeper_reaction_ledger.Turn_disposition.t
   | Consumed
   | Completed
   | Cancelled of string option
@@ -52,6 +52,18 @@ let optional_text name fields =
   | Some (`String value) -> Ok (Some value)
   | Some _ -> Error ("schedule observation " ^ name ^ " must be a string or null")
 
+(* The finished turn's disposition, read with the ledger's own closed decoder:
+   [null] is "no turn this stimulus started has finished", an unknown token is
+   a decode failure rather than a guess. *)
+let turn_finished_disposition fields =
+  let* token = optional_text "turn_finished_disposition" fields in
+  match token with
+  | None -> Ok None
+  | Some token ->
+    (match Keeper_reaction_ledger.Turn_disposition.of_string token with
+     | Some disposition -> Ok (Some disposition)
+     | None -> Error ("schedule observation turn_finished_disposition is unknown: " ^ token))
+
 let optional_bool name fields =
   match List.assoc_opt name fields with
   | None | Some `Null -> Ok None
@@ -70,6 +82,21 @@ let same name expected fields =
   if String.equal actual expected then Ok ()
   else Error ("schedule observation identity mismatch: " ^ name)
 
+(* The two [projection_status] axes are read through the schedule contract's
+   closed tables: a token this build does not know fails the decode instead of
+   falling to a default reading (#36009). *)
+module Contract = Schedule_contract_values
+
+let queue_status fields =
+  let* token = text "projection_status" fields in
+  Contract.queue_projection_status_of_string token
+  |> Result.map_error Contract.decode_error_to_string
+
+let reaction_status fields =
+  let* token = text "projection_status" fields in
+  Contract.reaction_projection_status_of_string token
+  |> Result.map_error Contract.decode_error_to_string
+
 let evidence_fields row name =
   match List.assoc_opt name row with
   | None | Some `Null -> Ok None
@@ -84,8 +111,23 @@ let missing_stimulus_stage ~check_identity queue reaction =
     | None -> Error "missing stimulus requires unavailable reaction evidence" in
   let* () = check_identity queue in
   let* () = check_identity reaction in
-  let* () = same "projection_status" "unrecognized_receipt" queue in
-  let* () = same "projection_status" "missing_stimulus_id" reaction in
+  let mismatch = Error "schedule observation identity mismatch: projection_status" in
+  let* queue_projection = queue_status queue in
+  let* () = match queue_projection with
+    | Contract.Queue_unrecognized_receipt -> Ok ()
+    | Contract.Queue_matched_pending | Contract.Queue_retained_terminal_wake
+    | Contract.Queue_withdrawn_at_cancel | Contract.Queue_not_found
+    | Contract.Queue_matched_terminal_completed | Contract.Queue_matched_terminal_cancelled
+    | Contract.Queue_terminal_projection_pending | Contract.Queue_transfer_projection_pending
+    | Contract.Queue_evidence_invalid | Contract.Queue_read_error -> mismatch in
+  let* reaction_projection = reaction_status reaction in
+  let* () = match reaction_projection with
+    | Contract.Reaction_missing_stimulus_id -> Ok ()
+    | Contract.Reaction_conflicting_terminal_evidence | Contract.Reaction_matched_terminal_cancelled
+    | Contract.Reaction_matched_consumed_ack | Contract.Reaction_matched_turn_finished
+    | Contract.Reaction_matched_turn_started | Contract.Reaction_matched_stimulus
+    | Contract.Reaction_not_found | Contract.Reaction_quarantined | Contract.Reaction_read_error
+    | Contract.Reaction_invalid_stimulus_id | Contract.Reaction_unrecognized_receipt -> mismatch in
   let* bound_stimulus = optional_text "stimulus_id" reaction in
   let* () = match bound_stimulus with
     | None -> Ok ()
@@ -97,7 +139,12 @@ let missing_stimulus_stage ~check_identity queue reaction =
         (match observed with
          | None | Some false -> no_progress rest
          | Some true -> Error "missing stimulus conflicts with reaction progress") in
-  no_progress [ "stimulus_seen"; "turn_started_seen"; "turn_finished_seen"
+  let* () =
+    let* finished = optional_text "turn_finished_disposition" reaction in
+    match finished with
+    | None -> Ok ()
+    | Some _ -> Error "missing stimulus conflicts with reaction progress" in
+  no_progress [ "stimulus_seen"; "turn_started_seen"
               ; "event_queue_ack_seen"; "event_queue_cancelled_seen" ]
 
 let decode row_json =
@@ -153,34 +200,37 @@ let decode row_json =
                   let* reaction_observation = match reaction with
                     | None -> Ok Unobserved
                     | Some reaction ->
-                        let* projection = text "projection_status" reaction in
+                        let* projection = reaction_status reaction in
                         (match projection with
-                         | "conflicting_terminal_evidence" -> Ok Terminal_conflict
-                         | "read_error" | "quarantined"
-                         | "invalid_stimulus_id" | "missing_stimulus_id" | "unrecognized_receipt" ->
+                         | Contract.Reaction_conflicting_terminal_evidence -> Ok Terminal_conflict
+                         | Contract.Reaction_read_error | Contract.Reaction_quarantined
+                         | Contract.Reaction_invalid_stimulus_id | Contract.Reaction_missing_stimulus_id
+                         | Contract.Reaction_unrecognized_receipt ->
                              Ok (Observed (Unknown "예약 반응 조회 불가"))
-                         | "matched_stimulus" | "matched_turn_started" | "matched_turn_finished"
-                         | "matched_consumed_ack" | "matched_terminal_cancelled" | "not_found" ->
+                         | Contract.Reaction_matched_stimulus | Contract.Reaction_matched_turn_started
+                         | Contract.Reaction_matched_turn_finished | Contract.Reaction_matched_consumed_ack
+                         | Contract.Reaction_matched_terminal_cancelled | Contract.Reaction_not_found ->
                              let* () = check_identity reaction in
                              let* () = same "stimulus_id" stimulus reaction in
                              let* seen = optional_bool "stimulus_seen" reaction in
                              let* started = optional_bool "turn_started_seen" reaction in
-                             let* ended = optional_bool "turn_finished_seen" reaction in
+                             let* ended = turn_finished_disposition reaction in
                              let* acked = optional_bool "event_queue_ack_seen" reaction in
                              let* cancelled = optional_bool "event_queue_cancelled_seen" reaction in
                              if acked = Some true && cancelled = Some true then
                                Ok Terminal_conflict
                              else if cancelled = Some true then Ok (Observed (Cancelled None))
                              else if acked = Some true then Ok (Observed Consumed)
-                             else if ended = Some true then Ok (Observed Turn_ended)
-                             else if started = Some true then Ok (Observed Turn_started)
-                             else if seen = Some true then Ok (Observed Queued)
-                             else Ok Unobserved
-                         | _ -> Ok (Observed (Unknown "예약 반응 상태 미지원"))) in
+                             else (match ended with
+                               | Some disposition -> Ok (Observed (Turn_ended disposition))
+                               | None ->
+                                 if started = Some true then Ok (Observed Turn_started)
+                                 else if seen = Some true then Ok (Observed Queued)
+                                 else Ok Unobserved)) in
                   (match queue with
                    | None -> Ok (reaction_stage reaction_observation)
                    | Some queue ->
-                       let* projection = text "projection_status" queue in
+                       let* projection = queue_status queue in
                        let matched expected =
                          let* () = check_identity queue in
                          let* payload = text "payload_digest" wake in
@@ -204,56 +254,58 @@ let decode row_json =
                                (match result with
                                 | Completed -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                | Turn_started | Turn_ended | Consumed | Cancelled _ | Settling _
+                                | Turn_started | Turn_ended _ | Consumed | Cancelled _ | Settling _
                                 | Transferring _ | Unknown _ -> false)
                            | Observed Consumed ->
                                (match result with
                                 | Cancelled _ -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                | Turn_started | Turn_ended | Consumed | Completed
+                                | Turn_started | Turn_ended _ | Consumed | Completed
                                 | Settling _ | Transferring _ | Unknown _ -> false)
                            | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-                                      | Turn_started | Turn_ended | Completed | Settling _
+                                      | Turn_started | Turn_ended _ | Completed | Settling _
                                       | Transferring _ | Unknown _) -> false in
                          matched (if disagrees then Unknown "예약 종결 증거 충돌" else result) in
                        match reaction_observation with
                        | Terminal_conflict -> Ok (Unknown "예약 소비 증거 충돌")
                        | Unobserved | Observed _ ->
                          (match projection with
-                          | "matched_pending" | "retained_terminal_wake" ->
+                          | Contract.Queue_matched_pending | Contract.Queue_retained_terminal_wake ->
                               let* owner = text "resolved_owner" queue in
                               if not (String.equal owner keeper) then matched (Queued_at owner)
                               else (match reaction_observation with
                                | Observed (Consumed | Cancelled _) -> matched (Unknown "예약 큐와 소비 증거 재확인 필요")
-                               | Observed (Unknown _ | Queued | Turn_started | Turn_ended as stage) -> matched stage
+                               | Observed (Unknown _ | Queued | Turn_started | Turn_ended _ as stage) -> matched stage
                                | Unobserved -> matched Queued
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌")
                                | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed
                                           | Missing | Queued_at _ | Settling _ | Transferring _) -> matched (Unknown "예약 반응 재확인 필요"))
-                          | "matched_terminal_completed" -> terminal "completed" (fun _ -> Completed)
-                          | "matched_terminal_cancelled" -> terminal "cancelled" (fun reason -> Cancelled reason)
-                          | "terminal_projection_pending" ->
+                          | Contract.Queue_matched_terminal_completed ->
+                              terminal "completed" (fun _ -> Completed)
+                          | Contract.Queue_matched_terminal_cancelled ->
+                              terminal "cancelled" (fun reason -> Cancelled reason)
+                          | Contract.Queue_terminal_projection_pending ->
                               let* owner = text "resolved_owner" queue in
                               matched (Settling owner)
-                          | "transfer_projection_pending" ->
+                          | Contract.Queue_transfer_projection_pending ->
                               let* owner = text "resolved_owner" queue in
                               let* target = text "transfer_target" queue in
                               matched (Transferring { owner; target })
-                          | "not_found" ->
+                          | Contract.Queue_not_found ->
                               (match reaction_observation with
                                | Unobserved | Observed Queued -> matched Missing
                                | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed
-                                          | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Cancelled _
+                                          | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Cancelled _
                                           | Settling _ | Transferring _ | Unknown _) as stage) -> matched stage
                                | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌"))
-                          | "withdrawn_at_cancel" -> matched (Cancelled None)
-                          | "read_error" | "evidence_invalid" | "unrecognized_receipt" ->
-                              Ok (Unknown "예약 큐 조회 불가")
-                          | _ -> Ok (Unknown "예약 큐 상태 미지원"))))
+                          | Contract.Queue_withdrawn_at_cancel -> matched (Cancelled None)
+                          | Contract.Queue_read_error | Contract.Queue_evidence_invalid
+                          | Contract.Queue_unrecognized_receipt ->
+                              Ok (Unknown "예약 큐 조회 불가"))))
         | _ -> Ok (Unknown "예약 전달 상태 미지원") in
       Ok { stage; due_at_iso }
 
 let needs_attention = function
-  | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended
+  | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _
   | Consumed | Settling _ | Transferring _ | Unknown _ -> true
   | No_occurrence | Completed | Cancelled _ -> false

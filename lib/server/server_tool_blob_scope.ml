@@ -176,7 +176,7 @@ let workspace =
     ; no_reference Fs_compat.Publication_recovery.directory_leaf
     ; no_reference Metrics_store_eio.metrics_dirname
     ; no_reference Operator_pending_confirm.operator_dirname
-    ; no_reference Browser_addon_setup.packages_dirname
+    ; no_reference Config_dir_resolver.packages_dirname
     ; no_reference Browser_goal_space.filename
     ; no_reference Runtime_params.params_filename
     ; no_reference Runtime_params.audit_filename

@@ -145,7 +145,7 @@ let history_error error =
     | Operation_store (Unknown_operation _) -> Unknown_operation
     | Operation_store (Invalid_input _ | Not_queued _ | Not_running _ | Idempotency_conflict _
         | Store_unavailable _ | Integrity_error _ | Native_call_unsettled)
-    | Runtime_unavailable | Filesystem_unavailable -> Store_unavailable
+    | Runtime_unavailable | Filesystem_unavailable -> Store_unreadable
     | Projection_failed (P.Invalid_limit _ | Cursor_scope_mismatch | Cursor_ahead _) -> Invalid_input
     | Projection_failed (Locator_not_found _ | Locator_not_top_level _) -> Journal_missing
     | Projection_failed (Semantic_failure _) -> Journal_corrupt

@@ -2,10 +2,13 @@ type exact_in_flight = int
 let one_exact_at_a_time = 1
 let exact_in_flight count = if count >= one_exact_at_a_time then Some count else None
 
+type package_source = Carried of Lane_addon_carried.id | Manifest_path
+
 type declaration = {
   id : string;
   enabled : bool;
   run_id : string;
+  package_source : package_source;
   manifest_path : string;
   package : Lane_addon_types.package;
   binding : Yojson.Safe.t;
@@ -125,8 +128,27 @@ let select_exact_outputs declared = function
         List.mem output.name selected) declared)
   | _ -> Error "exact_outputs requires an array of declared output names"
 
-let decode ~manifest_scope ~source_path ~source_revision ~id fields =
-  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs";
+(* RFC server-carries-its-exact-worker-packages 3.2: a declaration names
+   either a package this server carries or a manifest path. *)
+let package_source_of_fields fields =
+  match List.assoc_opt "package" fields, List.assoc_opt "manifest_path" fields with
+  | Some _, Some _ -> Error "declaration names both package and manifest_path"
+  | None, None -> Error "declaration requires package or manifest_path"
+  | Some (Otoml.TomlString value), None ->
+      (match Lane_addon_carried.of_name value with
+       | Some carried -> Ok (Carried carried)
+       | None ->
+           Error (Printf.sprintf "package %S is not one this server carries: %s" value
+             (String.concat ", " (List.map Lane_addon_carried.name Lane_addon_carried.all))))
+  | Some ( Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+         | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+         | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTable _
+         | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ), None ->
+      Error "package requires the name of a package this server carries"
+  | None, Some _ -> Ok Manifest_path
+
+let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
+  let allowed = ["id"; "enabled"; "run_id"; "package"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs";
     "max_exact_in_flight"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
@@ -147,16 +169,35 @@ let decode ~manifest_scope ~source_path ~source_revision ~id fields =
     | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
     | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> refused in
   let* run_id = text fields "run_id" in
-  let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
-  let manifest_path = absolute_from ~directory manifest_path in
-  let* manifest_path = match manifest_scope with
-    | Operator_declared -> Ok manifest_path
-    | Within_workspace workspace ->
-        Lane_addon_manifest.resolve_in_workspace ~workspace manifest_path
-        |> Option.to_result ~none:Lane_addon_manifest.outside_workspace in
+  (* A carried package resolves only to the folder holding exactly this
+     binary's copy, so its worker speaks this server's Exact protocol. *)
+  let* package_source = package_source_of_fields fields in
+  let* manifest_path = match package_source with
+    | Carried carried ->
+        Lane_addon_carried.installed_manifest ~packages carried
+        |> Result.map_error (Lane_addon_carried.installation_error_to_string carried)
+    | Manifest_path ->
+        let* manifest_path = text fields "manifest_path" in
+        let manifest_path = absolute_from ~directory manifest_path in
+        (match manifest_scope with
+         | Operator_declared -> Ok manifest_path
+         | Within_workspace workspace ->
+             Lane_addon_manifest.resolve_in_workspace ~workspace manifest_path
+             |> Option.to_result ~none:Lane_addon_manifest.outside_workspace) in
   let* package = Lane_addon_manifest.load ~path:manifest_path
     |> Result.map_error Lane_addon_manifest.error_to_string in
+  (* RFC server-carries-its-exact-worker-packages 3.3: the worker of a carried
+     package starts only from an image built from this server's own copy of
+     the image inputs. *)
+  let* package = match package_source, package.execution with
+    | Manifest_path, (Lane_addon_types.Container _ | Lane_addon_types.Host_process _) -> Ok package
+    | Carried carried, Lane_addon_types.Container container ->
+        let image_label : Lane_addon_types.image_label =
+          { label_key = Lane_addon_carried.image_label; label_value = Lane_addon_carried.image_digest carried } in
+        Ok { package with execution = Lane_addon_types.Container { container with image_label = Some image_label } }
+    | Carried carried, Lane_addon_types.Host_process _ ->
+        Error (Printf.sprintf "package %s does not run in a container" (Lane_addon_carried.name carried)) in
   let* package = match List.assoc_opt "tool_hooks" fields with
     | None -> Ok package
     | Some value ->
@@ -199,10 +240,10 @@ let decode ~manifest_scope ~source_path ~source_revision ~id fields =
     |> Yojson.Safe.sort |> Yojson.Safe.to_string
   in
   let revision = Agent_core_sha256.(to_hex (digest_string canonical)) in
-  Ok { id; enabled; run_id; manifest_path; package; binding; revision; source_revision; source_path;
+  Ok { id; enabled; run_id; package_source; manifest_path; package; binding; revision; source_revision; source_path;
        max_exact_in_flight }
 
-let parse_declaration ~manifest_scope ~source_path bytes =
+let parse_declaration ~packages ~manifest_scope ~source_path bytes =
   let failure ?id ~unreadable message =
     Error { issue = {source_path; id; message}; unreadable } in
   try
@@ -214,7 +255,7 @@ let parse_declaration ~manifest_scope ~source_path bytes =
             | Ok id ->
                 try
                   let source_revision = Agent_core_sha256.(to_hex (digest_string bytes)) in
-                  match decode ~manifest_scope ~source_path ~source_revision ~id fields with
+                  match decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields with
                   | Ok declaration -> Ok declaration
                   | Error message -> failure ~id ~unreadable:false message
                 with (Sys_error _ | Unix.Unix_error _) as exn ->
@@ -225,22 +266,22 @@ let parse_declaration ~manifest_scope ~source_path bytes =
        | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> failure ~unreadable:false "declaration requires a TOML table")
   with Otoml.Duplicate_key message -> failure ~unreadable:false message
 
-let load_source ~manifest_scope ~source_path ~source_text =
-  parse_declaration ~manifest_scope ~source_path:(absolute source_path) source_text
+let load_source ~packages ~manifest_scope ~source_path ~source_text =
+  parse_declaration ~packages ~manifest_scope ~source_path:(absolute source_path) source_text
   |> Result.map_error (fun failure -> failure.issue.message)
 
-let read_declaration ~path =
+let read_declaration ~packages ~path =
   let source_path = absolute path in
   match read_document source_path with
   | Error message -> Error {issue={source_path;id=None;message};unreadable=true}
-  | Ok bytes -> parse_declaration ~manifest_scope:Operator_declared ~source_path bytes
+  | Ok bytes -> parse_declaration ~packages ~manifest_scope:Operator_declared ~source_path bytes
 
-let load_file ~path =
-  read_declaration ~path |> Result.map_error (fun failure -> failure.issue.message)
+let load_file ~packages ~path =
+  read_declaration ~packages ~path |> Result.map_error (fun failure -> failure.issue.message)
 
-let load ~directory =
-  let directory = absolute directory in
-  let listing = try
+(* The declaration files of [directory], in name order. *)
+let declaration_paths directory =
+  try
     Ok (Sys.readdir directory |> Array.to_list
       |> List.filter (fun name -> Filename.check_suffix name Declaration_file.suffix)
       |> List.sort String.compare
@@ -255,13 +296,15 @@ let load ~directory =
        | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> Error "configuration path is not a directory"
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
        | exception Unix.Unix_error _ -> Error message)
-  in
-  match listing with
+
+let load ~packages ~directory =
+  let directory = absolute directory in
+  match declaration_paths directory with
   | Error message ->
       { declarations = []; issues = [{source_path = directory; id = None; message}];
         paths = []; complete = false }
   | Ok paths ->
-      let results = List.map (fun path -> path, read_declaration ~path) paths in
+      let results = List.map (fun path -> path, read_declaration ~packages ~path) paths in
       let id_of_result = function
         | Ok (declaration : declaration) -> Some declaration.id
         | Error failure -> failure.issue.id in
@@ -283,6 +326,31 @@ let load ~directory =
                complete && not failure.unreadable)
         ([], [], true) results in
       {declarations = List.rev declarations; issues = List.rev issues; paths; complete}
+
+let toml_table bytes =
+  match Otoml.Parser.from_string_result bytes with
+  | Error message -> Error message
+  | Ok (Otoml.TomlTable fields) -> Ok fields
+  | Ok ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+       | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+       | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlInlineTable _
+       | Otoml.TomlTableArray _ ) -> Error "declaration requires a TOML table"
+  | exception Otoml.Duplicate_key message -> Error message
+
+let declared_carried ~directory =
+  let directory = absolute directory in
+  match declaration_paths directory with
+  | Error message -> [], [{ source_path = directory; id = None; message }]
+  | Ok paths ->
+      let named, issues = List.fold_left (fun (named, issues) source_path ->
+          let source = Result.bind (read_document source_path) (fun bytes ->
+              Result.bind (toml_table bytes) package_source_of_fields) in
+          match source with
+          | Ok (Carried carried) -> carried :: named, issues
+          | Ok Manifest_path -> named, issues
+          | Error message -> named, { source_path; id = None; message } :: issues)
+        ([], []) paths in
+      List.filter (fun carried -> List.mem carried named) Lane_addon_carried.all, List.rev issues
 
 let browser_source (d : declaration) = match d.package.worker_service with
   | Lane_addon_types.Browser_service served -> Some served

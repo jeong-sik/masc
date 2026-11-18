@@ -689,7 +689,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
     (fun () ->
       ignore
         (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
-      Masc.Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
+      Masc.Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
         ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
       let entry =
         match Masc.Keeper_registry.get ~base_path keeper_name with
@@ -783,7 +783,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
     (fun () ->
       ignore
         (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
-      Masc.Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
+      Masc.Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
         ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
       let entry =
         match Masc.Keeper_registry.get ~base_path keeper_name with
@@ -986,7 +986,7 @@ let with_runtime_mcp_board_call
     Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path
       ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared ());
     ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
-    Masc.Keeper_registry.mark_turn_started
+    Masc.Keeper_registry.mark_turn_started ~turn_id:1
       ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
       ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
     (match fault with

@@ -229,7 +229,9 @@ let run ~store ~declarations =
 
 let run_for_workspace config =
   let snapshot =
-    Lane_addon_config.load ~directory:(Lane_addon_runtime.configuration_directory config)
+    Lane_addon_config.load
+      ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path)
+      ~directory:(Lane_addon_runtime.configuration_directory config)
   in
   if not snapshot.complete then
     Error (Sweep_refused "the Lane declarations could not all be read")

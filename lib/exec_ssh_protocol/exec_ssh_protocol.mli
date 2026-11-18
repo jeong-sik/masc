@@ -455,6 +455,12 @@ module Relay : sig
       contract. A peer with another version is refused before any request
       kind/header byte is sent, never read past its hello. *)
 
+  val version_declaration : string
+  (** ["MASC_EXEC_SHIM_RELAY_VERSION=<version>;"], kept as a string literal so
+      it is stored verbatim in every shim binary built from this source. The
+      host reads it out of the mounted shim's bytes and refuses to boot a guest
+      whose shim declares another relay version, or none (#52968). *)
+
   val serve_flag : string
   (** The shim argument that makes it the agent:
       [masc-exec-shim --serve SOCKET UID:GID]. *)

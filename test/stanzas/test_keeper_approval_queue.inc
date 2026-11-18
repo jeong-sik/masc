@@ -1,6 +1,7 @@
 (test
  (name test_keeper_approval_queue)
  (modules test_keeper_approval_queue)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc.keeper_approval masc.keeper_checkpoint_ref masc_test_deps eio_main))
 
 (test

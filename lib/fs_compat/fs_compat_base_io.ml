@@ -267,12 +267,19 @@ let release_append_path_entry key entry =
     then Hashtbl.remove append_path_mutex_registry key)
 ;;
 
-let with_append_path_mutex path f =
-  let key = canonical_append_mutex_path path in
+type append_path_mutex_key = string
+
+let capture_append_path_mutex_key = canonical_append_mutex_path
+
+let with_captured_append_path_mutex key f =
   let entry = acquire_append_path_entry key in
   Fun.protect
     ~finally:(fun () -> release_append_path_entry key entry)
     (fun () -> Stdlib.Mutex.protect entry.mutex f)
+;;
+
+let with_append_path_mutex path f =
+  with_captured_append_path_mutex (capture_append_path_mutex_key path) f
 ;;
 
 let try_with_append_path_mutex path f =

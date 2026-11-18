@@ -45,7 +45,7 @@ let pending () =
          :: ("reaction_kind", `String "turn_started")
          :: ("stimulus_seen", `Bool true)
          :: ("turn_started_seen", `Bool false)
-         :: ("turn_finished_seen", `Bool false)
+         :: ("turn_finished_disposition", `Null)
          :: ("event_queue_ack_seen", `Bool false)
          :: ("event_queue_cancelled_seen", `Bool false) :: identity)
     ]
@@ -85,8 +85,10 @@ let test_turn_boundary_is_not_completion () =
       (replace "turn_started_seen" (`Bool true)) in
   stage Observation.Turn_started started;
   let ended = started |> nested "keeper_reaction_evidence"
-      (replace "turn_finished_seen" (`Bool true)) in
-  stage Observation.Turn_ended ended;
+      (replace "turn_finished_disposition" (`String "failed")) in
+  stage (Observation.Turn_ended Masc.Keeper_reaction_ledger.Turn_disposition.Failed) ended;
+  refused (started |> nested "keeper_reaction_evidence"
+      (replace "turn_finished_disposition" (`String "not-a-disposition")));
   let consumed = ended
     |> nested "keeper_queue_evidence" (replace "projection_status" (`String "not_found"))
     |> nested "keeper_reaction_evidence" (replace "event_queue_ack_seen" (`Bool true)) in
@@ -126,13 +128,26 @@ let test_unavailable_is_not_a_negative () =
   let unknown row = match (decoded row).stage with
     | Observation.Unknown _ -> ()
     | Observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
-    | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
+    | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Cancelled _
     | Settling _ | Transferring _ -> Alcotest.fail "unavailable evidence became confirmed progress" in
   unknown (pending () |> nested "keeper_queue_evidence" (replace "projection_status" (`String "read_error")));
   unknown (pending () |> nested "keeper_reaction_evidence" (replace "projection_status" (`String "quarantined")));
-  unknown (pending () |> nested "keeper_queue_evidence" (replace "projection_status" (`String "future_value")));
   unknown (pending () |> nested "keeper_reaction_evidence" (replace "event_queue_ack_seen" (`Bool true)));
   stage Observation.Queued (pending () |> replace "keeper_reaction_evidence" `Null)
+
+(* A projection_status token outside the schedule contract is a decode
+   failure, not an [Unknown] stage: the server and this reader share one
+   table, so an unknown word means the two builds disagree (#36009). *)
+let test_unknown_projection_status_is_refused () =
+  refused (pending () |> nested "keeper_queue_evidence"
+    (replace "projection_status" (`String "future_value")));
+  refused (pending () |> nested "keeper_reaction_evidence"
+    (replace "projection_status" (`String "future_value")));
+  (* The two axes are separate types: a reaction-only word is not a queue word. *)
+  refused (pending () |> nested "keeper_queue_evidence"
+    (replace "projection_status" (`String "matched_consumed_ack")));
+  refused (pending () |> nested "keeper_reaction_evidence"
+    (replace "projection_status" (`String "matched_pending")))
 
 let test_terminal_contradiction_cannot_become_completed () =
   let row = pending () |> terminal "completed"
@@ -143,7 +158,7 @@ let test_terminal_contradiction_cannot_become_completed () =
     (match result with
      | Observation.Unknown _ -> true
      | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-     | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
+     | Turn_started | Turn_ended _ | Consumed | Completed | Cancelled _
      | Settling _ | Transferring _ -> false)
 
 let test_cross_source_terminal_disagreement () =
@@ -157,7 +172,7 @@ let test_cross_source_terminal_disagreement () =
       (match result.stage with
        | Observation.Unknown _ -> true
        | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started
-       | Turn_ended | Consumed | Completed | Cancelled _ | Settling _ | Transferring _ -> false))
+       | Turn_ended _ | Consumed | Completed | Cancelled _ | Settling _ | Transferring _ -> false))
     ["completed"];
   let consumed = pending () |> nested "keeper_reaction_evidence"
     (replace "event_queue_ack_seen" (`Bool true)) in
@@ -204,7 +219,7 @@ let test_missing_stimulus_receipt_is_unconfirmed () =
   let unknown row = match (decoded row).stage with
     | Observation.Unknown _ -> ()
     | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
-    | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
+    | Turn_started | Turn_ended _ | Consumed | Completed | Cancelled _
     | Settling _ | Transferring _ -> Alcotest.fail "missing identity became confirmed progress" in
   unknown row;
   unknown (row |> nested "last_wake" (nested "detail"
@@ -246,6 +261,7 @@ let () = Alcotest.run "schedule occurrence observation"
       ; Alcotest.test_case "durable outcomes and unsettled projection" `Quick test_durable_results_and_projection
       ; Alcotest.test_case "exact occurrence isolation" `Quick test_another_occurrence_cannot_supply_progress
       ; Alcotest.test_case "unavailable and contradictory observations" `Quick test_unavailable_is_not_a_negative
+      ; Alcotest.test_case "unknown projection status is refused" `Quick test_unknown_projection_status_is_refused
       ; Alcotest.test_case "terminal contradiction remains unconfirmed" `Quick test_terminal_contradiction_cannot_become_completed
       ; Alcotest.test_case "cross-source terminal disagreement" `Quick test_cross_source_terminal_disagreement
       ; Alcotest.test_case "exact queue absence is not pending" `Quick test_queue_absence_is_not_pending_delivery

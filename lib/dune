@@ -345,6 +345,7 @@
   ; Transitive module visibility is disabled, so the dependency is spelled out.
   masc_backend
   masc_goal
+  masc.goal_measure
   masc_candle
   masc_candle_runtime
   zarith
@@ -374,6 +375,7 @@
   masc.parse_outcome
   masc.embedded_config
   masc.embedded_browser_addon
+  masc.embedded_exact_addons
   masc.fusion_core)
  (preprocess
   (pps

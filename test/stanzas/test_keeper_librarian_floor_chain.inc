@@ -4,11 +4,9 @@
  (name test_keeper_librarian_floor_chain)
  (modules test_keeper_librarian_floor_chain)
  (deps
-  ../config/prompts/librarian.md
-  ../config/prompts/keeper.md
   (source_tree ../addons/keeper-librarian)
   ../addons/protocol.py
-  ../addons/exact_worker.py)
+  ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
  (libraries
   masc_test_deps
   exact_output_fixture

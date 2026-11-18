@@ -160,28 +160,24 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
     lines
 
 module Tool_audit_cache = struct
-  type entry =
-    { physical_row_count : int
-    ; snapshot : tool_audit_snapshot option
-    }
+  type entry = tool_audit_snapshot Dated_jsonl.latest_view
 
   let entries : (string, entry) Hashtbl.t = Hashtbl.create 64
   let mutex = Stdlib.Mutex.create ()
   let max_entries = 256
 
-  let find path =
-    Stdlib.Mutex.protect mutex (fun () -> Hashtbl.find_opt entries path)
-
   let remove path =
     Stdlib.Mutex.protect mutex (fun () -> Hashtbl.remove entries path)
 
-  let replace path entry =
+  let get_or_create path ~create =
     Stdlib.Mutex.protect mutex (fun () ->
-      if
-        (not (Hashtbl.mem entries path))
-        && Hashtbl.length entries >= max_entries
-      then Hashtbl.clear entries;
-      Hashtbl.replace entries path entry)
+      match Hashtbl.find_opt entries path with
+      | Some entry -> entry
+      | None ->
+        if Hashtbl.length entries >= max_entries then Hashtbl.clear entries;
+        let entry = create () in
+        Hashtbl.add entries path entry;
+        entry)
 end
 
 let invalidate_tool_audit_cache config ~keeper_name =
@@ -243,58 +239,15 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
       ~reason:Read_drop_reason.Entry_load_error
       ~detail:(Dated_jsonl.read_error_to_string error)
   in
-  let rows_stable ~physical_row_count =
-    Dated_jsonl.count_entries store = physical_row_count
+  let view =
+    Tool_audit_cache.get_or_create metrics_path
+      ~create:(fun () -> Dated_jsonl.latest_view store ~f:parse_snapshot)
   in
-  let cache_snapshot ~physical_row_count snapshot =
-    Tool_audit_cache.replace
-      metrics_path
-      { physical_row_count; snapshot }
-  in
-  let scan_full physical_row_count =
-    match Dated_jsonl.find_latest_entry_result store parse_snapshot with
-    | Error error ->
-        report_read_error error;
-        Error error
-    | Ok snapshot ->
-        if rows_stable ~physical_row_count
-        then cache_snapshot ~physical_row_count snapshot;
-        Ok snapshot
-  in
-  let physical_row_count = Dated_jsonl.count_entries store in
-  match Tool_audit_cache.find metrics_path with
-  | Some cached when cached.physical_row_count = physical_row_count ->
-      Ok cached.snapshot
-  | Some cached when cached.physical_row_count < physical_row_count ->
-      let appended_row_count =
-        physical_row_count - cached.physical_row_count
-      in
-      (match Dated_jsonl.read_recent_result store appended_row_count with
-       | Error error ->
-           report_read_error error;
-           Error error
-       | Ok appended_entries ->
-           let appended_snapshot =
-             List.fold_left
-               (fun latest entry ->
-                 match parse_snapshot entry with
-                 | Some snapshot -> Some snapshot
-                 | None -> latest)
-               None
-               appended_entries
-           in
-           let snapshot =
-             match appended_snapshot with
-             | Some _ as snapshot -> snapshot
-             | None -> cached.snapshot
-           in
-           if rows_stable ~physical_row_count
-           then begin
-             cache_snapshot ~physical_row_count snapshot;
-             Ok snapshot
-           end
-           else scan_full (Dated_jsonl.count_entries store))
-  | Some _ | None -> scan_full physical_row_count
+  match Dated_jsonl.read_latest_view_result view with
+  | Ok snapshot -> Ok snapshot
+  | Error error ->
+    report_read_error error;
+    Error error
 
 let latest_tool_audit_snapshot_from_files config ~keeper_name =
   latest_tool_audit_snapshot_from_metrics config keeper_name

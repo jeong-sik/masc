@@ -1547,6 +1547,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
           ~tool_source_map
         |> Result.map (List.iter (fun event -> push_worker_event (Stream_chat_event event)))
+      | Keeper_hooks_agent_core.Turn_restored { turn; response; tool_source_map } ->
+        Keeper_stream_tool_accum.seal_restored_turn worker_tool_accum ~turn
+          ~response ~tool_source_map
       | Keeper_hooks_agent_core.Child_content_observed {attempt; observation} ->
           (* Received child snapshots commit independently of worker queue,
              client disconnect and root lifecycle closure. No chat-bus publish. *)
@@ -1591,9 +1594,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       publish_tool_stream_protocol_error
         Keeper_chat_events.Tool_occurrence_mapping_invalid
         detail;
-      (* [Turn_collected] is the final exact pre-execution authority. A bad
-         mapping must fail the AfterTurn hook before stage_output can dispatch
-         a side effect; warning-only would execute an occurrence the stream
+      (* [Turn_collected] and [Turn_restored] are the final exact
+         pre-execution authority. A bad mapping must fail the AfterTurn hook
+         before stage_output can dispatch a side effect; warning-only would execute an occurrence the stream
          cannot identify. Official-client [Turn_closed_without_sources] runs
          after its own tool loop, but a contradictory close is still a turn
          protocol failure rather than a state to normalize. *)

@@ -22,8 +22,21 @@ let decode_hex output =
         | _ -> Error "upload backend returned invalid bytes" in
     loop 0
 
-let backend_read ~turn_sandbox_factory ~config ~meta ~host_path ~max_bytes =
-  let* backend_path = Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path in
+(* One chunk of [count] bytes from [offset], read through the confined open
+   (#35934): the path is opened once, the opened file is checked against the
+   sandbox root, and od reads that same descriptor. *)
+let chunk_argv ~(confined : Keeper_sandbox_read_backend.confined_path) ~offset ~count =
+  [ "sh"; "-c";
+    Keeper_sandbox_read_backend.confined_open_prelude
+    ^ {|exec od -An -v -tx1 -j "$3" -N "$4"|};
+    "browser-upload"; confined.root; confined.path;
+    string_of_int offset; string_of_int count ]
+
+let backend_read ~turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_meta)
+    ~host_path ~max_bytes =
+  let* confined = Keeper_sandbox_read_runner.confined_path_of_host ~config ~meta ~host_path in
+  let profile_label =
+    Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile in
   (* Endpoint stdout rewrites visible paths, so raw binary `cat` is unsuitable.
      POSIX od's hex alphabet cannot contain a path. Keep each chunk's encoded
      output inside Process_eio's retained head; increasing run_command's limit
@@ -39,11 +52,11 @@ let backend_read ~turn_sandbox_factory ~config ~meta ~host_path ~max_bytes =
     if offset = max_bytes then Ok (Buffer.contents bytes)
     else
       let count = min chunk_bytes (max_bytes - offset) in
-      let* output = Keeper_sandbox_read_runner.run_command ?turn_sandbox_factory
+      let* status, output = Keeper_sandbox_read_runner.run_command_with_status
+          ?turn_sandbox_factory
+          ~ok_exit_codes:(0 :: Keeper_sandbox_read_backend.confined_open_exits)
           ~config ~meta
-          ~command_argv:["sh"; "-c";
-            "test -f \"$1\" || exit 1; exec od -An -v -tx1 -j \"$2\" -N \"$3\" \"$1\"";
-            "browser-upload"; backend_path; string_of_int offset; string_of_int count]
+          ~command_argv:(chunk_argv ~confined ~offset ~count)
           (* Keep the complete bounded Process_eio capture, including a possible
              truncation marker. A second prefix cut could hide that marker and
              turn incomplete hex into an apparently valid short final chunk.
@@ -51,6 +64,21 @@ let backend_read ~turn_sandbox_factory ~config ~meta ~host_path ~max_bytes =
              bounded by [count]. *)
           ~max_bytes:capture_bytes
           ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()) () in
+      let* output =
+        match status with
+        | Unix.WEXITED 0 -> Ok output
+        | Unix.WEXITED code ->
+          (match Keeper_sandbox_read_backend.confined_open_refusal_of_exit code with
+           | Some refusal ->
+             Error
+               (Keeper_sandbox_read_backend.read_error_to_string
+                  (Keeper_sandbox_read_backend.read_error_of_refusal ~profile_label ~host_path
+                     refusal))
+           (* [ok_exit_codes] admits only 0 and the refusal exits. *)
+           | None ->
+             Error (Printf.sprintf "upload backend ended with unexpected exit %d" code))
+        | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+          Error "upload backend ended with an unexpected status" in
       let* chunk = decode_hex output in
       if String.length chunk > count then Error "upload backend exceeded requested chunk size"
       else (

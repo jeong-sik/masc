@@ -251,7 +251,7 @@ max-concurrent = 1
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; pending_input = None; mcp_sessions = []
+    ; pending_input = None
     ; working_context = None
     }
   in
@@ -399,7 +399,7 @@ let checkpoint_with_messages ~session_id ~agent_name messages : Agent_core.Check
   ; response_format = Agent_core.Types.Off
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create_sync ()
-  ; pending_input = None; mcp_sessions = []
+  ; pending_input = None
   ; working_context = None
   }
 
@@ -528,7 +528,7 @@ max-concurrent = 1
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; pending_input = None; mcp_sessions = []
+    ; pending_input = None
     ; working_context = None
     }
   in
@@ -644,7 +644,7 @@ max-concurrent = 1
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; pending_input = None; mcp_sessions = []
+    ; pending_input = None
     ; working_context = None
     }
   in
@@ -1365,7 +1365,7 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
     ; temperature = None; top_p = None; top_k = None; min_p = None
     ; reasoning_effort = None; enable_thinking = None; preserve_thinking = None
     ; response_format = Agent_core.Types.Off; cache_system_prompt = false
-    ; context = Agent_core.Context.create_sync (); pending_input = None; mcp_sessions = []; working_context = None }
+    ; context = Agent_core.Context.create_sync (); pending_input = None; working_context = None }
   in
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   ignore (Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes

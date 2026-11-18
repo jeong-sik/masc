@@ -278,47 +278,31 @@ module For_testing = struct
   let install_domain_pool_references = install_domain_pool_references
 end
 
-(* GC tuning for long-running server with bursty allocation.
+(* Server GC parameters. They apply only when OCAMLRUNPARAM is unset, so an
+   operator can override them at launch without code changes.
 
-   Dashboard refresh loops create 2GB+ transient allocations per cycle.
-   With aggressive GC (space_overhead=40), major GC slices walk
-   MADV_FREE'd pages on macOS, triggering page faults that freeze the
-   Eio event loop — blocking /health and all HTTP endpoints.
-
-   Only apply defaults when OCAMLRUNPARAM is not set, so operators
-   can override at launch without code changes. *)
+   minor_heap_size is per domain in OCaml 5, so it is not set here.
+   [Minor_heap.tune] sets it on the main domain and on the masc pool
+   domains; Agent Core's codec pool is not covered. *)
 let () =
   ignore (Dashboard.force_link, Operator_tool.force_link);
   Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
   Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in
-    (* Route through the validated helper: a malformed value (e.g.
-       MASC_GC_SPACE_OVERHEAD=abc) previously raised [Failure] -- the
-       hand-rolled [with Not_found] only caught the unset case, so a typo
-       in this env var crashed server bootstrap. [get_int_nonneg] also
-       maps a negative value to the default. *)
+    (* A negative MASC_GC_SPACE_OVERHEAD gets the default. A malformed one
+       is handled like every integer knob ([Env_config_core.get_int]). *)
     let gc_space_overhead =
       Env_config_core.get_int_nonneg
         ~default:(Env_setting.Int_knob.default Gc_space_overhead)
         (Env_setting.Int_knob.env_name Gc_space_overhead)
     in
     let ctrl = get () in
-    set { ctrl with
-      (* minor_heap_size is intentionally not set here. [main_eio.ml]
-         sets it to 4M words (32 MiB) to cut stop-the-world minor-GC
-         pressure from JSON parsing and metric encoding; a second 2M
-         setting here would either be dead (if main_eio runs later) or
-         override the intended 4M (if it runs first), depending on init
-         order. Keep a single source in main_eio.ml. *)
-      space_overhead = gc_space_overhead;  (* default 120. Configurable via MASC_GC_SPACE_OVERHEAD.
-                                             100 = triggers major GC when free > live (was 200/3x).
-                                             Lower = shorter individual pauses, more frequent slices.
-                                             P0 allocation fixes (PR #20965) reduced broadcast hot-path
-                                             allocation by ~97%, so the increased frequency has negligible
-                                             throughput impact. *)
-      max_overhead = 500;                 (* compaction triggers when free memory exceeds 500% of live data *)
-    }
+    (* Default 100, below the runtime's 120: the major GC works harder and
+       keeps less free memory. Much lower values stalled the server: at 40,
+       major GC slices touched pages macOS had MADV_FREE'd, and the page
+       faults blocked the Eio loop (2026-04 analysis). *)
+    set { ctrl with space_overhead = gc_space_overhead }
   end
 
 

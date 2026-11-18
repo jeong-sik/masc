@@ -3,9 +3,8 @@
    [Gc.set]'s minor_heap_size is per-domain in OCaml 5: it resizes the
    caller's minor heap and says nothing about domains that start later.
    Measured 2026-09-05 -- a domain spawned after a 4M-word set reports the
-   2M-word default. So the tuning in [main_eio.ml], which the comment in
-   [server_runtime_bootstrap.ml] names as the single source, reached one
-   domain out of fifteen: the live server ran its pool on the default.
+   2M-word default. So a single set in [main_eio.ml] reached one domain out
+   of fifteen: the live server ran its pool on the default.
 
    That matters more than the frequency it was meant to cut. A minor
    collection is a stop-the-world barrier across every domain, so a pool

@@ -11,6 +11,7 @@
   keeper_event_queue_schema
   keeper_owned_job_identity
   keeper_task_skill_resolution_error
+  keeper_official_client_session_refusal
   keeper_terminal_reason
   keeper_runtime_config
   keeper_disk_pressure

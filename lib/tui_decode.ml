@@ -381,8 +381,8 @@ type planning_goal = {
   pg_phase : Goal_phase.t;
   pg_priority : int;
   pg_due_date : string option;
-  pg_metric : string option;
-  pg_target_value : string option;
+  pg_measure : Goal_measure.t;
+  pg_procedure : string;
   pg_proof : goal_proof;
   pg_criterion_review : goal_criterion_review;
   pg_retry_binding : goal_retry_binding option;
@@ -811,9 +811,9 @@ let decode_log_entry json =
           }
   | Keeper_metrics_record.Turn ->
       let* le_channel = decode_turn_channel raw_channel in
-      let* le_message_count = Json_util.require_int json "message_count" in
+      let* le_message_count = required_nullable_int_field json "message_count" in
       let* () =
-        if le_message_count < 0 then
+        if Option.exists (fun count -> count < 0) le_message_count then
           Error "turn message_count must be non-negative"
         else Ok ()
       in
@@ -883,7 +883,7 @@ let decode_log_entry json =
         { le_kind = Log_turn;
           le_ts;
           le_channel;
-          le_message_count = Some le_message_count;
+          le_message_count;
           le_input_tokens;
           le_output_tokens;
           le_latency_ms = Some latency_ms;
@@ -1365,12 +1365,12 @@ let goal_proof_of_projection = function
 ;;
 
 (* The Goal row remains visible if its proof binding fields are ambiguous.
-   In particular, absent metric/target are not observed null values. *)
+   In particular, an absent measure or procedure is not an observed value. *)
 let goal_binding_fields_present_once = function
   | `Assoc fields ->
     let count name = List.length (List.filter (fun (key, _) -> String.equal name key) fields) in
     count "resume_phase" <= 1 && List.for_all (fun name -> count name = 1)
-      ["id"; "phase"; "title"; "criterion_revision"; "metric"; "target_value"; "verification"]
+      ["id"; "phase"; "title"; "criterion_revision"; "measure"; "procedure"; "verification"]
   | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _ -> false
 ;;
 
@@ -1471,8 +1471,8 @@ let decode_planning_goal json =
   let* pg_phase = Goal_phase.of_fields json in
   let* pg_priority = required_int_field json "priority" in
   let* pg_due_date = optional_string_field json "due_date" in
-  let* pg_metric = optional_string_field json "metric" in
-  let* pg_target_value = optional_string_field json "target_value" in
+  let* pg_measure = Goal_measure.of_yojson (member "measure" json) in
+  let* pg_procedure = required_string_field json "procedure" in
   let* pg_last_review_note = optional_string_field json "last_review_note" in
   let* pg_last_review_at = optional_string_field json "last_review_at" in
   let* pg_created_at = optional_string_field json "created_at" in
@@ -1480,7 +1480,8 @@ let decode_planning_goal json =
   let verification = member "verification" json in
   let criterion = match pg_criterion_revision with
     | Some revision when String.trim revision <> "" ->
-      Some (Goal_store.Criterion {revision; title=pg_title; metric=pg_metric; target_value=pg_target_value})
+      Some (Goal_store.Criterion {revision; title=pg_title; measure=pg_measure;
+                                  procedure=pg_procedure})
     | Some _ | None -> None in
   let projection =
     if goal_binding_fields_present_once json then
@@ -1504,8 +1505,8 @@ let decode_planning_goal json =
       pg_phase;
       pg_priority;
       pg_due_date;
-      pg_metric;
-      pg_target_value;
+      pg_measure;
+      pg_procedure;
       pg_proof;
       pg_criterion_review;
       pg_retry_binding;
@@ -3071,8 +3072,8 @@ type overview_goal = {
   og_phase : Goal_phase.t;
   og_priority : int;
   og_criterion_revision : string option;
-  og_metric : string option;
-  og_target_value : string option;
+  og_measure : Goal_measure.t;
+  og_procedure : string;
   og_measurement : overview_goal_measurement;
   og_due_date : string option;
   og_task_count : int;
@@ -3161,8 +3162,8 @@ let rec decode_overview_goal_node json =
          | Some _ -> Error (Overview_goals_malformed detail)) in
   let* og_priority = malformed (required_int_field json "priority") in
   let* og_criterion_revision = malformed (optional_string_field json "criterion_revision") in
-  let* og_metric = malformed (optional_string_field json "metric") in
-  let* og_target_value = malformed (optional_string_field json "target_value") in
+  let* og_measure = malformed (Goal_measure.of_yojson (member "measure" json)) in
+  let* og_procedure = malformed (required_string_field json "procedure") in
   let* og_measurement =
     malformed (decode_overview_goal_measurement ~goal_id:og_id
                  ~criterion_revision:og_criterion_revision json)
@@ -3192,8 +3193,8 @@ let rec decode_overview_goal_node json =
      ; og_phase
      ; og_priority
      ; og_criterion_revision
-     ; og_metric
-     ; og_target_value
+     ; og_measure
+     ; og_procedure
      ; og_measurement
      ; og_due_date
      ; og_task_count
@@ -8210,7 +8211,9 @@ type task_history_event = {
   th_from_status : string option;
   th_to_status : string option;
   th_actor : string option;
-  th_note : string option;  (** handoff_context.summary when present *)
+  th_note : string option;
+      (** handoff_context.summary when present, plus the refusal of a stored
+          handoff the transition replaced because it was unreadable *)
 }
 
 let decode_task_history json =
@@ -8235,12 +8238,38 @@ let decode_task_history json =
           th_to_status = str "to_status";
           th_actor = (match str "agent" with Some a -> Some a | None -> str "actor");
           th_note =
-            (match member "handoff_context" row with
-             | `Assoc _ as handoff ->
-                 (match member "summary" handoff with
-                  | `String s when String.trim s <> "" -> Some s
-                  | _ -> None)
-             | _ -> None);
+            (let summary =
+               match member "handoff_context" row with
+               | `Assoc _ as handoff ->
+                   (match member "summary" handoff with
+                    | `String s when String.trim s <> "" -> Some s
+                    | `String _ | `Null | `Bool _ | `Int _ | `Intlit _
+                    | `Float _ | `Assoc _ | `List _ ->
+                        None)
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+               | `List _ ->
+                   None
+             in
+             (* #38219: an exit that replaced a stored note the server could
+                not read records that note; the row says so with the refusal. *)
+             let replaced =
+               match member "replaced_unreadable_handoff" row with
+               | `Assoc _ as replaced ->
+                   (match member "reason" replaced with
+                    | `String reason ->
+                        Some ("replaced unreadable handoff: " ^ reason)
+                    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _
+                    | `Assoc _ | `List _ ->
+                        Some "replaced unreadable handoff")
+               | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+               | `List _ ->
+                   None
+             in
+             match summary, replaced with
+             | Some summary, Some replaced ->
+                 Some (summary ^ " (" ^ replaced ^ ")")
+             | Some note, None | None, Some note -> Some note
+             | None, None -> None);
         }
       in
       Ok (List.map event_of_row rows)

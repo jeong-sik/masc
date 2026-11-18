@@ -106,7 +106,7 @@ type node_update =
   | Checkpoint_snapshot of Checkpoint_snapshot.t
   | Provider_event of Yojson.Safe.t
   | Provider_request_snapshot of Llm_provider.Completion_outcome.request_provenance
-  | Provider_response_snapshot of Llm_provider.Types.api_response
+  | Provider_response_snapshot of Execution_provider_response_snapshot.t
   | Output_delta of Yojson.Safe.t
   | Output_snapshot of Llm_provider.Types.content_block
   | Tool_input_delta of Yojson.Safe.t

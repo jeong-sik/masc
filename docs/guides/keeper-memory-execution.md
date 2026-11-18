@@ -42,37 +42,35 @@ parser messages and source paths remain in the authenticated Lane inventory.
 to establish completed work. Full health aggregates actionable missing
 dependencies as degraded while intentional Off remains explicit in each row.
 
-## Prepare package version 0.2.7
+## Install the package
 
-Use the repository version containing
-[`addons/keeper-librarian/lane.toml`](../../addons/keeper-librarian/lane.toml),
-its `server.py` and both bundled schemas. Prepare this image through the package
-image workflow, then load it into the container engine used by MASC:
+This masc carries the `keeper-librarian` package: its `lane.toml`, `server.py`,
+both schemas and its `Dockerfile`, and the shared `protocol.py` and
+`exact_worker.py` its image is built from
+([RFC](../rfc/RFC-server-carries-its-exact-worker-packages.md) 3.1).
+`masc exact-addon-setup` writes the package to
+`<base-path>/.masc/packages/keeper-librarian-<revision>/` and builds the image
+its manifest names, labeled with this masc's digest of those image inputs:
 
 ```sh
-docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.7 addons
+masc exact-addon-setup --declared --base-path <base-path>
 ```
 
-The build context is `addons`, because the image contains the shared
-`protocol.py` and `exact_worker.py`. The runtime mounts the package directory.
-Saving a declaration does not build or download an image. Installations that
-still contain worker record v1 require the
-[Exact worker state hard cut](EXACT-WORKER-STATE-HARD-CUT.md); do not erase
-unresolved originals or attach a v1 state directory to this worker. Existing v2
-state remains usable as described below. A first installation uses the
-host-created empty state under its declared owner identity. For another
-configured engine, import the same image into that engine before attaching.
+`--declared` installs only the packages the workspace's declarations name with
+`package`; without it the command installs every package this masc carries.
+`scripts/install-local-build.sh` runs it without `--declared` on every install,
+and `scripts/install.sh` runs it with `--declared`. Docker must be installed.
+Without Docker the package is reported as not installed, and the install goes
+on.
 
-Place the complete package in an operator-managed, versioned location readable
-by MASC. For example, `<base-path>/.masc/packages/keeper-librarian-0.2.7/` works
-with this declaration when the resolved config root is
-`<base-path>/.masc/config`:
+Declare the installation by the package's name. The server finds the package
+under the base path, wherever the config root is:
 
 ```toml
 id = "keeper-librarian"
 run_id = "keeper-librarian"
 enabled = true
-manifest_path = "../../packages/keeper-librarian-0.2.7/lane.toml"
+package = "keeper-librarian"
 
 [binding]
 sources = []
@@ -82,15 +80,51 @@ Create it through `masc_lane_declaration_save` with `mode="create"`,
 `file_name="keeper-librarian.toml"` and the complete `source_text`. An existing
 installation is edited with `mode="save"` and its freshly read
 `expected_source_revision`. Preserve the existing installation ID, run ID and
-persistent state when restoring an existing installation. Select a new versioned
-package through that declaration rather than editing a running package in place.
-Resolve a relative manifest from the actual declaration directory if
-`MASC_CONFIG_DIR` selects another root. Do not replace a conflicting declaration
-or manual attachment by inventing a second installation.
+persistent state when restoring an existing installation. Do not replace a
+conflicting declaration or manual attachment by inventing a second installation.
+
+On a first installation the declaration does not exist when the installer
+runs, so run the command above once after saving it. Until then the server
+refuses the declaration, and its message names the command. The worker starts
+only from an image whose `masc.lane.carried.digest` label equals this masc's
+digest, read from Docker, so a carried package runs on Docker.
+
+Installations that still contain worker record v1 require the
+[Exact worker state hard cut](EXACT-WORKER-STATE-HARD-CUT.md); do not erase
+unresolved originals or attach a v1 state directory to this worker. Existing v2
+state remains usable as described below. A first installation uses the
+host-created empty state under its declared owner identity.
+
+### Pin a package by path
+
+An operator who manages the package folder declares `manifest_path` instead of
+`package`, for example
+`manifest_path = "../../packages/keeper-librarian-0.2.8/lane.toml"` relative to
+the declaration's directory. Place the complete package in a versioned location
+readable by MASC, and build or load its image from the same source revision:
+
+```sh
+docker build -f addons/keeper-librarian/Dockerfile -t masc-lane-keeper-librarian:0.2.8 addons
+```
+
+The build context is `addons`, because the image contains the shared
+`protocol.py` and `exact_worker.py`; the runtime mounts the package directory.
+The server reads no image label for such a declaration, so another container
+engine can run the image once it is imported there. The manifest must name the
+Exact protocol the server speaks (below). Select a new versioned package through
+that declaration rather than editing a running package in place.
 
 ### Upgrade an existing installation
 
-Version 0.2.7 lists its waiting requests in pages that carry nothing but the
+Version 0.2.8 names the Exact protocol it was written for in
+`[world] exact_protocol = 1`. A server that knows the key attaches a package
+with exact outputs only when its manifest names the protocol that server speaks,
+and its refusal names both. It refuses 0.2.7 and every earlier manifest. A server
+that does not know the key refuses the 0.2.8 manifest. No server runs a worker
+written for another protocol
+([RFC](../rfc/RFC-server-carries-its-exact-worker-packages.md) 3.4).
+
+Since 0.2.7 the package lists its waiting requests in pages that carry nothing but the
 requests: in rising request id order above the `after` cursor, as many as fit
 one reply frame. It admits a request when the page carrying only that request
 fits the frame. Other waiting requests no longer hold a new one back, and every
@@ -102,42 +136,47 @@ with `next` instead. That key made a page 81 bytes longer than the page an
 earlier version measured at admission, so a record kept within those 81 bytes
 of the frame could not be listed while another request waited behind it.
 
-Stop the server, change the declaration's `manifest_path` to the 0.2.7 package,
-then start the updated server, which reads the
+A `package` declaration needs no edit. Install the new masc, whose installer
+writes the new revision's folder and image beside the old ones, then restart
+the server. The updated server resolves the same declaration to its own
+revision. Until it restarts, the running server starts workers only from the
+image its own setup built
+([RFC](../rfc/RFC-server-carries-its-exact-worker-packages.md) 3.3).
+
+To move a `manifest_path` installation to the carried package, install the new
+masc and stop the server. Replace `manifest_path` with
+`package = "keeper-librarian"`, run
+`masc exact-addon-setup --declared --base-path <base-path>`, then start the
+updated server, which reads the
 [declaration file](lane-declaration-editor.md) as it starts. This order loses
-nothing from any earlier version. With the server running, the order depends on
-the version it runs:
+nothing from any earlier version.
 
-- From 0.2.6, update the server first and select 0.2.7 after it. The updated
-  server asks a worker that does not declare pages once and refuses its answer
-  while that answer names `next`; those requests wait in the worker until 0.2.7
-  is selected. A server that does not know `host_request_pages` refuses the
-  0.2.7 manifest, so 0.2.7 cannot go first.
-- From a version before 0.2.6, stop the server as above. Such a version answers
-  a submission with `capacity_wait` when its waiting requests fill the frame,
-  and a server that includes [#52731](https://github.com/jeong-sik/masc/pull/52731)
-  no longer reads that answer. The original stays `Dispatch_pending`, its worker
-  has no record of it, and nothing sends it again; selecting 0.2.7 afterwards
-  leaves it among the originals below that still wait.
+A version before 0.2.6 answers a submission with `capacity_wait` when its
+waiting requests fill the frame. A server that includes
+[#52731](https://github.com/jeong-sik/masc/pull/52731) and does not know
+`exact_protocol` still attaches such a version and no longer reads that answer.
+The original stays `Dispatch_pending`, its worker has no record of it, and
+nothing sends it again; selecting 0.2.8 afterwards leaves it among the originals
+below that still wait.
 
-Version 0.2.7 also accepts the ending the host delivers for a request whose
+Since 0.2.5 the package accepts the ending the host delivers for a request whose
 declaration was replaced: `{"status":"not_allowed","cause":"declaration_replaced"}`
 ([#52621](https://github.com/jeong-sik/masc/pull/52621),
-[#52622](https://github.com/jeong-sik/masc/pull/52622)); 0.2.5 was the first
-version to accept it. The `exact_worker.py` in an installed 0.2.4 image answers
-that delivery with an error and keeps the request pending. Selecting 0.2.7 is
-itself a declaration change, and its replacement worker is the 0.2.7 worker, so
+[#52622](https://github.com/jeong-sik/masc/pull/52622)). The `exact_worker.py` in an installed 0.2.4 image answers
+that delivery with an error and keeps the request pending. Selecting 0.2.8 is
+itself a declaration change, and its replacement worker is the 0.2.8 worker, so
 that worker receives those endings. A declaration change that keeps the 0.2.4
 image, such as a new `run_id`, does not deliver them.
 
 Version 0.2.4 gives the compact `refuse_body` command introduced in
 [#52504](https://github.com/jeong-sik/masc/pull/52504) its own package revision and
 image tag. An installed 0.2.3 image or mounted `server.py` from before that change
-does not accept the command. Updating the MASC executables does not build the
-Add-on image, copy its operator-managed package or change its declaration.
+does not accept the command. For a `manifest_path` declaration, updating the
+MASC executables does not build the Add-on image, copy its operator-managed
+package or change its declaration.
 
-Build or load the image and copy the complete package from the same source
-revision. The image supplies `protocol.py` and `exact_worker.py`; the mounted
+For such a declaration, build or load the image and copy the complete package
+from the same source revision. The image supplies `protocol.py` and `exact_worker.py`; the mounted
 package supplies `server.py` and both schemas. Keep the old package and image
 unchanged. Worker record version 2 is unchanged, so this update alone does not
 require an empty volume. The separate v1 record hard cut linked above applies

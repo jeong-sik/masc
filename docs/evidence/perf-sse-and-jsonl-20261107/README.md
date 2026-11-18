@@ -2,7 +2,7 @@
 
 Date: 2026-11-07  
 Topic: Server Core SSE Wire Framing & JSONL Append Buffer Optimization  
-Environment: macOS (Darwin arm64), OCaml 5.5.1 (native `ocamlopt -O3 -unbox-closures`)  
+Environment: macOS (Darwin arm64), OCaml 5.5.1 (native `ocamlopt`)  
 
 ## 1. Background & Problem Analysis
 
@@ -31,7 +31,7 @@ In MASC's multicore architecture, Keepers and Operators constantly communicate t
 
 ## 3. Measured Results
 
-Measured with native OCaml 5.5.1 (`-O3 -unbox-closures`), measuring latency and Gc minor/major heap allocations.
+Measured with native OCaml 5.5.1 `ocamlopt`, measuring latency and Gc minor/major heap allocations.
 
 | Target Benchmark | Baseline Latency | Optimized Latency | Speedup | Baseline Minor Alloc | Optimized Minor Alloc | Alloc Reduction |
 |:---|:---|:---|:---|:---|:---|:---|

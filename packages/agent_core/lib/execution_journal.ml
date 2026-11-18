@@ -102,7 +102,7 @@ type materialized =
   | Agent_run_state
   | Agent_turn_state
   | Provider_attempt_state of
-      { response : Llm_provider.Types.api_response option
+      { response : Execution_provider_response_snapshot.t option
       ; request_provenance : Llm_provider.Completion_outcome.request_provenance option
       }
   | Output_block_state of { snapshot : Llm_provider.Types.content_block option }
@@ -503,7 +503,7 @@ module Reducer = struct
     ; occurrences : Event.Node_id.t Occurrence_map.t
     ; updates_rev : Event.node_update event_record list
     ; provider_request : Llm_provider.Completion_outcome.request_provenance option
-    ; provider_response : Llm_provider.Types.api_response option
+    ; provider_response : Execution_provider_response_snapshot.t option
     ; output_snapshot : Llm_provider.Types.content_block option
     ; tool_input : Llm_provider.Types.content_block option
     ; tool_result : Llm_provider.Types.content_block option

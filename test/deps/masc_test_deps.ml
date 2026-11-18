@@ -271,7 +271,8 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Last_total_tokens
         | Schema.Last_latency_ms
         | Schema.Proactive_count_total
-        | Schema.Proactive_visible_count_total -> `Int 0
+        | Schema.Proactive_visible_count_total
+        | Schema.Last_turn_id -> `Int 0
         | Schema.Total_cost_usd
         | Schema.Last_turn_ts
         | Schema.Last_proactive_ts
@@ -285,7 +286,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Message_scope_ack_id
         | Schema.Usage_cursor
         | Schema.Last_usage_resolution
-        | Schema.Last_runtime_attempt
         | Schema.Latched_reason
         | Schema.Current_task_id
         | Schema.Keeper_id -> `Null

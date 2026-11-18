@@ -98,5 +98,3 @@ val apply : plan -> applied
     without that table. *)
 val without : Browser_lane.Backend.t list -> plan -> plan
 
-val packages_dirname : string
-(** The package directory below [<base>/.masc]. *)

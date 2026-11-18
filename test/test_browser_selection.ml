@@ -167,7 +167,7 @@ let test_goal_space_default () =
   Fun.protect ~finally:(fun () -> remove dir) (fun () ->
     let config=Masc.Workspace.default_config dir in
     ignore (Masc.Workspace.init config ~agent_name:(Some "fixture"));
-    let goal title=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"verified" ~target_value:"1" () with
+    let goal title=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"verified" () with
       | Ok (goal, _, _) -> goal.id
       | Error error -> fail (Goal_store.write_error_to_string error) in
     let first=goal "first" and second=goal "second" in

@@ -7,4 +7,5 @@
 (test
  (name test_goal_verification_gate)
  (modules test_goal_verification_gate)
- (libraries masc_test_deps))
+ (deps (source_tree %{workspace_root}/config/prompts))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))

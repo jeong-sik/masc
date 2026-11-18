@@ -107,6 +107,10 @@ val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
     does not establish that each earlier row was read. *)
 
 val wrapped : width:int -> tone -> string -> line list
+
+val measure_text : Goal_measure.t -> string
+(** A Goal's measure as the screens print it: [14 층], [≤ 100 ms],
+    [≥ 90 %], or the condition sentence itself. *)
 (** [text] split at its line breaks and wrapped between words to [width]. *)
 
 val body :

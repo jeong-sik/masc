@@ -170,6 +170,7 @@ let owner_turn_rejection_cycle_status
       ( Keeper_owner.Reducer_rejected _
       | Keeper_owner.Operation_rejected _
       | Keeper_owner.Store_unavailable _
+      | Keeper_owner.Store_fenced _
       | Keeper_owner.Owner_closed ) -> Turn_cycle_owner_rejected
 ;;
 
@@ -1341,7 +1342,7 @@ let run_keepalive_unified_turn
           record_replay_owned_turn_finished_reactions
             ~ctx
             ~keeper_name:meta_after_triage.name
-            ~disposition:(Cycle.disposition_token cycle_outcome)
+            ~disposition:(Cycle.turn_disposition cycle_outcome)
             turn_stimuli;
           Cycle.meta cycle_outcome)
         else meta_after_triage

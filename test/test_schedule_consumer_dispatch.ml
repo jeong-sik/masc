@@ -1365,7 +1365,7 @@ let test_supersede_withdraws_the_wake_a_failed_turn_left_pending () =
   Keeper_reaction_ledger.record_event_queue_turn_finished
     ~base_path
     ~keeper_name
-    ~disposition:"failed"
+    ~disposition:Keeper_reaction_ledger.Turn_disposition.Failed
     failed_selection.source;
   let second_id = tick_ok config ~now:261.0 |> single_occurrence_id in
   check (list string) "the failed turn's occurrence is superseded" [ second_id ]
@@ -1987,7 +1987,7 @@ let test_retirement_cancel_withdraws_the_wake_a_failed_turn_left_pending () =
   Keeper_reaction_ledger.record_event_queue_turn_finished
     ~base_path
     ~keeper_name
-    ~disposition:"failed"
+    ~disposition:Keeper_reaction_ledger.Turn_disposition.Failed
     selection.source;
   (match Server_schedule_consumers.cancel_keeper_schedules config ~keeper_name with
    | Ok () -> ()
@@ -3561,7 +3561,7 @@ let test_wake_received_during_a_turn_survives_its_finish () =
     ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
     (fun () ->
        let observation_token = Keeper_turn_observation_token.fresh () in
-       Keeper_registry.mark_turn_started ~observation_token ~base_path
+       Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path
          ~wake:Keeper_registry.Chat_request keeper_name;
        Atomic.set entry.fiber_wakeup false;
        let request = create_keeper_wake_schedule

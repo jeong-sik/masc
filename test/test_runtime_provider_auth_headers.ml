@@ -2138,7 +2138,9 @@ let test_dashboard_runtime_probe_groups_models_by_provider () =
   check int "reachable runtime projections" 2
     Yojson.Safe.Util.(member "summary" json |> member "reachable" |> to_int)
 
-let test_runtime_agent_terminal_observation_uses_runtime_identity () =
+(* #52969: a capture that never saw a provider request classifies the failure
+   as undispatched, so no execution capture can be claimed for it. *)
+let test_runtime_agent_failure_without_attempt_is_undispatched () =
   let config =
     Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
       ~name:"agent_core-runpod_mtp.qwen"
@@ -2149,60 +2151,15 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   let config =
     { config with runtime_id = Some "runpod_mtp.qwen" }
   in
-  let observation =
-    Runtime_agent.For_testing.runtime_observation_for_completed_config
-      ~total_duration_ms:42.9
-      ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
-      config
-  in
-  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
-  check (option string) "selected model" (Some "qwen")
-    observation.selected_model;
-  check int "attempt count" 1 (List.length observation.attempts);
-  check string "attempt detail source" "runtime_agent_terminal"
-    observation.attempt_details_source
-
-let test_runtime_agent_terminal_error_preserves_uncaptured_failure () =
-  let config =
-    Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
-      ~name:"agent_core-runpod_mtp.qwen"
-      ~provider_cfg:(provider_cfg ())
-      ~system_prompt:""
-      ~tools:[]
-  in
-  let config =
-    { config with runtime_id = Some "runpod_mtp.qwen" }
-  in
-  let error = "Not found: OpenAI-compatible endpoint returned 404" in
-  let observation =
-    Runtime_agent.For_testing.runtime_observation_for_terminal_config
-      ~total_duration_ms:31.2
-      ~error
-      config
-  in
-  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
-  check (option string) "no unobserved answerer is selected" None
-    observation.selected_model;
-  check int "missing capture invents no attempt" 0 (List.length observation.attempts);
-  check bool "attempt details unavailable" false observation.attempt_details_available;
-  (match observation.execution_evidence with
-   | Runtime_observation.Uncaptured_failure actual -> check string "runtime error" error actual
-   | Captured_execution -> fail "raw error cannot supply a capture");
-  check string "runtime outcome" "failed"
-    (Keeper_execution_receipt.runtime_outcome_to_string
-       (Keeper_agent_error.runtime_outcome_of_observation
-          ~lane_failover_applied:false
-          (Some observation)));
-  (* The boundary failure is unchanged, but a lane walk that
-     landed this attempt on a later candidate (lane_failover_applied)
-     always reports the turn as passed-to-next-model — that signal comes
-     from the lane walk, not from anything on the observation. *)
-  check string "runtime outcome reflects lane failover truth, not observation shape"
-    "passed_to_next_model"
-    (Keeper_execution_receipt.runtime_outcome_to_string
-       (Keeper_agent_error.runtime_outcome_of_observation
-          ~lane_failover_applied:true
-          (Some observation)))
+  let error = Agent_core.Error.Internal "refused before dispatch" in
+  match
+    Runtime_agent.run_failure_of_capture (Runtime_agent.execution_capture config) error
+  with
+  | Runtime_agent.Failed_before_dispatch actual ->
+    check string "the failure keeps its error"
+      (Agent_core.Error.to_string error) (Agent_core.Error.to_string actual)
+  | Runtime_agent.Failed_after_dispatch { runtime_observation = _; error = _ } ->
+    fail "a capture without an attempt claimed a dispatched failure"
 
 let test_runtime_agent_context_preserves_max_tokens_intent () =
   Eio_main.run (fun env ->
@@ -2281,7 +2238,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     ; response_format = (Agent_core.Types.default_config ~model:"qwen").response_format
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; pending_input = None; mcp_sessions = []
+    ; pending_input = None
     ; working_context = None
     }
   in
@@ -2387,7 +2344,7 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; pending_input = None; mcp_sessions = []
+    ; pending_input = None
     ; working_context = None
     }
   in
@@ -2809,7 +2766,7 @@ let context_fit_checkpoint () =
   ; response_format = Agent_core.Types.Off
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create_sync ()
-  ; pending_input = None; mcp_sessions = []
+  ; pending_input = None
   ; working_context = None
   }
 
@@ -4194,13 +4151,9 @@ let () =
             `Quick
             test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default
         ; test_case
-            "runtime agent terminal observation carries model identity"
+            "runtime agent failure without a provider attempt is undispatched"
             `Quick
-            test_runtime_agent_terminal_observation_uses_runtime_identity
-        ; test_case
-            "runtime agent terminal error preserves missing capture and failure"
-            `Quick
-            test_runtime_agent_terminal_error_preserves_uncaptured_failure
+            test_runtime_agent_failure_without_attempt_is_undispatched
         ; test_case
             "runtime agent context preserves max_tokens intent"
             `Quick

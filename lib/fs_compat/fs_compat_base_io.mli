@@ -42,6 +42,14 @@ val write_all_and_close : Unix.file_descr -> string -> unit
 
 val canonical_append_mutex_path : string -> string
 
+type append_path_mutex_key
+val capture_append_path_mutex_key : string -> append_path_mutex_key
+(** Capture the existing canonical pathname key in a filesystem worker. This
+    does not identify arbitrary hardlink or leaf-symlink aliases of an inode. *)
+val with_captured_append_path_mutex : append_path_mutex_key -> (unit -> 'a) -> 'a
+(** Reenter the existing registry with the captured key and ordinary active
+    entry accounting. The callback must not reenter the same path mutex. *)
+
 val with_append_path_mutex : string -> (unit -> 'a) -> 'a
 
 val try_with_append_path_mutex : string -> (unit -> 'a) -> 'a option

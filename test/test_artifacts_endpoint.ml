@@ -398,14 +398,20 @@ let test_generated_media_cors_and_read_authority () =
           ; Some "not a serialized origin", None
           ; None, None
           ];
-        List.iter (fun origin ->
-          let response = dispatch router (http_request ~path ~origin ()) in
-          Alcotest.(check int) "a content locator alone grants no read authority" 401
-            (status_of_response response);
+        (* An origin that may not make this request is refused before the
+           credential is read, so it answers 403 and not 401. The 401 below is
+           the allowed origin's answer: the locator alone still grants no read
+           authority. Either way no media byte leaves. *)
+        List.iter (fun (origin, expected_status) ->
+          let response = dispatch router (http_request ~path ?origin ()) in
+          Alcotest.(check int) "a content locator alone grants no read authority"
+            expected_status (status_of_response response);
           let _, body = headers_and_body response in
           Alcotest.(check bool) "unauthenticated response excludes media" false
             (Astring.String.is_infix ~affix:payload body))
-          [ "http://localhost"; "https://foreign.example" ]))
+          [ Some "http://localhost", 401
+          ; Some "https://foreign.example", 403
+          ]))
 ;;
 
 (* --- blob_response shape --- *)

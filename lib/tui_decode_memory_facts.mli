@@ -104,8 +104,8 @@ val decode_memory_fact_snapshot :
     [/api/v1/keepers/:name/memory-facts]. Each store object is read by which
     field it carries -- [read_error], [present]:false, or [present]:true with
     its rows -- and any other shape is a decode error, not an empty store.
-    [mfs_events_read_error] keeps a sidecar read failure distinct from an empty
-    event history. *)
+    [mfs_events_read_error] keeps a failure to read the event history (the
+    retrieval sidecar or the journal lineage) distinct from an empty one. *)
 
 val merge_keeper_memory_facts :
   refused:Tui_decode_memory_health.memory_keeper_refusal list ->

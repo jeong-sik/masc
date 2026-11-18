@@ -71,11 +71,16 @@ digest or repeated request is rejected; read the operation again before deciding
 whether to retry. Success of this endpoint confirms retry admission, not completion
 of the unfinished work.
 
-A `store_unavailable` response can also leave retry admission committed when both
+A `store_commit_unknown` response can also leave retry admission committed when both
 the commit acknowledgement and its confirmation read fail. The same explicitly
 authorized operation can then continue after storage recovery. Read the exact
 operation and `preparation_wait` again before sending another retry; the error
 does not prove that admission was rejected, and a null wait grants no new retry.
+A `store_fenced` response is different: a fence raised by an earlier fault refused
+the request before it touched the store, so nothing was written. The Owner retries
+an availability fence on its own every 2 seconds and announces the lift as a
+`keeper_waiting_inventory_changed` event; an integrity fence stays up until an
+operator or a restart clears it.
 
 The official checkpoint remains retained while resume guidance is rendered.
 Client entry requires a confirmed dispatch-admission commit. An entered, partially

@@ -3818,7 +3818,9 @@ let test_worker_rejects_invalid_developer_instructions () =
         (match run_fixture ~worker_pool:true
                  ~developer_instructions:"invalid-\xff"
                  ~on_prompt_sent:(fun () -> incr sent) path with
-         | Error (Runtime_codex_app_server.Spawn_failed detail) ->
+         (* The client was running: an exception after spawn is a
+            runtime-boundary failure, not a spawn refusal (#28072). *)
+         | Error (Runtime_codex_app_server.Protocol_error { stage = "runtime boundary"; detail }) ->
            check string "worker exception keeps the offending field"
              (Printexc.to_string (Failure
                 "codex app-server stdin: refusing invalid UTF-8 payload (field params.developerInstructions)"))
@@ -4827,7 +4829,7 @@ candidates = [%s]
                                        ())
                                 else None
                               in
-                              let run () = Keeper_agent_run.run_turn ~approval_admission:Keeper_approval_origin.Unavailable
+                              let run () = Keeper_agent_run.run_turn ~keeper_turn_id:1 ~approval_admission:Keeper_approval_origin.Unavailable
                                 ?trajectory_acc
                                 ~config
                                 ~meta

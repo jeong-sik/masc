@@ -51,7 +51,7 @@ let test_keep_body_returns_the_whole_body () =
     Alcotest.(check bool) "and every chunk on the way" true (String.equal streamed_body chunks);
     Alcotest.(check int) "every byte counted" body_bytes progress.bytes_received
   | Ok (Pool.Buffered response), _ -> Alcotest.failf "refused with %d" response.status
-  | Error message, _ -> Alcotest.fail message
+  | Error error, _ -> Alcotest.fail (Pool.request_error_to_string error)
 
 let test_discard_body_hands_every_chunk_on () =
   match stream ~retention:Pool.Discard_body "/stream" with
@@ -60,7 +60,7 @@ let test_discard_body_hands_every_chunk_on () =
     Alcotest.(check bool) "every chunk reached on_chunk" true (String.equal streamed_body chunks);
     Alcotest.(check int) "every byte counted" body_bytes progress.bytes_received
   | Ok (Pool.Buffered response), _ -> Alcotest.failf "refused with %d" response.status
-  | Error message, _ -> Alcotest.fail message
+  | Error error, _ -> Alcotest.fail (Pool.request_error_to_string error)
 
 let test_a_refused_stream_is_read_whole_under_discard () =
   match stream ~retention:Pool.Discard_body "/refused" with
@@ -69,7 +69,7 @@ let test_a_refused_stream_is_read_whole_under_discard () =
     Alcotest.(check string) "the refusal body" refusal_body response.body;
     Alcotest.(check string) "no chunk was handed on" "" chunks
   | Ok (Pool.Streamed _), _ -> Alcotest.fail "a 401 was streamed"
-  | Error message, _ -> Alcotest.fail message
+  | Error error, _ -> Alcotest.fail (Pool.request_error_to_string error)
 
 let () =
   Alcotest.run "Pool stream retention"

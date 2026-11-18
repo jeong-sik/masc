@@ -33,20 +33,24 @@ let with_env name value f =
   Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value ~default:"" previous)) f
 
 let fixture_frame = 4096
-let manifest = Printf.sprintf {|id="quiz-package"
+let carried_packages (config : Workspace.config) = Config_dir_resolver.packages_dir ~base_path:config.base_path
+let manifest_with_world world = Printf.sprintf {|id="quiz-package"
 revision="1"
 title="Host request fixture"
 contributions=["observe"]
 image="fixture/image"
 command=["fixture"]
-[world.exact_outputs.author]
+[world]
+exact_protocol=1
+%s[world.exact_outputs.author]
 schema="schemas/author.json"
 [resources]
 cpus=0.5
 memory_bytes=67108864
 pids=16
 max_reply_bytes=%d
-|} fixture_frame
+|} world fixture_frame
+let manifest = manifest_with_world ""
 let author_schema = {|{"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false}|}
 let declaration = {|id="quiz"
 run_id="quiz-world"
@@ -227,7 +231,7 @@ let test_original_exact_semantic_dispatch_authority () =
   with_installation (fun clock config _worker _state root ->
     let directory=Filename.concat root ".masc/config/lane-addons" in
     let source=Filename.concat directory "quiz.toml" in
-    let snapshot=Lane_addon_config.load ~directory in
+    let snapshot=Lane_addon_config.load ~packages:(carried_packages config) ~directory in
     let original=match snapshot.declarations with [d] -> d | [] | _::_::_ -> fail "one original declaration" in
     let store=Lane_addon_store.create ~root:(Filename.concat root ".masc/lane-addons") in
     let guard ()=Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:original.id
@@ -255,7 +259,7 @@ let test_original_exact_semantic_dispatch_authority () =
     check bool "a pending original cannot dispatch under a new semantic revision" true (Result.is_error (guard ()));
     check bool "an edited file with no worker attached for it is not yet a replacement" true (waits (guard ()));
     ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
-    let changed=match (Lane_addon_config.load ~directory).declarations with
+    let changed=match (Lane_addon_config.load ~packages:(carried_packages config) ~directory).declarations with
       | [d] -> d | [] | _::_::_ -> fail "one replacement declaration" in
     let changed_guard ()=Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:changed.id
       ~package_id:changed.package.id ~configuration_revision:changed.revision in
@@ -652,7 +656,7 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
     await clock (fun () -> Option.is_some (current ()));
     let export=Option.get (current ()) in
     let source=Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
-    let declaration=Lane_addon_config.load_file ~path:source |> unwrap in
+    let declaration=Lane_addon_config.load_file ~packages:(carried_packages config) ~path:source |> unwrap in
     let capture (destination : Runtime.tool_request_destination) =
       let json=`Assoc ["installation",`String destination.installation_id;
         "package",`String destination.package_id;"tool",`String destination.tool;
@@ -732,7 +736,7 @@ let test_category_edit_preserves_original_export_and_worker () =
       let worker () = snapshot () |> member "instances" |> Yojson.Safe.Util.to_list
         |> List.find (fun item -> text "instance_id" item=original.instance_id) in
       let source = Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
-      let before = Lane_addon_config.load_file ~path:source |> unwrap in
+      let before = Lane_addon_config.load_file ~packages:(carried_packages config) ~path:source |> unwrap in
       let admit () = match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export:original
           ~publish:(fun destination -> Ok destination.configuration_revision) with
         | Ok revision -> check string "original destination keeps its worker inputs" before.revision revision
@@ -752,7 +756,7 @@ let test_category_edit_preserves_original_export_and_worker () =
        | [declaration] -> check string "inventory publishes the current declared category"
            "memory_judgment" (text "ui_category" declaration)
        | _ -> fail "category rewrite lost the actual declaration");
-      let after = Lane_addon_config.load_file ~path:source |> unwrap in
+      let after = Lane_addon_config.load_file ~packages:(carried_packages config) ~path:source |> unwrap in
       check string "navigation edit preserves the configuration authority" before.revision after.revision;
       let store = Lane_addon_store.create ~root:(Filename.concat root ".masc/lane-addons") in
       (match Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:after.id
@@ -822,7 +826,7 @@ let test_schema_key_order_edit_preserves_original_export_and_worker () =
       await clock (fun () -> Option.is_some (current ()));
       let original = Option.get (current ()) in
       let source = Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
-      let before = Lane_addon_config.load_file ~path:source |> unwrap in
+      let before = Lane_addon_config.load_file ~packages:(carried_packages config) ~path:source |> unwrap in
       let admit () = match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export:original
           ~publish:(fun destination -> Ok destination.configuration_revision) with
         | Ok revision -> check string "original destination keeps its worker inputs" before.revision revision
@@ -837,7 +841,7 @@ let test_schema_key_order_edit_preserves_original_export_and_worker () =
       admit ();
       let (_ : Yojson.Safe.t) = Runtime.reconcile_configuration ~config
         ~directory:(Runtime.configuration_directory config) |> unwrap in
-      let after = Lane_addon_config.load_file ~path:source |> unwrap in
+      let after = Lane_addon_config.load_file ~packages:(carried_packages config) ~path:source |> unwrap in
       check string "key order keeps the configuration authority" before.revision after.revision;
       let schema_text (declaration : Lane_addon_config.declaration) =
         match declaration.package.exact_outputs with
@@ -915,7 +919,7 @@ let test_a_request_listed_again_after_delivery_ends_the_cycle () =
 
 (* RFC librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1:
    one pass walks every page of the listing. *)
-let paged_manifest = manifest ^ "\n[world]\nhost_request_pages=true\n"
+let paged_manifest = manifest_with_world "host_request_pages=true\n"
 
 let answered ~validate =
   match validate (`Assoc [ "question", `String "Q?" ]) with
@@ -1827,7 +1831,7 @@ let web_search id =
   Lane_addon_host_request.to_json (Web_search {
     request_id=id; query="original evidence"; limit=Some 3})
 
-let search_manifest = manifest ^ "\n[world]\nweb_search=true\n"
+let search_manifest = manifest_with_world "web_search=true\n"
 
 let search_result search : Lane_addon_search_result.result = {
   serving_provider=Some "fixture-provider";
@@ -1866,7 +1870,7 @@ let test_web_search_requires_the_package_declaration () =
         check string "another host port does not grant web search" "not_allowed"
           (text "status" (result_of "undeclared-search" worker));
         check (list (pair string (option int))) "the host provider runner was never called" [] !calls))
-    [manifest; manifest ^ "\n[world]\nweb_search=false\n"]
+    [manifest; manifest_with_world "web_search=false\n"]
 
 let test_web_search_delivers_one_decodable_result () =
   let calls = ref [] in

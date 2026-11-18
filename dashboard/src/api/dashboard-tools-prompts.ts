@@ -13,6 +13,10 @@ import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
 import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
+import type {
+  ScheduleQueueProjectionStatus,
+  ScheduleReactionProjectionStatus,
+} from './schedule-projection-status'
 import type { PromptAuthoringIssue } from './schemas/prompt-authoring'
 import {
   parseToolMetricsSeriesResponse,
@@ -170,24 +174,21 @@ export type DashboardScheduledAutomationDispatchReceipt =
       reason: string
     }
 
+export type ScheduledTurnDisposition =
+  | 'completed'
+  | 'checkpointed'
+  | 'input_required'
+  | 'cancelled'
+  | 'skipped'
+  | 'failed'
+  | 'rested'
+
 export interface DashboardScheduledAutomationKeeperReactionEvidence {
   // Ranked by the server: cancelled and ack are terminal, finished outranks
   // started, and a stimulus row alone is the producer's record, not a
   // reaction. The two terminals together are a contradiction the server
   // names rather than resolves.
-  projection_status:
-    | 'conflicting_terminal_evidence'
-    | 'matched_terminal_cancelled'
-    | 'matched_consumed_ack'
-    | 'matched_turn_finished'
-    | 'matched_turn_started'
-    | 'matched_stimulus'
-    | 'not_found'
-    | 'quarantined'
-    | 'read_error'
-    | 'missing_stimulus_id'
-    | 'invalid_stimulus_id'
-    | 'unrecognized_receipt'
+  projection_status: ScheduleReactionProjectionStatus
   source?: string
   keeper_name?: string
   schedule_id?: string
@@ -198,7 +199,8 @@ export interface DashboardScheduledAutomationKeeperReactionEvidence {
   reaction_kind?: string
   stimulus_seen?: boolean
   turn_started_seen?: boolean
-  turn_finished_seen?: boolean
+  /** How the turn the wake started ended (Keeper_reaction_ledger.Turn_disposition); null until it finishes. */
+  turn_finished_disposition?: ScheduledTurnDisposition | null
   event_queue_ack_seen?: boolean
   event_queue_cancelled_seen?: boolean
   matched_record_count?: number
@@ -224,11 +226,7 @@ export interface DashboardScheduledAutomationKeeperQueueEvidence {
   transition_id?: string
   terminal_outcome?: 'completed' | 'cancelled'
   terminal_reason?: string | null
-  projection_status:
-    | 'matched_pending' | 'not_found' | 'read_error' | 'unrecognized_receipt'
-    | 'terminal_projection_pending' | 'transfer_projection_pending'
-    | 'matched_terminal_completed' | 'matched_terminal_cancelled'
-    | 'evidence_invalid' | 'retained_terminal_wake' | 'withdrawn_at_cancel'
+  projection_status: ScheduleQueueProjectionStatus
   source?: string
   queue?: string
   stimulus?: string

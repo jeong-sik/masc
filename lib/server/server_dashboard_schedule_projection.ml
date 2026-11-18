@@ -412,7 +412,10 @@ let schedule_keeper_queue_evidence_dashboard_json
        (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
         | Error reason ->
           `Assoc
-            [ "projection_status", `String "unrecognized_receipt"
+            [ ( "projection_status"
+              , `String
+                  (Schedule_contract_values.queue_projection_status_to_string
+                     Schedule_contract_values.Queue_unrecognized_receipt) )
             ; "reason", `String reason
             ]
         (* A Lane action receipt and a Keeper receipt delivery have no Keeper queue
@@ -485,9 +488,15 @@ let schedule_keeper_queue_evidence_dashboard_json
             ]
           in
           let encode status fields =
-            `Assoc (("projection_status", `String status) :: base_fields @ fields)
+            `Assoc
+              (( "projection_status"
+               , `String (Schedule_contract_values.queue_projection_status_to_string status) )
+               :: base_fields @ fields)
           in
-          let invalid reason = encode "evidence_invalid" [ "reason", `String reason ] in
+          let invalid reason =
+            encode Schedule_contract_values.Queue_evidence_invalid
+              [ "reason", `String reason ]
+          in
           let source_matches source =
             let full_matches source =
               schedule_queue_match
@@ -533,7 +542,7 @@ let schedule_keeper_queue_evidence_dashboard_json
                | Some result -> result
                | None -> Error "durable occurrence was not captured in the request snapshot")
           in
-          let terminal owner source evidence outcome reason =
+          let terminal owner source evidence ~status outcome reason =
             match source_matches source with
             | Error detail -> invalid detail
             | Ok source ->
@@ -543,23 +552,27 @@ let schedule_keeper_queue_evidence_dashboard_json
                 @ schedule_queue_match_fields ~now "terminal" source in
               (match evidence with
                | Keeper_event_queue_state.Terminal_evidence_pending id ->
-                 encode "terminal_projection_pending" (("transition_id", `String id) :: fields)
-               | Keeper_event_queue_state.Terminal_evidence_recorded ->
-                 encode ("matched_terminal_" ^ outcome) fields)
+                 encode Schedule_contract_values.Queue_terminal_projection_pending
+                   (("transition_id", `String id) :: fields)
+               | Keeper_event_queue_state.Terminal_evidence_recorded -> encode status fields)
           in
           match stimulus_id, snapshot.read_errors, disposition with
-          | None, _, _ -> encode "unrecognized_receipt"
+          | None, _, _ -> encode Schedule_contract_values.Queue_unrecognized_receipt
               [ "reason", `String "dispatch receipt has no exact stimulus identity" ]
-          | Some _, _ :: _, _ -> encode "read_error" []
-          | Some _, [], Error reason -> encode "read_error" [ "reason", `String reason ]
+          | Some _, _ :: _, _ -> encode Schedule_contract_values.Queue_read_error []
+          | Some _, [], Error reason ->
+            encode Schedule_contract_values.Queue_read_error [ "reason", `String reason ]
           | Some _, [], Ok (Server_schedule_consumers.Terminal_completed_at (owner, source, evidence)) ->
-            terminal owner source evidence "completed" None
+            terminal owner source evidence
+              ~status:Schedule_contract_values.Queue_matched_terminal_completed "completed" None
           | Some _, [], Ok (Server_schedule_consumers.Terminal_cancelled_at (owner, source, reason, evidence)) ->
-            terminal owner source evidence "cancelled" (Some reason)
+            terminal owner source evidence
+              ~status:Schedule_contract_values.Queue_matched_terminal_cancelled "cancelled"
+              (Some reason)
           | Some _, [], Ok (Server_schedule_consumers.Transfer_projecting_at (owner, target, source)) ->
             (match source_matches source with
              | Error detail -> invalid detail
-             | Ok source -> encode "transfer_projection_pending"
+             | Ok source -> encode Schedule_contract_values.Queue_transfer_projection_pending
                  ([ "resolved_owner", `String owner; "transfer_target", `String target ]
                   @ schedule_queue_match_fields ~now "transfer" source))
           | Some _, [], Ok (Server_schedule_consumers.Pending_at (owner, source)) ->
@@ -567,7 +580,8 @@ let schedule_keeper_queue_evidence_dashboard_json
              | Error detail -> invalid detail
              | Ok source ->
                let status, bucket = if schedule_cancelled
-                 then "retained_terminal_wake", "retained" else "matched_pending", "pending" in
+                 then Schedule_contract_values.Queue_retained_terminal_wake, "retained"
+                 else Schedule_contract_values.Queue_matched_pending, "pending" in
                encode status (("resolved_owner", `String owner)
                  :: schedule_queue_match_fields ~now bucket source))
           | Some _, [], Ok (Server_schedule_consumers.Absent_at _) ->
@@ -575,7 +589,11 @@ let schedule_keeper_queue_evidence_dashboard_json
                Dispatch-only evidence remains a miss. *)
             (match pending_match with
              | Some _ -> invalid "pending source conflicts with exact durable occurrence identity"
-             | None -> encode (if schedule_cancelled then "withdrawn_at_cancel" else "not_found") [])))
+             | None ->
+               encode
+                 (if schedule_cancelled then Schedule_contract_values.Queue_withdrawn_at_cancel
+                  else Schedule_contract_values.Queue_not_found)
+                 [])))
 ;;
 
 let schedule_keeper_reaction_evidence_dashboard_json
@@ -591,7 +609,10 @@ let schedule_keeper_reaction_evidence_dashboard_json
        (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
         | Error reason ->
           `Assoc
-            [ "projection_status", `String "unrecognized_receipt"
+            [ ( "projection_status"
+              , `String
+                  (Schedule_contract_values.reaction_projection_status_to_string
+                     Schedule_contract_values.Reaction_unrecognized_receipt) )
             ; "reason", `String reason
             ]
         (* A Lane action receipt and a Keeper receipt delivery have no Keeper queue
@@ -615,6 +636,10 @@ let schedule_keeper_reaction_evidence_dashboard_json
               ; occurrence_status = _
               ; activation_outcome = _
               }) ->
+          let status_field status =
+            ( "projection_status"
+            , `String (Schedule_contract_values.reaction_projection_status_to_string status) )
+          in
           let base_fields =
             [ "source", `String "keeper_reaction_ledger"
             ; "keeper_name", `String keeper_name
@@ -635,7 +660,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
           (match stimulus_id with
            | None ->
              `Assoc
-               (("projection_status", `String "missing_stimulus_id")
+               (status_field Schedule_contract_values.Reaction_missing_stimulus_id
                 :: ("reason", `String "dispatch receipt predates stimulus_id projection")
                 :: base_fields)
            | Some stimulus_id ->
@@ -645,7 +670,13 @@ let schedule_keeper_reaction_evidence_dashboard_json
                [ "stimulus_id", `String stimulus_id
                   ; "stimulus_seen", `Bool evidence.stimulus_seen
                   ; "turn_started_seen", `Bool evidence.turn_started_seen
-                  ; "turn_finished_seen", `Bool evidence.turn_finished_seen
+                  ; ( "turn_finished_disposition"
+                    , match evidence.turn_finished with
+                      | None -> `Null
+                      | Some disposition ->
+                        `String
+                          (Keeper_reaction_ledger.Turn_disposition.to_string
+                             disposition) )
                   ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
                   ; ( "event_queue_cancelled_seen"
                     , `Bool evidence.event_queue_cancelled_seen )
@@ -698,7 +729,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                  | None -> []
                in
                `Assoc
-                 (("projection_status", `String status)
+                 (status_field status
                   :: base_fields
                   @ evidence_fields evidence
                   @ reason_fields
@@ -716,7 +747,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   Keeper_reaction_ledger.Evidence_invalid_stimulus_id
                 in
                 `Assoc
-                  (("projection_status", `String "invalid_stimulus_id")
+                  (status_field Schedule_contract_values.Reaction_invalid_stimulus_id
                    :: ( "reason"
                       , `String
                           (Keeper_reaction_ledger
@@ -727,7 +758,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
               | Reaction_evidence_failed
                   (Keeper_reaction_ledger.Evidence_read_error _ as error) ->
                 `Assoc
-                  (("projection_status", `String "read_error")
+                  (status_field Schedule_contract_values.Reaction_read_error
                    :: ( "reason"
                       , `String
                           (Keeper_reaction_ledger
@@ -737,7 +768,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                    @ [ "stimulus_id", `String stimulus_id ])
               | Reaction_evidence_not_captured ->
                 `Assoc
-                  (("projection_status", `String "read_error")
+                  (status_field Schedule_contract_values.Reaction_read_error
                    :: ( "reason"
                       , `String
                           "reaction evidence was not captured in the request snapshot" )
@@ -749,21 +780,21 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   if
                     evidence.event_queue_ack_seen
                     && evidence.event_queue_cancelled_seen
-                  then "conflicting_terminal_evidence"
+                  then Schedule_contract_values.Reaction_conflicting_terminal_evidence
                   else if evidence.event_queue_cancelled_seen
-                  then "matched_terminal_cancelled"
+                  then Schedule_contract_values.Reaction_matched_terminal_cancelled
                   else if evidence.event_queue_ack_seen
-                  then "matched_consumed_ack"
+                  then Schedule_contract_values.Reaction_matched_consumed_ack
                   (* Finished outranks started: both rows are written for the
                      same stimulus, and the later one is the more complete
                      reading of what happened. *)
-                  else if evidence.turn_finished_seen
-                  then "matched_turn_finished"
+                  else if Option.is_some evidence.turn_finished
+                  then Schedule_contract_values.Reaction_matched_turn_finished
                   else if evidence.turn_started_seen
-                  then "matched_turn_started"
+                  then Schedule_contract_values.Reaction_matched_turn_started
                   else if evidence.stimulus_seen
-                  then "matched_stimulus"
-                  else "not_found"
+                  then Schedule_contract_values.Reaction_matched_stimulus
+                  else Schedule_contract_values.Reaction_not_found
                 in
                 projection_json projection_status evidence
               | Reaction_evidence_observed
@@ -773,7 +804,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
                   ~reason:
                     (Keeper_reaction_ledger.row_quarantine_reason_to_string
                        first_reason)
-                  "quarantined"
+                  Schedule_contract_values.Reaction_quarantined
                   evidence))))
 ;;
 

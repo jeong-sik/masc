@@ -38,6 +38,36 @@ let optional_nested_string_field json object_field field =
         (Printf.sprintf "schedule %s must be an object or null: %s"
            object_field (Yojson.Safe.to_string value))
 
+(* The server attaches the evidence fields only when it read the reaction
+   ledger; a read error or an invalid stimulus id carries none. So an absent
+   [turn_finished_disposition] is "the ledger did not say", while a present
+   [null] is "no turn this wake started has finished". [member] cannot tell
+   the two apart, so the key is looked up directly. The disposition token is
+   read with the ledger's closed decoder. *)
+let turn_finish_field json =
+  match Yojson.Safe.Util.member "keeper_reaction_evidence" json with
+  | `Null -> Ok None
+  | `Assoc fields -> (
+      match List.assoc_opt "turn_finished_disposition" fields with
+      | None -> Ok None
+      | Some `Null -> Ok (Some Masc_tui_types.Schedule_turn_open)
+      | Some (`String token) -> (
+          match Masc.Keeper_reaction_ledger.Turn_disposition.of_string token with
+          | Some disposition -> Ok (Some (Masc_tui_types.Schedule_turn_finished disposition))
+          | None ->
+              Error
+                ("schedule keeper_reaction_evidence.turn_finished_disposition is unknown: "
+                 ^ token))
+      | Some value ->
+          Error
+            (Printf.sprintf
+               "schedule keeper_reaction_evidence.turn_finished_disposition must be a string or null: %s"
+               (Yojson.Safe.to_string value)))
+  | value ->
+      Error
+        (Printf.sprintf "schedule keeper_reaction_evidence must be an object or null: %s"
+           (Yojson.Safe.to_string value))
+
 (* Whether a step of the wake actually happened, as the reaction ledger
    recorded it. Absent reads as [None] and not as [false]: "the ledger did not
    say" and "the ledger said no" are different answers, and only one of them
@@ -78,6 +108,15 @@ let required_schedule_json_field json field =
   match Yojson.Safe.Util.member field json with
   | `Null -> Error (Printf.sprintf "schedule %s is required" field)
   | value -> Ok value
+
+let optional_nested_contract_field json object_field field of_string =
+  let* token = optional_nested_string_field json object_field field in
+  match token with
+  | None -> Ok None
+  | Some token ->
+      of_string token
+      |> Result.map_error Schedule_contract_values.decode_error_to_string
+      |> Result.map Option.some
 
 let decode_schedule_row json =
   let* sch_schedule_instance_id =
@@ -128,15 +167,21 @@ let decode_schedule_row json =
   let* sch_last_wake_error =
     optional_nested_string_field json "last_wake" "error"
   in
+  (* Both projection axes decode through the schedule contract's closed
+     tables, so a word this build does not know fails the read the way the
+     wake status above does (#36009). *)
   let* sch_queue_projection_status =
-    optional_nested_string_field json "keeper_queue_evidence" "projection_status"
+    optional_nested_contract_field json "keeper_queue_evidence"
+      "projection_status"
+      Schedule_contract_values.queue_projection_status_of_string
   in
   let* sch_queue_pending_count =
     optional_nested_int_field json "keeper_queue_evidence" "pending_count"
   in
   let* sch_reaction_projection_status =
-    optional_nested_string_field json "keeper_reaction_evidence"
+    optional_nested_contract_field json "keeper_reaction_evidence"
       "projection_status"
+      Schedule_contract_values.reaction_projection_status_of_string
   in
   let* sch_reaction_latest_at_iso =
     optional_nested_string_field json "keeper_reaction_evidence"
@@ -180,10 +225,7 @@ let decode_schedule_row json =
     optional_nested_string_field json "keeper_reaction_evidence"
       "stimulus_recorded_at_iso"
   in
-  let* sch_turn_finished =
-    optional_nested_bool_field json "keeper_reaction_evidence"
-      "turn_finished_seen"
-  in
+  let* sch_turn_finished = turn_finish_field json in
   let* sch_turn_finished_recorded_at_iso =
     optional_nested_string_field json "keeper_reaction_evidence"
       "turn_finished_recorded_at_iso"

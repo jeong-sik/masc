@@ -123,6 +123,11 @@ type hook_event =
       ; response : api_response
       ; tool_source_map : admitted_tool_source_map option
       }
+  | AfterRestoredTurn of
+      { turn : int
+      ; response : api_response
+      ; tool_source_map : admitted_tool_source_map
+      }
   | PreToolUse of
       { invocation : Tool_contract.Invocation.t
       ; tool_name : string
@@ -166,7 +171,7 @@ let invocation_of_event = function
   | PostToolUseFailure { invocation; _ }
   | OnToolError { invocation; _ } -> Some invocation
   | OnError { invocation; _ } -> invocation
-  | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | OnStop _ -> None
+  | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | AfterRestoredTurn _ | OnStop _ -> None
 ;;
 
 (** Elicitation: structured request for user input during agent execution.
@@ -324,6 +329,7 @@ let stage_of_event = function
   | BeforeTurn _ -> Before_turn
   | BeforeTurnParams _ -> Before_turn_params
   | AfterTurn _ -> After_turn
+  | AfterRestoredTurn _ -> After_turn
   | PreToolUse _ -> Pre_tool_use
   | PostToolUse _ -> Post_tool_use
   | PostToolUseFailure _ -> Post_tool_use_failure

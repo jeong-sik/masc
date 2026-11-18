@@ -52,11 +52,14 @@ let test_failed_scope mode () =
           let failure = send [ "content-length", "-1" ] in
           (match failure with
            | Ok _ -> Alcotest.fail "invalid body length unexpectedly succeeded"
-           | Error message ->
+           | Error (Pool.Exchange_failed message) ->
              Alcotest.(check string) "original sending-fiber failure is returned"
                (Printexc.to_string
                   (Failure "httpun.Client_connection.request: invalid body length"))
-               message);
+               message
+           | Error error ->
+             Alcotest.failf "sending-fiber failure was not an exchange failure: %s"
+               (Pool.request_error_to_string error));
           Alcotest.(check int) "invalid request never reached the server" 0
             (List.length !requests);
           Alcotest.(check int) "failed headers never notified the caller" 0 !responses;
@@ -69,7 +72,8 @@ let test_failed_scope mode () =
             failed_stats.create_count_total;
           for _ = 1 to 2 do
             match send [] with
-            | Error message -> Alcotest.failf "pool did not recover: %s" message
+            | Error error ->
+              Alcotest.failf "pool did not recover: %s" (Pool.request_error_to_string error)
             | Ok response ->
               Alcotest.(check int) "later valid response status" 200 response.status;
               Alcotest.(check string) "later valid response body" "healthy" response.body
@@ -115,7 +119,8 @@ let test_eviction_under_cancellation_reaches_every_client () =
             with
             | Ok response ->
               Alcotest.(check int) "parked response status" 200 response.status
-            | Error message -> Alcotest.failf "request failed: %s" message
+            | Error error ->
+              Alcotest.failf "request failed: %s" (Pool.request_error_to_string error)
           in
           (* Both at once. A sequential second call would reuse the first
              client, and one parked client cannot show a walk stopping early. *)

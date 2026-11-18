@@ -46,9 +46,13 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
          | Error detail ->
            Error (Previous_mode_guest_not_removed { container_name = previous; detail }))
     in
-    (* The guest is stopped and deleted only after the nameserver it will be
+    (* The guest is stopped and deleted only after the mounted shim is one
+       this server may boot with (#52968) and the nameserver it will be
        booted with is known: see {!microvm_boot_nameserver}. *)
     let boot_after remove_guest =
+      match verify_microvm_shim_before_teardown t ~backend with
+      | Error error -> `Error (Guest_shim_unready error)
+      | Ok shim ->
       match
         Result.map_error
           (fun detail -> "microvm_guest_dns_unusable: " ^ detail)
@@ -63,7 +67,7 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
               could recreate an attached build volume or trim a live work
               volume. Warm adoption does neither and needs no sibling cleanup. *)
            (match remove_previous_modes Keeper_types_profile_sandbox.all_network_modes with
-            | Ok () -> `Boot nameserver
+            | Ok () -> `Boot (nameserver, shim)
             | Error failure -> `Error failure)
          | Error detail -> `Error (Unadoptable_guest_not_removed detail))
     in
@@ -133,7 +137,7 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
        | Ok () -> adopt snapshot
        | Error detail -> Error (Adopted_guest_volume_unverified detail))
     | `Error error -> Error error
-    | `Boot nameserver ->
+    | `Boot (nameserver, shim) ->
       (* The current name and all previous modes are confirmed absent before
          reaching any volume operation. A record still held for this name
          describes one that stopped or vanished without passing through
@@ -152,7 +156,7 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
               ~name:t.meta.sandbox_image
               ~image
               ~timeout_sec:image_timeout)
-           (fun () -> microvm_guest_provisions t ~backend ~timeout_sec:image_timeout)
+           (fun () -> microvm_guest_provisions t ~backend ~shim ~timeout_sec:image_timeout)
        with
        | Error detail -> Error (Guest_provisions_unavailable detail)
        | Ok provisions ->

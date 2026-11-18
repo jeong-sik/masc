@@ -407,7 +407,7 @@ let event_queue_turn_finished_json ~keeper_name ~disposition stimulus =
              ; "source", `String "keeper_event_queue"
              ; "post_id", `String stimulus.post_id
              ; "stimulus_kind", `String (stimulus_kind_to_string (stimulus_kind_of_event_queue stimulus))
-             ; "disposition", `String disposition
+             ; "disposition", `String (Turn_disposition.to_string disposition)
              ] )
        ])
 ;;
@@ -602,7 +602,7 @@ type event_queue_reaction_evidence =
   ; stimulus_id : string
   ; stimulus_seen : bool
   ; turn_started_seen : bool
-  ; turn_finished_seen : bool
+  ; turn_finished : Turn_disposition.t option
   ; event_queue_ack_seen : bool
   ; event_queue_cancelled_seen : bool
   ; stimulus_recorded_at : float option
@@ -643,6 +643,7 @@ type event_queue_reaction_evidence_accumulator =
   { mutable stimulus_recorded_at : float option
   ; mutable turn_started_recorded_at : float option
   ; mutable turn_finished_recorded_at : float option
+  ; mutable turn_finished_disposition : Turn_disposition.t option
   ; mutable event_queue_ack_recorded_at : float option
   ; mutable event_queue_cancelled_recorded_at : float option
   ; mutable latest_recorded_at : float option
@@ -656,6 +657,7 @@ let empty_event_queue_reaction_evidence_accumulator () =
   { stimulus_recorded_at = None
   ; turn_started_recorded_at = None
   ; turn_finished_recorded_at = None
+  ; turn_finished_disposition = None
   ; event_queue_ack_recorded_at = None
   ; event_queue_cancelled_recorded_at = None
   ; latest_recorded_at = None
@@ -697,16 +699,25 @@ let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
      | Current_stimulus _ ->
        accumulator.stimulus_recorded_at
          <- max_recorded_at accumulator.stimulus_recorded_at recorded_at
-     | Current_reaction { reaction_kind = Turn_started; _ } ->
+     | Current_reaction { reaction = Turn_started_reaction; _ } ->
        accumulator.turn_started_recorded_at
          <- max_recorded_at accumulator.turn_started_recorded_at recorded_at
-     | Current_reaction { reaction_kind = Turn_finished; _ } ->
-       accumulator.turn_finished_recorded_at
-         <- max_recorded_at accumulator.turn_finished_recorded_at recorded_at
-     | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
+     | Current_reaction { reaction = Turn_finished_reaction disposition; _ } ->
+       (* Every attempt at this stimulus appends under the same event id; the
+          disposition shown is the latest attempt's, by its own recorded_at. *)
+       let is_latest =
+         match accumulator.turn_finished_recorded_at with
+         | None -> true
+         | Some previous -> Float.compare metadata.recorded_at previous >= 0
+       in
+       if is_latest
+       then (
+         accumulator.turn_finished_recorded_at <- recorded_at;
+         accumulator.turn_finished_disposition <- Some disposition)
+     | Current_reaction { reaction = Event_queue_ack_reaction _; _ } ->
        accumulator.event_queue_ack_recorded_at
          <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
-     | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
+     | Current_reaction { reaction = Event_queue_cancelled_reaction _; _ } ->
        accumulator.event_queue_cancelled_recorded_at
          <- max_recorded_at
               accumulator.event_queue_cancelled_recorded_at
@@ -723,7 +734,7 @@ let event_queue_reaction_evidence_of_accumulator
     ; stimulus_id
     ; stimulus_seen = Option.is_some accumulator.stimulus_recorded_at
     ; turn_started_seen = Option.is_some accumulator.turn_started_recorded_at
-    ; turn_finished_seen = Option.is_some accumulator.turn_finished_recorded_at
+    ; turn_finished = accumulator.turn_finished_disposition
     ; event_queue_ack_seen = Option.is_some accumulator.event_queue_ack_recorded_at
     ; event_queue_cancelled_seen = Option.is_some accumulator.event_queue_cancelled_recorded_at
     ; stimulus_recorded_at = accumulator.stimulus_recorded_at
@@ -921,8 +932,10 @@ let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
 ;;
 
 let current_row_matches_source_reaction ~reaction_matches ~post_id ~expected_stimulus_kind = function
-  | Current_reaction { metadata; reaction_kind; transition_receipt }
-    when reaction_matches reaction_kind transition_receipt ->
+  | Current_reaction { metadata; reaction }
+    when reaction_matches
+           (reaction_kind_of_reaction reaction)
+           (transition_receipt_of_reaction reaction) ->
     (match Json_util.assoc_member_opt "reaction" metadata.raw with
      | Some reaction ->
        string_field "post_id" reaction = Some post_id
@@ -1044,8 +1057,11 @@ let add_delivery_evidence ~keeper_name evidence entry =
        ; first_invalid = note_first_invalid evidence reason
        }
      | Ok (Current_stimulus _) -> evidence
-     | Ok (Current_reaction { metadata; reaction_kind; transition_receipt }) ->
-       if not (delivery_reaction_matches reaction_kind transition_receipt)
+     | Ok (Current_reaction { metadata; reaction }) ->
+       if not
+            (delivery_reaction_matches
+               (reaction_kind_of_reaction reaction)
+               (transition_receipt_of_reaction reaction))
        then evidence
        else
          let reference = match Json_util.assoc_member_opt "reaction" metadata.raw with
@@ -1580,9 +1596,11 @@ let summarize_rows ~keeper_name ~pending_queue rows =
         incr stimulus_count;
         remember_stimulus metadata stimulus_kind;
         remember_board_stimulus metadata stimulus_kind
-      | Current_reaction { metadata; reaction_kind; transition_receipt } ->
+      | Current_reaction { metadata; reaction } ->
         incr reaction_count;
-        note_reaction_kind reaction_kind transition_receipt;
+        note_reaction_kind
+          (reaction_kind_of_reaction reaction)
+          (transition_receipt_of_reaction reaction);
         mark_reacted metadata.stimulus_id
     end
     else

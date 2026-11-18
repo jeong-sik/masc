@@ -194,7 +194,7 @@ let composition_result_lifecycle_hook delivery = function
     (* SDK schema rejection happens before the MASC handler is entered. *)
     Keeper_composition_result_delivery.discard_status delivery ~invocation;
     Agent_core.Hooks.Continue
-  | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | PostToolUse _
+  | BeforeTurn _ | BeforeTurnParams _ | AfterTurn _ | AfterRestoredTurn _ | PostToolUse _
   | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue
 ;;
 
@@ -911,6 +911,7 @@ let assemble_hooks
                     Skill_delivery_state.active skill_delivery_state);
                 Agent_core.Hooks.Continue
               | Agent_core.Hooks.BeforeTurn _
+              | AfterRestoredTurn _
               | BeforeTurnParams _
               | PreToolUse _
               | PostToolUse _
@@ -953,7 +954,7 @@ let assemble_hooks
                 Agent_core.Hooks.Continue
               | BeforeTurn _
               | BeforeTurnParams _
-              | AfterTurn _
+              | AfterTurn _ | AfterRestoredTurn _
               | PostToolUse _
               | PostToolUseFailure _
               | OnStop _
@@ -1482,7 +1483,7 @@ let assemble_hooks
                       ~previous:current_params.system_prompt_override extra_system_context_assembly
                   ; tool_choice
                   })
-              | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue))
+              | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue))
       }
     in
     let hooks = Agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in

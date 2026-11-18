@@ -11,15 +11,15 @@ let test_a_nested_tree_is_read_flat_with_each_goals_tasks () =
   let json =
     Yojson.Safe.from_string
       {|{"tree":[
-          {"id":"goal-a","title":"a","phase":"executing","priority":1,
+          {"id":"goal-a","title":"a","phase":"executing","priority":1,"measure":{"kind":"done_when","condition":"done"},"procedure":"read it",
            "due_date":"2026-10-07","task_count":2,"task_done_count":1,
            "stagnation_seconds":3600,
            "tasks":[{"id":"task-1"},{"id":"task-2"}],
            "children":[
-             {"id":"goal-b","title":"b","phase":"executing","priority":2,
+             {"id":"goal-b","title":"b","phase":"executing","priority":2,"measure":{"kind":"done_when","condition":"done"},"procedure":"read it",
               "due_date":null,"task_count":0,"task_done_count":0,
               "stagnation_seconds":null,"tasks":[],"children":[]}]},
-          {"id":"goal-c","title":"c","phase":"executing","priority":3,
+          {"id":"goal-c","title":"c","phase":"executing","priority":3,"measure":{"kind":"done_when","condition":"done"},"procedure":"read it",
            "due_date":null,"task_count":0,"task_done_count":0,
            "stagnation_seconds":null,"tasks":[],"children":[]}]}|}
   in
@@ -44,7 +44,7 @@ let test_a_nested_tree_is_read_flat_with_each_goals_tasks () =
 let test_a_goal_without_children_is_refused () =
   let json =
     Yojson.Safe.from_string
-      {|{"tree":[{"id":"goal-x","title":"x","phase":"executing","priority":1,
+      {|{"tree":[{"id":"goal-x","title":"x","phase":"executing","priority":1,"measure":{"kind":"done_when","condition":"done"},"procedure":"read it",
           "due_date":null,"task_count":0,"task_done_count":0,
           "stagnation_seconds":null,"tasks":[]}]}|}
   in
@@ -61,7 +61,7 @@ let test_an_unknown_phase_is_refused () =
      The fixture needs a phase name no Goal_phase.Kind spells. *)
   let json =
     Yojson.Safe.from_string
-      {|{"tree":[{"id":"goal-x","title":"x","phase":"hibernating","priority":1,
+      {|{"tree":[{"id":"goal-x","title":"x","phase":"hibernating","priority":1,"measure":{"kind":"done_when","condition":"done"},"procedure":"read it",
           "due_date":null,"task_count":0,"task_done_count":0,
           "stagnation_seconds":null,"tasks":[],"children":[]}]}|}
   in
@@ -79,7 +79,7 @@ let test_explicit_measurement_requires_the_current_criterion () =
     Yojson.Safe.from_string
       (Printf.sprintf
          {|{"tree":[{"id":"goal-x","title":"x","phase":"executing","priority":1,
-            "criterion_revision":"r2","metric":"passing checks","target_value":"5",
+            "criterion_revision":"r2","measure":{"kind":"done_when","condition":"5"},"procedure":"passing checks",
             "measurement":{"state":"reported","record":{"goal_id":"goal-x",
               "criterion_revision":"%s","observed_value":"3","evidence":"artifact:checks",
               "actor":"planner","recorded_at":"2026-09-24T00:00:00Z"}},

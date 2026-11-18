@@ -4,4 +4,5 @@
 (test
  (name test_anti_rationalization_empty_reject)
  (modules test_anti_rationalization_empty_reject)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))

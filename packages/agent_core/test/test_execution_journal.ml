@@ -25,7 +25,7 @@ let serial_schedule : Tool_contract.schedule =
   }
 ;;
 
-let provider_response ?(id = "response-stream-1") ?(cost_usd = Some 0.25) () =
+let provider_api_response ~id ~cost_usd =
   { Llm_provider.Types.id
   ; model = "streaming-model"
   ; unreadable_tool_uses = []
@@ -40,6 +40,19 @@ let provider_response ?(id = "response-stream-1") ?(cost_usd = Some 0.25) () =
         ; cost_usd
         }
   ; telemetry = None
+  }
+;;
+
+let provider_response ?(id = "response-stream-1") ?(cost_usd = Some 0.25) ()
+  : Internal.Execution_provider_response_snapshot.t =
+  { Internal.Execution_provider_response_snapshot.response =
+      provider_api_response ~id ~cost_usd
+  ; admission =
+      { Internal.Execution_provider_response_snapshot.source_map =
+          { Agent_core.Hooks.admitted_tool_sources = []; source_tool_use_count = 0 }
+      ; unavailable_names = []
+      ; unreadable = []
+      }
   }
 ;;
 
@@ -1153,6 +1166,48 @@ let test_json_terminal_and_id_boundaries () =
     "invalid provider response did not advance journal"
     before_invalid_response
     (Journal.length journal);
+  (* An admission that does not account for the response's tool calls cannot
+     restore them: two calls were made, the record names only one. *)
+  let miscounted_admission =
+    let snapshot = provider_response ~id:"response-miscounted" () in
+    let admission = snapshot.Internal.Execution_provider_response_snapshot.admission in
+    { snapshot with
+      Internal.Execution_provider_response_snapshot.admission =
+        { admission with
+          Internal.Execution_provider_response_snapshot.source_map =
+            { admission.Internal.Execution_provider_response_snapshot.source_map with
+              Agent_core.Hooks.source_tool_use_count = 2
+            }
+        ; unavailable_names = [ "missing_tool" ]
+        }
+    }
+  in
+  (match
+     Journal.update_node
+       journal
+       ~node:turn
+       (Event.Provider_response_snapshot miscounted_admission)
+   with
+   | Error (Journal.Invalid_event _) -> ()
+   | _ -> fail "provider response with a miscounted admission entered the journal");
+  check
+    int
+    "miscounted admission did not advance journal"
+    before_invalid_response
+    (Journal.length journal);
+  (* The same record read back from a journal is refused by the decoder, not
+     only by the writer: a resumed turn must never seal against it. *)
+  (match
+     Event.node_update_of_yojson
+       (`Assoc
+           [ "type", `String "provider_response_snapshot"
+           ; ( "value"
+             , Internal.Execution_provider_response_snapshot.to_yojson
+                 miscounted_admission )
+           ])
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "provider response with a miscounted admission decoded from a journal");
   let before_invalid_updates = Journal.length journal in
   let invalid_json_values = [ `Float nan; `Intlit "not-a-json-integer" ] in
   List.iter

@@ -35,6 +35,25 @@ type turn_binding =
   ; name_resolutions : Agent_core.Hooks.tool_name_resolution list
   }
 
+(* A ToolUse of a turn restored from the durable execution journal: the
+   admitted response's call, the row this process never saw streamed. *)
+type restored_tool_use =
+  { tool_call_id : string
+  ; tool_name : string
+  ; input : Yojson.Safe.t
+  }
+
+(* A turn sealed from its journaled admission rather than from streamed
+   blocks. [binding.sources] maps each planned index to the call's
+   [source_tool_use_ordinal], which is also the block index of the synthesized
+   row: raw stream indices were never journaled. Kept apart from [turns]
+   because a runtime attempt boundary does not undo a durable record; the same
+   restored turn delivered again must find it. *)
+type restored_turn =
+  { binding : turn_binding
+  ; tool_uses : restored_tool_use list
+  }
+
 type execution_binding =
   { occurrence : Keeper_chat_events.tool_stream_occurrence
   ; execution_id : Ids.Execution_id.t
@@ -75,6 +94,7 @@ type t = {
      execution. Provider ids remain correlation data and never select a row. *)
   mutable turns : (int * turn_binding) list;
   mutable unmapped_turns : (int * int) list;
+  mutable restored_turns : (int * restored_turn) list;
   mutable executions : execution_binding list;
   mutable next_opened_at : int;
 }
@@ -96,6 +116,7 @@ let create () =
   ; runtime_attempt_seen = false
   ; turns = []
   ; unmapped_turns = []
+  ; restored_turns = []
   ; executions = []
   ; next_opened_at = 0
   }
@@ -154,6 +175,10 @@ let scope_is_sealed t stream_scope =
     (fun (_, (binding : turn_binding)) -> binding.stream_scope = stream_scope)
     t.turns
   || List.exists (fun (_, scope) -> scope = stream_scope) t.unmapped_turns
+  || List.exists
+       (fun (_, (restored : restored_turn)) ->
+          restored.binding.stream_scope = stream_scope)
+       t.restored_turns
 ;;
 
 let current_scope_is_sealed t = scope_is_sealed t t.current_stream_scope
@@ -482,6 +507,13 @@ let recovered_tool_names t ~stream_scope ~sources admitted_tool_sources =
   |> Result.map List.rev
 ;;
 
+let restored_scope_owner t stream_scope =
+  List.find_map
+    (fun (turn, (restored : restored_turn)) ->
+       if restored.binding.stream_scope = stream_scope then Some turn else None)
+    t.restored_turns
+;;
+
 let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_map) =
   let admitted_tool_sources = tool_source_map.admitted_tool_sources in
   let source_tool_use_count = tool_source_map.source_tool_use_count in
@@ -570,6 +602,16 @@ let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_
       admitted_tool_sources in
     if List.mem_assoc turn t.unmapped_turns
     then Error (Printf.sprintf "Agent Core turn %d closed without source mapping" turn)
+    else if List.mem_assoc turn t.restored_turns
+    then
+      Error
+        (Printf.sprintf
+           "Agent Core turn %d was sealed from its journaled admission" turn)
+    else if Option.is_some (restored_scope_owner t stream_scope)
+    then
+      Error
+        (Printf.sprintf
+           "stream scope %d holds a turn restored from its journal" stream_scope)
     else match List.assoc_opt turn t.turns with
     | Some recorded
       when recorded.stream_scope = stream_scope
@@ -625,7 +667,7 @@ let close_turn_without_sources t ~turn =
      | Some _ ->
        Error (Printf.sprintf "unmapped Agent Core turn %d closed twice" turn)
      | None ->
-       if List.mem_assoc turn t.turns
+       if List.mem_assoc turn t.turns || List.mem_assoc turn t.restored_turns
        then Error (Printf.sprintf "Agent Core turn %d already has exact sources" turn)
        else if
          List.exists
@@ -635,11 +677,218 @@ let close_turn_without_sources t ~turn =
          || List.exists
               (fun (_, recorded_scope) -> recorded_scope = stream_scope)
               t.unmapped_turns
+         || Option.is_some (restored_scope_owner t stream_scope)
        then
          Error (Printf.sprintf "stream scope %d already belongs to another turn" stream_scope)
        else (
          t.unmapped_turns <- (turn, stream_scope) :: t.unmapped_turns;
          Ok ()))
+;;
+
+let restored_tool_uses (response : Agent_core.Types.api_response) =
+  List.filter_map
+    (fun (block : Llm_provider.Types.content_block) ->
+       match block with
+       | Llm_provider.Types.ToolUse { id; name; input } ->
+         Some { tool_call_id = id; tool_name = name; input }
+       | Llm_provider.Types.Text _
+       | Llm_provider.Types.Thinking _
+       | Llm_provider.Types.ReasoningDetails _
+       | Llm_provider.Types.RedactedThinking _
+       | Llm_provider.Types.ToolResult _
+       | Llm_provider.Types.Image _
+       | Llm_provider.Types.Document _
+       | Llm_provider.Types.Audio _ -> None)
+    response.content
+;;
+
+let restored_tool_use_equal left right =
+  String.equal left.tool_call_id right.tool_call_id
+  && String.equal left.tool_name right.tool_name
+  && Yojson.Safe.equal left.input right.input
+;;
+
+(* The journal record is the authority, so every coordinate is checked against
+   it alone: one source per admitted ToolUse in planned order, and each source
+   at a distinct place inside the provider's recorded tool calls. *)
+let validate_restored_admission
+    ~tool_uses
+    (tool_source_map : Agent_core.Hooks.admitted_tool_source_map)
+  =
+  let open Result.Syntax in
+  let sources = tool_source_map.admitted_tool_sources in
+  let count = tool_source_map.source_tool_use_count in
+  let ordinals =
+    List.map
+      (fun (source : Agent_core.Hooks.admitted_tool_use_source) ->
+         source.source_tool_use_ordinal)
+      sources
+  in
+  let* () =
+    if count < 0
+    then Error "restored admission has a negative tool call count"
+    else Ok ()
+  in
+  let* () =
+    if List.length sources = List.length tool_uses
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "restored admission has %d sources for %d admitted ToolUse blocks"
+           (List.length sources) (List.length tool_uses))
+  in
+  let* () =
+    if
+      List.equal
+        Int.equal
+        (List.map
+           (fun (source : Agent_core.Hooks.admitted_tool_use_source) ->
+              source.planned_index)
+           sources)
+        (List.init (List.length sources) Fun.id)
+    then Ok ()
+    else Error "restored admission sources are not in contiguous planned order"
+  in
+  let* () =
+    match List.find_opt (fun ordinal -> ordinal < 0 || ordinal >= count) ordinals with
+    | Some ordinal ->
+      Error
+        (Printf.sprintf
+           "restored source ordinal %d is outside the %d tool calls of its admission"
+           ordinal count)
+    | None -> Ok ()
+  in
+  let* () =
+    if List.equal Int.equal ordinals (List.sort_uniq Int.compare ordinals)
+    then Ok ()
+    else Error "restored source ordinals must be strictly increasing"
+  in
+  List.fold_left2
+    (fun result (source : Agent_core.Hooks.admitted_tool_use_source) tool_use ->
+       let* () = result in
+       match source.name_resolution with
+       | Agent_core.Hooks.Registered_name -> Ok ()
+       | Agent_core.Hooks.Recovered_name { tool_call_id; provider_name; registered_name } ->
+         if
+           String.equal tool_call_id tool_use.tool_call_id
+           && String.equal registered_name tool_use.tool_name
+           && not (String.equal provider_name registered_name)
+         then Ok ()
+         else
+           Error
+             (Printf.sprintf
+                "restored name recovery does not describe planned_index %d"
+                source.planned_index))
+    (Ok ())
+    sources
+    tool_uses
+;;
+
+(* A restored turn takes a scope of its own. A scope already sealed is left
+   behind exactly as the next raw event would leave it; a scope that holds
+   unsealed provider output would mix two turns, so it is refused. *)
+let enter_restored_scope t =
+  if current_scope_is_sealed t
+  then (
+    advance_to_empty_scope t;
+    Ok ())
+  else if
+    t.message_presence = Message_unseen
+    && (not t.current_scope_progress_seen)
+    && (not (current_scope_has_tool_occurrence t))
+    && not (current_scope_is_invalid t)
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "restored turn arrived while stream scope %d holds unsealed provider output"
+         t.current_stream_scope)
+;;
+
+let seal_restored_turn
+    t
+    ~turn
+    ~(response : Agent_core.Types.api_response)
+    ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_map)
+  =
+  let open Result.Syntax in
+  let tool_uses = restored_tool_uses response in
+  let sources =
+    List.map
+      (fun (source : Agent_core.Hooks.admitted_tool_use_source) ->
+         source.planned_index, source.source_tool_use_ordinal)
+      tool_source_map.admitted_tool_sources
+  in
+  let name_resolutions =
+    List.map
+      (fun (source : Agent_core.Hooks.admitted_tool_use_source) -> source.name_resolution)
+      tool_source_map.admitted_tool_sources
+  in
+  let* () =
+    if turn < 0 then Error "Agent Core turn must be non-negative" else Ok ()
+  in
+  let* () = validate_restored_admission ~tool_uses tool_source_map in
+  match List.assoc_opt turn t.restored_turns with
+  | Some recorded
+    when List.equal ( = ) recorded.binding.sources sources
+         && recorded.binding.source_tool_use_count
+            = tool_source_map.source_tool_use_count
+         && recorded.binding.name_resolutions = name_resolutions
+         && List.equal restored_tool_use_equal recorded.tool_uses tool_uses ->
+    Ok ()
+  | Some _ ->
+    Error
+      (Printf.sprintf
+         "restored Agent Core turn %d was already sealed from a different admission"
+         turn)
+  | None when List.mem_assoc turn t.turns || List.mem_assoc turn t.unmapped_turns ->
+    Error
+      (Printf.sprintf "Agent Core turn %d was already closed from a stream" turn)
+  | None ->
+    let* () = enter_restored_scope t in
+    let stream_scope = t.current_stream_scope in
+    let provider_message_id =
+      if String.trim response.id = "" then None else Some response.id
+    in
+    List.iter2
+      (fun (source : Agent_core.Hooks.admitted_tool_use_source) tool_use ->
+         let raw_call_name =
+           match source.name_resolution with
+           | Agent_core.Hooks.Registered_name -> tool_use.tool_name
+           | Agent_core.Hooks.Recovered_name { provider_name; _ } -> provider_name
+         in
+         let opened_at = t.next_opened_at in
+         t.next_opened_at <- opened_at + 1;
+         t.finalized <-
+           ( opened_at
+           , { block_index = source.source_tool_use_ordinal
+             ; stream_scope
+             ; provider_message_id
+             ; raw_call_id = tool_use.tool_call_id
+             ; raw_call_name
+             ; call =
+                 { Keeper_chat_store.call_id = tool_use.tool_call_id
+                 ; execution_id = None
+                 ; call_name = tool_use.tool_name
+                 ; args = Yojson.Safe.to_string tool_use.input
+                 }
+             } )
+           :: t.finalized)
+      tool_source_map.admitted_tool_sources
+      tool_uses;
+    t.restored_turns <-
+      ( turn
+      , { binding =
+            { stream_scope
+            ; sources
+            ; source_tool_use_count = tool_source_map.source_tool_use_count
+            ; name_resolutions
+            }
+        ; tool_uses
+        } )
+      :: t.restored_turns;
+    Ok ()
 ;;
 
 let occurrence_equal
@@ -751,11 +1000,16 @@ let record_occurrence_execution_id t ~stream_scope ~block_index ~tool_call_id ~e
 let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
   let open Result.Syntax in
   let* binding =
-    match List.assoc_opt turn t.turns with
-    | Some binding -> Ok binding
-    | None when List.mem_assoc turn t.unmapped_turns ->
+    match List.assoc_opt turn t.turns, List.assoc_opt turn t.restored_turns with
+    | Some binding, None -> Ok binding
+    | None, Some (restored : restored_turn) -> Ok restored.binding
+    | Some _, Some _ ->
+      Error
+        (Printf.sprintf
+           "Agent Core turn %d is sealed both from a stream and from its journal" turn)
+    | None, None when List.mem_assoc turn t.unmapped_turns ->
       Error (Printf.sprintf "Agent Core turn %d closed without exact tool sources" turn)
-    | None -> Error (Printf.sprintf "Agent Core turn %d was not sealed" turn)
+    | None, None -> Error (Printf.sprintf "Agent Core turn %d was not sealed" turn)
   in
   let* block_index =
     match List.assoc_opt planned_index binding.sources with

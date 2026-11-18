@@ -34,13 +34,18 @@ type reaction_kind =
   | Turn_started
   | Turn_finished
       (** The turn the stimulus opened reached its boundary. Carries the turn's
-          own typed disposition as a token; this ledger records what the turn
+          own {!Turn_disposition.t}; this ledger records what the turn
           boundary decided and never decides it. *)
   | Event_queue_ack
   | Event_queue_cancelled
 
 type reaction_decode_error = Unknown_reaction_kind of string
 type row_quarantine_reason
+
+module Turn_disposition :
+  module type of struct
+    include Keeper_reaction_ledger_wire.Turn_disposition
+  end
 
 val install_state_change_observer :
   (base_path:string -> keeper_name:string -> unit) -> unit
@@ -109,7 +114,7 @@ val record_event_queue_turn_started :
 val record_event_queue_turn_finished :
   base_path:string ->
   keeper_name:string ->
-  disposition:string ->
+  disposition:Turn_disposition.t ->
   Keeper_event_queue.stimulus ->
   unit
 (** Append the closing half of {!record_event_queue_turn_started}. Without it a
@@ -147,7 +152,9 @@ type event_queue_reaction_evidence =
   ; stimulus_id : string
   ; stimulus_seen : bool
   ; turn_started_seen : bool
-  ; turn_finished_seen : bool
+  ; turn_finished : Turn_disposition.t option
+      (** The latest attempt's disposition by [recorded_at]; [None] when no
+          turn the stimulus started has reached its boundary. *)
   ; event_queue_ack_seen : bool
   ; event_queue_cancelled_seen : bool
   ; stimulus_recorded_at : float option

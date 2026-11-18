@@ -44,6 +44,9 @@ val microvm_endpoint_route : Keeper_sandbox_remote.t -> Yojson.Safe.t
     workspace root. *)
 val read_authority_workspace_root : read_authority -> string
 val read_authority_declared_path : read_authority -> string -> string option
+val read_authority_declared_match :
+  read_authority -> string -> Exec_policy_paths.extra_root_match option
+(** {!read_authority_declared_path} with the declared root that admitted it. *)
 val read_authority_declared_path_of_args :
   read_authority -> path:string -> cwd:string option -> string option
 
@@ -117,6 +120,15 @@ val declared_path_of_endpoint : Exec_ssh_endpoint.t -> string -> string option
     roots ([allowed_paths], {!Exec_policy_paths.extra_root_path}); [p] is the
     endpoint path, lexically normalized. The one judgment {!declared_endpoint_path}
     and the remote Write lane both make. *)
+
+val declared_endpoint_match :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  string ->
+  (Exec_policy_paths.extra_root_match option, string) result
+(** {!declared_endpoint_path} with the declared root that admitted it. A
+    reader that opens the path on the endpoint checks the opened file
+    against that root (#35934). *)
 
 val declared_endpoint_path :
   config:Workspace.config ->

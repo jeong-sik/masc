@@ -1059,6 +1059,22 @@ let header_object ~read_object digest =
   | json -> Ok json
 ;;
 
+let decode_header ~system_prompt ~tools head =
+  match head.header_json with
+  | `Assoc header_fields ->
+    Checkpoint_codec.of_json (full_header_json ~header_fields ~system_prompt ~tools)
+    |> Result.map_error (fun error -> Checkpoint_invalid error)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error (Head_invalid "head.checkpoint must be an object")
+;;
+
+let validate_header ~read_object head =
+  let* system_prompt = header_object ~read_object head.header_objects.system_prompt in
+  let* tools = header_object ~read_object head.header_objects.tools in
+  let+ _header = decode_header ~system_prompt ~tools head in
+  ()
+;;
+
 let system_prompt ~read_object head =
   let digest = head.header_objects.system_prompt in
   let* json = header_object ~read_object digest in
@@ -1182,14 +1198,7 @@ let load_with ~decode_open ~decode_bundle ~entry_digest ~finish_loaded ~read_obj
       (Ok (chain, rev_loaded))
       head.history.open_messages
   in
-  let* header =
-    match head.header_json with
-    | `Assoc header_fields ->
-      Checkpoint_codec.of_json (full_header_json ~header_fields ~system_prompt ~tools)
-      |> Result.map_error (fun error -> Checkpoint_invalid error)
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
-      Error (Head_invalid "head.checkpoint must be an object")
-  in
+  let* header = decode_header ~system_prompt ~tools head in
   let messages = finish_loaded rev_loaded in
   Ok { header with messages }
 ;;

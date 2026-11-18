@@ -435,6 +435,7 @@ let run_turn
       ?event_scope
       ?preview
       ?observation_token
+      ~(keeper_turn_id : int)
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -679,7 +680,8 @@ let run_turn
   let config_root = ctx.config_root in
   let runtime_config_path = ctx.runtime_config_path in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  let manifest_keeper_turn_id = meta.runtime.usage.total_turns + 1 in
+  (* The caller allocated this number with the Owner (#52839). *)
+  let manifest_keeper_turn_id = keeper_turn_id in
   let event_scope = match event_scope with
     | Some scope -> scope
     | None -> Keeper_turn_scope.create ~keeper_turn_id:manifest_keeper_turn_id

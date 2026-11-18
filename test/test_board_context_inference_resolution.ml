@@ -262,7 +262,7 @@ let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
           (make_meta "awake-pre-turn")
       in
       let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-      Keeper_registry.mark_turn_started ~observation_token
+      Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token
         ~base_path
         ~wake:Keeper_registry.Proactive_tick
         "in-flight";
@@ -357,7 +357,7 @@ let test_keeper_metric_producer_tracks_turn_and_failed_sleep () =
       check bool "idle running lane is not an active producer" false
         (Keeper_status_runtime.keeper_metric_producer_active ~base_path);
       let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-      Keeper_registry.mark_turn_started ~observation_token
+      Keeper_registry.mark_turn_started ~turn_id:1 ~observation_token
         ~base_path
         ~wake:Keeper_registry.Proactive_tick
         entry.name;

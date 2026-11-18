@@ -48,7 +48,8 @@ let check_resources ?(runtime = Docker) r =
         Error (Printf.sprintf "Apple microVM memory_bytes must be at least %Ld MiB"
           apple_container_minimum_memory_mib)
       else Ok ()
-type container = { runtime : runtime; image : string; resources : resources }
+type image_label = { label_key : string; label_value : string }
+type container = { runtime : runtime; image : string; resources : resources; image_label : image_label option }
 type execution = Container of container | Host_process of { max_reply_bytes : int }
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
@@ -83,6 +84,7 @@ type package = {
 let host_requests_tool = "lane_host_requests"
 let operator_tool = "lane_operator"
 let host_result_tool = "lane_host_result"
+let exact_protocol = 1
 let uses_host_requests package = package.exact_outputs <> [] || package.operator_asks
   || package.web_search
 let max_reply_bytes (package : package) = match package.execution with
@@ -242,14 +244,16 @@ let package_to_json (p : package) =
          refresh_policy = _; model_access = _; binding_schema = _; presentation = _;
          skills_directory = _; exact_outputs = _; operator_asks = _; web_search = _;
          host_request_listing = _ } : package) = p in
-  (* runtime, exact_outputs, operator_asks and host_request_pages are written only when
-     they differ from what a package without the key means, so such a package keeps its
-     revision. *)
+  (* runtime, image_label, exact_outputs, operator_asks and host_request_pages are written
+     only when they differ from what a package without the key means, so such a package
+     keeps its revision. *)
   let runtime, image, resources = match p.execution with
     | Container container ->
         (match container.runtime with Docker -> []
           | Apple_container -> ["runtime", string (runtime_to_string container.runtime)]),
-        ["image", string container.image],
+        ["image", string container.image]
+        @ (match container.image_label with None -> []
+           | Some label -> ["image_label", `Assoc ["key", string label.label_key; "value", string label.label_value]]),
         `Assoc ["cpus", `Float container.resources.cpus;
           "memory_bytes", `Intlit (Int64.to_string container.resources.memory_bytes);
           "pids", optional (fun value -> `Int value) container.resources.pids;

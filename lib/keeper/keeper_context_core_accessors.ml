@@ -59,7 +59,7 @@ let empty_runtime_checkpoint ~system_prompt ~messages
     response_format = Agent_core.Types.Off;
     cache_system_prompt = false;
     context;
-    pending_input = None; mcp_sessions = [];
+    pending_input = None;
     working_context = None;
   }
 

@@ -114,10 +114,13 @@ let checked_plan ~config ~owner ~observed_meta ~(backlog : Masc_domain.backlog) 
     match List.filter (fun (task : Masc_domain.task) -> String.equal task.id wire) backlog.tasks with
     | [task] ->
         (match task.task_status, task.handoff_context with
-         | (Masc_domain.Claimed { assignee; _ } | InProgress { assignee; _ }), _
+         | (Masc_domain.Claimed { assignee; _ } | InProgress { assignee; _ }),
+           (None | Some (Masc_domain.Handoff_decoded _ | Masc_domain.Handoff_unreadable _))
            when Workspace_task_classify.same_task_actor config assignee operation.keeper_name -> Ok held
-         | Todo, Some handoff when List.exists (String.equal receipt) handoff.evidence_refs -> Ok (id :: held)
-         | (Claimed _ | InProgress _ | AwaitingVerification _ | Todo | Done _ | Cancelled _), _ ->
+         | Todo, Some (Masc_domain.Handoff_decoded handoff)
+           when List.exists (String.equal receipt) handoff.evidence_refs -> Ok (id :: held)
+         | (Claimed _ | InProgress _ | AwaitingVerification _ | Todo | Done _ | Cancelled _),
+           (None | Some (Masc_domain.Handoff_decoded _ | Masc_domain.Handoff_unreadable _)) ->
              Error (Recorded_task_changed wire))
     | [] | _ :: _ :: _ -> Error (Recorded_task_changed wire)) (Ok []) operation.owned_task_ids in
   Ok { Store.backlog_version = backlog.version; receipted_task_ids = List.rev receipted }

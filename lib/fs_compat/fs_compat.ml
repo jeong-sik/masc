@@ -14,6 +14,7 @@
 *)
 
 include Fs_compat_base_io
+module Input = Fs_compat_input
 include Fs_compat_capability_write
 include Fs_compat_owned_file
 include Fs_compat_owned_inventory

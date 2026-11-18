@@ -921,9 +921,9 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
       (fun (message : Agent_core.Types.message) -> message.role <> System) messages))
     ~instructions:"Keeper instructions" ~world:"Newer steering" () in
   (match rejected.Keeper_codex_runtime.result with
-   | Error (Agent_core.Error.Config (InvalidConfig {field;_})) ->
+   | Error (Agent_core.Error.Internal detail) ->
      check string "required task mapping cannot be projected away"
-       "official_client_session.task_reference" field
+       "required historical task reference was removed by model-input projection" detail
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok _ -> fail "a continuation with no historical task mapping was admitted");
   check int "rejected mapping never submits a model request" before

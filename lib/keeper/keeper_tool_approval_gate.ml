@@ -39,7 +39,7 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
        stop the build here and be decided on. *)
     | Agent_core.Hooks.BeforeTurn _
     | Agent_core.Hooks.BeforeTurnParams _
-    | Agent_core.Hooks.AfterTurn _
+    | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _
     | Agent_core.Hooks.PostToolUse _
     | Agent_core.Hooks.PostToolUseFailure _
     | Agent_core.Hooks.OnToolError _

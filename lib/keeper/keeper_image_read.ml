@@ -89,7 +89,7 @@ let admission_hook ~accepts_image_input = function
         "The selected runtime does not declare image input support. Use keeper_analyze_image for a delegated text reading. No pixels were read or sent."
   | Agent_core.Hooks.PreToolUse _
   | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
-  | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PostToolUse _
+  | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PostToolUse _
   | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _
   | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ ->
       Agent_core.Hooks.Continue

@@ -189,6 +189,7 @@
 (include stanzas/test_keeper_trust_disposition.inc)
 (include stanzas/test_keeper_attention_reason.inc)
 (include stanzas/test_keeper_trust_disposition_reason.inc)
+(include stanzas/test_schedule_projection_status_contract.inc)
 (include stanzas/test_play_room.inc)
 (include stanzas/test_server_play_room_events.inc)
 (include stanzas/test_h2_play_room.inc)
@@ -279,13 +280,14 @@
 (test
  (name test_keeper_librarian_absorb_gate)
  (modules test_keeper_librarian_absorb_gate)
- (deps fixtures/librarian_statements_golden.json ../config/prompts/librarian.md)
+ (deps fixtures/librarian_statements_golden.json (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main mtime.clock.os))
 
 (test
  (name test_keeper_librarian_cancellation)
  (modules test_keeper_librarian_cancellation)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main))
 
@@ -390,6 +392,7 @@
 (test
  (name test_verifier_official_client)
  (modules test_verifier_official_client)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))
 
 (test
@@ -427,10 +430,7 @@
 (test
  (name test_workspace_memory_curator_lane)
  (modules test_workspace_memory_curator_lane)
- (deps ../config/prompts/workspace_memory_curator.md
-       ../config/prompts/workspace_memory_briefing.md
-       ../config/prompts/keeper.md
-       (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py)
+ (deps (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps masc.server exact_output_fixture))
 
 (test
@@ -464,7 +464,7 @@
 (test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
- (libraries alcotest agent_core masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
+ (libraries goal_measure_fixture masc.goal_measure alcotest agent_core masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
 
 (test
  (name test_keeper_effective_tool_surface)
@@ -1222,7 +1222,7 @@
   test_exec_command_gate_log_sink
   )
  (deps (source_tree %{workspace_root}/config/prompts))
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
  masc.prompt_registry
  masc_test_deps masc_schedule bigstringaf masc.keeper_checkpoint_ref
   ;; The workspace file-save HTTP fixture creates real role-scoped tokens.
@@ -1334,6 +1334,7 @@
 (test
  (name test_keeper_event_queue_state_v2)
  (modules test_keeper_event_queue_state_v2)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc_test_deps))
 
 (test
@@ -1442,7 +1443,8 @@
 (test
  (name test_keeper_effective_meta_overlay)
  (modules test_keeper_effective_meta_overlay)
- (libraries
+ (deps (source_tree %{workspace_root}/config/prompts))
+ (libraries goal_measure_fixture masc.goal_measure
   masc_test_deps
   masc.embedded_config))
 
@@ -1636,6 +1638,7 @@
 (test
  (name test_fusion_metrics)
  (modules test_fusion_metrics)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps masc.fusion_core))
 
 (test
@@ -1659,6 +1662,7 @@
 (test
  (name test_keeper_librarian_cli_lane)
  (modules test_keeper_librarian_cli_lane)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   masc_test_deps
   exact_output_fixture
@@ -1671,6 +1675,7 @@
 (test
  (name test_keeper_librarian_message_floor)
  (modules test_keeper_librarian_message_floor)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   masc_test_deps
   exact_output_fixture
@@ -1750,7 +1755,7 @@
 (test
  (name test_goal_timeline_projection)
  (modules test_goal_timeline_projection)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 
 ; Goal_due: the one reading of a Goal's due date (the UTC instant it falls due).
 
@@ -1758,6 +1763,11 @@
  (name test_goal_due)
  (modules test_goal_due)
  (libraries alcotest masc.masc_goal ptime))
+
+(library
+ (name goal_measure_fixture)
+ (modules goal_measure_fixture)
+ (libraries masc.goal_measure))
 
 (test
  (name test_goal_measure)
@@ -1770,7 +1780,7 @@
 (test
  (name test_goal_task_assignment)
  (modules test_goal_task_assignment)
- (libraries masc_test_deps unix))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps unix))
 
 ; Group 2: Property-based tests (QCheck)
 
@@ -2188,7 +2198,7 @@
   test_prompt_preset
   test_managed_assets_sync_from_binary
  test_board_core_payload)
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
   uucp
   masc.toml_line_editor
   ; The fallback descendant fixture uses the monotonic deadline owner.
@@ -2226,7 +2236,7 @@
   masc.agent_core.digest
   masc.tool_metrics_store)
  (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json
-  ../config/prompts/keeper.fleet.diagnose.md))
+  (source_tree %{workspace_root}/config/prompts)))
 
 (test
  (name test_dashboard_namespace_truth)
@@ -2236,7 +2246,7 @@
 (test
  (name test_dashboard_http_core)
  (modules test_dashboard_http_core)
- (libraries
+ (libraries goal_measure_fixture masc.goal_measure
   masc.masc_candle
   masc.masc_candle_runtime
   masc.masc_candle_store
@@ -2260,7 +2270,7 @@
 (test
  (name test_dashboard_goals_trust_reads)
  (modules test_dashboard_goals_trust_reads)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 
 ; Exercise the private immutable state with its production source and interface
 ; without publishing it from masc.server.
@@ -2439,6 +2449,7 @@
 (test
  (name test_keeper_board_turn_ack)
  (modules test_keeper_board_turn_ack)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps exact_output_fixture eio_main unix))
 
 ; Production Board-attention adapter proof over the provider-neutral AGENT_CORE lane.
@@ -2451,6 +2462,7 @@
 (test
  (name test_keeper_librarian_exact_lane_preference)
  (modules test_keeper_librarian_exact_lane_preference)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
 ; The exact-execution lease guard and exact-disposition recovery suites lived
@@ -2563,7 +2575,7 @@
 (test
  (name test_completion_trust_harness)
  (modules test_completion_trust_harness)
- (deps (source_tree ../config/prompts))
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps))
 
 ; Scheduled internal automation domain guardrails.
@@ -2704,7 +2716,7 @@
  (name keeper_tool_matrix_cases_lib)
  (wrapped false)
  (modules test_keeper_tool_matrix_cases test_mcp_tool_matrix_cases)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 
 ; Special: Custom compiler flags
 
@@ -3024,6 +3036,7 @@
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
+(include stanzas/test_dated_jsonl_input.inc)
 (include stanzas/test_dated_jsonl_store.inc)
 (include stanzas/test_play_role_permissions.inc)
 (include stanzas/test_play_screen.inc)
@@ -3163,6 +3176,7 @@
 (include stanzas/test_fs_compat_missing_binding.inc)
 (include stanzas/test_fs_compat_owned_observation.inc)
 (include stanzas/test_fs_compat_owned_transactions.inc)
+(include stanzas/test_fs_compat_input.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_retention_directory.inc)
@@ -3819,7 +3833,7 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries browser_addon_fixture masc_test_deps masc.runtime masc.browser_lane masc.lane_addon_call_context)
- (deps ../config/prompts/keeper.vision.output.md ../config/prompts/keeper.vision.request_header.md ../bin/masc_native_addon_launcher.exe))
+ (deps ../bin/masc_native_addon_launcher.exe (source_tree %{workspace_root}/config/prompts)))
 
 (rule
  (alias runtest-browser-native-screenshot)
@@ -4941,7 +4955,7 @@
 (test
  (name test_tui_planning_order)
  (modules test_tui_planning_order)
- (libraries alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
+ (libraries goal_measure_fixture masc.goal_measure alcotest masc.masc_goal masc_tui_types masc_tui_keys masc_tui_render_prim masc_tui_message_layout masc_tui_scroll masc_tui_theme))
 
 ; The named lanes below are the same suite sliced by scenario family. They
 ; existed only as local commands, so every assertion in them was dead in CI:
@@ -5134,13 +5148,13 @@
 (test
  (name test_tui_planning_detail)
  (modules test_tui_planning_detail)
- (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched yojson))
+ (libraries goal_measure_fixture masc.goal_measure alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched yojson))
 
 ; #39571: a Goal at work past its due date stands apart from one due later.
 (test
  (name test_tui_planning_due)
  (modules test_tui_planning_due)
- (libraries alcotest masc masc.masc_goal masc_tui_planning_due ptime))
+ (libraries goal_measure_fixture masc.goal_measure alcotest masc masc.masc_goal masc_tui_planning_due ptime))
 
 (test
  (name test_tui_roster_pane)
@@ -5513,6 +5527,7 @@
 (test
  (name test_keeper_ide_annotate_contract)
  (modules test_keeper_ide_annotate_contract)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest yojson masc masc_test_deps eio eio_main fs_compat unix))
 
 (test
@@ -5523,6 +5538,7 @@
 (test
  (name test_keeper_task_skill_block)
  (modules test_keeper_task_skill_block)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   alcotest
   masc
@@ -6390,6 +6406,7 @@
 (test
  (name test_workspace_memory_execution_capture)
  (modules test_workspace_memory_execution_capture)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry unix))
 
 (test
@@ -6405,7 +6422,7 @@
 (test
  (name test_fusion_decision)
  (modules test_fusion_decision)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 (include stanzas/test_onboarding_status.inc)
 (include stanzas/test_onboarding_journey.inc)
 (include stanzas/test_sandbox_readiness.inc)
@@ -6434,6 +6451,7 @@
 (include stanzas/test_sandbox_prerequisites.inc)
 (include stanzas/test_native_addon_program.inc)
 (include stanzas/test_browser_addon_setup.inc)
+(include stanzas/test_exact_addon_setup.inc)
 (include stanzas/test_browser_lane_ego_setup.inc)
 
 (include stanzas/test_apple_container_install.inc)
@@ -6670,7 +6688,7 @@
        ; The operator lesson case loads its declaration.
        ../docs/examples/lane-addons/operator-lesson.toml ../addons/operator-lesson/lane.toml
        (glob_files ../addons/operator-lesson/schemas/*.json))
- (libraries alcotest masc masc.browser_lane masc.masc_log masc.otel_spans mcp_protocol yojson unix))
+ (libraries alcotest masc masc.browser_lane masc.fs_compat masc.masc_log masc.otel_spans mcp_protocol yojson unix))
 
 (test
  (name test_lane_addon_declaration)
@@ -6781,7 +6799,7 @@
  (modules test_candle_appraiser_contract)
  (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py ../addons/exact_worker.py
   (source_tree %{workspace_root}/config/prompts))
- (libraries masc_test_deps masc.server masc_candle masc_candle_runtime masc_process mcp_protocol eio_main yojson unix))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps masc.server masc_candle masc_candle_runtime masc_process mcp_protocol eio_main yojson unix))
 
 (test
  (name test_workspace_curator_addon_contract)
@@ -6794,7 +6812,7 @@
  (modules test_workspace_curator_addon_commit)
  (deps ../addons/workspace-curator/lane.toml
        ../addons/workspace-curator/schemas/classification.json
-       ../addons/workspace-curator/schemas/briefing.json)
+       ../addons/workspace-curator/schemas/briefing.json (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps masc.server mcp_protocol))
 
 (test
@@ -6851,7 +6869,7 @@
 (test
  (name test_tui_lane_addons)
  (modules test_tui_lane_addons)
- (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_lane_standing masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions otoml masc_tui_lane_declaration masc_tui_message_layout masc_tui_theme))
+ (libraries alcotest yojson unix masc masc.fs_compat masc.config_dir_resolver masc_tui_lane_addons masc_tui_lane_standing masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions otoml masc_tui_lane_declaration masc_tui_message_layout masc_tui_theme))
 
 (test
  (name test_tui_lane_subscriptions)
@@ -7109,7 +7127,7 @@
 (test
  (name test_goal_suspension)
  (modules test_goal_suspension)
- (libraries masc masc_goal masc_types masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
+ (libraries goal_measure_fixture masc.goal_measure masc masc_goal masc_types masc_workspace masc.tool_types fs_compat alcotest eio eio_main unix yojson))
 
 (test
  (name test_goal_suspension_projection)
@@ -7440,20 +7458,18 @@
 (test
  (name test_keeper_librarian_addon_owner)
  (modules test_keeper_librarian_addon_owner)
- (deps ../config/prompts/librarian.md
-       ../config/prompts/keeper.md
-       (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py)
+ (deps (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
  (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id))
 
 (test
  (name test_keeper_librarian_input_capture)
  (modules test_keeper_librarian_input_capture)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))
 
 (test
  (name test_keeper_librarian_durable_preparation)
  (modules test_keeper_librarian_durable_preparation)
- (deps ../config/prompts/librarian.md)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest astring masc_test_deps masc agent_core))
 
 (test
@@ -7469,9 +7485,7 @@
 (test
  (name test_keeper_librarian_durable_execution)
  (modules test_keeper_librarian_durable_execution)
- (deps ../config/prompts/librarian.md
-       ../config/prompts/keeper.md
-       (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py)
+ (deps (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py (source_tree %{workspace_root}/config/prompts))
  (libraries masc masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
 
 ; Not a test: prints one Librarian pass's allocation and stored bytes per
@@ -7487,7 +7501,7 @@
  (name test_keeper_addon_deferred_runtime)
  (modules test_keeper_addon_deferred_runtime)
  (deps (source_tree ../addons/candle-appraiser) ../addons/protocol.py ../addons/exact_worker.py)
- (libraries masc_test_deps masc_candle masc_candle_runtime mcp_protocol masc.skill_config))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps masc_candle masc_candle_runtime mcp_protocol masc.skill_config))
 
 ; Completion review keeps the original lookup through actual provider refusal.
 (test

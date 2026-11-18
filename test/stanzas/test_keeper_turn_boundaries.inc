@@ -5,4 +5,4 @@
 (test
  (name test_keeper_turn_boundaries)
  (modules test_keeper_turn_boundaries)
- (libraries masc_test_deps))
+ (libraries goal_measure_fixture masc.goal_measure masc_test_deps))

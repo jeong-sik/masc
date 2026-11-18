@@ -55,13 +55,20 @@
  (libraries agent_core_test_deps agent_core alcotest))
 
 ; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
-; ---- (1) compile failures — not wired until bodies are fixed ----
-; The following files are NOT wired here because they fail to compile
-; against current main.  Bodies untouched per fix scope.  Tracked separately:
+; ---- (1) compile failures — nothing is held back here ----
+; This header used to say that files were withheld until their bodies compiled.
+; No file is named below: nothing is withheld for a compile failure today.
+; Keep this header as the place to record one if it returns, and say so.
 ;
-; ---- (2) pre-existing runtime failures — compile OK, runtest fails ----
-; The following suites compile but have pre-existing test failures.
-; They are excluded until the failures are fixed in separate PRs:
+; ---- (2) pre-existing runtime failures — wired, and running ----
+; The suites named below are NOT excluded.  They sit in the tests stanza that
+; follows and do run under `dune runtest`.  Two of them fail on today's main
+; for reasons older than any single change:
+;   - backend_openai_codec: serialize 3 and serialize 7
+;   - snapshot_provider_serialization: gemini 0, tool_choice Any
+; A failure in either one says nothing about the change under test, and a full
+; regression run cannot be green until they are fixed or moved out of the list.
+; See task-3737.
 ;
 
 (tests
@@ -128,7 +135,6 @@
   test_mcp_coverage
   test_mcp_deep
   test_mcp_integration
-  test_mcp_session
   test_metrics
   test_model_catalog_default
   test_model_catalog_composition
@@ -251,7 +257,6 @@
   test_mcp_coverage
   test_mcp_deep
   test_mcp_integration
-  test_mcp_session
   test_metrics
   test_model_catalog_default
   test_model_catalog_composition

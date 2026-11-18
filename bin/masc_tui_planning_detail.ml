@@ -43,6 +43,17 @@ let wrapped_indent ~width ~indent tone text =
          (Masc.Tui_terminal_text.sanitize_terminal_text (without_line_end_cr line)))
   |> List.map (fun row -> { tone; text = String.make indent ' ' ^ row })
 
+(* %g drops the trailing ".0" of a whole number and keeps a fraction. *)
+let measure_number value = Printf.sprintf "%g" value
+
+let measure_text (measure : Goal_measure.t) =
+  match measure with
+  | Count { noun; total } -> Printf.sprintf "%d %s" (total :> int) (noun :> string)
+  | Quantity { unit; direction; target } ->
+    let sign = match direction with Goal_measure.At_least -> "≥" | At_most -> "≤" in
+    Printf.sprintf "%s %s %s" sign (measure_number (target :> float)) (unit :> string)
+  | Done_when { condition } -> (condition :> string)
+
 let wrapped ~width tone text = wrapped_indent ~width ~indent:0 tone text
 
 (* [Yojson] reads the value once, to decide that it is JSON; the layout below
@@ -358,10 +369,10 @@ let decode_confirmation ~goal_id ~workspace ~runtime_instance_id ~credential_hea
   in
   let* revision = field "criterion_revision" goal in
   let* title = field "title" goal in
-  let* metric = field "metric" goal in
-  let* target = field "target_value" goal in
+  let* measure = field "measure" goal in
+  let* procedure = field "procedure" goal in
   let* criterion = Goal_store.criterion_of_yojson
-      (`Assoc ["revision", revision; "title", title; "metric", metric; "target_value", target]) in
+      (`Assoc ["revision", revision; "title", title; "measure", measure; "procedure", procedure]) in
   if Goal_store.criterion_equal criterion verdict.criterion then
     let submitted =
       (* An answer from before the list existed carries no key; the originals
@@ -534,9 +545,8 @@ let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmati
   in
   let promise =
     labelled ~tone:Plain (text "제목" "Title") criterion.title
-    @ labelled ~tone:Plain (text "목표값" "Target")
-        (Option.value criterion.metric ~default:(text "미지정" "not declared")
-         ^ " = " ^ Option.value criterion.target_value ~default:(text "미지정" "not declared"))
+    @ labelled ~tone:Plain (text "목표" "Measure") (measure_text criterion.measure)
+    @ labelled ~tone:Plain (text "측정 방법" "Procedure") criterion.procedure
   in
   let binding =
     labelled ~tone:Quiet (text "결속" "Binding")

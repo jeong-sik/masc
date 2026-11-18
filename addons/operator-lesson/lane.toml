@@ -1,10 +1,13 @@
 id = "operator-lesson"
-revision = "0.2.2"
+revision = "0.2.3"
 title = "Operator lesson"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]
 image = "masc-lane-operator-lesson:0.1.2"
 command = ["python3", "server.py", "--state", "/state"]
+
+[world]
+exact_protocol = 1
 
 [world.actions]
 tool = "lane_act"

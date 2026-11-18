@@ -46,7 +46,7 @@ let checkpoint_with_messages messages : Agent_core.Checkpoint.t =
     cache_system_prompt = false;
 
     context = Agent_core.Context.create_sync ();
-    pending_input = None; mcp_sessions = [];
+    pending_input = None;
     working_context = None;
   }
 
@@ -308,6 +308,7 @@ let run_tool_then_empty_with_checkpoint_store store_case () =
   let hooks = { Core.Hooks.empty with after_turn = Some (function
     | Core.Hooks.AfterTurn { turn; _ } ->
       observed_provider_turn_ordinal := Some turn; Core.Hooks.Continue
+    | Core.Hooks.AfterRestoredTurn _
     | Core.Hooks.BeforeTurn _ | Core.Hooks.BeforeTurnParams _
     | Core.Hooks.PreToolUse _ | Core.Hooks.PostToolUse _
     | Core.Hooks.PostToolUseFailure _ | Core.Hooks.OnStop _
@@ -1526,7 +1527,7 @@ let with_live_progress_observation test =
     | Error detail -> Alcotest.fail detail in
   ignore (Registry.For_testing.register ~base_path keeper_name meta);
   let observation_token = Masc.Keeper_turn_observation_token.fresh () in
-  Registry.mark_turn_started ~observation_token ~base_path
+  Registry.mark_turn_started ~turn_id:1 ~observation_token ~base_path
     ~wake:Masc.Keeper_registry_types.Chat_request keeper_name;
   test ~clock ~base_path ~keeper_name ~observation_token
     ~config:(Masc.Workspace.default_config base_path)
@@ -1648,7 +1649,7 @@ let test_carriers_and_stale_owners_do_not_refresh_live_progress () =
   Alcotest.(check bool) "empty carriers and signatures leave the real sample stalled"
     true (stalled ());
   let successor = Masc.Keeper_turn_observation_token.fresh () in
-  Registry.mark_turn_started ~observation_token:successor ~base_path
+  Registry.mark_turn_started ~turn_id:1 ~observation_token:successor ~base_path
     ~wake:Masc.Keeper_registry_types.Chat_request keeper_name;
   let successor_started_at = Time_compat.now () in
   let successor_stalled = live_progress_stalled ~base_path ~keeper_name

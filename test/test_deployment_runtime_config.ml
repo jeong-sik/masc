@@ -39,13 +39,17 @@ let with_env pairs f =
     (fun (key, value) f () -> Masc_test_deps.with_process_env key value f)
     pairs f ()
 
+let lease_root root = Filename.concat root "lease-root"
+
 let with_workspace f =
   let root = Filename.temp_dir "preflight-runtime-config-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    Unix.mkdir (lease_root root) 0o700;
     with_env
       [ "MASC_CONFIG_DIR", None
       ; "MASC_CONFIG_BOOTSTRAP", None
-      ; "AGENT_CORE_MODEL_CATALOG", None ]
+      ; "AGENT_CORE_MODEL_CATALOG", None
+      ; "MASC_BASE_PATH_LEASE_DIR", Some (lease_root root) ]
       (fun () -> f root))
 
 let write_runtime_config root text =
@@ -279,6 +283,121 @@ let test_signalled_command_exit_code exe subcommand () = with_workspace (fun roo
       fail ("the helper itself did not exit after " ^ script ^ ": " ^ output))
     signalled_commands)
 
+let rec waitpid_nointr pid =
+  try snd (Unix.waitpid [] pid) with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+
+(* The real helper A owns the lease while its preparation waits for EOF on
+   stdin. Its environment reports A's PID only after acquisition. Both pipes
+   are close-on-exec apart from the child's standard streams, so closing our
+   writer releases the preparation even when an assertion fails. *)
+let with_lease_holder exe root f =
+  let command_input, release = Unix.pipe ~cloexec:true () in
+  let ready, command_output = Unix.pipe ~cloexec:true () in
+  let errors_path = Filename.concat root "holder-stderr" in
+  let errors = Unix.openfile errors_path
+      [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC; Unix.O_CLOEXEC] 0o600 in
+  let exe = absolute exe in
+  let arguments = Array.of_list
+      (exe :: lease_run root @ ["--"; "/bin/sh"; "-c";
+        "printf '%s\\n' \"$MASC_DEPLOYMENT_LEASE_OWNER_PID\"; IFS= read -r released; exit 0"]) in
+  let pid =
+    try Unix.create_process exe arguments command_input command_output errors with
+    | exn -> (* cancel-guard-ok: Unix.create_process performs no Eio operation. *)
+      List.iter Unix.close [command_input; release; ready; command_output; errors];
+      raise exn
+  in
+  List.iter Unix.close [command_input; command_output; errors];
+  let ready = Unix.in_channel_of_descr ready in
+  let release = Unix.out_channel_of_descr release in
+  let ended = ref None in
+  let result = Fun.protect
+      ~finally:(fun () ->
+        close_out_noerr release;
+        close_in_noerr ready;
+        ended := Some (waitpid_nointr pid))
+      (fun () ->
+        let reported = input_line ready |> int_of_string in
+        check int "the acquired lease belongs to helper A" pid reported;
+        f pid)
+  in
+  (match !ended with
+   | Some (Unix.WEXITED 0) -> ()
+   | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) | None ->
+     fail ("the actual lease holder did not finish cleanly: " ^ read errors_path));
+  result
+
+(* Find the actual helper-created lease under this test's otherwise empty
+   override, without copying the product's inode-derived filename algorithm. *)
+let rec lease_files path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Sys.readdir path |> Array.to_list |> List.concat_map (fun name ->
+      lease_files (Filename.concat path name))
+  | Unix.S_REG -> [path]
+  | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+    fail "the fixture lease root contains an unexpected file kind"
+
+let verify_owner exe root owner =
+  run_exe exe root ["verify-lease-owner"; "--base-path"; root;
+    "--owner-pid"; string_of_int owner]
+
+let test_lease_owner_uses_kernel exe () = with_workspace (fun root ->
+  let parent_pid = Unix.getpid () in
+  let path = with_lease_holder exe root (fun holder_pid ->
+    let path = match lease_files (lease_root root) with
+      | [path] -> path
+      | [] | _ :: _ -> fail "the actual helper did not create exactly one lease file" in
+    let (_ : string) = passes "the actual acquired owner passes"
+        (verify_owner exe root holder_pid) in
+    List.iter (fun advisory ->
+      write path advisory;
+      let (_ : string) = refuses "the live parent C is not lease holder A"
+          (verify_owner exe root parent_pid) in
+      check string "a refused observation preserves advisory bytes" advisory (read path);
+      let (_ : string) = passes "the kernel owner passes independently of advisory bytes"
+          (verify_owner exe root holder_pid) in
+      check string "an accepted observation preserves advisory bytes" advisory (read path))
+      [Printf.sprintf "%d\n" parent_pid; ""; "not a process identity\n"];
+    path) in
+  (* A has actually exited and released its lock before these observations. *)
+  List.iter (fun advisory ->
+    write path advisory;
+    let (_ : string) = refuses "an unlocked lease is not owned by the live parent"
+        (verify_owner exe root parent_pid) in
+    check string "unlocked verification never rewrites the PID file" advisory (read path))
+    [Printf.sprintf "%d\n" parent_pid; ""; "not a process identity\n"];
+  Unix.unlink path;
+  let (_ : string) = refuses "a removed lease remains absent"
+      (verify_owner exe root parent_pid) in
+  check bool "the removed lease file was not recreated" false (Sys.file_exists path))
+
+let test_lease_owner_absence_is_read_only exe () = with_workspace (fun root ->
+  Unix.rmdir (lease_root root);
+  let (_ : string) = refuses "a never-held lease is not an owner proof"
+      (verify_owner exe root (Unix.getpid ())) in
+  check bool "the lease override was not created" false (Sys.file_exists (lease_root root));
+  check bool "the runtime directory was not created" false
+    (Sys.file_exists (Filename.concat root ".masc")))
+
+let test_lease_owner_rejects_invalid_and_self exe () = with_workspace (fun root ->
+  Unix.rmdir (lease_root root);
+  List.iter (fun owner ->
+    let (_ : string) = refuses "a nonpositive expected owner is refused"
+        (verify_owner exe root owner) in ()) [0; -1];
+  let (_ : string) = refuses "the verifying helper cannot name itself as another owner"
+      (run_exe "/bin/sh" root ["-c";
+        "exec \"$1\" verify-lease-owner --base-path \"$2\" --owner-pid \"$$\"";
+        "verify-self"; absolute exe; root]) in
+  check bool "invalid and self observations create no lease paths" false
+    (Sys.file_exists (lease_root root));
+  let malformed_root = "not a lease directory\n" in
+  write (lease_root root) malformed_root;
+  let (_ : string) = refuses "an invalid lease boundary is not an owner proof"
+      (verify_owner exe root (Unix.getpid ())) in
+  check string "a rejected lease boundary is unchanged" malformed_root
+    (read (lease_root root)))
+
 let () =
   let exe = Sys.getenv "MASC_TEST_DEPLOYMENT_PREFLIGHT_EXE" in
   run "deployment runtime config"
@@ -301,6 +420,13 @@ let () =
         (test_resolve_workspace_follows_masc exe);
       test_case "a missing MASC_CONFIG_DIR needs an empty workspace" `Quick
         (test_missing_config_dir_needs_empty_workspace exe)];
+     "kernel lease owner verification",
+     [test_case "the real holder wins over advisory PID bytes and free files stay unchanged" `Quick
+        (test_lease_owner_uses_kernel exe);
+      test_case "an absent lease creates no paths" `Quick
+        (test_lease_owner_absence_is_read_only exe);
+      test_case "nonpositive and self owner expectations are refused" `Quick
+        (test_lease_owner_rejects_invalid_and_self exe)];
      "signalled deployment command",
      [test_case "lease-run exits 128 plus the host signal number" `Quick
         (test_signalled_command_exit_code exe lease_run);

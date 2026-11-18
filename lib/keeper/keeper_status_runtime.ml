@@ -98,24 +98,6 @@ let keeper_metric_producer_active ~base_path =
        | Keeper_state_machine.Restarting -> false)
 ;;
 
-let unknown_model_label =
-  Boundary_redaction.to_string Boundary_redaction.unknown_model_label
-
-let active_model_of_meta (m : keeper_meta) : string =
-  match m.runtime.last_runtime_attempt with
-  | Some record when String.trim record.provider_id <> "" -> record.provider_id
-  | _ -> unknown_model_label
-
-let active_model_label_of_meta (m : keeper_meta) : string =
-  (* RFC-0132 PR-2: the meta surface is external (status detail); the model
-     label is redacted via SSOT ([Boundary_redaction.runtime_model_label]).
-     Missing runtime-attempt evidence stays explicit instead of borrowing the
-     configured/default runtime. *)
-  match m.runtime.last_runtime_attempt with
-  | Some record when String.trim record.provider_id <> "" ->
-      Boundary_redaction.to_string Boundary_redaction.runtime_model_label
-  | _ -> unknown_model_label
-
 let string_of_fiber_health = function
   | Fiber_alive -> "alive"
   | Fiber_zombie -> "zombie"

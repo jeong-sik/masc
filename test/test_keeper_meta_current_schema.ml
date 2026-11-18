@@ -55,7 +55,6 @@ let nullable_field_names =
   [ "message_scope_ack_id"
   ; "usage_cursor"
   ; "last_usage_resolution"
-  ; "last_runtime_attempt"
   ; "latched_reason"
   ; "current_task_id"
   ; "keeper_id"
@@ -124,6 +123,12 @@ let test_every_field_rejects_a_wrong_type () =
     expect_rejected
       ("wrong type " ^ key)
       (current_json () |> replace_field key (wrong_value value)))
+;;
+
+(* #52839: a turn number below zero names no turn the Owner handed out. *)
+let test_negative_last_turn_id_is_rejected () =
+  expect_rejected "negative last_turn_id"
+    (current_json () |> replace_field "last_turn_id" (`Int (-1)))
 ;;
 
 let test_nullability_is_exact () =
@@ -308,6 +313,8 @@ let () =
             test_every_duplicate_is_rejected
         ; test_case "every field rejects a wrong type" `Quick
             test_every_field_rejects_a_wrong_type
+        ; test_case "negative last_turn_id is rejected" `Quick
+            test_negative_last_turn_id_is_rejected
         ; test_case "nullability is exact" `Quick
             test_nullability_is_exact
         ; test_case "outside fields share one classification" `Quick

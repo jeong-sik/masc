@@ -52,7 +52,18 @@ type resources = {
     An Apple container declaration needs whole vCPUs, an exact number of MiB of
     at least 200 MiB (the least Apple [container] creates), and no [pids]. *)
 val check_resources : ?runtime:runtime -> resources -> (unit, string) result
-type container = { runtime : runtime; image : string; resources : resources }
+type image_label = { label_key : string; label_value : string }
+type container = {
+  runtime : runtime;
+  image : string;
+  resources : resources;
+  image_label : image_label option;
+      (** A label the image must carry for a worker to start from it. A
+          manifest sets [None]. A declaration that names a package this server
+          carries sets this server's digest of that package's image inputs
+          ({!Lane_addon_config}), so its worker starts only from the image this
+          server's [masc exact-addon-setup] builds. *)
+}
 type execution = Container of container | Host_process of { max_reply_bytes : int }
 type refresh_policy = Every_hint | Source_changes
 type model_access = Model_disabled | Host_sampling
@@ -138,6 +149,16 @@ val uses_host_requests : package -> bool
 (** A package that declares an exact output, may ask the operator, or
     declares [world.web_search] waits on the host, so its worker must
     advertise both host request tools. *)
+
+val exact_protocol : int
+(** The Exact protocol this server speaks with a worker whose manifest
+    declares exact outputs: the host request listing and result delivery, and
+    the answers to Exact submit and status calls. Such a manifest names the
+    protocol it was written for in [[world] exact_protocol], and
+    {!Lane_addon_manifest.load} refuses any other value, so no server attaches
+    a worker that speaks another protocol (RFC
+    server-carries-its-exact-worker-packages 3.4). Raise it with any change to
+    those messages. *)
 
 val max_reply_bytes : package -> int
 (** Transport/data envelope, independent of execution isolation. *)

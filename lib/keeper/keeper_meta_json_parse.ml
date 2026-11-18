@@ -66,20 +66,6 @@ let nullable_string_field fields name =
     invalidf "field %s must be a string or null, got %s" name (Json_util.kind_name other)
 ;;
 
-let require_exact_fields ~context expected fields =
-  match find_duplicate fields with
-  | Some key -> invalidf "%s has duplicate field %s" context key
-  | None ->
-    let present = List.map fst fields in
-    let missing = List.filter (fun key -> not (List.mem key present)) expected in
-    let extra = List.filter (fun key -> not (List.mem key expected)) present in
-    if missing <> []
-    then invalidf "%s is missing fields: %s" context (String.concat ", " missing)
-    else if extra <> []
-    then invalidf "%s has unknown fields: %s" context (String.concat ", " extra)
-    else Ok ()
-;;
-
 let parse_trace_id raw =
   if String.trim raw = ""
   then invalidf "trace_id must not be empty"
@@ -94,68 +80,6 @@ let parse_proactive_outcome fields =
   match proactive_cycle_outcome_of_string raw with
   | Some outcome -> Ok outcome
   | None -> invalidf "last_proactive_outcome has non-canonical value %S" raw
-;;
-
-
-let parse_runtime_attempt_outcome value =
-  match value with
-  | `Assoc fields ->
-    let* kind = string_field fields "kind" in
-    (match kind with
-     | "success" ->
-       let* () =
-         require_exact_fields ~context:"last_runtime_attempt.outcome" [ "kind" ] fields
-       in
-       Ok `Success
-     | "failure" ->
-       let* () =
-         require_exact_fields
-           ~context:"last_runtime_attempt.outcome"
-           [ "kind"; "message" ]
-           fields
-       in
-       let* message = string_field fields "message" in
-       Ok (`Failure message)
-     | other -> invalidf "last_runtime_attempt.outcome has unknown kind %S" other)
-  | other ->
-    invalidf
-      "last_runtime_attempt.outcome must be an object, got %s"
-      (Json_util.kind_name other)
-;;
-
-let parse_last_runtime_attempt fields =
-  let* value = required_field fields "last_runtime_attempt" in
-  match value with
-  | `Null -> Ok None
-  | `Assoc attempt_fields ->
-    let* () =
-      require_exact_fields
-        ~context:"last_runtime_attempt"
-        [ "provider_id"; "http_status"; "outcome"; "timestamp" ]
-        attempt_fields
-    in
-    let* provider_id = string_field attempt_fields "provider_id" in
-    let* http_status_json = required_field attempt_fields "http_status" in
-    let* http_status =
-      match http_status_json with
-      | `Null -> Ok None
-      | `Int status -> Ok (Some status)
-      | other ->
-        invalidf
-          "last_runtime_attempt.http_status must be an integer or null, got %s"
-          (Json_util.kind_name other)
-    in
-    let* outcome_json = required_field attempt_fields "outcome" in
-    let* outcome = parse_runtime_attempt_outcome outcome_json in
-    let* timestamp = float_field attempt_fields "timestamp" in
-    let attempt : runtime_attempt_record =
-      { provider_id; http_status; outcome; timestamp }
-    in
-    Ok (Some attempt)
-  | other ->
-    invalidf
-      "field last_runtime_attempt must be an object or null, got %s"
-      (Json_util.kind_name other)
 ;;
 
 let parse_latched_reason fields =
@@ -259,7 +183,7 @@ let decode_current_meta fields =
   let* last_proactive_reason = string_field fields "last_proactive_reason" in
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
   let* message_scope_ack_id = nullable_string_field fields "message_scope_ack_id" in
-  let* last_runtime_attempt = parse_last_runtime_attempt fields in
+ let* last_turn_id = int_field fields "last_turn_id" in
   let* paused = bool_field fields "paused" in
   let* latched_reason = parse_latched_reason fields in
   let* current_task_id = parse_current_task_id fields in
@@ -272,6 +196,8 @@ let decode_current_meta fields =
   then invalidf "unsupported schema: %S" schema
   else if not (validate_name name)
   then invalidf "name is invalid: %S" name
+  else if last_turn_id < 0
+  then invalidf "last_turn_id must be non-negative: %d" last_turn_id
   (* Generation is the lifecycle fencing counter, so zero is not a valid
      persisted value: it is what an unstamped or reset row looks like. This
      decoder replaces [parse_required_positive_generation], which enforced the
@@ -311,8 +237,8 @@ let decode_current_meta fields =
       ; last_usage_resolution
       ; proactive_rt
       ; trace_id
+      ; last_turn_id
       ; message_scope_ack_id
-      ; last_runtime_attempt
       }
     in
     (* The eleven config fields below are placeholders, not decoded values.

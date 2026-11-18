@@ -13,30 +13,13 @@ let backlog_lock_path config =
 let backlog_recovery_path config =
   backlog_path config ^ Common.recovery_mirror_suffix
 
+(* A task field the decoder refuses stays on the task as a typed unreadable
+   value ([Masc_domain.Handoff_unreadable]) and is written back unchanged, so
+   decoding here neither drops it nor needs to report a drop (#38219). *)
 let decode_backlog ~path json =
-  match backlog_of_yojson_with_diagnostics json with
-  | Ok (backlog, dropped) ->
-      (* #27499: the decoder drops a corrupt optional nested field instead of
-         rejecting the whole backlog. Report each drop so the corruption is
-         not silent, while the backlog still opens. *)
-      List.iter
-        (fun (entry : backlog_task_diagnostics) ->
-          (match entry.dropped_outcomes.handoff_context_outcome with
-           | Field_unreadable detail ->
-               Log.Misc.warn
-                 "[read_backlog] %s: task %s handoff_context unreadable, dropped: %s"
-                 path
-                 entry.dropped_task_id
-                 detail
-           | Field_absent | Field_decoded -> ()))
-        dropped;
-      Ok backlog
-  | Error msg ->
-      Error
-        (Printf.sprintf
-           "[read_backlog] backlog decode failed for %s: %s"
-           path
-           msg)
+  backlog_of_yojson json
+  |> Result.map_error (fun msg ->
+    Printf.sprintf "[read_backlog] backlog decode failed for %s: %s" path msg)
 
 (** Filesystem backlog cache keyed by path and file mtime/size.
 

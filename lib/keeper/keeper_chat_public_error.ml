@@ -1,6 +1,7 @@
 type kind =
   | Invalid_input | Unknown_operation | Not_queued | Idempotency_conflict
-  | Native_call_unsettled | Store_unavailable | Owner_unavailable | Owner_stopping
+  | Native_call_unsettled | Store_fenced | Store_commit_unknown | Store_unreadable
+  | Owner_unavailable | Owner_stopping
   | Interrupt_failed | Operation_forbidden | Keeper_paused | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_unsupported_version | Journal_missing | Journal_pruned
   | Cursor_refusal of Keeper_chat_event_log.cursor_refusal
@@ -14,7 +15,9 @@ let code = function
   | Not_queued -> "not_queued"
   | Idempotency_conflict -> "idempotency_conflict"
   | Native_call_unsettled -> "native_call_unsettled"
-  | Store_unavailable -> "store_unavailable"
+  | Store_fenced -> "store_fenced"
+  | Store_commit_unknown -> "store_commit_unknown"
+  | Store_unreadable -> "store_unreadable"
   | Owner_unavailable -> "owner_unavailable"
   | Owner_stopping -> "owner_stopping"
   | Interrupt_failed -> "interrupt_failed"
@@ -35,7 +38,9 @@ let message = function
   | Not_queued -> "The operation is no longer queued."
   | Idempotency_conflict -> "This operation identity already belongs to another request."
   | Native_call_unsettled -> "The operation has an unsettled native call."
-  | Store_unavailable -> "The operation store is unavailable."
+  | Store_fenced -> "The operation store is fenced; the request was not accepted."
+  | Store_commit_unknown -> "The operation store failed during the request; whether it was recorded is unknown."
+  | Store_unreadable -> "The operation store could not be read; the request was not applied."
   | Owner_unavailable -> "The Keeper owner is unavailable; the request was not accepted."
   | Owner_stopping -> "The Keeper owner is stopping."
   | Interrupt_failed -> "The active turn could not be interrupted."
@@ -57,13 +62,15 @@ type pre_acceptance =
   | Not_accepted
   | Acceptance_unknown
 
-(* The kinds a submission attempt can be refused with before it reaches any
-   Owner are [Not_accepted]. Every other kind keeps the client's operation
-   held while the same id is re-POSTed. *)
+(* The kinds that say this attempt wrote nothing are [Not_accepted]: refused
+   before any Owner, or by an Owner whose store was fenced before the attempt
+   touched it, or by a read that failed before any write. Every other kind
+   keeps the client's operation held until it reads the operation back. *)
 let pre_acceptance = function
-  | Invalid_input | Unknown_operation | Not_queued | Owner_stopping | Owner_unavailable ->
+  | Invalid_input | Unknown_operation | Not_queued | Owner_stopping | Owner_unavailable
+  | Store_fenced | Store_unreadable ->
     Not_accepted
-  | Idempotency_conflict | Native_call_unsettled | Store_unavailable | Interrupt_failed
+  | Idempotency_conflict | Native_call_unsettled | Store_commit_unknown | Interrupt_failed
   | Operation_forbidden | Keeper_paused | Unknown_keeper
   | Journal_unreadable | Journal_corrupt | Journal_unsupported_version | Journal_missing | Journal_pruned
   | Cursor_refusal (_ : Keeper_chat_event_log.cursor_refusal) ->
@@ -88,7 +95,8 @@ let of_command_error : Keeper_owner_registry.command_error -> kind = function
      | Keeper_owner.Operation_not_queued -> Not_queued
      | Keeper_owner.Operation_idempotency_conflict -> Idempotency_conflict
      | Keeper_owner.Operation_native_call_unsettled -> Native_call_unsettled
-     | Keeper_owner.Operation_store_unavailable -> Store_unavailable)
+     | Keeper_owner.Operation_store_unavailable -> Store_commit_unknown)
+  | Command_rejected (Keeper_owner.Store_fenced _) -> Store_fenced
   | Command_rejected (Keeper_owner.Store_unavailable _ | Keeper_owner.Reducer_rejected _) ->
-    Store_unavailable
+    Store_commit_unknown
 ;;

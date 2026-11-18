@@ -338,7 +338,7 @@ let seed_durable_librarian_baseline
     ; response_format = Agent_core.Types.Off
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
-    ; pending_input = None; mcp_sessions = []
+    ; pending_input = None
     ; working_context = None
     }
   in

@@ -18,7 +18,7 @@ let task id = Some (Keeper_id.Task_id.of_string id |> Result.get_ok)
 let goal id title : Goal_store.goal =
   let now = Masc_domain.now_iso () in
   { id; title; criterion_revision = "revision-" ^ id
-  ; metric = Some "accepted artifacts"; target_value = Some "2"
+  ; measure = Goal_measure_fixture.done_when "2"; procedure = "accepted artifacts"
   ; due_date = None; priority = 3; phase = Goal_phase.Executing
   ; last_review_note = None; last_review_at = None
   ; created_at = now; updated_at = now }
@@ -49,7 +49,7 @@ let test_task_switch_and_goal_revision () =
    | _ -> fail "unclaimed turn must remain taskless");
   expect_goal config "task-first" first;
   expect_goal config "task-second" second;
-  let revised = { second with criterion_revision = "revised-film"; target_value = Some "3" } in
+  let revised = { second with criterion_revision = "revised-film"; measure = Goal_measure_fixture.done_when "3" } in
   write_goals config [first; revised];
   expect_goal config "task-second" revised
 

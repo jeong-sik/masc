@@ -16,7 +16,7 @@ let checkpoint messages : Agent_core.Checkpoint.t =
    tools=[];tool_choice=None;disable_parallel_tool_use=false;temperature=None;
    top_p=None;top_k=None;min_p=None;reasoning_effort=None;enable_thinking=None;
    preserve_thinking=None;response_format=Agent_core.Types.Off;cache_system_prompt=false;
-   context=Agent_core.Context.create_sync ();pending_input = None; mcp_sessions = [];working_context=None}
+   context=Agent_core.Context.create_sync ();pending_input = None; working_context=None}
 let message text = Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text text]
 let with_source f =
   Eio_main.run @@ fun env -> Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -287,7 +287,7 @@ let test_historical_sources_survive_narrowing_and_recovery () =
   let module T = Masc.Keeper_turn_task_context in
   ignore (Masc.Workspace.init config ~agent_name:None);
   let goal target_value = match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:"goal-history"
-      ~title:"Historical goal" ~metric:"count" ~target_value () with
+      ~title:"Historical goal" ~measure:(Goal_measure_fixture.done_when target_value) ~procedure:"count" () with
     | Ok (goal, _, _) -> goal | Error e -> fail (Goal_store.write_error_to_string e) in
   let original = goal "1" in
   Workspace_goal_index.write_goal_task_links config [original.id, ["task-a"]];

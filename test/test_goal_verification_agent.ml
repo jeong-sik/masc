@@ -147,8 +147,8 @@ let create_goal ctx title =
          ctx
          ~name:"masc_goal_upsert"
          [ "title", `String title
-         ; "metric", `String "verified services"
-         ; "target_value", `String "3"
+         ; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "3")
+         ; "procedure", `String "verified services"
          ])
   in
   json_state created [ "goal_id" ]
@@ -992,7 +992,7 @@ let strip_criterion_revision path =
 let test_skipped_scan_records_one_row_and_one_warn_per_cycle () =
   with_workspace @@ fun config ->
   (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Rows without criterion_revision"
-      ~metric:"cases" ~target_value:"1" () with
+      ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"cases" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let path = Goal_store.goals_path config in
   strip_criterion_revision path;
@@ -1044,7 +1044,7 @@ let test_healthy_store_scan_records_no_skipped_row () =
 let test_scan_preserves_source_failure () =
   with_workspace @@ fun config ->
   (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Review source"
-      ~metric:"cases" ~target_value:"1" () with
+      ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"cases" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let path = Goal_store.goals_path config in
   let mirror = Fs_compat.load_file (path ^ ".last-good") in
@@ -1093,7 +1093,7 @@ let review_while_editing_goal config ctx goal_id edits =
   let before_verdict prompt =
     prompts := !prompts @ [ prompt ];
     check bool "the reviewer received the original target" true
-      (String_util.contains_substring prompt "<target_value>3</target_value>");
+      (String_util.contains_substring prompt "<measure>{\"kind\":\"done_when\",\"condition\":\"3\"}</measure>");
     List.iter
       (fun fields ->
         ignore
@@ -1128,10 +1128,10 @@ let test_target_edit_during_review_invalidates_approval () =
   let goal_id = create_goal ctx "Target changes during proof" in
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   review_while_editing_goal config ctx goal_id
-    [ [ "target_value", `String "300" ] ];
+    [ [ "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "300") ] ];
   (match Goal_store.find_goal config ~goal_id with
-   | Goal_store.Goal_found goal -> check (option string) "the new target is retained"
-       (Some "300") goal.Goal_store.target_value
+   | Goal_store.Goal_found goal -> check bool "the new target is retained" true
+       (Goal_measure.equal (Goal_measure_fixture.done_when "300") goal.Goal_store.measure)
    | Goal_store.Goal_absent -> fail "goal disappeared after editing its target"
    | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u));
   check_obsolete_proof_not_applied config goal_id
@@ -1144,10 +1144,10 @@ let test_target_aba_during_review_invalidates_approval () =
   let goal_id = create_goal ctx "Target changes and returns during proof" in
   ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
   review_while_editing_goal config ctx goal_id
-    [ [ "target_value", `String "300" ]; [ "target_value", `String "3" ] ];
+    [ [ "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "300") ]; [ "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "3") ] ];
   (match Goal_store.find_goal config ~goal_id with
-   | Goal_store.Goal_found goal -> check (option string) "the target returned to its original text"
-       (Some "3") goal.Goal_store.target_value
+   | Goal_store.Goal_found goal -> check bool "the target returned to its original text" true
+       (Goal_measure.equal (Goal_measure_fixture.done_when "3") goal.Goal_store.measure)
    | Goal_store.Goal_absent -> fail "goal disappeared after changing its target twice"
    | Goal_store.Store_unavailable u -> fail (Goal_store.unavailable_to_string u));
   check_obsolete_proof_not_applied config goal_id
@@ -1343,7 +1343,7 @@ let test_a_clean_scan_replaces_the_unreconciled_list () =
      check bool "the server row names the re-arm step" true
        (List.assoc_opt "step" fields = Some (`String "rearm_proof"))
    | _ -> fail "the stuck goal is not marked on the server's planning row");
-  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"4" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~measure:(Goal_measure_fixture.done_when "4") () with
    | Ok _ -> ()
    | Error e -> fail (Goal_store.write_error_to_string e));
   (* The edit takes the request back to Executing; submitting again puts the
@@ -1365,9 +1365,9 @@ let test_superseded_review_keeps_the_evaluated_original_criterion () =
   let original_request, original_criterion = pending_identity config goal_id in
   let before_verdict prompt =
     check bool "review saw the original target" true
-      (String_util.contains_substring prompt "<target_value>3</target_value>");
+      (String_util.contains_substring prompt "<measure>{\"kind\":\"done_when\",\"condition\":\"3\"}</measure>");
     ignore (must_succeed "edit" (dispatch ctx ~name:"masc_goal_upsert"
-      [ "id", `String goal_id; "target_value", `String "300" ]));
+      [ "id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "300") ]));
     if request_new then
       ignore (must_succeed "request revised proof" (transition ctx goal_id "request_complete"))
   in
@@ -1476,7 +1476,7 @@ let leave_by_criterion_edit ctx goal_id =
   ignore
     (must_succeed "edit the target during the review"
        (dispatch ctx ~name:"masc_goal_upsert"
-          [ "id", `String goal_id; "target_value", `String "4" ]))
+          [ "id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "4") ]))
 ;;
 
 (* A review bound before a pause may still commit while the Goal is paused, so
@@ -1903,7 +1903,7 @@ let test_original_failure_projection_is_bound_to_request_and_workspace () =
   check bool "the newer view does not attach a replacement failure to the old request" true
     (project replacement_snapshot = `Null);
   ignore (must_succeed "change the actual criterion" (dispatch ctx ~name:"masc_goal_upsert"
-    ["id", `String goal_id; "target_value", `String "4"]));
+    ["id", `String goal_id; "measure", Goal_measure.to_yojson (Goal_measure_fixture.done_when "4")]));
   ignore (must_succeed "request the changed criterion" (transition ctx goal_id "request_complete"));
   let _, changed_criterion = pending_identity config goal_id in
   check bool "the Goal now has a different criterion" false

@@ -70,7 +70,7 @@ implementation_prs: []
 
 ## 3. 누가 어떤 모양으로 기다렸나
 
-`keeper_turn_id` 는 Keeper 마다 따로 세는 턴 번호예요(`meta.runtime.usage.total_turns + 1`, `lib/keeper/keeper_agent_run.ml:682`). 두 Keeper 가 같은 번호를 가질 수 있어서 `sleep_waits.py turns` 는 턴을 Keeper 와 `keeper_turn_id` 의 짝으로 묶어요(시험 `test_turn_ids_of_two_keepers_do_not_merge`).
+`keeper_turn_id` 는 Keeper 마다 따로 세는 턴 번호예요. 턴이 시작할 때 Keeper Owner 가 `meta.runtime.last_turn_id` 를 하나 올려 저장하고 그 값을 줘요(`Keeper_turn_allocation.allocate`, #52839). 두 Keeper 가 같은 번호를 가질 수 있어서 `sleep_waits.py turns` 는 턴을 Keeper 와 `keeper_turn_id` 의 짝으로 묶어요(시험 `test_turn_ids_of_two_keepers_do_not_merge`).
 
 | Keeper | 호출 | 시간 | 턴 | 같은 턴에서 push·run 시작 뒤 | `sleep`+`gh` 가 2번 이상인 턴의 호출 | 한 턴 최대 | `until_github_*` 를 건 횟수 |
 |---|---:|---:|---:|---:|---:|---:|---:|

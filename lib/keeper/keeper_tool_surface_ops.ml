@@ -1019,7 +1019,8 @@ let owner_command_error_data error =
       if Keeper_owner.operation_error_kind error = Keeper_owner.Operation_not_queued
       then Tool_result.Workflow_rejection
       else Tool_result.Runtime_failure
-    | Command_rejected (Owner_stopping | Owner_closed | Store_unavailable _ | Reducer_rejected _)
+    | Command_rejected
+        (Owner_stopping | Owner_closed | Store_unavailable _ | Store_fenced _ | Reducer_rejected _)
     | Command_lookup_failed _ | Command_lifecycle_reserved _ ->
       Tool_result.Runtime_failure
   in
@@ -1156,7 +1157,7 @@ let delegate_status_read ~(config : Workspace.config) ~caller (keeper_name, oper
        Error
          ( Tool_result.Dependency_unavailable
          , `Assoc
-             [ "error", `String Keeper_chat_public_error.(code Store_unavailable)
+             [ "error", `String Keeper_chat_public_error.(code Store_unreadable)
              ; "message", `String detail
              ] )
      | Ok false -> unknown_operation ()
@@ -1266,7 +1267,7 @@ let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
         | Error detail ->
           tool_result_error_data ~class_:Tool_result.Dependency_unavailable
             (`Assoc
-               [ "error", `String Keeper_chat_public_error.(code Store_unavailable)
+               [ "error", `String Keeper_chat_public_error.(code Store_unreadable)
                ; "message", `String detail
                ])
         | Ok false ->
@@ -1320,7 +1321,7 @@ let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
         | Error detail ->
           tool_result_error_data ~class_:Tool_result.Dependency_unavailable
             (`Assoc
-               [ "error", `String Keeper_chat_public_error.(code Store_unavailable)
+               [ "error", `String Keeper_chat_public_error.(code Store_unreadable)
                ; "message", `String detail
                ])))
 ;;

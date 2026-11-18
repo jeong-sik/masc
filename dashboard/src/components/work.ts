@@ -339,8 +339,23 @@ function mergeTaskRecord(goalStoreTask: Task, executionTask: Task): Task {
     updated_at: executionTask.updated_at || goalStoreTask.updated_at,
     completed_at: executionTask.completed_at || goalStoreTask.completed_at,
     contract: executionTask.contract ?? goalStoreTask.contract,
-    handoff_context: executionTask.handoff_context ?? goalStoreTask.handoff_context,
+    ...mergedHandoff(goalStoreTask, executionTask),
     execution_links: executionTask.execution_links ?? goalStoreTask.execution_links,
+  }
+}
+
+// The execution record's handoff wins when it has one. An unreadable one is a
+// held note too (#38219), so it is not replaced by the Goal Store's copy.
+function mergedHandoff(goalStoreTask: Task, executionTask: Task): Pick<Task, 'handoff_context' | 'handoff_context_unreadable'> {
+  if (executionTask.handoff_context_unreadable) {
+    return { handoff_context: null, handoff_context_unreadable: true }
+  }
+  if (executionTask.handoff_context) {
+    return { handoff_context: executionTask.handoff_context, handoff_context_unreadable: false }
+  }
+  return {
+    handoff_context: goalStoreTask.handoff_context,
+    handoff_context_unreadable: goalStoreTask.handoff_context_unreadable,
   }
 }
 

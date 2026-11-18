@@ -215,7 +215,7 @@ and masc_internal_error =
           when nothing was submitted upstream, which is what tells a lost
           connection from an ambiguous one. Kept apart from a failed spawn:
           a spawn that never started the client is a different recovery
-          ([Transient_spawn_failed] rather than [Transport_interrupted]) and
+          ([Spawn_resources_busy] or [Spawn_refused_same_input] rather than [Transport_interrupted]) and
           the two shared one rendered sentence before this. *)
   | Receipt_persistence_failed of { detail : string }
   | Gate_replay_repair_required of {

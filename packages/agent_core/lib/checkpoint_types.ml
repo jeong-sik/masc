@@ -1,6 +1,6 @@
 open Types
 
-let checkpoint_version = 18
+let checkpoint_version = 19
 
 type t =
   { version : int
@@ -26,7 +26,6 @@ type t =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   ; cache_system_prompt : bool
   ; context : Context.t
-  ; mcp_sessions : Mcp_session.info list
   ; working_context : Yojson.Safe.t option
   ; pending_input : Agent_input_request.pending option
   }

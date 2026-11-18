@@ -1039,7 +1039,8 @@ let settle_root ~base_path ~id ~recorded_at ~consume_candidate =
        | A.Consumed _ -> ()
        | A.Pending _ | A.Judged _ | A.Quarantine _ ->
          Alcotest.fail ("candidate " ^ id ^ " did not reach Consumed"))
-     | Ok A.Candidate_absent | Ok (A.Judgment_conflict _) | Error _ ->
+     | Ok A.Candidate_absent | Ok (A.Candidate_unreadable _)
+     | Ok (A.Judgment_conflict _) | Error _ ->
        Alcotest.fail ("candidate " ^ id ^ " could not be consumed"));
   row.candidate_id
 ;;

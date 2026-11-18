@@ -100,8 +100,8 @@ let validate_current_meta path =
 let validate_task_backlog path =
   try
     let json = Yojson.Safe.from_file path in
-    let* (_backlog, _diagnostics) =
-      Masc_domain.backlog_of_yojson_with_diagnostics json
+    let* _backlog =
+      Masc_domain.backlog_of_yojson json
       |> Result.map_error (fun detail ->
         `Msg (Printf.sprintf "task backlog contract rejected path=%s: %s" path detail))
     in
@@ -306,34 +306,42 @@ let run_child command environment =
 let verify_base_path_lease_owner base_path owner_pid =
   if owner_pid <= 0
   then errorf "lease owner PID must be positive"
-  else
-    match
-      Server_startup_takeover.acquire_owner_lease
-        (Host_config.host ()).base_path_lease_root base_path
-    with
-    | Server_startup_takeover.Base_path_already_owned { owner; _ }
-      when Server_startup_takeover.base_path_owner_pid owner = Some owner_pid ->
-      Ok ()
-    | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-      let pid = Server_startup_takeover.base_path_owner_pid owner in
-      errorf
-        "workspace writer lease owner mismatch base_path=%s expected_pid=%d actual_pid=%s"
-        base_path
-        owner_pid
-        (match pid with
-         | Some value -> string_of_int value
-         | None -> "unknown")
-    | Server_startup_takeover.Base_path_rejected rejection ->
+  else if owner_pid = Unix.getpid ()
+  then errorf "lease owner verification requires another process base_path=%s" base_path
+  else (
+    let reject detail =
       errorf
         "workspace writer lease verification rejected base_path=%s: %s"
         base_path
-        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-    | Server_startup_takeover.Base_path_acquired lease ->
-      Server_startup_takeover.release_base_path_lease lease;
+        detail
+    in
+    let root = (Host_config.host ()).base_path_lease_root in
+    let* present =
+      Server_startup_takeover.lease_file_present root ~base_path
+      |> Result.map_error (fun error ->
+        `Msg (Server_startup_takeover.base_path_lock_rejection_to_string error))
+    in
+    if not present then
       errorf
         "workspace writer lease is not held by the expected process base_path=%s expected_pid=%d"
         base_path
         owner_pid
+    else (
+      (* Presence avoids creating a never-held lease. It is a separate read,
+         not a lifetime guarantee: the validated owner read can race removal.
+         No acquisition or advisory PID write is used as an observation. *)
+      let* run_dir =
+        Server_startup_takeover.lease_run_dir root ~base_path
+        |> Result.map_error (fun error ->
+          `Msg (Server_startup_takeover.base_path_lock_rejection_to_string error))
+      in
+      match Server_startup_takeover.existing_owner_pid ~run_dir ~base_path with
+      | Ok actual_pid when actual_pid = owner_pid -> Ok ()
+      | Ok actual_pid ->
+        errorf
+          "workspace writer lease owner mismatch base_path=%s expected_pid=%d actual_pid=%d"
+          base_path owner_pid actual_pid
+      | Error error -> reject (Server_startup_takeover.owner_capture_error_to_string error)))
 ;;
 
 (* The Workspace writer lease of [base_path], or the reason it is not ours. *)

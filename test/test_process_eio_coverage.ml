@@ -222,6 +222,90 @@ let test_or_refusal_carries_the_spawn_errno () =
   | Ok (status, _stdout, stderr) ->
     failf "expected a refusal, got %s with stderr %S" (status_to_string status) stderr
 
+(* #28072: a refusal the same argv, env and cwd meet again is told apart from
+   a shortage that passes, so the caller does not pay for retries that cannot
+   succeed. *)
+let test_spawn_refusal_outlook () =
+  let outlook refusal =
+    match Process_eio.spawn_refusal_outlook refusal with
+    | Process_eio.Same_input_fails_again -> "same input fails again"
+    | Process_eio.Resources_may_free -> "resources may free"
+    | Process_eio.Cause_unknown -> "cause unknown"
+  in
+  let failed error = Process_eio.Spawn_failed { executable = "cli"; error } in
+  List.iter
+    (fun (label, refusal, expected) -> check string label expected (outlook refusal))
+    [ "argv over the limit", failed Unix.E2BIG, "same input fails again"
+    ; "program missing at spawn", failed Unix.ENOENT, "same input fails again"
+    ; "not executable", failed Unix.EACCES, "same input fails again"
+    ; "unnamed errno", failed (Unix.EUNKNOWNERR 999), "same input fails again"
+    ; "process slots full", failed Unix.EAGAIN, "resources may free"
+    ; "descriptor table full", failed Unix.EMFILE, "resources may free"
+    ; "memory short", failed Unix.ENOMEM, "resources may free"
+    ; "executable not found", Process_eio.Executable_not_found "cli", "same input fails again"
+    (* The child's errno arrives as text; an E2BIG and an ETXTBSY look the
+       same here, so neither answer is claimed. *)
+    ; ( "child setup failed, request-shaped text"
+      , Process_eio.Child_setup_failed { executable = "cli"; detail = "execve: Argument list too long" }
+      , "cause unknown" )
+    ; ( "child setup failed, shortage-shaped text"
+      , Process_eio.Child_setup_failed { executable = "cli"; detail = "execve: Text file busy" }
+      , "cause unknown" )
+    ; "cwd not a directory", failed Unix.ENOTDIR, "same input fails again"
+    ; "empty argv", Process_eio.Empty_argv, "same input fails again"
+    ]
+
+(* #28072: the piped spawn every official-client runtime uses hands back the
+   parent's pipe ends with the child's already closed, so EOF on stdin
+   reaches the child and EOF on stdout reaches the parent. *)
+let test_spawn_piped_child_round_trips () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  match Process_eio.spawn_piped_child ~sw (Eio.Stdenv.process_mgr env) [ "cat" ] with
+  | Error refusal -> failf "cat did not start: %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok child ->
+    Eio.Flow.copy_string "piped" child.Process_eio.to_stdin;
+    Eio.Flow.close child.Process_eio.to_stdin;
+    let out = Eio.Buf_read.parse_exn ~max_size:1024 Eio.Buf_read.take_all child.Process_eio.from_stdout in
+    check string "stdout carries stdin" "piped" out;
+    (match Eio.Process.await child.Process_eio.process with
+     | `Exited 0 -> ()
+     | `Exited code -> failf "cat exited %d" code
+     | `Signaled signal -> failf "cat was signaled %d" signal)
+
+(* #28072: a cwd open that fails with an errno eio does not name as an
+   [Eio.Fs] error reaches the caller as a typed [Spawn_failed], not as an
+   exception past the refusal boundary. *)
+let test_spawn_piped_child_refuses_a_file_cwd_with_its_errno () =
+  let file = Filename.temp_file "masc-process-eio-cwd-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove file) @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  match
+    Process_eio.spawn_piped_child ~sw (Eio.Stdenv.process_mgr env)
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / file)
+      [ "true" ]
+  with
+  | Error (Process_eio.Spawn_failed { executable; error = Unix.ENOTDIR }) ->
+    check string "the refusal names the program" "true" executable
+  | Error refusal ->
+    failf "expected Spawn_failed ENOTDIR, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok _ -> fail "a file was accepted as the child's cwd"
+
+(* The piped spawn refuses a program PATH does not have before it forks. *)
+let test_spawn_piped_child_names_the_missing_program () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  match
+    Process_eio.spawn_piped_child ~sw (Eio.Stdenv.process_mgr env)
+      [ "masc-process-eio-definitely-missing-program" ]
+  with
+  | Error (Process_eio.Executable_not_found program) ->
+    check string "the refusal names argv[0]" "masc-process-eio-definitely-missing-program" program
+  | Error refusal ->
+    failf "expected Executable_not_found, got %s" (Process_eio.spawn_refusal_to_string refusal)
+  | Ok _ -> fail "a missing program started"
+
 (* Native foreground execution owns a posix_spawn group. A failed exec
    therefore reports libc's errno, rather than a fork error-pipe string. *)
 let test_or_refusal_carries_the_native_spawn_errno () =
@@ -1856,6 +1940,12 @@ let () =
              test_capture_leaves_small_stdout_untouched;
            test_case "exit-reason-classifies-the-timeout-status" `Quick
              test_exit_reason_classifies_the_timeout_status;
+           test_case "spawn-refusal-outlook" `Quick test_spawn_refusal_outlook;
+           test_case "spawn-piped-child-round-trips" `Quick test_spawn_piped_child_round_trips;
+           test_case "spawn-piped-child-refuses-a-file-cwd-with-its-errno" `Quick
+             test_spawn_piped_child_refuses_a_file_cwd_with_its_errno;
+           test_case "spawn-piped-child-names-the-missing-program" `Quick
+             test_spawn_piped_child_names_the_missing_program;
             test_case "run_argv_with_stdin_held_open-handles-early-closed-pipe"
               `Quick
               test_run_argv_with_stdin_held_open_handles_early_closed_pipe;

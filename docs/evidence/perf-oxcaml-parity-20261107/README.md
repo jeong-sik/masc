@@ -11,7 +11,6 @@ Recent profiling (`docs/research/tui-frame-cost-and-terminal-output-prior-art-20
 1. **GC Minor Collection Spikes (`empty_minor`)**: Minor GC pauses caused UI thread frame drops and stop-the-world barriers across OCaml 5 multicore domains.
 2. **Terminal Text Sanitization Hotspot**: `Tui_terminal_text.sanitize_terminal_text` and `preview_line` are called on every rendered cell, label, status badge, and diff row. For UTF-8 / Korean text, every call allocated multiple `Buffer.t`s, closures, `Some scalar` options per scalar, and performed two string allocations even when the text was completely clean.
 3. **JSON Extraction Overhead**: `Json_field.string` / `to_option` allocated intermediate `Found 'a` variant heap blocks on every field lookup.
-4. **Compiler Optimization Flags**: Release profiles in root `dune` lacked native `-O3` and `-unbox-closures` flags for `ocamlopt`.
 
 ## 2. Optimizations Implemented
 
@@ -24,8 +23,6 @@ Recent profiling (`docs/research/tui-frame-cost-and-terminal-output-prior-art-20
    - Added direct non-allocating option extractors: `string_opt`, `int_opt`, `bool_opt`, `float_opt`, `assoc_opt`, `list_opt`.
    - Annotated hot extraction functions with `[@inline always]`.
    - Updated `lib/server/server_dashboard_http_json_utils.ml` to use `float_opt` and `assoc_opt`.
-3. **`dune` Compiler Flags**:
-   - Added `(ocamlopt_flags (:standard -O3 -unbox-closures))` to the `release` profile in root `dune`.
 
 ## 3. Measured Results (100,000 iterations per scenario)
 

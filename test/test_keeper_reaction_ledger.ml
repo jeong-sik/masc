@@ -227,7 +227,7 @@ let test_turn_finished_closes_the_interval_the_start_opened () =
   Keeper_reaction_ledger.record_event_queue_turn_finished
     ~base_path
     ~keeper_name
-    ~disposition:"completed"
+    ~disposition:Keeper_reaction_ledger.Turn_disposition.Completed
     stimulus;
   let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
   check int "three rows persisted" 3 (List.length rows);
@@ -269,12 +269,88 @@ let test_turn_finished_closes_the_interval_the_start_opened () =
     (List.nth rows 0);
   check_observed "turn start" evidence.turn_started_seen evidence.turn_started_recorded_at
     (List.nth rows 1);
-  check_observed "turn finish" evidence.turn_finished_seen evidence.turn_finished_recorded_at
-    finished_row;
+  check_observed "turn finish" (Option.is_some evidence.turn_finished)
+    evidence.turn_finished_recorded_at finished_row;
+  check bool "the evidence carries the turn's own disposition" true
+    (evidence.turn_finished = Some Keeper_reaction_ledger.Turn_disposition.Completed);
   check bool "no queue acknowledgement was observed" false evidence.event_queue_ack_seen;
   check (option (float 0.)) "no queue acknowledgement time" None evidence.event_queue_ack_recorded_at;
   check bool "no queue cancellation was observed" false evidence.event_queue_cancelled_seen;
   check (option (float 0.)) "no queue cancellation time" None evidence.event_queue_cancelled_recorded_at
+;;
+
+(* #32468: a stimulus retried after a failed turn shows the latest attempt's
+   disposition, chosen by its own recorded time. *)
+let test_turn_finished_disposition_is_the_latest_attempts () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "ledger-keeper" in
+  let stimulus = board_stimulus ~post_id:"retry-post" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_finished ~base_path ~keeper_name
+    ~disposition:Keeper_reaction_ledger.Turn_disposition.Failed stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_finished ~base_path ~keeper_name
+    ~disposition:Keeper_reaction_ledger.Turn_disposition.Completed stimulus;
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path ~keeper_name ~stimulus_id:"board:retry-post"
+    |> require_complete_evidence "retried turn evidence"
+  in
+  check bool "the later attempt's disposition is shown" true
+    (evidence.turn_finished = Some Keeper_reaction_ledger.Turn_disposition.Completed)
+;;
+
+(* A turn_finished row whose disposition is outside the closed set is
+   quarantined, not read as some other outcome. *)
+let test_unknown_turn_disposition_is_quarantined () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "disposition-keeper" in
+  let stimulus = board_stimulus ~post_id:"bad-disposition" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_finished ~base_path ~keeper_name
+    ~disposition:Keeper_reaction_ledger.Turn_disposition.Completed stimulus;
+  let rows = read_recent_rows ~base_path ~keeper_name ~limit:2 in
+  let with_disposition token = function
+    | `Assoc fields ->
+      (match List.assoc_opt "reaction" fields with
+       | Some (`Assoc reaction) ->
+         `Assoc
+           (("reaction", `Assoc (("disposition", `String token)
+                                  :: List.remove_assoc "disposition" reaction))
+            :: List.remove_assoc "reaction" fields)
+       | _ -> fail "missing reaction object")
+    | _ -> fail "ledger writer did not emit an object"
+  in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (with_disposition "test-boundary" (List.nth rows 1));
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path ~keeper_name ~stimulus_id:"board:bad-disposition"
+  with
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined { evidence; first_reason }) ->
+    check string "quarantine reason" "unknown_turn_disposition"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason);
+    check bool "the valid row's disposition still stands" true
+      (evidence.turn_finished = Some Keeper_reaction_ledger.Turn_disposition.Completed)
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "an unknown disposition was admitted"
+  | Error error ->
+    fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+;;
+
+(* Every disposition token round-trips through the closed decoder, and a token
+   outside the closed set is not read as any of them. *)
+let test_turn_disposition_tokens_round_trip () =
+  List.iter
+    (fun disposition ->
+       let token = Keeper_reaction_ledger.Turn_disposition.to_string disposition in
+       check bool ("round trip " ^ token) true
+         (Keeper_reaction_ledger.Turn_disposition.of_string token = Some disposition))
+    Keeper_reaction_ledger.Turn_disposition.all;
+  check bool "unknown token" true
+    (Keeper_reaction_ledger.Turn_disposition.of_string "test-boundary" = None)
 ;;
 
 let test_direct_append_state_change_observer_contract () =
@@ -1366,11 +1442,16 @@ let test_repeated_turn_reactions_advance_recorded_at_timestamps () =
         ; "stimulus_id", `String stimulus_id
         ; ( "reaction"
           , `Assoc
-              [ "kind", `String kind
-              ; "source", `String "keeper_event_queue"
-              ; "post_id", `String stimulus.post_id
-              ; "stimulus_kind", `String "board_signal"
-              ] )
+              ([ "kind", `String kind
+               ; "source", `String "keeper_event_queue"
+               ; "post_id", `String stimulus.post_id
+               ; "stimulus_kind", `String "board_signal"
+               ]
+               (* The producer writes a disposition on every turn_finished
+                  row; a row without one is quarantined. *)
+               @ if String.equal kind "turn_finished"
+                 then [ "disposition", `String "completed" ]
+                 else []) )
         ])
   in
   append_reaction ~recorded_at:1000.0 "turn_started";
@@ -2461,6 +2542,18 @@ let () =
             "turn finished closes the interval the start opened"
             `Quick
             test_turn_finished_closes_the_interval_the_start_opened
+        ; test_case
+            "turn finished disposition is the latest attempt's"
+            `Quick
+            test_turn_finished_disposition_is_the_latest_attempts
+        ; test_case
+            "turn disposition tokens round trip"
+            `Quick
+            test_turn_disposition_tokens_round_trip
+        ; test_case
+            "unknown turn disposition is quarantined"
+            `Quick
+            test_unknown_turn_disposition_is_quarantined
         ; test_case
             "unexpected schema rows cannot double-count current occurrences"
             `Quick

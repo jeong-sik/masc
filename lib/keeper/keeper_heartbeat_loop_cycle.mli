@@ -18,11 +18,11 @@ type cycle_outcome =
       (** {!Keeper_unified_turn.Turn_rested}: the Keeper rests until
           [rest.release_at] and records no turn status. *)
 
-val disposition_token : cycle_outcome -> string
-(** Canonical lowercase token for how the cycle ended, for evidence that has to
-    name the outcome without carrying the whole variant. Exhaustive over
-    {!cycle_outcome}: a new way for a turn to end has to be spelled here rather
-    than falling into a catch-all that would report it as one of the others. *)
+val turn_disposition : cycle_outcome -> Keeper_reaction_ledger.Turn_disposition.t
+(** How the cycle ended, for evidence that has to name the outcome without
+    carrying the whole variant. Exhaustive over {!cycle_outcome}: a new way for
+    a turn to end has to be named here rather than falling into a catch-all
+    that would report it as one of the others. *)
 
 val meta : cycle_outcome -> Keeper_meta_contract.keeper_meta
 (** Metadata projection for callers that must continue the heartbeat state

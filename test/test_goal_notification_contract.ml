@@ -70,7 +70,7 @@ let test_active_mention_survives_projection () = with_workspace @@ fun config ->
 
 let create_goal config =
   match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Notification identity"
-    ~metric:"durable notifications" ~target_value:"1" () with
+    ~measure:(Goal_measure_fixture.done_when "1") ~procedure:"durable notifications" () with
   | Ok (goal, _, _) -> goal
   | Error error -> fail (Goal_store.write_error_to_string error)
 

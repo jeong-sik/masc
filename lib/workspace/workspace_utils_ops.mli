@@ -217,8 +217,21 @@ val commit_under_held_lease :
 
 (** {1 Event logging} *)
 
+(** Raised by {!log_event} when the durable append did not commit the row.
+    A registered [Printexc] printer renders [path], [error] and
+    [cleanup_failure]. *)
+exception Event_log_append_failed of
+    { path : string
+    ; error : Fs_compat.private_jsonl_append_error
+    ; cleanup_failure : Fs_compat.private_jsonl_operation_failure option
+    }
+
 (** Append [event_json], serialized via [Yojson.Safe.to_string], to the
-    YYYY-MM/DD.jsonl event log under [.masc/events/]. PR #11507 migrated
-    the implementation and every caller to typed JSON; the .mli must
-    track. *)
+    YYYY-MM/DD.jsonl event log under [.masc/events/] through
+    {!Fs_compat.append_private_jsonl_durable_locked_result}: the row and its
+    newline are written and fsynced under the path mutex and an exclusive
+    lock, and bytes after the file's last newline (an append a crash cut
+    short) are cut first. Raises {!Event_log_append_failed} when the row
+    did not commit; a descriptor cleanup failure after the commit is logged,
+    not raised. *)
 val log_event : config -> Yojson.Safe.t -> unit

@@ -11,10 +11,18 @@ val exact_in_flight : int -> exact_in_flight option
 val one_exact_at_a_time : exact_in_flight
 (** The host waits for each exact request before it starts the next. *)
 
+(** RFC server-carries-its-exact-worker-packages 3.2: the key that chose the
+    package. [manifest_path] in {!declaration} is where either one resolved. *)
+type package_source =
+  | Carried of Lane_addon_carried.id
+      (** [package = "<name>"]: the folder of the package this server carries. *)
+  | Manifest_path  (** [manifest_path]: a package the operator placed. *)
+
 type declaration = {
   id : string;
   enabled : bool;
   run_id : string;
+  package_source : package_source;
   manifest_path : string;
   package : Lane_addon_types.package;
   binding : Yojson.Safe.t;
@@ -50,8 +58,15 @@ type snapshot = {
     [declaration.package.exact_outputs] is the effective selection. These two
     choices are independent. [enabled] is
     desired worker activity, separate from this payload revision. During the
-    accepting deployment stage an absent key retains the current enabled behavior. *)
-val load_file : path:string -> (declaration, string) result
+    accepting deployment stage an absent key retains the current enabled behavior.
+
+    A declaration names its package with exactly one of [package] or
+    [manifest_path]. [package = "<name>"] names a package this server carries
+    ({!Lane_addon_carried}); it resolves to [<packages>/<name>-<revision>]
+    only when that folder holds exactly the carried files, and the declaration
+    is refused otherwise. [packages] is [Config_dir_resolver.packages_dir] for
+    the server's base path. *)
+val load_file : packages:string -> path:string -> (declaration, string) result
 
 (** Who wrote the source bytes [load_source] reads. *)
 type manifest_scope =
@@ -68,7 +83,7 @@ type manifest_scope =
     Relative paths resolve from the final declaration path; no declaration is
     written. Package manifest reads remain effects owned by the caller. *)
 val load_source :
-  manifest_scope:manifest_scope -> source_path:string -> source_text:string ->
+  packages:string -> manifest_scope:manifest_scope -> source_path:string -> source_text:string ->
   (declaration, string) result
 
 (** Read the immediate [.toml] children in deterministic filename order.
@@ -76,7 +91,15 @@ val load_source :
     [complete] false; callers must not infer deletions from that snapshot.
     Malformed files remain in [paths]. Duplicate declared IDs are all excluded
     from [declarations] and reported, without selecting an arbitrary winner. *)
-val load : directory:string -> snapshot
+val load : packages:string -> directory:string -> snapshot
+
+val declared_carried : directory:string -> Lane_addon_carried.id list * issue list
+(** The carried packages the declarations in [directory] name with [package],
+    in {!Lane_addon_carried.all} order. Each declaration's package choice is
+    read by the same rule as {!load}, without resolving it, so a package
+    whose folder is not installed is named too. The issues are the
+    declarations whose choice cannot be read, or [directory] when it cannot
+    be listed. A missing [directory] names nothing. *)
 
 val browser_source : declaration -> Browser_lane.Backend.t option
 (** The browser source [declaration]'s worker serves, [None] for an MCP tool

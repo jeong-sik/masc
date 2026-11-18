@@ -50,14 +50,16 @@ type cycle_outcome =
       ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
       }
 
-let disposition_token = function
-  | Completed _ -> "completed"
-  | Checkpointed _ -> "checkpointed"
-  | Input_required _ -> "input_required"
-  | Cancelled _ -> "cancelled"
-  | Skipped _ -> "skipped"
-  | Failed _ -> "failed"
-  | Rested _ -> "rested"
+let turn_disposition outcome =
+  let module D = Keeper_reaction_ledger.Turn_disposition in
+  match outcome with
+  | Completed _ -> D.Completed
+  | Checkpointed _ -> D.Checkpointed
+  | Input_required _ -> D.Input_required
+  | Cancelled _ -> D.Cancelled
+  | Skipped _ -> D.Skipped
+  | Failed _ -> D.Failed
+  | Rested _ -> D.Rested
 ;;
 
 let meta = function

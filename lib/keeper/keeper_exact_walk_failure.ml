@@ -252,7 +252,7 @@ let native_cause (cause : Fusion_official_client.failure) =
   | Missing_reply | Setup_failure _ -> Native_failed Host
   | Codex_failure
       ( Runtime_codex_app_server.Invalid_config _
-      | Runtime_codex_app_server.Spawn_failed _
+      | Runtime_codex_app_server.Spawn_refused _
       | Runtime_codex_app_server.Reasoning_effort_admission_failed _
       | Runtime_codex_app_server.Account_read_failed _
       | Runtime_codex_app_server.Turn_input_write_failed _
@@ -268,7 +268,7 @@ let native_cause (cause : Fusion_official_client.failure) =
       | Runtime_codex_app_server.Timeout _ ) -> Native_failed Codex
   | Claude_failure
       ( Runtime_claude_code.Invalid_config _
-      | Runtime_claude_code.Spawn_failed _
+      | Runtime_claude_code.Spawn_refused _
       | Runtime_claude_code.Protocol_error _
       | Runtime_claude_code.Subscription_required _
       | Runtime_claude_code.Unsupported_control_request _

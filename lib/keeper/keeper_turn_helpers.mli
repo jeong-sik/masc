@@ -34,9 +34,9 @@ val record_pre_dispatch_terminal_observation :
   terminal_reason_code:string ->
   activity_kind:string ->
   trajectory_outcome:Trajectory.trajectory_outcome ->
+  keeper_turn_id:int ->
   ?error_kind:Keeper_execution_receipt.error_kind ->
   ?error_message:string ->
-  ?keeper_turn_id:int ->
   unit -> unit
 (** Record a terminal observation (receipt + activity graph event) for a
     pre-dispatch failure or early exit. *)

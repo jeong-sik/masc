@@ -744,6 +744,19 @@ let test_stdio_budget_after_write_closes_connection () =
   check int "timed-out request was not replayed" 1 !connections;
   check bool "budget expiry closed the owned connection" true !closed
 
+(* #52968: the host reads the relay version out of the mounted shim's bytes
+   before booting a guest with it. The executable dune built from this source
+   carries the declaration, and it names the relay this host speaks. *)
+let test_the_built_shim_declares_this_relay () =
+  let bytes = In_channel.with_open_bin !shim_binary In_channel.input_all in
+  match Masc.Keeper_sandbox_microvm.relay_declaration_of_bytes bytes with
+  | Masc.Keeper_sandbox_microvm.Relay_version version ->
+    check int "the built shim declares this host's relay" Relay.version version
+  | Masc.Keeper_sandbox_microvm.No_relay_version ->
+    Alcotest.fail "the built shim carries no relay declaration"
+  | Masc.Keeper_sandbox_microvm.Several_relay_versions _ ->
+    Alcotest.fail "the built shim declares several relay versions"
+
 let () =
   if Array.length Sys.argv <> 2 then failwith "expected the masc-exec-shim binary path";
   shim_binary := Unix.realpath Sys.argv.(1);
@@ -768,7 +781,9 @@ let () =
         ; test_case "cancellation releases backpressured decoder" `Quick test_stdio_cancellation_releases_blocked_decoder
         ; test_case "post-write budget closes without replay" `Quick test_stdio_budget_after_write_closes_connection ] )
     ; ( "real shim"
-      , [ test_case "a request reaches the shim" `Quick test_run_reaches_the_real_shim
+      , [ test_case "the built shim declares this relay" `Quick
+            test_the_built_shim_declares_this_relay
+        ; test_case "a request reaches the shim" `Quick test_run_reaches_the_real_shim
         ; test_case "a probe reaches the shim" `Quick test_probe_reaches_the_real_shim
         ; test_case "a refused agent gets nothing" `Quick test_a_refused_agent_gets_nothing
         ; test_case "a spent budget cancels the payload" `Quick

@@ -139,13 +139,14 @@ val append_metrics_snapshot :
   turn_cost:float ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   checkpoint_bytes:int option ->
-  message_count:int ->
+  message_count:int option ->
   unit ->
   unit
 
 val append_decision_record :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  keeper_turn_id:int ->
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->

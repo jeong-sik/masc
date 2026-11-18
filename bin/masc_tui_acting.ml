@@ -287,11 +287,10 @@ let settle_tokens_text ~ko = function
   | None, None -> ""
 
 (* The keeper turn a provider call belongs to, as the keeper's hook reports
-   it: [total_turns] keeper turns had completed when the call ran, so the
-   call is inside turn [total_turns + 1] -- the registry's own definition of
-   a turn id and the number the turn's settle carries. *)
+   it: the number the turn took from the Keeper Owner, which is also the
+   number the turn's settle carries. *)
 let keeper_turn_of_observation (o : Observer.keeper_turn_observation) =
-  Option.map succ o.Observer.to_total_turns
+  o.Observer.to_keeper_turn
 
 let batch_text = function
   | Some (index, size) -> Printf.sprintf " [%d/%d]" (index + 1) size

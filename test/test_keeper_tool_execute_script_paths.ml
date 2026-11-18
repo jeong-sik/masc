@@ -121,8 +121,15 @@ let judge_suite =
   ; judge_test "unnameable operand (glob) is left to the box, not rejected" ~expect_ok:true
       "mkdir /tmp/t634-*"
   ; judge_test "non-owning command is left alone" ~expect_ok:true "echo /etc/passwd"
-  ; judge_test "variable in earlier stage does not blind later rm escape" ~expect_ok:false
-      "echo $HOME && rm /etc/passwd"
+  ; (* The bash subset refuses parameter expansion outright
+       (`Parsed.Too_complex `Param_expansion`; lib/exec/test/test_bash_parser.ml
+       asserts that on its own), so `$HOME` never reaches [judge_operands] and
+       this case could not pass. A glob is the subset's own unnameable operand:
+       it parses (the case above proves it) and the judge leaves it to the box,
+       so it still stands in front of the escape this case is about. *)
+    judge_test "unnameable operand in an earlier stage does not blind later rm escape"
+      ~expect_ok:false
+      "echo /tmp/t634-* && rm /etc/passwd"
   ; judge_test "absolute binary path /bin/rm is still judged" ~expect_ok:false
       "/bin/rm /etc/passwd"
   ; judge_test "absolute binary path /bin/mkdir inside prefix passes" ~expect_ok:true

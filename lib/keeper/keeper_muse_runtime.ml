@@ -108,7 +108,7 @@ let model_input_refusal_of_error (error : Serve.error) =
           | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
       ; _
       }
-  | Serve.Invalid_config _ | Serve.Spawn_failed _ | Serve.Turn_input_write_failed _
+  | Serve.Invalid_config _ | Serve.Spawn_refused _ | Serve.Turn_input_write_failed _
   | Serve.Protocol_error _ | Serve.Rpc_error _ | Serve.Capability_not_granted _
   | Serve.Session_not_durable | Serve.Session_model_mismatch _
   | Serve.Session_workspace_mismatch _ | Serve.Session_approval_mode_mismatch _
@@ -147,9 +147,10 @@ let runtime_error_to_core_error ?(now = Time_compat.now ()) ?catalog (error : Se
   match error with
   | Serve.Invalid_config detail -> config_error ~field:provider_name detail
   | Serve.Session_not_durable -> config_error ~field:"session_durability" (Serve.error_to_string error)
-  | Serve.Spawn_failed detail ->
+  | Serve.Spawn_refused refusal ->
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable { provider = provider_name; detail })
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = provider_name; detail = Process_eio.spawn_refusal_to_string refusal })
   | Serve.Turn_input_write_failed _ ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
@@ -333,14 +334,15 @@ let runtime_error_to_core_error ?(now = Time_compat.now ()) ?catalog (error : Se
 let recovery_failure_of_runtime_error ?current (error : Serve.error) =
   match current with
   | Some Session_store.State_persistence_failed -> Session_store.State_persistence_failed
-  | None | Some (Session_store.Pre_dispatch_failed) | Some (Session_store.Transient_spawn_failed)
+  | None | Some (Session_store.Pre_dispatch_failed) | Some (Session_store.Spawn_resources_busy)
+  | Some (Session_store.Spawn_refused_same_input) | Some (Session_store.Spawn_failed_cause_unknown)
   | Some (Session_store.Owner_stopped_turn) | Some (Session_store.Retryable_turn_failed)
   | Some (Session_store.Transport_interrupted) | Some (Session_store.Protocol_failed)
   | Some (Session_store.Provider_rejected) | Some (Session_store.Input_rejected _)
   | Some (Session_store.Host_hook_failed) | Some (Session_store.Process_restarted)
   | Some (Session_store.Vendor_session_full _) ->
   match error with
-  | Serve.Spawn_failed _ -> Session_store.Transient_spawn_failed
+  | Serve.Spawn_refused refusal -> Session_store.recovery_failure_of_spawn_refusal refusal
   | Serve.Turn_input_write_failed _
   | Serve.Turn_cancelled
   | Serve.Runtime_shutting_down
@@ -393,9 +395,9 @@ let recovery_failure_for_attempt ~current ~admission error =
   | Session_store.State_persistence_failed, _, _ -> current
   | _, Not_dispatched, (Serve.Timeout {turn_accepted=false; _} | Serve.Capability_not_granted _) ->
     Session_store.Pre_dispatch_failed
-  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, Serve.Timeout { turn_accepted = true;_})
-  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, (Serve.Session_not_durable | (Serve.Turn_cancelled | (Serve.Runtime_shutting_down | (Serve.Invalid_config _ | (Serve.Spawn_failed _ | (Serve.Turn_input_write_failed _ | (Serve.Protocol_error _ | (Serve.Rpc_error _ | (Serve.Session_model_mismatch _ | (Serve.Session_workspace_mismatch _ | (Serve.Session_approval_mode_mismatch _ | (Serve.Auth_required _ | (Serve.Turn_failed _ | (Serve.Unsupported_server_request _ | Serve.Process_exited _)))))))))))))))
-  | ((Session_store.Pre_dispatch_failed | (Session_store.Transient_spawn_failed | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), (Dispatched | Acknowledged), _) -> recovery_failure_of_runtime_error ~current error
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Spawn_resources_busy | Session_store.Spawn_refused_same_input | Session_store.Spawn_failed_cause_unknown | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, Serve.Timeout { turn_accepted = true;_})
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Spawn_resources_busy | Session_store.Spawn_refused_same_input | Session_store.Spawn_failed_cause_unknown | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), Not_dispatched, (Serve.Session_not_durable | (Serve.Turn_cancelled | (Serve.Runtime_shutting_down | (Serve.Invalid_config _ | (Serve.Spawn_refused _ | (Serve.Turn_input_write_failed _ | (Serve.Protocol_error _ | (Serve.Rpc_error _ | (Serve.Session_model_mismatch _ | (Serve.Session_workspace_mismatch _ | (Serve.Session_approval_mode_mismatch _ | (Serve.Auth_required _ | (Serve.Turn_failed _ | (Serve.Unsupported_server_request _ | Serve.Process_exited _)))))))))))))))
+  | ((Session_store.Pre_dispatch_failed | (Session_store.Spawn_resources_busy | Session_store.Spawn_refused_same_input | Session_store.Spawn_failed_cause_unknown | (Session_store.Owner_stopped_turn | (Session_store.Retryable_turn_failed | (Session_store.Transport_interrupted | (Session_store.Protocol_failed | (Session_store.Provider_rejected | (Session_store.Host_hook_failed | (Session_store.Process_restarted | (Session_store.Input_rejected _ | Session_store.Vendor_session_full _)))))))))), (Dispatched | Acknowledged), _) -> recovery_failure_of_runtime_error ~current error
 ;;
 
 (* Whether a failed attempt can no longer claim it was effect-free. Before the
@@ -420,7 +422,7 @@ let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) 
         | Serve.Turn_failed _ | Serve.Auth_required _ -> false
         | Serve.Invalid_config _
         | Serve.Session_not_durable
-        | Serve.Spawn_failed _
+        | Serve.Spawn_refused _
         | Serve.Turn_input_write_failed _
         | Serve.Protocol_error _
         | Serve.Rpc_error _
@@ -438,7 +440,7 @@ let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) 
      | Serve.Rpc_error _ -> false
      | Serve.Invalid_config _
      | Serve.Session_not_durable
-     | Serve.Spawn_failed _
+     | Serve.Spawn_refused _
      | Serve.Turn_input_write_failed _
      | Serve.Protocol_error _
      | Serve.Capability_not_granted _
@@ -457,7 +459,7 @@ let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) 
      | Serve.Turn_input_write_failed _ -> true
      | Serve.Invalid_config _
      | Serve.Session_not_durable
-     | Serve.Spawn_failed _
+     | Serve.Spawn_refused _
      | Serve.Protocol_error _
      | Serve.Rpc_error _
      | Serve.Capability_not_granted _
@@ -992,8 +994,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           ~current_owner_epoch:owner_epoch
           ~required_at:(Time_compat.now ())
         |> Result.map Option.some
-        |> Result.map_error (fun detail ->
-          config_error ~field:"official_client_session.phase" detail)
+        |> Result.map_error Session_store.process_restart_error_to_core_error
       | None | Some { phase = Ready | Recovery_required _ | Settled _; _ } ->
         Ok stored_session
     in
@@ -1023,7 +1024,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
       | Some reference -> Keeper_official_task_reference.message
           ~current:official_client_continuation reference
         |> Result.map Option.some
-        |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+        |> Result.map_error Keeper_official_client_session_refusal.core_error in
     let preparation_messages = Option.to_list historical_task_message @ initial_messages in
     (* Freeze the host attempt ordinal before hooks compose the context. A
        changed composition can restart the vendor session at 1, but its tool
@@ -1063,7 +1064,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           ~client_kind:Muse
           ~runtime_id
           ~tool_surface_sha256
-        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation")
+        |> Result.map_error (fun (_ : string) ->
+          Keeper_official_client_session_refusal.core_error Keeper_official_client_session_refusal.Gate_continuation_unresumable)
     in
     let claim_plan = Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256 in
     (* MSP offers no replaceable configuration channel for the root, and this
@@ -1092,9 +1094,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           ]
     in
     let admission_error reason =
-      config_error
-        ~field:"official_client_session.context_admission"
-        (Session_store.context_admission_error_to_string reason)
+      Keeper_official_client_session_refusal.core_error (Session_store.gate_context_refusal reason)
     in
     (* A Gate continuation is bound to its original host session: completion
        requires that session to settle again, so a fresh one would run the
@@ -1227,7 +1227,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
-      |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+      (* The host's own model-input projection removed the reference it was
+         given: a MASC contract break, not a setting or a session state. *)
+      |> Result.map_error internal_error in
     (* Original returned results survive history projection and range shrinking.
        Only their completed consumer, after delivery, may acknowledge them. *)
     let prepared = {prepared with Host.messages = prepared.messages
@@ -1807,7 +1809,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                        | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
                    ; _
                    }
-               | Serve.Invalid_config _ | Serve.Spawn_failed _
+               | Serve.Invalid_config _ | Serve.Spawn_refused _
                | Serve.Turn_input_write_failed _ | Serve.Protocol_error _
                | Serve.Rpc_error _ | Serve.Capability_not_granted _
                | Serve.Session_not_durable | Serve.Session_model_mismatch _

@@ -48,7 +48,6 @@ let make_checkpoint ~session_id ~turn_count ~marker =
     ; cache_system_prompt = false
     ; context = Agent_core.Context.create_sync ()
     ; pending_input = None
-    ; mcp_sessions = []
     ; working_context = None
     }
 
@@ -76,6 +75,8 @@ let with_session f =
 let canonical_path session_dir = Store.agent_core_checkpoint_path ~session_dir ~session_id:"session"
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 let write_file path bytes = Out_channel.with_open_bin path (fun ch -> output_string ch bytes)
+let replace_file path bytes =
+  match Fs_compat.save_file_atomic path bytes with Ok () -> () | Error detail -> fail detail
 (* A reference names the head's content digest (RFC-0476 §3.2). *)
 let content_digest_of_head bytes =
   match Agent_core.Checkpoint_objects.head_of_string bytes with
@@ -357,13 +358,14 @@ let observed_load session_dir =
 let expect_unchanged label witness =
   match Observation.revalidate witness with
   | Observation.Unchanged -> ()
+  | Refreshed _ -> fail (label ^ ": unexpectedly refreshed")
   | Changed -> fail (label ^ ": changed")
   | Unavailable error -> failf "%s: %s" label (Store.checkpoint_load_error_to_string error)
 
 let expect_not_reusable label witness =
   match Observation.revalidate witness with
   | Observation.Changed | Unavailable _ -> ()
-  | Unchanged -> fail (label ^ ": reused a changed or unreadable source")
+  | Unchanged | Refreshed _ -> fail (label ^ ": reused a changed or unreadable source")
 
 let bundle_path session_dir =
   match Agent_core.Checkpoint_objects.head_of_string (read_file (canonical_path session_dir)) with
@@ -385,6 +387,58 @@ let test_observation_reads_and_revalidates_without_retaining_a_lineage () = with
   let again, refreshed = observed_load session_dir in
   check bool "a full reread preserves the messages" true (loaded.messages = again.messages);
   expect_unchanged "replacement was verified by a fresh read" refreshed)
+
+let test_observation_refreshes_only_a_fresh_header_over_the_same_graph () = with_session (fun session_dir ->
+  let module Objects = Agent_core.Checkpoint_objects in
+  save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"body");
+  let initial_reads = ref [] in
+  let _, witness = match Observation.For_testing.load_after_object_read
+      ~after_object_read:(fun digest -> initial_reads := digest :: !initial_reads)
+      ~session_dir ~session_id:"session" with
+    | Ok observed -> observed | Error error -> fail (Store.checkpoint_load_error_to_string error) in
+  let _, bundle = bundle_path session_dir in
+  check bool "the cold witness verified actual history" true (List.mem bundle !initial_reads);
+  let path = canonical_path session_dir in
+  let original_bytes = read_file path in
+  let original_head = Objects.head_of_string original_bytes |> Result.get_ok in
+  let refresh witness =
+    let reads = ref [] in
+    let observed = Observation.For_testing.revalidate_after_object_read
+        ~after_object_read:(fun digest -> reads := digest :: !reads) witness in
+    check bool "refresh reads header bodies only, in their original order" true
+      (List.rev !reads = [original_head.header_objects.system_prompt; original_head.header_objects.tools]);
+    let refreshed = match observed with
+      | Observation.Refreshed witness -> witness
+      | Unavailable error -> fail (Store.checkpoint_load_error_to_string error)
+      | Unchanged | Changed -> fail "a verified replacement did not refresh the witness" in
+    reads := [];
+    (match Observation.For_testing.revalidate_after_object_read
+        ~after_object_read:(fun digest -> reads := digest :: !reads) refreshed with
+     | Observation.Unchanged -> ()
+     | Refreshed _ | Changed | Unavailable _ -> fail "the returned witness did not bind the new head");
+    check int "the next unchanged check reads no object body" 0 (List.length !reads);
+    refreshed
+  in
+  replace_file path original_bytes;
+  let witness = refresh witness in
+  let snapshot = load_snapshot ~session_dir "current header" in
+  let checkpoint = Store.exact_snapshot_checkpoint snapshot in
+  let context = Agent_core.Context.copy checkpoint.context in
+  Agent_core.Context.set context "execution_scope" (`String "restored-operation");
+  (match Store.save_agent_core_if_source ~session_dir
+      ~expected_source_ref:(Store.exact_snapshot_reference snapshot)
+      ~boundary:Objects.Turn_continues {checkpoint with context}
+      |> Store.require_confirmed_installation with
+   | Ok _ -> ()
+   | Error _ -> fail "the actual context-only CAS did not install");
+  let changed_bytes = read_file path in
+  let changed_head = Objects.head_of_string changed_bytes |> Result.get_ok in
+  check bool "the CAS really changes the header" false (String.equal original_bytes changed_bytes);
+  check bool "the context-only CAS preserves the exact history" true
+    (original_head.history = changed_head.history);
+  check bool "and preserves header-object references" true
+    (original_head.header_objects = changed_head.header_objects);
+  ignore (refresh witness))
 
 let test_observation_invalidates_every_named_object () =
   with_session (fun session_dir ->
@@ -430,8 +484,9 @@ let test_observation_invalidates_every_named_object () =
       | turn :: _ -> turn.bundle | [] -> fail "fixture has no direct bundle" in
     let open_message = match head.history.open_messages with
       | digest :: _ -> digest | [] -> fail "fixture has no open message" in
-    List.iter (fun (label, digest) ->
+    List.iter (fun replaced_head -> List.iter (fun (label, digest) ->
     let _checkpoint, witness = observed_load session_dir in
+    if replaced_head then replace_file (canonical_path session_dir) (read_file (canonical_path session_dir));
     let path = Keeper_checkpoint_object_store.path ~session_dir digest in
     let bytes = read_file path in
     write_file path "corrupted object";
@@ -447,12 +502,13 @@ let test_observation_invalidates_every_named_object () =
     ; "transitive segment", previous_segment
     ; "transitive turn bundle", transitive_bundle
     ; "direct turn bundle", direct_bundle
-    ; "open message", open_message ])
+    ; "open message", open_message ]) [false; true])
 
 let test_observation_refuses_missing_linked_and_unreadable_objects () =
-  List.iter (fun (label, mutate) -> with_session (fun session_dir ->
+  List.iter (fun replaced_head -> List.iter (fun (label, mutate) -> with_session (fun session_dir ->
     save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"body");
     let _checkpoint, witness = observed_load session_dir in
+    if replaced_head then replace_file (canonical_path session_dir) (read_file (canonical_path session_dir));
     let path, _digest = bundle_path session_dir in
     mutate session_dir path;
     expect_not_reusable label witness;
@@ -465,7 +521,31 @@ let test_observation_refuses_missing_linked_and_unreadable_objects () =
     ; "symlink", (fun session_dir path ->
         let outside = Filename.concat (Filename.dirname session_dir) "outside-object" in
         write_file outside (read_file path); Unix.unlink path; Unix.symlink outside path)
-    ; "permission changed", (fun _session_dir path -> Unix.chmod path 0o000) ]
+    ; "permission changed", (fun _session_dir path -> Unix.chmod path 0o000) ]) [false; true]
+
+let test_observation_refresh_keeps_fresh_head_and_object_race_checks () =
+  List.iter (fun target -> with_session (fun session_dir ->
+    save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"body");
+    let _, witness = observed_load session_dir in
+    let path = canonical_path session_dir in
+    let bytes = read_file path in
+    replace_file path bytes;
+    let object_path, _ = bundle_path session_dir in
+    let changed = ref false in
+    let after_object_read _digest =
+      if not !changed then (
+        changed := true;
+        match target with
+        | `Head -> replace_file path bytes
+        | `Body -> write_file object_path "changed during header validation"
+        | `Cancel -> raise (Eio.Cancel.Cancelled Exit)) in
+    (match Observation.For_testing.revalidate_after_object_read ~after_object_read witness with
+     | Observation.Changed when target <> `Cancel -> ()
+     | exception Eio.Cancel.Cancelled Exit when target = `Cancel -> ()
+     | Unchanged | Refreshed _ | Changed | Unavailable _ ->
+       fail "a refresh ignored a concurrent source change or cancellation");
+    check bool "the race ran after an actual header-object read" true !changed))
+    [`Head; `Body; `Cancel]
 
 let test_observation_refuses_a_changed_or_truncated_head () = with_session (fun session_dir ->
   save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"first");
@@ -485,6 +565,34 @@ let test_observation_refuses_a_changed_or_truncated_head () = with_session (fun 
   | Error Store.Not_found -> ()
   | Error error -> fail (Store.checkpoint_load_error_to_string error)
   | Ok _ -> fail "an absent head produced a witness")
+
+let test_observation_refresh_refuses_changed_session_and_malformed_header () =
+  List.iter (fun (field, value, identity_change) -> with_session (fun session_dir ->
+    save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"body");
+    let _, witness = observed_load session_dir in
+    let path = canonical_path session_dir in
+    let json = match Yojson.Safe.from_string (read_file path) with
+      | `Assoc fields -> `Assoc (List.map (function
+          | "checkpoint", `Assoc header ->
+            "checkpoint", `Assoc (List.map (fun (name, old) ->
+              name, if String.equal name field then value else old) header)
+          | pair -> pair) fields)
+      | _ -> fail "fixture has no checkpoint head" in
+    replace_file path (Yojson.Safe.to_string json);
+    let reads = ref 0 in
+    (match Observation.For_testing.revalidate_after_object_read
+        ~after_object_read:(fun _digest -> incr reads) witness with
+     | Observation.Changed when identity_change -> ()
+     | Unavailable _ when not identity_change -> ()
+     | Unchanged | Refreshed _ | Changed | Unavailable _ ->
+       fail "a changed session or malformed header reused the old proof");
+    check int "fresh parse or graph mismatch stops before header-object reads" 0 !reads))
+    [ "session_id", `String "another-session", true
+    ; "context", `List [], false
+    ; "pending_input", `Assoc [], false
+    ; "version", `Int (Agent_core.Checkpoint.checkpoint_version + 1), false
+    ; "messages", `List [Agent_core.Checkpoint.message_to_json (Agent_core.Types.user_msg "hidden")], false
+    ]
 
 let test_observation_uses_the_snapshot_of_the_bytes_actually_read () = with_session (fun session_dir ->
   save_plain ~session_dir (make_checkpoint ~session_id:"session" ~turn_count:1 ~marker:"read before change");
@@ -537,14 +645,20 @@ let () =
     ; ( "read observation"
       , [ test_case "cold read and replacement revalidation" `Quick
             test_observation_reads_and_revalidates_without_retaining_a_lineage
+        ; test_case "replacement and context-only CAS refresh only the header" `Quick
+            test_observation_refreshes_only_a_fresh_header_over_the_same_graph
         ; test_case "every named object invalidates the witness" `Quick
             test_observation_invalidates_every_named_object
         ; test_case "missing, truncated, linked and unreadable objects refuse reuse" `Quick
             test_observation_refuses_missing_linked_and_unreadable_objects
         ; test_case "changed, truncated and absent heads refuse reuse" `Quick
             test_observation_refuses_a_changed_or_truncated_head
+        ; test_case "changed session and malformed header cannot refresh" `Quick
+            test_observation_refresh_refuses_changed_session_and_malformed_header
         ; test_case "witness belongs to the bytes read before a race" `Quick
             test_observation_uses_the_snapshot_of_the_bytes_actually_read
+        ; test_case "header refresh preserves source-race and cancellation checks" `Quick
+            test_observation_refresh_keeps_fresh_head_and_object_race_checks
         ; test_case "lineage witness expires with its existing eligibility" `Quick
             test_observation_reuses_only_an_eligible_written_lineage
         ] )

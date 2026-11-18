@@ -34,8 +34,8 @@ let with_workspace run =
 let create config =
   let now = Masc_domain.now_iso () in
   let goal = { Goal_store.id = "goal-drop-delivery"; criterion_revision = "fixture-criterion";
-    title = "Preserve cancellation audit"; metric = Some "cancelled Goals with audit";
-    target_value = Some "1"; due_date = None; priority = 3; phase = Goal_phase.Executing;
+    title = "Preserve cancellation audit"; measure = Goal_measure_fixture.done_when "1";
+    procedure = "cancelled Goals with audit"; due_date = None; priority = 3; phase = Goal_phase.Executing;
     last_review_note = None; last_review_at = None; created_at = now; updated_at = now } in
   Goal_store.write_state config
     { version = 1; updated_at = now; goals = [goal]; pending_events = []; pending_notifications = [] };

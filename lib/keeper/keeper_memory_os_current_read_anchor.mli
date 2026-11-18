@@ -102,6 +102,26 @@ val read_dropped :
   current_facts:fact list ->
   (archived_fact list, string) result
 
+type commit_lineage =
+  { revisions : revision list
+  (** Revision links of committed journal rows, in journal order: each names a
+      fact the commit removed and the successor it kept. *)
+  ; retractions : string list
+  (** One memory id per fact an explicit retraction removed, in journal order,
+      with repeats when the same claim was stored and retracted again. *)
+  }
+
+val read_commit_lineage :
+  keepers_dir:string -> keeper_id:string -> (commit_lineage, string) result
+(** Revisions and explicit retractions as the committed journal records them.
+    The journal row is part of the commit (written by it or recovered from its
+    publication receipt), so a commit cannot keep its snapshot and lose this
+    lineage. Recovers a prepared publication first, as public snapshot reads
+    do, then scans the complete journal in an IO pool job. A missing journal is
+    no lineage; a malformed or unreadable journal, or a pending removal
+    receipt, is an error, not an empty lineage. Rows that predate
+    [revision_links] contribute no revisions. *)
+
 type retirement_context =
   | Retirement_source_changed
   | Retirement_source_unavailable of string

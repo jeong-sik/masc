@@ -20,8 +20,19 @@ Required contract and pending approvals are unchanged.
 Revision 0.1.1 uses worker record version 2: finished requests retain only the
 original ID, digest and result. Existing worker state needs the
 [backup and hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md), even when
-the host dispatch is not connected. Build its image from the repository root:
+the host dispatch is not connected.
+
+The masc server carries this package. Declare it with `package = "hitl-auto-judge"`,
+then run `masc exact-addon-setup --declared --base-path <base-path>`, which writes
+the package under `<base-path>/.masc/packages/` and builds its image
+([Keeper Librarian install](../../docs/guides/keeper-memory-execution.md#install-the-package)).
+A declaration that pins the package with `manifest_path` builds the image from
+the repository root instead:
 
 ```sh
-docker build -f addons/hitl-auto-judge/Dockerfile -t masc-lane-hitl-auto-judge:0.1.3 addons
+docker build -f addons/hitl-auto-judge/Dockerfile -t masc-lane-hitl-auto-judge:0.1.4 addons
 ```
+
+Revision 0.1.4 names `[world] exact_protocol = 1`.
+A server that knows `exact_protocol` refuses a manifest that does not name the
+protocol it speaks, and a server that does not know the key refuses this one.

@@ -358,6 +358,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
       ~observation_token
+      ~keeper_turn_id
       ~operation_id
       ~(input_speaker : Keeper_input_speaker.t)
       ?on_text_delta
@@ -556,14 +557,11 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in
-      let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
-      (* RFC-0233 §7: mint the turn's join key ONCE from the exact admitted meta —
-         the same (trace_id, total_turns + 1) snapshot the Turn_record writer
-         stamps (keeper_agent_run.ml:250-251 receives this very meta via the
-         run_turn call below). Threaded into reply_json; never re-derived at
-         the reply seam from updated_meta, whose total_turns already counts
-         this turn — re-derivation would yield a different join key than the
-         Turn_record for the same turn (RFC §7.2 mint-once, thread down). *)
+      (* RFC-0233 §7: mint the turn's join key ONCE — the admitted trace and
+         the number the Owner allocated before this body ran, the same pair
+         the Turn_record writer stamps ([Keeper_agent_run.run_turn] receives
+         this very number below). Threaded into reply_json; never re-derived
+         at the reply seam (RFC §7.2 mint-once, thread down; #52839). *)
       let turn_ref =
         Ids.Turn_ref.make
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -816,6 +814,7 @@ let run_keeper_invocation_turn_admitted_inner
                     ~turn_id:keeper_turn_id
                     (fun () ->
                       Keeper_agent_run.run_turn
+                                      ~keeper_turn_id
                                       ~approval_admission:(Keeper_approval_origin.Direct_request operation_id)
                                       ~preview
                                       ~observation_token
@@ -1207,11 +1206,29 @@ let run_keeper_invocation_turn_admitted
   =
   let base_path = ctx.config.base_path in
   let name = Keeper_invocation_contract.direct_message_target_name direct_message in
+  (* The turn's number is spent with the Owner before the observation names
+     it and before the body writes under it (#52839). *)
+  match Keeper_turn_allocation.allocate ~config:ctx.config ~keeper_name:name with
+  (* A name with no Keeper behind it is refused the way [ensure_keeper_exists]
+     refuses it in the body: the caller named something absent. *)
+  | Error (Keeper_turn_allocation.Keeper_absent _) ->
+    dispatch_failed
+      ~class_:Tool_result.Workflow_rejection
+      (Keeper_request_failure.Keeper_meta_unresolved
+         { keeper = name; detail = keeper_absent_detail ~config:ctx.config name })
+  | Error (Keeper_turn_allocation.Owner_refused _ as error) ->
+    let { Keeper_request_failure.cause } =
+      Keeper_request_failure.of_core_error
+        (Keeper_turn_allocation.to_core_error ~config:ctx.config ~keeper_name:name error)
+    in
+    dispatch_failed ~class_:Tool_result.Runtime_failure cause
+  | Ok keeper_turn_id ->
   let observation_token = Keeper_turn_observation_token.fresh () in
   Keeper_registry.mark_turn_started
     ~observation_token
     ~base_path
     ~wake:Keeper_registry.Chat_request
+    ~turn_id:keeper_turn_id
     name;
   (* [mark_turn_started] above has no counterpart unless this runs. Since
      #15932 put the turn body inside [turn_sw], a cancelled turn cancels this
@@ -1236,6 +1253,7 @@ let run_keeper_invocation_turn_admitted
   match
     run_keeper_invocation_turn_admitted_inner
       ~observation_token
+      ~keeper_turn_id
       ~operation_id
       ~input_speaker
       ?on_text_delta

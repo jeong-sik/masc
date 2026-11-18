@@ -71,6 +71,7 @@
  (modules
   fs_compat
   fs_compat_base_io
+  fs_compat_input
   fs_compat_capability_write
   fs_compat_durable_append
   fs_compat_jsonl_read
@@ -87,6 +88,7 @@
   fs_compat_owned_private_jsonl)
  (private_modules
   fs_compat_base_io
+  fs_compat_input
   fs_compat_capability_write
   fs_compat_durable_append
   fs_compat_jsonl_read

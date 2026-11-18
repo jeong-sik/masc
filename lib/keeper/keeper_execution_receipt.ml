@@ -76,6 +76,7 @@ type operator_disposition_reason =
   | Reason_phase_skipped
   | Reason_transcript_corruption
   | Reason_official_client_recovery_required
+  | Reason_official_client_session_refused
   | Reason_provider_attempt_effect_fenced
   | Reason_tool_correction_lost
   | Reason_accept_rejected
@@ -99,6 +100,7 @@ let operator_disposition_reason_to_string = function
   | Reason_transcript_corruption -> "transcript_corruption"
   | Reason_official_client_recovery_required ->
     Keeper_internal_error.official_client_recovery_required_kind
+  | Reason_official_client_session_refused -> "official_client_session_refused"
   | Reason_provider_attempt_effect_fenced ->
     Keeper_internal_error.provider_attempt_effect_fenced_kind
   | Reason_tool_correction_lost -> Keeper_internal_error.tool_correction_lost_kind
@@ -173,6 +175,30 @@ let operator_disposition (receipt : t)
        resolves its recovery, so the receipt must not claim a runtime
        continuation. *)
     Disp_operator_action_required, Reason_official_client_recovery_required
+  | Keeper_terminal_reason.Official_client_session_refused refusal ->
+    (* Refused before provider dispatch because of the vendor session's
+       state, so no toml edit changes it (#38402). What follows depends on
+       which session fact refused. *)
+    (match refusal with
+     | Keeper_official_client_session_refusal.Gate_continuation_unresumable
+     | Keeper_official_client_session_refusal.Gate_context_frontier_missing
+     | Keeper_official_client_session_refusal.Gate_canonical_context_changed
+     | Keeper_official_client_session_refusal.Task_reference_unbound ->
+       (* The continuation or reference is bound to one vendor session that
+          no longer matches. Every later turn meets the same session, so a
+          person decides what happens to the bound work. *)
+       Disp_operator_action_required, Reason_official_client_session_refused
+     | Keeper_official_client_session_refusal.Claim_held_by_this_process ->
+       (* Another turn of this process holds the claim; a later cycle finds
+          it released. *)
+       Disp_retry_later, Reason_official_client_session_refused
+     | Keeper_official_client_session_refusal.Task_reference_unsupported
+     | Keeper_official_client_session_refusal.Continuation_on_other_runtime ->
+       (* A fact of this candidate alone (its client cannot carry the
+          reference, or it is not the continuation's runtime): the lane walks
+          on to the next candidate, and this receipt is reached only when none
+          was left. *)
+       Disp_fail_open_next_runtime, Reason_official_client_session_refused)
   | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
     (* Same-turn replay stays forbidden, and the runtime lifecycle selects a
        later turn, so the Keeper keeps running. Nothing proves whether the
@@ -259,6 +285,7 @@ let operator_disposition (receipt : t)
        | Provider_runtime_failure _
        | Transcript_corruption _
        | Official_client_recovery_required _
+       | Official_client_session_refused _
        | Provider_attempt_effect_fenced _
        | Tool_correction_lost _
        | Accept_rejected _
@@ -304,6 +331,7 @@ let operator_disposition (receipt : t)
               | Provider_runtime_failure _
               | Transcript_corruption _
               | Official_client_recovery_required _
+              | Official_client_session_refused _
               | Provider_attempt_effect_fenced _
               | Tool_correction_lost _
               | Terminal_effect_failed _

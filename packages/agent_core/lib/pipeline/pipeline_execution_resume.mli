@@ -40,6 +40,9 @@ val frontier_ordinal : frontier -> int
     rejected, even when the restored message contains tool blocks.
     Admission is frozen by the response producer before its checkpoint;
     recovery does not reinterpret it with the resumed agent's tool palette.
+    [execute] and [pending_terminal] receive that frozen admission with the
+    response: the source of every admitted ToolUse among the provider's tool
+    calls and the calls admission refused (#30728, #32715).
     Any persisted invocation, content mismatch or stale terminal counter is
     rejected. Fails closed on inconsistent restored topology. Terminal validation
     materializes restored media; unavailable or invalid bytes fail. It compares
@@ -53,10 +56,12 @@ val dispatch
   -> execute:
        (turn:int
         -> response:Types.api_response
+        -> admission:Execution_provider_response_snapshot.admission
         -> Llm_provider.Types.content_block Nonempty.t
         -> ('a, Error.t) result)
   -> tools_settled_before_checkpoint:
        (response:Types.api_response
+        -> admission:Execution_provider_response_snapshot.admission
         -> turn:int
         -> invocations:Execution_agent_scope.invocation_authority list
         -> tool_results:Llm_provider.Types.content_block list
@@ -70,7 +75,11 @@ val dispatch
         -> Llm_provider.Types.content_block Nonempty.t
         -> ('a, Error.t) result)
   -> all_pre_tool_use_blocked:'a
-  -> pending_terminal:(turn:int -> Types.api_response -> ('a, Error.t) result)
+  -> pending_terminal:
+       (turn:int
+        -> admission:Execution_provider_response_snapshot.admission
+        -> Types.api_response
+        -> ('a, Error.t) result)
   -> terminal:(Types.api_response -> 'a)
   -> fresh:(turn:int -> ('a, Error.t) result)
   -> ('a, Error.t) result

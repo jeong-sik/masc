@@ -77,12 +77,9 @@ once: it serializes Dune inside one worktree, defaults concurrency to
 match `dune-project`. `MASC_DUNE_DRY_RUN=1` prints the command instead of
 running it.
 
-The hooks: `pre-commit` skips the `dune build` type-check for a commit that
-only touches docs and assets; `pre-push` refuses a push that adds Dune trace
-dumps, because those carry the environment. Code commits invoke a local Dune
-build through pre-commit. External AI sessions must use the
-[commit boundary procedure](docs/guides/CONTRIBUTOR-WORKFLOW.md#2-start-an-ai-development-session)
-when these hooks are active.
+The hooks: `pre-commit` refuses a commit on `main`, `master` or `develop`;
+`pre-push` refuses a push that adds Dune trace dumps, because those carry the
+environment. Neither hook runs a build.
 
 ## Where things are
 

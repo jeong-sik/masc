@@ -548,7 +548,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
 
 (* One registered autonomous Keeper on the fixture CLI, inside the real Owner
    child: [f] receives [run], which runs one unified cycle on a meta. *)
-let with_unified_autonomous_cycle ~base_path ~cli_path f =
+let with_unified_autonomous_cycle ?(last_turn_id = 0) ~base_path ~cli_path f =
   let keeper_name = "claude-fixture" in
   let meta =
     match
@@ -558,7 +558,8 @@ let with_unified_autonomous_cycle ~base_path ~cli_path f =
           ; "activation_mode", `String "autonomous"
           ])
     with
-    | Ok meta -> meta
+    | Ok (meta : Keeper_meta_contract.keeper_meta) ->
+      { meta with runtime = { meta.runtime with last_turn_id } }
     | Error detail -> fail ("keeper meta fixture failed: " ^ detail)
   in
   let shared_context = ref (Agent_core.Context.create ()) in
@@ -687,9 +688,12 @@ let with_unified_autonomous_cycle ~base_path ~cli_path f =
                       ~shared_context ~run)))))
 ;;
 
+(* The fixture Keeper has handed out 40 turn numbers but committed no usage
+   ([total_turns = 0]), the state a crash between allocation and commit
+   leaves. Its cycles must run as turns 41 and 42 (#52839). *)
 let run_unified_autonomous_read_cycles ~base_path ~cli_path =
-  with_unified_autonomous_cycle ~base_path ~cli_path
-    (fun ~config:_ ~keeper_name ~meta ~trace_id ~checkpoint_path
+  with_unified_autonomous_cycle ~last_turn_id:40 ~base_path ~cli_path
+    (fun ~config ~keeper_name ~meta ~trace_id ~checkpoint_path
          ~shared_context ~run ->
                     let completed meta = match run meta with
                       | Error failure -> fail (Agent_core.Error.to_string failure.error)
@@ -712,14 +716,30 @@ let run_unified_autonomous_read_cycles ~base_path ~cli_path =
                       | Ok rows -> List.filter (fun row -> Yojson.Safe.Util.(
                           member "tool" row = `String "keeper_tasks_list"
                           && member "trace_id" row = `String trace_id)) rows in
-                    check (list int) "real ledger keeps all repeated reads in their original cycles"
-                      [1;1;2] (List.map (fun row -> Yojson.Safe.Util.(member "keeper_turn_id" row |> to_int)) rows);
+                    check (list int) "real ledger keeps all repeated reads in their allocated cycles"
+                      [41;41;42] (List.map (fun row -> Yojson.Safe.Util.(member "keeper_turn_id" row |> to_int)) rows);
                     check (list string) "all reads execute successfully without a repeat-count stop"
                       ["ok";"ok";"ok"] (List.map (fun row -> Yojson.Safe.Util.(member "wire_outcome" row |> to_string)) rows);
                     List.iter (fun field -> match List.map (Yojson.Safe.Util.member field) rows with
                       | [first;second;third] -> check bool ("same actual " ^ field ^ " is retained across cycles")
                           true (first=second && second=third)
-                      | _ -> fail "expected three actual retained reads") ["input";"output"])
+                      | _ -> fail "expected three actual retained reads") ["input";"output"];
+                    let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
+                    List.iter (fun absolute_turn ->
+                      match Server_keeper_turn_records.read_exact ~store ~keeper:keeper_name
+                          ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn) with
+                      | Ok (Some record, _) ->
+                        check string "the turn record carries the allocated turn"
+                          (Ids.Turn_ref.to_string (Ids.Turn_ref.make ~trace_id ~absolute_turn))
+                          (Ids.Turn_ref.to_string record.Turn_record.turn_ref)
+                      | Ok (None, _) -> failf "no turn record under allocated turn %d" absolute_turn
+                      | Error error -> fail (Server_keeper_turn_records.exact_error_to_string error))
+                      [41; 42];
+                    (match Server_keeper_turn_records.read_exact ~store ~keeper:keeper_name
+                        ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:1) with
+                     | Ok (None, _) -> ()
+                     | Ok (Some _, _) -> fail "a turn record reused a number below the allocator"
+                     | Error error -> fail (Server_keeper_turn_records.exact_error_to_string error)))
 ;;
 
 let check_usage_scope ~frames ~expected_scope ~input_tokens ~output_tokens
@@ -940,7 +960,7 @@ let checkpoint_with_messages
   ; reasoning_effort = None
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create ()
-  ; pending_input = None; mcp_sessions = []
+  ; pending_input = None
   ; working_context = None
   }
 ;;
@@ -3410,7 +3430,7 @@ let test_start_authority_is_user_context_not_standing_system () =
             extra_system_context=assembly.A.extra_system_context;
             system_prompt_override=A.system_prompt_override
               ~previous:current_params.system_prompt_override assembly}
-        | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+        | BeforeTurn _ | AfterTurn _ | AfterRestoredTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
         | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
       with_fixture ~system_marker ~prompt_marker
         [Emit (assistant ~turn_id:(string_of_int index) "ANSWER");
@@ -5803,7 +5823,7 @@ let test_a_closed_client_connection_is_typed () =
    | Some _ | None -> fail "a closed Claude Code connection did not decode");
   match
     Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
-      (Runtime_claude_code.Spawn_failed "executable not found")
+      (Runtime_claude_code.Spawn_refused (Process_eio.Executable_not_found "claude"))
   with
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
   | other ->

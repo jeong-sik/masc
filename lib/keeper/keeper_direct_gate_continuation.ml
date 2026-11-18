@@ -489,7 +489,7 @@ let session_full_cause ~(checkpoint : Semantic.official_client_checkpoint) ~appr
           ( Native.Ready | Native.Start _ | Native.Active _ | Native.Turn_inflight _
           | Native.Recovery_required
               { Native.failure =
-                  ( Native.Pre_dispatch_failed | Native.Transient_spawn_failed
+                  ( Native.Pre_dispatch_failed | Native.Spawn_resources_busy | Native.Spawn_refused_same_input | Native.Spawn_failed_cause_unknown
                   | Native.Owner_stopped_turn | Native.Retryable_turn_failed
                   | Native.Transport_interrupted | Native.Protocol_failed
                   | Native.Provider_rejected | Native.Input_rejected _

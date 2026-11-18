@@ -58,6 +58,7 @@ type t =
   | Provider_runtime_failure of string
   | Transcript_corruption of string
   | Official_client_recovery_required of string
+  | Official_client_session_refused of Keeper_official_client_session_refusal.t
   | Provider_attempt_effect_fenced of string
   | Tool_correction_lost of string
   | Accept_rejected of string
@@ -146,6 +147,12 @@ let of_wire wire =
   match Keeper_internal_error.wire_kind_of_string wire with
   | Some kind -> of_masc_internal_kind wire kind
   | None ->
+    (* An official-client session refusal has its own closed code list. No
+       code in it equals or prefixes a config, authorization or provider
+       wire, so looking it up first changes no other classification. *)
+    match Keeper_official_client_session_refusal.of_code wire with
+    | Some refusal -> Official_client_session_refused refusal
+    | None ->
     if is_config_invalid_wire wire
     then Config_invalid wire
     else if is_authorization_refused_wire wire
@@ -173,6 +180,8 @@ let to_wire = function
   | Provider_runtime_failure wire -> wire
   | Transcript_corruption wire -> wire
   | Official_client_recovery_required wire -> wire
+  | Official_client_session_refused refusal ->
+    Keeper_official_client_session_refusal.code refusal
   | Provider_attempt_effect_fenced wire -> wire
   | Tool_correction_lost wire -> wire
   | Accept_rejected wire -> wire
@@ -207,6 +216,7 @@ let is_transient_provider_runtime_failure = function
   | Authorization_refused _
   | Transcript_corruption _
   | Official_client_recovery_required _
+  | Official_client_session_refused _
   | Provider_attempt_effect_fenced _
   | Tool_correction_lost _
   | Accept_rejected _

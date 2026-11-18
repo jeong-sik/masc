@@ -27,7 +27,6 @@
   "active_goal_ids": [],
   "message_scope_ack_id": null,
   "last_blocker": null,
-  "last_runtime_attempt": null,
   "paused": false,
   "latched_reason": null,
   "current_task_id": null,

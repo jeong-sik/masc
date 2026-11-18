@@ -292,6 +292,24 @@ let image_of_inspect runtime raw =
        | Some (`String digest) when sha256 digest -> Ok (Apple_manifest_digest digest)
        | _ -> Error "local Apple image has no SHA-256 descriptor")
 
+(* The labels are read from the resolved image by its immutable ID, so the
+   image whose labels are checked is the image the container is created from.
+   An Apple image's labels are not read. *)
+let image_label_arguments = function
+  | Docker_image_id id -> Ok ["image"; "inspect"; "--format"; "{{json .Config.Labels}}"; id]
+  | Apple_manifest_digest _ ->
+      Error "an Apple image's labels are not read, so a package that requires an image label runs on Docker"
+let image_label_of_inspect ~name raw =
+  let* labels = parse raw in
+  match labels with
+  | `Null -> Ok None
+  | `Assoc labels ->
+      (match List.assoc_opt name labels with
+       | None -> Ok None
+       | Some (`String value) -> Ok (Some value)
+       | Some _ -> Error ("image label " ^ name ^ " is not a string"))
+  | _ -> Error "image labels are not an object"
+
 let volume_list_arguments runtime name = match runtime with
   | Docker -> ["volume"; "ls"; "--filter"; "name=^" ^ name ^ "$"; "--format"; "{{json .Name}}"]
   | Apple_container -> ["volume"; "list"; "--format"; "json"]

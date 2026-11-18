@@ -79,15 +79,23 @@ Finished worker records retain the request ID, input digest and result without
 the input body. Deploy this revision with the
 [worker state hard cut](../../docs/guides/EXACT-WORKER-STATE-HARD-CUT.md).
 
-Build the optional container from the repository root:
+The masc server carries this package. Declare it with `package = "candle-appraiser"`,
+then run `masc exact-addon-setup --declared --base-path <base-path>`, which writes
+the package under `<base-path>/.masc/packages/` and builds its image
+([Keeper Librarian install](../../docs/guides/keeper-memory-execution.md#install-the-package)).
+State that still holds worker record v1 needs the hard cut above before the move.
+A declaration that pins the package with `manifest_path` builds the image from
+the repository root instead:
 
 ```sh
-docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.7 addons
+docker build -f addons/candle-appraiser/Dockerfile -t masc-lane-candle-appraiser:0.1.8 addons
 ```
 
 Select this revision with the server stopped, in the order the
 [Keeper Librarian upgrade](../../docs/guides/keeper-memory-execution.md#upgrade-an-existing-installation)
-gives. A server that does not know `host_request_pages` refuses this manifest.
+gives. This revision names `[world] exact_protocol = 1`.
+A server that knows `exact_protocol` refuses a manifest that does not name the
+protocol it speaks, and a server that does not know the key refuses this one.
 A revision before 0.1.6 answers `capacity_wait`, which a server that
 includes [#52731](https://github.com/jeong-sik/masc/pull/52731) no longer reads.
 

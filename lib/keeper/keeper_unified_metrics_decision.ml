@@ -30,6 +30,7 @@ let execution_path_of_string = function
 let append_decision_record
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
+    ~(keeper_turn_id : int)
     ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
@@ -71,15 +72,16 @@ let append_decision_record
       , _turn_trace_id
       , _turn_session_id
       , _turn_number
-      , turn_id_opt
+      , _turn_id
       , task_id_opt
       , _sandbox_profile
       , _network_mode ) =
     Keeper_tool_call_log.get_turn_context ~cell:turn_ctx_cell ()
   in
-  let turn_id =
-    Option.value ~default:meta.runtime.usage.total_turns turn_id_opt
-  in
+  (* The caller names the turn the Owner allocated. The turn context cell is
+     filled only once tool hooks run, and [meta] may predate the allocation, so
+     neither can stand in for the id of a turn that failed early (#52839). *)
+  let turn_id = keeper_turn_id in
   let task_id =
     match task_id_opt with
     | Some _ as value -> value

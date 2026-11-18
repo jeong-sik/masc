@@ -119,7 +119,7 @@ val not_ready_to_string : not_ready -> string
 type error =
   | Workdir_not_absolute of string
   | Invalid_timeout of float  (** Not finite or not above zero. *)
-  | Spawn_failed of string
+  | Spawn_refused of Process_eio.spawn_refusal
       (** Eio could not start [cli_path]: not found, not executable, a pipe
           or fork failure, or a child setup step that failed. *)
   | Timed_out of { after_s : float }

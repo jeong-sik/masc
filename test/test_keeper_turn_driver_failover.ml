@@ -78,7 +78,7 @@ let checkpoint_with_session_id session_id : Agent_core.Checkpoint.t =
   ; response_format = Agent_core.Types.Off
   ; cache_system_prompt = false
   ; context = Agent_core.Context.create_sync ()
-  ; pending_input = None; mcp_sessions = []
+  ; pending_input = None
   ; working_context = None
   }
 
@@ -2983,6 +2983,115 @@ let test_attempt_loop_moves_past_missing_candidate () =
     "each candidate is called once, in order"
     [ "gone.test_model"; "live.test_model" ]
     !attempts
+
+(* #38402: an official-client Gate or checkpoint continuation is bound to the
+   runtime that settled its vendor session. The turn driver asks every
+   candidate the same admission question; a candidate that is another runtime
+   is refused with a refusal the walk moves past, so a lane that lists the
+   continuation's runtime second still reaches it. A task-reference
+   (checkpoint) continuation and a Gate continuation pass the same admission:
+   the task reference and the Gate session check run inside the runtime's
+   adapter, after it, so no other runtime reaches either check. *)
+let continuation_walk ~continuation_runtime_id ~original_attempt candidates =
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~walk_owner:(Driver.Fleet_keeper_turn test_fleet_turn)
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        let admitted =
+          Driver.For_testing.official_continuation_admission
+            ~continuation_runtime_id:(Some continuation_runtime_id)
+            ~attempt_runtime_id:candidate
+            ~checkpoint_owner:Runtime_execution.Official_client
+        in
+        match admitted with
+        | Error error -> attempt_without_effect (Error error) None
+        | Ok () -> attempt_without_effect (original_attempt runtime_id) None)
+      candidates
+  in
+  result, !attempts
+
+let test_continuation_walk_reaches_its_original_runtime () =
+  let result, attempts =
+    continuation_walk ~continuation_runtime_id:"claude.original_model"
+      ~original_attempt:(fun runtime_id -> Ok runtime_id)
+      [ "codex.other_model"; "claude.original_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string) "the original runtime takes the continuation"
+       "claude.original_model" runtime_id
+   | Error error ->
+     Alcotest.failf "the walk stopped before the original runtime: %s"
+       (Agent_core.Error.to_string error));
+  Alcotest.(check (list string))
+    "the other runtime is refused, then the original runs"
+    [ "codex.other_model"; "claude.original_model" ]
+    attempts
+
+let test_continuation_admission_names_other_runtime () =
+  let refusal_of = function
+    | Ok () -> None
+    | Error error -> Keeper_official_client_session_refusal.of_core_error error
+  in
+  Alcotest.(check bool) "another runtime is refused as bound to another runtime" true
+    (refusal_of
+       (Driver.For_testing.official_continuation_admission
+          ~continuation_runtime_id:(Some "claude.original_model")
+          ~attempt_runtime_id:"codex.other_model"
+          ~checkpoint_owner:Runtime_execution.Official_client)
+     = Some Keeper_official_client_session_refusal.Continuation_on_other_runtime);
+  Alcotest.(check bool) "the original runtime is admitted" true
+    (Driver.For_testing.official_continuation_admission
+       ~continuation_runtime_id:(Some "claude.original_model")
+       ~attempt_runtime_id:"claude.original_model"
+       ~checkpoint_owner:Runtime_execution.Official_client
+     = Ok ());
+  Alcotest.(check bool) "a turn without a continuation is admitted" true
+    (Driver.For_testing.official_continuation_admission
+       ~continuation_runtime_id:None
+       ~attempt_runtime_id:"codex.other_model"
+       ~checkpoint_owner:Runtime_execution.Masc_agent_core
+     = Ok ());
+  Alcotest.(check bool)
+    "the original id now running Agent Core is not a refusal the walk passes"
+    true
+    (refusal_of
+       (Driver.For_testing.official_continuation_admission
+          ~continuation_runtime_id:(Some "claude.original_model")
+          ~attempt_runtime_id:"claude.original_model"
+          ~checkpoint_owner:Runtime_execution.Masc_agent_core)
+     = None)
+
+(* A refusal of the durable session itself stops the walk where it is met:
+   the next candidate is never called. *)
+let test_session_refusal_every_candidate_meets_stops_walk () =
+  List.iter
+    (fun refusal ->
+       let code = Keeper_official_client_session_refusal.code refusal in
+       let result, attempts =
+         continuation_walk ~continuation_runtime_id:"claude.original_model"
+           ~original_attempt:(fun (_ : string) ->
+             Error (Keeper_official_client_session_refusal.core_error refusal))
+           [ "claude.original_model"; "codex.other_model" ]
+       in
+       (match result with
+        | Ok runtime_id -> Alcotest.failf "%s: the walk answered from %s" code runtime_id
+        | Error error ->
+          Alcotest.(check bool) (code ^ ": the walk ends with the refusal") true
+            (Keeper_official_client_session_refusal.of_core_error error = Some refusal));
+       Alcotest.(check (list string))
+         (code ^ ": the next candidate is never called")
+         [ "claude.original_model" ]
+         attempts)
+    [ Keeper_official_client_session_refusal.Task_reference_unbound
+    ; Keeper_official_client_session_refusal.Gate_continuation_unresumable
+    ]
 
 let test_runtime_dedupe_preserves_first_occurrence () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
@@ -8207,6 +8316,12 @@ let () =
             "attempt loop moves past a missing candidate"
             `Quick
             test_attempt_loop_moves_past_missing_candidate;
+          Alcotest.test_case "continuation walk reaches its original runtime" `Quick
+            test_continuation_walk_reaches_its_original_runtime;
+          Alcotest.test_case "continuation admission names another runtime" `Quick
+            test_continuation_admission_names_other_runtime;
+          Alcotest.test_case "session refusal every candidate meets stops the walk" `Quick
+            test_session_refusal_every_candidate_meets_stops_walk;
           Alcotest.test_case
             "runtime dedupe preserves first occurrence"
             `Quick

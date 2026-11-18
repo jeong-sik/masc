@@ -249,6 +249,11 @@ type tool_stream_observation =
       { turn : int
       ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
       }
+  | Turn_restored of
+      { turn : int
+      ; response : Agent_core.Types.api_response
+      ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
+      }
   | Child_content_observed of
       { attempt : Runtime_native_tasks.attempt
       ; observation : Keeper_claude_task_binding.child_observation
@@ -353,7 +358,7 @@ let make_hooks
            whole wait. *)
         Keeper_turn_preview.note_request ~writer:preview ~now:(Unix.gettimeofday ());
         Agent_core.Hooks.Continue
-      | (Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with
@@ -687,6 +692,15 @@ let make_hooks
                "turn=%d sse_turn_observation broadcast failed: %s"
                turn (Printexc.to_string exn));
         tool_call_count_ref := 0;
+        Agent_core.Hooks.Continue
+      | Agent_core.Hooks.AfterRestoredTurn { turn; response; tool_source_map } ->
+        (* A turn resumed in a new process. Its usage, cost and preview were
+           recorded when it was collected; what this process lacks is where
+           each admitted ToolUse stood among the provider's calls, which the
+           stream projection needs before the turn's tools report their
+           executions (#30728). No stream is replayed, so the journaled
+           admission seals the turn, not streamed blocks. *)
+        on_tool_stream_observation (Turn_restored { turn; response; tool_source_map });
         Agent_core.Hooks.Continue
       | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
@@ -1043,7 +1057,7 @@ let make_hooks
               Log.Keeper.error ~keeper_name:(!meta_ref).name "on_tool_executed callback failed for %s: %s"
                 tool_name (Printexc.to_string exn));
         Agent_core.Hooks.Continue
-      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     on_stop = Some (fun event ->
       match event with
@@ -1056,7 +1070,7 @@ let make_hooks
             ]
           ();
         Agent_core.Hooks.Continue
-      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     on_error = Some (function
       | Agent_core.Hooks.OnError { detail; context = err_ctx; _ } ->
@@ -1067,7 +1081,7 @@ let make_hooks
         Log.Keeper.error ~keeper_name:(!meta_ref).name "on_error: %s (context: %s)"
           detail err_ctx;
         Agent_core.Hooks.Continue
-      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
     on_tool_error = Some (function
       | Agent_core.Hooks.OnToolError { tool_name; error; _ } ->
@@ -1099,7 +1113,7 @@ let make_hooks
            nothing after a restart. *)
         Log.Keeper.debug ~keeper_name "tool_error: %s — %s" tool_name error;
         Agent_core.Hooks.Continue
-      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _) as _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _) as _event -> Agent_core.Hooks.Continue);
 
     post_tool_use_failure = Some (function
       | Agent_core.Hooks.PostToolUseFailure
@@ -1220,7 +1234,7 @@ let make_hooks
              ~wire_outcome:Tool_result.Unknown
              ~result_ready:false ~call_label:"cancelled-call");
         Agent_core.Hooks.Continue
-      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
+      | (Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
   }
   in
   hooks

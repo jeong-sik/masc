@@ -97,8 +97,12 @@ let observe_sources ~base_path ~keeper_name sources =
       (match Wire.decode_current_row ~keeper_name json with
        | Error _ -> incr invalid_ledger
        | Ok (Wire.Current_stimulus _) -> ()
-       | Ok (Wire.Current_reaction {transition_receipt=None; _}) -> ()
-       | Ok (Wire.Current_reaction {metadata; transition_receipt=Some receipt; _}) ->
+       | Ok (Wire.Current_reaction
+               {reaction = Wire.Turn_started_reaction | Wire.Turn_finished_reaction _; _}) -> ()
+       | Ok (Wire.Current_reaction
+               {metadata;
+                reaction = Wire.Event_queue_ack_reaction receipt
+                         | Wire.Event_queue_cancelled_reaction receipt}) ->
          (match Hashtbl.find_opt by_id metadata.stimulus_id with
           | None -> ()
           | Some candidates ->

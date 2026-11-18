@@ -15,8 +15,8 @@ let snapshot
   ?(goal_id = "goal-1")
   ?(due_date = Some "2026-09-26")
   ?(title = "Ship the ledger")
-  ?(metric = Some "tests")
-  ?(target_value = None)
+  ?(measure = Goal_measure_fixture.measure)
+  ?(procedure = "tests")
   ?(linked_task_ids = [ "task-1"; "task-2" ])
   ()
   =
@@ -30,8 +30,8 @@ let snapshot
        ; goal_created_at = at "2026-09-20T01:00:00Z"
        ; due_date
        ; title
-       ; metric
-       ; target_value
+       ; measure
+       ; procedure
        ; linked_task_ids
        })
 ;;
@@ -121,7 +121,7 @@ let test_the_row_format () =
     "snapshot"
     ({|{"kind":"snapshot","at":"2026-09-29T06:00:00Z","goal_id":"goal-1","request_id":"req-1","verification_run_id":"run-1",|}
      ^ {|"criterion_revision":"rev-1","passed_at":"2026-09-28T06:32:00Z","goal_created_at":"2026-09-20T01:00:00Z",|}
-     ^ {|"due_date":"2026-09-26","title":"Ship the ledger","metric":"tests","target_value":null,|}
+     ^ {|"due_date":"2026-09-26","title":"Ship the ledger","measure":{"kind":"done_when","condition":"the declared target is reached"},"procedure":"tests",|}
      ^ {|"linked_task_ids":["task-1","task-2"]}|})
     (line_of (snapshot ()));
   Alcotest.(check string)
@@ -213,7 +213,7 @@ let test_candidate_provenance_round_trips_without_changing_legacy_rows () =
 
 let test_a_row_reads_back_as_written () =
   round_trips "typical" (snapshot ());
-  round_trips "nothing optional" (snapshot ~due_date:None ~metric:None ~linked_task_ids:[] ());
+  round_trips "nothing optional" (snapshot ~due_date:None ~linked_task_ids:[] ());
   round_trips "an empty title" (snapshot ~title:"" ());
   round_trips "a payout owed" (payout_owed ());
   round_trips "candidates" (candidates ());
@@ -234,7 +234,7 @@ let test_a_due_date_is_kept_as_the_goal_held_it () =
    is read line by line. *)
 let test_a_row_stays_one_line () =
   let title = "line one\nline two\r\n\ttabbed \"quoted\" back\\slash \xe2\x80\xa8 unicode \xed\x95\x9c\xea\xb8\x80" in
-  let row = snapshot ~title ~metric:(Some "a\nb") () in
+  let row = snapshot ~title ~procedure:"a\nb" () in
   let written = line_of row in
   Alcotest.(check bool) "no newline inside the row" false (String.contains written '\n');
   Alcotest.(check bool) "no carriage return inside the row" false (String.contains written '\r');

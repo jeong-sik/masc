@@ -54,6 +54,9 @@ type microvm_start_failure =
           must release them before any fresh boot can recreate or trim them. *)
   | Adopted_guest_volume_unverified of string
   | Guest_provisions_unavailable of string
+  | Guest_shim_unready of Keeper_microvm_shim_readiness.error
+      (** The mounted shim is not one this server may run a guest with
+          (#52968): nothing is adopted, stopped or booted. *)
   | Github_identity_invalid of string
   | Policy_network_unavailable of string
   | Network_unexpressible of string
@@ -103,6 +106,7 @@ let microvm_start_failure_message failure =
   | Policy_network_unavailable detail
   | Network_unexpressible detail -> failed detail
   | Image_unresolved error -> failed (image_unresolved_message error)
+  | Guest_shim_unready error -> failed (Keeper_microvm_shim_readiness.error_message error)
   | Guest_size_invalid detail -> failed ("microvm_guest_size_invalid: " ^ detail)
   | Agent_socket_unavailable error ->
     failed (Keeper_microvm_agent_socket.preparation_error_message error)
@@ -163,6 +167,7 @@ let microvm_start_failure_cause failure =
   | Previous_mode_guest_not_removed _
   | Adopted_guest_volume_unverified _
   | Guest_provisions_unavailable _
+  | Guest_shim_unready _
   | Policy_network_unavailable _
   | Network_unexpressible _
   | Invalid_boot_plan _

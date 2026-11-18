@@ -88,7 +88,7 @@ let feature_opener_is_spelled row =
 let catalog_commands_outside_sheet =
   [ "about"; "activity"; "approve"; "calls"; "changes"; "cost"; "deny"; "features"
   ; "fleet-memory"; "help"; "links"; "login"; "memory"; "metrics"; "preset"
-  ; "preview"; "settings"; "task"; "task-inspect"; "task-recover"
+  ; "preview"; "reconcile"; "settings"; "task"; "task-inspect"; "task-recover"
   ; "thinking"; "tools" ]
 
 let test_every_feature_opener_is_real () =

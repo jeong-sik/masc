@@ -466,17 +466,20 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
       (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
   else
-    (* Each card is one clause, so a row too narrow for two moves the second
-       to the next row whole: cutting it at the edge left "최" of 최대 and
-       dropped the figure after it (RFC tui-one-screen-grammar §6.6). *)
+    (* One card to a row. Two cards shared the first row and were cut at
+       the edge, which left "최" of 최대 and dropped the figure after it (RFC
+       tui-one-screen-grammar §6.6). Packing them by their current width
+       instead made the row count follow the figures: a latency gaining a
+       digit moved every section below by a row (§8). A card wider than the
+       row on its own wraps; nothing is cut. *)
     let card tone title text = Printf.sprintf "%s[%s]%s %s" tone title Ansi.reset text in
-    [ [ card (Theme.info ()) (say "엔진" "ENGINE") c1_compact
-      ; card c2_tone (say "지연" "SCHED") c2_l1 ]
-    ; [ card (Theme.info ()) (say "작업" "TASKS") c3_l1 ]
-    ; [ card c4_tone (say "확인" "HOLDS") (c4_l1 ^ " · " ^ c4_l2) ]
+    [ card (Theme.info ()) (say "엔진" "ENGINE") c1_compact
+    ; card c2_tone (say "지연" "SCHED") c2_l1
+    ; card (Theme.info ()) (say "작업" "TASKS") c3_l1
+    ; card c4_tone (say "확인" "HOLDS") (c4_l1 ^ " · " ^ c4_l2)
     ]
-    |> List.concat_map (fun cards ->
-           Layout.pack_clauses ~max_cells:(inner_width - 2) cards
+    |> List.concat_map (fun card ->
+           Layout.pack_clauses ~max_cells:(inner_width - 2) [ card ]
            |> List.map (fun row -> "  " ^ row))
 
 type session_entry = { event : event; run : int; rows : string list }

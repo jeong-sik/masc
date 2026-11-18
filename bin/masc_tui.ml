@@ -19696,7 +19696,7 @@ let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
        cannot replace identity observed by a newer collector. *)
     (match admission with
      | Admit_identity_and_data | Admit_identity_only ->
-         note_server_health state ~answered:Masc_tui_refresh_pace.probe_answered
+         note_server_health state ~answered:Masc_tui_refresh_pace.answered_again
            results.http_scoped_server_identity;
          apply_server_identity_reading state ~mailbox results.http_scoped_server_identity
      | Admit_data_only | Admit_nothing -> ());
@@ -19743,7 +19743,7 @@ let apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_t
     (* The last [/health] reading its probes took, the probe's own answer
        whatever stopped the refresh after it. *)
     Option.iter
-      (note_server_health state ~answered:Masc_tui_refresh_pace.probe_answered) latest;
+      (note_server_health state ~answered:Masc_tui_refresh_pace.answered_again) latest;
     apply_refused_workspace_identity state ~mailbox ~detail:err latest;
     Option.iter
       (fun ao_ticket ->
@@ -24614,6 +24614,19 @@ let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <- Option.value settings.send_on_stop ~default:false
 
+(* Start a server here, and read it once it answers. The failures in a row
+   were of an address where nothing listened, so that answer ends their wait
+   (RFC tui-one-screen-grammar §2). The start the TUI makes by itself and the
+   Keeper list's [s] both come here. *)
+let start_server_here_then_read state ~base_path ~host ~port ~refresh_inflight
+    ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+  start_masc_server_here ~base_path ~host ~port
+    ~note:(fun msg -> add_event state "system" msg)
+    ~on_ready:(fun () ->
+      state.refresh_pace <- Masc_tui_refresh_pace.answered_again state.refresh_pace;
+      start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
+        ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox)
+
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
 
@@ -24632,16 +24645,10 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
       ~already_attempted:!tui_auto_start_spent
   then begin
     tui_auto_start_spent := true;
-    start_masc_server_here ~base_path ~host ~port
-      ~note:(fun msg -> add_event state "system" msg)
-      ~on_ready:(fun () ->
-        (* The failures in a row were of an address where nothing listened;
-           the server started here answering ends their wait. *)
-        state.refresh_pace <- Masc_tui_refresh_pace.probe_answered state.refresh_pace;
-        start_http_refresh state ~host ~port ~intent:Revalidate
-          ~refresh_inflight:http_refresh_inflight
-          ~scoped_refresh_inflight:http_scoped_refresh_inflight
-          ~scoped_refresh_followup ~mailbox)
+    start_server_here_then_read state ~base_path ~host ~port
+      ~refresh_inflight:http_refresh_inflight
+      ~scoped_refresh_inflight:http_scoped_refresh_inflight
+      ~scoped_refresh_followup ~mailbox
   end;
   (* A server answering here is the workspace appearing. The decision is the
      same guarded one taken at boot -- it still refuses a base path that holds
@@ -44570,15 +44577,10 @@ Use relative paths for resources already held in the package. -->
                  | Disconnected ->
                      (* RFC tui-server-lifecycle: with no server up there is
                         no keeper to shut down, so "s" starts one here. *)
-                     start_masc_server_here ~base_path ~host:server_peer_host
-                       ~port:state.port
-                       ~note:(fun msg -> add_event state "system" msg)
-                       ~on_ready:(fun () ->
-                         start_http_refresh state ~host:server_peer_host
-                           ~port:state.port ~intent:Revalidate
-                           ~refresh_inflight:http_refresh_inflight
-                           ~scoped_refresh_inflight:http_scoped_refresh_inflight
-                           ~scoped_refresh_followup ~mailbox:async_messages)
+                     start_server_here_then_read state ~base_path ~host:server_peer_host
+                       ~port:state.port ~refresh_inflight:http_refresh_inflight
+                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                       ~scoped_refresh_followup ~mailbox:async_messages
                  | Connecting | Booting | Account_server _ | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)

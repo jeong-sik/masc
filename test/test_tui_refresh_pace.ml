@@ -80,15 +80,15 @@ let test_an_operator_key_skips_the_wait_and_keeps_the_count () =
   check (float 1e-9) "a failure after it waits one step longer" 4.0
     (wait_after ~now:10.2 (failed ~now:10.2 t))
 
-let test_a_screen_answer_ends_the_wait_and_the_owed_pass_starts_now () =
+let test_an_answer_ends_the_wait_and_the_owed_pass_starts_now () =
   let t = failed ~now:10.0 (failed ~now:0.0 P.answering) in
-  let t = P.probe_answered t in
+  let t = P.answered_again t in
   check bool "the owed pass is due before its wait was over" true (P.due ~now:10.1 t);
   check bool "a pass the TUI asks for starts" true (P.starts ~now:10.1 P.Revalidate t);
   check (float 1e-9) "the run of failures is broken" retry_s
     (wait_after ~now:10.2 (failed ~now:10.2 t));
   check bool "a screen answer with nothing owed owes nothing" false
-    (P.due ~now:0.0 (P.probe_answered P.answering))
+    (P.due ~now:0.0 (P.answered_again P.answering))
 
 let () =
   run "tui_refresh_pace"
@@ -103,7 +103,7 @@ let () =
             test_no_pass_starts_before_its_wait
         ; test_case "an operator key skips the wait and keeps the count" `Quick
             test_an_operator_key_skips_the_wait_and_keeps_the_count
-        ; test_case "a screen answer ends the wait and the owed pass starts now" `Quick
-            test_a_screen_answer_ends_the_wait_and_the_owed_pass_starts_now
+        ; test_case "an answer ends the wait and the owed pass starts now" `Quick
+            test_an_answer_ends_the_wait_and_the_owed_pass_starts_now
         ] )
     ]

@@ -24,7 +24,7 @@ type t = private
       (** The last [failures] probes failed in a row. One pass is owed at
           [retry_at]. *)
   | Recovered
-      (** A screen's probe answered while a pass was owed. The wait is over
+      (** The server answered again while a pass was owed. The wait is over
           and that pass starts now. *)
 
 type ask =
@@ -49,8 +49,9 @@ val pass_answered : t -> t
 (** A full pass's probe answered. A pass is a whole revalidation, so nothing
     stays owed. *)
 
-val probe_answered : t -> t
-(** The probe of a screen's own reads answered. The wait is over; a pass the
+val answered_again : t -> t
+(** The server answered again: a screen's probe answered, or a server the
+    TUI started answered its liveness probe. The wait is over; a pass the
     failure owed is still owed and starts now. *)
 
 val due : now:float -> t -> bool

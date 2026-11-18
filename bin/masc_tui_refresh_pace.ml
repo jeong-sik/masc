@@ -16,7 +16,7 @@ let probe_failed ~retry_s ~max_retry_s ~now t =
 
 let pass_answered (_ : t) = Answering
 
-let probe_answered = function
+let answered_again = function
   | Failing _ | Recovered -> Recovered
   | Answering -> Answering
 

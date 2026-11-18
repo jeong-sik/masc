@@ -165,7 +165,7 @@ let stale_cells source_invalidations =
   else []
 ;;
 
-let span_since ~now at = Masc_tui_message_layout.span_text (max 0.0 (now -. at))
+let span_since ~now at = Masc_tui_value.Ongoing.since ~now at
 
 let cells ~now = function
   | Unknown -> [ unknown_cell ]

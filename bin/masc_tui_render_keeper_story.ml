@@ -94,8 +94,8 @@ let relative_text ~now (row : Masc_tui_types.schedule_row) = function
   | Some at ->
       (match Masc_tui_agenda.standing_of_wire row.sch_status with
        | Masc_tui_agenda.Coming ->
-           if at >= now then "in " ^ Message_layout.span_text (at -. now)
-           else "late " ^ Message_layout.span_text (now -. at)
+           if at >= now then "in " ^ Masc_tui_value.Ongoing.until ~now at
+           else "late " ^ Masc_tui_value.Ongoing.since ~now at
        | Masc_tui_agenda.Settled -> ago ~now at
        | Masc_tui_agenda.Unrecognised _ -> Masc_tui_theme.Glyph.no_value)
 ;;

@@ -821,7 +821,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
         ( [ Printf.sprintf "keeper=%s"
               (Terminal_text.single_line held.kta_keeper)
           ; Printf.sprintf "tool=%s" (Terminal_text.single_line (Masc.Tool_display.label held.kta_tool))
-          ; Masc_tui_answering.duration_text (max 0. (Unix.gettimeofday () -. held.kta_asked_at))
+          ; Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) held.kta_asked_at
             ^ ui_text state ~ko:" 대기" ~en:" waiting" ]
         , Printf.sprintf "  %sargs=%s%s" Ansi.dim
             (fit_width
@@ -856,7 +856,7 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
         ( operation @ site
           @ (match pending.gp_waiting_s with
              | None -> []
-             | Some seconds -> [Masc_tui_answering.duration_text seconds
+             | Some seconds -> [Masc_tui_value.Ongoing.text seconds
                  ^ ui_text state ~ko:" 경과" ~en:" old"])
         , Printf.sprintf "  %sinput=%s%s" Ansi.dim
             (fit_width

@@ -69,7 +69,10 @@ let local_source_pending_note state source =
       let name = match source with
         | Local_keepers -> ui_text state ~ko:"Keeper 메타데이터" ~en:"Keeper metadata"
         | Local_work -> ui_text state ~ko:"작업 목록" ~en:"Work" in
-      let seconds = Printf.sprintf "%.1f" (Int64.to_float age_ns /. 1e9) ^ ui_text state ~ko:"초" ~en:"s" in
+      (* A length still going reads in whole seconds, then whole minutes
+         (RFC tui-one-screen-grammar §6.2). *)
+      let seconds = Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ())
+          (Int64.to_float age_ns /. 1e9) in
       let lead = match phase with
         | Local_read_observation.Read_failed _ | Read_not_started -> name
         | Awaiting_start | Io_queued | Io_running | Io_returning | Preparing
@@ -3866,7 +3869,7 @@ let fusion_run_clock run =
 
 let fusion_run_duration ~now run =
   match run.fur_status, run.fur_finished_at with
-  | Fusion_running, _ -> Message_layout.span_text (now -. run.fur_started_at) ^ " running"
+  | Fusion_running, _ -> Masc_tui_value.Ongoing.since ~now run.fur_started_at ^ " running"
   | (Fusion_completed | Fusion_failed _), Some finished ->
       Message_layout.span_text (finished -. run.fur_started_at)
   | (Fusion_completed | Fusion_failed _), None -> "not recorded"

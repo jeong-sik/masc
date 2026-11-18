@@ -218,9 +218,8 @@ let window_label (window : Masc.Tui_decode_usage.provider_usage_window) =
 
 (* ---- time --------------------------------------------------------------- *)
 
-(* The screen's one ladder, so a countdown here reads like every other span
-   on the Overview. *)
-let span_text = Masc_tui_message_layout.span_text
+(* A countdown changes while the reader looks, so it reads on the ongoing
+   ladder like every other such span (RFC tui-one-screen-grammar §6.2). *)
 
 (* The screen's clock is the terminal's zone, like every other row clock. A
    time on another day carries its date. *)
@@ -254,8 +253,8 @@ let reset_words ~now = function
   | Some at ->
       { reset_tone = None
       ; reset_full =
-          Printf.sprintf "resets %s (%s)" (clock_text ~now at) (span_text (at -. now))
-      ; reset_short = Printf.sprintf "resets in %s" (span_text (at -. now))
+          Printf.sprintf "resets %s (%s)" (clock_text ~now at) (Masc_tui_value.Ongoing.until ~now at)
+      ; reset_short = Printf.sprintf "resets in %s" (Masc_tui_value.Ongoing.until ~now at)
       }
 
 (* A clock that moved backwards says nothing rather than a negative age. *)
@@ -337,7 +336,7 @@ let exhausted_tag ~now = function
   | Observed_exhausted (Some at) ->
       Some
         (Printf.sprintf "exhausted (observed) \xc2\xb7 catalogue reopens %s in %s"
-           (clock_text ~now at) (span_text (at -. now)))
+           (clock_text ~now at) (Masc_tui_value.Ongoing.until ~now at))
 
 (* ---- group the reported and observed evidence --------------------------- *)
 

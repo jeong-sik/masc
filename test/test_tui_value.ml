@@ -7,6 +7,8 @@
 module Instant = Masc_tui_value.Instant
 module Count = Masc_tui_value.Count
 module Hash = Masc_tui_value.Hash
+module Ongoing = Masc_tui_value.Ongoing
+module Redraw = Masc_tui_value.Redraw
 
 (* [Unix.tm] counts years from 1900. *)
 let tm_year_origin = 1900
@@ -119,6 +121,86 @@ let test_a_hash_keeps_its_head () =
     (Hash.short digest);
   Alcotest.(check string) "a value shorter than the cut" "0b9c" (Hash.short "0b9c")
 
+
+(* Every instant at which the ongoing reading of a growing span differs from
+   the reading just before it, sampled every quarter second from [first] up to
+   [last]. *)
+let reading_changes ~first ~last =
+  let step = 0.25 in
+  let rec walk at previous changes =
+    if at > last then List.rev changes
+    else
+      let reading = Ongoing.text at in
+      walk (at +. step) reading
+        (if String.equal reading previous then changes else at :: changes)
+  in
+  walk first (Ongoing.text first) []
+
+let seconds_per_minute = 60.
+let seconds_per_day = 86_400.
+
+(* RFC tui-one-screen-grammar §6.2 and §10: a length past a minute changes at
+   most once a minute, so time alone redraws it at most once a minute. *)
+let test_a_length_past_a_minute_changes_at_most_once_a_minute () =
+  let changes = reading_changes ~first:seconds_per_minute ~last:(2. *. seconds_per_day) in
+  let rec gaps = function
+    | a :: (b :: _ as rest) -> (b -. a) :: gaps rest
+    | [ _ ] | [] -> []
+  in
+  Alcotest.(check bool) "the reading changes past a minute" true (List.length changes > 1);
+  List.iter
+    (fun gap ->
+      Alcotest.(check bool) "two changes are at least a minute apart" true
+        (gap >= seconds_per_minute))
+    (gaps changes)
+
+(* [next_change] is the instant the reading next differs: a frame that waits
+   for it is neither early (the same reading drawn again) nor late. *)
+let test_next_change_is_the_first_instant_the_reading_differs () =
+  List.iter
+    (fun span ->
+      match Ongoing.next_change span with
+      | None -> Alcotest.fail "a readable span always changes again"
+      | Some next ->
+          Alcotest.(check bool) "it is later than the span" true (next > span);
+          Alcotest.(check bool) "the reading differs from then" false
+            (String.equal (Ongoing.text span) (Ongoing.text next));
+          Alcotest.(check bool) "and not before" true
+            (String.equal (Ongoing.text span) (Ongoing.text (next -. 0.001))))
+    [ 0.; 0.4; 1.; 59.2; 60.; 61.; 125.3; 3599.9; 3600.; 7322.; 86_399.; 86_400.5;
+      100. *. seconds_per_day; 123. *. seconds_per_day ]
+
+(* A countdown reads the same until what is left drops below the reading's
+   floor. *)
+let test_a_countdown_changes_below_its_reading_floor () =
+  List.iter
+    (fun left ->
+      let floor = Ongoing.reading_floor left in
+      Alcotest.(check bool) "the floor reads the same" true
+        (String.equal (Ongoing.text left) (Ongoing.text floor));
+      Alcotest.(check bool) "just below it does not" false
+        (String.equal (Ongoing.text left) (Ongoing.text (floor -. 0.001))))
+    [ 1.5; 59.9; 60.; 125.3; 3600.; 7322.; 86_400.5; 101. *. seconds_per_day ]
+
+(* What a frame notes is when its earliest time text changes. *)
+let test_a_frame_notes_its_earliest_change () =
+  Redraw.begin_frame ();
+  Alcotest.(check (option (float 1e-9))) "a new frame notes nothing" None
+    (Redraw.next_change ());
+  (* 100.25s ago reads in minutes and next changes at the second minute;
+     4.75s ago next changes at its fifth second. *)
+  ignore (Ongoing.since ~now:1000.25 900.);
+  ignore (Ongoing.since ~now:1000.25 995.5);
+  Alcotest.(check (option (float 1e-9))) "the earliest of the two" (Some 1000.5)
+    (Redraw.next_change ());
+  let worker = Domain.spawn Redraw.next_change in
+  Alcotest.(check (option (float 1e-9))) "another domain built no frame" None
+    (Domain.join worker);
+  Redraw.begin_frame ();
+  ignore (Ongoing.until ~now:1000. 990.);
+  Alcotest.(check (option (float 1e-9))) "a passed moment changes no more" None
+    (Redraw.next_change ())
+
 let () =
   Alcotest.run "tui_value"
     [ ( "instant distance",
@@ -143,4 +225,14 @@ let () =
         ] )
     ; ( "hash",
         [ Alcotest.test_case "a hash keeps its head" `Quick test_a_hash_keeps_its_head ] )
+    ; ( "ongoing length",
+        [ Alcotest.test_case "past a minute, at most once a minute" `Quick
+            test_a_length_past_a_minute_changes_at_most_once_a_minute
+        ; Alcotest.test_case "next change is when the reading differs" `Quick
+            test_next_change_is_the_first_instant_the_reading_differs
+        ; Alcotest.test_case "a countdown changes below its floor" `Quick
+            test_a_countdown_changes_below_its_reading_floor
+        ; Alcotest.test_case "a frame notes its earliest change" `Quick
+            test_a_frame_notes_its_earliest_change
+        ] )
     ]

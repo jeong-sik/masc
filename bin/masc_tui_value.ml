@@ -1,3 +1,19 @@
+module Redraw = struct
+  (* The earliest instant at which text drawn on the frame being built reads
+     differently, kept per domain because only the UI domain builds frames. *)
+  let earliest = Domain.DLS.new_key (fun () -> None)
+
+  let begin_frame () = Domain.DLS.set earliest None
+
+  let note_change_at at =
+    if Float.is_finite at then
+      match Domain.DLS.get earliest with
+      | Some sooner when sooner <= at -> ()
+      | Some _ | None -> Domain.DLS.set earliest (Some at)
+
+  let next_change () = Domain.DLS.get earliest
+end
+
 module Instant = struct
   type distance =
     | Same_day
@@ -77,10 +93,87 @@ module Instant = struct
       | 0 -> Printf.sprintf "UTC%c%d" sign hours
       | minutes -> Printf.sprintf "UTC%c%d:%02d" sign hours minutes
 
+  let seconds_per_minute = 60
+
   let wall_clock ~now =
     let local = Unix.localtime now in
+    (* The clock reads to the minute, so it next reads differently when the
+       local minute turns over. *)
+    Redraw.note_change_at
+      (Float.floor now +. Float.of_int (seconds_per_minute - local.Unix.tm_sec));
     clock To_minute local ^ " "
     ^ zone_label ~offset_minutes:(offset_minutes ~utc:(Unix.gmtime now) ~local)
+end
+
+module Ongoing = struct
+  let seconds_per_minute = 60
+  let seconds_per_hour = 60 * seconds_per_minute
+  let seconds_per_day = 24 * seconds_per_hour
+
+  (* From a hundred days the ladder drops the hours, as the finished ladder
+     does, so a reading stays within six cells. *)
+  let days_with_hours = 100 * seconds_per_day
+
+  (* [int_of_float] is defined only below 2^62. Far below that, past this
+     many seconds (thirty million years), a value is a malformed stamp. *)
+  let longest_whole_seconds = 1_000_000_000_000_000
+
+  (* Whole seconds of a span: a span at or below zero, or one that is not a
+     number, is no time at all; one past the longest reads as the longest. *)
+  let whole_seconds seconds =
+    if not (seconds > 0.) then 0
+    else if seconds >= Float.of_int longest_whole_seconds then longest_whole_seconds
+    else int_of_float seconds
+
+  let text seconds =
+    let whole = whole_seconds seconds in
+    if whole < seconds_per_minute then Printf.sprintf "%ds" whole
+    else if whole < seconds_per_hour then Printf.sprintf "%dm" (whole / seconds_per_minute)
+    else if whole < seconds_per_day then
+      Printf.sprintf "%dh%02dm" (whole / seconds_per_hour)
+        (whole mod seconds_per_hour / seconds_per_minute)
+    else if whole < days_with_hours then
+      Printf.sprintf "%dd%02dh" (whole / seconds_per_day)
+        (whole mod seconds_per_day / seconds_per_hour)
+    else Printf.sprintf "%dd" (whole / seconds_per_day)
+
+  (* The unit the reading counts in at this length: the step between two
+     readings. *)
+  let step whole =
+    if whole < seconds_per_minute then 1
+    else if whole < seconds_per_day then seconds_per_minute
+    else if whole < days_with_hours then seconds_per_hour
+    else seconds_per_day
+
+  let reading_floor seconds =
+    let whole = whole_seconds seconds in
+    let step = step whole in
+    Float.of_int (whole / step * step)
+
+  let next_change seconds =
+    let whole = whole_seconds seconds in
+    if whole >= longest_whole_seconds then None
+    else
+      let step = step whole in
+      Some (Float.of_int ((whole / step + 1) * step))
+
+  let since ~now at =
+    let seconds = now -. at in
+    (if Float.is_finite seconds then
+       let from = Float.max 0. seconds in
+       Option.iter (fun next -> Redraw.note_change_at (at +. next)) (next_change from));
+    text seconds
+
+  let age ~now seconds = since ~now (now -. seconds)
+
+  let until ~now at =
+    let seconds = at -. now in
+    (if Float.is_finite seconds && seconds > 0. then
+       let floor = reading_floor seconds in
+       (* Below its first second the countdown already reads [0s], as every
+          moment after it does, so it changes no more. *)
+       if floor > 0. then Redraw.note_change_at (at -. floor));
+    text seconds
 end
 
 module Mark = struct

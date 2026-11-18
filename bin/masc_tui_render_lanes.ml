@@ -68,7 +68,7 @@ let standalone_lane_last_run ~ko ~now (lane : Tui_decode.standalone_lane) =
     Printf.sprintf
       (if ko then "마지막 실행 %s (%s 전)" else "last run %s (%s ago)")
       (standalone_lane_outcome_word ~ko outcome)
-      (Masc_tui_answering.elapsed_text ~now at)
+      (Masc_tui_value.Ongoing.since ~now at)
 
 let standalone_lane_state_tone (lane : Tui_decode.standalone_lane) =
   match lane.sl_configuration_state, lane.sl_status with
@@ -114,7 +114,7 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
           (if ko then "%d건 진행 중 (최근 %s 전 시작)"
            else "%d running (latest started %s ago)")
           lane.sl_running_count
-          (Masc_tui_answering.elapsed_text ~now started)
+          (Masc_tui_value.Ongoing.since ~now started)
       | None ->
         Printf.sprintf (if ko then "%d건 진행 중" else "%d running")
           lane.sl_running_count

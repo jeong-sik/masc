@@ -207,7 +207,7 @@ let async_request_inventory_lines (state : state) =
       in
       let elapsed =
         match
-          Masc_tui_message_layout.elapsed_text (now -. request.ar_submitted_at)
+          Masc_tui_message_layout.age_text ~now ~since:request.ar_submitted_at
         with
         | Some text -> text
         | None -> Masc_tui_theme.Glyph.no_value

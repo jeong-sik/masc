@@ -46,22 +46,6 @@ let lane_word ~ko = function
   | Tui_decode.Turn_lane_maintenance -> if ko then "정비" else "maintenance"
 ;;
 
-(* "2m14s" reads at a glance; a bare second count stops meaning anything past
-   a minute. 41989s is a real reading a surface drew, and no operator weighs
-   it -- it is eleven hours and thirty-nine minutes, which is a different
-   sentence.
-
-   Two callers, one spelling. Some know when a thing started and some are
-   handed the span already measured; splitting on that rather than letting
-   the second one invent its own format is what keeps "11h39m" from becoming
-   "11:39" one surface over.
-
-   Negative spans (clock skew between server and terminal) clamp to zero
-   rather than counting up from the future. *)
-let duration_text = Masc_tui_message_layout.span_text
-
-let elapsed_text ~now started_at = duration_text (now -. started_at)
-
 (* One row of the chat pane's status band. [lead] is what the eye lands on
    -- the mark, the lane, the age -- and the renderer paints it in the
    status colour; [rest] is the detail after it, receded. The band used to
@@ -112,7 +96,7 @@ let chat_activity ?(stop_keys = "") ?(show_timing = true)
       | Some preview ->
         Printf.sprintf (if ko then "%s · 마지막 활동 %s 전" else "%s · last activity %s ago")
           preview.Tui_decode.ktp_status_text
-          (elapsed_text ~now preview.ktp_updated_at_unix)
+          (Masc_tui_value.Ongoing.since ~now preview.ktp_updated_at_unix)
     in
     (* "Current chat_operation turn · 14m43s · …" went: the mark says a turn
        is running, and the lane and the age are the facts; "current" and
@@ -127,7 +111,7 @@ let chat_activity ?(stop_keys = "") ?(show_timing = true)
     in
     stale
     @ [ { lead = Printf.sprintf "%s %s%s%s" running_mark observed (lane_word ~ko lane)
-                   (if show_timing then " · " ^ elapsed_text ~now started_at_unix else "")
+                   (if show_timing then " · " ^ Masc_tui_value.Ongoing.since ~now started_at_unix else "")
         ; rest = " · " ^ Masc.Tui_terminal_text.sanitize_terminal_text status
         ; keys = stop_keys
         } ]
@@ -259,12 +243,12 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
       (fun widest (_, lane, started_at) ->
         max widest (Masc_tui_message_layout.display_width
           (Printf.sprintf "  %-14s  %s" (lane_word ~ko lane)
-            (elapsed_text ~now started_at)))) 0 running
+            (Masc_tui_value.Ongoing.since ~now started_at)))) 0 running
     in
     List.fold_left
       (fun widest (_, finished_at) ->
         max widest (Masc_tui_message_layout.display_width
-          ("  " ^ answered (elapsed_text ~now finished_at))))
+          ("  " ^ answered (Masc_tui_value.Ongoing.since ~now finished_at))))
       running_width live_finishes
   in
   (* Reserve the lane and age first: one long fleet name must not push every
@@ -297,7 +281,7 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
           }
         ; { text =
               Printf.sprintf (if ko then "%s 전에 읽은 목록" else "showing the rows read %s ago")
-                (elapsed_text ~now read_at)
+                (Masc_tui_value.Ongoing.since ~now read_at)
           ; tone = Quiet
           ; target = None
           }
@@ -325,7 +309,7 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
                 Printf.sprintf "%s %s  %-14s  %s" running_mark
                   (fitted_name name)
                   (lane_word ~ko lane)
-                  (elapsed_text ~now started_at)
+                  (Masc_tui_value.Ongoing.since ~now started_at)
             ; tone = Running
             ; target = Some name
             })
@@ -337,7 +321,7 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
         { text =
             Printf.sprintf "\xe2\x9c\x93 %s  %s"
               (fitted_name name)
-              (answered (elapsed_text ~now finished_at))
+              (answered (Masc_tui_value.Ongoing.since ~now finished_at))
         ; tone = Done
         ; target = Some name
         })

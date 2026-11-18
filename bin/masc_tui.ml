@@ -30435,7 +30435,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Some at ->
                say "처리 관측 " "pass observed "
                ^ span_ago ~ko
-                   (Masc_tui_message_layout.span_text (max 0. (Unix.gettimeofday () -. at))) in
+                   (Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) at) in
            let cause = Option.bind librarian.mlh_state
              Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause in
            let admission = Option.map (fun admission ->
@@ -30445,7 +30445,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            let reading_age =
              say "상태 조회 " "status loaded "
              ^ span_ago ~ko
-                 (Masc_tui_message_layout.span_text (max 0. (Unix.gettimeofday () -. mhr_generated_at))) in
+                 (Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) mhr_generated_at) in
            notice ~kind:Notice_reply (String.concat " · "
              ([keeper; pass; lag; measured; reading_age] @ Option.to_list cause @ Option.to_list admission)));
       (* The row replaces the Keeper's row in the fleet answer, or removes it

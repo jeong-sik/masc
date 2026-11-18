@@ -1044,11 +1044,13 @@ val composer_lines : max_rows:int -> string -> string list
     {!input_viewport}, the way the single-line composer already was. *)
 
 val span_text : float -> string
-(** A span of seconds in the largest unit that still carries a remainder:
-    [42s], [2m14s], [11h39m], [8d15h], and from a hundred days the days alone,
-    [255d]. At most six cells below a hundred thousand days, so a column sized
-    for the longest reading holds every shorter one. A negative span reads as
-    [0s]; a caller that would rather say nothing checks first.
+(** A finished span of seconds in the largest unit that still carries a
+    remainder: [42s], [2m14s], [11h39m], [8d15h], and from a hundred days the
+    days alone, [255d]. At most six cells below a hundred thousand days, so a
+    column sized for the longest reading holds every shorter one. A negative
+    span reads as [0s]; a caller that would rather say nothing checks first.
+    A span that grows or shrinks while the reader looks is
+    {!Masc_tui_value.Ongoing}'s.
 
     One ladder. Two callers used to keep their own, with different ceilings,
     and the one that stopped at minutes drew [12045m] for a nine-day-old
@@ -1063,7 +1065,9 @@ val elapsed_text : float -> string option
     NaN, an infinite one, or one past 10^15 seconds. *)
 
 val age_text : now:float -> since:float -> string option
-(** How long something has been outstanding, as {!span_text}.
+(** How long something has been outstanding, as
+    {!Masc_tui_value.Ongoing.since} reads it ([45s], [3m], [1h04m]), noting
+    when it next reads differently.
 
     An age, not a countdown: it says how long a thing has been going so a
     reader can tell slow from stuck. Rendered from a clock the caller passes

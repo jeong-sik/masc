@@ -5068,7 +5068,7 @@ let render_keeper_message (state : state) =
              | Some row ->
                let age =
                  match row.gp_waiting_s with
-                 | Some seconds -> " " ^ Masc_tui_answering.duration_text seconds
+                 | Some seconds -> " " ^ Masc_tui_value.Ongoing.text seconds
                  | None -> ""
                in
                Printf.sprintf
@@ -5194,7 +5194,7 @@ let render_keeper_message (state : state) =
                    let phase = Masc_tui_types.gate_phase_word state row.gp_phase in
                    let age =
                      match row.gp_waiting_s with
-                     | Some seconds -> Masc_tui_answering.duration_text seconds
+                     | Some seconds -> Masc_tui_value.Ongoing.text seconds
                      | None -> Masc_tui_theme.Glyph.no_value
                    in
                    Printf.sprintf "%s %s %s"

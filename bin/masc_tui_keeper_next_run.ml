@@ -395,7 +395,7 @@ let cell ~now = function
   | Scheduled_at at ->
       let text =
         if at >= now then
-          Printf.sprintf "◷ %s" (Masc_tui_message_layout.span_text (at -. now))
+          Printf.sprintf "◷ %s" (Masc_tui_value.Ongoing.until ~now at)
         else
           "◷ 곧"
       in
@@ -403,7 +403,7 @@ let cell ~now = function
   | Late_since at ->
       let text =
         if now > at then
-          Printf.sprintf "◷ 늦음 +%s" (Masc_tui_message_layout.span_text (now -. at))
+          Printf.sprintf "◷ 늦음 +%s" (Masc_tui_value.Ongoing.since ~now at)
         else
           "◷ 늦음"
       in
@@ -413,7 +413,7 @@ let cell ~now = function
   | Held_as_of at ->
       let text =
         if now > at then
-          Printf.sprintf "◷ 보류 (%s 전)" (Masc_tui_message_layout.span_text (now -. at))
+          Printf.sprintf "◷ 보류 (%s 전)" (Masc_tui_value.Ongoing.since ~now at)
         else
           "◷ 보류 (확인 전)"
       in
@@ -421,7 +421,7 @@ let cell ~now = function
   | Not_before at ->
       let text =
         if at >= now then
-          Printf.sprintf "◷ >%s" (Masc_tui_message_layout.span_text (at -. now))
+          Printf.sprintf "◷ >%s" (Masc_tui_value.Ongoing.until ~now at)
         else
           "◷ 확인 중"
       in

@@ -2798,4 +2798,5 @@ let age_text ~now ~since =
   (* A clock that moved backwards, or a stamp that is not a number, says
      nothing rather than an age. The row that shows this has no way to draw
      "-4s" a reader could use. *)
-  if is_readable_span seconds then Some (span_text seconds) else None
+  if is_readable_span seconds then Some (Masc_tui_value.Ongoing.since ~now since)
+  else None

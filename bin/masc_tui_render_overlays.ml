@@ -135,8 +135,8 @@ let render_context_inspector state =
     else
       match state.context_inspector_reading, state.context_inspector_read_at with
       | Some _, Some read_at ->
-          let age = Float.max 0. (Unix.gettimeofday () -. read_at) in
-          Ansi.dim ^ "  read " ^ Masc_tui_message_layout.span_text age ^ " ago" ^ Ansi.reset
+          Ansi.dim ^ "  read " ^ Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) read_at
+          ^ " ago" ^ Ansi.reset
       | Some _, None | None, (Some _ | None) -> ""
   in
   (* The search query, drawn where the typing lands: the Keepers strip's

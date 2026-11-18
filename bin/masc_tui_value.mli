@@ -7,6 +7,25 @@
     on the next, the first in the operator's zone and the second in UTC with
     nothing marking which was which (RFC tui-one-screen-grammar, section 6). *)
 
+(** When the text of the frame being built next reads differently with no new
+    data. Without new data only time text changes: the zone-1 clock, moments
+    and lengths (RFC tui-one-screen-grammar §8). Each function in this module
+    that draws such text notes the instant its reading next changes, and the
+    loop redraws on the first whole second at or after the earliest one. *)
+module Redraw : sig
+  val begin_frame : unit -> unit
+  (** Forget what the previous frame noted. Called where a frame starts. *)
+
+  val note_change_at : float -> unit
+  (** A text drawn on this frame reads differently from this wall-clock
+      instant on. A non-finite instant is no instant and is not noted. *)
+
+  val next_change : unit -> float option
+  (** The earliest instant noted since {!begin_frame}, [None] when the frame
+      drew no text that changes with time. Read in the domain that built the
+      frame. *)
+end
+
 (** A moment, drawn in the time zone of the machine the TUI runs on. *)
 module Instant : sig
   type distance =
@@ -55,7 +74,47 @@ module Instant : sig
 
   val wall_clock : now:float -> string
   (** The current time with the zone every other moment on the screen is
-      drawn in ([15:43 UTC+9]). The one place a screen names the zone. *)
+      drawn in ([15:43 UTC+9]). The one place a screen names the zone. Notes
+      the next local minute with {!Redraw.note_change_at}. *)
+end
+
+(** The length of something still going, how long ago something happened, or
+    how long until something comes: a length that changes while the reader
+    looks at it (RFC tui-one-screen-grammar §6.2). It has no decimal, and past
+    a minute it has no seconds, so past a minute it changes at most once a
+    minute. A finished length keeps the finer ladder
+    ({!Masc_tui_message_layout.elapsed_text}). *)
+module Ongoing : sig
+  val text : float -> string
+  (** [45s], [3m], [1h04m], [2d03h], [120d]: whole seconds below a minute,
+      whole minutes below an hour, then two units, and days alone from a
+      hundred days. Never wider than six cells. A span at or below zero, or
+      one that is not a number, reads [0s]. *)
+
+  val next_change : float -> float option
+  (** The shortest span longer than the given one that {!text} reads
+      differently: the next whole second below a minute, the next whole
+      minute below a day, then the next hour, then the next day. [None] past
+      the longest span the ladder reads. *)
+
+  val reading_floor : float -> float
+  (** The shortest span {!text} reads the same as the given one. A
+      countdown changes when what is left drops below it. *)
+
+  val since : now:float -> float -> string
+  (** {!text} of the span from a past moment to [now], noting when it next
+      reads differently ({!Redraw.note_change_at}). A moment ahead of [now]
+      (clocks that disagree) reads [0s]. *)
+
+  val age : now:float -> float -> string
+  (** {!since} for a length measured on another clock, such as the monotonic
+      age of a pending read: [age ~now seconds] reads [seconds] and notes when
+      it next reads differently, counting from the wall-clock [now]. *)
+
+  val until : now:float -> float -> string
+  (** {!text} of the span from [now] to a coming moment, noting when it next
+      reads differently. A moment already passed reads [0s] and notes
+      nothing, as nothing about it changes any more. *)
 end
 
 (** The mark ahead of a state word. One mark has one meaning on every screen

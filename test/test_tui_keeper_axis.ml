@@ -166,8 +166,10 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   (* When memory_health is None, memory reading is Unknown ("mem ?") *)
   let cells = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" ~runtime:None in
   Alcotest.(check int) "has schedule cell + mem ?" 2 (List.length cells);
-  (* The schedule cell counts down: the row is due at 12:00:00Z and now is 11:13:20Z. *)
-  Alcotest.(check string) "first cell is schedule" "◷ 46m40s"
+  (* The schedule cell counts down: the row is due at 12:00:00Z and now is
+     11:13:20Z. A countdown past a minute reads whole minutes (RFC
+     tui-one-screen-grammar §6.2). *)
+  Alcotest.(check string) "first cell is schedule" "◷ 46m"
     (List.hd cells).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "second cell is mem ?" "mem ?"
     (List.nth cells 1).Masc_tui_keeper_axis_cell.text;
@@ -218,7 +220,7 @@ let test_segments_extracts_scheduled_and_memory_cells () =
     (List.length cells_with_memory);
   Alcotest.(check string) "edgar lag cell" "lag 4"
     (List.nth cells_with_memory 1).Masc_tui_keeper_axis_cell.text;
-  Alcotest.(check string) "edgar clock cell" "+1m00s +2 -1"
+  Alcotest.(check string) "edgar clock cell" "+1m +2 -1"
     (List.nth cells_with_memory 2).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "edgar stale cell" "stale ×1"
     (List.nth cells_with_memory 3).Masc_tui_keeper_axis_cell.text;

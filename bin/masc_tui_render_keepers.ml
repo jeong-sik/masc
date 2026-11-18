@@ -327,7 +327,7 @@ let keeper_path_rest ~ko ?now (row : Keeper_list_model.row) =
        | Ok (Some (Tui_decode.Path_rest_resting { runtime_id; release_at; release_basis })) ->
            let now_val = match now with Some t -> t | None -> Unix.gettimeofday () in
            let time_clause =
-             if release_at > now_val then " ~" ^ Message_layout.span_text (release_at -. now_val)
+             if release_at > now_val then " ~" ^ Masc_tui_value.Ongoing.until ~now:now_val release_at
              else ""
            in
            let basis_word =
@@ -1901,11 +1901,14 @@ let keeper_waiting_refresh_line state =
   match keeper_waiting_refresh_slow state with
   | None -> ""
   | Some age ->
-      let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
+      (* A length still going reads in whole seconds, then whole minutes
+         (RFC tui-one-screen-grammar §6.2). *)
+      let elapsed = Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ())
+          (Int64.to_float age /. 1e9) in
       Theme.warn ()
       ^ ui_text state
-          ~ko:("  대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed ^ "초")
-          ~en:("  waiting refresh pending · showing last observation · " ^ elapsed ^ "s")
+          ~ko:("  대기 목록 갱신 중 · 마지막 관측을 표시합니다 · " ^ elapsed)
+          ~en:("  waiting refresh pending · showing last observation · " ^ elapsed)
       ^ Ansi.reset
 
 (* One row above the list that is always drawn, so a reading going stale or

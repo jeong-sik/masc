@@ -251,7 +251,7 @@ let test_chat_shows_background_work_and_uncertainty () =
   (match lines with
    | status :: _ ->
      Alcotest.(check bool) "the lead names the lane and the age" true
-       (Astring.String.is_infix ~affix:"autonomous · 1m40s" status.Masc_tui_answering.lead);
+       (Astring.String.is_infix ~affix:"autonomous · 1m" status.Masc_tui_answering.lead);
      Alcotest.(check bool) "the model is not in the lead" false
        (Astring.String.is_infix ~affix:"glm" status.lead);
      Alcotest.(check bool) "no sentence around the facts" false

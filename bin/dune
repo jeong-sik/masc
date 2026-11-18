@@ -1346,6 +1346,13 @@
  (wrapped false)
  (modules masc_tui_words))
 
+; Screen text in both languages (RFC tui-one-screen-grammar section 7.1).
+; Depends on nothing, like the words table, so every renderer can use it.
+(library
+ (name masc_tui_say)
+ (wrapped false)
+ (modules masc_tui_say))
+
 (library
  (name masc_tui_alloc_profile)
  (wrapped false)

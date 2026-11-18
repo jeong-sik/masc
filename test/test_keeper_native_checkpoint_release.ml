@@ -148,11 +148,13 @@ let run_call ~scenario root =
     let result = match Native.prepared_input prepared, Native.prepared_checkpoint prepared with
       | Native.New_input {blocks; metadata}, checkpoint ->
         Runtime_agent.run_blocks ~sw:turn_sw ~net:env#net ~config ~agent_ref
-          ?agent_core_checkpoint:checkpoint ~input_metadata:metadata blocks
+          ?agent_core_checkpoint:checkpoint ~input_metadata:metadata
+          ~execution_capture:(Runtime_agent.execution_capture config) blocks
       | Native.Continue_from_checkpoint, Some checkpoint ->
         Runtime_agent.continue_from_checkpoint ~sw:turn_sw ~net:env#net ~config ~agent_ref
-          ~checkpoint ()
+          ~checkpoint ~execution_capture:(Runtime_agent.execution_capture config) ()
       | Native.Continue_from_checkpoint, None -> fail "continuation without a checkpoint" in
+    let result = Result.map_error Runtime_agent.run_failure_error result in
     (match result with
      | Ok result ->
        check string "the call completes" "rounds recorded"

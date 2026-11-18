@@ -128,6 +128,10 @@ val record_attempt_terminal :
     directly but cannot thread AGENT_CORE's per-call metrics sink through the
     provider invocation path. *)
 
+val capture_has_attempts : runtime_metrics_capture -> bool
+(** [true] once [capture] holds an attempt, open or terminal. A provider
+    request opened it; a capture without one never reached a provider. *)
+
 val runtime_metrics_for_candidates :
   runtime_id:string ->
   ?keeper_name:string ->

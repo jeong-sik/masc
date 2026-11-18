@@ -185,14 +185,35 @@ val provider_caps_of_config :
   Llm_provider.Capabilities.capabilities
 val provider_label : Llm_provider.Provider_config.t -> string
 
-val runtime_observation_for_terminal_config :
-  total_duration_ms:float ->
-  ?error:string ->
-  ?usage_scope:Runtime_usage_scope.t ->
-  config ->
-  Runtime_observation.runtime_observation
-(** A completed runtime owns its terminal attempt. If [error] is present,
-    retain an uncaptured boundary failure without inventing an attempt. *)
+(** {1 Execution capture} *)
+
+type execution_capture
+(** One run's provider attempts. The run's transport opens an attempt for
+    every request it receives and closes it when the request returns or
+    raises. A caller that may abandon the run (a cancelled attempt fiber)
+    keeps its own handle so it can still read the attempts the run made. *)
+
+val execution_capture :
+  ?keeper_name:string -> ?turn_id:int -> config -> execution_capture
+(** A fresh capture bound to [config]'s runtime identity. Use one per run. *)
+
+type run_failure = private
+  | Failed_before_dispatch of Agent_core.Error.t
+      (** The run ended before any provider request entered its transport.
+          No execution capture exists. *)
+  | Failed_after_dispatch of
+      { error : Agent_core.Error.t
+      ; runtime_observation : Runtime_observation.runtime_observation
+          (** The attempts the run made, with no selected model. *)
+      }
+(** Built only by {!run_failure_of_capture}, so a failure without a capture
+    is representable only when the capture holds no attempt. *)
+
+val run_failure_of_capture :
+  execution_capture -> Agent_core.Error.t -> run_failure
+(** Classifies [error] by whether [capture] holds an attempt. *)
+
+val run_failure_error : run_failure -> Agent_core.Error.t
 
 (** {1 RFC-0265 — capability-driven proactive runtime reroute} *)
 
@@ -412,19 +433,6 @@ module For_testing : sig
     resume:('checkpoint -> 'result) ->
     build:(unit -> 'result) ->
     'result
-
-  val runtime_observation_for_completed_config :
-    total_duration_ms:float ->
-    usage_scope:Runtime_usage_scope.t ->
-    config ->
-    Runtime_observation.runtime_observation
-
-  val runtime_observation_for_terminal_config :
-    total_duration_ms:float ->
-    ?error:string ->
-    ?usage_scope:Runtime_usage_scope.t ->
-    config ->
-    Runtime_observation.runtime_observation
 end
 
 (** {1 Build / resume / run} *)
@@ -458,13 +466,14 @@ val run :
   ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
   ?input_metadata:Agent_core.Types.metadata ->
+  execution_capture:execution_capture ->
   string ->
-  (run_result, Agent_core.Error.t) result
+  (run_result, run_failure) result
 (** Runs an Agent Core agent against [goal]. When
     [agent_core_checkpoint] is present, {!resume_from_checkpoint}
     is used; otherwise {!build} produces a fresh agent.
-    Returns the wrapped {!run_result}; errors propagate
-    as [Agent_core.Error.t].
+    Returns the wrapped {!run_result}; a failure carries the attempts
+    [execution_capture] recorded, see {!run_failure}.
     [on_event] observes actual SSE events when the resolved model supports
     native streaming. Otherwise the run keeps sync JSON dispatch and emits
     synthetic events for each successful provider response, before existing
@@ -483,8 +492,9 @@ val run_blocks :
   ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
   ?input_metadata:Agent_core.Types.metadata ->
+  execution_capture:execution_capture ->
   Agent_core.Types.content_block list ->
-  (run_result, Agent_core.Error.t) result
+  (run_result, run_failure) result
 (** Runs an Agent Core agent against structured user-authored content blocks.
     [on_event] follows the same streaming-capability rule as {!run}.
     [input_metadata] (default empty) is stamped on the User message AGENT_CORE
@@ -500,8 +510,9 @@ val continue_from_checkpoint :
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
+  execution_capture:execution_capture ->
   unit ->
-  (run_result, Agent_core.Error.t) result
+  (run_result, run_failure) result
 (** Resumes the checkpoint's next provider turn without appending another User
     message. The checkpoint must already contain the caller-authored request and
     every completed tool result. This is for same-turn continuation after a

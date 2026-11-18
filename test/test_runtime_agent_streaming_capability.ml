@@ -132,10 +132,13 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
     Eio.Time.with_timeout_exn env#clock
       Exact_output_fixture.fixture_wait_seconds (fun () ->
         match entry with
-        | Fresh -> Runtime_agent.run ~sw ~net:env#net ~config ?on_event goal
+        | Fresh ->
+          Runtime_agent.run ~sw ~net:env#net ~config ?on_event
+            ~execution_capture:(Runtime_agent.execution_capture config) goal
         | Cooperative ->
           Runtime_agent.run ~sw ~net:env#net ~config ?on_event
-            ~cooperative_yield_probe:(fun _ -> Ok Runtime_agent.Continue) goal
+            ~cooperative_yield_probe:(fun _ -> Ok Runtime_agent.Continue)
+            ~execution_capture:(Runtime_agent.execution_capture config) goal
         | Checkpoint | Cooperative_checkpoint ->
           let context = Keeper_context_core.create ~eio:true ~system_prompt in
           let checkpoint =
@@ -149,7 +152,9 @@ let run_case ?(callbacks = Persist_callbacks) ?(observer_failure = false)
             | Fresh | Cooperative -> fail "unreachable checkpoint entry"
           in
           Runtime_agent.continue_from_checkpoint ~sw ~net:env#net ~config
-            ~checkpoint ?on_event ?cooperative_yield_probe ())
+            ~checkpoint ?on_event ?cooperative_yield_probe
+            ~execution_capture:(Runtime_agent.execution_capture config) ())
+    |> Result.map_error Runtime_agent.run_failure_error
   in
   check int "scope persistence callback reaches the selected dispatch"
     (if durable_execution then 1 else 0) (Atomic.get scope_callbacks);
@@ -317,9 +322,12 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
   let result = Eio.Time.with_timeout_exn env#clock
     Exact_output_fixture.fixture_wait_seconds (fun () ->
       match entry with
-      | Fresh -> Runtime_agent.run ~sw ~net:env#net ~config ~on_event goal
+      | Fresh ->
+        Runtime_agent.run ~sw ~net:env#net ~config ~on_event
+          ~execution_capture:(Runtime_agent.execution_capture config) goal
       | Cooperative -> Runtime_agent.run ~sw ~net:env#net ~config ~on_event
-          ~cooperative_yield_probe:(fun _ -> Ok Runtime_agent.Continue) goal
+          ~cooperative_yield_probe:(fun _ -> Ok Runtime_agent.Continue)
+          ~execution_capture:(Runtime_agent.execution_capture config) goal
       | Checkpoint | Cooperative_checkpoint ->
         let context = Keeper_context_core.create ~eio:true ~system_prompt in
         let checkpoint = Keeper_context_core.append context (Agent_core.Types.user_msg goal)
@@ -329,7 +337,9 @@ let completed_media_and_tools ?(execution_actor = Some "actual-keeper")
           | Checkpoint -> None
           | Fresh | Cooperative -> fail "unreachable checkpoint entry" in
         Runtime_agent.continue_from_checkpoint ~sw ~net:env#net ~config
-          ~checkpoint ~on_event ?cooperative_yield_probe ()) in
+          ~checkpoint ~on_event ?cooperative_yield_probe
+          ~execution_capture:(Runtime_agent.execution_capture config) ())
+    |> Result.map_error Runtime_agent.run_failure_error in
   let completed = match result with
     | Ok completed -> completed
     | Error error -> fail (Agent_core.Error.to_string error) in
@@ -383,9 +393,34 @@ let failed_completion_has_no_progress () =
   let result = Eio.Time.with_timeout_exn env#clock
     Exact_output_fixture.fixture_wait_seconds (fun () ->
       Runtime_agent.run ~sw ~net:env#net ~config
-        ~on_event:(fun event -> events := event :: !events) goal) in
+        ~on_event:(fun event -> events := event :: !events)
+        ~execution_capture:(Runtime_agent.execution_capture config) goal) in
+  (* #52969: the refused request reached the transport, so the failure keeps
+     the attempt it made instead of reporting a missing capture. *)
   (match result with
-   | Error _ -> ()
+   | Error
+       (Runtime_agent.Failed_after_dispatch
+          { runtime_observation = observation; error = _ }) ->
+     check string "the capture keeps the runtime identity" "failed-progress"
+       observation.runtime_id;
+     check int "the refused request is the captured attempt" 1
+       (List.length observation.attempts);
+     check bool "the captured attempt carries the provider error" true
+       (List.for_all
+          (fun (attempt : Runtime_observation.runtime_attempt) ->
+             Option.is_some attempt.error)
+          observation.attempts);
+     check bool "the capture is execution evidence" true
+       (match observation.execution_evidence with
+        | Runtime_observation.Captured_execution -> true
+        | Runtime_observation.Uncaptured_failure _ -> false);
+     check string "the outcome receipt records the failure" "failed"
+       (Keeper_execution_receipt.runtime_outcome_to_string
+          (Keeper_agent_error.runtime_outcome_of_observation
+             ~lane_failover_applied:false (Some observation)))
+   | Error (Runtime_agent.Failed_before_dispatch error) ->
+     failf "a refused provider request lost its capture: %s"
+       (Agent_core.Error.to_string error)
    | Ok _ -> fail "provider refusal must remain a failed completion");
   check int "one refused JSON request" 1 (Exact_output_fixture.post_count server);
   check int "refusal does not synthesize a successful response" 0 (List.length !events)

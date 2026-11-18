@@ -245,6 +245,11 @@ let record_host_acceptance ?keeper_name ?turn_id
 
 let record_attempt_terminal = ensure_terminal_attempt
 
+let capture_has_attempts (capture : runtime_metrics_capture) =
+  match capture.attempts_rev with
+  | [] -> false
+  | _ :: _ -> true
+
 let empty_streaming_capture () : streaming_metrics_capture =
   { ttfrc_ms = None; inter_chunk_count = 0; inter_chunk_total_ms = 0.0 }
 

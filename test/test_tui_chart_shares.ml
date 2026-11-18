@@ -1,3 +1,4 @@
+module Braille = Masc_tui_braille
 module Chart = Masc_tui_chart
 
 let check_shares label ~cells counts expected =
@@ -149,57 +150,57 @@ let relative_cells_are_plain () =
 let graph_t =
   Alcotest.testable
     (fun formatter -> function
-      | Chart.Never_read -> Format.pp_print_string formatter "Never_read"
-      | Chart.Too_narrow -> Format.pp_print_string formatter "Too_narrow"
-      | Chart.Drawn rows ->
+      | Braille.Never_read -> Format.pp_print_string formatter "Never_read"
+      | Braille.Too_narrow -> Format.pp_print_string formatter "Too_narrow"
+      | Braille.Drawn rows ->
         Format.fprintf formatter "Drawn [%s]" (String.concat "; " rows))
     (fun left right ->
       match left, right with
-      | Chart.Never_read, Chart.Never_read | Chart.Too_narrow, Chart.Too_narrow -> true
-      | Chart.Drawn left, Chart.Drawn right -> List.equal String.equal left right
-      | Chart.Never_read, (Chart.Too_narrow | Chart.Drawn _)
-      | Chart.Too_narrow, (Chart.Never_read | Chart.Drawn _)
-      | Chart.Drawn _, (Chart.Never_read | Chart.Too_narrow) -> false)
+      | Braille.Never_read, Braille.Never_read | Braille.Too_narrow, Braille.Too_narrow -> true
+      | Braille.Drawn left, Braille.Drawn right -> List.equal String.equal left right
+      | Braille.Never_read, (Braille.Too_narrow | Braille.Drawn _)
+      | Braille.Too_narrow, (Braille.Never_read | Braille.Drawn _)
+      | Braille.Drawn _, (Braille.Never_read | Braille.Too_narrow) -> false)
 
 (* One text row is four dots tall. Blank is 0, the baseline 1, and any value
    above zero starts at 2. *)
 let braille_levels () =
   let check name expected sample =
-    Alcotest.(check int) name expected (Chart.braille_level ~dots:4 ~maximum:1000 sample)
+    Alcotest.(check int) name expected (Braille.braille_level ~dots:4 ~maximum:1000 sample)
   in
-  check "a time never read is blank" 0 Chart.Unread;
-  check "a time with no sample or a failed read is blank" 0 Chart.Absent;
-  check "zero is the baseline" 1 Chart.Zero;
-  check "a small value is one level above the baseline" 2 (Chart.Value 1);
-  check "the axis maximum fills the column" 4 (Chart.Value 1000);
-  check "a value past the axis fills the column" 4 (Chart.Value max_int);
+  check "a time never read is blank" 0 Braille.Unread;
+  check "a time with no sample or a failed read is blank" 0 Braille.Absent;
+  check "zero is the baseline" 1 Braille.Zero;
+  check "a small value is one level above the baseline" 2 ((Braille.of_count 1));
+  check "the axis maximum fills the column" 4 ((Braille.of_count 1000));
+  check "a value past the axis fills the column" 4 ((Braille.of_count max_int));
   Alcotest.(check int) "a taller column still lifts a small value only one level" 2
-    (Chart.braille_level ~dots:12 ~maximum:max_int (Chart.Value 1))
+    (Braille.braille_level ~dots:12 ~maximum:max_int ((Braille.of_count 1)))
 
 (* The last cell of a row: one Braille glyph is three bytes. *)
 let last_cell row = String.sub row (String.length row - 3) 3
 
 let braille_graph_rules () =
-  let graph ~width samples = Chart.braille_graph ~width ~rows:1 ~axis:"9" ~maximum:9 samples in
-  Alcotest.(check graph_t) "no sample at all is never read" Chart.Never_read (graph ~width:12 []);
-  Alcotest.(check graph_t) "only unread samples is never read" Chart.Never_read
-    (graph ~width:12 [ Chart.Unread; Chart.Unread ]);
-  Alcotest.(check graph_t) "never read wins over a narrow width" Chart.Never_read
-    (graph ~width:1 [ Chart.Unread ]);
+  let graph ~width samples = Braille.braille_graph ~width ~rows:1 ~axis:"9" ~maximum:9 samples in
+  Alcotest.(check graph_t) "no sample at all is never read" Braille.Never_read (graph ~width:12 []);
+  Alcotest.(check graph_t) "only unread samples is never read" Braille.Never_read
+    (graph ~width:12 [ Braille.Unread; Braille.Unread ]);
+  Alcotest.(check graph_t) "never read wins over a narrow width" Braille.Never_read
+    (graph ~width:1 [ Braille.Unread ]);
   (* The axis "9" and its gap take two cells. *)
-  Alcotest.(check graph_t) "three cells of dots is no graph" Chart.Too_narrow
-    (graph ~width:5 [ Chart.Zero ]);
-  (match graph ~width:6 [ Chart.Unread; Chart.Zero; Chart.Zero ] with
-   | Chart.Drawn [ row ] ->
+  Alcotest.(check graph_t) "three cells of dots is no graph" Braille.Too_narrow
+    (graph ~width:5 [ Braille.Zero ]);
+  (match graph ~width:6 [ Braille.Unread; Braille.Zero; Braille.Zero ] with
+   | Braille.Drawn [ row ] ->
      Alcotest.(check string) "two zeros draw the baseline dots"
-       (Chart.braille_cell ~mask:0xc0) (last_cell row)
-   | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+       (Braille.braille_cell ~mask:0xc0) (last_cell row)
+   | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
      Alcotest.failf "four cells of dots draw one row: %a" (Alcotest.pp graph_t) other);
-  match graph ~width:6 [ Chart.Absent; Chart.Value 1 ] with
-  | Chart.Drawn [ row ] ->
+  match graph ~width:6 [ Braille.Absent; (Braille.of_count 1) ] with
+  | Braille.Drawn [ row ] ->
     Alcotest.(check string) "a blank time beside a small value: two dots up the right column"
-      (Chart.braille_cell ~mask:(0x80 lor 0x20)) (last_cell row)
-  | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+      (Braille.braille_cell ~mask:(0x80 lor 0x20)) (last_cell row)
+  | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "four cells of dots draw one row: %a" (Alcotest.pp graph_t) other
 
 (* Calls up, failures down, one axis: one failure in a thousand calls still
@@ -207,19 +208,19 @@ let braille_graph_rules () =
 let braille_mirror_minimum_dot () =
   match
     (* The axis "1K" and its gap take three cells, leaving four for dots. *)
-    Chart.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000
-      ~up:[ Chart.Value 1000 ] ~down:[ Chart.Value 1 ]
+    Braille.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000
+      ~up:[ (Braille.of_count 1000) ] ~down:[ (Braille.of_count 1) ]
   with
-  | Chart.Drawn [ upper; lower ] ->
+  | Braille.Drawn [ upper; lower ] ->
     Alcotest.(check string) "the larger side fills its half"
-      (Chart.braille_cell ~mask:0xb8) (last_cell upper);
+      (Braille.braille_cell ~mask:0xb8) (last_cell upper);
     Alcotest.(check string) "the smaller side shows the baseline and one dot below it"
-      (Chart.braille_cell ~mask:0x18) (last_cell lower);
+      (Braille.braille_cell ~mask:0x18) (last_cell lower);
     Alcotest.(check graph_t) "a mirror with neither side read is never read"
-      Chart.Never_read
-      (Chart.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000
-         ~up:[ Chart.Unread ] ~down:[])
-  | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+      Braille.Never_read
+      (Braille.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000
+         ~up:[ Braille.Unread ] ~down:[])
+  | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "a one-row half draws two rows: %a" (Alcotest.pp graph_t) other
 
 (* The 50% and 80% steps hold at widths other than ten: the band follows the
@@ -315,22 +316,41 @@ let relative_meter_bar_has_no_sgr () =
   Alcotest.(check bool) "a relative bar with no track style has no escape" false
     (String.contains bar '\027')
 
+let sample_name = function
+  | Braille.Unread -> "Unread"
+  | Braille.Absent -> "Absent"
+  | Braille.Zero -> "Zero"
+  | Braille.Value value -> Printf.sprintf "Value %d" (value :> int)
+
+(* A count is parsed once into a sample: zero and a value above zero are
+   different constructors, and a count below zero is no reading. *)
+let counts_become_samples () =
+  let check name expected count =
+    Alcotest.(check string) name expected (sample_name (Braille.of_count count))
+  in
+  check "zero is the baseline" "Zero" 0;
+  check "a count above zero is a value" "Value 3" 3;
+  check "the largest count is a value" (Printf.sprintf "Value %d" max_int) max_int;
+  check "a count below zero is no reading" "Absent" (-3);
+  check "min_int is no reading" "Absent" min_int;
+  let positive count = Option.map (fun (value : Braille.positive) -> (value :> int)) (Braille.positive count) in
+  Alcotest.(check (option int)) "zero is not positive" None (positive 0);
+  Alcotest.(check (option int)) "a negative count is not positive" None (positive (-1));
+  Alcotest.(check (option int)) "one is positive" (Some 1) (positive 1)
+
 let braille_level_edges () =
-  let level ?(dots = 4) ~maximum sample = Chart.braille_level ~dots ~maximum sample in
-  Alcotest.(check int) "a Value of zero sits on the baseline" 1 (level ~maximum:10 (Chart.Value 0));
-  Alcotest.(check int) "a negative Value sits on the baseline" 1
-    (level ~maximum:10 (Chart.Value (-5)));
+  let level ?(dots = 4) ~maximum sample = Braille.braille_level ~dots ~maximum sample in
   Alcotest.(check int) "a value on an axis with no height fills the column" 4
-    (level ~maximum:0 (Chart.Value 3));
+    (level ~maximum:0 ((Braille.of_count 3)));
   Alcotest.(check int) "zero on an axis with no height stays on the baseline" 1
-    (level ~maximum:0 Chart.Zero);
+    (level ~maximum:0 Braille.Zero);
   Alcotest.(check int) "the axis maximum fills a two-row column" 8
-    (level ~dots:8 ~maximum:10 (Chart.Value 10));
+    (level ~dots:8 ~maximum:10 ((Braille.of_count 10)));
   Alcotest.(check int) "the largest Value is the axis top" 7
-    (Chart.graph_maximum
-       Chart.[ Unread; Absent; Zero; Value 3; Value 7; Value 2 ]);
+    (Braille.graph_maximum
+       Braille.[ Unread; Absent; Zero; of_count 3; of_count 7; of_count 2 ]);
   Alcotest.(check int) "no Value leaves the axis top at zero" 0
-    (Chart.graph_maximum Chart.[ Unread; Absent; Zero ])
+    (Braille.graph_maximum Braille.[ Unread; Absent; Zero ])
 
 (* Narrower than four cells is no graph, whatever the axis text. *)
 let narrow_graphs_are_numbers () =
@@ -340,47 +360,47 @@ let narrow_graphs_are_numbers () =
         (fun axis ->
           Alcotest.(check graph_t)
             (Printf.sprintf "width %d with axis %S is too narrow" width axis)
-            Chart.Too_narrow
-            (Chart.braille_graph ~width ~rows:1 ~axis ~maximum:5 [ Chart.Value 5 ]);
+            Braille.Too_narrow
+            (Braille.braille_graph ~width ~rows:1 ~axis ~maximum:5 [ (Braille.of_count 5) ]);
           Alcotest.(check graph_t)
             (Printf.sprintf "a mirror of width %d with axis %S is too narrow" width axis)
-            Chart.Too_narrow
-            (Chart.braille_mirror ~width ~half_rows:1 ~axis ~maximum:5
-               ~up:[ Chart.Value 5 ] ~down:[ Chart.Zero ]))
+            Braille.Too_narrow
+            (Braille.braille_mirror ~width ~half_rows:1 ~axis ~maximum:5
+               ~up:[ (Braille.of_count 5) ] ~down:[ Braille.Zero ]))
         [ ""; "5" ])
     [ 0; 1; 2; 3 ];
-  match Chart.braille_graph ~width:6 ~rows:1 ~axis:"5" ~maximum:5 [ Chart.Value 5 ] with
-  | Chart.Drawn _ -> ()
-  | (Chart.Never_read | Chart.Too_narrow) as other ->
+  match Braille.braille_graph ~width:6 ~rows:1 ~axis:"5" ~maximum:5 [ (Braille.of_count 5) ] with
+  | Braille.Drawn _ -> ()
+  | (Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "four cells of dots draw a graph: %a" (Alcotest.pp graph_t) other
 
 let only_row = function
-  | Chart.Drawn [ row ] -> row
-  | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+  | Braille.Drawn [ row ] -> row
+  | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "one row expected: %a" (Alcotest.pp graph_t) other
 
 (* A time not read, or whose read failed, inside a graph with readings is a
    blank half-cell beside the baseline of a measured zero. *)
 let missing_times_are_blank () =
-  let graph samples = Chart.braille_graph ~width:6 ~rows:1 ~axis:"9" ~maximum:9 samples in
-  Alcotest.(check string) "an unread time after a zero is blank" (Chart.braille_cell ~mask:0x40)
-    (last_cell (only_row (graph [ Chart.Zero; Chart.Unread ])));
-  Alcotest.(check string) "a failed read after a zero is blank" (Chart.braille_cell ~mask:0x40)
-    (last_cell (only_row (graph [ Chart.Zero; Chart.Absent ])))
+  let graph samples = Braille.braille_graph ~width:6 ~rows:1 ~axis:"9" ~maximum:9 samples in
+  Alcotest.(check string) "an unread time after a zero is blank" (Braille.braille_cell ~mask:0x40)
+    (last_cell (only_row (graph [ Braille.Zero; Braille.Unread ])));
+  Alcotest.(check string) "a failed read after a zero is blank" (Braille.braille_cell ~mask:0x40)
+    (last_cell (only_row (graph [ Braille.Zero; Braille.Absent ])))
 
 (* A small value in a two-row graph lifts the bottom row only; the row above
    stays blank. *)
 let small_value_in_two_rows () =
   match
-    Chart.braille_graph ~width:7 ~rows:2 ~axis:"1K" ~maximum:1000
-      [ Chart.Absent; Chart.Value 1 ]
+    Braille.braille_graph ~width:7 ~rows:2 ~axis:"1K" ~maximum:1000
+      [ Braille.Absent; (Braille.of_count 1) ]
   with
-  | Chart.Drawn [ top; bottom ] ->
-    Alcotest.(check string) "the top row is blank" (Chart.braille_cell ~mask:0x00)
+  | Braille.Drawn [ top; bottom ] ->
+    Alcotest.(check string) "the top row is blank" (Braille.braille_cell ~mask:0x00)
       (last_cell top);
     Alcotest.(check string) "the bottom row shows the baseline and one dot above it"
-      (Chart.braille_cell ~mask:(0x80 lor 0x20)) (last_cell bottom)
-  | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+      (Braille.braille_cell ~mask:(0x80 lor 0x20)) (last_cell bottom)
+  | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "two rows expected: %a" (Alcotest.pp graph_t) other
 
 (* Both halves of a mirror read one axis: equal values reach equally far from
@@ -388,31 +408,31 @@ let small_value_in_two_rows () =
    dots while the other side draws. *)
 let mirror_shared_axis_and_baselines () =
   let mirror ~up ~down =
-    Chart.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000 ~up ~down
+    Braille.braille_mirror ~width:7 ~half_rows:1 ~axis:"1K" ~maximum:1000 ~up ~down
   in
-  (match mirror ~up:[ Chart.Zero; Chart.Zero ] ~down:[ Chart.Zero; Chart.Zero ] with
-   | Chart.Drawn [ upper; lower ] ->
-     Alcotest.(check string) "the upper zero is the bottom dots" (Chart.braille_cell ~mask:0xc0)
+  (match mirror ~up:[ Braille.Zero; Braille.Zero ] ~down:[ Braille.Zero; Braille.Zero ] with
+   | Braille.Drawn [ upper; lower ] ->
+     Alcotest.(check string) "the upper zero is the bottom dots" (Braille.braille_cell ~mask:0xc0)
        (last_cell upper);
-     Alcotest.(check string) "the lower zero is the top dots" (Chart.braille_cell ~mask:0x09)
+     Alcotest.(check string) "the lower zero is the top dots" (Braille.braille_cell ~mask:0x09)
        (last_cell lower)
-   | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+   | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
      Alcotest.failf "two rows expected: %a" (Alcotest.pp graph_t) other);
-  (match mirror ~up:[ Chart.Value 1000 ] ~down:[ Chart.Value 1000 ] with
-   | Chart.Drawn [ upper; lower ] ->
-     Alcotest.(check string) "the upper maximum fills its half" (Chart.braille_cell ~mask:0xb8)
+  (match mirror ~up:[ (Braille.of_count 1000) ] ~down:[ (Braille.of_count 1000) ] with
+   | Braille.Drawn [ upper; lower ] ->
+     Alcotest.(check string) "the upper maximum fills its half" (Braille.braille_cell ~mask:0xb8)
        (last_cell upper);
-     Alcotest.(check string) "the lower maximum fills its half" (Chart.braille_cell ~mask:0xb8)
+     Alcotest.(check string) "the lower maximum fills its half" (Braille.braille_cell ~mask:0xb8)
        (last_cell lower)
-   | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+   | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
      Alcotest.failf "two rows expected: %a" (Alcotest.pp graph_t) other);
-  match mirror ~up:[ Chart.Value 3 ] ~down:[ Chart.Unread ] with
-  | Chart.Drawn [ upper; lower ] ->
+  match mirror ~up:[ (Braille.of_count 3) ] ~down:[ Braille.Unread ] with
+  | Braille.Drawn [ upper; lower ] ->
     Alcotest.(check bool) "the read side draws dots" true
-      (not (String.equal (last_cell upper) (Chart.braille_cell ~mask:0x00)));
-    Alcotest.(check string) "the unread side draws none" (Chart.braille_cell ~mask:0x00)
+      (not (String.equal (last_cell upper) (Braille.braille_cell ~mask:0x00)));
+    Alcotest.(check string) "the unread side draws none" (Braille.braille_cell ~mask:0x00)
       (last_cell lower)
-  | (Chart.Drawn _ | Chart.Never_read | Chart.Too_narrow) as other ->
+  | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "one side read still draws: %a" (Alcotest.pp graph_t) other
 
 let () =
@@ -441,6 +461,7 @@ let () =
       ; Alcotest.test_case "unread, narrow and baseline rules" `Quick braille_graph_rules
       ; Alcotest.test_case "the mirrored smaller side shows a dot" `Quick
           braille_mirror_minimum_dot
+      ; Alcotest.test_case "counts become samples" `Quick counts_become_samples
       ; Alcotest.test_case "level edges and the axis top" `Quick braille_level_edges
       ; Alcotest.test_case "narrower than four cells is a number" `Quick
           narrow_graphs_are_numbers

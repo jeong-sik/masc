@@ -1,6 +1,7 @@
 open Masc_tui_types
 open Masc_tui_ansi
 module Decode = Masc.Tui_decode
+module Braille = Masc_tui_braille
 module Chart = Masc_tui_chart
 module Layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
@@ -735,22 +736,20 @@ let render_section_resources ~cols (state : state) =
            (* A day that completed nothing is the baseline, not a gap
               (RFC tui-one-screen-grammar 5.6). *)
            let samples =
-             List.map
-               (fun (day : Task_flow.day) ->
-                 match day.d_completed with 0 -> Chart.Zero | count -> Chart.Value count)
+             List.map (fun (day : Task_flow.day) -> Braille.of_count day.d_completed)
                (first :: rest)
            in
-           let maximum = Chart.graph_maximum samples in
+           let maximum = Braille.graph_maximum samples in
            let axis = Count.grouped maximum in
            let width = Layout.display_width axis + 1 + ((List.length samples + 1) / 2) in
            let spark =
-             match Chart.braille_graph ~width ~rows:1 ~axis ~maximum samples with
-             | Chart.Drawn rows -> String.concat "" rows
-             | Chart.Too_narrow ->
+             match Braille.braille_graph ~width ~rows:1 ~axis ~maximum samples with
+             | Braille.Drawn rows -> String.concat "" rows
+             | Braille.Too_narrow ->
                Count.grouped
                  (List.fold_left (fun _ (day : Task_flow.day) -> day.d_completed)
                     first.d_completed rest)
-             | Chart.Never_read -> Unknown.(glyph Unread)
+             | Braille.Never_read -> Unknown.(glyph Unread)
            in
            [ "    " ^ Layout.fit_width (say "완료 추세" "done trend") 10 ^ " " ^ spark ])
   in

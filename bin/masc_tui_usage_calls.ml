@@ -76,8 +76,8 @@ let no_call_mark = "\xc2\xb7"
 let top_level = 4
 
 let mark level =
-  if level <= 0 then Masc_tui_chart.braille_pair ~left:1 ~right:0
-  else Masc_tui_chart.braille_bar_mark ~level
+  if level <= 0 then Masc_tui_braille.braille_pair ~left:1 ~right:0
+  else Masc_tui_braille.braille_bar_mark ~level
 
 (* A value above zero never draws the lowest level, which is what zero draws:
    one failed call among thirty is told apart from none by its shape and not

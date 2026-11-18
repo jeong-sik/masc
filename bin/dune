@@ -354,13 +354,21 @@
  (modules masc_tui_chart)
  (libraries masc_tui_theme masc_tui_message_layout zarith))
 
+;; Braille cells and graphs (RFC tui-one-screen-grammar 5.6), apart from the
+;; chart's bars so the graph rules and their sample type stand on their own.
+(library
+ (name masc_tui_braille)
+ (wrapped false)
+ (modules masc_tui_braille)
+ (libraries masc_tui_message_layout zarith))
+
 ;; Usage's quota scope trend, built once per provider history answer so the
 ;; frame draws rows rather than regrouping every point on every repaint.
 (library
  (name masc_tui_usage_trend)
  (wrapped false)
  (modules masc_tui_usage_trend)
- (libraries masc masc_tui_chart masc_tui_message_layout unix))
+ (libraries masc masc_tui_braille masc_tui_chart masc_tui_message_layout unix))
 
 ;; Usage's Calls section: the tool-call series of one window, kept to the
 ;; buckets the window draws when its answer arrives.
@@ -372,6 +380,7 @@
   masc
   masc_tui_value
   masc_tui_ansi
+  masc_tui_braille
   masc_tui_chart
   masc_tui_message_layout
   masc_tui_table
@@ -2410,6 +2419,7 @@
   masc_tui_task_flow
   masc
   masc_tui_ansi
+  masc_tui_braille
   masc_tui_card
   masc_tui_chart
   masc_tui_context_inspector

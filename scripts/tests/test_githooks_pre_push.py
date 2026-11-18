@@ -19,7 +19,7 @@ HOOKS_DIR = Path(__file__).resolve().parents[2] / ".githooks"
 IDENTITY = ("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid")
 NO_HOOKS = "/dev/null"
 
-type Completed = subprocess.CompletedProcess[str]
+Completed = subprocess.CompletedProcess[str]
 
 
 def git(cwd: Path, *args: str, hooks_path: str) -> Completed:
@@ -114,6 +114,39 @@ class PrePushTraceGuard(unittest.TestCase):
         self.setup_git("push", "-q", "origin", "feature")
         self.delete("trace.csexp")
         self.assert_accepted(self.push())
+
+    def test_known_remote_tip_excludes_a_pushed_dump_without_tracking_ref(self) -> None:
+        self.commit("trace.csexp", "(env ...)\n")
+        self.setup_git("push", "-q", "origin", "feature")
+        self.setup_git("update-ref", "-d", "refs/remotes/origin/feature")
+        self.commit("lib/a.ml", "let x = 1\n")
+        result = git(
+            self.work, "push", "-q", "origin", "HEAD:refs/heads/feature", hooks_path=str(HOOKS_DIR)
+        )
+        self.assert_accepted(result)
+        self.commit("trace.csexp", "(env ... new trace)\n")
+        result = git(
+            self.work, "push", "-q", "origin", "HEAD:refs/heads/feature", hooks_path=str(HOOKS_DIR)
+        )
+        self.assert_refused(result)
+
+    def test_merge_inheriting_an_already_pushed_dump_is_accepted(self) -> None:
+        self.setup_git("checkout", "-q", "-b", "legacy", "main")
+        self.commit("trace.csexp", "(env ...)\n")
+        self.setup_git("push", "-q", "origin", "legacy")
+        self.setup_git("checkout", "-q", "feature")
+        self.commit("lib/a.ml", "let x = 1\n")
+        self.setup_git("merge", "-q", "--no-ff", "legacy")
+        self.assert_accepted(self.push())
+
+    def test_dump_introduced_in_a_merge_is_refused(self) -> None:
+        self.setup_git("checkout", "-q", "-b", "other", "main")
+        self.commit("lib/b.ml", "let y = 2\n")
+        self.setup_git("checkout", "-q", "feature")
+        self.commit("lib/a.ml", "let x = 1\n")
+        self.setup_git("merge", "-q", "--no-ff", "--no-commit", "other")
+        self.commit("trace.csexp", "(env ...)\n")
+        self.assert_refused(self.push())
 
 
 if __name__ == "__main__":

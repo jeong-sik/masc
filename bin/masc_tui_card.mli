@@ -42,6 +42,10 @@ type status =
   ; tone : string  (** Style code for the symbol and the word. *)
   }
 
+val symbol_glyph : symbol -> string
+(** The one cell the top edge draws for [symbol]. A layout that draws a
+    card's body without its edge puts this cell where the edge would have. *)
+
 type focus =
   | Unfocused
   | Focused_list

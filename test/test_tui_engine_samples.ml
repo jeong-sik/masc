@@ -475,6 +475,97 @@ let test_a_view_reopened_within_two_seconds_takes_the_answer () =
   let _, decision = Samples.tick reopened ~now:1.0 ~newest in
   Alcotest.check step "taken without a read" Samples.Sampled decision
 
+(* Times under a tenth of the top pile up; a time above takes one off them,
+   so the low time after it is the fifth only one sample later. *)
+let test_a_time_above_takes_one_off_the_low_count () =
+  let just_above = 13_000_001 in
+  let swinging = 10_000_000 :: (repeat 4 steady @ [ just_above; steady ]) in
+  Alcotest.(check (option int)) "four low, one above, one low: four" (Some 13_000_000)
+    (heap_top swinging);
+  (* The five newest: four at 1,000,000 and one at 13,000,001, averaging
+     3,400,000. *)
+  Alcotest.(check (option int)) "the fifth then lowers it" (Some 10_200_000)
+    (heap_top (swinging @ [ steady ]))
+
+(* A count with nothing on it stays at nothing: a time on the other side
+   does not put it in debt. *)
+let test_a_count_at_nothing_stays_at_nothing () =
+  Alcotest.(check (option int)) "one above, then five low" (Some 3_000_000)
+    (heap_top ((10_000_000 :: [ 13_000_001 ]) @ repeat 5 steady));
+  Alcotest.(check (option int)) "one low, then five above" (Some 2_600_000)
+    (heap_top ((steady :: [ low ]) @ repeat 5 high))
+
+(* A time on the top, or on a tenth of it, is inside the band. *)
+let test_a_time_on_the_band_edge_counts_for_neither_side () =
+  Alcotest.(check (option int)) "five times at the top" (Some first_top)
+    (heap_top (steady :: repeat 5 first_top));
+  Alcotest.(check (option int)) "five times at a tenth of the top" (Some first_top)
+    (heap_top (steady :: repeat 5 (first_top / 10)))
+
+(* A top at the floor counts no time as low, so a low time there takes
+   nothing off the times above. *)
+let test_a_low_time_at_the_floor_takes_nothing_off () =
+  let above_floor = 200_000 in
+  (* The five newest: three at 200,000 and two at 0, averaging 120,000. *)
+  Alcotest.(check (option int)) "five above among four zeros" (Some 156_000)
+    (heap_top (0 :: (List.concat (repeat 4 [ above_floor; 0 ]) @ [ above_floor ])))
+
+(* A move starts both counts again: one time above the raised top does not
+   move it. *)
+let test_a_moved_top_counts_from_nothing () =
+  Alcotest.(check (option int)) "one time above the raised top" (Some 2_600_000)
+    (heap_top ((steady :: repeat 5 high) @ [ 3_000_000 ]))
+
+(* Blanks count for neither side and stand for no time in the average: the
+   five newest measured times reach back past them. *)
+let test_the_average_takes_the_five_newest_measured_times () =
+  let failed = Samples.Failed "server identity load failed: refused" in
+  let above = [ 2_000_000; 2_000_000; 2_000_000; 3_000_000; 4_000_000 ] in
+  let readings =
+    heap_reading steady
+    :: List.concat_map (fun heap -> [ heap_reading heap; failed ]) above
+  in
+  (* Five above, a blank after each: 1.3 times their average of 2,600,000. *)
+  Alcotest.(check (option int)) "five above among five blanks" (Some 3_380_000)
+    (axis_top ~width:32 Samples.Live_heap (sampled_readings ~capacity readings))
+
+(* A top past the integer range stands at the largest integer. *)
+let test_a_top_past_the_integer_range_stands_at_the_largest () =
+  Alcotest.(check (option int)) "1.3 times the largest integer" (Some max_int)
+    (heap_top [ max_int ])
+
+(* The graph's room changing is not the view closing: the top stays. *)
+let test_a_resized_graph_keeps_its_top () =
+  let sampler = sampled_heaps ~capacity [ steady ] in
+  let at = Samples.interval_s in
+  let narrower = Samples.shown sampler ~now:at ~capacity:8 in
+  Alcotest.(check (option int)) "the same top in less room" (Some first_top)
+    (axis_top ~width:32 Samples.Live_heap narrower);
+  let newest = Some { Samples.at; reading = heap_reading 1_200_000 } in
+  let sampled, _ = Samples.tick narrower ~now:at ~newest in
+  Alcotest.(check (option int)) "a time inside the band leaves it" (Some first_top)
+    (axis_top ~width:32 Samples.Live_heap sampled)
+
+(* A held top whose times all left the graph has no time under it to stand
+   for, so it is not written. *)
+let test_a_top_over_blanks_only_is_not_written () =
+  let width = 12 in
+  let times = Braille.graph_times ~width ~axis_cells in
+  let failed = Samples.Failed "server identity load failed: refused" in
+  let sampler = sampled_readings ~capacity:times (heap_reading steady :: repeat times failed) in
+  Alcotest.(check (option int)) "no top over blanks" None
+    (axis_top ~width Samples.Live_heap sampler)
+
+(* A time above the top draws at the top until the axis rises, so how far
+   above it is moves no dot: two graphs that differ only there draw alike. *)
+let test_how_far_above_the_top_moves_no_dot () =
+  let graph heaps =
+    Samples.graph ~tint:no_tint ~width:32 ~axis_cells ~axis Samples.Live_heap
+      (sampled_heaps ~capacity heaps)
+  in
+  Alcotest.(check bool) "four times a little or far above" true
+    (graph (steady :: repeat 4 1_400_000) = graph (steady :: repeat 4 10_000_000))
+
 let () =
   Alcotest.run "tui_engine_samples"
     [ ( "requests"
@@ -528,5 +619,25 @@ let () =
             test_the_top_never_goes_under_the_floor
         ; Alcotest.test_case "a reopened view sets its top again" `Quick
             test_a_reopened_view_sets_its_top_again
+        ; Alcotest.test_case "a time above takes one off the low count" `Quick
+            test_a_time_above_takes_one_off_the_low_count
+        ; Alcotest.test_case "a count at nothing stays at nothing" `Quick
+            test_a_count_at_nothing_stays_at_nothing
+        ; Alcotest.test_case "a time on the band edge counts for neither side" `Quick
+            test_a_time_on_the_band_edge_counts_for_neither_side
+        ; Alcotest.test_case "a low time at the floor takes nothing off" `Quick
+            test_a_low_time_at_the_floor_takes_nothing_off
+        ; Alcotest.test_case "a moved top counts from nothing" `Quick
+            test_a_moved_top_counts_from_nothing
+        ; Alcotest.test_case "the average takes the five newest measured times" `Quick
+            test_the_average_takes_the_five_newest_measured_times
+        ; Alcotest.test_case "a top past the integer range stands at the largest" `Quick
+            test_a_top_past_the_integer_range_stands_at_the_largest
+        ; Alcotest.test_case "a resized graph keeps its top" `Quick
+            test_a_resized_graph_keeps_its_top
+        ; Alcotest.test_case "a top over blanks only is not written" `Quick
+            test_a_top_over_blanks_only_is_not_written
+        ; Alcotest.test_case "how far above the top moves no dot" `Quick
+            test_how_far_above_the_top_moves_no_dot
         ] )
     ]

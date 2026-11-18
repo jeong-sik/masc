@@ -105,6 +105,12 @@ let removed label ~runtime_root id expected =
   Alcotest.(check string) label expected (remove_name (F.remove ~runtime_root ~account_id:id))
 ;;
 
+let present label ~runtime_root id expected =
+  match F.present ~runtime_root ~account_id:id with
+  | Ok there -> Alcotest.(check bool) label expected there
+  | Error detail -> Alcotest.failf "%s: not looked at: %s" label detail
+;;
+
 (* What a read of the key file gave, with the key as its characters: the keys
    of this file are made up. *)
 let read_name path =
@@ -154,8 +160,10 @@ let test_open_home =
 
 let test_removed =
   with_root (fun ~base_path:_ ~runtime_root ->
+    present "an account before its files" ~runtime_root account false;
     made "the account" ~runtime_root account the_key "made";
     made "another account of the person" ~runtime_root other_account "sk-test-the-other-key" "made";
+    present "an account with its files" ~runtime_root account true;
     let home = home_of ~runtime_root account in
     let keys = keys_of ~runtime_root account in
     (* What a client and a write that stopped leave in the two folders. *)
@@ -167,6 +175,15 @@ let test_removed =
     removed "the account" ~runtime_root account "removed";
     Alcotest.(check bool) "the folder of its keys is gone" false (there keys);
     Alcotest.(check bool) "its home is gone" false (there home);
+    present "the account after its removal" ~runtime_root account false;
+    present "the other account" ~runtime_root other_account true;
+    (* What a restore of a backup brings back, one folder at a time. *)
+    Unix.mkdir home 0o700;
+    present "an account whose home came back" ~runtime_root account true;
+    Unix.rmdir home;
+    Unix.mkdir keys 0o700;
+    present "an account whose key folder came back" ~runtime_root account true;
+    removed "the account whose key folder came back" ~runtime_root account "removed";
     Alcotest.(check string)
       "the key of the other account is in place"
       "key:sk-test-the-other-key"
@@ -178,7 +195,13 @@ let test_removed =
 (* An account whose record was written and whose files were not, as a process
    that died between the two leaves it: a removal finds nothing and ends. *)
 let test_nothing_made =
-  with_root (fun ~base_path:_ ~runtime_root -> removed "an account with no files" ~runtime_root account "removed")
+  with_root (fun ~base_path:_ ~runtime_root ->
+    removed "an account with no files" ~runtime_root account "removed";
+    (* A person no login and no registration made a runtime root for. *)
+    let no_root = Filename.concat (Filename.dirname runtime_root) "namespace-of-nobody" in
+    removed "an account under a runtime root that is not there" ~runtime_root:no_root account "removed";
+    present "and nothing of it is there" ~runtime_root:no_root account false;
+    Alcotest.(check bool) "the removal made no runtime root" false (there no_root))
 ;;
 
 (* A link in the place of the folder of the keys is removed and not followed. *)

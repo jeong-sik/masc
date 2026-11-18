@@ -267,9 +267,10 @@ let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
     Layout.take_cells line inner_width ^ Ansi.reset
   else line
 
-(* The four cards share the row, two cells apart. Below
-   [minimum_card_text_cells] of text inside the border and padding the row is
-   compact summaries, not four boxes of clipped labels. *)
+(* The four cards share the row; [kpi_card_gaps] cells go to its lead and
+   the gaps between them. Below [minimum_card_text_cells] of text inside the
+   border and padding the row is compact summaries, not four boxes of
+   clipped labels. *)
 let minimum_card_text_cells = 32
 let kpi_cards = 4
 let kpi_card_gaps = 10

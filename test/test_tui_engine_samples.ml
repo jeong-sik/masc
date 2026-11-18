@@ -55,8 +55,7 @@ let axis maximum = string_of_int maximum
    arrives as every [/health] answer does, as the newest one the TUI
    received, and its own read then delivers it. [visible] says whether the
    engine view is on screen at an instant. Counts the reads sent. *)
-let run ?(visible = fun _ -> true) ?(answer = fun _ -> answered_point) ~from ~until
-    sampler newest =
+let run ?(visible = fun _ -> true) ~from ~until sampler newest =
   let reads = ref 0 in
   let pending = ref None in
   let sampler = ref sampler in
@@ -65,9 +64,8 @@ let run ?(visible = fun _ -> true) ?(answer = fun _ -> answered_point) ~from ~un
   while !now < until do
     (match !pending with
      | Some due when !now >= due ->
-       let reading = answer !now in
-       newest := Some { Samples.at = !now; reading };
-       let next, _, _ = Samples.answered !sampler ~now:!now reading in
+       newest := Some { Samples.at = !now; reading = answered_point };
+       let next, _, _ = Samples.answered !sampler ~now:!now answered_point in
        sampler := next;
        pending := None
      | Some _ | None -> ());
@@ -87,9 +85,10 @@ let run ?(visible = fun _ -> true) ?(answer = fun _ -> answered_point) ~from ~un
   (!sampler, !newest, !reads)
 
 let test_ten_seconds_on_screen_send_at_most_five_reads () =
-  let _, _, reads = run ~from:0. ~until:10. Samples.stopped None in
+  let sampler, _, reads = run ~from:0. ~until:10. Samples.stopped None in
   Alcotest.(check bool) "at most one read per two seconds" true (reads <= 5);
-  Alcotest.(check bool) "the view does sample" true (reads >= 1)
+  Alcotest.(check int) "a sample every two seconds" 5
+    (List.length (Samples.samples Samples.Live_heap sampler))
 
 let test_no_read_while_the_view_is_off_screen () =
   let sampler, _, reads =

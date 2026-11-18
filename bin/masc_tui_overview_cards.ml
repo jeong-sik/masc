@@ -81,6 +81,7 @@ let draw ~ko ~(edges : edges) ~empty_decisions ~inner
     in
     let style =
       { Masc_tui_card.border = Theme.recede ()
+      ; focused_border = Theme.border_focus ()
       ; title_style = Ansi.bold
       ; reset = Ansi.reset
       }

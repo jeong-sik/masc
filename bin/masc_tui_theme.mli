@@ -356,8 +356,6 @@ end
 val selection : string
 (** [Sgr.reverse]; survives NO_COLOR by contract. *)
 
-val border_focus : string
-
 (** Content colours that stay constant: "this word is green" is a diff or a
     code literal, not a reading of state, so it stays out of [status]. The
     words a reader scans for (keyword, string, number, type, link, a JSON key)

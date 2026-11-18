@@ -5,17 +5,22 @@
 
    The edge cases check the decision, not the drawn text: which parts of the
    top edge a width keeps, in the order RFC tui-one-screen-grammar section 2
-   gives them up, and how many rows a body cuts off. *)
+   gives them up, how many rows a body cuts off, and what the bottom edge
+   writes for them at a width. *)
 
 open Alcotest
 module Card = Masc_tui_card
 module Layout = Masc_tui_message_layout
 module Mark = Masc_tui_value.Mark
 
-let plain = { Card.border = ""; title_style = ""; reset = "" }
+let plain = { Card.border = ""; focused_border = ""; title_style = ""; reset = "" }
 
 let styled =
-  { Card.border = "\027[2m"; title_style = "\027[1m"; reset = "\027[0m" }
+  { Card.border = "\027[2m"
+  ; focused_border = "\027[96m"
+  ; title_style = "\027[1m"
+  ; reset = "\027[0m"
+  }
 
 let contains ~needle haystack =
   let n = String.length needle and h = String.length haystack in
@@ -256,11 +261,22 @@ let edges =
         ~status:{ Card.symbol = Card.Unknown Masc_tui_value.Unknown.Unread; word = ""; tone = "" }
         "Scheduler lag" )
   ; ("name alone", edge "Memory flow")
-  ; ( "focused"
-    , edge ~focus:Card.Focused ~status:(yours "your turn")
+  ; ( "a focused list"
+    , edge ~focus:Card.Focused_list ~status:(yours "your turn")
         ~count:(Card.Partial { loaded = 50; total = 2000 })
         "Tasks" )
+  ; ( "a focused card that is not a list"
+    , edge ~focus:Card.Focused_other ~status:(yours "your turn")
+        ~count:(Card.Whole 12)
+        "Execution capacity" )
   ]
+
+(* Whether an edge has a count it may write: a focused list writes none,
+   since zone 2's position counts its rows. *)
+let writes_count (edge : Card.edge) =
+  match edge.focus with
+  | Card.Focused_list -> false
+  | Card.Focused_other | Card.Unfocused -> Option.is_some edge.count
 
 let name_fit =
   testable
@@ -272,36 +288,77 @@ let name_fit =
 
 (* One edge at the widths where it gives up each part: the key first, then the
    name is shortened while the word stays, then the word goes and the name
-   takes its room back, then the name goes. The mark and the count stay until
-   the edge has room for nothing else. *)
-let test_the_top_edge_gives_up_its_parts_in_order () =
-  let every_part =
-    edge ~key:("p", "") ~status:(yours "your turn") ~count:(Card.Whole 3)
-      "Needs your decision"
-  in
+   takes its room back, then the name goes. The mark and the count stay while
+   they fit together; then the count goes and the mark stays until the edge
+   has room for nothing. *)
+let check_widths ~ko edge rows =
   List.iter
-    (fun (width, key, name, word, mark_and_count) ->
-       let fit = Card.top_fit ~ko:false ~width every_part in
+    (fun (width, key, name, word, mark, count) ->
+       let fit = Card.top_fit ~ko ~width edge in
        let at what = Printf.sprintf "%s at %d" what width in
        check bool (at "key") key fit.key_kept;
        check name_fit (at "name") name fit.name_kept;
        check bool (at "word") word fit.word_kept;
-       check bool (at "mark") mark_and_count fit.symbol_kept;
-       check bool (at "count") mark_and_count fit.count_kept)
-    [ (60, true, Card.Whole_name, true, true)
-    ; (43, true, Card.Whole_name, true, true)
-    ; (42, false, Card.Whole_name, true, true)
-    ; (41, false, Card.Whole_name, true, true)
-    ; (40, false, Card.Shortened_name 18, true, true)
-    ; (25, false, Card.Shortened_name 3, true, true)
-    ; (24, false, Card.Shortened_name 12, false, true)
-    ; (15, false, Card.Shortened_name 3, false, true)
-    ; (14, false, Card.No_name, false, true)
-    ; (11, false, Card.No_name, false, true)
-    ; (10, false, Card.No_name, false, false)
+       check bool (at "mark") mark fit.symbol_kept;
+       check bool (at "count") count fit.count_kept)
+    rows
+
+let test_the_top_edge_gives_up_its_parts_in_order () =
+  check_widths ~ko:false
+    (edge ~key:("p", "") ~status:(yours "your turn") ~count:(Card.Whole 3)
+       "Needs your decision")
+    [ (60, true, Card.Whole_name, true, true, true)
+    ; (43, true, Card.Whole_name, true, true, true)
+    ; (42, false, Card.Whole_name, true, true, true)
+    ; (41, false, Card.Whole_name, true, true, true)
+    ; (40, false, Card.Shortened_name 18, true, true, true)
+    ; (25, false, Card.Shortened_name 3, true, true, true)
+    ; (24, false, Card.Shortened_name 12, false, true, true)
+    ; (15, false, Card.Shortened_name 3, false, true, true)
+    ; (14, false, Card.No_name, false, true, true)
+    ; (11, false, Card.No_name, false, true, true)
+    ; (10, false, Card.No_name, false, true, false)
+    ; (6, false, Card.No_name, false, true, false)
+    ; (5, false, Card.No_name, false, false, false)
     ]
 
-(* How far down the RFC's order an edge has gone. *)
+(* A count read in part is wide: [50 · of 2,000] is thirteen cells. Where the
+   mark and that count do not fit together the mark stays alone, rather than
+   both leaving a bare rule while the mark alone would fit. *)
+let test_a_wide_count_goes_before_the_mark () =
+  check_widths ~ko:false
+    (edge
+       ~status:{ Card.symbol = Card.Mark Mark.Waiting; word = "idle"; tone = "" }
+       ~count:(Card.Partial { loaded = 50; total = 2000 })
+       "Tasks")
+    [ (35, false, Card.Whole_name, true, true, true)
+    ; (23, false, Card.No_name, false, true, true)
+    ; (22, false, Card.No_name, false, true, false)
+    ; (6, false, Card.No_name, false, true, false)
+    ; (5, false, Card.No_name, false, false, false)
+    ];
+  (* An edge with a count and no status keeps the count alone to the end. *)
+  check_widths ~ko:false
+    (edge ~count:(Card.Partial { loaded = 50; total = 2000 }) "Tasks")
+    [ (19, false, Card.No_name, false, false, true)
+    ; (18, false, Card.No_name, false, false, false)
+    ]
+
+(* A focused list writes no count, since zone 2's position counts its rows.
+   A focused card that is not a list keeps its count: zone 2 counts
+   something else (RFC tui-one-screen-grammar section 2). *)
+let test_only_a_focused_list_drops_its_count () =
+  let counted focus =
+    (Card.top_fit ~ko:true ~width:200
+       (edge ~focus ~count:(Card.Whole 12) "Execution capacity"))
+      .count_kept
+  in
+  check bool "unfocused" true (counted Card.Unfocused);
+  check bool "a focused list" false (counted Card.Focused_list);
+  check bool "a focused card that is not a list" true (counted Card.Focused_other)
+
+(* How far down the RFC's order an edge has gone. With no name, one step for
+   each of the mark and the count it no longer keeps. *)
 let stage (fit : Card.top_fit) =
   match fit.key_kept, fit.name_kept, fit.word_kept with
   | true, (Card.Whole_name | Card.Shortened_name _ | Card.No_name), (true | false) -> 0
@@ -309,7 +366,7 @@ let stage (fit : Card.top_fit) =
   | false, Card.Shortened_name _, true -> 2
   | false, (Card.Whole_name | Card.Shortened_name _), false -> 3
   | false, Card.No_name, (true | false) ->
-      if fit.symbol_kept || fit.count_kept then 4 else 5
+      4 + (if fit.symbol_kept then 0 else 1) + if fit.count_kept then 0 else 1
 
 let name_cells name (fit : Card.top_fit) =
   match fit.name_kept with
@@ -320,8 +377,8 @@ let name_cells name (fit : Card.top_fit) =
 (* At every width and for every mix of parts: a narrower edge is never
    further back in the order; the key leaves only whole things behind it; a
    shortened name keeps its first character and is shorter than the name; the
-   mark and the count stay while anything else does; a focused card has no
-   count. *)
+   mark and the count stay while anything else does; the mark is the last
+   part an edge keeps; a focused list has no count. *)
 let test_the_order_holds_at_every_width () =
   List.iter
     (fun (label, (edge : Card.edge)) ->
@@ -329,9 +386,7 @@ let test_the_order_holds_at_every_width () =
          (fun ko ->
             let fits = List.init 91 (fun width -> (width, Card.top_fit ~ko ~width edge)) in
             let has_symbol = Option.is_some edge.status in
-            let has_count =
-              Option.is_some edge.count && edge.focus = Card.Unfocused
-            in
+            let has_count = writes_count edge in
             List.iter
               (fun (width, (fit : Card.top_fit)) ->
                  let at what = Printf.sprintf "%s, %s at %d" label what width in
@@ -349,8 +404,11 @@ let test_the_order_holds_at_every_width () =
                    check bool (at "the mark stays") has_symbol fit.symbol_kept;
                    check bool (at "the count stays") has_count fit.count_kept
                  end;
-                 if edge.focus = Card.Focused then
-                   check bool (at "a focused card has no count") false fit.count_kept)
+                 if has_symbol && (fit.count_kept || fit.name_kept <> Card.No_name) then
+                   check bool (at "the mark is the last part kept") true fit.symbol_kept;
+                 if not has_count then
+                   check bool (at "an edge with no count to write keeps none") false
+                     fit.count_kept)
               fits;
             List.iter2
               (fun (width, wider) (_, narrower) ->
@@ -364,10 +422,6 @@ let test_the_order_holds_at_every_width () =
               (List.rev fits |> List.tl))
          [ true; false ])
     edges
-
-(* Whether an edge has a count it may write: a focused card writes none. *)
-let writes_count (edge : Card.edge) =
-  Option.is_some edge.count && edge.focus = Card.Unfocused
 
 (* With room to spare an edge keeps every part it has. *)
 let test_a_wide_edge_keeps_every_part () =
@@ -419,15 +473,17 @@ let test_the_name_goes_before_the_mark_and_the_count () =
     edges
 
 (* The border's colour class follows focus. An unfocused card draws its
-   border in the caller's code. A focused card draws it in the theme's
-   border.focused token and never in the caller's code (RFC
-   tui-one-screen-grammar section 2, RFC-0459 section 3). The caller's code
-   below is one no other part of the card uses, so finding it in a row means
-   that row's border carried it. The body overflows, so the bottom edge
+   border in the caller's border code. A focused card draws it in the
+   caller's focused code, the border.focused token, and never in the other
+   (RFC tui-one-screen-grammar section 2, RFC-0459 section 3). The two codes
+   below are ones no other part of the card uses, so finding one in a row
+   means that row's border carried it. The body overflows, so the bottom edge
    carries a count as well. *)
 let test_a_focused_card_borders_in_the_focus_token () =
-  let caller_border = "\027[38;5;201m" in
-  let style = { Card.border = caller_border; title_style = "\027[1m"; reset = "\027[0m" } in
+  let caller_border = "\027[38;5;201m" and focused_border = "\027[38;5;45m" in
+  let style =
+    { Card.border = caller_border; focused_border; title_style = "\027[1m"; reset = "\027[0m" }
+  in
   let drawn focus =
     Card.render ~ko:true ~style ~width:40 ~height:5
       { Card.edge =
@@ -438,17 +494,57 @@ let test_a_focused_card_borders_in_the_focus_token () =
   List.iter
     (fun row ->
        check bool "an unfocused border is in the caller's code" true
-         (contains ~needle:caller_border row))
+         (contains ~needle:caller_border row);
+       check bool "an unfocused border carries no focused code" false
+         (contains ~needle:focused_border row))
     (drawn Card.Unfocused);
   List.iter
-    (fun row ->
-       check bool "a focused border carries none of the caller's code" false
-         (contains ~needle:caller_border row);
-       (* Without colours the token is empty and there is nothing to find. *)
-       if Masc_tui_theme.border_focus <> "" then
-         check bool "a focused border is in the border.focused token" true
-           (contains ~needle:Masc_tui_theme.border_focus row))
-    (drawn Card.Focused)
+    (fun focus ->
+       List.iter
+         (fun row ->
+            check bool "a focused border carries none of the unfocused code" false
+              (contains ~needle:caller_border row);
+            check bool "a focused border is in the focused code" true
+              (contains ~needle:focused_border row))
+         (drawn focus))
+    [ Card.Focused_list; Card.Focused_other ]
+
+(* The bottom edge writes the rows a card cut off whole or not at all: the
+   word goes first, then the number, and the number is never shortened,
+   since a cut number reads as a different one. [외 1,234] is eight cells,
+   [1,234 more] ten and [1,234] five; the edge spends six around them. *)
+let bottom_fit =
+  testable
+    (fun formatter fit ->
+       Format.pp_print_string formatter
+         (match fit with
+          | Card.Says_more -> "says more"
+          | Card.Number_only -> "number only"
+          | Card.Plain -> "plain"))
+    ( = )
+
+let test_the_bottom_edge_keeps_the_number_whole () =
+  List.iter
+    (fun (ko, width, expected) ->
+       check bottom_fit
+         (Printf.sprintf "%s at %d" (if ko then "ko" else "en") width)
+         expected
+         (Card.bottom_fit ~ko ~width ~hidden:1234))
+    [ (true, 40, Card.Says_more)
+    ; (true, 14, Card.Says_more)
+    ; (true, 13, Card.Number_only)
+    ; (true, 11, Card.Number_only)
+    ; (true, 10, Card.Plain)
+    ; (false, 16, Card.Says_more)
+    ; (false, 15, Card.Number_only)
+    ; (false, 11, Card.Number_only)
+    ; (false, 10, Card.Plain)
+    ];
+  List.iter
+    (fun width ->
+       check bottom_fit (Printf.sprintf "nothing cut at %d" width) Card.Plain
+         (Card.bottom_fit ~ko:true ~width ~hidden:0))
+    [ 5; 40; 200 ]
 
 (* Every row of a card with every kind of edge is the card's width, focused or
    not, at every width down to the narrowest card. *)
@@ -508,8 +604,16 @@ let () =
             test_a_wide_edge_keeps_every_part
         ; test_case "the name goes before the mark and the count" `Quick
             test_the_name_goes_before_the_mark_and_the_count
+        ; test_case "a wide count goes before the mark" `Quick
+            test_a_wide_count_goes_before_the_mark
+        ; test_case "only a focused list drops its count" `Quick
+            test_only_a_focused_list_drops_its_count
         ; test_case "a focused card borders in the focus token" `Quick
             test_a_focused_card_borders_in_the_focus_token
+        ] )
+    ; ( "bottom edge"
+      , [ test_case "the bottom edge keeps the number whole" `Quick
+            test_the_bottom_edge_keeps_the_number_whole
         ] )
     ; ( "columns"
       , [ test_case "columns and gaps add up to the screen" `Quick

@@ -510,8 +510,6 @@ let sidebar_selection palette =
      | None -> selection
      | Some projected -> Sgr.default_fg ^ Sgr.background (Some projected))
 
-let border_focus = Sgr.bright_cyan
-
 module Syntax = struct
   (* What does not take a hue from the palette. The words a reader scans for
      (keyword, string, number, type, link, a JSON key) are hues, and draw

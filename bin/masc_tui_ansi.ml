@@ -265,7 +265,11 @@ module Theme = struct
     Masc_tui_terminal_palette.snapshot ()
     |> Masc_tui_terminal_palette.snapshot_palette
     |> Masc_tui_theme.sidebar_selection
-  let border_focus = Masc_tui_theme.border_focus
+  (* A focused card's border, the border.focused token. RFC
+     tui-one-screen-grammar section 7.3 gives status.info to "under way" and
+     to focus, so it is [info] and goes through the same lift: a raw bright
+     cyan reads under 4.5:1 in 11 of the 53 bundled themes. *)
+  let border_focus () = (resolved ()).info
 
   let recede () = (resolved ()).recede
 

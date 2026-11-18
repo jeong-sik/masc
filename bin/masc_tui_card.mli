@@ -15,10 +15,10 @@
     bottom edge rather than boxes of unrelated heights.
 
     The caller passes the style codes, so the same card reads in whatever
-    palette the screen probed. The one colour the card picks itself is a
-    focused card's border, the theme's border.focused token. The corners stay
-    rounded either way: RFC section 12 leaves the focused card's border glyphs
-    open. *)
+    palette the screen probed. That includes a focused card's border, the
+    theme's border.focused token, which the caller takes from the probed
+    palette like every other colour. The corners stay rounded either way: RFC
+    section 12 leaves the focused card's border glyphs open. *)
 
 type count =
   | Whole of int  (** Every row of the reading is loaded: [12]. *)
@@ -40,8 +40,13 @@ type status =
   }
 
 type focus =
-  | Focused  (** The card owns the keyboard. *)
   | Unfocused
+  | Focused_list
+      (** A list card that owns the keyboard. Zone 2's position counts its
+          rows, so the edge writes no count. *)
+  | Focused_other
+      (** Any other card that owns the keyboard. Zone 2's position does not
+          count what this card counts, so the edge keeps its count. *)
 
 type edge =
   { name : string  (** Plain text, one line. *)
@@ -52,8 +57,8 @@ type edge =
             so it never costs the name a cell. *)
   ; status : status option
   ; count : count option
-        (** A focused card writes no count: zone 2's position already says
-            it. *)
+        (** A focused list card writes no count: zone 2's position already
+            says it (RFC section 2). *)
   ; focus : focus
   }
 
@@ -70,6 +75,9 @@ type style =
   { border : string
         (** Style code for an unfocused border, the count and the cut-off
             rows. *)
+  ; focused_border : string
+        (** The same for a focused card: the border.focused token,
+            [Masc_tui_ansi.Theme.border_focus ()]. *)
   ; title_style : string  (** Style code for the name. *)
   ; reset : string
   }
@@ -94,11 +102,30 @@ val top_fit : ko:bool -> width:int -> edge -> top_fit
     fits. Otherwise the key tag goes first. Then the name is shortened with
     ["…"], down to its first character. Then the status word goes, and the
     name takes back the room the word left. The status symbol and the count
-    stay to the end: the name goes before them. When even those two do not
-    fit, the edge is a bare rule. A focused card keeps no count.
+    stay to the end: the name goes before them. When the two do not fit
+    together, the count goes and the symbol stays; when the symbol alone does
+    not fit either, the edge is a bare rule. A focused list card keeps no
+    count.
+
+    RFC section 2 keeps the symbol and the count to the end and does not say
+    which of them goes first. The symbol stays because it is one cell and
+    says whether anything is wrong, which a number cannot say on its own.
 
     [ko] picks the language of a {!Partial} count, whose width is part of
     the decision. *)
+
+type bottom_fit =
+  | Says_more  (** The whole text: [외 1,234], [1,234 more]. *)
+  | Number_only
+      (** The number alone, [1,234]: the word goes before the number. *)
+  | Plain
+      (** A plain rule: nothing was cut, or not even the number fits. *)
+
+val bottom_fit : ko:bool -> width:int -> hidden:int -> bottom_fit
+(** What the bottom edge of a card [width] cells wide writes for the [hidden]
+    rows it cut off. The number is never shortened: a cut number reads as a
+    different one, so it is written whole or not at all (RFC section 2 keeps
+    [외 N] to the end). *)
 
 val window : rows:int -> 'a list -> 'a list * int
 (** The rows a body shows in [rows] rows -- its head -- and how many it cuts

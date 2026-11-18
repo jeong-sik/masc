@@ -1181,6 +1181,7 @@ let account_card ~tone ~layout entry =
 let draw_card_rows ~ko ~width ~tone entries =
   let style =
     { Masc_tui_card.border = Theme.recede ()
+    ; focused_border = Theme.border_focus ()
     ; title_style = Ansi.bold ^ tone
     ; reset = Ansi.reset
     }

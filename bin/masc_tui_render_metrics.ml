@@ -238,6 +238,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let render_card ?status ?count ~title_style name line1 line2 =
     let style =
       { Masc_tui_card.border = Theme.recede ()
+      ; focused_border = Theme.border_focus ()
       ; title_style = Ansi.bold ^ title_style
       ; reset = Ansi.reset
       }

@@ -17,8 +17,9 @@ type status =
   }
 
 type focus =
-  | Focused
   | Unfocused
+  | Focused_list
+  | Focused_other
 
 type edge =
   { name : string
@@ -35,6 +36,7 @@ type t =
 
 type style =
   { border : string
+  ; focused_border : string
   ; title_style : string
   ; reset : string
   }
@@ -51,6 +53,11 @@ type top_fit =
   ; symbol_kept : bool
   ; count_kept : bool
   }
+
+type bottom_fit =
+  | Says_more
+  | Number_only
+  | Plain
 
 (* A side, one cell of padding, a cell of content, one cell of padding, a side. *)
 let side_and_padding_cells = 4
@@ -95,11 +102,12 @@ let count_text ~ko = function
   | Whole rows -> Value.Count.grouped rows
   | Partial { loaded; total } -> Value.Count.partial ~ko ~loaded ~total
 
-(* Zone 2's position counts a focused list, so its card does not. *)
+(* Zone 2's position counts a focused list, so its card does not. A focused
+   card that is not a list keeps its count: zone 2 counts something else. *)
 let shown_count edge =
   match edge.focus with
-  | Focused -> None
-  | Unfocused -> edge.count
+  | Focused_list -> None
+  | Focused_other | Unfocused -> edge.count
 
 let key_text (tag, _) = Masc_tui_theme.strip_sgr tag
 
@@ -128,7 +136,9 @@ let top_fit ~ko ~width edge =
   let count_cells =
     match shown_count edge with None -> 0 | Some count -> cells (count_text ~ko count)
   in
-  let fits ~left =
+  (* Whether [left] fits, beside the count when [count] keeps it. *)
+  let fits ~left ~count =
+    let count_cells = if count then count_cells else 0 in
     match left > 0, count_cells > 0 with
     | true, true -> left + count_cells + left_and_count_cells <= width
     | true, false -> left + left_only_cells <= width
@@ -148,32 +158,45 @@ let top_fit ~ko ~width edge =
     else if room >= shortest_name_cells then Some (Shortened_name room)
     else None
   in
-  let kept ~key ~name ~word =
+  let kept ?(symbol = true) ?(count = true) ~key ~name ~word () =
     { key_kept = key && key_cells > 0
     ; name_kept = name
     ; word_kept = word && word_cells > 0
-    ; symbol_kept = symbol_cells > 0
-    ; count_kept = count_cells > 0
+    ; symbol_kept = symbol && symbol_cells > 0
+    ; count_kept = count && count_cells > 0
     }
   in
   let whole ~key =
     joined_cells
       [ (if key then key_cells else 0); name_cells; symbol_cells; word_cells ]
   in
-  if fits ~left:(whole ~key:true) then kept ~key:true ~name:Whole_name ~word:true
-  else if fits ~left:(whole ~key:false) then kept ~key:false ~name:Whole_name ~word:true
+  (* With no name left the symbol and the count are all the edge holds: both
+     when they fit together, then the symbol alone, then the count alone for
+     an edge with no symbol. *)
+  let tail () =
+    match
+      List.find_opt
+        (fun (symbol, count) ->
+           fits ~left:(if symbol then symbol_cells else 0) ~count)
+        [ (true, true); (true, false); (false, true) ]
+    with
+    | Some (symbol, count) -> kept ~symbol ~count ~key:false ~name:No_name ~word:false ()
+    | None -> bare
+  in
+  if fits ~left:(whole ~key:true) ~count:true then
+    kept ~key:true ~name:Whole_name ~word:true ()
+  else if fits ~left:(whole ~key:false) ~count:true then
+    kept ~key:false ~name:Whole_name ~word:true ()
   else
     match name_beside [ symbol_cells; word_cells ] with
-    | Some name -> kept ~key:false ~name ~word:true
+    | Some name -> kept ~key:false ~name ~word:true ()
     | None -> (
         match name_beside [ symbol_cells ] with
-        | Some name -> kept ~key:false ~name ~word:false
-        | None ->
-            if fits ~left:symbol_cells then kept ~key:false ~name:No_name ~word:false
-            else bare)
+        | Some name -> kept ~key:false ~name ~word:false ()
+        | None -> tail ())
 
 let border_style ~style = function
-  | Focused -> Masc_tui_theme.border_focus
+  | Focused_list | Focused_other -> style.focused_border
   | Unfocused -> style.border
 
 let top_edge ~ko ~style ~width edge =
@@ -223,20 +246,25 @@ let top_edge ~ko ~style ~width edge =
       paint border (opening ^ " ") ^ left
       ^ paint border (" " ^ repeat Box.h rule ^ " " ^ count ^ " " ^ closing)
 
-(* A card too narrow to hold the text keeps a plain edge: five or six cells
-   wide, its body is one or two cells and nothing in it reads anyway. *)
+let bottom_fit ~ko ~width ~hidden =
+  let room = width - bottom_text_cells in
+  if hidden <= 0 then Plain
+  else if cells (Value.Count.more ~ko hidden) <= room then Says_more
+  else if cells (Value.Count.grouped hidden) <= room then Number_only
+  else Plain
+
 let bottom_edge ~ko ~border ~reset ~width hidden =
   let paint text = border ^ text ^ reset in
-  let plain = paint (Box.bl_round ^ repeat Box.h (width - 2) ^ Box.br_round) in
-  let room = width - bottom_text_cells in
-  if hidden <= 0 || room < 1 then plain
-  else
-    let text = Value.Count.more ~ko hidden in
-    let text = if cells text <= room then text else Layout.fit_width text room in
+  let with_text text =
     paint
       (Box.bl_round
        ^ repeat Box.h (width - cells text - bottom_text_cells + 1)
        ^ " " ^ text ^ " " ^ Box.h ^ Box.br_round)
+  in
+  match bottom_fit ~ko ~width ~hidden with
+  | Says_more -> with_text (Value.Count.more ~ko hidden)
+  | Number_only -> with_text (Value.Count.grouped hidden)
+  | Plain -> paint (Box.bl_round ^ repeat Box.h (width - 2) ^ Box.br_round)
 
 let body_row ~border ~reset ~width content =
   String.concat ""

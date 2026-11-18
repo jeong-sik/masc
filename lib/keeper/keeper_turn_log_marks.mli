@@ -16,19 +16,34 @@ module Objects := Agent_core.Checkpoint_objects
     first. *)
 val closed_messages : Objects.history -> int
 
-(** Closed turns, oldest first, and the number of the first message of the
-    first one. Messages are numbered from 0. *)
-type covered =
-  { first : int
-  ; turns : Objects.turn list
-  }
+(** Closed turns that follow one another, and where in the history they
+    start. Only {!of_head} and {!with_segment_before} make one, so its turns
+    and its first message number always agree. *)
+type covered
 
 (** The turns the head holds itself, after its last segment. *)
 val of_head : Objects.history -> covered
 
-(** The turns of the segment just before [covered], put in front of it. The
-    caller reads the segment when a run starts before {!covered.first}. *)
-val with_segment_before : Objects.segment -> covered -> covered
+(** The number of the first message covered. Messages are numbered from 0. *)
+val first : covered -> int
+
+(** The segment to read when a run starts before {!first}. [None] when the
+    covered turns start at message 0. *)
+val segment_before : covered -> Objects.digest option
+
+type segment_error =
+  | Nothing_before (** The covered turns already start at message 0. *)
+  | Does_not_fit of
+      { first : int
+      ; segment_messages : int
+      ; has_previous : bool
+      }
+  (** This is not the segment just before: it holds more messages than there
+      are before {!first}, or it reaches message 0 and names a segment before
+      it, or it stops short of message 0 and names none. *)
+
+(** The turns of the segment {!segment_before} names, put in front. *)
+val with_segment_before : Objects.segment -> covered -> (covered, segment_error) result
 
 type range_error =
   | Starts_before_covered of
@@ -46,7 +61,8 @@ type range_error =
       }
 
 (** The messages numbered [from] up to, not including, [through], as slices
-    of the bundles that hold them, in order. Empty when [from = through]. *)
+    of the bundles that hold them, in order. No slice when [from = through].
+    A run outside what is covered is an error even when it is empty. *)
 val slices
   :  covered
   -> from:int

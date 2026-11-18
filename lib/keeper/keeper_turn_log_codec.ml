@@ -34,32 +34,39 @@ let f_goals = "goals"
 let f_goal = "goal"
 let f_shown = "shown"
 
-(* A closed set of tokens, read back through the same table it is written
-   from. *)
-let token_of table value = List.assoc value (List.map (fun (token, value) -> value, token) table)
-
-let of_token table field fields =
+(* A closed set of tokens. Writing is a total match, so a new constructor
+   does not compile until it has a token. Reading goes through the list of
+   every value: a value missing from its list is written and then refused,
+   which the round trip test of every line shows. *)
+let of_token ~token_of values field fields =
   let ( let* ) = Result.bind in
   let* token = wire_string_field field fields in
-  match List.assoc_opt token table with
+  match List.find_opt (fun value -> String.equal (token_of value) token) values with
   | Some value -> Ok value
   | None -> wire_fail [ Wire_field field ] (Unknown_token token)
 ;;
 
-let outcomes =
-  [ "completed", Completed
-  ; "errored", Errored
-  ; "cancelled", Cancelled
-  ; "save_failed", Save_failed
-  ; "stale_save", Stale_save
-  ; "close_missing", Close_missing
-  ; "process_exited", Process_exited
-  ]
+let outcome_token = function
+  | Completed -> "completed"
+  | Errored -> "errored"
+  | Cancelled -> "cancelled"
+  | Save_failed -> "save_failed"
+  | Stale_save -> "stale_save"
+  | Close_missing -> "close_missing"
+  | Process_exited -> "process_exited"
 ;;
 
-let causes =
-  [ "cleared", Announced Cleared; "recovered", Announced Recovered; "unannounced", Unannounced ]
+let outcomes =
+  [ Completed; Errored; Cancelled; Save_failed; Stale_save; Close_missing; Process_exited ]
 ;;
+
+let cause_token = function
+  | Announced Cleared -> "cleared"
+  | Announced Recovered -> "recovered"
+  | Unannounced -> "unannounced"
+;;
+
+let causes = [ Announced Cleared; Announced Recovered; Unannounced ]
 
 type line_kind =
   | Kind_log_started
@@ -67,25 +74,27 @@ type line_kind =
   | Kind_closed
   | Kind_reset
 
-let line_kinds =
-  [ "log_started", Kind_log_started
-  ; "opened", Kind_opened
-  ; "closed", Kind_closed
-  ; "reset", Kind_reset
-  ]
+let line_kind_token = function
+  | Kind_log_started -> "log_started"
+  | Kind_opened -> "opened"
+  | Kind_closed -> "closed"
+  | Kind_reset -> "reset"
 ;;
+
+let line_kinds = [ Kind_log_started; Kind_opened; Kind_closed; Kind_reset ]
 
 type task_kind =
   | Kind_no_task
   | Kind_task_source_unavailable
   | Kind_task
 
-let task_kinds =
-  [ "no_task", Kind_no_task
-  ; "task_source_unavailable", Kind_task_source_unavailable
-  ; "task", Kind_task
-  ]
+let task_kind_token = function
+  | Kind_no_task -> "no_task"
+  | Kind_task_source_unavailable -> "task_source_unavailable"
+  | Kind_task -> "task"
 ;;
+
+let task_kinds = [ Kind_no_task; Kind_task_source_unavailable; Kind_task ]
 
 let mark_fields =
   [ f_trace
@@ -121,12 +130,12 @@ let slice_to_json slice =
 let slices_to_json slices = `List (List.map slice_to_json slices)
 
 let task_to_json = function
-  | No_task -> `Assoc [ f_kind, `String (token_of task_kinds Kind_no_task) ]
+  | No_task -> `Assoc [ f_kind, `String (task_kind_token Kind_no_task) ]
   | Task_source_unavailable ->
-    `Assoc [ f_kind, `String (token_of task_kinds Kind_task_source_unavailable) ]
+    `Assoc [ f_kind, `String (task_kind_token Kind_task_source_unavailable) ]
   | Task { task; goals } ->
     `Assoc
-      [ f_kind, `String (token_of task_kinds Kind_task)
+      [ f_kind, `String (task_kind_token Kind_task)
       ; f_task, `String (Keeper_id.Task_id.to_string task)
       ; ( f_goals
         , match goals with
@@ -140,7 +149,7 @@ let task_to_json = function
 ;;
 
 let to_json line =
-  let kind kind = f_line, `String (token_of line_kinds kind) in
+  let kind kind = f_line, `String (line_kind_token kind) in
   match line with
   | Log_started { id; at; mark } ->
     `Assoc
@@ -163,7 +172,7 @@ let to_json line =
       [ kind Kind_closed
       ; f_turn, `Int turn
       ; f_at, `Float at
-      ; f_outcome, `String (token_of outcomes outcome)
+      ; f_outcome, `String (outcome_token outcome)
       ; f_after, mark_to_json after
       ; f_unattributed, slices_to_json unattributed
       ; f_own, slices_to_json own
@@ -172,7 +181,7 @@ let to_json line =
     `Assoc
       [ kind Kind_reset
       ; f_at, `Float at
-      ; f_cause, `String (token_of causes cause)
+      ; f_cause, `String (cause_token cause)
       ; f_before, mark_to_json before
       ; f_after, mark_to_json after
       ; f_closed_before, slices_to_json closed_before
@@ -253,7 +262,7 @@ let goal_of_json json =
 
 let task_of_json json =
   let* fields = object_fields json in
-  let* kind = of_token task_kinds f_kind fields in
+  let* kind = of_token ~token_of:task_kind_token task_kinds f_kind fields in
   match kind with
   | Kind_no_task ->
     let* () = exact_field_names_result [ f_kind ] fields in
@@ -284,7 +293,7 @@ let task_of_json json =
 
 let of_json json =
   let* fields = object_fields json in
-  let* kind = of_token line_kinds f_line fields in
+  let* kind = of_token ~token_of:line_kind_token line_kinds f_line fields in
   match kind with
   | Kind_log_started ->
     let* () = exact_field_names_result [ f_line; f_id; f_at; f_mark ] fields in
@@ -322,7 +331,7 @@ let of_json json =
     in
     let* turn = count_field f_turn fields in
     let* at = wire_number_field f_at fields in
-    let* outcome = of_token outcomes f_outcome fields in
+    let* outcome = of_token ~token_of:outcome_token outcomes f_outcome fields in
     let* after = object_field f_after fields mark_of_json in
     let* unattributed = list_field f_unattributed fields slice_of_json in
     let* own = list_field f_own fields slice_of_json in
@@ -332,7 +341,7 @@ let of_json json =
       exact_field_names_result [ f_line; f_at; f_cause; f_before; f_after; f_closed_before ] fields
     in
     let* at = wire_number_field f_at fields in
-    let* cause = of_token causes f_cause fields in
+    let* cause = of_token ~token_of:cause_token causes f_cause fields in
     let* before = object_field f_before fields mark_of_json in
     let* after = object_field f_after fields mark_of_json in
     let* closed_before = list_field f_closed_before fields slice_of_json in

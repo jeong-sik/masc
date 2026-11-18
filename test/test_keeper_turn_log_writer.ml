@@ -44,8 +44,24 @@ let turn letter messages : Objects.turn =
   { bundle = digest_of_letter letter; messages; chain = Objects.chain_start }
 ;;
 
+let covered_from ?(first = 0) turns =
+  Marks.of_head
+    { segment =
+        (if first = 0
+         then None
+         else
+           Some
+             { segment = digest_of_letter 'f'
+             ; segment_messages = first
+             ; segment_chain = Objects.chain_start
+             })
+    ; turns
+    ; open_messages = []
+    }
+;;
+
 (* a holds messages 0 to 2, b 3 and 4, c 5 to 8. *)
-let nine : Marks.covered = { first = 0; turns = [ turn 'a' 3; turn 'b' 2; turn 'c' 4 ] }
+let nine = covered_from [ turn 'a' 3; turn 'b' 2; turn 'c' 4 ]
 
 let outcome_text : Log.outcome -> string = function
   | Completed -> "completed"
@@ -137,7 +153,7 @@ let test_ending () =
   check string "a failed closing save closes nothing"
     "closed 40 save_failed to a:5/chat 0 before [b+0:2] own []"
     (plan_text
-       ~covered:{ first = 0; turns = [ turn 'a' 3; turn 'b' 2 ] }
+       ~covered:(covered_from [ turn 'a' 3; turn 'b' 2 ])
        ~tail ~now:(mark 5)
        (finish ~ending:Save_failed (Recorded { opened = 40 })));
   check string "a turn whose Opened was not written writes nothing" "nothing"
@@ -161,7 +177,7 @@ let test_process_start () =
 (* The reset keeps the other stores where the last line left them, and its
    history part is the empty mark of the new head. *)
 let test_replaced_head () =
-  let two : Marks.covered = { first = 0; turns = [ turn 'd' 2 ] } in
+  let two = covered_from [ turn 'd' 2 ] in
   check string "another trace, seen at an admission"
     "reset unannounced a:9/chat 7 -> b:0/chat 7 [] | opened from b:2/chat 30"
     (plan_text ~covered:two
@@ -182,7 +198,7 @@ let test_replaced_head () =
   check string "after that reset the same head is not lower again" "opened from b:2/chat 0"
     (plan_text ~covered:two ~tail:(written (mark ~trace:"b" 0)) ~now:(mark ~trace:"b" 2) admit);
   check string "an empty head on a trace the log already starts from" "opened from a:0/chat 0"
-    (plan_text ~covered:{ first = 0; turns = [] } ~tail:(written (mark 0)) ~now:(mark 0) admit)
+    (plan_text ~covered:(covered_from []) ~tail:(written (mark 0)) ~now:(mark 0) admit)
 ;;
 
 (* The turn was admitted at 2 and never closed. A clear then wrote its reset
@@ -192,13 +208,13 @@ let test_reset_inside_the_turn () =
   check string "a reset followed the Opened: nothing is the turn's"
     "closed 40 close_missing to a:5/chat 0 before [a+0:3 b+0:2] own [] | opened from a:5/chat 0"
     (plan_text
-       ~covered:{ first = 0; turns = [ turn 'a' 3; turn 'b' 2 ] }
+       ~covered:(covered_from [ turn 'a' 3; turn 'b' 2 ])
        ~tail:(written ~open_turn:(open_at ~reset_since:true 40 (mark 2)) (mark 0))
        ~now:(mark 5) admit)
 ;;
 
 let test_ranges () =
-  let behind : Marks.covered = { first = 5; turns = [ turn 'c' 4 ] } in
+  let behind = covered_from ~first:5 [ turn 'c' 4 ] in
   check string "the unit starts before the head's own turns" "needs the segment before: 3 < 5"
     (plan_text ~covered:behind
        ~tail:(written ~open_turn:(open_at 40 (mark 5)) (mark 3))
@@ -322,8 +338,8 @@ let mark_of state : Log.mark =
   }
 ;;
 
-let covered_of state : Marks.covered =
-  { first = 0; turns = List.map (fun (turn, (_ : message list)) -> turn) state.head.turns }
+let covered_of state =
+  covered_from (List.map (fun (turn, (_ : message list)) -> turn) state.head.turns)
 ;;
 
 let shown_open state =
@@ -408,7 +424,8 @@ let apply_line ~now state (line : Log.line) =
     | Ok position -> position
     | Error
         ( Not_started | Started_twice | Opened_while_open _ | Closed_without_open
-        | Closed_another_turn _ ) -> fail ("a line out of order: " ^ line_text line)
+        | Closed_another_turn _ | Own_after_reset _ ) ->
+      fail ("a line the reader's order rule refuses: " ^ line_text line)
   in
   let state = { state with position; next_offset = offset + 1 } in
   let rows_end = offset + 1 in

@@ -4,29 +4,49 @@ let messages_of turns =
   List.fold_left (fun total (turn : Objects.turn) -> total + turn.messages) 0 turns
 ;;
 
-let before_head (history : Objects.history) =
-  match history.segment with
-  | Some segment -> segment.segment_messages
-  | None -> 0
-;;
-
+(* [Objects.message_count] is the one definition of how many messages a head
+   holds. The open ones are the only part a mark leaves out. *)
 let closed_messages (history : Objects.history) =
-  before_head history + messages_of history.turns
+  Objects.message_count history - List.length history.open_messages
 ;;
 
 type covered =
   { first : int
   ; turns : Objects.turn list
+  ; before : Objects.digest option
   }
 
 let of_head (history : Objects.history) =
-  { first = before_head history; turns = history.turns }
+  match history.segment with
+  | Some segment ->
+    { first = segment.segment_messages; turns = history.turns; before = Some segment.segment }
+  | None -> { first = 0; turns = history.turns; before = None }
 ;;
 
+let first covered = covered.first
+let segment_before covered = covered.before
+
+type segment_error =
+  | Nothing_before
+  | Does_not_fit of
+      { first : int
+      ; segment_messages : int
+      ; has_previous : bool
+      }
+
 let with_segment_before (segment : Objects.segment) covered =
-  { first = covered.first - messages_of segment.segment_turns
-  ; turns = segment.segment_turns @ covered.turns
-  }
+  match covered.before with
+  | None -> Error Nothing_before
+  | Some (_ : Objects.digest) ->
+    let segment_messages = messages_of segment.segment_turns in
+    let first = covered.first - segment_messages in
+    let has_previous = Option.is_some segment.previous in
+    (* A segment holds at least one message, so the history starts at this
+       segment exactly when no segment comes before it. *)
+    if first < 0 || Bool.equal (first = 0) has_previous
+    then Error (Does_not_fit { first = covered.first; segment_messages; has_previous })
+    else
+      Ok { first; turns = segment.segment_turns @ covered.turns; before = segment.previous }
 ;;
 
 type range_error =

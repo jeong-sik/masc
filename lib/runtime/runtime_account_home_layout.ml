@@ -82,14 +82,42 @@ let persons_remain ~base_path =
   | exception Unix.Unix_error (error, _, _) -> Error error
 ;;
 
-let home ~runtime_root client ~account_id =
-  if not (Fs_compat.is_capability_leaf account_id)
-  then Error "Invalid login account identity."
-  else if Filename.is_relative runtime_root
+(* The real path of a runtime root: every path under it is spelled from this
+   one spelling. *)
+let real_root runtime_root =
+  if Filename.is_relative runtime_root
   then Error "The runtime directory must be absolute."
   else (
     match Unix.realpath runtime_root with
     | exception (Unix.Unix_error _ | Sys_error _) ->
       Error "The runtime directory is unavailable."
-    | root -> Ok (List.fold_left Filename.concat root [ clients_dir; client_dir client; account_id ]))
+    | root -> Ok root)
+;;
+
+let home ~runtime_root client ~account_id =
+  if not (Fs_compat.is_capability_leaf account_id)
+  then Error "Invalid login account identity."
+  else
+    Result.map
+      (fun root -> List.fold_left Filename.concat root [ clients_dir; client_dir client; account_id ])
+      (real_root runtime_root)
+;;
+
+let api_keys_dir = "api-keys"
+
+let key_dir ~runtime_root ~account_id =
+  Result.map
+    (fun root ->
+      List.fold_left
+        Filename.concat
+        root
+        [ api_keys_dir; Authz_types.Provider_account_id.to_string account_id ])
+    (real_root runtime_root)
+;;
+
+let key_file ~runtime_root ~account_id ~generation =
+  Result.map
+    (fun dir ->
+      Filename.concat dir (string_of_int (Authz_types.Key_generation.to_int generation)))
+    (key_dir ~runtime_root ~account_id)
 ;;

@@ -22,28 +22,21 @@ type selected_reference =
   | Selected_inline
   | Selected_file of string
 
+(* The one check of an API credential file, with the sentence of each
+   refusal. *)
 let read_file path =
-  if Filename.is_relative path then Error "API credential file must use an absolute path"
-  else
-    match Fs_compat.load_owned_regular_file_with_snapshot
-        ~ownership_root:(Filename.dirname path) path with
-    | Error _ -> Error "API credential file could not be read as an owned regular file"
-    | Ok None -> Error "API credential file is missing"
-    | Ok (Some {snapshot;_})
-      when snapshot.owner_uid <> Unix.geteuid () || snapshot.permissions land 0o077 <> 0 ->
-      Error "API credential file must be owned by the current user and private"
-    | Ok (Some {content;_}) ->
-      let value = String.trim content in
-      if value = "" then Error "API credential file is empty"
-      else
-        let structured_json =
-          try match Yojson.Safe.from_string value with
-            | `Assoc _ | `List _ -> true
-            | _ -> false
-          with Yojson.Json_error _ -> false in
-        if structured_json then
-          Error "API credential file must contain a raw API key, not a JSON credential document"
-        else Ok value
+  Result.map_error
+    (function
+      | Runtime_api_key_file.Relative_path -> "API credential file must use an absolute path"
+      | Runtime_api_key_file.Not_an_owned_regular_file ->
+        "API credential file could not be read as an owned regular file"
+      | Runtime_api_key_file.Missing -> "API credential file is missing"
+      | Runtime_api_key_file.Not_private ->
+        "API credential file must be owned by the current user and private"
+      | Runtime_api_key_file.Empty -> "API credential file is empty"
+      | Runtime_api_key_file.Json_document ->
+        "API credential file must contain a raw API key, not a JSON credential document")
+    (Runtime_api_key_file.read_file path)
 
 let select_reference = function
   | Runtime_schema.Env key ->

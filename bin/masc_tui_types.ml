@@ -3396,8 +3396,8 @@ let schedule_row_queue_keepers row =
         [ owner ]
     | Tui_schedule_observation.Transferring { owner; target } -> [ owner; target ]
     | Tui_schedule_observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
-    | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Cancelled _
-    | Unknown _ ->
+    | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record
+    | Cancelled _ | Unknown _ ->
         []
   in
   List.filter_map Fun.id [ row.sch_payload_keeper_name; row.sch_reaction_keeper_name ] @ holders
@@ -3411,7 +3411,7 @@ let schedule_row_unsettled row =
   match row.sch_occurrence.Tui_schedule_observation.stage with
   | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed
   | Settling _ | Transferring _ | Unknown _ | Dispatching -> true
-  | No_occurrence | Dispatch_failed _ | Completed | Cancelled _ -> false
+  | No_occurrence | Dispatch_failed _ | Completed | Receipt_is_the_record | Cancelled _ -> false
 ;;
 
 let schedule_row_due_time row =
@@ -3450,7 +3450,7 @@ let chat_schedule_entries ~keeper_name snapshot =
              (match Schedule_domain.schedule_status_of_string row.sch_status with
               | Ok Failed -> true
               | Ok (Scheduled | Due | Running | Succeeded | Cancelled | Expired) | Error _ -> false)
-         | Dispatch_failed _ | Completed | Cancelled _ -> true
+         | Dispatch_failed _ | Completed | Receipt_is_the_record | Cancelled _ -> true
          | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Settling _
          | Transferring _ | Unknown _ -> false)
     |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
@@ -27884,6 +27884,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
                 ; "결과 확인 중" ]
               | Consumed -> Schedule_pending, ["최근 회차 소비 확인"; "결과 미확인"]
               | Completed -> Schedule_settled, ["최근 회차 턴 완료"]
+              | Receipt_is_the_record -> Schedule_settled, ["최근 회차 전달 완료"]
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
               | Settling _ -> Schedule_pending, ["최근 회차 결과 기록 중"]
               | Transferring _ -> Schedule_pending, ["최근 회차 인계 기록 중"]
@@ -27908,11 +27909,11 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
-                         | Cancelled _ | Settling _ | Transferring _) ->
+                         | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) ->
                   [fact ~label:"다음 예정 " Facts.Plain (local_minute at)]
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
-                      | Cancelled _ | Settling _ | Transferring _) -> [] in
+                      | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) -> [] in
             List.map (fact (Facts.Reading tone)) occurrence
             @ hold
             @ [fact Facts.Plain (plain title); fact (Facts.Reading proximity) clock]

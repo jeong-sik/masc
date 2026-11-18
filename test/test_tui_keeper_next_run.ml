@@ -687,6 +687,60 @@ let test_decode_keeps_a_row_whose_recurrence_it_cannot_read () =
   | _ -> Alcotest.fail "a 600 s interval did not decode as itself"
 ;;
 
+(* Review on #53163: a dispatch receipt the server's decoder refuses keeps its
+   row as unknown, and the other rows of the page still read. *)
+let test_decode_keeps_a_page_around_an_unreadable_receipt () =
+  let json =
+    match agenda_json (Schedule_domain.recurrence_to_yojson
+                         (Schedule_domain.Interval { interval_sec = 600 })) with
+    | `Assoc fields ->
+      let row =
+        match List.assoc "requests" fields with
+        | `List [ `Assoc row ] -> row
+        | _ -> Alcotest.fail "the fixture holds one row"
+      in
+      let with_identity instance extra =
+        `Assoc
+          (("schedule_instance_id", `String instance)
+           :: List.filter (fun (name, _) -> not (String.equal name "schedule_instance_id")) row
+           @ extra)
+      in
+      let unreadable_wake =
+        `Assoc
+          [ "schedule_instance_id", `String "inst-1"
+          ; "schedule_id", `String "sch-1"
+          ; "status", `String "succeeded"
+          ; "due_at", `Float 0.
+          ; "detail", `Assoc [ "kind", `String "masc.keeper_wake.invented" ]
+          ]
+      in
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+             if String.equal name "requests" then
+               ( name
+               , `List
+                   [ with_identity "inst-1" [ "last_wake", unreadable_wake ]
+                   ; with_identity "inst-2" [] ] )
+             else if String.equal name "request_count" then (name, `Int 2)
+             else (name, value))
+           fields)
+    | _ -> Alcotest.fail "the fixture is an object"
+  in
+  match Masc_tui_schedule_decode.snapshot_of_json json with
+  | Error reason -> Alcotest.failf "one unreadable receipt dropped the page: %s" reason
+  | Ok snapshot ->
+    (match snapshot.Masc_tui_types.scs_rows with
+     | [ first; second ] ->
+       (match first.Masc_tui_types.sch_occurrence.Masc.Tui_schedule_observation.stage with
+        | Masc.Tui_schedule_observation.Unknown _ -> ()
+        | _ -> Alcotest.fail "the unreadable receipt's row is not unknown");
+       (match second.Masc_tui_types.sch_occurrence.Masc.Tui_schedule_observation.stage with
+        | Masc.Tui_schedule_observation.No_occurrence -> ()
+        | _ -> Alcotest.fail "the other row did not read as it is")
+     | rows -> Alcotest.failf "the page kept %d rows, not 2" (List.length rows))
+;;
+
 (* #32468: the server sends no evidence fields when it could not read the
    reaction ledger, so an absent disposition is "not said" ([None]); only a
    present [null] is "the turn has not finished". *)
@@ -813,6 +867,8 @@ let () =
             test_absent_turn_disposition_is_not_an_open_turn
         ; Alcotest.test_case "decode keeps an unread recurrence" `Quick
             test_decode_keeps_a_row_whose_recurrence_it_cannot_read
+        ; Alcotest.test_case "an unreadable receipt keeps the page" `Quick
+            test_decode_keeps_a_page_around_an_unreadable_receipt
         ; Alcotest.test_case "failed or missing agenda" `Quick
             test_failed_or_missing_agenda_is_unknown
         ; Alcotest.test_case "cut agenda" `Quick test_cut_agenda_is_unknown_from_its_last_due

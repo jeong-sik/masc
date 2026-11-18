@@ -120,7 +120,7 @@ let attention_word (row : Masc_tui_types.schedule_row) =
        | Turn_ended _ | Consumed | Settling _ -> Some "settling"
        | Transferring _ -> Some "handoff"
        | Unknown _ -> Some "unknown"
-       | No_occurrence | Completed | Cancelled _ -> None)
+       | No_occurrence | Completed | Receipt_is_the_record | Cancelled _ -> None)
 ;;
 
 (* One time line, oldest first, the way the Story page reads past to next. A

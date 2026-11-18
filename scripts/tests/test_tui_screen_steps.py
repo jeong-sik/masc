@@ -24,7 +24,7 @@ NEVER = frozenset({b'\r', b'\n', b'y', b'\x1b'})
 # delete, toggle the gate, unbind all channels (bin/masc_tui_keys.ml
 # keeper_actions, keeper_detail_tab_bindings), and toggle a Services provider.
 KEEPER_ACTS = frozenset({b'p', b'w', b's', b'x', b'g', b'U', b't', b'T'})
-KEEPER_PLACES = frozenset({Destination.KEEPERS, Reached.KEEPER_DETAIL})
+KEEPER_PLACES = frozenset({Destination.KEEPERS, Reached.KEEPER_ROW, Reached.KEEPER_DETAIL})
 
 
 def planned(step: Step) -> Planned:
@@ -80,6 +80,7 @@ class AllowListTest(unittest.TestCase):
             (Step('open', Destination.USAGE, (Move.OPEN,)), Destination.USAGE, Move.OPEN),
             (Step('help', Destination.WORK, (Move.HELP,)), Destination.WORK, Move.HELP),
             (Step('tab', Destination.KEEPERS, (Move.NEXT_TAB,)), Destination.KEEPERS, Move.NEXT_TAB),
+            (Step('row_tab', Destination.KEEPERS, (Move.OPEN, Move.NEXT_TAB)), Reached.KEEPER_ROW, Move.NEXT_TAB),
             (Step('wide', Destination.OPERATIONS, (Move.HELP, Move.HELP, Move.HELP)), Reached.HELP_EVERYWHERE,
              Move.HELP),
         ):
@@ -100,8 +101,8 @@ class TableTest(unittest.TestCase):
                 passed = route(step)
                 assert isinstance(passed, tuple)
                 self.assertIs(passed[-1], Reached.KEEPER_DETAIL)
-                first, *walk = step.moves
-                self.assertIs(first, Move.OPEN)
+                unfold, opened, *walk = step.moves
+                self.assertEqual((unfold, opened), (Move.OPEN, Move.OPEN))
                 net = sum(1 if move is Move.NEXT_TAB else -1 for move in walk)
                 self.assertEqual(net % len(KEEPER_TABS), index)
                 self.assertLessEqual(len(walk), len(KEEPER_TABS) // 2)

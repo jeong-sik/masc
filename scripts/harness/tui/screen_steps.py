@@ -71,6 +71,7 @@ class Reached(enum.Enum):
     PALETTE = 'the command palette'
     USAGE_TELEMETRY = 'Usage on Telemetry'
     WORK_TASKS = 'Work on Tasks'
+    KEEPER_ROW = 'the first Keeper row of the list'
     KEEPER_DETAIL = 'a Keeper detail'
     BOARD_POST = 'a Board post'
     REQUEST_DETAIL = 'a request detail'
@@ -132,11 +133,19 @@ MOVES: Mapping[tuple[Place, Move], Place] = MappingProxyType({
     # Work's Navigate t: Goals / Tasks.
     (Destination.WORK, Move.TASKS): Reached.WORK_TASKS,
     # Right opens the row under the cursor (bin/masc_tui.ml, the arm of
-    # "\r" | "\n" | "right"): the Keeper detail on its Info tab, the Board post,
-    # the request's detail.
-    (Destination.KEEPERS, Move.OPEN): Reached.KEEPER_DETAIL,
+    # "\r" | "\n" | "right"): the Board post, the request's detail.
     (Destination.BOARD, Move.OPEN): Reached.BOARD_POST,
     (Destination.REQUESTS, Move.OPEN): Reached.REQUEST_DETAIL,
+    # The Keeper list puts its cursor on row 0. When that row's group starts
+    # folded (`initially_folded` in bin/masc_tui_keeper_list_model.ml, such
+    # as UPDATED WITHIN 24H of the age view), the cursor is on the group's
+    # heading, and Right there unfolds the group and rests on its first row
+    # (the Keeper list's Navigate "Left / Right" fold). A second Right opens
+    # that Keeper's detail on Info. When row 0 is no heading, the first Right
+    # opens the detail and the second does nothing there: the open arm's
+    # Keeper_detail branch is ().
+    (Destination.KEEPERS, Move.OPEN): Reached.KEEPER_ROW,
+    (Reached.KEEPER_ROW, Move.OPEN): Reached.KEEPER_DETAIL,
     # `keeper_detail_tab_hint` "[ ]:tab": the next or previous detail tab,
     # which reads its own data on entry.
     (Reached.KEEPER_DETAIL, Move.NEXT_TAB): Reached.KEEPER_DETAIL,
@@ -229,7 +238,7 @@ STEPS: tuple[Step, ...] = (
     Step('work_board_post', Destination.BOARD, (Move.OPEN,)),
     Step('work_task_review', Destination.TASK_REVIEW),
     Step('work_task_verdicts', Destination.TASK_VERDICTS),
-    *(Step(f'keeper_{tab}', Destination.KEEPERS, (Move.OPEN, *keeper_tab_moves(index)))
+    *(Step(f'keeper_{tab}', Destination.KEEPERS, (Move.OPEN, Move.OPEN, *keeper_tab_moves(index)))
       for index, tab in enumerate(KEEPER_TABS)),
     Step('keepers_memory', Destination.MEMORY),
     Step('keepers_schedules', Destination.SCHEDULES),

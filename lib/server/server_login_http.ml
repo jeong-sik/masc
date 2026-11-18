@@ -349,6 +349,17 @@ let verify t ~base_path request reqd =
       Server_setup_account_login.verify ~person:(person_of t person) ~base_path ~body request reqd))
 ;;
 
+(* The removal of a key account takes files of the person off the server, so
+   the gate of their own provider accounts judges it. The body is not read. *)
+let remove_key_account t ~base_path request reqd =
+  with_entry ~prefix:Server_key_account.entry_prefix request reqd (fun provider_account_id ->
+    as_person t request reqd (fun (_ : Authz_state.t) person ->
+      with_body reqd (fun (_ : string) ->
+        respond
+          reqd
+          (Server_key_account.remove ~person:(person_of t person) ~base_path ~provider_account_id))))
+;;
+
 let provider_accounts t ~base_path request reqd =
   as_person t request reqd (fun state person ->
     let config = Result.to_option (Server_runtime_setup_actions.config ~base_path) in
@@ -500,6 +511,7 @@ let add_person_routes t ~env ~base_path router =
        access
        Auth_preview_keeper.conversation_entry_prefix
        (delete_keeper_conversation t ~env ~base_path)
+  |> Server_route.prefix_delete access Server_key_account.entry_prefix (remove_key_account t ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
   |> Server_route.post mcp_access Server_person_mcp.path (person_mcp t ~env ~base_path)

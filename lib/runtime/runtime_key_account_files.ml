@@ -65,22 +65,51 @@ let removed path =
   | exception Unix.Unix_error (error, call, argument) -> Error (unix_detail error call argument)
 ;;
 
+(* Whether [path] names anything, a link included. *)
+let named path =
+  match Unix.lstat path with
+  | (_ : Unix.stats) -> Ok true
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok false
+  | exception Unix.Unix_error (error, call, argument) -> Error (unix_detail error call argument)
+;;
+
+(* A runtime root that is not there holds no file of any account: no login
+   and no registration made it, or it was taken away whole. *)
+let root_there ~runtime_root =
+  Fs_compat.Systhread_host.run ~label:thread_label (fun () -> named runtime_root)
+;;
+
+let home_of ~runtime_root ~account_id =
+  Layout.home ~runtime_root client ~account_id:(Authz_types.Provider_account_id.to_string account_id)
+;;
+
 let remove ~runtime_root ~account_id =
-  match
-    let* keys = Layout.key_dir ~runtime_root ~account_id in
-    removed keys
-  with
+  match root_there ~runtime_root with
   | Error detail -> Error (Key_not_removed detail)
-  | Ok () ->
+  | Ok false -> Ok ()
+  | Ok true ->
     (match
-       let* home =
-         Layout.home
-           ~runtime_root
-           client
-           ~account_id:(Authz_types.Provider_account_id.to_string account_id)
-       in
-       removed home
+       let* keys = Layout.key_dir ~runtime_root ~account_id in
+       removed keys
      with
-     | Error detail -> Error (Home_not_removed detail)
-     | Ok () -> Ok ())
+     | Error detail -> Error (Key_not_removed detail)
+     | Ok () ->
+       (match
+          let* home = home_of ~runtime_root ~account_id in
+          removed home
+        with
+        | Error detail -> Error (Home_not_removed detail)
+        | Ok () -> Ok ()))
+;;
+
+let present ~runtime_root ~account_id =
+  let* there = root_there ~runtime_root in
+  if not there
+  then Ok false
+  else
+    let* keys = Layout.key_dir ~runtime_root ~account_id in
+    let* home = home_of ~runtime_root ~account_id in
+    Fs_compat.Systhread_host.run ~label:thread_label (fun () ->
+      let* keys_there = named keys in
+      if keys_there then Ok true else named home)
 ;;

@@ -1533,6 +1533,102 @@ let a_person_keeps_keepers_over_mcp () =
       (result theirs "masc_my_keeper_conversation" ~arguments:(keeper "keeper-1")))
 ;;
 
+(* The removal of a key account over the route (RFC
+   a-persons-api-key-is-their-own-provider-account 3.6): what a request needs
+   to reach it, and what it is told. What a removal does to the files and the
+   log is tested in test_server_key_account_purge. *)
+let a_person_removes_a_key_account () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "the Admin joins"
+      200
+      (sign_in t admin ~fields:[ "invite", admin_token ] ~user_id:583231).status;
+    let csrf = csrf_of t admin in
+    let user_id = user_of t admin in
+    let linked = function
+      | Ok () -> ()
+      | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error)
+    in
+    (* The record of a key account comes before its files, and an account
+       whose files were never made is removed too. *)
+    let on_key = "account-on-a-key" in
+    linked
+      (Authz_provider_account.link_key
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:(get_ok (Provider_account_id.of_string on_key))
+         ~integration_id:(get_ok (Integration_id.of_string "claude_code")));
+    let on_login = "account-on-a-login" in
+    linked
+      (Authz_provider_account.link
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:(get_ok (Provider_account_id.of_string on_login)));
+    let pat effects =
+      let issued =
+        send
+          admin
+          router
+          ~meth:"POST"
+          ~path:"/api/v1/auth/pats"
+          ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+          ~body:
+            (Printf.sprintf
+               {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":%s},"expires_at_ms":null}|}
+               effects)
+      in
+      match member "token" issued with
+      | Some (`String token) -> token
+      | _ -> Alcotest.failf "no PAT in %S" issued.body
+    in
+    (* The status of the answer, and its code when it has one. *)
+    let told (reply : reply) =
+      ( reply.status
+      , match member "code" reply with
+        | Some (`String code) -> code
+        | Some _ | None -> "" )
+    in
+    let remove ?(browser = fresh_browser ()) headers id =
+      send browser router ~meth:"DELETE" ~path:(Server_key_account.entry_prefix ^ id) ~headers
+    in
+    let by_token token id = told (remove [ "Authorization", "Bearer " ^ token ] id) in
+    Alcotest.(check int) "a request with no credential" 401 (remove [] on_key).status;
+    Alcotest.(check int)
+      "the session without its token"
+      403
+      (remove ~browser:admin (changing ()) on_key).status;
+    Alcotest.(check int)
+      "a PAT that manages Keepers and no provider account"
+      403
+      (remove [ "Authorization", "Bearer " ^ pat {|["manage_own_keeper","read_state"]|} ] on_key).status;
+    let owner = pat {|["manage_own_provider"]|} in
+    Alcotest.(check (pair int string))
+      "an account no record links"
+      (404, "unknown_account")
+      (by_token owner "account-of-nobody");
+    Alcotest.(check (pair int string))
+      "an account that holds a login"
+      (400, "not_a_key_account")
+      (by_token owner on_login);
+    let removed = remove ~browser:admin (changing ~csrf ()) on_key in
+    Alcotest.(check int) ("the session with its token: " ^ removed.body) 200 removed.status;
+    Alcotest.(check (pair (option string) (option bool)))
+      "the answer names the account and nothing else of it"
+      (Some on_key, Some true)
+      ( (match member "provider_account_id" removed with
+         | Some (`String id) -> Some id
+         | Some _ | None -> None)
+      , match member "removed" removed with
+        | Some (`Bool removed) -> Some removed
+        | Some _ | None -> None );
+    Alcotest.(check (pair int string))
+      "the removed account, again"
+      (404, "unknown_account")
+      (by_token owner on_key))
+;;
+
 (* Bytes another writer added to the log: the next commit finds the end moved
    and stops the log. From then on no route decides on the state the zone
    holds. A person who signed in before gets a 503 where they read or change
@@ -1780,6 +1876,7 @@ let () =
         ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
         ; Alcotest.test_case "a person calls MCP" `Quick a_person_calls_mcp
         ; Alcotest.test_case "a person keeps Keepers over MCP" `Quick a_person_keeps_keepers_over_mcp
+        ; Alcotest.test_case "a person removes a key account" `Quick a_person_removes_a_key_account
         ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_answers_no_person
         ; Alcotest.test_case
             "the request that meets a moved log"

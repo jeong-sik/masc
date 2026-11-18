@@ -53,10 +53,22 @@ type remove_error =
 
     A folder that is not there is removed already, so a removal that stopped
     is asked again, and an account whose files were never made is removed
-    too. A link is removed and not followed. Each folder is looked at after
+    too. A runtime root that is not there holds no file of any account. A
+    link is removed and not followed. Each folder is looked at after
     its removal, and the folder it was in is synced, so what is reported gone
     stays gone after a crash. *)
 val remove
   :  runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> (unit, remove_error) result
+
+(** Whether something has the name of the folder of the keys of [account_id]
+    or of its home under [runtime_root], a link included. A restore of a
+    backup brings back the files of an account whose removal went through,
+    and the start of the server asks this of each such account. [Error] when
+    a name could not be looked at; the detail can name a path of the
+    server. *)
+val present
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> (bool, string) result
